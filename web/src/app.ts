@@ -1,5 +1,8 @@
-// Backplane Web UI main shell: connects over data/1 JSON WS (cookie auth),
-// wires sidebar, chat timeline, composer, hub-driven right rail, viewer host slot, and settings.
+// Backplane Web UI main shell matching GPUI native-chat.png:
+// Unified top bar (breadcrumb, STATE dot+word, Pin/Settle with icons, command box, gear),
+// sidebar (This computer, ACTIVE/BOTS/ROOMS, bottom-left Connected status),
+// bottom-anchored chat timeline, tall composer + toolbar row, hub-driven right rail
+// with PR #1367 `has` reconciliation + `railGen` staleness guard, and Settings › Devices modal.
 import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { onLocaleChange, setLocale, t } from "./i18n";
@@ -11,6 +14,13 @@ import { HubClient, type DataPush, type HelloFrame } from "./ws";
 // @ts-ignore resolved by web/build.ts to ./viewers/viewer-pane.ts when present
 import { mountViewerPane } from "virtual:viewer-pane";
 
+export interface RailHas {
+  board?: boolean;
+  schematic?: boolean;
+  mech?: boolean;
+  gerbers?: boolean;
+}
+
 export interface ViewerHostApi {
   hub: HubClient;
   getThreadId: () => string;
@@ -20,15 +30,52 @@ export interface ViewerHostApi {
 type ViewerMountFn = (el: HTMLElement, api: ViewerHostApi) => {
   open: (kind: string, threadId: string) => void;
   close: () => void;
+  reconcileHas?: (has: RailHas) => void;
 };
 
 type SubId = number | string;
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function makeMiniIcon(paths: string[]): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "13");
+  svg.setAttribute("height", "13");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.8");
+  svg.setAttribute("aria-hidden", "true");
+  for (const d of paths) {
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    svg.appendChild(p);
+  }
+  return svg;
+}
+
+function stateDotClass(th: ThreadItem | null): string {
+  if (!th) return "bp-dot-idle";
+  const s = th.status || th.state;
+  if (s === "active" || s === "working") return "bp-dot-work";
+  if (s === "finished") return "bp-dot-done";
+  if (s === "waiting" || s === "asking" || s === "blocked" || s === "failed" || (th.waiting ?? 0) > 0) return "bp-dot-need";
+  return "bp-dot-idle";
+}
+
+function hasForKind(has: RailHas | undefined, kind: string): boolean {
+  if (!has) return true;
+  if (kind === "board" || kind === "3d") return has.board !== false;
+  if (kind === "schematic") return has.schematic !== false;
+  if (kind === "mech") return has.mech !== false;
+  if (kind === "gerbers") return has.gerbers !== false;
+  return true;
+}
 
 function applyHubTheme(theme: string | undefined): void {
   if (!theme) return;
   const light = theme === "light";
   document.documentElement.classList.toggle("light", light);
-  // Pre-connect paint hint only; the hub's hello.theme / theme push always wins on connect.
   try { localStorage.setItem("bp.theme", light ? "light" : "dark"); } catch { /* ignore */ }
 }
 
@@ -40,11 +87,11 @@ function mountApp(): void {
   const root = document.getElementById("root");
   if (!root) return;
 
-  // Pre-connect paint hint only; overwritten as soon as hello.theme arrives.
   try {
     if (localStorage.getItem("bp.theme") === "light") document.documentElement.classList.add("light");
   } catch { /* ignore */ }
 
+  // Unified GPUI-style top bar
   const topbar = document.createElement("header");
   topbar.className = "bp-topbar";
   topbar.setAttribute("data-testid", "topbar");
@@ -62,27 +109,83 @@ function mountApp(): void {
   logo.src = "/assets/favicon.svg";
   logo.alt = "Backplane";
   logo.className = "bp-logo";
-  const crumbEl = document.createElement("span");
-  crumbEl.className = "bp-crumb";
-  crumbEl.textContent = "Backplane";
-  brand.append(logo, crumbEl);
+  const brandName = document.createElement("span");
+  brandName.className = "bp-brand-name bp-hide-phone";
+  brandName.textContent = "Backplane";
+  const sep1 = document.createElement("span");
+  sep1.className = "bp-crumb-sep bp-hide-phone";
+  sep1.textContent = "/";
+  const projCrumb = document.createElement("span");
+  projCrumb.className = "bp-crumb-proj bp-hide-phone";
+  const sep2 = document.createElement("span");
+  sep2.className = "bp-crumb-sep bp-hide-phone";
+  sep2.textContent = "/";
+  const threadCrumb = document.createElement("span");
+  threadCrumb.className = "bp-crumb-thread";
+  threadCrumb.setAttribute("data-testid", "thread-title");
+  brand.append(logo, brandName, sep1, projCrumb, sep2, threadCrumb);
 
+  // STATE indicator (desktop)
+  const stateBox = document.createElement("div");
+  stateBox.className = "bp-top-state bp-hide-phone bp-hidden";
+  const stateLbl = document.createElement("span");
+  stateLbl.className = "bp-top-state-lbl";
+  stateLbl.textContent = "STATE";
+  const stateDot = document.createElement("span");
+  stateDot.className = "bp-dot bp-dot-idle";
+  const stateWord = document.createElement("span");
+  stateWord.className = "bp-top-state-word";
+  stateBox.append(stateLbl, stateDot, stateWord);
+
+  // Thread action buttons in top bar (Pin, Settle with crisp icons)
+  const topActs = document.createElement("div");
+  topActs.className = "bp-top-acts bp-hide-phone bp-hidden";
+
+  const pinBtn = document.createElement("button");
+  pinBtn.type = "button";
+  pinBtn.className = "bp-btn-ghost bp-top-act";
+  const pinLbl = document.createElement("span");
+  pinLbl.textContent = t("menu.pin", "Pin");
+  pinBtn.append(makeMiniIcon(["M12 17v5", "M9 3h6l1 7 3 3H5l3-3 1-7z"]), pinLbl);
+
+  const settleBtn = document.createElement("button");
+  settleBtn.type = "button";
+  settleBtn.className = "bp-btn-ghost bp-top-act";
+  const settleLbl = document.createElement("span");
+  settleLbl.textContent = t("menu.settle", "Settle");
+  settleBtn.append(makeMiniIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M9 12l2 2 4-4"]), settleLbl);
+
+  topActs.append(pinBtn, settleBtn);
+
+  // Right controls: command box, search icon, settings gear
   const topRight = document.createElement("div");
   topRight.className = "bp-top-right";
 
-  const connEl = document.createElement("span");
-  connEl.className = "bp-conn-status";
-  connEl.textContent = "Connecting…";
-  connEl.setAttribute("data-testid", "conn-status");
+  const cmdBox = document.createElement("button");
+  cmdBox.type = "button";
+  cmdBox.className = "bp-cmd-box bp-hide-tablet";
+  cmdBox.textContent = "> Jump or run a command";
+
+  const searchBtn = document.createElement("button");
+  searchBtn.type = "button";
+  searchBtn.className = "icon bp-top-icon";
+  searchBtn.title = "Search";
+  searchBtn.setAttribute("aria-label", "Search");
+  searchBtn.appendChild(makeMiniIcon(["M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16z", "M21 21l-4.3-4.3"]));
 
   const settingsBtn = document.createElement("button");
   settingsBtn.type = "button";
-  settingsBtn.className = "bp-btn-ghost";
-  settingsBtn.textContent = "Devices";
+  settingsBtn.className = "icon bp-top-icon";
+  settingsBtn.title = t("palette.settings", "Settings");
+  settingsBtn.setAttribute("aria-label", t("palette.settings", "Settings"));
   settingsBtn.setAttribute("data-testid", "settings-btn");
+  settingsBtn.appendChild(makeMiniIcon([
+    "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
+    "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.85 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z",
+  ]));
 
-  topRight.append(connEl, settingsBtn);
-  topbar.append(sideToggle, brand, topRight);
+  topRight.append(cmdBox, searchBtn, settingsBtn);
+  topbar.append(sideToggle, brand, stateBox, topActs, topRight);
 
   const body = document.createElement("div");
   body.className = "bp-body";
@@ -113,6 +216,7 @@ function mountApp(): void {
   let rooms: RoomItem[] = [];
   let selectedThreadId = "";
   let threadGen = 0;
+  let railGen = 0;
   let threadSubId: SubId | null = null;
   let olderCursor: string | null = null;
   let activeRailKind = "";
@@ -151,8 +255,9 @@ function mountApp(): void {
         void hub.rpc("thread.act", { thread: selectedThreadId, action, value }).catch(() => {});
       }
     },
-    onThreadAction: (action) => {
-      if (selectedThreadId) void runThreadAct(selectedThreadId, action);
+    onReplyEntry: (entry) => {
+      const firstLine = (entry.text || "").split("\n")[0]?.slice(0, 100) ?? "";
+      if (firstLine) composer.prependDraft(`> ${firstLine}\n`);
     },
     onLoadImage: async (entryId, path) => {
       try {
@@ -213,30 +318,57 @@ function mountApp(): void {
     },
   });
 
+  pinBtn.addEventListener("click", () => {
+    const th = threads.find((x) => x.id === selectedThreadId);
+    if (th) void runThreadAct(th.id, th.pinned ? "unpin" : "pin");
+  });
+  settleBtn.addEventListener("click", () => {
+    const th = threads.find((x) => x.id === selectedThreadId);
+    if (th) void runThreadAct(th.id, th.settled ? "unsettle" : "settle");
+  });
+  cmdBox.addEventListener("click", () => sidebar.focusFilter());
+  searchBtn.addEventListener("click", () => sidebar.focusFilter());
   settingsBtn.addEventListener("click", () => { void settings.open(); });
   sideToggle.addEventListener("click", () => {
     sidebarEl.classList.toggle("bp-sidebar-open");
     sidebarEl.classList.toggle("bp-sidebar-collapsed");
   });
 
-  function updateCrumb(): void {
-    const th = threads.find((x) => x.id === selectedThreadId);
+  function updateHeader(): void {
+    const th = threads.find((x) => x.id === selectedThreadId) ?? null;
     const proj = th ? projects.find((p) => p.id === th.project) : undefined;
-    const hubName = hub.hello?.name ? ` · ${hub.hello.name}` : "";
-    crumbEl.textContent = proj ? `Backplane / ${proj.title}${hubName}` : `Backplane${hubName}`;
+    projCrumb.textContent = proj?.title ?? "";
+    sep1.classList.toggle("bp-hidden", !proj);
+    sep2.classList.toggle("bp-hidden", !th);
+    threadCrumb.textContent = th ? (th.title || "Untitled thread") : "";
+
+    stateBox.classList.toggle("bp-hidden", !th);
+    topActs.classList.toggle("bp-hidden", !th);
+    if (th) {
+      stateDot.className = `bp-dot ${stateDotClass(th)}`;
+      stateWord.textContent = th.status || th.state || "idle";
+      pinLbl.textContent = th.pinned ? t("menu.unpin", "Unpin") : t("menu.pin", "Pin");
+      settleLbl.textContent = th.settled ? t("phone.unsettle", "Unsettle") : t("menu.settle", "Settle");
+      composer.setModelChip(th.chip || th.model || "default");
+    } else {
+      composer.setModelChip("default");
+    }
   }
 
-  function closeViewer(): void {
+  function closeViewer(notifyHub = true): void {
+    railGen++;
     activeRailKind = "";
     rail.setActive("");
     viewerEl.classList.add("bp-hidden");
     viewerController?.close();
-    if (selectedThreadId && hub.getState() === "connected") {
+    if (notifyHub && selectedThreadId && hub.getState() === "connected") {
       void hub.rpc("viewer.watch", { thread: selectedThreadId, kind: "" }).catch(() => {});
     }
   }
 
   function openViewer(kind: string): void {
+    if (kind === "split") return;
+    railGen++;
     activeRailKind = kind;
     rail.setActive(kind);
     viewerEl.classList.remove("bp-hidden");
@@ -244,10 +376,11 @@ function mountApp(): void {
       viewerController = (mountViewerPane as ViewerMountFn)(viewerEl, {
         hub,
         getThreadId: () => selectedThreadId,
-        closeViewer,
+        closeViewer: () => closeViewer(true),
       });
     }
     if (viewerController) {
+      // PR #1367 rule (3): direct destination open replaces active watch without a separate stop first.
       viewerController.open(kind, selectedThreadId);
     } else {
       const box = document.createElement("div");
@@ -260,7 +393,7 @@ function mountApp(): void {
       closeBtn.type = "button";
       closeBtn.className = "icon";
       closeBtn.textContent = "×";
-      closeBtn.addEventListener("click", closeViewer);
+      closeBtn.addEventListener("click", () => closeViewer(true));
       head.append(lbl, closeBtn);
       const bodyMsg = document.createElement("div");
       bodyMsg.className = "bp-dim bp-viewer-msg";
@@ -275,18 +408,29 @@ function mountApp(): void {
       if (gen === threadGen) rail.setItems([]);
       return;
     }
+    const rGen = ++railGen;
     try {
-      const res = await hub.rpc<{ rail?: RailEntry[]; items?: RailEntry[] }>("viewer.rail", { thread: threadId });
-      if (gen !== threadGen) return;
+      const res = await hub.rpc<{ rail?: RailEntry[]; items?: RailEntry[]; has?: RailHas }>("viewer.rail", {
+        thread: threadId,
+        page: activeRailKind,
+      });
+      // PR #1367 rule (2): drop replies older than a newer thread or local rail selection.
+      if (gen !== threadGen || rGen !== railGen) return;
       const items = Array.isArray(res.rail) ? res.rail : Array.isArray(res.items) ? res.items : [];
       rail.setItems(items);
+      // PR #1367 rule (1): reconcile open page against `has`, never against entry state.
+      if (res.has) {
+        viewerController?.reconcileHas?.(res.has);
+        if (activeRailKind && !hasForKind(res.has, activeRailKind)) {
+          closeViewer(true);
+        }
+      }
     } catch {
-      if (gen === threadGen) rail.setItems([]);
+      if (gen === threadGen && rGen === railGen) rail.setItems([]);
     }
   }
 
   async function loadLists(): Promise<void> {
-    // Old socket's subscriptions do not survive reconnect.
     threadSubId = null;
 
     const [pRes, tRes] = await Promise.all([
@@ -307,7 +451,6 @@ function mountApp(): void {
     sidebar.setData(projects, threads, bots, rooms);
     await hub.rpc("subscribe", { topic: "lists" }).catch(() => {});
 
-    // Always re-fetch & resubscribe the selected thread on (re)connect.
     let targetId = selectedThreadId;
     if (!targetId) {
       let saved = "";
@@ -325,12 +468,11 @@ function mountApp(): void {
       selectedThreadId = "";
       rail.setItems([]);
       composer.setState(false, false);
-      updateCrumb();
+      updateHeader();
     }
   }
 
   async function openThread(threadId: string): Promise<void> {
-    // Save current thread's held entries into in-memory cache before switching
     if (selectedThreadId && selectedThreadId !== threadId) {
       const held = chat.getEntries();
       if (held.length > 0) {
@@ -345,6 +487,7 @@ function mountApp(): void {
     }
 
     const gen = ++threadGen;
+    railGen++;
     const prevSub = threadSubId;
     threadSubId = null;
     if (prevSub !== null) {
@@ -357,16 +500,14 @@ function mountApp(): void {
     try { localStorage.setItem("bp.lastThread", threadId); } catch { /* ignore */ }
     sidebar.setSelected(threadId);
     sidebarEl.classList.remove("bp-sidebar-open");
-    updateCrumb();
+    updateHeader();
 
     const th = threads.find((x) => x.id === threadId) ?? null;
-    // Synchronously replace A's content: paint B's cached snapshot if held, else empty loading pane.
     if (cached) {
       chat.setThread(th, cached.entries, Boolean(cached.olderCursor), cached.review, cached.unanswered);
     } else {
       chat.setLoading(th);
     }
-    // Target is unambiguous once A's content is gone; keep composer ready to type.
     composer.setState(true, th?.state === "working");
     rail.setItems([]);
 
@@ -407,7 +548,6 @@ function mountApp(): void {
       const subVal = sub.sub ?? null;
       if (subVal !== null) {
         if (gen !== threadGen) {
-          // Superseded while subscribe was in flight: drop the stale subscription immediately.
           void hub.rpc("unsubscribe", { sub: subVal }).catch(() => {});
           return;
         }
@@ -421,7 +561,10 @@ function mountApp(): void {
   }
 
   async function loadOlderEntries(): Promise<void> {
-    if (!selectedThreadId || !olderCursor) return;
+    if (!selectedThreadId || !olderCursor) {
+      chat.clearLoadingOlder();
+      return;
+    }
     const gen = threadGen;
     const threadId = selectedThreadId;
     const cursor = olderCursor;
@@ -434,7 +577,9 @@ function mountApp(): void {
       if (gen !== threadGen || selectedThreadId !== threadId) return;
       olderCursor = res.next ?? null;
       chat.prependEntries(res.entries ?? [], Boolean(olderCursor));
-    } catch { /* ignore */ }
+    } catch {
+      if (gen === threadGen) chat.clearLoadingOlder();
+    }
   }
 
   async function createThread(projectId: string): Promise<void> {
@@ -511,7 +656,10 @@ function mountApp(): void {
       if (res.thread) {
         threads = threads.map((x) => (x.id === res.thread!.id ? res.thread! : x));
         sidebar.setData(projects, threads, bots, rooms);
-        if (res.thread.id === selectedThreadId) chat.updateThreadMeta(res.thread);
+        if (res.thread.id === selectedThreadId) {
+          chat.updateThreadMeta(res.thread);
+          updateHeader();
+        }
       }
     } catch (e) {
       composer.showError(e instanceof Error ? e.message : `Action "${action}" not allowed`);
@@ -520,22 +668,21 @@ function mountApp(): void {
 
   function renderConnStatus(state: string): void {
     if (state === "connected") {
-      connEl.textContent = t("gpui.acct.connected", "Connected");
-      connEl.className = "bp-conn-status bp-ok";
+      sidebar.setConnStatus(t("gpui.acct.connected", "Connected"), "bp-ok");
     } else if (state === "reconnecting") {
-      connEl.textContent = "Reconnecting…";
-      connEl.className = "bp-conn-status bp-warn";
+      sidebar.setConnStatus("Reconnecting…", "bp-warn");
     } else if (state === "revoked") {
-      connEl.textContent = t("gpui.acct.sign.in.expired", "Sign-in expired");
-      connEl.className = "bp-conn-status bp-bad";
+      sidebar.setConnStatus(t("gpui.acct.sign.in.expired", "Sign-in expired"), "bp-bad");
     } else {
-      connEl.textContent = "Connecting…";
-      connEl.className = "bp-conn-status";
+      sidebar.setConnStatus("Connecting…", "");
     }
   }
 
   onLocaleChange(() => {
     renderConnStatus(hub.getState());
+    settingsBtn.title = t("palette.settings", "Settings");
+    settingsBtn.setAttribute("aria-label", t("palette.settings", "Settings"));
+    updateHeader();
     sidebar.refreshLocale();
     chat.refreshLocale();
     composer.refreshLocale();
@@ -547,6 +694,7 @@ function mountApp(): void {
     if (state === "connected" && hello) {
       if (hello.locale) setLocale(hello.locale);
       if (hello.theme) applyHubTheme(hello.theme);
+      if (hello.name) sidebar.setHostName(hello.name);
       renderConnStatus(state);
       if (Array.isArray(hello.commands)) composer.setCommands(hello.commands as SlashCommand[]);
       void loadLists();
@@ -566,7 +714,7 @@ function mountApp(): void {
         if (idx >= 0) projects[idx] = proj;
         else projects.unshift(proj);
         sidebar.setData(projects, threads, bots, rooms);
-        updateCrumb();
+        updateHeader();
         break;
       }
       case "thread": {
@@ -578,6 +726,7 @@ function mountApp(): void {
         sidebar.setData(projects, threads, bots, rooms);
         if (th.id === selectedThreadId) {
           chat.updateThreadMeta(th);
+          updateHeader();
           composer.setState(true, th.state === "working");
         }
         break;
@@ -604,6 +753,7 @@ function mountApp(): void {
         if (p.thread === selectedThreadId) {
           const st = String(p.state ?? "idle");
           composer.setState(true, st === "working");
+          void refreshRail(selectedThreadId, threadGen);
         }
         break;
       }

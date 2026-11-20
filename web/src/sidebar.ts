@@ -1,4 +1,7 @@
-// Left sidebar: Projects, Threads (Pinned / Active / Settled, nested children), Bots & Rooms.
+// Left sidebar matching GPUI native-chat.png:
+// "This computer" header, "Search projects" input, ACTIVE section with folder icons
+// and indented thread rows with status dots + relative age, BOTS & ROOMS sections,
+// and bottom-left Connected status footer.
 import { t } from "./i18n";
 
 export interface ProjectItem {
@@ -54,6 +57,24 @@ export interface SidebarCallbacks {
   onThreadAct: (threadId: string, action: string) => void;
 }
 
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+function makeFolderIcon(): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.75");
+  svg.setAttribute("aria-hidden", "true");
+  svg.classList.add("bp-folder-icon");
+  const p = document.createElementNS(SVG_NS, "path");
+  p.setAttribute("d", "M3 6h6l2 2h10v11H3z");
+  svg.appendChild(p);
+  return svg;
+}
+
 function statusClass(th: ThreadItem): string {
   const s = th.status || th.state;
   if (s === "active" || s === "working") return "bp-dot-work";
@@ -62,10 +83,22 @@ function statusClass(th: ThreadItem): string {
   return "bp-dot-idle";
 }
 
+function formatAge(ts: number): string {
+  if (!ts) return "";
+  const ms = ts < 10_000_000_000 ? ts * 1000 : ts;
+  const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (diffSec < 60) return "now";
+  if (diffSec < 3600) return `${Math.floor(diffSec / 60)}m`;
+  if (diffSec < 86400) return `${Math.floor(diffSec / 3600)}h`;
+  return `${Math.floor(diffSec / 86400)}d`;
+}
+
 export class SidebarView {
   private el: HTMLElement;
+  private hostLabel: HTMLElement;
   private filterInput: HTMLInputElement;
   private listEl: HTMLElement;
+  private connEl: HTMLElement;
   private filterText = "";
   private showSettled = new Set<string>();
   private collapsedProjects = new Set<string>();
@@ -81,14 +114,24 @@ export class SidebarView {
     this.el = container;
     this.cb = cb;
 
+    const hostRow = document.createElement("div");
+    hostRow.className = "bp-side-host";
+    this.hostLabel = document.createElement("span");
+    this.hostLabel.textContent = "This computer";
+    const chev = document.createElement("span");
+    chev.className = "bp-dim";
+    chev.textContent = "›";
+    hostRow.append(this.hostLabel, chev);
+
     const head = document.createElement("div");
     head.className = "bp-side-head";
 
     this.filterInput = document.createElement("input");
     this.filterInput.type = "search";
     this.filterInput.className = "bp-input bp-side-search";
-    this.filterInput.placeholder = t("gpui.filter.projects.and.threads", "Filter projects and threads");
-    this.filterInput.setAttribute("aria-label", t("gpui.filter.projects.and.threads", "Filter projects and threads"));
+    const ph = t("gpui.filter.projects.and.threads", "Search projects");
+    this.filterInput.placeholder = ph;
+    this.filterInput.setAttribute("aria-label", ph);
     this.filterInput.setAttribute("data-testid", "sidebar-filter");
     this.filterInput.addEventListener("input", () => {
       this.filterText = this.filterInput.value.trim().toLowerCase();
@@ -100,7 +143,24 @@ export class SidebarView {
     this.listEl.className = "bp-side-list";
     this.listEl.setAttribute("data-testid", "sidebar-list");
 
-    this.el.append(head, this.listEl);
+    const footer = document.createElement("div");
+    footer.className = "bp-side-footer";
+    this.connEl = document.createElement("span");
+    this.connEl.className = "bp-conn-status";
+    this.connEl.textContent = "Connecting…";
+    this.connEl.setAttribute("data-testid", "conn-status");
+    footer.appendChild(this.connEl);
+
+    this.el.append(hostRow, head, this.listEl, footer);
+  }
+
+  public setHostName(name: string): void {
+    this.hostLabel.textContent = name || "This computer";
+  }
+
+  public setConnStatus(text: string, toneClass: string): void {
+    this.connEl.textContent = text;
+    this.connEl.className = `bp-conn-status ${toneClass}`.trim();
   }
 
   public setData(projects: ProjectItem[], threads: ThreadItem[], bots: BotItem[], rooms: RoomItem[]): void {
@@ -121,7 +181,7 @@ export class SidebarView {
   }
 
   public refreshLocale(): void {
-    const ph = t("gpui.filter.projects.and.threads", "Filter projects and threads");
+    const ph = t("gpui.filter.projects.and.threads", "Search projects");
     this.filterInput.placeholder = ph;
     this.filterInput.setAttribute("aria-label", ph);
     this.render();
@@ -158,42 +218,40 @@ export class SidebarView {
       row.setAttribute("data-thread-id", th.id);
       row.setAttribute("data-testid", `thread-row-${th.id}`);
 
+      const branch = document.createElement("span");
+      branch.className = "bp-tree-branch";
+      branch.setAttribute("aria-hidden", "true");
+
       const dot = document.createElement("span");
       dot.className = `bp-dot ${statusClass(th)}`;
-
-      const body = document.createElement("div");
-      body.className = "bp-thread-body";
 
       const title = document.createElement("div");
       title.className = "bp-thread-title";
       title.textContent = th.title || "Untitled thread";
 
-      body.appendChild(title);
-      if (th.preview) {
-        const prev = document.createElement("div");
-        prev.className = "bp-thread-preview";
-        prev.textContent = th.preview;
-        body.appendChild(prev);
-      }
-
-      row.append(dot, body);
+      row.append(branch, dot, title);
 
       if ((th.waiting ?? 0) > 0) {
         const badge = document.createElement("span");
         badge.className = "bp-badge-need";
         badge.textContent = String(th.waiting);
         row.appendChild(badge);
-      } else if (th.pinned) {
-        const pin = document.createElement("span");
-        pin.className = "bp-pin-mark";
-        pin.title = t("tools.pinned", "Pinned");
-        pin.textContent = "·";
-        row.appendChild(pin);
+      } else {
+        const age = document.createElement("span");
+        age.className = "bp-thread-age";
+        age.textContent = formatAge(th.updatedAt);
+        if (th.pinned) age.title = t("tools.pinned", "Pinned");
+        row.appendChild(age);
       }
 
       row.addEventListener("click", () => this.cb.onSelectThread(th.id));
       return row;
     };
+
+    const activeHead = document.createElement("div");
+    activeHead.className = "bp-side-section-head";
+    activeHead.textContent = "ACTIVE";
+    frag.appendChild(activeHead);
 
     if (this.projects.length === 0 && this.threads.length === 0) {
       const empty = document.createElement("div");
@@ -217,13 +275,12 @@ export class SidebarView {
       toggle.type = "button";
       toggle.className = "bp-proj-toggle";
       const collapsed = this.collapsedProjects.has(proj.id) && !q;
-      const swatch = document.createElement("span");
-      swatch.className = "bp-proj-swatch";
-      if (proj.css) swatch.style.backgroundColor = proj.css;
+      const folder = makeFolderIcon();
+      if (proj.css) folder.style.color = proj.css;
       const nameSpan = document.createElement("span");
       nameSpan.className = "bp-proj-name";
       nameSpan.textContent = proj.title || proj.id;
-      toggle.append(swatch, nameSpan);
+      toggle.append(folder, nameSpan);
       toggle.addEventListener("click", () => {
         if (this.collapsedProjects.has(proj.id)) this.collapsedProjects.delete(proj.id);
         else this.collapsedProjects.add(proj.id);
@@ -284,13 +341,13 @@ export class SidebarView {
       frag.appendChild(sec);
     }
 
-    if (this.bots.length > 0 && !q) {
+    if (!q) {
       const botSec = document.createElement("section");
       botSec.className = "bp-proj-group bp-bots-group";
-      const head = document.createElement("div");
-      head.className = "bp-side-label";
-      head.textContent = t("tour.title.bots", "Bots");
-      botSec.appendChild(head);
+      const botHead = document.createElement("div");
+      botHead.className = "bp-side-section-head";
+      botHead.textContent = t("tour.title.bots", "Bots").toUpperCase();
+      botSec.appendChild(botHead);
       for (const bot of this.bots) {
         const row = document.createElement("div");
         row.className = "bp-thread-row" + (bot.thread === this.selectedThreadId ? " active" : "");
@@ -305,15 +362,13 @@ export class SidebarView {
         botSec.appendChild(row);
       }
       frag.appendChild(botSec);
-    }
 
-    if (this.rooms.length > 0 && !q) {
       const roomSec = document.createElement("section");
       roomSec.className = "bp-proj-group";
-      const head = document.createElement("div");
-      head.className = "bp-side-label";
-      head.textContent = t("bots.rooms", "Rooms");
-      roomSec.appendChild(head);
+      const roomHead = document.createElement("div");
+      roomHead.className = "bp-side-section-head";
+      roomHead.textContent = t("bots.rooms", "Rooms").toUpperCase();
+      roomSec.appendChild(roomHead);
       for (const room of this.rooms) {
         const row = document.createElement("div");
         row.className = "bp-thread-row";

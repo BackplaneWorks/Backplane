@@ -1,4 +1,7 @@
-// Thread timeline: entries, pagination, streaming text, asks, #1309 review bar, #1311 unanswered notice.
+// Thread timeline matching GPUI native-chat.png:
+// Bottom-anchored conversation, right-aligned user bubble with Copy · Reply · time,
+// left-aligned plain assistant reply with Finished time · Copy · Reply,
+// hidden routine git/system notes, load-on-scroll pagination, asks, #1309 review bar, #1311 unanswered notice.
 import { t } from "./i18n";
 import { renderMarkdown } from "./md";
 import type { ThreadItem } from "./sidebar";
@@ -37,18 +40,33 @@ export interface ChatCallbacks {
   onAnswerAsk: (askId: string, answer: string) => void;
   onToggleReview: (nextOn: boolean) => void;
   onUnansweredAction: (action: string, value: string) => void;
-  onThreadAction: (action: string) => void;
+  onReplyEntry: (entry: EntryItem) => void;
   onLoadImage: (entryId: string, path: string) => Promise<{ mime: string; data: string } | null>;
 }
 
-function formatTime(ms: number): string {
+function formatTime24(ms: number): string {
   if (!ms) return "";
   const d = new Date(ms < 10_000_000_000 ? ms * 1000 : ms);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function isHiddenSystemNote(e: EntryItem): boolean {
+  if (e.agentOnly) return true;
+  // Match desktop GPUI: routine git snapshot/repo-init notes are not drawn in the chat timeline.
+  if (e.kind === "note") {
+    const txt = (e.text || "").trim();
+    if (
+      txt.startsWith("Made this folder a git repository") ||
+      txt.startsWith("Backplane: snapshot") ||
+      txt.includes("snapshot of existing work before first use")
+    ) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export class ChatView {
-  private headEl: HTMLElement;
   private bannerEl: HTMLElement;
   private scrollEl: HTMLElement;
   private listEl: HTMLElement;
@@ -57,6 +75,7 @@ export class ChatView {
   private thread: ThreadItem | null = null;
   private entries: EntryItem[] = [];
   private hasMore = false;
+  private loadingOlder = false;
   private review: ReviewBar | null = null;
   private unanswered: UnansweredNotice | null = null;
   private btwNote: { q: string; a: string } | null = null;
@@ -65,9 +84,6 @@ export class ChatView {
 
   constructor(container: HTMLElement, cb: ChatCallbacks) {
     this.cb = cb;
-    this.headEl = document.createElement("header");
-    this.headEl.className = "bp-thread-head";
-    this.headEl.setAttribute("data-testid", "thread-head");
 
     this.bannerEl = document.createElement("div");
     this.bannerEl.className = "bp-thread-banners";
@@ -81,24 +97,37 @@ export class ChatView {
     this.olderBtn.className = "bp-older-btn bp-hidden";
     this.olderBtn.textContent = t("android.load.earlier", "Load earlier");
     this.olderBtn.setAttribute("data-testid", "load-older-btn");
-    this.olderBtn.addEventListener("click", () => this.cb.onLoadOlder());
+    this.olderBtn.addEventListener("click", () => {
+      if (!this.loadingOlder && this.hasMore) {
+        this.loadingOlder = true;
+        this.cb.onLoadOlder();
+      }
+    });
+
+    // Load older messages automatically on scroll near top (matching desktop paging)
+    this.scrollEl.addEventListener("scroll", () => {
+      if (this.hasMore && !this.loadingOlder && this.scrollEl.scrollTop < 48) {
+        this.loadingOlder = true;
+        this.cb.onLoadOlder();
+      }
+    });
 
     this.listEl = document.createElement("div");
     this.listEl.className = "bp-timeline-list";
 
     this.scrollEl.append(this.olderBtn, this.listEl);
-    container.append(this.headEl, this.bannerEl, this.scrollEl);
+    container.append(this.bannerEl, this.scrollEl);
   }
 
   public setLoading(thread: ThreadItem | null): void {
     this.thread = thread;
     this.entries = [];
     this.hasMore = false;
+    this.loadingOlder = false;
     this.review = null;
     this.unanswered = null;
     this.btwNote = null;
     this.liveNodes.clear();
-    this.renderHead();
     this.renderBanners();
     this.olderBtn.classList.add("bp-hidden");
     const el = document.createElement("div");
@@ -111,11 +140,11 @@ export class ChatView {
     this.thread = thread;
     this.entries = [];
     this.hasMore = false;
+    this.loadingOlder = false;
     this.review = null;
     this.unanswered = null;
     this.btwNote = null;
     this.liveNodes.clear();
-    this.renderHead();
     this.renderBanners();
     this.olderBtn.classList.add("bp-hidden");
     const box = document.createElement("div");
@@ -138,7 +167,6 @@ export class ChatView {
   public refreshLocale(): void {
     const savedScroll = this.scrollEl.scrollTop;
     this.olderBtn.textContent = t("android.load.earlier", "Load earlier");
-    this.renderHead();
     this.renderBanners();
     if (this.thread && this.entries.length > 0) {
       this.renderEntries(false);
@@ -154,12 +182,12 @@ export class ChatView {
     unanswered: UnansweredNotice | null,
   ): void {
     this.thread = thread;
-    this.entries = entries.filter((e) => !e.agentOnly);
+    this.entries = entries.filter((e) => !isHiddenSystemNote(e));
     this.hasMore = hasMore;
+    this.loadingOlder = false;
     this.review = review;
     this.unanswered = unanswered;
     this.btwNote = null;
-    this.renderHead();
     this.renderBanners();
     this.renderEntries(true);
   }
@@ -167,7 +195,6 @@ export class ChatView {
   public updateThreadMeta(thread: ThreadItem): void {
     if (!this.thread || this.thread.id !== thread.id) return;
     this.thread = thread;
-    this.renderHead();
   }
 
   public setReview(review: ReviewBar | null): void {
@@ -186,17 +213,22 @@ export class ChatView {
   }
 
   public prependEntries(older: EntryItem[], hasMore: boolean): void {
+    this.loadingOlder = false;
     const prevHeight = this.scrollEl.scrollHeight;
     const seen = new Set(this.entries.map((e) => e.id));
-    const add = older.filter((e) => !e.agentOnly && !seen.has(e.id));
+    const add = older.filter((e) => !isHiddenSystemNote(e) && !seen.has(e.id));
     this.entries = [...add, ...this.entries];
     this.hasMore = hasMore;
     this.renderEntries(false);
     this.scrollEl.scrollTop += this.scrollEl.scrollHeight - prevHeight;
   }
 
+  public clearLoadingOlder(): void {
+    this.loadingOlder = false;
+  }
+
   public upsertEntry(entry: EntryItem): void {
-    if (entry.agentOnly) return;
+    if (isHiddenSystemNote(entry)) return;
     const atBottom = this.isNearBottom();
     let idx = this.entries.findIndex((e) => e.id === entry.id);
     if (idx < 0 && entry.clientId) {
@@ -242,52 +274,6 @@ export class ChatView {
 
   private scrollToBottom(): void {
     this.scrollEl.scrollTop = this.scrollEl.scrollHeight;
-  }
-
-  private renderHead(): void {
-    this.headEl.replaceChildren();
-    if (!this.thread) {
-      const empty = document.createElement("span");
-      empty.className = "bp-dim";
-      empty.textContent = "Select a thread or start a new one.";
-      this.headEl.appendChild(empty);
-      return;
-    }
-    const left = document.createElement("div");
-    left.className = "bp-thread-head-left";
-    const title = document.createElement("h1");
-    title.className = "bp-thread-head-title";
-    title.textContent = this.thread.title || "Untitled thread";
-    title.setAttribute("data-testid", "thread-title");
-
-    const statePill = document.createElement("span");
-    statePill.className = "bp-state-pill";
-    statePill.textContent = this.thread.status || this.thread.state || "idle";
-    left.append(title, statePill);
-
-    const right = document.createElement("div");
-    right.className = "bp-thread-head-right";
-    if (this.thread.chip) {
-      const chip = document.createElement("span");
-      chip.className = "bp-model-chip";
-      chip.textContent = this.thread.chip;
-      right.appendChild(chip);
-    }
-
-    const pinBtn = document.createElement("button");
-    pinBtn.type = "button";
-    pinBtn.className = "bp-btn-ghost";
-    pinBtn.textContent = this.thread.pinned ? t("menu.unpin", "Unpin") : t("menu.pin", "Pin");
-    pinBtn.addEventListener("click", () => this.cb.onThreadAction(this.thread?.pinned ? "unpin" : "pin"));
-
-    const settleBtn = document.createElement("button");
-    settleBtn.type = "button";
-    settleBtn.className = "bp-btn-ghost";
-    settleBtn.textContent = this.thread.settled ? t("phone.unsettle", "Unsettle") : t("menu.settle", "Settle");
-    settleBtn.addEventListener("click", () => this.cb.onThreadAction(this.thread?.settled ? "unsettle" : "settle"));
-
-    right.append(pinBtn, settleBtn);
-    this.headEl.append(left, right);
   }
 
   private renderBanners(): void {
@@ -359,6 +345,41 @@ export class ChatView {
       frag.appendChild(box);
     }
     this.bannerEl.replaceChildren(frag);
+  }
+
+  private makeEntryActions(entry: EntryItem, isUser: boolean): HTMLElement {
+    const foot = document.createElement("div");
+    foot.className = "bp-entry-foot" + (isUser ? " user" : "");
+
+    const copyBtn = document.createElement("button");
+    copyBtn.type = "button";
+    copyBtn.className = "bp-entry-act";
+    const copyLbl = t("common.copy", "Copy");
+    copyBtn.textContent = copyLbl;
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard?.writeText(entry.text || "").then(() => {
+        copyBtn.textContent = "✓";
+        window.setTimeout(() => { copyBtn.textContent = copyLbl; }, 1000);
+      }).catch(() => {});
+    });
+
+    const replyBtn = document.createElement("button");
+    replyBtn.type = "button";
+    replyBtn.className = "bp-entry-act";
+    replyBtn.textContent = "Reply";
+    replyBtn.addEventListener("click", () => this.cb.onReplyEntry(entry));
+
+    const timeEl = document.createElement("span");
+    timeEl.className = "bp-entry-time";
+    const ts = formatTime24(entry.at);
+    if (isUser) {
+      timeEl.textContent = ts;
+      foot.append(copyBtn, replyBtn, timeEl);
+    } else {
+      timeEl.textContent = entry.live ? "Streaming…" : (ts ? `Finished ${ts}` : "");
+      foot.append(timeEl, copyBtn, replyBtn);
+    }
+    return foot;
   }
 
   private renderEntries(scrollToBottom: boolean): void {
@@ -450,16 +471,6 @@ export class ChatView {
         continue;
       }
 
-      const meta = document.createElement("div");
-      meta.className = "bp-entry-meta";
-      const who = document.createElement("span");
-      who.className = "bp-entry-who";
-      who.textContent = entry.kind === "user" ? t("secret.you", "You") : entry.kind === "assistant" ? t("model.col.agent", "Agent") : entry.kind;
-      const time = document.createElement("span");
-      time.className = "bp-entry-time";
-      time.textContent = entry.live ? "Streaming…" : formatTime(entry.at);
-      meta.append(who, time);
-
       if (entry.replyTo?.quote) {
         const rq = document.createElement("div");
         rq.className = "bp-reply-quote";
@@ -473,7 +484,7 @@ export class ChatView {
       else body.appendChild(renderMarkdown(entry.text || ""));
       if (entry.live) this.liveNodes.set(entry.id, body);
 
-      row.append(meta, body);
+      row.appendChild(body);
 
       if (entry.images && entry.images.length > 0) {
         const imgs = document.createElement("div");
@@ -497,6 +508,8 @@ export class ChatView {
         }
         row.appendChild(imgs);
       }
+
+      row.appendChild(this.makeEntryActions(entry, entry.kind === "user"));
       frag.appendChild(row);
     }
     this.listEl.replaceChildren(frag);
