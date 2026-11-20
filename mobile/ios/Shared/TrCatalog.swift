@@ -4560,6 +4560,18 @@ settings.designmode.note	Auto opens KiCad by itself only where that is enabled f
 review.empty.title	Nothing to review yet	レビューするものはまだありません	Aún no hay nada que revisar
 review.empty.next	Add a schematic to see its parts here.	回路図を追加すると、ここに部品が表示されます。	Añade un esquemático para ver sus componentes aquí.
 viewer.diff.threadchanges	Thread changes	スレッドの変更	Cambios del hilo
+viewer.layout.refusal.locked	KiCad has a dialog open	KiCad でダイアログが開いています	KiCad tiene un diálogo abierto
+viewer.layout.refusal.toosmall	Too small for KiCad	KiCad の表示領域が小さすぎます	Demasiado pequeño para KiCad
+viewer.layout.refusal.onekicad	Only one KiCad tile	KiCad タイルは 1 つまでです	Solo un panel de KiCad
+viewer.layout.refusal.incompatibleoverlay	Those views cannot be overlaid	これらのビューは重ね合わせできません	Esas vistas no se pueden superponer
+viewer.layout.refusal.notfound	That tile is no longer open	そのタイルはもう開いていません	Ese panel ya no está abierto
+viewer.layout.refusal.nooverlay	That tile has no overlay	そのタイルに重ね合わせはありません	Ese panel no tiene superposición
+viewer.layout.refusal.invalidsource	That file is outside this project	そのファイルはこのプロジェクト外です	Ese archivo está fuera de este proyecto
+viewer.layout.refusal.sametile	Choose two different tiles	異なる 2 つのタイルを選んでください	Elige dos paneles distintos
+viewer.layout.refusal.invalidratio	Invalid split ratio	分割比率が無効です	Proporción de división no válida
+viewer.layout.refusal.duplicateid	Tile already exists	タイルは既に存在します	El panel ya existe
+viewer.layout.refusal.unknownframe	Unknown KiCad frame	不明な KiCad フレームです	Marco de KiCad desconocido
+viewer.layout.refusal.invalidinput	Invalid layout request	無効なレイアウト要求です	Solicitud de diseño no válida
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
