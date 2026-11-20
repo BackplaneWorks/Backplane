@@ -342,10 +342,18 @@ fn model_loading(clock: &mut super::panestate::LoadingClock, load_key: &str, say
     super::panestate::view_on_backdrop(crate::viewers::raster::Backdrop::current(), &super::panestate::PaneState::loading(line), None)
 }
 /// A page in an empty, loading or error state: keeps the header bar at its normal height when `actions` is given, and centres the state in the pane body.
+pub(crate) fn main_body<E: ParentElement + Styled>(body: E) -> E {
+    crate::ui::with_rect(body, || "tile-body:main".into())
+}
+
+fn measured_body(body: AnyElement) -> AnyElement {
+    if crate::art::rects_on() { main_body(div().flex_1().min_h_0().flex().flex_col()).child(body).into_any_element() } else { body }
+}
+
 fn pane_body_state(light: bool, st: &super::panestate::PaneState, actions: Option<AnyElement>, retry: Option<AnyElement>) -> AnyElement {
     let body = super::panestate::view(light, st, retry);
     match actions {
-        Some(a) => div().size_full().flex().flex_col().child(a).child(body).into_any_element(),
+        Some(a) => div().size_full().flex().flex_col().child(a).child(measured_body(body)).into_any_element(),
         None => body,
     }
 }
@@ -363,8 +371,8 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: He
             tools.push(command(cx, id, trs(label), id == "revert-ask" && diff["reverting"] == true, action, value.into()));
         }
     }
-    col = col.child(pane_header(light, actions.identity, tools, actions.controls))
-        .child(div().px_3().text_color(c("dim")).child(trs(&string(diff, "summary"))));
+    let header = pane_header(light, actions.identity, tools, actions.controls);
+    col = col.child(div().px_3().text_color(c("dim")).child(trs(&string(diff, "summary"))));
     // Revert asks first (Ui.revert): the diff stays on show while the person decides what to discard
     if diff["reverting"] == true {
         col = col.child(div().flex().flex_col().gap_2().px_3().py_2().bg(c("raise")).border_y_1().border_color(c("bad"))
@@ -386,7 +394,7 @@ fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: He
         }
     }
     if budget == 0 { col = col.child(div().px_3().py_1().text_color(c("dim")).child(trs("… the rest of the diff is not shown"))); }
-    col.into_any_element()
+    div().flex().flex_col().child(header).child(main_body(col)).into_any_element()
 }
 
 /// One plot canvas: the frame it is given (or what the hub says instead) and, when `layers` is on, the hub's layer list beside it.
@@ -431,7 +439,7 @@ fn plot_loading(cx: &mut Context<Backplane>, light: bool, slot: usize, viewer: &
     let secs = match clock { Some(clk) => clk.track_now(load_key), None => pv.loading.track_now(load_key) };
     let line = super::panestate::loading_line(say, secs, 0);
     if slot == 0 { DRAWN.with(|d| d.borrow_mut().1 = line.clone()); }
-    col.child(super::panestate::view(light, &super::panestate::PaneState::loading(line), None)).into_any_element()
+    col.child(measured_body(super::panestate::view(light, &super::panestate::PaneState::loading(line), None))).into_any_element()
 }
 /// Called from the warm-handoff `if editing` branch with `origin/main`'s exact signature; passes `editing = true` explicitly down to `plot_pane_inner`.
 fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, viewer: &Value, frame: Option<&super::plot::Frame>, pv: &mut super::plotview::PlotView, layers: bool, sheets: &[super::plot::Sheet], refs: &[(String, Vec<String>)], actions: Option<Header>) -> AnyElement {
@@ -596,7 +604,7 @@ fn plot_pane_inner(cx: &mut Context<Backplane>, light: bool, slot: usize, open: 
         for (k, v) in card_rows(&card) { box_ = box_.child(div().flex().gap_2().child(div().w(crate::scale::tpx(58.)).flex_none().text_color(c("dim")).child(trs(&k))).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(v))); }
         area = area.child(box_);
     }
-    col = col.child(area);
+    col = col.child(area.when(slot == 0 && !editing, |d| main_body(d)));
     if hb { col = col.child(super::histbar::bar_el(cx, light, pv, &vkey)); }
     col.into_any_element()
 }
@@ -816,9 +824,9 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
         let title = trs(title);
         DRAWN.with(|d| d.borrow_mut().1 = title.clone());
         let state = super::panestate::PaneState::empty(title, trs(&string(&review["empty"], "next")));
-        return div().size_full().flex().flex_col().child(bar).child(super::panestate::view(light, &state, None)).into_any_element();
+        return div().size_full().flex().flex_col().child(bar).child(measured_body(super::panestate::view(light, &state, None))).into_any_element();
     }
-    if let Some(panel) = shared { return div().size_full().flex().flex_col().child(bar).child(panel).into_any_element() }
+    if let Some(panel) = shared { return div().size_full().flex().flex_col().child(bar).child(measured_body(panel)).into_any_element() }
     let title = string(review, "title");
     let page = arr(review, "tabs").find(|t| t["on"] == true).map(|t| string(t, "page")).unwrap_or_default();
     if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(trs(&title)))
@@ -844,7 +852,7 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
             super::panestate::PaneState::empty(trs(&string(review, "note")), String::new())
         };
         // Keep the title + Refresh header row above the centred empty/busy state.
-        return div().size_full().flex().flex_col().child(bar).child(col).child(div().flex_1().min_h(px(160.)).flex().flex_col().child(super::panestate::view(light, &st, None))).into_any_element();
+        return div().size_full().flex().flex_col().child(bar).child(main_body(col)).child(div().flex_1().min_h(px(160.)).flex().flex_col().child(super::panestate::view(light, &st, None))).into_any_element();
     }
     if blocks.is_empty() { col = col.child(div().text_color(c("dim")).child(if review["busy"] == true { trs("Working…") } else { trs(&string(review, "note")) })); }
     else { let parsed = md::parse(&blocks); for el in timeline::blocks(cx, reg, light, &parsed, "review") { col = col.child(el); } }
@@ -853,7 +861,7 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
         let nodes = review["release"]["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
         col = col.children(timeline::blocks(cx, reg, light, &md::parse(nodes), "release"));
     }
-    div().flex().flex_col().child(bar).child(col).into_any_element()
+    div().flex().flex_col().child(bar).child(main_body(col)).into_any_element()
 }
 
 thread_local! { static BOARDS_ASKED: std::cell::RefCell<std::collections::HashSet<String>> = std::cell::RefCell::new(Default::default()); }
@@ -987,16 +995,17 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
                     super::panestate::view(light, &super::panestate::mech_empty(&say, &note), None)
                 }
             } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(&mut pv.loading, &format!("{open}:{want}"), &super::panestate::loading_for(open, false)) } };
-            if open == "mech" { let a = acts(cx); div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, a)).child(model).into_any_element() }
-            else if ready { let a0 = acts(cx); let a = with_boards(cx, light, viewer, pv, a0); in_corner(div().size_full().flex().flex_col().child(model).into_any_element(), a) }
+            if open == "mech" { let a = acts(cx); div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, a)).child(measured_body(model)).into_any_element() }
+            else if ready { let a0 = acts(cx); let a = with_boards(cx, light, viewer, pv, a0); in_corner(main_body(div().size_full().flex().flex_col()).child(model).into_any_element(), a) }
             else { let a = acts(cx); in_corner(model_loading(&mut pv.loading, &format!("3d:{want}"), &super::panestate::loading_for("3d", false)), a) }
         }
         else if open == "browser" { let a = acts(cx); match browser { Some(b) => in_corner(div().size_full().child(b.clone()).into_any_element(), a), None => pane_body_state(light, &super::panestate::PaneState::empty(trs("The browser page needs a connected hub."), String::new()), Some(bar(light).child(div().flex_1()).child(a).into_any_element()), None) } }
         else { let a = if migrated { let h = header(cx); pane_header(light, h.identity, vec![], h.controls) } else { bar(light).child(div().flex_1()).child(acts(cx)).into_any_element() }; let secs = pv.loading.track_now(&format!("open:{open}")); pane_body_state(light, &super::panestate::PaneState::loading(super::panestate::loading_line(&trs("Opening…"), secs, 0)), Some(a), None) };
     if editing { pv.loading.clear(); }
+    let container = crate::ui::with_rect(div().id("viewer-body").size_full(), || format!("tile-page:{page_key}"));
     // Keep main's exact scroll parent for the embedded editor (`editing`) and scrollable pages (Review, Diff, Mech);
     // only 3D (when not editing) joins files/image/pdf/text in omitting overflow_y_scroll so 3D's size_full() does not collapse under mgmt::host.
-    if (matches!(open, "files" | "image" | "pdf" | "text" | "3d") || (shared_scroll && open == "review")) && !diff_on && !editing { div().id("viewer-body").size_full().child(body).into_any_element() } else { div().id("viewer-body").size_full().overflow_y_scroll().child(body).into_any_element() }
+    if (matches!(open, "files" | "image" | "pdf" | "text" | "3d") || (shared_scroll && open == "review")) && !diff_on && !editing { container.child(body).into_any_element() } else { container.overflow_y_scroll().child(body).into_any_element() }
 }
 /// The pane around the page on show: its width, the left edge's drag and border; `page` (the page itself, `page()`, drawn as a part of the
 /// window by ui.rs) fills the rest, so the pane's frame is known without building the page.
