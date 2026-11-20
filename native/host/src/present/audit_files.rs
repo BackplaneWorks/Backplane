@@ -13,7 +13,14 @@ pub mod kicad { pub mod canonical { pub fn design_root(root: &str) -> String { r
 /// What follow.rs's embedded-KiCad part reaches for (its `super::`): the audit has no KiCad, so no pane holds one and nothing is sent.
 #[allow(dead_code)] pub mod ipc { pub fn pro_of(_: &str) -> String { String::new() } }
 #[allow(dead_code)] pub mod embed { use serde_json::Value; #[derive(Clone)] pub struct GuiRoute { pub pro: String }
-    pub fn kind_of_fk_val(_: &Value) -> &'static str { "" } pub fn pane_client(_: &str) -> Option<u64> { None } pub fn norm_pro_key(p: &str) -> String { p.to_string() }
+    /// kicad/embed.rs's own mapping (pure), so follow.rs's tests read GetFrames the same here
+    pub fn canon_frame(raw: &str) -> &'static str { match raw.trim().to_ascii_uppercase().as_str() {
+        "" | "0" | "PCB" | "FK_PCB" | "BOARD" => "PCB", "1" | "SCH" | "FK_SCH" | "SCHEMATIC" => "SCH", "2" | "PCB_3D" | "FK_PCB_3D" | "3D" | "3D_VIEWER" => "PCB_3D",
+        "SYMBOL_EDITOR" | "FK_SYMBOL_EDITOR" | "SYM" => "SYMBOL_EDITOR", "FOOTPRINT_EDITOR" | "FK_FOOTPRINT_EDITOR" | "FP" => "FOOTPRINT_EDITOR",
+        "GERBVIEW" | "FK_GERBVIEW" => "GERBVIEW", "SIMULATOR" | "FK_SIMULATOR" | "SIMULATION" | "SIM" => "SIMULATOR", _ => "OTHER" } }
+    pub fn kind_of_fk_val(v: &Value) -> &'static str { if let Some(s) = v.as_str() { return canon_frame(s) }
+        match v.as_i64().unwrap_or(0) { 1 => "PCB", 2 => "SCH", 3 => "SYMBOL_EDITOR", 4 => "FOOTPRINT_EDITOR", 5 => "PCB_3D", 7 => "GERBVIEW", 8 => "SIMULATOR", _ => "OTHER" } }
+    pub fn pane_client(_: &str) -> Option<u64> { None } pub fn norm_pro_key(p: &str) -> String { p.to_string() }
     pub fn gui_route(_: &str) -> Option<GuiRoute> { None } pub async fn gui_call(_: &GuiRoute, _: &str, _: Value) -> Value { Value::Null } pub fn session_state(_: &str) -> Value { Value::Null } }
 #[allow(dead_code)] pub mod watch { pub fn pane_frame_of(_: u64, _: &str) -> Option<String> { None } }
 #[allow(dead_code)] pub mod xprobe { pub fn has_select_items(_: &super::embed::GuiRoute) -> bool { false } }
