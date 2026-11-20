@@ -25,12 +25,20 @@ const WAIT_TICKS: u32 = 7; // a view waiting for its project's first board or sc
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Stamp { rev: String, ok: bool }
-pub fn stamp(path: &str) -> Stamp {
+pub fn stamp(path: &str) -> Stamp { stamp_in(path, None) }
+pub fn stamp_in(path: &str, root: Option<&std::path::Path>) -> Stamp {
     use crate::plat::fs::MetadataExt;
-    // a Gerber set's folder: its files' stamps (an export rewrites them in place)
-    if std::path::Path::new(path).is_dir() { return Stamp { rev: super::gerber::set_stamp(std::path::Path::new(path)), ok: true } }
-    // a set compared with its board: both
-    if let Some(r) = path.strip_prefix(super::gerber::CMP) { let (a, b) = r.split_once('\n').unwrap_or((r, "")); return Stamp { rev: format!("{}{}", super::gerber::set_stamp(std::path::Path::new(a)), stamp(b).rev), ok: true } }
+    // a Gerber set's folder: its files' stamps (an export rewrites them in place), bounded by project root when provided
+    if std::path::Path::new(path).is_dir() { return Stamp { rev: super::gerber::set_stamp_in(std::path::Path::new(path), root), ok: true } }
+    // a set compared with its board: both, bounded by project root when provided
+    if let Some(r) = path.strip_prefix(super::gerber::CMP) {
+        let (a, b) = r.split_once('\n').unwrap_or((r, ""));
+        let b_rev = match root {
+            Some(rt) => std::fs::canonicalize(rt).ok().and_then(|cr| super::gerber::canon_in(std::path::Path::new(b), &cr)).map(|cb| stamp(&cb.to_string_lossy()).rev).unwrap_or_default(),
+            None => stamp(b).rev,
+        };
+        return Stamp { rev: format!("{}{}", super::gerber::set_stamp_in(std::path::Path::new(a), root), b_rev), ok: true }
+    }
     // FS.revision: "dev:ino:size:mtime s:ns:ctime s:ns" (a same-size save within a second still changes it)
     match std::fs::metadata(path) { Ok(m) => Stamp { rev: format!("{}:{}:{}:{}:{}:{}:{}", m.dev(), m.ino(), m.len(), m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec()), ok: true }, Err(_) => Stamp::default() }
 }
@@ -80,7 +88,7 @@ pub fn fnv(s: &str) -> u32 { s.chars().fold(2166136261u32, |h, c| (h ^ c as u32)
 #[derive(Default)]
 /// `parts`: a board model's part frames so far (the one that starts them first), `stop` its stream's (set when another replaces it)
 /// `focus`: a STEP the person zoomed in on, refined around this box (kicad.refine): read at that detail from then on
-struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool, parts: Vec<Arc<Vec<u8>>>, stop: Option<Arc<std::sync::atomic::AtomicBool>>, focus: Option<[f64; 6]> }
+struct Src { kind: u32, root: String, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool, parts: Vec<Arc<Vec<u8>>>, stop: Option<Arc<std::sync::atomic::AtomicBool>>, focus: Option<[f64; 6]> }
 /// `kept`: the id (`plot::mesh_id`) of the model the client already holds from an earlier visit; that model is not sent again
 /// `parts_at`: how many of its source's part frames this watcher has been sent
 struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, parts_at: usize }
@@ -142,10 +150,12 @@ impl Plots {
               let carries = !force && i == 0 && !solid_kind(k);
               let (mesh, parts_at) = had.iter().position(|h| h.0 == ky).map(|i| { let h = had.swap_remove(i); (h.1, h.2) }).unwrap_or_default();
               st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if !force && solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at });
-              let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: f.clone(), ..Default::default() });
+              let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: f.clone(), ..Default::default() });
+              s.root = root.to_string();
               s.file = f;
+              let rt = (!s.root.is_empty()).then(|| std::path::Path::new(&s.root));
               if force { s.plot = None; s.stamp = None; }
-              else if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None } // Pv.fresh: a plot of an older file is not sent
+              else if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp_in(&s.file, rt)) { s.plot = None } // Pv.fresh: a plot of an older file is not sent
               todo.push(ky);
           }
           self.gc(&mut st);
@@ -180,10 +190,12 @@ impl Plots {
                   if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
               }
               st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 });
-              let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, file: file.clone(), ..Default::default() });
+              let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: file.clone(), ..Default::default() });
+              s.root = root.to_string();
               s.file = file;
+              let rt = (!s.root.is_empty()).then(|| std::path::Path::new(&s.root));
               if force { s.plot = None; s.stamp = None; }
-              else if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp(&s.file)) { s.plot = None }
+              else if !s.busy && !is_version(&s.file) && s.stamp.as_ref() != Some(&stamp_in(&s.file, rt)) { s.plot = None }
               todo.push(ky);
           }
           self.gc(&mut st);
@@ -477,7 +489,7 @@ impl Plots {
     }
 
     fn read(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str) {
-        let (kind, file) = { let mut st = self.st.lock().unwrap(); let Some(s) = st.srcs.get_mut(ky) else { return }; if s.busy { s.again = true; return } s.busy = true; (s.kind, s.file.clone()) };
+        let (kind, root, file) = { let mut st = self.st.lock().unwrap(); let Some(s) = st.srcs.get_mut(ky) else { return }; if s.busy { s.again = true; return } s.busy = true; (s.kind, s.root.clone(), s.file.clone()) };
         let (me, hub, ky) = (self.clone(), hub.clone(), ky.to_string());
         tokio::spawn(async move {
             let t0 = std::time::Instant::now();
@@ -495,11 +507,12 @@ impl Plots {
                 Some(g)
             } else { None };
             if solid3 { say(&stage_text(kind, &file, native3d, known > 0, &stepglb::machine(&me.home))) }
-            let before = if is_version(&file) { Stamp::default() } else { stamp(&file) };
+            let rt = (!root.is_empty()).then(|| std::path::Path::new(&root));
+            let before = if is_version(&file) { Stamp::default() } else { stamp_in(&file, rt) };
             let mut parts = None;
             let out = if native3d { me.run_board3d(&hub, kind, &file, &ky).await.map(|r| match r { Ok((p, plan)) => { parts = plan; (0, String::new(), Some(p)) } Err(e) => (3, e, None) }) }
-                else if !solid::fits_for(known, solidread::is_step(&file)) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
-            let after = if is_version(&file) { Stamp::default() } else { stamp(&file) };
+                else if !solid::fits_for(known, solidread::is_step(&file)) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &root, &file, &ky).await } else { me.run_child(kind, &root, &file, &ky).await.map(|(c, t)| (c, t, None)) };
+            let after = if is_version(&file) { Stamp::default() } else { stamp_in(&file, rt) };
             let (code, text, made) = match out { Some((c, t, m)) => if before != after { (2, String::new(), None) } else { (c, t, m) }, None => (1, "cannot run the plot reader".into(), None) };
             let mut again = false;
             let plot = if code == 0 { Some(Arc::new(made.unwrap_or_else(|| plot::parse_child(&text)))) } else { None };
@@ -532,7 +545,7 @@ impl Plots {
     }
     /// `Pv.child` in this process (kicad/plotread.rs, kicad/solidread.rs): the plot, its info file written, and the child's exit code and
     /// message. A panic in a reader is an unread file, never the hub's end; a big file's memory goes back when it is done.
-    async fn run_native(self: &Arc<Self>, hub: &Arc<Hub>, kind: u32, file: &str, ky: &str) -> Option<(i32, String, Option<Plot>)> {
+    async fn run_native(self: &Arc<Self>, hub: &Arc<Hub>, kind: u32, root: &str, file: &str, ky: &str) -> Option<(i32, String, Option<Plot>)> {
         let (f, infos) = (file.to_string(), self.infos(ky));
         if solid_kind(kind) {
             let (cli, home) = (super::ipc::runtime(hub).await.cli, self.home.clone());
@@ -566,7 +579,7 @@ impl Plots {
                 o
             }).await.ok()
         }
-        let root = ky.split('|').nth(1).filter(|r| !r.is_empty()).map(std::path::PathBuf::from);
+        let root = (!root.is_empty()).then(|| std::path::PathBuf::from(root));
         tokio::task::spawn_blocking(move || {
             let r = std::panic::catch_unwind(|| plotread::read_in(kind, &f, root.as_deref()));
             let o = match r {
@@ -579,9 +592,8 @@ impl Plots {
             o
         }).await.ok()
     }
-    async fn run_child(&self, kind: u32, file: &str, ky: &str) -> Option<(i32, String)> {
+    async fn run_child(&self, kind: u32, root: &str, file: &str, ky: &str) -> Option<(i32, String)> {
         let mut c = if solid_kind(kind) { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, "nice"); c.args(["-n", "10"]).arg(&self.bin); c } else { crate::proc::tokio_cmd(crate::proc::Kind::Local, &self.bin) };
-        let root = ky.split('|').nth(1).unwrap_or("");
         if !root.is_empty() { c.env("BACKPLANE_PLOT_ROOT", root); }
         c.arg("--plot").arg(kind.to_string()).arg(file).arg(self.infos(ky)).stdin(std::process::Stdio::null()).kill_on_drop(false);
         let o = c.output().await.ok()?;
@@ -607,7 +619,8 @@ impl Plots {
               let watched: std::collections::HashSet<String> = st.subs.values().flatten().map(|s| s.key.clone()).collect();
               for (k, s) in st.srcs.iter_mut() {
                   if !watched.contains(k) || s.busy || is_version(&s.file) { continue }
-                  let now = stamp(&s.file);
+                  let rt = (!s.root.is_empty()).then(|| std::path::Path::new(&s.root));
+                  let now = stamp_in(&s.file, rt);
                   if s.stamp.as_ref() != Some(&now) { changed.push(k.clone()) }
               } }
             for k in changed {

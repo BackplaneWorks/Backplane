@@ -57,8 +57,8 @@ pub fn plot_in(path: &str, root: Option<&Path>) -> super::plotgen::Read {
     let (items, kind) = match cmp_board {
         None => (r.items, super::plotgen::GERBER),
         Some(b) => {
-            let b_path = match root.and_then(|r| std::fs::canonicalize(r).ok()) {
-                Some(cr) => canon_in(Path::new(&b), &cr),
+            let b_path = match root {
+                Some(r) => std::fs::canonicalize(r).ok().and_then(|cr| canon_in(Path::new(&b), &cr)),
                 None => std::fs::canonicalize(&b).ok(),
             };
             let Some(b_path) = b_path else { return super::plotgen::Read::Fail("that board is not in this project".into()) };
@@ -238,9 +238,12 @@ pub fn read_set_in(path: &Path, root: Option<&Path>) -> Read {
 }
 
 /// The stamp of a set: every file's (name, size, modified), so a new export (files rewritten in place or replaced) shows at once.
-pub fn set_stamp(path: &Path) -> String {
+pub fn set_stamp(path: &Path) -> String { set_stamp_in(path, None) }
+
+/// The same, confining metadata enumeration to canonical `root` when provided.
+pub fn set_stamp_in(path: &Path, root: Option<&Path>) -> String {
     let mut s = String::new();
-    for f in set_files(path) { if let Ok(m) = std::fs::metadata(&f) { s.push_str(&format!("{}:{}:{:?};", f.display(), m.len(), m.modified().ok())) } }
+    for f in set_files_in(path, root) { if let Ok(m) = std::fs::metadata(&f) { s.push_str(&format!("{}:{}:{:?};", f.display(), m.len(), m.modified().ok())) } }
     format!("{:016x}", s.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3)))
 }
 
@@ -384,6 +387,20 @@ mod tests {
         std::fs::write(proj.join("local.kicad_pcb"), "(kicad_pcb)").unwrap();
         let good_cmp = cmp_path(&mfg.to_string_lossy(), &proj.join("local.kicad_pcb").to_string_lossy());
         assert!(matches!(plot_in(&good_cmp, Some(&proj)), super::super::plotgen::Read::Plot(_, _)), "plot_in allows comparison board inside root");
+        // Unresolvable supplied root must fail closed (never fall back to unbounded read)
+        let missing_root = base.join("does-not-exist");
+        assert!(matches!(plot_in(&good_cmp, Some(&missing_root)), super::super::plotgen::Read::Fail(_)), "plot_in must fail closed when supplied root cannot be resolved");
+        // Stamp polling is also bounded by project root when a watched directory is replaced by an outside symlink
+        #[cfg(unix)]
+        {
+            let outside = base.join("outside-stamp");
+            std::fs::create_dir_all(&outside).unwrap();
+            std::fs::write(outside.join("ext-F_Cu.gbr"), "%FSLAX46Y46*%M02*\n").unwrap();
+            let linked = proj.join("linked-mfg");
+            std::os::unix::fs::symlink(&outside, &linked).unwrap();
+            let empty_stamp = set_stamp_in(&base.join("empty-dir"), Some(&proj));
+            assert_eq!(set_stamp_in(&linked, Some(&proj)), empty_stamp, "set_stamp_in must not enumerate files outside root");
+        }
         let _ = std::fs::remove_dir_all(&base);
     }
 }
