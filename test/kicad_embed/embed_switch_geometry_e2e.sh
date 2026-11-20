@@ -3,7 +3,8 @@
 # KiCad's frames): no placement that reads as a change of geometry and no synthetic ConfigureNotify (rail-round4: three same-rect
 # placements and three ConfigureNotify per switch). And KiCad still knows where its frame is on screen: a context menu opens at the
 # pointer after the switches, and again after Backplane's window has moved and the editors were switched once more.
-#   G1  across two switches (Board -> Schematic -> Board) at an unchanged rect: no `kicad_place` with "changed": true, no `kicad_place_notify`
+#   G1  across two switches (Board -> Schematic -> Board) at an unchanged rect, after a first round that shows the schematic once (its first
+#       show is told its place, rightly): no `kicad_place` with "changed": true, no `kicad_place_notify`
 #   G2  a right-click in the board after the switches opens KiCad's context menu at the pointer
 #   G3  Backplane's window moved, two more switches: the context menu still opens at the pointer (the frame was told its new place)
 # BACKPLANE_KICAD_DEBUG=1 (the lines are debug-only). Copies only (seed_project.py), fork mode, X11.
@@ -21,7 +22,7 @@ import json, sys
 sw = lambda tag: [{"click": "kicad-tab:SCH"}, {"kicad": {"wait_painted": 30000, "kind": "SCH", "tag": f"{tag}_sch"}}, {"wait": 2500},
                   {"click": "kicad-tab:PCB"}, {"kicad": {"wait_painted": 30000, "kind": "PCB", "tag": f"{tag}_pcb"}}, {"wait": 2500}]
 s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"kicad": {"wait_painted": 60000, "kind": "PCB", "tag": "edit"}},
-     {"wait": 5000}, {"mark": "switches"}] + sw("a") + [{"kicad": {"report": True, "tag": "switched"}}, {"mark": "switched"}, {"wait": 8000},
+     {"wait": 5000}] + sw("w") + [{"mark": "switches"}] + sw("a") + [{"kicad": {"report": True, "tag": "switched"}}, {"mark": "switched"}, {"wait": 8000},
      {"mark": "move"}, {"wait": 5000}, {"mark": "moved"}] + sw("b") + [{"kicad": {"report": True, "tag": "switched2"}}, {"mark": "switched2"}, {"wait": 8000}, {"mark": "done"}, {"wait": 2000}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
@@ -75,16 +76,16 @@ subprocess.run(["python3", xin, "key", "Escape"]); time.sleep(0.3)
 print("none" if not menu else f'{menu["root_x"] - x} {menu["root_y"] - y} {menu["h"]}')
 PY
 }
-# at the pointer: its left edge at the pointer's x, and its top (opened downwards) or bottom (GTK flips it upwards when there is no room
-# below) at the pointer's y; a stale place is off by the distance the frame moved, or by the pane's own offset
-near() { python3 -c 'import sys; a=sys.argv[1].split(); sys.exit(0 if len(a) == 3 and abs(int(a[0])) <= 48 and (abs(int(a[1])) <= 48 or abs(int(a[1]) + int(a[2])) <= 48) else 1)' "$1"; }
+# at the pointer: its left edge at the pointer's x, and the pointer's y within its height (GTK opens it downwards, or moves a tall one up
+# to fit the screen); a stale place is off by the distance the frame moved (G3 moves it by 160, 90), or by the pane's own offset
+near() { python3 -c 'import sys; a=sys.argv[1].split(); sys.exit(0 if len(a) == 3 and abs(int(a[0])) <= 48 and -int(a[2]) - 48 <= int(a[1]) <= 48 else 1)' "$1"; }
 M1=$(menu_at switched 2>/dev/null || echo none); echo "INFO G2 menu offset from the pointer: $M1"
-check "G2 after the switches a context menu opens at the pointer" "$(near "$M1" && echo 1 || echo 0)" "offset x y, height: $M1 (top or bottom within 48 px)"
+check "G2 after the switches a context menu opens at the pointer" "$(near "$M1" && echo 1 || echo 0)" "offset x y, height: $M1 (x within 48 px, the pointer within its height)"
 mark move || true
 wm_moveresize 160 90 >"$OUT/wm_move.json" 2>&1 || true
 mark switched2 || true
 M2=$(menu_at switched2 2>/dev/null || echo none); echo "INFO G3 menu offset from the pointer after the window moved: $M2"
-check "G3 Backplane's window moved and two more switches: the context menu opens at the pointer" "$(near "$M2" && echo 1 || echo 0)" "offset x y, height: $M2 (top or bottom within 48 px)"
+check "G3 Backplane's window moved and two more switches: the context menu opens at the pointer" "$(near "$M2" && echo 1 || echo 0)" "offset x y, height: $M2 (x within 48 px, the pointer within its height)"
 grep -o '"kicad_place_notify":[^}]*' "$OUT/client.log" | head -20 > "$OUT/notify.txt" || true
 wait "$CP" 2>/dev/null || true
 finish_suite "embed_switch_geometry_e2e ($EMBED_MODE)"
