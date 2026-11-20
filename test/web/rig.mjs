@@ -1,6 +1,7 @@
 // Browser context for the disposable HTTPS test hub. Chromium resolves the
 // synthetic origin to loopback while retaining the dedicated hostname in Host,
 // Origin and its cookie jar. Only the fixture certificate's SPKI is trusted.
+import { installVoiceStandin } from './voice.mjs';
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, X509Certificate } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -159,7 +160,7 @@ async function main(binary, output) {
   await fs.writeFile(path.join(agents, 'claude'), '#!/bin/sh\nexec bun "$BP_WEB_STANDIN" "$@"\n', { mode: 0o700 });
   try {
     await withTestTls(path.join(home, 'browser.sock'), async tls => {
-      const env = { PATH: process.env.PATH, HOME: temp, TMPDIR: temp, BP_TMP: temp,
+      const env = { BACKPLANE_VOICE_BIN: await installVoiceStandin(temp), PATH: process.env.PATH, HOME: temp, TMPDIR: temp, BP_TMP: temp,
         BACKPLANE_VAULT_KEYRING:'file', BP_WEB_MASK_FIXTURE:canary, BP_STREAM_N: "3", BP_STREAM_MS: "600", BP_WEB_STANDIN: standin, BP_WEB_FIXTURE: temp, BACKPLANE_AGENTS: agents,
         BP_WEB_NATIVE_PORT: String(nativePort), BP_WEB_TLS_PORT: String(tls.port),
         BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9' };
@@ -211,7 +212,7 @@ async function main(binary, output) {
             await checkAccess(probe, false);
             await probe.close();
             await rpc('devices.page.act', { action: 'device-web-access', value: '1' });
-            await browserTasks({ context, origin, rpc, thread: 't1', canary, advanceDays,
+            await browserTasks({ temp, context, origin, rpc, thread: 't1', canary, advanceDays,
               moveFixtureGerbers: async () => {
                 const archive = path.join(temp, "archived-gerbers");
                 await fs.rename(gerbers, archive);
