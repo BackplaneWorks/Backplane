@@ -147,6 +147,7 @@ fun DataRoot() {
             is Page.New -> { BackHandler { page = Page.Home }; NewThreadScreen(p.project, { page = Page.Home }) { page = Page.Thread(it) } }
         } }
         DataClient.askLink?.let { AskPair(it) }
+        DownloadStrip()
         LinkNote()
     }
 }

@@ -666,7 +666,9 @@ struct DataFilePreview: View {
     @State private var failed = false
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Button { close() } label: { Text("‹ " + (path.split(separator: "/").last.map(String.init) ?? path)).font(.system(.subheadline, design: .monospaced).bold()) }.accessibilityIdentifier("data.preview.back"); Spacer() }
+            HStack { Button { close() } label: { Text("‹ " + (path.split(separator: "/").last.map(String.init) ?? path)).font(.system(.subheadline, design: .monospaced).bold()) }.accessibilityIdentifier("data.preview.back"); Spacer()
+                // the file itself, to keep or open in another app (docs/file-links.md: the Files tab's Download, `/files/get`)
+                Button(Tr.t("Download")) { DDownloads.shared.project(thread: thread.id, path: path) }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("data.preview.download") }
                 .padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.panel)
             Divider()
             if failed { Text(Tr.t("This file could not be read.")).foregroundStyle(BackplaneDesign.bad).padding(16) }

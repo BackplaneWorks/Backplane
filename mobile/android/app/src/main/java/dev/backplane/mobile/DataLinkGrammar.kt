@@ -14,7 +14,7 @@ private val rePath = Regex("^(?:~/|/|\\./|\\.\\./)?(?:[A-Za-z0-9_.@+-]+/)+[A-Za-
 private val reFile = Regex("^[A-Za-z0-9_@+-][A-Za-z0-9_.@+-]*\\.(?:rs|swift|kt|kts|java|js|jsx|ts|tsx|py|go|c|h|cc|cpp|hpp|m|mm|md|txt|toml|json|yaml|yml|lock|sh|css|html|sql|kicad_pcb|kicad_sch|kicad_pro|kicad_sym|kicad_mod|PcbDoc|SchDoc|PrjPcb|pcbdoc|schdoc|prjpcb|PCBDOC|SCHDOC|PRJPCB|step|stp|pdf|csv|log|ini|cfg|gradle|xml|svg|png|jpg)(?::\\d{1,6}){0,2}(?:#L\\d{1,6}(?:-L?\\d{1,6})?)?$")
 private val rePhone = Regex("^(?:(?:\\+\\d{1,3}[ .-]?)?(?:\\(\\d{3}\\)[ .-]?|\\d{3}[ .-])\\d{3}[ .-]\\d{4}(?!\\d)|\\+\\d{1,3}(?:[ .-]?\\d{2,4}){2,4}(?!\\d))")
 
-fun isPathText(t: String) = !t.startsWith("http") && !t.contains("://") && (rePath.matches(t) || reFile.matches(t))
+fun isPathText(t: String) = !t.startsWith("http") && !t.contains("://") && (rePath.matches(t) || reFile.matches(t) || FileFetch.shareRoute(t) != null)
 fun pathLink(p: String) = PATH_SCHEME + p
 fun pathOf(url: String): String? = if (url.startsWith(PATH_SCHEME)) url.removePrefix(PATH_SCHEME) else null
 

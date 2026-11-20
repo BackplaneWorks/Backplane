@@ -3937,6 +3937,12 @@ android.clone.phase.adding = プロジェクトを追加しています
 android.clone.phase.cancelled = キャンセルしました
 android.clone.busy = {path} はすでにあり、空ではありません。別のフォルダか名前を選んでください。
 android.clone.file = {path} はファイルです。別のフォルダか名前を選んでください。
+android.download.saved = ダウンロードに保存しました
+android.download.of = {have} / {total}
+android.download.share = 共有
+android.download.retry = 再試行
+android.download.noapp = このファイルを開けるアプリがありません。
+android.download.button = ダウンロード
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。

@@ -3914,6 +3914,12 @@ android.clone.phase.adding = Adding the project
 android.clone.phase.cancelled = Cancelled
 android.clone.busy = {path} already exists and isn't empty. Pick another folder or name.
 android.clone.file = {path} is a file. Pick another folder or name.
+android.download.saved = Saved to Downloads
+android.download.of = {have} of {total}
+android.download.share = Share
+android.download.retry = Retry
+android.download.noapp = No app here opens that file.
+android.download.button = Download
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
 ios.alerts.ask = Bub can alert you when a thread needs you.

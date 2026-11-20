@@ -29,6 +29,7 @@ data class DEntry(
     val restore: DRestore? = null, // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
     val h: String = "", // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
     val queued: Boolean = false, // queued for an away home machine (docs/PHONE-DATA.md, The home)
+    val files: List<DFileLink> = emptyList(), // the files a reply names that the hub serves (feature `fileLinks`): a tap on one downloads it (FileFetch.kt)
 )
 /** Restore to before this (data/1 `restore`): the turn (0: a snapshot from before it was named), its short commit, the short info its confirm shows. */
 data class DRestore(val turn: Long, val commit: String, val info: String)
@@ -106,7 +107,9 @@ fun parseEntry(o: JSONObject) = DEntry(
     restore = o.optJSONObject("restore")?.let { DRestore(it.lng("turn"), it.str("commit"), it.str("info")) },
     h = o.str("h"),
     queued = o.optBoolean("queued", false),
+    files = parseFileLinks(o.optJSONArray("files")),
 )
+fun parseFileLinks(a: JSONArray?) = a.list { DFileLink(it.str("path"), it.str("name"), it.lng("size"), it.str("open").ifEmpty { "download" }) }.filter { it.path.isNotEmpty() }
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))
 fun parseThread(o: JSONObject) = DThread(

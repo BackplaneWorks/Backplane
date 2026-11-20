@@ -589,7 +589,10 @@ private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () 
     androidx.activity.compose.BackHandler(onBack = close)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            DMono("‹ " + path.substringAfterLast('/'), dcs.primary, 13, Modifier.clickable(onClick = close).testTag("preview.back"), bold = true)
+            DMono("‹ " + path.substringAfterLast('/'), dcs.primary, 13, Modifier.weight(1f).clickable(onClick = close).testTag("preview.back"), bold = true)
+            // the file itself, to keep or open in another app (docs/file-links.md: the Files tab's Download, `/files/get`)
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            DBtn(Msg.android_download_button, false, modifier = Modifier.testTag("preview.download")) { Downloads.project(ctx, thread.id, path) }
         }
         DLine()
         val b = bytes

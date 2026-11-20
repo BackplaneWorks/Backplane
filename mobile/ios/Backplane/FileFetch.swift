@@ -1,0 +1,87 @@
+import Foundation
+
+// Files of the hub's machine on the phone (docs/file-links.md; the Android app's FileFetch.kt is the same rules): which tapped link is a file the hub
+// serves, the address it is fetched from, and how a download that stopped goes on. Pure, Foundation only, so mobile/ios/Tests/FileFetchTests.swift runs it.
+
+/// A file an assistant entry names that the hub serves (data/1 feature `fileLinks`): `open` is "view" (Backplane's viewers draw it) or "download".
+struct DFileLink: Codable, Equatable {
+    var path: String; var name: String; var size: Int64; var open: String
+    enum CodingKeys: String, CodingKey { case path, name, size, open }
+    init(path: String, name: String, size: Int64, open: String) { self.path = path; self.name = name; self.size = size; self.open = open }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        path = (try? c.decode(String.self, forKey: .path)) ?? ""; name = (try? c.decode(String.self, forKey: .name)) ?? ""
+        size = (try? c.decode(Int64.self, forKey: .size)) ?? 0; open = (try? c.decode(String.self, forKey: .open)) ?? ""
+        if open.isEmpty { open = "download" }
+    }
+}
+
+enum FileFetch {
+    private static let share = try! NSRegularExpression(pattern: "^/s/[0-9A-Fa-f]{48}/[^\\s/]+$")
+    private static let lineTail = try! NSRegularExpression(pattern: "(?::\\d{1,6}){1,2}$|#L\\d{1,6}(?:-L?\\d{1,6})?$")
+    private static func whole(_ s: String) -> NSRange { NSRange(location: 0, length: (s as NSString).length) }
+
+    /// A share's address (`/s/<token>/<name>`, written in a message): fetched as it is, the token its own credential.
+    static func shareRoute(_ p: String) -> String? {
+        let t = p.trimmingCharacters(in: .whitespaces)
+        return share.firstMatch(in: t, range: whole(t)) != nil ? t : nil
+    }
+    /// A path as a link carries it, without the line it points at (`a.rs:12`, `a.rs:3:4`, `a.rs#L4-L9`).
+    static func bare(_ p: String) -> String { lineTail.stringByReplacingMatches(in: p, range: whole(p), withTemplate: "") }
+    /// The file of `files` a tapped path names, in the message's spelling.
+    static func find(_ p: String, in files: [DFileLink]) -> DFileLink? { let b = bare(p); return files.first { $0.path == p || $0.path == b } }
+    /// A thread of another machine (`<link>~<id>`) is named on the request; this hub's own thread is not.
+    static func far(_ thread: String) -> Bool { thread.contains("~") }
+    /// `/file`'s query.
+    static func fileQuery(path: String, thread: String) -> [URLQueryItem] {
+        [URLQueryItem(name: "path", value: path)] + (far(thread) ? [URLQueryItem(name: "thread", value: thread)] : [])
+    }
+    /// The name a share saves as: its last part, percent-decoding undone.
+    static func shareName(_ route: String) -> String { let l = route.split(separator: "/").last.map(String.init) ?? route; return l.removingPercentEncoding ?? l }
+    /// A name safe to be a file's: no folder in it.
+    static func safeName(_ n: String) -> String {
+        let t = n.replacingOccurrences(of: "/", with: "_").replacingOccurrences(of: "\\", with: "_").trimmingCharacters(in: .whitespaces)
+        return t.isEmpty || t == "." || t == ".." ? "download" : t
+    }
+
+    /// The headers that ask for the rest of a file: none from nothing (or without the tag the first answer had: the start again), else the range and its tag.
+    static func ask(have: Int64, etag: String) -> [String: String] { have <= 0 || etag.isEmpty ? [:] : ["Range": "bytes=\(have)-", "If-Range": etag] }
+
+    enum Step: Equatable {
+        /// Write from `from` (0: truncate the `.part` and start over; else append); `total` the whole file's length, -1 unknown.
+        case write(from: Int64, total: Int64)
+        /// Nothing more to fetch: the `.part` is the file.
+        case done
+        /// The `.part` is no good (a range that does not join it): drop it and ask for the whole file.
+        case again
+        /// The hub refused: show its own words when it sent some.
+        case fail(String)
+    }
+    private static let contentRange = try! NSRegularExpression(pattern: "^bytes (\\d+)-(\\d+)/(\\d+|\\*)$")
+    private static let unsatisfied = try! NSRegularExpression(pattern: "^bytes \\*/(\\d+)$")
+    private static func group(_ r: NSRegularExpression, _ s: String, _ i: Int) -> String? {
+        guard let m = r.firstMatch(in: s, range: whole(s)), let g = Range(m.range(at: i), in: s) else { return nil }
+        return String(s[g])
+    }
+    /// The answer's status and headers made a Step. `have`: the bytes the `.part` holds and was asked to go on from.
+    static func step(code: Int, have: Int64, contentRange cr: String?, contentLength: Int64, body: String = "") -> Step {
+        let r = (cr ?? "").trimmingCharacters(in: .whitespaces)
+        switch code {
+        case 206:
+            guard let a = group(contentRange, r, 1).flatMap({ Int64($0) }), a == have else { return .again }
+            return .write(from: have, total: group(contentRange, r, 3).flatMap { Int64($0) } ?? -1)
+        case 200: return .write(from: 0, total: contentLength)
+        case 416:
+            if let t = group(unsatisfied, r, 1).flatMap({ Int64($0) }), t == have { return .done }
+            return .again
+        default:
+            let t = String(body.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))
+            return .fail(t.isEmpty ? "HTTP \(code)" : t)
+        }
+    }
+    /// Whether a `.part` of `have` bytes is the whole file.
+    static func complete(have: Int64, total: Int64) -> Bool { total >= 0 && have == total }
+    /// How long to wait before try `n` (1, 2, …) after a dropped connection, in seconds.
+    static func backoff(_ n: Int) -> Double { min(30, Double(1 << min(max(n - 1, 0), 5))) }
+    static let tries = 6
+}
