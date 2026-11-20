@@ -22,6 +22,7 @@ SUITES=(
   "embed_follow_pane_e2e.sh:follow-pane"
   "embed_follow_reconnect_e2e.sh:follow-reconnect"
   "embed_unmapped_reshow_e2e.sh:unmapped-reshow"
+  "embed_ctrl_e_e2e.sh:ctrl-e"
   "embed_bp9_e2e.sh:bp9"
   "embed_checks_e2e.sh:checks"
   "embed_checks_panel_e2e.sh:checks-panel"
