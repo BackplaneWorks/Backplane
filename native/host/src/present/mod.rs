@@ -9,6 +9,7 @@ pub mod tokstats;
 pub mod picker;
 pub mod thread;
 pub mod design_mode;
+pub mod layout;
 pub mod rail;
 pub mod viewer;
 pub mod settings;
@@ -158,6 +159,84 @@ mod tests {
         assert_eq!(v["cad"], "altium");
         check(true, true, false);
         assert_eq!(state(&v, "simulation"), None);
+    }
+
+    #[test]
+    fn viewer_json_emits_derived_layout_for_one_page_split_gerbers_vs_board_and_history() {
+        let d = crate::plat::tmp::dir("viewer-layout");
+        let root = d.to_string_lossy().into_owned();
+        std::fs::write(d.join("unit.kicad_pcb"), "(kicad_pcb)").unwrap();
+        std::fs::write(d.join("unit.kicad_sch"), "(kicad_sch)").unwrap();
+        std::fs::create_dir_all(d.join("mfg/rev1")).unwrap();
+        std::fs::write(d.join("mfg/rev1/unit-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+
+        let mut st = crate::state::State::new();
+        st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
+        st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+
+        let picture = |drafts: Value| {
+            let session = json!({"sel":"t","drafts":drafts,"panel":false,"info":{}});
+            viewer::viewer_json(&st, &json!({}), &session).unwrap()
+        };
+
+        // 0. Idle
+        let v_idle = picture(json!({}));
+        let l_idle: layout::Layout = serde_json::from_value(v_idle["layout"].clone()).unwrap();
+        layout::check_invariants(&l_idle).unwrap();
+        assert!(l_idle.is_empty());
+
+        // 1. One page (board)
+        let v_one = picture(json!({"@view:t": "board"}));
+        let l_one: layout::Layout = serde_json::from_value(v_one["layout"].clone()).unwrap();
+        layout::check_invariants(&l_one).unwrap();
+        assert_eq!(l_one.tile("t1").unwrap().kind, layout::PageKind::Board);
+        assert_eq!(l_one.tile("t1").unwrap().source, "unit.kicad_pcb");
+
+        // 2. Split
+        let v_split = picture(json!({"@view:t": "split"}));
+        let l_split: layout::Layout = serde_json::from_value(v_split["layout"].clone()).unwrap();
+        layout::check_invariants(&l_split).unwrap();
+        assert_eq!(l_split.tiles().len(), 3);
+        let ctx = layout::WatchContext::from_root(&root);
+        let watches = layout::plan_watches(&l_split, &ctx);
+        assert_eq!(watches.iter().map(|w| w.key.as_str()).collect::<Vec<_>>(), vec![
+            format!("1|{root}|"),
+            format!("0|{root}|"),
+            format!("2|{root}|"),
+        ]);
+
+        // 3. Gerbers vs board
+        let gcmp = crate::files::kicad::gerber::cmp_path(&format!("{root}/mfg/rev1"), &format!("{root}/unit.kicad_pcb"));
+        let v_gvb = picture(json!({"@view:t": "board", "@view.gerbers:t": "1", "@view.file:t": gcmp}));
+        let l_gvb: layout::Layout = serde_json::from_value(v_gvb["layout"].clone()).unwrap();
+        layout::check_invariants(&l_gvb).unwrap();
+        let gvb_t = l_gvb.tile("t1").unwrap();
+        assert_eq!(gvb_t.kind, layout::PageKind::Board);
+        assert_eq!(gvb_t.source, "unit.kicad_pcb");
+        assert_eq!(gvb_t.overlay.as_ref().unwrap().kind, layout::PageKind::Gerbers);
+        assert_eq!(gvb_t.overlay.as_ref().unwrap().source, "mfg/rev1");
+
+        // 4. History comparison
+        let diff_raw = format!("diff\ngit\t{root}/.git\t1111aaaa9999\t20\t{root}/unit.kicad_pcb\ngit\t{root}/.git\t2222bbbb8888\t20\t{root}/unit.kicad_pcb\n0");
+        let v_hist = picture(json!({"@view:t": "board", "@view.file:t": diff_raw}));
+        let l_hist: layout::Layout = serde_json::from_value(v_hist["layout"].clone()).unwrap();
+        layout::check_invariants(&l_hist).unwrap();
+        let ht = l_hist.tile("t1").unwrap();
+        assert_eq!(ht.source, "unit.kicad_pcb");
+        assert_eq!(ht.version.as_ref().unwrap().id, "2222bbbb");
+        assert_eq!(ht.overlay.as_ref().unwrap().version.as_ref().unwrap().id, "1111aaaa");
+
+        for v in [&v_one, &v_split, &v_gvb, &v_hist] {
+            let s = v["layout"].to_string();
+            assert!(!s.contains(&root), "viewer.layout leaked absolute root: {s}");
+            assert!(!s.contains("git\\t"), "viewer.layout leaked raw git spec: {s}");
+            assert!(!s.contains("\"kicad\""), "viewer.layout leaked transient kicad flag: {s}");
+        }
+        println!("LAYOUT_JSON_ONE={}", v_one["layout"]);
+        println!("LAYOUT_JSON_SPLIT={}", v_split["layout"]);
+        println!("LAYOUT_JSON_GVB={}", v_gvb["layout"]);
+        println!("LAYOUT_JSON_HIST={}", v_hist["layout"]);
+        let _ = std::fs::remove_dir_all(&d);
     }
     struct Mine; impl Screen for Mine {
         fn name(&self) -> &'static str { "mine" }

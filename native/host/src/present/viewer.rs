@@ -787,6 +787,28 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         let has = json!({"board":input.board, "schematic":input.schematic, "mech":input.mech, "gerbers":input.gerbers});
         v["rail"] = rail::rail(input);
         v["has"] = has;
+        let proj = crate::files::kicad::project::read(&root);
+        let default_gerber_set = crate::files::kicad::gerber::default_set(std::path::Path::new(&root))
+            .map(|p| p.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let drafts = &session["drafts"];
+        let picked_board = chosen_board(drafts, sel);
+        let derived = super::layout::derive_layout(&super::layout::DeriveInput {
+            root: &root,
+            open: s(&v, "open"),
+            diff_on: pages::diff_on(session, sel),
+            gerbers: v["gerbers"] == true,
+            gerbers_vs_board: v["gerbersVsBoard"] == true,
+            file: s(drafts, &format!("@view.file:{sel}")),
+            sheet: s(drafts, &format!("@view.sheet:{sel}")),
+            picked_board: &picked_board,
+            mech_rel: s(&v["mech"], "rel"),
+            files_dir: s(drafts, &format!("@files.dir:{sel}")),
+            default_pcb: &proj.pcb,
+            default_sch: &proj.sch,
+            default_gerber_set: &default_gerber_set,
+        });
+        v["layout"] = serde_json::to_value(derived).unwrap_or(Value::Null);
     }
     Some(v)
 }
