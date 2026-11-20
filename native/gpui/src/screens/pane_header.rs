@@ -22,6 +22,7 @@ pub struct Identity {
     name: String,
     version: String,
     detail: String,
+    pub picker: Option<(WeakEntity<Backplane>, Press, Option<AnyElement>)>,
 }
 
 impl Identity {
@@ -30,6 +31,7 @@ impl Identity {
         let fallback_key = match page {
             "board" => "viewer.board", "schematic" => "viewer.schematic", "gerbers" => "gpui.gerbers",
             "3d" => "viewer.solid", "simulation" => "gpui.simulation", "kicad" => "gpui.f.name.kicad",
+            "mech" => "viewer.mech", "browser" => "bots.tab.browser",
             "split" => "gpui.split", "diff" => "viewer.diff", "review" => "viewer.review", "files" => "viewer.files", _ => page,
         };
         let label = facts["label"].as_str().map(trs).unwrap_or_else(|| t(fallback_key));
@@ -59,7 +61,7 @@ impl Identity {
                 Some([trs(pane["label"].as_str()?).as_str(), source].join(" · "))
             }).collect::<Vec<_>>().join("\n");
         }
-        Self { page: page.into(), label, rel, name, version, detail }
+        Self { page: page.into(), label, rel, name, version, detail, picker: None }
     }
 
     pub fn with_set_note(mut self, note: &str) -> Self {
@@ -80,10 +82,13 @@ pub enum Press {
     Hub(String, String),
     File(super::filesui::Do),
     Boards { folder: String },
+    Browser(crate::viewers::chrome::Act),
+    MechParts,
     Edit,
     Sheets,
     Layers,
     Fit(usize),
+    Camera(WeakEntity<crate::viewers::solid::SolidPage>, crate::viewers::solid::SolidTool),
     GerbView(Vec<String>),
     Split(&'static str),
     FocusProbe,
@@ -99,9 +104,16 @@ impl Press {
             }
             Self::File(action) => super::filesui::act(this, action.clone(), Some(window), cx),
             Self::Boards { .. } => crate::viewers::boards::toggle(this, window, cx),
+            Self::Browser(action) => {
+                if let Some((_, page)) = this.screens.browser.clone() {
+                    page.update(cx, |b, cx| b.header_press(action.clone(), window, cx));
+                }
+            }
+            Self::MechParts => viewer::toggle_parts(this, window, cx),
             Self::Edit => { this.kicad_edit(cx); }
             Self::Sheets => super::sheets::toggle(this, 0, window, cx),
             Self::Layers => crate::viewers::layers::toggle(this, cx),
+            Self::Camera(page, tool) => { let _ = page.update(cx, |p, cx| p.run_tool(*tool, cx)); }
             Self::Fit(slot) => {
                 let pv = this.screens.pv(*slot);
                 pv.touched = false;
@@ -232,7 +244,7 @@ fn layout(room: f32, more: f32, items: &[(u8, f32)]) -> Vec<bool> {
 }
 
 fn priority(id: &str, pane_action: bool) -> u8 {
-    if id == "layers-btn" || id.starts_with("plot-fit-") || id.starts_with("rv-")
+    if id == "br-url" || id == "layers-btn" || id.starts_with("plot-fit-") || id.starts_with("rv-")
         || id == "fm-up" || id.starts_with("crumb-") { 0 }
     else if pane_action { 1 } else { 2 }
 }
@@ -345,6 +357,11 @@ pub fn pane_header(light: bool, identity: Identity, tools: Vec<PaneTool<ToolActi
         let tooltip = [full, identity.detail].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join("\n");
         let title = with_rect(div().id("pane-identity"), || format!("pane-identity:{page}:{text}"))
             .flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_size(crate::scale::tpx(12.)).tooltip(crate::keys::tip(&tooltip, "", light)).child(text);
+        let title = if let Some((entity, press, popup)) = identity.picker {
+            crate::script::header_action(&page, "mech-picker", &tooltip, false, Some(press.clone()));
+            div().id("mech-picker").relative().flex().items_center().flex_1().min_w_0().gap_1().cursor_pointer().on_click(listener(&entity, &press))
+                .child(title).child(crate::art::icon("chevron-down", 12., c("dim"))).children(popup).into_any_element()
+        } else { title.into_any_element() };
         let mut strip = with_rect(div().flex_none().flex().items_center().gap(px(gap)), || format!("pane-tools:{page}"));
         let mut rows = Vec::new();
         let mut actions = Vec::new();
@@ -353,6 +370,10 @@ pub fn pane_header(light: bool, identity: Identity, tools: Vec<PaneTool<ToolActi
             crate::script::header_action(&page, &id, &label, !show, action.as_ref().map(|(_, p)| p.clone()));
             if show {
                 strip = strip.child(div().relative().child(inline).children(popup));
+                continue;
+            }
+            if id == "br-url" {
+                rows.push(div().id("menu-br-url").child(inline));
                 continue;
             }
             popups.extend(popup);
@@ -415,8 +436,8 @@ pub fn pane_header(light: bool, identity: Identity, tools: Vec<PaneTool<ToolActi
             .child(title).when(!widths.is_empty(), |r| r.child(strip)).child(close).into_any_element();
         row.prepaint_as_root(bounds.origin, size(bounds.size.width.into(), bounds.size.height.into()), w, cx);
         row
-    }, |_, mut row, w, cx| row.paint(w, cx)).size_full();
-    with_rect(div().flex_shrink_0(), || format!("pane-header:{}", identity_page)).child(viewer::bar(light).child(inner)).into_any_element()
+    }, |_, mut row, w, cx| row.paint(w, cx)).absolute().left_3().right_3().top_0().bottom_0();
+    with_rect(viewer::bar(light).relative(), || format!("pane-header:{}", identity_page)).child(inner).into_any_element()
 }
 
 #[cfg(test)]

@@ -11,6 +11,7 @@ use gpui::{prelude::*, *};
 use std::{ops::Range, sync::{Arc, Mutex}};
 
 pub struct CefPage {
+    pub header_owner: Option<WeakEntity<crate::Backplane>>,
     tabs: Vec<Arc<Tab>>, active: usize, focus: FocusHandle, bar_focus: FocusHandle, bar_text: String, bar_edit: bool,
     bounds: Arc<Mutex<Option<Bounds<Pixels>>>>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>,
     wake: async_channel::Sender<()>, hub: tokio::sync::mpsc::Sender<Command>, owner: String, port: u16,
@@ -31,7 +32,7 @@ impl CefPage {
                 cx.background_executor().timer(std::time::Duration::from_millis(16)).await; // at most ~60 repaints a second
             }
         }).detach();
-        let mut me = CefPage { tabs: Vec::new(), active: 0, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bar_text: String::new(), bar_edit: false, bounds: Arc::default(), image: None, retired: Vec::new(), wake, hub, owner, port, taken: false, light: false, start: "about:blank".into(), fresh: false, sample: [0; 3], lat_probe: None, lat_ms: -1.0, buttons: 0, visible: false, composing: false, attached: Vec::new(), status: String::new(), stats: (0, 0, 0), last_mouse: (0, 0),
+        let mut me = CefPage { header_owner: None, tabs: Vec::new(), active: 0, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bar_text: String::new(), bar_edit: false, bounds: Arc::default(), image: None, retired: Vec::new(), wake, hub, owner, port, taken: false, light: false, start: "about:blank".into(), fresh: false, sample: [0; 3], lat_probe: None, lat_ms: -1.0, buttons: 0, visible: false, composing: false, attached: Vec::new(), status: String::new(), stats: (0, 0, 0), last_mouse: (0, 0),
             host: None, marker: Arc::default(), placed: Default::default(), covered: false, from_page: Vec::new(), lat_native: Arc::new(Mutex::new(-1.0)), want_focus: false, want_yank: false, dispatching: Arc::default(), subs: Vec::new() };
         me
     }
@@ -194,7 +195,7 @@ impl CefPage {
         if self.bar_focus.is_focused(window) { return }
         if let (Some(t), Some(vk)) = (self.tab(), cef::vk(&e.keystroke.key)) { t.key(1, Self::mods(&e.keystroke.modifiers, 0), vk, vk, vk as u16); }
     }
-    fn act(&mut self, a: super::chrome::Act, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn act(&mut self, a: super::chrome::Act, window: &mut Window, cx: &mut Context<Self>) {
         use super::chrome::Act::*;
         match a {
             Back => { if let Some(t) = self.tab() { t.back(); } } Forward => { if let Some(t) = self.tab() { t.forward(); } }
@@ -242,7 +243,7 @@ impl Render for CefPage {
         let tabs: Vec<super::chrome::TabView> = self.tabs.iter().enumerate().map(|(i, t)| { let st = t.st.lock().unwrap(); super::chrome::TabView { id: i.to_string(), title: st.title.clone(), url: st.url.clone(), active: i == self.active } }).collect();
         let cur_url = self.tab().map(|t| t.st.lock().unwrap().url.clone()).unwrap_or_default();
         let value = if bar_focused && self.bar_edit { self.bar_text.clone() } else if cur_url == "about:blank" { String::new() } else { cur_url };
-        let (strip, chrome) = super::chrome::render(&tabs, super::chrome::NavIn { light: self.light, value, focused: bar_focused, taken: self.taken, have: !self.tabs.is_empty(), loading, can_back: back, can_forward: fwd, bar_focus: &self.bar_focus }, cx,
+        let (strip, chrome) = super::chrome::render(self.header_owner.as_ref(), &tabs, super::chrome::NavIn { light: self.light, value, focused: bar_focused, taken: self.taken, have: !self.tabs.is_empty(), loading, can_back: back, can_forward: fwd, bar_focus: &self.bar_focus }, cx,
             |this: &mut CefPage, a, w, cx| this.act(a, w, cx), |this, e, w, cx| this.key_down(e, w, cx));
         let c = |n: &str| crate::theme::color(self.light, n);
         // windowed: nothing gpui draws shows over Chromium's window, so the load error and the download line go at the end of the tab strip

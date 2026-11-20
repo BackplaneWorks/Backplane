@@ -352,7 +352,12 @@ impl Backplane {
         }
         let light = self.light();
         let start = start_page(&self.data);
-        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| { p.set_start(&start, cx); p.set_light(light, cx); p.set_visible(true, cx) }); }
+        let header_owner = (self.data["bot"]["kind"] != "bot").then(|| cx.weak_entity());
+        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| {
+            p.header_owner = header_owner.clone();
+            #[cfg(feature = "cef")]
+            if let Some(c) = &p.cef { c.update(cx, |cef, _| cef.header_owner = header_owner); }
+            p.set_start(&start, cx); p.set_light(light, cx); p.set_visible(true, cx) }); }
     }
 
 }

@@ -14,6 +14,7 @@ from rail_shots_post import parse_captures, parse_client_log, shot_privacy_reaso
 IDENTITY = {
     "Board": "ecc83-pp.kicad_pcb", "Schematic": "ecc83-pp.kicad_sch",
     "Gerbers": "mfg/gerbers", "Split": "ecc83-pp.kicad_pcb",
+    "3D": "ecc83-pp.kicad_pcb", "Mech": "mech/bracket.step", "Browser": "",
     "Diff": "Thread changes", "Review": "Working copy", "Files": "Project",
 }
 
@@ -26,6 +27,9 @@ TOOL_ORDER = {
     "gerbers": ["?boards-btn", "layers-btn", "plot-fit-0", "gerbers-vs-board",
                 "?gerbers-gerbview", "?gerbers-legend"],
     "split": ["?boards-btn", "split-pick-sch", "split-pick-pcb", "split-pick-3d", "?split-probe"],
+    "3d": ["?boards-btn", "solid-fit", "solid-iso", "solid-top", "solid-bottom", "solid-front", "solid-right", "solid-back", "solid-left", "solid-snap", "?solid-probe-clear"],
+    "mech": ["mech-refresh"],
+    "browser": ["br-back", "br-fwd", "br-reload", "br-url", "?br-hand"],
     "diff": ["git-commit_push", "git-commit_push_pr", "revert-ask"],
     "review": ["rv-0", "rv-1", "rv-2", "rv-3"],
     "files": ["fm-up", "fm-new", "fm-upload", "fm-zip"],
@@ -49,6 +53,8 @@ def tool_orders(reports):
             "review": ["kicad-edit"] if "kicad-edit" in observed else [],
             "files": ["kicad-edit"] if "kicad-edit" in observed else [],
         }
+        if page in {"3d", "mech", "browser"}:
+            actions[page] = [key for key in ("follow-agent", "kicad-edit") if key in observed]
         expected += actions.get(page, [])
         for result in (wide, narrow):
             if "tools" not in result:
@@ -194,7 +200,7 @@ def measure(image, shot, title, size, crop):
     prefix = f"pane-identity:{page}:"
     identities = [key for key in probes if key.startswith(prefix)]
     label = identities[0][len(prefix):] if len(identities) == 1 else ""
-    wanted = f"{title} · {source}"
+    wanted = f"{title} · {source}" if source else title
     labels = {wanted}
     if size == "minimum":
         basename = Path(source).name

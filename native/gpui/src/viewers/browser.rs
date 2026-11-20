@@ -18,7 +18,7 @@ pub fn decode_jpeg(bytes: &[u8]) -> Option<Arc<RenderImage>> {
 }
 fn fnv(bytes: &[u8]) -> u64 { bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)) }
 
-pub struct BrowserPage { #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, banner: String, pub light: bool, open_error: Option<String>, opening_since: Instant, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool>, hub_at: (String, String) }
+pub struct BrowserPage { pub header_owner: Option<WeakEntity<crate::Backplane>>, #[cfg(feature = "cef")] pub cef: Option<Entity<super::cef_page::CefPage>>, bar: Bar, banner: String, pub light: bool, open_error: Option<String>, opening_since: Instant, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>, pub status: String, stop: Arc<AtomicBool>, visible: Arc<AtomicBool>, hub_at: (String, String) }
 /// The hub's copy of a person's download (`/browser-download?id=`) written to `dir` under a name not taken there: what the page says after.
 pub fn save_download(base: &str, token: &str, id: &str, name: &str, dir: &std::path::Path) -> String {
     let url = format!("{}/browser-download?id={id}", base.trim_end_matches('/'));
@@ -119,7 +119,7 @@ impl BrowserPage {
         #[cfg(not(feature = "cef"))]
         let banner = String::new();
         /* i18n-ok: the status is drawn through trs */ let status = if !cef_note2.is_empty() { cef_note2 } else if https { "https hubs are not supported by this page yet (the client has no TLS)".to_string() } else { "Waiting for the first frame".to_string() };
-        BrowserPage { #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), banner, light: false, open_error: None, opening_since: Instant::now(), image: None, retired: Vec::new(), status, stop, visible, hub_at }
+        BrowserPage { header_owner: None, #[cfg(feature = "cef")] cef, bar: Bar::new(cx, hub_tx.clone(), owner_bar), banner, light: false, open_error: None, opening_since: Instant::now(), image: None, retired: Vec::new(), status, stop, visible, hub_at }
     }
     /// A download the person started on this page (the hub's `browser.download`): fetched from the hub and saved in Downloads under a name not taken
     /// (as the embedded browser saves its own); the note line says where, or why not.
@@ -134,6 +134,11 @@ impl BrowserPage {
     }
     /// The helper's `tabs` event for this page (info `browser.tabs.<owner>`): the tab strip and the address of the active tab.
     /// The theme of the window: light or dark (both pages draw from its tokens).
+    pub fn header_press(&mut self, action: chrome::Act, w: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(feature = "cef")]
+        if let Some(page) = &self.cef { page.update(cx, |p, cx| p.act(action, w, cx)); return }
+        self.bar.act(action, w); cx.notify();
+    }
     pub fn set_light(&mut self, light: bool, cx: &mut Context<Self>) {
         if self.light != light { self.light = light; cx.notify(); }
         #[cfg(feature = "cef")]
@@ -220,7 +225,7 @@ impl Render for BrowserPage {
             }
         };
         let light = self.light;
-        let bar = self.bar.render(light, size, content, window, cx);
+        let bar = self.bar.render(self.header_owner.as_ref(), light, size, content, window, cx);
         let banner = (!self.banner.is_empty()).then(|| div().px_3().py_1().text_size(crate::scale::tpx(12.)).bg(c("panel")).border_b_1().border_color(c("line")).text_color(c("warn")).child(trs(&self.banner)));
         div().id("browser-page").size_full().flex().flex_col().children(banner).child(div().flex_1().min_h_0().child(bar)).into_any_element()
     }
@@ -300,7 +305,7 @@ impl Bar {
         if let Some(v) = page_input(&k.key, k.key_char.as_deref()) { self.input(v); }
         cx.stop_propagation();
     }
-    fn render(&mut self, light: bool, size: Option<(f32, f32)>, content: AnyElement, window: &mut Window, cx: &mut Context<BrowserPage>) -> AnyElement {
+    fn render(&mut self, owner: Option<&WeakEntity<crate::Backplane>>, light: bool, size: Option<(f32, f32)>, content: AnyElement, window: &mut Window, cx: &mut Context<BrowserPage>) -> AnyElement {
         if let Some(s) = size { self.image = s; }
         // the page fills its pane: when the pane's size changed (and not more than ~3 times a second) the helper's page is given that size
         if let Some(b) = *self.bounds.lock().unwrap() {
@@ -314,7 +319,7 @@ impl Bar {
         let focused = self.bar_focus.is_focused(window); let bounds = self.bounds.clone();
         let tabs: Vec<chrome::TabView> = self.tabs.iter().map(|(id, title, url, on)| chrome::TabView { id: id.clone(), title: title.clone(), url: url.clone(), active: *on }).collect();
         let value = if focused && self.edit { self.text.clone() } else { self.url.clone() };
-        let (strip, chrome) = chrome::render(&tabs, chrome::NavIn { light, value, focused, taken: self.taken, have: !self.tabs.is_empty(), loading: false, can_back: true, can_forward: true, bar_focus: &self.bar_focus }, cx,
+        let (strip, chrome) = chrome::render(owner, &tabs, chrome::NavIn { light, value, focused, taken: self.taken, have: !self.tabs.is_empty(), loading: false, can_back: true, can_forward: true, bar_focus: &self.bar_focus }, cx,
             |this: &mut BrowserPage, a, w, cx| { this.bar.act(a, w); cx.notify(); }, |this, e, w, cx| { this.bar.key(e, w, cx); cx.notify(); });
         let view = div().id("browser-frame").flex_1().relative().overflow_hidden().track_focus(&self.focus).key_context("BrowserView")
             .child(canvas(move |b, _, _| { *bounds.lock().unwrap() = Some(b); b }, |_, _, _, _| {}).absolute().size_full())

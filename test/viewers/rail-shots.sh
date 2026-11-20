@@ -583,7 +583,7 @@ PY
     BACKPLANE_GPUI_SHOT_DIR="$SHOT_DIR" \
     BACKPLANE_GPUI_LOCAL="$RUN/local-settings.json" \
     $([ "$USE_EMBED" = "1" ] && echo BACKPLANE_KICAD_DEBUG=1) \
-    "$CLIENT_BIN" --url "http://127.0.0.1:$PORT" --token-file "$HHOME/token" --script "$SCRIPT_JSON" --exit-after "$([ "$USE_EMBED" = "1" ] && echo 900 || echo 420)" >"$KIND_OUT/client.log" 2>&1
+    "$CLIENT_BIN" ${RAIL_THEME:+--theme "$RAIL_THEME"} --url "http://127.0.0.1:$PORT" --token-file "$HHOME/token" --script "$SCRIPT_JSON" --exit-after "$([ "$USE_EMBED" = "1" ] && echo 900 || echo 420)" >"$KIND_OUT/client.log" 2>&1
   CLIENT_PG=$!
 
   set +e
