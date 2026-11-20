@@ -8,6 +8,8 @@ export ORIGIN=$T/origin.git FAKE=$T/fake LAND_GH=$HERE/fake-gh LAND_REPO=x/y LAN
 # the Windows gate's lock: no hub answers (a closed loopback port), so scripts/bp-lock.sh takes a flock in $T/locks
 export BACKPLANE_LOCK_URL=http://127.0.0.1:9 BACKPLANE_LOCK_HOME=$T/nohub BACKPLANE_LOCK_DIR=$T/locks; mkdir -p "$T/locks"
 WINLOCK=$T/locks/bp-bp-win-gate.lock
+# the Windows gate's shutdown check off by default here (no measured time, no margin); the cases below set a VM's measured time in $T/state
+export LAND_WIN_STATE=$T/state LAND_WIN_EST_MIN=0 LAND_WIN_MARGIN_MIN=0
 mkdir -p "$FAKE"; fails=0
 ok() { if [ "$1" = 0 ]; then echo "ok   $2"; else echo "FAIL $2"; fails=$((fails + 1)); fi; }
 g() { git -C "$W" "$@"; }
@@ -80,7 +82,7 @@ pushed() { [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" 
 # 16. a host change: a failing Windows gate pushes nothing
 mkdir -p "$LANE/native/host"; echo a > "$LANE/native/host/x.rs"; g add -A; g commit -qm "host: a"
 before=$(wc -l < "$GATES"); LAND_WIN_TEST="echo win >> $WINS; exit 1" land > "$T/o16"; rc=$?
-[ $rc = 1 ] && grep -q "the Windows tests failed" "$T/o16" && ! pushed && [ "$(wc -l < "$WINS")" = 1 ] && [ "$(wc -l < "$GATES")" = $((before + 1)) ]; ok $? "the Windows gate fails: nothing pushed, after the Linux gate (rc $rc)"
+[ $rc = 1 ] && grep -q "the Windows gate did not pass" "$T/o16" && ! pushed && [ "$(wc -l < "$WINS")" = 1 ] && [ "$(wc -l < "$GATES")" = $((before + 1)) ]; ok $? "the Windows gate fails: nothing pushed, after the Linux gate (rc $rc)"
 # 17. it passes: run under the bp-win-gate lock, which is released after; the tree is recorded and the time said
 LAND_WIN_TEST="if flock -n $WINLOCK true; then echo free >> $T/lockseen; else echo held >> $T/lockseen; fi; echo win >> $WINS" land > "$T/o17"; rc=$?
 [ $rc = 3 ] && [ "$(cat "$T/lockseen")" = held ] && flock -n "$WINLOCK" true && pushed && grep -q "Windows gate passed: [0-9]*m[0-9]*s" "$T/o17" && [ "$(wc -l < "$WINS")" = 2 ]; ok $? "the Windows gate passes under bp-win-gate, the lock released after, its time said, then pushed (rc $rc)"
@@ -89,11 +91,12 @@ land > "$T/o18"; rc=$?; [ $rc = 3 ] && [ "$(wc -l < "$WINS")" = 2 ] && grep -q "
 # 19. neither VM up: held with one line naming each VM and why, exit 4, nothing pushed (the real land-windows.sh, stand-ins for ssh and az)
 printf '#!/bin/sh\nexit 255\n' > "$T/ssh"; printf '#!/bin/sh\ncase "$*" in *get-instance-view*) echo PowerState/deallocated;; *) echo "az: start refused" >&2; exit 1;; esac\n' > "$T/az"; chmod +x "$T/ssh" "$T/az"
 echo b > "$LANE/native/host/x.rs"; g commit -qam "host: b"
-( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/ssh LAND_WIN_AZ=$T/az LAND_WIN_GUARD_MIN=0 land ) > "$T/o19"; rc=$?
+( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/ssh LAND_WIN_AZ=$T/az land ) > "$T/o19"; rc=$?
 [ $rc = 4 ] && grep -q "^land: HELD: the Windows gate could not run, so nothing is pushed or merged. Tried bp-win: deallocated, and az vm start failed; bp-winbuild: deallocated, and az vm start failed." "$T/o19" && ! pushed && [ "$(wc -l < "$WINS")" = 2 ]; ok $? "no VM up: held, the line names each VM and why, nothing pushed (rc $rc)"
-# 19b. a VM is not started this close to its daily auto-shutdown
-( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/ssh LAND_WIN_AZ=$T/az LAND_WIN_GUARD_MIN=1441 land ) > "$T/o19b"; rc=$?
-[ $rc = 4 ] && grep -q "Tried bp-win: its daily auto-shutdown is in [0-9]* min; bp-winbuild: its daily auto-shutdown is in [0-9]* min" "$T/o19b" && ! pushed; ok $? "near the daily shutdowns: not started, held (rc $rc)"
+# 19b. a gate whose measured time would cross both VMs' daily auto-shutdowns is not started: held, each named
+mkdir -p "$T/state"; echo 1500 > "$T/state/bp-win.minutes"; echo 1500 > "$T/state/bp-winbuild.minutes"
+( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/ssh LAND_WIN_AZ=$T/az land ) > "$T/o19b"; rc=$?; rm -f "$T/state/"*.minutes
+[ $rc = 4 ] && grep -q "Tried bp-win: a gate now would cross its 07:00 UTC auto-shutdown (it needs about 1500 min with the margin, [0-9]* min are left); bp-winbuild: a gate now would cross its [0-9][0-9]:00 UTC auto-shutdown" "$T/o19b" && ! pushed; ok $? "a gate that would cross both shutdowns: not started, held, each named (rc $rc)"
 # 20. LAND_WINDOWS=skip: no Windows gate, said, and noted in the PR body
 LAND_WINDOWS=skip land > "$T/o20"; rc=$?; n=$(cat "$FAKE/pr.lane")
 [ $rc = 3 ] && grep -q "LAND_WINDOWS=skip: the Windows gate is NOT run" "$T/o20" && grep -q "Windows gate skipped (LAND_WINDOWS=skip)" "$FAKE/body.$n" && [ "$(wc -l < "$WINS")" = 2 ] && pushed; ok $? "LAND_WINDOWS=skip: no gate, said, noted in PR #$n's body (rc $rc)"
@@ -103,19 +106,53 @@ LAND_WINDOWS=yes land > "$T/o20b"; rc=$?; [ $rc = 1 ] && grep -q "only LAND_WIND
 cp "$ROOT/scripts/land-windows-known.txt" "$LANE/scripts/"; g add -A; g commit -qm "known list"; git init -q --bare "$T/vm.git"
 cat > "$T/vmssh" <<'EOS'
 #!/bin/sh
-while [ $# -gt 1 ]; do case "$1" in -o) shift 2;; *) break;; esac; done; shift   # the options, then the host
-case "$*" in *receive-pack*) exec git receive-pack "$VMREPO";; 'exit 0') exit 0;; esac
+# the stand-in VM: every call logged to $VMLOG as "<host> <what>"; the run logs which owner locks are held while it runs
+while [ $# -gt 1 ]; do case "$1" in -o) shift 2;; *) break;; esac; done; h=$1; shift   # the options, then the host
+lk() { if flock -n "$BACKPLANE_LOCK_DIR/bp-$1.lock" true 2>/dev/null; then echo free; else echo held; fi; }
+case "$*" in *receive-pack*) exec git receive-pack "$VMREPO";; 'exit 0') exit 0;; *EncodedCommand*) echo "$h sweep" >> "$VMLOG"; echo "sweep: stopped 0; C:\bp\gate\tmp removed"; exit 0;; esac
 grep -q "nextest run" || exit 0   # preparing: nothing to do
+echo "$h run bp-win-ui=$(lk bp-win-ui) winbuild-vm=$(lk winbuild-vm)" >> "$VMLOG"
+[ -z "${VMSLEEP:-}" ] || exec sleep "$VMSLEEP"
 printf '        PASS [   1.0s] (1/3) backplane-hub::bin/backplane-hub a::ok\n     Summary [  2.0s] 3 tests run: 1 passed, 2 failed\n'
 for t in $VMFAIL; do printf '  TRY 2 FAIL [   1.0s] (2/3) backplane-hub::bin/backplane-hub %s\n' "$t"; done
 [ -z "$VMFAIL" ]
 EOS
-chmod +x "$T/vmssh"; export VMREPO=$T/vm.git
+chmod +x "$T/vmssh"; export VMREPO=$T/vm.git VMLOG=$T/vmlog VMFAIL=
 known1=$(sed 's/#.*//' "$ROOT/scripts/land-windows-known.txt" | awk 'NF && $1 != "flaky" { print $1; exit }')
 echo c > "$LANE/native/host/x.rs"; g commit -qam "host: c"
-( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh LAND_WIN_GUARD_MIN=0 VMFAIL="$known1" land ) > "$T/o21"; rc=$?
+( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh VMFAIL="$known1" land ) > "$T/o21"; rc=$?
 [ $rc = 3 ] && grep -q "known Windows failures" "$T/o21" && grep -q "PASSED on bp-win" "$T/o21" && pushed && [ "$(git --git-dir="$T/vm.git" rev-parse refs/heads/gate)" = "$(g rev-parse HEAD)" ]; ok $? "a known Windows failure does not hold the landing; the tree reached the VM by push (rc $rc)"
 echo d > "$LANE/native/host/x.rs"; g commit -qam "host: d"
-( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh LAND_WIN_GUARD_MIN=0 VMFAIL="$known1 a::new_fault" land ) > "$T/o21b"; rc=$?
+( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh VMFAIL="$known1 a::new_fault" land ) > "$T/o21b"; rc=$?
 [ $rc = 1 ] && grep -q "not known to:" "$T/o21b" && grep -q "^    a::new_fault" "$T/o21b" && ! pushed; ok $? "a new Windows failure holds it: named, nothing pushed (rc $rc)"
+vm() { ( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh land ) ; }
+step() { echo "$1" > "$LANE/native/host/x.rs"; g commit -qam "host: $1"; : > "$VMLOG"; }
+# 22. one owner per VM: bp-win only when the gate takes bp-win-ui, held for the whole run and released after; swept before and after
+step e; vm > "$T/o22"; rc=$?
+[ $rc = 3 ] && [ "$(cat "$VMLOG")" = "bp-win sweep
+bp-win run bp-win-ui=held winbuild-vm=free
+bp-win sweep" ] && flock -n "$T/locks/bp-bp-win-ui.lock" true && pushed; ok $? "bp-win runs it holding bp-win-ui, released after; swept before and after (rc $rc)"
+# 23. bp-win-ui held by the UI tests: straight to bp-winbuild under winbuild-vm; bp-win is not touched
+step f; ( flock 9; exec sleep 60 ) 9>"$T/locks/bp-bp-win-ui.lock" & ui=$!; sleep 0.3
+vm > "$T/o23"; rc=$?; kill $ui 2>/dev/null; wait $ui 2>/dev/null
+[ $rc = 3 ] && ! grep -q '^bp-win ' "$VMLOG" && grep -q '^bp-winbuild run bp-win-ui=held winbuild-vm=held$' "$VMLOG" && grep -q "bp-win: bp-win-ui is held" "$T/o23" && grep -q "PASSED on bp-winbuild" "$T/o23" && pushed; ok $? "bp-win-ui held: bp-winbuild under winbuild-vm, bp-win untouched (rc $rc)"
+# 24. bp-win's measured time would cross its shutdown: bp-winbuild runs it
+step g; mkdir -p "$T/state"; echo 1500 > "$T/state/bp-win.minutes"; vm > "$T/o24"; rc=$?; rm -f "$T/state/bp-win.minutes"
+[ $rc = 3 ] && ! grep -q '^bp-win ' "$VMLOG" && grep -q '^bp-winbuild run' "$VMLOG" && grep -q "bp-win: a gate now would cross its 07:00 UTC auto-shutdown" "$T/o24" && [ -s "$T/state/bp-winbuild.minutes" ]; ok $? "bp-win would cross its 07:00 UTC shutdown: bp-winbuild runs it, its time recorded (rc $rc)"
+# 25. a failing run is swept after too
+step h; VMFAIL=a::new_fault vm > "$T/o25"; rc=$?
+[ $rc = 1 ] && [ "$(grep -c '^bp-win sweep' "$VMLOG")" = 2 ] && ! pushed; ok $? "a failed run: swept before and after, nothing pushed (rc $rc)"
+# 26. a run cut off at its bound is swept, and the next VM tried; neither finishing holds the landing
+step i; LAND_WIN_RUN_MAX_S=2 VMSLEEP=30 vm > "$T/o26"; rc=$?
+[ $rc = 4 ] && [ "$(cat "$VMLOG")" = "bp-win sweep
+bp-win run bp-win-ui=held winbuild-vm=free
+bp-win sweep
+bp-winbuild sweep
+bp-winbuild run bp-win-ui=free winbuild-vm=held
+bp-winbuild sweep" ] && grep -q "bp-win: the run was cut off after" "$T/o26" && ! pushed; ok $? "cut off at its bound: swept, the next VM tried, held (rc $rc)"
+# 27. a gate terminated mid-run (TERM) sweeps the VM on its way out; nothing pushed
+step j; ( VMSLEEP=30 vm > "$T/o27" ) & lp=$!
+for _ in $(seq 100); do grep -q ' run ' "$VMLOG" && break; sleep 0.1; done
+pkill -TERM -f "^sh $LANE/scripts/land-windows.sh --vm bp-win\$"; wait $lp; rc=$?
+[ $rc != 0 ] && [ "$(tail -n 1 "$VMLOG")" = "bp-win sweep" ] && [ "$(grep -c sweep "$VMLOG")" = 2 ] && ! pushed && flock -n "$T/locks/bp-bp-win-ui.lock" true; ok $? "terminated mid-run: the VM is swept, bp-win-ui released, nothing pushed (rc $rc)"
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }
