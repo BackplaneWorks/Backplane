@@ -97,7 +97,8 @@ fn snap_step(st: &State, sess: &Value, cmds: &[Value], root: &str) -> Value {
 }
 
 fn fixture() -> (crate::plat::tmp::TempDir, String, std::path::PathBuf, State) {
-    let td = crate::plat::tmp::dir("viewer-parity-main");
+    // canonical: the hub canonicalizes what it lists (Gerbers, a preview), and a Windows runner's TMP is in 8.3 form (RUNNER~1)
+    let td = crate::plat::tmp::canonical("viewer-parity-main");
     let root_p = td.path().to_path_buf();
     let root = root_p.to_string_lossy().into_owned();
 
