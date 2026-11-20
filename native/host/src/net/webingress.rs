@@ -304,10 +304,16 @@ async fn isolated_browser_hub() {
     let project = root.join("project");
     std::fs::create_dir(&project).unwrap();
     std::fs::write(project.join("sample.txt"), "Backplane fixture").unwrap();
-    let log = [
+    let mut log = [
         serde_json::json!({"$":"ProjectCreated","id":"p1","title":"Browser fixture","root":project,"at":1700000000}),
         serde_json::json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"Browser test","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000001}),
     ].map(|e| e.to_string()).join("\n") + "\n";
+    for i in 0..45 {
+        let entry = serde_json::json!({"$":"MessagePosted","thread":"t1","msg":format!("history-{i}"),
+            "role":"assistant","text":format!("History entry {i}"),"at":1700000010+i});
+        log.push_str(&entry.to_string());
+        log.push('\n');
+    }
     std::fs::write(home.join("events.jsonl"), log).unwrap();
     crate::run(crate::Args { window: None, home, port, host: "127.0.0.1".into(), version: "test".into(),
         commit: "test".into(), tailscale: false, https: false }).await.unwrap();

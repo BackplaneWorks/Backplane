@@ -116,7 +116,7 @@ async function main(binary, output) {
   try {
     await withTestTls(path.join(home, 'browser.sock'), async tls => {
       const env = { PATH: process.env.PATH, HOME: temp, TMPDIR: temp, BP_TMP: temp,
-        BP_WEB_STANDIN: standin, BP_WEB_FIXTURE: temp, BACKPLANE_AGENTS: agents,
+        BP_STREAM_N: "3", BP_STREAM_MS: "600", BP_WEB_STANDIN: standin, BP_WEB_FIXTURE: temp, BACKPLANE_AGENTS: agents,
         BP_WEB_NATIVE_PORT: String(nativePort), BP_WEB_TLS_PORT: String(tls.port),
         BACKPLANE_NO_UPDATE: '1', BACKPLANE_ORDER_SERVER: 'http://127.0.0.1:9' };
       const child = spawn(binary, ['--ignored', '--exact', 'net::listener::webingress::isolated_browser_hub'], {
@@ -161,7 +161,7 @@ async function main(binary, output) {
             await rpc('devices.page.act', { action: 'device-web-access', value: '1' });
             await browserTasks({ context, origin, rpc, thread: 't1',
               assets: [{path:'/files/get?thread=t1&path=sample.txt',body:Buffer.from('Backplane fixture')}],
-              replyText:'Browser stand-in reply',
+              replyText:'Browser0 Browser1 Browser2',
               nativeShot: process.env.BP_WEB_GPUI && (async name => {
                 const helper = new URL('./native-shot.sh', import.meta.url).pathname;
                 const proc = spawn('bash', [helper, temp, String(nativePort), output, name], {stdio:'inherit'});

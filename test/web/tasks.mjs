@@ -38,11 +38,19 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
 
   await testId('thread-row-' + thread).click();
   await testId('timeline').waitFor();
+  const earliest = testId('timeline').getByText('History entry 0', {exact:true});
+  await testId('load-older-btn').waitFor();
+  assert.equal(await earliest.count(), 0);
+  await testId('load-older-btn').click();
+  await earliest.waitFor();
   await testId('composer-input').fill('/');
   await testId('slash-menu').waitFor();
-  await testId('composer-input').fill('echo:Browser stand-in reply:echo');
+  const timeline = testId('timeline');
+  await testId('composer-input').fill('mode:stream Browser');
+  const partial = timeline.getByText('Browser0', {exact:true}).waitFor({timeout:10000});
   await testId('composer-send').click();
-  await testId('timeline').getByText(replyText, { exact: true }).waitFor();
+  await partial;
+  await timeline.getByText(replyText, { exact: true }).waitFor();
   await screenshot(page, 'paired-chat');
 
   if (nativeShot) await nativeShot('native-chat');
