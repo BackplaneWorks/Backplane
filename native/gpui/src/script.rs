@@ -683,7 +683,7 @@ impl Backplane {
             }
             Step::Layers(on, cap, scroll) => { let pv = &mut self.screens.plotview; pv.layers_cap = cap; pv.layers_scroll.set_offset(point(px(0.), px(-scroll)));
                 self.screens.plotview.layers_open = on; self.ui_epoch += 1; self.begin("layers".into(), Goal::Frame, cx); cx.notify(); }
-            Step::ViewShow(kind, path) => { let t = self.selected.clone(); self.view_show(&t, &kind, &path, cx); self.m("viewshow", json!({"kind": kind, "path": path})); self.ui_epoch += 1; self.begin("viewshow".into(), Goal::Frame, cx); cx.notify(); }
+            Step::ViewShow(kind, path) => { let t = self.selected.clone(); self.view_show(&t, &kind, &path, "", cx); self.m("viewshow", json!({"kind": kind, "path": path})); self.ui_epoch += 1; self.begin("viewshow".into(), Goal::Frame, cx); cx.notify(); }
             Step::Compare(i) => { // the Compare menu's row i (null: put the comparison away); the versions are asked for first
                 match i { None => crate::screens::histbar::compare(self, None),
                     Some(i) => { if self.screens.plotview.hist.refs.is_none() { crate::screens::histbar::ask_refs(self); } let r = self.screens.plotview.hist.refs.clone().and_then(|r| r.rows.get(i).cloned());

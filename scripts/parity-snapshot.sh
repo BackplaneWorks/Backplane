@@ -11,7 +11,7 @@ here=$(git rev-parse --show-toplevel); cd "$here"
 git fetch -q origin main
 commit=$(git rev-parse HEAD)
 git merge-base --is-ancestor "$commit" origin/main || { echo "parity-snapshot: HEAD $commit is not on origin/main" >&2; exit 1; }
-! grep -q 'fn layout_action' native/host/src/present/viewer.rs || { echo "parity-snapshot: this tree has branch-only code" >&2; exit 1; }
+! grep -q 'fn viewer_show_action' native/host/src/present/viewer.rs || { echo "parity-snapshot: this tree has branch-only code" >&2; exit 1; }
 [ -z "$(git status --porcelain --untracked-files=no)" ] || { echo "parity-snapshot: tracked files are modified" >&2; exit 1; }
 src=$BRANCH/native/host/src/present/viewer_parity_tests.rs
 sed '/^\/\/ ---- branch-only/,$d' "$src" > native/host/src/present/viewer_parity_tests.rs

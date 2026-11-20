@@ -46,6 +46,7 @@ fn strip_additive_2a(mut v: Value) -> Value {
     if let Some(o) = v.as_object_mut() {
         o.remove("layout");
         o.remove("tiles");
+        o.remove("showToken");
         if let Some(rail) = o.get_mut("rail").and_then(Value::as_array_mut) {
             for entry in rail {
                 if let Some(eo) = entry.as_object_mut() {
@@ -294,7 +295,7 @@ fn record_all_flows() -> Value {
 #[test]
 #[ignore = "generator: scripts/parity-snapshot.sh on a main checkout"]
 fn generate_main_snapshot() {
-    assert!(!include_str!("viewer.rs").contains("fn layout_action"), "this tree has branch-only code: the snapshot is generated from origin/main only");
+    assert!(!include_str!("viewer.rs").contains("fn viewer_show_action"), "this tree has branch-only code: the snapshot is generated from origin/main only");
     let commit = std::env::var("PARITY_MAIN_COMMIT").unwrap_or_default();
     assert!(commit.len() == 40 && commit.bytes().all(|b| b.is_ascii_hexdigit()), "PARITY_MAIN_COMMIT must be the main checkout's full commit id");
     let flows = record_all_flows();
@@ -340,4 +341,29 @@ fn legacy_single_page_flows_match_origin_main_snapshot() {
     let mut diffs = Vec::new();
     diff_paths(&expected, &actual, "", &mut diffs);
     assert!(diffs.is_empty(), "legacy single-page flows must match the origin/main snapshot in full; differences (main vs branch):\n{}", diffs.join("\n"));
+}
+
+/// On this branch the desktop's agent show is `view-show` (`viewer_show_action`), main's was `view <kind>`: from a session with nothing open
+/// the pictures, commands and drafts must be main's (the snapshot's `agent_show_each_kind`), except the differences listed here.
+#[test]
+fn agent_show_from_idle_matches_main_view_for_each_kind() {
+    let expected = load_snapshot()["flows"].clone();
+    let want = expected["agent_show_each_kind"].as_array().expect("agent_show_each_kind flow");
+    let (_td, root, _rp, st) = fixture();
+    // the desktop's show: the kind, and the part only for Mech (a tab-joined wire value, as main's `view`)
+    let shows: Vec<(&str, &str)> = AGENT_SHOWS.iter().map(|w| w.split_once('\t').unwrap_or((w, ""))).collect();
+    assert_eq!(want.len(), shows.len(), "the snapshot flow and this list name the same kinds");
+    let mut diffs = Vec::new();
+    for (i, (k, path)) in shows.iter().enumerate() {
+        let mut s = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{"fab.board:t":"board.kicad_pcb","fab.boards:t":"board.kicad_pcb\nalt/alt.kicad_pcb"}});
+        let o = match viewer::viewer_show_action(&st, "h", &s, Some(1), "en", k, path).unwrap_or_else(|| panic!("view-show {k} unsupported")) {
+            viewer::LayoutOut::Ok(o) => o,
+            viewer::LayoutOut::Refused { text, .. } => panic!("view-show {k} refused: {text}"),
+        };
+        patch::merge(&mut s, &o.patch);
+        let got = snap_step(&st, &s, &o.before, &root);
+        // a stored layout never exists for one tile: no `@view.layout` and no layout-only picture fields beyond the stripped additive ones
+        diff_paths(&want[i], &got, &format!("/{k}"), &mut diffs);
+    }
+    assert!(diffs.is_empty(), "view-show differs from main's `view` from idle (main vs branch):\n{}", diffs.join("\n"));
 }

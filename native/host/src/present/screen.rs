@@ -361,6 +361,19 @@ pub fn settings_link(href: &str) -> Option<&'static str> {
     let page=href.trim().strip_prefix("backplane://settings/")?.split(['#','?']).next()?.trim_end_matches('/');
     super::settings::PAGES.iter().map(|(id,_)|*id).find(|id|*id==page)
 }
+/// What `view` and `view-show` do with a page change the viewer made: the session's patch, its commands after the request's reads, the fab's look
+/// (`fab_tail`) and, when the viewer opened on a drawing from anything else, the project's boards asked for.
+fn applied_view(st: &State,hub: &str,thread: &str,session: &mut Value,read_cmds: &[Value],o: super::viewer::ViewOut) -> Vec<Value> {
+    crate::session::patch::merge(session,&o.patch);
+    let mut cmds=[read_cmds.to_vec(),o.before].concat();
+    crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,session,&mut cmds);
+    if o.boards_look {
+        let rid=session["rid"].as_u64().unwrap_or(0);
+        cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
+        session["rid"]=json!(rid+1);
+    }
+    cmds
+}
 /// `recent_far` with projects shared across machines shown once (`Unified`).
 pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value) -> Option<Value> {
     if text(p,"action")=="proj-go" { match find_go(st,p) { Some(c)=>return recent_unified(st,far,un,&c), None=>{ let mut c=p.clone(); c["action"]=json!("proj-find-q"); c["value"]=json!(""); return recent_unified(st,far,un,&c) } } }
@@ -488,16 +501,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             let vst: &State=far.iter().map(|(_,f)|*f).find(|f|vsel.contains('~') && f.threads.contains_key(vsel.as_str())).unwrap_or(st);
             let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
             match super::viewer::view_action_for(vst,hub,&session,p["designDesktop"].as_u64(),locale,value,p["now"].as_u64().unwrap_or(0)) {
-                Some(super::viewer::LayoutOut::Ok(o)) => {
-                    crate::session::patch::merge(&mut session,&o.patch);
-                    cmds=[read_cmds.clone(),o.before].concat();
-                    crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds);
-                    if o.boards_look {
-                        let rid=session["rid"].as_u64().unwrap_or(0);
-                        cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
-                        session["rid"]=json!(rid+1);
-                    }
-                }
+                Some(super::viewer::LayoutOut::Ok(o)) => { cmds=applied_view(st,hub,thread,&mut session,&read_cmds,o); }
                 Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
                     cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
                 }
@@ -713,6 +717,20 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
                 Some(super::viewer::LayoutOut::Ok(o)) => { crate::session::patch::merge(&mut session,&o.patch); cmds=o.before; }
                 Some(super::viewer::LayoutOut::Refused { code, key, text }) => { cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text})); }
                 None => return refused("action.sheet-unported"),
+            }
+        },
+        // agent's idempotent viewer_show (never closes an already-focused tile)
+        "view-show" => {
+            let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
+            // "<kind>\t<path>\t<token>": what the hub pushed, unchanged (a value with no token of the hub's applies nothing)
+            let mut parts=value.splitn(3,'\t'); let (k,path,token)=(parts.next().unwrap_or(""),parts.next().unwrap_or(""),parts.next().unwrap_or(""));
+            match super::viewer::view_show_token(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, k, path, token) {
+                // the same tail as `view` (one function): a show is a view that never closes
+                Some(super::viewer::LayoutOut::Ok(o)) => { cmds = applied_view(st, hub, thread, &mut session, &read_cmds, o); }
+                Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
+                    cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
+                }
+                None => return refused("action.view-unported"),
             }
         },
         // docking/tiling layout actions (present/viewer.rs `layout_action`)
@@ -1577,7 +1595,7 @@ mod thread_binding_tests {
             let (st,p,expected)=fixture(lean);
             let out=recent(&st,&p).expect("plain thread root is supported");
             // the Allowance chip's text (keys.rs `allowance`), the picker's other agents (`pickerAgents`) and the masked box and the composer's commands (`secretBox`, `commands`; `btw` is the helper's own key) are Backplane's own: the recorded helper reply has no such keys
-            let bare=|mut t:Value|{ t["viewer"].as_object_mut().unwrap().remove("runtime"); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("mode").unwrap()["want"], "viewer"); assert!(t["viewer"].as_object_mut().unwrap().remove("rail").unwrap().is_array()); assert!(t["viewer"].as_object_mut().unwrap().remove("has").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("layout").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("tiles").unwrap().is_object()); for k in ["allowance","combo","pickerAgents","secretBox","commands","project","subView","planOnce","review","unanswered"] { t.as_object_mut().unwrap().remove(k); } t["picker"]=crate::present::keys::as_helper(&t["picker"]); t };
+            let bare=|mut t:Value|{ t["viewer"].as_object_mut().unwrap().remove("runtime"); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("mode").unwrap()["want"], "viewer"); assert!(t["viewer"].as_object_mut().unwrap().remove("rail").unwrap().is_array()); assert!(t["viewer"].as_object_mut().unwrap().remove("has").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("layout").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("tiles").unwrap().is_object()); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("showToken").unwrap(), true); for k in ["allowance","combo","pickerAgents","secretBox","commands","project","subView","planOnce","review","unanswered"] { t.as_object_mut().unwrap().remove(k); } t["picker"]=crate::present::keys::as_helper(&t["picker"]); t };
             assert_eq!(bare(out["shown"]["thread"].clone()),expected); assert_eq!(bare(out["overlay"]["j"]["thread"].clone()),expected);
             assert_eq!(out["session"]["sel"],p["target"]["id"]); assert_eq!(out["window"],p["window"]);
             assert_eq!(out["shown"]["nativeSidebar"],1);
