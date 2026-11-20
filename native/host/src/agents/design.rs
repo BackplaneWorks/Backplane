@@ -247,6 +247,7 @@ impl Agents {
         let (frame, busy) = if explicit { crate::files::kicad::follow::bring_frame(thread, &shown).await } else { (None, String::new()) };
         let mut push = json!({"t":"view","action":"view-show","thread":thread,"path":shown,"kind":kind});
         if let Some(f) = frame { push["frame"] = json!(f) }
+        crate::present::viewer::record_pending_show(thread, kind, &shown);
         self.hub.push_all(&push);
         // (the owner's windows on other machines show it too)
         { let (hub, ann) = (self.hub.clone(), json!({"thread":thread,"path":shown.clone(),"kind":kind})); tokio::spawn(async move { hub.far_announce("viewer.show", &ann).await }); }
@@ -254,19 +255,29 @@ impl Agents {
         if !wait { return (true, note(json!({"shown":shown}))) }
         let mut now = crate::files::kicad::watch::viewer_state(thread);
         // a frame brought: the read-back waits for the window's report of it (its kicadFrame), AND
-        // for the reported kind/source to match what was requested when specified
+        // strictly for the requested page and source to be observed (missing kind/open or missing/empty key never matches).
         let want_kind = match kind {
             "pcb" => "board",
             "sch" => "schematic",
-            "" if shown.to_ascii_lowercase().ends_with(".kicad_pcb") => "board",
-            "" if shown.to_ascii_lowercase().ends_with(".kicad_sch") => "schematic",
+            "3d" if crate::present::viewer::is_model(&shown) => "mech",
+            "" if shown.to_ascii_lowercase().ends_with(".kicad_pcb") || shown.to_ascii_lowercase().ends_with(".pcbdoc") => "board",
+            "" if shown.to_ascii_lowercase().ends_with(".kicad_sch") || shown.to_ascii_lowercase().ends_with(".schdoc") => "schematic",
             "" if crate::present::viewer::is_model(&shown) => "mech",
             k => k,
         };
         let matches_target = |s: &(u64, Value)| {
             let brought = frame.map_or(true, |f| s.1["kicadFrame"] == f);
-            let kind_ok = want_kind.is_empty() || s.1["kind"].as_str().map_or(true, |k| k == want_kind || (want_kind == "gerbers" && k == "board"));
-            let src_ok = shown.is_empty() || s.1["key"].as_str().map_or(true, |k| k.is_empty() || k.ends_with(&shown) || s.1["part"].as_str().is_some_and(|p| shown.ends_with(p)));
+            let obs_kind = s.1["open"].as_str().or_else(|| s.1["kind"].as_str()).unwrap_or("");
+            let kind_ok = want_kind.is_empty() || match want_kind {
+                "gerbers" => obs_kind == "gerbers" || (obs_kind == "board" && s.1["gerbers"] == true),
+                "files" => matches!(obs_kind, "files" | "image" | "pdf" | "text"),
+                wk => obs_kind == wk,
+            };
+            let src_ok = shown.is_empty()
+                || s.1["key"].as_str().is_some_and(|k| !k.is_empty() && (k == shown || k.ends_with(&shown) || k.ends_with(&format!("/{shown}"))))
+                || s.1["part"].as_str().is_some_and(|p| !p.is_empty() && (p == shown || shown.ends_with(p) || shown.ends_with(&format!("/{p}"))))
+                || s.1["sheet"].as_str().is_some_and(|sh| !sh.is_empty() && (sh == shown || sh.ends_with(&shown) || shown.ends_with(sh)))
+                || s.1["source"].as_str().is_some_and(|src| !src.is_empty() && (src == shown || shown.ends_with(&format!("/{src}"))));
             brought && kind_ok && src_ok
         };
         for _ in 0..60 { if now.0 > before && matches_target(&now) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }

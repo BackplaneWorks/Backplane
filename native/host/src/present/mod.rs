@@ -25,6 +25,7 @@ pub mod badge;
 mod refusal;
 pub mod tz;
 pub mod window;
+#[cfg(test)] mod viewer_parity_tests;
 use crate::presenter::{Fut, Presenter};
 use anyhow::Result;
 use serde_json::{json, Value};
@@ -599,7 +600,6 @@ mod tests {
         let mut s_leg = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{}});
         for act in ["board", "schematic", "3d", "split", "mech", "files", "review", ""] {
             if act == "review" {
-                // First open board so Review stops an active watch
                 let ob = viewer::view_action(&st, "h", &s_leg, "board").unwrap();
                 crate::session::patch::merge(&mut s_leg, &ob.patch);
                 let orv = viewer::view_action(&st, "h", &s_leg, "review").unwrap();
@@ -614,6 +614,100 @@ mod tests {
                 crate::session::patch::merge(&mut s_leg, &o.patch);
             }
         }
+
+        // 11. Item 2: Entering multi-tile from legacy Review preserves BOTH Review and Board;
+        // linked migration with picked board preserves picked sibling schematic.
+        let mut s_rev = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{}});
+        let (p_rev, _) = crate::session::pages::open_review(&s_rev, "h", "t", "bom", false);
+        crate::session::patch::merge(&mut s_rev, &p_rev);
+        assert_eq!(s_rev["drafts"]["@view:t"], "");
+        assert_eq!(s_rev["info"]["view.kind:t"], "review");
+        let add_from_rev = viewer::layout_action(&st, "h", &s_rev, Some(10), "en", "layout-add", r#"{"side":"right","kind":"board"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_afr) = add_from_rev else { panic!() };
+        crate::session::patch::merge(&mut s_rev, &vo_afr.patch);
+        let v_afr = viewer::viewer_json(&st, &json!({}), &s_rev).unwrap();
+        let kinds_afr: Vec<&str> = v_afr["tiles"].as_object().unwrap().values().filter_map(|t| t["kind"].as_str()).collect();
+        assert!(kinds_afr.contains(&"review") && kinds_afr.contains(&"board"), "entering multi-tile from Review must keep both Review and Board: {kinds_afr:?}");
+
+        let sess_far_picked = json!({"sel":"peer~t","rid":1,"drafts":{"@view:peer~t":"split","@view.board:peer~t":"alt/alt.kicad_pcb"},"panel":false,"info":{}});
+        let add_far = viewer::layout_action(&st_far, "h", &sess_far_picked, Some(10), "en", "layout-add", r#"{"side":"right","kind":"files"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_af) = add_far else { panic!() };
+        let mut s_far2 = sess_far_picked.clone();
+        crate::session::patch::merge(&mut s_far2, &vo_af.patch);
+        let v_far2 = viewer::viewer_json(&st_far, &json!({}), &s_far2).unwrap();
+        assert!(v_far2["tiles"].as_object().unwrap().values().any(|t| t["kind"] == "schematic" && t["source"] == "alt/alt.kicad_sch"), "linked migration must preserve picked sibling schematic: {}", v_far2["tiles"]);
+
+        // 12. Item 3: Leaving multi-tile to 1 tile clears stale @view.layout, @view.file, @view.sheet, @view.gerbers
+        let mut s_leave = json!({"sel":"t","rid":1,"drafts":{"@view:t":"schematic","@view.sheet:t":format!("{root}/power.kicad_sch"),"@view.file:t":format!("{root}/stale.kicad_pcb"),"@view.gerbers:t":"1"},"panel":false,"info":{}});
+        let add_l = viewer::layout_action(&st, "h", &s_leave, Some(10), "en", "layout-add", r#"{"side":"right","kind":"diff"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_al) = add_l else { panic!() };
+        crate::session::patch::merge(&mut s_leave, &vo_al.patch);
+        let close_sch = viewer::layout_action(&st, "h", &s_leave, Some(10), "en", "layout-close", r#"{"tile":"t1"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_cd) = close_sch else { panic!() };
+        crate::session::patch::merge(&mut s_leave, &vo_cd.patch);
+        assert_eq!(s_leave["drafts"]["@view.layout:t"], "");
+        assert_eq!(s_leave["drafts"]["@view.sheet:t"], "");
+        assert_eq!(s_leave["drafts"]["@view.file:t"], "");
+        assert_eq!(s_leave["drafts"]["@view.gerbers:t"], "");
+
+        // 13. Item 4: Unresolved historical tile surviving handoff stays stored & error; Retry never watches live board
+        let mut s_unres_surv = sess_unres.clone();
+        let close_live = viewer::layout_action(&st, "h", &s_unres_surv, Some(10), "en", "layout-close", r#"{"tile":"t2"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_cl) = close_live else { panic!() };
+        crate::session::patch::merge(&mut s_unres_surv, &vo_cl.patch);
+        assert!(!s_unres_surv["drafts"]["@view.layout:t"].as_str().unwrap_or("").is_empty(), "unresolved survivor must retain stored layout");
+        let v_us = viewer::viewer_json(&st, &json!({}), &s_unres_surv).unwrap();
+        assert_eq!(v_us["key"], "");
+        assert_eq!(v_us["error"], "Unresolved version");
+        let retry_us = viewer::view_action_for(&st, "h", &s_unres_surv, Some(10), "en", "retry", 5000).unwrap();
+        let viewer::LayoutOut::Ok(vo_ru) = retry_us else { panic!() };
+        assert!(watch_msg(&vo_ru).is_none_or(|p| p["kind"] == ""), "Retry on unresolved survivor must NEVER watch live artwork");
+
+        // 14. Item 5: Far Review watch stop carries `on`
+        let s_far_rev = json!({"sel":"peer~t","rid":1,"drafts":{"@view:peer~t":"board","@view.at":"0|/remote/wt|"},"panel":false,"info":{}});
+        let (_, far_rev_cmds) = crate::session::pages::open_review(&s_far_rev, "h", "peer~t", "bom", false);
+        let far_stop = far_rev_cmds.iter().find_map(|c| {
+            let v: Value = serde_json::from_str(c["text"].as_str()?).ok()?;
+            (v["m"] == "kicad.watch").then_some(v["p"].clone())
+        }).expect("far review must stop active watch");
+        assert_eq!(far_stop["on"], "peer");
+
+        // 15. Item 6: resolve_kicad_guard never trusts client_locked when hub_dialog_open == false;
+        // stored Split sheet change with non-Schematic leaf focused updates stored schematic leaf.
+        let g_no_dlg = layout::resolve_kicad_guard(&l_multi, Some(&json!({"holder": 10})), false, Some(10), Some("t1"), Some("t1"));
+        assert_eq!(g_no_dlg.locked, None, "client_locked must never lock when hub_dialog_open is false");
+
+        let mut s_sp = json!({"sel":"t","rid":1,"drafts":{"@view:t":"split"},"panel":false,"info":{}});
+        let mut l_sp = layout::derive_layout(&layout::DeriveInput { root: &root, open: "split", default_pcb: &format!("{root}/board.kicad_pcb"), default_sch: &format!("{root}/board.kicad_sch"), ..Default::default() });
+        l_sp.focus = Some("t2".into()); // Board focused, NOT Schematic!
+        s_sp["drafts"]["@view.layout:t"] = json!(serde_json::to_string(&l_sp).unwrap());
+        let sh_sp = viewer::sheet_action_for(&st, "h", &s_sp, None, "en", &format!("{root}/power.kicad_sch")).unwrap();
+        let viewer::LayoutOut::Ok(vo_shsp) = sh_sp else { panic!() };
+        crate::session::patch::merge(&mut s_sp, &vo_shsp.patch);
+        let v_shsp = viewer::viewer_json(&st, &json!({}), &s_sp).unwrap();
+        assert_eq!(v_shsp["tiles"]["t1"]["source"], "power.kicad_sch", "sheet change in stored Split with Board focused must update Schematic leaf");
+
+        // 16. Item 7: Old desktop answering hub-pushed agent show with plain `view` is idempotent
+        let sess_old_files = json!({"sel":"t","rid":1,"drafts":{"@view:t":"files"},"panel":false,"info":{}});
+        viewer::record_pending_show("t", "files", "");
+        let old_ans = viewer::view_action_for(&st, "h", &sess_old_files, Some(42), "en", "files", 0).unwrap();
+        let viewer::LayoutOut::Ok(vo_oa) = old_ans else { panic!() };
+        assert!(vo_oa.patch.as_object().unwrap().is_empty(), "old desktop replying to pending show with plain `view files` must NOT toggle Files closed");
+
+        // 17. Item 8: Empty Gerber directory (no `.gbr` members) is vanished via contained member check
+        std::fs::create_dir_all(d.join("mfg/empty_rev")).unwrap();
+        let mut s_g = json!({"sel":"t","rid":1,"drafts":{"@view:t":"board"},"panel":false,"info":{}});
+        let add_g = viewer::layout_action(&st, "h", &s_g, None, "en", "layout-add", r#"{"side":"right","kind":"gerbers","source":"mfg/empty_rev"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_ag) = add_g else { panic!() };
+        crate::session::patch::merge(&mut s_g, &vo_ag.patch);
+        let v_g = viewer::viewer_json(&st, &json!({}), &s_g).unwrap();
+        assert_eq!(v_g["tiles"]["t2"]["key"], "");
+        assert_eq!(v_g["tiles"]["t2"]["identity"]["missing"], true);
+
+        // 18. Item 9: Unfocused tiles and ALL historical tiles never expose absolute paths, `.git`, or repo top
+        let v_no_abs = viewer::viewer_json(&st, &json!({}), &sess_b).unwrap();
+        let unfocus_k = v_no_abs["tiles"]["t2"]["key"].as_str().unwrap_or("");
+        assert!(!unfocus_k.contains(&root) && !unfocus_k.contains(".git"), "unfocused tile key must not expose absolute path or .git: {unfocus_k}");
 
         let _ = std::fs::remove_dir_all(&d);
     }

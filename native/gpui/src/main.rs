@@ -77,7 +77,7 @@ impl Backplane {
     pub(crate) fn view_show(&mut self,thread:&str,kind:&str,path:&str,cx:&mut Context<Self>){
         let Some((k,part))=screens::viewer::shown(kind,path) else {return};
         if !(self.selected==thread||self.selected.ends_with(&format!("|{thread}"))||thread.is_empty()) {return}
-        let _=self.tx.try_send(screens::viewer::view_kind(&match part {Some(p)=>format!("{k}\t{p}"),None=>k})); cx.notify();
+        let _=self.tx.try_send(screens::viewer::view_show_kind(&match part {Some(p)=>format!("{k}\t{p}"),None=>k})); cx.notify();
     }
     /// An agent's viewer_show named the KiCad frame the embedded pane is to show (the hub saw it show another: the person's strip tab;
     /// issue 1355): the pane shows it as a tab press would (show_kind_as), so it publishes the change itself, but as Automatic: the keyboard

@@ -432,7 +432,7 @@ impl Refusal {
         self.text_for("en")
     }
 
-    /// Runtime catalog lookup from `i18n/{en,es,ja}.msg` for the session's locale (no duplicate table).
+    /// Catalog lookup from compile-time-embedded `i18n/{en,es,ja}.msg` for the session's locale (no runtime file reads, no duplicate table).
     pub fn text_for(self, locale: &str) -> &'static str {
         fn parse_msg(src: &'static str) -> HashMap<&'static str, &'static str> {
             src.lines()
@@ -1142,13 +1142,8 @@ pub fn resolve_kicad_guard(
         .map(|t| t.id.clone())
         .or_else(|| kicad_tile(layout, |_| true));
     let client_has_kicad = kt.is_some();
-    let locked = if hub_dialog_open {
-        kt.clone()
-    } else {
-        client_locked
-            .filter(|s| !s.is_empty() && layout.contains_tile(s))
-            .map(str::to_string)
-    };
+    let locked = if hub_dialog_open { kt.clone() } else { None };
+    let _ = client_locked;
     KicadGuard {
         is_holder: true,
         kicad_tile: kt,
