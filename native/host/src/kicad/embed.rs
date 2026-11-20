@@ -1726,6 +1726,9 @@ enum Msg {
     ForkSyncNow { pro: String },
     HealthResult { pro: String, gen: u64, ok: bool, modified_docs: Option<Vec<String>> },
     ChildExited { pro: String, gen: u64, code: i32, how: String, tail: String, reply: Option<oneshot::Sender<Result<Value, String>>> },
+    /// a KiCad that answered the hub's Close is ending by itself (`Draining`), or ended (`Drained`, how)
+    Draining { pro: String, pid: u32 },
+    Drained { pro: String, pid: u32, how: String },
     Tick,
 }
 
@@ -1740,6 +1743,9 @@ struct Actor {
     pend: HashMap<String, oneshot::Sender<Value>>,
     sessions: HashMap<String, Session>,
     attach_waiters: HashMap<String, Vec<(u64, oneshot::Sender<Result<Value, String>>)>>,
+    /// a project's KiCad that answered the hub's Close and is ending by itself (CLOSE_EXIT_WAIT): its pid. A new start of the project
+    /// waits for it (never a second KiCad into its lock)
+    draining: HashMap<String, u32>,
     /// the runtime each project's latest start used, and the projects whose start was already retried once (start_retry)
     start_env: HashMap<String, Env>,
     start_retried: std::collections::HashSet<String>,
@@ -1784,6 +1790,27 @@ pub fn mac_prompt_failure(bound: Duration) -> String {
 /// How long the start retry waits for the first KiCad after asking it to close (kill_pid's grace: a KiCad that missed its start window
 /// gets no more), then after killing it.
 const RETRY_TERM_WAIT: Duration = Duration::from_millis(1500);
+/// How long KiCad gets to end by itself after it answered the hub's Close (its project-local writes: `.kicad_prl`, local history, temp
+/// files; documents are written before it answers): ended past it with TERM, then KILL
+const CLOSE_EXIT_WAIT: Duration = Duration::from_secs(15);
+
+/// After a Close KiCad answered: waits up to `bound` for it to end by itself; past it TERM, `RETRY_TERM_WAIT`, then KILL. Says what it took,
+/// in `gone_before_retry`'s words ("was still there…" when even the kill did not end it)
+async fn exit_after_close(pid: u32, bound: Duration) -> String {
+    use crate::plat::proc;
+    let t0 = std::time::Instant::now();
+    let gone_within = |limit: Duration| async move {
+        let end = tokio::time::Instant::now() + limit;
+        while tokio::time::Instant::now() < end { if !proc::group_alive(pid) { return true } tokio::time::sleep(Duration::from_millis(50)).await; }
+        !proc::group_alive(pid)
+    };
+    if pid == 0 || gone_within(bound).await { return format!("ended by itself in {} ms", t0.elapsed().as_millis()) }
+    if !proc::kill_group(pid, proc::TERM) { let _ = proc::kill(pid, proc::TERM); }
+    if gone_within(RETRY_TERM_WAIT).await { return format!("did not end in {} ms and ended on TERM", bound.as_millis()) }
+    if !proc::kill_group(pid, proc::KILL) { let _ = proc::kill(pid, proc::KILL); }
+    if gone_within(RETRY_KILL_WAIT).await { format!("did not end in {} ms and was killed", bound.as_millis()) }
+    else { format!("was still there {} ms after it was killed", t0.elapsed().as_millis()) }
+}
 const RETRY_KILL_WAIT: Duration = Duration::from_secs(5);
 
 /// Ends the first start's KiCad before the retry starts another on the same project: asked to close, killed if it is still there after
@@ -2080,6 +2107,25 @@ impl Actor {
         if mode == "fork" && !crate::copy::on() && !self.sessions.values().any(|s| s.pro != pro && s.is_live()) {
             if let (Some(root), Some(ver)) = (super::libtables::config_root(), super::libtables::settings_version(&env.version)) { wheel_zoom_once(&root.join(ver)); }
         }
+        // the project's last KiCad answered a close and is still ending (CLOSE_EXIT_WAIT): this start waits for it, never a second KiCad
+        // into its lock. Held as a start (the pane says Starting) under a new generation; the next starts once it is gone (Msg::RetryNow)
+        if let Some(&old) = self.draining.get(&pro).filter(|p| crate::plat::proc::group_alive(**p)) {
+            self.next_gen += 1;
+            let g = self.next_gen;
+            let mut held = Session::new(&pro, &root, &mode, &frame, g, now);
+            held.reason = "restarting".into(); held.container = container; held.toplevel = toplevel; held.display = display.clone();
+            if container > 0 { held.pane_cid = pane_cid.clone(); }
+            self.publish(&held, None);
+            self.sessions.insert(pro.clone(), held);
+            self.attach_waiters.entry(pro.clone()).or_default().push((client, reply));
+            let (me, pro_c) = (self.me.clone(), pro.clone());
+            eprintln!("kicad embed: {pro}: waiting for the KiCad that answered its close (pid {old}) before starting the next");
+            tokio::spawn(async move {
+                let waited = exit_after_close(old, CLOSE_EXIT_WAIT).await;
+                let _ = me.send(Msg::RetryNow { pro: pro_c, gen: g, client, env, waited });
+            });
+            return;
+        }
         let eff_display = if !display.is_empty() { display } else { std::env::var("DISPLAY").unwrap_or_default() };
 
         self.next_gen += 1;
@@ -2313,12 +2359,15 @@ impl Actor {
             tokio::spawn(async move {
                 let o = raw_on(&me, &s.sock, &s.desc, "kiapi.backplane.embed.Close", json!({"mode": cm}), 15000).await;
                 if o["ok"].as_bool().unwrap_or(false) {
+                    // KiCad answered after writing every document it was to save (its Close saves before it answers): it ends by itself,
+                    // its project-local writes done; ended only past CLOSE_EXIT_WAIT. The session reads closed at once (the pane goes back
+                    // to the viewer now, as before); KiCad's real exit, when it is not clean, is logged (ChildExited on a stopped session)
                     if pid > 0 {
+                        let _ = me.send(Msg::Draining { pro: s.pro.clone(), pid });
+                        let (me2, pro2) = (me.clone(), s.pro.clone());
                         tokio::spawn(async move {
-                            tokio::time::sleep(Duration::from_millis(800)).await;
-                            if crate::plat::proc::alive(pid) {
-                                Actor::kill_pid(pid);
-                            }
+                            let how = exit_after_close(pid, CLOSE_EXIT_WAIT).await;
+                            let _ = me2.send(Msg::Drained { pro: pro2, pid, how });
                         });
                     }
                     let _ = me.send(Msg::ChildExited { pro: s.pro.clone(), gen: s.gen, code: 0, how: String::new(), tail: String::new(), reply: Some(reply) });
@@ -2473,6 +2522,11 @@ impl Actor {
                 self.publish(&snap, None);
             }
             Msg::Restart { client, pro, env, reply } => self.restart(client, pro, env, reply),
+            Msg::Draining { pro, pid } => { self.draining.insert(pro, pid); }
+            Msg::Drained { pro, pid, how } => {
+                if !how.starts_with("ended by itself") { eprintln!("kicad embed: {pro}: the KiCad that answered its close {how}"); }
+                if self.draining.get(&pro) == Some(&pid) { self.draining.remove(&pro); }
+            }
             Msg::RetryNow { pro, gen, client, env, waited } => {
                 // the session was left (stopped or retired) while the first KiCad went: nothing to start
                 if !self.sessions.get(&pro).is_some_and(|s| s.gen == gen && s.state == "starting") { return }
@@ -3749,7 +3803,7 @@ pub fn start(hub: &Arc<Hub>) {
         }
     });
     let mut a = Actor {
-        hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
+        hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0, draining: HashMap::new(),
         pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(),
         users: HashSet::new(), users_gone: None,
     };
@@ -4742,6 +4796,23 @@ mod tests {
         let mut c = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); c.stop_reason = "closeAsked".into();
         assert!(!closed_frames_apply(&mut c, "SCH", false));
         assert!(s.stopped("").closed_frames.is_empty(), "emptied when it stops");
+    }
+    /// After a Close KiCad answered, the hub waits for its own exit (CLOSE_EXIT_WAIT): one that ends by itself is not touched; one still
+    /// there past the bound gets TERM; one that ignores TERM is killed
+    #[cfg(unix)]
+    #[tokio::test] async fn after_its_close_kicad_ends_by_itself_and_only_past_the_bound_is_ended() {
+        use std::os::unix::process::CommandExt;
+        let spawn = |script: &str| std::process::Command::new("sh").arg("-c").arg(script).process_group(0).spawn().expect("sh");
+        let reap = |mut c: std::process::Child| { std::thread::spawn(move || { let _ = c.wait(); }); };
+        let quick = spawn("sleep 0.3"); let pid = quick.id(); reap(quick);
+        assert!(super::exit_after_close(pid, Duration::from_secs(5)).await.starts_with("ended by itself"), "a clean exit within the bound");
+        let slow = spawn("sleep 30"); let pid = slow.id(); reap(slow);
+        let how = super::exit_after_close(pid, Duration::from_millis(300)).await;
+        assert!(how.contains("ended on TERM"), "past the bound: TERM ({how})");
+        let stubborn = spawn("trap '' TERM; while :; do sleep 0.1; done"); let pid = stubborn.id(); reap(stubborn);
+        let how = super::exit_after_close(pid, Duration::from_millis(300)).await;
+        assert!(how.contains("was killed"), "TERM ignored: killed ({how})");
+        assert!(!crate::plat::proc::group_alive(pid));
     }
     #[test] fn the_runtime_picture_follows_the_session_the_warm_up_and_the_holder() {
         // its own project and cids: the registry is the process's
