@@ -6,6 +6,8 @@
 # only its tab appears. Copies only (seed_project.py), fork mode.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
+# the whole row at the pane's usual width, then at the narrowest (380 px, local.rs VIEWER_PX)
+if [ -z "${LIB_W:-}" ]; then rc=0; for w in 0 380; do LIB_W=$w OUT= bash "$0" || rc=1; done; exit $rc; fi
 # shellcheck source=lib/env_xvfb.sh
 . "$HERE/lib/env_xvfb.sh"
 [ "$EMBED_MODE" = "fork" ] || { echo "embed_lib_opening_e2e: fork only"; exit 0; }
@@ -71,6 +73,8 @@ cat >"$OUT/script.json" <<'JSON'
  {"kicad":{"wait_painted":90000,"kind":"PCB","tag":"ready"}},{"click":"kicad-tab:SCH"},{"kicad":{"wait_painted":90000,"kind":"SCH","tag":"sch"}},
  {"click":"kicad-tab:PCB"},{"wait":2500},{"kicad":{"report":true,"tag":"placed"}},{"mark":"edit_ready"},{"wait":300000},{"mark":"done"}]
 JSON
+[ "$LIB_W" -gt 0 ] && echo "{\"viewer_px\": $LIB_W}" > "$OUT/local-settings.json"
+[ "$LIB_W" -gt 0 ] && export BACKPLANE_GPUI_LOCAL="$OUT/local-settings.json"
 HOME="$OUT/fh" BACKPLANE_KICAD_DEBUG=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 400 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
@@ -98,6 +102,18 @@ for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
     if isinstance(r, list): last = [x.get("id") for x in r]
 print(" ".join(i for i in (last or []) if i))' "$OUT/client.log"; }
 has_rect() { rects_now | tr ' ' '\n' | grep -qx "$1" && echo 1 || echo 0; }
+# a rect's "x y w h" in the client's last drawn rects ("" when not drawn)
+rect_of() { python3 -c '
+import json, sys
+last = ""
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    if "GPUI_METRIC " not in line or "\"rects\"" not in line: continue
+    try: o = json.loads(line.split("GPUI_METRIC ", 1)[1])
+    except Exception: continue
+    for x in o.get("rects") or []:
+        if isinstance(x, dict) and x.get("id") == sys.argv[2]: last = "%d %d %d %d" % (x["x"], x["y"], x["w"], x["h"])
+print(last)' "$OUT/client.log" "$1"; }
+identity_now() { rects_now | tr ' ' '\n' | grep '^pane-identity:' | tail -1; }
 # KiCad's Ctrl+E on part REF of frame TAB (its tab clicked first: KiCad has the keys)
 press_ctrl_e() { local tab=$1 kind=$2 ref=$3
   ctl "kicad-tab:$tab" 3
@@ -106,11 +122,21 @@ press_ctrl_e() { local tab=$1 kind=$2 ref=$3
   python3 "$RT" key e ctrl >/dev/null
 }
 # 1. Symbol Editor: the wait is said, then the editor comes with its tab
+POP0=$(rect_of kicad:popout); SCH0=$(rect_of kicad-tab:SCH)
 press_ctrl_e SCH sch U1; sleep 2.5
-R=$(rects_now); TB=$(last_tab); T=$(titles)
+R=$(rects_now); TB=$(last_tab); T=$(titles); ID=$(identity_now); POP1=$(rect_of kicad:popout); SCH1=$(rect_of kicad-tab:SCH); TXT=$(rect_of kicad:opening)
+echo "INFO pane ${LIB_W:-0} px: identity [$ID]; Pop out [$POP0] -> [$POP1]; Schematic tab [$SCH0] -> [$SCH1]; opening text [$TXT]"
+check "while it opens: the header row's identity is still the schematic's, never the Symbol Editor's ($ID)" "$(echo "$ID" | grep -q 'Symbol Editor' && echo 0 || { [ -n "$ID" ] && echo 1 || echo 0; })"
+check "while it opens: the strip keeps its row (Pop out and the tabs where they were)" "$([ "$POP0" = "$POP1" ] && [ "$SCH0" = "$SCH1" ] && [ -n "$POP1" ] && echo 1 || echo 0)"
+check "while it opens: the text is whole inside the strip, left of Pop out, or not drawn at all" "$(python3 -c '
+import sys
+t, p = sys.argv[1].split(), sys.argv[2].split()
+if not t: print(1)
+elif not p: print(0)
+else: print(int(int(t[2]) >= 80 and int(t[0]) + int(t[2]) <= int(p[0]) + 1))' "$TXT" "$POP1")"
 echo "INFO during the wait: tab $TB, windows [$T], opening rects: $(echo "$R" | tr ' ' '\n' | grep opening | tr '\n' ' ')"
 check "while it opens: the placeholder tab is drawn (kicad-opening:SYMBOL_EDITOR)" "$(has_rect kicad-opening:SYMBOL_EDITOR)"
-check "while it opens: the strip says so (kicad:opening)" "$(has_rect kicad:opening)"
+[ "$LIB_W" -eq 0 ] && check "while it opens: the strip says so (kicad:opening)" "$(has_rect kicad:opening)"
 check "while it opens: the pane stays on the schematic (tab $TB)" "$([ "$TB" = "SCH" ] && echo 1 || echo 0)"
 shot "opening_wait"
 sleep 6
@@ -135,4 +161,4 @@ check "its tab appears (kicad-tab:FOOTPRINT_EDITOR)" "$(has_rect kicad-tab:FOOTP
 check "the hub said why" "$(tail -n +"$((L + 1))" "$OUT/hub.log" | grep -aq "not put on show: the person chose" && echo 1 || echo 0)"
 shot "opening_switched"
 hub_rpc "[{\"method\":\"editor.kicad.close\",\"params\":{\"project\":\"$PROJ/ecc83-pp.kicad_pro\",\"save\":\"discard\"}}]" >/dev/null || true
-finish_suite "embed_lib_opening_e2e ($EMBED_MODE)"
+finish_suite "embed_lib_opening_e2e ($EMBED_MODE, pane ${LIB_W} px)"
