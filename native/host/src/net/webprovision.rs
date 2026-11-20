@@ -25,7 +25,7 @@ pub fn mapping_status(raw: &str, authority: &str, proxy: &str) -> Mapping {
         }) {
             return None;
         }
-        let endpoint = proxy.strip_prefix("http://")?;
+        let endpoint = proxy.strip_prefix("http://").unwrap_or(proxy);
         if let Some(tcp) = config.get("TCP") {
             for handler in tcp.as_object()?.values() {
                 if handler
@@ -409,14 +409,23 @@ async fn cleanup_disabled<F, R>(ts: &dyn super::Tailscale, service: &str, socket
 where F: FnOnce(Option<String>, String, u16, std::path::PathBuf) -> R, R: std::future::Future<Output=bool> {
     let Ok(status) = serde_json::from_str::<Value>(&ts.status().await) else { return false; };
     let Some(node) = status["Self"]["DNSName"].as_str().map(|s| s.trim_end_matches('.')).filter(|s| !s.is_empty()) else { return false; };
-    let Ok(config) = serde_json::from_str::<Value>(&ts.serve_status().await) else { return false; };
+    let raw = ts.serve_status().await;
+    let Ok(config) = serde_json::from_str::<Value>(&raw) else { return false; };
     if !config.is_object() { return false; }
-    let Some(authority) = configured_authority(&config, service, node, socket) else { return true; };
+    let Some(authority) = configured_authority(&config, service, node, socket) else {
+        return private_backend_absent(&raw, socket);
+    };
     let (host, port) = authority.rsplit_once(':').map_or((authority.as_str(), 443), |(host, port)| (host, port.parse().unwrap_or(0)));
     let scope = (host != node).then(|| service.to_owned());
     let _ = remove(scope, host.to_owned(), port, socket.to_owned()).await;
     // Read back on the next pass. The other address mode may also have a mapping.
     false
+}
+
+// A shared handler cannot be removed automatically. Scan all scopes and paths:
+// either Present or Unconfirmed keeps the disabled-state warning visible.
+fn private_backend_absent(raw: &str, socket: &std::path::Path) -> bool {
+    socket.to_str().is_some_and(|path| mapping_status(raw, "", &format!("unix:{path}")) == Mapping::Absent)
 }
 
 /// An administrator may have reassigned the endpoint since setup. Only
@@ -509,6 +518,18 @@ mod tests {
         }).await;
         assert!(called);
         assert!(!confirmed, "removal still needs readback");
+    }
+
+    #[test]
+    fn sibling_handler_keeps_cleanup_pending_until_private_backend_disappears() {
+        let socket = std::path::Path::new("/private/browser.sock");
+        let mut config = json!({"TCP":{"8443":{"HTTPS":true}},"Web":{"node.example.ts.net:8443":{"Handlers":{
+            "/":{"Proxy":"unix:/private/browser.sock"}, "/other":{"Text":"keep"}
+        }}}});
+        assert!(configured_authority(&config, "bp", "node.example.ts.net", socket).is_none());
+        assert!(!private_backend_absent(&config.to_string(), socket));
+        config["Web"]["node.example.ts.net:8443"]["Handlers"].as_object_mut().unwrap().remove("/");
+        assert!(private_backend_absent(&config.to_string(), socket));
     }
 
     #[test]
