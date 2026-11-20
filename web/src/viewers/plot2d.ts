@@ -308,9 +308,9 @@ export class Plot2DViewer {
       }
       if (count > 0) ctx.fill();
     } else {
-      // Strokes
+      // Strokes (min 1.0 px width matching GPUI plotview.rs)
       ctx.strokeStyle = baseColor;
-      ctx.lineWidth = Math.max(0.75, ch.r * 2 * scale);
+      ctx.lineWidth = Math.max(1.0, ch.r * 2 * scale);
       ctx.beginPath();
       let count = 0;
       for (let pi = 0; pi < ch.pieces.length; pi++) {
