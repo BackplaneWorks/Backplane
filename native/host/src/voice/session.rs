@@ -62,7 +62,7 @@ fn live_args(home: &Path, engine: &str, model: &str, upload: bool, device: &str,
 fn frame(thread: &str, ev: &str, mut body: Value) -> Value { body["t"] = json!("voice"); body["thread"] = json!(thread); body["ev"] = json!(ev); body }
 
 /// `cut`: a send while dictating, to the session's reader (Reader::cut).
-struct Live { always: bool, id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, ctl: mpsc::UnboundedSender<Ctl> }
+struct Live { browser_owner: Option<String>, chunk_window: Instant, chunks: u32, always: bool, id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, ctl: mpsc::UnboundedSender<Ctl> }
 /// To a live session's reader: a client's send while dictating (cut, seq), Keep talking in an end-of-turn countdown, Jev's answer about a pause.
 enum Ctl { Cut(u64, u64), Hold, Jev(u64, Option<f64>), /** always on: the open thread changed (between messages only) */ Target(String) }
 /// Always-on (always.rs): who turned it on and how to start it again; why it is paused ("" listening); muted by the person; the window's focus.
@@ -115,17 +115,20 @@ impl Voice {
         tokio::spawn(async move { while let Some(b) = rx.recv().await { if stdin.write_all(&b).await.is_err() { break } } });
         let key = if upload { hex::encode(pairing::urandom(16)) } else { String::new() };
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
-        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { always, id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, ctl: ctl_tx.clone() }); id };
+        let browser_owner = crate::net::start::registry(&hub.cfg.home).and_then(|r| r.browser_owner(client));
+        let upload_info = if browser_owner.is_some() { json!({"session":key}) }
+            else if upload { json!({"path":format!("/voice/in?s={key}")}) } else { json!({"path":""}) };
+        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { browser_owner, chunk_window: Instant::now(), chunks: 0, always, id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, ctl: ctl_tx.clone() }); id };
         self.with(&thread, |x| { x.begin(); x.engine = engine.to_string(); x.always = always; });
         self.tell(hub, client, &thread);
-        if upload { hub.push(client, frame(&thread, "audio", json!({"path": format!("/voice/in?s={key}")}))); }
+        if upload { hub.push(client, frame(&thread, "audio", upload_info.clone())); }
         let reader = Reader::new(d, engine == "local", draft, caret).with_cmds(super::cmds::Cmds::of(&pr)).with_eot(super::eot::Cfg::of(&pr))
             .with_stt(if engine == "local" { vdict::model_id(&model) } else { "gpt-live-transcribe" });
         let ac = super::always::Cfg::of(&pr);
         let reader = if always { let r = reader.with_gate(ac.gate); if ac.speaker { r.with_speaker(super::speaker::Print::load(&home)) } else { r } } else { reader };
         let _ = speaker_on;
         { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout, ctl_rx, ctl_tx).await }); }
-        json!({"path": if upload { format!("/voice/in?s={key}") } else { String::new() }})
+        upload_info
     }
     async fn read(self: Arc<Self>, hub: Arc<Hub>, client: u64, id: u64, mut thread: String, engine: String, mut r: Reader, mut child: tokio::process::Child, stdout: tokio::process::ChildStdout, mut ctl: mpsc::UnboundedReceiver<Ctl>, me: mpsc::UnboundedSender<Ctl>) {
         let mut lines = BufReader::new(stdout).lines(); let mut tick = tokio::time::interval(Duration::from_secs(1));
@@ -252,7 +255,23 @@ impl Voice {
         let v = self.clone(); tokio::spawn(async move { tokio::time::sleep(UPLOAD_GRACE).await; v.close_audio(id) });
     }
     /// A piece of a client's audio into the helper's stdin; None when no session has this key.
-    fn sink(&self, key: &str) -> Option<(u64, Option<mpsc::Sender<Vec<u8>>>)> { let g = self.st.lock().unwrap(); g.live.as_ref().filter(|l| !l.key.is_empty() && l.key == key).map(|l| (l.id, l.audio.clone())) }
+    pub(crate) fn browser_chunk(&self, owner: &str, key: &str, body: Vec<u8>, end: bool) -> Result<u64, &'static str> {
+        let mut g = self.st.lock().unwrap();
+        let live = g.live.as_mut().filter(|l| l.browser_owner.as_deref() == Some(owner)
+            && !key.is_empty() && l.key == key).ok_or("403 Forbidden")?;
+        if live.chunk_window.elapsed().as_secs() >= 1 {
+            live.chunk_window = Instant::now();
+            live.chunks = 0;
+        }
+        if live.chunks >= 64 { return Err("429 Too Many Requests") }
+        live.chunks += 1;
+        let tx = live.audio.as_ref().ok_or("409 Conflict")?;
+        if !body.is_empty() { tx.try_send(body).map_err(|_| "429 Too Many Requests")?; }
+        if end { live.audio = None; live.stopped.get_or_insert_with(Instant::now); }
+        Ok(live.client)
+    }
+
+    fn sink(&self, key: &str) -> Option<(u64, Option<mpsc::Sender<Vec<u8>>>)> { let g = self.st.lock().unwrap(); g.live.as_ref().filter(|l| l.browser_owner.is_none() && !l.key.is_empty() && l.key == key).map(|l| (l.id, l.audio.clone())) }
 
     /// What the hub finds out for Settings, published as info for every client.
     async fn refresh(&self, hub: &Arc<Hub>) -> Value {
@@ -501,7 +520,7 @@ fn system_state(ignore: &[String]) -> (Vec<String>, bool) {
 }
 
 /// Registers `bots.voice` and `/voice/in`, and starts the resident recognizer's keeper (before `settings::start`, which then leaves `bots.voice` alone).
-pub fn start(hub: &Arc<Hub>) -> Arc<Voice> { resident::start(hub); let v = Arc::new(Voice::default()); hub.register_rpc(Arc::new(VoiceRpc(v.clone()))); hub.register_http(Arc::new(VoiceIn(v.clone()))); v }
+pub fn start(hub: &Arc<Hub>) -> Arc<Voice> { resident::start(hub); let v = Arc::new(Voice::default()); let _ = hub.voice_service.set(v.clone()); hub.register_rpc(Arc::new(VoiceRpc(v.clone()))); hub.register_http(Arc::new(VoiceIn(v.clone()))); v }
 
 #[cfg(test)]
 mod tests;

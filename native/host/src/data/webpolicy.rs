@@ -54,6 +54,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "viewer.follow"
         | "viewer.watch"
         | "voice.act"
+        | "POST /voice/in"
         | "voice.start"
         | "voice.stop"
         | "work.act" => Activity,
