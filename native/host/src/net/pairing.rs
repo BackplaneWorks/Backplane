@@ -79,6 +79,15 @@ impl Registry {
     /// Errors (and starts nothing) on a registry that is not valid or belongs to another hub token: existing
     /// pairings are preserved, never overwritten.
     pub fn open(home: &Path, root: &str) -> Result<Registry, String> {
+        #[cfg(test)]
+        if let Some(dir) = std::env::var_os("BP_WEB_FIXTURE").map(std::path::PathBuf::from) {
+            if home == dir.join("hub") {
+                let clock = dir.join("registry-clock");
+                return Self::with(home, root, Box::new(move || {
+                    std::fs::read_to_string(&clock).expect("fixture clock").parse().expect("fixture timestamp")
+                }), Box::new(urandom));
+            }
+        }
         Self::with(home, root, Box::new(|| std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)), Box::new(urandom))
     }
     /// A registry that holds nothing and persists nothing: what the routes get when the real file cannot be read. The file is not touched.

@@ -10,13 +10,19 @@ async function deviceButton(rpc, name, action) {
   return { row, button: row.buttons.find(button => button.action === action) };
 }
 
-export async function browserTasks({ context, origin, rpc, thread, canary, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs, checkBoundary, registeredRoutes }) {
+export async function browserTasks({ context, origin, rpc, thread, canary, advanceDays, moveFixtureGerbers, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs, checkBoundary, registeredRoutes }) {
   let leaked = false;
-  const bodies = [];
   const inspect = bytes => { if (Buffer.from(bytes).includes(canary)) leaked = true; };
-  context.on('response', response => bodies.push(response.body().then(inspect, () => {})));
   const urls = new Set();
   context.on('request', req => urls.add(req.url()));
+  if (process.env.BP_WEB_VIEWERS === '1') await context.addInitScript(() => {
+    window.fixtureDraws = 0;
+    const draw = WebGL2RenderingContext.prototype.drawArrays;
+    WebGL2RenderingContext.prototype.drawArrays = function(mode, first, count) {
+      if (mode === this.TRIANGLES && count >= 3) window.fixtureDraws++;
+      return draw.call(this, mode, first, count);
+    };
+  });
   const page = await context.newPage();
   page.on('websocket', ws => {
     urls.add(ws.url());
@@ -93,13 +99,95 @@ export async function browserTasks({ context, origin, rpc, thread, canary, asset
     await screenshot(page, 'paired-chat-' + width);
   }
   await page.setViewportSize({width:1440, height:900});
+  if (process.env.BP_WEB_VIEWERS === '1') {
+    const { execFileSync } = await import('node:child_process');
+    for (const view of ['board', 'schematic', '3d', 'mech', 'gerbers']) {
+      await page.evaluate(() => {window.fixtureDraws = 0;});
+      const start = performance.now();
+      await testId('rail-' + view).click({timeout:5000});
+      const canvas = page.locator('canvas:visible').first();
+      await canvas.waitFor({timeout:8000});
+      if (view === '3d' || view === 'mech') await page.waitForFunction(() => window.fixtureDraws > 0, null, {timeout:20000});
+      let colors = 0;
+      do {
+        const png = await canvas.screenshot({timeout:4000});
+        colors = Number(execFileSync('convert', ['png:-','-resize','240x160','-format','%k','info:'], {input:png}));
+        if (colors > 8) break;
+        await new Promise(resolve => setTimeout(resolve,100));
+      } while (performance.now() - start < 15000);
+      assert.ok(colors > 8, view + ' canvas remained blank');
+      console.log(JSON.stringify({view, firstVisibleMs:Math.round(performance.now()-start), colors}));
+      if (view === '3d') {
+        await page.waitForTimeout(2000);
+        const draws = await page.evaluate(() => window.fixtureDraws);
+        await page.waitForTimeout(1000);
+        assert.equal(await page.evaluate(() => window.fixtureDraws), draws, 'idle viewer drew again');
+      }
+      for (const width of [1440,820,390]) {
+        await page.setViewportSize({width,height:width===390?844:900});
+        await screenshot(page, view + '-' + width);
+      }
+      await page.setViewportSize({width:1440,height:900});
+      await testId('viewer-close-btn').click();
+    }
+  }
   const revocation = await deviceButton(rpc, name, 'device-revoke');
   const closed = socket.waitForEvent('close', { timeout: 1000 });
   await Promise.all([closed, rpc('devices.page.act', revocation.button)]);
   await testId('pair-card').waitFor();
   await checkProtectedAssets(page, origin, assets, false);
   await screenshot(page, 'revoked');
-  await Promise.all(bodies);
+  for (const absolute of [false, true]) {
+    const label = absolute ? 'Absolute expiry' : 'Idle expiry';
+    await testId('pair-name').fill(label);
+    await testId('pair-request-btn').click();
+    await testId('pair-code').waitFor();
+    const {button} = await deviceButton(rpc, label, 'device-web-approve');
+    await rpc('devices.page.act', button);
+    await testId('sidebar-list').waitFor();
+    const opened = page.waitForEvent('websocket');
+    await page.evaluate(() => new Promise((resolve, reject) => {
+      const socket = new WebSocket('/ws?data=1&enc=json');
+      window.fixtureBinaryFrames = 0;
+      let reply;
+      window.fixtureCall = (m, p) => new Promise(r => {reply=r; socket.send(JSON.stringify({id:1,m,p}));});
+      socket.onerror = () => reject(Error('expiry fixture connection failed'));
+      socket.onmessage = e => {
+        if (typeof e.data !== "string") { window.fixtureBinaryFrames++; return; }
+        const v = JSON.parse(e.data);
+        if (v.t === 'hello') resolve();
+        if (v.t === 'reply') reply(v);
+      };
+    }));
+    if (!absolute) {
+      const call = (method, params) => page.evaluate(([m,p]) => window.fixtureCall(m,p), [method,params]);
+      assert.equal((await call('viewer.files', {thread})).result.hasGerbers, true);
+      await moveFixtureGerbers();
+      assert.equal((await call('viewer.files', {thread})).result.hasGerbers, false);
+      assert.equal((await call('viewer.rail', {thread})).result.has.gerbers, false);
+      const watch = await call('viewer.watch', {thread, kind:'gerbers'});
+      assert.equal(watch.ok, false);
+      assert.match(JSON.stringify(watch.error), /no Gerbers in this project/i);
+      // Keep the fresh socket open across a response and a delivery window.
+      await call('viewer.files', {thread});
+      await new Promise(resolve => setTimeout(resolve, 500));
+      assert.equal(await page.evaluate(() => window.fixtureBinaryFrames), 0);
+    }
+    if (absolute) {
+      for (const days of [25,25,25,14]) {
+        await advanceDays(days);
+        assert.ok((await page.evaluate(() => window.fixtureCall('viewer.follow', {thread:'t1',action:'pause'}))).ok);
+      }
+    }
+    const expired = (await opened).waitForEvent('close', {timeout:5000});
+    await advanceDays(absolute ? 1 : 30);
+    // Trigger a validity check through a normal read on the still-open test socket.
+    await page.evaluate(() => { void window.fixtureCall('thread.entries', {thread:'t1'}); });
+    await expired;
+    await page.reload();
+    await testId('pair-card').waitFor({timeout:5000});
+    await checkProtectedAssets(page, origin, assets, false);
+  }
   assert.equal(leaked, false, 'raw fixture value visible in browser traffic');
   checkLogs(session);
   for (const address of urls) {
