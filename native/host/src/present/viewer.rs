@@ -1350,6 +1350,11 @@ struct Shows { next: u64, recs: std::collections::BTreeMap<u64, ShowRec>, newest
 /// How long a pushed show can still be applied.
 pub const TOKEN_LIFE: std::time::Duration = std::time::Duration::from_secs(20);
 const TOKEN_MAX: usize = 128;
+/// Tests: the show table is the process's, and a test that floods it (the bound) evicts another's tokens mid-test. The flooding test holds this
+/// alone; every test that issues shows holds it shared (they still run beside each other).
+#[cfg(test)] pub(crate) static SHOWS_TEST_LOCK: std::sync::RwLock<()> = std::sync::RwLock::new(());
+#[cfg(test)] pub(crate) fn shows_shared() -> std::sync::RwLockReadGuard<'static, ()> { SHOWS_TEST_LOCK.read().unwrap_or_else(|e| e.into_inner()) }
+#[cfg(test)] pub(crate) fn shows_alone() -> std::sync::RwLockWriteGuard<'static, ()> { SHOWS_TEST_LOCK.write().unwrap_or_else(|e| e.into_inner()) }
 fn shows_map() -> &'static std::sync::Mutex<Shows> {
     static MAP: std::sync::OnceLock<std::sync::Mutex<Shows>> = std::sync::OnceLock::new();
     MAP.get_or_init(|| std::sync::Mutex::new(Shows { next: 1, recs: Default::default(), newest: Default::default() }))

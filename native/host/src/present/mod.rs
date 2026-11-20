@@ -417,6 +417,7 @@ mod tests {
 
     #[test]
     fn rail_v_2a_layout_actions_watches_sessions_locks_versions_and_malformed_payloads() {
+        let _shows = viewer::shows_shared(); // the process's show table (viewer::SHOWS_TEST_LOCK)
         let d = crate::plat::tmp::dir("rail-v-2a");
         let root = d.to_string_lossy().into_owned();
         std::fs::write(d.join("unit.kicad_pcb"), "(kicad_pcb)").unwrap();
@@ -804,6 +805,7 @@ mod tests {
     /// An agent's show is applied only through its token (kind and full path unchanged, this thread), for every kind; the read-back settles exactly.
     #[test]
     fn rail_v_2a_show_tokens_apply_exactly_and_read_back_exactly() {
+        let _shows = viewer::shows_shared(); // the process's show table (viewer::SHOWS_TEST_LOCK)
         let d = crate::plat::tmp::dir("rail-v-2a-show");
         let root = d.to_string_lossy().into_owned();
         for f in ["unit.kicad_pcb", "unit.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
@@ -893,6 +895,7 @@ mod tests {
     /// normalized kinds ("" with a board path, "3d" with a model) and another board or sheet included.
     #[test]
     fn rail_show_raw_push_to_token_handler_to_the_selected_page_and_source() {
+        let _shows = viewer::shows_shared(); // the process's show table (viewer::SHOWS_TEST_LOCK)
         let d = crate::plat::tmp::dir("rail-show-push");
         let root = d.to_string_lossy().into_owned();
         for f in ["unit.kicad_pcb", "unit.kicad_sch", "power.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
@@ -951,6 +954,7 @@ mod tests {
     /// apply one broadcast once; the table stays bounded.
     #[test]
     fn rail_show_token_lifetime_once_per_session_superseded_expiring_and_bounded() {
+        let _shows = viewer::shows_alone(); // the process's show table (viewer::SHOWS_TEST_LOCK)
         let d = crate::plat::tmp::dir("rail-show-life");
         let root = d.to_string_lossy().into_owned();
         std::fs::write(d.join("unit.kicad_pcb"), "()").unwrap();
@@ -988,6 +992,7 @@ mod tests {
     /// Review round on the agent show: a prior board pick, a linked thread, a stored layout's named board and Split, an already-open preview.
     #[test]
     fn rail_show_applies_the_named_source_over_a_pick_a_stored_layout_and_a_preview() {
+        let _shows = viewer::shows_shared(); // the process's show table (viewer::SHOWS_TEST_LOCK)
         let d = crate::plat::tmp::dir("rail-show-src");
         let root = d.to_string_lossy().into_owned();
         for f in ["unit.kicad_pcb", "unit.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }
@@ -1066,6 +1071,7 @@ mod tests {
     /// Review round 3: a child sheet keeps the person's pick; a stored Split restores a maximized pair and is read back on the visible, sibling pair.
     #[test]
     fn rail_show_child_sheet_keeps_the_pick_and_stored_split_reads_back_the_visible_sibling_pair() {
+        let _shows = viewer::shows_shared(); // the process's show table (viewer::SHOWS_TEST_LOCK)
         let d = crate::plat::tmp::dir("rail-show-r3");
         let root = d.to_string_lossy().into_owned();
         for f in ["unit.kicad_pcb", "unit.kicad_sch", "power.kicad_sch"] { std::fs::write(d.join(f), "()").unwrap(); }

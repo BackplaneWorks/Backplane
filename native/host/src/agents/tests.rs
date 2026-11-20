@@ -1999,6 +1999,7 @@ fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, re
 }
 
 #[tokio::test(flavor = "multi_thread")] async fn viewer_show_answers_with_what_the_viewer_then_shows() {
+    let _shows = crate::present::viewer::shows_shared(); // the process's show table (present::viewer::SHOWS_TEST_LOCK)
     let sd = dir("vs-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("vs", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
     let cwd = ag.world().await.cwd(T1); std::fs::create_dir_all(std::path::Path::new(&cwd).join("mech")).unwrap(); std::fs::write(std::path::Path::new(&cwd).join("mech/a.step"), "ISO-10303-21;").unwrap();

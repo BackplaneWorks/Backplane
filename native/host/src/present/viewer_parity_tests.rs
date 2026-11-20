@@ -389,6 +389,7 @@ fn legacy_single_page_flows_match_origin_main_snapshot() {
 /// the pictures, commands and drafts must be main's (the snapshot's `agent_show_each_kind`), except the differences listed here.
 #[test]
 fn agent_show_from_idle_matches_main_view_for_each_kind() {
+    let _shows = viewer::shows_shared(); // the process's show table (viewer::SHOWS_TEST_LOCK)
     let expected = load_snapshot()["flows"].clone();
     let want = expected["agent_show_each_kind"].as_array().expect("agent_show_each_kind flow");
     let (_td, root, _rp, st) = fixture();
