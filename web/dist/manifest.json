@@ -1,10 +1,6 @@
 {
   "version": 1,
-<<<<<<< HEAD
-  "totalAssetGzipBytes": 60611,
-=======
-  "totalAssetGzipBytes": 59099,
->>>>>>> fe1023e8b3 (web dist rebuilt on main with the restart strip)
+  "totalAssetGzipBytes": 61323,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -70,13 +66,8 @@
   ],
   "i18nSubsetSha256": "996974bcff0c9f1499d7069773e20ce83e261621e1cc9119a14b505df46c7e35",
   "inputs": {
-<<<<<<< HEAD
-    "web/src/app.ts": "2ad2a4bdf89b1a115f1cfadab2b0d3a6c3ced2e5cd924f4618e8f5836a06875f",
+    "web/src/app.ts": "1d0a6371181aab1a51aec37674b9a98df85fb5f2c4f96a432e6f75dd40d7c3d3",
     "web/src/chat.ts": "6f666b2bd10f3134622dac927dba5a30b84211bfe8179be9980cb07ef77db5aa",
-=======
-    "web/src/app.ts": "33595f3035dd73245519869aea43c1c4760aa6cc31e9229ae60e0f13e84a8540",
-    "web/src/chat.ts": "ab668e1fa4a7da8b3cd5a06a49b425b684240c0bf2254acba350142bd26441ae",
->>>>>>> fe1023e8b3 (web dist rebuilt on main with the restart strip)
     "web/src/composer.ts": "b78e16d39ecec108b8259f5d619a751878f5dc65cc23676c7f9aa99d2a8e5ae5",
     "web/src/i18n.ts": "40bb973e3acda75aea4bc5d16746757e59487b95225f5ed36cdfe13c813cf66d",
     "web/src/index.html": "a661afef2f425bd880bccd134f90969b4d037cf455da827c921a99764ffd83a4",
@@ -99,26 +90,16 @@
     "web/src/viewers/solid3d.ts": "1db566e722a0621bc0df85d7339fae735d5bc06454f7291b88703906ce5af0dc",
     "web/src/viewers/viewer-pane.ts": "c11cbc313a2daf6b5eacedd7c38258fe3cddc4c4780947d9e8ecc42af56069ba",
     "web/src/voice.ts": "f401f1d5bd1685c7d7270fc02a8ff16f54bde7ae98aee21b4e802f0357063345",
-<<<<<<< HEAD
-    "web/src/ws.ts": "a854ef329bb4fdb60b590d0549cb876273f4587cd8a0efbc4c3fc6ea2b8b21f8",
-=======
-    "web/src/ws.ts": "786986e5146ee764f480d8b476135a3d2dad0c45473460762b4978140584fcbf",
->>>>>>> fe1023e8b3 (web dist rebuilt on main with the restart strip)
+    "web/src/ws.ts": "9ad03421260b8ff06d5ae86d1a1adcc2de94130006f6ece71b33ba98ab521e44",
     "web/build.ts": "c32254f4abe4cea4e8e1f65aeced47aae007c0efd292236b2cf65d296651bcca",
     "assets/web/favicon.svg": "5b0f22a3329f59809216aabe58d8dbbedbd46d29e4a2373a727529daa2441a2c",
     "assets/web/favicon-light.svg": "9aa4fb973f8a719c602e351c84d3344bac377db049f59eaa52d617e84eada5b6"
   },
   "outputs": {
     "assets/app.js": {
-<<<<<<< HEAD
-      "bytes": 147838,
-      "gzipBytes": 43742,
-      "sha256": "ca46e2e921443862bc75b8f452c65073c1324c4345189121252b9750c57784c1"
-=======
-      "bytes": 143232,
-      "gzipBytes": 42006,
-      "sha256": "0c7b514a4404ca0cfef4fe4eb5386e269f9343f7d95207010ff23976ebb6d80f"
->>>>>>> fe1023e8b3 (web dist rebuilt on main with the restart strip)
+      "bytes": 149304,
+      "gzipBytes": 44230,
+      "sha256": "36296b5107ae29dbe4dba648a2d4c601220708db685361a7a7cefdfa332a38e8"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
