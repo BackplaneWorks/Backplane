@@ -496,9 +496,16 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const light = isLight();
     if (page === "3d" || page === "mech") {
       solid3d = new Solid3DViewer(stage, {
-        onStatus: (msg) => {
-          if (msg) setOverlay("loading", msg);
-          else setOverlay("none");
+        onStatus: (msg, streaming) => {
+          if (streaming) {
+            setOverlay("none");
+            setBanner(msg, false);
+          } else if (msg) {
+            setOverlay("loading", msg);
+          } else {
+            setOverlay("none");
+            setBanner("", false);
+          }
         },
         onUserMove: () => void pauseFollowOnUserMove(),
       });
