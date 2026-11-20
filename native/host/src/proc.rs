@@ -48,9 +48,23 @@ fn in_agents_dir(program: &str, dir: &str) -> bool {
 }
 fn refusal(kind: Kind, program: &str) -> Option<String> {
     if let (Some(why), Kind::Agent | Kind::PersonTurn) = (PAUSED.get(), kind) { return Some(why.clone()) }
+    if cfg!(test) { if let Some(why) = test_refusal(program, &std::env::temp_dir()) { return Some(why) } }
     if !copy::on() { return None }
     if kind == Kind::PersonTurn && copy::person_turn_allowed() { return None }
     refusal_with(true, kind, program, std::env::var("BACKPLANE_AGENTS").ok().as_deref())
+}
+/// A test never runs the machine's own Tailscale CLI: its tailnet is the person's (the desktop's gate, a Boat) or a VM's (the Windows gate),
+/// and a real `tailscale` reached from a test acts on it. A program named tailscale (`tailscale`, `tailscale.exe`, any folder, any case) is
+/// refused under test unless it is a stand-in under the temporary folder `tmp`; code that asks Tailscale then sees it unavailable, as on a
+/// machine without it. (bp-winbuild's Tailscale was logged out in the middle of a Windows gate run on 2026-11-20; no hub path to a local
+/// logout was found, and this closes the door to all of them.)
+fn test_refusal(program: &str, tmp: &std::path::Path) -> Option<String> {
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program).to_ascii_lowercase();
+    if base != "tailscale" && base != "tailscale.exe" { return None }
+    let norm = |x: &str| { let x = x.replace('\\', "/"); if cfg!(windows) { x.to_ascii_lowercase() } else { x } };
+    let t = norm(&tmp.to_string_lossy()); let t = t.trim_end_matches('/');
+    if !t.is_empty() && norm(program).starts_with(&format!("{t}/")) { return None }
+    Some(format!("{program}: a test never runs the machine's real tailscale (proc.rs test_refusal); give it a stand-in under {}", tmp.display()))
 }
 /// The hub's own variables from its guard and updater: which builds folder it was started from, its commit, its guard, safe mode, injected faults, the update feed.
 /// An agent, a shell an agent or the person runs, or a terminal never gets them: a test hub started from one would take the person's builds folder for its own,
@@ -237,6 +251,19 @@ pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command
 mod tests {
     use super::*;
 
+    #[test] fn a_test_never_runs_the_real_tailscale() {
+        let tmp = std::path::Path::new(if cfg!(windows) { "C:\\Users\\x\\AppData\\Local\\Temp" } else { "/tmp" });
+        for p in ["tailscale", "tailscale.exe", "TailScale.EXE", "/usr/bin/tailscale", "C:\\Program Files\\Tailscale\\tailscale.exe", "C:/Program Files/Tailscale/tailscale.exe", "/tmp-evil/tailscale"] {
+            assert!(test_refusal(p, tmp).is_some(), "{p} would run the machine's tailscale");
+        }
+        let standin = tmp.join("bp-ts-standin").join("tailscale"); let standin = standin.to_str().unwrap();
+        assert!(test_refusal(standin, tmp).is_none(), "a stand-in under the temporary folder runs");
+        for p in ["curl", "tailscaled-helper", "git", "/usr/bin/tail"] { assert!(test_refusal(p, tmp).is_none(), "{p} is not tailscale") }
+        // through the gate the hub uses: the real one is never started, and a caller sees an error (Tailscale unavailable)
+        assert!(std_cmd(Kind::Net, "tailscale").args(["status", "--json"]).output().is_err(), "std_cmd ran the real tailscale");
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        assert!(rt.block_on(tokio_cmd(Kind::Net, "tailscale").args(["status", "--json"]).output()).is_err(), "tokio_cmd ran the real tailscale");
+    }
     #[test] fn on_macos_every_child_but_a_terminal_gets_kicads_documents_folder_unless_the_hub_was_given_one() {
         let d = std::path::Path::new("/h/kicad/documents");
         for k in [Kind::Local, Kind::Agent, Kind::Shell, Kind::Net, Kind::Browser, Kind::PersonTurn] {

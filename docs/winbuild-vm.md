@@ -22,7 +22,9 @@ the fork's `scripts/backplane-windows-local.ps1 -Root D:\bpk -Jobs 32 -Ccache` (
 `D:\bpk\vcpkg-cache`, ccache in `D:\bpk\ccache`, both on the persistent data disk), copies the package to
 `~/.cache/bp-winbuild/out/<commit>/` and deallocates the VM (`scripts/winbuild-down.sh`). Anything else that
 uses the VM holds the `winbuild-vm` lock for as long as it does. ssh: `bp-winbuild` (Tailscale), or
-`bp-winbuild-vnet` (through bp-win) if Tailscale is down.
+`bp-winbuild-vnet` (through bp-win) if Tailscale is down. land.sh's Windows gate reaches it at its Azure public address
+(`bp-winbuild-gate-ip`, made with `scripts/winvm/winvm-gate-net.sh`); its NSG `bp-winbuild-gate-nsg` lets nothing in from the internet
+but the gate's per-run rule `land-gate-ssh` (TCP 22 from the desktop's address alone, deleted at the end).
 
 bp-win no longer builds KiCad; it stays the UI test box. Lanes start it with `az vm start -g BP-WIN-RG -n bp-win`
 when they need it and hold `bp-win-ui` while they use it.
