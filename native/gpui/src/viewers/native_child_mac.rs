@@ -113,7 +113,6 @@ pub fn stack(top: u64, frame: u64) -> Vec<crate::viewers::kicad_pane::Who> {
 }
 #[repr(C)] struct CgPoint { x: f64, y: f64 }
 #[link(name = "CoreGraphics", kind = "framework")] unsafe extern "C" { fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64; fn CGEventCreate(source: *const c_void) -> *mut c_void; fn CGEventGetLocation(event: *mut c_void) -> CgPoint; } // i18n-ok: a framework name
-#[link(name = "CoreFoundation", kind = "framework")] unsafe extern "C" { fn CFRelease(cf: *const c_void); } // i18n-ok: a framework name
 /// The pointer now, in global display points from the top left of the primary screen (the coordinates of `screen_rect`)
 pub fn pointer_global() -> Option<(f64, f64)> {
     unsafe { let e = CGEventCreate(std::ptr::null()); if e.is_null() { return None } let p = CGEventGetLocation(e); CFRelease(e); Some((p.x, p.y)) }
