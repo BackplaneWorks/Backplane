@@ -72,17 +72,19 @@ for _ in range(40):
         if w["shown"] and w["override_redirect"] and w["pid"] == pid and w["w"] >= 40 and w["h"] >= 40 and w["xid"] not in before: menu = w; break
     if menu: break
 subprocess.run(["python3", xin, "key", "Escape"]); time.sleep(0.3)
-print("none" if not menu else f'{menu["root_x"] - x} {menu["root_y"] - y}')
+print("none" if not menu else f'{menu["root_x"] - x} {menu["root_y"] - y} {menu["h"]}')
 PY
 }
-near() { python3 -c 'import sys; a=sys.argv[1].split(); sys.exit(0 if len(a) == 2 and abs(int(a[0])) <= 48 and abs(int(a[1])) <= 48 else 1)' "$1"; }
+# at the pointer: its left edge at the pointer's x, and its top (opened downwards) or bottom (GTK flips it upwards when there is no room
+# below) at the pointer's y; a stale place is off by the distance the frame moved, or by the pane's own offset
+near() { python3 -c 'import sys; a=sys.argv[1].split(); sys.exit(0 if len(a) == 3 and abs(int(a[0])) <= 48 and (abs(int(a[1])) <= 48 or abs(int(a[1]) + int(a[2])) <= 48) else 1)' "$1"; }
 M1=$(menu_at switched 2>/dev/null || echo none); echo "INFO G2 menu offset from the pointer: $M1"
-check "G2 after the switches a context menu opens at the pointer" "$(near "$M1" && echo 1 || echo 0)" "offset $M1 (within 48 px)"
+check "G2 after the switches a context menu opens at the pointer" "$(near "$M1" && echo 1 || echo 0)" "offset x y, height: $M1 (top or bottom within 48 px)"
 mark move || true
 wm_moveresize 160 90 >"$OUT/wm_move.json" 2>&1 || true
 mark switched2 || true
 M2=$(menu_at switched2 2>/dev/null || echo none); echo "INFO G3 menu offset from the pointer after the window moved: $M2"
-check "G3 Backplane's window moved and two more switches: the context menu opens at the pointer" "$(near "$M2" && echo 1 || echo 0)" "offset $M2 (within 48 px)"
+check "G3 Backplane's window moved and two more switches: the context menu opens at the pointer" "$(near "$M2" && echo 1 || echo 0)" "offset x y, height: $M2 (top or bottom within 48 px)"
 grep -o '"kicad_place_notify":[^}]*' "$OUT/client.log" | head -20 > "$OUT/notify.txt" || true
 wait "$CP" 2>/dev/null || true
 finish_suite "embed_switch_geometry_e2e ($EMBED_MODE)"
