@@ -34,7 +34,7 @@ pub fn stamp_in(path: &str, root: Option<&std::path::Path>) -> Stamp {
     if let Some(r) = path.strip_prefix(super::gerber::CMP) {
         let (a, b) = r.split_once('\n').unwrap_or((r, ""));
         let b_rev = match root {
-            Some(rt) => std::fs::canonicalize(rt).ok().and_then(|cr| super::gerber::canon_in(std::path::Path::new(b), &cr)).map(|cb| stamp(&cb.to_string_lossy()).rev).unwrap_or_default(),
+            Some(rt) => crate::plat::fs::canonicalize(rt).ok().and_then(|cr| super::gerber::canon_in(std::path::Path::new(b), &cr)).map(|cb| stamp(&cb.to_string_lossy()).rev).unwrap_or_default(),
             None => stamp(b).rev,
         };
         return Stamp { rev: format!("{}{}", super::gerber::set_stamp_in(std::path::Path::new(a), root), b_rev), ok: true }

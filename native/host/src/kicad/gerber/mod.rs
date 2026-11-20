@@ -58,8 +58,8 @@ pub fn plot_in(path: &str, root: Option<&Path>) -> super::plotgen::Read {
         None => (r.items, super::plotgen::GERBER),
         Some(b) => {
             let b_path = match root {
-                Some(r) => std::fs::canonicalize(r).ok().and_then(|cr| canon_in(Path::new(&b), &cr)),
-                None => std::fs::canonicalize(&b).ok(),
+                Some(r) => crate::plat::fs::canonicalize(r).ok().and_then(|cr| canon_in(Path::new(&b), &cr)),
+                None => crate::plat::fs::canonicalize(&b).ok(),
             };
             let Some(b_path) = b_path else { return super::plotgen::Read::Fail("that board is not in this project".into()) };
             let bytes = std::fs::read(&b_path).unwrap_or_default();
