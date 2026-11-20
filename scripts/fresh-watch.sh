@@ -53,6 +53,10 @@ go() {  # go BUILD_DIR WHAT(client|both): relaunch on that build
 }
 trap 'echo; say "stopped following; the app keeps running"; exit 0' INT TERM
 [ -d "$H" ] || { echo "fresh-watch: no fresh home in $H: run fresh.sh start first" >&2; exit 1; }
+# the hub tells every client when no watcher runs (native/host/src/restarting.rs, watcher): this file is how it knows one does
+WPID=$D/watch.pid; printf '%s\n' "$$" > "$WPID"; trap 'rm -f "$WPID"' EXIT
+# the watchdog that brings this watcher back when it dies: its units and timer put right if they are not (hub-watchdog.sh ensure). Only for the person's own fresh home.
+[ "$D" != "$HOME/.backplane-gpui-fresh" ] || [ -n "${FRESH_NO_WATCHDOG:-}" ] || "$HERE/hub-watchdog.sh" ensure 2>&1 | while read -r l; do say "$l"; done
 say "following $DEV/CURRENT (shown: $(shown), hub: $(basename "$(running_dir)"))"
 rm -f "$REQ"; waiting=
 SELF=$(cksum < "$0")
@@ -67,7 +71,7 @@ while :; do
     if [ "$n" != 0 ]; then
       # one desktop notification per build; the window's bar follows the count silently
       [ "$waiting" = "$c" ] || tell "Build $c is ready; waiting for $n running turn(s) to finish (Enter relaunches now)."
-      hk=$(tr -d '"\\' < "$DEV/builds/$c/HAIKU" 2>/dev/null | paste -sd'|' | sed 's/|/ \/ /g')   # the build's haiku, on one line
+      hk=; [ -r "$DEV/builds/$c/HAIKU" ] && hk=$(tr -d '"\\' < "$DEV/builds/$c/HAIKU" | paste -sd'|' | sed 's/|/ \/ /g')   # the build's haiku, on one line (a build may have none)
       bg=$(turns background); case "$bg" in ''|0|'?') bg=;; *) bg=", $bg thread(s) on background work";; esac
       tn=$n; [ "$tn" = '?' ] && tn=0
       waiting=$c; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to end$bg" ",\"action\":\"restart\",\"turns\":$tn,\"haiku\":\"$hk\""

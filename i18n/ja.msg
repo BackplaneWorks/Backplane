@@ -265,6 +265,7 @@ hub.restarting = Backplaneを再起動しています…
 hub.restarting.build = Backplaneを再起動しています…（新しいビルド {build}）
 hub.stopped = Backplaneは停止しました
 hub.back.crash = 予期せず停止したBackplaneが戻りました
+hub.watcher.missing = 自動更新の監視が動いていません：新しいビルドはこのアプリに届きません
 
 # bot tabs and moods
 bots.tab.chat = チャット

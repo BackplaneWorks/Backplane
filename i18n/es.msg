@@ -252,6 +252,7 @@ hub.restarting = Reiniciando Backplane…
 hub.restarting.build = Reiniciando Backplane… (nueva compilación {build})
 hub.stopped = Backplane se detuvo
 hub.back.crash = Backplane volvió tras detenerse de forma inesperada
+hub.watcher.missing = El vigilante de actualizaciones no está en marcha: las compilaciones nuevas no llegarán a esta app
 
 # bot tabs and moods
 bots.tab.chat = Chat

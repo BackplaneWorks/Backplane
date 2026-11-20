@@ -166,7 +166,7 @@ pub fn status(home: &Path) -> Value {
     let lines = std::fs::read_to_string(g.join("incidents.jsonl")).unwrap_or_default();
     let all: Vec<Value> = lines.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
     let (_, h) = health();
-    json!({"guard": st, "incidents": all[all.len().saturating_sub(5)..], "hub": h, "guarded": supervised()})
+    json!({"guard": st, "incidents": all[all.len().saturating_sub(5)..], "hub": h, "guarded": supervised(), "watcher": crate::restarting::watcher(home)})
 }
 /// Why the hub was last restarted, when something went wrong in the last hour: for the uberbot's turn.
 pub fn last_why(home: &Path) -> String {
@@ -192,8 +192,9 @@ pub fn notice(s: &Value) -> Value {
     let text = if safe { format!("Safe mode: agents, routines and bots are paused. {}", last["why"].as_str().unwrap_or("")) }
         else if degraded { format!("Hub is running without {}.", s["hub"]["degraded"].as_array().map_or(String::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))) }
         else if fresh { format!("{}: {}", last["what"].as_str().unwrap_or(""), last["did"].as_str().unwrap_or("")) }
+        else if s["watcher"] == false { crate::restarting::NO_WATCHER.to_string() }
         else { String::new() };
-    json!({"text": text.trim(), "tone": if safe || degraded { "warn" } else { "info" }, "actions": s["guard"]["actions"]})
+    json!({"text": text.trim(), "tone": if safe || degraded || (text == crate::restarting::NO_WATCHER) { "warn" } else { "info" }, "actions": s["guard"]["actions"]})
 }
 
 /// `/hub/status` and `/hub/control`. Control writes the guard a request and waits for its answer; it needs nothing from the views, the presenter or the agents, so it works when they do not.
@@ -325,6 +326,11 @@ mod tests {
         assert_eq!(step("slow", 0, async { tokio::time::sleep(Duration::from_secs(30)).await; 1 }).await, None);
         let d = degraded_list(); assert!(d.iter().any(|(w, y)| w == "boom" && y.contains("panicked")), "{d:?}"); assert!(d.iter().any(|(w, y)| w == "slow" && y.contains("no answer")));
         assert_eq!(step_now("ok2", || 1), Some(1)); assert_eq!(step_now("boom2", || -> i32 { panic!("y") }), None);
+    }
+    #[test] fn a_missing_auto_update_watcher_is_said() {
+        let n = notice(&json!({"hub": {"safe": false, "degraded": []}, "incidents": [], "guard": {}, "watcher": false}));
+        assert_eq!((n["text"].as_str(), n["tone"].as_str()), (Some(crate::restarting::NO_WATCHER), Some("warn")));
+        for w in [json!(true), Value::Null] { assert_eq!(notice(&json!({"hub": {"safe": false, "degraded": []}, "incidents": [], "guard": {}, "watcher": w}))["text"], "", "{w}"); }
     }
     #[test] fn a_notice_says_nothing_when_all_is_well() {
         assert_eq!(notice(&json!({"hub": {"safe": false, "degraded": []}, "incidents": [], "guard": {}}))["text"], "");

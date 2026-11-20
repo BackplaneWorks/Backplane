@@ -252,6 +252,7 @@ hub.restarting = Restarting Backplane…
 hub.restarting.build = Restarting Backplane… (new build {build})
 hub.stopped = Backplane stopped
 hub.back.crash = Backplane is back after it stopped unexpectedly
+hub.watcher.missing = Auto-update watcher not running: new builds will not reach this app
 
 # bot tabs and moods
 bots.tab.chat = Chat

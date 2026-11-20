@@ -66,6 +66,17 @@ pub fn announce() {
 /// What runs on SIGTERM, SIGINT, SIGHUP (and Ctrl+C on Windows): the clients told, then the KiCad sessions ended.
 pub fn on_exit() { announce(); crate::files::kicad::embed::shutdown_all(); }
 
+/// Whether the auto-update watcher (scripts/fresh-watch.sh) runs for this home: None when the home is not a fresh one (`<dir>/.fresh` beside `<dir>/home`), else
+/// whether the pid in `<dir>/watch.pid` is alive and (where /proc says) a fresh-watch.sh. Nov 20: a watcher gone for a day left the person's app on one build, unsaid.
+pub fn watcher(home: &std::path::Path) -> Option<bool> {
+    let d = home.parent()?; if !d.join(".fresh").exists() { return None }
+    let pid: u32 = std::fs::read_to_string(d.join("watch.pid")).ok().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
+    if pid <= 1 || !crate::plat::proc::alive(pid) { return Some(false) }
+    Some(std::fs::read(format!("/proc/{pid}/cmdline")).map_or(true, |c| c.windows(10).any(|w| w == b"fresh-watch")))
+}
+/// The words for a missing watcher (guard::notice).
+pub const NO_WATCHER: &str = "Auto-update watcher not running: new builds will not reach this app";
+
 #[cfg(test)] mod tests {
     use super::*;
     #[test] fn a_new_build_is_named_by_its_commit() {
@@ -77,6 +88,14 @@ pub fn on_exit() { announce(); crate::files::kicad::embed::shutdown_all(); }
         for n in ["", "{", r#"{"reason":"reboot"}"#, r#"{"reason":"build"}"#] { assert_eq!(frame(n, 1)["text"], "Restarting Backplane…", "{n:?}"); }
         assert_eq!(frame(r#"{"reason":"stop"}"#, 1)["text"], "Backplane stopped");
         assert_eq!(frame(r#"{"reason":"build","build":"x\"; rm"}"#, 1)["build"], "xrm", "only an id's characters");
+    }
+    #[test] fn a_fresh_home_says_whether_its_watcher_runs() {
+        let t = crate::plat::tmp::dir("watcher"); let home = t.join("home"); std::fs::create_dir_all(&home).unwrap();
+        assert_eq!(watcher(&home), None, "not a fresh home: nothing to say");
+        std::fs::write(t.join(".fresh"), "").unwrap(); assert_eq!(watcher(&home), Some(false), "no pid file");
+        std::fs::write(t.join("watch.pid"), "999999999\n").unwrap(); assert_eq!(watcher(&home), Some(false), "a pid that is gone");
+        std::fs::write(t.join("watch.pid"), format!("{}\n", std::process::id())).unwrap();
+        assert_eq!(watcher(&home), Some(!std::path::Path::new("/proc/self/cmdline").exists()), "alive, but not a fresh-watch.sh where /proc can tell");
     }
     #[test] fn only_a_crash_is_said_after_the_start() {
         let b: Value = serde_json::from_str(&back("crash", 5)).unwrap();
