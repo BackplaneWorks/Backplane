@@ -924,6 +924,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         let (popped, full) = (KICAD_POPPED.load(std::sync::atomic::Ordering::Relaxed), KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed));
         let screen = KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed);
         let strip = crate::viewers::kicad_pane::strip(cx, light, &e, checks, false, full, screen, |this: &mut Backplane, a, _, cx| this.kicad_strip_act(a, cx));
+        let e_frame = e.read(cx).tab();
         let body = if popped {
             // the editor is in its own window: the pane says so and offers it back
             div().flex_1().min_h_0().flex().flex_col().items_center().justify_center().gap_2().text_color(theme::color(light, "faint")).child(trs("KiCad is open in its own window."))
@@ -938,7 +939,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         } else { div().flex_1().min_h_0().child(e).into_any_element() };
         // the Boards menu (a project with several boards) stays where the viewer's bar has it; a pick moves KiCad to that board (boards::edit_due)
         let boards = crate::viewers::boards::picker(cx, light, viewer, &pv.boards);
-        div().size_full().flex().flex_col().when(!screen, |d| d.child(bar(light).children(boards).child(div().flex_1()).child(a))).children(update).when(!popped, |d| d.child(strip)).child(body).into_any_element()
+        div().size_full().flex().flex_col().when(!screen, |d| d.child(bar(light).child(super::pane_header::embedded_title(&e_frame, &viewer["identity"], light)).children(boards).child(a))).children(update).when(!popped, |d| d.child(strip)).child(body).into_any_element()
     }
     else if early {
         let k = open;
