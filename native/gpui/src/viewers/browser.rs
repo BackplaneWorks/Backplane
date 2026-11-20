@@ -307,7 +307,7 @@ impl Bar {
         let focused = self.bar_focus.is_focused(window); let bounds = self.bounds.clone();
         let tabs: Vec<chrome::TabView> = self.tabs.iter().map(|(id, title, url, on)| chrome::TabView { id: id.clone(), title: title.clone(), url: url.clone(), active: *on }).collect();
         let value = if focused && self.edit { self.text.clone() } else { self.url.clone() };
-        let (strip, chrome) = chrome::render(chrome::In { light, tabs: &tabs, value, focused, taken: self.taken, have: !self.tabs.is_empty(), loading: false, can_back: true, can_forward: true, bar_focus: &self.bar_focus }, cx,
+        let (strip, chrome) = chrome::render(&tabs, chrome::NavIn { light, value, focused, taken: self.taken, have: !self.tabs.is_empty(), loading: false, can_back: true, can_forward: true, bar_focus: &self.bar_focus }, cx,
             |this: &mut BrowserPage, a, w, cx| { this.bar.act(a, w); cx.notify(); }, |this, e, w, cx| { this.bar.key(e, w, cx); cx.notify(); });
         let view = div().id("browser-frame").flex_1().relative().overflow_hidden().track_focus(&self.focus).key_context("BrowserView")
             .child(canvas(move |b, _, _| { *bounds.lock().unwrap() = Some(b); b }, |_, _, _, _| {}).absolute().size_full())

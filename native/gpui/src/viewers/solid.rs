@@ -1100,31 +1100,52 @@ impl SolidPage {
         if self.core.image.is_none() && self.core.retired.is_empty() && before > 0 { eprintln!("GPUI_METRIC {{\"event\":\"solid_put_away\",\"images_dropped\":{before},\"atlas_images\":{}}}", self.atlas_images()); }
     }
 
+    pub fn run_tool(&mut self, tool: SolidTool, cx: &mut Context<Self>) {
+        match tool {
+            SolidTool::View(view) => self.set_view(view),
+            SolidTool::Snap => {
+                /* i18n-ok: a folder name */ let dir = std::env::var_os("BACKPLANE_GPUI_SNAP_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| crate::plat::user_home().map(|h| h.join("Pictures/Backplane")).unwrap_or_default());
+                /* i18n-ok: the note is drawn through note_words */ self.note = match self.snap(&dir) { Ok(p) => format!("Saved {}", p.display()), Err(e) => format!("Snap view failed: {e}") };
+            }
+            SolidTool::ClearProbe => { self.set_probe(""); cx.emit(SolidEvent::Pick(String::new())); }
+        }
+        cx.notify();
+    }
+
+    pub fn probe_tool(&self) -> Option<crate::pane_tool::PaneTool<SolidTool>> {
+        (self.names_probe && self.core.lit.as_ref().is_some_and(|l| l.1 == self.core.probe && l.2.is_some()))
+            .then(|| crate::pane_tool::PaneTool::new("solid-probe-clear", self.core.probe.clone(), SolidTool::ClearProbe))
+    }
+
     fn view_controls(&self, cx: &mut Context<Self>) -> Div {
         let mut bar = div().flex().flex_wrap().gap_1();
-        for (key, view) in [("viewer.fit", "fit"), ("viewer.c.view.iso", "iso"), ("viewer.c.view.top", "top"), ("viewer.c.view.bottom", "bottom"), ("viewer.c.view.front", "front"), ("viewer.c.view.right", "right"), ("viewer.c.view.back", "back"), ("viewer.c.view.left", "left"), ("viewer.c.view.snap", "snap")] {
-            bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().h(crate::scale::tpx(TOOL_H)).flex().items_center().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
-                .hover(|d| d.bg(rgba(0x2a3548ee))).child(t(key))
+        for tool in solid_tools() {
+            bar = bar.child(div().id(SharedString::from(tool.id)).px_2().h(crate::scale::tpx(TOOL_H)).flex().items_center().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
+                .hover(|d| d.bg(rgba(0x2a3548ee))).child(tool.label)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    if view == "snap" {
-                        /* i18n-ok: a folder name */ let dir = std::env::var_os("BACKPLANE_GPUI_SNAP_DIR").map(std::path::PathBuf::from).unwrap_or_else(|| crate::plat::user_home().map(|h| h.join("Pictures/Backplane")).unwrap_or_default());
-                        /* i18n-ok: the note is drawn through note_words */ this.note = match this.snap(&dir) { Ok(p) => format!("Saved {}", p.display()), Err(e) => format!("Snap view failed: {e}") };
-                    } else { this.set_view(view); }
-                    cx.notify();
-                })));
+                .on_click(cx.listener(move |this, _, _, cx| this.run_tool(tool.action, cx))));
         }
         // the probed part, when this model has it: its name in the colour it is lit in, and a press to put it away
-        if self.names_probe && self.core.lit.as_ref().is_some_and(|l| l.1 == self.core.probe && l.2.is_some()) {
+        if let Some(tool) = self.probe_tool() {
             bar = bar.child(div().id("solid-probe").pl_2().pr(px(2.)).h(crate::scale::tpx(TOOL_H)).flex().items_center().gap_1().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0xffe066))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .child(self.core.probe.clone())
-                .child(div().id("solid-probe-clear").p(px(2.)).cursor_pointer().hover(|d| d.bg(rgba(0x2a3548ee))).child(crate::art::icon("x", 12., rgb(0x8a93a3)))
-                    .on_click(cx.listener(|this, _, _, cx| { this.set_probe(""); cx.emit(SolidEvent::Pick(String::new())); cx.notify(); }))));
+                .child(tool.label)
+                .child(div().id(SharedString::from(tool.id)).p(px(2.)).cursor_pointer().hover(|d| d.bg(rgba(0x2a3548ee))).child(crate::art::icon("x", 12., rgb(0x8a93a3)))
+                    .on_click(cx.listener(move |this, _, _, cx| this.run_tool(tool.action, cx)))));
         }
         bar
     }
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SolidTool { View(&'static str), Snap, ClearProbe }
+
+pub fn solid_tools() -> Vec<crate::pane_tool::PaneTool<SolidTool>> {
+    [("viewer.fit", "fit"), ("viewer.c.view.iso", "iso"), ("viewer.c.view.top", "top"), ("viewer.c.view.bottom", "bottom"), ("viewer.c.view.front", "front"), ("viewer.c.view.right", "right"), ("viewer.c.view.back", "back"), ("viewer.c.view.left", "left"), ("viewer.c.view.snap", "snap")].into_iter().map(|(key, view)| {
+        let action = if view == "snap" { SolidTool::Snap } else { SolidTool::View(view) };
+        crate::pane_tool::PaneTool::new(format!("solid-{view}"), t(key), action)
+    }).collect()
+}
+
 impl Render for SolidPage {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.stats.painted = self.painted_count();
@@ -1216,6 +1237,19 @@ impl Render for SolidPage {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn solid_tools_match_the_camera_actions_and_snap() {
+        let tools = super::solid_tools();
+        let views = ["fit","iso","top","bottom","front","right","back","left","snap"];
+        assert_eq!(tools.len(), views.len());
+        for (tool, view) in tools.iter().zip(views) {
+            assert_eq!(tool.id, format!("solid-{view}"));
+            let key = if view == "fit" { "viewer.fit".into() } else { format!("viewer.c.view.{view}") };
+            assert_eq!(tool.label, super::t(&key));
+            assert!(tool.enabled && !tool.active);
+            assert_eq!(tool.action, if view == "snap" { super::SolidTool::Snap } else { super::SolidTool::View(view) });
+        }
+    }
+
     /// The page's note, stage and progress read in Japanese, the hub's reason and the page's own tail each through the catalog; English stays as it was.
     #[test] fn the_page_says_its_note_stage_and_progress_in_the_readers_language() {
         let kept = "Invalid part placement — previous saved revision shown";

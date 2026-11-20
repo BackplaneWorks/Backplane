@@ -151,19 +151,20 @@ fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: 
 }
 
 /// Mech: a chip per part over the part's 3D; the bar stays on the header's line, and empty/loading states sit centred in the pane body below it.
-fn mech_controls(viewer: &Value) -> (impl Iterator<Item = (String, bool, Command)>, Command) {
-    let parts = mech_parts(viewer).into_iter().map(|part| {
-        (part.label, part.on, Command::Action("mech-part".into(), part.value))
-    });
-    (parts, Command::Action("mech-refresh".into(), String::new()))
+pub(crate) fn mech_controls(viewer: &Value) -> Vec<crate::pane_tool::PaneTool<Command>> {
+    use crate::pane_tool::PaneTool;
+    let mut controls: Vec<_> = mech_parts(viewer).into_iter().enumerate().map(|(i, part)| {
+        let mut tool = PaneTool::new(format!("mech-part-{i}"), part.label, Command::Action("mech-part".into(), part.value));
+        tool.active = part.on;
+        tool
+    }).collect();
+    controls.push(PaneTool::new("mech-refresh", trs("Refresh"), Command::Action("mech-refresh".into(), String::new())));
+    controls
 }
 
 fn mech_chrome(cx: &mut Context<Backplane>, light: bool, viewer: &Value, actions: AnyElement) -> AnyElement {
-    let (parts, refresh) = mech_controls(viewer);
     let mut row = div().flex().flex_wrap().items_center().gap_2();
-    for (i, (label, on, pick)) in parts.enumerate() { row = row.child(btn(cx, light, format!("mech-part-{i}"), label, on, pick)); }
-    // (no Renders button: the renders page is not drawn here yet, and an offered button must lead somewhere)
-    row = row.child(btn(cx, light, "mech-refresh".into(), trs("Refresh"), false, refresh));
+    for tool in mech_controls(viewer) { row = row.child(btn(cx, light, tool.id, tool.label, tool.active, tool.action)); }
     // the bar: the parts, the pane's controls at the end of its first line (the parts wrap under them)
     bar_wrap(light).flex_nowrap().items_start().child(div().flex_1().min_w_0().child(row)).child(actions).into_any_element()
 }
@@ -1280,6 +1281,17 @@ mod tests {
         assert!(!solid_ready("2|/a|mech/new.step", "2|/a|mech/old.step"), "a new part waits for its frame"); assert!(solid_ready("", ""));
         // a frame accepted but not decoded yet: the page still holds nothing (or the old key), so it is not ready
         assert!(!solid_ready("2|/a|", "")); assert!(!solid_ready("2|/b|", "2|/a|"));
+    }
+    #[test] fn mech_controls_keep_part_paths_and_the_refresh_action() {
+        let viewer = serde_json::json!({"mech":{"parts":[{"label":"Shell","value":"mech/body.step","on":true}]}});
+        let tools = mech_controls(&viewer);
+        assert_eq!(tools.len(), 2);
+        let expected = [("mech-part-0", "Shell".to_owned(), true, "mech-part", "mech/body.step"),
+            ("mech-refresh", trs("Refresh"), false, "mech-refresh", "")];
+        for (tool, (id, label, active, action, value)) in tools.iter().zip(expected) {
+            assert_eq!((&*tool.id, &tool.label, tool.active, tool.enabled), (id, &label, active, true));
+            assert!(matches!(&tool.action, Command::Action(a, v) if a == action && v == value));
+        }
     }
     #[test] fn mech_parts_parse_from_the_pages_choices() {
         let v = j(r#"{"mech":{"parts":[{"label":"bracket","value":"mech/bracket.step","on":true},{"label":"lid","value":"mech/lid.step","on":false}],"say":"","rel":"mech/bracket.step"}}"#);
