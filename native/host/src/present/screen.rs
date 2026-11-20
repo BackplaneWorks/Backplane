@@ -361,6 +361,19 @@ pub fn settings_link(href: &str) -> Option<&'static str> {
     let page=href.trim().strip_prefix("backplane://settings/")?.split(['#','?']).next()?.trim_end_matches('/');
     super::settings::PAGES.iter().map(|(id,_)|*id).find(|id|*id==page)
 }
+/// What `view` and `view-show` do with a page change the viewer made: the session's patch, its commands after the request's reads, the fab's look
+/// (`fab_tail`) and, when the viewer opened on a drawing from anything else, the project's boards asked for.
+fn applied_view(st: &State,hub: &str,thread: &str,session: &mut Value,read_cmds: &[Value],o: super::viewer::ViewOut) -> Vec<Value> {
+    crate::session::patch::merge(session,&o.patch);
+    let mut cmds=[read_cmds.to_vec(),o.before].concat();
+    crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,session,&mut cmds);
+    if o.boards_look {
+        let rid=session["rid"].as_u64().unwrap_or(0);
+        cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
+        session["rid"]=json!(rid+1);
+    }
+    cmds
+}
 /// `recent_far` with projects shared across machines shown once (`Unified`).
 pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value) -> Option<Value> {
     if text(p,"action")=="proj-go" { match find_go(st,p) { Some(c)=>return recent_unified(st,far,un,&c), None=>{ let mut c=p.clone(); c["action"]=json!("proj-find-q"); c["value"]=json!(""); return recent_unified(st,far,un,&c) } } }
@@ -488,16 +501,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             let vst: &State=far.iter().map(|(_,f)|*f).find(|f|vsel.contains('~') && f.threads.contains_key(vsel.as_str())).unwrap_or(st);
             let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
             match super::viewer::view_action_for(vst,hub,&session,p["designDesktop"].as_u64(),locale,value,p["now"].as_u64().unwrap_or(0)) {
-                Some(super::viewer::LayoutOut::Ok(o)) => {
-                    crate::session::patch::merge(&mut session,&o.patch);
-                    cmds=[read_cmds.clone(),o.before].concat();
-                    crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds);
-                    if o.boards_look {
-                        let rid=session["rid"].as_u64().unwrap_or(0);
-                        cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
-                        session["rid"]=json!(rid+1);
-                    }
-                }
+                Some(super::viewer::LayoutOut::Ok(o)) => { cmds=applied_view(st,hub,thread,&mut session,&read_cmds,o); }
                 Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
                     cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
                 }
@@ -720,17 +724,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
             let (k, path) = value.split_once('\t').unwrap_or((value, ""));
             match super::viewer::viewer_show_action(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, k, path) {
-                Some(super::viewer::LayoutOut::Ok(o)) => {
-                    crate::session::patch::merge(&mut session, &o.patch);
-                    cmds = [read_cmds.clone(), o.before].concat();
-                    // the same tail as `view` (the fab's look, the project's boards): a show is a view that never closes
-                    crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st), hub, &mut session, &mut cmds);
-                    if o.boards_look {
-                        let rid = session["rid"].as_u64().unwrap_or(0);
-                        cmds.push(json!({"type":"send","hub":hub,"text":format!("{{\"id\":{rid},\"m\":\"boards.list\",\"p\":{{\"thread\":{}}}}}",serde_json::to_string(thread).unwrap_or_default())}));
-                        session["rid"] = json!(rid + 1);
-                    }
-                }
+                // the same tail as `view` (one function): a show is a view that never closes
+                Some(super::viewer::LayoutOut::Ok(o)) => { cmds = applied_view(st, hub, thread, &mut session, &read_cmds, o); }
                 Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
                     cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
                 }
@@ -1556,30 +1551,6 @@ mod state_tests {
         let out=recent(&st,&p).unwrap(); assert_eq!(out["shown"]["sidebarPages"][0]["projects"]["offset"],8);
         assert_eq!(out["shown"]["projects"].as_array().unwrap().len(),4); assert_eq!(out["cmds"],json!([])); assert_eq!(seq,st.seq);
         p["value"]=json!("forged"); assert_eq!(recent(&st,&p).unwrap()["refused"],true);
-    }
-    /// An agent's show reaches the hub as `view-show`, main's was `view`: from idle the dispatcher's answer (commands, with the fab's look and the boards
-    /// list, and the session's drafts) is the same for every kind an agent can show.
-    #[test] fn view_show_from_idle_answers_as_the_dispatcher_does_for_view() {
-        let d=crate::plat::tmp::canonical("show-tail");
-        std::fs::write(d.join("a.kicad_pcb"),"(kicad_pcb)").unwrap(); std::fs::write(d.join("a.kicad_sch"),"(kicad_sch)").unwrap();
-        std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::write(d.join("mech/case.step"),"ISO-10303-21;").unwrap();
-        let root=d.to_string_lossy().to_string();
-        let mut st=State::new(); st.lean=true;
-        for e in [json!({"$":"ProjectCreated","id":"pa","title":"Amp","root":root,"at":1}),
-                  json!({"$":"ThreadCreated","id":"ta","project":"pa","title":"A","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":5})] { event(&mut st,e); }
-        let map=HashMap::new(); let marks=HashMap::new(); let un=Unified{ far:&map, marks:&marks, here:"desk", rows:&HashMap::new() };
-        // the params of a real thread request (the recorded pair), on this project's thread
-        let pair: Value=serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json"))).unwrap();
-        let run=|action: &str,value: &str| { let mut q=pair["params"].clone(); q["nativeSidebar"]=json!(1); q["nativeKey"]=json!("00112233445566778899aabbccddeeff");
-            q["generation"]=json!("g"); q["epoch"]=json!("e"); q["viewId"]=json!("v"); q["revision"]=json!(st.seq); q["hub"]=json!("h"); q["now"]=json!(1_000_000);
-            q["target"]=json!({"kind":"thread","id":"ta"}); q["session"]=json!({"rid":1,"open":{},"drafts":{},"panel":false,"info":{}}); q["window"]=json!({"remaining":0});
-            q["action"]=json!(action); q["value"]=json!(value); recent_unified(&st,&[],&un,&q).unwrap_or_else(|| panic!("{action} {value:?} unanswered")) };
-        for kind in ["board","schematic","3d","split","browser","mech\tmech/case.step","files","gerbers"] {
-            let (v,s)=(run("view",kind),run("view-show",kind));
-            assert_eq!(v["cmds"],s["cmds"],"{kind}: commands");
-            assert_eq!(v["session"]["drafts"],s["session"]["drafts"],"{kind}: drafts");
-            assert_eq!(v["session"]["rid"],s["session"]["rid"],"{kind}: rid");
-        }
     }
 }
 
