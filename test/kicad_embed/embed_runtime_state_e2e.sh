@@ -33,13 +33,17 @@ rt() { info | python3 -c 'import json,sys
 try: v=json.load(sys.stdin).get("value") or {}
 except Exception: v={}
 print(json.dumps(v.get("runtime") or {}))'; }
-field() { python3 -c 'import json,sys; v=json.loads(sys.argv[1]); x=v.get(sys.argv[2]); print("" if x is None else x)' "$1" "$2"; }
+field() { python3 -c 'import json,sys
+try: v=json.loads(sys.argv[1]) or {}
+except Exception: v={}
+x=v.get(sys.argv[2]) if isinstance(v, dict) else None
+print("" if x is None else x)' "$1" "$2" 2>/dev/null || true; }
 until_rt() { # until_rt KEY VALUE [tries]: the picture once KEY reads VALUE (or the last read)
-  local r=""; for _ in $(seq "${3:-120}"); do r=$(rt); [ "$(field "$r" "$1")" = "$2" ] && break; sleep 0.5; done; echo "$r"; }
+  local r=""; for _ in $(seq "${3:-120}"); do r=$(rt || true); [ "$(field "$r" "$1")" = "$2" ] && break; sleep 0.5; done; [ -n "$r" ] || r="{}"; echo "$r"; return 0; }
 
 # R1: support read at hub start, before any KiCad ran (its log line comes before the first "warming")
 for _ in $(seq 40); do grep -q "kicad embed: runtime support:" "$OUT/hub.log" && break; sleep 0.25; done
-SUP=$(grep -o "kicad embed: runtime support: [a-z]*" "$OUT/hub.log" | head -1 | awk '{print $NF}')
+SUP=$(grep -o "kicad embed: runtime support: [a-z]*" "$OUT/hub.log" | head -1 | awk '{print $NF}' || true)
 BEFORE=$(awk '/kicad embed: runtime support:/{print "yes"; exit} /kicad embed: warming/{print "no"; exit}' "$OUT/hub.log")
 echo "INFO hub start: support $SUP (before any warm-up: ${BEFORE:-?})"
 
@@ -62,11 +66,11 @@ check "R1 support is supported at hub start, before any KiCad, and in the pictur
 check "R2 the warm-up: live, a generation, no holder" "$([ "$(field "$R" session)" = live ] && [ -n "$G1" ] && [ -z "$(field "$R" holder)" ] && echo 1 || echo 0)" "$R"
 
 mark edited || true
-R=$(rt); echo "INFO R3 $R"
+R=$(rt || true); echo "INFO R3 $R"
 check "R3 Edit: live, held by the client's window, the same generation" "$([ "$(field "$R" session)" = live ] && [ -n "$(field "$R" holder)" ] && [ "$(field "$R" generation)" = "$G1" ] && echo 1 || echo 0)" "$R"
 
 mark viewed || true
-R=$(rt); echo "INFO R4 $R"
+R=$(rt || true); echo "INFO R4 $R"
 check "R4 View: no holder" "$([ "$(field "$R" session)" = live ] && [ -z "$(field "$R" holder)" ] && echo 1 || echo 0)" "$R"
 
 R=$(until_rt session idleStopped 90); echo "INFO R5 $R"
