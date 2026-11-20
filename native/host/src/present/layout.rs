@@ -413,17 +413,17 @@ impl Refusal {
     pub fn i18n_key(self) -> &'static str {
         match self {
             Refusal::Locked => "viewer.layout.refusal.locked",
-            Refusal::OneKicad => "viewer.layout.refusal.oneKicad",
-            Refusal::TooSmall => "viewer.layout.refusal.tooSmall",
-            Refusal::NotFound => "viewer.layout.refusal.notFound",
-            Refusal::SameTile => "viewer.layout.refusal.sameTile",
-            Refusal::NoOverlay => "viewer.layout.refusal.noOverlay",
-            Refusal::IncompatibleOverlay => "viewer.layout.refusal.incompatibleOverlay",
-            Refusal::InvalidSource => "viewer.layout.refusal.invalidSource",
-            Refusal::DuplicateId => "viewer.layout.refusal.duplicateId",
-            Refusal::InvalidRatio => "viewer.layout.refusal.invalidRatio",
-            Refusal::UnknownFrame => "viewer.layout.refusal.unknownFrame",
-            Refusal::InvalidInput => "viewer.layout.refusal.invalidInput",
+            Refusal::OneKicad => "viewer.layout.refusal.onekicad",
+            Refusal::TooSmall => "viewer.layout.refusal.toosmall",
+            Refusal::NotFound => "viewer.layout.refusal.notfound",
+            Refusal::SameTile => "viewer.layout.refusal.sametile",
+            Refusal::NoOverlay => "viewer.layout.refusal.nooverlay",
+            Refusal::IncompatibleOverlay => "viewer.layout.refusal.incompatibleoverlay",
+            Refusal::InvalidSource => "viewer.layout.refusal.invalidsource",
+            Refusal::DuplicateId => "viewer.layout.refusal.duplicateid",
+            Refusal::InvalidRatio => "viewer.layout.refusal.invalidratio",
+            Refusal::UnknownFrame => "viewer.layout.refusal.unknownframe",
+            Refusal::InvalidInput => "viewer.layout.refusal.invalidinput",
         }
     }
 
