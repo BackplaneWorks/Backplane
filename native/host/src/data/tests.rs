@@ -1023,3 +1023,74 @@ async fn viewer_follow_and_hello_theme_and_unanswered_on_data1() {
     assert_eq!(f3["ok"], false);
     drop(hub);
 }
+
+#[tokio::test]
+async fn socket_with_browser_refused_and_passive_rpcs_do_not_extend_idle_and_outbound_guards_expiry() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    const DAY: u64 = 86_400_000;
+    let (hub, _port) = up_with("socket-with-clock", "{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1700000040}\n").await;
+    let clock = Arc::new(AtomicU64::new(DAY));
+    let c2 = clock.clone();
+    let reg = Arc::new(crate::net::pairing::Registry::with(
+        &hub.hub.cfg.home,
+        "tok",
+        Box::new(move || c2.load(Ordering::SeqCst)),
+        Box::new(crate::net::pairing::urandom),
+    ).unwrap());
+    let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Clock Browser").unwrap();
+    assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
+    let session_cookie = reg.browser_wait("person@example.com", &poll_cookie).await.unwrap().unwrap();
+    let device_id = reg.browser_verify("person@example.com", &session_cookie, None, false).unwrap();
+
+    let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+    let (h2, r2, dev2) = (hub.hub.clone(), reg.clone(), device_id.clone());
+    let srv = tokio::spawn(async move { socket_with_reg(h2, server_io, true, Principal::Browser { device_id: dev2 }, "bp.ts.net".into(), Some(r2)).await });
+    let (mut ws, _) = tokio_tungstenite::client_async("ws://bp.ts.net/ws?data=1&enc=json", client_io).await.unwrap();
+    let hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+    assert_eq!(hello["t"], "hello");
+    assert_eq!(hello["hubOffer"], "");
+    assert_eq!(hello["migrating"], Value::Null);
+
+    // Subscribe to t1, then advance 20 days and send repeated refused + passive refresh requests
+    ws.send(Message::Text(json!({"id":1,"m":"subscribe","p":{"topic":"thread","thread":"t1"}}).to_string().into())).await.unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap()["ok"], true);
+    clock.fetch_add(20 * DAY, Ordering::SeqCst);
+    for id in 2..=4 {
+        ws.send(Message::Text(json!({"id":id,"m":"devices.page.act","p":{"action":"device-invite"}}).to_string().into())).await.unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap()["ok"], false);
+    }
+    for (id, m, p) in [(5, "projects.list", json!({})), (6, "thread.entries", json!({"thread":"t1"}))] {
+        ws.send(Message::Text(json!({"id":id,"m":m,"p":p}).to_string().into())).await.unwrap();
+        assert_eq!(serde_json::from_str::<Value>(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap()["ok"], true);
+    }
+
+    // Advance 10 more days (total 30 days since creation): must now be expired (passive/refused did NOT extend idle)
+    clock.fetch_add(10 * DAY, Ordering::SeqCst);
+    // Trigger an outbound push (MessagePosted on subscribed t1): must close immediately without delivering the entry!
+    hub.hub.commit(&json!({"$":"MessagePosted","thread":"t1","msg":"m-after-expiry","role":"assistant","text":"secret after expiry","at":1700000099})).await.unwrap();
+    let next = tokio::time::timeout(Duration::from_secs(1), ws.next()).await.unwrap();
+    assert!(matches!(next, None | Some(Ok(Message::Close(_))) | Some(Err(_))), "expired socket must close instead of delivering push, got {next:?}");
+    let _ = tokio::time::timeout(Duration::from_secs(1), srv).await.unwrap();
+}
+
+#[tokio::test]
+async fn socket_with_browser_closes_immediately_on_web_enabled_setting_set() {
+    let (hub, _port) = up_with("socket-with-disable", "{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1700000040}\n").await;
+    let (reg, _routes) = crate::net::start::open(&hub.hub.cfg.home, "127.0.0.1", 0).unwrap();
+    let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Disable Browser").unwrap();
+    assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
+    let session_cookie = reg.browser_wait("person@example.com", &poll_cookie).await.unwrap().unwrap();
+    let device_id = reg.browser_verify("person@example.com", &session_cookie, None, false).unwrap();
+
+    let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+    let h2 = hub.hub.clone();
+    let srv = tokio::spawn(async move { socket_with(h2, server_io, true, Principal::Browser { device_id }, "bp.ts.net".into()).await });
+    let (mut ws, _) = tokio_tungstenite::client_async("ws://bp.ts.net/ws?data=1&enc=json", client_io).await.unwrap();
+    let _hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+
+    // Turning web.enabled off via SettingSet must close the browser socket immediately (< 1s, not waiting for 15s heartbeat)
+    hub.hub.commit(&json!({"$":"SettingSet","key":"web.enabled","value":"0","at":1700000050})).await.unwrap();
+    let next = tokio::time::timeout(Duration::from_secs(1), ws.next()).await.unwrap();
+    assert!(matches!(next, None | Some(Ok(Message::Close(_))) | Some(Err(_))), "expected immediate close on web.enabled=0, got {next:?}");
+    let _ = tokio::time::timeout(Duration::from_secs(1), srv).await.unwrap();
+}
