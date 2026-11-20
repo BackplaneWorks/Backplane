@@ -43,6 +43,8 @@ SUITES=(
   "embed_lib_wait_e2e.sh:lib-wait"
   # an automatic attach (the rail's design mode) never takes the keyboard: every key typed meanwhile lands in the composer. Fork mode only.
   "embed_auto_attach_e2e.sh:auto-attach"
+  # the default flip's PR B: one attach for a burst, a stale generation changes nothing, the person's close holds automatic attaches off. Fork mode only.
+  "embed_attach_gen_e2e.sh:attach-gen"
   # the person's edits in KiCad's plan view (bp.13+; skips itself on runtimes without them, and outside fork mode)
   "embed_plan_person_e2e.sh:plan-person"
   # an agent routes in plan view; the Plan panel rows there (bp.13 batch 11 plan-view-api; skips itself without it)

@@ -977,6 +977,16 @@ fn rt_picture(r: &Rt, e: Option<&RtEntry>, attached: &dyn Fn(u64) -> bool) -> Va
     }
     v
 }
+/// Whether a request decided on session `asked` (its `generation`) is stale against the runtime's picture now: another generation, or that
+/// session no longer starting or live (stopped, closed by the person, failed). A request with no generation is never stale.
+pub fn stale_generation(asked: u64, picture: &Value) -> bool {
+    picture["generation"].as_u64() != Some(asked) || !matches!(picture["session"].as_str(), Some("live" | "starting"))
+}
+fn tracing_stale(method: &str, pro: &str, asked: u64, pic: &Value) {
+    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+        eprintln!("kicad embed: {method} for generation {asked} of {pro} is stale (now {} {})", pic["generation"], pic["session"]);
+    }
+}
 /// `viewer.runtime` for a project's canonical .kicad_pro (as the session info carries it).
 pub fn runtime_picture_of(pro: &str) -> Value { let r = rt().lock().unwrap(); let a = hub_attached(&r); rt_picture(&r, r.entries.get(&norm_pro_key(pro)), &a) }
 #[cfg(test)]
@@ -3843,8 +3853,22 @@ impl RpcHandler for EmbedRpc {
                 return err_reply(id, &format!("{} is not in a project this hub knows", resolved.pro));
             }
             if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(norm_pro_key(&resolved.pro), t.to_string()); }
-            // the person's switch, Edit or pre-warm: an automatic check in KiCad starts after it, not in its middle (its task would refuse them)
-            if matches!(method, "editor.kicad.show" | "editor.kicad.attach" | "editor.kicad.prewarm") { super::checkrun::person_touched(&resolved.pro); }
+            // a request decided on a session the client saw (`generation`, the runtime's): stale once that session has stopped or another
+            // runs, so a late automatic attach or show never reopens what the person closed nor drives a KiCad started since. Answered, no change
+            if matches!(method, "editor.kicad.attach" | "editor.kicad.show") {
+                if let Some(g) = p["generation"].as_u64() {
+                    let pic = runtime_picture_of(&resolved.pro);
+                    if stale_generation(g, &pic) {
+                        tracing_stale(method, &resolved.pro, g, &pic);
+                        return ok_reply(id, json!({"stale": true, "generation": pic["generation"], "session": pic["session"]}));
+                    }
+                }
+            }
+            // the person's switch, Edit or pre-warm: an automatic check in KiCad starts after it, not in its middle (its task would refuse them).
+            // Backplane's own (`auto`: an automatic attach, the rail's design mode) holds the checks off the same way, but is not the person's
+            if matches!(method, "editor.kicad.show" | "editor.kicad.attach" | "editor.kicad.prewarm") {
+                if p["auto"].as_bool().unwrap_or(false) { super::checkrun::host_touched(&resolved.pro); } else { super::checkrun::person_touched(&resolved.pro); }
+            }
             // the update row above the pane says what the pin offers: read the signed KiCad pins again first (at most every 15 minutes)
             if method == "editor.kicad.attach" { super::pins::nudge(hub); }
             if method == "editor.kicad.prewarm" {
@@ -4798,6 +4822,19 @@ mod tests {
         let mut c = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); c.stop_reason = "closeAsked".into();
         assert!(!closed_frames_apply(&mut c, "SCH", false));
         assert!(s.stopped("").closed_frames.is_empty(), "emptied when it stops");
+    }
+    /// A request carries the generation of the session the client decided on: a late one, for a session that stopped (the person closed it,
+    /// idle, failed) or was replaced by another start, is stale and changes nothing; with no generation nothing is checked (a deliberate Edit)
+    #[test] fn a_request_for_a_session_no_longer_running_is_stale() {
+        use super::stale_generation;
+        let pic = |session: &str, generation: Option<u64>| { let mut v = json!({"session": session}); if let Some(g) = generation { v["generation"] = json!(g); } v };
+        assert!(!stale_generation(41, &pic("live", Some(41))));
+        assert!(!stale_generation(41, &pic("starting", Some(41))));
+        assert!(stale_generation(41, &pic("live", Some(42))), "another KiCad started since");
+        assert!(stale_generation(41, &pic("closedByPerson", Some(41))), "the person closed it: an automatic attach must not reopen it");
+        assert!(stale_generation(41, &pic("idleStopped", Some(41))));
+        assert!(stale_generation(41, &pic("failed", Some(41))));
+        assert!(stale_generation(41, &pic("cold", None)), "nothing runs");
     }
     #[test] fn the_runtime_picture_follows_the_session_the_warm_up_and_the_holder() {
         // its own project and cids: the registry is the process's
