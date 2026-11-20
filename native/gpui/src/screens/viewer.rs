@@ -194,6 +194,11 @@ pub(crate) fn mech_controls(viewer: &Value) -> Vec<crate::pane_tool::PaneTool<Co
     controls
 }
 
+/// A download the hub offers (`down`, a hub address, and `downName`): the Mech part on show (`viewer.mech`) or a part of its list.
+pub fn down_of(v: &Value) -> Option<(String, String)> {
+    let (u, n) = (string(v, "down"), string(v, "downName"));
+    (!u.is_empty()).then(|| { let n = if n.is_empty() { u.rsplit(['/', '=']).next().unwrap_or("").to_string() } else { n }; (u, n) })
+}
 fn matching_parts(viewer: &Value, query: &str) -> Vec<Part> {
     let query = query.trim().to_lowercase();
     mech_parts(viewer).into_iter().filter(|part| part.value.to_lowercase().contains(&query)
@@ -228,6 +233,7 @@ fn mech_header(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &su
     if !mech_parts(viewer).is_empty() {
         let popup = pv.part_search.as_ref().map(|field| {
             let rows = matching_parts(viewer, &field.read(cx).content);
+            let downs: Vec<(String, Option<(String, String)>)> = arr(&viewer["mech"], "parts").map(|p| (string(p, "value"), down_of(p))).collect();
             let mut menu = div().id("mech-menu").occlude().w(px(360.)).max_h(px(400.)).overflow_y_scroll()
                 .p_1().border_1().border_color(theme::color(light, "line")).bg(theme::color(light, "panel"))
                 .on_mouse_down_out(cx.listener(|app, _, _, cx| {
@@ -235,7 +241,10 @@ fn mech_header(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &su
                 })).child(field.clone());
             for part in rows {
                 let value = part.value;
+                // a part's right click: Download (its file, as the hub serves it)
+                let down = downs.iter().find(|(v, _)| *v == value).and_then(|(_, d)| d.clone());
                 menu = menu.child(div().id(SharedString::from(format!("part-{value}"))).px_2().py_1().cursor_pointer()
+                    .when_some(down, |d, (u, n)| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| this.ctx_open(e.position, vec![super::ctxmenu::download_item(&u, &n)], cx))))
                     .text_size(crate::scale::tpx(12.)).when(part.on, |d| d.text_color(theme::color(light, "accent")))
                     .hover(|s| s.bg(theme::color(light, "raise"))).child(value.clone())
                     .on_click(cx.listener(move |app, _, _, cx| pick_part(app, value.clone(), cx))));
@@ -246,6 +255,12 @@ fn mech_header(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &su
     }
     let refresh = command(cx, "mech-refresh", trs("Refresh"), false, "mech-refresh", String::new());
     camera.insert(0, refresh);
+    // the part on show downloads as its file (the hub streams `/files/get`; screens/dlbar.rs)
+    if let Some((u, n)) = down_of(&viewer["mech"]) {
+        let mut down = button(cx, "mech-download", trs("Download"), Press::Download(u, n));
+        down.icon = Some("download");
+        camera.insert(1, down);
+    }
     pane_header(light, header.identity, camera, header.controls)
 }
 
@@ -1518,6 +1533,12 @@ mod tests {
             assert_eq!((&*tool.id, &tool.label, tool.active, tool.enabled), (id, &label, active, true));
             assert!(matches!(&tool.action, Command::Action(a, v) if a == action && v == value));
         }
+    }
+    #[test] fn the_mech_part_on_show_and_each_chip_download_as_the_hub_says() {
+        let v = j(r#"{"mech":{"down":"/files/get?thread=t&path=mech%2Fa.step","downName":"a.step","parts":[{"label":"a","value":"mech/a.step","down":"/files/get?thread=t&path=mech%2Fa.step","downName":"a.step"},{"label":"b","value":"mech/b.step"}]}}"#);
+        assert_eq!(down_of(&v["mech"]), Some(("/files/get?thread=t&path=mech%2Fa.step".into(), "a.step".into())));
+        assert_eq!(arr(&v["mech"], "parts").map(down_of).collect::<Vec<_>>(), [Some(("/files/get?thread=t&path=mech%2Fa.step".into(), "a.step".into())), None]);
+        assert_eq!(down_of(&Value::Null), None);
     }
     #[test] fn mech_parts_parse_from_the_pages_choices() {
         let v = j(r#"{"mech":{"parts":[{"label":"bracket","value":"mech/bracket.step","on":true},{"label":"lid","value":"mech/lid.step","on":false}],"say":"","rel":"mech/bracket.step"}}"#);

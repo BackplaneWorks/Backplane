@@ -2011,6 +2011,17 @@ gpui.show.all = すべてを表示
 gpui.close.window = ウインドウを閉じる
 gpui.close.the.window.on.a = ウインドウを閉じる（Mac）：ハブは動き続けます
 gpui.hide.backplane.on.a.mac = Backplane を隠す（Mac）：KiCad のエディタも一緒に隠れ、一緒に戻ります
+gpui.dl.percent = {name} · {pct}%
+gpui.dl.mb = {name} · {mb} MB
+gpui.dl.saved = {name} を保存しました
+gpui.dl.failed = {name}: ダウンロードに失敗しました: {why}
+gpui.dl.manufacturing = 製造
+gpui.dl.the.download.ended.early = ダウンロードが途中で終わりました
+gpui.dl.the.hub.closed.the.connection = ハブが接続を閉じました
+gpui.dl.that.file.is.not.there = そのファイルはもうありません
+gpui.dl.the.hub.does.not.share = ハブはそのファイルを共有していません
+gpui.dl.the.hub.kept.changing.the = ハブ上のファイルが変わり続けました
+gpui.dl.the.hub.sent.the.file = ハブがこのクライアントの読めない形式でファイルを送りました
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = コミット

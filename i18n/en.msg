@@ -1988,6 +1988,17 @@ gpui.show.all = Show All
 gpui.close.window = Close Window
 gpui.close.the.window.on.a = Close the window, on a Mac: the hub keeps running
 gpui.hide.backplane.on.a.mac = Hide Backplane, on a Mac: KiCad's editor hides with it and comes back with it
+gpui.dl.percent = {name} · {pct}%
+gpui.dl.mb = {name} · {mb} MB
+gpui.dl.saved = Saved {name}
+gpui.dl.failed = {name}: download failed: {why}
+gpui.dl.manufacturing = Manufacturing
+gpui.dl.the.download.ended.early = the download ended early
+gpui.dl.the.hub.closed.the.connection = the hub closed the connection
+gpui.dl.that.file.is.not.there = that file is not there any more
+gpui.dl.the.hub.does.not.share = the hub does not share that file
+gpui.dl.the.hub.kept.changing.the = the hub kept changing the file
+gpui.dl.the.hub.sent.the.file = the hub sent the file in a form this client does not read
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = Commit

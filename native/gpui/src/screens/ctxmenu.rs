@@ -31,6 +31,8 @@ pub const LOCAL_URL_OPEN: &str = "local:url-open";
 pub const LOCAL_LINK_FILE: &str = "local:link-file";
 /// A KiCad file link's Open in KiCad (embedded): opened as above, then the KiCad pane in the viewer edits it (kicad_pane.rs).
 pub const LOCAL_KICAD_EMBED: &str = "local:kicad-embed";
+/// A Download from the hub to this computer (screens/dlbar.rs): its `value` is the hub address and the name, a line apart.
+pub const LOCAL_DOWNLOAD: &str = "local:download";
 /// An item that opens a second menu where the first was (a project's Move to group): its `value` is the second menu's items, as JSON.
 pub const LOCAL_SUB: &str = "local:sub";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
@@ -39,11 +41,16 @@ fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 /* i18n-ok: menu labels, drawn through trs in render */ pub fn selection_items(selected: &str) -> Vec<Item> { if selected.is_empty() { vec![] } else { vec![item("Copy", LOCAL_COPY, selected, false)] } }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm, note: String::new() } }
 
+/// A Download item: (hub address, name) in its value.
+pub fn download_item(url: &str, name: &str) -> Item { /* i18n-ok: a menu label, drawn through trs in render */ item("Download", LOCAL_DOWNLOAD, &format!("{url}\n{name}"), false) }
 /// The menu of a link in a message: a file opens, shows in its folder, or has its path copied; a web address opens or is copied; any other link is copied.
-pub fn link_items(href: &str, file: bool) -> Vec<Item> {
+/// `download`: the file's Download from the hub (a share, or a file on another computer's hub: timeline.rs `link_download`).
+pub fn link_items(href: &str, file: bool, download: Option<(String, String)>) -> Vec<Item> {
     use super::linkroute::{route, Route};
     /* i18n-ok: menu labels, drawn through trs in render */ match route(href, file) {
+        /* i18n-ok: menu labels, drawn through trs in render */ Route::Share(u) => { let mut v: Vec<Item> = download.iter().map(|(u, n)| download_item(u, n)).collect(); v.push(item("Copy link", LOCAL_COPY, &u, false)); v }
         /* i18n-ok: menu labels, drawn through trs in render */ Route::File(p) => { let mut v = vec![item("Open", LOCAL_LINK_FILE, &p, false)];
+            if let Some((u, n)) = &download { v.push(download_item(u, n)); }
             /* i18n-ok: a menu label, drawn through trs in render */ if super::linkroute::kicad_file(&p) { v.push(item("Open in KiCad (embedded)", LOCAL_KICAD_EMBED, &p, false)); }
             /* i18n-ok: menu labels, drawn through trs in render */ v.extend([item("Show in folder", LOCAL_FILE_REVEAL, &p, false), item("Copy path", LOCAL_COPY, &p, false)]); v }
         /* i18n-ok: menu labels, drawn through trs in render */ Route::Web(u) => vec![item("Open link", LOCAL_URL_OPEN, &u, false), item("Copy link", LOCAL_COPY, &u, false)],
@@ -217,6 +224,7 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_COPY => { self.ctx_close(cx); cx.write_to_clipboard(ClipboardItem::new_string(v)); return }
             Some((a, v)) if a == LOCAL_URL_OPEN => { self.ctx_close(cx); cx.open_url(&v); return }
             Some((a, v)) if a == LOCAL_LINK_FILE || a == LOCAL_KICAD_EMBED => { self.ctx_close(cx); self.link_file(&v, a == LOCAL_KICAD_EMBED, cx); return }
+            Some((a, v)) if a == LOCAL_DOWNLOAD => { self.ctx_close(cx); if let Some((u, n)) = v.split_once('\n') { self.download(u.to_string(), n.to_string(), super::dlbar::From::Other, cx); } return }
             Some((a, _)) if a == LOCAL_SAVE_IMAGE => { self.ctx_close(cx); if let Some(s) = self.screens.ctx_save.take() { self.save_image(s, cx); } return }
             Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); self.copy_image(cx); return }
             // a second menu, where the first was (Move to group: the other groups, then New group…)
@@ -313,8 +321,17 @@ mod tests {
         assert_eq!(up.x, px(500.)); assert!(up.y + px(3. * 22. + 10.) <= px(938.), "over it: {up:?}");
         assert!(anchored(b(10., 20.), px(60.), 9).y >= px(4.), "never off the top");
     }
+    #[test] fn a_file_on_another_computers_hub_and_a_share_offer_download() {
+        let dl = Some(("/file?path=%2Fw%2Fa.zip".to_string(), "a.zip".to_string()));
+        let v = link_items("/w/a.zip", true, dl);
+        assert_eq!(v.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Open", "Download", "Show in folder", "Copy path"], "Open stays");
+        assert_eq!((v[1].action.as_str(), v[1].value.as_str()), (LOCAL_DOWNLOAD, "/file?path=%2Fw%2Fa.zip\na.zip"));
+        let tok = "0123456789abcdef0123456789abcdef"; let href = format!("/s/{tok}/a.zip");
+        let v = link_items(&href, false, Some((href.clone(), "a.zip".into())));
+        assert_eq!(v.iter().map(|i| (i.label.as_str(), i.action.as_str())).collect::<Vec<_>>(), [("Download", LOCAL_DOWNLOAD), ("Copy link", LOCAL_COPY)]);
+    }
     #[test] fn a_link_and_a_picture_have_menus() {
-        let l = |h: &str, f: bool| link_items(h, f).into_iter().map(|i| (i.label, i.action, i.value)).collect::<Vec<_>>();
+        let l = |h: &str, f: bool| link_items(h, f, None).into_iter().map(|i| (i.label, i.action, i.value)).collect::<Vec<_>>();
         assert_eq!(l("mfg/a.zip", true).iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["Open", "Show in folder", "Copy path"]); assert_eq!(l("mfg/a.zip", true)[1], ("Show in folder".into(), LOCAL_FILE_REVEAL.into(), "mfg/a.zip".into()));
         assert_eq!(l("mfg/a.zip", true)[0].1, LOCAL_LINK_FILE, "a file opens inside Backplane, never the system's app");
         // a KiCad file: Open, Open in KiCad (embedded), Show in folder, Copy path

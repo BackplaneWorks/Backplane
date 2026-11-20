@@ -84,6 +84,8 @@ pub enum Press {
     Boards { folder: String },
     Browser(crate::viewers::chrome::Act),
     MechParts,
+    /// a file of the hub's to this computer's Downloads (screens/dlbar.rs): hub address, name
+    Download(String, String),
     Edit,
     Sheets,
     Layers,
@@ -110,6 +112,7 @@ impl Press {
                 }
             }
             Self::MechParts => viewer::toggle_parts(this, window, cx),
+            Self::Download(url, name) => this.download(url.clone(), name.clone(), super::dlbar::From::Other, cx),
             Self::Edit => { this.kicad_edit(cx); }
             Self::Sheets => super::sheets::toggle(this, 0, window, cx),
             Self::Layers => crate::viewers::layers::toggle(this, cx),
