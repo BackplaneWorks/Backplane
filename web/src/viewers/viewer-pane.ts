@@ -199,6 +199,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let playTimer = 0;
   let compareMenuOpen = false;
   let compareKeyPrefix = "";
+  let activeCompareSig = "";
 
   document.addEventListener("click", (e) => {
     if (!compareMenuOpen) return;
@@ -264,7 +265,18 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const cmp = history.compareRequest();
     if (!cmp) {
       compareKeyPrefix = "";
+      activeCompareSig = "";
       await startWatch(false);
+      return;
+    }
+    const sig = `${page}|${cmp.commit}|${cmp.bits}|${selectedPath}`;
+    if (sig === activeCompareSig && activeKeys.size > 0) {
+      setBanner(
+        history.highlightEdits
+          ? `Comparing against ${history.activeRef()?.label || cmp.commit.slice(0, 7)} (edits highlighted)`
+          : `Comparing against ${history.activeRef()?.label || cmp.commit.slice(0, 7)}`,
+        false
+      );
       return;
     }
     const gen = ++watchGen;
@@ -273,6 +285,8 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     clearPending();
     watchPending = true;
     compareKeyPrefix = "";
+    activeCompareSig = "";
+    activeCompareSig = sig;
     compareKeyPrefix = "";
     try {
       const res = await api.hub.rpc<{ root?: string }>("viewer.compare", {
@@ -963,6 +977,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
 
     watchPending = true;
     compareKeyPrefix = "";
+    activeCompareSig = "";
     try {
       const res = await api.hub.rpc<{ keys?: string[] }>("viewer.watch", params);
       if (gen !== watchGen) return;
