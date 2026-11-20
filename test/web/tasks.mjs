@@ -125,6 +125,8 @@ export async function browserTasks({ context, origin, rpc, thread, canary, advan
       }
       for (const width of [1440,820,390]) {
         await page.setViewportSize({width,height:width===390?844:900});
+        await page.evaluate(() => new Promise(resolve =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
         await screenshot(page, view + '-' + width);
       }
       await page.setViewportSize({width:1440,height:900});
