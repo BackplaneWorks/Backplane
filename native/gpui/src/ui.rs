@@ -841,11 +841,14 @@ impl Render for Backplane {
         crate::screens::viewer::follow(&self.tx, thread);
         let active_kind = if thread["diff"].is_object() { "diff".to_owned() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
         // the rail's Simulation entry (the hub's word, in a window that can hold KiCad), lit while the pane is on KiCad's Simulator: the page under it is then not
-        let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread)).is_some();
+        let can_embed = crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread);
+        let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], can_embed).is_some();
         let sim_on = sim_rail && !thread["diff"].is_object() && self.simulation_on(cx) && self.kicad_for(thread, cx).is_some();
         let mut previous_group = None;
         let mut page_top = px(0.);
         let mut selected_row = None;
+        let collect_inv = crate::art::rects_on();
+        let mut inv_rows: Vec<RailInvRow> = Vec::new();
         for row in rail_rows(&thread["viewer"], sim_rail) {
             let rail = if row.group == "tools" { &mut rail_tools } else { &mut rail_pages };
             if row.group != "tools" {
@@ -867,18 +870,38 @@ impl Render for Backplane {
                 if active { selected_row = Some((row.id, page_top)); }
                 page_top += crate::scale::tpx(48.);
             }
+            let icon_resolved = art::icon_name(row.icon);
+            let drawn_label = trs(row.label);
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(rail_label())
                 .when(active, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
                 .text_color(c(if active { "text" } else { "dim" }))
-                .child(ic(light, art::icon_name(row.icon).unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(trs(row.label));
+                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else { "dim" })).child(drawn_label.clone());
             if disabled {
                 button = button.opacity(0.45).tooltip(crate::keys::tip(row.why, "", light));
+                if collect_inv {
+                    inv_rows.push(RailInvRow {
+                        id: id.into(), label: drawn_label, group: row.group.into(), state: row.state.into(), disabled: true,
+                        icon: row.icon.into(), icon_known: icon_resolved.is_some(),
+                        tooltip_label: trs(row.why), tooltip_hint: String::new(),
+                        key: row.key.into(), keycap_drawn: String::new(), keycap_eligible: false,
+                    });
+                }
             } else {
                 let letter = row.key;
                 let hint = rail_hint(&self.local, id, letter);
+                let cap_el = keycap(letter, active);
+                let cap_drawn = if cap_el.is_some() { letter.to_uppercase() } else { String::new() };
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
-                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(keycap(letter, active));
+                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(cap_el);
+                if collect_inv {
+                    inv_rows.push(RailInvRow {
+                        id: id.into(), label: drawn_label, group: row.group.into(), state: row.state.into(), disabled: false,
+                        icon: row.icon.into(), icon_known: icon_resolved.is_some(),
+                        tooltip_label: trs(row.label), tooltip_hint: hint,
+                        key: letter.into(), keycap_drawn: cap_drawn, keycap_eligible: letter.chars().count() == 1,
+                    });
+                }
                 let action = match id {
                     "terminal" => Ctl::None, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
                     "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),
@@ -892,6 +915,9 @@ impl Render for Backplane {
                 }));
             }
             rail.push(button.into_any_element());
+        }
+        if collect_inv {
+            emit_rail_inventory_if_changed(self.started, &self.data, can_embed, &self.local, inv_rows);
         }
         let selected = selected_row.map(|(id, _)| id);
         let reveal = if !kscreen && self.screens.rail_last_lit.as_deref() != selected {
@@ -1134,43 +1160,66 @@ impl Render for Ghost { fn render(&mut self, _: &mut Window, _: &mut Context<Sel
 /// The width a project page's README is laid out to: the list's, in the page's 930 px column less its padding.
 pub fn page_doc_w(l: &ListState) -> f32 { (f32::from(l.viewport_bounds().size.width).min(930.) - 32.).max(300.) }
 
-/// Test-mode inventory of every drawn right-rail entry (icon, label, tooltip, keycap, palette command).
-pub(crate) fn rail_inventory_of(data: &Value, can_embed: bool, local: &crate::local::Local) -> Vec<Value> {
-    let viewer = &data["thread"]["viewer"];
-    let sim_rail = crate::viewers::kicad_pane::rail_simulation(viewer, can_embed).is_some();
-    rail_rows(viewer, sim_rail).into_iter().map(|row| {
-        let disabled = row.state == "disabled";
-        let hint = if disabled { String::new() } else { rail_hint(local, row.id, row.key) };
-        let tooltip = if disabled { trs(row.why) } else { trs(row.label) };
-        let keycap = if disabled { String::new() } else { row.key.to_uppercase() };
-        let pal = crate::screens::palette::rail_command_for(data, can_embed, row.id, local);
+/// Built-button evidence for one right-rail entry, collected where the button is constructed
+/// under `BACKPLANE_GPUI_RECTS` (inert in normal clients).
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RailInvRow {
+    id: String,
+    label: String,
+    group: String,
+    state: String,
+    disabled: bool,
+    icon: String,
+    icon_known: bool,
+    tooltip_label: String,
+    tooltip_hint: String,
+    key: String,
+    keycap_drawn: String,
+    keycap_eligible: bool,
+}
+
+fn rail_inventory_json(rows: &[RailInvRow], pal_map: &std::collections::HashMap<String, (String, String)>) -> Vec<Value> {
+    rows.iter().map(|r| {
+        let pal = pal_map.get(&r.id);
         serde_json::json!({
-            "id": row.id,
-            "label": trs(row.label),
-            "group": row.group,
-            "state": row.state,
-            "disabled": disabled,
-            "icon": row.icon,
-            "icon_known": art::icon_name(row.icon).is_some(),
-            "tooltip": tooltip,
-            "tooltip_hint": hint,
-            "key": row.key,
-            "keycap": keycap,
-            "palette_label": pal.as_ref().map(|(l, _)| l.as_str()).unwrap_or(""),
-            "palette_shortcut": pal.as_ref().map(|(_, s)| s.as_str()).unwrap_or(""),
+            "id": r.id,
+            "label": r.label,
+            "group": r.group,
+            "state": r.state,
+            "disabled": r.disabled,
+            "icon": r.icon,
+            "icon_known": r.icon_known,
+            "tooltip": r.tooltip_label,
+            "tooltip_hint": r.tooltip_hint,
+            "key": r.key,
+            "keycap": r.keycap_drawn,
+            "keycap_eligible": r.keycap_eligible,
+            "palette_label": pal.map(|(l, _)| l.as_str()).unwrap_or(""),
+            "palette_shortcut": pal.map(|(_, s)| s.as_str()).unwrap_or(""),
         })
     }).collect()
 }
 
-/// Test-mode wrapper called only from `script::drawn_marks` when `BACKPLANE_GPUI_RECTS` is enabled; inert in normal clients.
-pub(crate) fn rail_inventory(this: &Backplane) -> Vec<Value> {
-    let can_embed = crate::viewers::kicad_pane::local(this.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), &this.data["thread"]);
-    rail_inventory_of(&this.data, can_embed, &this.local)
+/// Emit `GPUI_METRIC {"event":"rail_inventory",...}` only when the built rail buttons or
+/// palette commands changed (compares raw rows + palette map before serializing JSON).
+fn emit_rail_inventory_if_changed(started: std::time::Instant, data: &Value, can_embed: bool, local: &crate::local::Local, rows: Vec<RailInvRow>) {
+    static LAST: std::sync::Mutex<Option<(Vec<RailInvRow>, Vec<(String, String, String)>)>> = std::sync::Mutex::new(None);
+    let pal_map = crate::screens::palette::rail_commands_map(data, can_embed, local);
+    let mut pal_key: Vec<(String, String, String)> = pal_map.iter().map(|(k, (l, s))| (k.clone(), l.clone(), s.clone())).collect();
+    pal_key.sort();
+    let mut g = LAST.lock().unwrap();
+    if g.as_ref().is_some_and(|(prev_r, prev_p)| *prev_r == rows && *prev_p == pal_key) {
+        return;
+    }
+    let entries = rail_inventory_json(&rows, &pal_map);
+    *g = Some((rows, pal_key));
+    drop(g);
+    crate::script::metric(started, "rail_inventory", serde_json::json!({"entries": entries}));
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{rail_inventory_of, rail_rows, viewer_row_on, RailRow};
+    use super::{rail_inventory_json, rail_rows, viewer_row_on, RailInvRow, RailRow};
     use serde_json::Value;
     #[test]
     fn rail_rows_follow_hub_order_content_and_empty_list() {
@@ -1220,21 +1269,21 @@ mod tests {
             {"id":"gerbers","label":"Gerbers","icon":"layers","group":"design","state":"off","key":""},
             {"id":"split","label":"Split","icon":"columns","group":"design","state":"disabled","key":"v","why":"No schematic"}
         ]}}});
-        let inv = rail_inventory_of(&data, false, &local);
+        let pal_map = crate::screens::palette::rail_commands_map(&data, false, &local);
+        let rows = vec![
+            RailInvRow { id: "board".into(), label: "Board".into(), group: "design".into(), state: "off".into(), disabled: false, icon: "circuit-board".into(), icon_known: true, tooltip_label: "Board".into(), tooltip_hint: "B".into(), key: "b".into(), keycap_drawn: String::new(), keycap_eligible: true },
+            RailInvRow { id: "gerbers".into(), label: "Gerbers".into(), group: "design".into(), state: "off".into(), disabled: false, icon: "layers".into(), icon_known: true, tooltip_label: "Gerbers".into(), tooltip_hint: String::new(), key: String::new(), keycap_drawn: String::new(), keycap_eligible: false },
+            RailInvRow { id: "split".into(), label: "Split".into(), group: "design".into(), state: "disabled".into(), disabled: true, icon: "columns".into(), icon_known: true, tooltip_label: "No schematic".into(), tooltip_hint: String::new(), key: "v".into(), keycap_drawn: String::new(), keycap_eligible: false },
+        ];
+        let inv = rail_inventory_json(&rows, &pal_map);
         assert_eq!(inv.len(), 3);
         assert_eq!(inv[0]["id"], "board");
-        assert_eq!(inv[0]["icon"], "circuit-board");
-        assert_eq!(inv[0]["icon_known"], crate::art::icon_name("circuit-board").is_some());
-        assert_eq!(inv[0]["label"], "Board");
         assert_eq!(inv[0]["tooltip"], "Board");
-        assert_eq!(inv[0]["keycap"], "B");
+        assert_eq!(inv[0]["tooltip_hint"], "B");
+        assert_eq!(inv[0]["keycap"], "");
         assert_eq!(inv[0]["palette_label"], "Board");
-        // Gerbers without key has empty keycap & tooltip_hint, which B5 flags.
-        assert_eq!(inv[1]["id"], "gerbers");
-        assert_eq!(inv[1]["keycap"], "");
+        assert_eq!(inv[0]["palette_shortcut"], "B");
         assert_eq!(inv[1]["tooltip_hint"], "");
-        // Disabled entry carries its why text as tooltip and has no palette command.
-        assert_eq!(inv[2]["id"], "split");
         assert_eq!(inv[2]["disabled"], true);
         assert_eq!(inv[2]["tooltip"], "No schematic");
         assert_eq!(inv[2]["palette_label"], "");

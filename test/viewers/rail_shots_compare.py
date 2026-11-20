@@ -71,13 +71,14 @@ def has_complete_privacy(steps: dict) -> tuple[bool, list[str]]:
     if not isinstance(kinds, dict) or not kinds:
         issues.append("no kinds present")
         return False, issues
+    schema = int(steps.get("evidence_schema") or 1)
     embed_mode = bool(steps.get("embed_mode"))
     for kind, kdata in kinds.items():
         if not isinstance(kdata, dict):
             issues.append(f"{kind}: invalid kind entry")
             continue
         try:
-            expected = M.expected_shots(kind, embed=(embed_mode and kind == "full"))
+            expected = M.expected_shots(kind, embed=(embed_mode and kind == "full"), schema=schema)
         except ValueError as e:
             issues.append(f"{kind}: {e}")
             continue
@@ -154,7 +155,27 @@ def check_comparability(base_steps: dict, new_steps: dict) -> tuple[bool, list[s
     if b_defs != n_defs:
         reasons.append("task definitions or step budgets differ")
 
+    # Per-part coverage must match for every task scored on both sides (prevents measurement-only +5 deltas).
+    b_t = {int(t["task"]): t for t in (base_steps.get("scorecard_tasks") or []) if "task" in t}
+    n_t = {int(t["task"]): t for t in (new_steps.get("scorecard_tasks") or []) if "task" in t}
+    cov_diff: list[int] = []
+    for tid in sorted(set(b_t) & set(n_t)):
+        sb = score_single_task(b_t[tid])
+        sn = score_single_task(n_t[tid])
+        if sb["scored"] and sn["scored"] and task_measured_parts(sb) != task_measured_parts(sn):
+            cov_diff.append(tid)
+    if cov_diff:
+        reasons.append(f"task part coverage differs on tasks {cov_diff}")
+
     return len(reasons) == 0, reasons
+
+
+TASK_PART_KEYS = ("found", "within_budget", "result_evidenced", "one_step_back")
+
+
+def task_measured_parts(scored_task: dict) -> list[str]:
+    parts = scored_task.get("parts") or {}
+    return [k for k in TASK_PART_KEYS if parts.get(k) != "not_measured"]
 
 
 def score_single_task(task: dict | None) -> dict:
@@ -270,14 +291,23 @@ def score_tasks(steps: dict) -> dict:
 
 
 def score_common_tasks(base_tasks: dict, new_tasks: dict) -> dict:
-    """Compare only tasks scored on BOTH sides whose id, definition (name), and step budget match."""
+    """Compare only tasks scored on BOTH sides whose id, definition (name), step budget, and measured-part coverage match.
+
+    Also computes `common_parts_*` (strictly over parts measured on BOTH sides) when coverage differs,
+    while refusing `delta` (`None`) whenever measured-part coverage differs so measurement-only changes
+    never inflate the common-task delta.
+    """
     b_by_id = {t["task"]: t for t in base_tasks["tasks"]}
     n_by_id = {t["task"]: t for t in new_tasks["tasks"]}
     common_ids: list[int] = []
     mismatched_defs: list[int] = []
+    coverage_mismatch: list[int] = []
     b_pts = 0
     n_pts = 0
     max_pts = 0
+    cp_b_pts = 0
+    cp_n_pts = 0
+    cp_max_pts = 0
     for tid in range(1, 11):
         bt = b_by_id.get(tid, {})
         nt = n_by_id.get(tid, {})
@@ -286,17 +316,35 @@ def score_common_tasks(base_tasks: dict, new_tasks: dict) -> dict:
         if bt.get("name") != nt.get("name") or bt.get("budget") != nt.get("budget"):
             mismatched_defs.append(tid)
             continue
+        b_cov = task_measured_parts(bt)
+        n_cov = task_measured_parts(nt)
+        shared_parts = [k for k in TASK_PART_KEYS if k in b_cov and k in n_cov]
+        cp_b = 0 if (bt.get("outcome") == "task_failed" or (bt.get("parts") or {}).get("result_evidenced") is not True) else sum(1 for k in shared_parts if (bt.get("parts") or {}).get(k) is True)
+        cp_n = 0 if (nt.get("outcome") == "task_failed" or (nt.get("parts") or {}).get("result_evidenced") is not True) else sum(1 for k in shared_parts if (nt.get("parts") or {}).get(k) is True)
+        cp_b_pts += cp_b
+        cp_n_pts += cp_n
+        cp_max_pts += len(shared_parts)
+        if b_cov != n_cov:
+            coverage_mismatch.append(tid)
+            continue
         common_ids.append(tid)
         b_pts += int(bt["points"])
         n_pts += int(nt["points"])
         max_pts += 4
+    cov_ok = len(coverage_mismatch) == 0
     return {
         "common_task_ids": common_ids,
         "excluded_definition_mismatch": mismatched_defs,
+        "coverage_mismatch_tasks": coverage_mismatch,
+        "coverage_matches": cov_ok,
         "base_points": b_pts,
         "new_points": n_pts,
         "max_points": max_pts,
-        "delta": n_pts - b_pts,
+        "delta": (n_pts - b_pts) if cov_ok else None,
+        "common_parts_base_points": cp_b_pts,
+        "common_parts_new_points": cp_n_pts,
+        "common_parts_max_points": cp_max_pts,
+        "common_parts_delta": cp_n_pts - cp_b_pts,
     }
 
 
@@ -352,9 +400,9 @@ def score_consistency(steps: dict) -> dict:
     b6_unscored_private = 0
 
     for kind, kdata in kinds.items():
-        # B1: One selection behaviour for every rail entry (requires client-drawn rail metric from PR #1359)
+        # B1: One selection behaviour for every rail entry (partial: 10 viewer entries; requires PR #1359 rail metric)
         b1_k = kdata.get("b1_checks") or {}
-        if isinstance(b1_k, dict) and b1_k.get("status") == "measured" and kdata.get("rail_metric_seen"):
+        if isinstance(b1_k, dict) and b1_k.get("status") in ("measured", "measured_partial") and kdata.get("rail_metric_seen"):
             b1_available = True
             for eid, edata in (b1_k.get("entries") or {}).items():
                 if not isinstance(edata, dict):
@@ -366,7 +414,7 @@ def score_consistency(steps: dict) -> dict:
                     failed = edata.get("failed") or ["failed"]
                     b1_violations.append(f"{kind}/{eid}: {', '.join(str(f) for f in failed)}")
 
-        # B5: Client's own drawn rail inventory (icon, label, tooltip, key, palette command)
+        # B5: Client-built rail buttons & palette items (icon, label, tooltip, key shown in tooltip, palette command & shortcut; Ctrl-held keycap not probed)
         inv = kdata.get("rail_inventory")
         if isinstance(inv, list) and inv:
             b5_available = True
@@ -380,16 +428,25 @@ def score_consistency(steps: dict) -> dict:
                     missing_fields.append("icon")
                 if not str(entry.get("label") or "").strip():
                     missing_fields.append("label")
-                if not str(entry.get("tooltip") or "").strip():
+                tip_txt = str(entry.get("tooltip") or "").strip()
+                tip_hint = str(entry.get("tooltip_hint") or "").strip()
+                if not tip_txt:
                     missing_fields.append("tooltip")
                 if not entry.get("disabled"):
-                    has_key = bool(str(entry.get("keycap") or "").strip()) or bool(str(entry.get("tooltip_hint") or "").strip())
-                    if not has_key:
-                        missing_fields.append("key")
-                    if eid != "commands" and not str(entry.get("palette_label") or "").strip():
-                        missing_fields.append("palette")
+                    # Verify key shown in tooltip (Ctrl-held keycap is not held during idle capture and is labelled unprobed).
+                    if not tip_hint:
+                        missing_fields.append("key(tooltip_hint)")
+                    if eid != "commands":
+                        pal_lbl = str(entry.get("palette_label") or "").strip()
+                        pal_sc = str(entry.get("palette_shortcut") or "").strip()
+                        if not pal_lbl:
+                            missing_fields.append("palette_command")
+                        if not pal_sc:
+                            missing_fields.append("palette_shortcut")
+                        elif tip_hint and pal_sc != tip_hint:
+                            missing_fields.append(f"palette_shortcut_mismatch({pal_sc!r}!={tip_hint!r})")
                 if missing_fields:
-                    b5_violations.append(f"{kind}/{eid}: missing {', '.join(missing_fields)}")
+                    b5_violations.append(f"{kind}/{eid}: {', '.join(missing_fields)}")
                 else:
                     b5_clean += 1
 
@@ -504,9 +561,9 @@ def score_consistency(steps: dict) -> dict:
 
     def rule_status(code: str) -> str:
         if code == "B1":
-            return "measured" if b1_available else "unavailable"
+            return "measured_partial" if b1_available else "unavailable"
         if code == "B5":
-            return "measured" if b5_available else "unavailable"
+            return "measured_partial" if b5_available else "unavailable"
         if code in ("B3", "B4", "B6"):
             return "measured_partial"
         return "not measured by the harness"
@@ -514,8 +571,9 @@ def score_consistency(steps: dict) -> dict:
     return {
         "B1": {
             "rule": RULE_BY_ID["B1"],
-            "scope": "One selection behaviour per rail entry (press, press again, key, palette, disabled no-op; client-drawn lit)",
-            "status": "measured" if b1_available else "unavailable",
+            "scope": "Partial: 10 viewer rail entries (press, press again, key, palette, disabled no-op; omits Simulation, Terminal, Commands)",
+            "status": "measured_partial" if b1_available else "unavailable",
+            "omitted_entries": list(M.B1_OMITTED_ENTRIES),
             "reason": "" if b1_available else "client did not emit GPUI_METRIC event=rail (requires PR #1359)",
             "max_points": 3,
             "checked": b1_checked,
@@ -546,8 +604,8 @@ def score_consistency(steps: dict) -> dict:
         },
         "B5": {
             "rule": RULE_BY_ID["B5"],
-            "scope": "Client-drawn rail inventory (icon, label, tooltip, key, palette command)",
-            "status": "measured" if b5_available else "unavailable",
+            "scope": "Partial: client-built rail buttons & palette items (icon, label, tooltip, key shown in tooltip, palette command & shortcut; Ctrl-held keycap not probed)",
+            "status": "measured_partial" if b5_available else "unavailable",
             "reason": "" if b5_available else "client did not emit GPUI_METRIC event=rail_inventory",
             "max_points": 3,
             "checked": b5_checked,
@@ -776,8 +834,15 @@ def main(argv: list[str] | None = None) -> int:
         "## Task Score Summary",
         "",
         f"- **Common scored tasks** ({len(common_tasks['common_task_ids'])} tasks: {common_tasks['common_task_ids']}): "
-        f"Base **{common_tasks['base_points']}/{common_tasks['max_points']}** vs New **{common_tasks['new_points']}/{common_tasks['max_points']}** "
-        f"(delta `{format_delta(common_tasks['new_points'], common_tasks['base_points'])}`)",
+        + (
+            f"Base **{common_tasks['base_points']}/{common_tasks['max_points']}** vs New **{common_tasks['new_points']}/{common_tasks['max_points']}** "
+            f"(delta `{format_delta(common_tasks['new_points'], common_tasks['base_points'])}`)"
+            if common_tasks["coverage_matches"]
+            else f"delta `unscored` (part coverage differs on tasks {common_tasks['coverage_mismatch_tasks']}; "
+                 f"common parts only: Base **{common_tasks['common_parts_base_points']}/{common_tasks['common_parts_max_points']}** vs "
+                 f"New **{common_tasks['common_parts_new_points']}/{common_tasks['common_parts_max_points']}**, "
+                 f"delta `{format_delta(common_tasks['common_parts_new_points'], common_tasks['common_parts_base_points'])}`)"
+        ),
         f"- **Base scored tasks**: {b_tasks['points']}/{b_tasks['scored_max_points']} ({b_tasks['unscored_tasks']} unscored)",
         f"- **New scored tasks**: {n_tasks['points']}/{n_tasks['scored_max_points']} ({n_tasks['unscored_tasks']} unscored)",
         "",
@@ -791,7 +856,7 @@ def main(argv: list[str] | None = None) -> int:
         nt = n_by_id[tid]
         name = nt.get("name") or bt.get("name") or f"Task {tid}"
         budget = nt.get("budget") or bt.get("budget") or 0
-        same_def = (bt.get("name") == nt.get("name") and bt.get("budget") == nt.get("budget"))
+        same_def = (bt.get("name") == nt.get("name") and bt.get("budget") == nt.get("budget") and task_measured_parts(bt) == task_measured_parts(nt))
         delta_s = format_delta(nt["points"], bt["points"]) if (bt["scored"] and nt["scored"] and same_def) else "unscored"
         lines.append(f"| {tid} | {name} | {budget} | {fmt_task_cell(bt)} | {fmt_task_cell(nt)} | {delta_s} |")
 
@@ -808,10 +873,10 @@ def main(argv: list[str] | None = None) -> int:
     for code, text in SCORECARD_RULES:
         if code == "B1":
             def fmt_b1(c: dict) -> str:
-                if c.get("status") != "measured":
+                if c.get("status") not in ("measured", "measured_partial"):
                     return "`unavailable`"
                 return f"{fmt_opt_pts(c['points'], 3)} ({c['clean']}/{c['checked']} clean)"
-            note = n_cons["B1"].get("reason") or f"{len(n_cons['B1']['violations'])} failing entries"
+            note = n_cons["B1"].get("reason") or f"partial (omits {', '.join(n_cons['B1'].get('omitted_entries') or [])}); {len(n_cons['B1']['violations'])} failing"
             lines.append(f"| **B1** | {text} | {fmt_b1(b_cons['B1'])} | {fmt_b1(n_cons['B1'])} | {note} |")
         elif code == "B3":
             lines.append(
@@ -825,10 +890,10 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif code == "B5":
             def fmt_b5(c: dict) -> str:
-                if c.get("status") != "measured":
+                if c.get("status") not in ("measured", "measured_partial"):
                     return "`unavailable`"
                 return f"{fmt_opt_pts(c['points'], 3)} ({c['clean']}/{c['checked']} clean)"
-            note = n_cons["B5"].get("reason") or f"{len(n_cons['B5']['violations'])} incomplete entries"
+            note = n_cons["B5"].get("reason") or f"partial (key shown in tooltip; Ctrl-held keycap unprobed); {len(n_cons['B5']['violations'])} incomplete"
             lines.append(f"| **B5** | {text} | {fmt_b5(b_cons['B5'])} | {fmt_b5(n_cons['B5'])} | {note} |")
         elif code == "B6":
             lines.append(
@@ -840,10 +905,10 @@ def main(argv: list[str] | None = None) -> int:
             lines.append(f"| **{code}** | {text} | not measured | not measured | not measured by the harness |")
 
     lines.extend(["", "## Consistency Findings (New)", ""])
-    if n_cons["B1"].get("status") != "measured":
+    if n_cons["B1"].get("status") not in ("measured", "measured_partial"):
         lines.append(f"### B1: `unavailable` ({n_cons['B1'].get('reason', 'no client rail metric')})")
     else:
-        lines.append(f"### B1: Failing rail selection entries ({len(n_cons['B1']['violations'])})")
+        lines.append(f"### B1 (partial — omits {', '.join(n_cons['B1'].get('omitted_entries') or [])}): Failing rail selection entries ({len(n_cons['B1']['violations'])})")
         if not n_cons["B1"]["violations"]:
             lines.append("- None")
         else:
@@ -867,10 +932,10 @@ def main(argv: list[str] | None = None) -> int:
             lines.append(f"- `{v}`")
     lines.append("")
 
-    if n_cons["B5"].get("status") != "measured":
+    if n_cons["B5"].get("status") not in ("measured", "measured_partial"):
         lines.append(f"### B5: `unavailable` ({n_cons['B5'].get('reason', 'no client rail_inventory metric')})")
     else:
-        lines.append(f"### B5: Incomplete drawn rail entries ({len(n_cons['B5']['violations'])})")
+        lines.append(f"### B5 (partial — key shown in tooltip; Ctrl-held keycap unprobed): Incomplete drawn rail entries ({len(n_cons['B5']['violations'])})")
         if not n_cons["B5"]["violations"]:
             lines.append("- None")
         else:

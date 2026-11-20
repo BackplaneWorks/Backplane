@@ -55,7 +55,7 @@ EMBED_SHOTS = [
     "task7-sim-run",
 ]
 
-# Viewer rail entries exercised for Rule B1 (press open/close, bare key open/close, palette open, disabled no-op).
+# Viewer rail entries exercised for Rule B1 (partial coverage: 10 viewer pages; omits Simulation, Terminal, Commands).
 # (id, label, rail_control_id, settle_kind, bare_key, palette_query)
 B1_ENTRIES = [
     ("board", "Board", "rail:Board", "board", "b", "Board"),
@@ -69,6 +69,8 @@ B1_ENTRIES = [
     ("review", "Review", "rail:Review", "review", "r", "Review"),
     ("browser", "Browser", "rail:Browser", "browser", "w", "Browser"),
 ]
+
+B1_OMITTED_ENTRIES = ["simulation", "terminal", "commands"]
 
 
 def contact_shots() -> list[str]:
@@ -97,20 +99,23 @@ def validate_kinds(kinds: list[str]) -> list[str]:
     return out
 
 
-def expected_shots(kind: str, embed: bool = False) -> list[str]:
-    """Every shot slug that must be captured for `kind`."""
+def expected_shots(kind: str, embed: bool = False, schema: int = 3) -> list[str]:
+    """Every shot slug that must be captured for `kind` under evidence `schema`."""
     validate_kinds([kind])
     shots = list(contact_shots())
     if kind == "full":
+        if schema >= 3:
+            shots.extend([
+                "task1-back",
+                "task2-back",
+                "task5-back",
+                "task6-back",
+                "task9-follow-off",
+            ])
         shots.extend([
-            "task1-back",
-            "task2-back",
             "task4-gerbers-vs-board",
             "task5-split-probe",
-            "task5-back",
-            "task6-back",
             "task9-follow-on",
-            "task9-follow-off",
             "task10-closed",
         ])
         for src_slug, _, _ in TASK3_SOURCES:

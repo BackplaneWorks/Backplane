@@ -198,7 +198,8 @@ class RailShotsRegressionTests(unittest.TestCase):
                 "presses": {"press:task7-sim": [{"id": "rail:Simulation", "found": True}]},
             }
 
-            # Case A: setup dialog open -> task_failed (0 pts), even with observer=None
+            # Case A: without a completion observer, Task 7 is unavailable ("not measurable until a later KiCad build");
+            # with an observer wired, an open setup dialog is task_failed (0 pts).
             caps_dialog = {
                 "task7-sim": {"name": "task7-sim", "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []},
                 "task7-sim-run": {
@@ -206,7 +207,12 @@ class RailShotsRegressionTests(unittest.TestCase):
                     "obstructions": [{"xid": "0x1", "title": "New Simulation Tab", "class": ["kicad.real", "KiCad"]}],
                 },
             }
-            t7a = next(t for t in P.evaluate_scorecard(outdir, full_parsed, caps_dialog, True, embed=True, embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": None}}) if t["task"] == 7)
+            t7a_unavail = next(t for t in P.evaluate_scorecard(outdir, full_parsed, caps_dialog, True, embed=True, embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": None}}) if t["task"] == 7)
+            self.assertEqual(t7a_unavail["outcome"], "unavailable")
+            self.assertIn("later KiCad build", t7a_unavail["note"])
+            self.assertFalse(C.score_single_task(t7a_unavail)["scored"])
+
+            t7a = next(t for t in P.evaluate_scorecard(outdir, full_parsed, caps_dialog, True, embed=True, embed_actions={"sim-run": {"action": "sim-run", "ok": True, "observer": "spice_result", "result_evidenced": False}}) if t["task"] == 7)
             self.assertEqual(t7a["outcome"], "task_failed")
             self.assertEqual(C.score_single_task(t7a)["points"], 0)
 
@@ -495,7 +501,7 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertFalse(tasks2[9]["parts"]["one_step_back"])
             self.assertEqual(C.score_single_task(tasks2[9])["points"], 3)
 
-    # --- rail-p item 2: Rule B1 unavailable without PR #1359 metric, scored 0-3 with it ---
+    # --- rail-p item 2: Rule B1 unavailable without PR #1359 metric, strict sequence-bound checks with it ---
     def test_rule_b1_unavailable_without_rail_metric_and_scored_with_it(self) -> None:
         with tempfile.TemporaryDirectory() as td:
             # Without GPUI_METRIC event=rail -> unavailable
@@ -509,33 +515,85 @@ class RailShotsRegressionTests(unittest.TestCase):
             self.assertEqual(cons_no["B1"]["status"], "unavailable")
             self.assertIsNone(cons_no["B1"]["points"])
 
-            # With GPUI_METRIC event=rail -> scored 0-3 with failing entries listed
+            # Hold 1 regression: a single idle snapshot must NOT pass disabled checks without delivered input + fresh post-input rail snapshot!
+            log_stale = Path(td) / "stale_rail.log"
+            log_stale.write_text("\n".join([
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Split"],"disabled":["Split"]}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:disabled-press:split"}',
+                'GPUI_METRIC {"event":"press","id":"rail:Split","found":false}',
+                # No fresh post-input event=rail emitted before settled -> must fail!
+                'GPUI_METRIC {"event":"settled","tag":"b1-disabled-press-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:disabled-key:split"}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-disabled-key-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:disabled-palette:split"}',
+                'GPUI_METRIC {"event":"settled","tag":"b1-disabled-palette-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+            ]) + "\n", encoding="utf-8")
+            p_stale = P.parse_client_log(log_stale)
+            b1_stale = P.evaluate_b1_kind("full", p_stale, {"split": {"state": "disabled", "why": "No schematic"}})
+            self.assertFalse(b1_stale["entries"]["split"]["passed"])
+            self.assertEqual(b1_stale["entries"]["split"]["failed"], ["disabled_press", "disabled_key", "disabled_palette"])
+
+            # With full pre-snapshot + input + palette read + fresh post-input rail snapshot -> scored 0-3 (partial) with failing entries listed
             log_rail = Path(td) / "with_rail.log"
             lines = [
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 # Board (enabled): all 5 pass
+                'GPUI_METRIC {"event":"mark","name":"b1:press-open:board"}',
+                'GPUI_METRIC {"event":"press","id":"rail:Board","found":true}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":["Board"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-press-open-board","state":"ready","settled":true,"viewer":{"open":"board","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:press-close:board"}',
+                'GPUI_METRIC {"event":"press","id":"rail:Board","found":true}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-press-close-board","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:key-open:board"}',
+                'GPUI_METRIC {"event":"keys","keys":"b"}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":["Board"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-key-open-board","state":"ready","settled":true,"viewer":{"open":"board","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:key-close:board"}',
+                'GPUI_METRIC {"event":"keys","keys":"b"}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-key-close-board","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:palette-open:board"}',
+                'GPUI_METRIC {"event":"read","what":"palette","supported":true,"text":"{\\"open\\":true,\\"selected_id\\":\\"rail:board\\",\\"selected_label\\":\\"Board\\"}"}',
+                'GPUI_METRIC {"event":"keys","keys":"enter"}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":["Board"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-palette-open-board","state":"ready","settled":true,"viewer":{"open":"board","diff_open":false}}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 # Gerbers (enabled): press & palette pass, bare key fails to open
+                'GPUI_METRIC {"event":"mark","name":"b1:press-open:gerbers"}',
+                'GPUI_METRIC {"event":"press","id":"rail:Gerbers","found":true}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":["Gerbers"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-press-open-gerbers","state":"ready","settled":true,"viewer":{"open":"board","gerbers":true,"diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:press-close:gerbers"}',
+                'GPUI_METRIC {"event":"press","id":"rail:Gerbers","found":true}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-press-close-gerbers","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:key-open:gerbers"}',
+                'GPUI_METRIC {"event":"keys","keys":"g"}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-key-open-gerbers","state":"timeout","settled":false,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:key-close:gerbers"}',
+                'GPUI_METRIC {"event":"keys","keys":"g"}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-key-close-gerbers","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:palette-open:gerbers"}',
+                'GPUI_METRIC {"event":"read","what":"palette","supported":true,"text":"{\\"open\\":true,\\"selected_id\\":\\"rail:gerbers\\",\\"selected_label\\":\\"Gerbers\\"}"}',
+                'GPUI_METRIC {"event":"keys","keys":"enter"}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":["Gerbers"],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-palette-open-gerbers","state":"ready","settled":true,"viewer":{"open":"board","gerbers":true,"diff_open":false}}',
-                # Split (disabled): all 3 no-ops pass
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
+                # Split (disabled): all 3 no-ops pass with fresh post-input rail snapshots
+                'GPUI_METRIC {"event":"mark","name":"b1:disabled-press:split"}',
+                'GPUI_METRIC {"event":"press","id":"rail:Split","found":false}',
                 'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-disabled-press-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:disabled-key:split"}',
+                'GPUI_METRIC {"event":"keys","keys":"v"}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-disabled-key-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
+                'GPUI_METRIC {"event":"mark","name":"b1:disabled-palette:split"}',
+                'GPUI_METRIC {"event":"read","what":"palette","supported":true,"text":"{\\"open\\":true,\\"selected_id\\":\\"\\",\\"selected_label\\":\\"\\"}"}',
+                'GPUI_METRIC {"event":"keys","keys":"enter"}',
+                'GPUI_METRIC {"event":"rail","rail":{"lit":[],"entries":["Board","Gerbers","Split"],"disabled":["Split"]}}',
                 'GPUI_METRIC {"event":"settled","tag":"b1-disabled-palette-split","state":"ready","settled":true,"viewer":{"open":"","diff_open":false}}',
             ]
             log_rail.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -547,31 +605,114 @@ class RailShotsRegressionTests(unittest.TestCase):
                 "split": {"state": "disabled", "why": "No schematic"},
             }
             b1_yes = P.evaluate_b1_kind("full", p_yes, rmap)
-            self.assertEqual(b1_yes["status"], "measured")
+            self.assertEqual(b1_yes["status"], "measured_partial")
+            self.assertEqual(b1_yes["omitted_entries"], ["simulation", "terminal", "commands"])
             self.assertTrue(b1_yes["entries"]["board"]["passed"])
             self.assertFalse(b1_yes["entries"]["gerbers"]["passed"])
             self.assertIn("key_open", b1_yes["entries"]["gerbers"]["failed"])
             self.assertTrue(b1_yes["entries"]["split"]["passed"])
             cons_yes = C.score_consistency({"kinds": {"full": {"rail_metric_seen": True, "b1_checks": b1_yes, "pages": {}}}})
-            self.assertEqual(cons_yes["B1"]["status"], "measured")
+            self.assertEqual(cons_yes["B1"]["status"], "measured_partial")
             self.assertEqual(cons_yes["B1"]["points"], 2.0)  # 2/3 * 3.0
-            self.assertEqual(cons_yes["B1"]["violations"], ["full/gerbers: key_open"])
+            self.assertIn("full/gerbers:", cons_yes["B1"]["violations"][0])
 
-    # --- rail-p item 3: Rule B5 from client's own rail_inventory ---
+    # --- rail-p item 3 (Hold 2): Rule B5 checks tooltip_hint & palette_shortcut and labels partial ---
     def test_rule_b5_scores_client_rail_inventory_and_flags_missing_fields(self) -> None:
         cons_unavail = C.score_consistency({"kinds": {"full": {"rail_inventory": None, "pages": {}}}})
         self.assertEqual(cons_unavail["B5"]["status"], "unavailable")
         self.assertIsNone(cons_unavail["B5"]["points"])
 
         inv = [
-            {"id": "board", "label": "Board", "disabled": False, "icon": "circuit-board", "icon_known": True, "tooltip": "Board", "tooltip_hint": "B", "key": "b", "keycap": "B", "palette_label": "Board"},
-            {"id": "gerbers", "label": "Gerbers", "disabled": False, "icon": "layers", "icon_known": True, "tooltip": "Gerbers", "tooltip_hint": "", "key": "", "keycap": "", "palette_label": "Gerbers"},
-            {"id": "commands", "label": "Commands", "disabled": False, "icon": "search", "icon_known": True, "tooltip": "Commands", "tooltip_hint": "Ctrl+Shift+P", "key": "", "keycap": "", "palette_label": ""},
+            {"id": "board", "label": "Board", "disabled": False, "icon": "circuit-board", "icon_known": True, "tooltip": "Board", "tooltip_hint": "B", "key": "b", "keycap": "", "palette_label": "Board", "palette_shortcut": "B"},
+            {"id": "gerbers", "label": "Gerbers", "disabled": False, "icon": "layers", "icon_known": True, "tooltip": "Gerbers", "tooltip_hint": "G", "key": "g", "keycap": "", "palette_label": "Gerbers", "palette_shortcut": "X"},
+            {"id": "commands", "label": "Commands", "disabled": False, "icon": "search", "icon_known": True, "tooltip": "Commands", "tooltip_hint": "Ctrl+Shift+P", "key": "", "keycap": "", "palette_label": "", "palette_shortcut": ""},
         ]
         cons = C.score_consistency({"kinds": {"full": {"rail_inventory": inv, "pages": {}}}})
-        self.assertEqual(cons["B5"]["status"], "measured")
-        self.assertEqual(cons["B5"]["points"], 2.0)  # 2/3 * 3.0 (gerbers missing key)
-        self.assertEqual(cons["B5"]["violations"], ["full/gerbers: missing key"])
+        self.assertEqual(cons["B5"]["status"], "measured_partial")
+        self.assertEqual(cons["B5"]["points"], 2.0)  # gerbers has mismatched palette_shortcut
+        self.assertIn("palette_shortcut_mismatch", cons["B5"]["violations"][0])
+
+    # --- rail-p Hold 3: Task 5 requires preceding page or verified close; close rejects wrong ctl, negative gap, failed inspect_ok ---
+    def test_hold3_task5_and_close_check_strict_predicates(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            outdir = Path(td)
+            full_dir = outdir / "full"
+            for s in ("idle", "board", "task1-back", "task4-gerbers-vs-board", "task5-split-probe", "task5-back"):
+                write_non_flat_png(full_dir / f"{s}.png")
+            lay_idle = {"topbar": {"x": 0, "y": 0, "w": 1440, "h": 36}, "main": {"x": 240, "y": 36, "w": 1128, "h": 864}, "rail": {"x": 1368, "y": 36, "w": 72, "h": 864}}
+            lay_neg_gap = {"topbar": {"x": 0, "y": 0, "w": 1440, "h": 36}, "main": {"x": 240, "y": 36, "w": 1128, "h": 864}, "rail": {"x": 1200, "y": 36, "w": 72, "h": 864}}
+            lay_open = {"topbar": {"x": 0, "y": 0, "w": 1440, "h": 36}, "main": {"x": 240, "y": 36, "w": 500, "h": 864}, "rail": {"x": 1368, "y": 36, "w": 72, "h": 864}}
+            base_parsed = {
+                "shots": {
+                    "idle": {"state": "ready", "viewer": {"open": "", "active_kind": "", "diff_open": False}, "layout": lay_idle, "controls_ids": []},
+                    "board": {"state": "ready", "viewer": {"open": "board", "gerbers": False, "plot_key": "0|/p|", "plot_none": ""}, "layout": lay_open, "controls_ids": []},
+                    "task1-back": {"state": "ready", "viewer": {"open": "", "active_kind": "", "diff_open": False}, "layout": lay_neg_gap, "controls_ids": []},
+                    "task4-gerbers-vs-board": {"state": "ready", "viewer": {"open": "board", "gerbers": True}, "layout": lay_open, "controls_ids": []},
+                    "task5-split-probe": {"state": "ready", "viewer": {"open": "split", "panes_count": 2, "split_pcb_ref": "R1", "split_sch_ref": "R1", "split_lit_sch": True, "split_lit_pcb": True}, "layout": lay_open, "controls_ids": []},
+                    # Unrelated ready page ("files") is NOT the preceding page ("gerbers") -> must NOT count as one_step_back!
+                    "task5-back": {"state": "ready", "viewer": {"open": "files", "gerbers": False}, "layout": lay_open, "controls_ids": []},
+                },
+                "settled_tags": {},
+                "kicad_tags": {},
+                "presses": {
+                    "press:board": [{"id": "rail:Board", "found": True}],
+                    "press:task1-back": [{"id": "rail:Board", "found": True}],
+                    "press:split": [{"id": "rail:Split", "found": True}],
+                    "press:task5-back": [{"id": "rail:Split", "found": True}],
+                },
+            }
+            caps = {k: {"name": k, "ok": True, "bytes": 1234, "inspect_ok": True, "obstructed": False, "obstructions": []} for k in base_parsed["shots"]}
+            tasks = {t["task"]: t for t in P.evaluate_scorecard(outdir, base_parsed, caps, True)}
+            self.assertFalse(tasks[1]["parts"]["one_step_back"], "negative pane gap must fail close check")
+            self.assertFalse(tasks[5]["parts"]["one_step_back"], "unrelated page 'files' must not satisfy Task 5 one_step_back")
+
+            # Returning to the actual preceding page (gerbers) satisfies Task 5 one_step_back.
+            base_parsed["shots"]["task5-back"]["viewer"] = {"open": "board", "gerbers": True}
+            tasks_prev = {t["task"]: t for t in P.evaluate_scorecard(outdir, base_parsed, caps, True)}
+            self.assertTrue(tasks_prev[5]["parts"]["one_step_back"])
+
+            # Wrong control id or inspect_ok=False fails close check.
+            base_parsed["shots"]["task1-back"]["layout"] = lay_idle
+            base_parsed["presses"]["press:task1-back"] = [{"id": "rail:Files", "found": True}]
+            tasks_ctl = {t["task"]: t for t in P.evaluate_scorecard(outdir, base_parsed, caps, True)}
+            self.assertFalse(tasks_ctl[1]["parts"]["one_step_back"], "wrong control id must fail close check")
+            base_parsed["presses"]["press:task1-back"] = [{"id": "rail:Board", "found": True}]
+            caps["task1-back"]["inspect_ok"] = False
+            tasks_insp = {t["task"]: t for t in P.evaluate_scorecard(outdir, base_parsed, caps, True)}
+            self.assertFalse(tasks_insp[1]["parts"]["one_step_back"], "inspect_ok=False must fail close check")
+
+    # --- rail-p Hold 4: schema 3 & per-part coverage comparison refuses measurement-only +5 delta ---
+    def test_hold4_coverage_mismatch_refuses_delta_and_compares_common_parts_only(self) -> None:
+        base_steps = {
+            "evidence_schema": 2,
+            "embed_mode": False,
+            "runtime": {"capabilities": []},
+            "kinds": {"full": {"pages": {}}},
+            "scorecard_tasks": [
+                {"task": 1, "name": "Open the board", "step_budget": 1, "presses_used": 1, "outcome": "passed",
+                 "parts": {"found": True, "within_budget": True, "result_evidenced": True, "one_step_back": "not_measured"}},
+            ],
+        }
+        new_steps = {
+            "evidence_schema": 3,
+            "embed_mode": False,
+            "runtime": {"capabilities": []},
+            "kinds": {"full": {"pages": {}}},
+            "scorecard_tasks": [
+                {"task": 1, "name": "Open the board", "step_budget": 1, "presses_used": 1, "outcome": "passed",
+                 "parts": {"found": True, "within_budget": True, "result_evidenced": True, "one_step_back": True}},
+            ],
+        }
+        comp, reasons = C.check_comparability(base_steps, new_steps)
+        self.assertFalse(comp)
+        self.assertTrue(any("coverage" in r for r in reasons))
+        bt = C.score_tasks(base_steps)
+        nt = C.score_tasks(new_steps)
+        ct = C.score_common_tasks(bt, nt)
+        self.assertFalse(ct["coverage_matches"])
+        self.assertEqual(ct["coverage_mismatch_tasks"], [1])
+        self.assertIsNone(ct["delta"], "common-task delta must be refused when part coverage differs")
+        self.assertEqual(ct["common_parts_delta"], 0, "common parts (found, within_budget, result_evidenced) had 0 real delta")
 
 
 if __name__ == "__main__":

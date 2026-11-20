@@ -65,19 +65,26 @@ def parse_embed_actions(kind_dir: Path) -> dict[str, dict]:
 
 
 def parse_client_log(log_path: Path) -> dict:
-    """Parse GPUI_METRIC lines from client.log into per-shot state, settled tags, presses, probes, kicad reports, rail state/inventory, and layout snapshots."""
+    """Parse GPUI_METRIC lines from client.log into per-shot state, settled tags, presses, keys, reads, probes, kicad reports, rail state/inventory, and layout snapshots."""
     layout: dict = {}
     controls: dict[str, dict] = {}
     probes: set[str] = set()
     rail_drawn: dict | None = None
+    rail_drawn_seq = 0
     rail_metric_seen = False
+    rail_events: list[tuple[int, dict]] = []
     rail_inventory: list[dict] | None = None
     current_mark = ""
+    mark_seqs: dict[str, int] = {}
+    mark_before_rail: dict[str, dict | None] = {}
     presses_by_mark: dict[str, list[dict]] = {}
+    keys_by_mark: dict[str, list[dict]] = {}
+    palette_reads_by_mark: dict[str, list[dict]] = {}
     shots: dict[str, dict] = {}
     settled_tags: dict[str, dict] = {}
     kicad_tags: dict[str, dict] = {}
     refused_shots: list[dict] = []
+    ev_seq = 0
 
     if not log_path.exists():
         return {
@@ -85,6 +92,11 @@ def parse_client_log(log_path: Path) -> dict:
             "settled_tags": settled_tags,
             "kicad_tags": kicad_tags,
             "presses": presses_by_mark,
+            "keys": keys_by_mark,
+            "palette_reads": palette_reads_by_mark,
+            "mark_seqs": mark_seqs,
+            "mark_before_rail": mark_before_rail,
+            "rail_events": rail_events,
             "refused_shots": refused_shots,
             "rail_metric_seen": rail_metric_seen,
             "rail_inventory": rail_inventory,
@@ -97,6 +109,7 @@ def parse_client_log(log_path: Path) -> dict:
             ev = json.loads(line.split("GPUI_METRIC ", 1)[1])
         except Exception:
             continue
+        ev_seq += 1
         kind = ev.get("event")
         if kind == "layout" and isinstance(ev.get("rects"), dict):
             layout = ev["rects"]
@@ -110,12 +123,33 @@ def parse_client_log(log_path: Path) -> dict:
                 probes = {x.get("id", "") for x in pr if isinstance(x, dict) and x.get("id")}
         elif kind == "rail" and isinstance(ev.get("rail"), dict):
             rail_drawn = ev["rail"]
+            rail_drawn_seq = ev_seq
             rail_metric_seen = True
+            rail_events.append((ev_seq, dict(rail_drawn)))
         elif kind == "rail_inventory" and isinstance(ev.get("entries"), list):
             if ev["entries"]:
                 rail_inventory = ev["entries"]
         elif kind == "mark":
             current_mark = ev.get("name") or ""
+            if current_mark:
+                mark_seqs[current_mark] = ev_seq
+                mark_before_rail[current_mark] = dict(rail_drawn) if rail_drawn is not None else None
+        elif kind == "keys":
+            keys_by_mark.setdefault(current_mark, []).append({
+                "keys": ev.get("keys") or "",
+                "seq": ev_seq,
+            })
+        elif kind == "read" and ev.get("what") == "palette":
+            parsed_pal: dict = {}
+            try:
+                parsed_pal = json.loads(ev.get("text") or "{}")
+            except Exception:
+                parsed_pal = {}
+            palette_reads_by_mark.setdefault(current_mark, []).append({
+                "supported": bool(ev.get("supported")),
+                "seq": ev_seq,
+                "snapshot": parsed_pal,
+            })
         elif kind in ("press", "click"):
             if kind == "press":
                 delivered = bool(ev.get("found"))
@@ -129,6 +163,7 @@ def parse_client_log(log_path: Path) -> dict:
                 "id": ev.get("id") or "",
                 "found": delivered,
                 "action": ev.get("action"),
+                "seq": ev_seq,
             })
         elif kind == "kicad":
             tag = ev.get("tag") or ""
@@ -146,7 +181,10 @@ def parse_client_log(log_path: Path) -> dict:
                     "state": ev.get("state", ""),
                     "settled": bool(ev.get("settled")),
                     "viewer": ev.get("viewer") or {},
+                    "seq": ev_seq,
+                    "mark": current_mark,
                     "rail_drawn": dict(rail_drawn) if rail_drawn is not None else None,
+                    "rail_drawn_seq": rail_drawn_seq,
                 }
         elif kind == "shot-ready":
             name = ev.get("name") or ""
@@ -159,7 +197,9 @@ def parse_client_log(log_path: Path) -> dict:
                     "layout": dict(layout),
                     "controls_ids": sorted(controls.keys()),
                     "probes_ids": sorted(probes),
+                    "seq": ev_seq,
                     "rail_drawn": dict(rail_drawn) if rail_drawn is not None else None,
+                    "rail_drawn_seq": rail_drawn_seq,
                 }
 
     return {
@@ -167,6 +207,11 @@ def parse_client_log(log_path: Path) -> dict:
         "settled_tags": settled_tags,
         "kicad_tags": kicad_tags,
         "presses": presses_by_mark,
+        "keys": keys_by_mark,
+        "palette_reads": palette_reads_by_mark,
+        "mark_seqs": mark_seqs,
+        "mark_before_rail": mark_before_rail,
+        "rail_events": rail_events,
         "refused_shots": refused_shots,
         "rail_metric_seen": rail_metric_seen,
         "rail_inventory": rail_inventory,
@@ -418,19 +463,30 @@ def build_strips(outdir: Path, kinds: list[str], parsed: dict[str, dict], cleare
 
 
 def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) -> dict:
-    """Evaluate Rule B1 (one selection behaviour for every rail entry) for one project kind.
+    """Evaluate Rule B1 (partial: 10 viewer rail entries; omits Simulation, Terminal, Commands) for one project kind.
 
     Requires client-drawn rail lighting via `GPUI_METRIC {"event":"rail", ...}` (PR #1359).
-    When absent, returns status="unavailable" so B1 is never guessed from hub state.
+    Every check is strictly bound to:
+      1. a known pre-action starting snapshot (`before_rail`) with the target in `entries` (and `disabled` when disabled),
+      2. observed input delivery (press / bare key / palette read + Enter),
+      3. a successful settle (`settled == True`, `state == "ready"`),
+      4. a FRESH post-input `event == "rail"` snapshot emitted strictly after the input (`after_seq > input_seq`).
+    When `event == "rail"` is absent, returns status="unavailable".
     """
     if not parsed_kind.get("rail_metric_seen"):
         return {
             "status": "unavailable",
             "reason": "client did not emit GPUI_METRIC event=rail (requires PR #1359)",
+            "omitted_entries": list(M.B1_OMITTED_ENTRIES),
             "entries": {},
         }
 
     settled_tags = parsed_kind.get("settled_tags") or {}
+    presses_by_mark = parsed_kind.get("presses") or {}
+    keys_by_mark = parsed_kind.get("keys") or {}
+    pal_reads_by_mark = parsed_kind.get("palette_reads") or {}
+    mark_before_rail = parsed_kind.get("mark_before_rail") or {}
+    rail_events: list[tuple[int, dict]] = parsed_kind.get("rail_events") or []
 
     def viewer_matches(eid: str, viewer: dict) -> bool:
         if eid == "diff":
@@ -442,14 +498,59 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) ->
     def viewer_closed(viewer: dict) -> bool:
         return viewer.get("open") == "" and not viewer.get("diff_open")
 
-    def lit_list(rec: dict) -> list[str] | None:
-        rd = rec.get("rail_drawn")
-        if not isinstance(rd, dict) or not isinstance(rd.get("lit"), list):
+    def rail_lists(rd: dict | None) -> tuple[list[str], list[str], list[str]] | None:
+        if not isinstance(rd, dict):
             return None
-        return [str(x) for x in rd["lit"]]
+        lit, entries, dis = rd.get("lit"), rd.get("entries"), rd.get("disabled")
+        if not (isinstance(lit, list) and isinstance(entries, list) and isinstance(dis, list)):
+            return None
+        return [str(x) for x in lit], [str(x) for x in entries], [str(x) for x in dis]
+
+    def fresh_rail_between(after_seq: int, up_to_seq: int) -> dict | None:
+        """Return the latest `event == "rail"` strictly after `after_seq` and <= `up_to_seq`, or None."""
+        found: dict | None = None
+        for seq, rd in rail_events:
+            if after_seq < seq <= up_to_seq:
+                found = rd
+        return found
+
+    def check_transition(
+        mark_name: str,
+        tag_name: str,
+        label: str,
+        input_seq: int | None,
+        expect_disabled: bool,
+        expect_before_lit: list[str],
+        expect_after_lit: list[str],
+        viewer_pred,
+    ) -> bool:
+        if input_seq is None:
+            return False
+        rec = settled_tags.get(tag_name)
+        if not rec or rec.get("settled") is not True or rec.get("state") != "ready":
+            return False
+        before = rail_lists(mark_before_rail.get(mark_name))
+        if before is None:
+            return False
+        b_lit, b_entries, b_dis = before
+        if label not in b_entries or b_lit != expect_before_lit:
+            return False
+        if expect_disabled and label not in b_dis:
+            return False
+        if not expect_disabled and label in b_dis:
+            return False
+        after = rail_lists(fresh_rail_between(input_seq, int(rec.get("seq") or 0)))
+        if after is None:
+            return False
+        a_lit, a_entries, a_dis = after
+        if label not in a_entries or a_lit != expect_after_lit:
+            return False
+        if expect_disabled and label not in a_dis:
+            return False
+        return bool(viewer_pred(rec.get("viewer") or {}))
 
     entries_out: dict[str, dict] = {}
-    for eid, label, _rail_id, settle_kind, _bare_key, _pal_q in M.B1_ENTRIES:
+    for eid, label, rail_id, settle_kind, bare_key, _pal_q in M.B1_ENTRIES:
         rentry = rail_map.get(settle_kind)
         if rentry is None:
             continue
@@ -458,46 +559,73 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) ->
         checks: dict[str, bool] = {}
 
         if not is_disabled:
-            r_po = settled_tags.get(f"b1-press-open-{eid}", {})
-            po_ok = bool(r_po) and viewer_matches(eid, r_po.get("viewer") or {}) and (lit_list(r_po) == [label])
+            # 1. press_open: press delivered with found=True, settled ready, fresh rail lit==[label]
+            m_po = f"b1:press-open:{eid}"
+            p_po = [p for p in presses_by_mark.get(m_po, []) if p.get("id") == rail_id and p.get("found")]
+            po_ok = check_transition(m_po, f"b1-press-open-{eid}", label, p_po[0].get("seq") if p_po else None, False, [], [label], lambda v, e=eid: viewer_matches(e, v))
             checks["press_open"] = po_ok
             if not po_ok:
                 failed.append("press_open")
 
-            r_pc = settled_tags.get(f"b1-press-close-{eid}", {})
-            pc_ok = bool(r_pc) and viewer_closed(r_pc.get("viewer") or {}) and (lit_list(r_pc) == [])
+            # 2. press_close: press delivered while lit==[label], settled closed, fresh rail lit==[]
+            m_pc = f"b1:press-close:{eid}"
+            p_pc = [p for p in presses_by_mark.get(m_pc, []) if p.get("id") == rail_id and p.get("found")]
+            pc_ok = check_transition(m_pc, f"b1-press-close-{eid}", label, p_pc[0].get("seq") if p_pc else None, False, [label], [], viewer_closed)
             checks["press_close"] = pc_ok
             if not pc_ok:
                 failed.append("press_close")
 
-            r_ko = settled_tags.get(f"b1-key-open-{eid}", {})
-            ko_ok = bool(r_ko) and viewer_matches(eid, r_ko.get("viewer") or {}) and (lit_list(r_ko) == [label])
+            # 3. key_open: bare key delivered, settled ready, fresh rail lit==[label]
+            m_ko = f"b1:key-open:{eid}"
+            k_ko = [k for k in keys_by_mark.get(m_ko, []) if k.get("keys") == bare_key]
+            ko_ok = check_transition(m_ko, f"b1-key-open-{eid}", label, k_ko[0].get("seq") if k_ko else None, False, [], [label], lambda v, e=eid: viewer_matches(e, v))
             checks["key_open"] = ko_ok
             if not ko_ok:
                 failed.append("key_open")
 
-            r_kc = settled_tags.get(f"b1-key-close-{eid}", {})
-            kc_ok = bool(r_kc) and viewer_closed(r_kc.get("viewer") or {}) and (lit_list(r_kc) == [])
+            # 4. key_close: bare key delivered while lit==[label], settled closed, fresh rail lit==[]
+            m_kc = f"b1:key-close:{eid}"
+            k_kc = [k for k in keys_by_mark.get(m_kc, []) if k.get("keys") == bare_key]
+            kc_ok = check_transition(m_kc, f"b1-key-close-{eid}", label, k_kc[0].get("seq") if k_kc else None, False, [label], [], viewer_closed)
             checks["key_close"] = kc_ok
             if not kc_ok:
                 failed.append("key_close")
 
-            r_pal = settled_tags.get(f"b1-palette-open-{eid}", {})
-            pal_ok = bool(r_pal) and viewer_matches(eid, r_pal.get("viewer") or {}) and (lit_list(r_pal) == [label])
+            # 5. palette_open: palette read confirms open & selected_id == rail:<eid> before Enter, then Enter opens & lights [label]
+            m_pal = f"b1:palette-open:{eid}"
+            preads = [r for r in pal_reads_by_mark.get(m_pal, []) if r.get("supported") and (r.get("snapshot") or {}).get("open") is True and (r.get("snapshot") or {}).get("selected_id") == f"rail:{eid}"]
+            enters = [k for k in keys_by_mark.get(m_pal, []) if k.get("keys") == "enter" and (not preads or int(k.get("seq") or 0) > int(preads[-1].get("seq") or 0))]
+            pal_seq = enters[0].get("seq") if (preads and enters) else None
+            pal_ok = check_transition(m_pal, f"b1-palette-open-{eid}", label, pal_seq, False, [], [label], lambda v, e=eid: viewer_matches(e, v))
             checks["palette_open"] = pal_ok
             if not pal_ok:
                 failed.append("palette_open")
         else:
-            for cname, tag in (
-                ("disabled_press", f"b1-disabled-press-{eid}"),
-                ("disabled_key", f"b1-disabled-key-{eid}"),
-                ("disabled_palette", f"b1-disabled-palette-{eid}"),
-            ):
-                rec = settled_tags.get(tag, {})
-                ok = bool(rec) and viewer_closed(rec.get("viewer") or {}) and (lit_list(rec) == [])
-                checks[cname] = ok
-                if not ok:
-                    failed.append(cname)
+            # Disabled press: input recorded (press event emitted for rail_id, even with found=False since disabled), fresh rail snapshot still lit==[]
+            m_dp = f"b1:disabled-press:{eid}"
+            p_dp = [p for p in presses_by_mark.get(m_dp, []) if p.get("id") == rail_id]
+            dp_ok = check_transition(m_dp, f"b1-disabled-press-{eid}", label, p_dp[0].get("seq") if p_dp else None, True, [], [], viewer_closed)
+            checks["disabled_press"] = dp_ok
+            if not dp_ok:
+                failed.append("disabled_press")
+
+            # Disabled key: bare key delivered, fresh rail snapshot still lit==[]
+            m_dk = f"b1:disabled-key:{eid}"
+            k_dk = [k for k in keys_by_mark.get(m_dk, []) if k.get("keys") == bare_key]
+            dk_ok = check_transition(m_dk, f"b1-disabled-key-{eid}", label, k_dk[0].get("seq") if k_dk else None, True, [], [], viewer_closed)
+            checks["disabled_key"] = dk_ok
+            if not dk_ok:
+                failed.append("disabled_key")
+
+            # Disabled palette: palette read confirms open & target NOT selected, Enter delivered, post-Enter fresh rail snapshot BEFORE Escape still lit==[]
+            m_dpal = f"b1:disabled-palette:{eid}"
+            preads = [r for r in pal_reads_by_mark.get(m_dpal, []) if r.get("supported") and (r.get("snapshot") or {}).get("open") is True and (r.get("snapshot") or {}).get("selected_id") != f"rail:{eid}"]
+            enters = [k for k in keys_by_mark.get(m_dpal, []) if k.get("keys") == "enter" and (not preads or int(k.get("seq") or 0) > int(preads[-1].get("seq") or 0))]
+            dpal_seq = enters[0].get("seq") if (preads and enters) else None
+            dpal_ok = check_transition(m_dpal, f"b1-disabled-palette-{eid}", label, dpal_seq, True, [], [], viewer_closed)
+            checks["disabled_palette"] = dpal_ok
+            if not dpal_ok:
+                failed.append("disabled_palette")
 
         entries_out[eid] = {
             "label": label,
@@ -507,7 +635,11 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict]) ->
             "failed": failed,
         }
 
-    return {"status": "measured", "entries": entries_out}
+    return {
+        "status": "measured_partial",
+        "omitted_entries": list(M.B1_OMITTED_ENTRIES),
+        "entries": entries_out,
+    }
 
 
 def evaluate_scorecard(
@@ -528,7 +660,7 @@ def evaluate_scorecard(
 
     def shot_ok(name: str) -> tuple[bool, bool, list[dict]]:
         cap = full_caps.get(name)
-        if not cap or not cap.get("ok") or cap.get("bytes", 0) <= 0:
+        if not cap or not cap.get("ok") or cap.get("bytes", 0) <= 0 or cap.get("inspect_ok") is not True:
             return False, False, []
         return True, bool(cap.get("obstructed")), cap.get("obstructions") or []
 
@@ -539,7 +671,7 @@ def evaluate_scorecard(
     s_idle = shots.get("idle", {})
     idle_main = (s_idle.get("layout") or {}).get("main") or {}
 
-    def check_closed_to_idle(shot_name: str, press_mark: str) -> dict:
+    def check_closed_to_idle(shot_name: str, press_mark: str, expected_ctl_id: str) -> dict:
         sr = shots.get(shot_name, {})
         vr = sr.get("viewer") or {}
         ok, obs, oblist = shot_ok(shot_name)
@@ -553,16 +685,17 @@ def evaluate_scorecard(
         closed_ok = (
             ok
             and not obs
-            and len(p_ids) == 1
+            and p_ids == [expected_ctl_id]
             and p_found
             and vr.get("open") == ""
             and vr.get("active_kind") == ""
             and not vr.get("diff_open")
             and w_diff <= 2.0
-            and pane_w <= 2.0
+            and abs(pane_w) <= 2.0
         )
         return {
             "ok": closed_ok,
+            "expected_control": expected_ctl_id,
             "presses": p_ids,
             "press_found": p_found,
             "open": vr.get("open"),
@@ -619,7 +752,7 @@ def evaluate_scorecard(
     ok1, obs1, oblist1 = shot_ok("board")
     p1_raw = presses.get("press:board", [])
     p1 = [p["id"] for p in p1_raw]
-    t1_back = check_closed_to_idle("task1-back", "press:task1-back")
+    t1_back = check_closed_to_idle("task1-back", "press:task1-back", "rail:Board")
     if not full_client_ok or not ok1 or obs1:
         o1 = "harness_failed"
     elif (
@@ -648,7 +781,7 @@ def evaluate_scorecard(
     ok2, obs2, oblist2 = shot_ok("3d")
     p2_raw = presses.get("press:3d", [])
     p2 = [p["id"] for p in p2_raw]
-    t2_back = check_closed_to_idle("task2-back", "press:task2-back")
+    t2_back = check_closed_to_idle("task2-back", "press:task2-back", "rail:3D")
     if not full_client_ok or not ok2 or obs2:
         o2 = "harness_failed"
     elif (
@@ -767,21 +900,29 @@ def evaluate_scorecard(
     p5 = [p["id"] for p in p5_raw] + ["tap:R1@slot2"]
     pcb_ref = v5.get("split_pcb_ref") or ""
     sch_ref = v5.get("split_sch_ref") or ""
-    t5_closed = check_closed_to_idle("task5-back", "press:task5-back")
+    t5_closed = check_closed_to_idle("task5-back", "press:task5-back", "rail:Split")
     s5b = shots.get("task5-back", {})
     v5b = s5b.get("viewer") or {}
+    # Preceding page before Split in M.PAGES is gerbers (after task4-gerbers-vs-board).
+    prev_before_split = (shots.get("task4-gerbers-vs-board") or shots.get("gerbers") or {}).get("viewer") or {}
+    prev_open = str(prev_before_split.get("open") or "")
+    prev_gerbers = bool(prev_before_split.get("gerbers"))
     t5_returned_prev = (
         t5_closed["capture_ok"]
         and not t5_closed["obstructed"]
-        and len(t5_closed["presses"]) == 1
+        and t5_closed["presses"] == ["rail:Split"]
         and t5_closed["press_found"]
-        and v5b.get("open") not in ("", "split")
+        and prev_open not in ("", "split")
+        and v5b.get("open") == prev_open
+        and bool(v5b.get("gerbers")) == prev_gerbers
         and s5b.get("state") == "ready"
     )
     t5_back = {
         **t5_closed,
         "closed_viewer": t5_closed["ok"],
-        "returned_to": "closed" if t5_closed["ok"] else (v5b.get("open") or "split"),
+        "preceding_open": prev_open,
+        "preceding_gerbers": prev_gerbers,
+        "returned_to": "closed" if t5_closed["ok"] else ("gerbers" if (v5b.get("open") == "board" and v5b.get("gerbers")) else (v5b.get("open") or "split")),
         "ok": t5_closed["ok"] or t5_returned_prev,
     }
     if not full_client_ok or not ok5 or obs5:
@@ -823,7 +964,7 @@ def evaluate_scorecard(
     p6 = [p["id"] for p in p6_raw]
     t6_start = settled_tags.get("task6-back-start", {})
     t6_start_ok = bool(t6_start.get("settled")) and (t6_start.get("viewer") or {}).get("open") == "mech"
-    t6_closed = check_closed_to_idle("task6-back", "press:task6-back")
+    t6_closed = check_closed_to_idle("task6-back", "press:task6-back", "rail:Mech")
     t6_back = {**t6_closed, "start_ok": t6_start_ok, "ok": t6_start_ok and t6_closed["ok"]}
     if not full_client_ok or not ok6 or obs6:
         o6 = "harness_failed"
@@ -880,10 +1021,10 @@ def evaluate_scorecard(
         sim_result_evidenced = bool(has_observer and sim_act.get("result_evidenced") and result_summary) and not setup_dialog_open
         if not full_client_ok or not ok7a or not ok7b or obs7a or bool(unexpected_obs7b):
             o7 = "harness_failed"
-        elif setup_dialog_open:
-            o7 = "task_failed"
         elif not has_observer:
             o7 = "unavailable"
+        elif setup_dialog_open:
+            o7 = "task_failed"
         elif (
             k7.get("state") == "ready"
             and k7.get("in_gpui_tree") is True
@@ -900,10 +1041,10 @@ def evaluate_scorecard(
             o7 = "task_failed"
         if o7 == "passed":
             note7 = ""
+        elif o7 == "unavailable":
+            note7 = "not measurable until a later KiCad build (no simulator completion observer wired)"
         elif setup_dialog_open:
             note7 = "pressing Run opened 'New Simulation Tab' setup dialog with no completed analysis or trace (fixture has no SPICE models; 0 points for opening a dialog)"
-        elif o7 == "unavailable":
-            note7 = "no simulator completion observer wired to verify a trace or operating-point result"
         elif not sim_result_evidenced:
             note7 = "observer reported no completed simulation analysis result (operating-point value or trace)"
         else:
@@ -1072,8 +1213,8 @@ def evaluate_scorecard(
         and v10.get("active_kind") == ""
         and not v10.get("diff_open")
         and width_diff <= 2.0
-        and pane_w_closed <= 2.0
-        and len(p10) <= 1
+        and abs(pane_w_closed) <= 2.0
+        and p10 == ["rail:Schematic"]
     ):
         o10 = "passed"
     else:
@@ -1293,8 +1434,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  - {item}", file=sys.stderr)
         return 3
 
+    task_part_coverage = {
+        str(t["task"]): sorted(k for k, v in (t.get("parts") or {}).items() if v != "not_measured")
+        for t in scorecard_tasks
+    }
     summary = {
-        "evidence_schema": 2,
+        "evidence_schema": 3,
         "privacy_checked": True,
         "overall_outcome": overall,
         "embed_mode": embed,
@@ -1302,6 +1447,7 @@ def main(argv: list[str] | None = None) -> int:
         "runtime": runtime_info,
         "private_shot_count": len(all_private),
         "harness_errors": harness_errors,
+        "task_part_coverage": task_part_coverage,
         "kinds": kinds_out,
         "scorecard_tasks": scorecard_tasks,
     }
