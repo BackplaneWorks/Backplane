@@ -505,7 +505,7 @@ html.light .bp-code-block { background: var(--panel); }
 }
 .bp-viewer-msg { padding: 24px; }
 
-/* ---- Right Rail (72px, matching GPUI ui.rs) ---- */
+/* ---- Right Rail (72px, matching GPUI ui.rs + PR #1367/#1376 tokens) ---- */
 .bp-rail {
   width: 72px;
   flex-shrink: 0;
@@ -514,9 +514,29 @@ html.light .bp-code-block { background: var(--panel); }
   padding: 8px 0;
   background: var(--panel);
   border-left: 1px solid var(--rule);
+  min-height: 0;
+}
+.bp-rail-pages {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   overflow-y: auto;
 }
-.bp-rail-gap { height: 12px; flex-shrink: 0; }
+.bp-rail-tools {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--rail-rule);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+.bp-rail-rule {
+  height: 1px;
+  background: var(--rail-rule);
+  margin: 6px 10px;
+  flex-shrink: 0;
+}
 .bp-rail-btn {
   position: relative;
   height: 48px;
@@ -532,11 +552,14 @@ html.light .bp-code-block { background: var(--panel); }
   color: var(--dim);
   padding: 0 2px;
 }
+.bp-rail-btn svg { color: var(--dim); }
 .bp-rail-btn:hover:not(:disabled) { background: var(--raise); color: var(--text); }
+.bp-rail-btn:hover:not(:disabled) svg { color: var(--text); }
 .bp-rail-btn.active { background: var(--raise); border-left-color: var(--accent); color: var(--text); }
 .bp-rail-btn.active svg { color: var(--accent); }
-.bp-rail-btn.disabled { opacity: 0.42; cursor: default; }
-.bp-rail-lbl { font-size: 10px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 66px; }
+.bp-rail-btn.disabled { color: var(--rail-disabled); cursor: default; }
+.bp-rail-btn.disabled svg { color: var(--rail-disabled-icon); }
+.bp-rail-lbl { font-size: 11px; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 66px; }
 
 /* ---- Settings Modal ---- */
 .bp-modal-backdrop {

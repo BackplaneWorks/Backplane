@@ -1,6 +1,7 @@
 // Safe, zero-dependency Markdown -> DOM renderer (never assigns untrusted innerHTML).
 // Supports fenced code blocks (with copy button), headings, lists, blockquotes,
 // inline code, bold, italic, and safe http(s) links.
+import { t } from "./i18n";
 
 function safeUrl(raw: string): string | null {
   try {
@@ -86,11 +87,12 @@ export function renderMarkdown(src: string): DocumentFragment {
       const copyBtn = document.createElement("button");
       copyBtn.type = "button";
       copyBtn.className = "bp-btn-ghost bp-code-copy";
-      copyBtn.textContent = "Copy";
+      const copyLabel = t("common.copy", "Copy");
+      copyBtn.textContent = copyLabel;
       copyBtn.addEventListener("click", () => {
         navigator.clipboard?.writeText(codeText).then(() => {
-          copyBtn.textContent = "Copied";
-          window.setTimeout(() => { copyBtn.textContent = "Copy"; }, 1200);
+          copyBtn.textContent = "✓";
+          window.setTimeout(() => { copyBtn.textContent = copyLabel; }, 1200);
         }).catch(() => {});
       });
       head.append(langEl, copyBtn);

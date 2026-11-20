@@ -5,6 +5,14 @@ import { CATALOGS } from "virtual:i18n";
 
 let currentLocale = detectLocale();
 
+// Reverse lookup: English string -> catalog key (mirrors GPUI's trs() for hub-supplied labels & whys).
+const EN_TO_KEY = new Map<string, string>();
+for (const [k, v] of Object.entries(CATALOGS.en || {})) {
+  if (typeof v === "string" && !EN_TO_KEY.has(v)) {
+    EN_TO_KEY.set(v, k);
+  }
+}
+
 function detectLocale(): string {
   const nav = (typeof navigator !== "undefined" && navigator.language) ? navigator.language.toLowerCase() : "en";
   if (nav.startsWith("ja")) return "ja";
@@ -33,4 +41,11 @@ export function t(key: string, fallback?: string, vars?: Record<string, string |
     }
   }
   return text;
+}
+
+export function trs(english: string): string {
+  if (!english) return "";
+  const key = EN_TO_KEY.get(english);
+  if (!key) return english;
+  return t(key, english);
 }

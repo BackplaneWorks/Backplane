@@ -87,8 +87,8 @@ export class SidebarView {
     this.filterInput = document.createElement("input");
     this.filterInput.type = "search";
     this.filterInput.className = "bp-input bp-side-search";
-    this.filterInput.placeholder = "Filter threads…";
-    this.filterInput.setAttribute("aria-label", "Filter threads");
+    this.filterInput.placeholder = t("gpui.filter.projects.and.threads", "Filter projects and threads");
+    this.filterInput.setAttribute("aria-label", t("gpui.filter.projects.and.threads", "Filter projects and threads"));
     this.filterInput.setAttribute("data-testid", "sidebar-filter");
     this.filterInput.addEventListener("input", () => {
       this.filterText = this.filterInput.value.trim().toLowerCase();
@@ -179,7 +179,7 @@ export class SidebarView {
       } else if (th.pinned) {
         const pin = document.createElement("span");
         pin.className = "bp-pin-mark";
-        pin.title = "Pinned";
+        pin.title = t("tools.pinned", "Pinned");
         pin.textContent = "·";
         row.appendChild(pin);
       }
@@ -262,7 +262,8 @@ export class SidebarView {
           const settledToggle = document.createElement("button");
           settledToggle.type = "button";
           settledToggle.className = "bp-settled-toggle";
-          settledToggle.textContent = open ? `Settled (${settled.length}) ▾` : `Settled (${settled.length}) ▸`;
+          const settledLabel = t("notify.settled", "Settled");
+          settledToggle.textContent = open ? `${settledLabel} (${settled.length}) ▾` : `${settledLabel} (${settled.length}) ▸`;
           settledToggle.addEventListener("click", () => {
             if (this.showSettled.has(proj.id)) this.showSettled.delete(proj.id);
             else this.showSettled.add(proj.id);
@@ -281,7 +282,7 @@ export class SidebarView {
       botSec.className = "bp-proj-group bp-bots-group";
       const head = document.createElement("div");
       head.className = "bp-side-label";
-      head.textContent = "Bots";
+      head.textContent = t("tour.title.bots", "Bots");
       botSec.appendChild(head);
       for (const bot of this.bots) {
         const row = document.createElement("div");
@@ -304,7 +305,7 @@ export class SidebarView {
       roomSec.className = "bp-proj-group";
       const head = document.createElement("div");
       head.className = "bp-side-label";
-      head.textContent = "Rooms";
+      head.textContent = t("bots.rooms", "Rooms");
       roomSec.appendChild(head);
       for (const room of this.rooms) {
         const row = document.createElement("div");

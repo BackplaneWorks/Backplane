@@ -1,4 +1,5 @@
 // Composer: multiline input, slash-command popup (hello.commands), mentions popup, Send/Stop.
+import { t } from "./i18n";
 
 export interface SlashCommand {
   word: string;
@@ -66,14 +67,14 @@ export class ComposerView {
     this.stopBtn = document.createElement("button");
     this.stopBtn.type = "button";
     this.stopBtn.className = "primary stop bp-hidden";
-    this.stopBtn.textContent = "Stop";
+    this.stopBtn.textContent = t("composer.stop", "Stop");
     this.stopBtn.setAttribute("data-testid", "composer-stop");
     this.stopBtn.addEventListener("click", () => this.cb.onInterrupt());
 
     this.sendBtn = document.createElement("button");
     this.sendBtn.type = "button";
     this.sendBtn.className = "primary";
-    this.sendBtn.textContent = "Send";
+    this.sendBtn.textContent = t("composer.send", "Send");
     this.sendBtn.setAttribute("data-testid", "composer-send");
     this.sendBtn.addEventListener("click", () => this.submit());
 

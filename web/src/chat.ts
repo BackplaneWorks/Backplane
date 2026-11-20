@@ -79,7 +79,7 @@ export class ChatView {
     this.olderBtn = document.createElement("button");
     this.olderBtn.type = "button";
     this.olderBtn.className = "bp-older-btn bp-hidden";
-    this.olderBtn.textContent = "Load earlier messages";
+    this.olderBtn.textContent = t("android.load.earlier", "Load earlier");
     this.olderBtn.setAttribute("data-testid", "load-older-btn");
     this.olderBtn.addEventListener("click", () => this.cb.onLoadOlder());
 
@@ -125,7 +125,7 @@ export class ChatView {
     msg.textContent = message;
     const btn = document.createElement("button");
     btn.type = "button";
-    btn.textContent = "Retry";
+    btn.textContent = t("tools.retry", "Retry");
     btn.addEventListener("click", onRetry);
     box.append(msg, btn);
     this.listEl.replaceChildren(box);
@@ -266,13 +266,13 @@ export class ChatView {
     const pinBtn = document.createElement("button");
     pinBtn.type = "button";
     pinBtn.className = "bp-btn-ghost";
-    pinBtn.textContent = this.thread.pinned ? "Unpin" : "Pin";
+    pinBtn.textContent = this.thread.pinned ? t("menu.unpin", "Unpin") : t("menu.pin", "Pin");
     pinBtn.addEventListener("click", () => this.cb.onThreadAction(this.thread?.pinned ? "unpin" : "pin"));
 
     const settleBtn = document.createElement("button");
     settleBtn.type = "button";
     settleBtn.className = "bp-btn-ghost";
-    settleBtn.textContent = this.thread.settled ? "Unsettle" : "Settle";
+    settleBtn.textContent = this.thread.settled ? t("phone.unsettle", "Unsettle") : t("menu.settle", "Settle");
     settleBtn.addEventListener("click", () => this.cb.onThreadAction(this.thread?.settled ? "unsettle" : "settle"));
 
     right.append(pinBtn, settleBtn);
@@ -443,7 +443,7 @@ export class ChatView {
       meta.className = "bp-entry-meta";
       const who = document.createElement("span");
       who.className = "bp-entry-who";
-      who.textContent = entry.kind === "user" ? "You" : entry.kind === "assistant" ? "Agent" : entry.kind;
+      who.textContent = entry.kind === "user" ? t("secret.you", "You") : entry.kind === "assistant" ? t("model.col.agent", "Agent") : entry.kind;
       const time = document.createElement("span");
       time.className = "bp-entry-time";
       time.textContent = entry.live ? "Streaming…" : formatTime(entry.at);
