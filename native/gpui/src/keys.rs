@@ -375,6 +375,14 @@ impl Backplane {
     fn escape_plot_slots(open: &str, split: &[&str]) -> [bool; 3] {
         [matches!(open, "board" | "schematic" | "gerbers"), open == "split" && split.contains(&"sch"), open == "split" && split.contains(&"pcb")]
     }
+    fn clear_escape_probe(plots: [&mut crate::screens::plotview::PlotView; 3], shown: [bool; 3], viewer_open: bool, solid_probe: bool) -> bool {
+        let consume = solid_probe || plots.iter().zip(shown).any(|(plot, visible)| visible &&
+            (plot.picked.is_some() || plot.card.is_some() || !plot.lit.is_empty()));
+        if consume || !viewer_open {
+            for plot in plots { plot.picked = None; plot.card = None; plot.lit.clear(); }
+        }
+        consume
+    }
     /// Esc once nothing over the page took it (0.14's WS.esc.next, after the terminal): the plot's tapped piece goes, else the viewer shuts as its lit rail button
     /// does and the keyboard goes back to the message box; with nothing to put away the keyboard leaves the message box, so a bare key may press a rail button
     /// ("/" or Esc again brings it back), and from anywhere else it goes back to it. Never from a field, a shell or a web page, whose Esc it is. True when it acted.
@@ -389,15 +397,9 @@ impl Backplane {
         let slots = Self::escape_plot_slots(open, &split);
         let solid = matches!(open, "3d" | "mech") || split.contains(&"3d");
         let kept = thread["viewer"]["probe"].as_str().is_some_and(|p| !p.is_empty());
-        let mut put = false;
-        for (slot, shown) in slots.into_iter().enumerate() {
-            if !shown { continue }
-            let pv = self.screens.pv(slot);
-            if pv.picked.is_some() || pv.card.is_some() || !pv.lit.is_empty() {
-                pv.picked = None; pv.card = None; pv.lit.clear(); put = true;
-            }
-        }
-        if put || (kept && solid && !crate::screens::plotview::probed_part(self).is_empty()) {
+        let solid_probe = kept && solid && !crate::screens::plotview::probed_part(self).is_empty();
+        let [sch, pcb] = &mut self.screens.split_pv;
+        if Self::clear_escape_probe([&mut self.screens.plotview, sch, pcb], slots, viewer_open, solid_probe) {
             if kept { crate::screens::plotview::keep_probe(self, None); }
             return true
         }
@@ -515,16 +517,20 @@ mod tests {
     fn d(key: &str, ctx: &[&str]) -> String { does(&Local::default(), key, ctx) }
 
     #[test] fn a_closed_viewers_stale_highlight_leaves_escape_for_composer_blur() {
-        let lit = [true; 3];
-        let consumes_probe = |page, panes: &[&str]| Backplane::escape_plot_slots(page, panes)
-            .into_iter().zip(lit).any(|(shown, lit)| shown && lit);
-        assert!(!consumes_probe("", &[]));
-        assert!(!consumes_probe("files", &[]));
-        assert!(!consumes_probe("split", &["3d"]));
-        assert!(consumes_probe("board", &[]));
-        assert_eq!(Backplane::escape_plot_slots("split", &["pcb"]), [false, false, true]);
+        let mut plots: [crate::screens::plotview::PlotView; 3] = Default::default();
+        plots[0].lit.push((0, 1));
+        let [main, sch, pcb] = &mut plots;
+        assert!(!Backplane::clear_escape_probe([main, sch, pcb], Backplane::escape_plot_slots("", &[]), false, false));
+        assert!(plots.iter().all(|plot| plot.lit.is_empty()));
         assert_eq!(d("escape", &["Composer"]), "backplane::ClosePopup");
         assert_eq!(d("b", &[]), "keys::RailBoard");
+    }
+    #[test] fn dismissing_a_visible_split_probe_clears_the_hidden_board_too() {
+        let mut plots: [crate::screens::plotview::PlotView; 3] = Default::default();
+        let [main, sch, pcb] = &mut plots;
+        sch.lit.push((0, 1)); pcb.lit.push((0, 2));
+        assert!(Backplane::clear_escape_probe([main, sch, pcb], Backplane::escape_plot_slots("split", &["sch"]), true, false));
+        assert!(plots.iter().all(|plot| plot.lit.is_empty()));
     }
     #[test] fn global_scope_keys_work_everywhere_including_the_composer() {
         for ctx in [&[][..], &["Composer"][..], &["TextInput"][..]] {
