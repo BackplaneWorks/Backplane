@@ -451,7 +451,9 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
         let registry = crate::net::start::registry(&hub.cfg.home);
         if let Some(device_id) = registry.and_then(|r| crate::auth::browser_device(&r, &req, &login)) {
             let stream = tokio::io::join(std::io::Cursor::new(bytes).chain(reader), writer);
-            return crate::data::socket_with(hub, stream, true, crate::data::Principal::Browser { device_id }, authority.into()).await;
+            // `z=deflate`: its frames compressed (docs/PHONE-DATA.md, Compression; the browser inflates with DecompressionStream("deflate-raw"))
+            let z = if req.target.ends_with("&z=deflate") { Some("deflate") } else { None };
+            return crate::data::socket_with_z(hub, stream, true, crate::data::Principal::Browser { device_id }, authority.into(), z).await;
         }
         json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
     } else if matches!(req.method.as_str(), "GET" | "HEAD") && (req.route() == "/file" || req.route() == "/files/get" || req.route().starts_with("/s/")) {
