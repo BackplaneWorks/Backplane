@@ -7,14 +7,14 @@ fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::canonical(&form
     for x in [&proj, &out, &home] { std::fs::create_dir_all(x).unwrap() }
     std::fs::write(proj.join("a.zip"), b"in").unwrap(); std::fs::write(out.join("b.zip"), b"out").unwrap();
     let roots = vec![proj.clone()];
-    let o = open_checked(&roots, &home, &s(&proj.join("a.zip"))).unwrap();
+    let o = open_checked(Who::Native, &roots, &home, &s(&proj.join("a.zip"))).unwrap();
     assert_eq!((o.real.clone(), o.md.len()), (proj.join("a.zip"), 2), "the handle's own path and size");
     // a path that is a link when opened is never followed: a swap of the checked file for a link to one outside fails at the open
     crate::plat::fs::symlink(out.join("b.zip"), proj.join("swapped.zip")).unwrap();
-    assert!(open_real(&roots, &home, &proj.join("swapped.zip")).is_err(), "O_NOFOLLOW");
+    assert!(open_real(Who::Native, &roots, &home, &proj.join("swapped.zip")).is_err(), "O_NOFOLLOW");
     // a file the handle says is outside the roots is refused even when opened by a path inside
-    assert_eq!(open_real(&roots, &home, &out.join("b.zip")).err(), Some("that file is not in a project"));
-    assert!(open_checked(&roots, &home, &s(&proj)).is_err(), "a folder");
+    assert_eq!(open_real(Who::Native, &roots, &home, &out.join("b.zip")).err(), Some("that file is not in a project"));
+    assert!(open_checked(Who::Native, &roots, &home, &s(&proj)).is_err(), "a folder");
 }
 
 #[test] fn the_store_is_private_from_its_first_byte_and_revokes_say_when_they_fail() {
@@ -120,7 +120,7 @@ fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
     let data: Vec<u8> = (0..(3 * BUF + 17)).map(|i| (i % 251) as u8).collect(); std::fs::write(&f, &data).unwrap();
     let md = std::fs::metadata(&f).unwrap();
     let get = |hs: Vec<(&str, String)>, method: &str| { let mut r = Req::new(method, "/file?path=x", hs.into_iter().map(|(a, b)| (a.to_string(), b)).collect()); r.peer = None; r };
-    let run = |r: Req| { let f = f.clone(); async move { let mut out: Vec<u8> = vec![]; let o = open_real(&[f.parent().unwrap().to_path_buf()], Path::new("/nonexistent-home"), &f).unwrap(); stream(&mut out, Who::Native, &r, o, "big.bin").await.unwrap(); out } };
+    let run = |r: Req| { let f = f.clone(); async move { let mut out: Vec<u8> = vec![]; let o = open_real(Who::Native, &[f.parent().unwrap().to_path_buf()], Path::new("/nonexistent-home"), &f).unwrap(); stream(&mut out, Who::Native, &r, o, "big.bin").await.unwrap(); out } };
     let split = |v: &[u8]| { let i = v.windows(4).position(|w| w == b"\r\n\r\n").unwrap(); (String::from_utf8_lossy(&v[..i]).into_owned(), v[i + 4..].to_vec()) };
     let (h, b) = split(&run(get(vec![], "GET")).await);
     assert!(h.starts_with("HTTP/1.1 200 OK") && h.contains(&format!("Content-Length: {}", data.len())) && h.contains("Accept-Ranges: bytes") && h.contains("ETag: \"") && h.contains("attachment; filename=\"big.bin\""), "{h}");
@@ -154,4 +154,25 @@ fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
     for t in ["image/png", "application/pdf", "text/plain; charset=utf-8"] { assert!(inline_ok(t)) }
     for t in ["text/html", "image/svg+xml", "text/csv; charset=utf-8", "application/json", "application/octet-stream", "application/xhtml+xml"] { assert!(!inline_ok(t), "{t}") }
     for n in ["a.html", "a.htm", "a.svg", "a.xhtml", "a.js"] { assert!(!inline_ok(ctype(n)), "{n}: {}", ctype(n)) }
+}
+
+#[test] fn a_project_that_holds_the_hub_home_opens_no_far_copy_to_a_browser() {
+    let d = tmp("overlap"); let (proj, home) = (d.join("proj"), d.join("proj/bphome"));
+    for x in [home.join("attachments"), home.join("far-files/L"), home.join("secrets")] { std::fs::create_dir_all(x).unwrap() }
+    std::fs::write(home.join("attachments/a.png"), b"a").unwrap(); std::fs::write(home.join("far-files/L/x.zip"), b"f").unwrap(); std::fs::write(home.join("events.jsonl"), b"{}").unwrap();
+    let roots = vec![proj.clone()]; // the project root holds the home; no other root listed
+    let far = s(&home.join("far-files/L/x.zip"));
+    assert!(open_checked(Who::Browser, &roots, &home, &far).is_err(), "a browser: never the far copies, even through a project around the home");
+    assert!(open_checked(Who::Native, &roots, &home, &far).is_ok(), "a native client may");
+    assert!(open_checked(Who::Browser, &roots, &home, &s(&home.join("attachments/a.png"))).is_ok());
+    for who in [Who::Browser, Who::Native, Who::Share] { assert!(open_checked(who, &roots, &home, &s(&home.join("events.jsonl"))).is_err(), "{who:?}: nothing else of the home") }
+}
+
+#[test] fn a_damaged_store_is_never_overwritten() {
+    let d = tmp("damaged");
+    std::fs::write(d.join("shares-v1.json"), b"{not json").unwrap();
+    assert!(mutate(&d, |v| v.clear()).unwrap_err().contains("damaged"), "the change fails and says why");
+    assert_eq!(std::fs::read(d.join("shares-v1.json")).unwrap(), b"{not json", "left as it was");
+    std::fs::remove_file(d.join("shares-v1.json")).unwrap();
+    assert!(mutate(&d, |v| v.len()).is_ok(), "no store yet is an empty list");
 }

@@ -175,6 +175,18 @@ mod tests {
         let enc = |p: &std::path::Path| p.to_string_lossy().replace('/', "%2F");
         let bom = format!("/file?path={}", enc(&proj.join("mfg/bom.csv")));
         assert!(ask(bom.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "unpaired");
+        let head = |target: String, extra: String| { let hub = hub.clone(); async move {
+            let (mut a, b) = tokio::io::duplex(1 << 20);
+            let t = tokio::spawn(async move { serve(hub, b, authority).await });
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            // (the ingress asks every method but GET for its one exact Origin)
+            a.write_all(format!("HEAD {target} HTTP/1.1\r\nHost: {authority}\r\nOrigin: https://{authority}\r\nTailscale-User-Login: {login}\r\n{extra}\r\n").as_bytes()).await.unwrap();
+            let mut out = vec![]; a.read_to_end(&mut out).await.unwrap(); let _ = t.await; String::from_utf8_lossy(&out).into_owned() } };
+        let missing = format!("/file?path={}", enc(&proj.join("none.csv")));
+        let (h1, h2) = (head(bom.clone(), String::new()).await, head(missing.clone(), String::new()).await);
+        assert!(h1.starts_with("HTTP/1.1 401") && h1.contains("unpaired") && h1 == h2, "HEAD unpaired: 401 alike for a file that is there and one that is not: {h1}");
+        let h = head(bom.clone(), format!("Cookie: __Host-bp_web={cookie}\r\n")).await;
+        assert!(h.starts_with("HTTP/1.1 200") && h.contains("Content-Length: 4") && h.ends_with("\r\n\r\n"), "HEAD paired: the headers, no body: {h}");
         let (h, b) = ask(bom.clone(), c.clone()).await;
         assert!(h.starts_with("HTTP/1.1 200") && b == b"a,b\n", "{h}");
         for need in ["Cache-Control: private, no-store", "sandbox", "Cross-Origin-Resource-Policy: same-origin", "Referrer-Policy: no-referrer", "nosniff"] { assert!(h.contains(need), "{need}: {h}") }
