@@ -5,6 +5,7 @@
 #   CYCLES=N                 cycles (30)
 #   CLOSE_PREWARM=0          no schematic pre-warm (the hub refuses it: BACKPLANE_KICAD_PREWARM_FREE_MB above any machine's memory)
 #   CLOSE_VIA=kicad          KiCad's own Close on its socket (the person's Quit), not the hub's editor.kicad.close
+#   CLOSE_CORES=1            core dumps allowed (a backtrace of each crash)
 #   CLOSE_FOREIGN_LOCK=0     no lock file on the project from another KiCad (removed before each start); 1: one left by a KiCad "elsewhere"
 # Prints a line per cycle and `close loop: N cycles, C clean, X crashed (...)`; each crash's hub log lines are kept in $OUT/crashes.txt.
 # Copies only (seed_project.py), fork mode. Measured on h@backplane (test/kicad_embed/remote.sh), never as a load on the desktop.
@@ -14,6 +15,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/lib/env_xvfb.sh"
 [ "$EMBED_MODE" = "fork" ] || { echo "embed_close_loop: fork only"; exit 0; }
 CYCLES=${CYCLES:-30}
+# CLOSE_CORES=1: core dumps allowed for KiCad (apport keeps them in /var/lib/apport/coredump), for a backtrace of a crash
+[ "${CLOSE_CORES:-0}" = 1 ] && ulimit -c unlimited
 discover_bins
 [ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"
 discover_kicad
