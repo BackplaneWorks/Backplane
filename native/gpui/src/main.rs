@@ -229,7 +229,9 @@ impl Backplane {
             Event::Accepted if self.sent_wait.take().is_some()=>{self.voice_sent(cx);self.timeline_to_end();},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));let _=self.tx.try_send(Command::Draft(String::new())); /* a /give keeps its text in the hub until it took it: the box is empty now, so is that copy */ self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
-            Event::Error(e)=>{self.error=e;self.screens.unsent.lost();self.sent_back(cx);},
+            // a hub that said it is restarting: the strip says so, calmly, in place of the red disconnect line
+            Event::Restarting(t)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"restarting":t}));screens::hubbar::restarting(&mut self.screens.hubbar,&t);cx.notify();},
+            Event::Error(e)=>{if screens::hubbar::restart_bar(self.screens.hubbar.restarting.as_ref(),false,std::time::Instant::now()).is_none(){self.error=e;}self.screens.unsent.lost();self.sent_back(cx);},
             Event::Unpaired=>screens::pair::revoked(self,cx),
             // a refused view leaves no page to wait for: the pressed tab gives way at once, and the window says why
             Event::Refused(e)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"refused":e.chars().take(160).collect::<String>()}));self.error=e;self.sent_back(cx);screens::viewer::forget_press();self.screens.rail_pending=None;self.screens.rail_at=None;self.ui_epoch+=1;cx.notify();}, // drawn now: a composer command's refusal (/project, /btw) came with no picture to repaint it
