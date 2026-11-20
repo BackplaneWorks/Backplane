@@ -192,7 +192,7 @@ pub fn view_action_at(st: &State, hub: &str, session: &Value, kind: &str, now_ms
         let shown_set = shown.strip_prefix("noboard\n").unwrap_or(shown);
         let set = if s(d, &format!("@view.gerbers:{sel}")) == "1" && !shown_set.is_empty() { Some(g::set_of(shown_set).to_string()) } else { g::default_set(std::path::Path::new(&root)).map(|p| p.to_string_lossy().into_owned()) };
         match set {
-            Some(set) if gerbers_vs_board => match g::board_of(std::path::Path::new(&set)) {
+            Some(set) if gerbers_vs_board => match g::board_of_in(std::path::Path::new(&set), Some(std::path::Path::new(&root))) {
                 Some(b) => g::cmp_path(&set, &b.to_string_lossy()),
                 None => { gerbers_no_board = true; format!("noboard\n{set}") }
             },
@@ -512,7 +512,7 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
             k = format!("{}{s_path}", key("board", root));
             o.insert("key".into(), json!(k));
         }
-        o.insert("gerberFiles".into(), json!(set.map(|p| crate::files::kicad::gerber::gerbview_files(&p)).unwrap_or_default()));
+        o.insert("gerberFiles".into(), json!(set.map(|p| crate::files::kicad::gerber::gerbview_files_in(&p, Some(std::path::Path::new(root)))).unwrap_or_default()));
     }
     // View.layers: a 3D view draws the board's layers on its faces
     o.insert("layers".into(), json!(if kind == "3d" { if file.is_empty() { key("board", root) } else { String::new() } } else { k }));
