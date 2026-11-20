@@ -69,6 +69,33 @@ pub fn mapping_status(raw: &str, authority: &str, proxy: &str) -> Mapping {
     }
 }
 
+/// Every directory used to resolve the persistent Serve target must be
+/// protected from replacement by other accounts, including after hub exit.
+pub fn protected_directory(path: &std::path::Path) -> std::io::Result<()> {
+    use std::{io, os::unix::fs::MetadataExt};
+    let uid = crate::plat::effective_uid();
+    if !path.is_absolute() || path.canonicalize()? != path {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "canonical absolute directory required",
+        ));
+    }
+    for ancestor in path.ancestors() {
+        let meta = std::fs::symlink_metadata(ancestor)?;
+        if !meta.is_dir()
+            || (meta.uid() != 0 && meta.uid() != uid)
+            || meta.mode() & 0o022 != 0
+            || (ancestor == path && (meta.uid() != uid || meta.mode() & 0o777 != 0o700))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "private socket path required",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Read the kernel identity of the daemon at the system LocalAPI socket.
 /// No HTTP request, login header, or hub credential is sent to this socket.
 pub async fn system_proxy_identity() -> std::io::Result<super::webtransport::ProxyIdentity> {
@@ -92,6 +119,15 @@ pub async fn system_proxy_identity() -> std::io::Result<super::webtransport::Pro
         uid: peer.uid(),
         pid,
     })
+}
+
+pub async fn bind_private_backend(
+    directory: &std::path::Path,
+    authority: String,
+) -> std::io::Result<super::webtransport::BrowserListener> {
+    protected_directory(directory)?;
+    let proxy = system_proxy_identity().await?;
+    super::webtransport::BrowserListener::bind(directory, authority, proxy)
 }
 
 /// Pick a spare node HTTPS port from the status snapshot. Recheck before
