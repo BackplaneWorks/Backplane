@@ -844,6 +844,8 @@ pub fn pointer_over(p: (f64, f64), r: (i32, i32, i32, i32)) -> bool {
 }
 /// An automatic pane's own attach, show and pre-warm say so (`auto`): the hub holds its checks off for them as for the person's, but does not
 /// take them for the person's activity (checkrun `host_touched`)
+/// The number of this client's last leave or back to the hub (`seq`), across panes: the hub takes them in this order.
+static LEAVE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 /// How long the pane must stay off screen before the hub hears it left (#1345): a thread switch that comes straight back (its frames
 /// in between) is no leave.
 pub const LEAVE_SETTLE: std::time::Duration = std::time::Duration::from_millis(300);
@@ -2092,10 +2094,13 @@ impl KicadPane {
     }
     fn send_leave(&self, s: LeaveSend) {
         let (left, why) = match s { LeaveSend::Leave(w) => (true, w), LeaveSend::Back => (false, "") };
-        let mut params = json!({"project": self.project, "left": left, "why": why});
-        if let Some(g) = self.generation.or_else(|| self.info["runtime"]["generation"].as_u64()) { params["generation"] = json!(g); }
+        // numbered, not tied to a KiCad generation: a leave said again after a reattach (a new session) must apply, and a late one never
+        // overrides a later back (the hub's leave_in_order)
+        // (one count for the whole client: a pane made again, after a View, never numbers below the one before it)
+        let seq = LEAVE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+        let params = json!({"project": self.project, "left": left, "why": why, "seq": seq});
         // always on, unlike the pane's debug lines: at most one per leave and one per back, and it is what the e2e counts (L2)
-        eprintln!("GPUI_LOG {}", json!({"kicad_leave": left, "why": why, "project": self.project, "generation": params["generation"], "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
+        eprintln!("GPUI_LOG {}", json!({"kicad_leave": left, "why": why, "project": self.project, "seq": seq, "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
         self.rpc("editor.kicad.leave", params);
     }
     /// Back to the viewer: the editor's windows leave the pane (KiCad stays warm in the hub).
