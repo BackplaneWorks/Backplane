@@ -97,7 +97,7 @@ function isLayerPage(p: string): boolean {
 }
 
 function isNonPlotPane(p: string): boolean {
-  return p === "files" || p === "diff" || p === "review" || p === "terminal";
+  return p === "files" || p === "diff" || p === "review" || p === "browser" || p === "terminal";
 }
 
 export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
@@ -572,6 +572,8 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         activePane = mountDiffPane(stage, api, threadId);
       } else if (page === "review") {
         activePane = mountReviewPane(stage, api, threadId);
+      } else if (page === "browser") {
+        activePane = mountBrowserPane(stage, api, threadId);
       } else if (page === "terminal") {
         setOverlay("loading", "Loading terminal…");
         const termUrl = "/assets/terminal.js";
