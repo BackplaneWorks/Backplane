@@ -98,6 +98,7 @@ async function main(binary, output) {
   const { spawn } = await import('node:child_process');
   const { once } = await import('node:events');
   const { createServer } = await import('node:net');
+  const { checkAccess } = await import('./security.mjs');
   const { browserTasks } = await import('./tasks.mjs');
   assert.ok(binary && output && process.env.BP_TMP && process.versions.bun);
   const temp = await fs.mkdtemp(path.join(process.env.BP_TMP, 'web-e2e-'));
@@ -157,9 +158,11 @@ async function main(binary, output) {
           await withBrowser(tls, async (context, origin) => {
             const probe = await context.newPage();
             assert.equal((await probe.goto(origin)).status(), 404);
+            await checkAccess(probe, false);
             await probe.close();
             await rpc('devices.page.act', { action: 'device-web-access', value: '1' });
             await browserTasks({ context, origin, rpc, thread: 't1',
+              readRegistry: () => fs.readFile(path.join(home, 'devices-v1.json'), 'utf8'),
               assets: [{path:'/files/get?thread=t1&path=sample.txt',body:Buffer.from('Backplane fixture')}],
               replyText:'Browser0 Browser1 Browser2',
               nativeShot: process.env.BP_WEB_GPUI && (async name => {

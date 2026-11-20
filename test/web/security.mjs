@@ -1,8 +1,24 @@
 // Assertions shared by the headless web rig. Call with an isolated Playwright
 // browser context after pairing and with URLs for populated synthetic fixtures.
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 
-export async function checkSessionCookie(context, origin, siblingOrigin) {
+export async function checkAccess(page, enabled) {
+  const statuses = await page.evaluate(async () => {
+    const paths = ['/', '/assets/app.js', '/files/get', '/message-image', '/bots/t1/screen.jpg',
+      '/auth/web/request', '/auth/web/poll', '/auth/web/logout'];
+    return Promise.all(paths.map(async (path, i) => {
+      if (i >= 5 && location.pathname === '/') {
+        // Use an invalid name for the request so this check cannot create a pending approval.
+        return (await fetch(path, {method:'POST', body:'{}'})).status;
+      }
+      return (await fetch(path)).status;
+    }));
+  });
+  assert.deepEqual(statuses, enabled ? [200,401,401,401,401,400,401,401] : Array(8).fill(404));
+}
+
+export async function checkSessionCookie(context, origin, siblingOrigin, readRegistry) {
   const primary = new URL(origin);
   const sibling = new URL(siblingOrigin);
   assert.equal(primary.protocol, 'https:');
@@ -20,6 +36,10 @@ export async function checkSessionCookie(context, origin, siblingOrigin) {
   assert.equal(session.sameSite, 'Strict');
   assert.ok(session.value.length > 0);
   assert.ok(!cookies.some(cookie => cookie.name === '__Host-bp_web_pair'));
+  const stored = await readRegistry();
+  const digest = createHash('sha256').update(session.value).digest('hex');
+  assert.ok(!stored.includes(session.value), 'browser credential was stored unsealed');
+  assert.ok(JSON.parse(stored).devices.some(device => device.kind === 'browser' && device.hash === digest));
   const siblings = await context.cookies(siblingOrigin);
   assert.ok(!siblings.some(cookie => cookie.name === session.name));
 }
