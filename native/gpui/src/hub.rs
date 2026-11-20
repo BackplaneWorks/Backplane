@@ -103,11 +103,17 @@ struct View {
     /// while history was read drew the older page as the newest, cut the rows read above it and started the list over (Nov 11).
     older_on:bool, older_reqs:std::collections::HashSet<u64>,
 }
+/// This app's client id (`cid`, sent in every view request): one per process and hub, kept across reconnects. The hub maps it to the
+/// connection that holds a KiCad pane (`viewer.runtime.holder` is that connection's id; the hub logs "kicad embed: connection N is client
+/// <cid>"). For the e2e: the `hub_connected` log line at each (re)connect and the KiCad report's `cid`.
+static CID:std::sync::Mutex<String>=std::sync::Mutex::new(String::new());
+fn note_cid(c:String)->String{*CID.lock().unwrap()=c.clone();c}
+pub fn cid()->String{CID.lock().unwrap().clone()}
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
 impl View {
     fn new(config:&Config)->Self {let mut v=Self::fresh(config);let reopen=crate::local::Local::load().default_view!="list"; let saved_view=crate::screens::place::take_view(); if let (true,Some((target,session)))=(reopen,saved_view){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=Restore::First;}v}
-    fn fresh(config:&Config)->Self {Self {launcher:config.launched,restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:crate::pairing::http_of(&config.hub),cid:format!("gpui-{}-{}",std::process::id(),millis()),
+    fn fresh(config:&Config)->Self {Self {launcher:config.launched,restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:crate::pairing::http_of(&config.hub),cid:note_cid(format!("gpui-{}-{}",std::process::id(),millis())),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
         view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,older_on:false,older_reqs:Default::default(),req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     /// the session key the composer's text goes under: the thread on show (a bot's target shows its chat thread), else the target
@@ -242,7 +248,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             match x["t"].as_str().unwrap_or("") {
                 "voice"=>{let _=events.send(Event::Voice(x)).await;continue;}
                 "google"=>{let _=events.send(Event::Data("google-changed",Value::Null)).await;continue;}
-                /* i18n-ok: connection errors, logged */ "view"=>{if x.get("version").is_none()&&x["thread"].is_string()&&x["kind"].is_string() {let g=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::ViewShow(g("thread"),g("kind"),g("path"),g("frame"),g("token"))).await;continue;}ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");v.greeting=x;let _=events.send(Event::Hello).await;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;
+                /* i18n-ok: connection errors, logged */ "view"=>{if x.get("version").is_none()&&x["thread"].is_string()&&x["kind"].is_string() {let g=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::ViewShow(g("thread"),g("kind"),g("path"),g("frame"),g("token"))).await;continue;}ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");eprintln!("GPUI_LOG {}",json!({"hub_connected":{"cid":v.cid,"generation":x["generation"],"epoch":x["epoch"],"at_ms":millis()}}));v.greeting=x;let _=events.send(Event::Hello).await;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;
                     // the star suggestion, if it is still out (a reconnect shows it again until it is decided)
                     let id=rpc_id();v.rpcs.insert(id,"star");sink.send(Message::Binary(wire::encode(&json!({"id":id,"m":"star.offer","p":{}})).into())).await?;
                     // the one-time telemetry notice, if the hub offers it (screens/tmnotice.rs)
