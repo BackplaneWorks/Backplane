@@ -45,6 +45,7 @@ pub struct PlotView {
     pub boards: crate::viewers::boards::BoardsUi,
     /// The hub's probe this canvas last lit, with the source it was lit on ("<key>\u{1}<info>"): another source or another probe lights it again.
     pub probe_at: String,
+    pub restore_pick: Option<(String, super::plot::Pick)>,
     /// Follow agent: how many times a person's hand moved this canvas (screens::follow), and the focus the camera takes once its plot is drawn.
     pub hands: u32, pub follow_to: Option<([f32; 4], serde_json::Value)>,
     /// Per-window loading elapsed-time clock (scoped to this Backplane entity, never thread-local).
@@ -593,6 +594,9 @@ pub fn cross_probe(app: &mut Backplane, slot: usize, card: &super::plot::Card) {
 /// hub has none. Called while the page is drawn; the requests go out right after.
 pub fn probe_sync(cx: &mut Context<Backplane>, slot: usize, pv: &mut PlotView, key: &str, probe: &str) {
     let tag = format!("{key}\u{1}{probe}");
+    if let Some((saved, pick)) = pv.restore_pick.take() {
+        if saved == tag && !probe.is_empty() { pv.picked = Some(pick); }
+    }
     if pv.probe_at == tag || key.is_empty() { return }
     // a tap (or a clear) on its way to the hub: what this canvas shows is already that; the hub's older copy waits
     if let Some((sent, at)) = PROBE_SENT.lock().unwrap().clone() {
