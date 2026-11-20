@@ -27,8 +27,37 @@ pub const PCBPARTS_NAME: &str = "pcbparts";
 /// The `pcbparts` entry Backplane keeps: a remote server, in the form `agy mcp add pcbparts <url>` writes.
 pub fn pcbparts_entry() -> Value { json!({"serverUrl": crate::mcpx::gen::PCBPARTS}) }
 
-/// How agy is started: `sh -c RUN agy ARGS...` (the hub resolves `sh`; agy is the person's own binary, run as it is).
-pub const RUN: &str = "exec \"$0\" \"$@\"";
+/// How agy is started: `sh -c RUN agy ARGS...` (the hub resolves `sh`; agy is the person's own binary, run as it is). The variables named in
+/// `BACKPLANE_AGY_UNSET` ([`storage_unset`]) are taken out of its environment first.
+pub const RUN: &str = "for v in $BACKPLANE_AGY_UNSET; do unset \"$v\"; done; unset BACKPLANE_AGY_UNSET; exec \"$0\" \"$@\"";
+pub const UNSET_VAR: &str = "BACKPLANE_AGY_UNSET";
+
+// ---- Where agy's sign-in is ----
+// agy 1.5 keeps its Google sign-in in one of two places. In an SSH session (SSH_CONNECTION, SSH_CLIENT or SSH_TTY set) it uses the token file
+// alone ("Using file-based token storage because SSH session detected"); anywhere else a composite store, which moves the token into the OS
+// keyring (the Secret Service) and leaves only its metadata in the file. A hub started from an SSH login hands those variables to every agy it
+// runs, so on Nov 20 each refresh by the person's own agy in a desktop terminal emptied the file of its token and every Backplane turn after it
+// said "You are not logged into Antigravity" (silent auth failed) until the person ran `agy` again in an SSH terminal, which wrote the file back.
+// So each run uses the store that holds the sign-in now: the file when it holds one (a refresh token), the keyring otherwise, when there is
+// a session bus to reach it. Backplane reads only whether the file has a refresh token, never a token's value, and never writes the file.
+pub const SSH_VARS: [&str; 3] = ["SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"];
+/// agy's token file under `home`.
+pub fn token_file(home: &Path) -> PathBuf { home.join(".gemini/antigravity-cli/antigravity-oauth-token") }
+/// Whether the token file's text holds the sign-in itself (a non-empty `token.refresh_token`), rather than the metadata the keyring store leaves.
+pub fn file_has_token(text: &str) -> bool {
+    serde_json::from_str::<Value>(text).ok().and_then(|v| v.get("token")?.get("refresh_token")?.as_str().map(|t| !t.is_empty())).unwrap_or(false)
+}
+/// The variables to take out of agy's environment so it reads its sign-in where it is: the SSH ones when the file does not hold the sign-in
+/// (`file`: its text, None when unreadable or missing) and a session bus can reach the keyring; none otherwise (agy decides as in a terminal).
+pub fn storage_unset(file: Option<&str>, var: impl Fn(&str) -> Option<String>) -> Vec<&'static str> {
+    let set = |k: &str| var(k).map_or(false, |v| !v.is_empty());
+    if !SSH_VARS.iter().any(|k| set(k)) || !set("DBUS_SESSION_BUS_ADDRESS") || file.map_or(false, file_has_token) { return vec![] }
+    SSH_VARS.to_vec()
+}
+/// [`storage_unset`] for this machine: the person's token file and the hub's environment.
+pub fn storage_unset_here(home: &Path) -> Vec<&'static str> {
+    storage_unset(std::fs::read_to_string(token_file(home)).ok().as_deref(), |k| std::env::var(k).ok())
+}
 
 /// The person's agy, found where the hub finds provider CLIs (its PATH, the login shell's, ~/.local/bin, ...). In tests only `BACKPLANE_TEST_AGY`.
 pub fn find() -> Option<PathBuf> {
@@ -313,6 +342,28 @@ mod tests {
         std::fs::write(&p, serde_json::to_string(&json!({"mcpServers": {"backplane": mcp_entry(), "pcbparts": mine}})).unwrap()).unwrap();
         assert_eq!(ensure_mcp(&p, true), Mcp::Had); assert_eq!(ensure_mcp(&p, false), Mcp::Had); assert_eq!(read()["mcpServers"]["pcbparts"], mine);
         assert_eq!(std::fs::read_dir(p.parent().unwrap()).unwrap().count(), 1, "no temporary file is left");
+    }
+    /// Nov 20: a hub started over SSH ran agy on the token file alone while the person's desktop agy kept the sign-in in the keyring, leaving the
+    /// file with only metadata; every turn then failed "not logged into Antigravity". The file's structure here is agy 1.5.13's (token values made up).
+    #[test] fn the_sign_in_is_read_where_it_is() {
+        let full = r#"{"token":{"access_token":"a","token_type":"Bearer","refresh_token":"r","expiry":"2026-11-20T12:10:43-05:00","expires_in":3599},"auth_method":"consumer","id_token_email":"x@y.z"}"#;
+        let meta = r#"{"token":{"token_type":"Bearer","expiry":"2026-11-20T12:10:43-05:00"},"auth_method":"consumer","id_token_email":"x@y.z"}"#;
+        assert!(file_has_token(full)); assert!(!file_has_token(meta)); assert!(!file_has_token(r#"{"token":{"refresh_token":""}}"#)); assert!(!file_has_token("")); assert!(!file_has_token("not json"));
+        let env = |vars: &'static [(&'static str, &'static str)]| move |k: &str| vars.iter().find(|(n, _)| *n == k).map(|(_, v)| v.to_string());
+        let ssh_bus: &[(&str, &str)] = &[("SSH_CONNECTION", "1 2 3 4"), ("SSH_TTY", "/dev/pts/1"), ("DBUS_SESSION_BUS_ADDRESS", "unix:path=/run/user/1000/bus")];
+        assert_eq!(storage_unset(Some(meta), env(ssh_bus)), SSH_VARS, "the keyring holds it: agy runs as in a desktop terminal");
+        assert_eq!(storage_unset(None, env(ssh_bus)), SSH_VARS, "no file at all: the keyring is the only place it can be");
+        assert!(storage_unset(Some(full), env(ssh_bus)).is_empty(), "the file holds it: agy keeps reading the file, and never moves it into the keyring");
+        assert!(storage_unset(Some(meta), env(&[("SSH_CLIENT", "1 2 3"), ("DBUS_SESSION_BUS_ADDRESS", "")])).is_empty(), "no session bus: no keyring to reach");
+        assert!(storage_unset(Some(meta), env(&[("DBUS_SESSION_BUS_ADDRESS", "unix:x")])).is_empty(), "no SSH session: agy already uses its keyring");
+        assert_eq!(token_file(Path::new("/h")), Path::new("/h/.gemini/antigravity-cli/antigravity-oauth-token"));
+    }
+    #[test] fn the_runner_takes_the_named_variables_out() {
+        let d = super::super::muse::e2e::dir("agy-cli-unset"); let exe = d.join("agy"); std::fs::write(&exe, "#!/bin/sh\necho \"[$SSH_CONNECTION][$SSH_TTY][$BACKPLANE_AGY_UNSET][$KEEP] $*\"\n").unwrap();
+        { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let run = |unset: &str| { let o = std::process::Command::new("sh").args(["-c", RUN]).arg(&exe).args(["--print=", "a b"]).env("SSH_CONNECTION", "c").env("SSH_TTY", "t").env("KEEP", "k").env(UNSET_VAR, unset).output().unwrap(); String::from_utf8_lossy(&o.stdout).into_owned() };
+        assert_eq!(run(&SSH_VARS.join(" ")), "[][][][k] --print= a b\n");
+        assert_eq!(run(""), "[c][t][][k] --print= a b\n", "nothing named: the environment is the hub's");
     }
     #[test] fn the_mcp_command_does_nothing_outside_backplane() {
         let o = std::process::Command::new("sh").args(["-c", MCP_SH]).env_remove("BACKPLANE_MCP_URL").output().unwrap(); assert!(o.status.success() && o.stdout.is_empty());
