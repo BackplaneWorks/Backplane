@@ -79,7 +79,7 @@ def script():
         if os.environ.get("RAIL_B2_SIZE") == "minimum":
             steps.extend([{"wait": 300}, {"shot": page + "-menu"}])
             if page == "gerbers":
-                steps.extend([{"wait": 300}, {"shot": "gerbers-after", "settle": page}])
+                steps.extend([{"wait": 300}, {"shot": "gerbers-after", "settle": page, "timeout_ms": 90000}])
             else:
                 steps.append({"keys": "escape"})
     return steps
