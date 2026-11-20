@@ -309,27 +309,31 @@ fn small_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static 
 }
 
 /// `actions`: the viewer pane's own controls (screens::viewer), at the end of the page's bar.
-pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &FilesUi, actions: AnyElement) -> AnyElement {
+pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &FilesUi, actions: super::pane_header::Header) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let rows = viewer::file_rows(files);
     let q = ui.filter.as_ref().map(|f| f.read(cx).content.to_string()).unwrap_or_default();
     let vis = visible(&rows, &q);
     let trail = viewer::crumbs(files);
     let focus = ui.focus.clone();
-    // bar: Up, breadcrumbs, then the actions
-    // the crumbs keep room for a name before the buttons wrap to a line of their own (bar_wrap), and never run under them
-    let mut crumbs = div().flex().flex_wrap().items_center().flex_1().min_w(crate::scale::tpx(96.)).overflow_hidden().text_size(crate::scale::tpx(12.));
+    use super::pane_header::{Press, button, command, pane_header};
+    let mut up = button(cx, "fm-up", trs("Up"), Press::File(Do::Up));
+    up.enabled = trail.len() > 1;
+    up.icon = Some("arrow-up");
+    let mut tools = vec![up];
     for (i, cr) in trail.iter().enumerate() {
-        let (a, v) = (cr.action.clone(), cr.value.clone());
-        crumbs = crumbs.child(div().id(SharedString::from(format!("crumb-{i}"))).px_1().cursor_pointer().text_color(c(if i + 1 == trail.len() { "text" } else { "accent" })).hover(|s| s.bg(c("raise"))).child(cr.label.clone()) // (a folder's name)
-            .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })));
-        if i + 1 < trail.len() { crumbs = crumbs.child(div().text_color(c("faint")).child("/")); }
+        tools.push(command(cx, format!("crumb-{i}"), cr.label.clone(), i + 1 == trail.len(), &cr.action, cr.value.clone()));
     }
-    let at_root = trail.len() <= 1;
-    let mut bar = viewer::bar_wrap(light)
-        .child(div().id("fm-up").px_1().cursor_pointer().when(at_root, |d| d.opacity(0.35)).child(crate::art::icon("arrow-up", 14., c("text"))).on_click(cx.listener(|this, _, w, cx| act(this, Do::Up, Some(w), cx))))
-        .child(crumbs);
-    bar = bar.child(small_btn(cx, light, "fm-new", "folder-plus", &t("gpui.b.files.new"), Do::NewFolder)).child(small_btn(cx, light, "fm-upload", "arrow-up", &trs("Upload"), Do::PickUpload)).child(small_btn(cx, light, "fm-zip", "download", &trs("Zip"), Do::DownloadDir)).child(actions);
+    for (id, icon, label, action) in [
+        ("fm-new", "folder-plus", t("gpui.b.files.new"), Do::NewFolder),
+        ("fm-upload", "arrow-up", trs("Upload"), Do::PickUpload),
+        ("fm-zip", "download", trs("Zip"), Do::DownloadDir),
+    ] {
+        let mut tool = button(cx, id, label, Press::File(action));
+        tool.icon = Some(icon);
+        tools.push(tool);
+    }
+    let bar = pane_header(light, actions.identity, tools, actions.controls);
     let mut col = div().size_full().flex().flex_col().relative();
     if let Some(f) = focus.clone() { col = col.track_focus(&f); }
     col = col.key_context("FilesPage").on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| {
