@@ -266,10 +266,15 @@ default_border none
 hide_edge_borders both
 ipc-socket $OUT/i3.sock
 EOF
-  if [ "${KEMBED_WM:-i3}" != mutter ]; then
-  own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" i3 -c "$OUT/i3.conf" >"$OUT/i3.log" 2>&1
-  for _ in $(seq 30); do [ -S "$OUT/i3.sock" ] && break; sleep 0.1; done
-  fi
+  # KEMBED_WM=openbox|xfwm4: that window manager instead of i3 (click to focus, windows placed where they ask, stacked not tiled), for a
+  # suite that must hold under more than one (embed_pointer_keys_e2e); the i3-only commands then do nothing
+  case "${KEMBED_WM:-i3}" in
+    mutter) ;;
+    openbox) own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" openbox --sm-disable >"$OUT/wm.log" 2>&1; sleep 1 ;;
+    xfwm4) own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" xfwm4 --compositor=off --sm-client-disable >"$OUT/wm.log" 2>&1; sleep 1 ;;
+    *) own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" i3 -c "$OUT/i3.conf" >"$OUT/i3.log" 2>&1
+       for _ in $(seq 30); do [ -S "$OUT/i3.sock" ] && break; sleep 0.1; done ;;
+  esac
 
   # mutter places a client where it likes at the size it asked for (1400x900, centred); i3 tiles it over the screen. Under mutter each
   # client window is maximized as it appears, so a suite sees the same pane as under i3 (KEMBED_WM_KEEP_MAX=0 leaves it as GNOME puts it)

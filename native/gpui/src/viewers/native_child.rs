@@ -164,8 +164,12 @@ mod imp {
         // GPUI's activate) moves on to the proxy at once (pump)
         let mask = c.get_window_attributes(top).ok().and_then(|r| r.reply().ok()).map(|a| u32::from(a.your_event_mask)).unwrap_or(0);
         let _ = c.change_window_attributes(top, &ChangeWindowAttributesAux::new().event_mask(EventMask::from(mask | u32::from(EventMask::FOCUS_CHANGE))));
-        let _ = c.flush();
         proxies().lock().unwrap().insert(top, id);
+        // the focus already on the top-level (it had the keyboard before the pane came: an automatic attach) has no FocusIn to come: moved now
+        if !PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) && c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top) {
+            let _ = c.set_input_focus(InputFocus::PARENT, id, x11rb::CURRENT_TIME);
+        }
+        let _ = c.flush();
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy": id, "top": top})); }
         Some(id)
     }
@@ -616,7 +620,15 @@ mod imp {
     pub fn keep_focus(_top: u64) -> bool { false }
     /// Whether KiCad has the keyboard now (the pane's tick): while it has, a focus on the top-level is left where it is (pump)
     static PANE_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-    pub fn note_pane_keys(kicad: bool) { PANE_KEYS.store(kicad, std::sync::atomic::Ordering::SeqCst); }
+    pub fn note_pane_keys(kicad: bool) {
+        // (called every tick: only a change to Backplane's keyboard looks at the focus)
+        let was = PANE_KEYS.swap(kicad, std::sync::atomic::Ordering::SeqCst);
+        // the keyboard Backplane's again with the focus left on a top-level itself (a FocusIn seen while KiCad still had the keys): its proxy
+        if kicad || !was { return }
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let Some(f) = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|r| r.focus) else { return };
+        if let Some(p) = proxies().lock().unwrap().get(&f).copied() { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
+    }
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
