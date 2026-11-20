@@ -133,6 +133,24 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let r = ask(&mut ws, 10, "thread.entries", json!({"thread":"t1"})).await; assert!(r["result"]["entries"].as_array().unwrap().iter().all(|x| x["kind"] != "ask"), "an answered ask is no longer open");
     let _ = hub;
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_phones_reply_keeps_the_desktops_in_reply_to_block() {
+    let (hub, port) = up("reply").await; let mut ws = open(port, "&enc=json").await; let h = next(&mut ws).await;
+    assert!(h["features"].as_array().unwrap().iter().any(|f| f == "reply"), "{h}");
+    let dir = crate::plat::tmp::dir("data-reply");
+    let pid = ask(&mut ws, 1, "project.add", json!({"path":dir.to_string_lossy()})).await["result"]["project"]["id"].as_str().unwrap().to_string();
+    let th = ask(&mut ws, 2, "thread.create", json!({"project":pid,"text":"first words"})).await["result"]["thread"]["id"].as_str().unwrap().to_string();
+    let quoted = "All done:\n- **merged**";
+    let r = ask(&mut ws, 3, "message.send", json!({"thread":th,"text":"make it faster","clientId":"c-r1","replyTo":{"id":"msg_A:0:aa","text":quoted}})).await; assert_eq!(r["ok"], true, "{r}");
+    let e = &r["result"]["entry"]; assert_eq!((e["text"].as_str(), e["replyTo"]["id"].as_str(), e["replyTo"]["quote"].as_str()), (Some("make it faster"), Some("msg_A:0:aa"), Some("All done:")), "{e}");
+    // the agent reads exactly what the desktop's Reply sends (session/composer.rs reply_block)
+    let kept = { let m = hub.model().await; m.tail(&hub.store, &th, 8).into_iter().find(|r| r.id == "c-r1").map(|r| r.text).unwrap() };
+    assert_eq!(kept, format!("{}\n\nmake it faster", crate::session::composer::reply_block("msg_A:0:aa", quoted)));
+    let es = ask(&mut ws, 4, "thread.entries", json!({"thread":th})).await; let got = es["result"]["entries"].as_array().unwrap().iter().find(|x| x["id"] == "c-r1").cloned().unwrap();
+    assert_eq!((got["text"].as_str(), got["replyTo"]["id"].as_str()), (Some("make it faster"), Some("msg_A:0:aa")), "{got}");
+    // a reply with nothing quoted, or no id, is a plain message
+    let r = ask(&mut ws, 5, "message.send", json!({"thread":th,"text":"plain","clientId":"c-r2","replyTo":{"id":"m1","text":"  "}})).await; assert!(r["result"]["entry"]["replyTo"].is_null(), "{r}");
+    let kept = { let m = hub.model().await; m.tail(&hub.store, &th, 8).into_iter().find(|r| r.id == "c-r2").map(|r| r.text).unwrap() }; assert_eq!(kept, "plain");
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_subscriptions_push_entries_text_turns_and_list_changes() {
     let (hub, port) = up("subs").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
     let lists = ask(&mut ws, 1, "subscribe", json!({"topic":"lists"})).await["result"]["sub"].as_u64().unwrap();
