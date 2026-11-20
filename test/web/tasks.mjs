@@ -10,7 +10,7 @@ async function deviceButton(rpc, name, action) {
   return { row, button: row.buttons.find(button => button.action === action) };
 }
 
-export async function browserTasks({ context, origin, rpc, thread, canary, advanceDays, moveFixtureGerbers, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs, checkBoundary, registeredRoutes }) {
+export async function browserTasks({ temp, context, origin, rpc, thread, canary, advanceDays, moveFixtureGerbers, assets, replyText, screenshot, nativeShot, readRegistry, checkLogs, checkBoundary, registeredRoutes }) {
   let leaked = false;
   const inspect = bytes => { if (Buffer.from(bytes).includes(canary)) leaked = true; };
   const urls = new Set();
@@ -135,6 +135,7 @@ export async function browserTasks({ context, origin, rpc, thread, canary, advan
     }
     if (nativeShot) await nativeShot('native-viewers');
   }
+  await (await import('./voice.mjs')).checkVoice({page,context,origin,rpc,thread,temp});
   const revocation = await deviceButton(rpc, name, 'device-revoke');
   const closed = socket.waitForEvent('close', { timeout: 1000 });
   await Promise.all([closed, rpc('devices.page.act', revocation.button)]);
