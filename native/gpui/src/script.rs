@@ -1015,20 +1015,15 @@ impl Backplane {
         let diff_on = th["diff"].is_object();
         let open = v["open"].as_str().unwrap_or("");
         let active = if diff_on { "diff".to_string() } else { crate::screens::viewer::active_kind(v, None) };
-        let (press_key, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
         let solid_state = |want_key: &str| -> Option<&'static str> {
             let Some(s) = self.screens.active_solid() else { return None };
             let sr = s.read(cx);
             if !want_key.is_empty() && sr.key() != want_key { return None; }
             if !sr.note.is_empty() { return Some("empty"); }
             if !want_key.is_empty() && sr.image_key() != want_key { return None; }
-            let painted_now = sr.painted_count();
-            let painted_for_key = if !want_key.is_empty() && press_key != want_key {
-                painted_now > press_painted
-            } else {
-                painted_now > 0
-            };
-            if sr.stage_text().is_empty() && painted_for_key && sr.stats.last_size.0 > 0 && sr.stats.last_size.1 > 0 {
+            // Each source owns its image and paint counter. A successful paint on
+            // this source cannot be compared to the count on the previous source.
+            if sr.stage_text().is_empty() && sr.painted_count() > 0 && sr.stats.last_size.0 > 0 && sr.stats.last_size.1 > 0 {
                 return Some("ready");
             }
             None
@@ -1111,7 +1106,7 @@ impl Backplane {
         let v = &th["viewer"];
         let d = &th["diff"];
         let rects = crate::art::ctl_rects();
-        let (_, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
+        let (press_key, press_painted) = PRESS_SOLID.with(|c| c.borrow().clone());
         let (solid_key, solid_image_key, solid_shown, solid_note, solid_stage, solid_painted, solid_last_w, solid_last_h) = match self.screens.active_solid() {
             Some(s) => { let sr = s.read(cx); (sr.key().to_string(), sr.image_key().to_string(), sr.shown_key().to_string(), sr.note.clone(), sr.stage_text(), sr.painted_count(), sr.stats.last_size.0, sr.stats.last_size.1) }
             None => (String::new(), String::new(), String::new(), String::new(), String::new(), 0, 0, 0),
@@ -1158,7 +1153,7 @@ impl Backplane {
             "solid_note": solid_note,
             "solid_stage": solid_stage,
             "solid_painted": solid_painted,
-            "solid_painted_since_press": solid_painted.saturating_sub(press_painted),
+            "solid_painted_since_press": solid_painted.saturating_sub(if press_key == solid_key { press_painted } else { 0 }),
             "solid_last_w": solid_last_w,
             "solid_last_h": solid_last_h,
             "diff_open": d.is_object(),
