@@ -257,6 +257,16 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     let upgrade = req.route() == "/ws";
     let reply = if hub.setting("web.enabled").await.as_deref() != Some("1") {
         json_response("404 Not Found", json!({}), "")
+    } else if req.route() == "/auth/web/setup" {
+        #[cfg(target_os = "linux")]
+        let ok = unix_proxy && req.method == "GET" && req.target == "/auth/web/setup"
+            && normalize_unix_authority(&mut req, authority)
+            && !req.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("tailscale-funnel-request"))
+            && single_header(&req, "x-backplane-setup").is_some_and(|n|
+                super::webprobe::consume(&hub.cfg.home, authority, n));
+        #[cfg(not(target_os = "linux"))]
+        let ok = false;
+        crate::wire::response_for(if ok { "204 No Content" } else { "404 Not Found" }, "text/plain", SECURITY_HEADERS, &[])
     } else if (unix_proxy && !normalize_unix_authority(&mut req, authority)) || !ingress.accepts(&req, upgrade) || login == "tagged-devices" {
         json_response("401 Unauthorized", json!({"state":"unauthorized"}), "")
     } else if req.target.split_once('?').is_some_and(|(_, query)| query.split('&').any(|field| {
