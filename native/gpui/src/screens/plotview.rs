@@ -38,7 +38,7 @@ pub struct PlotView {
     /// The plot as last tessellated, and what it was made from: a paint of the same chunks at the same zoom and canvas size submits these
     /// again, moved to where the camera is now, instead of tessellating every chunk (tens of ms on a real board) for a frame that only moved
     /// the plot (a drag) or something else. `tess_ahead`: the plot is being tessellated around the camera off the window's thread.
-    pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>, pub tess_ahead: bool,
+    pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>, pub tess_ahead: std::rc::Rc<std::cell::Cell<bool>>,
     /// What the probe lights, tessellated for that exact camera and those lit pieces (a hash of `lit`).
     pub lit_tess: Option<(TessKey, u64, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
     /// The Boards menu (viewers::boards), held on the Board/Schematic page's camera for every page that shows it.
@@ -88,9 +88,9 @@ fn tessellate(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: &View
 fn tess_ahead(this: &Entity<Backplane>, cx: &mut App, slot: usize, chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: View, b: Bounds<Pixels>) {
     this.update(cx, |app, cx| {
         let pv = app.screens.pv(slot);
-        if pv.tess_ahead { return }
+        let running = pv.tess_ahead.clone();
+        if running.replace(true) { return }
         let source = pv.key.clone();
-        pv.tess_ahead = true;
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
         let pad = tess_pad(w, h); let mut key = TessKey::of(chunks, order, &v, b, pad);
         let (chunks, order) = (chunks.to_vec(), order.to_vec());
@@ -99,13 +99,28 @@ fn tess_ahead(this: &Entity<Backplane>, cx: &mut App, slot: usize, chunks: &[std
             let (out, whole) = cx.background_executor().spawn(async move { tessellate(&chunks, &order, &v, b.origin, w, h, pad, None) }).await;
             if whole { key.pad = f32::INFINITY; }
             let _ = weak.update(cx, |app, cx| {
-                if app.screens.plots.owner != owner || app.screens.plots[slot].key != source { return }
-                let pv = app.screens.pv(slot); pv.tess_ahead = false;
+                if !finish_tess(&running, app.screens.plots.owner == owner && app.screens.plots[slot].key == source) { return }
+                let pv = app.screens.pv(slot);
                 // (a plot, zoom or canvas that changed meanwhile: these paths are of the old one, and the paint on show keeps its own)
                 if pv.tess.as_ref().map_or(true, |t| t.0.same_plot(&key)) { pv.tess = Some((key, std::rc::Rc::new(out))); cx.notify(); }
             });
         }).detach();
     });
+}
+
+fn finish_tess(running: &std::cell::Cell<bool>, current: bool) -> bool {
+    running.set(false);
+    current
+}
+
+#[cfg(test)]
+#[test]
+fn stale_tessellation_releases_its_originating_slot() {
+    let slot = PlotView::default();
+    let job = slot.tess_ahead.clone();
+    assert!(!job.replace(true));
+    assert!(!finish_tess(&job, false));
+    assert!(!slot.tess_ahead.replace(true));
 }
 
 fn color(c: &Chunk, factor: f32) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha * factor; r.into() }
