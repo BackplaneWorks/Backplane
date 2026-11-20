@@ -28,7 +28,7 @@ pub fn route(href: &str, file: bool) -> Route {
 /// A file the viewer draws, by its name (the hub's present/filelink.rs `design_kind`): a KiCad board, schematic or project, a STEP, STP or
 /// GLB model, Gerbers. Such a word is a link in a message even alone (`main.kicad_sch`), and opens inside Backplane.
 pub fn design_file(p: &str) -> bool {
-    let name = p.rsplit('/').next().unwrap_or(p); let l = name.to_ascii_lowercase();
+    let l = file_name(p).to_ascii_lowercase();
     let Some((stem, e)) = l.rsplit_once('.') else { return false };
     let inner = e.strip_prefix('g').map_or(false, |n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit()));
     !stem.is_empty() && (inner || matches!(e, "kicad_pcb" | "kicad_sch" | "kicad_pro" | "pcbdoc" | "schdoc" | "prjpcb" | "step" | "stp" | "glb" | "gbr" | "gbrjob" | "gtl" | "gbl" | "gts" | "gbs" | "gto" | "gbo" | "gtp" | "gbp" | "gko" | "gm1" | "gml" | "drl" | "xln"))
@@ -36,14 +36,21 @@ pub fn design_file(p: &str) -> bool {
 /// A file KiCad edits (a board, a schematic, a KiCad project): its link offers Open in KiCad (embedded).
 pub fn kicad_file(p: &str) -> bool { let l = p.split(['#', '?']).next().unwrap_or(p).to_ascii_lowercase(); let l = l.trim_end_matches(|c: char| c.is_ascii_digit() || c == ':'); [".kicad_pcb", ".kicad_sch", ".kicad_pro"].iter().any(|x| l.ends_with(x)) }
 
+/// A path's last part: after its last `/` or `\` (a Windows path, `C:\w\a.kicad_pcb` or `\\host\share\a.kicad_pcb`, may mix both).
+fn file_name(p: &str) -> &str { p.rsplit(['/', '\\']).next().unwrap_or(p) }
+/// Whether two file stems name the same file: case-blind where the file system is (Windows, macOS), exact elsewhere.
+fn same_stem(a: &str, b: &str, fold: bool) -> bool { if fold { a.eq_ignore_ascii_case(b) } else { a == b } }
+const FOLD_CASE: bool = cfg!(any(windows, target_os = "macos"));
+
 /// A file link's name without its folder, extension or `:line` (`boards/main/main.kicad_pro:3` → `main`): what the viewer's source must be named.
 pub fn stem_of(p: &str) -> String {
     let p = p.split('#').next().unwrap_or(p); let p = p.trim_end_matches(|c: char| c.is_ascii_digit() || c == ':');
-    let name = p.rsplit('/').next().unwrap_or(p); name.rsplit_once('.').map_or(name, |(s, _)| s).to_string()
+    let name = file_name(p); name.rsplit_once('.').map_or(name, |(s, _)| s).to_string()
 }
 /// Whether the viewer shows the board or schematic of that name (its page and its source key, `0|<root>|<file>`).
-pub fn shows_file(open: &str, key: &str, stem: &str) -> bool {
-    matches!(open, "board" | "schematic") && !stem.is_empty() && key.rsplit('/').next().map_or(false, |f| f.rsplit_once('.').map_or(false, |(s, _)| s == stem))
+pub fn shows_file(open: &str, key: &str, stem: &str) -> bool { shows_file_as(open, key, stem, FOLD_CASE) }
+fn shows_file_as(open: &str, key: &str, stem: &str, fold: bool) -> bool {
+    matches!(open, "board" | "schematic") && !stem.is_empty() && file_name(key.rsplit('|').next().unwrap_or(key)).rsplit_once('.').map_or(false, |(s, _)| same_stem(s, stem, fold))
 }
 
 /// What hovering a link shows: its target, as the person would read it.
@@ -81,6 +88,19 @@ mod tests {
         assert!(shows_file("schematic", "1|/w|/w/boards/main/main.kicad_sch", "main")); assert!(shows_file("board", "0|/w|/w/main.kicad_pcb", "main"));
         assert!(!shows_file("board", "0|/w|", "main"), "the project's own board, before the file's"); assert!(!shows_file("mech", "2|/w|/w/main.step", "main"));
         assert!(!shows_file("board", "0|/w|/w/other.kicad_pcb", "main"));
+    }
+    #[test] fn windows_paths_name_the_same_file() {
+        // a link to a Windows absolute path, a UNC path, mixed separators, a file:// address and a project-relative link
+        assert_eq!(stem_of(r"C:\Users\h\proj\ecc83-pp.kicad_sch"), "ecc83-pp"); assert_eq!(stem_of(r"\\host\share\p\main.kicad_pcb"), "main");
+        assert_eq!(stem_of(r"C:/Users/h\proj/boards\main.kicad_pcb:12"), "main"); assert_eq!(stem_of("file:///C:/w/a.b.kicad_sch"), "a.b");
+        assert_eq!(stem_of(r"boards\main\main.kicad_pro"), "main"); assert_eq!(stem_of("ecc83-pp.kicad_sch"), "ecc83-pp");
+        // the viewer's source key on Windows (#1369)
+        let key = r"1|C:\bp\runs\g1353\proj|C:\bp\runs\g1353\proj\ecc83-pp.kicad_sch";
+        assert!(shows_file("schematic", key, "ecc83-pp")); assert!(!shows_file("schematic", key, "proj")); assert!(!shows_file("schematic", r"1|C:\w|", "w"), "no file yet");
+        assert!(shows_file("board", r"0|C:\w|C:\w/boards\main.kicad_pcb", "main"), "mixed separators");
+        assert!(shows_file("board", r"0|\\host\share\w|\\host\share\w\main.kicad_pcb", "main"), "UNC");
+        // the same file in another case: one file where the file system ignores case, two where it does not
+        assert!(shows_file_as("board", r"0|C:\w|C:\w\Main.kicad_pcb", "main", true)); assert!(!shows_file_as("board", "0|/w|/w/Main.kicad_pcb", "main", false));
     }
     #[test] fn what_opens_nowhere_is_a_note() {
         assert!(matches!(route("ftp://x", false), Route::Note(_))); assert!(matches!(route("", true), Route::Note(_))); assert!(matches!(route("javascript:alert(1)", false), Route::Note(_)));
