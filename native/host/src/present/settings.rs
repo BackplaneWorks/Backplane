@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("git", "Projects and git"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("mouse", "Mouse and trackpad"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("git", "Projects and git"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("mouse", "Mouse and trackpad"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("web", "Web UI"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -306,6 +306,26 @@ pub fn loopback_invite(invite: &str) -> bool {
 }
 fn row_tone(label: &str, note: &str, tone: &str) -> Value { let mut r = row(label, note, vec![]); r["tone"] = json!(tone); r }
 
+fn web_ui(st: &State, info: &Value) -> Vec<Value> {
+    let status = &info["web"];
+    let enabled = set(st, "web.enabled", "") == "1";
+    let mut rows = Vec::new();
+    let reason = status["reason"].as_str().unwrap_or("Browser access requires a verified Tailscale HTTPS connection.");
+    let available = status["available"] == true;
+    let buttons = if enabled || available {
+        vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]
+    } else { vec![] };
+    rows.push(row("Browser access", if available { "Pair each browser in Settings › Devices. Paired browsers can use the terminal." } else { reason }, buttons));
+    if enabled && available {
+        if let Some(address) = status["address"].as_str() {
+            let mut link = row("Web address", address, vec![]);
+            link["qr"] = json!(crate::net::qr::text(address).lines().collect::<Vec<_>>());
+            rows.push(link);
+        }
+    }
+    rows
+}
+
 /// Settings → Devices: Add a device, the paired devices, the local network addresses the hub was let answer on, and the pairing
 /// links (net/pairing.rs `Registry::list` with `lan` and `host`, put in `info.devices` by the presenter's caller: `routes::AuthRoutes::devices`).
 /// An invitation made here (`device-invite`, kept in the draft `@invite`) carries every address it can be shown with (net/plan.rs): the
@@ -334,7 +354,7 @@ pub fn devices(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     } else if let Some(e) = inv["error"].as_str() { r.push(row("Add a device", &format!("Could not make an invitation: {e}."), vec![btn("Try again", "device-invite", "", false)])) }
     else { r.push(row("Add a device", "Makes a link, a QR code and a short code for one new device. Each works once, for ten minutes.", vec![btn("Add a device", "device-invite", "", false)])) }
     let enabled = set(st, "web.enabled", "") == "1";
-    r.push(row("Browser access", "Pair a browser over HTTPS using the dedicated Backplane tailnet name. A paired browser can use the terminal.",
+    r.push(row("Browser access", "Pair a browser over HTTPS on your tailnet. A paired browser can use the terminal.",
         vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]));
     if enabled {
         for req in list["browserPending"].as_array().into_iter().flatten() {
@@ -813,7 +833,7 @@ fn mcp_patch(p: serde_json::Map<String, Value>) -> Value {
 
 /// One page's rows (without the way back).
 fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
-    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "mouse" => mouse(st), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
+    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "mouse" => mouse(st), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "web" => web_ui(st, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
             r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
             r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
             r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] }
@@ -1064,7 +1084,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Projects and git", "Notifications", "Agents", "MCP servers", "Writing", "CAD", "Mouse and trackpad", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Projects and git", "Notifications", "Agents", "MCP servers", "Writing", "CAD", "Mouse and trackpad", "Ordering", "Network and updates", "Devices", "Web UI", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn projects_and_git_offers_auto_push_off_by_default() {
@@ -1146,6 +1166,17 @@ mod tests {
     }
     fn by<'a>(r: &'a [Value], l: &str) -> &'a Value { r.iter().find(|x| x["label"] == l).unwrap_or_else(|| panic!("no row {l}: {r:?}")) }
     /// Add a device: Tailscale first, its own link and QR code, the code beside the hub address and the expiry; the link and code copy.
+    #[test] fn web_ui_shows_only_the_active_address() {
+        let address = "https://bp.example.ts.net";
+        let info = json!({"web":{"available":true,"address":address}});
+        assert!(pg_rows("web", &[], json!({}), info.clone()).iter().all(|row| row["label"] != "Web address" && row.get("qr").is_none()));
+        let rows = pg_rows("web", &[("web.enabled", "1")], json!({}), info);
+        let link = by(&rows, "Web address");
+        assert_eq!(link["note"], address);
+        assert_eq!(link["qr"], json!(crate::net::qr::text(address).lines().collect::<Vec<_>>()));
+        let unavailable = pg_rows("web", &[], json!({}), json!({}));
+        assert_eq!(by(&unavailable, "Browser access")["buttons"], json!([]));
+    }
     #[test] fn devices_an_invitation_shows_the_chosen_address_link_qr_code_and_expiry() {
         let r = dev_rows(json!({"@invite": invite3(false)}), json!({"devices": [], "invitations": [], "lan": [], "host": "127.0.0.1"}));
         let pick = by(&r, "Reach this hub by");
