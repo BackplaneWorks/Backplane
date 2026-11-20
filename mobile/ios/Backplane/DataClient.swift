@@ -167,6 +167,10 @@ final class DataClient {
     /// text put back into a thread's draft from outside the composer (Edit, a refusal): the open composer reads `drafts` again when `rev` moves
     struct DraftBack: Equatable { var thread = ""; var rev = 0 }
     private(set) var draftBack = DraftBack()
+    /// Reply on a message (feature `reply`): per thread, the message the composer's strip answers; `replyFocus` moves when one is picked, so the box takes the keyboard
+    private(set) var replying: [String: DReplyRef] = [:]
+    struct ReplyFocus: Equatable { var thread = ""; var rev = 0 }
+    private(set) var replyFocus = ReplyFocus()
 
     // a tapped notification: the thread to open and the approval to land on. The views follow these
     var pushThread = ""
@@ -1005,33 +1009,40 @@ final class DataClient {
     /// A message: message.send at once, whatever the thread is doing (the hub puts it into a running turn). With the socket down, or while older
     /// unsent ones wait, it goes to the outbox instead (a message with pictures is not kept there: it stays in the conversation with Retry).
     /// `voice`: dictated (what the hub tells the agent of it, voice/mark.rs). The message's client id.
-    @discardableResult func send(_ tid: String, _ text: String, images: [Data] = [], voice: [String: Any]? = nil) -> String {
+    /// `reply`: the message this one answers (the composer's strip, feature `reply`); the strip is dropped once it is sent.
+    @discardableResult func send(_ tid: String, _ text: String, images: [Data] = [], voice: [String: Any]? = nil, reply: DReplyRef? = nil) -> String {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !images.isEmpty else { return "" }
         let cid = UUID().uuidString
-        queueError[tid] = nil
+        let rp = reply.flatMap { has("reply") && !text.isEmpty ? ReplyDraft.param($0) : nil }
+        queueError[tid] = nil; replying[tid] = nil
         if images.isEmpty && (conn != .online || !outbox.isEmpty) {
-            outbox.push(thread: tid, text: text, clientId: cid); saveOutbox()
+            outbox.push(thread: tid, text: text, clientId: cid, replyTo: rp); saveOutbox()
             setDraft(tid, "")
             if conn == .online { let g = gen; Task { await flushOutbox(g) } }
             return cid
         }
         var local = DEntry(id: "local:" + cid, kind: "user", text: text, at: Int(Date().timeIntervalSince1970 * 1000), clientId: cid)
-        local.sending = true; local.localImages = images; local.voice = voice.map(DVoiceMark.init)
+        local.sending = true; local.localImages = images; local.voice = voice.map(DVoiceMark.init); local.replyParam = rp
+        if let r = reply, rp != nil { let c = ReplyDraft.chip(r); local.replyTo = DReplyTo(id: c.id, quote: c.quote) }
         entries[tid, default: []].append(local)
         setDraft(tid, "")
-        Task { await deliver(tid, text, cid, images, voice: voice) }
+        Task { await deliver(tid, text, cid, images, voice: voice, reply: rp) }
         return cid
     }
+    /// Reply on a message (feature `reply`): the composer's strip shows it until the send or its ×.
+    func startReply(_ tid: String, _ r: DReplyRef) { replying[tid] = r; replyFocus = ReplyFocus(thread: tid, rev: replyFocus.rev + 1) }
+    func dropReply(_ tid: String) { replying[tid] = nil }
     func retry(_ tid: String, _ entry: DEntry) {
         guard let cid = entry.clientId, var l = entries[tid], let i = l.firstIndex(where: { $0.id == entry.id }) else { return }
         l[i].failed = false; l[i].sending = true; entries[tid] = l
-        Task { await deliver(tid, entry.text, cid, entry.localImages) }
+        Task { await deliver(tid, entry.text, cid, entry.localImages, reply: entry.replyParam) }
     }
-    private func deliver(_ tid: String, _ text: String, _ cid: String, _ images: [Data], voice: [String: Any]? = nil) async {
+    private func deliver(_ tid: String, _ text: String, _ cid: String, _ images: [Data], voice: [String: Any]? = nil, reply: [String: String]? = nil) async {
         do {
             var p: [String: Any] = ["thread": tid, "text": text, "clientId": cid]
             if let voice { p["voice"] = voice }
+            if let reply { p["replyTo"] = reply }
             if !images.isEmpty {
                 p["attachments"] = images.enumerated().map { ["name": "photo-\($0.offset + 1).jpg", "mime": "image/jpeg", "data": $0.element.base64EncodedString()] }
             }
@@ -1044,9 +1055,9 @@ final class DataClient {
             if images.isEmpty, var l = entries[tid], let i = l.firstIndex(where: { $0.clientId == cid }) {
                 l.remove(at: i); entries[tid] = l
                 // the socket went: into the outbox, sent again (same clientId, posted once) when connected
-                if Self.socketGone(error) { outbox.push(thread: tid, text: text, clientId: cid); saveOutbox() }
-                // the hub said no: its words, and the text back into the draft
-                else { refused(tid, text, error) }
+                if Self.socketGone(error) { outbox.push(thread: tid, text: text, clientId: cid, replyTo: reply); saveOutbox() }
+                // the hub said no: its words, and the text back into the draft (and what it answered back over it)
+                else { refused(tid, text, error, reply: reply) }
                 return
             }
             if var l = entries[tid], let i = l.firstIndex(where: { $0.clientId == cid }) { l[i].sending = false; l[i].failed = true; entries[tid] = l }
@@ -1054,9 +1065,10 @@ final class DataClient {
     }
     /// The call never got the hub's answer (no socket, cut, or no reply): not a refusal, so the message is kept and sent again.
     nonisolated static func socketGone(_ e: Error) -> Bool { guard let d = e as? DError else { return true }; return d.code == "OFFLINE" || d.code == "TIMEOUT" }
-    private func refused(_ tid: String, _ text: String, _ error: Error) {
+    private func refused(_ tid: String, _ text: String, _ error: Error, reply: [String: String]? = nil) {
         queueError[tid] = (error as? DError)?.message ?? error.localizedDescription
         backToDraft(tid, text)
+        if let r = reply, let id = r["id"], let t = r["text"], replying[tid] == nil { replying[tid] = DReplyRef(id: id, text: t, role: (entries[tid] ?? []).first { $0.id == id }?.kind ?? "assistant") }
     }
     private func backToDraft(_ tid: String, _ text: String) {
         setDraft(tid, Outbox.draft(drafts[tid] ?? "", adding: text))
@@ -1091,14 +1103,16 @@ final class DataClient {
         flushing = true; defer { flushing = false }
         while g == gen, conn == .online, let it = outbox.next {
             do {
-                let r: DEntryReply = try await call("message.send", ["thread": it.thread, "text": it.text, "clientId": it.clientId])
+                var p: [String: Any] = ["thread": it.thread, "text": it.text, "clientId": it.clientId]
+                if let r = it.replyTo { p["replyTo"] = r }
+                let r: DEntryReply = try await call("message.send", p)
                 outbox.sent(it.clientId); saveOutbox()
                 put(r.entry, in: it.thread)
                 await loadQueue(it.thread)
             } catch {
                 if Self.socketGone(error) { return }
                 outbox.sent(it.clientId); saveOutbox()
-                refused(it.thread, it.text, error)
+                refused(it.thread, it.text, error, reply: it.replyTo)
             }
         }
     }

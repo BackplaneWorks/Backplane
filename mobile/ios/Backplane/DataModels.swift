@@ -86,6 +86,7 @@ struct DEntry: Codable, Equatable, Identifiable {
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
+    var replyParam: [String: String]?   // the `replyTo {id, text}` a message this phone is sending carries (feature `reply`), for Retry
     enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h, queued, files }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live

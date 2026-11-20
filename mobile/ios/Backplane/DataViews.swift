@@ -842,7 +842,7 @@ struct DataThreadView: View {
                             switch r {
                             // a thought: folded to its first line, opened with a tap, kept open or shut as a run of tool calls is
                             case .entry(let e) where e.folds: DataThoughtRow(client: client, thread: id, entry: e, open: Binding(get: { openRuns.contains(e.id) }, set: { if $0 { openRuns.insert(e.id) } else { openRuns.remove(e.id) } })).id(e.id)
-                            case .entry(let e): DataEntryRow(client: client, thread: id, entry: e, goTo: { mark = $0; findGo = $0 })
+                            case .entry(let e): DataEntryRow(client: client, thread: id, entry: e, goTo: { mark = $0; findGo = $0 }, reply: { client.startReply(id, $0) })
                                 // the message a find or a search hit went to
                                 .background { if mark == e.id { Rectangle().fill(BackplaneDesign.accent.opacity(0.12)).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }.padding(-4).accessibilityElement().accessibilityLabel(Tr.k("ios.thread.marked")).accessibilityIdentifier("data.thread.marked") } }
                                 .id(e.id)
@@ -889,6 +889,8 @@ struct DataThreadView: View {
         // Edit in the strip, or a refusal: the text is back in the draft
         // (the caret goes to its end; negative revs, so they never meet dictation's)
         .onChange(of: client.draftBack) { _, b in if b.thread == id { text = client.drafts[id] ?? ""; caret = (text.utf16.count, -b.rev) } }
+        // Reply picked on a message: the box takes the keyboard
+        .onChange(of: client.replyFocus) { _, f in if f.thread == id { DispatchQueue.main.async { ComposerHandle.view?.becomeFirstResponder() } } }
         .onChange(of: client.voice.caret.rev) { _, rev in
             // the hub's dictation wrote this thread's draft: show it and put the caret where it said
             let c = client.voice.caret
@@ -1033,6 +1035,7 @@ struct DataThreadView: View {
                         }
                     }.accessibilityIdentifier("data.pending.images")
                 }
+                if let r = client.replying[id] { replyStrip(r) }
                 UIKitField(text: text, placeholder: Tr.t("Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw"), editable: true,
                            onChange: { text = $0; client.setDraft(id, $0) },
                            onSend: { send() }, onPasteImages: { imgs in add(imgs.compactMap { $0.jpegData(compressionQuality: 0.95) }) },
@@ -1093,6 +1096,20 @@ struct DataThreadView: View {
         }
         .background(BackplaneDesign.background)
     }
+    // Reply's strip over the box (the desktop's `reply-strip`): who wrote it and its first line, a tap goes to it, × drops it
+    private func replyStrip(_ r: DReplyRef) -> some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(BackplaneDesign.accent).frame(width: 2)
+            Button { mark = r.id; findGo = r.id } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(Tr.t(ReplyDraft.who(r))).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent)
+                    Text(Tr.gpui_b_replying_to(line: ReplyDraft.firstLine(r.text))).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.tail)
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("data.reply.strip")
+            Button { client.dropReply(id) } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(BackplaneDesign.dim).frame(width: 32, height: 32) }
+                .buttonStyle(.plain).accessibilityLabel(Tr.t("Cancel reply")).accessibilityIdentifier("data.reply.drop")
+        }.fixedSize(horizontal: false, vertical: true).padding(.trailing, 2).dbox(fill: BackplaneDesign.panel)
+    }
     @State private var holdStarted = false
     private func micPress() {
         let at = ComposerHandle.view.map { VoiceEdit.chars(text, utf16: $0.selectedRange.location) } ?? VoiceEdit.count(text)
@@ -1133,7 +1150,7 @@ struct DataThreadView: View {
         let images = pending
         text = ""; pending = []; atEnd = true
         // a dictated draft goes marked as spoken (the agent is told; edited when typed in)
-        client.send(id, t, images: images, voice: images.isEmpty ? client.voice.dictated(id) : nil)
+        client.send(id, t, images: images, voice: images.isEmpty ? client.voice.dictated(id) : nil, reply: client.replying[id])
         client.voice.sent(id, draft: "")
     }
     // pictures chosen or pasted: shrunk off the main thread, at most four to a message
@@ -1319,8 +1336,19 @@ struct DataEntryRow: View {
     let thread: String
     let entry: DEntry
     var goTo: (String) -> Void = { _ in }   // a reply's chip: to the message it answers
+    var reply: (DReplyRef) -> Void = { _ in }   // Reply on this message (feature `reply`): the composer's strip
     @State private var restoring: DRestore?   // Restore to before this, pressed: its confirm is up
 
+    /// The message a Reply here answers, when the hub takes replies
+    private var replyRef: DReplyRef? { client.has("reply") ? ReplyDraft.of(id: entry.id, kind: entry.kind, text: entry.text, live: entry.live) : nil }
+    // long-press: Reply and Copy (the desktop's two under a message)
+    @ViewBuilder private var replyMenu: some View {
+        if let r = replyRef { Button(Tr.t("Reply"), systemImage: "arrowshape.turn.up.left") { reply(r) }.accessibilityIdentifier("data.entry.reply.menu") }
+        if !entry.text.isEmpty { Button(Tr.t("Copy"), systemImage: "doc.on.doc") { UIPasteboard.general.string = entry.text } }
+    }
+    private var replyButton: some View {
+        Group { if let r = replyRef { Button(Tr.t("Reply")) { reply(r) }.dmono(11).foregroundStyle(BackplaneDesign.faint).buttonStyle(.plain).accessibilityIdentifier("data.entry.reply") } }
+    }
     var body: some View {
         switch entry.kind {
         case "user":
@@ -1335,8 +1363,8 @@ struct DataEntryRow: View {
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
                         if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
                     }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised)
-                    // long-press: Restore to before this, when the hub has the snapshot before the turn this message started
-                    .contextMenu { if let r = entry.restore { Button(Tr.t("Restore to before this"), systemImage: "clock.arrow.circlepath") { restoring = r }.accessibilityIdentifier("data.entry.restore") } }
+                    // long-press: Reply, Copy, and Restore to before this when the hub has the snapshot before the turn this message started
+                    .contextMenu { replyMenu; if let r = entry.restore { Button(Tr.t("Restore to before this"), systemImage: "clock.arrow.circlepath") { restoring = r }.accessibilityIdentifier("data.entry.restore") } }
                     .confirmationDialog(Tr.t("Restore the project to before this message?"), isPresented: Binding(get: { restoring != nil }, set: { if !$0 { restoring = nil } }), titleVisibility: .visible, presenting: restoring) { r in
                         Button(Tr.t("Restore"), role: .destructive) { Task { await client.restore(thread, r) } }
                         Button(Tr.t("Cancel"), role: .cancel) {}
@@ -1353,17 +1381,18 @@ struct DataEntryRow: View {
                         }
                         if entry.sending { Text(Tr.t("Sending…")).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                         else if entry.failed { Button(Tr.t("Not sent · Retry")) { client.retry(thread, entry) }.dmono(11).foregroundStyle(BackplaneDesign.bad) }
-                        else { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                        else { replyButton; Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                     }
                 }
-            }.padding(.vertical, 4).accessibilityIdentifier("data.entry.user")
+            }.padding(.vertical, 4).modifier(DReplySwipe(ref: replyRef, reply: reply)).accessibilityIdentifier("data.entry.user")
         case "assistant":
             VStack(alignment: .leading, spacing: 4) {
                 DataMarkdown(text: entry.text, thread: thread, entry: entry.id, images: entry.live ? [] : entry.images, copy: Copyable.list(entry.copy, hubHasCopy: client.has("copy")))
                 // the pictures the reply names (the hub lists them as attachments); tap for the full size
                 ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) }
-                if !entry.live { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
-            }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .contain).accessibilityIdentifier("data.entry.assistant")
+                if !entry.live { HStack(spacing: 8) { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint); replyButton } }
+            }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).contextMenu { replyMenu }.modifier(DReplySwipe(ref: replyRef, reply: reply))
+            .accessibilityElement(children: .contain).accessibilityIdentifier("data.entry.assistant")
         case "tool", "step":
             DataToolRow(entry: entry).accessibilityIdentifier("data.entry.tool")
         case "ask":
@@ -1381,6 +1410,25 @@ struct DataEntryRow: View {
             // a notice's code (an error naming a command to run, a path): copy buttons, and Run in terminal for a command
             DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(entry.copy, hubHasCopy: client.has("copy")), text: entry.text))
         }
+    }
+}
+
+/// Reply by a swipe right, as messaging apps do: the arrow shows as the message is pulled; let go past it, Reply (ReplyDraft.swipe). The list still scrolls.
+struct DReplySwipe: ViewModifier {
+    let ref: DReplyRef?
+    let reply: (DReplyRef) -> Void
+    @State private var pull: CGFloat = 0
+    func body(content: Content) -> some View {
+        content.offset(x: pull).overlay(alignment: .leading) {
+            if pull > 0 { Image(systemName: "arrowshape.turn.up.left").font(.system(size: 14)).foregroundStyle(pull >= 60 ? BackplaneDesign.accent : BackplaneDesign.faint).opacity(min(1, pull / 60)).offset(x: pull / 2 - 14) }
+        }
+        .simultaneousGesture(DragGesture(minimumDistance: 20).onChanged { g in
+            guard ref != nil, g.translation.width > 0, abs(g.translation.height) < g.translation.width / 2 else { if pull != 0 { pull = 0 }; return }
+            pull = min(80, g.translation.width)
+        }.onEnded { g in
+            if let r = ref, ReplyDraft.swipe(dx: g.translation.width, dy: g.translation.height) { UIImpactFeedbackGenerator(style: .light).impactOccurred(); reply(r) }
+            withAnimation(.easeOut(duration: 0.15)) { pull = 0 }
+        })
     }
 }
 
