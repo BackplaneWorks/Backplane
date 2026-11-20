@@ -989,7 +989,13 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     if editing { pv.loading.clear(); }
     // Keep main's exact scroll parent for the embedded editor (`editing`) and scrollable pages (Review, Diff, Mech);
     // only 3D (when not editing) joins files/image/pdf/text in omitting overflow_y_scroll so 3D's size_full() does not collapse under mgmt::host.
-    if (matches!(open, "files" | "image" | "pdf" | "text" | "3d") || (shared_scroll && open == "review")) && !diff_on && !editing { div().id("viewer-body").size_full().child(body).into_any_element() } else { div().id("viewer-body").size_full().overflow_y_scroll().child(body).into_any_element() }
+    if shared_scroll && open == "review" && !diff_on && !editing {
+        // This panel owns its scroll. Give the Review column the finished viewport
+        // bounds independently of the BOM table's intrinsic width.
+        return div().id("viewer-body").size_full().relative()
+            .child(div().absolute().inset_0().flex().flex_col().child(body)).into_any_element();
+    }
+    if matches!(open, "files" | "image" | "pdf" | "text" | "3d") && !diff_on && !editing { div().id("viewer-body").size_full().child(body).into_any_element() } else { div().id("viewer-body").size_full().overflow_y_scroll().child(body).into_any_element() }
 }
 /// The pane around the page on show: its width, the left edge's drag and border; `page` (the page itself, `page()`, drawn as a part of the
 /// window by ui.rs) fills the rest, so the pane's frame is known without building the page.
