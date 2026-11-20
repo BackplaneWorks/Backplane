@@ -110,6 +110,12 @@ for i in $(seq "$CYCLES"); do
     echo "cycle $i: KiCad still running after the close ($(cat "$OUT/close-$i.out" | tail -c 200))"; OTHER=$((OTHER + 1))
     # CLOSE_HANG_STACK=1: a KiCad running under gdb (the -gdb runtimes) is interrupted, so gdb writes every thread's stack, then killed
     if [ "${CLOSE_HANG_STACK:-0}" = 1 ]; then kill -INT "$KPID" 2>/dev/null; sleep 15; fi
+    # CLOSE_HANG_STACK=attach: a KiCad started through bin/ptracer-any (the -ptr runtimes: it lets this user attach under Yama ptrace_scope 1)
+    # is read where it hangs with gdb -p, every thread's stack, at full speed until then (under gdb the hang did not come: 0 of 10)
+    if [ "${CLOSE_HANG_STACK:-0}" = attach ]; then
+      timeout 120 gdb -p "$KPID" -batch -ex "set pagination off" -ex "info threads" -ex "thread apply all bt" >"$OUT/hang-stack-$i.txt" 2>&1
+      echo "INFO cycle $i: hung KiCad's stacks in hang-stack-$i.txt ($(grep -c '^Thread ' "$OUT/hang-stack-$i.txt") threads)"
+    fi
     kill -9 "$KPID" 2>/dev/null
   else
     CLEAN=$((CLEAN + 1)); echo "cycle $i: clean (frames=$FRAMES, exited ${EXIT_MS} ms after the close answered)"
