@@ -170,6 +170,7 @@ mod tests {
     #[test]
     fn history_watches_preserve_working_document_availability() {
         let root = crate::plat::tmp::canonical("viewer-history-availability");
+        std::fs::write(root.join("other.kicad_pro"), "{}").unwrap();
         let mut st = State::new();
         for line in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() {
             st.apply_line(line);
