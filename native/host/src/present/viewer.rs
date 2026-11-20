@@ -803,36 +803,54 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         v["has"] = has;
         layout_sources = Some((root, sources));
     }
-    // Diagnostic `viewer.layout`: derived for both local threads (reusing `rail_sources` with zero extra
-    // filesystem discovery) and linked-machine threads (from the mirrored picture without local probes).
+    // Diagnostic `viewer.layout`: derived for both local threads (reusing `rail_sources` + `v["panes"]`
+    // with zero filesystem calls) and linked-machine threads (from mirrored values only, never calling
+    // `root_of` / `canonical::design_root` or probing local disk).
     if !sel.is_empty() {
         let linked = sel.contains('~');
-        let (root, default_pcb, default_sch, default_gerber_set, altium) = match &layout_sources {
-            Some((r, src)) => (r.as_str(), src.pcb.as_str(), src.sch.as_str(), src.gerber_set.as_str(), src.altium),
-            None => ("", "", "", "", v["cad"] == "altium"),
+        let (root, default_pcb, default_sch, default_gerber_set) = match &layout_sources {
+            Some((r, src)) => (r.as_str(), src.pcb.as_str(), src.sch.as_str(), src.gerber_set.as_str()),
+            None => ("", "", "", ""),
         };
-        let linked_root = if linked { root_of(st, sel) } else { String::new() };
+        let linked_root = if linked {
+            st.threads.get(sel).map(|t| {
+                if !t.worktree.is_empty() { t.worktree.clone() }
+                else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }
+            }).unwrap_or_default()
+        } else {
+            String::new()
+        };
         let eff_root = if linked { linked_root.as_str() } else { root };
         let drafts = &session["drafts"];
         let picked_board = chosen_board(drafts, sel);
-        let picked_sch = if picked_board.is_empty() {
+        let open = s(&v, "open");
+        // Derive `picked_sch` strictly from the already-built picture (`v["panes"][0]` / `v["key"]`)
+        // with zero filesystem probes, and never invent a sibling schematic on linked threads.
+        let picked_sch = if picked_board.is_empty() || linked {
             String::new()
-        } else if altium {
-            let abs_b = format!("{eff_root}/{picked_board}");
-            if abs_b == default_pcb { default_sch.to_string() } else { String::new() }
-        } else {
-            let cand = board_file("schematic", eff_root, &picked_board);
-            if linked {
-                cand
-            } else if !cand.is_empty() && std::path::Path::new(&cand).is_file() {
-                cand
-            } else {
+        } else if open == "split" {
+            v["panes"].as_array().and_then(|ps| ps.first()).and_then(|sch_pane| {
+                if sch_pane["empty"].as_str().is_some_and(|e| !e.is_empty()) {
+                    return None;
+                }
+                let k = sch_pane["key"].as_str().unwrap_or("");
+                let prefix = format!("1|{eff_root}|");
+                k.strip_prefix(&prefix).filter(|p| !p.is_empty()).map(str::to_string)
+            }).unwrap_or_default()
+        } else if open == "schematic" {
+            let k = v["key"].as_str().unwrap_or("");
+            let prefix = format!("1|{eff_root}|");
+            if v["empty"].as_str().is_some_and(|e| !e.is_empty()) {
                 String::new()
+            } else {
+                k.strip_prefix(&prefix).filter(|p| !p.is_empty()).map(str::to_string).unwrap_or_default()
             }
+        } else {
+            String::new()
         };
         let derived = super::layout::derive_layout(&super::layout::DeriveInput {
             root: eff_root,
-            open: s(&v, "open"),
+            open,
             diff_on: pages::diff_on(session, sel),
             gerbers: v["gerbers"] == true,
             gerbers_vs_board: v["gerbersVsBoard"] == true,

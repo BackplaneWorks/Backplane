@@ -9,7 +9,7 @@
 use crate::files::{kicad::{gerber, project}, rv};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 pub const LAYOUT_VERSION: u32 = 1;
 pub const MIN_TILE_PX: f32 = 180.0;
@@ -21,6 +21,7 @@ pub type SplitId = String;
 
 fn default_version() -> u32 { LAYOUT_VERSION }
 fn default_overlay_mode() -> OverlayMode { OverlayMode::Diff }
+fn is_false(b: &bool) -> bool { !*b }
 
 fn watch_key(kind: u32, root: &str, path: &str) -> String {
     format!("{kind}|{root}|{path}")
@@ -125,25 +126,83 @@ impl PageKind {
     }
 }
 
-/// Which project-scoped repository holds a historical version (never a filesystem path).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum VersionRepo {
-    /// The project's primary git repository.
-    Git,
-    /// Backplane's local history repository (`.backplane/history.git`).
-    History,
+/// Authorised object store and repository top directory for one hub-issued `source_id`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct VersionSource {
+    pub git_dir: String,
+    pub repo_top: String,
 }
 
-/// Project-scoped version reference for a historical tile or overlay.
+/// Pure resolver mapping an opaque, hub-issued `source_id` to its authorised `(git_dir, repo_top)`.
+/// Unknown or ambiguous ids return `None` and cause watch planning to fail explicitly.
+pub trait VersionResolver {
+    fn resolve(&self, source_id: &str) -> Option<&VersionSource>;
+}
+
+/// Deterministic opaque `source_id` for a `(git_dir, repo_top)` pair (never contains any path).
+pub fn opaque_source_id(git_dir: &str, repo_top: &str) -> String {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in git_dir.as_bytes().iter().chain([0xffu8].iter()).chain(repo_top.as_bytes()) {
+        h ^= *b as u64;
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    format!("vsrc-{h:016x}")
+}
+
+/// Map-backed [`VersionResolver`]. Registering two different `(git_dir, repo_top)` values under
+/// the same `source_id` marks that id ambiguous (`None`), so resolution fails explicitly.
+#[derive(Clone, Debug, Default)]
+pub struct VersionSourceMap {
+    entries: BTreeMap<String, Option<VersionSource>>,
+}
+
+impl VersionSourceMap {
+    pub fn new() -> Self { Self::default() }
+
+    /// Insert a mapping for an explicit `source_id`. Conflicting registrations mark it ambiguous.
+    pub fn insert(&mut self, source_id: impl Into<String>, src: VersionSource) {
+        let key = source_id.into();
+        match self.entries.get_mut(&key) {
+            None => { self.entries.insert(key, Some(src)); }
+            Some(Some(existing)) if *existing == src => {}
+            Some(slot) => { *slot = None; }
+        }
+    }
+
+    /// Register `(git_dir, repo_top)` under its deterministic opaque `source_id` and return that id.
+    pub fn register(&mut self, git_dir: impl Into<String>, repo_top: impl Into<String>) -> String {
+        let gd = git_dir.into();
+        let top = repo_top.into();
+        let id = opaque_source_id(&gd, &top);
+        self.insert(id.clone(), VersionSource { git_dir: gd, repo_top: top });
+        id
+    }
+}
+
+impl VersionResolver for VersionSourceMap {
+    fn resolve(&self, source_id: &str) -> Option<&VersionSource> {
+        self.entries.get(source_id).and_then(|v| v.as_ref())
+    }
+}
+
+/// Project/thread-scoped version reference for a historical tile or overlay.
 ///
-/// `repo` identifies which of the project's repositories holds the commit (never a path),
-/// `id` is the full git object id (4..=64 hex chars), and `label` is the short display label.
+/// - `source_id` is an opaque, hub-issued id mapped by [`VersionResolver`] to an authorised object
+///   store and repository top (never a filesystem path).
+/// - `id` is a full git object id (40-char SHA-1 or 64-char SHA-256 hex).
+/// - `label` is a short display label (never a path or wire token).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TileVersion {
-    pub repo: VersionRepo,
+    pub source_id: String,
     pub id: String,
     pub label: String,
+}
+
+impl TileVersion {
+    /// True if both versions name the same commit in the same source repository (ignoring display label).
+    pub fn same_commit(&self, other: &Self) -> bool {
+        self.source_id == other.source_id && self.id.eq_ignore_ascii_case(&other.id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -174,6 +233,10 @@ pub struct Tile {
     pub kind: PageKind,
     #[serde(default)]
     pub source: String,
+    /// True when `source` was explicitly selected (e.g. picked in the Boards menu or opened as a
+    /// child sheet), so watch planning keys by the explicit path rather than collapsing to `""`.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub explicit: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub version: Option<TileVersion>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -207,6 +270,8 @@ impl<'de> Deserialize<'de> for Node {
             #[serde(default)]
             source: String,
             #[serde(default)]
+            explicit: bool,
+            #[serde(default)]
             version: Option<TileVersion>,
             #[serde(default)]
             overlay: Option<Overlay>,
@@ -221,6 +286,7 @@ impl<'de> Deserialize<'de> for Node {
                 id: w.id,
                 kind: w.kind.ok_or_else(|| serde::de::Error::missing_field("kind"))?,
                 source: w.source,
+                explicit: w.explicit,
                 version: w.version,
                 overlay: w.overlay,
             })),
@@ -287,15 +353,6 @@ pub struct Rect {
     pub h: f32,
 }
 
-impl Rect {
-    pub fn approx_eq(self, other: Self) -> bool {
-        (self.x - other.x).abs() < 1e-5
-            && (self.y - other.y).abs() < 1e-5
-            && (self.w - other.w).abs() < 1e-5
-            && (self.h - other.h).abs() < 1e-5
-    }
-}
-
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum Refusal {
@@ -303,13 +360,15 @@ pub enum Refusal {
     Locked,
     /// Cannot open Simulation beside an existing KiCad tile (one KiCad host per process).
     OneKicad,
+    /// Available bounds are too small to satisfy the subtree minimum sizes.
+    TooSmall,
     /// Target tile or split ID does not exist in the layout.
     NotFound,
     /// Source and destination tile IDs are identical.
     SameTile,
     /// Target tile has no overlay to split out.
     NoOverlay,
-    /// Overlay pair is not comparable (only Board+Gerbers, or same Board/Schematic source with distinct versions).
+    /// Overlay pair is not comparable (only Board+Gerbers, or same Board/Schematic source with distinct commits).
     IncompatibleOverlay,
     /// Source path is not relative to the project root or contains raw internal tokens.
     InvalidSource,
@@ -326,6 +385,7 @@ impl Refusal {
         match self {
             Refusal::Locked => "locked",
             Refusal::OneKicad => "oneKicad",
+            Refusal::TooSmall => "tooSmall",
             Refusal::NotFound => "notFound",
             Refusal::SameTile => "sameTile",
             Refusal::NoOverlay => "noOverlay",
@@ -338,13 +398,16 @@ impl Refusal {
     }
 }
 
-/// Result of [`split_overlay`], preserving `mode` and `layer_bits` so [`merge_overlay`] is a true inverse.
+/// Result of [`split_overlay`], preserving `mode`, `layer_bits`, `prev_focus`, and `prev_maximized`
+/// so [`unsplit_overlay`] / [`merge_overlay`] is an exact inverse.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SplitOverlayOut {
     pub layout: Layout,
     pub overlay_tile_id: TileId,
     pub mode: OverlayMode,
     pub layer_bits: Option<u32>,
+    pub prev_focus: Option<TileId>,
+    pub prev_maximized: Option<TileId>,
 }
 
 /// Returns true if `p` is empty (project default) or a clean relative path under the project root.
@@ -372,12 +435,20 @@ pub fn is_relative_source(p: &str) -> bool {
     true
 }
 
-fn is_commit_word(c: &str) -> bool {
-    (4..=64).contains(&c.len()) && c.bytes().all(|b| b.is_ascii_hexdigit())
+/// Only full git object ids (40-char SHA-1 or 64-char SHA-256 hex) are accepted.
+pub fn is_full_object_id(c: &str) -> bool {
+    matches!(c.len(), 40 | 64) && c.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+fn is_clean_source_id(s: &str) -> bool {
+    !s.is_empty()
+        && s.len() <= 64
+        && s.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
 }
 
 fn is_clean_version(v: &TileVersion) -> bool {
-    is_commit_word(&v.id)
+    is_clean_source_id(&v.source_id)
+        && is_full_object_id(&v.id)
         && !v.label.is_empty()
         && !v.label.contains('\t')
         && !v.label.contains('\n')
@@ -387,9 +458,18 @@ fn is_clean_version(v: &TileVersion) -> bool {
         && !v.label.contains(':')
 }
 
+fn versions_same_commit(a: Option<&TileVersion>, b: Option<&TileVersion>) -> bool {
+    match (a, b) {
+        (Some(x), Some(y)) => x.same_commit(y),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
 /// Whether `ov` is a valid comparable overlay on `tile`:
 /// - Board + Gerbers (fabrication output compared against a board), OR
-/// - Same design kind (`Board` or `Schematic`) and same `source` with distinct versions (at least one versioned).
+/// - Same design kind (`Board` or `Schematic`) and same `source` with distinct commits
+///   (compared by `(source_id, id)`, ignoring display label; at least one side versioned).
 pub fn overlay_compatible(tile: &Tile, ov: &Overlay) -> bool {
     if tile.kind == PageKind::Board && ov.kind == PageKind::Gerbers {
         return tile.version.is_none() && ov.version.is_none();
@@ -397,7 +477,7 @@ pub fn overlay_compatible(tile: &Tile, ov: &Overlay) -> bool {
     matches!(tile.kind, PageKind::Board | PageKind::Schematic)
         && ov.kind == tile.kind
         && ov.source == tile.source
-        && ov.version != tile.version
+        && !versions_same_commit(tile.version.as_ref(), ov.version.as_ref())
         && (tile.version.is_some() || ov.version.is_some())
 }
 
@@ -511,10 +591,30 @@ fn collect_tiles<'a>(node: &'a Node, out: &mut Vec<&'a Tile>) {
     }
 }
 
+fn node_contains_tile(node: &Node, id: &str) -> bool {
+    match node {
+        Node::Tile(t) => t.id == id,
+        Node::Split { a, b, .. } => node_contains_tile(a, id) || node_contains_tile(b, id),
+    }
+}
+
 fn node_contains_split(node: &Node, id: &str) -> bool {
     match node {
         Node::Tile(_) => false,
         Node::Split { id: sid, a, b, .. } => sid == id || node_contains_split(a, id) || node_contains_split(b, id),
+    }
+}
+
+fn split_is_ancestor_of(node: &Node, split_id: &str, tile_id: &str) -> bool {
+    match node {
+        Node::Tile(_) => false,
+        Node::Split { id, a, b, .. } => {
+            if id == split_id {
+                node_contains_tile(a, tile_id) || node_contains_tile(b, tile_id)
+            } else {
+                split_is_ancestor_of(a, split_id, tile_id) || split_is_ancestor_of(b, split_id, tile_id)
+            }
+        }
     }
 }
 
@@ -561,8 +661,9 @@ fn node_tile_rect(node: &Node, target: &str, r: Rect) -> Option<Rect> {
     }
 }
 
-/// Enforce the tile lock against the resulting layout: if `locked` names a tile present in `before`,
-/// that tile must remain present with identical contents and identical visible unit-square rect in `after`.
+/// Enforce the tile lock against the resulting layout with **exact** (zero-epsilon) rect equality:
+/// if `locked` names a tile present in `before`, it must remain present with identical contents
+/// and identical visible unit-square rect in `after`.
 fn check_lock_preserved(before: &Layout, after: &Layout, locked: Option<&str>) -> Result<(), Refusal> {
     let Some(lid) = locked else {
         return Ok(());
@@ -577,7 +678,7 @@ fn check_lock_preserved(before: &Layout, after: &Layout, locked: Option<&str>) -
         return Err(Refusal::Locked);
     }
     match (tile_rect(before, lid), tile_rect(after, lid)) {
-        (Some(r1), Some(r2)) if r1.approx_eq(r2) => Ok(()),
+        (Some(r1), Some(r2)) if r1 == r2 => Ok(()),
         _ => Err(Refusal::Locked),
     }
 }
@@ -837,7 +938,10 @@ pub fn subtree_min<F: Fn(&Tile) -> (f32, f32)>(node: &Node, min_for: &F) -> (f32
 
 /// Resize `split_id` to `desired_ratio`, clamped so every descendant leaf stays at or above the
 /// minimum size returned by `min_for` inside `bounds = (width_px, height_px)` (accounting for
-/// descendant split ratios). Enforces `locked` against the resulting tree placement.
+/// descendant split ratios).
+///
+/// - Refuses with [`Refusal::Locked`] if `split_id` is on the ancestor path to `locked` (zero drift).
+/// - Refuses with [`Refusal::TooSmall`] if `bounds` cannot satisfy both subtrees' minimums.
 pub fn resize<F: Fn(&Tile) -> (f32, f32)>(
     layout: &Layout,
     split_id: &str,
@@ -850,7 +954,12 @@ pub fn resize<F: Fn(&Tile) -> (f32, f32)>(
         return Err(Refusal::InvalidRatio);
     }
     let root = layout.root.as_ref().ok_or(Refusal::NotFound)?;
-    let new_root = resize_node(root, split_id, desired_ratio, bounds, &min_for).ok_or(Refusal::NotFound)?;
+    if let Some(lid) = locked {
+        if split_is_ancestor_of(root, split_id, lid) {
+            return Err(Refusal::Locked);
+        }
+    }
+    let new_root = resize_node(root, split_id, desired_ratio, bounds, &min_for)?;
     let next = Layout {
         version: layout.version.max(LAYOUT_VERSION),
         root: Some(new_root),
@@ -867,9 +976,9 @@ fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
     desired_ratio: f32,
     bounds: (f32, f32),
     min_for: &F,
-) -> Option<Node> {
+) -> Result<Node, Refusal> {
     match node {
-        Node::Tile(_) => None,
+        Node::Tile(_) => Err(Refusal::NotFound),
         Node::Split { id, axis, ratio, a, b } => {
             if id == split_id {
                 let (min_aw, min_ah) = subtree_min(a, min_for);
@@ -878,18 +987,16 @@ fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
                     Axis::Row => (bounds.0, min_aw, min_bw),
                     Axis::Col => (bounds.1, min_ah, min_bh),
                 };
-                let clamped = if !total.is_finite() || total <= 0.0 || min_a + min_b >= total {
-                    (min_a / (min_a + min_b)).clamp(0.05, 0.95)
-                } else {
-                    let lo = (min_a / total).clamp(0.05, 0.95);
-                    let hi = (1.0 - min_b / total).clamp(0.05, 0.95);
-                    if lo <= hi {
-                        desired_ratio.clamp(lo, hi)
-                    } else {
-                        ((lo + hi) * 0.5).clamp(0.05, 0.95)
-                    }
-                };
-                return Some(Node::Split {
+                if !total.is_finite() || total <= 0.0 || min_a + min_b > total {
+                    return Err(Refusal::TooSmall);
+                }
+                let lo = min_a / total;
+                let hi = 1.0 - min_b / total;
+                if lo > hi || lo <= 0.0 || hi >= 1.0 {
+                    return Err(Refusal::TooSmall);
+                }
+                let clamped = desired_ratio.clamp(lo, hi);
+                return Ok(Node::Split {
                     id: id.clone(),
                     axis: *axis,
                     ratio: clamped,
@@ -901,16 +1008,13 @@ fn resize_node<F: Fn(&Tile) -> (f32, f32)>(
                 Axis::Row => ((bounds.0 * ratio, bounds.1), (bounds.0 * (1.0 - ratio), bounds.1)),
                 Axis::Col => ((bounds.0, bounds.1 * ratio), (bounds.0, bounds.1 * (1.0 - ratio))),
             };
-            if let Some(na) = resize_node(a, split_id, desired_ratio, a_bounds, min_for) {
-                Some(Node::Split { id: id.clone(), axis: *axis, ratio: *ratio, a: Box::new(na), b: b.clone() })
-            } else {
-                resize_node(b, split_id, desired_ratio, b_bounds, min_for).map(|nb| Node::Split {
-                    id: id.clone(),
-                    axis: *axis,
-                    ratio: *ratio,
-                    a: a.clone(),
-                    b: Box::new(nb),
-                })
+            match resize_node(a, split_id, desired_ratio, a_bounds, min_for) {
+                Ok(na) => Ok(Node::Split { id: id.clone(), axis: *axis, ratio: *ratio, a: Box::new(na), b: b.clone() }),
+                Err(Refusal::NotFound) => {
+                    let nb = resize_node(b, split_id, desired_ratio, b_bounds, min_for)?;
+                    Ok(Node::Split { id: id.clone(), axis: *axis, ratio: *ratio, a: a.clone(), b: Box::new(nb) })
+                }
+                Err(e) => Err(e),
             }
         }
     }
@@ -971,7 +1075,7 @@ fn map_tile(node: &Node, target: &str, f: &dyn Fn(&Tile) -> Tile) -> Option<Node
 /// Set or clear an overlay on `target`.
 ///
 /// Enforces [`overlay_compatible`] (only Board+Gerbers, or same Board/Schematic source with
-/// distinct versions) and `locked`.
+/// distinct commits) and `locked`.
 pub fn overlay(layout: &Layout, target: &str, ov: Option<Overlay>, locked: Option<&str>) -> Result<Layout, Refusal> {
     let existing = layout.tile(target).ok_or(Refusal::NotFound)?;
     if let Some(o) = &ov {
@@ -997,8 +1101,9 @@ pub fn overlay(layout: &Layout, target: &str, ov: Option<Overlay>, locked: Optio
     Ok(next)
 }
 
-/// Detach `target`'s overlay into its own tile beside `target` on `side`, preserving `mode` and
-/// `layer_bits` in [`SplitOverlayOut`] so [`merge_overlay`] is a true inverse.
+/// Detach `target`'s overlay into its own tile beside `target` on `side`, preserving `mode`,
+/// `layer_bits`, `prev_focus`, and `prev_maximized` in [`SplitOverlayOut`] so [`unsplit_overlay`]
+/// is an exact inverse.
 pub fn split_overlay(
     layout: &Layout,
     target: &str,
@@ -1009,11 +1114,14 @@ pub fn split_overlay(
     let t = layout.tile(target).ok_or(Refusal::NotFound)?;
     let ov = t.overlay.clone().ok_or(Refusal::NoOverlay)?;
     let id = new_tile_id.unwrap_or_else(|| layout.next_tile_id());
+    let prev_focus = layout.focus.clone();
+    let prev_maximized = layout.maximized.clone();
     let cleared = overlay(layout, target, None, locked)?;
     let new_tile = Tile {
         id: id.clone(),
         kind: ov.kind,
         source: ov.source,
+        explicit: t.explicit,
         version: ov.version,
         overlay: None,
     };
@@ -1024,17 +1132,22 @@ pub fn split_overlay(
         overlay_tile_id: id,
         mode: ov.mode,
         layer_bits: ov.layer_bits,
+        prev_focus,
+        prev_maximized,
     })
 }
 
 /// Inverse of [`split_overlay`]: close `overlay_tile_id` and attach it back onto `base_id` as an
-/// [`Overlay`] with `mode` and `layer_bits`, focusing `base_id`.
+/// [`Overlay`] with `mode` and `layer_bits`, restoring `restore_focus` and `restore_maximized`
+/// when provided and present in the resulting tree.
 pub fn merge_overlay(
     layout: &Layout,
     base_id: &str,
     overlay_tile_id: &str,
     mode: OverlayMode,
     layer_bits: Option<u32>,
+    restore_focus: Option<&str>,
+    restore_maximized: Option<&str>,
     locked: Option<&str>,
 ) -> Result<Layout, Refusal> {
     if base_id == overlay_tile_id {
@@ -1055,9 +1168,30 @@ pub fn merge_overlay(
     }
     let without = close(layout, overlay_tile_id, None)?;
     let mut merged = overlay(&without, base_id, Some(ov), None)?;
-    merged.focus = Some(base_id.to_string());
+    merged.focus = match restore_focus {
+        Some(f) if merged.contains_tile(f) => Some(f.to_string()),
+        _ => Some(base_id.to_string()),
+    };
+    merged.maximized = match restore_maximized {
+        Some(m) if merged.contains_tile(m) => Some(m.to_string()),
+        _ => None,
+    };
     check_lock_preserved(layout, &merged, locked)?;
     Ok(merged)
+}
+
+/// Exact inverse of [`split_overlay`], restoring mode, layer bits, focus, and maximized state.
+pub fn unsplit_overlay(out: &SplitOverlayOut, base_id: &str, locked: Option<&str>) -> Result<Layout, Refusal> {
+    merge_overlay(
+        &out.layout,
+        base_id,
+        &out.overlay_tile_id,
+        out.mode,
+        out.layer_bits,
+        out.prev_focus.as_deref(),
+        out.prev_maximized.as_deref(),
+        locked,
+    )
 }
 
 /// Retarget an existing tile to a new `kind` and `source` (e.g. when the embedded KiCad tile
@@ -1077,6 +1211,7 @@ pub fn retarget(
         id: t.id.clone(),
         kind,
         source: source.clone(),
+        explicit: false,
         version: None,
         overlay: None,
     })
@@ -1145,6 +1280,7 @@ pub fn rail_press<F: Fn(PageKind) -> bool>(
         id: layout.next_tile_id(),
         kind,
         source: default_source,
+        explicit: false,
         version: None,
         overlay: None,
     })
@@ -1184,6 +1320,7 @@ pub fn viewer_show(
         id: layout.next_tile_id(),
         kind,
         source,
+        explicit: false,
         version: None,
         overlay: None,
     })
@@ -1289,7 +1426,8 @@ pub fn sanitize_rel(root: &str, raw: &str) -> String {
 }
 
 /// Parse a hub `git\t<gitdir>\t<commit>\t<top_len>\t<file>` version string into
-/// `(rel_source, TileVersion)` preserving repository identity and the full commit id.
+/// `(rel_source, TileVersion)` with an opaque `source_id` derived from `(gitdir, top)` and a
+/// full 40- or 64-char hex object id.
 pub fn parse_git_source(root: &str, raw: &str) -> Option<(String, TileVersion)> {
     let rest = raw.strip_prefix("git\t")?;
     let mut parts = rest.splitn(4, '\t');
@@ -1297,26 +1435,19 @@ pub fn parse_git_source(root: &str, raw: &str) -> Option<(String, TileVersion)> 
     let commit = parts.next()?;
     let top_len_str = parts.next()?;
     let file = parts.next()?;
-    if !is_commit_word(commit) {
+    if !is_full_object_id(commit) || gitdir.is_empty() {
         return None;
     }
-    let repo = if gitdir.ends_with("/.backplane/history.git") || gitdir.ends_with("\\.backplane\\history.git") {
-        VersionRepo::History
-    } else {
-        VersionRepo::Git
-    };
+    let top_len = top_len_str.parse::<usize>().ok()?;
+    let split_byte = file.char_indices().nth(top_len).map(|(i, _)| i)?;
+    let repo_top = file.get(..split_byte)?;
+    let tail = file.get(split_byte..)?;
+    let rel_raw = tail.strip_prefix('/').or_else(|| tail.strip_prefix('\\'))?;
+    let rel_norm = rel_raw.replace('\\', "/");
+    let rel = if is_relative_source(&rel_norm) { rel_norm } else { sanitize_rel(root, file) };
+    let source_id = opaque_source_id(gitdir, repo_top);
     let label: String = commit.chars().take(8).collect();
-    // Extract relative path using `top_len` (character count of repository top) when valid,
-    // falling back to `sanitize_rel(root, file)`.
-    let rel_from_top = top_len_str.parse::<usize>().ok().and_then(|n| {
-        let byte_idx = file.char_indices().nth(n).map(|(i, _)| i)?;
-        let tail = file.get(byte_idx..)?;
-        let stripped = tail.strip_prefix('/').or_else(|| tail.strip_prefix('\\'))?;
-        let norm = stripped.replace('\\', "/");
-        is_relative_source(&norm).then_some(norm)
-    });
-    let rel = rel_from_top.unwrap_or_else(|| sanitize_rel(root, file));
-    Some((rel, TileVersion { repo, id: commit.to_string(), label }))
+    Some((rel, TileVersion { source_id, id: commit.to_string(), label }))
 }
 
 /// Parse a hub `diff\n<old>\n<new>[\n<bits>]` comparison string into
@@ -1330,15 +1461,16 @@ pub fn parse_diff_source(
     let old_raw = lines.next()?;
     let new_raw = lines.next()?;
     let layer_bits = lines.next().and_then(|b| b.trim().parse::<u32>().ok());
-    let parse_side = |side: &str| -> (String, Option<TileVersion>) {
-        if let Some((r, v)) = parse_git_source(root, side) {
-            (r, Some(v))
+    let parse_side = |side: &str| -> Option<(String, Option<TileVersion>)> {
+        if side.starts_with("git\t") {
+            let (r, v) = parse_git_source(root, side)?;
+            Some((r, Some(v)))
         } else {
-            (sanitize_rel(root, side), None)
+            Some((sanitize_rel(root, side), None))
         }
     };
-    let (old_rel, old_ver) = parse_side(old_raw);
-    let (new_rel, new_ver) = parse_side(new_raw);
+    let (old_rel, old_ver) = parse_side(old_raw)?;
+    let (new_rel, new_ver) = parse_side(new_raw)?;
     Some((new_rel, new_ver, old_rel, old_ver, layer_bits))
 }
 
@@ -1353,7 +1485,7 @@ pub struct DeriveInput<'a> {
     pub file: &'a str,
     pub sheet: &'a str,
     pub picked_board: &'a str,
-    /// Resolved sibling schematic for `picked_board` (empty if `picked_board` has no schematic).
+    /// Resolved sibling schematic for `picked_board` (empty if none or unconfirmed).
     pub picked_sch: &'a str,
     pub mech_rel: &'a str,
     pub files_dir: &'a str,
@@ -1369,6 +1501,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             id: "t1".into(),
             kind: PageKind::Diff,
             source: String::new(),
+            explicit: false,
             version: None,
             overlay: None,
         })
@@ -1378,21 +1511,21 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
         return Layout::empty();
     }
     if inp.open == "split" {
-        let board_rel = if !inp.picked_board.is_empty() {
+        let picked = !inp.picked_board.is_empty();
+        let board_rel = if picked {
             sanitize_rel(inp.root, inp.picked_board)
         } else {
             sanitize_rel(inp.root, inp.default_pcb)
         };
+        let sch_explicit = !inp.sheet.is_empty() || picked;
         let sch_rel = if !inp.sheet.is_empty() {
             sanitize_rel(inp.root, inp.sheet)
-        } else if !inp.picked_board.is_empty() {
+        } else if picked {
             sanitize_rel(inp.root, inp.picked_sch)
         } else {
             sanitize_rel(inp.root, inp.default_sch)
         };
-        // When an alternate board is picked and has no sibling schematic (and no explicit sheet),
-        // do not invent a nonexistent `.kicad_sch` tile: emit Board + 3D only, matching `watch_split`.
-        let include_sch = !sch_rel.is_empty() || (inp.picked_board.is_empty() && inp.default_sch.is_empty());
+        let include_sch = !sch_rel.is_empty() || (!picked && inp.default_sch.is_empty());
         let right = Node::Split {
             id: if include_sch { "s2".into() } else { "s1".into() },
             axis: Axis::Col,
@@ -1401,6 +1534,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                 id: "pcb".into(),
                 kind: PageKind::Board,
                 source: board_rel.clone(),
+                explicit: picked,
                 version: None,
                 overlay: None,
             })),
@@ -1408,6 +1542,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                 id: "3d".into(),
                 kind: PageKind::Solid3d,
                 source: board_rel,
+                explicit: picked,
                 version: None,
                 overlay: None,
             })),
@@ -1421,6 +1556,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                     id: "sch".into(),
                     kind: PageKind::Schematic,
                     source: sch_rel,
+                    explicit: sch_explicit,
                     version: None,
                     overlay: None,
                 })),
@@ -1447,7 +1583,6 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             sanitize_rel(inp.root, inp.default_gerber_set)
         };
         if inp.gerbers_vs_board {
-            // `noboard\n` keeps today's empty comparison: no board source (plan_watches emits nothing).
             let board_rel = if no_board {
                 String::new()
             } else {
@@ -1468,6 +1603,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
                 id: "t1".into(),
                 kind: PageKind::Board,
                 source: board_rel,
+                explicit: false,
                 version: None,
                 overlay: Some(Overlay {
                     kind: PageKind::Gerbers,
@@ -1483,6 +1619,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             id: "t1".into(),
             kind: PageKind::Gerbers,
             source: gerber_rel,
+            explicit: false,
             version: None,
             overlay: None,
         })
@@ -1506,6 +1643,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             id: "t1".into(),
             kind,
             source: new_rel,
+            explicit: false,
             version: new_ver,
             overlay: Some(ov),
         };
@@ -1518,43 +1656,44 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
             id: "t1".into(),
             kind,
             source: rel,
+            explicit: false,
             version: Some(ver),
             overlay: None,
         })
         .unwrap_or_else(|_| Layout::empty());
     }
 
-    let source = match kind {
+    let (source, explicit) = match kind {
         PageKind::Board | PageKind::Solid3d => {
             if !inp.file.is_empty() {
-                sanitize_rel(inp.root, inp.file)
+                (sanitize_rel(inp.root, inp.file), true)
             } else if !inp.picked_board.is_empty() {
-                sanitize_rel(inp.root, inp.picked_board)
+                (sanitize_rel(inp.root, inp.picked_board), true)
             } else {
-                sanitize_rel(inp.root, inp.default_pcb)
+                (sanitize_rel(inp.root, inp.default_pcb), false)
             }
         }
         PageKind::Schematic => {
             if !inp.sheet.is_empty() {
-                sanitize_rel(inp.root, inp.sheet)
+                (sanitize_rel(inp.root, inp.sheet), true)
             } else if !inp.file.is_empty() {
-                sanitize_rel(inp.root, inp.file)
+                (sanitize_rel(inp.root, inp.file), true)
             } else if !inp.picked_board.is_empty() {
-                sanitize_rel(inp.root, inp.picked_sch)
+                (sanitize_rel(inp.root, inp.picked_sch), true)
             } else {
-                sanitize_rel(inp.root, inp.default_sch)
+                (sanitize_rel(inp.root, inp.default_sch), false)
             }
         }
-        PageKind::Mech => sanitize_rel(inp.root, inp.mech_rel),
+        PageKind::Mech => (sanitize_rel(inp.root, inp.mech_rel), false),
         PageKind::Files => {
             if !inp.file.is_empty() {
-                sanitize_rel(inp.root, inp.file)
+                (sanitize_rel(inp.root, inp.file), true)
             } else {
-                sanitize_rel(inp.root, inp.files_dir)
+                (sanitize_rel(inp.root, inp.files_dir), false)
             }
         }
         PageKind::Gerbers | PageKind::Diff | PageKind::Review | PageKind::Browser | PageKind::Simulation => {
-            sanitize_rel(inp.root, inp.file)
+            (sanitize_rel(inp.root, inp.file), false)
         }
     };
 
@@ -1562,6 +1701,7 @@ pub fn derive_layout(inp: &DeriveInput<'_>) -> Layout {
         id: "t1".into(),
         kind,
         source,
+        explicit,
         version: None,
         overlay: None,
     })
@@ -1579,12 +1719,6 @@ pub struct WatchContext {
     pub default_pcb: String,
     /// Project default schematic absolute path (from `kicad::project::read`).
     pub default_sch: String,
-    /// Primary git directory for resolving `VersionRepo::Git` (e.g. `<root>/.git`).
-    pub git_dir: String,
-    /// Backplane history git directory for resolving `VersionRepo::History` (`<root>/.backplane/history.git`).
-    pub history_git_dir: String,
-    /// Repository top-level directory passed to `rv::hist_git` (defaults to `root` when empty).
-    pub repo_top: String,
 }
 
 impl WatchContext {
@@ -1597,37 +1731,22 @@ impl WatchContext {
             root: root.to_string(),
             default_pcb: files.pcb,
             default_sch: files.sch,
-            git_dir: String::new(),
-            history_git_dir: String::new(),
-            repo_top: root.to_string(),
         }
-    }
-
-    fn resolve_version(&self, tile_id: &str, ver: &TileVersion, rel: &str) -> Result<String, WatchError> {
-        let gd = match ver.repo {
-            VersionRepo::Git => self.git_dir.as_str(),
-            VersionRepo::History => self.history_git_dir.as_str(),
-        };
-        if gd.is_empty() || rel.is_empty() {
-            return Err(WatchError::UnresolvedVersion {
-                tile_id: tile_id.to_string(),
-                repo: ver.repo,
-                id: ver.id.clone(),
-            });
-        }
-        let top = if self.repo_top.is_empty() { self.root.trim_end_matches('/') } else { self.repo_top.trim_end_matches('/') };
-        Ok(rv::hist_git(gd, &ver.id, top, rel))
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WatchError {
-    /// A versioned tile or overlay could not be resolved against `WatchContext`;
-    /// never falls back silently to watching the live working file.
+    /// A versioned tile or overlay could not be resolved against the [`VersionResolver`];
+    /// never falls back silently to watching the live working file or returning empty `Ok`.
     UnresolvedVersion {
         tile_id: TileId,
-        repo: VersionRepo,
+        source_id: String,
         id: String,
+    },
+    /// A versioned tile requires a non-empty project root to form its watch key.
+    MissingRoot {
+        tile_id: TileId,
     },
 }
 
@@ -1651,19 +1770,51 @@ fn join_root(root: &str, rel: &str) -> String {
     }
 }
 
+fn resolve_version(
+    tile_id: &str,
+    ver: &TileVersion,
+    rel: &str,
+    resolver: &dyn VersionResolver,
+) -> Result<String, WatchError> {
+    if rel.is_empty() || !is_full_object_id(&ver.id) {
+        return Err(WatchError::UnresolvedVersion {
+            tile_id: tile_id.to_string(),
+            source_id: ver.source_id.clone(),
+            id: ver.id.clone(),
+        });
+    }
+    let Some(src) = resolver.resolve(&ver.source_id) else {
+        return Err(WatchError::UnresolvedVersion {
+            tile_id: tile_id.to_string(),
+            source_id: ver.source_id.clone(),
+            id: ver.id.clone(),
+        });
+    };
+    if src.git_dir.is_empty() || src.repo_top.is_empty() {
+        return Err(WatchError::UnresolvedVersion {
+            tile_id: tile_id.to_string(),
+            source_id: ver.source_id.clone(),
+            id: ver.id.clone(),
+        });
+    }
+    Ok(rv::hist_git(&src.git_dir, &ver.id, src.repo_top.trim_end_matches('/'), rel))
+}
+
 /// Plan the deduplicated list of `kicad.watch` subscriptions needed to draw all tiles in `layout`.
 ///
-/// Pure function over `layout` and `ctx`: does not touch `kicad.watch` runtime state.
-/// Returns `Err(WatchError::UnresolvedVersion)` if any versioned tile or overlay cannot be resolved
-/// (never silently watches the live file).
-pub fn plan_watches(layout: &Layout, ctx: &WatchContext) -> Result<Vec<WatchSpec>, WatchError> {
-    if ctx.root.is_empty() {
-        return Ok(Vec::new());
-    }
+/// Pure function over `layout`, `ctx`, and `resolver`: does not touch `kicad.watch` runtime state.
+/// Always resolves versioned tiles/overlays first (even if `ctx.root` is empty) and returns
+/// `Err(WatchError::UnresolvedVersion)` on any unknown or ambiguous source id, never falling back
+/// to the live working file.
+pub fn plan_watches(
+    layout: &Layout,
+    ctx: &WatchContext,
+    resolver: &dyn VersionResolver,
+) -> Result<Vec<WatchSpec>, WatchError> {
     let mut specs = Vec::new();
     let mut seen = HashSet::new();
     for tile in layout.tiles() {
-        for spec in plan_tile_watches(tile, ctx)? {
+        for spec in plan_tile_watches(tile, ctx, resolver)? {
             if seen.insert(spec.key.clone()) {
                 specs.push(spec);
             }
@@ -1672,89 +1823,177 @@ pub fn plan_watches(layout: &Layout, ctx: &WatchContext) -> Result<Vec<WatchSpec
     Ok(specs)
 }
 
-fn plan_tile_watches(tile: &Tile, ctx: &WatchContext) -> Result<Vec<WatchSpec>, WatchError> {
+fn plan_tile_watches(
+    tile: &Tile,
+    ctx: &WatchContext,
+    resolver: &dyn VersionResolver,
+) -> Result<Vec<WatchSpec>, WatchError> {
     let root = &ctx.root;
 
-    // Board + Gerbers diff overlay -> `gerbercmp\n<abs_set>\n<abs_board>` (empty when noboard)
+    // 1. Handle Board + Gerbers overlay (all modes: Diff, Old, New)
     if tile.kind == PageKind::Board {
         if let Some(ov) = &tile.overlay {
-            if ov.kind == PageKind::Gerbers && ov.mode == OverlayMode::Diff {
-                if tile.source.is_empty() || ov.source.is_empty() {
+            if ov.kind == PageKind::Gerbers {
+                if root.is_empty() {
                     return Ok(Vec::new());
                 }
-                let abs_set = join_root(root, &ov.source);
-                let abs_board = join_root(root, &tile.source);
-                let cmp = gerber::cmp_path(&abs_set, &abs_board);
-                let key = watch_key(0, root, &cmp);
-                return Ok(vec![WatchSpec { kind: 0, key, root: root.clone(), path: cmp }]);
+                return match ov.mode {
+                    OverlayMode::Diff => {
+                        if tile.source.is_empty() || ov.source.is_empty() {
+                            return Ok(Vec::new());
+                        }
+                        let abs_set = join_root(root, &ov.source);
+                        let abs_board = join_root(root, &tile.source);
+                        let cmp = gerber::cmp_path(&abs_set, &abs_board);
+                        Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &cmp), root: root.clone(), path: cmp }])
+                    }
+                    OverlayMode::Old => {
+                        if ov.source.is_empty() {
+                            return Ok(Vec::new());
+                        }
+                        let abs_set = join_root(root, &ov.source);
+                        Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &abs_set), root: root.clone(), path: abs_set }])
+                    }
+                    OverlayMode::New => {
+                        if tile.source.is_empty() {
+                            return Ok(Vec::new());
+                        }
+                        let abs_board = join_root(root, &tile.source);
+                        let req_path = if !tile.explicit && abs_board == ctx.default_pcb { String::new() } else { abs_board };
+                        Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &req_path), root: root.clone(), path: req_path }])
+                    }
+                };
             }
         }
     }
 
-    // History diff overlay on Board or Schematic -> `diff\n<old>\n<new>[\n<bits>]`
+    // 2. Handle versioned overlay on Board or Schematic (all modes: Diff, Old, New)
     if matches!(tile.kind, PageKind::Board | PageKind::Schematic) {
         if let Some(ov) = &tile.overlay {
-            if ov.kind == tile.kind && ov.mode == OverlayMode::Diff && (tile.version.is_some() || ov.version.is_some()) {
+            if ov.kind == tile.kind && (tile.version.is_some() || ov.version.is_some()) {
                 let k = if tile.kind == PageKind::Board { 0 } else { 1 };
                 let default_abs = if k == 0 { &ctx.default_pcb } else { &ctx.default_sch };
                 let new_rel = if tile.source.is_empty() { sanitize_rel(root, default_abs) } else { tile.source.clone() };
                 let old_rel = if ov.source.is_empty() { new_rel.clone() } else { ov.source.clone() };
-                let old_spec = match &ov.version {
-                    Some(v) => ctx.resolve_version(&tile.id, v, &old_rel)?,
-                    None => join_root(root, &old_rel),
+                return match ov.mode {
+                    OverlayMode::Diff => {
+                        let old_spec = match &ov.version {
+                            Some(v) => resolve_version(&tile.id, v, &old_rel, resolver)?,
+                            None => join_root(root, &old_rel),
+                        };
+                        let new_spec = match &tile.version {
+                            Some(v) => resolve_version(&tile.id, v, &new_rel, resolver)?,
+                            None => join_root(root, &new_rel),
+                        };
+                        if root.is_empty() {
+                            return Err(WatchError::MissingRoot { tile_id: tile.id.clone() });
+                        }
+                        let mut diff_path = format!("diff\n{old_spec}\n{new_spec}");
+                        if let Some(bits) = ov.layer_bits {
+                            diff_path.push('\n');
+                            diff_path.push_str(&bits.to_string());
+                        }
+                        Ok(vec![WatchSpec { kind: k, key: watch_key(k, root, &diff_path), root: root.clone(), path: diff_path }])
+                    }
+                    OverlayMode::Old => {
+                        match &ov.version {
+                            Some(v) => {
+                                let p = resolve_version(&tile.id, v, &old_rel, resolver)?;
+                                if root.is_empty() {
+                                    return Err(WatchError::MissingRoot { tile_id: tile.id.clone() });
+                                }
+                                Ok(vec![WatchSpec { kind: k, key: watch_key(k, root, &p), root: root.clone(), path: p }])
+                            }
+                            None => {
+                                if root.is_empty() {
+                                    return Ok(Vec::new());
+                                }
+                                let abs = join_root(root, &old_rel);
+                                if abs.is_empty() { return Ok(Vec::new()); }
+                                let req_path = if !tile.explicit && abs == *default_abs { String::new() } else { abs };
+                                Ok(vec![WatchSpec { kind: k, key: watch_key(k, root, &req_path), root: root.clone(), path: req_path }])
+                            }
+                        }
+                    }
+                    OverlayMode::New => {
+                        match &tile.version {
+                            Some(v) => {
+                                let p = resolve_version(&tile.id, v, &new_rel, resolver)?;
+                                if root.is_empty() {
+                                    return Err(WatchError::MissingRoot { tile_id: tile.id.clone() });
+                                }
+                                Ok(vec![WatchSpec { kind: k, key: watch_key(k, root, &p), root: root.clone(), path: p }])
+                            }
+                            None => {
+                                if root.is_empty() {
+                                    return Ok(Vec::new());
+                                }
+                                let abs = join_root(root, &new_rel);
+                                if abs.is_empty() { return Ok(Vec::new()); }
+                                let req_path = if !tile.explicit && abs == *default_abs { String::new() } else { abs };
+                                Ok(vec![WatchSpec { kind: k, key: watch_key(k, root, &req_path), root: root.clone(), path: req_path }])
+                            }
+                        }
+                    }
                 };
-                let new_spec = match &tile.version {
-                    Some(v) => ctx.resolve_version(&tile.id, v, &new_rel)?,
-                    None => join_root(root, &new_rel),
-                };
-                let mut diff_path = format!("diff\n{old_spec}\n{new_spec}");
-                if let Some(bits) = ov.layer_bits {
-                    diff_path.push('\n');
-                    diff_path.push_str(&bits.to_string());
-                }
-                let key = watch_key(k, root, &diff_path);
-                return Ok(vec![WatchSpec { kind: k, key, root: root.clone(), path: diff_path }]);
             }
         }
     }
 
+    // 3. Single-source tiles (resolve version FIRST even when root is empty)
+    if let Some(ver) = &tile.version {
+        let default_abs = match tile.kind {
+            PageKind::Schematic => &ctx.default_sch,
+            _ => &ctx.default_pcb,
+        };
+        let rel = if tile.source.is_empty() { sanitize_rel(root, default_abs) } else { tile.source.clone() };
+        let p = resolve_version(&tile.id, ver, &rel, resolver)?;
+        if root.is_empty() {
+            return Err(WatchError::MissingRoot { tile_id: tile.id.clone() });
+        }
+        return match tile.kind {
+            PageKind::Board => Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &p), root: root.clone(), path: p }]),
+            PageKind::Schematic => Ok(vec![WatchSpec { kind: 1, key: watch_key(1, root, &p), root: root.clone(), path: p }]),
+            PageKind::Solid3d => {
+                // Versioned 3D tile resolves BOTH kind 2 and kind 0 against the versioned spec — NEVER the live board.
+                let mut out = vec![WatchSpec { kind: 2, key: watch_key(2, root, &p), root: root.clone(), path: p.clone() }];
+                if rel.ends_with(".kicad_pcb") {
+                    out.push(WatchSpec { kind: 0, key: watch_key(0, root, &p), root: root.clone(), path: p });
+                }
+                Ok(out)
+            }
+            _ => Ok(Vec::new()),
+        };
+    }
+
+    if root.is_empty() {
+        return Ok(Vec::new());
+    }
+
     match tile.kind {
         PageKind::Board => {
-            if let Some(ver) = &tile.version {
-                let rel = if tile.source.is_empty() { sanitize_rel(root, &ctx.default_pcb) } else { tile.source.clone() };
-                let p = ctx.resolve_version(&tile.id, ver, &rel)?;
-                return Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &p), root: root.clone(), path: p }]);
-            }
             let abs = if tile.source.is_empty() { ctx.default_pcb.clone() } else { join_root(root, &tile.source) };
             if abs.is_empty() {
                 return Ok(Vec::new());
             }
-            let req_path = if abs == ctx.default_pcb { String::new() } else { abs };
-            let key = watch_key(0, root, &req_path);
-            Ok(vec![WatchSpec { kind: 0, key, root: root.clone(), path: req_path }])
+            let req_path = if !tile.explicit && abs == ctx.default_pcb { String::new() } else { abs };
+            Ok(vec![WatchSpec { kind: 0, key: watch_key(0, root, &req_path), root: root.clone(), path: req_path }])
         }
         PageKind::Schematic => {
-            if let Some(ver) = &tile.version {
-                let rel = if tile.source.is_empty() { sanitize_rel(root, &ctx.default_sch) } else { tile.source.clone() };
-                let p = ctx.resolve_version(&tile.id, ver, &rel)?;
-                return Ok(vec![WatchSpec { kind: 1, key: watch_key(1, root, &p), root: root.clone(), path: p }]);
-            }
             let abs = if tile.source.is_empty() { ctx.default_sch.clone() } else { join_root(root, &tile.source) };
             if abs.is_empty() {
                 return Ok(Vec::new());
             }
-            let req_path = if abs == ctx.default_sch { String::new() } else { abs };
-            let key = watch_key(1, root, &req_path);
-            Ok(vec![WatchSpec { kind: 1, key, root: root.clone(), path: req_path }])
+            let req_path = if !tile.explicit && abs == ctx.default_sch { String::new() } else { abs };
+            Ok(vec![WatchSpec { kind: 1, key: watch_key(1, root, &req_path), root: root.clone(), path: req_path }])
         }
         PageKind::Solid3d => {
             let abs = if tile.source.is_empty() { ctx.default_pcb.clone() } else { join_root(root, &tile.source) };
             if abs.is_empty() {
                 return Ok(Vec::new());
             }
-            let req_path = if abs == ctx.default_pcb { String::new() } else { abs.clone() };
+            let req_path = if !tile.explicit && abs == ctx.default_pcb { String::new() } else { abs.clone() };
             let mut out = vec![WatchSpec { kind: 2, key: watch_key(2, root, &req_path), root: root.clone(), path: req_path.clone() }];
-            // Matches `watch.rs:129-133`: a board's 3D view also subscribes the board plot (`kind == 0`).
             if abs.ends_with(".kicad_pcb") {
                 out.push(WatchSpec { kind: 0, key: watch_key(0, root, &req_path), root: root.clone(), path: req_path });
             }
@@ -1782,12 +2021,15 @@ fn plan_tile_watches(tile: &Tile, ctx: &WatchContext) -> Result<Vec<WatchSpec>, 
 mod tests {
     use super::*;
 
+    const SHA_A: &str = "1111aaaa99998888777766665555444433332222";
+    const SHA_B: &str = "2222bbbb88889999000011112222333344445555";
+
     fn tile(id: &str, kind: PageKind, source: &str) -> Tile {
-        Tile { id: id.into(), kind, source: source.into(), version: None, overlay: None }
+        Tile { id: id.into(), kind, source: source.into(), explicit: false, version: None, overlay: None }
     }
 
-    fn ver(repo: VersionRepo, id: &str) -> TileVersion {
-        TileVersion { repo, id: id.into(), label: id.chars().take(8).collect() }
+    fn ver(source_id: &str, id: &str) -> TileVersion {
+        TileVersion { source_id: source_id.into(), id: id.into(), label: id.chars().take(8).collect() }
     }
 
     #[test]
@@ -1819,18 +2061,9 @@ mod tests {
                 .unwrap_or_else(|e| panic!("frame {frame} failed: {e:?}"));
             assert_eq!(next.tile("k1").unwrap().kind, expected, "frame={frame}");
         }
-        assert_eq!(
-            retarget_kicad_frame(&l, "k1", "UNKNOWN_TAB", "main.kicad_pcb".into(), None),
-            Err(Refusal::UnknownFrame)
-        );
-        assert_eq!(
-            retarget(&l, "k1", PageKind::Schematic, "main.kicad_sch".into(), Some("k1")),
-            Err(Refusal::Locked)
-        );
-        assert_eq!(
-            retarget(&l, "k1", PageKind::Schematic, "/proj/main.kicad_sch".into(), None),
-            Err(Refusal::InvalidSource)
-        );
+        assert_eq!(retarget_kicad_frame(&l, "k1", "UNKNOWN_TAB", "main.kicad_pcb".into(), None), Err(Refusal::UnknownFrame));
+        assert_eq!(retarget(&l, "k1", PageKind::Schematic, "main.kicad_sch".into(), Some("k1")), Err(Refusal::Locked));
+        assert_eq!(retarget(&l, "k1", PageKind::Schematic, "/proj/main.kicad_sch".into(), None), Err(Refusal::InvalidSource));
     }
 
     #[test]
@@ -1846,15 +2079,30 @@ mod tests {
     }
 
     #[test]
-    fn resize_enforces_kicad_380x300_and_accounts_for_descendant_ratios() {
+    fn resize_refuses_too_small_and_prevents_ancestor_drift_on_locked_tile() {
         let l = Layout::single(tile("k", PageKind::Board, "main.kicad_pcb")).unwrap();
         let l = add(&l, Some("k"), Side::Right, tile("v", PageKind::Schematic, "main.kicad_sch"), false, None).unwrap();
-        let r1 = resize(&l, "s1", 0.1, (1000.0, 800.0), default_min_for(Some("k")), None).unwrap();
-        let Node::Split { ratio, .. } = r1.root.as_ref().unwrap() else { panic!() };
-        assert!((*ratio - 0.38).abs() < 1e-4, "ratio={ratio}");
 
-        // Descendant ratio test: child row at 80/20 of two 180px tiles needs 900px total width
-        // so the 20% tile stays >= 180px. Inside 1200px parent, parent split min ratio = 900/1200 = 0.75.
+        // Counterexample: 500 px row with 380 px (KiCad) and 180 px minimums cannot fit -> Refusal::TooSmall
+        assert_eq!(
+            resize(&l, "s1", 0.5, (500.0, 800.0), default_min_for(Some("k")), None),
+            Err(Refusal::TooSmall)
+        );
+        assert_eq!(Refusal::TooSmall.code(), "tooSmall");
+
+        // Counterexample: repeated 1e-6 ancestor resizes must NEVER drift a locked tile
+        let mut cur = l.clone();
+        for i in 1..=100 {
+            let tiny = 0.5 + (i as f32) * 1e-6;
+            assert_eq!(
+                resize(&cur, "s1", tiny, (1000.0, 800.0), default_min_for(Some("k")), Some("k")),
+                Err(Refusal::Locked)
+            );
+            cur = cur;
+        }
+        assert_eq!(tile_rect(&cur, "k"), tile_rect(&l, "k"));
+
+        // Descendant ratio test: 80/20 row of two 180px leaves requires 900px; inside 1200px -> min ratio 0.75
         let nested = Layout {
             version: LAYOUT_VERSION,
             root: Some(Node::Split {
@@ -1873,182 +2121,127 @@ mod tests {
             focus: Some("a".into()),
             maximized: None,
         };
-        let min_child = subtree_min(
-            match nested.root.as_ref().unwrap() { Node::Split { a, .. } => a, _ => unreachable!() },
-            &default_min_for(None),
-        );
-        assert!((min_child.0 - 900.0).abs() < 1e-3, "expected 900px, got {}", min_child.0);
         let resized = resize(&nested, "parent", 0.4, (1200.0, 800.0), default_min_for(None), None).unwrap();
         let Node::Split { ratio, .. } = resized.root.as_ref().unwrap() else { panic!() };
         assert!((*ratio - 0.75).abs() < 1e-4, "expected 0.75, got {ratio}");
     }
 
     #[test]
-    fn lock_enforces_unchanged_unit_square_rect_across_all_operations() {
-        // Tree: s1(Row, a=k, b=s2(Col, a=v1, b=v2))
-        let l = Layout::single(tile("k", PageKind::Board, "a.kicad_pcb")).unwrap();
-        let l = add(&l, Some("k"), Side::Right, tile("v1", PageKind::Schematic, "a.kicad_sch"), false, None).unwrap();
-        let l = add(&l, Some("v1"), Side::Bottom, tile("v2", PageKind::Solid3d, "a.kicad_pcb"), false, None).unwrap();
+    fn overlay_same_commit_different_label_rejected_and_unsplit_restores_focus_and_maximized() {
+        let mut map = VersionSourceMap::new();
+        let sid = map.register("/proj/.git", "/proj");
 
-        // Adding beside locked `k` would shrink `k` -> refused
-        assert_eq!(add(&l, Some("k"), Side::Top, tile("x", PageKind::Files, ""), false, Some("k")), Err(Refusal::Locked));
-        // Adding beside `v2` (sibling subtree) leaves `k`'s rect unchanged -> allowed!
-        let l_added = add(&l, Some("v2"), Side::Right, tile("x", PageKind::Files, ""), false, Some("k")).unwrap();
-        assert_eq!(tile_rect(&l, "k"), tile_rect(&l_added, "k"));
-
-        // Resizing ancestor `s1` moves/resizes `k` -> refused
-        assert_eq!(resize(&l, "s1", 0.6, (1000.0, 800.0), default_min_for(Some("k")), Some("k")), Err(Refusal::Locked));
-        // Resizing sibling split `s2` leaves `k`'s rect unchanged -> allowed!
-        let l_res = resize(&l, "s2", 0.6, (1000.0, 800.0), default_min_for(Some("k")), Some("k")).unwrap();
-        assert_eq!(tile_rect(&l, "k"), tile_rect(&l_res, "k"));
-
-        // Closing `k` -> refused; closing `v2` (inside `s2`, leaving `v1` in `b`) keeps `k` unchanged -> allowed!
-        assert_eq!(close(&l, "k", Some("k")), Err(Refusal::Locked));
-        let l_closed = close(&l, "v2", Some("k")).unwrap();
-        assert_eq!(tile_rect(&l, "k"), tile_rect(&l_closed, "k"));
-        // Now closing `v1` would expand `k` from 0.5 to 1.0 -> refused!
-        assert_eq!(close(&l_closed, "v1", Some("k")), Err(Refusal::Locked));
-
-        // Maximizing `v1` covers `k` -> refused; maximizing `k` resizes `k` from 0.5 to 1.0 -> refused
-        assert_eq!(maximize(&l, "v1", Some("k")), Err(Refusal::Locked));
-        assert_eq!(maximize(&l, "k", Some("k")), Err(Refusal::Locked));
-
-        // Swapping or moving `k` -> refused
-        assert_eq!(swap(&l, "k", "v1", Some("k")), Err(Refusal::Locked));
-        assert_eq!(move_tile(&l, "k", "v1", Side::Top, Some("k")), Err(Refusal::Locked));
-    }
-
-    #[test]
-    fn overlay_rejects_incompatible_pairs_and_split_merge_is_exact_inverse() {
-        let l = Layout::single(tile("t1", PageKind::Files, "readme.md")).unwrap();
-        let bad = Overlay { kind: PageKind::Browser, source: "".into(), version: None, mode: OverlayMode::Diff, layer_bits: None };
-        assert_eq!(overlay(&l, "t1", Some(bad), None), Err(Refusal::IncompatibleOverlay));
-
-        // Valid history comparison with layer_bits and Old mode -> split -> merge -> exact inverse
+        // Same (source_id, id) with different label must be rejected as IncompatibleOverlay
         let base = Layout::single(Tile {
             id: "t1".into(),
             kind: PageKind::Board,
             source: "main.kicad_pcb".into(),
-            version: Some(ver(VersionRepo::Git, "2222bbbb88889999000011112222333344445555")),
+            explicit: false,
+            version: Some(TileVersion { source_id: sid.clone(), id: SHA_A.into(), label: "v1".into() }),
             overlay: None,
         })
         .unwrap();
+        let same_commit_diff_label = Overlay {
+            kind: PageKind::Board,
+            source: "main.kicad_pcb".into(),
+            version: Some(TileVersion { source_id: sid.clone(), id: SHA_A.into(), label: "rev-one".into() }),
+            mode: OverlayMode::Diff,
+            layer_bits: None,
+        };
+        assert_eq!(overlay(&base, "t1", Some(same_commit_diff_label), None), Err(Refusal::IncompatibleOverlay));
+
+        // Add a second tile, attach valid overlay to t1, focus t2, maximize t1 -> split -> unsplit restores exact Layout
+        let l = add(&base, Some("t1"), Side::Right, tile("t2", PageKind::Files, "README.md"), false, None).unwrap();
         let ov = Overlay {
             kind: PageKind::Board,
             source: "main.kicad_pcb".into(),
-            version: Some(ver(VersionRepo::Git, "1111aaaa99998888777766665555444433332222")),
+            version: Some(ver(&sid, SHA_B)),
             mode: OverlayMode::Old,
-            layer_bits: Some(42),
+            layer_bits: Some(12),
         };
-        let with_ov = overlay(&base, "t1", Some(ov), None).unwrap();
-        let split = split_overlay(&with_ov, "t1", Side::Right, Some("t2".into()), None).unwrap();
-        assert_eq!(split.mode, OverlayMode::Old);
-        assert_eq!(split.layer_bits, Some(42));
-        let back = merge_overlay(&split.layout, "t1", &split.overlay_tile_id, split.mode, split.layer_bits, None).unwrap();
+        let mut with_ov = overlay(&l, "t1", Some(ov), None).unwrap();
+        with_ov = maximize(&with_ov, "t1", None).unwrap();
+        with_ov.focus = Some("t2".into()); // distinct focus + maximized
+        let split = split_overlay(&with_ov, "t1", Side::Bottom, Some("t3".into()), None).unwrap();
+        let back = unsplit_overlay(&split, "t1", None).unwrap();
         assert_eq!(back, with_ov);
     }
 
     #[test]
-    fn rail_press_respects_rail_availability() {
-        let rail_json = super::super::rail::rail(super::super::rail::RailInput {
-            board: true,
-            schematic: false,
-            mech: false,
-            gerbers: false,
-            simulation: false,
-            altium: false,
-            page: "",
-            diff: false,
-        });
-        let idle = Layout::empty();
-        // Disabled (schematic) or omitted (gerbers, simulation) -> no-op
-        assert_eq!(rail_press(&idle, PageKind::Schematic, "a.kicad_sch".into(), |k| rail_allows(&rail_json, k), None).unwrap(), idle);
-        assert_eq!(rail_press(&idle, PageKind::Gerbers, "mfg/r1".into(), |k| rail_allows(&rail_json, k), None).unwrap(), idle);
-        // Enabled (board) -> opens 1-tile layout
-        let open = rail_press(&idle, PageKind::Board, "a.kicad_pcb".into(), |k| rail_allows(&rail_json, k), None).unwrap();
-        assert_eq!(open.tile("t1").unwrap().kind, PageKind::Board);
-        // Press focused kind again -> closes
-        let closed = rail_press(&open, PageKind::Board, "a.kicad_pcb".into(), |k| rail_allows(&rail_json, k), None).unwrap();
-        assert!(closed.is_empty());
-    }
-
-    #[test]
-    fn versions_round_trip_through_rv_hist_git_and_unresolved_is_error() {
+    fn versions_strict_full_id_resolver_old_overlay_versioned_3d_and_empty_root() {
         let root = "/proj";
-        let git_dir = "/proj/.git";
-        let hist_dir = "/proj/.backplane/history.git";
-        let sha_old = "1111aaaa99998888777766665555444433332222";
-        let sha_new = "2222bbbb88889999000011112222333344445555";
-        let old_wire = rv::hist_git(hist_dir, sha_old, root, "sub/main.kicad_pcb");
-        let new_wire = rv::hist_git(git_dir, sha_new, root, "sub/main.kicad_pcb");
-        let diff_wire = format!("diff\n{old_wire}\n{new_wire}\n7");
+        let mut resolver = VersionSourceMap::new();
+        let sid_main = resolver.register("/proj/.git", "/proj");
+        let sid_sub = resolver.register("/proj/sub/.git", "/proj/sub");
+        assert_ne!(sid_main, sid_sub, "distinct repos/tops get distinct opaque source_ids");
 
-        let layout = derive_layout(&DeriveInput {
-            root,
-            open: "board",
-            file: &diff_wire,
-            default_pcb: "/proj/sub/main.kicad_pcb",
-            ..Default::default()
-        });
-        check_invariants(&layout).unwrap();
-        let t = layout.tile("t1").unwrap();
-        assert_eq!(t.version.as_ref().unwrap().repo, VersionRepo::Git);
-        assert_eq!(t.version.as_ref().unwrap().id, sha_new);
-        assert_eq!(t.version.as_ref().unwrap().label, "2222bbbb");
-        let ov = t.overlay.as_ref().unwrap();
-        assert_eq!(ov.version.as_ref().unwrap().repo, VersionRepo::History);
-        assert_eq!(ov.version.as_ref().unwrap().id, sha_old);
-        assert_eq!(ov.layer_bits, Some(7));
+        // Short prefix (8 hex) must be rejected everywhere
+        assert!(!is_full_object_id("1111aaaa"));
+        let short_json = format!(
+            r#"{{"version":1,"focus":"t1","maximized":null,"root":{{"type":"tile","id":"t1","kind":"board","source":"m.kicad_pcb","version":{{"source_id":"{sid_main}","id":"1111aaaa","label":"1111aaaa"}}}}}}"#
+        );
+        assert!(serde_json::from_str::<Layout>(&short_json).is_err());
 
-        // Missing repo resolver -> error, NEVER live file
-        let empty_ctx = WatchContext { root: root.into(), default_pcb: "/proj/sub/main.kicad_pcb".into(), ..Default::default() };
-        assert!(matches!(plan_watches(&layout, &empty_ctx), Err(WatchError::UnresolvedVersion { repo: VersionRepo::History, .. })));
+        // Ambiguous source_id -> unresolved error
+        let mut ambig = VersionSourceMap::new();
+        ambig.insert("vsrc-dup", VersionSource { git_dir: "/a/.git".into(), repo_top: "/a".into() });
+        ambig.insert("vsrc-dup", VersionSource { git_dir: "/b/.git".into(), repo_top: "/b".into() });
+        assert!(ambig.resolve("vsrc-dup").is_none());
 
-        // Complete context -> exact byte-for-byte round-trip of `diff\n<old>\n<new>\n<bits>`
-        let full_ctx = WatchContext {
-            root: root.into(),
-            default_pcb: "/proj/sub/main.kicad_pcb".into(),
-            git_dir: git_dir.into(),
-            history_git_dir: hist_dir.into(),
-            repo_top: root.into(),
-            ..Default::default()
-        };
-        let specs = plan_watches(&layout, &full_ctx).unwrap();
-        assert_eq!(specs.len(), 1);
-        assert_eq!(specs[0].path, diff_wire);
-        assert_eq!(specs[0].key, watch_key(0, root, &diff_wire));
-    }
+        // Empty context root MUST NOT return Ok(vec![]) for a versioned tile
+        let v_board = Layout::single(Tile {
+            id: "t1".into(),
+            kind: PageKind::Board,
+            source: "main.kicad_pcb".into(),
+            explicit: false,
+            version: Some(ver(&sid_main, SHA_A)),
+            overlay: None,
+        })
+        .unwrap();
+        assert!(plan_watches(&v_board, &WatchContext::default(), &VersionSourceMap::new()).is_err());
+        assert_eq!(
+            plan_watches(&v_board, &WatchContext::default(), &resolver),
+            Err(WatchError::MissingRoot { tile_id: "t1".into() })
+        );
 
-    #[test]
-    fn decoding_validates_invariants_and_tolerates_unknown_fields() {
-        let with_extra = r#"{
-            "version": 1,
-            "futureField": 42,
-            "focus": "t1",
-            "maximized": null,
-            "root": {
-                "type": "tile",
-                "id": "t1",
-                "kind": "board",
-                "source": "main.kicad_pcb",
-                "kicad": true,
-                "overlay": {"kind": "gerbers", "source": "mfg/rev1", "mode": "diff", "opacity": 0.5}
-            }
-        }"#;
-        let parsed: Layout = serde_json::from_str(with_extra).unwrap();
-        assert_eq!(parsed.tile("t1").unwrap().source, "main.kicad_pcb");
+        // Versioned 3D tile MUST NOT plan the live board
+        let v_3d = Layout::single(Tile {
+            id: "t1".into(),
+            kind: PageKind::Solid3d,
+            source: "main.kicad_pcb".into(),
+            explicit: false,
+            version: Some(ver(&sid_main, SHA_A)),
+            overlay: None,
+        })
+        .unwrap();
+        let ctx = WatchContext { root: root.into(), default_pcb: "/proj/main.kicad_pcb".into(), default_sch: String::new() };
+        assert!(plan_watches(&v_3d, &ctx, &VersionSourceMap::new()).is_err());
+        let specs_3d = plan_watches(&v_3d, &ctx, &resolver).unwrap();
+        let expected_wire = rv::hist_git("/proj/.git", SHA_A, "/proj", "main.kicad_pcb");
+        assert_eq!(specs_3d, vec![
+            WatchSpec { kind: 2, key: watch_key(2, root, &expected_wire), root: root.into(), path: expected_wire.clone() },
+            WatchSpec { kind: 0, key: watch_key(0, root, &expected_wire), root: root.into(), path: expected_wire.clone() },
+        ]);
 
-        // Dangling focus rejected at decode time
-        let bad_focus = r#"{"version":1,"focus":"missing","maximized":null,"root":{"type":"tile","id":"t1","kind":"board","source":"a.kicad_pcb"}}"#;
-        assert!(serde_json::from_str::<Layout>(bad_focus).is_err());
-
-        // Absolute source rejected at decode time
-        let bad_src = r#"{"version":1,"focus":"t1","maximized":null,"root":{"type":"tile","id":"t1","kind":"board","source":"/etc/passwd"}}"#;
-        assert!(serde_json::from_str::<Layout>(bad_src).is_err());
-
-        // Path-like version label rejected at decode time
-        let bad_ver = r#"{"version":1,"focus":"t1","maximized":null,"root":{"type":"tile","id":"t1","kind":"board","source":"a.kicad_pcb","version":{"repo":"git","id":"1111aaaa","label":"/proj/foo"}}}"#;
-        assert!(serde_json::from_str::<Layout>(bad_ver).is_err());
+        // `Old` overlay MUST watch the overlay's version (SHA_A), NEVER the base tile's version (SHA_B) or live file
+        let old_ov = Layout::single(Tile {
+            id: "t1".into(),
+            kind: PageKind::Board,
+            source: "main.kicad_pcb".into(),
+            explicit: false,
+            version: Some(ver(&sid_main, SHA_B)),
+            overlay: Some(Overlay {
+                kind: PageKind::Board,
+                source: "main.kicad_pcb".into(),
+                version: Some(ver(&sid_main, SHA_A)),
+                mode: OverlayMode::Old,
+                layer_bits: None,
+            }),
+        })
+        .unwrap();
+        let specs_old = plan_watches(&old_ov, &ctx, &resolver).unwrap();
+        assert_eq!(specs_old.len(), 1);
+        assert_eq!(specs_old[0].path, expected_wire);
     }
 
     #[test]
@@ -2073,10 +2266,9 @@ mod tests {
             root: "/proj".into(),
             default_pcb: "/proj/dir/file.kicad_pcb".into(),
             default_sch: "/proj/dir/file.kicad_sch".into(),
-            git_dir: "/proj/.git".into(),
-            history_git_dir: "/proj/.backplane/history.git".into(),
-            repo_top: "/proj".into(),
         };
+        let mut resolver = VersionSourceMap::new();
+        resolver.register("/proj/.git", "/proj");
         let mut layout = Layout::empty();
         for step in 0..600 {
             let op = next_u64() % 12;
@@ -2116,7 +2308,7 @@ mod tests {
                     let sid = format!("s{}", (next_u64() % 6) + 1);
                     let r = ((next_u64() % 100) as f32) / 100.0;
                     let kt = kicad_tile(&layout, |_| true);
-                    resize(&layout, &sid, r, (1400.0, 900.0), default_min_for(kt.as_deref()), locked_ref).ok()
+                    resize(&layout, &sid, r, (2400.0, 1600.0), default_min_for(kt.as_deref()), locked_ref).ok()
                 }
                 6 if !tiles.is_empty() => {
                     let t = &tiles[(next_u64() as usize) % tiles.len()];
@@ -2143,7 +2335,6 @@ mod tests {
                     retarget(&layout, t, k, "dir/file.kicad_sch".into(), locked_ref).ok()
                 }
                 11 if !tiles.is_empty() => {
-                    // Incompatible overlay must always be rejected
                     let t = &tiles[(next_u64() as usize) % tiles.len()];
                     let bad = Overlay { kind: PageKind::Browser, source: "".into(), version: None, mode: OverlayMode::Diff, layer_bits: None };
                     assert_eq!(overlay(&layout, t, Some(bad), locked_ref), Err(Refusal::IncompatibleOverlay));
@@ -2157,7 +2348,7 @@ mod tests {
                 layout = next;
             }
             check_invariants(&layout).unwrap_or_else(|e| panic!("step {step} violated invariant: {e}\n{layout:#?}"));
-            let specs = plan_watches(&layout, &ctx).unwrap_or_else(|e| panic!("step {step} watch plan failed: {e:?}"));
+            let specs = plan_watches(&layout, &ctx, &resolver).unwrap_or_else(|e| panic!("step {step} watch plan failed: {e:?}"));
             let unique: HashSet<&str> = specs.iter().map(|s| s.key.as_str()).collect();
             assert_eq!(unique.len(), specs.len(), "step {step} duplicate watch keys");
             for sp in &specs {

@@ -198,7 +198,9 @@ mod tests {
         layout::check_invariants(&l_split).unwrap();
         assert_eq!(l_split.tiles().len(), 3);
         let ctx = layout::WatchContext::from_root(&root);
-        let watches = layout::plan_watches(&l_split, &ctx).unwrap();
+        let mut resolver = layout::VersionSourceMap::new();
+        resolver.register(format!("{root}/.git"), root.clone());
+        let watches = layout::plan_watches(&l_split, &ctx, &resolver).unwrap();
         assert_eq!(watches.iter().map(|w| (w.kind, w.key.clone(), w.path.clone())).collect::<Vec<_>>(), vec![
             (1, format!("1|{root}|"), String::new()),
             (0, format!("0|{root}|"), String::new()),
@@ -231,6 +233,11 @@ mod tests {
         assert_eq!(ht.version.as_ref().unwrap().label, "2222bbbb");
         assert_eq!(ht.overlay.as_ref().unwrap().version.as_ref().unwrap().id, sha_old);
         assert_eq!(ht.overlay.as_ref().unwrap().layer_bits, Some(3));
+        // Round-trip history comparison through plan_watches matches exact live wire path
+        let hist_specs = layout::plan_watches(&l_hist, &ctx, &resolver).unwrap();
+        assert_eq!(hist_specs.len(), 1);
+        assert_eq!(hist_specs[0].path, diff_raw);
+        assert_eq!(hist_specs[0].key, crate::files::kicad::watch::key(0, &root, &diff_raw));
 
         for v in [&v_one, &v_split, &v_gvb, &v_hist] {
             let s = v["layout"].to_string();
@@ -246,21 +253,32 @@ mod tests {
     }
 
     #[test]
-    fn viewer_json_emits_layout_for_linked_machine_thread_without_local_probes() {
+    fn viewer_json_emits_layout_for_linked_machine_thread_with_worktree_without_local_probes() {
         let mut st = crate::state::State::new();
         let remote_root = "/nonexistent-remote-machine/project";
+        let remote_wt = "/nonexistent-remote-machine/worktrees/feat";
         st.apply_line(&json!({"$":"ProjectCreated","id":"peer~p","title":"Remote","root":remote_root,"at":1}).to_string());
-        st.apply_line(&json!({"$":"ThreadCreated","id":"peer~t","project":"peer~p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
-        let session = json!({"sel":"peer~t","drafts":{"@view:peer~t":"board","@view.board:peer~t":"sub/main.kicad_pcb"},"panel":false,"info":{}});
+        st.apply_line(&json!({"$":"ThreadCreated","id":"peer~t","project":"peer~p","title":"T","env":"local","branch":"feat","worktree":remote_wt,"provider":"claude","model":"","at":2}).to_string());
+        // Linked thread with non-empty worktree and picked board in Split: no local probe, no invented sibling schematic
+        let session = json!({"sel":"peer~t","drafts":{"@view:peer~t":"split","@view.board:peer~t":"sub/main.kicad_pcb"},"panel":false,"info":{}});
         let v = viewer::viewer_json(&st, &json!({}), &session).unwrap();
         let l: layout::Layout = serde_json::from_value(v["layout"].clone()).unwrap();
-        assert_eq!(l.tile("t1").unwrap().kind, layout::PageKind::Board);
-        assert_eq!(l.tile("t1").unwrap().source, "sub/main.kicad_pcb");
+        assert_eq!(l.tiles().len(), 2, "must not invent a sibling schematic on linked thread");
+        assert_eq!(l.tile("pcb").unwrap().source, "sub/main.kicad_pcb");
         assert!(!v["layout"].to_string().contains(remote_root));
+        assert!(!v["layout"].to_string().contains(remote_wt));
+
+        // Remembered board selection on shut viewer and Files emits clean layout with zero sibling probes
+        let shut = json!({"sel":"peer~t","drafts":{"@view.board:peer~t":"sub/main.kicad_pcb"},"panel":false,"info":{}});
+        let l_shut: layout::Layout = serde_json::from_value(viewer::viewer_json(&st, &json!({}), &shut).unwrap()["layout"].clone()).unwrap();
+        assert!(l_shut.is_empty());
+        let files = json!({"sel":"peer~t","drafts":{"@view:peer~t":"files","@view.board:peer~t":"sub/main.kicad_pcb"},"panel":false,"info":{}});
+        let l_files: layout::Layout = serde_json::from_value(viewer::viewer_json(&st, &json!({}), &files).unwrap()["layout"].clone()).unwrap();
+        assert_eq!(l_files.tile("t1").unwrap().kind, layout::PageKind::Files);
     }
 
     #[test]
-    fn plan_watches_matches_live_watch_and_view_action_on_all_real_inputs() {
+    fn plan_watches_matches_live_view_action_and_watch_split_on_all_real_inputs() {
         let d = crate::plat::tmp::dir("watch-parity");
         let root = d.to_string_lossy().into_owned();
         std::fs::write(d.join("main.kicad_pcb"), "(kicad_pcb)").unwrap();
@@ -278,30 +296,52 @@ mod tests {
         st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
 
         let ctx = layout::WatchContext::from_root(&root);
+        let mut resolver = layout::VersionSourceMap::new();
+        resolver.register(format!("{root}/.git"), root.clone());
+
         let plan_for = |drafts: Value| {
             let session = json!({"sel":"t","drafts":drafts,"panel":false,"info":{}});
             let v = viewer::viewer_json(&st, &json!({}), &session).unwrap();
             let l: layout::Layout = serde_json::from_value(v["layout"].clone()).unwrap();
-            (v, l.clone(), layout::plan_watches(&l, &ctx).unwrap())
+            (v, l.clone(), layout::plan_watches(&l, &ctx, &resolver).unwrap())
         };
         let sent_watch = |action: &str, base_drafts: Value| {
             let session = json!({"sel":"t","drafts":base_drafts,"panel":false,"info":{}});
             let out = viewer::view_action(&st, "h", &session, action).unwrap();
             let txt = out.before[0]["text"].as_str().unwrap();
             let msg: Value = serde_json::from_str(txt).unwrap();
-            msg["p"].clone()
+            (out.patch, msg["p"].clone())
+        };
+        // Exact mirror of `kicad/watch.rs:160-172` `watch_split` subscription calculation from a live `view_action` payload
+        let live_split_specs = |wp: &Value| {
+            let r = wp["root"].as_str().unwrap();
+            let path = wp["path"].as_str().unwrap_or("");
+            let board = wp["board"].as_str().unwrap_or("");
+            let f = crate::files::kicad::project::read(r);
+            let picked = !board.is_empty();
+            let own_sch = if picked {
+                board.strip_suffix(".kicad_pcb").map(|b| format!("{b}.kicad_sch")).filter(|p| std::path::Path::new(p).is_file()).unwrap_or_default()
+            } else { f.sch.clone() };
+            let sch = if path.is_empty() { own_sch.clone() } else { path.to_string() };
+            let pcb = if picked { board.to_string() } else { f.pcb.clone() };
+            let (sch_at, pcb_at) = if picked { (if path.is_empty() { own_sch.as_str() } else { path }, board) } else { (path, "") };
+            let mut out = vec![];
+            if !sch.is_empty() { out.push(layout::WatchSpec { kind: 1, key: crate::files::kicad::watch::key(1, r, sch_at), root: r.into(), path: sch_at.into() }); }
+            if !pcb.is_empty() {
+                out.push(layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, r, pcb_at), root: r.into(), path: pcb_at.into() });
+                out.push(layout::WatchSpec { kind: 2, key: crate::files::kicad::watch::key(2, r, pcb_at), root: r.into(), path: pcb_at.into() });
+            }
+            out
         };
 
-        // 1. Default Board: request path is "", key is "0|<root>|" (matches live view_action)
-        let wp_board = sent_watch("board", json!({}));
+        // 1. Default Board (live view_action)
+        let (_, wp_board) = sent_watch("board", json!({}));
         let (_, _, specs_board) = plan_for(json!({"@view:t": "board"}));
-        assert_eq!(specs_board.len(), 1);
-        assert_eq!(specs_board[0].kind, 0);
-        assert_eq!(specs_board[0].path, wp_board["path"].as_str().unwrap());
-        assert_eq!(specs_board[0].key, crate::files::kicad::watch::key(0, &root, wp_board["path"].as_str().unwrap()));
+        let pb = wp_board["path"].as_str().unwrap();
+        assert_eq!(specs_board, vec![layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, &root, pb), root: root.clone(), path: pb.into() }]);
 
-        // 2. Standalone 3D: subscribes BOTH kind 2 and kind 0 with request path "" (matches watch.rs:132-133)
-        let wp_3d = sent_watch("3d", json!({}));
+        // 2. Standalone 3D (live view_action + watch.rs:132-133)
+        let (_, wp_3d) = sent_watch("3d", json!({}));
         let (_, _, specs_3d) = plan_for(json!({"@view:t": "3d"}));
         let p3d = wp_3d["path"].as_str().unwrap();
         assert_eq!(specs_3d, vec![
@@ -309,30 +349,46 @@ mod tests {
             layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, &root, p3d), root: root.clone(), path: p3d.into() },
         ]);
 
-        // 3. Picked alternate board WITH sibling schematic in Split -> 3 watches matching watch_split
-        let (_, _, specs_alt_sch) = plan_for(json!({"@view:t": "split", "@view.board:t": "sub/with_sch.kicad_pcb"}));
-        assert_eq!(specs_alt_sch, vec![
-            layout::WatchSpec { kind: 1, key: crate::files::kicad::watch::key(1, &root, &format!("{root}/sub/with_sch.kicad_sch")), root: root.clone(), path: format!("{root}/sub/with_sch.kicad_sch") },
-            layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, &root, &format!("{root}/sub/with_sch.kicad_pcb")), root: root.clone(), path: format!("{root}/sub/with_sch.kicad_pcb") },
-            layout::WatchSpec { kind: 2, key: crate::files::kicad::watch::key(2, &root, &format!("{root}/sub/with_sch.kicad_pcb")), root: root.clone(), path: format!("{root}/sub/with_sch.kicad_pcb") },
-        ]);
+        // 3. Split (default board) vs live view_action("split")
+        let (_, wp_split_def) = sent_watch("split", json!({}));
+        let (_, _, specs_split_def) = plan_for(json!({"@view:t": "split"}));
+        assert_eq!(specs_split_def, live_split_specs(&wp_split_def));
 
-        // 4. Picked alternate board with NO sibling schematic in Split -> Board + 3D ONLY (no invented .kicad_sch!)
+        // 4. Counterexample: Split with EXPLICITLY picked DEFAULT board (`main.kicad_pcb`) keys by absolute path, NOT ""
+        let (_, wp_split_exp_def) = sent_watch("split", json!({"@view.board:t": "main.kicad_pcb"}));
+        let (_, _, specs_split_exp_def) = plan_for(json!({"@view:t": "split", "@view.board:t": "main.kicad_pcb"}));
+        assert_eq!(specs_split_exp_def, live_split_specs(&wp_split_exp_def));
+        assert_eq!(specs_split_exp_def[1].path, format!("{root}/main.kicad_pcb"));
+
+        // 5. Split with picked alternate board WITH sibling schematic
+        let (_, wp_split_alt) = sent_watch("split", json!({"@view.board:t": "sub/with_sch.kicad_pcb"}));
+        let (_, _, specs_alt_sch) = plan_for(json!({"@view:t": "split", "@view.board:t": "sub/with_sch.kicad_pcb"}));
+        assert_eq!(specs_alt_sch, live_split_specs(&wp_split_alt));
+
+        // 6. Split with picked alternate board with NO sibling schematic -> Board + 3D ONLY
+        let (_, wp_split_alone) = sent_watch("split", json!({"@view.board:t": "sub/alone.kicad_pcb"}));
         let (_, l_alone, specs_alone) = plan_for(json!({"@view:t": "split", "@view.board:t": "sub/alone.kicad_pcb"}));
         assert_eq!(l_alone.tiles().len(), 2);
-        assert_eq!(specs_alone, vec![
-            layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, &root, &format!("{root}/sub/alone.kicad_pcb")), root: root.clone(), path: format!("{root}/sub/alone.kicad_pcb") },
-            layout::WatchSpec { kind: 2, key: crate::files::kicad::watch::key(2, &root, &format!("{root}/sub/alone.kicad_pcb")), root: root.clone(), path: format!("{root}/sub/alone.kicad_pcb") },
-        ]);
+        assert_eq!(specs_alone, live_split_specs(&wp_split_alone));
 
-        // 5. Child schematic sheet (single page and Split)
+        // 7. Child sheet inside Split vs live view_action("retry") on Split with @view.sheet
         let child = format!("{root}/power.kicad_sch");
-        let (_, _, specs_child) = plan_for(json!({"@view:t": "schematic", "@view.sheet:t": child}));
-        assert_eq!(specs_child, vec![
-            layout::WatchSpec { kind: 1, key: crate::files::kicad::watch::key(1, &root, &child), root: root.clone(), path: child.clone() },
-        ]);
+        let (_, wp_split_child) = sent_watch("retry", json!({"@view:t": "split", "@view.sheet:t": child}));
+        let (_, _, specs_split_child) = plan_for(json!({"@view:t": "split", "@view.sheet:t": child}));
+        assert_eq!(specs_split_child, live_split_specs(&wp_split_child));
 
-        // 6. Gerbers with `noboard\n` -> empty comparison (0 watches, matching live empty key "")
+        // 8. History single version & diff forms
+        let sha_a = "1111aaaa99998888777766665555444433332222";
+        let sha_b = "2222bbbb88889999000011112222333344445555";
+        let wa = crate::files::rv::hist_git(&format!("{root}/.git"), sha_a, &root, "main.kicad_pcb");
+        let wb = crate::files::rv::hist_git(&format!("{root}/.git"), sha_b, &root, "main.kicad_pcb");
+        let (_, _, specs_single_ver) = plan_for(json!({"@view:t": "board", "@view.file:t": wa}));
+        assert_eq!(specs_single_ver, vec![layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, &root, &wa), root: root.clone(), path: wa.clone() }]);
+        let diff_wire = format!("diff\n{wa}\n{wb}\n5");
+        let (_, _, specs_diff) = plan_for(json!({"@view:t": "board", "@view.file:t": diff_wire}));
+        assert_eq!(specs_diff, vec![layout::WatchSpec { kind: 0, key: crate::files::kicad::watch::key(0, &root, &diff_wire), root: root.clone(), path: diff_wire.clone() }]);
+
+        // 9. Gerbers with `noboard\n` -> empty comparison (0 watches, matching live empty key "")
         let noboard = format!("noboard\n{root}/mfg/rev1");
         let (v_nb, l_nb, specs_nb) = plan_for(json!({"@view:t": "board", "@view.gerbers:t": "1", "@view.file:t": noboard}));
         assert_eq!(v_nb["key"].as_str(), Some(""));
