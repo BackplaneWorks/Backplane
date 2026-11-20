@@ -372,6 +372,9 @@ def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
             fails.append(f"the pane report {tag} says keys={r.get('keys')!r}: KiCad has the keyboard")
     if not rt.get("holder"):
         fails.append("hub runtime.holder is absent: the pane is not held by a client")
+    holder_ev = _holder_is_this_client(rt, logs, marks, parsed.get("hub_clients") or {}, rep)
+    if holder_ev["verdict"] is False:
+        fails.append(holder_ev["note"])
     lit = _rail_lit_between(parsed, marks.get("auto:a:painted"), marks.get("auto:a:done"))
     if lit is None:
         return _rec(gid, name, "unavailable", "no fresh rail snapshot after the frame appeared")
@@ -390,12 +393,31 @@ def _gate_a(marks, kt, logs, comp, caps, actions, parsed) -> dict:
     ev = {"composer": {"start": start, "pre": r_pre, "mid": r_mid, "post": r_post}, "report": {k: rep.get(k) for k in ("ok", "in_gpui_tree", "shown", "keys", "pid", "state")},
           "hub_runtime": rt, "rail_lit": lit, "mid_typed_while_kicad_state": mid_state, "mid_typing_after_state": mid.get("kicad_state_after"),
           "kicad_side": "composer received all; KiCad-side: no kicad_key / kicad_key_dispatch log in the interval (those fire for keys KiCad's container receives)",
-          "holder_is_this_client": "inferred: the single GPUI client of the run is the only possible holder (the client's own connection id has no observable)"}
+          "holder_is_this_client": holder_ev["note"]}
     if fails:
         return _rec(gid, name, "failed", "; ".join(fails), ev)
     if mid_state != "starting":
         return _rec(gid, name, "unavailable", f"composer received all of the marker and KiCad took none, but `mid` began when KiCad's state was {mid_state!r}, not `starting`: the typing during the start is not proven", ev)
     return _rec(gid, name, "passed", "", ev)
+
+
+def _holder_is_this_client(rt: dict, logs: list[dict], marks: dict, hub_clients: dict[str, int], report: dict) -> dict:
+    """`viewer.runtime.holder` is the hub CONNECTION id of the window holding the pane (never the session info's `holder`, which is KiCad's
+    own X window). This client's cid comes from its last `hub_connected` log before the frame appeared (the KiCad report's `cid` must
+    agree); the hub's `connection <N> is client <cid>` line maps it to N. Without those lines the identity is only inferred."""
+    hi = marks.get("auto:a:done")
+    cids = [lg["obj"]["hub_connected"].get("cid") for lg in logs if isinstance(lg["obj"].get("hub_connected"), dict)
+            and (hi is None or lg["seq"] <= hi)]
+    cid = cids[-1] if cids else None
+    if cid is None or cid not in hub_clients:
+        return {"verdict": None, "note": "inferred: the single GPUI client of the run is the only possible holder (no `hub_connected` cid with a matching hub.log "
+                                         "`connection <N> is client <cid>` line in this run: turns on once the client and hub log them)"}
+    n = hub_clients[cid]
+    if report.get("cid") not in (None, cid):
+        return {"verdict": False, "note": f"the KiCad report names cid {report.get('cid')!r}, the last hub_connected is {cid!r}"}
+    if str(rt.get("holder")) != str(n):
+        return {"verdict": False, "note": f"hub runtime.holder {rt.get('holder')!r} is not this client's connection {n} (cid {cid})"}
+    return {"verdict": True, "note": f"observed: runtime.holder {rt.get('holder')!r} == connection {n} == this client's cid {cid}"}
 
 
 def _gate_b(marks, kt, logs, caps) -> dict:
@@ -455,11 +477,29 @@ def _gate_c(marks, kt, logs, caps) -> dict:
         fails.append(f"Board and Schematic are not two different frames of the one KiCad (shown {ev['frames']})")
     sent = _logs_between(logs, marks.get("auto:c:schematic"), marks.get("auto:c:done"), "kicad_rpc_sent")
     ev["rpcs_sent_during_switches"] = [s["obj"]["kicad_rpc_sent"] for s in sent]
+    # second half: a frame switch with no new geometry is `kicad_place` changed:false, frame_changed:true (and no changed:true push)
+    switches = (("board->schematic", "auto:c:schematic", "auto:c:back"), ("schematic->board", "auto:c:back", "auto:c:done"))
+    placed: dict = {}
+    for label, lo, hi in switches:
+        evs = [lg["obj"] for lg in _logs_between(logs, marks.get(lo), marks.get(hi), "kicad_place")]
+        placed[label] = [{"changed": e.get("changed"), "frame_changed": e.get("frame_changed"), "why": e.get("why"), "frame": e.get("frame")} for e in evs]
+    ev["placements"] = placed
+    ev["place_notifies"] = len([lg for lg in logs if "kicad_place_notify" in lg["obj"]])
+    seen = all(placed[label] for label, _lo, _hi in switches)
+    if seen:
+        for label, _lo, _hi in switches:
+            evs = placed[label]
+            if not any(e["frame_changed"] is True and e["changed"] is False for e in evs):
+                fails.append(f"{label}: no placement with frame_changed:true and changed:false (placements {evs})")
+            if any(e["changed"] is True for e in evs):
+                fails.append(f"{label}: a new geometry was pushed on a frame switch (changed:true)")
     if fails:
         return _rec(gid, name, "failed", "; ".join(fails), ev)
-    return _rec(gid, name, "unavailable",
-                "measured: each switch ended in a painted PCB/SCH frame and the hub's pid equals the pane's pid every time (one process, two frames). "
-                "Unproven: one geometry push per switch (no client observable on Linux), so the gate as a whole is not earned", ev)
+    if not seen:
+        return _rec(gid, name, "unavailable",
+                    "measured: each switch ended in a painted PCB/SCH frame and the hub's pid equals the pane's pid every time (one process, two frames). "
+                    "Unproven: no geometry push per switch, since no `kicad_place` log lines exist in this run (the client logs them with BACKPLANE_KICAD_DEBUG once it has them)", ev)
+    return _rec(gid, name, "passed", "", ev)
 
 
 def _keep_warm_fails(left: dict, rt: dict) -> list[str]:
