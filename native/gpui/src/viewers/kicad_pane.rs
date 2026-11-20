@@ -857,6 +857,8 @@ impl LeaveState {
         self.since = None;
         std::mem::take(&mut self.sent).then_some(LeaveSend::Back)
     }
+    /// After an attach again (a reconnect, a fresh start): the leave once more if one was sent and the pane is still off screen.
+    pub fn resend(&self) -> Option<LeaveSend> { (self.sent && self.since.is_some()).then_some(LeaveSend::Leave(self.why)) }
     /// The settle's end: the leave, if the pane is still off screen and it was not sent yet.
     pub fn due(&mut self, now: std::time::Instant) -> Option<LeaveSend> {
         if self.sent || !self.since.is_some_and(|t| now.saturating_duration_since(t) >= LEAVE_SETTLE) { return None }
@@ -880,8 +882,10 @@ pub fn closing_away(info: &Value, in_page: bool) -> bool { !in_page && info["clo
 /// own Edit only. A pane Backplane opened by itself (`ShowBy::Automatic`) goes instead: nothing starts a KiCad on its own after a close.
 pub fn waits_on_close(why: ShowBy) -> bool { why == ShowBy::Deliberate }
 /// Whether the hub's picture `info` still has the closing KiCad `pid` live (the pane keeps waiting on it).
+/// A KiCad whose Close KiCad refused (or that became unclean at the bound) is live again with `closing` false: the pane stops waiting
+/// and attaches to it.
 pub fn still_closing(pid: u64, info: &Value) -> bool {
-    info["pid"].as_u64() == Some(pid) && matches!(info["state"].as_str(), Some("ready" | "unresponsive" | "starting"))
+    info["pid"].as_u64() == Some(pid) && info["closing"] == true && matches!(info["state"].as_str(), Some("ready" | "unresponsive" | "starting"))
 }
 /// #1345: the hub closed this pane's KiCad as idle (`idleStopped`, after it was starting or live) while the pane was off screen.
 pub fn closed_idle_away(old: &Value, new: &Value, in_page: bool) -> bool {
@@ -1776,6 +1780,8 @@ impl KicadPane {
         let kind = self.wanted_kind().to_string();
         self.pending_show = Some(kind.clone());
         self.rpc("editor.kicad.attach", json!({"project": self.project, "container": c, "toplevel": self.toplevel, "display": display, "frame": kind, "wait": false, "theme": if self.light { "light" } else { "dark" }}));
+        // the attach makes the hub take it as on screen again: a pane still off screen says its leave once more (after the attach, in order)
+        if let Some(l) = self.leave.resend() { self.send_leave(l); }
     }
     /// After every frame: the container over the pane (the marker's bounds) with the wanted editor mapped, holes where gpui drew over it.
     fn after_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -2407,14 +2413,17 @@ mod tests {
         assert_eq!(l.due(ms(1200)), None, "not settled yet");
         assert_eq!(l.due(ms(1300)), Some(LeaveSend::Leave("thread")));
         assert_eq!(l.due(ms(1400)), None, "once");
+        assert_eq!(l.resend(), Some(LeaveSend::Leave("thread")), "an attach again while away: the leave once more");
         assert_eq!(l.on(true, "", ms(5000)), Some(LeaveSend::Back));
+        assert_eq!(l.resend(), None, "back: nothing to say again");
         assert_eq!(l.on(true, "", ms(5001)), None, "once");
         assert_eq!(l.due(ms(9000)), None);
     }
     #[test] fn a_pane_waits_on_a_closing_kicad_until_its_process_is_gone() {
         use super::{still_closing, waiting_on};
-        assert!(still_closing(41, &json!({"state": "ready", "pid": 41})));
-        assert!(still_closing(41, &json!({"state": "unresponsive", "pid": 41})));
+        assert!(still_closing(41, &json!({"state": "ready", "pid": 41, "closing": true})));
+        assert!(still_closing(41, &json!({"state": "unresponsive", "pid": 41, "closing": true})));
+        assert!(!still_closing(41, &json!({"state": "ready", "pid": 41, "closing": false})), "its close refused: live again, the pane attaches to it");
         assert!(!still_closing(41, &json!({"state": "stopped", "pid": null})), "stopped: attach again (a fresh start)");
         assert!(!still_closing(41, &json!({"state": "failed", "pid": null})));
         assert!(!still_closing(41, &json!({"state": "starting", "pid": 57})), "another KiCad started: attach to it");
