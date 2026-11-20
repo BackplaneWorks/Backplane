@@ -710,6 +710,21 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             crate::session::patch::merge(&mut session,&o.patch);
             cmds=o.before;
         },
+        // agent's idempotent viewer_show (never closes an already-focused tile)
+        "view-show" => {
+            let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
+            let (k, path) = value.split_once('\t').unwrap_or((value, ""));
+            match super::viewer::viewer_show_action(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, k, path) {
+                Some(super::viewer::LayoutOut::Ok(o)) => {
+                    crate::session::patch::merge(&mut session, &o.patch);
+                    cmds = [read_cmds.clone(), o.before].concat();
+                }
+                Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
+                    cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
+                }
+                None => return refused("action.view-unported"),
+            }
+        },
         // docking/tiling layout actions (present/viewer.rs `layout_action`)
         "layout-add" | "layout-close" | "layout-focus" | "layout-resize" | "layout-swap"
         | "layout-move" | "layout-overlay" | "layout-unsplit" | "layout-maximize" | "layout-restore" => {

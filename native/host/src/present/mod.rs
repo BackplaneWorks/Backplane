@@ -482,21 +482,25 @@ mod tests {
         assert!(vo_rd.before.is_empty(), "layout-resize must emit zero watches");
         assert!(vo_rd.patch.get("panel").is_none(), "layout-resize must NOT call pages::leave or dismiss Diff");
 
-        // 4. Hub-derived KiCad guard: holder's `clientHasKicad` derived by hub (Simulation refused even when payload says clientHasKicad: false);
-        // non-holder cannot set `locked`, `kicadTile`, or `clientHasKicad`; open dialog blocks `view ""` close & `split` too; localized in `ja`!
-        sess_a["info"]["editor.kicad.abc"] = json!({"holder": 10, "dialogs": [], "runtime": {"holder": 10}});
-        let sim_refused = viewer::layout_action(&st, "h", &sess_a, Some(10), "ja", "layout-add", r#"{"side":"bottom","kind":"simulation","clientHasKicad":false}"#).unwrap();
-        assert!(matches!(sim_refused, viewer::LayoutOut::Refused { code: "oneKicad", text: "KiCad タイルは 1 つまでです", .. }));
-        // Non-holder (99) trying to spoof locked="t1" or kicadTile="t1" has zero effect
-        let non_holder_close = viewer::layout_action(&st, "h", &sess_a, Some(99), "en", "layout-close", r#"{"tile":"t1","locked":"t1"}"#).unwrap();
-        assert!(matches!(non_holder_close, viewer::LayoutOut::Ok(_)));
-        let non_holder_sim = viewer::layout_action(&st, "h", &sess_a, Some(99), "en", "layout-add", r#"{"side":"bottom","kind":"simulation","clientHasKicad":true}"#).unwrap();
-        assert!(matches!(non_holder_sim, viewer::LayoutOut::Ok(_)));
-        // Holder with open KiCad dialog: `view ""` and `view "split"` are refused in `ja`
-        sess_a["info"]["editor.kicad.abc"]["dialogs"] = json!(["Save Changes"]);
-        let dlg_close = viewer::view_action_for(&st, "h", &sess_a, Some(10), "ja", "split", 0).unwrap();
-        assert!(matches!(dlg_close, viewer::LayoutOut::Refused { code: "locked", text: "KiCad でダイアログが開いています", .. }));
-        sess_a["info"]["editor.kicad.abc"]["dialogs"] = json!([]);
+        // 4. Hub-only KiCad guard (`resolve_kicad_guard`): NEVER trusts session["info"];
+        // holder's `clientHasKicad` derived by hub; non-holder cannot set locked/kicadTile/clientHasKicad;
+        // dialog of another project does not lock this one.
+        let l_multi: layout::Layout = serde_json::from_value(va["layout"].clone()).unwrap();
+        let g_holder = layout::resolve_kicad_guard(&l_multi, Some(&json!({"holder": 10})), false, Some(10), None, None);
+        assert!(g_holder.is_holder && g_holder.client_has_kicad && g_holder.kicad_tile.as_deref() == Some("t1"));
+        assert_eq!(layout::add(&l_multi, Some("t1"), layout::Side::Bottom, layout::Tile { id: "t3".into(), kind: layout::PageKind::Simulation, source: "unit.kicad_sch".into(), explicit: false, version: None, unresolved_version: false, overlay: None }, g_holder.client_has_kicad, g_holder.locked.as_deref()), Err(layout::Refusal::OneKicad));
+        assert_eq!(layout::Refusal::OneKicad.text_for("ja"), "KiCad タイルは 1 つまでです");
+        // Non-holder (99) trying to spoof locked/kicadTile has zero effect
+        let g_other = layout::resolve_kicad_guard(&l_multi, Some(&json!({"holder": 10})), true, Some(99), Some("t1"), Some("t1"));
+        assert!(!g_other.is_holder && !g_other.client_has_kicad && g_other.locked.is_none() && g_other.kicad_tile.is_none());
+        // Holder with hub dialog open -> locked automatically even without client_locked
+        let g_dlg = layout::resolve_kicad_guard(&l_multi, Some(&json!({"holder": 10})), true, Some(10), None, None);
+        assert_eq!(g_dlg.locked.as_deref(), Some("t1"));
+        assert_eq!(layout::Refusal::Locked.text_for("ja"), "KiCad でダイアログが開いています");
+        // Request-session info spoofing holder/dialogs is ignored by hub_kicad_guard
+        sess_a["info"]["editor.kicad.spoof"] = json!({"holder": 10, "dialogs": ["Fake"], "runtime": {"holder": 10}});
+        let spoof_close = viewer::layout_action(&st, "h", &sess_a, Some(10), "en", "layout-close", r#"{"tile":"t1","locked":"t1"}"#).unwrap();
+        assert!(matches!(spoof_close, viewer::LayoutOut::Ok(_)), "session info must never forge a KiCad lock");
 
         // 5. Malformed payloads (bad JSON, unknown kind/side/mode, invalid overlay) return `invalidInput` refusal without mutating state
         for (act, bad_val) in [
@@ -510,25 +514,44 @@ mod tests {
             assert!(matches!(r, viewer::LayoutOut::Refused { code: "invalidInput", text: "無効なレイアウト要求です", .. }), "{act} {bad_val}");
         }
 
-        // 6. Vanished Gerber set shows empty state + identity.missing = true + key = ""; unresolved version shows error state + key = ""
+        // 6. Older existing Gerber set (`mfg/older`) is NOT falsely marked vanished; truly deleted set IS vanished
+        std::fs::create_dir_all(d.join("mfg/older")).unwrap();
+        std::fs::write(d.join("mfg/older/unit-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+        let mut sess_old_g = json!({"sel":"t","rid":1,"drafts":{"@view:t":"board"},"panel":false,"info":{}});
+        let add_old = viewer::layout_action(&st, "h", &sess_old_g, Some(10), "en", "layout-add", r#"{"side":"right","kind":"gerbers","source":"mfg/older"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_og) = add_old else { panic!() };
+        crate::session::patch::merge(&mut sess_old_g, &vo_og.patch);
+        let v_og = viewer::viewer_json(&st, &json!({}), &sess_old_g).unwrap();
+        assert!(v_og["tiles"]["t2"].get("empty").is_none(), "existing non-newest Gerber set must NOT be marked vanished");
+        assert_eq!(v_og["tiles"]["t2"]["key"], format!("0|{root}|{root}/mfg/older"));
+
         std::fs::remove_dir_all(d.join("mfg")).unwrap();
         let v_vanished = viewer::viewer_json(&st, &json!({}), &sess_a).unwrap();
         assert_eq!(v_vanished["tiles"]["t2"]["key"], "");
         assert_eq!(v_vanished["tiles"]["t2"]["empty"], "No Gerber files in this project yet");
         assert_eq!(v_vanished["tiles"]["t2"]["identity"]["missing"], true);
 
-        let mut sess_unres = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{}});
-        let bad_ver_layout = layout::Layout::single(layout::Tile {
-            id: "t1".into(), kind: layout::PageKind::Board, source: "unit.kicad_pcb".into(), explicit: false,
-            version: Some(layout::TileVersion { source_id: "vsrc-unknown00000000".into(), id: "1111aaaa99998888777766665555444433332222".into(), label: "1111aaaa".into() }),
-            unresolved_version: false, overlay: None,
-        }).unwrap();
+        // Unresolved version tile: error state + key = "", and focusing it never watches live artwork
+        let mut sess_unres = json!({"sel":"t","rid":1,"drafts":{"@view:t":"board","@view.at":format!("0|{root}|")},"panel":false,"info":{}});
+        let bad_ver_layout = layout::add(
+            &layout::Layout::single(layout::Tile {
+                id: "t1".into(), kind: layout::PageKind::Board, source: "unit.kicad_pcb".into(), explicit: false,
+                version: Some(layout::TileVersion { source_id: "vsrc-unknown00000000".into(), id: "1111aaaa99998888777766665555444433332222".into(), label: "1111aaaa".into() }),
+                unresolved_version: false, overlay: None,
+            }).unwrap(),
+            Some("t1"), layout::Side::Right,
+            layout::Tile { id: "t2".into(), kind: layout::PageKind::Schematic, source: "unit.kicad_sch".into(), explicit: false, version: None, unresolved_version: false, overlay: None },
+            false, None,
+        ).unwrap();
         sess_unres["drafts"]["@view.layout:t"] = json!(serde_json::to_string(&bad_ver_layout).unwrap());
         let v_unres = viewer::viewer_json(&st, &json!({}), &sess_unres).unwrap();
         assert_eq!(v_unres["tiles"]["t1"]["key"], "");
         assert_eq!(v_unres["tiles"]["t1"]["error"], "Unresolved version");
+        let focus_unres = viewer::layout_action(&st, "h", &sess_unres, Some(10), "en", "layout-focus", r#"{"tile":"t1"}"#).unwrap();
+        let viewer::LayoutOut::Ok(vo_fu) = focus_unres else { panic!() };
+        assert_eq!(watch_msg(&vo_fu).unwrap()["kind"], "", "focusing unresolved version tile must stop watch, NEVER watch live board");
 
-        // 7. Unfocused Mech & Files tiles carry their own rel/dir without copying focused tile
+        // 7. Unfocused Mech & Files tiles carry their own rel/dir; multi-tile `sheet_action` updates stored focused tile
         let out_m = viewer::layout_action(&st, "h", &sess_b, Some(11), "en", "layout-add", r#"{"side":"right","kind":"mech","source":"mech/case.step"}"#).unwrap();
         let viewer::LayoutOut::Ok(vo_m) = out_m else { panic!() };
         crate::session::patch::merge(&mut sess_b, &vo_m.patch);
@@ -538,6 +561,11 @@ mod tests {
         let vb2 = viewer::viewer_json(&st, &json!({}), &sess_b).unwrap();
         assert_eq!(vb2["tiles"]["t2"]["mech"]["rel"], "mech/case.step");
         assert_eq!(vb2["tiles"]["t2"]["mech"]["name"], "case");
+        std::fs::write(d.join("power.kicad_sch"), "(kicad_sch)").unwrap();
+        let sh_out = viewer::sheet_action(&st, "h", &sess_b, &format!("{root}/power.kicad_sch")).unwrap();
+        crate::session::patch::merge(&mut sess_b, &sh_out.patch);
+        let vb_sh = viewer::viewer_json(&st, &json!({}), &sess_b).unwrap();
+        assert_eq!(vb_sh["tiles"]["t1"]["source"], "power.kicad_sch");
 
         // 8. Linked thread Split with child sheet
         let mut st_far = crate::state::State::new();
@@ -547,13 +575,45 @@ mod tests {
         let v_far = viewer::viewer_json(&st_far, &json!({}), &sess_far).unwrap();
         assert_eq!(v_far["layout"]["root"]["a"]["source"], "power.kicad_sch");
 
-        // 9. Production `viewer_show` path (`show_refusal` + `view_action_for` with `"mech\t<abs>"`)
+        // 9. Idempotent `view-show` (`viewer_show_action`) NEVER closes an already-focused tile (multi-tile or legacy Files)
         assert!(viewer::show_refusal("mech", "mech/case.step", &[root.clone()]).is_none());
-        let vs_prod = viewer::view_action_for(&st, "h", &sess_b, Some(11), "en", &format!("mech\t{root}/mech/case.step"), 0).unwrap();
-        let viewer::LayoutOut::Ok(vo_vs) = vs_prod else { panic!("expected viewer_show Ok") };
-        crate::session::patch::merge(&mut sess_b, &vo_vs.patch);
+        let vs1 = viewer::viewer_show_action(&st, "h", &sess_b, Some(11), "en", "mech", &format!("{root}/mech/case.step")).unwrap();
+        let viewer::LayoutOut::Ok(vo_vs1) = vs1 else { panic!() };
+        crate::session::patch::merge(&mut sess_b, &vo_vs1.patch);
+        // Repeat show of already-focused Mech -> must stay open (2 tiles, focused on t2), NEVER close!
+        let vs2 = viewer::viewer_show_action(&st, "h", &sess_b, Some(11), "en", "mech", &format!("{root}/mech/case.step")).unwrap();
+        let viewer::LayoutOut::Ok(vo_vs2) = vs2 else { panic!() };
+        crate::session::patch::merge(&mut sess_b, &vo_vs2.patch);
         let vb3 = viewer::viewer_json(&st, &json!({}), &sess_b).unwrap();
         assert_eq!(vb3["layout"]["focus"], "t2");
+        assert_eq!(vb3["tiles"].as_object().unwrap().len(), 2);
+
+        // Legacy single-tile mode: repeated `view-show files` does NOT close Files
+        let sess_files = json!({"sel":"t","rid":1,"drafts":{"@view:t":"files"},"panel":false,"info":{}});
+        let vs_files = viewer::viewer_show_action(&st, "h", &sess_files, None, "en", "files", "").unwrap();
+        let viewer::LayoutOut::Ok(vo_vf) = vs_files else { panic!() };
+        assert!(vo_vf.patch.as_object().unwrap().is_empty(), "repeated view-show files is an idempotent no-op");
+
+        // 10. Legacy replay parity: with no stored `@view.layout:t`, legacy actions NEVER write `@view.layout:t`
+        // and Review from a watched drawing emits exactly ONE stop command.
+        let mut s_leg = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{}});
+        for act in ["board", "schematic", "3d", "split", "mech", "files", "review", ""] {
+            if act == "review" {
+                // First open board so Review stops an active watch
+                let ob = viewer::view_action(&st, "h", &s_leg, "board").unwrap();
+                crate::session::patch::merge(&mut s_leg, &ob.patch);
+                let orv = viewer::view_action(&st, "h", &s_leg, "review").unwrap();
+                assert!(orv.patch["drafts"].get("@view.layout:t").is_none(), "legacy review must not write @view.layout");
+                let watch_stops = orv.before.iter().filter(|c| c["text"].as_str().is_some_and(|t| t.contains("\"kicad.watch\""))).count();
+                assert_eq!(watch_stops, 1, "Review from watched drawing must emit exactly ONE watch stop");
+                crate::session::patch::merge(&mut s_leg, &orv.patch);
+                continue;
+            }
+            if let Some(o) = viewer::view_action(&st, "h", &s_leg, act) {
+                assert!(o.patch["drafts"].get("@view.layout:t").is_none(), "legacy action {act:?} must never write @view.layout");
+                crate::session::patch::merge(&mut s_leg, &o.patch);
+            }
+        }
 
         let _ = std::fs::remove_dir_all(&d);
     }
