@@ -93,7 +93,9 @@ describe("viewer-tools", () => {
     expect(matchesCompareKey(sheetA, schPrefix, "bbb222", "amp.kicad_sch")).toBe(false);
     expect(matchesCompareKey(sheetB, schPrefix, "bbb222", "amp.kicad_sch")).toBe(true);
 
-    // Rejects wrong prefix or empty guards
+    // Rejects empty expectedFile (e.g. unresolved viewer.files metadata), wrong prefix, or empty guards
+    expect(matchesCompareKey(sheetA, schPrefix, "bbb222", "")).toBe(false);
+    expect(matchesCompareKey(frameB, prefix, "bbb222", "")).toBe(false);
     expect(matchesCompareKey(frameB, "1|/proj|diff\n", "bbb222", "/proj/board.kicad_pcb")).toBe(false);
     expect(matchesCompareKey(frameB, "", "bbb222", "/proj/board.kicad_pcb")).toBe(false);
     expect(matchesCompareKey(frameB, prefix, "", "/proj/board.kicad_pcb")).toBe(false);

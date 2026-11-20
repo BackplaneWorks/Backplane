@@ -294,6 +294,17 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     compareFile = "";
     activeCompareSig = sig;
     try {
+      let rawFile = selectedPath || (page === "schematic" ? filesInfo.sch : filesInfo.pcb) || "";
+      if (!rawFile) {
+        const vf = await api.hub.rpc<ViewerFilesReply>("viewer.files", { thread: threadId });
+        if (gen !== watchGen) return;
+        filesInfo = vf || {};
+        renderHeader();
+        rawFile = (page === "schematic" ? filesInfo.sch : filesInfo.pcb) || "";
+      }
+      if (!rawFile) {
+        throw new Error(`Unable to resolve ${page} file path for compare`);
+      }
       const res = await api.hub.rpc<{ root?: string }>("viewer.compare", {
         thread: threadId,
         kind: page,
@@ -306,12 +317,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       const kindNum = page === "schematic" ? "1" : "0";
       compareKeyPrefix = root ? `${kindNum}|${root}|diff\n` : `${kindNum}|`;
       compareCommit = cmp.commit;
-      const rawFile = selectedPath || (page === "schematic" ? filesInfo.sch : filesInfo.pcb) || "";
-      compareFile = rawFile
-        ? (rawFile.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rawFile) || !root
-            ? rawFile
-            : `${root.replace(/\/+$/, "")}/${rawFile.replace(/^\/+/, "")}`)
-        : "";
+      compareFile =
+        rawFile.startsWith("/") || /^[A-Za-z]:[\\/]/.test(rawFile) || !root
+          ? rawFile
+          : `${root.replace(/\/+$/, "")}/${rawFile.replace(/^\/+/, "")}`;
       watchPending = false;
       const queued = pendingQueue;
       clearPending();
