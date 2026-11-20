@@ -1,6 +1,6 @@
 #!/bin/bash
 # The Boat build boxes that scripts/cargo-q and scripts/dev-build.sh use when the local build slots are all taken (scripts/lib-boat.sh).
-#   scripts/boat-pool.sh status          the pool: each box, its state, how long idle, what it has cost
+#   scripts/boat-pool.sh status          the pool: each box, its state, how long idle, what it has cost, its disk as the last job left it (scripts/boat-disk.py)
 #   scripts/boat-pool.sh reap            stop the boxes idle for BP_BOAT_IDLE seconds (default 300); runs by itself after every offloaded job and ends when none is running
 #   scripts/boat-pool.sh stop            stop every pool box now (the disk is kept 14 days; the next job resumes it)
 #   scripts/boat-pool.sh base            (re)build the snapshot every box starts from: a sandbox with NO environment (no logins, no tokens), scripts/boat-base.sh on it
@@ -13,12 +13,17 @@ boxes() { bo_b list --all --json 2>/dev/null | bo_py 'import sys,json,re
 for x in json.load(sys.stdin)["sandboxes"]:
     m = re.fullmatch(r"bp-build-(\d+)", x.get("name") or "")
     if m and x.get("state") not in ("deleted", "deleting"): print(m.group(1), x["id"], x["state"])'; }
+# the disk as the last job left it (lib-boat.sh bo_finish, scripts/boat-disk.py report): "disk 48% (70/146G, target 44G) at 02:34"
+disk() { bo_py 'import sys,json,time
+try: j=json.load(open(sys.argv[1]))
+except Exception: print("disk unknown"); sys.exit()
+print("disk %.0f%% (%.0f/%.0fG, target %.0fG, sccache %.0fG) at %s%s" % (j["pct"], j["used_gb"], j["size_gb"], j["target_gb"], j["sccache_gb"], time.strftime("%m-%d %H:%M", time.localtime(j["at"])), " FULL" if j["pct"] >= 90 else ""))' "$d/boat.$1.disk"; }
 live() { case "$1" in ready|idle|running|provisioned|starting|cloning) return 0;; esac; return 1; }
 leased() { ( flock -n 9 ) 9> "$d/boat.$1" && return 1; return 0; }
 case "${1:-status}" in
   status) now=$(date +%s); boxes | while read -r n id st; do
       l=$(cat "$d/boat.$n.last" 2>/dev/null || echo 0); s="idle $(( now - l ))s"; leased "$n" && s="in use"
-      echo "bp-build-$n $id $st ($s) $(bo_b usage "$id" --json 2>/dev/null | bo_py 'import sys,json;j=json.load(sys.stdin);print("%ds, $%.3f" % (j["seconds"], j["dollars"]))' 2>/dev/null)"; done ;;
+      echo "bp-build-$n $id $st ($s) $(bo_b usage "$id" --json 2>/dev/null | bo_py 'import sys,json;j=json.load(sys.stdin);print("%ds, $%.3f" % (j["seconds"], j["dollars"]))' 2>/dev/null) $(disk "$n")"; done ;;
   reap) exec 8> "$d/boat.reaper"; flock -n 8 || exit 0
       while :; do act=0; now=$(date +%s)
         while read -r n id st; do live "$st" || continue

@@ -83,6 +83,8 @@ jobs:
           fetch-depth: 0
       - name: Author and hook regression tests
         run: bash test/land/check_author_test.sh
+      - name: Boat build box disk guard
+        run: bash test/boat-disk.sh
       - name: Every commit has an approved author and committer
         env:
           BEFORE: ${{ github.event.before }}
