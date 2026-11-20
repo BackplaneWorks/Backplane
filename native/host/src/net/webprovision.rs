@@ -69,10 +69,130 @@ pub fn mapping_status(raw: &str, authority: &str, proxy: &str) -> Mapping {
     }
 }
 
+/// Arguments for the system-installed Tailscale executable. Pass directly
+/// to the process API so a path containing spaces stays a single argument.
+pub fn private_serve_args(
+    service: Option<&str>,
+    port: u16,
+    socket: &std::path::Path,
+) -> Option<Vec<String>> {
+    if port == 0 || (service.is_none() && port == 443) || !socket.is_absolute() {
+        return None;
+    }
+    let path = socket.to_str()?;
+    if path.chars().any(char::is_control) {
+        return None;
+    }
+    let mut args = vec![String::from("serve"), String::from("--bg")];
+    if let Some(name) = service {
+        if name.is_empty()
+            || name.len() > 63
+            || name.starts_with('-')
+            || name.ends_with('-')
+            || !name
+                .bytes()
+                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+        {
+            return None;
+        }
+        args.push(format!("--service=svc:{name}"));
+    }
+    args.push(format!("--https={port}"));
+    args.push(format!("unix:{path}"));
+    Some(args)
+}
+
+/// Inspect the exact node or Service scope before showing its URL. The
+/// caller separately verifies reachability and the identity of the proxy.
+pub fn private_route_matches(
+    config: &Value,
+    service: Option<&str>,
+    authority: &str,
+    port: u16,
+    socket: &std::path::Path,
+) -> bool {
+    let Some(path) = socket.to_str().filter(|_| socket.is_absolute()) else {
+        return false;
+    };
+    let scope = match service {
+        Some(name) => &config["Services"][name],
+        None => config,
+    };
+    let host_port = format!("{authority}:{port}");
+    let handlers = &scope["Web"][&host_port]["Handlers"];
+    let funnel_off = |scope: &Value| match scope.get("AllowFunnel") {
+        None => true,
+        Some(map) => map
+            .as_object()
+            .is_some_and(|map| map.get(&host_port).is_none_or(|flag| flag == false)),
+    };
+    funnel_off(config)
+        && funnel_off(scope)
+        && scope["TCP"][port.to_string()] == serde_json::json!({"HTTPS":true})
+        && *handlers == serde_json::json!({"/":{"Proxy":format!("unix:{path}")}})
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[test]
+    fn setup_targets_an_exclusive_unix_socket_in_the_selected_address_mode() {
+        let path = std::path::Path::new("/run/private dir/browser.sock");
+        assert_eq!(
+            private_serve_args(None, 8443, path).unwrap(),
+            [
+                "serve",
+                "--bg",
+                "--https=8443",
+                "unix:/run/private dir/browser.sock"
+            ]
+        );
+        assert_eq!(
+            private_serve_args(Some("bp"), 443, path).unwrap(),
+            [
+                "serve",
+                "--bg",
+                "--service=svc:bp",
+                "--https=443",
+                "unix:/run/private dir/browser.sock"
+            ]
+        );
+        assert!(private_serve_args(None, 443, path).is_none());
+        assert!(private_serve_args(Some("--other"), 443, path).is_none());
+        assert!(private_serve_args(None, 8443, std::path::Path::new("relative")).is_none());
+    }
+
+    #[test]
+    fn private_route_requires_exclusive_https_and_the_expected_scope() {
+        let name = "bp.example.ts.net";
+        let socket = std::path::Path::new("/run/example/browser.sock");
+        let route = json!({"TCP":{"8443":{"HTTPS":true}},
+            "Web":{"bp.example.ts.net:8443":{"Handlers":{"/":{"Proxy":"unix:/run/example/browser.sock"}}}}});
+        assert!(private_route_matches(&route, None, name, 8443, socket));
+        let mut config = json!({"Services":{"svc:bp":route}});
+        assert!(private_route_matches(
+            &config,
+            Some("svc:bp"),
+            name,
+            8443,
+            socket
+        ));
+        assert!(!private_route_matches(&config, None, name, 8443, socket));
+        config["AllowFunnel"] = json!({"bp.example.ts.net:8443":true});
+        assert!(!private_route_matches(
+            &config,
+            Some("svc:bp"),
+            name,
+            8443,
+            socket
+        ));
+        let mut shared = route;
+        shared["Web"]["bp.example.ts.net:8443"]["Handlers"]["/other"] =
+            json!({"Text":"another app"});
+        assert!(!private_route_matches(&shared, None, name, 8443, socket));
+    }
 
     #[test]
     fn keeper_requires_confirmed_removal_of_its_own_foreground_mapping() {
