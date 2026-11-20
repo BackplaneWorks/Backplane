@@ -256,7 +256,7 @@ pub async fn look_project(hub: &Arc<Hub>, project: &str) -> Value {
     let root = { let m = hub.model().await; m.projects.get(project).filter(|p| !p.removed).map(|p| std::path::PathBuf::from(&p.root)) };
     let home = hub.cfg.home.clone();
     let r2 = root.clone();
-    let mut c = tokio::task::spawn_blocking(move || look_in(&home, r2.as_deref(), "", false, "", &[])).await.unwrap_or_else(|_| card("", "", &[], 0, &Value::Null, false, &[], "", ""));
+    let mut c = tokio::task::spawn_blocking(move || look_kept(&home, r2.as_deref(), "", false, "", &[])).await.unwrap_or_else(|_| card("", "", &[], 0, &Value::Null, false, &[], "", ""));
     c["project"] = json!(project);
     // commits the remote lacks, with the page's Push (#1171: the hub pushes on its own only when `git.auto_push` is on)
     if let Some(r) = root.as_deref().and_then(|r| r.to_str()) { if let Some((n, up)) = crate::files::kicad::canonical::unpushed(r).await { if n > 0 { c["unpushed"] = json!({"count": n, "upstream": up}); } } }
@@ -275,7 +275,7 @@ pub async fn look(hub: &Arc<Hub>, thread: &str) -> Value {
     let cwd = crate::files::root_of(hub, thread).await;
     let home = hub.cfg.home.clone();
     let (th, buy, est_on, server) = (thread.to_string(), o.buy_threads.clone(), o.estimates, o.server.clone());
-    tokio::task::spawn_blocking(move || look_in(&home, cwd.as_deref(), &th, est_on, &server, &buy)).await.unwrap_or_else(|_| card(thread, "", &[], 0, &Value::Null, true, &[], "", ""))
+    tokio::task::spawn_blocking(move || look_kept(&home, cwd.as_deref(), &th, est_on, &server, &buy)).await.unwrap_or_else(|_| card(thread, "", &[], 0, &Value::Null, true, &[], "", ""))
 }
 pub fn look_in(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, server: &str, buy: &[String]) -> Value {
     let Some(cwd) = cwd else { return card(thread, "", &[], 0, &Value::Null, est_on, &[], "", "") };
@@ -301,6 +301,90 @@ pub fn look_in(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, serv
         let (c, b) = curl(home, &format!("{server}/v1/estimate"), &["Content-Type: application/json".into(), format!("X-Backplane-Install: {}", install_id(home))], Some(&body)); est_got(&c, &b)
     } else { Value::Null };
     card(thread, intent.trim(), &ps, if ps.is_empty() { own.len() } else { 0 }, &est, est_on, &boards, &bd, &order)
+}
+
+// ---- the card, kept (`thread.buy` and the header ask `fab.look` on every thread open and switch) ----
+//
+// Reading a card walks the project three times (fab files, boards, KiCad projects) and may ask the order server for an estimate; the same folder answers the same card
+// until something it read changes. So the card is kept with what it read: the modification time of every folder those walks could enter (an entry added, removed or
+// renamed changes its folder's time) and the time and size of every file it read. A kept card is answered while all of them are as they were; an estimate (which the
+// order server could price anew) for ESTIMATE_KEEP at most, and a card with an error (the server away, say) is never kept, so Retry asks again.
+// A time within RACY of the read is not trusted (a coarse clock could hide a change made in the same tick), as git does with its index.
+
+const ESTIMATE_KEEP: std::time::Duration = std::time::Duration::from_secs(600);
+const RACY: std::time::Duration = std::time::Duration::from_secs(2);
+const KEPT_MAX: usize = 64;
+type Stamp = Option<(std::time::SystemTime, u64)>;
+struct Kept { card: Value, seen: Vec<(PathBuf, Stamp)>, at: std::time::Instant, estimated: bool }
+static KEPT: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, Kept>>> = std::sync::LazyLock::new(Default::default);
+
+fn stamp(p: &Path) -> Stamp { std::fs::metadata(p).ok().map(|m| (m.modified().unwrap_or(std::time::UNIX_EPOCH), if m.is_dir() { 0 } else { m.len() })) }
+/// Every folder a card's walks may enter below `root`: the walks' common limits (five deep, no hidden folder, no node_modules), so a folder any of them reads is here.
+fn folders(root: &Path, out: &mut Vec<PathBuf>) {
+    fn walk(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
+        out.push(dir.to_path_buf());
+        if depth >= 5 { return }
+        let Ok(rd) = std::fs::read_dir(dir) else { return };
+        for e in rd.flatten() {
+            let Some(name) = e.file_name().to_str().map(str::to_string) else { continue };
+            if name.starts_with('.') || name == "node_modules" || !e.file_type().map_or(false, |t| t.is_dir()) { continue }
+            walk(&e.path(), depth + 1, out)
+        }
+    }
+    walk(root, 1, out)
+}
+/// What a card of `cwd` read: its folders, and its files (the intent, the fab files and what a SendCutSend part names, the project's settings, the orders).
+fn read_set(home: &Path, cwd: &Path) -> Vec<PathBuf> {
+    let droot = PathBuf::from(kicad::canonical::design_root(&cwd.to_string_lossy()));
+    let mut v = vec![]; folders(cwd, &mut v); if droot != cwd { folders(&droot, &mut v) }
+    v.push(cwd.join(".backplane/intent.md")); v.push(droot.join(".backplane.json"));
+    for f in find_fab(cwd) {
+        let p = cwd.join(&f);
+        if let Some(s) = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|o| o.get("sendcutsend").map(|s| (o["source"].clone(), s["flat"].clone()))) {
+            let dir = p.parent().map(Path::to_path_buf).unwrap_or_default();
+            for x in [s.0, s.1].iter().filter_map(Value::as_str) { v.push(dir.join(x)) }
+        }
+        v.push(p);
+    }
+    let kf = kicad::project::read(&droot.to_string_lossy());
+    if !kf.pro.is_empty() { v.push(PathBuf::from(kf.pro)) }
+    let orders = home.join("orders"); v.push(orders.clone());
+    if let Ok(rd) = std::fs::read_dir(&orders) { v.extend(rd.flatten().map(|e| e.path())) }
+    v
+}
+fn kept_key(home: &Path, cwd: &Path, thread: &str, est_on: bool, server: &str, buy: &[String]) -> String {
+    // the design root too: a worktree's card reads the main checkout once that is a hardware project
+    serde_json::to_string(&json!([home, cwd, kicad::canonical::design_root(&cwd.to_string_lossy()), thread, est_on, server, buy])).unwrap_or_default()
+}
+/// `look_in`, answered from the kept card while nothing it read has changed.
+pub fn look_kept(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, server: &str, buy: &[String]) -> Value { look_kept_racy(home, cwd, thread, est_on, server, buy, RACY).0 }
+/// (card, whether it was the kept one)
+fn look_kept_racy(home: &Path, cwd: Option<&Path>, thread: &str, est_on: bool, server: &str, buy: &[String], racy: std::time::Duration) -> (Value, bool) {
+    let Some(dir) = cwd else { return (look_in(home, cwd, thread, est_on, server, buy), false) };
+    let key = kept_key(home, dir, thread, est_on, server, buy);
+    let seen_now = |paths: &[PathBuf]| paths.iter().map(|p| (p.clone(), stamp(p))).collect::<Vec<_>>();
+    {
+        let k = KEPT.lock().unwrap();
+        if let Some(e) = k.get(&key) {
+            let fresh = !e.estimated || e.at.elapsed() < ESTIMATE_KEEP;
+            let paths: Vec<PathBuf> = e.seen.iter().map(|s| s.0.clone()).collect();
+            let card = e.card.clone(); let was = e.seen.clone(); drop(k);
+            // the stamps are taken again outside the lock (they touch the disk); a new folder, fab file, project or order changes its folder's time, so the same paths are enough
+            if fresh && seen_now(&paths) == was { return (card, true) }
+        }
+    }
+    let started = std::time::SystemTime::now();
+    let paths = read_set(home, dir); let seen = seen_now(&paths);
+    let card = look_in(home, cwd, thread, est_on, server, buy);
+    let racy_hit = seen.iter().any(|(_, s)| s.map_or(false, |(t, _)| t + racy >= started));
+    let estimated = est_on && !crate::copy::on() && !server.is_empty();
+    // the stamps were taken before the read: a change made during it shows as a difference next time
+    if card["error"].as_str().map_or(true, str::is_empty) && !racy_hit {
+        let mut k = KEPT.lock().unwrap();
+        if k.len() >= KEPT_MAX && !k.contains_key(&key) { if let Some(old) = k.iter().min_by_key(|(_, v)| v.at).map(|(k, _)| k.clone()) { k.remove(&old); } }
+        k.insert(key, Kept { card: card.clone(), seen, at: std::time::Instant::now(), estimated });
+    }
+    (card, false)
 }
 
 /// The answer to `fab.look` / `fab.intent` (the hub calls this for `fab.look` itself, to keep the read for the view's policy, and the handler below for `fab.intent`).
@@ -433,6 +517,42 @@ mod tests {
         let c = look_in(&home, Some(&work), "t1", false, "http://127.0.0.1:9", &[]);
         assert_eq!(c["board_files"], json!(["a/a.kicad_pcb", "b/b.kicad_pcb"]), "the worktree's card offers the main checkout's boards");
         assert_eq!(c["board_files"], look_in(&home, Some(&main), "t1", false, "http://127.0.0.1:9", &[])["board_files"]);
+    }
+    #[test] fn a_kept_card_is_answered_until_something_it_read_changes() {
+        // the clock's tick is not waited for: no time is too recent here (racy 0), and every change is a new size or a new entry
+        let (home, work) = (tmp("kepthome"), tmp("keptwork")); let none = std::time::Duration::ZERO;
+        put(work.join("boards/amp/amp.kicad_pro"), "{}"); put(work.join("boards/amp/amp.kicad_pcb"), "(kicad_pcb)"); put(work.join("amp.fab.json"), r#"{"name":"Amp","kind":"pcb","features":{}}"#);
+        let look = || look_kept_racy(&home, Some(&work), "t1", false, "", &[], none);
+        let (first, hit) = look(); assert!(!hit, "the first look reads"); assert_eq!(first, look_in(&home, Some(&work), "t1", false, "", &[]));
+        let t = std::time::Instant::now(); let (again, hit) = look(); let kept_us = t.elapsed().as_micros(); assert!(hit, "nothing changed: the kept card"); assert_eq!(again, first);
+        let t = std::time::Instant::now(); let _ = look_in(&home, Some(&work), "t1", false, "", &[]); eprintln!("fab.look: read {} us, kept {kept_us} us", t.elapsed().as_micros());
+        assert!(!look_kept_racy(&home, Some(&work), "t2", false, "", &[], none).1, "another thread's card is its own");
+        put(work.join(".backplane/intent.md"), "# Goal\nA desk amp\n"); let (c, hit) = look(); assert!(!hit); assert_eq!(c["goal"], "A desk amp", "the intent written");
+        assert!(look().1);
+        put(work.join("amp.fab.json"), r#"{"name":"Amplifier","kind":"pcb","features":{}}"#); let (c, hit) = look(); assert!(!hit); assert_eq!(c["parts"][0]["name"], "Amplifier", "a fab file edited");
+        put(work.join("mech/deep/case.fab.json"), r#"{"name":"Case","kind":"3dp","features":{}}"#); let (c, hit) = look(); assert!(!hit); assert_eq!(c["parts"].as_array().unwrap().len(), 2, "a fab file in a new folder");
+        assert!(look().1);
+        put(work.join("boards/b2/b2.kicad_pcb"), "(kicad_pcb)"); put(work.join("boards/b2/b2.kicad_pro"), "{}"); let (c, hit) = look(); assert!(!hit); assert_eq!(c["board_files"].as_array().unwrap().len(), 2, "a board added");
+        std::fs::remove_file(work.join("mech/deep/case.fab.json")).unwrap(); let (c, hit) = look(); assert!(!hit); assert_eq!(c["parts"].as_array().unwrap().len(), 1, "a fab file removed");
+        put(home.join("orders/q_1.json"), r#"{"thread":"b1","status":"paid"}"#);
+        let buy = ["b1".to_string()]; assert!(!look_kept_racy(&home, Some(&work), "t1", false, "", &buy, none).1); assert!(look_kept_racy(&home, Some(&work), "t1", false, "", &buy, none).1);
+        put(home.join("orders/q_1.json"), r#"{"thread":"b1","status":"shipped"}"#); let (c, hit) = look_kept_racy(&home, Some(&work), "t1", false, "", &buy, none); assert!(!hit); assert_eq!(c["order"], "shipped", "an order's state moved on");
+        // what was just written is not trusted to its folder's clock
+        put(work.join("amp.fab.json"), r#"{"name":"Amp2","kind":"pcb","features":{}}"#);
+        assert!(!look_kept_racy(&home, Some(&work), "t1", false, "", &[], std::time::Duration::from_secs(3600)).1); assert!(!look_kept_racy(&home, Some(&work), "t1", false, "", &[], std::time::Duration::from_secs(3600)).1, "a racy read is not kept");
+        // a priced card: the order server is asked once (here a loopback one that counts what it is asked), then the card is kept
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap(); let url = format!("http://{}", l.local_addr().unwrap());
+        let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0)); let a2 = asked.clone();
+        std::thread::spawn(move || for c in l.incoming().flatten() { use std::io::{Read, Write}; let mut c = c; let mut b = [0u8; 65536]; let _ = c.read(&mut b); a2.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let body = r#"{"label":"from $5","parts":[{"name":"Amp2","kind":"pcb","from":5,"problems":[]}]}"#; let _ = write!(c, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()); });
+        let t = std::time::Instant::now(); let (c, hit) = look_kept_racy(&home, Some(&work), "t1", true, &url, &[], none); let read_us = t.elapsed().as_micros();
+        assert!(!hit); assert_eq!((c["label"].clone(), c["error"].clone()), (json!("last estimate: from $5"), json!("")), "{c}");
+        let t = std::time::Instant::now(); let (k, hit) = look_kept_racy(&home, Some(&work), "t1", true, &url, &[], none); let kept_us = t.elapsed().as_micros();
+        assert!(hit); assert_eq!(k, c); assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 1, "the order server is asked once");
+        eprintln!("fab.look with an estimate: read {read_us} us (curl to the order server), kept {kept_us} us");
+        // a card with an error (the order server away) is read again each time, so Retry asks again
+        assert!(!look_kept_racy(&home, Some(&work), "t1", true, "http://127.0.0.1:9", &[], none).1); assert!(!look_kept_racy(&home, Some(&work), "t1", true, "http://127.0.0.1:9", &[], none).1);
+        let _ = std::fs::remove_dir_all(&home); let _ = std::fs::remove_dir_all(&work);
     }
     static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
     #[test] fn only_https_or_loopback_order_servers_are_accepted() {

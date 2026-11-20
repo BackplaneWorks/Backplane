@@ -1195,3 +1195,30 @@ async fn viewer_rail_omits_split_for_browser_only() {
     drop(hub);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[path = "budget_tests.rs"] mod budget;
+
+/// The kept ask index answers what a pass over the log's last ASK_SCAN lines answers, as the log grows and the tail moves on; a thread's preview follows its newest message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn kept_asks_and_previews_answer_as_a_fresh_read() {
+    let (h, _port) = up("keptasks").await;
+    let pass = |hub: &Hub| -> HashMap<String, u64> {
+        let n = hub.store.len(); let lines = hub.store.range(n.saturating_sub(ASK_SCAN), n).unwrap();
+        let (mut opened, mut closed) = (vec![], HashSet::new());
+        for l in lines { let e: Value = serde_json::from_str(&l).unwrap(); match s(&e, "$") { "AskOpened" => opened.push((s(&e, "id").to_string(), s(&e, "thread").to_string())), "AskClosed" => { closed.insert(s(&e, "id").to_string()); } _ => {} } }
+        let mut m = HashMap::new(); for (id, th) in opened { if !closed.contains(&id) { *m.entry(th).or_insert(0) += 1 } } m
+    };
+    assert_eq!(open_ask_counts(&h), pass(&h)); assert_eq!(open_ask_counts(&h)["t1"], 1, "LOG's ask");
+    let ask = |id: &str, th: &str| json!({"$":"AskOpened","id":id,"thread":th,"kind":"approval","tool":"Bash","detail":"x","options":"","at":1700000100});
+    h.commit_many(&[ask("q2", "t2"), ask("q3", "t2"), json!({"$":"AskClosed","id":"q2","answer":"yes","at":1700000101})]).await.unwrap();
+    assert_eq!(open_ask_counts(&h), pass(&h)); assert_eq!((open_ask_counts(&h)["t2"], ask_thread(&h, "q3"), ask_thread(&h, "q2")), (1, Some("t2".into()), None));
+    assert_eq!(open_asks(&h, "t2").len(), 1, "the thread's own open asks, from their lines");
+    // the tail moves past q1 and q3: they were opened before it, so neither counts any more, as a pass over the tail says
+    let filler: Vec<Value> = (0..ASK_SCAN).map(|i| json!({"$":"SettingSet","key":format!("k{}", i % 7),"value":format!("{i}"),"at":1700000200})).collect();
+    for c in filler.chunks(500) { h.commit_many(c).await.unwrap(); assert_eq!(open_ask_counts(&h), pass(&h)); }
+    assert!(open_ask_counts(&h).is_empty() && ask_thread(&h, "q3").is_none());
+    h.commit_many(&[ask("q4", "t1")]).await.unwrap(); assert_eq!(open_ask_counts(&h), pass(&h)); assert_eq!(open_ask_counts(&h)["t1"], 1);
+    // previews: kept while the thread has no new entry, read again once it has
+    let g = h.model().await; assert_eq!(preview_of(&h, &g, "t1"), "hi, how can I help with this long reply that goes on"); assert_eq!(preview_of(&h, &g, "t2"), ""); drop(g);
+    h.commit_many(&[json!({"$":"MessagePosted","thread":"t1","msg":"m9","role":"assistant","text":"a newer\nreply","at":1700000300})]).await.unwrap();
+    let g = h.model().await; assert_eq!(preview_of(&h, &g, "t1"), "a newer reply");
+}

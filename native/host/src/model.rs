@@ -214,6 +214,12 @@ impl Model {
     }
     /// How many entries a thread (or a log such as `@sub:<thread>`) holds.
     pub fn count(&self, thread: &str) -> usize { self.own.get(thread).map_or(0, Vec::len) }
+    /// What a thread's newest page is made of, in brief: its own entries and those it sent elsewhere (how many, the newest's log line). The log only grows,
+    /// so a page read at one tip is the same page at that tip (data/mod.rs keeps its previews by it).
+    pub fn tip(&self, thread: &str) -> (usize, u32, usize, u32) {
+        let t = |v: Option<&Vec<Ent>>| v.map_or((0, 0), |v| (v.len(), v.last().map_or(0, |e| e.seq)));
+        let (a, b) = t(self.own.get(thread)); let (c, d) = t(self.sent.get(thread)); (a, b, c, d)
+    }
     /// A thread's (or a log's) newest `n` entries, newest first, their text whole.
     pub fn tail(&self, store: &Store, thread: &str, n: usize) -> Vec<Row> {
         let own = self.own.get(thread).map(Vec::as_slice).unwrap_or(&[]);

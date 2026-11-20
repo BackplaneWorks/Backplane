@@ -33,7 +33,7 @@ fn ct_eq(a: &str, b: &str) -> bool {
     a.bytes().zip(b.bytes()).fold(0u8, |d,(a,b)| d | (a^b)) == 0
 }
 fn stored(p: &Value) -> Value {
-    json!({"offset":p["offset"],"limit":p["limit"],"metadataRevision":p["metadataRevision"],
+    json!({"offset":p["offset"],"limit":p["limit"],
         "choicesDigest":p["choicesDigest"],"membershipDigest":p["membershipDigest"]})
 }
 
@@ -43,19 +43,21 @@ pub struct NativeSidebar {
     next_pages: Map<String, Value>,
 }
 impl NativeSidebar {
-    /// Ns.offered/prepare: identity changes discard the budget; revision or choices discard positions.
+    /// Ns.offered/prepare: identity changes discard the budget; choices discard positions. The hub's revision does not: a position is kept by the exact list
+    /// it pages (`membershipDigest`, the list's ids in order), so a log line that leaves a list as it was leaves its page, and its cursor, as they were (a cursor
+    /// that carried the revision changed in every project on every line, and a remote view's unchanged update was those cursors, resent).
     pub fn prepare(p: &Value, mode: &str, query: &str, open: &Value, owners: Vec<String>) -> Option<Self> {
         if p["nativeSidebar"] != json!(1) || !key_valid(text(p,"nativeKey")) { return None }
         let old_ctx = parse(text(&p["local"], &format!("{PREFIX}context")));
         let mut ctx = json!({"hub":text(p,"hub"),"generation":text(p,"generation"),"epoch":text(p,"epoch"),
-            "viewId":text(p,"viewId"),"target":p["target"],"metadataRevision":p["revision"].as_u64().unwrap_or(0)});
+            "viewId":text(p,"viewId"),"target":p["target"]});
         // Obj.put prepends the choices field in . It is not part of context_digest.
         let digest = choices(mode, query, open);
         let mut with_choices = json!({"choicesDigest":digest});
         with_choices.as_object_mut().unwrap().extend(ctx.as_object().unwrap().clone());
         ctx = with_choices;
         let identity = same(&old_ctx, &ctx);
-        let pages = if identity && old_ctx["metadataRevision"] == ctx["metadataRevision"] && old_ctx["choicesDigest"] == ctx["choicesDigest"] {
+        let pages = if identity && old_ctx["choicesDigest"] == ctx["choicesDigest"] {
             parse(text(&p["local"], &format!("{PREFIX}pages")))
         } else { json!({}) };
         let budget = if identity { parse(text(&p["local"], &format!("{PREFIX}budget"))) } else { Value::Null };
@@ -63,17 +65,20 @@ impl NativeSidebar {
     }
     pub fn project_limit(&self) -> usize { self.budget["projects"].as_u64().unwrap_or(8).clamp(1,8) as usize }
     pub fn row_budget(&self) -> usize { self.budget["rows"].as_u64().unwrap_or(48).clamp(1,48) as usize }
+    /// What a cursor is bound to: this hub's run (hub, generation, epoch) and the target it was drawn for. Not the view: each view.open is a new view, and a cursor
+    /// bound to it made every project's pager new on a return to a thread the client still holds (all its bytes resent); a cursor of an earlier view of the same
+    /// target can only page the same list, which its `membershipDigest` checks.
     fn context_digest(&self) -> String {
-        hash(&format!("backplane.native-sidebar.context.v1\n{}", show(&json!({"hub":self.ctx["hub"],"generation":self.ctx["generation"],
-            "epoch":self.ctx["epoch"],"viewId":self.ctx["viewId"],"target":self.ctx["target"]}))))
+        hash(&format!("backplane.native-sidebar.context.v2\n{}", show(&json!({"hub":self.ctx["hub"],"generation":self.ctx["generation"],
+            "epoch":self.ctx["epoch"],"target":self.ctx["target"]}))))
     }
     fn payload(&self, kind: &str, owner: &str, member: &str, offset: usize, limit: usize) -> Value {
         json!({"version":1,"hub":self.ctx["hub"],"generation":self.ctx["generation"],"epoch":self.ctx["epoch"],
-            "viewId":self.ctx["viewId"],"target":self.ctx["target"],"metadataRevision":self.ctx["metadataRevision"],
+            "target":self.ctx["target"],
             "listKind":kind,"projectOwner":owner,"choicesDigest":self.ctx["choicesDigest"],"membershipDigest":member,"offset":offset,"limit":limit})
     }
     fn token(&self, payload: &Value) -> String {
-        show(&json!({"payload":{"version":payload["version"],"contextDigest":self.context_digest(),"metadataRevision":payload["metadataRevision"],
+        show(&json!({"payload":{"version":payload["version"],"contextDigest":self.context_digest(),
             "listKind":payload["listKind"],"ownerDigest":owner_digest(text(payload,"projectOwner")),"choicesDigest":payload["choicesDigest"],
             "membershipDigest":payload["membershipDigest"],"offset":payload["offset"],"limit":payload["limit"]},"signature":mac(&self.key,payload)}))
     }
@@ -82,7 +87,7 @@ impl NativeSidebar {
         let found: Vec<&str> = if d == owner_digest("") { vec![""] } else { self.owners.iter().filter(|o| owner_digest(o) == d).map(String::as_str).collect() };
         if found.len()!=1 { return None }
         let mut p = self.payload(text(c,"listKind"),found[0],text(c,"membershipDigest"),0,1);
-        for k in ["version","metadataRevision","choicesDigest","offset","limit"] { p[k] = c[k].clone(); }
+        for k in ["version","choicesDigest","offset","limit"] { p[k] = c[k].clone(); }
         Some(p)
     }
     /// Ns.valid: the paired hub prefix and exact canonical MAC bind a cursor to this actor's private context.
@@ -96,10 +101,10 @@ impl NativeSidebar {
         let p = self.expand(c)?;
         ct_eq(text(&token,"signature"),&mac(&self.key,&p)).then_some(p)
     }
-    /// Ns.accept: stale signed metadata/choices clears positions; forged or foreign cursors change nothing.
+    /// Ns.accept: stale signed choices clear positions; forged or foreign cursors change nothing.
     pub fn accept(&mut self, value: &str) -> bool {
         let Some(p) = self.valid(value) else { return false };
-        if p["metadataRevision"] != self.ctx["metadataRevision"] || p["choicesDigest"] != self.ctx["choicesDigest"] {
+        if p["choicesDigest"] != self.ctx["choicesDigest"] {
             self.pages = json!({}); return true
         }
         if !self.pages.is_object() || self.pages.as_object().unwrap().len()>=64 { self.pages=json!({}); }
@@ -121,7 +126,7 @@ impl NativeSidebar {
         let member=hash(&show(&json!(ids))); let total=ids.len(); let limit=limit.clamp(1,48);
         let saved=&self.pages[scope(kind,owner)];
         let offset=saved["offset"].as_u64().filter(|n| *n < total as u64 && saved["limit"]==json!(limit)
-            && text(saved,"membershipDigest")==member && saved["metadataRevision"]==self.ctx["metadataRevision"] && saved["choicesDigest"]==self.ctx["choicesDigest"]).unwrap_or(0) as usize;
+            && text(saved,"membershipDigest")==member && saved["choicesDigest"]==self.ctx["choicesDigest"]).unwrap_or(0) as usize;
         let end=(offset+limit).min(total);
         let extra=!selected.is_empty() && ids.contains(&selected) && !ids[offset..end].contains(&selected);
         let pager=json!({"version":1,"total":total,"offset":offset,"limit":limit,"selectedOutside":extra,
@@ -174,17 +179,20 @@ mod tests {
         assert!(nav.valid(control).is_some()); assert!(nav.valid(control.trim_start_matches("h|")).is_none());
         let token=parse(control.strip_prefix("h|").unwrap());
         for (k,v) in [("offset",json!(999)),("limit",json!(48)),("ownerDigest",json!(owner_digest("other"))),
-            ("choicesDigest",json!("forged")),("membershipDigest",json!("forged")),("listKind",json!("threads")),("metadataRevision",json!(8))] {
+            ("choicesDigest",json!("forged")),("membershipDigest",json!("forged")),("listKind",json!("threads"))] {
             let mut t=token.clone(); t["payload"][k]=v; assert!(nav.valid(&format!("h|{}",show(&t))).is_none(),"{k}");
         }
         let local=nav.local();
-        for (k,v) in [("hub","other"),("generation","2"),("viewId","other"),("epoch","other"),("nativeKey","ffeeddccbbaa99887766554433221100")] {
+        for (k,v) in [("hub","other"),("generation","2"),("epoch","other"),("nativeKey","ffeeddccbbaa99887766554433221100")] {
             let mut q=p.clone(); q[k]=json!(v); let mut other=restored(&q,local.clone()); assert!(!other.accept(control),"{k}");
         }
+        // a later view of the same target (each view.open is a new view): the same cursor, still good
+        let mut q=p.clone(); q["viewId"]=json!("later"); let mut later=restored(&q,local.clone()); assert!(later.accept(control), "a new view of the same target");
+        let mut other_view=ns(&q); assert_eq!(next(&other_view.slice(rows(200),"settled","p",16,"").1), next(&ns(&p).slice(rows(200),"settled","p",16,"").1), "a pager is the same in every view of its target");
         let mut q=p.clone(); q["target"]["id"]=json!("other"); assert!(!restored(&q,local.clone()).accept(control));
         let mut missing=NativeSidebar::prepare(&p,"projects","",&json!({}),vec![]).unwrap(); assert!(!missing.accept(control));
     }
-    #[test] fn native_sidebar_revision_membership_choices_and_hidden_lists_retire_positions() {
+    #[test] fn native_sidebar_membership_choices_and_hidden_lists_retire_positions_and_the_revision_does_not() {
         let p=request(); let mut nav=ns(&p); let (_,pager)=nav.slice(rows(200),"settled","p",16,""); let control=next(&pager).to_string();
         let local=nav.local(); let mut nav=restored(&p,local); assert!(nav.accept(&control));
         let (_,page)=nav.slice(rows(200),"settled","p",16,""); assert_eq!(page["offset"],16);
@@ -194,7 +202,9 @@ mod tests {
         let mut reversed=rows(200); reversed.reverse(); let mut nav=restored(&p,local.clone()); assert_eq!(nav.slice(reversed,"settled","p",16,"").1["offset"],0);
         let mut retired=restored(&p,nav.local()); assert_eq!(retired.slice(rows(200),"settled","p",16,"").1["offset"],0);
         let nav=restored(&p,local.clone()); let mut hidden=restored(&p,nav.local()); assert_eq!(hidden.slice(rows(200),"settled","p",16,"").1["offset"],0);
-        let mut q=p.clone(); q["revision"]=json!(8); let mut nav=restored(&q,local.clone()); assert!(nav.accept(&control)); assert_eq!(nav.slice(rows(200),"settled","p",16,"").1["offset"],0);
+        // a new log line that leaves the list as it was: the page stays, and so does its cursor
+        let mut q=p.clone(); q["revision"]=json!(8); let mut nav=restored(&q,local.clone()); assert!(nav.accept(&control)); let (_,later)=nav.slice(rows(200),"settled","p",16,""); assert_eq!(later["offset"],16);
+        let mut same=restored(&p,local.clone()); assert!(same.accept(&control)); assert_eq!(same.slice(rows(200),"settled","p",16,"").1["next"],later["next"], "the revision is not in the cursor");
         let mut q=p.clone(); q["local"]=local.clone(); let mut nav=NativeSidebar::prepare(&q,"projects","search",&json!({}),vec!["p".into()]).unwrap(); assert!(nav.accept(&control)); assert_eq!(nav.slice(rows(200),"settled","p",16,"").1["offset"],0);
         let mut nav=restored(&p,local); assert_eq!(nav.slice(rows(200),"settled","p",8,"").1["offset"],0);
     }
