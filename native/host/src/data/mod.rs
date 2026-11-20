@@ -807,12 +807,59 @@ pub enum Principal {
     Browser { device_id: String },
 }
 
-async fn browser_alive(hub: &Arc<Hub>, device_id: &str, client: u64, activity: bool) -> bool {
+/// Only deliberate user actions extend a browser session's 30-day idle deadline.
+/// Background refreshes, subscriptions, heartbeats, and refused requests never do.
+fn is_deliberate_activity(method: &str) -> bool {
+    matches!(
+        method,
+        "ask.answer"
+            | "bot.say"
+            | "composer.run"
+            | "find"
+            | "message.send"
+            | "plan.act"
+            | "project.act"
+            | "project.add"
+            | "queue.act"
+            | "review.comment"
+            | "review.tick"
+            | "room.keep"
+            | "room.post"
+            | "search"
+            | "sidebar.act"
+            | "swarm.act"
+            | "swarm.create"
+            | "swarm.post"
+            | "term.new"
+            | "term.resize"
+            | "term.stop"
+            | "term.write"
+            | "thread.act"
+            | "thread.again"
+            | "thread.create"
+            | "thread.model"
+            | "thread.pick"
+            | "thread.restore"
+            | "thread.review"
+            | "turn.interrupt"
+            | "viewer.compare"
+            | "viewer.follow"
+            | "viewer.watch"
+            | "voice.act"
+            | "voice.start"
+            | "voice.stop"
+            | "work.act"
+            | "kicad.checks.focus"
+            | "kicad.checks.run"
+            | "mgmt.bom.edit"
+            | "mgmt.panel"
+    )
+}
+
+async fn browser_alive(hub: &Arc<Hub>, reg: &Arc<crate::net::pairing::Registry>, device_id: &str, client: u64, activity: bool) -> bool {
     if hub.setting("web.enabled").await.as_deref() != Some("1") { return false }
-    let (home, dev) = (hub.cfg.home.clone(), device_id.to_string());
-    tokio::task::spawn_blocking(move || {
-        crate::net::start::registry(&home).is_some_and(|r| r.browser_connection(&dev, client, activity))
-    }).await.unwrap_or(false)
+    let (r, dev) = (reg.clone(), device_id.to_string());
+    tokio::task::spawn_blocking(move || r.browser_connection(&dev, client, activity)).await.unwrap_or(false)
 }
 
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String, host: String) -> Result<()> {
@@ -820,6 +867,17 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
 }
 
 pub async fn socket_with<S: AsyncRead + AsyncWrite + Unpin + Send>(hub: Arc<Hub>, stream: S, json_mode: bool, principal: Principal, host: String) -> Result<()> {
+    socket_with_reg(hub, stream, json_mode, principal, host, None).await
+}
+
+async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
+    hub: Arc<Hub>,
+    stream: S,
+    json_mode: bool,
+    principal: Principal,
+    host: String,
+    test_reg: Option<Arc<crate::net::pairing::Registry>>,
+) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(40 << 20); cfg.max_frame_size = Some(40 << 20); // (images come as base64 in one JSON frame: 4 x 8 MB)
     let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(stream, Some(cfg)).await?.split();
     let (mut conn, _) = hub.connect(true);
@@ -832,8 +890,13 @@ pub async fn socket_with<S: AsyncRead + AsyncWrite + Unpin + Send>(hub: Arc<Hub>
             None
         }
         Principal::Browser { device_id } => {
-            if !browser_alive(&hub, &device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
-            Some(device_id)
+            let Some(reg) = test_reg.or_else(|| crate::net::start::registry(&hub.cfg.home)) else {
+                let _ = tx.send(Message::Close(None)).await; return Ok(())
+            };
+            if !browser_alive(&hub, &reg, &device_id, conn.client, false).await {
+                let _ = tx.send(Message::Close(None)).await; return Ok(())
+            }
+            Some((device_id, reg))
         }
     };
     // `name`: the machine's name (BACKPLANE_NAME, else its host name), for the phone's title instead of the address it was paired at
@@ -841,7 +904,16 @@ pub async fn socket_with<S: AsyncRead + AsyncWrite + Unpin + Send>(hub: Arc<Hub>
     let name = NAME.get_or_init(crate::net::botnet::name).await.clone();
     let theme = hub.setting("ui.theme").await.unwrap_or_default();
     let locale = hub.setting("ui.lang").await.unwrap_or_default();
-    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub.info_now()["hub.offer"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home)),"migrating":crate::import014::phone_state(&hub).await}), json_mode)).await?;
+    let (hub_offer, notice, migrating) = if browser.is_some() {
+        (String::new(), Value::Null, Value::Null)
+    } else {
+        (
+            hub.info_now()["hub.offer"].as_str().unwrap_or("").to_string(),
+            crate::guard::notice(&crate::guard::status(&hub.cfg.home)),
+            crate::import014::phone_state(&hub).await,
+        )
+    };
+    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating}), json_mode)).await?;
     let (late_tx, mut late_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();
@@ -853,12 +925,18 @@ pub async fn socket_with<S: AsyncRead + AsyncWrite + Unpin + Send>(hub: Arc<Hub>
                 let Some(m) = m else { return Ok(()) }; let m = m?;
                 if matches!(m, Message::Close(_)) { return Ok(()) }
                 let v = match wire::decode(&m) { None => continue, Some(Err(r)) => { tx.send(pack(&r, json_mode)).await?; continue } Some(Ok(v)) => v };
-                if let Some(ref device_id) = browser {
-                    if !browser_alive(&hub, device_id, conn.client, true).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                if let Some((ref device_id, ref reg)) = browser {
+                    // 1. Check validity without touching idle activity first.
+                    if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                    // 2. Enforce allow-list before recording any activity.
                     let (method, params) = (s(&v, "m"), v.get("p").unwrap_or(&Value::Null));
                     if !webpolicy::allowed(method, params) {
                         tx.send(pack(&json!({"t":"reply","id":v["id"],"ok":false,"error":"not allowed for browser"}), json_mode)).await?;
                         continue
+                    }
+                    // 3. Touch idle deadline only for authorized deliberate user actions.
+                    if is_deliberate_activity(method) && !browser_alive(&hub, reg, device_id, conn.client, true).await {
+                        let _ = tx.send(Message::Close(None)).await; return Ok(())
                     }
                 }
                 if waits_far(&v) {
@@ -872,30 +950,73 @@ pub async fn socket_with<S: AsyncRead + AsyncWrite + Unpin + Send>(hub: Arc<Hub>
                 }
                 let r = handle(&hub, &mut conn, &mut subs, &v).await; tx.send(pack(&r, json_mode)).await?;
             }
-            r = late_rx.recv() => { if let Some(r) = r { tx.send(pack(&r, json_mode)).await?; } }
+            r = late_rx.recv() => {
+                if let Some((ref device_id, ref reg)) = browser {
+                    if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                }
+                if let Some(r) = r { tx.send(pack(&r, json_mode)).await?; }
+            }
             n = changes.recv() => {
                 if let Err(tokio::sync::broadcast::error::RecvError::Closed) = n { return Ok(()) }
-                if browser.is_some() && hub.setting("web.enabled").await.as_deref() != Some("1") { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                if let Some((ref device_id, ref reg)) = browser {
+                    if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                }
                 let len = hub.store.len();
                 if len > seen { let lines = hub.store.range(seen, len.min(seen + 2000)).unwrap_or_default(); seen += lines.len(); for f in deltas(&hub, &lines, &mut subs).await { tx.send(pack(&f, json_mode)).await?; } }
                 if len > seen { let _ = hub.changed.send(len as u64); } // (more than one pass: wake again)
             }
-            f = frames.recv() => { if let Ok(f) = f { for p in live_pushes(&f, &mut subs) { tx.send(pack(&p, json_mode)).await?; } } }
+            f = frames.recv() => {
+                if let Ok(f) = f {
+                    let pushes = live_pushes(&f, &mut subs);
+                    if !pushes.is_empty() {
+                        if let Some((ref device_id, ref reg)) = browser {
+                            if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                        }
+                        for p in pushes { tx.send(pack(&p, json_mode)).await?; }
+                    }
+                }
+            }
             o = outbox.recv() => { let Some(o) = o else { return Ok(()) };
-                match o { Out::Close => { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                match o { Out::Close => { if browser.is_some() { let _ = tx.send(Message::Close(None)).await; } return Ok(()) }
                     // a viewer's plot frames (binary CBOR) and its small announcements; anything else the hub pushes is for the other clients
-                    Out::Raw(b) => if ext::wants_raw(&b) { tx.send(Message::Binary(b.into())).await?; },
+                    Out::Raw(b) => if ext::wants_raw(&b) {
+                        if let Some((ref device_id, ref reg)) = browser {
+                            if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                        }
+                        tx.send(Message::Binary(b.into())).await?;
+                    },
                     // a terminal this socket watches: its bytes and where they start (data/term.rs)
-                    Out::Value(v) if v["t"] == "term" => if let Some(f) = term::push_of(&subs.terms, &v) { tx.send(pack(&f, json_mode)).await?; },
+                    Out::Value(v) if v["t"] == "term" => if let Some(f) = term::push_of(&subs.terms, &v) {
+                        if let Some((ref device_id, ref reg)) = browser {
+                            if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                        }
+                        tx.send(pack(&f, json_mode)).await?;
+                    },
                     // hub info (set_info): what a phone draws of it (phone_info), as `{"t":"info","info":{...}}`
-                    Out::Value(v) if v["t"] == "info" => if let Some(f) = phone_info_frame(&v) { tx.send(pack(&f, json_mode)).await?; },
+                    Out::Value(v) if v["t"] == "info" => if let Some(f) = phone_info_frame(&v) {
+                        if let Some((ref device_id, ref reg)) = browser {
+                            if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                        }
+                        tx.send(pack(&f, json_mode)).await?;
+                    },
                     Out::Value(v) => if ext::wants_value(&v) {
+                        if let Some((ref device_id, ref reg)) = browser {
+                            if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                        }
                         // a plot's "none" is binary like the plots (one decoder in the app); a browser frame's announcement is JSON
                         if v["t"] == "plot" { let mut b = Vec::new(); cbor_plain(&v, &mut b); tx.send(Message::Binary(b.into())).await?; } else { tx.send(pack(&v, json_mode)).await?; } } } }
-            _ = far_beat.tick() => { if !subs.subs.is_empty() { for f in far_pushes(&hub, &mut subs).await { tx.send(pack(&f, json_mode)).await?; } } }
+            _ = far_beat.tick() => { if !subs.subs.is_empty() {
+                let pushes = far_pushes(&hub, &mut subs).await;
+                if !pushes.is_empty() {
+                    if let Some((ref device_id, ref reg)) = browser {
+                        if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                    }
+                    for f in pushes { tx.send(pack(&f, json_mode)).await?; }
+                }
+            } }
             _ = beat.tick() => {
-                if let Some(ref device_id) = browser {
-                    if !browser_alive(&hub, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
+                if let Some((ref device_id, ref reg)) = browser {
+                    if !browser_alive(&hub, reg, device_id, conn.client, false).await { let _ = tx.send(Message::Close(None)).await; return Ok(()) }
                 }
                 tx.send(pack(&json!({"t":"hb"}), json_mode)).await?;
             }
