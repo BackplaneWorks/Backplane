@@ -3,11 +3,8 @@
 # nextest name, then why; `flaky NAME` for a known flake (its passes are not news). The Windows lane (t1795078581-215) owns fixing them: when one passes again, land.sh says so; take it off this list then.
 # We file no GitHub issue for our own findings: the reference is this file and the PR that added it.
 
-# Windows faults on main: path text with a / where Windows gives \ (also red on GitHub's windows-latest, ci.yml hub job, at 2122ce898f)
-files::kicad::mgmt::tests::panel_doors_resolve_to_the_same_project_and_scope   # from 9f8acfd9d2: "...\sub\b.kicad_pro" against "...\sub/b.kicad_pro"
-files::kicad::watch::tests::presenter_gerber_watch_with_pipe_in_root_preserves_root_through_reader
-present::tests::plan_watches_matches_live_view_action_and_watch_split_on_all_real_inputs   # the watch key's path is "<root>/main.kicad_pcb" where "" is expected
-present::tests::viewer_json_emits_derived_layout_for_one_page_split_gerbers_vs_board_and_history   # as above
+# Windows faults on main: path text with a / where Windows gives \ (also red on GitHub's windows-latest, ci.yml hub job, at 2122ce898f; the rest of
+# that group was fixed by 8e343ceec9)
 present::viewer_parity_tests::legacy_single_page_flows_match_origin_main_snapshot   # "<ROOT>\proj.kicad_pro" against main's "<ROOT>/proj.kicad_pro"
 
 # the gate's VM only (green on GitHub's windows-latest): the tests run in an ssh logon, not a runner service
@@ -18,3 +15,4 @@ files::kicad::canonical::tests::subfolder_boards_project_is_canonical_from_the_w
 flaky agents::tests::twenty_agents_stream_at_once_with_every_event_written_once   # "stats: left 14, right 20" on both tries; passes alone
 flaky voice::session::tests::always_on_writes_only_real_words_sends_by_end_of_turn_and_stays_off_once_muted   # Windows flake
 flaky agents::tests::a_thread_whose_worktree_job_found_no_repository_starts_in_the_project_folder   # failed in a full run and a 9-test run on bp-win, passes alone
+flaky agents::tests::a_person_message_to_a_running_codex_turn_steers_it   # waits 500 ms for the stand-in's first words; failed both tries on bp-win beside UI rows, green on GitHub
