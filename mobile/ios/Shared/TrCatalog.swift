@@ -2485,6 +2485,7 @@ gpui.c.kicad.phase.answering	KiCad is opening the project	KiCad がプロジェ�
 gpui.c.kicad.phase.show	KiCad is drawing the editor	KiCad がエディターを表示しています	KiCad está dibujando el editor
 gpui.c.kicad.task.wait	KiCad is running {what}; the editor follows when it ends.	KiCadが{what}を実行中です。終わるとエディターに切り替わります。	KiCad está ejecutando {what}; el editor sigue cuando termine.
 gpui.c.kicad.notice	KiCad says: {what}	KiCadからの通知: {what}	KiCad dice: {what}
+gpui.c.kicad.firstshow	{editor} did not open in KiCad ({why}). Its tab above opens it again.	{editor}がKiCadで開きませんでした ({why})。上のタブで開き直せます。	{editor} no se abrió en KiCad ({why}). Su pestaña de arriba lo vuelve a abrir.
 gpui.c.kicad.this.window.cannot.hold.another	this window cannot hold another program's (only X11 and XWayland for now)	このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）	esta ventana no puede alojar la de otro programa (solo X11 y XWayland por ahora)
 gpui.c.kicad.no.x11.connection	no X11 connection	X11 に接続できません	sin conexión X11
 gpui.c.kicad.could.not.create.container	could not create container window	コンテナウィンドウを作成できませんでした	no se pudo crear la ventana contenedora
@@ -5718,6 +5719,9 @@ viewer.diff.threadchanges	Thread changes	スレッドの変更	Cambios del hilo
 
     /// gpui.c.kicad.notice = KiCad says: {what}
     static func gpui_c_kicad_notice(what: String) -> String { f("gpui.c.kicad.notice", ["what": what]) }
+
+    /// gpui.c.kicad.firstshow = {editor} did not open in KiCad ({why}). Its tab above opens it again.
+    static func gpui_c_kicad_firstshow(editor: String, why: String) -> String { f("gpui.c.kicad.firstshow", ["editor": editor, "why": why]) }
 
     /// gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
     static func gpui_c_kicad_changed(files: String) -> String { f("gpui.c.kicad.changed", ["files": files]) }

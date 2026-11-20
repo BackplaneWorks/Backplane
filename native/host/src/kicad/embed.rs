@@ -175,6 +175,14 @@ impl Session {
         self
     }
     /// The person dismissed notice `id` in the pane (an agent still reads it).
+    /// #1344: a first show's failure notice goes once that editor's frame is on show (a tab press opened it, or KiCad did): the pane and
+    /// what an agent reads say no more that it did not open. Whether any went.
+    pub fn settle_first_show(&mut self) -> bool {
+        let n = self.notices.len();
+        let frames = &self.frames;
+        self.notices.retain(|x| !(x["kind"] == "first_show_failed" && frames.iter().any(|f| f.shown && x["frame"].as_str() == Some(f.kind.as_str()))));
+        self.notices.len() != n
+    }
     pub fn dismiss_notice(mut self, id: u64) -> Self {
         for n in self.notices.iter_mut().filter(|n| n["id"].as_u64() == Some(id)) { n["dismissed"] = json!(true); }
         self
@@ -2556,6 +2564,7 @@ impl Actor {
                 s.holder = holder;
                 if !events_sock.is_empty() { s.events_sock = events_sock; }
                 if !frames.is_empty() { s.frames = frames; }
+                s.settle_first_show();
                 let snap = s.clone();
                 self.publish(&snap, None);
                 self.finish_attach_waiters(&pro, Ok(snap.info_json()));
@@ -2626,6 +2635,7 @@ impl Actor {
                 if let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) {
                     if let Some(h) = holder { s.holder = h; }
                     s.frames = frames;
+                    s.settle_first_show();
                     let snap = s.clone();
                     if let Some((cid, tx)) = reply {
                         let out = snap.info_json();
@@ -2986,7 +2996,8 @@ fn held_elsewhere(sock: &str, kind: &str) -> Option<String> {
 pub fn first_show_outcome(active: &str, ms: u64, r: &Result<Option<Vec<Frame>>, String>) -> (String, Option<Value>) {
     let kind = canon_frame(active);
     let name = match kind { "PCB" => "board", "SCH" => "schematic", "PCB_3D" => "3D view", "SYMBOL_EDITOR" => "Symbol Editor", "FOOTPRINT_EDITOR" => "Footprint Editor", _ => "editor" };
-    let notice = |why: &str| json!({"kind": "first_show_failed", "frame": kind, "error": true,
+    // title/detail in English for an agent reading the session; the pane draws its own catalog line from kind, frame and why
+    let notice = |why: &str| json!({"kind": "first_show_failed", "frame": kind, "why": why, "error": true,
         "title": format!("The {name} did not open in KiCad"), "detail": format!("{why}; its tab above opens it again")});
     match r {
         Ok(Some(frames)) => {
@@ -4039,6 +4050,19 @@ mod tests {
         assert_eq!(n.unwrap()["title"], json!("The schematic did not open in KiCad"));
         let (line, n) = first_show_outcome("PCB", 50, &Ok(None));
         assert!(line.contains("frames unknown") && n.is_none(), "unknown is logged, not put to the person");
+    }
+    #[test] fn a_first_show_notice_goes_once_its_editor_is_on_show() {
+        let f = |kind: &str, shown: bool| Frame { kind: kind.into(), doc: String::new(), title: String::new(), modified: false, shown, realized: shown, xid: 1, min_w: 0, min_h: 0 };
+        let (_, n) = first_show_outcome("PCB", 1300, &Err("KiCad answered AS_BUSY: a task is running".into()));
+        let mut s = Session::new("/p/b.kicad_pro", "/p", "fork", "PCB", 1, 0).notice(n.unwrap()).notice(json!({"kind": "kicad", "title": "KiCad's own", "detail": ""}));
+        s.frames = vec![f("PCB", false), f("SCH", true)];
+        assert!(!s.settle_first_show() && s.notices.len() == 2, "the board not on show yet: the notice stays");
+        s.frames = vec![f("PCB", true), f("SCH", false)];
+        assert!(s.settle_first_show(), "the board on show (a tab press opened it): the notice goes");
+        assert_eq!(s.notices.len(), 1); assert_eq!(s.notices[0]["kind"], json!("kicad"), "KiCad's own notices are left alone");
+        let (_, n) = first_show_outcome("PCB", 900, &Err("timed out".into()));
+        let s2 = s.clone().notice(n.unwrap());
+        assert_eq!(s2.notices.iter().filter(|x| x["kind"] == "first_show_failed").count(), 1, "a later failure is said again");
     }
     #[cfg(unix)]
     #[test] fn a_restart_sweep_removes_only_this_hosts_unheld_locks() {

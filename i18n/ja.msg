@@ -2150,6 +2150,7 @@ gpui.c.kicad.phase.answering = KiCad がプロジェクトを開いています
 gpui.c.kicad.phase.show = KiCad がエディターを表示しています
 gpui.c.kicad.task.wait = KiCadが{what}を実行中です。終わるとエディターに切り替わります。
 gpui.c.kicad.notice = KiCadからの通知: {what}
+gpui.c.kicad.firstshow = {editor}がKiCadで開きませんでした ({why})。上のタブで開き直せます。
 gpui.c.kicad.this.window.cannot.hold.another = このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）
 gpui.c.kicad.no.x11.connection = X11 に接続できません
 gpui.c.kicad.could.not.create.container = コンテナウィンドウを作成できませんでした

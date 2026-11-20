@@ -449,6 +449,12 @@ pub fn asking(dialogs: &[String], kicad_has_keys: bool) -> Option<String> {
 /// frame not on screen yet, "Could not use OpenGL, falling back to software rendering"): the newest, as (id, the line the pane shows).
 pub fn open_notice(info: &Value) -> Option<(u64, String)> {
     let n = info["notices"].as_array()?.iter().rev().find(|n| n["dismissed"] != true)?;
+    // the hub's own notice that the start's first show failed (#1344): Backplane's words, from the catalog; KiCad's reason as it is
+    if n["kind"] == "first_show_failed" {
+        let frame = n["frame"].as_str().unwrap_or("");
+        let editor = TABS.iter().find(|(k, _)| *k == frame).map(|(_, l)| crate::i18n::trs(l)).unwrap_or_else(|| frame.to_string());
+        return Some((n["id"].as_u64()?, crate::i18n::tf("gpui.c.kicad.firstshow", &[("editor", editor.into()), ("why", n["why"].as_str().unwrap_or("").to_string().into())])))
+    }
     let (title, detail) = (n["title"].as_str().unwrap_or(""), n["detail"].as_str().unwrap_or(""));
     let text = if detail.is_empty() || title.is_empty() { format!("{title}{detail}") } else { format!("{title} ({detail})") }; // i18n-ok: KiCad's own (translated) title and detail joined; the line is the catalog's gpui.c.kicad.notice
     Some((n["id"].as_u64()?, crate::i18n::tf("gpui.c.kicad.notice", &[("what", text.into())])))
@@ -1716,6 +1722,15 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_hubs_first_show_notice_is_drawn_from_the_catalog_with_kicads_reason() {
+        use serde_json::json;
+        let info = json!({"notices": [{"id": 3, "kind": "first_show_failed", "frame": "PCB", "why": "KiCad answered AS_BUSY: a task is running",
+            "title": "The board did not open in KiCad", "detail": "…", "dismissed": false}]});
+        let (id, text) = super::open_notice(&info).expect("drawn");
+        assert_eq!(id, 3);
+        assert_eq!(text, crate::i18n::tf("gpui.c.kicad.firstshow", &[("editor", crate::i18n::trs("Board").into()), ("why", "KiCad answered AS_BUSY: a task is running".into())]));
+        assert!(text.contains("AS_BUSY") && !text.starts_with("KiCad says"), "Backplane's own words, not 'KiCad says'");
+    }
     #[test] fn only_the_persons_show_hands_kicad_the_keyboard() {
         use super::ShowBy;
         assert!(ShowBy::Deliberate.takes_keys(), "a tab, a key, the rail: the person chose the editor");
