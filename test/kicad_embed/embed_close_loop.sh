@@ -5,6 +5,7 @@
 #   CYCLES=N                 cycles (30)
 #   CLOSE_PREWARM=0          no schematic pre-warm (the hub refuses it: BACKPLANE_KICAD_PREWARM_FREE_MB above any machine's memory)
 #   CLOSE_VIA=kicad          KiCad's own Close on its socket (the person's Quit), not the hub's editor.kicad.close
+#   CLOSE_VIA=quit           KiCad's Quit action (the menu's); CLOSE_VIA=frames: every frame closed, the board last
 #   CLOSE_SAVE=1             (with CLOSE_VIA=kicad) the board modified, then Close{CM_SAVE}; the saved file checked whole (row 1n)
 #   CLOSE_CORES=1            core dumps allowed (a backtrace of each crash)
 #   CLOSE_FOREIGN_LOCK=0     no lock file on the project from another KiCad (removed before each start); 1: one left by a KiCad "elsewhere"
@@ -74,6 +75,14 @@ for i in $(seq "$CYCLES"); do
       MOD=$(python3 "$IPC_PY" modified "$SOCK" pcb 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("modified"))' 2>/dev/null || echo "?")
     fi
     for _ in $(seq 60); do python3 "$IPC_PY" close "$SOCK" "$MODE" >"$OUT/close-$i.out" 2>&1 && grep -q '"exiting": true' "$OUT/close-$i.out" && break; sleep 1; done
+  elif [ "${CLOSE_VIA:-hub}" = quit ]; then
+    # the person's Quit from KiCad's menu: its action (common.Control.quit) in the board editor
+    SOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("sock") or "")' "$R")
+    python3 "$IPC_PY" run-action "$SOCK" common.Control.quit >"$OUT/close-$i.out" 2>&1 || true
+  elif [ "${CLOSE_VIA:-hub}" = frames ]; then
+    # the person closing every frame, the last one last (the pre-warmed schematic, then the board): KiCad ends with its last frame
+    SOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("sock") or "")' "$R")
+    { python3 "$IPC_PY" close "$SOCK" discard sch; python3 "$IPC_PY" close "$SOCK" discard pcb; } >"$OUT/close-$i.out" 2>&1 || true
   else
   # (KiCad refuses a close while one of its tasks runs: the editor's automatic DRC or ERC. Asked again each second, as a person waits)
   for _ in $(seq 60); do

@@ -723,9 +723,11 @@ def main() -> None:
             print(json.dumps({"ok": True, "frame": _decode_frame(f[1][0]) if 1 in f else {}}))
             return
 
-        if cmd == "close":  # Close discard|save|fail: KiCad itself quits (the person's Quit, as the hub sees it: exit 0, no close asked)
+        if cmd == "close":  # Close discard|save|fail [KIND]: KiCad itself quits (the person's Quit, as the hub sees it: exit 0, no close asked)
             mode = {"fail": 0, "save": 1, "discard": 2}[args[0] if args else "discard"]
-            _, val = cli.call("kiapi.backplane.embed.Close", pb_field_varint(1, mode) if mode else b"")
+            # an optional frame kind (pcb, sch, ...): that frame alone, as the person closing it
+            kind = EMBED_KIND_MAP[args[1]] if len(args) > 1 else 0
+            _, val = cli.call("kiapi.backplane.embed.Close", (pb_field_varint(1, mode) if mode else b"") + (pb_field_varint(2, kind) if kind else b""))
             f = pb_decode_fields(val)
             print(json.dumps({"ok": True, "exiting": bool(f.get(2, [0])[0])}))
             return
