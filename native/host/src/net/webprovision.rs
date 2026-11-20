@@ -327,6 +327,19 @@ pub fn request_setup(home: &std::path::Path, plan: &str) -> Result<(), &'static 
     requests.get(home).ok_or("web setup unavailable")?.try_send(plan.to_owned()).map_err(|_| "setup already pending")
 }
 
+fn missing_setup_component(admin: bool) -> Option<&'static str> {
+    use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+    let executable = |path: &str| std::fs::metadata(path).is_ok_and(|file|
+        file.is_file() && file.permissions().mode() & 0o111 != 0);
+    if !std::fs::metadata("/run/tailscale/tailscaled.sock").is_ok_and(|file| file.file_type().is_socket()) {
+        return Some("Start Tailscale. Backplane needs its system socket at /run/tailscale/tailscaled.sock.");
+    }
+    if !executable("/usr/bin/tailscale") { return Some("HTTPS setup requires the Tailscale command at /usr/bin/tailscale."); }
+    if !executable("/usr/bin/curl") { return Some("HTTPS verification requires curl at /usr/bin/curl."); }
+    if admin && !executable("/usr/bin/pkexec") { return Some("Administrator approval requires polkit at /usr/bin/pkexec."); }
+    None
+}
+
 pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tailscale) {
     use std::os::unix::fs::DirBuilderExt;
     use std::time::Duration;
@@ -344,6 +357,12 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
         let mut status_row = serde_json::json!({"canEnable":true});
         if hub.setting("web.enabled").await.as_deref() == Some("1") {
             cleanup_pending = true;
+            if let Some(reason) = missing_setup_component(false) {
+                status_row["reason"] = Value::from(reason);
+                hub.set_info("web.status", &status_row.to_string()).await;
+                tokio::time::sleep(Duration::from_secs(2)).await;
+                continue;
+            }
             let status: Value = serde_json::from_str(&ts.status().await).unwrap_or(Value::Null);
             let config: Value =
                 serde_json::from_str(&ts.serve_status().await).unwrap_or(Value::Null);
@@ -385,7 +404,11 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                             }
                         }
                     }
-                    status_row["command"] = Value::from(plan);
+                    if let Some(reason) = missing_setup_component(plan.starts_with("sudo ")) {
+                        status_row["reason"] = Value::from(reason);
+                    } else {
+                        status_row["command"] = Value::from(plan);
+                    }
                 }
             }
             if let Some(authority) = configured_authority(&config, &service, node, &socket) {
