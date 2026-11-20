@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import subprocess
 import sys
@@ -63,6 +64,21 @@ def parse_embed_actions(kind_dir: Path) -> dict[str, dict]:
         act = rec.get("action")
         if act:
             out[act] = rec
+    return out
+
+
+HUB_CLIENT_RE = re.compile(r"kicad embed: connection (\d+) is client (\S+)")
+
+
+def parse_hub_clients(hub_log: Path) -> dict[str, int]:
+    """`{client cid: hub connection id}` from the hub's `kicad embed: connection <N> is client <cid>` lines (the latest per cid wins).
+    Empty when the hub does not log them (turns on by itself once it does)."""
+    out: dict[str, int] = {}
+    if hub_log.exists():
+        for line in hub_log.read_text(encoding="utf-8", errors="replace").splitlines():
+            m = HUB_CLIENT_RE.search(line)
+            if m:
+                out[m.group(2)] = int(m.group(1))
     return out
 
 
@@ -192,7 +208,7 @@ def parse_client_log(log_path: Path) -> dict:
                 lev = json.loads(line.split("GPUI_LOG ", 1)[1])
             except Exception:
                 lev = None
-            if isinstance(lev, dict) and any(k.startswith("kicad_") for k in lev):
+            if isinstance(lev, dict) and any(k.startswith("kicad_") or k == "hub_connected" for k in lev):
                 # KiCad pane/attach decisions the auto-attach gates read (ordered with the metrics by `seq`)
                 gpui_logs.append({"seq": ev_seq + 0.5, "mark": current_mark, "obj": lev})
             if isinstance(lev, dict) and isinstance(lev.get("refused"), str) and lev["refused"].strip():
@@ -2371,7 +2387,7 @@ def main(argv: list[str] | None = None) -> int:
     extra_checks = evaluate_extra_checks(outdir, kinds, parsed, captures_by_kind, embed=embed)
     if embed and "full" in kinds:
         extra_checks += AUTO.evaluate_auto_gates(
-            outdir, parsed.get("full", {}), captures_by_kind.get("full", {}), parse_auto_actions(outdir / "full"),
+            outdir, {**parsed.get("full", {}), "hub_clients": parse_hub_clients(outdir / "full" / "hub.log")}, captures_by_kind.get("full", {}), parse_auto_actions(outdir / "full"),
             cleared_shots=cleared_by_kind.get("full"),
         )
 

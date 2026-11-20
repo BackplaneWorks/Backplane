@@ -290,6 +290,58 @@ class AutoGateTests(unittest.TestCase):
         # nothing run at all
         self.assertEqual(f(lambda p, c, x: x[:] and [x.pop(3), x.pop(3)])["outcome"], "unavailable")
 
+    def test_holder_is_this_client_turns_on_with_the_cid_lines_and_never_compares_x_window(self) -> None:
+        def a_with(clients, logs_extra, holder="7", report_cid=None):
+            parsed, caps, actions = good()
+            parsed["hub_clients"] = clients
+            parsed["gpui_logs"] += logs_extra
+            parsed["kicad_tags"]["auto-a-report"] = {**pane(11, False), **({"cid": report_cid} if report_cid else {})}
+            caps["auto-a-frame"] = cap({"session": "live", "holder": holder, "generation": 3})
+            return run(parsed, caps, actions)["a-frame-no-keyboard"]
+        conn = [log(1, hub_connected={"cid": "gpui-1-2", "generation": 1})]
+        # no lines: inferred (the pane's own X-window `holder` is never compared)
+        r = a_with({}, [])
+        self.assertEqual(r["outcome"], "passed")
+        self.assertIn("inferred", r["evidence"]["holder_is_this_client"])
+        # cid -> N -> runtime.holder == N: observed
+        r = a_with({"gpui-1-2": 7}, conn)
+        self.assertEqual(r["outcome"], "passed")
+        self.assertIn("observed", r["evidence"]["holder_is_this_client"])
+        # another window holds the pane: failed
+        self.assertEqual(a_with({"gpui-1-2": 8}, conn)["outcome"], "failed")
+        # the report's cid must agree; a reconnect (later hub_connected) is the one that counts
+        self.assertEqual(a_with({"gpui-1-2": 7}, conn, report_cid="gpui-9-9")["outcome"], "failed")
+        re = conn + [log(2, hub_connected={"cid": "gpui-1-3", "generation": 2})]
+        self.assertEqual(a_with({"gpui-1-2": 7, "gpui-1-3": 9}, re)["outcome"], "failed")
+        self.assertEqual(a_with({"gpui-1-2": 7, "gpui-1-3": 7}, re)["outcome"], "passed")
+
+    def test_hub_log_client_lines_are_parsed(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            lg = Path(td) / "hub.log"
+            lg.write_text("noise\nkicad embed: connection 5 is client gpui-10-20\nkicad embed: connection 8 is client gpui-10-20\nkicad embed: connection 9 is client other\n", encoding="utf-8")
+            self.assertEqual(P.parse_hub_clients(lg), {"gpui-10-20": 8, "other": 9})
+            self.assertEqual(P.parse_hub_clients(Path(td) / "none.log"), {})
+
+    def test_c_second_half_reads_kicad_place_and_turns_on_by_itself(self) -> None:
+        def c_with(sch, back):
+            parsed, caps, actions = good()
+            m = parsed["mark_seqs"]
+            for evs, mk in ((sch, "auto:c:schematic"), (back, "auto:c:back")):
+                for e in evs:
+                    parsed["gpui_logs"].append(log(m[mk] + 1, kicad_place=[1, 2, 3, 4], visible=True, **e))
+            return run(parsed, caps, actions)["c-frame-switch"]
+        # no kicad_place lines at all: still unavailable, naming it
+        r = c_with([], [])
+        self.assertEqual(r["outcome"], "unavailable")
+        self.assertIn("no `kicad_place` log lines", r["note"])
+        sw = {"changed": False, "frame_changed": True, "why": "layout", "frame": "SCH"}
+        self.assertEqual(c_with([sw], [{**sw, "frame": "PCB"}])["outcome"], "passed")
+        # one switch observed and the other not: still unavailable (not earned)
+        self.assertEqual(c_with([sw], [])["outcome"], "unavailable")
+        # a new geometry pushed on a switch, or no frame_changed placement: failed
+        self.assertEqual(c_with([{**sw, "changed": True}], [sw])["outcome"], "failed")
+        self.assertEqual(c_with([{**sw, "frame_changed": False}], [sw])["outcome"], "failed")
+
     def test_state_of_requires_every_part(self) -> None:
         good_sess = {"pid": 5, "runtime": {"session": "live", "generation": 2}, "frames": [{"kind": "PCB", "shown": True}]}
         self.assertEqual(A.state_of(good_sess), {"pid": 5, "generation": 2, "session": "live", "holder": None, "shown_frames": ["PCB"]})
