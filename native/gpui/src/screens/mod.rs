@@ -7,6 +7,7 @@ pub mod sections;
 pub mod find;
 pub mod kicad_update;
 pub mod handoff;
+pub mod thought;
 pub mod halt;
 pub mod unanswered;
 pub mod google;

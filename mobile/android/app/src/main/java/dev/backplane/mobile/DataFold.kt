@@ -15,6 +15,13 @@ object DataFold {
     private fun calls(n: Int) = "$n tool ${if (n == 1) "call" else "calls"}"
     private fun steps(n: Int) = "$n design ${if (n == 1) "change" else "changes"}"
 
+    /** A thought shut (data/1 `folds`): its first line with words, " …" when more follows (the desktop's screens/thought.rs `head_line`; test/mobile/thought_lines.json). */
+    fun thoughtLine(text: String): String {
+        val t = text.trim()
+        val first = t.split("\n").map { it.trim() }.firstOrNull { it.isNotEmpty() } ?: ""
+        return if (first.length < t.length) "$first …" else first
+    }
+
     fun label(run: List<DEntry>, live: Boolean): String {
         val tools = run.filter { it.kind == "tool" }
         val d = run.size - tools.size

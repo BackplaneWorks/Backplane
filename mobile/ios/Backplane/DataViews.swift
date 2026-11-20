@@ -815,6 +815,8 @@ struct DataThreadView: View {
                         }
                         ForEach(DataFold.rows(list, running: working)) { r in
                             switch r {
+                            // a thought: folded to its first line, opened with a tap, kept open or shut as a run of tool calls is
+                            case .entry(let e) where e.folds: DataThoughtRow(client: client, thread: id, entry: e, open: Binding(get: { openRuns.contains(e.id) }, set: { if $0 { openRuns.insert(e.id) } else { openRuns.remove(e.id) } })).id(e.id)
                             case .entry(let e): DataEntryRow(client: client, thread: id, entry: e, goTo: { mark = $0; findGo = $0 })
                                 // the message a find or a search hit went to
                                 .background { if mark == e.id { Rectangle().fill(BackplaneDesign.accent.opacity(0.12)).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }.padding(-4).accessibilityElement().accessibilityLabel(Tr.k("ios.thread.marked")).accessibilityIdentifier("data.thread.marked") } }
@@ -1217,6 +1219,33 @@ struct DataFoldRow: View {
             .buttonStyle(.plain).accessibilityLabel(Tr.t(fold.label)).accessibilityValue(Tr.t(open ? "open" : "shut")).accessibilityIdentifier("data.fold." + fold.id)
             if open { ForEach(fold.items) { DataToolRow(entry: $0) }.padding(.leading, 8) }
         }.accessibilityIdentifier("data.entry.tool")
+    }
+}
+
+/// A thought the agent sent (data/1 `folds`, #1325): shut, its first line beside a chevron, as Settings' Show thinking says ("folded"); a tap opens the
+/// whole of it as Markdown, selectable, and shuts it again. The desktop's screens/thought.rs.
+struct DataThoughtRow: View {
+    let client: DataClient
+    let thread: String
+    let entry: DEntry
+    @Binding var open: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button { open.toggle() } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint).frame(width: 12)
+                    Text(Tr.t(entry.label.isEmpty ? "thinking" : entry.label)).dmono(12, bold: true).foregroundStyle(BackplaneDesign.faint)
+                    if !open { Text(DataFold.thoughtLine(entry.text)).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }
+                    Spacer(minLength: 0)
+                }.padding(.vertical, 3).frame(minHeight: 32).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).accessibilityLabel(Tr.t("thinking") + ": " + DataFold.thoughtLine(entry.text)).accessibilityValue(Tr.t(open ? "open" : "shut")).accessibilityIdentifier("data.thought." + entry.id)
+            if open {
+                DataMarkdown(text: entry.text, thread: thread, entry: entry.id, images: [], copy: Copyable.list(entry.copy, hubHasCopy: client.has("copy")))
+                    .opacity(0.85).padding(.leading, 10).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.line).frame(width: 1) }.padding(.leading, 6)
+                    .accessibilityIdentifier("data.thought.body")
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .contain).accessibilityIdentifier("data.entry.thought")
     }
 }
 

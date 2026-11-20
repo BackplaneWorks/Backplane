@@ -20,6 +20,7 @@ data class DEntry(
     val label: String = "", // a design step: what changed; a note: its name
     val agentOnly: Boolean = false, // a message only the agent reads (data/1 `agentOnly`): never shown
     val tone: String = "",  // a note: error, info…
+    val folds: Boolean = false, // a note that is a thought (data/1 `folds`): drawn folded to its first line, a tap opens the whole of it
     val term: DTermRef? = null, // a chat terminal (feature `terms`, kind "term"): its card
     val handoff: DHandoff? = null, // a `/give` received (kind "handoff"): its card
     val replyTo: DReplyTo? = null, // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
@@ -95,7 +96,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     o.optJSONObject("tool")?.let { DTool(it.str("name"), it.str("summary"), it.str("state"), it.str("sub"), it.str("result")) },
     o.optJSONObject("ask")?.let(::parseAsk),
     o.optJSONArray("attachments").list { DAttachment(it.str("id"), it.str("name"), it.str("mime"), it.lng("bytes")) },
-    label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
+    label = o.str("label"), tone = o.str("tone"), folds = o.optBoolean("folds", false), agentOnly = o.optBoolean("agentOnly", false),
     term = o.optJSONObject("term")?.let { DTermRef(it.str("key"), it.str("id"), it.str("title"), it.optInt("cols", 80), it.optInt("rows", 24), it.str("cmd")) },
     handoff = o.optJSONObject("handoff")?.let(::parseHandoff),
     replyTo = o.optJSONObject("replyTo")?.takeIf { it.str("id").isNotEmpty() }?.let { DReplyTo(it.str("id"), it.str("quote")) },

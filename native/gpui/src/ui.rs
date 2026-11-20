@@ -472,9 +472,10 @@ impl Backplane {
                 div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().child(
                     with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).w_full().min_w_0().overflow_hidden().flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).cursor_pointer()
                         .hover(|s| s.bg(c("raise")))
-                        .on_click(cx.listener(move |this, _, _, cx| { this.fold_click(value.clone()); cx.notify(); }))
                         .child(div().flex_shrink_0().flex().items_center().child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")))
-                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(&text)))).into_any_element()
+                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(&text)))
+                        // a click opens and shuts it, and the keyboard too: Tab to it, Enter or Space (screens/thought.rs)
+                        .map(|d| crate::screens::thought::keyed(d, &id, value, light, cx))).into_any_element()
             }
             // the agent still working: a blue square that breathes beside the word (the one animation on screen, only while this row is; blue as the sidebar's and the head's working dots, 0.14's --st-work)
             "assistant" if id.starts_with("@live:") || id.starts_with("@working:") => {
@@ -520,6 +521,12 @@ impl Backplane {
             // s03: the call that runs now, in an open fold of the running turn: its name in the accent with the live mark beside it
             _ if !text.is_empty() && e["now"] == true => div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("text"))
                 .child(div().size(px(6.)).flex_shrink_0().bg(c("accent"))).child(div().text_color(c("accent")).child(string(&e, "label"))).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.lines().next().unwrap_or("").to_string())).into_any_element(),
+            // a thought (#1325): folded to its first line, opened by a click or Enter on it (screens/thought.rs), as a run of tool calls is
+            _ if e["folds"] == true && !text.is_empty() => {
+                let body = match e["blocks"].as_array() { Some(b) if e["open"] == true && !b.is_empty() => { let parsed = self.screens.parsed.get(&id, &text, b); crate::screens::timeline::blocks(cx, &reg, light, &parsed, &id) }
+                    _ if e["open"] == true => vec![crate::screens::timeline::user_text(&reg, light, &text, &[])], _ => vec![] };
+                crate::screens::thought::row(self, cx, light, &e, body)
+            }
             // an activity: its kind faint, what it did on one line (a heredoc's first line, "…"), as 0.14's .act; an error, a warning or a restart says all of it
             _ if !text.is_empty() => {
                 let tone = string(&e, "tone"); let whole = act_whole(&tone);

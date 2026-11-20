@@ -684,7 +684,8 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             items(rows, key = { it.id }) { r ->
                 Box(Modifier.background(if (found == r.id) dcs.primary.copy(alpha = .16f) else Color.Transparent)) {
                 when (r) {
-                    is DRow.Entry -> EntryRow(id, r.entry) { jump(it, true) }
+                    // a thought: folded to its first line, opened with a tap, kept open or shut as a run of tool calls is
+                    is DRow.Entry -> if (r.entry.folds) ThoughtRow(id, r.entry, r.entry.id in openRuns) { openRuns = if (r.entry.id in openRuns) openRuns - r.entry.id else openRuns + r.entry.id } else EntryRow(id, r.entry) { jump(it, true) }
                     is DRow.Fold -> FoldRow(r.fold, r.fold.id in openRuns) { openRuns = if (r.fold.id in openRuns) openRuns - r.fold.id else openRuns + r.fold.id }
                 }
                 }
@@ -764,6 +765,23 @@ private fun FoldRow(f: DFold, open: Boolean, toggle: () -> Unit) {
             DMono(Tr.t(f.label), dcs.onSurfaceVariant, 12)
         }
         if (open) f.items.forEach { ToolRow(it) }
+    }
+}
+
+/** A thought the agent sent (data/1 `folds`, #1325): shut, its first line beside a chevron, as Settings' Show thinking says ("folded"); a tap opens the
+ *  whole of it as Markdown and shuts it again. The desktop's screens/thought.rs. */
+@Composable
+private fun ThoughtRow(tid: String, e: DEntry, open: Boolean, toggle: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp).testTag("thought.${e.id}")) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clickable(onClick = toggle).testTag("thought.head.${e.id}"), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, if (open) Msg.common_hide else Msg.common_show, tint = dfaint, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp))
+            Text(Tr.t(e.label.ifEmpty { "thinking" }), color = dfaint, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            if (!open) { Spacer(Modifier.width(8.dp)); Text(DataFold.thoughtLine(e.text), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)) }
+        }
+        if (open) Row(Modifier.padding(start = 6.dp, top = 2.dp, bottom = 4.dp).height(IntrinsicSize.Min)) {
+            Box(Modifier.width(1.dp).fillMaxHeight().background(dcs.outlineVariant)); Spacer(Modifier.width(10.dp))
+            Box(Modifier.alpha(.85f).testTag("thought.body.${e.id}")) { MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy"), false)) }
+        }
     }
 }
 

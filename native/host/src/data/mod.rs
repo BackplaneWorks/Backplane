@@ -290,7 +290,9 @@ fn act_entry(thread: &str, id: &str, role: &str, akind: &str, text: &str, at: u6
         _ => { let mut a = pt::plain_act(&e);
             // a turn the restart cut, carrying on: when, on the person's clock (docs/PHONE-DATA.md, Restarts)
             if pt::restart_note(&e) { let now = now_ms() / 1000; let c = crate::statehost::policies().and_then(|p| p.with_state(|st| pt::person_zone(st).map(|z| pt::clock(at / 1000, now, &z)))).flatten().unwrap_or_default(); a["text"] = json!(pt::carry_row(&c)) }
-            let mut n = json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}); if a.get("copy").is_some() { n["copy"] = a["copy"].clone() } n }
+            let mut n = json!({"id":id,"kind":"note","text":a["text"],"label":a["label"],"tone":a["tone"],"at":at}); if a.get("copy").is_some() { n["copy"] = a["copy"].clone() }
+            // a thought: the phone draws it folded to its first line and opens it with a tap (docs/PHONE-DATA.md, Fold)
+            if a["folds"] == true { n["folds"] = json!(true) } n }
     })
 }
 /// What of a message there is to copy (feature `copy`, md/copy.rs `spans`): `copy: [{text, cmd}]`, each fenced block and each inline code span with a

@@ -366,7 +366,7 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &
         }
         // a zone that cannot be known degrades the time stamps (empty), not the screen
         let c = zone.map(|z| clock(e.at, now, z));
-        if !e.msg { let mut a = plain_act(e); if restart_note(e) { a["text"] = json!(carry_row(c.as_deref().unwrap_or(""))) } out.push(a); i += 1; continue }
+        if !e.msg { let mut a = plain_act(e); if restart_note(e) { a["text"] = json!(carry_row(c.as_deref().unwrap_or(""))) } out.push(fold_thought(a, open)); i += 1; continue }
         if e.role == "user" && e.text.starts_with(CARRY) {
             out.push(json!({"id": e.id, "kind": "act", "tone": "info restart", "label": "restart", "text": carry_row(c.as_deref().unwrap_or(""))}));
         } else if e.role == "user" {
@@ -446,6 +446,19 @@ pub(crate) fn plain_act(e: &Ent) -> Value {
     let mut a = json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text});
     // a notice's code (an error naming a command to run, a path): the clients draw copy buttons for it (md/copy.rs)
     let copy = crate::md::copy::spans(&text); if !copy.is_empty() { a["copy"] = json!(copy) }
+    // a thought (Fold.think): shown folded to its first line, opened to the whole of it with a tap (the setting agent.thinking says "folded")
+    if e.role == THINK && !text.is_empty() { a["folds"] = json!(true) }
+    a
+}
+/// The tone of a thought the agent sent (agents/lines.rs, codex.rs).
+pub const THINK: &str = "thinking";
+/// Fold.think.open: a thought opens and shuts as a run of tool calls does, by the person's `fold:<id>` choice (shut until opened); `value` is the
+/// `fold` action that flips it, and an open one carries its Markdown `blocks`, drawn as a reply's.
+fn fold_thought(mut a: Value, open: &dyn Fn(&str) -> bool) -> Value {
+    if a["folds"] != true { return a }
+    let id = a["id"].as_str().unwrap_or("").to_string(); let o = open(&id);
+    a["open"] = json!(o); a["value"] = json!(format!("{}{id}", if o { "0" } else { "1" }));
+    if o { a["blocks"] = json!(md_blocks(a["text"].as_str().unwrap_or(""))) }
     a
 }
 
@@ -952,6 +965,22 @@ mod tests {
         let r = row(true, "u2"); assert_eq!((r["stamp"].as_str(), r["unread"].as_bool()), (Some("not read yet · 21:57"), Some(true)));
         assert!(row(true, "").get("unread").is_none() && row(false, "u2").get("unread").is_none(), "read, or the turn over: as any other");
         assert_eq!(row(true, "u")["stamp"], "21:57", "another id in the list is not this one");
+    }
+    // #1325 (Fold.think): a thought is a fold of its own: shut until the person opens it, its whole text kept either way, Markdown blocks once open,
+    // the `fold` action's value flipping it; the phones get `folds` on its note
+    #[test] fn a_thought_folds_and_opens_by_the_persons_choice() {
+        let th = Ent { id: "th1".into(), msg: false, role: THINK.into(), akind: THINK.into(), text: "First I check the vias.\n\nThen the **planes**.".into(), at: 1699999001 };
+        let es = [m("u", "user", "go", 1699999000), th.clone(), m("a1", "assistant", "done", 1699999002)];
+        let row = |open: bool| entries_w(&es, false, false, "", &|id| open && id == "th1", 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap().into_iter().find(|e| e["id"] == "th1").unwrap();
+        let shut = row(false);
+        assert_eq!((shut["folds"].as_bool(), shut["open"].as_bool(), shut["value"].as_str(), shut["text"].as_str()), (Some(true), Some(false), Some("1th1"), Some(th.text.as_str())), "{shut}");
+        assert!(shut.get("blocks").is_none(), "a shut thought sends no blocks");
+        let open = row(true);
+        assert_eq!((open["open"].as_bool(), open["value"].as_str()), (Some(true), Some("0th1")));
+        assert_eq!(open["blocks"].as_array().map(|b| b.len()), Some(2), "two paragraphs: {open}");
+        let tool = entries_w(&[tl("t1", "Bash", "ls", 1699999001)], false, false, "", &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        assert!(tool.iter().all(|e| e.get("folds").is_none()), "a tool call is no thought");
+        let empty = Ent { text: String::new(), ..th.clone() }; assert!(plain_act(&empty).get("folds").is_none(), "an empty thought has nothing to open");
     }
     // s03: in an open fold of the running turn, the call that runs is marked
     #[test] fn the_running_call_in_an_open_fold_is_marked() {

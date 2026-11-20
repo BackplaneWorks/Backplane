@@ -39,6 +39,13 @@ enum DataFold {
         return out
     }
 
+    /// A thought shut (data/1 `folds`): its first line with words, " …" when more follows (the desktop's screens/thought.rs `head_line`; test/mobile/thought_lines.json).
+    static func thoughtLine(_ text: String) -> String {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let first = t.components(separatedBy: .newlines).map { $0.trimmingCharacters(in: .whitespaces) }.first { !$0.isEmpty } ?? ""
+        return first.count < t.count ? first + " …" : first
+    }
+
     /// `running`: the thread's turn runs, so a run at the very end of the thread is still growing.
     static func rows(_ all: [DEntry], running: Bool) -> [DRow] {
         let entries = all.filter { !$0.agentOnly }   // the hub's note to the agent is not the person's to read
