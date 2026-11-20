@@ -40,6 +40,8 @@ SUITES=(
   # an agent's footprint exchange while the person's Choose Symbol has KiCad's full footprint load running: kicad_edit waits for each
   # library by its status (bp.13.2 b5/b6 Fix 1). Fork mode only.
   "embed_lib_wait_e2e.sh:lib-wait"
+  # an automatic attach (the rail's design mode) never takes the keyboard: every key typed meanwhile lands in the composer. Fork mode only.
+  "embed_auto_attach_e2e.sh:auto-attach"
   # the person's edits in KiCad's plan view (bp.13+; skips itself on runtimes without them, and outside fork mode)
   "embed_plan_person_e2e.sh:plan-person"
   # an agent routes in plan view; the Plan panel rows there (bp.13 batch 11 plan-view-api; skips itself without it)

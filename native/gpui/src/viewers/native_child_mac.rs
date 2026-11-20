@@ -111,6 +111,10 @@ pub fn stack(top: u64, frame: u64) -> Vec<crate::viewers::kicad_pane::Who> {
     list(ON_SCREEN_ABOVE | EXCLUDE_DESKTOP, 0).into_iter().filter(|e| e.2 == 0)
         .map(|e| if e.0 == top { Who::Ours } else if e.0 == frame { Who::Frame } else if e.1 == kicad { Who::Kicad } else if e.1 == own_pid() { Who::OurOther } else { Who::Other }).collect()
 }
+#[link(name = "CoreGraphics", kind = "framework")] unsafe extern "C" { fn CGEventSourceSecondsSinceLastEventType(state: i32, event_type: u32) -> f64; } // i18n-ok: a framework name
+/// Seconds since the last left or right mouse press anywhere, by the window server's count (kCGEventSourceStateCombinedSessionState):
+/// a press in KiCad's own window, which the client never hears of, counts too
+pub fn secs_since_press() -> f64 { unsafe { CGEventSourceSecondsSinceLastEventType(0, 1).min(CGEventSourceSecondsSinceLastEventType(0, 3)) } }
 /// A mouse button is down (anywhere): a press on our window brings it in front of KiCad's frame before we hear of it, if we ever do.
 pub fn mouse_down() -> bool { unsafe { send_usize(class(c"NSEvent"), c"pressedMouseButtons") != 0 } } // i18n-ok: an Objective-C class name
 /// For a log line: the on-screen normal windows front to back as (number, whose), ours `u`, the frame `f`, KiCad's other windows `k`,

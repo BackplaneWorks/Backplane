@@ -483,7 +483,15 @@ impl Backplane {
             }
             Step::Kicad(cmd) => { // {"kicad":{"report":true}} or {"kicad":{"wait_painted":25000,"kind":"PCB","tag":"..."}} (viewers/kicad_pane.rs)
                 let tag = cmd["tag"].as_str().map(String::from);
-                if let Some(ms) = cmd["wait_painted"].as_u64() {
+                // {"kicad":{"attach":"board","why":"auto"}}: the thread's design in the embedded KiCad as the rail's reconcile asks for it
+                // (why "auto": ShowBy::Automatic, shown without the keyboard; anything else deliberate, as Edit)
+                if let Some(open) = cmd["attach"].as_str() {
+                    let why = if cmd["why"].as_str() == Some("auto") { crate::viewers::kicad_pane::ShowBy::Automatic } else { crate::viewers::kicad_pane::ShowBy::Deliberate };
+                    let ok = self.kicad_attach(open, why, None, cx);
+                    self.ui_epoch += 1;
+                    self.m("kicad", json!({"attach": open, "why": format!("{why:?}"), "ok": ok, "tag": tag}));
+                    self.pump(cx);
+                } else if let Some(ms) = cmd["wait_painted"].as_u64() {
                     let want_kind = cmd["kind"].as_str().map(String::from);
                     let min_lit = cmd["min_painted"].as_u64().unwrap_or(15);
                     let t0 = Instant::now();
