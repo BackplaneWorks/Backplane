@@ -68,6 +68,7 @@ def parse_client_log(log_path: Path) -> dict:
     """Parse GPUI_METRIC lines from client.log into per-shot state, settled tags, presses, keys, reads, probes, kicad reports, rail state/inventory, and layout snapshots."""
     layout: dict = {}
     controls: dict[str, dict] = {}
+    probe_rects = {}
     probes: set[str] = set()
     rail_drawn: dict | None = None
     rail_drawn_seq = 0
@@ -117,6 +118,7 @@ def parse_client_log(log_path: Path) -> dict:
             controls = {c.get("id", ""): c for c in ev["controls"] if isinstance(c, dict)}
         elif kind == "probes":
             pr = ev.get("probes") or ev.get("rects") or []
+            probe_rects = pr if isinstance(pr, dict) else {r["id"]: r for r in pr if isinstance(r, dict) and "id" in r}
             if isinstance(pr, dict):
                 probes = set(pr.keys())
             elif isinstance(pr, list):
@@ -200,6 +202,7 @@ def parse_client_log(log_path: Path) -> dict:
                     "seq": ev_seq,
                     "rail_drawn": dict(rail_drawn) if rail_drawn is not None else None,
                     "rail_drawn_seq": rail_drawn_seq,
+                    "probe_rects": probe_rects,
                 }
 
     return {
