@@ -357,7 +357,7 @@ which a sequence number alone would miss.
 - `h` is an opaque string (16 hex characters now); compare it, never parse it. Each `Entry` in these replies carries its own `h`.
 - `have` is an object of the parts held: `{"<key>": "<h>", …}`. Leave out what is not held. Keys are given per method below.
 
-### `thread.open {thread, limit?=40, have?}` (feature `open`)
+### `thread.open {thread, limit?=40, have?}` (feature `open`; a page holds at most 32 entries, as `thread.entries`: `Model::page`)
 Subscribes to the thread (as `subscribe {topic:"thread"}`) and answers its newest page and its panels in one reply:
 `{sub, thread?, ids?, entries, next?, work?, queue?, buy?, rail?, h}`.
 - `have` keys: `"@thread"`, `"@ids"`, `"@work"`, `"@queue"`, `"@buy"`, `"@rail"`, and each held entry's id (`"<entryId>": "<h>"`).
