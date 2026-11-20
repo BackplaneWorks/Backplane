@@ -83,7 +83,7 @@
     "web/src/shell.css": "99d212a9bf5b8cef1cdef3f1dfac98c5cfe9a365256cb9c3ea359cde70194aa6",
     "web/src/sidebar.ts": "289f0171dfd9d2b1fd7a5f651048d38d002090858e8ed50877d0573447b29351",
     "web/src/viewers/browser-input.ts": "2be7672b8bfaded19f385ef56196793b9125130bffee7ac70afd493a3a91a9ab",
-    "web/src/viewers/browser.ts": "0c7a4cafdfb45f702ca6a9e5bef548355ce54a6fa460dedd5be3d12254c8a3b4",
+    "web/src/viewers/browser.ts": "44ba909e0e7d4c2d31672c97d41ad7e8039a8654e9929c2ba2650c7581f398ba",
     "web/src/viewers/cbor.ts": "98a300dad42941cef83acf8748b9e8a14e376ae3fbbd4a18178fd56b3ec68af1",
     "web/src/viewers/mesh-worker.ts": "b7a5094d136cdcba42132ab54615a1518b7e6a13eb232e055065d9d00ba1f4ab",
     "web/src/viewers/panes.ts": "a1b1e4a5f1135ed442f761a7a189053583da653172fc8c6d2a2df17391d16dff",
