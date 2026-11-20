@@ -241,47 +241,35 @@ impl Agents {
         let shown = kc::route(path);
         let cwd = self.world().await.cwd(thread); let roots = [kc::design_root(&cwd), cwd];
         if let Some(why) = crate::present::viewer::show_refusal(kind, &shown, &roots) { return fail(&why) }
-        let before = crate::files::kicad::watch::viewer_state(thread).0;
         // the window holding the project's embedded KiCad shows another frame (the person's strip tab): its pane is brought to this one,
         // unless KiCad is busy, which the answer says (issue 1355; a kicad_edit's own push never comes here while the page holds KiCad)
         let (frame, busy) = if explicit { crate::files::kicad::follow::bring_frame(thread, &shown).await } else { (None, String::new()) };
-        let mut push = json!({"t":"view","action":"view-show","thread":thread,"path":shown,"kind":kind});
+        // the push carries what is asked (kind and the whole source path) and a token the desktop answers with (`view-show`), so the hub applies nothing by guesswork
+        let token = crate::present::viewer::issue_show(thread, kind, &shown);
+        let mut push = json!({"t":"view","thread":thread,"path":shown,"kind":kind,"token":token});
         if let Some(f) = frame { push["frame"] = json!(f) }
-        crate::present::viewer::record_pending_show(thread, kind, &shown);
         self.hub.push_all(&push);
         // (the owner's windows on other machines show it too)
         { let (hub, ann) = (self.hub.clone(), json!({"thread":thread,"path":shown.clone(),"kind":kind})); tokio::spawn(async move { hub.far_announce("viewer.show", &ann).await }); }
         let note = |mut v: Value| { if !busy.is_empty() { v["kicad"] = json!(busy) } v };
         if !wait { return (true, note(json!({"shown":shown}))) }
+        // settled: the picture the client reports is, now or when it reports, exactly the page and source asked (already showing counts), in the frame
+        // brought; a show the hub refused (a KiCad dialog is open) answers with its reason instead of waiting out the time
+        let root = roots[0].clone();
+        let defaults = { let r = root.clone(); tokio::task::spawn_blocking(move || {
+            let f = crate::files::kicad::project::read(&r);
+            let set = crate::files::kicad::gerber::default_set(std::path::Path::new(&r)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+            crate::present::viewer::ShowDefaults { pcb: f.pcb, sch: f.sch, set }
+        }).await.unwrap_or_default() };
+        let want = crate::present::viewer::show_want(kind, &shown, &root, &defaults);
+        let settled = |s: &(u64, Value)| frame.map_or(true, |f| s.1["kicadFrame"] == f) && crate::present::viewer::show_settled(&want, &s.1, &defaults);
         let mut now = crate::files::kicad::watch::viewer_state(thread);
-        // a frame brought: the read-back waits for the window's report of it (its kicadFrame), AND
-        // strictly for the requested page and source to be observed (missing kind/open or missing/empty key never matches).
-        let want_kind = match kind {
-            "pcb" => "board",
-            "sch" => "schematic",
-            "3d" if crate::present::viewer::is_model(&shown) => "mech",
-            "" if shown.to_ascii_lowercase().ends_with(".kicad_pcb") || shown.to_ascii_lowercase().ends_with(".pcbdoc") => "board",
-            "" if shown.to_ascii_lowercase().ends_with(".kicad_sch") || shown.to_ascii_lowercase().ends_with(".schdoc") => "schematic",
-            "" if crate::present::viewer::is_model(&shown) => "mech",
-            k => k,
-        };
-        let matches_target = |s: &(u64, Value)| {
-            let brought = frame.map_or(true, |f| s.1["kicadFrame"] == f);
-            let obs_kind = s.1["open"].as_str().or_else(|| s.1["kind"].as_str()).unwrap_or("");
-            let kind_ok = want_kind.is_empty() || match want_kind {
-                "gerbers" => obs_kind == "gerbers" || (obs_kind == "board" && s.1["gerbers"] == true),
-                "files" => matches!(obs_kind, "files" | "image" | "pdf" | "text"),
-                wk => obs_kind == wk,
-            };
-            let src_ok = shown.is_empty()
-                || s.1["key"].as_str().is_some_and(|k| !k.is_empty() && (k == shown || k.ends_with(&shown) || k.ends_with(&format!("/{shown}"))))
-                || s.1["part"].as_str().is_some_and(|p| !p.is_empty() && (p == shown || shown.ends_with(p) || shown.ends_with(&format!("/{p}"))))
-                || s.1["sheet"].as_str().is_some_and(|sh| !sh.is_empty() && (sh == shown || sh.ends_with(&shown) || shown.ends_with(sh)))
-                || s.1["source"].as_str().is_some_and(|src| !src.is_empty() && (src == shown || shown.ends_with(&format!("/{src}"))));
-            brought && kind_ok && src_ok
-        };
-        for _ in 0..60 { if now.0 > before && matches_target(&now) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
-        (true, note(json!({"shown":shown,"viewer":now.1,"settled":now.0 > before && matches_target(&now)})))
+        for _ in 0..60 {
+            if settled(&now) { break }
+            if let crate::present::viewer::ShowOutcome::Refused(why) = crate::present::viewer::show_outcome(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.1, "settled": false})) }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread);
+        }
+        (true, note(json!({"shown":shown,"viewer":now.1,"settled":settled(&now)})))
     }
     /// The same gate for a direct write of a board or schematic (`files_write`): Err names the holder.
     pub async fn doc_gate(&self, thread: &str, doc: &str) -> Result<(), String> {

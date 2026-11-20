@@ -46,6 +46,7 @@ fn strip_additive_2a(mut v: Value) -> Value {
     if let Some(o) = v.as_object_mut() {
         o.remove("layout");
         o.remove("tiles");
+        o.remove("showToken");
         if let Some(rail) = o.get_mut("rail").and_then(Value::as_array_mut) {
             for entry in rail {
                 if let Some(eo) = entry.as_object_mut() {
