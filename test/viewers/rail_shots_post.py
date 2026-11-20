@@ -396,6 +396,7 @@ EMBED_CANVAS_SHOTS = {
     "task7-sim-run",
     *M.EXTRA_EDIT_SHOTS,
     *(s for xs in M.EXTRA_MISSING_SHOTS.values() for s in xs),
+    *M.rail_auto.AUTO_SHOTS,  # the auto-attach gates' frames show the embedded KiCad canvas
 }
 
 

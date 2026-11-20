@@ -407,16 +407,15 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
             {"shot": "extra-edit-files"},
         ])
 
-    if kind == "full" and embed:
-        # Decision-5 gates (auto-attach): KiCad is still cold here, before any page opens it; see rail_auto.py
-        AUTO_INSERT_AT = 2  # right after the idle shot
-        steps[AUTO_INSERT_AT:AUTO_INSERT_AT] = AUTO.build_auto_steps(settle_timeout_ms)
-
     if kind == "full":
         # Docking/tiling (Task 4 user route, Rule B7): scheduled in the normal `full` run, UI controls and drawn-inventory selectors only;
         # every check stays `unavailable` until a build emits `GPUI_METRIC event=tiles` (docs: rail_dock.py contract table).
         steps.extend(DOCK.build_task4_dock_steps(settle_timeout_ms))
         steps.extend(DOCK.build_b7_steps(settle_timeout_ms))
+
+    if kind == "full" and embed:
+        # Decision-5 gates (auto-attach): AFTER every existing task and check, so earlier measurements are untouched; see rail_auto.py
+        steps.extend(AUTO.build_auto_steps(settle_timeout_ms))
 
     return steps
 
@@ -601,35 +600,63 @@ def query_hub_kicad_sessions(port: str, token_file: str, bun_bin: str) -> dict:
     return _parse_hub_kicad_sessions_output(out)
 
 
+_FIRST_GENERATION: list[int] = []  # the running KiCad's generation seen by the first stale probe (the "old" one after Edit restarts it)
+
+
+def _single_session(port: str, token: str, bun: str) -> dict | None:
+    inv = query_hub_kicad_sessions(port, token, bun)
+    sessions = list((inv.get("sessions") or {}).values()) if inv.get("ok") and inv.get("inventory_complete") else []
+    return sessions[0] if len(sessions) == 1 else None
+
+
 def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> None:
     """The watcher's half of an auto-attach gate, run BEFORE the script's shot is released (the script waits on `<name>.done`).
 
-    `auto-act-type-<tag>`: real X keys (XTest) typing the marker as a person does; `auto-act-stale`: an `editor.kicad.attach` with an
-    old generation (and a control with the running one) straight to the hub; `auto-act-close`: KiCad's own Close on its socket
-    (the person's Quit as the hub sees it). Every outcome is a record in `auto_actions.jsonl`; a failure is recorded, never raised.
+    `auto-act-type-<tag>`: real X keys (XTest) typing the marker as a person does (`mid` also records KiCad's hub state when the typing
+    began and ended); `auto-act-stale-future|old`: an `editor.kicad.attach` with a generation that does not exist yet (running+7) or the
+    previous KiCad's, with the complete session state captured right before and right after it and a control with the running
+    generation; `auto-act-close`: KiCad's own Close on its socket (the person's Quit as the hub sees it); `auto-act-kill`: a crash
+    (SIGKILL of the KiCad pid the hub names), which is not the person's close. Every outcome is a record in `auto_actions.jsonl`; a
+    failure is recorded, never raised.
     """
     repo_root = Path(__file__).resolve().parents[2]
     xinput = repo_root / "test" / "cef" / "xinput.py"
     ipc = repo_root / "test" / "kicad_embed" / "lib" / "gui_ipc_probe.py"
     hub_rpc = repo_root / "test" / "kicad_embed" / "lib" / "hub_rpc.mjs"
+    port, token, bun, pro = (os.environ.get(k, "") for k in ("RAIL_HUB_PORT", "RAIL_HUB_TOKEN_FILE", "RAIL_BUN_BIN", "RAIL_PRO"))
     rec: dict = {"shot": name, "ok": False, "error": None}
     try:
         if name.startswith("auto-act-type-"):
             tag = name[len("auto-act-type-"):]
             text = AUTO.MARKERS[tag]
             rec.update({"action": f"type-{tag}", "text": text})
+            if tag == "mid":
+                sess = _single_session(port, token, bun)
+                rec["kicad_state_before"] = (sess or {}).get("state")
             subprocess.run([sys.executable, str(xinput), "type", text], env=dict(os.environ, DISPLAY=disp), check=True, timeout=30)
             time.sleep(0.4)
+            if tag == "mid":
+                sess = _single_session(port, token, bun)
+                rec["kicad_state_after"] = (sess or {}).get("state")
             rec["ok"] = True
-        elif name == "auto-act-stale":
-            rec.update({"action": "stale"})
-            port, token, bun, pro = (os.environ.get(k, "") for k in ("RAIL_HUB_PORT", "RAIL_HUB_TOKEN_FILE", "RAIL_BUN_BIN", "RAIL_PRO"))
-            inv = query_hub_kicad_sessions(port, token, bun)
-            sessions = list((inv.get("sessions") or {}).values()) if inv.get("ok") and inv.get("inventory_complete") else []
-            gen = ((sessions[0].get("runtime") or {}).get("generation")) if len(sessions) == 1 else None
-            if not isinstance(gen, int) or not pro or not hub_rpc.exists():
-                raise RuntimeError(f"no single session generation / project path / helper (generation={gen!r})")
-            rec.update({"generation": gen, "sent_generation": gen + 7})
+        elif name in ("auto-act-stale-future", "auto-act-stale-old"):
+            label = name[len("auto-act-stale-"):]
+            rec.update({"action": f"stale-{label}"})
+            if not pro or not hub_rpc.exists():
+                raise RuntimeError("no project path / hub helper")
+            sess = _single_session(port, token, bun)
+            before = AUTO.state_of(sess)
+            running = ((sess or {}).get("runtime") or {}).get("generation")
+            if not isinstance(running, int):
+                raise RuntimeError("no single session with a runtime generation")
+            if label == "future":
+                _FIRST_GENERATION[:] = [running]
+                sent = running + 7
+            else:
+                if not _FIRST_GENERATION or _FIRST_GENERATION[0] >= running:
+                    raise RuntimeError(f"no previous generation exists (first {list(_FIRST_GENERATION)}, running {running})")
+                sent = _FIRST_GENERATION[0]
+            rec.update({"generation": running, "sent_generation": sent})
             env = {k: v for k, v in os.environ.items() if k not in ("DISPLAY", "WAYLAND_DISPLAY")}
 
             def rpc(method: str, params: dict) -> dict | None:
@@ -644,10 +671,14 @@ def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> N
                             return r
                 return None
 
-            old = rpc("editor.kicad.attach", {"project": pro, "frame": "PCB", "wait": False, "auto": True, "generation": gen + 7})
-            cur = rpc("editor.kicad.show", {"project": pro, "frame": "PCB", "generation": gen})
-            rec["stale"] = None if old is None else bool((old.get("result") or {}).get("stale") is True or (old.get("reply") or {}).get("stale") is True)
-            rec["current_stale"] = None if cur is None else bool((cur.get("result") or {}).get("stale") is True or (cur.get("reply") or {}).get("stale") is True)
+            def stale_flag(r: dict | None) -> bool | None:
+                return None if r is None else bool((r.get("result") or {}).get("stale") is True or (r.get("reply") or {}).get("stale") is True)
+
+            old = rpc("editor.kicad.attach", {"project": pro, "frame": "PCB", "wait": False, "auto": True, "generation": sent})
+            after = AUTO.state_of(_single_session(port, token, bun))  # immediately after the stale attach, before the control
+            cur = rpc("editor.kicad.show", {"project": pro, "frame": "PCB", "generation": running})
+            rec.update({"before": before, "after": after, "stale": stale_flag(old), "control_stale": stale_flag(cur),
+                        "control_ok": bool(cur is not None and cur.get("ok") is True and not cur.get("error")), "control_error": None if cur is None else (cur.get("error") or None)})
             rec["ok"] = old is not None
         elif name == "auto-act-close":
             rec.update({"action": "close"})
@@ -657,6 +688,17 @@ def run_auto_action(name: str, last_kicad: dict, kind_out: Path, disp: str) -> N
             r = subprocess.run([sys.executable, str(ipc), "close", str(sock), "discard"], capture_output=True, text=True, timeout=30)
             rec["output"] = (r.stdout or r.stderr or "").strip()[:300]
             rec["ok"] = r.returncode == 0 and '"ok": true' in (r.stdout or "").replace('"ok":true', '"ok": true')
+        elif name == "auto-act-kill":
+            rec.update({"action": "kill"})
+            sess = _single_session(port, token, bun)
+            pid = (sess or {}).get("pid")
+            if not isinstance(pid, int) or pid <= 1:
+                raise RuntimeError("the hub names no single KiCad pid to kill")
+            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(errors="replace")
+            if "kicad" not in cmdline:
+                raise RuntimeError(f"pid {pid} is not a KiCad process")
+            os.kill(pid, 9)
+            rec.update({"pid": pid, "ok": True})
         else:
             return
     except Exception as e:
@@ -709,6 +751,13 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                     if not SHOT_NAME_RE.match(name) or name in seen:
                         continue
                     seen.add(name)
+                    if AUTO.is_action_only_shot(name):
+                        # an action-only shot saves NO screenshot (nothing to review, nothing to leak): the watcher acts, then releases the script
+                        run_auto_action(name, last_kicad, kind_out, disp)
+                        done_tmp = shot_dir / f".{name}.done.tmp"
+                        done_tmp.write_text("ok\n", encoding="utf-8")
+                        done_tmp.replace(shot_dir / f"{name}.done")
+                        continue
                     out_png = kind_out / f"{name}.png"
                     ok = False
                     err = None
@@ -758,8 +807,6 @@ def watch_and_capture(disp: str, client_log: Path, shot_dir: Path, kind_out: Pat
                                 rec["click"] = {"target": target, "point": [x, y], "ok": click.returncode == 0}
                     with captures_path.open("a", encoding="utf-8") as cf:
                         cf.write(json.dumps(rec, separators=(",", ":")) + "\n")
-                    if name.startswith("auto-act-"):
-                        run_auto_action(name, last_kicad, kind_out, disp)
                     done_tmp = shot_dir / f".{name}.done.tmp"
                     done_tmp.write_text("ok\n", encoding="utf-8")
                     done_tmp.replace(shot_dir / f"{name}.done")
