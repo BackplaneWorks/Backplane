@@ -265,3 +265,88 @@ Every phase is independently shippable, gated by `hello.features` capability neg
 1. **Direction confirmation:** Does the 5-pillar architecture (multi-hub supervisor without relaunch, `shell.sync`/`thread.open` with sequence cursors, client replica + LRU cache, `zstd`/`permessage-deflate` + CBOR + content-addressed viewer/blob cache, persistent binary hub-to-hub link) match what you want?
 2. **GPUI remote path (Phase 4):** Should we keep remote GPUI on `?view=1` (with compression + fixed `viewDelta` + no relaunch) for now, or plan to converge remote GPUI onto the `data/2` client replica as well?
 3. **Phase 0 quick wins:** Good to land the 4 zero-risk quick wins (`fab.look` cache, `c.sent.clear()` fix, incremental `open_asks`/`preview`, iOS N+1 fix) immediately while we finalize Phase 1–3?
+
+---
+
+## 9. One Home for the Uberbot Across Machines
+
+> Status: **Proposal — three decisions for the person at the end.** Requirement: one machine holds the uberbot (Bub), the bots and their state; every
+> other machine of the person shows the same conversation live and sends to the one Bub; settings and history are shared; the home can move.
+
+### 9.1 What exists and is reused (`native/host/`)
+
+| Need | Existing piece | State |
+|---|---|---|
+| One home holds Bub, bots, rooms, hooks, mail, memories, routines, vault, APNs, paired devices | `net/homemove.rs` (`home.move`, `home.status`, settings `home.at` / `home.here`): copy → check → switch → retire, undone when the check fails | Works (the move to boat-hub) |
+| Clients find the home | `hub.offer` (a client adds the holder by itself); the clients' home failover (GPUI `hub.rs`, `DataClient`) | Works |
+| Bub's state on every machine, and who holds the conversation | `bots/uber.rs` + `bots/world.rs`: ops (memory, space, page, persona, routines) folded into registers; a lease `{holder, term}` (`lease`, `holder_me`, `b_lease`); `bots.uber_home`, `bots.uber_join`, `bots.pin` | Ops and lease exist; **the exchange `uber.sync` is not ported** (`net/rpc.rs` answers 501) |
+| Threads and history of other machines | `net/feed.rs` → `net/outbox.rs` (one push at a time, backoff, gap pull) → `net/farsync.rs` → `net/farstore.rs` (mirrors outside `events.jsonl`) | Works; **streamed text is dropped** (`farsync.rs`) |
+| Sending to another machine, held while it is away | `net/farsend.rs`, the outbox's held sends and launches | Works |
+| Bots and rooms across machines | `bots/far.rs`, `bots/mesh.rs` (machine ids) | Works |
+| Accounts on every machine | `settings/accounts_sync.rs` (long-lived sync tokens over the signed link) | Works, accounts only |
+| One project list | `docs/ALWAYS-ON.md` section 5 (registry at the home, D7) | Partly built |
+| Trust | the signed owner link (`net/peering`, `net/owner.rs`), pairing, the tailnet | Works |
+
+### 9.2 Three kinds of data
+
+1. **One owner, called through (never copied):** running Bub's turns, the vault and every secret, the provider sign-ins Bub runs on, APNs, webhooks, the
+   firing of routines, the paired devices. Other machines ask the home over the signed owner link (Phase 2: the persistent hub-to-hub socket). The vault
+   never leaves the home.
+2. **Copied from the home, read-only elsewhere (a replica):** Bub's conversation and the bots' threads (shared lines through `feed`/`outbox`/`farstore`),
+   Bub's memory, persona and routine definitions (the `uber.rs` ops, once `uber.sync` is ported), told state, and the project registry (D7). Every
+   machine draws Bub from its own replica: history paints at once and stays readable with the home off; writes go to the one Bub.
+3. **Shared settings, from an allowlist:** theme, language, quiet hours, notification settings, default models, and project pins, icons and groups
+   (keyed by the project key, `docs/ALWAYS-ON.md` section 5). A change made anywhere goes to the home, which commits it and sends it out; a change
+   made while the home is away is queued with its time, and the later of two changes to one key wins. Everything not on the list stays local:
+   folders and paths, KiCad pane state, local builds, window places.
+
+A pure live proxy would leave every other machine blank while the home sleeps; full replication would copy the vault and allow two Bubs. The split keeps
+one actor and one secret store while every screen paints from local data.
+
+### 9.3 Clients stay dumb
+
+GPUI, iOS, Android and the web draw the home from hub data only. The hub a client is connected to answers, from its replica:
+
+```
+home: {name, online, awaySince?, queuedCount?, canTakeOver}
+```
+
+in `hello` (data/1), the native sidebar's `shown` (`?view=1`) and a `home` push on the `lists` subscription when it changes. Every client renders the
+same row, "Home (<name>) is away since HH:MM · N queued", Bub's chat and memory from the replica (0 ms cached paint), and Settings → Home machine
+(Move here, Take over here) from the same object. No client decides anything about the home.
+
+### 9.4 When the home is offline: the replica, a queue, no automatic failover
+
+- Every machine still shows Bub's chat and memory from its replica, with the row above.
+- Messages, settings changes and launches queue in the existing outbox (backoff, gap fill) and go when the home is back, as messages already wait
+  during a move.
+- **Take over here** (`bots.uber_home`, the lease one term on) is the person's choice, offered when the home has been away a while (`canTakeOver`). On
+  the new holder, tools that need a secret fail with a clear message until the vault is restored. The old home, back, sees the higher term, steps
+  down, sends what it had not sent and stops firing routines (the exchange designed in `docs/BOAT-HUB.md`).
+- Not automatic: during a network split two Bubs would fire routines twice, let memory diverge and answer one message twice.
+
+### 9.5 Moving the home: `home.move`, plus two things
+
+- Kept as it is: copy, check, one switch, retire, undo on a failed check; Bub's chat stays open and a message sent during the move is held and delivered
+  at the new home.
+- **The lease term is the switch:** the move commits by taking the lease one term on, so a crash part-way through leaves exactly one home, the holder of
+  the highest term.
+- **A home lost for good:** a replica can be promoted from what it already holds (kind 2). The vault cannot come back that way unless the person chose
+  an encrypted backup with a recovery code (opt-in).
+
+### 9.6 Order of work
+
+1. Port `uber.sync`: the op exchange, the holder's beat, takeover. The missing link.
+2. The shared-settings allowlist over the same exchange.
+3. Streamed text over the link (Phase 2's persistent hub-to-hub socket); until then Bub's replies show on other machines when they are complete.
+4. The `home` object (9.3) and the away row and queue counts on every client.
+5. Take over here, and the optional vault backup.
+
+Byte budgets (section 5.2) hold: Bub's chat on a non-home machine is a local replica read (0 B on open) plus the link's shared lines.
+
+### 9.7 Decisions for the person
+
+1. **Offline home:** the replica plus a queue with a manual *Take over here* (recommended), or automatic failover to the always-on Boat after a long
+   absence (off by default).
+2. **What is shared:** the settings allowlist in 9.2 (3), or more or less of it.
+3. **A lost home's vault:** offer an encrypted vault backup with a recovery code, or accept that a lost home means signing in to its secrets again.
