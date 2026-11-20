@@ -335,8 +335,14 @@ fn renames(ev: &[Value]) -> Vec<String> { ev.iter().filter(|e| is(e, "ThreadRena
 fn running_log(work: &Path, extra: &str) -> String { base_log(work, 1, &format!("{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m1\",\"role\":\"user\",\"text\":\"build it\",\"at\":1700000100}}\n{{\"$\":\"TurnChanged\",\"thread\":\"{T1}\",\"state\":\"running\",\"at\":1700000100}}\n{extra}")) }
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_marks_the_cut_turn_stopped_and_carries_it_on() {
     let sd = dir("c-bin"); perf_standin(&sd, 1);
-    let (hub, ag, _h, _w) = start("c", |w| running_log(w, ""), |_| Cli::standin(&sd)).await;
-    let ev = until(&hub, 0, 10, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let t0 = Instant::now(); let (hub, ag, _h, _w) = start("c", |w| running_log(w, ""), |_| Cli::standin(&sd)).await; let started = t0.elapsed();
+    // 30 s: the carried turn is the project's first, so it makes the folder a repository and takes its first snapshot before the agent starts;
+    // on Windows that git work alone took 5 s of a 7.8 s run (windows-debug 44743317828) and ran past the 10 s this waited before
+    let ev = until(&hub, 0, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    // what the carried turn did, when it does not end in time: the hub's start, then each step (turn, restart, git, session)
+    let way = || format!("hub started in {started:?}, then {:?}: {}", t0.elapsed(), ev.iter().filter_map(|e| { let w = if is(e, "TurnChanged") { format!("turn {}", e["state"].as_str()?) } else if is(e, "ActivityLogged") { format!("{}: {}", e["kind"].as_str().unwrap_or(""), e["summary"].as_str().unwrap_or("").chars().take(50).collect::<String>()) } else if is(e, "SessionSet") { "session".into() } else { return None }; Some(format!("{} {w}", e["at"])) }).collect::<Vec<_>>().join(" | "));
+    eprintln!("carried turn: {}", way());
+    assert!(ev.iter().any(|e| turn_is(e, "completed")), "the carried turn did not end in 30 s; {}; agents started {}", way(), ag.stats.procs_spawned.load(Relaxed));
     let t: Vec<&Value> = ev.iter().collect();
     let at = |f: &dyn Fn(&Value) -> bool| t.iter().position(|e| f(e)).unwrap();
     let cut = at(&|e| is(e, "ActivityLogged") && e["kind"] == "restart" && e["tone"] == "error"); let int = at(&|e| turn_is(e, "interrupted"));
