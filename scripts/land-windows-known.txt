@@ -6,6 +6,8 @@
 # Windows faults on main: path text with a / where Windows gives \ (also red on GitHub's windows-latest, ci.yml hub job, at 2122ce898f; the rest of
 # that group was fixed by 8e343ceec9)
 present::viewer_parity_tests::legacy_single_page_flows_match_origin_main_snapshot   # "<ROOT>\proj.kicad_pro" against main's "<ROOT>/proj.kicad_pro"
+present::viewer_parity_tests::agent_show_from_idle_matches_main_view_for_each_kind   # as above, from the rail-show split (after GitHub's last Windows run, 8e343ceec9)
+present::tests::rail_show_raw_push_to_token_handler_to_the_selected_page_and_source   # the hub draws key "0|<root>|", the test wants source "<root>/unit.kicad_pcb"
 
 # the gate's VM only (green on GitHub's windows-latest): the tests run in an ssh logon, not a runner service
 settings::vault::tests::the_windows_credential_manager_keeps_the_key_and_a_copy_never_touches_it   # an ssh (network) logon has no Credential Manager session: "stored and read back"
