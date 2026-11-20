@@ -1094,3 +1094,44 @@ async fn socket_with_browser_closes_immediately_on_web_enabled_setting_set() {
     assert!(matches!(next, None | Some(Ok(Message::Close(_))) | Some(Err(_))), "expected immediate close on web.enabled=0, got {next:?}");
     let _ = tokio::time::timeout(Duration::from_secs(1), srv).await.unwrap();
 }
+
+#[tokio::test]
+async fn socket_with_browser_drops_in_flight_handle_reply_when_disabled_mid_call() {
+    struct HeldRpc { started: Arc<tokio::sync::Notify>, release: Arc<tokio::sync::Notify> }
+    impl RpcHandler for HeldRpc {
+        fn methods(&self) -> &'static [&'static str] { &["thread.again"] }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, _m: &'a str, _p: &'a Value) -> Fut<'a, Vec<Value>> {
+            let (started, release, id) = (self.started.clone(), self.release.clone(), id.clone());
+            Box::pin(async move {
+                started.notify_one();
+                release.notified().await;
+                vec![json!({"t":"reply","id":id,"ok":true,"result":{"secret":"must-not-escape"}})]
+            })
+        }
+    }
+
+    let (hub, _port) = up_with("socket-with-held", "{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1700000040}\n").await;
+    let started = Arc::new(tokio::sync::Notify::new());
+    let release = Arc::new(tokio::sync::Notify::new());
+    hub.hub.register_rpc(Arc::new(HeldRpc { started: started.clone(), release: release.clone() }));
+    let (reg, _routes) = crate::net::start::open(&hub.hub.cfg.home, "127.0.0.1", 0).unwrap();
+    let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Held Browser").unwrap();
+    assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
+    let session_cookie = reg.browser_wait("person@example.com", &poll_cookie).await.unwrap().unwrap();
+    let device_id = reg.browser_verify("person@example.com", &session_cookie, None, false).unwrap();
+
+    let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+    let h2 = hub.hub.clone();
+    let srv = tokio::spawn(async move { socket_with(h2, server_io, true, Principal::Browser { device_id }, "bp.ts.net".into()).await });
+    let (mut ws, _) = tokio_tungstenite::client_async("ws://bp.ts.net/ws?data=1&enc=json", client_io).await.unwrap();
+    let _hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+
+    ws.send(Message::Text(json!({"id":1,"m":"thread.again","p":{"thread":"t1"}}).to_string().into())).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(1), started.notified()).await.unwrap();
+    // Disable web access while handle() is mid-flight, then release the handler
+    hub.hub.commit(&json!({"$":"SettingSet","key":"web.enabled","value":"0","at":1700000051})).await.unwrap();
+    release.notify_one();
+    let next = tokio::time::timeout(Duration::from_secs(1), ws.next()).await.unwrap();
+    assert!(matches!(next, None | Some(Ok(Message::Close(_))) | Some(Err(_))), "in-flight reply must not be sent after disable, got {next:?}");
+    let _ = tokio::time::timeout(Duration::from_secs(1), srv).await.unwrap();
+}
