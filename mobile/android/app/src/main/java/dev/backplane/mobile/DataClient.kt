@@ -1245,6 +1245,7 @@ object DataClient {
     }
     private fun J(o: DEntry) = JSONObject().put("id", o.id).put("kind", o.kind).put("text", o.text).put("at", o.at).apply {
         if (o.agentOnly) put("agentOnly", true)
+        if (o.label.isNotEmpty()) put("label", o.label); if (o.tone.isNotEmpty()) put("tone", o.tone); if (o.folds) put("folds", true)
         o.copy?.let { put("copy", copyJson(it)) }
         o.handoff?.let { put("handoff", handoffJson(it)) }
         o.term?.let { t -> put("term", JSONObject().put("key", t.key).put("id", t.id).put("title", t.title).put("cols", t.cols).put("rows", t.rows).put("cmd", t.cmd)) }

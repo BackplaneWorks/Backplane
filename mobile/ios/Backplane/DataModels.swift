@@ -64,6 +64,7 @@ struct DEntry: Codable, Equatable, Identifiable {
     var at: Int
     var label: String = ""   // a design step: what changed; a note: its name
     var tone: String = ""    // a note: error, info…
+    var folds = false        // a note that is a thought (data/1 `folds`): drawn folded to its first line, a tap opens the whole of it
     var clientId: String?
     var replaces: String?   // the final entry that ends a stream names the live entry it replaces
     var live: Bool
@@ -83,13 +84,13 @@ struct DEntry: Codable, Equatable, Identifiable {
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        id = c.str(.id); kind = c.str(.kind); text = c.str(.text); at = c.int(.at); label = c.str(.label); tone = c.str(.tone)
+        id = c.str(.id); kind = c.str(.kind); text = c.str(.text); at = c.int(.at); label = c.str(.label); tone = c.str(.tone); folds = c.bool(.folds)
         clientId = try? c.decode(String.self, forKey: .clientId)
         replaces = try? c.decode(String.self, forKey: .replaces)
         live = c.bool(.live)

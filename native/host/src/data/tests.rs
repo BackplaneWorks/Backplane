@@ -795,6 +795,12 @@ fn a_reply_and_a_notice_carry_their_code_to_copy() {
     assert!(act_entry("t1", "x2", "warn", "error", "plain words", 1).unwrap().get("copy").is_none());
     assert!(super::FEATURES.contains(&"copy") && super::FEATURES.contains(&"termChat"));
 }
+// #1325: a thought reaches the phone as a note that folds (its whole text, `folds`); any other note does not
+#[test] fn a_thought_note_folds_on_the_phone() {
+    let n = act_entry("t1", "th1", "thinking", "thinking", "First the vias.\nThen the planes.", 1).unwrap();
+    assert_eq!((n["kind"].as_str(), n["tone"].as_str(), n["text"].as_str(), n["folds"].as_bool()), (Some("note"), Some("thinking"), Some("First the vias.\nThen the planes."), Some(true)), "{n}");
+    assert!(act_entry("t1", "x1", "info", "result", "done", 1).unwrap().get("folds").is_none());
+}
 
 #[tokio::test]
 async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
