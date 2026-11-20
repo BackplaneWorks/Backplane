@@ -15,10 +15,15 @@ PROJ="$OUT/proj"; WHICH=${STANDALONE:-pcbnew}; CYCLES=${CYCLES:-10}
 DOC="$PROJ/ecc83-pp.$([ "$WHICH" = eeschema ] && echo kicad_sch || echo kicad_pcb)"
 TITLE=$([ "$WHICH" = eeschema ] && echo "Schematic Editor" || echo "PCB Editor")
 BIN="$(dirname "$KICAD_BIN")/$WHICH"
+# a fresh home's first run asks for the global library tables (a modal dialog that held every close: all of the first loop's cycles):
+# empty tables in the config the editor reads, as the macOS check gives it
+for v in "" 10.0 10.99; do c="${XDG_CONFIG_HOME:-$OUT/fh/.config}/kicad/$v"; mkdir -p "$c"
+  printf '(sym_lib_table\n  (version 7)\n)\n' >"$c/sym-lib-table"; printf '(fp_lib_table\n  (version 7)\n)\n' >"$c/fp-lib-table"
+  printf '(design_block_lib_table\n  (version 7)\n)\n' >"$c/design-block-lib-table"; done
 start_xvfb_and_wm
 CLEAN=0; CRASHED=0; HUNG=0; OTHER=0
 for i in $(seq "$CYCLES"); do
-  HOME="$OUT/home" "$BIN" "$DOC" >"$OUT/sa-$i.log" 2>&1 &
+  HOME="$OUT/fh" "$BIN" "$DOC" >"$OUT/sa-$i.log" 2>&1 &
   P=$!
   W=$(wait_for_kicad_win "$P" "$TITLE" 240 || true)
   if [ -z "$W" ]; then echo "cycle $i: no window"; OTHER=$((OTHER + 1)); kill -9 "$P" 2>/dev/null; wait "$P" 2>/dev/null; continue; fi
@@ -26,7 +31,9 @@ for i in $(seq "$CYCLES"); do
   python3 "$KEMBED_LIB/wm_ctl.py" close "$W" >/dev/null 2>&1
   for _ in $(seq 120); do kill -0 "$P" 2>/dev/null || break; sleep 0.25; done
   if kill -0 "$P" 2>/dev/null; then
-    HUNG=$((HUNG + 1)); echo "cycle $i: still running 30 s after its window was closed"; kill -9 "$P" 2>/dev/null; wait "$P" 2>/dev/null
+    # what is on screen of its own (a dialog that held the close is not a hang of its exit)
+    WINS=$(xwininfo -root -tree 2>/dev/null | grep -E '"[^"]+"' | grep -iE "kicad|pcb|schematic|library|footprint|symbol" | sed 's/^ *//' | cut -c1-80 | tr '\n' ';')
+    HUNG=$((HUNG + 1)); echo "cycle $i: still running 30 s after its window was closed; on screen: $WINS"; kill -9 "$P" 2>/dev/null; wait "$P" 2>/dev/null
   else
     wait "$P"; st=$?
     if [ "$st" = 0 ]; then CLEAN=$((CLEAN + 1)); echo "cycle $i: clean"
