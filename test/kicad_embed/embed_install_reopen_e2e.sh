@@ -58,13 +58,23 @@ PAINT=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); f=next((
 echo "INFO the pane after: $PAINT"
 check "I3 the pane shows the board, drawn, attached to its container" "$([ "$ATT" = 1 ] && python3 -c 'import sys; a=sys.argv[1].split(); sys.exit(0 if a[0]=="PCB" and int(a[1])>=15 else 1)' "$PAINT" && echo 1 || echo 0)" "session $ST container $CONT; pane $PAINT"
 # a KiCad top-level outside Backplane's window
-STRAY=$(python3 - "$KEMBED_LIB" <<'PY'
-import sys
+STRAY=$(python3 - "$KEMBED_LIB" "$R" <<'PY'
+import json, sys
 sys.path.insert(0, sys.argv[1]); import x11_embed_driver as d
-lib = d.load_lib(); out = []
-for w in d.list_all_windows(lib):
+r = json.loads(sys.argv[2] or "{}")
+lib = d.load_lib(); ws = d.list_all_windows(lib); parent = {w["xid"]: w["parent"] for w in ws}
+cont = r.get("container") or {}
+cont = d.fmt_xid(cont.get("xid") or 0) if isinstance(cont, dict) else d.fmt_xid(int(cont or 0))
+def inside(x):   # a window in the pane's container (KiCad's frames embedded there) is not a stray one
+    for _ in range(12):
+        if x == cont: return True
+        x = parent.get(x)
+        if not x: return False
+    return False
+out = []
+for w in ws:
     t = (w["title"] + " " + w["wm_class"]).lower()
-    if w["shown"] and not w["override_redirect"] and w["w"] >= 100 and ("kicad" in t or "pcb editor" in t) and "backplane" not in t: out.append(f'{w["xid"]}:{w["title"][:40]}@{w["root_x"]},{w["root_y"]}')
+    if w["shown"] and not w["override_redirect"] and w["w"] >= 100 and ("kicad" in t or "pcb editor" in t) and "backplane" not in t and not inside(w["xid"]): out.append(f'{w["xid"]}:{w["title"][:40]}@{w["root_x"]},{w["root_y"]}')
 print(" ".join(out) or "none")
 PY
 )
