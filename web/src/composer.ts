@@ -79,6 +79,7 @@ export class ComposerView {
   private sendBtn: HTMLButtonElement;
   private stopBtn: HTMLButtonElement;
   private errorEl: HTMLElement;
+  private replyEl: HTMLElement;
   private cb: ComposerCallbacks;
 
   private commands: SlashCommand[] = [];
@@ -105,6 +106,11 @@ export class ComposerView {
 
     this.errorEl = document.createElement("div");
     this.errorEl.className = "bp-composer-err bp-hidden";
+
+    // Reply's strip (the desktop's reply-strip): who wrote the message and its first line; a tap goes to it, × drops the reply
+    this.replyEl = document.createElement("div");
+    this.replyEl.className = "bp-reply-strip bp-hidden";
+    this.replyEl.setAttribute("data-testid", "composer-reply");
 
     this.attachStripEl = document.createElement("div");
     this.attachStripEl.className = "bp-attach-strip bp-hidden";
@@ -200,7 +206,7 @@ export class ComposerView {
 
     btns.append(this.attachBtn, this.voiceBtn, this.stopBtn, this.sendBtn);
     bar.append(modelWrap, this.memoryEl, btns);
-    inner.append(this.popupEl, this.errorEl, this.attachStripEl, this.fileInput, this.textarea, bar);
+    inner.append(this.popupEl, this.errorEl, this.replyEl, this.attachStripEl, this.fileInput, this.textarea, bar);
     wrap.appendChild(inner);
     container.appendChild(wrap);
 
@@ -325,6 +331,35 @@ export class ComposerView {
   public setDraft(text: string): void {
     this.textarea.value = text;
     this.autoGrow();
+    this.textarea.focus();
+  }
+
+  /** The reply being written, or null: the strip over the box. Text goes in as text only. */
+  public setReply(r: { who: string; line: string } | null, onGo?: () => void, onDrop?: () => void): void {
+    if (!r) { this.replyEl.replaceChildren(); this.replyEl.classList.add("bp-hidden"); return; }
+    const body = document.createElement("button");
+    body.type = "button";
+    body.className = "bp-reply-strip-body";
+    body.setAttribute("data-testid", "composer-reply-go");
+    const who = document.createElement("span");
+    who.className = "bp-reply-strip-who";
+    who.textContent = r.who;
+    const line = document.createElement("span");
+    line.className = "bp-reply-strip-line";
+    line.textContent = t("gpui.b.replying.to", "↩ Replying to: {line}", { line: r.line });
+    body.append(who, line);
+    if (onGo) body.addEventListener("click", onGo);
+    const drop = document.createElement("button");
+    drop.type = "button";
+    drop.className = "icon bp-reply-strip-drop";
+    drop.textContent = "×";
+    const cancel = t("reply.cancel", "Cancel reply");
+    drop.title = cancel;
+    drop.setAttribute("aria-label", cancel);
+    drop.setAttribute("data-testid", "composer-reply-drop");
+    if (onDrop) drop.addEventListener("click", onDrop);
+    this.replyEl.replaceChildren(body, drop);
+    this.replyEl.classList.remove("bp-hidden");
     this.textarea.focus();
   }
 

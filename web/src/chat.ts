@@ -296,6 +296,18 @@ export class ChatView {
     this.renderEntries(atBottom);
   }
 
+  /** Scroll to a message (a reply's quote) and flash it; false when it is not loaded. */
+  public goTo(entryId: string): boolean {
+    const el = this.scrollEl.querySelector<HTMLElement>(`[data-entry-id="${CSS.escape(entryId)}"]`);
+    if (!el) return false;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.remove("bp-entry-flash");
+    void el.offsetWidth;
+    el.classList.add("bp-entry-flash");
+    window.setTimeout(() => el.classList.remove("bp-entry-flash"), 1200);
+    return true;
+  }
+
   public removeEntry(entryId: string): void {
     const next = this.entries.filter((e) => e.id !== entryId);
     if (next.length !== this.entries.length) {
@@ -430,24 +442,26 @@ export class ChatView {
     replyBtn.type = "button";
     replyBtn.className = "bp-entry-act";
     const replySpan = document.createElement("span");
-    replySpan.textContent = "Reply";
+    replySpan.textContent = t("reply.action", "Reply");
     replyBtn.append(
       makeTinyIcon(["M9 17l-5-5 5-5", "M20 18v-2a4 4 0 0 0-4-4H4"]),
       replySpan,
     );
     replyBtn.addEventListener("click", () => this.cb.onReplyEntry(entry));
+    // not yet on the hub (still sending, or streaming): nothing a reply could name
+    const replyable = !entry.live && !entry.id.startsWith("local-") && !entry.id.startsWith("live:");
 
     const timeEl = document.createElement("span");
     timeEl.className = "bp-entry-time";
     const ts = formatTime24(entry.at);
     if (isUser) {
       timeEl.textContent = ts;
-      foot.append(copyBtn, replyBtn, timeEl);
+      foot.append(copyBtn, ...(replyable ? [replyBtn] : []), timeEl);
     } else {
       const dur = prevUserAt && entry.at ? formatDuration(toMs(entry.at) - toMs(prevUserAt)) : "";
       const finished = ts ? (dur ? `Finished ${ts} · ${dur}` : `Finished ${ts}`) : "";
       timeEl.textContent = entry.live ? "Streaming…" : finished;
-      foot.append(timeEl, copyBtn, replyBtn);
+      foot.append(timeEl, copyBtn, ...(replyable ? [replyBtn] : []));
     }
     return foot;
   }
@@ -552,7 +566,14 @@ export class ChatView {
       if (entry.replyTo?.quote) {
         const rq = document.createElement("div");
         rq.className = "bp-reply-quote";
-        rq.textContent = `↩ ${t("gpui.b.in.reply.to", "In reply to:")} ${entry.replyTo.quote}`;
+        rq.textContent = t("gpui.b.in.reply.to", "↩ In reply to: {quote}", { quote: entry.replyTo.quote });
+        // a tap goes to the message it answers (when it is loaded)
+        const to = entry.replyTo.id;
+        rq.setAttribute("role", "button");
+        rq.tabIndex = 0;
+        rq.setAttribute("data-testid", "entry-reply-quote");
+        rq.addEventListener("click", () => this.goTo(to));
+        rq.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); this.goTo(to); } });
         row.appendChild(rq);
       }
 
