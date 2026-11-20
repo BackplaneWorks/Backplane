@@ -35,6 +35,8 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('sidebar-list').waitFor();
   assert.ok(performance.now() - approvedAt <= 1000, 'approval to app exceeded one second');
   const socket = await connected;
+  await testId('composer-input').waitFor();
+  const interactiveMs = await page.evaluate(() => performance.now());
   await checkPageHeaders(page);
   await checkSessionCookie(context, origin, 'https://other.example.test', readRegistry);
   await checkProtectedAssets(page, origin, assets, true);
@@ -50,9 +52,21 @@ export async function browserTasks({ context, origin, rpc, thread, assets, reply
   await testId('slash-menu').waitFor();
   const timeline = testId('timeline');
   await testId('composer-input').fill('mode:stream Browser');
-  const partial = timeline.getByText('Browser0', {exact:true}).waitFor({timeout:10000});
+  let firstFrameAt;
+  socket.on('framereceived', ({payload}) => {
+    if (typeof payload !== 'string') return;
+    const frame = JSON.parse(payload);
+    if (frame.k === 'text' && frame.thread === thread && frame.append?.includes('Browser0')) firstFrameAt ??= performance.now();
+  });
+  const partial = timeline.getByText('Browser0', {exact:true}).waitFor({timeout:10000}).then(() => performance.now());
+  const sendAt = performance.now();
   await testId('composer-send').click();
-  await partial;
+  await timeline.getByText('mode:stream Browser', {exact:true}).waitFor();
+  const echoMs = performance.now() - sendAt;
+  const displayedAt = await partial;
+  assert.ok(Number.isFinite(firstFrameAt), 'missing first text frame');
+  console.log(JSON.stringify({interactiveMs:Math.round(interactiveMs), sendToEchoMs:Math.round(echoMs),
+    firstFrameToVisibleMs:Math.round(displayedAt-firstFrameAt)}));
   await timeline.getByText(replyText, { exact: true }).waitFor();
   await screenshot(page, 'paired-chat');
 
