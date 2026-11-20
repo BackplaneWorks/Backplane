@@ -676,11 +676,13 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             crate::session::patch::merge(&mut session,&o.patch);
             cmds=o.before;
         },
-        // another board of a project with several (present/viewer.rs `board_action`)
+        // another board of a project with several (present/viewer.rs `board_action_for`)
         "view-board" => {
+            let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
             // a board the page cannot show (not in the project's list yet, another page on show) changes nothing and says so: it must never refuse the whole view
-            match super::viewer::board_action(sel_st,hub,&session,value) {
-                Some(o) => { crate::session::patch::merge(&mut session,&o.patch); cmds=o.before; }
+            match super::viewer::board_action_for(sel_st,hub,&session,p["designDesktop"].as_u64(),locale,value) {
+                Some(super::viewer::LayoutOut::Ok(o)) => { crate::session::patch::merge(&mut session,&o.patch); cmds=o.before; }
+                Some(super::viewer::LayoutOut::Refused { code, key, text }) => { cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text})); }
                 None => cmds.push(json!({"type":"say","tone":"note","text":"That board is not in this project's list yet."})),
             }
         },
@@ -704,11 +706,14 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             let sel=session["sel"].as_str().unwrap_or("").to_string();
             if sel.is_empty() || sel.contains('~') || !crate::files::kicad::follow::act(&sel,value) { return refused("action.follow-unported") }
         },
-        // a sheet of the schematic (present/viewer.rs `sheet_action`)
+        // a sheet of the schematic (present/viewer.rs `sheet_action_for`)
         "view-sheet" => {
-            let Some(o)=super::viewer::sheet_action(sel_st,hub,&session,value) else { return refused("action.sheet-unported") };
-            crate::session::patch::merge(&mut session,&o.patch);
-            cmds=o.before;
+            let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
+            match super::viewer::sheet_action_for(sel_st,hub,&session,p["designDesktop"].as_u64(),locale,value) {
+                Some(super::viewer::LayoutOut::Ok(o)) => { crate::session::patch::merge(&mut session,&o.patch); cmds=o.before; }
+                Some(super::viewer::LayoutOut::Refused { code, key, text }) => { cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text})); }
+                None => return refused("action.sheet-unported"),
+            }
         },
         // agent's idempotent viewer_show (never closes an already-focused tile)
         "view-show" => {

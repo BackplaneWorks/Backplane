@@ -121,6 +121,7 @@ impl Plots {
     /// watches the board's plot beside the model. `kept` names the model the client has cached: its key ("" for any of this view's) and id (0: none).
     /// Returns the keys of the plots this view shows, so a client can drop what arrives late for the view it left.
     pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str, kept: (&str, u64), force: bool) -> Vec<String> {
+        if !root.is_empty() { crate::present::viewer::refresh_gerber_sets_for_root(root); }
         let Some(kind) = kind else { self.stop(client); return vec![] };
         let board = |k: u32| if path.is_empty() { own_file(k, root) } else { path.to_string() };
         let file = board(kind);
@@ -168,6 +169,7 @@ impl Plots {
     /// plot (full chunks, no carry: the panes are separate sources) and the 3D model's board plot shared with the board pane.
     /// `board` (absolute, "" the project's own): a board picked in the Boards menu: its file and the schematic beside it are the sources, keyed by their paths.
     pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str, board: &str, force: bool) -> Vec<String> {
+        if !root.is_empty() { crate::present::viewer::refresh_gerber_sets_for_root(root); }
         self.st.lock().unwrap().waiting.remove(&client);
         let f = project::read(root);
         let picked = !board.is_empty();

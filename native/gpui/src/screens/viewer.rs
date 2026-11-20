@@ -23,6 +23,7 @@ pub const MAX_ROWS: usize = 1000;
 
 /// Open a viewer kind, or close the viewer with "": the phones' idempotent `view` action.
 pub fn view_kind(kind: &str) -> Command { Command::Action("view".into(), kind.to_string()) }
+pub fn view_show_kind(kind: &str) -> Command { Command::Action("view-show".into(), kind.to_string()) }
 pub fn close() -> Command { view_kind("") }
 /// A rail press (or its key) on a viewer kind: the kind the rail shows lit (the hub's page, or the one just pressed) shuts the viewer, as a press
 /// on the web's shown tab did; any other kind opens. Still the idempotent `view` action either way, decided from what is on the screen.

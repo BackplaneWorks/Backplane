@@ -178,7 +178,8 @@ impl B {
         // a drawing open before it: its watch stops, and the drawing is no longer the one on show
         if !draft(session, "@view.at").is_empty() {
             let root = draft(session, "@view.at").split('|').nth(1).unwrap_or("");   // "0|<root>|": the key of the source being watched
-            let p = json!({"kind": "", "root": root, "path": "", "tree": ""});
+            let mut p = json!({"kind": "", "root": root, "path": "", "tree": ""});
+            if let Some((peer, _)) = sel.split_once('~') { p["on"] = json!(peer); }
             self.rpc("kicad.watch", p); self.patch_d.insert("@view.at".into(), json!(""));
         }
         self.patch_d.insert(format!("@view:{sel}"), json!(""));

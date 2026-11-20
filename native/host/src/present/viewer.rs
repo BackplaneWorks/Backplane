@@ -167,6 +167,40 @@ pub fn view_action_for(
     let sel = s(session, "sel");
     let d = &session["drafts"];
     let force_retry = kind == "retry";
+    // Old desktop clients answer a hub-pushed agent `viewer_show` with plain `view`: treat that
+    // matching reply as an idempotent `view-show` (never toggles Files closed or closes a focused Board).
+    if !force_retry {
+        if let Some((sk, sp)) = matches_pending_show(sel, client_id, kind) {
+            return viewer_show_action(st, hub, session, client_id, locale, &sk, &sp);
+        }
+    }
+    let stored = parse_stored_layout(d, sel);
+    // Retry on a stored versioned/unresolved focused tile MUST go through commit_layout's version
+    // resolver — NEVER fall through to main's live board/schematic watch path.
+    if force_retry {
+        if let Some(cur_layout) = &stored {
+            if cur_layout.focus.as_deref().and_then(|id| cur_layout.tile(id)).is_some_and(is_tile_versioned) {
+                let last_ms: u64 = s(d, "@view.retry.at").parse().unwrap_or(0);
+                if !retry_allowed(last_ms, now_ms) {
+                    return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false }));
+                }
+                let linked = sel.contains('~');
+                let eff_root = if linked {
+                    st.threads.get(sel).map(|t| if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() }).unwrap_or_default()
+                } else {
+                    root_of(st, sel)
+                };
+                let mut vo = commit_layout(st, hub, session, sel, &eff_root, cur_layout, false);
+                if now_ms > 0 {
+                    if let Some(dm) = vo.patch["drafts"].as_object_mut() {
+                        dm.insert("@view.retry.at".into(), json!(now_ms.to_string()));
+                    }
+                }
+                return Some(LayoutOut::Ok(vo));
+            }
+        }
+    }
+    let raw_value = kind;
     // "retry": re-watch whatever page is currently open through the same presenter path
     let (kind, part) = if force_retry {
         if !simple(st, session, sel) { return None }
@@ -193,15 +227,20 @@ pub fn view_action_for(
     } else {
         root_of(st, sel)
     };
-    let stored = parse_stored_layout(d, sel);
-    // Multi-tile mode (`@view.layout:<sel>` present with >= 2 tiles): route rail press and `view ""`
-    // (closing focused tile only) through `layout` + `commit_layout`, guarded by hub KiCad runtime.
+    // Multi-tile / versioned stored layout mode: guard ALL transitions (including kind == "split")
+    // by the hub's KiCad runtime before any mutation or fallback.
     if !force_retry {
         if let Some(cur_layout) = &stored {
-            if kind != "split" {
-                let picked_abs = board_file("board", &eff_root, &chosen_board(d, sel, &eff_root));
-                let guard = hub_kicad_guard(cur_layout, &eff_root, &picked_abs, client_id, None, None, linked);
-                let locked_ref = guard.locked.as_deref();
+            let picked_abs = board_file("board", &eff_root, &chosen_board(d, sel, &eff_root));
+            let guard = hub_kicad_guard(cur_layout, &eff_root, &picked_abs, client_id, None, None, linked);
+            let locked_ref = guard.locked.as_deref();
+            if kind == "split" {
+                if locked_ref.is_some() {
+                    let r = super::layout::Refusal::Locked;
+                    return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
+                }
+                // Unlocked Split press from a stored layout falls through to main's Split writer and clears `@view.layout:<sel>`.
+            } else {
                 let next_res = if kind.is_empty() {
                     let fid = cur_layout.focus.as_deref().unwrap_or("");
                     super::layout::close(cur_layout, fid, locked_ref)
@@ -230,7 +269,7 @@ pub fn view_action_for(
         } else if client_id.is_some() {
             // Single-tile / legacy mode: check hub KiCad guard only when a holder's dialog locks the open tile,
             // establishing that any allowed same-kind press preserves the locked tile's content.
-            let open = s(d, &format!("@view:{sel}"));
+            let open = legacy_open(session, sel);
             if !open.is_empty() {
                 let picked_board = chosen_board(d, sel, &eff_root);
                 let cur_derived = super::layout::derive_layout(&super::layout::DeriveInput {
@@ -260,19 +299,46 @@ pub fn view_action_for(
         }
     }
 
-    // Legacy single-page / idle / Split mode (no stored `@view.layout:<sel>`): runs main's path UNCHANGED
-    // without ever writing `@view.layout:<sel>`.
-    // the Review tab: its first page (pages.rs asks for it; no source to watch)
+    let mut vo = legacy_view_inner(st, hub, session, raw_value, now_ms, false)?;
+    if !force_retry && stored.is_some() {
+        if let Some(dm) = vo.patch["drafts"].as_object_mut() {
+            dm.insert(format!("@view.layout:{sel}"), json!(""));
+        }
+    }
+    Some(LayoutOut::Ok(vo))
+}
+
+/// Main's exact legacy single-page / idle / Split `view` writer, shared by `view_action_for` (when no
+/// stored layout exists) and `commit_layout` (when leaving multi-tile mode down to 0 or 1 tile).
+fn legacy_view_inner(st: &State, hub: &str, session: &Value, kind: &str, now_ms: u64, no_files_toggle: bool) -> Option<ViewOut> {
+    let sel = s(session, "sel");
+    let d = &session["drafts"];
+    let force_retry = kind == "retry";
+    let (kind, part) = if force_retry {
+        if !simple(st, session, sel) { return None }
+        let cur = s(d, &format!("@view:{sel}"));
+        if cur.is_empty() { return Some(ViewOut { patch: json!({}), before: vec![], boards_look: false }) }
+        if cur == "board" && s(d, &format!("@view.gerbers:{sel}")) == "1" {
+            let f = s(d, &format!("@view.file:{sel}"));
+            if f.starts_with(crate::files::kicad::gerber::CMP) || f.starts_with("noboard\n") { ("gerbers", "board") } else { ("gerbers", "") }
+        } else { (cur, "") }
+    } else {
+        kind.split_once('\t').unwrap_or((kind, ""))
+    };
+    let gerbers = kind == "gerbers";
+    let gerbers_vs_board = gerbers && part == "board";
+    let kind = if gerbers { "board" } else { kind };
+    if !(shows(kind) || kind.is_empty() || kind == "review") { return None }
     if kind == "review" {
         if sel.is_empty() || sel.contains('~') || sel.starts_with("project-home-") || sel.starts_with('@') || !st.threads.contains_key(sel) || !s(&session["drafts"], &format!("@view.file:{sel}")).is_empty() { return None }
         let (patch, before) = pages::open_review(session, hub, sel, "bom", has_management(&root_of(st, sel)));
-        return Some(LayoutOut::Ok(ViewOut { patch, before, boards_look: false }));
+        return Some(ViewOut { patch, before, boards_look: false });
     }
     if !simple(st, session, sel) { return None }
     let prev = s(d, &format!("@view:{sel}"));
     if !(prev.is_empty() || shows(prev)) { return None }
     // Files pressed while the Files tab is on show closes it (every other press opens its kind, and "" closes): the hub decides, never the button
-    let kind = if !force_retry && kind == "files" && files_kind(prev) { "" } else { kind };
+    let kind = if !force_retry && !no_files_toggle && kind == "files" && files_kind(prev) { "" } else { kind };
     let root = root_of(st, sel);
     // what the hub is asked to watch: the kind and path View.ask sends (Mech's part is a 3D model; a split watches three sources)
     // Mech opened from the rail (no part named) shows the part chosen last in this thread, as it was left
@@ -313,7 +379,7 @@ pub fn view_action_for(
     if force_retry {
         let last_ms: u64 = s(d, "@view.retry.at").parse().unwrap_or(0);
         if !retry_allowed(last_ms, now_ms) {
-            return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false }));
+            return Some(ViewOut { patch: json!({}), before: vec![], boards_look: false });
         }
     }
     let at = s(d, "@view.at");
@@ -322,10 +388,6 @@ pub fn view_action_for(
     let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.file:{sel}"), json!(if kind == "split" { "" } else { picked.as_str() })); drafts.insert(format!("@view:{sel}"), json!(kind));
     drafts.insert(format!("@view.gerbers:{sel}"), json!(if gerbers { "1" } else { "" }));
-    if !force_retry && stored.is_some() {
-        // Returning from a multi-tile layout to Split clears the stored multi-tile layout.
-        drafts.insert(format!("@view.layout:{sel}"), json!(""));
-    }
     // vs board starts on one layer's differences (F.Cu, the others dimmed) unless a layer is already in focus: the list picks another
     if gerbers_vs_board && !gerbers_no_board && !Focus::read(s(d, "@view.focus.board")).on() { drafts.insert("@view.focus.board".into(), json!(Focus { active: 12, mode: 1 }.show())); }
     if !force_retry { drafts.insert(format!("@view.sheet:{sel}"), json!("")); }
@@ -344,7 +406,7 @@ pub fn view_action_for(
     }
     let mut out = json!({"rid": rid, "drafts": drafts});
     patch::merge(&mut out, &pages::leave(session, sel));
-    Some(LayoutOut::Ok(ViewOut { patch: out, before, boards_look: !force_retry && drawing(kind) && kind != "mech" && !drawing(prev) }))
+    Some(ViewOut { patch: out, before, boards_look: !force_retry && drawing(kind) && kind != "mech" && !drawing(prev) })
 }
 
 /// Where the hub keeps a board's probe (0.14's Probe.key "probe:<root>|<board>"): the board picked, else the project's own; the same for every page of it.
@@ -428,16 +490,25 @@ fn boards_menu(session: &Value, sel: &str, root: &str) -> Option<Value> {
 /// `view-board <path from the root>`: another of the project's boards on the Board, Schematic, 3D or Split page (its schematic is the one beside it), kept as the
 /// thread's board (`@view.board`) for the other pages and the next opening; watched as the Files tab watches a file.
 pub fn board_action(st: &State, hub: &str, session: &Value, rel: &str) -> Option<ViewOut> {
+    match board_action_for(st, hub, session, None, "en", rel)? {
+        LayoutOut::Ok(v) => Some(v),
+        LayoutOut::Refused { .. } => None,
+    }
+}
+pub fn board_action_for(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, rel: &str) -> Option<LayoutOut> {
     let sel = s(session, "sel"); let d = &session["drafts"];
     if !simple(st, session, sel) { return None }
     let kind = s(d, &format!("@view:{sel}"));
     if !matches!(kind, "board" | "schematic" | "3d" | "split") { return None }
     if !s(&session["info"], &format!("fab.boards:{sel}")).lines().any(|l| l == rel) { return None }
     let root = root_of(st, sel); if root.is_empty() { return None }
+    let linked = sel.contains('~');
     // the project's own board is no choice: the pages follow the project again (its file may be renamed or moved)
     let own = s(&session["info"], &format!("fab.board:{sel}")) == rel;
-    // Multi-tile mode: update the stored focused tile as well as the legacy fields through `commit_layout`.
+    let picked_abs = board_file("board", &root, &chosen_board(d, sel, &root));
+    // Multi-tile / stored layout mode: guard with hub KiCad runtime and update the stored focused tile through `commit_layout`.
     if let Some(cur_layout) = parse_stored_layout(d, sel) {
+        let guard = hub_kicad_guard(&cur_layout, &root, &picked_abs, client_id, None, None, linked);
         if let Some(fid) = cur_layout.focus.as_deref() {
             if let Some(ft) = cur_layout.tile(fid) {
                 let new_src = match ft.kind {
@@ -452,15 +523,40 @@ pub fn board_action(st: &State, hub: &str, session: &Value, rel: &str) -> Option
                     }
                     _ => ft.source.clone(),
                 };
-                if let Ok(mut next) = super::layout::retarget(&cur_layout, fid, ft.kind, new_src, None) {
-                    if let Some(r) = &mut next.root {
-                        set_tile_explicit(r, fid, !own);
+                return Some(match super::layout::retarget(&cur_layout, fid, ft.kind, new_src, guard.locked.as_deref()) {
+                    Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
+                    Ok(mut next) => {
+                        if let Some(r) = &mut next.root {
+                            set_tile_explicit(r, fid, !own);
+                        }
+                        let mut vo = commit_layout(st, hub, session, sel, &root, &next, false);
+                        if let Some(dm) = vo.patch["drafts"].as_object_mut() {
+                            dm.insert(format!("@view.board:{sel}"), json!(if own { "" } else { rel }));
+                        }
+                        LayoutOut::Ok(vo)
                     }
-                    let mut vo = commit_layout(st, hub, session, sel, &root, &next, false);
-                    if let Some(dm) = vo.patch["drafts"].as_object_mut() {
-                        dm.insert(format!("@view.board:{sel}"), json!(if own { "" } else { rel }));
-                    }
-                    return Some(vo);
+                });
+            }
+        }
+    } else if client_id.is_some() {
+        // Single-tile / legacy mode: refuse changing the locked design document while a holder's dialog is open.
+        let picked_board = chosen_board(d, sel, &root);
+        let cur_derived = super::layout::derive_layout(&super::layout::DeriveInput {
+            root: &root, open: legacy_open(session, sel), diff_on: pages::diff_on(session, sel),
+            gerbers: s(d, &format!("@view.gerbers:{sel}")) == "1",
+            file: s(d, &format!("@view.file:{sel}")), sheet: s(d, &format!("@view.sheet:{sel}")),
+            picked_board: &picked_board, ..Default::default()
+        });
+        let guard = hub_kicad_guard(&cur_derived, &root, &picked_abs, client_id, None, None, linked);
+        if let Some(lid) = guard.locked.as_deref() {
+            if let Some(lt) = cur_derived.tile(lid) {
+                let target_src = match lt.kind {
+                    super::layout::PageKind::Schematic => super::layout::sanitize_rel(&root, &board_file("schematic", &root, rel)),
+                    _ => rel.to_string(),
+                };
+                if lt.source != target_src {
+                    let r = super::layout::Refusal::Locked;
+                    return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
                 }
             }
         }
@@ -477,7 +573,7 @@ pub fn board_action(st: &State, hub: &str, session: &Value, rel: &str) -> Option
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
-    Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
+    Some(LayoutOut::Ok(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false }))
 }
 /// `view-boards`: the Boards menu opened, so the project's boards are read again (0.14's data-on-open "board-list"): a board added or renamed since shows at once.
 pub fn boards_look(st: &State, hub: &str, session: &Value) -> Option<Vec<Value>> {
@@ -583,26 +679,65 @@ pub fn layer_action(st: &State, session: &Value, action: &str, value: &str) -> O
 /// `view-sheet <file>`: the schematic page (or Split's schematic pane) shows another sheet of the design (its file, absolute; "" the root sheet), watched like
 /// the root (`View.ask` with the sheet as the path; Split watches its three sources again with that sheet).
 pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Option<ViewOut> {
+    match sheet_action_for(st, hub, session, None, "en", file)? {
+        LayoutOut::Ok(v) => Some(v),
+        LayoutOut::Refused { .. } => None,
+    }
+}
+pub fn sheet_action_for(st: &State, hub: &str, session: &Value, client_id: Option<u64>, locale: &str, file: &str) -> Option<LayoutOut> {
     let sel = s(session, "sel"); let d = &session["drafts"];
     let kind = s(d, &format!("@view:{sel}"));
     if !simple(st, session, sel) || !matches!(kind, "schematic" | "split") { return None }
     let root = root_of(st, sel);
     if !file.is_empty() && !(file.starts_with(&format!("{root}/")) && (file.ends_with(".kicad_sch") || file.to_ascii_lowercase().ends_with(".schdoc")) && !file.contains("..")) { return None }
-    // Multi-tile mode: update the stored focused Schematic tile as well as the legacy fields through `commit_layout`.
+    let linked = sel.contains('~');
+    let picked_board = chosen_board(d, sel, &root);
+    let picked_abs = board_file("board", &root, &picked_board);
+    // Multi-tile / stored layout mode: guard with hub KiCad runtime; target focused Schematic leaf,
+    // or in stored Split target its Schematic leaf even when a non-Schematic leaf is focused.
     if let Some(cur_layout) = parse_stored_layout(d, sel) {
-        if let Some(fid) = cur_layout.focus.as_deref() {
-            if cur_layout.tile(fid).is_some_and(|t| t.kind == super::layout::PageKind::Schematic) {
-                let rel = if file.is_empty() { String::new() } else { super::layout::sanitize_rel(&root, file) };
-                if let Ok(mut next) = super::layout::retarget(&cur_layout, fid, super::layout::PageKind::Schematic, rel, None) {
+        let target_id = cur_layout.focus.as_deref()
+            .filter(|fid| cur_layout.tile(fid).is_some_and(|t| t.kind == super::layout::PageKind::Schematic))
+            .map(str::to_string)
+            .or_else(|| {
+                if kind == "split" || is_exact_split_preset(&cur_layout) {
+                    cur_layout.tiles().into_iter().find(|t| t.kind == super::layout::PageKind::Schematic).map(|t| t.id.clone())
+                } else {
+                    None
+                }
+            });
+        if let Some(tid) = target_id {
+            let guard = hub_kicad_guard(&cur_layout, &root, &picked_abs, client_id, None, None, linked);
+            let rel = if file.is_empty() { String::new() } else { super::layout::sanitize_rel(&root, file) };
+            return Some(match super::layout::retarget(&cur_layout, &tid, super::layout::PageKind::Schematic, rel, guard.locked.as_deref()) {
+                Err(r) => LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) },
+                Ok(mut next) => {
                     if let Some(r) = &mut next.root {
-                        set_tile_explicit(r, fid, !file.is_empty());
+                        set_tile_explicit(r, &tid, !file.is_empty());
                     }
-                    return Some(commit_layout(st, hub, session, sel, &root, &next, false));
+                    LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false))
+                }
+            });
+        }
+    } else if client_id.is_some() {
+        let cur_derived = super::layout::derive_layout(&super::layout::DeriveInput {
+            root: &root, open: legacy_open(session, sel), diff_on: pages::diff_on(session, sel),
+            gerbers: s(d, &format!("@view.gerbers:{sel}")) == "1",
+            file: s(d, &format!("@view.file:{sel}")), sheet: s(d, &format!("@view.sheet:{sel}")),
+            picked_board: &picked_board, ..Default::default()
+        });
+        let guard = hub_kicad_guard(&cur_derived, &root, &picked_abs, client_id, None, None, linked);
+        if let Some(lid) = guard.locked.as_deref() {
+            if let Some(lt) = cur_derived.tile(lid) {
+                let target_rel = if file.is_empty() { String::new() } else { super::layout::sanitize_rel(&root, file) };
+                if lt.kind == super::layout::PageKind::Schematic && lt.source != target_rel {
+                    let r = super::layout::Refusal::Locked;
+                    return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
                 }
             }
         }
     }
-    let board = if kind == "split" { board_file("split", &root, &chosen_board(d, sel, &root)) } else { String::new() };
+    let board = if kind == "split" { board_file("split", &root, &picked_board) } else { String::new() };
     let want = if kind == "split" { format!("split|{root}|{board}|{file}") } else { format!("1|{root}|{file}") };
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.sheet:{sel}"), json!(file));
@@ -613,7 +748,7 @@ pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Optio
         before.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"kicad.watch\",\"p\":{p}}}")}));
         rid += 1; drafts.insert("@view.at".into(), json!(want));
     }
-    Some(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false })
+    Some(LayoutOut::Ok(ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before, boards_look: false }))
 }
 
 const BOARD_LAYERS: [(u32, &str); 17] = [(12, "F.Cu"), (11, "In1.Cu"), (10, "In2.Cu"), (9, "In3.Cu"), (8, "In4.Cu"), (7, "In5.Cu"), (6, "In6.Cu"), (5, "B.Cu"), (13, "Pads"), (23, "Vias"), (24, "Holes"),
@@ -1023,8 +1158,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         let drafts = &session["drafts"];
         let picked_board = chosen_board(drafts, sel, eff_root);
         let open = s(&v, "open");
-        let picked_sch = if picked_board.is_empty() || linked {
+        let picked_sch = if picked_board.is_empty() {
             String::new()
+        } else if linked {
+            schematic_for_board(&picked_board)
         } else if open == "split" {
             v["panes"].as_array().and_then(|ps| ps.first()).and_then(|sch_pane| {
                 if sch_pane["empty"].as_str().is_some_and(|e| !e.is_empty()) {
@@ -1069,6 +1206,21 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         v["layout"] = serde_json::to_value(&active_layout).unwrap_or(Value::Null);
         let src_ref = local.then_some(&*sources);
         v["tiles"] = build_tiles_picture(&active_layout, eff_root, &v, drafts, src_ref, &shown, linked);
+        // If a stored layout's focused tile is versioned/unresolved, never let top-level legacy `key`/`layers`
+        // fall back to live default artwork or expose `.git`/repo paths.
+        if had_stored_layout {
+            if let Some(fid) = active_layout.focus.as_deref() {
+                if active_layout.tile(fid).is_some_and(is_tile_versioned) {
+                    if let Some(to) = v["tiles"].get(fid).cloned() {
+                        v["key"] = to["key"].clone();
+                        v["layers"] = to["layers"].clone();
+                        if let Some(err) = to.get("error") {
+                            v["error"] = err.clone();
+                        }
+                    }
+                }
+            }
+        }
     }
     if local {
         let selected = v["choices"].as_array().and_then(|rows| rows.iter().find(|r| r["on"] == true)).and_then(|r| r["value"].as_str());
@@ -1183,15 +1335,168 @@ pub enum LayoutOut {
     },
 }
 
-/// Parse `@view.layout:<sel>` ONLY when it holds a multi-tile layout (`>= 2` tiles).
-/// Single-tile / idle / Split sessions have no stored layout and run `main`'s legacy path unchanged.
+/// Pending hub-pushed agent `viewer_show` records so old desktops that answer with plain `view`
+/// are still handled idempotently (never closing an already-focused tile or toggling Files closed).
+struct PendingShow {
+    kind: String,
+    path: String,
+    at: std::time::Instant,
+    consumed: std::collections::HashSet<u64>,
+}
+fn pending_shows() -> &'static std::sync::Mutex<std::collections::HashMap<String, Vec<PendingShow>>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, Vec<PendingShow>>>> = std::sync::OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+fn normalize_show_kind(kind: &str, path: &str) -> String {
+    let l = path.to_ascii_lowercase();
+    let model = is_model(path);
+    match kind {
+        "board" | "pcb" => "board",
+        "schematic" | "sch" => "schematic",
+        "3d" if model => "mech",
+        "" if l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc") => "board",
+        "" if l.ends_with(".kicad_sch") || l.ends_with(".schdoc") => "schematic",
+        "" if model => "mech",
+        k => k,
+    }.to_string()
+}
+/// Record an agent `viewer_show` push for `thread` so an old desktop answering with plain `view`
+/// is routed idempotently through `viewer_show_action`.
+pub fn record_pending_show(thread: &str, kind: &str, path: &str) {
+    if thread.is_empty() { return; }
+    let norm = normalize_show_kind(kind, path);
+    let mut map = pending_shows().lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    let entry = map.entry(thread.to_string()).or_default();
+    entry.retain(|p| now.duration_since(p.at).as_secs() < 5);
+    entry.push(PendingShow { kind: norm, path: path.to_string(), at: now, consumed: std::collections::HashSet::new() });
+}
+fn matches_pending_show(thread: &str, client_id: Option<u64>, value: &str) -> Option<(String, String)> {
+    if thread.is_empty() || value.is_empty() { return None; }
+    let (vk, vp) = value.split_once('\t').unwrap_or((value, ""));
+    let norm_vk = normalize_show_kind(vk, vp);
+    let cid = client_id.unwrap_or(0);
+    let mut map = pending_shows().lock().unwrap_or_else(|e| e.into_inner());
+    let now = std::time::Instant::now();
+    let list = map.get_mut(thread)?;
+    list.retain(|p| now.duration_since(p.at).as_secs() < 5);
+    for p in list.iter_mut().rev() {
+        if p.consumed.contains(&cid) { continue; }
+        let path_ok = p.path == vp || (p.kind != "mech" && vp.is_empty());
+        if p.kind == norm_vk && path_ok {
+            p.consumed.insert(cid);
+            return Some((p.kind.clone(), p.path.clone()));
+        }
+    }
+    None
+}
+
+/// Cached Gerber-set member availability resolved when layout or watch changes (never during picture rendering).
+fn gerber_set_state() -> &'static std::sync::Mutex<std::collections::HashMap<(String, String), bool>> {
+    static MAP: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(String, String), bool>>> = std::sync::OnceLock::new();
+    MAP.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()))
+}
+fn has_gerber_members(root: &str, set_rel: &str) -> bool {
+    if root.is_empty() || set_rel.is_empty() { return false; }
+    let root_p = std::path::Path::new(root);
+    crate::files::fm::contained(root_p, set_rel)
+        .is_some_and(|p| !crate::files::kicad::gerber::set_files_in(&p, Some(root_p)).is_empty())
+}
+/// Resolve contained Gerber members for all Gerber tiles in `layout` and keep the results in state.
+pub fn refresh_gerber_sets(root: &str, layout: &super::layout::Layout) {
+    use super::layout::PageKind;
+    if root.is_empty() { return; }
+    let mut updates = Vec::new();
+    for tile in layout.tiles() {
+        let is_gvb = tile.kind == PageKind::Board
+            && tile.overlay.as_ref().is_some_and(|ov| ov.kind == PageKind::Gerbers);
+        let set_rel = if is_gvb {
+            tile.overlay.as_ref().map(|ov| ov.source.as_str()).unwrap_or("")
+        } else if tile.kind == PageKind::Gerbers {
+            tile.source.as_str()
+        } else {
+            ""
+        };
+        if !set_rel.is_empty() {
+            updates.push((set_rel.to_string(), has_gerber_members(root, set_rel)));
+        }
+    }
+    if !updates.is_empty() {
+        let mut map = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+        for (rel, ok) in updates {
+            map.insert((root.to_string(), rel), ok);
+        }
+    }
+}
+/// Re-check all tracked Gerber sets under `root` when a watch updates.
+pub fn refresh_gerber_sets_for_root(root: &str) {
+    if root.is_empty() { return; }
+    let keys: Vec<String> = {
+        let map = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+        map.keys().filter(|(r, _)| r == root).map(|(_, rel)| rel.clone()).collect()
+    };
+    if keys.is_empty() { return; }
+    let updates: Vec<(String, bool)> = keys.into_iter().map(|rel| { let ok = has_gerber_members(root, &rel); (rel, ok) }).collect();
+    let mut map = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+    for (rel, ok) in updates {
+        map.insert((root.to_string(), rel), ok);
+    }
+}
+fn cached_gerber_set_exists(root: &str, set_rel: &str) -> Option<bool> {
+    let map = gerber_set_state().lock().unwrap_or_else(|e| e.into_inner());
+    map.get(&(root.to_string(), set_rel.to_string())).copied()
+}
+
+/// Real legacy open page: reads `@view:<sel>`, falling back to `info["view.kind:<sel>"] == "review"`
+/// because `pages::open_review` stores Review in `info` with `@view:<sel>` cleared.
+fn legacy_open<'a>(session: &'a Value, sel: &str) -> &'a str {
+    let d_open = s(&session["drafts"], &format!("@view:{sel}"));
+    if !d_open.is_empty() {
+        d_open
+    } else if s(&session["info"], &format!("view.kind:{sel}")) == "review" {
+        "review"
+    } else {
+        ""
+    }
+}
+
+fn is_tile_versioned(t: &super::layout::Tile) -> bool {
+    t.unresolved_version
+        || t.version.is_some()
+        || t.overlay.as_ref().is_some_and(|ov| ov.version.is_some())
+}
+
+/// Root-relative / opaque tile plot key that NEVER exposes absolute paths, `.git` dirs, or repo tops.
+fn opaque_tile_key(tile: &super::layout::Tile, root: &str) -> String {
+    let rel = super::layout::sanitize_rel(root, &tile.source);
+    let prefix = if is_tile_versioned(tile) { "hist" } else { "tile" };
+    let base = if let Some(v) = &tile.version {
+        format!("{prefix}:{}:{}:{}", tile.kind.as_str(), v.commit, rel)
+    } else if tile.unresolved_version {
+        format!("{prefix}:{}:unresolved:{}", tile.kind.as_str(), rel)
+    } else {
+        format!("{prefix}:{}:{}", tile.kind.as_str(), rel)
+    };
+    if let Some(ov) = &tile.overlay {
+        let ov_rel = super::layout::sanitize_rel(root, &ov.source);
+        let ov_ver = ov.version.as_ref().map(|v| v.commit.as_str()).unwrap_or("live");
+        format!("{base}:ov:{}:{}:{}", ov.kind.as_str(), ov_ver, ov_rel)
+    } else {
+        base
+    }
+}
+
+/// Parse `@view.layout:<sel>` when it holds a multi-tile layout (`>= 2` tiles) OR a single
+/// versioned/unresolved tile (so historical error identity survives handoff and never reverts to live artwork).
 fn parse_stored_layout(drafts: &Value, sel: &str) -> Option<super::layout::Layout> {
     let raw = s(drafts, &format!("@view.layout:{sel}"));
     if raw.is_empty() {
         return None;
     }
     let l = serde_json::from_str::<super::layout::Layout>(raw).ok()?;
-    (l.tiles().len() >= 2).then_some(l)
+    let ts = l.tiles();
+    let keep = ts.len() >= 2 || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t)));
+    keep.then_some(l)
 }
 
 fn set_tile_explicit(node: &mut super::layout::Node, target: &str, explicit: bool) {
@@ -1297,7 +1602,19 @@ fn commit_layout(
     let mut before = Vec::new();
     let abs = |rel: &str| if rel.is_empty() || root.is_empty() { String::new() } else { format!("{}/{rel}", root.trim_end_matches('/')) };
 
+    if !sel.contains('~') && !root.is_empty() {
+        refresh_gerber_sets(root, next);
+    }
+
     if next.is_empty() {
+        if let Some(mut vo) = legacy_view_inner(st, hub, session, "", 0, true) {
+            if !s(d, &format!("@view.layout:{sel}")).is_empty() {
+                if let Some(dm) = vo.patch["drafts"].as_object_mut() {
+                    dm.insert(format!("@view.layout:{sel}"), json!(""));
+                }
+            }
+            return vo;
+        }
         if !s(d, &format!("@view.layout:{sel}")).is_empty() {
             drafts.insert(format!("@view.layout:{sel}"), json!(""));
         }
@@ -1319,16 +1636,51 @@ fn commit_layout(
         return ViewOut { patch, before, boards_look: false };
     }
 
-    // Stored layout exists ONLY while the session has > 1 tile; dropping to 1 tile removes `@view.layout:<sel>`
-    // and returns to legacy mode with the surviving tile's drafts written cleanly.
-    let multi = next.tiles().len() >= 2;
-    if multi {
+    // Stored layout exists while the session has >= 2 tiles OR a single versioned/unresolved tile
+    // (so a surviving historical/unresolved tile never drops back to live default artwork).
+    let ts_all = next.tiles();
+    let keep_stored = ts_all.len() >= 2 || (ts_all.len() == 1 && ts_all.iter().all(|t| is_tile_versioned(t)));
+    if keep_stored {
         drafts.insert(format!("@view.layout:{sel}"), json!(serde_json::to_string(next).unwrap_or_default()));
     } else if !s(d, &format!("@view.layout:{sel}")).is_empty() {
         drafts.insert(format!("@view.layout:{sel}"), json!(""));
     }
     if geometry_only {
         return ViewOut { patch: json!({"rid": rid, "drafts": drafts}), before: vec![], boards_look: false };
+    }
+
+    // Leaving multi-tile mode down to a single non-versioned tile delegates to main's own `view`
+    // writer (clearing `@view.layout:<sel>` and leaving zero stale `@view.file`/`@view.sheet`/`@view.gerbers`).
+    if !keep_stored && ts_all.len() == 1 {
+        let ft = ts_all[0];
+        if !matches!(ft.kind, PageKind::Review | PageKind::Diff) && !ft.explicit {
+            let legacy_arg = match ft.kind {
+                PageKind::Board if ft.overlay.as_ref().is_some_and(|o| o.kind == PageKind::Gerbers) => "gerbers\tboard".to_string(),
+                PageKind::Gerbers => "gerbers".to_string(),
+                PageKind::Mech if !ft.source.is_empty() => format!("mech\t{}", ft.source),
+                PageKind::Mech => "mech".to_string(),
+                PageKind::Files => "files".to_string(),
+                k => k.as_str().to_string(),
+            };
+            if let Some(mut vo) = legacy_view_inner(st, hub, session, &legacy_arg, 0, true) {
+                if let Some(dm) = vo.patch["drafts"].as_object_mut() {
+                    if !s(d, &format!("@view.layout:{sel}")).is_empty() {
+                        dm.insert(format!("@view.layout:{sel}"), json!(""));
+                    }
+                    if ft.kind == PageKind::Files && !ft.source.is_empty() {
+                        let preview_k = crate::files::fm::preview(crate::files::fm::last(&ft.source));
+                        if !preview_k.is_empty() {
+                            dm.insert(format!("@view:{sel}"), json!(preview_k));
+                            dm.insert(format!("@view.file:{sel}"), json!(abs(&ft.source)));
+                            dm.insert(format!("@files.dir:{sel}"), json!(crate::files::fm::parent(&ft.source)));
+                        } else {
+                            dm.insert(format!("@files.dir:{sel}"), json!(ft.source));
+                        }
+                    }
+                }
+                return vo;
+            }
+        }
     }
 
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
@@ -1367,10 +1719,14 @@ fn commit_layout(
     };
 
     // 2. Review & Diff pages (pages.rs state) enter through the same writer with at most ONE watch stop
+    // and clear any stale file/sheet/Gerber drafts.
     if ft.kind == PageKind::Review {
         let (mut p_rev, rev_cmds) = pages::open_review(session, hub, sel, "bom", !sel.contains('~') && has_management(root));
         if let Some(pd) = p_rev["drafts"].as_object_mut() {
-            if multi {
+            pd.insert(format!("@view.file:{sel}"), json!(""));
+            pd.insert(format!("@view.sheet:{sel}"), json!(""));
+            pd.insert(format!("@view.gerbers:{sel}"), json!(""));
+            if keep_stored {
                 pd.insert(format!("@view.layout:{sel}"), json!(serde_json::to_string(next).unwrap_or_default()));
             } else if !s(d, &format!("@view.layout:{sel}")).is_empty() {
                 pd.insert(format!("@view.layout:{sel}"), json!(""));
@@ -1382,6 +1738,7 @@ fn commit_layout(
         drafts.insert(format!("@view:{sel}"), json!(""));
         drafts.insert(format!("@view.gerbers:{sel}"), json!(""));
         drafts.insert(format!("@view.file:{sel}"), json!(""));
+        drafts.insert(format!("@view.sheet:{sel}"), json!(""));
         let at = s(d, "@view.at");
         if !at.is_empty() {
             let on = if sel.contains('~') { format!(",\"on\":{}", jstr(sel.split('~').next().unwrap_or(""))) } else { String::new() };
@@ -1660,8 +2017,8 @@ fn build_tiles_picture(
             || tile.version.is_some()
             || tile.overlay.as_ref().is_some_and(|ov| ov.version.is_some());
 
-        // A Gerber set is "vanished" ONLY when the hub's contained lookup says it does not exist
-        // (not merely because it differs from the newest or focused set).
+        // A Gerber set is "vanished" ONLY when state (resolved on layout/watch change via contained
+        // Gerber member listing — zero filesystem calls here) says it has no Gerber members left.
         let gerber_vanished = !linked && is_gerbers && sources.is_some_and(|src| {
             let set_rel = if is_gvb {
                 tile.overlay.as_ref().map(|ov| ov.source.as_str()).unwrap_or("")
@@ -1671,7 +2028,7 @@ fn build_tiles_picture(
             if set_rel.is_empty() || set_rel == default_gerber_rel {
                 !src.gerbers
             } else {
-                !crate::files::fm::contained(std::path::Path::new(root), set_rel).is_some_and(|p| p.exists())
+                !cached_gerber_set_exists(root, set_rel).unwrap_or(src.gerbers)
             }
         });
         let explicit_missing = !linked && tile.explicit && !tile.source.is_empty() && sources.is_some_and(|src| {
@@ -1682,13 +2039,14 @@ fn build_tiles_picture(
             }
         });
         let source_missing = gerber_vanished || explicit_missing;
+        let is_focused = layout.focus.as_deref() == Some(tile.id.as_str());
 
         let mut version_error = false;
         let plot_key = if is_versioned {
             if let Ok(single) = layout::Layout::single(tile.clone()) {
                 match layout::plan_watches(&single, &watch_ctx, &resolver) {
-                    Ok(specs) => specs.first().map(|sp| sp.key.clone()).unwrap_or_default(),
-                    Err(_) => {
+                    Ok(specs) if specs.first().is_some_and(|sp| !sp.key.is_empty()) => opaque_tile_key(tile, root),
+                    _ => {
                         version_error = true;
                         String::new()
                     }
@@ -1699,13 +2057,12 @@ fn build_tiles_picture(
             }
         } else if source_missing {
             String::new()
-        } else if let Ok(single) = layout::Layout::single(tile.clone()) {
-            layout::plan_watches(&single, &watch_ctx, &resolver)
-                .ok()
-                .and_then(|specs| specs.into_iter().next().map(|sp| sp.key))
-                .unwrap_or_default()
+        } else if is_focused {
+            // Only the focused non-historical tile may carry what the legacy picture already carried.
+            s(viewer, "key").to_string()
         } else {
-            String::new()
+            // Unfocused tiles NEVER expose absolute filenames, `.git` dirs, or repo tops.
+            opaque_tile_key(tile, root)
         };
 
         if version_error {
@@ -1714,8 +2071,8 @@ fn build_tiles_picture(
         o.insert("key".into(), json!(plot_key));
         let layers_key = if tile.kind == PageKind::Solid3d {
             if version_error || source_missing { String::new() }
-            else if !root.is_empty() && !tile.explicit && tile.version.is_none() { format!("0|{root}|") }
-            else { String::new() }
+            else if is_focused && !is_versioned { s(viewer, "layers").to_string() }
+            else { format!("tile:board:{}", layout::sanitize_rel(root, &tile.source)) }
         } else {
             plot_key.clone()
         };
@@ -1728,14 +2085,10 @@ fn build_tiles_picture(
             let lkind = if tile.kind == PageKind::Schematic { "schematic" } else { "board" };
             let off: u32 = s(drafts, &format!("@view.off.{lkind}")).parse().unwrap_or(0);
             let f = Focus::read(s(drafts, &format!("@view.focus.{lkind}")));
-            layer_fields(&mut o, lkind, off, f);
+            layer_fields(&mut o, if is_gerbers { "gerbers" } else { lkind }, off, f);
             if is_gerbers {
                 o.insert("gerbers".into(), json!(true));
                 o.insert("gerbersVsBoard".into(), json!(is_gvb));
-                let rows: Vec<Value> = GERBER_LAYERS.iter().chain(GERBER_MORE.iter())
-                    .map(|(n, name)| json!({"layer": n, "name": name, "on": off & bit(*n) == 0, "active": f.on() && f.active == *n}))
-                    .collect();
-                o.insert("layerList".into(), Value::Array(rows));
             } else if tile.kind == PageKind::Board {
                 o.insert("gerbers".into(), json!(false));
             }
@@ -1850,14 +2203,18 @@ pub fn layout_action(
     let picked_board = chosen_board(drafts, sel, &root);
     let sources = if linked { RailSources::default() } else { rail_sources_for(&root, &picked_board, s(drafts, &format!("@view:{sel}")), s(drafts, &format!("@view.file:{sel}")), s(drafts, &format!("@view.sheet:{sel}"))) };
     let cur = parse_stored_layout(drafts, sel).unwrap_or_else(|| {
-        let picked_sch = if picked_board.is_empty() || linked || sources.docs["hasSheet"] != true {
+        let picked_sch = if picked_board.is_empty() {
+            String::new()
+        } else if linked {
+            schematic_for_board(&picked_board)
+        } else if sources.docs["hasSheet"] != true {
             String::new()
         } else {
             sources.root_sheet.clone()
         };
         layout::derive_layout(&layout::DeriveInput {
             root: &root,
-            open: s(drafts, &format!("@view:{sel}")),
+            open: legacy_open(session, sel),
             diff_on: pages::diff_on(session, sel),
             gerbers: s(drafts, &format!("@view.gerbers:{sel}")) == "1",
             gerbers_vs_board: {
@@ -2093,7 +2450,40 @@ pub fn viewer_show_action(
             Ok(next) => LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &next, false)),
         });
     }
-    // Legacy single-tile / idle mode: idempotent open/update (never toggles Files closed on repeat).
+    // Legacy single-tile / idle mode: guard the CURRENT open tile (NOT the requested tile),
+    // and check exact kind + source preservation before allowing during a dialog.
+    let picked_board = chosen_board(drafts, sel, &root);
+    let picked_abs = board_file("board", &root, &picked_board);
+    if client_id.is_some() {
+        let open = legacy_open(session, sel);
+        if !open.is_empty() {
+            let cur_derived = layout::derive_layout(&layout::DeriveInput {
+                root: &root,
+                open,
+                diff_on: pages::diff_on(session, sel),
+                gerbers: s(drafts, &format!("@view.gerbers:{sel}")) == "1",
+                file: s(drafts, &format!("@view.file:{sel}")),
+                sheet: s(drafts, &format!("@view.sheet:{sel}")),
+                picked_board: &picked_board,
+                ..Default::default()
+            });
+            let guard = hub_kicad_guard(&cur_derived, &root, &picked_abs, client_id, None, None, linked);
+            if let Some(lid) = guard.locked.as_deref() {
+                if let Some(lt) = cur_derived.tile(lid) {
+                    let same_source = rel.is_empty() || rel == lt.source;
+                    let preserves = cur_derived.tiles().len() == 1
+                        && lt.kind == pk
+                        && lt.version.is_none()
+                        && lt.overlay.is_none()
+                        && same_source;
+                    if !preserves {
+                        let r = layout::Refusal::Locked;
+                        return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
+                    }
+                }
+            }
+        }
+    }
     let prev = s(drafts, &format!("@view:{sel}"));
     if pk == PageKind::Files && files_kind(prev) && path.is_empty() {
         return Some(LayoutOut::Ok(ViewOut { patch: json!({}), before: vec![], boards_look: false }));
@@ -2107,12 +2497,6 @@ pub fn viewer_show_action(
         unresolved_version: false,
         overlay: None,
     }).ok()?;
-    let picked_abs = board_file("board", &root, &chosen_board(drafts, sel, &root));
-    let guard = hub_kicad_guard(&single, &root, &picked_abs, client_id, None, None, linked);
-    if guard.locked.is_some() && prev != pk.as_str() {
-        let r = layout::Refusal::Locked;
-        return Some(LayoutOut::Refused { code: r.code(), key: r.i18n_key(), text: r.text_for(locale) });
-    }
     Some(LayoutOut::Ok(commit_layout(st, hub, session, sel, &root, &single, false)))
 }
 
