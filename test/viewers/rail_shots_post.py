@@ -573,7 +573,8 @@ def evaluate_b1_kind(kind: str, parsed_kind: dict, rail_map: dict[str, dict], em
         if input_seq is None:
             return False
         rec = settled_tags.get(tag_name)
-        if not rec or rec.get("settled") is not True or rec.get("state") != "ready":
+        allowed_states = ("ready", "empty") if expect_after_lit else ("ready",)
+        if not rec or rec.get("settled") is not True or rec.get("state") not in allowed_states:
             return False
         before = rail_lists(mark_before_rail.get(mark_name))
         if before is None:
@@ -2180,6 +2181,7 @@ def main(argv: list[str] | None = None) -> int:
                 "matched_expected": matched,
                 "body_non_flat": bstats["body_non_flat"] if bstats is not None else None,
                 "controls_ids": srec.get("controls_ids") or [],
+                "drawn_controls_ids": srec.get("drawn_controls_ids") or [],
                 "obstructed": bool(cap.get("obstructed")),
                 "obstructions": cap.get("obstructions") or [],
                 "private": len(p_reasons) > 0,

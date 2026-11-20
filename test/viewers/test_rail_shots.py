@@ -985,6 +985,78 @@ class RailShotsRegressionTests(unittest.TestCase):
             for gid, g in g_bad.items():
                 self.assertEqual(g["outcome"], "failed", f"{gid} expected failed: {g}")
 
+    def test_b3_counts_only_drawn_controls_and_visible_follow(self) -> None:
+        steps = {
+            "kinds": {
+                "full": {
+                    "pages": {
+                        "files": {
+                            "rail_state": "enabled",
+                            "matched_expected": True,
+                            "controls_ids": ["rail:Files", "ui:Edit", "ui:Open in KiCad"],
+                            "drawn_controls_ids": ["rail:Files"],
+                            "viewer": {"follow_present": False, "follow_rect_visible": False},
+                        },
+                        "gerbers": {
+                            "rail_state": "enabled",
+                            "matched_expected": True,
+                            "controls_ids": ["rail:Gerbers", "follow-agent"],
+                            "drawn_controls_ids": ["rail:Gerbers"],
+                            "viewer": {"follow_present": True, "follow_rect_visible": False},
+                        },
+                    }
+                }
+            }
+        }
+        rules = C.score_consistency(steps)
+        self.assertEqual(rules["B3"]["checked"], 2)
+        self.assertEqual(rules["B3"]["clean"], 2)
+        self.assertEqual(rules["B3"]["misplaced"], [])
+
+        # When ui:Edit IS drawn on files or follow_rect_visible IS True on gerbers -> flagged
+        steps["kinds"]["full"]["pages"]["files"]["drawn_controls_ids"].append("ui:Edit")
+        steps["kinds"]["full"]["pages"]["gerbers"]["viewer"]["follow_rect_visible"] = True
+        rules_bad = C.score_consistency(steps)
+        self.assertEqual(rules_bad["B3"]["clean"], 0)
+        self.assertEqual(len(rules_bad["B3"]["misplaced"]), 2)
+
+    def test_b1_accepts_settled_empty_state_when_opening_review(self) -> None:
+        rail_map = {"review": {"state": "enabled", "why": ""}}
+        r_idle = {"lit": [], "entries": ["Review"], "disabled": []}
+        r_rev = {"lit": ["Review"], "entries": ["Review"], "disabled": []}
+        parsed = {
+            "rail_metric_seen": True,
+            "mark_before_rail": {
+                "b1:press-open:review": r_idle,
+                "b1:press-close:review": r_rev,
+                "b1:key-open:review": r_idle,
+                "b1:key-close:review": r_rev,
+                "b1:palette-open:review": r_idle,
+            },
+            "rail_events": [(11, r_rev), (21, r_idle), (31, r_rev), (41, r_idle), (51, r_rev)],
+            "presses": {
+                "b1:press-open:review": [{"id": "rail:Review", "found": True, "seq": 10}],
+                "b1:press-close:review": [{"id": "rail:Review", "found": True, "seq": 20}],
+            },
+            "keys": {
+                "b1:key-open:review": [{"keys": "r", "seq": 30}],
+                "b1:key-close:review": [{"keys": "r", "seq": 40}],
+                "b1:palette-open:review": [{"keys": "enter", "seq": 50}],
+            },
+            "palette_reads": {"b1:palette-open:review": [{"supported": True, "seq": 49, "snapshot": {"open": True, "selected_id": "rail:review"}}]},
+            "settled_tags": {
+                "b1-press-open-review": {"settled": True, "state": "empty", "seq": 12, "viewer": {"open": "review"}},
+                "b1-press-close-review": {"settled": True, "state": "ready", "seq": 22, "viewer": {"open": ""}},
+                "b1-key-open-review": {"settled": True, "state": "empty", "seq": 32, "viewer": {"open": "review"}},
+                "b1-key-close-review": {"settled": True, "state": "ready", "seq": 42, "viewer": {"open": ""}},
+                "b1-palette-open-review": {"settled": True, "state": "empty", "seq": 52, "viewer": {"open": "review"}},
+            },
+            "rail_reads": {},
+            "kicad_tags": {},
+        }
+        res = P.evaluate_b1_kind("no-design", parsed, rail_map, embed=False)
+        self.assertTrue(res["entries"]["review"]["passed"], res["entries"]["review"])
+
 
 if __name__ == "__main__":
     unittest.main()

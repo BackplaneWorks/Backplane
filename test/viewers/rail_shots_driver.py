@@ -113,15 +113,17 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
                 {"mark": f"settled:task3-from-{src_slug}"},
                 {"shot": f"task3-from-{src_slug}", "settle": "schematic", "timeout_ms": settle_timeout_ms},
             ])
+        # Clear the Task 5 R1 probe WHILE Schematic is still open (presenter available; view-probe after close returns PRESENTER_UNAVAILABLE).
+        steps.extend([
+            {"action": ["view-probe", ""]},
+            {"wait": 120},
+        ])
         # Task 10: close the viewer from an open page (Schematic -> press rail:Schematic) and verify idle width
         steps.extend([
             {"mark": "press:task10-closed"},
             {"press": "rail:Schematic"},
             {"mark": "settled:task10-closed"},
             {"shot": "task10-closed", "settle": "", "timeout_ms": settle_timeout_ms},
-            # Clear the Task 5 R1 probe (hub + PlotView pv.picked/pv.lit) so Esc moves focus out of the composer cleanly during B1 key checks.
-            {"action": ["view-probe", ""]},
-            {"wait": 100},
             {"keys": "escape"},
             {"wait": 60},
         ])
@@ -168,11 +170,14 @@ def build_script(kind: str, early_ms: int = 300, settle_timeout_ms: int = 15000,
                 {"read": "palette"},
                 {"keys": "enter"},
                 {"wait_settled": settle_kind, "tag": f"b1-palette-open-{eid}", "timeout_ms": min(settle_timeout_ms, 4000)},
-                # Close viewer (or palette if it didn't match) without ever toggling a closed viewer open
+                # Close viewer (or palette if it didn't match) without ever toggling a closed viewer open;
+                # send two escapes so a first escape that clears a palette/probe/composer still closes any open viewer.
                 {"keys": "ctrl-l"},
-                {"wait": 100},
+                {"wait": 80},
                 {"keys": "escape"},
-                {"wait": 100},
+                {"wait": 80},
+                {"keys": "escape"},
+                {"wait": 80},
                 {"wait_settled": "", "tag": f"b1-cleanup-{eid}", "timeout_ms": min(settle_timeout_ms, 3000)},
             ])
         else:
