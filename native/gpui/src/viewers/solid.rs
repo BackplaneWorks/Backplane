@@ -901,6 +901,12 @@ impl SolidPage {
     pub fn image_key(&self) -> &str { &self.core.image_key }
     /// Number of distinct rendered images that have reached the GPUI paint callback with non-zero bounds
     /// (runs in normal clients too as one relaxed atomic per qualifying paint; measures the paint callback, not GPU presentation).
+    pub fn painted_at_canvas_size(&self) -> bool {
+        let [w, h, scale, _, _] = *self.size.lock().unwrap();
+        target_px(w, h, scale, false, self.draft_scale) == Some(self.stats.last_size)
+            && self.painted_gen.load(Ordering::Relaxed) == self.core.image_gen
+            && self.painted_count() > 0
+    }
     pub fn painted_count(&self) -> u64 { self.painted.load(Ordering::Relaxed) }
     /// The source the page is showing: the one being made when the hub is making another than the model held (the page then shows its
     /// progress), else `key`. The viewer shows the page when this is the source it asks for.
@@ -1162,13 +1168,20 @@ impl Render for SolidPage {
         let size = self.size.clone();
         let painted = self.painted.clone();
         let painted_gen = self.painted_gen.clone();
-        let probe = canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
+        let page = cx.entity().downgrade();
+        let probe = canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, cx| {
             let new = [f32::from(b.size.width), f32::from(b.size.height), window.scale_factor(), f32::from(b.origin.x), f32::from(b.origin.y)];
             if let Some(g) = paint_gen && new[0] > 0.0 && new[1] > 0.0 && painted_gen.swap(g, Ordering::Relaxed) != g {
                 painted.fetch_add(1, Ordering::Relaxed);
             }
             let mut g = size.lock().unwrap();
-            if *g != new { *g = new; drop(g); window.refresh(); } // the panel changed size or scale: ask for the next frame once, which re-renders at the new size
+            let resized = g[..3] != new[..3];
+            *g = new;
+            drop(g);
+            if resized {
+                let page = page.clone();
+                window.defer(cx, move |_, cx| { let _ = page.update(cx, |_, cx| cx.notify()); });
+            }
         }).absolute().top_0().left_0().size_full(); // (at the page's corner: with no place of its own it sat under the picture, and the pointer was measured from the page's bottom edge)
         let body = match &self.core.image {
             _ if making_other || (self.core.image.is_none() && !stage.is_empty()) => div().id("solid-stage").size_full().child(crate::screens::panestate::view_on_backdrop(self.core.back, &crate::screens::panestate::PaneState::loading(stage.clone()), None)).into_any_element(),
