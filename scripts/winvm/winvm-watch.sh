@@ -22,9 +22,10 @@ dry=; [ "${1:-}" = --dry-run ] && dry=1
 mkdir -p "$state"
 log() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" | tee -a "$state/watch.log"; }
 # VM, its locks, whether to ask its watchdog about sessions first
+# (bp-win-gate: scripts/land.sh's Windows gate, scripts/land-windows.sh, which runs on bp-win or else bp-winbuild)
 vms=(
-  "bp-winbuild|winbuild-vm|no"
-  "bp-win|bp-win-ui winbuild|yes"
+  "bp-winbuild|winbuild-vm bp-win-gate|no"
+  "bp-win|bp-win-ui winbuild bp-win-gate|yes"
 )
 
 held() { # held NAME: a flock on /tmp/bp-NAME.lock, from /proc/locks
