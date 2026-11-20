@@ -654,8 +654,17 @@ mod tests {
     fn group(d: &Path, name: &str, body: &str) -> u32 {
         use std::io::BufRead;
         let p = script(d, name, body);
-        let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &p); c.stdout(Stdio::piped()).stdin(Stdio::null()); crate::plat::proc::own_group(&mut c);
-        let mut ch = c.spawn().unwrap(); let pid = ch.id();
+        // the script written a moment ago can still be open for writing in a child another test thread forked (Text file busy, #1391): its spawn is tried again
+        // until that child execs, as the other stand-ins here do (5954ec0e17, c0c2a259f9)
+        let t = std::time::Instant::now();
+        let mut ch = loop {
+            let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &p); c.stdout(Stdio::piped()).stdin(Stdio::null()); crate::plat::proc::own_group(&mut c);
+            match c.spawn() {
+                Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && t.elapsed() < std::time::Duration::from_secs(120) => std::thread::sleep(std::time::Duration::from_millis(25)),
+                r => break r.unwrap(),
+            }
+        };
+        let pid = ch.id();
         let mut l = String::new(); std::io::BufReader::new(ch.stdout.take().unwrap()).read_line(&mut l).unwrap(); assert_eq!(l.trim(), "ready");
         std::thread::spawn(move || { let _ = ch.wait(); });
         pid
