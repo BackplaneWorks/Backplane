@@ -37,6 +37,10 @@ pub fn carry_wait() -> u64 { std::env::var("BACKPLANE_CARRY_WAIT").ok().and_then
 
 fn dir() -> Option<PathBuf> { HOME.get().map(|h| h.join("guard")) }
 fn now_s() -> u64 { crate::hub::now_ms() / 1000 }
+/// Seconds on the clock the watch's timers run on (tokio's, `Instant`): it stops while the machine sleeps, as they do. The wall clock does not, so a
+/// last good check stored as wall time looked minutes or hours old the moment a Mac woke (a DarkWake every 15 minutes or so, for 2 s, is enough for
+/// the guard to ask and too short for the next check to run): every part "hung" at once, and six such wakes in a row ended a well hub.
+fn mono_s() -> u64 { static T0: OnceLock<std::time::Instant> = OnceLock::new(); T0.get_or_init(std::time::Instant::now).elapsed().as_secs() }
 /// Small files beside and renamed: the guard never reads half. A full disk loses the note, nothing else.
 fn put(name: &str, text: &str) { if let Some(d) = dir() { let _ = crate::ckpt::write_atomic(&d.join(name), &[text.as_bytes()]); } }
 
@@ -113,16 +117,16 @@ pub fn step_now<T>(name: &'static str, f: impl FnOnce() -> T) -> Option<T> {
 
 /// Keep asking `check`, from outside what it checks. `check` should do what a real request does: take the lock, go through the task.
 pub fn watch(name: &'static str, check: impl Fn() -> Fut<'static, ()> + Send + Sync + 'static) {
-    let last = Arc::new(AtomicU64::new(now_s()));
+    let last = Arc::new(AtomicU64::new(mono_s()));
     WATCHED.lock().unwrap_or_else(|e| e.into_inner()).push((name, last.clone()));
     tokio::spawn(async move { loop {
-        if tokio::time::timeout(Duration::from_secs(WATCH_TIMEOUT_S), check()).await.is_ok() { last.store(now_s(), Relaxed); } else { eprintln!("backplane-hub: {name} did not answer in {WATCH_TIMEOUT_S} s"); }
+        if tokio::time::timeout(Duration::from_secs(WATCH_TIMEOUT_S), check()).await.is_ok() { last.store(mono_s(), Relaxed); } else { eprintln!("backplane-hub: {name} did not answer in {WATCH_TIMEOUT_S} s"); }
         tokio::time::sleep(Duration::from_secs(WATCH_EVERY_S)).await;
     } });
 }
 /// What stopped answering (none: the hub is well).
 pub fn hung_at(rows: &[(&str, u64)], now: u64) -> Vec<String> { rows.iter().filter(|(_, at)| now.saturating_sub(*at) > WATCH_STALE_S).map(|(n, _)| n.to_string()).collect() }
-fn hung() -> Vec<String> { let w = WATCHED.lock().unwrap_or_else(|e| e.into_inner()); hung_at(&w.iter().map(|(n, t)| (*n, t.load(Relaxed))).collect::<Vec<_>>(), now_s()) }
+fn hung() -> Vec<String> { let w = WATCHED.lock().unwrap_or_else(|e| e.into_inner()); hung_at(&w.iter().map(|(n, t)| (*n, t.load(Relaxed))).collect::<Vec<_>>(), mono_s()) }
 
 static FOLDING: AtomicU64 = AtomicU64::new(0);
 /// A fold of history is still running after the hub began to serve. `/healthz` says so, and the guard does not begin counting a build as proven until it is over: a crash at the end of a long fold is the start failing.
