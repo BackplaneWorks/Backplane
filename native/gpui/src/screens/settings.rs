@@ -326,7 +326,7 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
             if let Some(c) = super::tools::rename_save(&id, &text) { flush_fields(this); let _ = this.tx.try_send(c); cx.notify(); }
         }
         // Enter in a settings field is its row's Save
-        "whurl" | "whsec" | "tzname" | "qfrom" | "qto" => { flush_fields(this); let (a, v) = match name { "whurl" => ("hook-url", ""), "whsec" => ("hook-secret", ""), "tzname" => ("tz-set", ""), _ => ("notify-quiet", "save") }; let _ = this.tx.try_send(Command::Action(a.into(), v.into())); cx.notify(); }
+        "whurl" | "whsec" | "tzname" | "qfrom" | "qto" | "bstart" => { flush_fields(this); let (a, v) = match name { "whurl" => ("hook-url", ""), "whsec" => ("hook-secret", ""), "tzname" => ("tz-set", ""), "bstart" => ("browser-start", "save"), _ => ("notify-quiet", "save") }; let _ = this.tx.try_send(Command::Action(a.into(), v.into())); cx.notify(); }
         // Enter in the masked box (the name or the value) is its Save
         /* i18n-ok: a button the row draws through trs */ "sname" | "sval" => if let Some(packed) = secret_enter(&this.data) { save_vault(this, &Btn { label: "Save".into(), action: "secret-save".into(), value: packed, on: true }, cx); },
         "todonew" => send_todo(this, cx),

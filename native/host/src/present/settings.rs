@@ -1006,6 +1006,8 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         // Settings › Browser › Start page (settings/browser_start.rs): Save reads the typed address, Reset and Blank need none
         a if a == crate::settings::browser_start::ACTION => {
             use crate::settings::browser_start as b;
+            // Save with nothing typed sends nothing (the field shows the stored address)
+            if value == "save" && !session["drafts"]["@f.bstart"].is_string() { return Some(Out { patch: json!({}), cmds }) }
             match b::act(value, draft(session, "@f.bstart")) {
                 Ok(v) => { send(session, hub, "setting.set", json!({"key": b::KEY, "value": v}), &mut cmds, &mut rid); json!({"drafts": {"@bstart.err": "", "@f.bstart": Value::Null}}) }
                 Err(e) => json!({"drafts": {"@bstart.err": e}}),
@@ -1466,6 +1468,27 @@ mod tests {
         assert!(act("h", &json!({"rid": 1, "drafts": {}}), "hook-url", "").unwrap().cmds.is_empty(), "nothing typed, nothing sent");
         let t = view(&st(&[]), &json!({"drafts": {"@settings.page": "threads", "@hook.err": "bad"}}), &json!({}));
         assert!(t["rows"].as_array().unwrap().iter().any(|r| r["note"] == "The address must be http or https."));
+    }
+    #[test] fn the_browser_page_saves_a_good_start_page_and_resets_and_blanks_without_one() {
+        use crate::settings::browser_start as b;
+        assert!(PAGES.iter().any(|(id, t)| *id == "browser" && *t == "Browser"));
+        let sent = |o: &Out| o.cmds.iter().map(|c| serde_json::from_str::<Value>(c["text"].as_str().unwrap()).unwrap()).map(|m| (m["m"].as_str().unwrap().to_string(), m["p"].clone())).collect::<Vec<_>>();
+        let set = |v: &str| vec![("setting.set".to_string(), json!({"key": b::KEY, "value": v}))];
+        let ok = act("h", &json!({"rid": 1, "drafts": {"@f.bstart": " example.com/docs "}}), b::ACTION, "save").unwrap();
+        assert_eq!(sent(&ok), set("https://example.com/docs"), "a bare host gets https://"); assert_eq!(ok.patch["drafts"]["@f.bstart"], Value::Null, "the field shows the stored address again");
+        let bad = act("h", &json!({"rid": 1, "drafts": {"@f.bstart": "javascript:alert(1)"}}), b::ACTION, "save").unwrap();
+        assert!(bad.cmds.is_empty()); assert_eq!(bad.patch["drafts"]["@bstart.err"], b::BAD);
+        assert!(act("h", &json!({"rid": 1, "drafts": {}}), b::ACTION, "save").unwrap().cmds.is_empty(), "nothing typed, nothing sent");
+        assert_eq!(sent(&act("h", &json!({"rid": 1, "drafts": {"@f.bstart": "x y"}}), b::ACTION, "reset").unwrap()), set(""), "reset needs no address");
+        assert_eq!(sent(&act("h", &json!({"rid": 1, "drafts": {}}), b::ACTION, "blank").unwrap()), set("blank"));
+        assert_eq!(act("h", &json!({}), "bfield", "bstart\u{1f}exa").unwrap().patch["drafts"]["@f.bstart"], "exa");
+        // the page: the stored address in the field, the refusal under it, the default lit until another is chosen
+        let page = |kv: &[(&str, &str)], drafts: Value| view(&st(kv), &json!({"drafts": drafts}), &json!({}));
+        let p = page(&[], json!({"@settings.page": "browser"}));
+        assert_eq!(p["rows"][1]["fields"][0]["value"], b::DEFAULT, "{p}");
+        let p = page(&[(b::KEY, "https://example.com")], json!({"@settings.page": "browser", "@bstart.err": b::BAD}));
+        let r = p["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Start page").unwrap();
+        assert_eq!((r["fields"][0]["value"].as_str(), r["note"].as_str()), (Some("https://example.com"), Some(b::BAD)));
     }
     #[test] fn typed_text_is_kept_in_the_session_and_shown_back() {
         let o = act("h", &json!({}), "bfield", "whurl\u{1f}https://a").unwrap();
