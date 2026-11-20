@@ -120,15 +120,19 @@ pub struct ViewOut {
 
 /// The board the person picked in the Boards menu (`@view.board:<thread>`, a path from the project's folder), kept across Board, Schematic, 3D and Split and
 /// across closing the viewer (0.14 kept the board picked, Bd.id): "" for the project's own. A path that leaves the folder is no choice.
-fn chosen_board(d: &Value, sel: &str) -> String {
-    let b = s(d, &format!("@view.board:{sel}"));
+fn chosen_board(d: &Value, sel: &str, root: &str) -> String {
+    let b = viewer_identity::relative(root, s(d, &format!("@view.board:{sel}"))).unwrap_or_default();
     if b.is_empty() || b.contains("..") || b.starts_with('/') || !(b.ends_with(".kicad_pcb") || b.to_ascii_lowercase().ends_with(".pcbdoc")) { String::new() } else { b.to_string() }
 }
+fn schematic_for_board(board: &str) -> String {
+    board.strip_suffix(".kicad_pcb").map(|stem| format!("{stem}.kicad_sch")).unwrap_or_default()
+}
+
 /// The file a page of `kind` shows for the board `rel` (its schematic beside it on the Schematic page); "" for none.
 fn board_file(kind: &str, root: &str, rel: &str) -> String {
     if rel.is_empty() || root.is_empty() { return String::new() }
     let abs = format!("{root}/{rel}");
-    match kind { "schematic" => abs.strip_suffix(".kicad_pcb").map(|b| format!("{b}.kicad_sch")).unwrap_or_default(), "board" | "3d" | "split" => abs, _ => String::new() }
+    match kind { "schematic" => schematic_for_board(&abs), "board" | "3d" | "split" => abs, _ => String::new() }
 }
 
 /// Minimum interval (ms) between accepted `"retry"` actions in one session (1 s spam guard).
@@ -200,7 +204,7 @@ pub fn view_action_at(st: &State, hub: &str, session: &Value, kind: &str, now_ms
             None => String::new(),
         }
     }
-        else if matches!(kind, "board" | "schematic" | "3d" | "split") { board_file(kind, &root, &chosen_board(d, sel)) } else { String::new() };
+        else if matches!(kind, "board" | "schematic" | "3d" | "split") { board_file(kind, &root, &chosen_board(d, sel, &root)) } else { String::new() };
     let (want, wkind, wpath, board) = if kind == "mech" { let part = rel_in(&root, part); let ps = parts_of(&root, sel, &part); let (w, a) = mech_want(&root, &ps, &part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a, String::new()) }
         else if gerbers && (picked.is_empty() || gerbers_no_board) { (String::new(), String::new(), String::new(), String::new()) }
         else { let base = key(kind, &root);
@@ -249,7 +253,7 @@ pub fn view_action_at(st: &State, hub: &str, session: &Value, kind: &str, now_ms
 
 /// Where the hub keeps a board's probe (0.14's Probe.key "probe:<root>|<board>"): the board picked, else the project's own; the same for every page of it.
 fn probe_key(session: &Value, sel: &str, root: &str) -> String {
-    let b = chosen_board(&session["drafts"], sel);
+    let b = chosen_board(&session["drafts"], sel, &root);
     let b = if b.is_empty() { s(&session["info"], &format!("fab.board:{sel}")).to_string() } else { b };
     format!("probe:{root}|{b}")
 }
@@ -317,7 +321,7 @@ fn boards_menu(session: &Value, sel: &str, root: &str) -> Option<Value> {
     let list: Vec<&str> = s(&session["info"], &format!("fab.boards:{sel}")).lines().filter(|l| !l.trim().is_empty()).collect();
     if list.len() < 2 { return None }
     let own = s(&session["info"], &format!("fab.board:{sel}"));
-    let chosen = chosen_board(&session["drafts"], sel);
+    let chosen = chosen_board(&session["drafts"], sel, &root);
     let on_abs = s(&session["drafts"], &format!("@view.file:{sel}"));
     let on = if !chosen.is_empty() { chosen } else if !on_abs.is_empty() && on_abs.ends_with(".kicad_pcb") { on_abs.strip_prefix(&format!("{root}/")).unwrap_or(on_abs).to_string() } else { own.to_string() };
     // nothing known of the board on show (the project's own not read yet): no row is lit and the picker says "Select board". It lit the first
@@ -448,7 +452,7 @@ pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Optio
     if !simple(st, session, sel) || !matches!(kind, "schematic" | "split") { return None }
     let root = root_of(st, sel);
     if !file.is_empty() && !(file.starts_with(&format!("{root}/")) && (file.ends_with(".kicad_sch") || file.to_ascii_lowercase().ends_with(".schdoc")) && !file.contains("..")) { return None }
-    let board = if kind == "split" { board_file("split", &root, &chosen_board(d, sel)) } else { String::new() };
+    let board = if kind == "split" { board_file("split", &root, &chosen_board(d, sel, &root)) } else { String::new() };
     let want = if kind == "split" { format!("split|{root}|{board}|{file}") } else { format!("1|{root}|{file}") };
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.sheet:{sel}"), json!(file));
@@ -474,7 +478,14 @@ const SCH_LAYERS: [&str; 24] = ["page", "sheet fill", "body fill", "sheet", "gra
     "junction", "label", "global label", "hier label", "sheet name", "sheet file", "sheet pin", "dnp"];
 
 /// One drawing page as `View.json.single` writes it: open, key, the layers it draws, the layer list.
-fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> Value {
+#[derive(Default)]
+struct ShownGerbers {
+    path: String,
+    made_at: Option<u64>,
+    has: Option<bool>,
+}
+
+fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str, sources: &RailSources, shown: &mut ShownGerbers) -> Value {
     // View.key.at: a schematic's sheet is part of its source key
     let sheet = if kind == "schematic" && !sel.is_empty() { s(drafts, &format!("@view.sheet:{sel}")) } else { "" };
     // a file opened from the Files tab is the source's path ("" for the project's own)
@@ -484,7 +495,7 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     let Some(o) = v.as_object_mut() else { return v };
     o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(k));
     // whether the project has fab output for a Gerbers tab (phones list the tab only then; the desktop's rail has it always)
-    if matches!(kind, "board" | "schematic" | "3d") && !root.is_empty() { o.insert("hasGerbers".into(), json!(crate::files::kicad::gerber::default_set(std::path::Path::new(root)).is_some())); }
+    if matches!(kind, "board" | "schematic" | "3d") && !root.is_empty() { o.insert("hasGerbers".into(), json!(sources.gerbers)); }
     // the Board page drawing a Gerber set (kicad/gerber): the rail lights Gerbers, the layer list is the set's
     let mut k = k;
     if kind == "board" && !sel.is_empty() && s(drafts, &format!("@view.gerbers:{sel}")) == "1" {
@@ -495,7 +506,8 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
         o.insert("gerbersVsBoard".into(), json!(no_board || raw_file.starts_with(crate::files::kicad::gerber::CMP)));
         // what "Open in GerbView" opens (the set's job, else its files): the desktop offers it where its KiCad has GerbView in process
         let set = crate::files::kicad::gerber::set_of(raw_file);
-        let set = if set.is_empty() { crate::files::kicad::gerber::default_set(std::path::Path::new(root)) } else { Some(std::path::PathBuf::from(set)) };
+        let set = if set.is_empty() { sources.newest.as_ref().map(|(p, _)| p.clone()) }
+            else { viewer_identity::relative(root, set).map(|rel| std::path::Path::new(root).join(rel)) };
         if no_board {
             k.clear();
             o.insert("key".into(), json!(""));
@@ -512,7 +524,16 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
             k = format!("{}{s_path}", key("board", root));
             o.insert("key".into(), json!(k));
         }
-        o.insert("gerberFiles".into(), json!(set.map(|p| crate::files::kicad::gerber::gerbview_files_in(&p, Some(std::path::Path::new(root)))).unwrap_or_default()));
+        let mut files = Vec::new();
+        if let Some(p) = set {
+            shown.path = p.to_string_lossy().into_owned();
+            if !sel.contains('~') && !root.is_empty() {
+                let time = sources.newest.as_ref().filter(|(path, _)| path == &p).map(|(_, t)| *t);
+                (files, shown.made_at) = crate::files::kicad::gerber::shown_set(std::path::Path::new(root), &p, time);
+            }
+        }
+        shown.has = (!sel.contains('~') && !root.is_empty()).then_some(!files.is_empty());
+        o.insert("gerberFiles".into(), json!(files));
     }
     // View.layers: a 3D view draws the board's layers on its faces
     o.insert("layers".into(), json!(if kind == "3d" { if file.is_empty() { key("board", root) } else { String::new() } } else { k }));
@@ -717,37 +738,54 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
 
 use super::rail;
 
-#[derive(Clone, Copy, Default)]
-pub struct RailSources { pub board: bool, pub schematic: bool, pub mech: bool, pub gerbers: bool, pub altium: bool }
+#[derive(Clone, Default)]
+pub struct RailSources { pub board: bool, pub schematic: bool, pub mech: bool, pub gerbers: bool, pub altium: bool,
+    docs: Value,
+    root_sheet: String,
+    newest: Option<(std::path::PathBuf, std::time::SystemTime)>,
+}
 
 pub fn rail_sources(root: &str) -> RailSources {
+    rail_sources_for(root, "", "", "", "")
+}
+
+fn rail_sources_for(root: &str, selected: &str, kind: &str, file: &str, sheet: &str) -> RailSources {
     use std::path::Path;
     if root.is_empty() { return RailSources::default(); }
     let files = crate::files::kicad::project::read(root);
+    let board_path = if matches!(kind,"board"|"3d") && !file.is_empty() { file } else if selected.is_empty() { &files.pcb } else { selected };
+    let root_sheet = if selected.is_empty() || files.sch.to_ascii_lowercase().ends_with(".schdoc") {
+        files.sch.clone()
+    } else { schematic_for_board(&selected) };
+    let sheet_path = if matches!(kind, "schematic"|"split") && !sheet.is_empty() { sheet }
+        else if kind == "schematic" && !file.is_empty() { file } else { &root_sheet };
+    let doc = |path| {
+        let rel = viewer_identity::relative(root,path).unwrap_or_default();
+        let exists = !rel.is_empty() && Path::new(root).join(&rel).is_file();
+        (rel, exists)
+    };
+    let (pcb, board) = doc(board_path);
+    let (sch, schematic) = doc(sheet_path);
+    let newest = crate::files::kicad::gerber::newest_set(Path::new(root)).map(|(rel, time)| (Path::new(root).join(rel), time));
+    let docs = json!({"board":pcb, "hasBoard":board, "sheet":sch, "hasSheet":schematic});
     RailSources {
-        board: Path::new(&files.pcb).is_file(), schematic: Path::new(&files.sch).is_file(),
-        mech: !mech_parts(root).is_empty(), gerbers: crate::files::kicad::gerber::default_set(Path::new(root)).is_some(),
+        board, schematic, docs, root_sheet,
+        mech: !mech_parts(root).is_empty(), gerbers: newest.is_some(), newest,
         altium: crate::files::kicad::project::is_altium(&files),
     }
 }
 
 /// Whether a Split sub-pane (`"schematic"`, `"board"`, `"3d"`) has no local source file to draw: `(empty, next)` when missing, `None` when present or on a far machine.
-pub fn split_pane_empty(kind: &str, root: &str, picked_board: &str, sheet: &str, far: bool) -> Option<(&'static str, &'static str)> {
+#[cfg(test)]
+fn split_pane_empty(kind: &str, root: &str, picked_board: &str, sheet: &str, far: bool) -> Option<(&'static str, &'static str)> {
     if far || root.is_empty() { return None }
-    let proj = crate::files::kicad::project::read(root);
+    pane_empty(kind, &rail_sources_for(root, picked_board, "split", "", sheet))
+}
+
+fn pane_empty(kind: &str, sources: &RailSources) -> Option<(&'static str, &'static str)> {
     match kind {
-        "schematic" => {
-            let has = if !sheet.is_empty() { std::path::Path::new(sheet).is_file() }
-                else if !picked_board.is_empty() {
-                    let s = board_file("schematic", root, picked_board);
-                    (!s.is_empty() && std::path::Path::new(&s).is_file()) || (crate::files::kicad::project::is_altium(&proj) && !proj.sch.is_empty())
-                } else { !proj.sch.is_empty() };
-            (!has).then_some(("No schematic in this project yet", "Ask an agent to draw one."))
-        }
-        "board" | "3d" => {
-            let has = if !picked_board.is_empty() { std::path::Path::new(&format!("{root}/{picked_board}")).is_file() } else { !proj.pcb.is_empty() };
-            (!has).then_some(("No board in this project yet", "Ask an agent to lay one out."))
-        }
+        "schematic" if !sources.schematic => Some(("No schematic in this project yet", "Ask an agent to draw one.")),
+        "board" | "3d" if !sources.board => Some(("No board in this project yet", "Ask an agent to lay one out.")),
         _ => None,
     }
 }
@@ -758,16 +796,23 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
     // the rail's Simulation entry (desktop: KiCad's Simulator in the pane), whatever page is on show: the frame it opens, where this
     // hub's KiCad embeds it and the thread's project has a schematic (kicad/embed.rs rail_simulation); absent otherwise, and for
     // another machine's thread (nothing to embed here)
-    let mut v = viewer_page(st, template, session)?;
+    let root = root_of(st, sel);
+    let local = !sel.is_empty() && !sel.contains('~');
+    let drafts = &session["drafts"];
+    let draft = |key: &str| s(drafts, &format!("{key}:{sel}"));
+    let kind = if draft("@view.gerbers") == "1" { "gerbers" } else { draft("@view") };
+    let sources = std::cell::LazyCell::new(|| if local {
+        rail_sources_for(&root, &chosen_board(drafts, sel, &root), kind, draft("@view.file"), draft("@view.sheet"))
+    } else { RailSources::default() });
+    let mut shown = ShownGerbers::default();
+    let mut v = viewer_page(st, template, session, &root, &|| &*sources, &mut shown)?;
     // Follow agent: the thread's setting and the last edit's focus (the phones read the same; kicad/follow.rs)
     if !sel.is_empty() && !sel.contains('~') && v["open"].as_str().is_some_and(|o| matches!(o, "board" | "schematic" | "split")) {
         if let Some(o) = v.as_object_mut() { o.insert("follow".into(), crate::files::kicad::follow::picture(sel)); }
     }
-    if !sel.is_empty() && !sel.contains('~') {
-        let root = root_of(st, sel);
-        let sources = rail_sources(&root);
+    if local {
         if (sources.board || sources.schematic) && !sources.altium && matches!(s(&v, "open"), "review" | "board" | "schematic" | "3d" | "split") {
-            let picked = board_file("board", &root, &chosen_board(&session["drafts"], sel));
+            let picked = board_file("board", &root, &chosen_board(&session["drafts"], sel, &root));
             let versions = if v["open"] == "review" { s(&session["drafts"], &format!("@rp.versions:{sel}")) } else { "" };
             v["designPanels"] = design_panels(if picked.is_empty() { &root } else { &picked }, versions);
         }
@@ -788,65 +833,55 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         v["rail"] = rail::rail(input);
         v["has"] = has;
     }
-    if let identity @ Value::Object(_) = header_identity(st,session,&v) { v["identity"] = identity; }
+    if let identity @ Value::Object(_) = header_identity(st, session, &v, &root, &sources, &shown) { v["identity"] = identity; }
     Some(v)
 }
 #[path="viewer_identity.rs"]
 mod viewer_identity;
 
 /// Gather source facts for the page, then format them without filesystem access.
-fn header_identity(st: &State, session: &Value, viewer: &Value) -> Value {
-    use std::path::Path;
-    use crate::files::kicad::gerber;
+fn header_identity(st: &State, session: &Value, viewer: &Value, root: &str, rail: &RailSources, shown: &ShownGerbers) -> Value {
     let sel = s(session,"sel");
-    let page = if pages::diff_on(session,sel) { "diff" } else if viewer["gerbers"] == true { "gerbers" } else { s(viewer,"open") };
+    let gerbers = viewer["gerbers"] == true;
+    let page = if pages::diff_on(session,sel) { "diff" } else if gerbers { "gerbers" } else { s(viewer,"open") };
     if page.is_empty() { return Value::Null }
-    let root = root_of(st,sel);
     let far = sel.contains('~');
     let draft = |key: &str| s(&session["drafts"],&format!("{key}:{sel}"));
     let file = draft("@view.file");
     let sheet = draft("@view.sheet");
-    let selected = chosen_board(&session["drafts"],sel);
-    let context = super::identity_context::facts(st, session, sel);
-    let mut board = if selected.is_empty() { s(&context,"board").to_owned() } else { selected.clone() };
-    let mut schematic = if selected.is_empty() { s(&context,"sheet").to_owned() } else { board_file("schematic",&root,&selected) };
+    let selected = chosen_board(&session["drafts"], sel, &root);
+    let context = super::identity_context::facts(st, session, sel, &rail.docs);
+    let root_sheet = if !far { rail.root_sheet.clone() } else if selected.is_empty() { s(&context,"sheet").to_owned() } else {
+        schematic_for_board(&selected)
+    };
+    let mut board: &str = if selected.is_empty() { s(&context,"board") } else { &selected };
+    let mut schematic = root_sheet.as_str();
     if !file.is_empty() {
-        match page { "board"|"3d"=>board=file.into(), "schematic"=>schematic=file.into(), _=>{} }
+        match page { "board"|"3d"=>board=file, "schematic"=>schematic=file, _=>{} }
     }
-    if !sheet.is_empty() { schematic=sheet.into(); }
-    let historical = s(&context,"historyRel");
+    if !sheet.is_empty() { schematic=sheet; }
+    let history = !gerbers && matches!(page, "board" | "schematic" | "3d" | "diff");
+    let historical = if history { s(&context,"historyRel") } else { "" };
     if !historical.is_empty() {
-        match page { "board" | "3d" => board = historical.into(), "schematic" => schematic = historical.into(), _ => {} }
+        match page { "board" | "3d" => board = historical, "schematic" => schematic = historical, _ => {} }
     }
-    let mut set = String::new();
-    let mut made_at = None;
-    if page=="gerbers" {
-        set = gerber::set_of(file.strip_prefix("noboard\n").unwrap_or(file)).to_owned();
-        if set.is_empty() && !far && !root.is_empty() {
-            set = gerber::default_set(Path::new(&root)).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        }
-        if !far {
-            if let Some(rel) = viewer_identity::relative(&root,&set) {
-                made_at = gerber::set_files(&Path::new(&root).join(rel)).iter()
-                    .filter_map(|p| p.metadata().ok()?.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok())
-                    .map(|d| d.as_secs()).max();
-            }
-        }
-    }
-    let sources = viewer_identity::Sources { root:&root, board:&board, schematic:&schematic, file, sheet, directory:draft("@files.dir"), set:&set,made_at };
+    let sources = viewer_identity::Sources { root:&root, board, schematic, root_sheet:&root_sheet,
+        has_board:context["hasBoard"].as_bool(), has_sheet:context["hasSheet"].as_bool(), has_set:shown.has,
+        file, sheet, directory:draft("@files.dir"), set:&shown.path, made_at:shown.made_at };
     let mut id = viewer_identity::identity(page,viewer,&sources,&|rel| {
         if !historical.is_empty() && historical == rel { return Some(true) }
-        if far {
-            if context["board"] == rel { context["hasBoard"].as_bool() }
-            else if context["sheet"] == rel { context["hasSheet"].as_bool() }
-            else { super::identity_context::far_exists(sel,rel) }
-        } else if page=="gerbers" { Some(made_at.is_some()) } else {
-            let p = Path::new(&root).join(rel);
-            Some(if page=="files" { p.is_dir() } else { p.is_file() })
-        }
+        if page == "gerbers" { return shown.has }
+        if context["board"] == rel { return context["hasBoard"].as_bool() }
+        if context["sheet"] == rel { return context["hasSheet"].as_bool() }
+        if far { return super::identity_context::far_exists(sel,rel) }
+        if page == "mech" { return Some(viewer["mech"]["parts"].as_array()?.iter().any(|p| p["value"] == rel)) }
+        if page == "files" { return (viewer["files"]["ready"] == true).then(|| viewer["files"]["error"] == "") }
+        // fm-open checked the local file when it selected this preview.
+        if matches!(page, "text" | "image" | "pdf") { return Some(viewer["file"]["name"].is_string()) }
+        None
     });
-    if !s(&context,"version").is_empty() { id["version"] = context["version"].clone(); }
-    if context["comparison"].is_object() {
+    if history && !s(&context,"version").is_empty() { id["version"] = context["version"].clone(); }
+    if history && context["comparison"].is_object() {
         let pair = &context["comparison"];
         id["scope"] = json!(format!("{} → {}",s(pair,"from"),s(pair,"to")));
     }
@@ -869,14 +904,7 @@ pub fn surface(st: &State, viewer: &Value, params: &Value, thread: &str) -> Valu
     } else if viewer["has"][page].as_bool().is_none() {
         Document::Unknown
     } else {
-        let selected = chosen_board(&session["drafts"], thread);
-        let drafts = &session["drafts"];
-        let sheet = s(drafts, &format!("@view.sheet:{thread}"));
-        let explicit = if page == "schematic" && !sheet.is_empty() { sheet } else { s(drafts, &format!("@view.file:{thread}")) };
-        let present = if linked { false }
-            else if !explicit.is_empty() { std::path::Path::new(explicit).is_file() }
-            else if selected.is_empty() { viewer["has"][page] == true }
-            else { std::path::Path::new(&board_file(page, &root_of(st, thread), &selected)).is_file() };
+        let present = !linked && viewer["has"][page] == true;
         if present { Document::Present } else { Document::Missing }
     };
     design_mode(Input {
@@ -924,7 +952,7 @@ fn panel_scope(project: &str, versions: &str) -> Value {
     }
     panels
 }
-fn viewer_page(st: &State, template: &Value, session: &Value) -> Option<Value> {
+fn viewer_page<'a>(st: &State, template: &Value, session: &Value, root: &str, sources: &impl Fn() -> &'a RailSources, shown: &mut ShownGerbers) -> Option<Value> {
     let sel = s(session, "sel");
     let kind = s(&session["drafts"], &format!("@view:{sel}"));
     // a panel the helper opened (Diff, Files, Mech, Review: view.kind/view.path in the info, panel on) is the helper's page, not an idle viewer
@@ -945,7 +973,6 @@ fn viewer_page(st: &State, template: &Value, session: &Value) -> Option<Value> {
     if !s(info, &format!("view.kind:{sel}")).is_empty() || !s(info, &format!("view.path:{sel}")).is_empty() { return None }
     if kind.is_empty() { return Some(template.clone()) }
     if !shows(kind) || !simple(st, session, sel) { return None }
-    let root = root_of(st, sel);
     let mut v = match kind {
         // Mech: the part on show as a 3D model (View.want: "2|<root>|<abs part>"), the parts as chips (Mech.json)
         "mech" => {
@@ -968,16 +995,16 @@ fn viewer_page(st: &State, template: &Value, session: &Value) -> Option<Value> {
             let mut v = template.clone(); let o = v.as_object_mut()?;
             o.insert("open".into(), json!("split")); o.insert("key".into(), json!(key("split", &root)));
             // a board picked in the Boards menu: each pane's source is that board's file (its schematic beside it), as kicad.watch's split keys them
-            let chosen = chosen_board(&session["drafts"], sel);
+            let chosen = chosen_board(&session["drafts"], sel, &root);
             let picked = board_file("board", &root, &chosen);
             // a sheet opened in the schematic pane is its source (`view-sheet`)
             let sheet = s(&session["drafts"], &format!("@view.sheet:{sel}")).to_string();
             let far = sel.contains('~');
-            o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| { let mut p = page(template, k, &root, &session["drafts"], "");
+            o.insert("panes".into(), Value::Array(["schematic", "board", "3d"].iter().map(|k| { let mut p = page(template, k, &root, &session["drafts"], "", sources(), shown);
                 if !picked.is_empty() { let f = if *k == "schematic" { board_file("schematic", &root, &chosen) } else { picked.clone() }; let kk = format!("{}{f}", key(k, &root));
                     if *k != "3d" { p["layers"] = json!(kk); } else { p["layers"] = json!(""); } p["key"] = json!(kk); }
                 if *k == "schematic" && !sheet.is_empty() { let kk = format!("{}{sheet}", key("schematic", &root)); p["key"] = json!(kk); p["layers"] = json!(kk); }
-                if let Some((empty, next)) = split_pane_empty(k, &root, &chosen, &sheet, far) {
+                if let Some((empty, next)) = (!far && !root.is_empty()).then(|| pane_empty(k, sources())).flatten() {
                     p["empty"] = json!(empty);
                     p["emptyNext"] = json!(next);
                 }
@@ -1004,7 +1031,7 @@ fn viewer_page(st: &State, template: &Value, session: &Value) -> Option<Value> {
             o.insert("file".into(), page);
             v
         }
-        _ => { let mut v = page(template, kind, &root, &session["drafts"], sel); if matches!(kind, "board" | "schematic" | "3d") { if let Some(b) = boards_menu(session, sel, &root) { v["boards"] = b; } } v }
+        _ => { let mut v = page(template, kind, &root, &session["drafts"], sel, sources(), shown); if matches!(kind, "board" | "schematic" | "3d") { if let Some(b) = boards_menu(session, sel, &root) { v["boards"] = b; } } v }
     };
     // the folder the Boards menu's paths are from (0.14's "Folder: <root>")
     if v["boards"].is_array() { v["boardsRoot"] = json!(root); }
@@ -1345,8 +1372,8 @@ mod tests {
     }
     #[test] fn split_is_three_pages_and_a_key_of_its_own() {
         let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
-        let p = page(&template, "schematic", "/p", &json!({}), ""); assert_eq!(p["key"], "1|/p|");
-        assert_eq!(page(&template, "3d", "/p", &json!({}), "")["layers"], "0|/p|");
+        let p = page(&template, "schematic", "/p", &json!({}), "", &RailSources::default(), &mut ShownGerbers::default()); assert_eq!(p["key"], "1|/p|");
+        assert_eq!(page(&template, "3d", "/p", &json!({}), "", &RailSources::default(), &mut ShownGerbers::default())["layers"], "0|/p|");
         assert_eq!(key("split", "/p"), "split|/p|"); assert_eq!(key("split", ""), "");
     }
 
@@ -1414,14 +1441,14 @@ mod tests {
 
     #[test] fn the_layer_page_says_what_can_be_reset_and_keeps_the_marks_apart() {
         let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
-        let p = |d: Value| page(&template, "board", "/p", &d, "");
+        let p = |d: Value| page(&template, "board", "/p", &d, "", &RailSources::default(), &mut ShownGerbers::default());
         assert_eq!(p(json!({}))["layerReset"], false); assert_eq!(p(json!({"@view.off.board": "32"}))["layerReset"], true);
         assert_eq!(p(json!({"@view.focus.board": "12|1"}))["layerReset"], true); assert_eq!(p(json!({"@view.focus.board": "12|0"}))["layerReset"], false);
         let q = p(json!({"@view.focus.board": "27|1"})); let l = q["layerMarks"].as_array().unwrap();
         assert_eq!(l.iter().map(|r| r["name"].as_str().unwrap()).collect::<Vec<_>>(), ["Removed", "Changed", "Added"]); assert_eq!(l[1]["active"], true);
         assert!(q["layerList"].as_array().unwrap().iter().all(|r| r["layer"].as_u64().unwrap() < 26), "a plain plot's list is Lyr.order's");
         assert_eq!(q["layerHead"], "Layer: Changed");
-        assert!(page(&template, "3d", "/p", &json!({}), "")["layerList"].as_array().unwrap().is_empty(), "a 3D mesh has no layers");
+        assert!(page(&template, "3d", "/p", &json!({}), "", &RailSources::default(), &mut ShownGerbers::default())["layerList"].as_array().unwrap().is_empty(), "a 3D mesh has no layers");
     }
 
     fn thread_on(page_kind: &str) -> (State, Value, String) {
@@ -1470,6 +1497,95 @@ mod tests {
         let o = view_action(&st, "h", &session, "mech").unwrap();
         assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "mech/b.step");
         let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains(&format!("{root}/mech/b.step")), "{w}");
+    }
+
+    #[test]
+    fn linked_schematic_waits_for_peer_evidence_without_a_local_root() {
+        let (mut st, th) = state();
+        let peer = "peer~pending-document";
+        let mut thread = st.threads[&th].clone();
+        thread.project.clear();
+        thread.worktree.clear();
+        st.threads.insert(peer.into(), thread);
+        for selected in ["", "boards/second.kicad_pcb"] {
+            let session = sess(peer, json!({format!("@view:{peer}"):"schematic", format!("@view.board:{peer}"):selected}));
+            let v = viewer_json(&st, &json!({}), &session).unwrap();
+            assert_eq!(v["identity"]["page"], "schematic");
+            assert!(v["identity"].get("missing").is_none());
+            assert!(v["identity"].get("source").is_none());
+        }
+        assert_eq!(schematic_for_board("boards/second.kicad_pcb"), "boards/second.kicad_sch");
+    }
+
+    #[test]
+    fn split_and_schematic_share_selected_document_facts() {
+        let (st, th, root) = files_world("identity-selected");
+        for name in ["docs/main.kicad_pcb", "docs/main.kicad_sch", "docs/deep/child.kicad_sch"] {
+            std::fs::write(root.join(name), "").unwrap();
+        }
+        let board = root.join("docs/main.kicad_pcb");
+        let mut session = sess(&th, json!({
+            format!("@view:{th}"): "schematic",
+            format!("@view.board:{th}"): board,
+            format!("@view.sheet:{th}"): root.join("docs/main.kicad_sch"),
+        }));
+        let v = viewer_json(&st, &json!({}), &session).unwrap();
+        assert_eq!(v["identity"]["source"]["rel"], "docs/main.kicad_sch");
+        assert!(v["identity"].get("sheet").is_none());
+
+        session["drafts"][format!("@view:{th}")] = json!("split");
+        session["drafts"][format!("@view.sheet:{th}")] = json!(root.join("docs/deep/child.kicad_sch"));
+        std::fs::remove_file(board).unwrap();
+        let v = viewer_json(&st, &json!({}), &session).unwrap();
+        assert_eq!(v["has"]["board"], false);
+        assert!(v["identity"].get("missing").is_none());
+        let panes = &v["identity"]["panes"];
+        assert_eq!(panes[0]["sheet"], "docs/deep/child.kicad_sch");
+        assert_eq!(panes[1]["missing"], true);
+        assert_eq!(panes[2]["missing"], true);
+    }
+
+    #[test]
+    fn explicit_gerber_set_keeps_its_time_and_drops_board_history() {
+        use std::time::{Duration, UNIX_EPOCH};
+        let (st, th, root) = files_world("identity-gerbers");
+        for (dir, time) in [("older", 1_600_000_000), ("newer", 1_600_000_100)] {
+            let set = root.join("mfg").join(dir);
+            std::fs::create_dir_all(&set).unwrap();
+            std::fs::File::create(set.join("copper.gbr")).unwrap()
+                .set_modified(UNIX_EPOCH + Duration::from_secs(time)).unwrap();
+        }
+        let mut session = sess(&th, json!({
+            format!("@view:{th}"): "board", format!("@view.gerbers:{th}"): "1",
+        }));
+        session["watchedHistory"] = json!({"kind":"board","historyRel":"a.kicad_pcb",
+            "version":"1234abcd","comparison":{"from":"first","to":"last"}});
+        for (file, set, time) in [("", "mfg/newer", 1_600_000_100), ("mfg/older", "mfg/older", 1_600_000_000)] {
+            session["drafts"][format!("@view.file:{th}")] = json!(file);
+            let v = viewer_json(&st, &json!({}), &session).unwrap();
+            assert_eq!(v["identity"]["set"], json!({"rel":set,"madeAt":time}));
+            assert!(v["identity"].get("version").is_none());
+            assert!(v["identity"].get("scope").is_none());
+        }
+        std::fs::remove_dir_all(root.join("mfg")).unwrap();
+        assert_eq!(viewer_json(&st, &json!({}), &session).unwrap()["identity"]["missing"], true);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn escaping_gerber_set_is_missing_for_default_and_explicit_selection() {
+        let (st, th, root) = files_world("identity-gerber-link");
+        let outside = crate::plat::tmp::dir("identity-external-set");
+        std::fs::write(outside.join("copper.gbr"), "").unwrap();
+        std::fs::create_dir(root.join("mfg")).unwrap();
+        std::os::unix::fs::symlink(&*outside, root.join("mfg/out")).unwrap();
+        for selected in ["", "mfg/out"] {
+            let session = sess(&th, json!({format!("@view:{th}"):"board",
+                format!("@view.gerbers:{th}"):"1", format!("@view.file:{th}"):selected}));
+            let v = viewer_json(&st, &json!({}), &session).unwrap();
+            assert_eq!(v["identity"]["missing"], true);
+            assert!(v["identity"].get("set").is_none());
+        }
     }
 
     #[test] fn the_gerbers_page_is_the_board_page_on_the_newest_set() {
@@ -1564,9 +1680,9 @@ mod tests {
     #[test] fn a_sheet_is_part_of_the_schematics_source_and_is_watched_by_its_file() {
         let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
         let drafts = json!({"@view.sheet:t1": "/p/amp.kicad_sch"});
-        assert_eq!(page(&template, "schematic", "/p", &drafts, "t1")["key"], "1|/p|/p/amp.kicad_sch");
-        assert_eq!(page(&template, "schematic", "/p", &drafts, "t2")["key"], "1|/p|", "another thread's sheet is not this one's");
-        assert_eq!(page(&template, "board", "/p", &drafts, "t1")["key"], "0|/p|");
+        assert_eq!(page(&template, "schematic", "/p", &drafts, "t1", &RailSources::default(), &mut ShownGerbers::default())["key"], "1|/p|/p/amp.kicad_sch");
+        assert_eq!(page(&template, "schematic", "/p", &drafts, "t2", &RailSources::default(), &mut ShownGerbers::default())["key"], "1|/p|", "another thread's sheet is not this one's");
+        assert_eq!(page(&template, "board", "/p", &drafts, "t1", &RailSources::default(), &mut ShownGerbers::default())["key"], "0|/p|");
     }
 
     #[test] fn split_pane_empty_reports_only_missing_sources_and_ignores_far_machines() {

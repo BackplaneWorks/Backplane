@@ -24,20 +24,26 @@ pub(crate) fn canon_in(p: &Path, canon_root: &Path) -> Option<PathBuf> {
 /// Every directory and file read must canonicalise inside `root` (or inside the set's own canonical folder when `root` is `None`).
 /// Returns canonical paths so callers open the verified target directly.
 pub fn set_files_in(path: &Path, root: Option<&Path>) -> Vec<PathBuf> {
+    set_listing(path, root).0
+}
+
+fn set_listing(path: &Path, root: Option<&Path>) -> (Vec<PathBuf>, Option<std::time::SystemTime>) {
     let bound = match root {
-        Some(r) => match std::fs::canonicalize(r) { Ok(c) => c, Err(_) => return vec![] },
+        Some(r) => match std::fs::canonicalize(r) { Ok(c) => c, Err(_) => return Default::default() },
         None => {
             let base = if path.is_file() { path.parent().unwrap_or(path) } else { path };
-            match std::fs::canonicalize(base) { Ok(c) => c, Err(_) => return vec![] }
+            match std::fs::canonicalize(base) { Ok(c) => c, Err(_) => return Default::default() }
         }
     };
-    let Some(canon_path) = canon_in(path, &bound) else { return vec![] };
-    if canon_path.is_file() {
+    let Some(canon_path) = canon_in(path, &bound) else { return Default::default() };
+    let Ok(meta) = canon_path.metadata() else { return Default::default() };
+    if meta.is_file() {
         let n = canon_path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-        return if is_job(&n) { canon_path.parent().map(|d| set_files_in(d, Some(&bound))).unwrap_or_default() } else { vec![canon_path] }
+        return if is_job(&n) { canon_path.parent().map(|d| set_listing(d, Some(&bound))).unwrap_or_default() } else { (vec![canon_path], meta.modified().ok()) }
     }
     let mut out = vec![];
-    fn walk(d: &Path, depth: u32, bound: &Path, out: &mut Vec<PathBuf>) {
+    let mut newest = None;
+    fn walk(d: &Path, depth: u32, bound: &Path, out: &mut Vec<PathBuf>, newest: &mut Option<std::time::SystemTime>) {
         let Some(cd) = canon_in(d, bound) else { return };
         let Ok(rd) = std::fs::read_dir(&cd) else { return };
         let mut es: Vec<_> = rd.flatten().collect();
@@ -45,12 +51,16 @@ pub fn set_files_in(path: &Path, root: Option<&Path>) -> Vec<PathBuf> {
         for e in es {
             let p = e.path(); let n = e.file_name().to_string_lossy().into_owned();
             let Some(cp) = canon_in(&p, bound) else { continue };
-            if cp.is_dir() { if depth > 0 && !n.starts_with('.') { walk(&cp, depth - 1, bound, out) } } else if is_fab_file(&n) { out.push(cp) }
+            let Ok(meta) = cp.metadata() else { continue };
+            if meta.is_dir() { if depth > 0 && !n.starts_with('.') { walk(&cp, depth - 1, bound, out, newest) } } else if meta.is_file() && is_fab_file(&n) {
+                if is_gerber(&n) || is_drill(&n) { *newest = (*newest).max(meta.modified().ok()); }
+                out.push(cp);
+            }
             if out.len() >= 200 { return }
         }
     }
-    walk(&canon_path, 2, &bound, &mut out);
-    out
+    walk(&canon_path, 2, &bound, &mut out, &mut newest);
+    (out, newest)
 }
 
 /// The files of a set (containment checked against the set's own canonical folder).
@@ -80,6 +90,11 @@ pub fn has_gerbers(root: &Path) -> bool {
 /// A project's Gerbers: the folder under `<root>/mfg` (three deep) or `<root>/gerbers` holding fab files inside the canonical root, the one written last.
 /// Returns the path spelled under `root` (keeping watch keys consistent when `root` itself is a symlink) after verifying canonical containment.
 pub fn default_set(root: &Path) -> Option<PathBuf> {
+    newest_set(root).map(|(rel, _)| root.join(rel))
+}
+
+/// Project-relative set and newest fabrication file modification time in that set.
+pub fn newest_set(root: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
     let canon_root = std::fs::canonicalize(root).ok()?;
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
     fn walk(d: &Path, depth: u32, canon_root: &Path, best: &mut Option<(std::time::SystemTime, PathBuf)>) {
@@ -95,7 +110,7 @@ pub fn default_set(root: &Path) -> Option<PathBuf> {
         if let Some(t) = newest { if best.as_ref().map_or(true, |b| t > b.0) { *best = Some((t, cd)) } }
     }
     for top in ["mfg", "gerbers", "gerber"] { walk(&canon_root.join(top), 3, &canon_root, &mut best) }
-    best.and_then(|(_, cd)| cd.strip_prefix(&canon_root).ok().map(|rel| root.join(rel)))
+    best.and_then(|(time, cd)| cd.strip_prefix(&canon_root).ok().map(|rel| (rel.to_owned(), time)))
 }
 
 
@@ -133,7 +148,17 @@ pub fn board_of(set: &Path) -> Option<std::path::PathBuf> { board_of_in(set, Non
 /// What "Open in GerbView" opens of a set (Backplane KiCad's in-process GerbView, `OpenGerbers`): its job file, which brings all its
 /// layers, else its Gerber and drill files, confined to `root` when provided.
 pub fn gerbview_files_in(set: &Path, root: Option<&Path>) -> Vec<String> {
-    let fs = set_files_in(set, root);
+    open_files(&set_files_in(set, root))
+}
+
+pub fn shown_set(root: &Path, set: &Path, newest: Option<std::time::SystemTime>) -> (Vec<String>, Option<u64>) {
+    let (files, listed) = set_listing(set, Some(root));
+    if files.is_empty() { return Default::default() }
+    let made_at = newest.or(listed).and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map(|d| d.as_secs());
+    (open_files(&files), made_at)
+}
+
+fn open_files(fs: &[PathBuf]) -> Vec<String> {
     if let Some(j) = fs.iter().find(|f| is_job(&f.to_string_lossy())) { return vec![j.to_string_lossy().into_owned()] }
     fs.iter().map(|f| f.to_string_lossy().into_owned()).collect()
 }
