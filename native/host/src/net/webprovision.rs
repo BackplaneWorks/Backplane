@@ -344,9 +344,28 @@ fn setup_component_reason(socket: bool, executable: impl Fn(&str) -> bool) -> Op
     None
 }
 
+async fn enabled_changed(hub: &crate::hub::Hub, changes: &mut tokio::sync::broadcast::Receiver<u64>, enabled: bool) {
+    loop {
+        let _ = changes.recv().await;
+        if (hub.setting("web.enabled").await.as_deref() == Some("1")) != enabled { return; }
+    }
+}
+
+fn retry_interval(since_action: std::time::Duration, verification_failed: bool) -> std::time::Duration {
+    use std::time::Duration;
+    if !verification_failed && since_action < Duration::from_secs(60) { Duration::from_secs(2) }
+    else { Duration::from_secs(60) }
+}
+
+async fn publish_status(hub: &crate::hub::Hub, previous: &mut Value, next: Value) {
+    if *previous != next {
+        hub.set_info("web.status", &next.to_string()).await;
+        *previous = next;
+    }
+}
+
 pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tailscale) {
     use std::os::unix::fs::DirBuilderExt;
-    use std::time::Duration;
     if crate::copy::on() {
         return;
     }
@@ -356,78 +375,85 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
     let socket = directory.join("browser.sock");
     let mut cleanup_pending = directory.exists();
     let mut refused_plan = None;
+    let mut changes = hub.subscribe();
+    let mut requested = None;
+    let mut previous = Value::Null;
+    let mut last_action = std::time::Instant::now();
+    let mut verification_failed = false;
     loop {
-        let requested = requests.try_recv().ok();
+        let enabled = hub.setting("web.enabled").await.as_deref() == Some("1");
         let mut status_row = serde_json::json!({"canEnable":true});
-        if hub.setting("web.enabled").await.as_deref() == Some("1") {
+        if enabled {
             cleanup_pending = true;
             if let Some(reason) = missing_setup_component() {
                 status_row["reason"] = Value::from(reason);
-                hub.set_info("web.status", &status_row.to_string()).await;
-                tokio::time::sleep(Duration::from_secs(2)).await;
-                continue;
-            }
-            let status: Value = serde_json::from_str(&ts.status().await).unwrap_or(Value::Null);
-            let config: Value =
-                serde_json::from_str(&ts.serve_status().await).unwrap_or(Value::Null);
-            let node = status["Self"]["DNSName"]
-                .as_str()
-                .unwrap_or("")
-                .trim_end_matches('.');
-            let service = hub
-                .setting("web.service")
-                .await
-                .unwrap_or_else(|| "bp".into());
-            status_row["reason"] = Value::from("Waiting for a verified private Tailscale HTTPS mapping.");
-            if !node.is_empty() && configured_authority(&config, &service, node, &socket).is_none() {
-                if let Some(args) = spare_node_port(&config).and_then(|port| private_serve_args(None, port, &socket)) {
-                    let quoted = args.iter().map(|arg| format!("'{}'", arg.replace('\'', "'\\''"))).collect::<Vec<_>>();
-                    let user_plan = format!("/usr/bin/tailscale {}", quoted.join(" "));
-                    if requested.as_ref() == Some(&user_plan) {
-                        let _ = std::fs::DirBuilder::new().mode(0o700).create(&directory);
-                        if protected_directory(&directory).is_ok() && system_proxy_identity().await.is_ok() {
-                            let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/tailscale");
-                            if let Ok(out) = cmd.args(&args).env("LC_ALL", "C").stdin(std::process::Stdio::null()).output().await {
-                                let reason = String::from_utf8_lossy(&out.stderr).to_ascii_lowercase();
-                                if out.status.success() {
-                                    refused_plan = None;
-                                } else if ["permission denied", "access denied", "requires root", "permission is denied", "not authorized"].iter().any(|m| reason.contains(m)) {
-                                    refused_plan = Some(user_plan.clone());
-                                } else {
-                                    status_row["reason"] = Value::from("Private HTTPS setup did not complete.");
+            } else {
+                let status: Value = serde_json::from_str(&ts.status().await).unwrap_or(Value::Null);
+                let config: Value =
+                    serde_json::from_str(&ts.serve_status().await).unwrap_or(Value::Null);
+                let node = status["Self"]["DNSName"]
+                    .as_str()
+                    .unwrap_or("")
+                    .trim_end_matches('.');
+                let service = hub
+                    .setting("web.service")
+                    .await
+                    .unwrap_or_else(|| "bp".into());
+                status_row["reason"] = Value::from("Waiting for a verified private Tailscale HTTPS mapping.");
+                if !node.is_empty() && configured_authority(&config, &service, node, &socket).is_none() {
+                    if let Some(args) = spare_node_port(&config).and_then(|port| private_serve_args(None, port, &socket)) {
+                        let quoted = args.iter().map(|arg| format!("'{}'", arg.replace('\'', "'\\''"))).collect::<Vec<_>>();
+                        let user_plan = format!("/usr/bin/tailscale {}", quoted.join(" "));
+                        if requested.as_ref() == Some(&user_plan) {
+                            let _ = std::fs::DirBuilder::new().mode(0o700).create(&directory);
+                            if protected_directory(&directory).is_ok() && system_proxy_identity().await.is_ok() {
+                                let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, "/usr/bin/tailscale");
+                                if let Ok(out) = cmd.args(&args).env("LC_ALL", "C").stdin(std::process::Stdio::null()).output().await {
+                                    let reason = String::from_utf8_lossy(&out.stderr).to_ascii_lowercase();
+                                    if out.status.success() {
+                                        refused_plan = None;
+                                    } else if ["permission denied", "access denied", "requires root", "permission is denied", "not authorized"].iter().any(|m| reason.contains(m)) {
+                                        refused_plan = Some(user_plan.clone());
+                                    } else {
+                                        status_row["reason"] = Value::from("Private HTTPS setup did not complete.");
+                                    }
                                 }
                             }
                         }
+                        if refused_plan.as_ref() == Some(&user_plan) {
+                            status_row["reason"] = Value::from("Tailscale refused setup. This account needs operator permission on this computer.");
+                            status_row["operatorRequired"] = Value::Bool(true);
+                        }
+                        status_row["command"] = Value::from(user_plan);
                     }
-                    if refused_plan.as_ref() == Some(&user_plan) {
-                        status_row["reason"] = Value::from("Tailscale refused setup. This account needs operator permission on this computer.");
-                        status_row["operatorRequired"] = Value::Bool(true);
-                    }
-                    status_row["command"] = Value::from(user_plan);
                 }
-            }
-            if let Some(authority) = configured_authority(&config, &service, node, &socket) {
-                let _ = std::fs::DirBuilder::new().mode(0o700).create(&directory);
-                if let Ok(listener) = bind_private_backend(&directory, authority.clone()).await {
-                    let mut task = tokio::spawn(listener.run(hub.clone()));
-                    if https_address_answers(&hub.cfg.home, &authority).await {
-                        let active = serde_json::json!({"available":true, "address":format!("https://{authority}")});
-                        hub.set_info("web.status", &active.to_string()).await;
-                        loop {
+                if let Some(authority) = configured_authority(&config, &service, node, &socket) {
+                    let _ = std::fs::DirBuilder::new().mode(0o700).create(&directory);
+                    if let Ok(listener) = bind_private_backend(&directory, authority.clone()).await {
+                        let mut task = tokio::spawn(listener.run(hub.clone()));
+                        if https_address_answers(&hub.cfg.home, &authority).await {
+                            let active = serde_json::json!({"available":true, "address":format!("https://{authority}")});
+                            publish_status(&hub, &mut previous, active).await;
                             tokio::select! {
-                                _ = &mut task => break,
-                                _ = tokio::time::sleep(Duration::from_secs(1)) => {
-                                    if hub.setting("web.enabled").await.as_deref() != Some("1") {break;}
-                                }
+                                _ = &mut task => (),
+                                _ = enabled_changed(&hub, &mut changes, true) => (),
                             }
+                            task.abort();
+                            let _ = std::fs::remove_file(&socket);
+                            requested = None;
+                            verification_failed = false;
+                            last_action = std::time::Instant::now();
+                            continue;
                         }
-                    }
-                    task.abort();
-                    let _ = std::fs::remove_file(&socket);
+                        verification_failed = true;
+                        status_row["reason"] = Value::from("Private HTTPS forwarding could not be verified. Backplane will retry.");
+                        task.abort();
+                        let _ = std::fs::remove_file(&socket);
 
+                    }
                 }
             }
-         } else if cleanup_pending {
+        } else if cleanup_pending {
             refused_plan = None;
             let service = hub.setting("web.service").await.unwrap_or_else(|| "bp".into());
             cleanup_pending = !cleanup_disabled(ts, &service, &socket, |scope, host, port, path| async move {
@@ -437,8 +463,15 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                 status_row["reason"] = Value::from("Browser access is off. Tailscale mapping removal could not be confirmed.");
             }
         }
-        hub.set_info("web.status", &status_row.to_string()).await;
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        publish_status(&hub, &mut previous, status_row).await;
+        requested = None;
+        tokio::select! {
+            plan = requests.recv() => { requested = plan; }
+            _ = enabled_changed(&hub, &mut changes, enabled) => (),
+            _ = tokio::time::sleep(retry_interval(last_action.elapsed(), verification_failed)) => continue,
+        }
+        last_action = std::time::Instant::now();
+        verification_failed = false;
     }
 }
 
@@ -536,6 +569,31 @@ async fn remove_private_mapping(service: Option<&str>, host: &str, port: u16, so
 mod tests {
     use super::*;
     use serde_json::json;
+
+    #[tokio::test]
+    async fn idle_hour_bounds_tailscale_status_reads() {
+        use std::{sync::atomic::{AtomicUsize, Ordering}, time::Duration};
+        use super::super::Tailscale;
+        struct Count(AtomicUsize);
+        impl Tailscale for Count {
+            fn ip4(&self) -> super::super::Fut<String> { unreachable!() }
+            fn whois(&self, _: String) -> super::super::Fut<String> { unreachable!() }
+            fn status(&self) -> super::super::Fut<String> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                Box::pin(async { String::new() })
+            }
+            fn serve_status(&self) -> super::super::Fut<String> { self.status() }
+        }
+        let ts = Count(AtomicUsize::new(0));
+        let mut elapsed = Duration::ZERO;
+        while elapsed < Duration::from_secs(3600) {
+            ts.status().await;
+            ts.serve_status().await;
+            elapsed += retry_interval(elapsed, false);
+        }
+        assert_eq!(ts.0.load(Ordering::Relaxed), 178);
+        assert_eq!(retry_interval(Duration::ZERO, true), Duration::from_secs(60));
+    }
 
     #[test]
     fn missing_components_name_the_path() {
