@@ -108,6 +108,34 @@ pub fn floating_dialog(style: u32, class: &str) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame { pub window: u64, pub title: String, pub kind: &'static str }
 
+/// The Linux focus proxy's redirect cap (#1519): at most `per` redirects of the focus to the proxy within `span`; one more starts a rest of
+/// `rest` with the focus left on the top-level, and when the rest has run out one re-check is due (the pane's tick moves a focus still
+/// left on the top-level to the proxy again, counted as the next burst's first). Pure, so its cycle is tested on every platform.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug)]
+pub(crate) struct RedirectCap { per: u32, span: std::time::Duration, rest: std::time::Duration, start: Option<std::time::Instant>, n: u32, rest_until: Option<std::time::Instant>, recheck_due: bool }
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+impl RedirectCap {
+    pub(crate) const fn new(per: u32, span: std::time::Duration, rest: std::time::Duration) -> Self {
+        RedirectCap { per, span, rest, start: None, n: 0, rest_until: None, recheck_due: false }
+    }
+    /// A redirect asked for at `now`: allowed, or refused (resting, or this one tripped the cap; then true is never answered before the
+    /// rest has run out). Returns (allowed, tripped now).
+    pub(crate) fn allow(&mut self, now: std::time::Instant) -> (bool, bool) {
+        if let Some(r) = self.rest_until { if now < r { return (false, false) } self.rest_until = None; self.start = None; self.n = 0; }
+        if self.start.is_none_or(|s| now.duration_since(s) > self.span) { self.start = Some(now); self.n = 0; }
+        self.n += 1;
+        if self.n > self.per { self.rest_until = Some(now + self.rest); self.recheck_due = true; return (false, true) }
+        (true, false)
+    }
+    /// The pane's tick at `now`: true once when a rest has run out (the re-check: the focus looked at again), then false until a cap trips again
+    pub(crate) fn recheck(&mut self, now: std::time::Instant) -> bool {
+        if !self.recheck_due || self.rest_until.is_some_and(|r| now < r) { return false }
+        self.recheck_due = false;
+        true
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod imp {
     use super::{Frame, R};
@@ -179,20 +207,11 @@ mod imp {
     const REDIRECTS_PER: u32 = 4;
     const REDIRECT_SPAN: std::time::Duration = std::time::Duration::from_millis(100);
     const REDIRECT_REST: std::time::Duration = std::time::Duration::from_secs(1);
+    static CAP: Mutex<super::RedirectCap> = Mutex::new(super::RedirectCap::new(REDIRECTS_PER, REDIRECT_SPAN, REDIRECT_REST));
     fn redirect_allowed() -> bool {
-        static S: Mutex<Option<(std::time::Instant, u32, Option<std::time::Instant>)>> = Mutex::new(None);
-        let mut g = S.lock().unwrap_or_else(|e| e.into_inner());
-        let now = std::time::Instant::now();
-        let (start, n, rest) = g.get_or_insert((now, 0, None));
-        if let Some(r) = *rest { if now < r { return false } *rest = None; *start = now; *n = 0; }
-        if now.duration_since(*start) > REDIRECT_SPAN { *start = now; *n = 0; }
-        *n += 1;
-        if *n > REDIRECTS_PER {
-            *rest = Some(now + REDIRECT_REST);
-            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_rest": {"redirects": *n - 1, "within_ms": REDIRECT_SPAN.as_millis() as u64}}));
-            return false;
-        }
-        true
+        let (ok, tripped) = CAP.lock().unwrap_or_else(|e| e.into_inner()).allow(std::time::Instant::now());
+        if tripped { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_rest": {"redirects": REDIRECTS_PER, "within_ms": REDIRECT_SPAN.as_millis() as u64, "rest_ms": REDIRECT_REST.as_millis() as u64}})); }
+        ok
     }
     /// The window the keyboard goes to when it is Backplane's in top-level `w`: its focus proxy, else `w` itself
     fn home_of(w: u32) -> u32 { proxies().lock().unwrap().get(&w).copied().unwrap_or(w) }
@@ -652,6 +671,16 @@ mod imp {
     pub fn note_pane_keys(kicad: bool) {
         // (called every tick: only a change to Backplane's keyboard looks at the focus)
         let was = PANE_KEYS.swap(kicad, std::sync::atomic::Ordering::SeqCst);
+        // a rest of the redirect cap run out with Backplane holding the keyboard: a focus still on a top-level goes to its proxy (else the
+        // cap would leave #1505's fault in place until the next focus change)
+        if !kicad && CAP.lock().unwrap_or_else(|e| e.into_inner()).recheck(std::time::Instant::now()) {
+            let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+            let f = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|r| r.focus);
+            let p = f.and_then(|f| proxies().lock().unwrap().get(&f).copied());
+            if let Some(p) = p.filter(|_| redirect_allowed()) { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_recheck": {"focus": f, "moved_to": p}})); }
+            return;
+        }
         // the keyboard Backplane's again with the focus left on a top-level itself (a FocusIn seen while KiCad still had the keys): its proxy
         if kicad || !was { return }
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
@@ -2423,6 +2452,25 @@ pub use imp::*;
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_focus_proxy_cap_trips_rests_rechecks_once_and_counts_a_new_burst() {
+        use std::time::{Duration, Instant};
+        let ms = Duration::from_millis;
+        let mut cap = super::RedirectCap::new(4, ms(100), ms(1000));
+        let t0 = Instant::now();
+        for k in 0..4 { assert_eq!(cap.allow(t0 + ms(k * 10)), (true, false), "redirect {k} of the burst allowed"); }
+        assert_eq!(cap.allow(t0 + ms(40)), (false, true), "the fifth within 100 ms trips the cap");
+        assert_eq!(cap.allow(t0 + ms(500)), (false, false), "resting: refused, not tripped again");
+        assert!(!cap.recheck(t0 + ms(900)), "no re-check before the rest has run out");
+        assert!(cap.recheck(t0 + ms(1041)), "the rest run out: one re-check");
+        assert!(!cap.recheck(t0 + ms(1081)), "and only one (the tick does not spin)");
+        assert_eq!(cap.allow(t0 + ms(1042)), (true, false), "the re-check's redirect counts as a new burst's first");
+        for k in 1..4 { assert_eq!(cap.allow(t0 + ms(1042 + k)), (true, false)); }
+        assert_eq!(cap.allow(t0 + ms(1050)), (false, true), "a window manager still fighting trips it again");
+        assert!(cap.recheck(t0 + ms(2051)), "and is re-checked again after the next rest");
+        let mut slow = super::RedirectCap::new(4, ms(100), ms(1000));
+        for k in 0..20 { assert_eq!(slow.allow(t0 + ms(k * 150)), (true, false), "redirects spread out never trip it"); }
+        assert!(!slow.recheck(t0 + ms(5000)), "no rest, no re-check");
+    }
     #[test] fn a_kicad_windows_placements_keep_only_the_latest_and_a_hide_drops_them() {
         use super::placeq::{still_ours, Job, Q};
         let j = |h: u64, w: i32| Job { hwnd: h, after: 0, x: 0, y: 0, w, h: 10, flags: 0, pid: 7, parent: 1, seq: 0 };
