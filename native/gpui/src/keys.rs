@@ -375,13 +375,15 @@ impl Backplane {
     fn escape_plot_slots(open: &str, split: &[&str]) -> [bool; 3] {
         [matches!(open, "board" | "schematic" | "gerbers"), open == "split" && split.contains(&"sch"), open == "split" && split.contains(&"pcb")]
     }
-    fn clear_escape_probe(plots: [&mut crate::screens::plotview::PlotView; 3], shown: [bool; 3], viewer_open: bool, solid_probe: bool) -> bool {
-        let consume = solid_probe || plots.iter().zip(shown).any(|(plot, visible)| visible &&
-            (plot.picked.is_some() || plot.card.is_some() || !plot.lit.is_empty()));
-        if consume || !viewer_open {
-            for plot in plots { plot.picked = None; plot.card = None; plot.lit.clear(); }
+    fn clear_escape_probe(plots: [&mut crate::screens::plotview::PlotView; 3]) -> bool {
+        let mut cleared = false;
+        for plot in plots {
+            cleared |= plot.picked.take().is_some();
+            cleared |= plot.card.take().is_some();
+            cleared |= !plot.lit.is_empty();
+            plot.lit.clear();
         }
-        consume
+        cleared
     }
     /// Esc once nothing over the page took it (0.14's WS.esc.next, after the terminal): the plot's tapped piece goes, else the viewer shuts as its lit rail button
     /// does and the keyboard goes back to the message box; with nothing to put away the keyboard leaves the message box, so a bare key may press a rail button
@@ -398,15 +400,20 @@ impl Backplane {
         let solid = matches!(open, "3d" | "mech") || split.contains(&"3d");
         let kept = thread["viewer"]["probe"].as_str().is_some_and(|p| !p.is_empty());
         let solid_probe = kept && solid && !crate::screens::plotview::probed_part(self).is_empty();
-        let [sch, pcb] = &mut self.screens.split_pv;
-        if Self::clear_escape_probe([&mut self.screens.plotview, sch, pcb], slots, viewer_open, solid_probe) {
-            if kept { crate::screens::plotview::keep_probe(self, None); }
-            return true
+        let consume = solid_probe || slots.into_iter().enumerate().any(|(slot, shown)| {
+            let plot = self.screens.pv(slot);
+            shown && (plot.picked.is_some() || plot.card.is_some() || !plot.lit.is_empty())
+        });
+        if !consume {
+            // A focused browser or an open management panel gets Escape before the viewer closes.
+            let in_viewer = window.context_stack().iter().any(|k| k.contains("Viewer"));
+            if in_viewer && crate::screens::viewer::active_kind(&self.data["thread"]["viewer"], None) == "browser" { return false }
+            if crate::screens::mgmt::escape(self, cx) { return true }
         }
-        // a web page with the keyboard keeps its Esc (the old client gave the bot's page every key)
-        let in_viewer = window.context_stack().iter().any(|k| k.contains("Viewer"));
-        if in_viewer && crate::screens::viewer::active_kind(&self.data["thread"]["viewer"], None) == "browser" { return false }
-        if crate::screens::mgmt::escape(self, cx) { return true }
+        let [sch, pcb] = &mut self.screens.split_pv;
+        let cleared = Self::clear_escape_probe([&mut self.screens.plotview, sch, pcb]);
+        if cleared || kept { crate::screens::plotview::keep_probe(self, None); }
+        if consume { return true }
         if viewer_open {
             self.screens.rail_pending = Some(String::new()); self.screens.rail_at = Some(std::time::Instant::now());
             let _ = self.tx.try_send(crate::screens::viewer::close()); self.want_focus = true; return true
@@ -520,7 +527,7 @@ mod tests {
         let mut plots: [crate::screens::plotview::PlotView; 3] = Default::default();
         plots[0].lit.push((0, 1));
         let [main, sch, pcb] = &mut plots;
-        assert!(!Backplane::clear_escape_probe([main, sch, pcb], Backplane::escape_plot_slots("", &[]), false, false));
+        assert!(Backplane::clear_escape_probe([main, sch, pcb]));
         assert!(plots.iter().all(|plot| plot.lit.is_empty()));
         assert_eq!(d("escape", &["Composer"]), "backplane::ClosePopup");
         assert_eq!(d("b", &[]), "keys::RailBoard");
@@ -529,7 +536,7 @@ mod tests {
         let mut plots: [crate::screens::plotview::PlotView; 3] = Default::default();
         let [main, sch, pcb] = &mut plots;
         sch.lit.push((0, 1)); pcb.lit.push((0, 2));
-        assert!(Backplane::clear_escape_probe([main, sch, pcb], Backplane::escape_plot_slots("split", &["sch"]), true, false));
+        assert!(Backplane::clear_escape_probe([main, sch, pcb]));
         assert!(plots.iter().all(|plot| plot.lit.is_empty()));
     }
     #[test] fn global_scope_keys_work_everywhere_including_the_composer() {
