@@ -6,10 +6,13 @@ import { trs } from "./i18n";
 import {
   abbrev,
   badgeOf,
+  buildBomUndoParams,
   drcWords,
   filterBomLines,
   filterCheckGroups,
   formatUtcDay,
+  isBomWriteCurrent,
+  isChecksFixCurrent,
   lifeWord,
   mgmtPanelsOf,
   money,
@@ -21,6 +24,9 @@ import {
   tierWords,
   type BomInfo,
   type BomLine,
+  type BomUndoRecord,
+  type BomWriteSnapshot,
+  type ChecksFixSnapshot,
   type ChecksInfo,
   type FabInfo,
   type LifeInfo,
@@ -32,13 +38,8 @@ import type { HubClient } from "./ws";
 export interface MgmtCallbacks {
   hub: HubClient;
   getThreadId: () => string;
+  getThreadGen: () => number;
   onSendText: (text: string) => void;
-}
-
-interface BomUndoState {
-  refs: string[];
-  field: string;
-  was: string;
 }
 
 export class MgmtStrip {
@@ -59,9 +60,10 @@ export class MgmtStrip {
   private bomFilter = "";
   private bomSelectedId = "";
   private bomEditingId = "";
+  private bomEditGen = 0;
   private bomEditDraft = "";
   private bomEditStatus = "";
-  private bomLastUndo: BomUndoState | null = null;
+  private bomLastUndo: BomUndoRecord | null = null;
 
   private checksSource = "";
   private checksSelectedId = "";
@@ -110,11 +112,18 @@ export class MgmtStrip {
 
   public clear(): void {
     this.watchGen++;
+    this.bomEditGen++;
     this.askedProject = "";
     this.digest = "";
     this.project = "";
     this.openPanel = "";
     this.errorMsg = "";
+    this.bomEditingId = "";
+    this.bomLastUndo = null;
+    this.bomEditStatus = "";
+    this.checksStatus = "";
+    this.planStatus = "";
+    this.fabStatus = "";
     this.render();
   }
 
@@ -130,14 +139,19 @@ export class MgmtStrip {
     const gen = ++this.watchGen;
     this.askedProject = projectPath;
     if (this.project !== projectPath) {
+      this.bomEditGen++;
       this.digest = "";
       this.project = "";
       this.openPanel = "";
       this.errorMsg = "";
       this.bomSelectedId = "";
       this.bomEditingId = "";
+      this.bomEditStatus = "";
       this.bomLastUndo = null;
       this.checksSelectedId = "";
+      this.checksStatus = "";
+      this.planStatus = "";
+      this.fabStatus = "";
       this.lifeSelectedKey = "";
       this.lifePartSamples = null;
       this.render();
@@ -427,6 +441,7 @@ export class MgmtStrip {
       editBtn.textContent = "Edit";
       editBtn.addEventListener("click", (e) => {
         e.stopPropagation();
+        this.bomEditGen++;
         this.bomEditingId = l.id;
         this.bomEditDraft = l.mpn ?? "";
         this.bomEditStatus = "";
@@ -489,7 +504,10 @@ export class MgmtStrip {
     closeBtn.className = "icon";
     closeBtn.textContent = "×";
     closeBtn.addEventListener("click", () => {
+      this.bomEditGen++;
       this.bomEditingId = "";
+      this.bomLastUndo = null;
+      this.bomEditStatus = "";
       this.render();
     });
     head.append(title, closeBtn);
@@ -501,18 +519,31 @@ export class MgmtStrip {
     input.value = this.bomEditDraft;
     input.addEventListener("input", () => { this.bomEditDraft = input.value; });
 
-    const writeField = async (field: string, value: string, isUndo = false): Promise<void> => {
+    const currentBomSnap = (): BomWriteSnapshot => ({
+      watchGen: this.watchGen,
+      editGen: this.bomEditGen,
+      project: this.project,
+      editId: this.bomEditingId,
+    });
+
+    const writeField = async (
+      params: { project: string; refs: string[]; field: string; value: string },
+      isUndo = false,
+    ): Promise<void> => {
+      const start = currentBomSnap();
       this.bomEditStatus = "Writing…";
       this.render();
       try {
-        const res = await this.cb.hub.rpc<{ changed?: number; via?: string; was?: string }>("mgmt.bom.edit", {
-          project: this.project,
-          refs,
-          field,
-          value,
-        });
+        const res = await this.cb.hub.rpc<{ changed?: number; via?: string; was?: string }>("mgmt.bom.edit", params);
+        if (!isBomWriteCurrent(start, currentBomSnap())) return;
         this.bomLastUndo = !isUndo && (res.changed ?? 0) > 0
-          ? { refs, field, was: typeof res.was === "string" ? res.was : (field === "mpn" ? (line.mpn ?? "") : (line.dnp ? "yes" : "no")) }
+          ? {
+            project: params.project,
+            editId: start.editId,
+            refs: params.refs.slice(),
+            field: params.field,
+            was: typeof res.was === "string" ? res.was : (params.field === "mpn" ? (line.mpn ?? "") : (line.dnp ? "yes" : "no")),
+          }
           : null;
         this.bomEditStatus = isUndo
           ? "Restored"
@@ -520,6 +551,7 @@ export class MgmtStrip {
             ? "No change"
             : res.via === "kicad" ? "Updated in KiCad" : "Saved to schematic";
       } catch (e) {
+        if (!isBomWriteCurrent(start, currentBomSnap())) return;
         this.bomEditStatus = e instanceof Error ? e.message : "Could not save edit";
       }
       this.render();
@@ -531,22 +563,26 @@ export class MgmtStrip {
     saveBtn.type = "button";
     saveBtn.className = "primary bp-mgmt-btn";
     saveBtn.textContent = "Save MPN";
-    saveBtn.addEventListener("click", () => { void writeField("mpn", this.bomEditDraft.trim()); });
+    saveBtn.addEventListener("click", () => {
+      void writeField({ project: this.project, refs: refs.slice(), field: "mpn", value: this.bomEditDraft.trim() });
+    });
 
     const dnpBtn = document.createElement("button");
     dnpBtn.type = "button";
     dnpBtn.className = "bp-mgmt-btn";
     dnpBtn.textContent = line.dnp ? "Clear DNP" : "Mark DNP";
-    dnpBtn.addEventListener("click", () => { void writeField("dnp", line.dnp ? "no" : "yes"); });
+    dnpBtn.addEventListener("click", () => {
+      void writeField({ project: this.project, refs: refs.slice(), field: "dnp", value: line.dnp ? "no" : "yes" });
+    });
     actions.append(saveBtn, dnpBtn);
 
-    if (this.bomLastUndo) {
+    if (this.bomLastUndo && this.bomLastUndo.project === this.project && this.bomLastUndo.editId === this.bomEditingId) {
       const undo = this.bomLastUndo;
       const undoBtn = document.createElement("button");
       undoBtn.type = "button";
       undoBtn.className = "bp-mgmt-btn";
       undoBtn.textContent = "Undo";
-      undoBtn.addEventListener("click", () => { void writeField(undo.field, undo.was, true); });
+      undoBtn.addEventListener("click", () => { void writeField(buildBomUndoParams(undo), true); });
       actions.appendChild(undoBtn);
     }
 
@@ -605,11 +641,18 @@ export class MgmtStrip {
     runBtn.className = "bp-mgmt-btn";
     runBtn.textContent = "Run";
     runBtn.addEventListener("click", () => {
+      const gen = this.watchGen;
+      const proj = this.project;
       this.checksStatus = "Running checks…";
       this.render();
-      void this.cb.hub.rpc("kicad.checks.run", { project: this.project })
-        .then(() => { this.checksStatus = ""; this.render(); })
+      void this.cb.hub.rpc("kicad.checks.run", { project: proj })
+        .then(() => {
+          if (gen !== this.watchGen || proj !== this.project) return;
+          this.checksStatus = "";
+          this.render();
+        })
         .catch((e) => {
+          if (gen !== this.watchGen || proj !== this.project) return;
           this.checksStatus = e instanceof Error ? e.message : "Could not run checks";
           this.render();
         });
@@ -667,8 +710,21 @@ export class MgmtStrip {
               fixBtn.textContent = "Fix with agent";
               fixBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
-                void this.cb.hub.rpc<{ text?: string }>("kicad.checks.fix", { project: this.project, id: r.id })
+                const start: ChecksFixSnapshot = {
+                  watchGen: this.watchGen,
+                  project: this.project,
+                  threadId: this.cb.getThreadId(),
+                  threadGen: this.cb.getThreadGen(),
+                };
+                void this.cb.hub.rpc<{ text?: string }>("kicad.checks.fix", { project: start.project, id: r.id })
                   .then((res) => {
+                    const now: ChecksFixSnapshot = {
+                      watchGen: this.watchGen,
+                      project: this.project,
+                      threadId: this.cb.getThreadId(),
+                      threadGen: this.cb.getThreadGen(),
+                    };
+                    if (!isChecksFixCurrent(start, now)) return;
                     if (res.text) {
                       this.cb.onSendText(res.text);
                       this.checksStatus = "Sent to agent";
@@ -676,6 +732,13 @@ export class MgmtStrip {
                     }
                   })
                   .catch((err) => {
+                    const now: ChecksFixSnapshot = {
+                      watchGen: this.watchGen,
+                      project: this.project,
+                      threadId: this.cb.getThreadId(),
+                      threadGen: this.cb.getThreadGen(),
+                    };
+                    if (!isChecksFixCurrent(start, now)) return;
                     this.checksStatus = err instanceof Error ? err.message : "Could not send finding";
                     this.render();
                   });
@@ -844,9 +907,12 @@ export class MgmtStrip {
     }
 
     const sendPlan = (method: string, params: Record<string, unknown>): void => {
+      const gen = this.watchGen;
+      const proj = this.project;
       this.planStatus = "";
-      void this.cb.hub.rpc(method, { pro: this.project, ...params })
+      void this.cb.hub.rpc(method, { pro: proj, ...params })
         .catch((e) => {
+          if (gen !== this.watchGen || proj !== this.project) return;
           this.planStatus = e instanceof Error ? e.message : "Plan action refused";
           this.render();
         });
@@ -990,9 +1056,12 @@ export class MgmtStrip {
     }
 
     const sendFab = (action: string, extra: Record<string, unknown> = {}): void => {
+      const gen = this.watchGen;
+      const proj = this.project;
       this.fabStatus = "";
-      void this.cb.hub.rpc("fab.profile", { pro: this.project, action, ...extra })
+      void this.cb.hub.rpc("fab.profile", { pro: proj, action, ...extra })
         .catch((e) => {
+          if (gen !== this.watchGen || proj !== this.project) return;
           this.fabStatus = e instanceof Error ? e.message : "Fab action failed";
           this.render();
         });
