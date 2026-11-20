@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 60652,
+  "totalAssetGzipBytes": 60648,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -84,7 +84,7 @@
     "web/src/viewers/responsive.css": "78ce1f2accbc4a920b354e0c388eab02658b8357dde8869ad07832bf9d4e0173",
     "web/src/viewers/solid3d.ts": "dc52f4f172ceedef2315fb154fef1e33047e4db3c93c234f166f3371df21ee45",
     "web/src/viewers/viewer-pane.ts": "4897cc63a1b202f6b395af97dafebd84379b3bbaca06146af73eff23b994edb5",
-    "web/src/viewers/viewer-tools.ts": "da5c46080f43d7f6cfc0d9f9905ab57414f4646a93b6470767a98ce4a9ec8057",
+    "web/src/viewers/viewer-tools.ts": "a5483111b08389bc8d2d70460bb745af8d10c802d5bfa4463e3435a25b0f7a86",
     "web/src/voice.ts": "f401f1d5bd1685c7d7270fc02a8ff16f54bde7ae98aee21b4e802f0357063345",
     "web/src/ws.ts": "bff5636759f3871df89395c792d5c69aef90a5e1e9ecd8247ac522ebb40badc9",
     "web/build.ts": "c32254f4abe4cea4e8e1f65aeced47aae007c0efd292236b2cf65d296651bcca",
@@ -93,9 +93,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 149271,
-      "gzipBytes": 43577,
-      "sha256": "ba8d19b021f91828beb86997b90b7a86d9162f6955c5368c4d706064da74f4eb"
+      "bytes": 149249,
+      "gzipBytes": 43573,
+      "sha256": "398db43310f6601ea979d70025368a6086da6769034abf5ddf1a091005051fdc"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,

@@ -117,10 +117,10 @@ export class HistoryStripState {
     return this.highlightEdits;
   }
 
-  /** Payload for `viewer.compare` when comparing, or null when Live. */
+  /** Payload for `viewer.compare` when comparing, or null when Live. `bits: 0` compares all layers. */
   compareRequest(): { commit: string; bits: number } | null {
     const ref = this.activeRef();
     if (!ref) return null;
-    return { commit: ref.commit, bits: this.highlightEdits ? 1 : 0 };
+    return { commit: ref.commit, bits: 0 };
   }
 }
