@@ -129,6 +129,8 @@ impl Composer {
     pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); self.followed = None; }
     pub fn editor(&self) -> &Editor { &self.ed }
     pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
+    /// A selection made elsewhere in the window (the timeline's) is the one to copy: this one goes, the caret stays where it was.
+    pub fn drop_selection(&mut self, cx: &mut Context<Self>) { if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
     fn sync(&mut self, cx: &mut Context<Self>) { self.content = self.ed.text().to_string().into(); cx.notify(); }
     fn edit(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Editor)) { f(&mut self.ed); self.sync(cx); }
 
