@@ -762,7 +762,7 @@ fn split_page(cx: &mut Context<Backplane>, light: bool, viewer: &Value, plot: &s
     // landscape (the pane wider than tall): the schematic on the left, the board over the 3D on the right; portrait: the schematic on top, the board beside the 3D
     let wide = split_box(0).map_or(true, |b| b.size.width >= b.size.height);
     let [sch_pv, brd_pv] = pvs;
-    let pane = |id: &str, head: Div, body: AnyElement| crate::ui::with_rect(div().flex().flex_col().min_w_0().min_h_0().child(head).child(div().relative().flex_1().min_h_0().min_w_0().child(body)), || format!("tile:{id}"));
+    let pane = |id: &str, head: Div, body: AnyElement| crate::ui::with_rect(div().flex().flex_col().min_w_0().min_h_0().child(head).child(crate::ui::with_rect(div().relative().flex_1().min_h_0().min_w_0().child(body), || format!("tile-body:{id}"))), || format!("tile:{id}"));
     // the schematic pane's sheets (0.14's combo-sheets): the sheet on show in its head, the hierarchy in a menu under it
     let sheets_el = split_sheets(cx, light, &plot.sheets, &string(panes[0], "key"), sch_pv);
     let sch = s_on.then(|| { /* i18n-ok: split_head draws the name through trs */ let h = split_head(cx, light, "sch", "Schematic", sheets_el); let b = plot_pane_inner(cx, light, 1, "schematic", panes[0], plot.frame_for(&string(panes[0], "key")), sch_pv, false, &plot.sheets, &plot.sheet_refs, None, false, Some(&mut *clock), Some(&plot.retrying), last_retry); pane("sch", h, b) });

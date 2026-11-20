@@ -48,7 +48,7 @@ pub(crate) fn resolve_selector(sel: &str, tiles: &[Value], splitters: &[Value]) 
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed) */ Pointer(String), /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ PointerDrag(Drag), Drag(Value), /** {"tap_mm":[x,y,slot]}: a tap at a board point in millimetres (a part's position from the design file), wherever the view has put it */ TapMm(f32, f32, usize), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed) */ Pointer(String), /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), /** {"tap_mm":[x,y,slot]}: a tap at a board point in millimetres (a part's position from the design file), wherever the view has put it */ TapMm(f32, f32, usize), Fit, Unsupported(String) }
 /// Script coordinates use physical window pixels, as do the painted control rectangles.
 #[derive(Clone, Debug)]
 pub struct Drag { from: DragStart, to: [f32; 2], moves: usize }
@@ -179,7 +179,6 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(a) = v["tap_mm"].as_array() { Some(Step::TapMm(a.first().and_then(Value::as_f64).unwrap_or(0.) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.) as f32, a.get(2).and_then(Value::as_u64).unwrap_or(0) as usize)) }
         else if let Some(t) = v["popup"].as_str() { Some(Step::Popup(t.into())) }
         else if let Some(t) = v["type"].as_str() { Some(Step::Type(t.into())) }
-        else if let Some(spec) = v.get("drag").filter(|s| s.get("from").is_some()) { Some(Drag::parse(spec).map(Step::PointerDrag).unwrap_or_else(|| Step::Unsupported("invalid_drag".into()))) }
         else if let Some(t) = v["keys"].as_str() { Some(Step::Keys(t.into())) }
         else if v["send"].as_bool() == Some(true) { Some(Step::Send) }
         else if let Some(p) = v["attach"].as_str() { Some(Step::Attach(p.into())) }
@@ -272,7 +271,28 @@ impl Backplane {
             let rects = crate::art::ctl_rects();
             let kind = crate::screens::viewer::pane_page(&self.data["thread"], false).map(|p| p.0).unwrap_or_default();
             let inventory = tile_inventory(&kind, self.screens.pick_slot, &rects);
-            if inventory != self.tiles_last { self.m("tiles", inventory.clone()); self.tiles_last = inventory; }
+            let mut tiles = inventory["tiles"].as_array().unwrap().clone();
+            self.tile_frame += 1;
+            let facts = &self.data["thread"]["viewer"]["identity"];
+            for tile in &mut tiles {
+                let id = tile["id"].as_str().unwrap();
+                let kind = tile["kind"].as_str().unwrap();
+                let identity = facts["panes"].as_array().and_then(|p| p.iter().find(|p| p["page"] == kind)).unwrap_or(facts);
+                let source = ["rel", "name"].iter().find_map(|key| identity["source"][key].as_str().filter(|s| !s.is_empty())).unwrap_or(kind).to_owned();
+                let mut body = tile["rect"].clone();
+                if let Some([x,y,w,h]) = rects.get(&format!("tile-body:{id}")) {
+                    body = json!({"x":x,"y":y,"w":w,"h":h});
+                } else if let Some([_,y,_,h]) = rects.get(&format!("pane-header:{kind}")) {
+                    let bottom = body["y"].as_f64().unwrap() + body["h"].as_f64().unwrap();
+                    body["y"] = (y+h).into();
+                    body["h"] = (bottom-f64::from(y+h)).max(0.).into();
+                }
+                tile["source"] = source.into();
+                tile["body"] = body;
+                tile["overlay"] = Value::Null;
+                tile["frame"] = self.tile_frame.into();
+            }
+            tiles_metric(started, tiles, inventory["splitters"].as_array().unwrap().clone());
             let ctl = HEADER.with_borrow(|registry| {
                 let inventory = |id: &str, label: &str, rect_id: &str, enabled: bool, folded: bool| {
                     json!({"id": id, "label": label, "rect": rects.get(rect_id).map(|r| json!({"x": r[0], "y": r[1], "w": r[2], "h": r[3]})),
@@ -323,7 +343,20 @@ impl Backplane {
             // G3, G4, G4b, G4c and the links: written after each frame is painted, when the controls this render registered and their
             // rectangles from that paint are both known (from render they were a frame behind, and an idle window then wrote nothing more:
             // a panel opened by a click showed in the log only at the next unrelated redraw)
-            if crate::art::rects_on() { let me = this.clone(); window.on_frame_drawn(move |_, cx| me.update(cx, |v, _| v.drawn_marks()).is_ok()); }
+            if crate::art::rects_on() {
+                let app = cx.to_async();
+                let handle = window.window_handle();
+                set_splitter_drag(Box::new(move |_, from, to, moves| {
+                    if !(1..=120).contains(&moves) { return false }
+                    app.spawn(async move |cx| {
+                        let _ = handle.update(cx, |_, window, cx| {
+                            let drag = Drag { from: DragStart::Point(from), to, moves: moves as usize };
+                            for event in drag.events(from, window.scale_factor()) { window.dispatch_event(event, cx); }
+                        });
+                    }).detach();
+                    true
+                }));
+                let me = this.clone(); window.on_frame_drawn(move |_, cx| me.update(cx, |v, _| v.drawn_marks()).is_ok()); }
             window.on_next_frame(move |_, _| metric(started, "first_frame", json!({})));
             match window.gpu_specs() {
                 Some(g) => metric(started, "gpu", json!({"device": g.device_name, "driver": g.driver_name, "driver_info": g.driver_info, "software": g.is_software_emulated})),
@@ -522,31 +555,6 @@ impl Backplane {
                 self.open_project(raw.clone(), cx);
             }
             Step::Popup(text) => { self.begin(format!("popup:{text}"), Goal::Popup, cx); self.set_text(text, cx); }
-            Step::PointerDrag(drag) => {
-                let from = match &drag.from {
-                    DragStart::Point(xy) => Some(*xy),
-                    DragStart::Control(id) => crate::art::ctl_rects().get(id).map(|[x,y,w,h]| [x+w/2., y+h/2.]),
-                };
-                let Some(from) = from else {
-                    self.m("drag", json!({"ok": false, "error": "control_missing"}));
-                    self.pump(cx);
-                    return;
-                };
-                let handle = self.script_window;
-                let this = cx.weak_entity();
-                cx.defer(move |cx| {
-                    let _ = handle.update(cx, |_, window, cx| {
-                        for event in drag.events(from, window.scale_factor()) {
-                            window.dispatch_event(event, cx);
-                        }
-                        let _ = this.update(cx, |app, cx| {
-                            app.m("drag", json!({"ok": true, "from": from, "to": drag.to, "moves": drag.moves}));
-                            app.begin("drag".into(), Goal::Frame, cx);
-                            cx.notify();
-                        });
-                    });
-                });
-            }
             Step::Keys(keys) => { self.m("keys", json!({"keys": keys})); self.screens.term.script = Some(keys); self.begin("keys".into(), Goal::Frame, cx); cx.notify(); }
             Step::Type(text) => {
                 let full = format!("{}{}", self.input.read(cx).content, text);
@@ -721,6 +729,20 @@ impl Backplane {
                 }
             }
             Step::Drag(spec) => {
+                if spec.get("from").is_some() {
+                    let result = Drag::parse(&spec).and_then(|drag| {
+                        let from = match drag.from {
+                            DragStart::Point(p) => p,
+                            DragStart::Control(ref id) => {
+                                let [x,y,w,h] = *crate::art::ctl_rects().get(id)?;
+                                [x+w/2., y+h/2.]
+                            }
+                        };
+                        DRAG_HOOK.with(|h| h.borrow().as_ref().map(|f| f("", from, drag.to, drag.moves as u32)))
+                    });
+                    self.m("drag", json!({"ok":result.unwrap_or(false),"from":spec["from"],"to":spec["to"],"moves":spec["moves"]}));
+                    self.begin("drag".into(), Goal::Frame, cx); cx.notify(); return;
+                }
                 let (tiles, splitters) = TILES.with(|t| t.borrow().clone());
                 let want = spec["splitter"].as_str().unwrap_or("");
                 let id = if want.starts_with('@') { resolve_selector(want, &tiles, &splitters) } else { Ok(want.to_string()) };

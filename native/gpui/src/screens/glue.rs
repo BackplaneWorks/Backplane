@@ -308,7 +308,7 @@ impl Backplane {
         let slot = key.unwrap();
         self.screens.solid_order.retain(|key| key != &slot);
         self.screens.solid_order.push_back(slot.clone());
-        if self.screens.solid_order.len() > 4 {
+        if self.screens.solid_order.len() > 2 {
             if let Some(i) = self.screens.solid_order.iter().position(|key| Some(key) != self.screens.solid_slot.as_ref()) {
                 let old = self.screens.solid_order.remove(i).unwrap();
                 if let Some(page) = self.screens.solids.remove(&old) { self.screens.retired_solids.push(page); }
