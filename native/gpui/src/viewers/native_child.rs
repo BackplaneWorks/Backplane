@@ -327,12 +327,21 @@ mod imp {
         let proxy_for = |top| proxies().lock().unwrap().get(&top).copied().filter(|_| pane_on_screen(top));
         let event_proxy = event_top.and_then(proxy_for);
         if event_top.is_some() && event_proxy.is_none() { return }
-        let Some(focus) = c.get_input_focus().ok().and_then(|request| request.reply().ok()).map(|r| r.focus) else { return };
-        if event_top.is_some_and(|top| top != focus) { return }
-        if let Some(proxy) = event_proxy.or_else(|| proxy_for(focus)).filter(|_| redirect_allowed()) {
-            let _ = c.set_input_focus(InputFocus::PARENT, proxy, x11rb::CURRENT_TIME);
-            let _ = c.flush();
-        }
+        with_server_grab(c, || {
+            let Some(focus) = c.get_input_focus().ok().and_then(|request| request.reply().ok()).map(|r| r.focus) else { return };
+            if event_top.is_some_and(|top| top != focus) { return }
+            if let Some(proxy) = event_proxy.or_else(|| proxy_for(focus)).filter(|_| redirect_allowed()) {
+                let _ = c.set_input_focus(InputFocus::PARENT, proxy, x11rb::CURRENT_TIME);
+            }
+        });
+    }
+
+    // A focus check and its SetInputFocus are one operation with respect to other X clients.
+    fn with_server_grab(c: &RustConnection, operation: impl FnOnce()) {
+        if c.grab_server().is_err() { return }
+        operation();
+        let _ = c.ungrab_server();
+        let _ = c.flush();
     }
 
     /// Native children that are not a KiCad pane's container (the Browser's page: cef_native), per top-level: the proxy is kept while any is.
@@ -361,12 +370,11 @@ mod imp {
     pub fn focus_home(top: u64, container: u64) {
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let w = home_of(top as u32);
-        if c.grab_server().ok().and_then(|request| request.check().ok()).is_none() { return }
-        if focus_in(c, container as u32) {
-            let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME);
-        }
-        let _ = c.ungrab_server();
-        let _ = c.flush();
+        with_server_grab(c, || {
+            if focus_in(c, container as u32) {
+                let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME);
+            }
+        });
     }
     /// The redirect, at most REDIRECTS_PER within REDIRECT_SPAN: a window manager that puts the focus back on the top-level
     /// each time it moves (none seen; the review's guard) gets the proxy a few times, then the top-level is left focused for REDIRECT_REST,
@@ -871,11 +879,9 @@ mod imp {
             if let Some(g) = conn() { redirect_focus(g.as_ref().unwrap(), None); }
             return;
         }
-        // the keyboard Backplane's again with the focus left on a top-level itself (a FocusIn seen while KiCad still had the keys): its proxy
+        // A pane can release the keyboard with focus already on the top-level.
         if kicad || !was { return }
-        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let Some(f) = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|r| r.focus) else { return };
-        if let Some(p) = proxies().lock().unwrap().get(&f).copied().filter(|_| pane_on_screen(f)) { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
+        if let Some(g) = conn() { redirect_focus(g.as_ref().unwrap(), None); }
     }
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}

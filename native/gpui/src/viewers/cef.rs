@@ -191,10 +191,8 @@ wrap_focus_handler! {
         /// Tab past the page's last element: the keyboard goes back to the client
         /// a click into the page (the system moving the keyboard there) is the person's, unlike our own SetFocus calls
         fn on_set_focus(&self, _b: Option<&mut Browser>, source: FocusSource) -> ::std::os::raw::c_int {
-            // (the person's press inside this page's container, recorded when it happened (cef_native `pressed_in`, X11 with XInput 2): a window
-            // manager that focuses what is under the pointer moves it there too, and that is nobody's click; nor is a script's focus. Asking
-            // whether a button is down when this callback runs missed the click whenever the press reached Chromium late (a KiCad pane's button
-            // grab replaying it): the page was given the keyboard and taken it back. Elsewhere, and without XInput 2: a button down now)
+            // The native page records and replays the delivered X press before CEF sees it.
+            // A SYSTEM focus with no such record cannot claim a page with an active button grab.
             let clicked = self.tab.host.is_some() && source == FocusSource::SYSTEM && native::pressed_in(self.tab.outer()).unwrap_or_else(|| native::button_down(self.tab.outer()));
             if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_set_focus": {"system": source == FocusSource::SYSTEM, "clicked": clicked}})); }
             if clicked { self.tab.st.lock().unwrap().person = true; let _ = self.tab.wake.try_send(()); }
