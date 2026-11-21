@@ -133,7 +133,7 @@ impl Parts {
             if ok && (m == "term.open" || p["sources"].as_array().map_or(false, |a| !a.is_empty()) || !p["kind"].as_str().unwrap_or("").is_empty()) {
                 let root = if m == "kicad.watch" || m == "kicad.watch.set" { p["root"].as_str().unwrap_or("").to_string() } else { watching.lock().unwrap().get(&client).filter(|(wl, _)| wl == l).map(|(_, r)| r.clone()).unwrap_or_default() };
                 watching.lock().unwrap().insert(client, (l.to_string(), root));
-                if pulling.lock().unwrap().insert(client) { pull_loop(sync.clone(), hub.clone(), watching.clone(), pulling.clone(), client, l.to_string()); }
+                if !super::peerws::connected(&hub.cfg.home, l) && pulling.lock().unwrap().insert(client) { pull_loop(sync.clone(), hub.clone(), watching.clone(), pulling.clone(), client, l.to_string()); }
             } else if ok { watching.lock().unwrap().remove(&client); }
         }
         let frame = if code == 200 {
@@ -293,10 +293,17 @@ pub async fn serve(sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
 pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
     if copy { return HttpReply::text("403 Forbidden", "a hub on a copied log does not take /far/rpc") }
     let link = match sync.peering.signed_in("far-rpc", r) { Ok(p) => p, Err(e) => return e };
+    serve_authenticated(copy, sync, hub, &link, &r.body).await
+}
+
+/// Dispatch an already-authenticated `/far/rpc` payload (from HTTP `signed_in` or `/far/ws`).
+pub(crate) async fn serve_authenticated(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, link: &str, body: &[u8]) -> HttpReply {
+    if copy { return HttpReply::text("403 Forbidden", "a hub on a copied log does not take /far/rpc") }
+    let link = link.to_string();
     // a link says where it is now: taken for an approved link whether or not the machine finder lists it (it is how the finder comes to find it)
-    if let Ok(o) = serde_json::from_slice::<Value>(&r.body) { if o["m"] == "peer.address" { return super::mesh::address_received(sync, hub, &link, &o["p"]).await } }
+    if let Ok(o) = serde_json::from_slice::<Value>(body) { if o["m"] == "peer.address" { return super::mesh::address_received(sync, hub, &link, &o["p"]).await } }
     if !sync.own(&link) { return HttpReply::text("403 Forbidden", "threads are shared with the owner's own machines") }
-    let Ok(o) = serde_json::from_slice::<Value>(&r.body) else { return HttpReply::text("400 Bad Request", "not JSON") };
+    let Ok(o) = serde_json::from_slice::<Value>(body) else { return HttpReply::text("400 Bad Request", "not JSON") };
     let m = o["m"].as_str().unwrap_or("");
     if m == "owner.mail" {
         let Some(bots) = crate::bots::api::of(hub) else { return HttpReply::text("503 Service Unavailable", "bots are not running") };
