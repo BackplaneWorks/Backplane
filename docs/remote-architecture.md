@@ -1,6 +1,6 @@
 # Remote & Multi-Machine Architecture Proposal
 
-> Status: **Approved — being built in phases (Phase 0: hub and clients).**
+> Status: **Approved — Phase 0, Phase 1, and Home P1 landed & verified (39/39 two-Boat HTTPS rehearsal at `d359007616`); Phase 2, Home P2, and Remote KiCad access in progress.**
 > Measured against Backplane `b523f965ef` (`native/host`, `native/gpui`, `mobile/ios`, `web/`) and compared with T3 Code (`pingdotgg/t3code`).
 
 ## 1. Summary
@@ -344,21 +344,81 @@ same row, "Home (<name>) is away since HH:MM · N queued", Bub's chat and memory
 
 Byte budgets (section 5.2) hold: Bub's chat on a non-home machine is a local replica read (0 B on open) plus the link's shared lines.
 
-### 9.7 The person's decisions (2026-11-20)
+### 9.7 The person's decisions (2026-11-20 & 2026-11-21)
 
 1. **Home offline:** other machines go read-only (the replica) and queue what is sent; no takeover, no automatic failover. (`canTakeOver` and
    *Take over here* in 9.3–9.6 are not built.)
 2. **Where the home runs is explicit:** `home.kind` is `local` | `peer` | `boat`, so a hosted always-on Boat slots in later and self-hosting stays supported.
 3. **Moving the home is a manual button** in Settings, "Make this machine the home", with handover: `home.move {to:"back"}` (net/homemove.rs). Not automatic.
-4. Not yet decided: the settings allowlist (9.2, 3) and an encrypted vault backup (9.5).
+4. **Shared-settings allowlist (approved 2026-11-21):** `theme`, `language`, `quiet hours`, `notifications`, `default models`, and `project pins/icons/groups`. Machine-local folders/paths, ports, KiCad pane state, builds, and secrets stay local. (Encrypted vault backup remains undecided / opt-in later.)
 
 The wire shape is docs/PHONE-DATA.md, The home: `{kind, id, name, online, awaySince?, queuedCount, canMoveHere, moving?}` in `hello`, `k:"home"` and
 `?view=1`'s `shown.home`.
 
 ### 9.8 Phases
 
-- **Home P1 (hub):** port `uber.sync` (the op exchange, the holder's beat, the lease term as the switch of a move); the `home` object and its pushes;
-  queued sends to an away home marked `queued`; "Make this machine the home" over `home.move {to:"back"}`.
-- **Home P2 (hub):** the shared-settings allowlist over the same exchange; the persistent hub-to-hub binary socket (live streamed text between machines,
-  replacing `curl` + `fsync` and `viewer.pull`).
-- **Clients:** `home` from `hello` / `k:"home"` / `shown.home`; the away row on Bub's row and thread; Settings → Home machine from hub data.
+- **Home P1 (hub + clients) — DONE (`d359007616`, 39/39 two-Boat HTTPS rehearsal):** `uber.sync` (op exchange, holder's beat, lease term as move switch), proxy-aware presence (`502`/`503`/`504`), `home` object and pushes, queued sends marked `queued`, "Make this machine the home" over `home.move {to:"back"}`, and all four clients drawing `home`.
+- **Home P2 (hub) — IN PROGRESS:** shared-settings allowlist over the signed owner link (last-write-wins by timestamp, queued while home is away); persistent hub-to-hub binary WebSocket (`/far/ws`, replacing `curl` + `fsync` and `viewer.pull` long-poll, carrying live streamed Bub/agent text between machines).
+- **Phase 2 (hub + clients) — IN PROGRESS:** immutable `/blob/<sha256>` replacing base64-in-JSON attachments/images; persistent content-addressed 2D/3D viewer caches (`keptChunks` / `keptParts`); Remote KiCad access (§10).
+
+---
+
+## 10. Remote KiCad Access (Local KiCad Wired to Remote Project Files)
+
+> Status: **Approved 2026-11-21 — built alongside Phase 2.**
+> Decision: **No GUI framebuffer streaming or X11/Wayland/Win32 display bridging.** Instead, wire the user's **local native KiCad** (embedded in GPUI or standalone) directly to a **local synced working copy** of the remote project's design files, backed by document locking, content-addressed blob transfer, and optimistic save-back to the remote canonical copy.
+
+### 10.1 Why Local-KiCad-on-Synced-Files Beats GUI Bridging
+
+1. **Full native speed (120 FPS, native HiDPI, native shortcuts, zero input lag):** PCB routing and schematic capture require sub-frame pointer responsiveness; streaming remote X11/Wayland frames over WAN/Tailscale adds 30–150 ms of round-trip lag on every drag and zoom.
+2. **Reuses Backplane's existing KiCad stack:** GPUI's embedded KiCad pane (`native/gpui/src/viewers/kicad_pane.rs`), `kicad/embed.rs`, `kicad/watch.rs`, `kicad/canonical.rs` (`is_design`), and `agents/design.rs` locks already manage local KiCad sessions and canonical design files.
+3. **Tiny incremental wire transfers:** KiCad design files (`.kicad_pcb`, `.kicad_sch`, `.kicad_pro`, `.kicad_dru`, project-local symbol/footprint/3D libs) compress 6–10x and are content-addressed by SHA-256 (`/blob/<sha256>` + `/far/ws`). Opening a project only transfers files whose hash differs from the local cache; saving a board only pushes the changed file(s).
+
+### 10.2 Architecture & Data Flow
+
+```mermaid
+flowchart LR
+    subgraph Local["Local Machine (GPUI + Local Hub)"]
+        K["Local Native KiCad\n(embedded or standalone)"]
+        Cache["Synced Working Copy\n<home>/far-kicad/<link>/<proj>/"]
+        Watch["Save Watcher + Conflict Guard\n(baseSha256 per file)"]
+        K <-->|"native local fs (0 ms)"| Cache
+        Cache <--> Watch
+    end
+
+    subgraph Remote["Remote Owning Machine (Hub B)"]
+        Canon["Canonical Project Files\n(main checkout, is_design)"]
+        Lock["Document Lock\n(agents/design.rs)"]
+        Agents["Agents & Remote Watchers"]
+        Canon <--> Lock
+        Canon <--> Agents
+    end
+
+    Watch <-->|"Signed /far/ws + /blob/<sha256>\nkicad.manifest · kicad.blob · kicad.push · lock_acquire"| Canon
+```
+
+### 10.3 Sync Scope, Locking, Save-Back, and Conflict Handling
+
+1. **Synced file set (`canonical::is_design`):** `.kicad_pro`, `.kicad_pcb`, `.kicad_sch` (including referenced hierarchical sheets), `.kicad_dru`, `.kicad_sym`, `.kicad_mod`, `sym-lib-table`, `fp-lib-table`, project-local `.pretty/` footprints, project-local 3D models (`.step`/`.stp`/`.wrl`/`.glb`), and `.backplane.json`. Build/git/temporary files (`.git/`, `target/`, `*.lck`, `*-backups/`) are never synced.
+2. **Pull / manifest sync (`kicad.manifest` + `kicad.blob`):**
+   - Before opening a remote project in local KiCad, the local hub asks the remote owning hub for `kicad.manifest {project}` → `[{rel, sha256, bytes, mtime}]`.
+   - Only files whose `sha256` is missing or different in `<home>/far-kicad/<link>/<project>/` are fetched (by hash over `/far/ws` or `/blob/<sha256>`), then written atomically and recorded as each file's `baseSha256`.
+3. **Locking (`lock_acquire` / `lock_release`):**
+   - Opening for edit acquires the remote project's board/schematic lock on the owning hub (preventing concurrent agent `kicad_edit` writes while the person edits).
+   - If another writer already holds the lock, the local copy opens read-only with a clear notice naming the lock holder (matching local Backplane behavior).
+   - Closing the local KiCad session releases the remote lock cleanly (and remote locks time out / clean up if the link drops).
+4. **Live save-back (`kicad.push`):**
+   - The local hub watches the synced working copy for saves (skipping transient KiCad `.lck` / temp files, respecting `savegate.rs`).
+   - On save, it pushes `{project, files: [{rel, baseSha256, sha256, bytes}]}` to the remote owning hub over `/far/ws`.
+   - The owning hub verifies `baseSha256` against the current canonical file on disk, writes atomically under the design lock, updates `baseSha256`, and triggers its normal post-save hooks (viewers refresh, `main` commit).
+5. **Conflict handling (never silent clobber):**
+   - If the remote canonical file's current hash differs from `baseSha256` (e.g., an agent or local user edited on the remote machine while offline), `kicad.push` returns `{ok: false, conflict: [{rel, remoteSha256, baseSha256}]}`.
+   - The local hub pauses auto-push for the conflicted file(s) and surfaces two explicit choices: **Reload remote copy** (re-sync from remote) or **Save as labelled copy** (push to an explicit labelled copy on `main`, never silently overwriting the canonical file).
+6. **Viewing vs Editing:**
+   - **Viewing** (Board / Schematic / 3D / Gerbers in the Backplane viewer rail) continues to work without needing KiCad installed locally, accelerated by Phase 2's persistent `/far/ws` binary stream and content-addressed `keptChunks` / `keptParts` caches.
+   - **Editing** ("Edit in KiCad" on a remote project) runs the sync → lock → local KiCad → live save-back loop above.
+
+### 10.4 Remote KiCad Phases
+
+- **RK1 (Hub sync engine + lock + save-back):** `kicad.manifest`, `kicad.blob`, `kicad.push` signed owner-link RPCs; `<home>/far-kicad/<link>/<project>/` sync + watcher + `baseSha256` conflict guard + remote `lock_acquire`/`lock_release`; unit & two-hub tests.
+- **RK2 (Local KiCad wiring):** Wire `kicad/open.rs` and `kicad/embed.rs` so opening/editing a remote project transparently syncs, acquires lock, launches local KiCad on the synced folder, and reflects sync/conflict status in the existing KiCad pane info.
