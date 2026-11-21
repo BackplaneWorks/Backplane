@@ -65,10 +65,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -348,6 +348,16 @@ impl crate::api::RpcHandler for PushState {
     assert!(p["css"].as_str().unwrap().starts_with('#') && !p["color"].as_str().unwrap().is_empty() && p["icon"] == "folder", "a project carries its badge: {p}");
     assert_eq!(r["result"]["threads"][0]["parent"], "", "a thread says what it is under");
 }
+#[tokio::test] async fn fork_action_returns_the_new_thread() {
+    let (fixture, port) = up("fork-action").await;
+    crate::commands::start(fixture.hub.clone());
+    let mut ws = open(port, "&enc=json").await;
+    let fork = ask(&mut ws, 81, "thread.act", json!({"thread":"t1","action":"fork"})).await;
+    let created = &fork["result"]["thread"];
+    assert_eq!(created["title"], "Fork: First", "{fork}");
+    assert_ne!(created["id"].as_str().unwrap(), "t1");
+}
+
 #[test] fn notify_says_what_the_gate_sent() {
     let n = ext::notify_of(&json!({"$":"PushSent","kind":"needs_you","thread":"t1","ask":"a1","key":"push-1","title":"Bub","body":"Approve?","badge":2,"through":false,"sent":1,"at":9}));
     assert_eq!(n, json!({"kind":"needs_you","thread":"t1","ask":"a1","key":"push-1","title":"Bub","body":"Approve?","badge":2,"through":false,"link":""}));
