@@ -967,7 +967,12 @@ impl Actor {
         let (host, cwd2, text2, prov2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone());
         let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
         if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return }
-        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url).await, speed: String::new(), speed_args: vec![] };
+        let codex_home = if !cfg!(windows) { String::new() }
+            else if let Some((_, dir)) = acct_env.iter().find(|(k, _)| k == "CODEX_HOME") { dir.clone() }
+            else if self.ag.cli.test_mode() { String::new() }
+            else if self.person { self.person_child().map(|pc| pc.home.join(".codex").to_string_lossy().into_owned()).unwrap_or_default() }
+            else { std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(|v| v.to_string_lossy().into_owned()).unwrap_or_else(|| std::path::Path::new(&self.ag.host.user_home).join(".codex").to_string_lossy().into_owned()) };
+        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url).await, speed: String::new(), speed_args: vec![], codex_home };
         let a = providers::TurnIn { pcbparts_url: if a.mcp.pcbparts { crate::mcpx::gen::PCBPARTS.into() } else { String::new() }, ..a };
         // the speed dial (agents/speed.rs): the mode the thread's model takes, passed the provider's way; recorded for the thread's usage (`turn.tier.<thread>`)
         let a = { let info = speed::info_now(); let want = self.ag.world().await.setting(&format!("speed.{th}")).to_string();
@@ -980,7 +985,8 @@ impl Actor {
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args } env.extend(acct_env); env.extend(self.ag.kicad_env.lock().unwrap().clone());
         // the KiCad actor its own scripts (KiStack's layout tools) name themselves by, so their edits are this thread's in the open editor
         env.push(("BACKPLANE_KICAD_ACTOR".into(), crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Agent(&th))));
-        let spawned = if self.person { match self.person_child() { Ok(pc) => proc::spawn_person(&pc, &prog, &args, std::path::Path::new(cwd), &env), Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)) } } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env) };
+        let keep = driver.take_files();
+        let spawned = if self.person { match self.person_child() { Ok(pc) => proc::spawn_person_holding(&pc, &prog, &args, std::path::Path::new(cwd), &env, keep), Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)) } } else { proc::spawn_holding(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env, keep) };
         match spawned {
             Ok(mut p) => { self.ag.memory_watch(&th, p.pid); self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); }
                 if driver.closes_stdin() { p.input = mpsc::channel(1).0 } /* the writer ends once what was queued is written, and the process reads EOF */ self.driver = Some(driver); self.live_proc = Some(Live { input: p.input, pid: p.pid, key: String::new(), person: self.person, _busy: busy }); self.lines = Some(p.lines); self.exit = Some(p.exit) }
@@ -1305,8 +1311,9 @@ impl Actor {
           keep.extend(rules::mcp_to_file(&mut args, &proc::run_dir(&self.ag.run_home()), &format!("{name}-{gen}-{}.mcp.json", proc::unique())).map_err(|e| format!("could not write the MCP config for Claude: {e}"))?); }
         if cfg!(windows) {
             let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
-            rules::prompt_to_file(&mut args, &self.ag.run_home().join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?;
-            keep.extend(rules::json_to_file(&mut args, "--settings", &proc::run_dir(&self.ag.run_home()), &format!("{name}-{gen}.settings.json")).map_err(|e| format!("could not write the settings for Claude: {e}"))?);
+            let rdir = proc::run_dir(&self.ag.run_home());
+            keep.extend(rules::prompt_to_run_file(&mut args, &rdir, &format!("{name}-{gen}-{}.prompt.md", proc::unique())).map_err(|e| format!("could not write the system prompt for Claude: {e}"))?);
+            keep.extend(rules::json_to_file(&mut args, "--settings", &rdir, &format!("{name}-{gen}-{}.settings.json", proc::unique())).map_err(|e| format!("could not write the settings for Claude: {e}"))?);
         }
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load

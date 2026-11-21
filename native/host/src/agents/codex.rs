@@ -15,6 +15,43 @@ pub const BEARER_VAR: &str = "BACKPLANE_MCP_BEARER_TOKEN";
 pub fn split_key(url: &str) -> (&str, &str) { match url.split_once("?k=") { Some((u, k)) => (u, k), None => (url, "") } }
 /// What Codex's env carries for the thread's MCP key (nothing when the url has none).
 pub fn bearer_env(url: &str) -> Vec<(String, String)> { let k = split_key(url).1; if k.is_empty() { vec![] } else { vec![(BEARER_VAR.to_string(), k.to_string())] } }
+/// Codex profile TOML (`$CODEX_HOME/<profile>.config.toml`): carries `developer_instructions`, reasoning settings,
+/// and all MCP server configs off the command line so argv stays tiny on every OS (never hits Windows' 32K limit).
+pub fn profile_toml(a: &ArgsIn) -> String {
+    let mut lines: Vec<String> = vec![];
+    if ["low", "medium", "high", "xhigh"].contains(&a.effort) { lines.push(format!("model_reasoning_effort = {}", Value::String(a.effort.into()))); }
+    if a.think { lines.push("model_reasoning_summary = \"detailed\"".into()); }
+    // the key is not in argv or the config file (F-009): the bare endpoint here, the key in the env var Codex sends as `Authorization: Bearer` (`bearer_env`)
+    lines.push(format!("mcp_servers.backplane.url = {}", Value::String(split_key(a.mcp_url).0.into())));
+    lines.push(format!("mcp_servers.backplane.bearer_token_env_var = \"{BEARER_VAR}\""));
+    if !a.pcbparts.is_empty() { lines.push(format!("mcp_servers.pcbparts.url = {}", Value::String(a.pcbparts.into()))); }
+    let mut i = 0;
+    while i < a.extra.len() {
+        if a.extra[i] == "-c" && i + 1 < a.extra.len() {
+            if let Some((k, v)) = a.extra[i + 1].split_once('=') { lines.push(format!("{k} = {v}")); }
+            i += 2;
+        } else { i += 1; }
+    }
+    if !a.prompt.is_empty() { lines.push(format!("developer_instructions = {}", Value::String(a.prompt.into()))); }
+    lines.join("\n") + "\n"
+}
+/// Codex.args with a profile file (`-p <profile>`) and stdin prompt (`-`): keeps instructions, MCP configs, and the
+/// prompt/handoff completely off argv. Any non-`-c` extra flags stay on argv.
+pub fn args_with_profile(a: &ArgsIn, profile: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec!["exec".into()];
+    if !profile.is_empty() { v.push("-p".into()); v.push(profile.into()); }
+    if a.session.is_empty() { v.extend(["--json".into(), "--skip-git-repo-check".into()]); }
+    else { v.extend(["resume".into(), a.session.into(), "--json".into(), "--skip-git-repo-check".into()]); }
+    v.extend(sandbox(a.runtime));
+    if !a.model.is_empty() { v.push("-m".into()); v.push(a.model.into()) }
+    for i in a.images { v.push("--image".into()); v.push(i.clone()) }
+    let mut i = 0;
+    while i < a.extra.len() {
+        if a.extra[i] == "-c" && i + 1 < a.extra.len() { i += 2; }
+        else { v.push(a.extra[i].clone()); i += 1; }
+    }
+    v.push("-".into()); v
+}
 /// Codex.args: head (fresh or resume), sandbox, model, effort, summaries, images, the MCP servers, the instructions, the text.
 pub fn args(a: &ArgsIn) -> Vec<String> {
     let mut v: Vec<String> = if a.session.is_empty() { vec!["exec".into(), "--json".into(), "--skip-git-repo-check".into()] } else { vec!["exec".into(), "resume".into(), a.session.into(), "--json".into(), "--skip-git-repo-check".into()] };
@@ -193,6 +230,11 @@ mod tests {
         assert!(v.windows(2).any(|w| w == ["-s", "workspace-write"])); assert!(v.windows(2).any(|w| w == ["-m", "m"])); assert!(v.windows(2).any(|w| w == ["--image", "/i.png"]));
         assert!(v.contains(&"developer_instructions=\"P\\\"q\"".to_string())); assert!(v.contains(&"mcp_servers.backplane.url=\"http://u\"".to_string()));
         let b = args(&ArgsIn { session: "S", runtime: "full-access", ..a }); assert_eq!(&b[..5], ["exec", "resume", "S", "--json", "--skip-git-repo-check"]); assert!(b.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        // Windows profile mode: instructions and MCP config live in the profile TOML, prompt on stdin (`-`)
+        let vp = args_with_profile(&a, "bp-1"); assert_eq!(&vp[..5], ["exec", "-p", "bp-1", "--json", "--skip-git-repo-check"]); assert_eq!(vp.last().unwrap(), "-");
+        assert!(!vp.iter().any(|x| x.contains("developer_instructions") || x.contains("mcp_servers") || x == "hi"), "{vp:?}");
+        let bp = args_with_profile(&ArgsIn { session: "S", runtime: "full-access", ..a }, "bp-2"); assert_eq!(&bp[..7], ["exec", "-p", "bp-2", "resume", "S", "--json", "--skip-git-repo-check"]);
+        let toml = profile_toml(&a); assert!(toml.contains("developer_instructions = \"P\\\"q\"") && toml.contains("mcp_servers.backplane.url = \"http://u\"") && toml.contains("model_reasoning_effort = \"high\""));
     }
     #[test] fn a_turn_in_codex_shapes() {
         let mut c = Cx::new("t1"); c.running = true;

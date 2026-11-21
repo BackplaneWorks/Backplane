@@ -31,6 +31,8 @@ pub struct TurnIn {
     /// the speed this turn runs at (agents/speed.rs `effective`: "" Normal, "fast", "ultrafast") and the arguments that pass it (Codex's `-c service_tier`,
     /// Oh My Pi's `--service-tier`); a provider whose fast mode is a model of its own (Grok, OpenCode) has that model in `model` already
     pub speed: String, pub speed_args: Vec<String>,
+    /// Codex's active CODEX_HOME directory (account's own, `~/.codex`, or a private run dir in tests) for per-turn profile files.
+    pub codex_home: String,
 }
 /// The settings the actor copies into `TurnIn.settings` (add a key here when a driver needs one).
 pub const SETTINGS: &[&str] = &["agy.auth", "agy.account", "agy.gcp.project", "agy.gcp.location", "agy.oauth.optin"];
@@ -79,6 +81,9 @@ pub trait Driver: Send {
     /// The process reads nothing after its start lines: its stdin is closed once they are written. Codex: `codex exec` (0.167) reads a piped
     /// stdin to its end as more prompt ("Reading additional input from stdin..."), so an open pipe kept every Codex turn waiting forever.
     fn closes_stdin(&self) -> bool { false }
+    /// Private per-turn files the process reads at startup (e.g. Codex's Windows profile TOML), handed to `proc::spawn_holding`
+    /// so they are removed as soon as the process exits.
+    fn take_files(&mut self) -> Vec<crate::agents::proc::RunFile> { vec![] }
 }
 
 /// A driver and the CLI it runs (resolved through `Cli`: in test mode only the stand-in folder).
