@@ -149,6 +149,15 @@ pub struct Session {
     /// question), so it is not `closing` and never killed; it stays reachable (an Edit attaches to it), the hub listens for the late
     /// answer (`exiting`: closing, the bound from then; an error or a refusal: live as it was)
     pub close_pending: bool,
+    /// the reason of the last Close sent to this KiCad (idle, evicted, appClosed, closeAsked, agentClosed) while KiCad may still act on
+    /// it: a Close the hub stopped waiting on stays queued in KiCad, and when KiCad then ends by itself it is that close, not the person's
+    /// own Quit. Kept through `live_again`; cleared by KiCad's answer (exiting or refused) and by the session's end
+    pub close_asked_as: String,
+    /// a pane attached to it while a Close of the hub's or an agent's was still with KiCad (`close_asked_as`): if that Close then ends it,
+    /// the pane opens KiCad again (`reopen` in the stopped picture), never left on a KiCad closed under it
+    pub close_overtaken: bool,
+    /// stopped by a Close a pane had overtaken (`close_overtaken`): the pane on show attaches again (a fresh KiCad)
+    pub reopen: bool,
     /// the last use (epoch s): an attach, a show, a warm-up's Have, a leave or back, an agent's or a panel's request to it, a job of its
     /// running (`note_use`); the idle close counts from it
     pub touched_at: u64,
@@ -209,7 +218,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, left: String::new(), holder_gone_at: 0, last_pid: 0, busy: false, gone_kinds: vec![], closing_ask: String::new(), close_answered: false, killed_by_hub: false, close_pending: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None), opening: None, lib_opened: None,
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, left: String::new(), holder_gone_at: 0, last_pid: 0, busy: false, gone_kinds: vec![], closing_ask: String::new(), close_answered: false, killed_by_hub: false, close_pending: false, close_asked_as: String::new(), close_overtaken: false, reopen: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None), opening: None, lib_opened: None,
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -278,6 +287,23 @@ impl Session {
     /// forgotten, and its idle time counted from now (not chosen again at the next tick).
     /// The process `pid` has ended: no start waits on it any more.
     pub fn forget_ended(&mut self, pid: u32) { if self.last_pid == pid { self.last_pid = 0; } }
+    /// A Close is sent for `why` (the hub's own or the caller's): pending, not closing (KiCad may be asking the person); false when one
+    /// is pending or the session is closing already (a second Close is answered "pending", never sent beside the first).
+    pub fn close_sent(&mut self, why: &str) -> bool {
+        if self.close_pending || self.closing { return false }
+        self.close_pending = true; self.stop_reason = why.into(); self.close_asked_as = why.into(); true
+    }
+    /// KiCad refused the Close (an answer with a status): live as it was, unless KiCad's own Quit has come meanwhile. True when it changed.
+    pub fn on_close_refused(&mut self, now: u64) -> bool {
+        if !self.close_pending || self.closing { self.close_asked_as.clear(); return false }
+        self.live_again(now); self.close_asked_as.clear(); true
+    }
+    /// The Close got no answer at all (its socket went, or nothing within CLOSE_ANSWER_WAIT_MS): live as it was, unless KiCad's own Quit
+    /// has come meanwhile (the same socket loss: `socket_gone`). Its reason is kept (`close_asked_as`): KiCad may still act on it.
+    pub fn on_close_unanswered(&mut self, now: u64) -> bool {
+        if !self.close_pending || self.closing { return false }
+        self.live_again(now); true
+    }
     pub fn live_again(&mut self, now: u64) { self.closing = false; self.close_pending = false; self.stop_reason.clear(); self.touched_at = now; }
     pub fn detached(mut self, now: u64) -> Self {
         self.container = 0; self.left.clear(); self.touched_at = now; self
@@ -292,7 +318,7 @@ impl Session {
         self.state = "stopped".into(); self.reason = reason.into(); self.pid = 0; self.holder = 0;
         self.frames.clear(); self.dialogs.clear(); self.ended(); self
     }
-    fn ended(&mut self) { self.stopped_at = ipc::now_s(); self.closed_frames.clear(); self.pane_cid.clear(); self.left.clear(); self.holder_gone_at = 0; self.gone_kinds.clear(); self.closing_ask.clear(); self.close_answered = false; self.killed_by_hub = false; self.close_pending = false; }
+    fn ended(&mut self) { self.stopped_at = ipc::now_s(); self.closed_frames.clear(); self.pane_cid.clear(); self.left.clear(); self.holder_gone_at = 0; self.gone_kinds.clear(); self.closing_ask.clear(); self.close_answered = false; self.killed_by_hub = false; self.close_pending = false; self.close_asked_as.clear(); self.close_overtaken = false; }
     /// KiCad's process ended: `how` its exit ("signal 9 (SIGKILL)", "code 1"; empty: code alone), `tail` its last output lines (kept in
     /// the hub's log only). After it was ready it closed unexpectedly (a crash, a kill): said as that, with how, never its output. Before
     /// it was ready its start failed: the reason is an error line of its output, never start-up noise (Fontconfig, GTK, GLib, Mesa).
@@ -315,7 +341,8 @@ impl Session {
         }
         // KiCad quit by itself (its window closed, its own File > Exit): said, so the pane and a later request never read "stopped ()"; a
         // close the hub was asked for (stop_reason set by `close`) keeps its reason
-        if code == 0 && how.is_empty() { let mut s = self; if s.stop_reason.is_empty() { s.stop_reason = "kicadQuit".into(); } return s.stopped("KiCad was closed") }
+        // (a Close the hub stopped waiting on, still queued in KiCad, is what ended it: its reason, not the person's Quit)
+        if code == 0 && how.is_empty() { let mut s = self; if s.stop_reason.is_empty() { s.stop_reason = if s.close_asked_as.is_empty() { "kicadQuit".into() } else { s.close_asked_as.clone() }; } return s.stopped("KiCad was closed") }
         let how = if how.is_empty() { format!("code {code}") } else { how.to_string() };
         if !tail.trim().is_empty() { eprintln!("kicad embed: {} ended ({how}); its last output:\n{}", self.pro, tail.trim_end()) }
         if matches!(self.state.as_str(), "ready" | "unresponsive") {
@@ -366,6 +393,7 @@ impl Session {
             "waits_previous": self.state == "starting" && self.reason == HELD_REASON,
             "closing_ask": self.closing_ask,
             "close_pending": self.close_pending,
+            "reopen": self.reopen,
             "agent_unsaved": json!(agent_unsaved(&self.pro).iter().map(|d| Path::new(d).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>()),
             "dialogs": self.dialogs,
             "notices": self.notices,
@@ -1150,7 +1178,7 @@ pub const APP_GONE_S: u64 = 15;
 /// The sessions to close when the app that showed them is gone: every live one with nothing unsaved (unsaved work is kept: the app
 /// opened again takes it back into its pane).
 pub fn app_gone_victims(sessions: &HashMap<String, Session>) -> Vec<String> {
-    let mut v: Vec<String> = sessions.values().filter(|s| s.is_live() && !s.closing && s.unsaved_docs().is_empty()).map(|s| s.pro.clone()).collect();
+    let mut v: Vec<String> = sessions.values().filter(|s| s.is_live() && !s.closing && !s.close_pending && s.unsaved_docs().is_empty()).map(|s| s.pro.clone()).collect();
     v.sort(); v
 }
 /// Whether an attach must not reuse this session: its KiCad is being closed (the hub's Close: idle, the cap, the person's or an
@@ -1209,7 +1237,9 @@ pub fn exit_unreported(s: &Session, pid: u32, alive: bool) -> bool { !alive && s
 pub fn socket_gone(s: &mut Session) -> bool {
     // (D) only a KiCad that had frames and closed them all: an empty picture (a start, a ready KiCad listing none) is no quit
     if s.closing || !matches!(s.state.as_str(), "ready" | "unresponsive") || s.gone_kinds.is_empty() || frames_left(s) > 0 { return false }
-    s.closing = true; if s.stop_reason.is_empty() { s.stop_reason = "kicadQuit".into(); }
+    // a Close pending meanwhile: this is its end (or the person's own Quit over it); either way not pending any more
+    s.closing = true; s.close_pending = false;
+    if s.stop_reason.is_empty() { s.stop_reason = if s.close_asked_as.is_empty() { "kicadQuit".into() } else { s.close_asked_as.clone() }; }
     true
 }
 /// Whether KiCad refused a Close (an answer with its status, not ok), as against no answer at all (closed, timed out: going or hung).
@@ -2232,8 +2262,8 @@ impl Actor {
     fn retire(&mut self, victim: &str, why: &str) {
         let Some(vs) = self.sessions.get_mut(victim) else { return };
         // asked, not closing yet: `closing` comes with KiCad's answer `exiting` (Msg::CloseAnswered); until then it is never killed and
-        // stays reachable, and the idle close and the cap leave it alone (close_pending)
-        vs.close_pending = true; vs.stop_reason = why.into();
+        // stays reachable, and the idle close and the cap leave it alone (close_pending). One Close at a time
+        if !vs.close_sent(why) { return }
         let vs_snap = vs.clone();
         self.publish(&vs_snap, None);
         if vs_snap.mode == "fork" && !vs_snap.sock.is_empty() {
@@ -2312,6 +2342,8 @@ impl Actor {
                 return;
             }
             if matches!(existing.state.as_str(), "ready" | "unresponsive") {
+                // a pane on a KiCad that still has a Close of the hub's or an agent's to act on: if that Close ends it, the pane opens it again
+                if container > 0 && !existing.close_asked_as.is_empty() && existing.close_asked_as != "closeAsked" { existing.close_overtaken = true; }
                 let prev_cont = existing.container;
                 existing.container = container;
                 existing.pane_cid = pane_cid.clone();
@@ -2702,9 +2734,15 @@ impl Actor {
         }
         // who asked: a desktop client (a connection that opened a view: the person's Close) or anything else (an agent's tool): the
         // person's close keeps the next automatic open away, an agent's does not (viewer.runtime.session closedByPerson / cold)
+        let who = if client_cid(client).is_some() { "closeAsked" } else { "agentClosed" };
         if let Some(x) = self.sessions.get_mut(&pro) {
-            x.stop_reason = if client_cid(client).is_some() { "closeAsked" } else { "agentClosed" }.into();
-            if x.mode == "fork" { x.close_pending = true; let snap = x.clone(); self.publish(&snap, None); } // asked, not closing yet
+            if x.mode == "fork" {
+                // a Close pending or KiCad closing already: answered so at once, never a second beside it (its refusal would undo the second's state)
+                if !x.close_sent(who) {
+                    let _ = reply.send(Ok(json!({"closed": false, "pending": true, "error": "KiCad is already asked to close and has not answered yet"}))); return
+                }
+                let snap = x.clone(); self.publish(&snap, None); // asked, not closing yet
+            } else { x.stop_reason = who.into(); }
         }
         let me = self.me.clone();
         let save_norm = save.trim().to_ascii_lowercase();
@@ -2913,7 +2951,7 @@ impl Actor {
                     if exit_unreported(s, pid, false) {
                         eprintln!("kicad embed: {pro}: pid {pid} has ended but its exit was not reported: recorded now");
                         let me = self.me.clone();
-                        let _ = me.send(Msg::ChildExited { pro, gen, pid, code: if s.killed_by_hub { -9 } else { 0 }, how: if s.killed_by_hub { "signal 9 (SIGKILL)".into() } else { String::new() }, tail: String::new(), reply: None });
+                        let _ = me.send(Msg::ChildExited { pro, gen, pid, code: if s.killed_by_hub { -9 } else { -1 }, how: if s.killed_by_hub { "signal 9 (SIGKILL)".into() } else { "its exit not reported".into() }, tail: String::new(), reply: None });
                     }
                     return
                 }
@@ -2947,7 +2985,7 @@ impl Actor {
             }
             Msg::CloseAnswered { pro, gen, pid, answered, reply } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { if let Some(r) = reply { let _ = r.send(Ok(json!({"closed":true}))); } return };
-                s.closing = true; s.close_answered = answered; s.close_pending = false;
+                s.closing = true; s.close_answered = answered; s.close_pending = false; s.close_asked_as.clear();
                 eprintln!("kicad embed: {pro}: its {} close {}: waiting for KiCad (pid {pid}) to end", s.stop_reason, if answered { "answered exiting" } else { "had no answer" });
                 let snap = s.clone();
                 match reply { Some(r) => self.publish_and_reply(&snap, None, r, Ok(json!({"closed": true, "closing": true}))), None => self.publish(&snap, None) }
@@ -2965,9 +3003,12 @@ impl Actor {
             }
             Msg::CloseUnanswered { pro, gen, why, reply } => {
                 // its exit (if that is what it was) is recorded by ChildExited; a live KiCad whose Close was lost is live as it was
-                if let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live() && s.close_pending) {
-                    eprintln!("kicad embed: {pro}: its {} close got no answer ({why}): not taken for `exiting`; it is live as it was", s.stop_reason);
-                    s.live_again(ipc::now_s()); let snap = s.clone(); self.publish(&snap, None);
+                if let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) {
+                    let was = s.stop_reason.clone();
+                    if s.on_close_unanswered(ipc::now_s()) {
+                        eprintln!("kicad embed: {pro}: its {was} close got no answer ({why}): not taken for `exiting`; it is live as it was");
+                        let snap = s.clone(); self.publish(&snap, None);
+                    }
                 }
                 if let Some(r) = reply { let _ = r.send(Ok(json!({"closed": false, "error": format!("KiCad did not answer the close ({why})")}))); }
             }
@@ -2988,8 +3029,7 @@ impl Actor {
             }
             Msg::CloseRefused { pro, gen } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { return };
-                let was = s.closing; s.live_again(ipc::now_s()); // not chosen again at the next tick
-                if was { let snap = s.clone(); self.publish(&snap, None); }
+                if s.on_close_refused(ipc::now_s()) { let snap = s.clone(); self.publish(&snap, None); } // not chosen again at the next tick
             }
             Msg::FrameOpen { pro, gen, kind, open } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen) else { return };
@@ -3363,7 +3403,9 @@ impl Actor {
                 let was_starting = s.state == "starting";
                 let old = s.clone();
                 *s = s.clone().exited_how(code, &how, &tail);
-                if reply.is_none() { s.last_pid = 0; } // its real exit: gone (a pid used again later is never waited on or killed)
+                if reply.is_none() { s.last_pid = 0; }
+                // ended by a Close a pane had overtaken: the pane on show opens KiCad again (a fresh one), never a pane on a KiCad closed under it
+                s.reopen = old.close_overtaken && !s.is_live(); // its real exit: gone (a pid used again later is never waited on or killed)
                 // bp.13.1: KiCad whose windows were lost with their container saved its autosave and local history and exited with code 3
                 // ("kicad embed: windows lost"): started again on the project at once, with no window to hold it (the next Edit adopts it),
                 // so KiCad offers its Recover Unsaved Changes; the person is never left with a dead pane
@@ -4413,6 +4455,18 @@ pub fn start(hub: &Arc<Hub>) {
 }
 
 pub struct EmbedRpc(mpsc::UnboundedSender<Msg>);
+
+/// An actor of its own for tests that drive its messages in a chosen order (its outgoing messages and info go nowhere).
+#[cfg(test)]
+async fn test_actor() -> (Actor, crate::plat::tmp::TempDir) {
+    let home = crate::plat::tmp::dir("ke-actor");
+    let cfg = crate::hub::Cfg { home: home.to_path_buf(), version: "0.14.0".into(), commit: "test".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+    let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+    let (tx, rx) = mpsc::unbounded_channel(); std::mem::forget(rx);
+    let (info_tx, irx) = mpsc::unbounded_channel(); std::mem::forget(irx);
+    (Actor { hub, me: tx, info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0, pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(),
+        start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(), users: HashSet::new(), users_gone: None, leave_seqs: HashMap::new() }, home)
+}
 
 const METHODS: &[&str] = &[
     "editor.kicad.attach",
@@ -5959,6 +6013,59 @@ mod tests {
         let mut st = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).spawned(41); st.gone_kinds = vec!["PCB".into()];
         assert!(!socket_gone(&mut st), "starting: no quit");
         let e = s.exited_how(-6, "signal 6 (SIGABRT)", ""); assert!(e.closed_unexpectedly(), "a crash, shown");
+    }
+
+    /// A ready KiCad with a board frame for the sequence tests: `pid` a real process (EventsGone and the bound read it).
+    fn seq_session(pid: u32) -> Session {
+        let fr = Frame { kind: "PCB".into(), doc: "/p/a.kicad_pcb".into(), title: String::new(), modified: false, shown: true, realized: true, xid: 1, min_w: 0, min_h: 0 };
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 3, 0).ready("/no/sock", "", 0).spawned(pid); s.frames = vec![fr]; s
+    }
+    #[tokio::test] async fn kicads_own_quit_during_a_pending_close_is_not_undone_by_the_failed_close() {
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        for order in ["events gone, then close unanswered", "close unanswered, then events gone"] {
+            let (mut a, _h) = test_actor().await;
+            let mut s = seq_session(pid); assert!(s.close_sent("idle")); s.gone_kinds = vec!["PCB".into()]; // the person quit over the pending Close
+            a.sessions.insert(s.pro.clone(), s);
+            let gone = Msg::EventsGone { pro: "/p/a.kicad_pro".into(), gen: 3 };
+            let unanswered = Msg::CloseUnanswered { pro: "/p/a.kicad_pro".into(), gen: 3, why: "the socket went".into(), reply: None };
+            if order.starts_with("events") { a.handle(gone); a.handle(unanswered); } else { a.handle(unanswered); a.handle(gone); }
+            let s = &a.sessions["/p/a.kicad_pro"];
+            assert!(s.closing && !s.close_pending, "{order}: KiCad's own end stands: closing (the bound runs), not live again");
+            assert_eq!(s.stop_reason, "idle", "{order}: the hub's Close it ended, not the person's Quit (no hold)");
+        }
+        let _ = child.kill(); let _ = child.wait();
+    }
+    #[tokio::test] async fn a_second_close_while_one_is_pending_keeps_the_first_and_its_reason() {
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let (mut a, _h) = test_actor().await;
+        let mut s = seq_session(pid); assert!(s.close_sent("closeAsked")); a.sessions.insert(s.pro.clone(), s); // the person's Close, pending
+        let (tx, rx) = oneshot::channel();
+        a.handle(Msg::Close { client: 0, pro: "/p/a.kicad_pro".into(), save: "discard".into(), reply: tx }); // an agent's, meanwhile
+        let r = rx.await.unwrap().unwrap(); assert_eq!(r["pending"], json!(true), "answered pending at once, never sent beside it: {r}");
+        assert_eq!(a.sessions["/p/a.kicad_pro"].stop_reason, "closeAsked", "the person's reason kept");
+        a.handle(Msg::CloseRefused { pro: "/p/a.kicad_pro".into(), gen: 3 }); // the first refused: live again, nothing else queued
+        let s = &a.sessions["/p/a.kicad_pro"]; assert!(!s.close_pending && !s.closing && s.stop_reason.is_empty() && s.close_asked_as.is_empty());
+        // a retire while one is pending is no second Close either
+        let mut p = seq_session(pid); assert!(p.close_sent("agentClosed")); a.sessions.insert(p.pro.clone(), p);
+        a.retire("/p/a.kicad_pro", "idle"); assert_eq!(a.sessions["/p/a.kicad_pro"].stop_reason, "agentClosed");
+        let _ = child.kill(); let _ = child.wait();
+    }
+    #[tokio::test] async fn a_close_the_hub_gave_up_on_is_never_the_persons_quit_nor_closes_an_attached_pane() {
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let (mut a, _h) = test_actor().await;
+        let mut s = seq_session(pid); assert!(s.close_sent("idle")); a.sessions.insert(s.pro.clone(), s);
+        a.handle(Msg::CloseUnanswered { pro: "/p/a.kicad_pro".into(), gen: 3, why: "no answer in 30 min".into(), reply: None }); // given up
+        { let s = &a.sessions["/p/a.kicad_pro"]; assert!(!s.close_pending && !s.closing && s.is_live()); assert_eq!(s.close_asked_as, "idle", "KiCad may still act on it"); }
+        // a pane attaches to it meanwhile (the person's Edit), then KiCad acts on the queued Close and ends with code 0
+        let (tx, _rx) = oneshot::channel();
+        a.handle(Msg::Attach { client: 0, pro: "/p/a.kicad_pro".into(), root: "/p".into(), files: Files::default(), frame: "PCB".into(), container: 9001, toplevel: 8001, display: String::new(), wait: false, env: Env::default(), reply: tx });
+        assert!(a.sessions["/p/a.kicad_pro"].close_overtaken, "the attach overtook the queued Close");
+        a.handle(Msg::ChildExited { pro: "/p/a.kicad_pro".into(), gen: 3, pid, code: 0, how: String::new(), tail: String::new(), reply: None });
+        let s = &a.sessions["/p/a.kicad_pro"];
+        assert_ne!(runtime_session(&s.state, &s.reason, &s.stop_reason), "closedByPerson", "never the person's quit: {}", s.stop_reason);
+        assert_eq!(runtime_session(&s.state, &s.reason, &s.stop_reason), "idleStopped");
+        assert!(s.reopen && s.info_json()["reopen"] == json!(true), "the pane on show opens KiCad again");
+        let _ = child.kill(); let _ = child.wait();
     }
     #[test] fn a_start_held_for_the_previous_kicad_is_one_session_that_every_attach_joins() {
         let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
