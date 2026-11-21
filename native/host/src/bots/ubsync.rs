@@ -182,7 +182,7 @@ pub(crate) async fn sync_with(
                 &json!({"uid":uid,"vv":vv,"ops":ops,"mid":mid}),
             )
             .await;
-        if matches!(code, 0 | 501) {
+        if crate::net::rpc::unavailable(code) || code == 501 {
             return Ok(took);
         }
         if code != 200 {
@@ -236,6 +236,13 @@ pub fn start(hub: &Arc<Hub>) {
                 .map(|(id, _, _)| id)
                 .collect();
             seen.retain(|l, _| links.contains(l));
+            let home: Value = serde_json::from_str(&hub.setting("home.at").await.unwrap_or_default())
+                .unwrap_or(Value::Null);
+            let home_link = home["link"].as_str().unwrap_or("");
+            if !home_link.is_empty() {
+                // A retired source has no uid to sync, but its clients still need the home's presence.
+                let _ = hub.far_raw_paired(home_link, "home.state", &json!({})).await;
+            }
             for link in links {
                 if let Err(e) = sync_with(&hub, &link, seen.entry(link.clone()).or_default()).await
                 {

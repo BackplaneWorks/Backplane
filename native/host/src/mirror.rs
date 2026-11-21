@@ -221,6 +221,7 @@ pub fn thread_ref(id: &str, here: &str, local: &dyn Fn(&str) -> bool, far: &[(St
 
 /// Ask one linked machine for its projects' origins (machine_list), bounded. Away only when it does not answer at all (no reply on the link): a
 /// machine that answers and refuses (an older build, not shared) is up, and its origins come from the rows it sends (net/registry.rs).
+/// The signed RPC transport treats upstream gateway errors as an unavailable hub.
 pub async fn ask_origins(hub: &crate::hub::Hub, link: &str) {
     let t0 = std::time::Instant::now();
     let r = match tokio::time::timeout(std::time::Duration::from_secs(15), hub.far_call(link, "machine_list", "machine_list", &serde_json::json!({}))).await { Ok(r) => r, Err(_) => Err("that machine is away".to_string()) };

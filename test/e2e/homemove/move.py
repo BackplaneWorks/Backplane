@@ -33,6 +33,9 @@ def start(name):
                BACKPLANE_BOTS_DIR=os.path.join(home, "botsdir"), BACKPLANE_UBER_GRACE="600", BACKPLANE_MOVE_PAUSE_MS=os.environ.get("BACKPLANE_MOVE_PAUSE_MS", ""), HOME=os.path.join(WORK, f"home-{name}"))
     for k in ("DISPLAY", "WAYLAND_DISPLAY", "BACKPLANE_URL", "BACKPLANE_HOOK_URL", "BACKPLANE_HTTPS_PORT"):
         env.pop(k, None)
+    if name == "B":
+        # The stable webhook name can differ from the URL peers use for RPC.
+        env["BACKPLANE_HOOK_URL"] = f"http://localhost:{PORTS[name]}"
     os.makedirs(env["HOME"], exist_ok=True)
     log = open(os.path.join(WORK, f"{name}.log"), "a")
     procs[name] = subprocess.Popen([BIN, "--home", home, "--port", str(PORTS[name]), "--host", "127.0.0.1", "--no-tailscale", "--foreground", "--headless"],
@@ -193,6 +196,7 @@ def main():
     check("B holds the phone's push registration", any(e.get("$") == "DeviceRegistered" and e.get("token") == "ab" * 32 for e in events(B)))
     s = Socket(A, phone); hello = s.hello(); s.close()
     offer = json.loads(hello.get("hubOffer") or "{}")
+    check("A knows the remote home's id without waiting for mesh discovery", bool(hello.get("home", {}).get("id")))
     check("the phone's hello on A offers B, same credential", offer.get("credential") == "same" and offer.get("url", "").endswith(str(PORTS["B"])), json.dumps(offer))
     s = Socket(B, phone); hb = s.hello(); s.close()
     check("the phone's own token opens B", hb.get("t") == "hello", str(hb)[:120])
@@ -204,7 +208,19 @@ def main():
     A = start("A")
     wait(lambda: rpc(A, "home.status") and True, 10)
 
-    # and back
+    stop("B")
+    def home_is_away():
+        socket = Socket(A, phone)
+        try:
+            home = socket.hello().get("home", {})
+            return home.get("online") is False and home.get("awaySince") and home.get("canMoveHere") is False
+        finally:
+            socket.close()
+
+    check("A reports B offline and disables the move", bool(wait(home_is_away, 40)))
+    B = start("B")
+
+    # and back after the front door has restarted
     r = rpc(A, "home.move", {"to": "back"})
     check("home.move back starts", r.get("started") is True, json.dumps(r)[:200])
     back = wait(lambda: uber(A) == bub and uber(B) == "", 180)
