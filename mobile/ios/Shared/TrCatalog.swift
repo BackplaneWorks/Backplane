@@ -2578,6 +2578,7 @@ gpui.c.kicad.full.screen	Full screen	全画面	Pantalla completa
 gpui.c.kicad.exit.full.screen	Exit full screen	全画面を終了	Salir de pantalla completa
 gpui.c.kicad.the.editor.takes.the.whole	The editor takes the whole window; only this row stays	エディタがウィンドウ全体を使います。この行だけが残ります	El editor ocupa toda la ventana; solo queda esta fila
 gpui.c.kicad.closing	KiCad is closing. The editor opens again once it has closed.	KiCad を閉じています。閉じ終わるとエディタがもう一度開きます。	KiCad se está cerrando. El editor vuelve a abrirse cuando termine de cerrarse.
+gpui.c.kicad.closing.ask	KiCad is waiting for an answer before it closes: "{title}". Its window may be behind another one.	KiCad は閉じる前に応答を待っています:「{title}」。そのウィンドウが別のウィンドウの後ろにあるかもしれません。	KiCad espera una respuesta antes de cerrarse: «{title}». Su ventana puede estar detrás de otra.
 gpui.assets.missing	Assets missing in {dir}: {files}	{dir} にアセットがありません: {files}	Faltan recursos en {dir}: {files}
 gpui.connecting	Connecting…	接続中…	Conectando…
 gpui.connected	Connected	接続済み	Conectado
@@ -5964,6 +5965,9 @@ viewer.tile.bottom	Add below	下に追加	Añadir abajo
 
     /// gpui.kicad.update.missing.admin = KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}.
     static func gpui_kicad_update_missing_admin(version: String, size: String, folder: String) -> String { f("gpui.kicad.update.missing.admin", ["version": version, "size": size, "folder": folder]) }
+
+    /// gpui.c.kicad.closing.ask = KiCad is waiting for an answer before it closes: "{title}". Its window may be behind another one.
+    static func gpui_c_kicad_closing_ask(title: String) -> String { f("gpui.c.kicad.closing.ask", ["title": title]) }
 
     /// gpui.assets.missing = Assets missing in {dir}: {files}
     static func gpui_assets_missing(dir: String, files: String) -> String { f("gpui.assets.missing", ["dir": dir, "files": files]) }
