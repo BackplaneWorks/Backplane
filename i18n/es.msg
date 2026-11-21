@@ -4879,3 +4879,4 @@ viewer.tile.left = Añadir a la izquierda
 viewer.tile.right = Añadir a la derecha
 viewer.tile.top = Añadir arriba
 viewer.tile.bottom = Añadir abajo
+web.logout.failed = No se pudo confirmar el cierre de sesión. Inténtalo de nuevo.
