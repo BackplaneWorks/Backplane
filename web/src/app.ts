@@ -756,11 +756,11 @@ function mountApp(): void {
       const w = Math.max(100, Math.min(8192, Math.round(viewerEl.clientWidth || Math.round(window.innerWidth * 0.5) || 960)));
       const h = Math.max(100, Math.min(8192, Math.round(viewerEl.clientHeight || Math.round(window.innerHeight - 60) || 640)));
       void hub
-        .rpc<{ tiles?: Array<{ overlay?: unknown }> }>("viewer.layout", { thread: threadId, bounds: [w, h] })
+        .rpc<{ tiles?: Array<{ overlay?: unknown; version?: unknown }> }>("viewer.layout", { thread: threadId, bounds: [w, h] })
         .then((lay) => {
           if (gen !== threadGen || selectedThreadId !== threadId || activeRailKind) return;
           const tiles = Array.isArray(lay?.tiles) ? lay.tiles : [];
-          if (tiles.length >= 2 || tiles.some((x) => x && x.overlay != null)) {
+          if (tiles.length >= 2 || tiles.some((x) => x && (x.overlay != null || x.version != null))) {
             activeRailKind = "split";
             rail.setActive("split");
             viewerEl.classList.remove("bp-hidden");

@@ -103,7 +103,28 @@ describe("tiles-state", () => {
       keys: ["0|/p|board.kicad_pcb"],
     });
     expect(second.emptyTileIds).toEqual([]);
-    expect(router.replayForTile("b2")).toEqual({ plots: ["FRAME_BOARD_V1"], nones: [] });
+    expect(router.replayForTile("b2")).toEqual({ plots: ["FRAME_BOARD_V1"], solids: [], nones: [] });
+
+    // Record 3D solid base mesh + parts reset + part batch, then add duplicate 3D tile sharing same key
+    const solidRouter = new TileFrameRouter<string, string>();
+    solidRouter.commitWatch(["s1"], {
+      thread: "t1",
+      tiles: { s1: ["2|/p|board.kicad_pcb"] },
+      keys: ["2|/p|board.kicad_pcb"],
+    });
+    expect(solidRouter.recordSolid("2|/p|board.kicad_pcb", "BASE_MESH", "base")).toEqual(["s1"]);
+    expect(solidRouter.recordSolid("2|/p|board.kicad_pcb", "PARTS_HDR", "parts-reset")).toEqual(["s1"]);
+    expect(solidRouter.recordSolid("2|/p|board.kicad_pcb", "PART_U1", "part")).toEqual(["s1"]);
+    solidRouter.commitWatch(["s1", "s2"], {
+      thread: "t1",
+      tiles: { s1: ["2|/p|board.kicad_pcb"], s2: ["2|/p|board.kicad_pcb"] },
+      keys: ["2|/p|board.kicad_pcb"],
+    });
+    expect(solidRouter.replayForTile("s2")).toEqual({
+      plots: [],
+      solids: ["BASE_MESH", "PARTS_HDR", "PART_U1"],
+      nones: [],
+    });
 
     // Replacement with zero keys reports tile in emptyTileIds so stale artwork is cleared
     const third = router.commitWatch(["b1"], {
@@ -112,7 +133,7 @@ describe("tiles-state", () => {
       keys: [],
     });
     expect(third.emptyTileIds).toEqual(["b1"]);
-    expect(router.replayForTile("b1")).toEqual({ plots: [], nones: [] });
+    expect(router.replayForTile("b1")).toEqual({ plots: [], solids: [], nones: [] });
 
     // Thread reset isolates all state
     router.reset();
@@ -158,6 +179,21 @@ describe("tiles-state", () => {
       tiles: [{ ...altSingle.tiles[0], kind: "board", overlay: { kind: "gerbers", source: "mfg/gerbers", mode: "diff" } }],
     };
     expect(classifyLayoutTransition(withOverlay)).toEqual({ action: "grid" });
+
+    // Lone versioned/historical tile stays in grid (never collapses to live single-pane)
+    const loneHistorical: LayoutReply = {
+      ...altSingle,
+      tiles: [
+        {
+          ...altSingle.tiles[0],
+          kind: "board",
+          source: "ecc83-pp.kicad_pcb",
+          version: { sourceId: "git", id: "abc1234", label: "Turn 1" },
+        },
+      ],
+    };
+    expect(isTiledOrOverlayLayout(loneHistorical)).toBe(true);
+    expect(classifyLayoutTransition(loneHistorical)).toEqual({ action: "grid" });
   });
 
   test("clamps bounds, splitter ratios, and formats refusals", () => {

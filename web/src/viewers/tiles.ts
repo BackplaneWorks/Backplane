@@ -85,7 +85,7 @@ export class TileGridController {
 
   private threadId = "";
   private layout: LayoutReply | null = null;
-  private router = new TileFrameRouter<Plot2DFrame>();
+  private router = new TileFrameRouter<Plot2DFrame, Record<string, CborValue>>();
   private heldChunks = new Map<string, PlotChunk[]>();
   private instances = new Map<string, TileInstance>();
   private splitEls: HTMLElement[] = [];
@@ -385,6 +385,9 @@ export class TileGridController {
       if (replay.plots.length > 0 && inst.plot2d) {
         inst.overlayEl.hidden = true;
         for (const f of replay.plots) inst.plot2d.setFrame(f);
+      } else if (replay.solids.length > 0 && inst.solid3d) {
+        inst.overlayEl.hidden = true;
+        for (const sf of replay.solids) inst.solid3d.handleFrame(sf);
       } else if (replay.nones.length > 0) {
         const last = replay.nones[replay.nones.length - 1];
         this.setTileOverlay(inst.overlayEl, last.retryable ? "error" : "empty", last.none || "Nothing to display", last.retryable);
@@ -523,6 +526,9 @@ export class TileGridController {
         if (replay.plots.length > 0 && inst.plot2d) {
           inst.overlayEl.hidden = true;
           for (const f of replay.plots) inst.plot2d.setFrame(f);
+        } else if (replay.solids.length > 0 && inst.solid3d) {
+          inst.overlayEl.hidden = true;
+          for (const sf of replay.solids) inst.solid3d.handleFrame(sf);
         } else if (replay.nones.length > 0) {
           const last = replay.nones[replay.nones.length - 1];
           this.setTileOverlay(inst.overlayEl, last.retryable ? "error" : "empty", last.none || "Nothing to display", last.retryable);
@@ -899,9 +905,13 @@ export class TileGridController {
     }
 
     if (map.mesh instanceof Uint8Array || map.parts) {
-      const targets = Object.entries(this.router.tileKeys)
-        .filter(([, ks]) => Array.isArray(ks) && ks.includes(key))
-        .map(([id]) => id);
+      const solidKind =
+        map.mesh instanceof Uint8Array && !map.part
+          ? "base"
+          : map.parts
+            ? "parts-reset"
+            : "part";
+      const targets = this.router.recordSolid(key, map, solidKind);
       for (const tileId of targets) {
         const inst = this.instances.get(tileId);
         if (inst?.solid3d) {

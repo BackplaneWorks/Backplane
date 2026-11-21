@@ -39,6 +39,12 @@ export interface TileOverlay {
   mode: OverlayMode;
 }
 
+export interface TileVersion {
+  sourceId?: string;
+  id?: string;
+  label?: string;
+}
+
 export interface LayoutTile {
   id: string;
   kind: string;
@@ -47,6 +53,7 @@ export interface LayoutTile {
   focused: boolean;
   visible: boolean;
   rect: LayoutRect | null;
+  version?: TileVersion | null;
   overlay?: TileOverlay | null;
   unavailable?: boolean;
 }
@@ -90,11 +97,11 @@ export function isTileKind(kind: string): kind is TileKind {
   return (TILE_KINDS as readonly string[]).includes(kind);
 }
 
-/** True when a hub layout needs the multi-tile/overlay renderer (2+ tiles or an active overlay). */
+/** True when a hub layout needs the tile/overlay renderer (2+ tiles, an active overlay, or a versioned/historical tile). */
 export function isTiledOrOverlayLayout(layout: LayoutReply | null | undefined): boolean {
   if (!layout || !Array.isArray(layout.tiles)) return false;
   if (layout.tiles.length >= 2) return true;
-  return layout.tiles.some((t) => t.overlay != null);
+  return layout.tiles.some((t) => t.overlay != null || t.version != null);
 }
 
 /**
@@ -220,12 +227,13 @@ export const MAX_TILE_PENDING_BYTES = 16 << 20;
  * Pure frame routing, bounded early-frame queue, and latest-frame replay cache for `TileGridController`.
  * Isolated per thread/watch lifecycle via `reset()`.
  */
-export class TileFrameRouter<TPlot = unknown> {
+export class TileFrameRouter<TPlot = unknown, TSolid = unknown> {
   watchPending = false;
   tileKeys: Record<string, string[]> = {};
   private pending: QueuedTileFrame[] = [];
   private pendingBytes = 0;
   private latestPlot = new Map<string, TPlot>();
+  private latestSolid = new Map<string, TSolid[]>();
   private latestNone = new Map<string, CachedTileNone>();
 
   reset(): void {
@@ -234,6 +242,7 @@ export class TileFrameRouter<TPlot = unknown> {
     this.pending = [];
     this.pendingBytes = 0;
     this.latestPlot.clear();
+    this.latestSolid.clear();
     this.latestNone.clear();
   }
 
@@ -282,6 +291,9 @@ export class TileFrameRouter<TPlot = unknown> {
     for (const k of Array.from(this.latestPlot.keys())) {
       if (!liveKeys.has(k)) this.latestPlot.delete(k);
     }
+    for (const k of Array.from(this.latestSolid.keys())) {
+      if (!liveKeys.has(k)) this.latestSolid.delete(k);
+    }
     for (const k of Array.from(this.latestNone.keys())) {
       if (!liveKeys.has(k)) this.latestNone.delete(k);
     }
@@ -312,24 +324,52 @@ export class TileFrameRouter<TPlot = unknown> {
     return routeFrameToTiles(key, this.tileKeys);
   }
 
+  /**
+   * Cache a 3D solid frame sequence (base mesh, parts header, and streamed part batches)
+   * so a newly mounted duplicate 3D tile sharing an unchanged subscription replays immediately.
+   */
+  recordSolid(
+    key: string,
+    frame: TSolid,
+    kind: "base" | "parts-reset" | "part"
+  ): string[] {
+    this.latestNone.delete(key);
+    const cur = this.latestSolid.get(key) || [];
+    if (kind === "base") {
+      this.latestSolid.set(key, [frame]);
+    } else if (kind === "parts-reset") {
+      // Preserve base board mesh (first frame if present) and restart parts sequence
+      const next = cur.length > 0 ? [cur[0], frame] : [frame];
+      this.latestSolid.set(key, next);
+    } else {
+      cur.push(frame);
+      this.latestSolid.set(key, cur);
+    }
+    return routeFrameToTiles(key, this.tileKeys);
+  }
+
   recordNone(key: string, none: string, retryable: boolean): string[] {
     this.latestPlot.delete(key);
+    this.latestSolid.delete(key);
     this.latestNone.set(key, { none, retryable });
     return routeFrameToTiles(key, this.tileKeys);
   }
 
-  /** Replay the latest cached plot or none status for a newly mounted tile sharing an unchanged subscription. */
-  replayForTile(tileId: string): { plots: TPlot[]; nones: CachedTileNone[] } {
+  /** Replay the latest cached 2D plot, 3D solid sequence, or none status for a newly mounted tile sharing an unchanged subscription. */
+  replayForTile(tileId: string): { plots: TPlot[]; solids: TSolid[]; nones: CachedTileNone[] } {
     const keys = this.tileKeys[tileId];
-    if (!Array.isArray(keys) || keys.length === 0) return { plots: [], nones: [] };
+    if (!Array.isArray(keys) || keys.length === 0) return { plots: [], solids: [], nones: [] };
     const plots: TPlot[] = [];
+    const solids: TSolid[] = [];
     const nones: CachedTileNone[] = [];
     for (const k of keys) {
       const p = this.latestPlot.get(k);
       if (p !== undefined) plots.push(p);
+      const s = this.latestSolid.get(k);
+      if (s && s.length > 0) solids.push(...s);
       const n = this.latestNone.get(k);
       if (n !== undefined) nones.push(n);
     }
-    return { plots, nones };
+    return { plots, solids, nones };
   }
 }
