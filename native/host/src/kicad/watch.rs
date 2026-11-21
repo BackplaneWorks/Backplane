@@ -91,7 +91,7 @@ pub fn fnv(s: &str) -> u32 { s.chars().fold(2166136261u32, |h, c| (h ^ c as u32)
 struct Src { kind: u32, root: String, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool, parts: Vec<Arc<Vec<u8>>>, stop: Option<Arc<std::sync::atomic::AtomicBool>>, focus: Option<[f64; 6]> }
 /// `kept`: the id (`plot::mesh_id`) of the model the client already holds from an earlier visit; that model is not sent again
 /// `parts_at`: how many of its source's part frames this watcher has been sent
-struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, parts_at: usize }
+struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, kept_chunks: std::collections::HashSet<u64>, with_chunk_hashes: bool, parts_at: usize }
 /// A view opened on a project that has no board or schematic yet ("No schematic in this project yet"): what it asked for, kept so the
 /// drawing appears by itself when an agent makes the file (`poll` looks for it; any other watch or a stop by that client ends the wait).
 #[derive(Clone, Debug, PartialEq)]
@@ -104,7 +104,7 @@ fn own_file(kind: u32, root: &str) -> String { let f = project::read(root); if k
 /// `mech_warming`: the projects whose Mech parts are being meshed ahead (warm_mech)
 /// `waiting`: the clients whose view shows "no board/schematic yet", `wait_busy` while their projects are being looked at
 /// `warming`: each board's prewarm converting now, by its file: its stop, set when the board's 3D view starts its own parts (start_parts)
-struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, sets: HashMap<u64, Option<String>>, sheet_sent: HashMap<(u64, String), (String, String, Stamp)>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String>, warming: HashMap<String, Arc<std::sync::atomic::AtomicBool>> }
+struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, client_kept_chunks: HashMap<u64, std::collections::HashSet<u64>>, sets: HashMap<u64, Option<String>>, sheet_sent: HashMap<(u64, String), (String, String, Stamp)>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String>, warming: HashMap<String, Arc<std::sync::atomic::AtomicBool>> }
 
 /// The most distinct sources one client's `kicad.watch.set` holds.
 pub const MAX_WATCH_SOURCES: usize = 12;
@@ -158,7 +158,8 @@ impl Plots {
               let (mesh, parts_at) = had.iter().position(|h| h.0 == ky).map(|i| { let h = had.swap_remove(i); (h.1, h.2) }).unwrap_or_default();
               let held_already = fold && st.subs.get(&client).is_some_and(|v| v.iter().any(|s| s.key == ky));
               let room = st.subs.get(&client).map_or(0, |v| v.len()) < MAX_WATCH_SOURCES;
-              if !held_already && (!fold || room) { st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if !force && solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, parts_at }); }
+              let (kc, wch) = if force { (Default::default(), false) } else { match st.client_kept_chunks.get(&client) { Some(s) => (s.clone(), true), None => (Default::default(), false) } };
+              if !held_already && (!fold || room) { st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if !force && solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, kept_chunks: kc, with_chunk_hashes: wch, parts_at }); }
               else if !held_already { continue }
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: f.clone(), ..Default::default() });
               s.root = root.to_string();
@@ -202,7 +203,7 @@ impl Plots {
                   let held = st.subs.get(&client).is_some_and(|v| v.iter().any(|s| s.key == ky));
                   if held && !force { continue }
                   if !held && st.subs.get(&client).map_or(0, |v| v.len()) >= MAX_WATCH_SOURCES { continue }
-                  if held { /* a forced re-read of a member: its source is reset below */ } else { st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 }); }
+                  if held { /* a forced re-read of a member: its source is reset below */ } else { st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, kept_chunks: Default::default(), with_chunk_hashes: false, parts_at: 0 }); }
                   let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: file.clone(), ..Default::default() });
                   s.root = root.to_string(); s.file = file;
                   if force { s.plot = None; s.stamp = None; }
@@ -211,7 +212,7 @@ impl Plots {
               if !force {
                   if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
               }
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 });
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, kept_chunks: Default::default(), with_chunk_hashes: false, parts_at: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: file.clone(), ..Default::default() });
               s.root = root.to_string();
               s.file = file;
@@ -258,7 +259,7 @@ impl Plots {
               if !force {
                   if let Some(i) = old.iter().position(|o| o.key == ky) { let o = old.swap_remove(i); st.subs.entry(client).or_default().push(o); continue }
               }
-              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 });
+              st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, kept_chunks: Default::default(), with_chunk_hashes: false, parts_at: 0 });
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: file.clone(), ..Default::default() });
               s.root = root.to_string();
               s.file = file;
@@ -299,6 +300,11 @@ impl Plots {
     pub fn set_thread(&self, client: u64) -> Option<Option<String>> { self.st.lock().unwrap().sets.get(&client).cloned() }
     /// The connection lets its set go (the presenter's leave to one tile, or another thread's page): the next plain watch replaces what it holds as usual.
     pub fn release_set(&self, client: u64) { let mut st = self.st.lock().unwrap(); st.sets.remove(&client); st.sheet_sent.retain(|(c, _), _| *c != client); }
+    /// Record a client's persistent 2D chunk hash cache (`keptChunks`) before `watch` fans out.
+    pub fn set_kept_chunks(&self, client: u64, hashes: std::collections::HashSet<u64>) {
+        let mut st = self.st.lock().unwrap();
+        st.client_kept_chunks.insert(client, hashes);
+    }
     /// A watch that starts afresh (`fresh`, the phones'): what this client was sent is not taken as held, so the next watch sends its model
     /// and parts again (`kept` still names a model it has). A phone drops the last view's model and parts when it switches views; the hub
     /// keeping them as sent left Split after 3D (and 3D after Split) on a bare board, or on "Loading 3D" until the board changed.
@@ -392,8 +398,9 @@ impl Plots {
                       else if sub.kept != 0 && plot::mesh_id(&so.d) == sub.kept { sub.mesh = so.d.clone(); sub.kept = 0; true } // the client's cached model is this one
                       else { let ok = hub.push_raw(*client, plot::solid_frame(ky, so)); sub.mesh = so.d.clone(); sub.kept = 0; ok }
                   } else {
-                      let rs = plot::delta(&p.cs, &sub.held);
-                      let ok = if !sub.fresh && plot::quiet(&rs, sub.held.len()) { true } else { hub.push_raw(*client, plot::frame(ky, &family(ky), &sub.base, p, &rs)) };
+                      let rs = if sub.with_chunk_hashes { plot::delta_kept(&p.cs, &sub.held, &sub.kept_chunks) } else { plot::delta(&p.cs, &sub.held) };
+                      let ok = if !sub.fresh && plot::quiet(&rs, sub.held.len()) { true } else { hub.push_raw(*client, plot::frame_kept(ky, &family(ky), &sub.base, p, &rs, sub.with_chunk_hashes)) };
+                      if sub.with_chunk_hashes { for c in &p.cs { sub.kept_chunks.insert(plot::chunk_id(c)); } }
                       sub.held = p.cs.clone(); sub.fresh = false; sub.base = ky.to_string(); ok
                   };
                   if !ok { gone.push(*client) }
@@ -707,7 +714,7 @@ impl Plots {
             { let mut st = self.st.lock().unwrap();
               // clients that went away
               let gone: Vec<u64> = st.subs.keys().chain(st.waiting.keys()).copied().filter(|c| !hub.is_attached(*c)).collect();
-              for c in gone { st.subs.remove(&c); st.sets.remove(&c); st.sheet_sent.retain(|(cl, _), _| *cl != c); st.waiting.remove(&c); }
+              for c in gone { st.subs.remove(&c); st.client_kept_chunks.remove(&c); st.sets.remove(&c); st.sheet_sent.retain(|(cl, _), _| *cl != c); st.waiting.remove(&c); }
               self.gc(&mut st);
               if st.subs.is_empty() && st.waiting.is_empty() { st.polling = false; return }
               let watched: std::collections::HashSet<String> = st.subs.values().flatten().map(|s| s.key.clone()).collect();
@@ -872,6 +879,10 @@ impl RpcHandler for KicadRpc {
                         if p.get("leave").and_then(Value::as_bool) == Some(true) || set_for != crate::session::target_thread(who.client) { self.0.release_set(who.client) }
                     }
                     let ticket = crate::session::begin_watch(who.client);
+                    if let Some(arr) = p.get("keptChunks").and_then(Value::as_array) {
+                        let hashes: std::collections::HashSet<u64> = arr.iter().take(4096).filter_map(|v| v.as_str()).filter_map(|h| u64::from_str_radix(h, 16).ok()).collect();
+                        self.0.set_kept_chunks(who.client, hashes);
+                    }
                     let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board, force) }
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k), force) };
                     if crate::session::finish_watch(who.client, ticket, p) { hub.bump_views(); }
@@ -1321,7 +1332,7 @@ mod tests {
         let mut out = hub.attach(7);
         { let mut st = plots.st.lock().unwrap();
           st.srcs.insert(ky.clone(), Src { kind: 2, root: "/p".into(), file: "/p/mech/lid.step".into(), stamp: None, busy: true, plot: None, again: false, parts: vec![], stop: None, focus: None });
-          st.subs.insert(7, vec![Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 }]); }
+          st.subs.insert(7, vec![Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, kept_chunks: Default::default(), with_chunk_hashes: false, parts_at: 0 }]); }
         let raw = |out: &mut crate::hub::Outbox| { let mut v = vec![]; while let Ok(o) = out.try_recv() { if let Out::Raw(b) = o { v.push(String::from_utf8_lossy(&b).into_owned()) } } v };
         let old = plots.step_stream(&ky);
         let stop = plots.step_stream(&ky);

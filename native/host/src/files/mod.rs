@@ -4,6 +4,7 @@ pub mod dir;
 pub mod export10;
 pub mod attach;
 pub mod attach_http;
+pub mod blob;
 pub mod fm;
 pub mod imgroutes;
 pub mod mimg;
@@ -32,6 +33,7 @@ pub fn start(hub: Arc<Hub>) {
     watch_dir::start(hub.clone());
     hub.register_http(Arc::new(Img));
     hub.register_http(Arc::new(webimg::WebImg));
+    hub.register_http(Arc::new(blob::BlobHttp));
     hub.register_http(Arc::new(Downloads));
     hub.register_rpc(Arc::new(Files));
     hub.register_rpc(Arc::new(GitRpc));

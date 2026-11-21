@@ -539,6 +539,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                 let mut q = machines::on_link(json!({"kind":kind,"root":root,"path":path}), th);
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() }
+                if p.get("keptChunks").is_some_and(Value::is_array) { q["keptChunks"] = p["keptChunks"].clone() }
                 if p["force"] == true { q["force"] = json!(true) }
                 if leaving { q["leave"] = json!(true) }
                 // Split of a board picked in the viewer (`viewer.files` → `boards`, a row's `pcb`): its file and the schematic beside it are the panes' sources
