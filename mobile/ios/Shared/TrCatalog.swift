@@ -4743,6 +4743,34 @@ viewer.tile.left	Add on the left	左に追加	Añadir a la izquierda
 viewer.tile.right	Add on the right	右に追加	Añadir a la derecha
 viewer.tile.top	Add above	上に追加	Añadir arriba
 viewer.tile.bottom	Add below	下に追加	Añadir abajo
+web.pair.subtitle	Pair this browser with your hub. Approve the 6-digit code in Backplane › Settings › Devices.	このブラウザーをハブとペアリングします。Backplane › 設定 › デバイス で 6 桁のコードを承認してください。	Vincula este navegador con tu hub. Aprueba el código de 6 dígitos en Backplane › Ajustes › Dispositivos.
+web.pair.name	Browser name	ブラウザー名	Nombre del navegador
+web.pair.request	Request pairing	ペアリングをリクエスト	Solicitar vinculación
+web.pair.code	Comparison code	確認コード	Código de comparación
+web.pair.approve.in	Approve on desktop or paired phone · expires in {time}	デスクトップまたはペアリング済みの端末で承認してください · 有効期限 {time}	Aprueba en el escritorio o en un teléfono vinculado · caduca en {time}
+web.pair.expired	Pairing code expired. Request a new code to try again.	ペアリングコードの有効期限が切れました。新しいコードをリクエストしてください。	El código de vinculación caducó. Solicita uno nuevo para intentarlo otra vez.
+web.pair.approved	Approved. Opening Backplane…	承認されました。Backplane を開いています…	Aprobado. Abriendo Backplane…
+web.pair.denied	Pairing request was denied.	ペアリングのリクエストが拒否されました。	Se rechazó la solicitud de vinculación.
+web.pair.cancelled	Cancelled.	キャンセルしました。	Cancelado.
+web.pair.requesting	Requesting pairing code…	ペアリングコードをリクエストしています…	Solicitando código de vinculación…
+web.pair.failed	Pairing request failed ({status})	ペアリングのリクエストに失敗しました ({status})	Falló la solicitud de vinculación ({status})
+web.pair.ratelimited	Too many pairing attempts. Wait a moment and try again.	ペアリングの試行回数が多すぎます。しばらく待ってからやり直してください。	Demasiados intentos de vinculación. Espera un momento e inténtalo de nuevo.
+web.pair.nocode	Hub did not return a comparison code.	ハブから確認コードが返されませんでした。	El hub no devolvió un código de comparación.
+web.pair.unreachable	Could not reach the hub. Check your tailnet connection.	ハブに接続できませんでした。tailnet の接続を確認してください。	No se pudo conectar con el hub. Comprueba tu conexión de tailnet.
+web.chat.loading	Loading messages…	メッセージを読み込んでいます…	Cargando mensajes…
+web.chat.choose	Choose a project thread on the left to begin.	左側からプロジェクトのスレッドを選んで開始してください。	Elige un hilo de proyecto a la izquierda para empezar.
+web.chat.empty	No messages yet. Type below to start a turn.	まだメッセージはありません。下に入力して開始してください。	Aún no hay mensajes. Escribe abajo para iniciar un turno.
+web.chat.streaming	Streaming…	受信中…	Transmitiendo…
+web.chat.finished	Finished {time}	完了 {time}	Terminado {time}
+web.chat.finished.dur	Finished {time} · {dur}	完了 {time} · {dur}	Terminado {time} · {dur}
+web.chat.answer.placeholder	Type answer…	回答を入力…	Escribe una respuesta…
+web.chat.answer.btn	Answer	回答	Responder
+web.chat.answered	Answered: {answer}	回答済み: {answer}	Respondido: {answer}
+web.chat.review.mode	Review mode	レビューモード	Modo de revisión
+web.composer.attach	Attach image	画像を添付	Adjuntar imagen
+web.composer.voice	Voice dictation	音声入力	Dictado por voz
+web.composer.unsupported	Unsupported image type: {type}	未対応の画像形式です: {type}	Tipo de imagen no compatible: {type}
+web.composer.maximages	At most {max} images per message.	1 件のメッセージに添付できる画像は最大 {max} 枚です。	Como máximo {max} imágenes por mensaje.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7630,4 +7658,25 @@ viewer.tile.bottom	Add below	下に追加	Añadir abajo
 
     /// gpui.c.kicad.openfailed = The {editor} did not open
     static func gpui_c_kicad_openfailed(editor: String) -> String { f("gpui.c.kicad.openfailed", ["editor": editor]) }
+
+    /// web.pair.approve.in = Approve on desktop or paired phone · expires in {time}
+    static func web_pair_approve_in(time: String) -> String { f("web.pair.approve.in", ["time": time]) }
+
+    /// web.pair.failed = Pairing request failed ({status})
+    static func web_pair_failed(status: String) -> String { f("web.pair.failed", ["status": status]) }
+
+    /// web.chat.finished = Finished {time}
+    static func web_chat_finished(time: String) -> String { f("web.chat.finished", ["time": time]) }
+
+    /// web.chat.finished.dur = Finished {time} · {dur}
+    static func web_chat_finished_dur(time: String, dur: String) -> String { f("web.chat.finished.dur", ["time": time, "dur": dur]) }
+
+    /// web.chat.answered = Answered: {answer}
+    static func web_chat_answered(answer: String) -> String { f("web.chat.answered", ["answer": answer]) }
+
+    /// web.composer.unsupported = Unsupported image type: {type}
+    static func web_composer_unsupported(type: String) -> String { f("web.composer.unsupported", ["type": type]) }
+
+    /// web.composer.maximages = At most {max} images per message.
+    static func web_composer_maximages(max: String) -> String { f("web.composer.maximages", ["max": max]) }
 }
