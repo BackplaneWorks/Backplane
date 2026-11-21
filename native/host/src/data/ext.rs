@@ -383,6 +383,16 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
 async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Value> {
     let (th, act) = (s(p, "thread"), s(p, "action"));
     if !known_any(hub, &*hub.model().await, th) { return Err(err("unknown thread")) }
+    if act == "fork" {
+        let source = thread_now(hub, th).await?;
+        let reply = rpc(hub, c, "thread.fork", json!({"thread":th})).await?;
+        let id = reply["thread"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| err("no thread was made"))?;
+        if machines::is_far(id) {
+            let g = hub.model().await;
+            return Ok(json!({"thread":far_made(hub, &g, id, s(&source, "project"), &format!("Fork: {}", s(&source, "title")))}));
+        }
+        return thread_now(hub, id).await.map(|t| json!({"thread":t}));
+    }
     if act == "rename" {
         if s(p, "title").trim().is_empty() { return Err(err("title")) }
         rpc(hub, c, "thread.rename", json!({"thread":th,"title":s(p, "title")})).await?;
@@ -393,7 +403,7 @@ async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Va
     } else if THREAD_ACTS.contains(&act) {
         rpc(hub, c, &format!("thread.{act}"), json!({"thread":th})).await?;
         if act == "delete" { return Ok(json!({})) }
-    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, reparent or rename")) }
+    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, reparent, rename or fork")) }
     thread_now(hub, th).await.map(|t| json!({"thread":t}))
 }
 

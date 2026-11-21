@@ -208,6 +208,7 @@ mod tests {
     #[test]
     fn browser_can_manage_threads_without_changing_provider_credentials() {
         use serde_json::json;
+        assert_eq!(policy("thread.act", &json!({"action":"fork"})), Policy::Activity);
         assert!(allowed("thread.act", &json!({"action":"rename"})));
         assert!(allowed("thread.pick", &json!({"action":"model"})));
         assert!(!allowed("thread.pick", &json!({"action":"account"})));
