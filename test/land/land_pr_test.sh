@@ -84,7 +84,7 @@ land > "$T/o11b"; ! grep -q "older than origin/main's" "$T/o11b"; ok $? "a land.
 ! grep -n 'push.*refs/heads/main\|push origin HEAD:main\|push.*HEAD:main' "$ROOT/scripts/land.sh" | grep -v '^[0-9]*:#'; ok $? "land.sh has no push to main"
 # 13. an edit of land.sh while a land runs (here from its gate) changes nothing in that run: it ends as it would have, not on a syntax error
 echo three > "$LANE/doc3"; g add -A; g commit -qm "docs: three"
-LAND_TEST="printf '\n( ((\n' >> $LANE/scripts/land.sh" land > "$T/o13"; rc=$?; g checkout -q scripts/land.sh
+LAND_TEST="printf '\n( ((\n' >> $LANE/scripts/land.sh; git -C $LANE update-index --skip-worktree scripts/land.sh" land > "$T/o13"; rc=$?; g update-index --no-skip-worktree scripts/land.sh; g checkout -q scripts/land.sh
 [ $rc = 3 ] && ! grep -qi "syntax error" "$T/o13" && grep -q "waiting for an approving review\|blocked by a rule" "$T/o13"; ok $? "land.sh edited under a running land: the run is unchanged (rc $rc)"
 ! ls "${TMPDIR:-/tmp}"/land-run.* >/dev/null 2>&1; ok $? "the private copy is removed"
 # 14. a token that is not i2cjak's on GitHub: no pull request is opened or merged
@@ -93,13 +93,13 @@ echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; nm=$(wc -l < "$
 # 15. a lane commit not made as i2cjak <build@amemb.com> is refused, with the fix
 echo five > "$LANE/doc5"; g add -A; GIT_AUTHOR_EMAIL=x@y.org g commit -qm "docs: five"
 land > "$T/o15"; rc=$?; [ $rc != 0 ] && grep -q "not made as i2cjak <build@amemb.com>" "$T/o15" && grep -q "reset-author" "$T/o15"; ok $? "a commit by another identity is refused, with the fix (rc $rc)"
-# 16. main moves between the gate and the merge while the PR still reads mergeable: no merge of a tree the gate never ran (#1374); it rebases, gates
-#     again on the new main and merges that
+# 16. main moves during the gate: the merge phase (in the land lock) rebases onto it and merges that head, with no second gate (the PR's own
+#     changes passed it; main is main: main-build.sh watches it)
 g reset -q --hard HEAD~1; git -C "$LANE" fetch -q origin main; g rebase -q origin/main; echo six > "$LANE/doc6"; g add -A; g commit -qm "docs: six"
 echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; rm -f "$T/moved"; before=$(wc -l < "$GATES")
 LAND_TEST="echo gate >> $GATES; [ -f $T/moved ] || { touch $T/moved; git -C $M pull -q origin main 2>/dev/null; echo m2 > $M/m2; git -C $M add -A; git -C $M commit -qm 'main moved during the gate'; git -C $M push -q origin main; }" land > "$T/o16"; rc=$?
 mover=$(git -C "$M" rev-parse HEAD)
-[ $rc = 0 ] && [ "$(wc -l < "$GATES")" = $((before + 2)) ] && grep -q "main moved after the gate" "$T/o16" && git --git-dir="$ORIGIN" merge-base --is-ancestor "$mover" main; ok $? "main moved after the gate: gated again on the new main, then merged; the moved commit is kept (rc $rc)"
+[ $rc = 0 ] && [ "$(wc -l < "$GATES")" = $((before + 1)) ] && git --git-dir="$ORIGIN" merge-base --is-ancestor "$mover" main && grep -q "the land lock was held [0-9]*s for the merge" "$T/o16"; ok $? "main moved during the gate: rebased onto it in the land lock, merged with no second gate; the moved commit is kept (rc $rc)"
 g reset -q --hard HEAD~1; rm -f "$FAKE/mergestate" "$FAKE/review"
 pushed() { [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" = "$(g rev-parse HEAD)" ]; }
 # 17. no Windows gate at a merge: a host PR merges on the gate alone (LAND_WIN_TEST, set above, is never run)
@@ -115,9 +115,38 @@ echo 'fn b() {}' > "$LANE/native/host/src/b.rs"; g add -A; g commit -qm "host: b
 gland > "$T/o19"; rc=$?; [ $rc = 0 ] && [ "$(cut -d' ' -f1-3 "$T/cargolog" | tr '\n' '|')" = "host check --all-targets|host test --locked|" ] && grep -q -- "-- --skip e2e" "$T/cargolog" && grep -q "gate: passed in .*host: cargo check --all-targets [0-9]*s, host: unit tests [0-9]*s" "$T/o19"; ok $? "a host PR: cargo check and the unit tests (no e2e) of the host alone, timed (rc $rc)"
 mkdir -p "$LANE/web/dist"; echo '<html>1' > "$LANE/web/dist/index.html"; printf '%s\n' 'macro_rules! asset { ($p:literal) => { include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/dist/", $p)) } }' > "$LANE/native/host/src/webingress.rs"; g add -A; g commit -qm "host: embeds web/dist"; gland > /dev/null
 echo '<html>2' > "$LANE/web/dist/index.html"; g commit -qam "web/dist only"
-gland > "$T/o20"; rc=$?; [ $rc = 0 ] && grep -q '^host check' "$T/cargolog" && ! grep -q '^gpui' "$T/cargolog"; ok $? "a web/dist-only PR checks and tests the host, which embeds it (rc $rc)"
+gland > "$T/o20"; rc=$?; [ $rc = 0 ] && [ ! -s "$T/cargolog" ] && grep -q "host: web/dist only: every file it names is there; no build" "$T/o20"; ok $? "a web/dist-only PR builds nothing (the hub embeds web/dist), and lands (rc $rc)"
 mkdir -p "$LANE/native/gpui/src"; echo 'fn g() {}' > "$LANE/native/gpui/src/g.rs"; g add -A; g commit -qm "gpui: g"
 gland > "$T/o21"; rc=$?; [ $rc = 0 ] && [ "$(cut -d' ' -f1 "$T/cargolog" | sort -u)" = gpui ]; ok $? "a gpui PR: the gpui crate alone (rc $rc)"
 touch "$LANE/native/host/FAIL"; echo 'fn c() {}' > "$LANE/native/host/src/c.rs"; g add -A; g commit -qm "host: c, failing"; before=$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)
 gland > "$T/o22"; rc=$?; [ $rc != 0 ] && grep -q "gate: FAILED" "$T/o22" && grep -q "the gate failed (above); nothing pushed" "$T/o22" && [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" = "$before" ]; ok $? "a failing check: the gate fails, nothing pushed (rc $rc)"
+# 30. the gate outside the land lock, the merge inside it (held for seconds), lanes gating side by side
+echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; export FAKE_LOCKFILE=$T/locks/bp-land.lock; : > "$FAKE/mergelock"
+nl() { git -C "$T/main" fetch -q origin main; git -C "$T/main" worktree add -q -b "$1" "$T/l-$1" origin/main 2>/dev/null; echo "x $1" > "$T/l-$1/$2"; git -C "$T/l-$1" add -A; git -C "$T/l-$1" commit -qm "$1: $2"; }
+lland() { (cd "$T/l-$1" && sh scripts/land.sh 2>&1); }
+nl p1 docs/p1.md; : > "$T/gl"
+LAND_TEST="if flock -n $T/locks/bp-land.lock true; then echo gate-lock-free; else echo gate-lock-held; fi >> $T/gl" lland p1 > "$T/o30"; rc=$?
+[ $rc = 0 ] && [ "$(cat "$T/gl")" = gate-lock-free ] && [ "$(cat "$FAKE/mergelock")" = held ] && flock -n "$T/locks/bp-land.lock" true && grep -q "the land lock was held [0-9]*s for the merge" "$T/o30"; ok $? "the gate holds no lock; the merge holds the land lock, released after (rc $rc)"
+# 31. two lanes gate at once (each gate 2 s), then merge one after the other: both land
+nl p2 docs/p2.md; nl p3 docs/p3.md; : > "$T/gt"
+G2="echo start >> $T/gt; sleep 2; echo end >> $T/gt"
+( LAND_TEST="$G2" lland p2 > "$T/o31a" ) & a=$!; ( LAND_TEST="$G2" lland p3 > "$T/o31b" ) & b=$!; wait $a; ra=$?; wait $b; rb=$?
+[ $ra = 0 ] && [ $rb = 0 ] && [ "$(head -n 2 "$T/gt" | tr '\n' ' ')" = "start start " ] && git --git-dir="$ORIGIN" cat-file -e main:docs/p2.md && git --git-dir="$ORIGIN" cat-file -e main:docs/p3.md; ok $? "two lanes gate at the same time and both merge, serialized in the lock ($ra $rb)"
+# 32. main moves during a gate in a way that conflicts: the rebase in the lock stops with a line, the lock is released, nothing is pushed
+nl p4 docs/shared.md; nl p5 docs/shared.md
+LAND_TEST="[ -f $T/p4done ] || { touch $T/p4done; (cd $T/l-p4 && LAND_TEST=true sh scripts/land.sh >/dev/null 2>&1); }" lland p5 > "$T/o32"; rc=$?
+[ $rc != 0 ] && grep -q "p5 conflicts with main .* (in the land lock): resolve it" "$T/o32" && ! git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/p5 >/dev/null && flock -n "$T/locks/bp-land.lock" true; ok $? "a conflict found in the lock: a clear line, the lock released, nothing pushed (rc $rc)"
+# 33. GitHub refuses the merge once (main moved in that instant): rebased and merged again inside the lock, no second gate
+nl p6 docs/p6.md; touch "$FAKE/refuse-once"; : > "$T/g33"
+LAND_TEST="echo g >> $T/g33" lland p6 > "$T/o33"; rc=$?
+[ $rc = 0 ] && grep -q "GitHub refused the merge of PR #[0-9]* (main moved?): rebasing again, in the lock" "$T/o33" && [ "$(wc -l < "$T/g33")" = 1 ] && git --git-dir="$ORIGIN" cat-file -e main:docs/p6.md; ok $? "GitHub refused once: rebased and merged in the lock, one gate (rc $rc)"
+# 34. the old way, wrapped in bp-lock.sh land: no deadlock, it lands, and says the wrapper is not needed
+nl p7 docs/p7.md
+(cd "$T/l-p7" && LAND_TEST=true sh scripts/bp-lock.sh land -- sh scripts/land.sh) > "$T/o34" 2>&1; rc=$?
+[ $rc = 0 ] && grep -q "already inside the land lock" "$T/o34" && git --git-dir="$ORIGIN" cat-file -e main:docs/p7.md; ok $? "wrapped in bp-lock.sh land: no deadlock, landed, told to drop the wrapper (rc $rc)"
+# 35. a commit made in the worktree while it gated: the merge phase refuses it (only what the gate passed lands)
+nl p8 docs/p8.md
+LAND_TEST="echo more > $T/l-p8/docs/p8b.md; git -C $T/l-p8 add -A; git -C $T/l-p8 commit -qm 'p8: after the gate'" lland p8 > "$T/o35"; rc=$?
+[ $rc != 0 ] && grep -q "p8 changed since the gate" "$T/o35" && ! git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/p8 >/dev/null; ok $? "a commit made during the gate is refused, nothing pushed (rc $rc)"
+unset FAKE_LOCKFILE
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }

@@ -11,6 +11,9 @@ case "$1 $2" in
     [ $st = MERGED ] && { echo "MERGED CLEAN APPROVED $oid MERGEABLE"; exit 0; }
     echo "OPEN $(cat "$FAKE/mergestate" 2>/dev/null || echo BLOCKED) $(cat "$FAKE/review" 2>/dev/null || echo REVIEW_REQUIRED) $oid MERGEABLE" ;;
   "pr merge") n=$3; head=$(cat "$FAKE/head.$n"); sha=; while [ $# -gt 0 ]; do [ "$1" = --match-head-commit ] && sha=$2; shift; done
+    # the land lock while it merges (land.sh holds it for the merge alone), and a refusal once when asked (main moved in that instant)
+    [ -z "${FAKE_LOCKFILE:-}" ] || { if flock -n "$FAKE_LOCKFILE" true; then echo free; else echo held; fi >> "$FAKE/mergelock"; }
+    [ -f "$FAKE/refuse-once" ] && { rm -f "$FAKE/refuse-once"; echo "GraphQL: Head branch is out of date (fake)" >&2; exit 1; }
     [ "$(git --git-dir="$ORIGIN" rev-parse "refs/heads/$head")" = "$sha" ] || { echo "head changed" >&2; exit 1; }
     [ "$(cat "$FAKE/mergestate" 2>/dev/null)" = CLEAN ] || { echo "not mergeable" >&2; exit 1; }
     git --git-dir="$ORIGIN" update-ref refs/heads/main "$sha" && touch "$FAKE/merged.$n" && echo "$n" >> "$FAKE/merges" ;;
