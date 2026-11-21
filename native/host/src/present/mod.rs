@@ -1397,10 +1397,17 @@ mod tests {
         assert!(viewer::apply_memory(&st, "h", &fresh, Some(2), "en", false).is_none(), "more than eight tiles are never restored");
         // the probe's deadline: a command that outlives it is killed and counts as unresolved
         let start = std::time::Instant::now();
-        let mut slow = std::process::Command::new("sleep"); slow.arg("5");
+        // (a command that outlives the deadline, and one that succeeds at once, on every platform)
+        let (slow, ok) = if cfg!(windows) {
+            let mut s = std::process::Command::new("cmd"); s.args(["/C", "ping -n 6 127.0.0.1 >nul"]);
+            let mut o = std::process::Command::new("cmd"); o.args(["/C", "exit 0"]); (s, o)
+        } else {
+            let mut s = std::process::Command::new("sleep"); s.arg("5");
+            (s, std::process::Command::new("true"))
+        };
         assert!(!crate::files::rv::succeeds_within(slow, std::time::Duration::from_millis(100)));
         assert!(start.elapsed() < std::time::Duration::from_secs(3), "the slow probe was killed, not waited for");
-        assert!(crate::files::rv::succeeds_within(std::process::Command::new("true"), std::time::Duration::from_secs(2)));
+        assert!(crate::files::rv::succeeds_within(ok, std::time::Duration::from_secs(2)));
     }
 
     struct Mine; impl Screen for Mine {

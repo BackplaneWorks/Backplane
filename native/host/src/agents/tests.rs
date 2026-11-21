@@ -2052,18 +2052,33 @@ fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, re
 }
 
 /// The report, the reporting client and its counter are one snapshot: two clients reporting interleaved never give A's picture with B's id.
+/// Deterministic on every platform: the writers and the reader start together at a barrier, the writers keep reporting until the reader has seen what it
+/// needs (so every observation is made while they write), and the reader waits for enough observations of BOTH clients with a deadline that fails loudly.
+/// (`viewer_snapshot` of a thread nobody has reported yet is (0, 0, null): that is why the reader counts only snapshots with a counter.)
 #[test] fn a_viewer_report_and_its_client_are_one_snapshot() {
     use crate::files::kicad::watch::{viewer_report_from, viewer_snapshot};
-    let writers: Vec<_> = [21u64, 22].into_iter().map(|c| std::thread::spawn(move || { for _ in 0..20000 { viewer_report_from(c, "tsnap", json!({"who": c})); } })).collect();
-    let mut seen = 0;
-    for _ in 0..40000 {
+    use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Barrier};
+    let stop = Arc::new(AtomicBool::new(false));
+    let start = Arc::new(Barrier::new(3));
+    let writers: Vec<_> = [21u64, 22].into_iter().map(|c| { let (stop, start) = (stop.clone(), start.clone()); std::thread::spawn(move || {
+        start.wait();
+        let mut n = 0u64;
+        while !stop.load(Ordering::Relaxed) { viewer_report_from(c, "tsnap", json!({"who": c, "n": n})); n += 1; }
+    }) }).collect();
+    start.wait();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let (mut seen, mut saw) = (0u64, [false, false]);
+    let mut problem = None;
+    while !(seen >= 5000 && saw[0] && saw[1]) {
+        if std::time::Instant::now() > deadline { problem = Some(format!("not enough observations in 30 s: {seen} snapshots, both clients seen: {saw:?}")); break }
         let (n, client, state) = viewer_snapshot("tsnap");
-        if n == 0 { continue }
-        assert_eq!(state["who"].as_u64(), Some(client), "a picture is paired with the client that made it (report {n})");
-        seen += 1;
+        if n == 0 { std::thread::yield_now(); continue }
+        if state["who"].as_u64() != Some(client) { problem = Some(format!("a picture is paired with another client (report {n}): client {client}, picture of {}", state["who"])); break }
+        seen += 1; saw[(client == 22) as usize] = true;
     }
+    stop.store(true, Ordering::Relaxed);
     for w in writers { w.join().unwrap(); }
-    assert!(seen > 0);
+    if let Some(p) = problem { panic!("{p}") }
 }
 
 // ---- Settle: the thread's turn and everything it owns stop, and nothing starts it again ----
