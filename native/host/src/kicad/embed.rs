@@ -6067,6 +6067,31 @@ mod tests {
         assert!(s.reopen && s.info_json()["reopen"] == json!(true), "the pane on show opens KiCad again");
         let _ = child.kill(); let _ = child.wait();
     }
+    #[tokio::test] async fn a_kicad_that_answered_exiting_then_was_killed_leaves_its_session_for_a_fresh_start() {
+        // Carbon's Windows row: `exiting`, still alive 30 s later, killed (by anyone): the next Edit must start a new KiCad, never wait on
+        // a failed session
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let (mut a, h) = test_actor().await;
+        let s = seq_session(pid); a.sessions.insert(s.pro.clone(), s);
+        a.sessions.get_mut("/p/a.kicad_pro").unwrap().close_sent("agentClosed");
+        a.handle(Msg::CloseAnswered { pro: "/p/a.kicad_pro".into(), gen: 3, pid, answered: true, reply: None });
+        assert!(a.sessions["/p/a.kicad_pro"].closing);
+        let _ = child.kill(); let _ = child.wait();
+        a.handle(Msg::ChildExited { pro: "/p/a.kicad_pro".into(), gen: 3, pid, code: -9, how: "signal 9 (SIGKILL)".into(), tail: String::new(), reply: None });
+        { let s = &a.sessions["/p/a.kicad_pro"]; assert_eq!(s.state, "stopped", "the close it was, not failed: {} {}", s.state, s.reason);
+          assert!(!s.closed_unexpectedly() && s.last_pid == 0 && !s.is_live()); }
+        // the next Edit: not answered closing, not held for a previous KiCad: the start path, a new generation starting
+        let bin = h.join("bin"); std::fs::create_dir_all(&bin).unwrap();
+        for (n, body) in [("kicad-cli", "#!/bin/sh\necho 10.99.0\n"), ("kicad", "#!/bin/sh\nsleep 5\n")] {
+            let f = bin.join(n); std::fs::write(&f, body).unwrap(); use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let env = Env { cli: bin.join("kicad-cli").to_string_lossy().into(), ..Env::default() };
+        let (tx, _rx) = oneshot::channel();
+        a.handle(Msg::Attach { client: 0, pro: "/p/a.kicad_pro".into(), root: "/p".into(), files: Files::default(), frame: "PCB".into(), container: 9001, toplevel: 8001, display: String::new(), wait: false, env, reply: tx });
+        let s = &a.sessions["/p/a.kicad_pro"];
+        assert_eq!(s.state, "starting", "a fresh KiCad starts: {} {}", s.state, s.reason);
+        assert!(s.gen != 3 && s.reason != HELD_REASON, "a new generation (the test actor counts from 1), not held");
+    }
     #[test] fn a_start_held_for_the_previous_kicad_is_one_session_that_every_attach_joins() {
         let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
         assert_eq!(previous_alive(&prev, |p| p == 41), Some(41), "its KiCad still there: the start is held");
