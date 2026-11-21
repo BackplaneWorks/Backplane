@@ -88,6 +88,68 @@ pub fn parent(home: &Path) -> PathBuf {
 pub fn managed_parent(windows: bool, local_app_data: Option<&std::ffi::OsStr>, home: &Path) -> PathBuf {
     match local_app_data.filter(|d| windows && !d.is_empty()) { Some(d) => Path::new(d).join("Backplane").join("kicad"), None => home.join("kicad") }
 }
+/// How many times its archive a runtime takes unpacked, for the free-space check before an install (no pin says its unpacked size; the
+/// pin format is not changed for it). Measured Nov 21 on the bp.13.3 packages: macOS 4.11× (on disk, APFS), Linux 4.66×, Windows 4.73×
+/// (its zip's file sizes): the largest, rounded up, for every platform.
+pub const UNPACK_X: u64 = 5;
+/// The bytes an install of `p` needs free where it goes, with `partial` bytes of its download already there: the rest of the download,
+/// the runtime unpacked (`UNPACK_X` times the archive; the archive stays until the runtime is in place), and a tenth more. None for a pin
+/// whose size is not known (a placeholder): no check. Pure.
+pub fn need_bytes(p: &Package, partial: u64) -> Option<u64> {
+    if p.size == 0 { return None }
+    let n = p.size.saturating_sub(partial).saturating_add(p.size.saturating_mul(UNPACK_X));
+    Some(n.saturating_add(n / 10))
+}
+/// Gigabytes in words for the space refusal: "6.3 GB" (decimal, as the disk tools and Finder say them).
+pub fn gb_words(b: u64) -> String { format!("{:.1} GB", b as f64 / 1e9) }
+/// Why an install is refused for space, before anything downloads: None when `free` is enough, or not known (an install that may fit is
+/// not refused for a number the system would not give). Pure.
+pub fn space_refusal(need: Option<u64>, free: Option<u64>, folder: &str) -> Option<String> {
+    match (need, free) {
+        (Some(n), Some(f)) if f < n => Some(format!("Not enough free space for KiCad: it needs about {} in {folder}, and {} is free", gb_words(n), gb_words(f))),
+        _ => None,
+    }
+}
+/// The free bytes on the disk that holds `dir` (its nearest existing folder: the install's folder is made by the install). None when the
+/// system does not say.
+pub fn free_bytes(dir: &Path) -> Option<u64> {
+    let mut at = dir;
+    while !at.exists() { at = at.parent()?; }
+    #[cfg(unix)] {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(at.as_os_str().as_bytes()).ok()?; let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 { return None }
+        Some((st.f_bavail as u64).saturating_mul(st.f_frsize as u64))
+    }
+    #[cfg(windows)] {
+        use std::os::windows::ffi::OsStrExt;
+        let w: Vec<u16> = at.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let mut free: u64 = 0;
+        let ok = unsafe { windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(w.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) };
+        if ok == 0 { None } else { Some(free) }
+    }
+    #[cfg(not(any(unix, windows)))] { let _ = at; None }
+}
+/// The install's folder as the person reads it in the offer: the home folder as `~` where there is one (Linux, macOS), the full path on
+/// Windows (%LOCALAPPDATA%\Backplane\kicad). Pure.
+pub fn folder_words(folder: &Path, user_home: Option<&Path>, windows: bool) -> String {
+    let f = folder.to_string_lossy().to_string();
+    if windows { return f }
+    match user_home.and_then(|h| folder.strip_prefix(h).ok()) { Some(rest) if rest.as_os_str().is_empty() => "~".into(), Some(rest) => format!("~/{}", rest.to_string_lossy()), None => f }
+}
+/// Whether installing into Backplane's own folder needs an administrator's password: never, on every platform (`managed_parent` is the
+/// person's own: %LOCALAPPDATA% on Windows, the hub's home elsewhere). The offer says "with no administrator password" only while this holds.
+pub fn needs_admin(_os: &str) -> bool { false }
+/// The offer at Edit when no KiCad is found (`status` "missing"): published in `kicad.update` as {missing, to, size, mb, folder, admin} (no `offer`: not an update)
+/// for a package this computer has, or {missing, nopackage, words} when none is published for it; None when KiCad is not missing. The
+/// client shows it only after the person's Edit press (kicad_update.rs); only its Install press installs. Pure.
+pub fn missing_offer(p: Option<&Package>, status: &str, folder: &str, os: &str) -> Option<serde_json::Value> {
+    if status != "missing" { return None }
+    Some(match p {
+        Some(p) => json!({"missing": true, "to": p.version, "size": size_words(p), "mb": p.size >> 20, "folder": folder, "admin": needs_admin(os)}),
+        None => json!({"missing": true, "nopackage": true, "words": none_here()}),
+    })
+}
 /// This computer in words, for "none is published for …".
 pub fn this_computer() -> String { format!("{} {}", std::env::consts::OS, std::env::consts::ARCH) }
 
@@ -735,8 +797,11 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
     let env = super::ipc::runtime(hub).await;
     if let Some(why) = refusal(&env.cli, &env.status, &env.version, consent, RUNNING.load(Ordering::SeqCst), package()) { return Err(why) }
     let p = package().expect("refusal checks the package");
-    if RUNNING.swap(true, Ordering::SeqCst) { return Err("KiCad is being installed already".into()) }
     let parent = parent(&hub.cfg.home);
+    // enough space for it, before anything downloads (what an earlier try left counts: the download continues it)
+    let folder = folder_words(&parent, std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).as_deref(), cfg!(windows));
+    if let Some(why) = space_refusal(need_bytes(p, partial_bytes(&hub.cfg.home, p)), free_bytes(&parent), &folder) { eprintln!("kicad: install refused: {why}"); return Err(why) }
+    if RUNNING.swap(true, Ordering::SeqCst) { return Err("KiCad is being installed already".into()) }
     // a stand-in installer (tests and rigs): the same arguments, so no real KiCad is downloaded or touched
     let standin = std::env::var_os("BACKPLANE_KICAD_INSTALLER").filter(|s| !s.is_empty()).map(PathBuf::from);
     eprintln!("kicad: installing Backplane KiCad {} into {}{}", p.version, parent.display(), standin.as_ref().map_or(String::new(), |s| format!(" (stand-in {})", s.display())));
@@ -763,6 +828,9 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
         RUNNING.store(false, Ordering::SeqCst);
         // Settings > CAD names the new KiCad (and its Install row goes) before the install says it is done: whoever reads "done" reads the new status with it
         super::ipc::publish_cad(&h).await;
+        // the pane's `support` from the new runtime (its manifest and api.desc), before anyone reads "done": else the pane kept the missing
+        // runtime's until something read it again
+        if r.is_ok() { let env = super::ipc::runtime(&h).await; super::embed::refresh_support(&h.cfg.home, &env); }
         match &r {
             Ok(dir) => { eprintln!("kicad: installed Backplane KiCad {} in {dir}", p.version); say(&h, "done", p.version, &format!("Installed Backplane KiCad {} in {dir}", p.version)).await }
             // a stopped download is not a failure for good: its own words, and its bytes (the bar stays where it got to)
@@ -782,6 +850,42 @@ mod tests {
     #[cfg(unix)] fn exe(p: &Path, body: &str) { std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap() }
     fn rt() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap() }
 
+    #[test] fn an_install_is_refused_for_space_before_anything_downloads() {
+        let p = Package { size: 1_000_000_000, ..LINUX };
+        // archive + 5x unpacked + a tenth
+        assert_eq!(need_bytes(&p, 0), Some(6_600_000_000));
+        assert_eq!(need_bytes(&p, 400_000_000), Some(6_160_000_000), "what an earlier try downloaded is not needed again");
+        assert_eq!(need_bytes(&p, 2_000_000_000), Some(5_500_000_000), "a partial larger than the pin (a changed pin): none left to download, never below zero");
+        assert_eq!(need_bytes(&Package { size: 0, ..LINUX }, 0), None, "a placeholder pin with no size: no check");
+        let r = space_refusal(Some(6_600_000_000), Some(2_000_000_000), "~/.backplane/kicad").unwrap();
+        assert_eq!(r, "Not enough free space for KiCad: it needs about 6.6 GB in ~/.backplane/kicad, and 2.0 GB is free");
+        assert_eq!(space_refusal(Some(6_600_000_000), Some(6_600_000_000), "f"), None, "exactly enough");
+        assert_eq!(space_refusal(Some(6_600_000_000), None, "f"), None, "free space not known: proceeds");
+        assert_eq!(space_refusal(None, Some(1), "f"), None, "need not known: proceeds");
+        // the three bp.13.3 packages, measured unpacked (Nov 21): every one fits under UNPACK_X
+        for (archive, unpacked) in [(1_106_823_193u64, 4_547_002_368u64), (1_022_758_312, 4_767_741_082), (865_966_402, 4_099_417_416)] { assert!(archive * UNPACK_X >= unpacked, "{archive} -> {unpacked}"); }
+    }
+    #[test] fn free_space_is_read_where_the_install_goes_or_above_it() {
+        let d = tmp("free"); let deep = d.join("not/made/yet");
+        assert!(free_bytes(&deep).is_some_and(|b| b > 0), "the nearest existing folder's disk");
+    }
+    #[test] fn the_offer_names_the_folder_as_the_person_reads_it() {
+        assert_eq!(folder_words(Path::new("/home/ann/.backplane/kicad"), Some(Path::new("/home/ann")), false), "~/.backplane/kicad");
+        assert_eq!(folder_words(Path::new("/srv/bp/kicad"), Some(Path::new("/home/ann")), false), "/srv/bp/kicad", "outside the home: in full");
+        assert_eq!(folder_words(Path::new(r"C:\Users\Ann\AppData\Local\Backplane\kicad"), Some(Path::new(r"C:\Users\Ann")), true), r"C:\Users\Ann\AppData\Local\Backplane\kicad", "Windows: in full");
+        for os in ["linux", "macos", "windows"] { assert!(!needs_admin(os), "{os}: Backplane's own folder is the person's") }
+    }
+    #[test] fn no_kicad_at_all_is_offered_the_install_and_one_with_no_package_says_why() {
+        let o = missing_offer(Some(&LINUX), "missing", "~/.backplane/kicad", "linux").unwrap();
+        assert_eq!((o["offer"].as_bool(), o["missing"].as_bool(), o["to"].as_str(), o["folder"].as_str(), o["admin"].as_bool()), (None, Some(true), Some(LINUX.version), Some("~/.backplane/kicad"), Some(false)), "not an update offer");
+        assert_eq!(o["size"], size_words(&LINUX));
+        let n = missing_offer(None, "missing", "f", "linux").unwrap();
+        assert!(n["nopackage"] == true && n["offer"].is_null() && !n["words"].as_str().unwrap_or("").is_empty());
+        for st in ["ok", "stock", "old", "broken", "checking", ""] { assert!(missing_offer(Some(&LINUX), st, "f", "linux").is_none(), "{st}") }
+        // consent is still the install's own: the offer installs nothing
+        assert!(refusal("", "missing", "", false, false, Some(&LINUX)).is_some_and(|w| w.contains("consent")));
+        assert_eq!(refusal("", "missing", "", true, false, Some(&LINUX)), None);
+    }
     #[test] fn the_catalog_is_0_14s_by_the_hubs_own_os_and_arch() {
         assert_eq!(pick("linux", "x86_64"), Some(&LINUX)); assert_eq!(pick("Linux", "amd64"), Some(&LINUX));
         assert_eq!(pick("macos", "aarch64"), Some(&MAC)); assert_eq!(pick("Darwin", "arm64"), Some(&MAC));
