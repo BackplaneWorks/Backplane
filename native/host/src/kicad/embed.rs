@@ -106,7 +106,7 @@ pub struct Session {
     /// The client (its `cid`, stable across a reconnect) whose window holds the pane: set by an attach with a container, cleared by a
     /// detach, a park and a stop (`viewer.runtime.holder` reads the client's current connection)
     pub pane_cid: String,
-    /// Who made `active` what it is (published as `activeBy`, `active_by`): a client's show `{"cid", "seq"}` (its own sequence number,
+    /// Who made `active` what it is (published as `active_by`): a client's show `{"cid", "seq"}` (its own sequence number,
     /// null for an attach), "agent" for the hub's own show (xprobe, an agent's select), "kicad" for KiCad's own switch. Set with every
     /// change of `active`, kept when KiCad then refuses the show (the hub set it for that request), so a pane tells its own echo, an
     /// older one of its own, another window's and KiCad's apart with no record of its own.
@@ -957,6 +957,15 @@ pub fn note_client_cid(client: u64, cid: &str) {
     if holds { rt_bump(); }
 }
 /// The `cid` a connection said at its `view.open` (None: no desktop view on it: an agent's or a tool's connection).
+/// What follows KiCad's own switch (its show request the hub followed, `active_by` "kicad"): the frames' update when KiCad answered with
+/// them; otherwise (an error, a task that held it, frames unread) the session published as it is, so the change and who made it reach
+/// the clients at once and never ride a later publish past a tab the person chose meanwhile. Pure.
+fn after_kicad_switch(pro: String, gen: u64, res: Result<Option<(u64, String, Vec<Frame>)>, String>) -> Msg {
+    match res {
+        Ok(Some((holder, _, frames))) => Msg::FramesUpdated { pro, gen, holder: Some(holder), frames, reply: None },
+        Ok(None) | Err(_) => Msg::Republish { pro, gen },
+    }
+}
 /// `active_by` for a change a client asked for: its cid and the sequence number it sent with the show (null for none: an attach, an
 /// older client); "agent" with no client cid (the hub's own drive). Pure.
 pub fn show_by(cid: Option<String>, seq: &Value) -> Value {
@@ -2708,9 +2717,8 @@ impl Actor {
                 let snap = s.clone();
                 let me = self.me.clone();
                 tokio::spawn(async move {
-                    if let Ok(Some((holder, _, frames))) = switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", &item, false, false).await {
-                        let _ = me.send(Msg::FramesUpdated { pro: snap.pro, gen: snap.gen, holder: Some(holder), frames, reply: None });
-                    }
+                    let res = switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", &item, false, false).await;
+                    let _ = me.send(after_kicad_switch(snap.pro, snap.gen, res));
                 });
             }
             Msg::Dialog { pro, gen, open, title } => {
@@ -4772,6 +4780,12 @@ mod tests {
         assert_eq!(runtime_stop_reason("failed", ""), "startFailed");
         assert_eq!(runtime_stop_reason(CLOSED, ""), "crashed");
         assert_eq!(runtime_stop_reason("stopped", "idle"), "idle");
+    }
+    #[test] fn kicads_own_switch_is_published_whatever_kicad_answers() {
+        let f = Frame { kind: "SCH".into(), doc: String::new(), title: String::new(), modified: false, shown: true, realized: true, xid: 5, min_w: 0, min_h: 0 };
+        assert!(matches!(after_kicad_switch("/p".into(), 2, Ok(Some((9, String::new(), vec![f])))), Msg::FramesUpdated { gen: 2, holder: Some(9), ref frames, .. } if frames.len() == 1));
+        assert!(matches!(after_kicad_switch("/p".into(), 2, Ok(None)), Msg::Republish { gen: 2, .. }), "frames unread: published as it is");
+        assert!(matches!(after_kicad_switch("/p".into(), 2, Err("AS_BUSY".into())), Msg::Republish { gen: 2, .. }), "refused or held: published as it is");
     }
     #[test] fn every_active_says_who_made_it() {
         // a client's show: its cid and the sequence number it sent; an attach (no seq): the cid, seq null; the hub's own drive: "agent"
