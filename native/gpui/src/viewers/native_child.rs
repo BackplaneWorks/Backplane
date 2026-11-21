@@ -108,6 +108,26 @@ pub fn floating_dialog(style: u32, class: &str) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame { pub window: u64, pub title: String, pub kind: &'static str }
 
+/// Which top-levels have a KiCad pane's frame on screen now (the pane in the page, its frame placed): the Linux focus proxy is used only
+/// there. Elsewhere nothing of KiCad is under the pointer, the descendant rule cannot give it a key, and the focus stays where GPUI and the
+/// Browser tab put it, as before #1505 (a click into the Browser's page with a pane hidden in the window was moved off the page).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// Keyed by the top-level and, within it, by the native child (a pane's container; the Browser's page can register its own): the
+/// top-level counts as on screen while any of its children is.
+#[derive(Debug, Default)]
+pub(crate) struct PaneScreens(std::collections::HashMap<u64, std::collections::HashSet<u64>>);
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+impl PaneScreens {
+    /// Child `child` of top-level `top` on screen or not: true when this brings the top-level on screen (none of its children was; the
+    /// redirect resumes: a focus left on the top-level itself moves to its proxy)
+    pub(crate) fn set(&mut self, top: u64, child: u64, on: bool) -> bool {
+        let was = self.on(top);
+        if on { self.0.entry(top).or_default().insert(child); } else if let Some(s) = self.0.get_mut(&top) { s.remove(&child); if s.is_empty() { self.0.remove(&top); } }
+        !was && self.on(top)
+    }
+    pub(crate) fn on(&self, top: u64) -> bool { self.0.get(&top).is_some_and(|s| !s.is_empty()) }
+}
+
 /// The Linux focus proxy's redirect cap (#1519): at most `per` redirects of the focus to the proxy within `span`; one more starts a rest of
 /// `rest` with the focus left on the top-level, and when the rest has run out one re-check is due (the pane's tick moves a focus still
 /// left on the top-level to the proxy again, counted as the next burst's first). Pure, so its cycle is tested on every platform.
@@ -194,7 +214,7 @@ mod imp {
         let _ = c.change_window_attributes(top, &ChangeWindowAttributesAux::new().event_mask(EventMask::from(mask | u32::from(EventMask::FOCUS_CHANGE))));
         proxies().lock().unwrap().insert(top, id);
         // the focus already on the top-level (it had the keyboard before the pane came: an automatic attach) has no FocusIn to come: moved now
-        if !PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) && c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top) {
+        if !PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) && pane_on_screen(top) && c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top) {
             let _ = c.set_input_focus(InputFocus::PARENT, id, x11rb::CURRENT_TIME);
         }
         let _ = c.flush();
@@ -213,8 +233,21 @@ mod imp {
         if tripped { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_rest": {"redirects": REDIRECTS_PER, "within_ms": REDIRECT_SPAN.as_millis() as u64, "rest_ms": REDIRECT_REST.as_millis() as u64}})); }
         ok
     }
-    /// The window the keyboard goes to when it is Backplane's in top-level `w`: its focus proxy, else `w` itself
-    fn home_of(w: u32) -> u32 { proxies().lock().unwrap().get(&w).copied().unwrap_or(w) }
+    static SCREENS: std::sync::LazyLock<Mutex<super::PaneScreens>> = std::sync::LazyLock::new(Default::default);
+    fn pane_on_screen(top: u32) -> bool { SCREENS.lock().unwrap_or_else(|e| e.into_inner()).on(top as u64) }
+    /// The pane's tick: whether its frame (`child`: its container) is on screen in top-level `top` (in the page, placed). Coming on screen with the focus on the
+    /// top-level itself and Backplane holding the keys, the focus moves to the proxy (the redirect resumes)
+    pub fn note_pane_on_screen(top: u64, child: u64, on: bool) {
+        if top == 0 { return }
+        let came = SCREENS.lock().unwrap_or_else(|e| e.into_inner()).set(top, child, on);
+        if !came || PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) { return }
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let Some(p) = proxies().lock().unwrap().get(&(top as u32)).copied() else { return };
+        if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top as u32) { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
+    }
+    /// The window the keyboard goes to when it is Backplane's in top-level `w`: its focus proxy while a pane's frame is on screen there,
+    /// else `w` itself
+    fn home_of(w: u32) -> u32 { if !pane_on_screen(w) { return w } proxies().lock().unwrap().get(&w).copied().unwrap_or(w) }
     /// Every child of `old` (stock KiCad's frames, or the fork's holder) moved into `new`, unmapped where it was not shown: a pane moved to
     /// another window (popped out, or back in) takes KiCad with it, its state untouched.
     pub fn move_frames(old: u64, new: u64) {
@@ -683,7 +716,7 @@ mod imp {
         if !kicad && CAP.lock().unwrap_or_else(|e| e.into_inner()).recheck(std::time::Instant::now()) {
             let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
             let f = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|r| r.focus);
-            let p = f.and_then(|f| proxies().lock().unwrap().get(&f).copied());
+            let p = f.filter(|&f| pane_on_screen(f)).and_then(|f| proxies().lock().unwrap().get(&f).copied());
             if let Some(p) = p.filter(|_| redirect_allowed()) { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
             if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_recheck": {"focus": f, "moved_to": p}})); }
             return;
@@ -692,7 +725,7 @@ mod imp {
         if kicad || !was { return }
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let Some(f) = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|r| r.focus) else { return };
-        if let Some(p) = proxies().lock().unwrap().get(&f).copied() { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
+        if let Some(p) = proxies().lock().unwrap().get(&f).copied().filter(|_| pane_on_screen(f)) { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
     }
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
@@ -860,7 +893,7 @@ mod imp {
                 // 1 of 20 on a real desktop). The pane reads its keys from the X focus (has_focus of its container), and a focus on the
                 // top-level or on its proxy reads the same there; a hand-in that follows focuses KiCad's frame from either.
                 x11rb::protocol::Event::FocusIn(f) => {
-                    let proxy = proxies().lock().unwrap().get(&f.event).copied();
+                    let proxy = proxies().lock().unwrap().get(&f.event).copied().filter(|_| pane_on_screen(f.event));
                     if let Some(p) = proxy {
                         if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == f.event) && redirect_allowed() {
                             let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME);
@@ -1403,6 +1436,7 @@ mod imp {
     /// The pane's view of who has the keys (true: KiCad's shown editor), noted each tick, for the reclaim's decision.
     static PANE_KEYS: AtomicBool = AtomicBool::new(false);
     pub fn note_pane_keys(kicad: bool) { PANE_KEYS.store(kicad, Ordering::SeqCst); }
+    pub fn note_pane_on_screen(_top: u64, _child: u64, _on: bool) {}
     /// When a button last went down in Backplane's own window outside the pane (`button_over`): the person taking the
     /// keys to Backplane, as opposed to focus drifting there on its own (a pre-warmed frame's activation ending).
     static BACKPLANE_PRESS_AT: AtomicU64 = AtomicU64::new(0);
@@ -2597,6 +2631,7 @@ mod imp {
     pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
     pub fn keep_focus(_top: u64) -> bool { false }
     pub fn note_pane_keys(_kicad: bool) {}
+    pub fn note_pane_on_screen(_top: u64, _child: u64, _on: bool) {}
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
     pub fn backplane_press_ms_ago() -> u64 { u64::MAX }
@@ -2628,6 +2663,17 @@ pub use imp::*;
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_focus_proxy_is_used_only_where_a_panes_frame_is_on_screen() {
+        let mut s = super::PaneScreens::default();
+        assert!(!s.on(7), "no pane on screen: the focus stays where GPUI and the Browser put it");
+        assert!(s.set(7, 70, true), "coming on screen: the redirect resumes (a focus on the top-level moves to the proxy)");
+        assert!(s.on(7) && !s.on(8), "per top-level: another window's pane is its own");
+        assert!(!s.set(7, 70, true), "still on screen: no new transition (the tick does not move the focus again)");
+        assert!(!s.set(7, 71, true), "a second child on screen in the same window: already on, no transition");
+        assert!(!s.set(7, 70, false) && s.on(7), "one child off, the other still on screen: still on");
+        assert!(!s.set(7, 71, false) && !s.on(7), "the last child off (another viewer on show): off, nothing moved");
+        assert!(s.set(7, 70, true), "back in the page: on again");
+    }
     #[test] fn the_focus_proxy_cap_trips_rests_rechecks_once_and_counts_a_new_burst() {
         use std::time::{Duration, Instant};
         let ms = Duration::from_millis;

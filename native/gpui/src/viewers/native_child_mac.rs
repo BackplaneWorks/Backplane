@@ -296,6 +296,7 @@ pub fn yield_to(w: u64) {
 }
 pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
 pub fn note_pane_keys(_kicad: bool) {}
+pub fn note_pane_on_screen(_top: u64, _child: u64, _on: bool) {}
 pub fn shield(_container: u64, _on: bool) {}
 pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
 pub fn backplane_press_ms_ago() -> u64 { u64::MAX }
