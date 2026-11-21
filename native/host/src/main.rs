@@ -474,7 +474,8 @@ mod auth_wire_tests {
             (String::from_utf8_lossy(&out[..i]).into_owned(), out[i + 4..].to_vec()) };
         let enc = |p: &std::path::Path| p.to_string_lossy().replace('/', "%2F");
         let zip = format!("/file?path={}", enc(&proj.join("mfg/gerbers.zip")));
-        assert!(raw(zip.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "no credential");
+        let (h, _) = raw(zip.clone(), String::new()).await;
+        assert!(h.starts_with("HTTP/1.1 401") && h.contains("sandbox") && h.contains("Cross-Origin-Resource-Policy: same-origin") && h.contains("Referrer-Policy: no-referrer") && h.contains("nosniff"), "no credential: a 401 with the file routes' guards: {h}");
         let dev = format!("Authorization: Bearer {DEV}\r\n");
         let (h, b) = raw(zip.clone(), dev.clone()).await; assert!(h.starts_with("HTTP/1.1 200") && b == data, "{h}");
         let tag = h.lines().find_map(|l| l.strip_prefix("ETag: ")).unwrap().to_string();
