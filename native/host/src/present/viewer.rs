@@ -1349,6 +1349,8 @@ struct ShowRec { thread: String, kind: String, path: String, issued: std::time::
 struct Shows { next: u64, recs: std::collections::BTreeMap<u64, ShowRec>, newest: std::collections::HashMap<String, u64> }
 /// How long a pushed show can still be applied.
 pub const TOKEN_LIFE: std::time::Duration = std::time::Duration::from_secs(20);
+/// Tests share this one table (about 100 tokens across the hub's tests): a test that issues many must use a `Shows` of its own (as
+/// `bounded_len_for_test` does), or it evicts the tokens tests running beside it have just applied.
 const TOKEN_MAX: usize = 128;
 /// Tests: the show table is the process's, and a test that floods it (the bound) evicts another's tokens mid-test. The flooding test holds this
 /// alone; every test that issues shows holds it shared (they still run beside each other).
@@ -1357,23 +1359,30 @@ const TOKEN_MAX: usize = 128;
 #[cfg(test)] pub(crate) fn shows_alone() -> std::sync::RwLockWriteGuard<'static, ()> { SHOWS_TEST_LOCK.write().unwrap_or_else(|e| e.into_inner()) }
 fn shows_map() -> &'static std::sync::Mutex<Shows> {
     static MAP: std::sync::OnceLock<std::sync::Mutex<Shows>> = std::sync::OnceLock::new();
-    MAP.get_or_init(|| std::sync::Mutex::new(Shows { next: 1, recs: Default::default(), newest: Default::default() }))
+    MAP.get_or_init(|| std::sync::Mutex::new(Shows::new()))
+}
+impl Shows {
+    fn new() -> Self { Shows { next: 1, recs: Default::default(), newest: Default::default() } }
+    /// A record for a show of `kind`/`path` to `thread` (its number), the thread's newest; the table stays bounded.
+    fn issue(&mut self, thread: &str, kind: &str, path: &str, at: std::time::Instant) -> u64 {
+        let n = self.next; self.next += 1;
+        self.recs.insert(n, ShowRec { thread: thread.into(), kind: kind.into(), path: path.into(), issued: at, applied_by: Default::default(), outcomes: Default::default(), resolved: Default::default() });
+        self.newest.insert(thread.to_string(), n);
+        // bounded: what expired goes, then the oldest beyond the cap
+        let now = std::time::Instant::now();
+        let dead: Vec<u64> = self.recs.iter().filter(|(_, r)| now.duration_since(r.issued) > TOKEN_LIFE * 3).map(|(k, _)| *k).collect();
+        for k in dead { self.recs.remove(&k); }
+        while self.recs.len() > TOKEN_MAX { let first = *self.recs.keys().next().unwrap(); self.recs.remove(&first); }
+        let live: std::collections::HashSet<u64> = self.recs.keys().copied().collect();
+        self.newest.retain(|_, n| live.contains(n));
+        n
+    }
 }
 fn token_id(token: &str) -> Option<u64> { token.strip_prefix("show-")?.parse().ok() }
 /// A token for a push of `kind`/`path` to `thread`; it supersedes the thread's earlier shows.
 pub fn issue_show(thread: &str, kind: &str, path: &str) -> String { issue_show_at(thread, kind, path, std::time::Instant::now()) }
 fn issue_show_at(thread: &str, kind: &str, path: &str, at: std::time::Instant) -> String {
-    let mut m = shows_map().lock().unwrap_or_else(|e| e.into_inner());
-    let n = m.next; m.next += 1;
-    m.recs.insert(n, ShowRec { thread: thread.into(), kind: kind.into(), path: path.into(), issued: at, applied_by: Default::default(), outcomes: Default::default(), resolved: Default::default() });
-    m.newest.insert(thread.to_string(), n);
-    // bounded: what expired goes, then the oldest beyond the cap
-    let now = std::time::Instant::now();
-    let dead: Vec<u64> = m.recs.iter().filter(|(_, r)| now.duration_since(r.issued) > TOKEN_LIFE * 3).map(|(k, _)| *k).collect();
-    for k in dead { m.recs.remove(&k); }
-    while m.recs.len() > TOKEN_MAX { let first = *m.recs.keys().next().unwrap(); m.recs.remove(&first); }
-    let live: std::collections::HashSet<u64> = m.recs.keys().copied().collect();
-    m.newest.retain(|_, n| live.contains(n));
+    let n = shows_map().lock().unwrap_or_else(|e| e.into_inner()).issue(thread, kind, path, at);
     format!("show-{n}")
 }
 /// A refusal any session recorded for the token (its reason), if there is one: the agent is told it whatever else was seen.
@@ -1413,9 +1422,14 @@ pub fn test_refuse(token: &str, session: u64, why: &str) { record_outcome(token,
 /// (tests) a token issued at a given time.
 #[cfg(test)]
 pub fn issue_show_at_for_test(thread: &str, kind: &str, path: &str, at: std::time::Instant) -> String { issue_show_at(thread, kind, path, at) }
-/// (tests) how many tokens the table holds.
+/// (tests) how many records a table of its own holds after `n` shows to as many threads: the bound, checked without flooding the shared table
+/// (400 shows there evicted the tokens other tests running at the same time had just applied).
 #[cfg(test)]
-pub fn shows_len_for_test() -> usize { shows_map().lock().unwrap_or_else(|e| e.into_inner()).recs.len() }
+pub fn bounded_len_for_test(n: usize) -> usize {
+    let mut m = Shows::new(); let now = std::time::Instant::now();
+    for i in 0..n { m.issue(&format!("tb{i}"), "files", "", now); }
+    m.recs.len()
+}
 /// (tests) a desktop's answer applying a token.
 #[cfg(test)]
 pub fn test_applied(token: &str, session: u64) { record_outcome(token, session, ShowOutcome::Applied) }
