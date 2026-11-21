@@ -900,6 +900,10 @@ pub fn closing_away(info: &Value, in_page: bool) -> bool { !in_page && info["clo
 /// Whether a pane whose attach was answered `closing` waits and attaches again once that KiCad has ended (a fresh start): the person's
 /// own Edit only. A pane Backplane opened by itself (`ShowBy::Automatic`) goes instead: nothing starts a KiCad on its own after a close.
 pub fn waits_on_close(why: ShowBy) -> bool { why == ShowBy::Deliberate }
+/// Whether the hub's picture `new` says this pane's KiCad was ended by a Close the pane had overtaken (`reopen`), the pane on show.
+pub fn reopens(old: &Value, new: &Value, in_page: bool) -> bool {
+    in_page && new["reopen"] == true && new["state"] == "stopped" && matches!(old["state"].as_str(), Some("ready" | "unresponsive"))
+}
 /// Whether the hub's picture `info` still has the closing KiCad `pid` live (the pane keeps waiting on it).
 /// A KiCad whose Close KiCad refused (or that became unclean at the bound) is live again with `closing` false: the pane stops waiting
 /// and attaches to it.
@@ -1069,6 +1073,12 @@ impl KicadPane {
         if info == self.info { return }
         // waiting on a KiCad that is closing: its own pictures change nothing here; once it is gone (stopped, failed, another process)
         // the pane attaches again, and the hub starts a fresh one
+        // a Close of the hub's or an agent's that this pane had overtaken ended its KiCad (the hub's `reopen`): on show, the pane opens
+        // KiCad again (a fresh one) rather than standing on one closed under it
+        if reopens(&self.info, &info, self.in_page) {
+            eprintln!("GPUI_LOG {}", json!({"kicad_reopen": self.project, "pid": self.info["pid"]}));
+            self.info = info; self.placed = None; self.reattach(); cx.notify(); return
+        }
         if let Some(pid) = self.closing_pid {
             if still_closing(pid, &info) {
                 // what it waits on, if anything (a question KiCad asks before it closes): said in the pane
@@ -2477,6 +2487,14 @@ mod tests {
         assert_eq!(l.resend(), None, "back: nothing to say again");
         assert_eq!(l.on(true, "", ms(5001)), None, "once");
         assert_eq!(l.due(ms(9000)), None);
+    }
+    #[test] fn a_pane_on_a_kicad_a_stale_close_ended_opens_it_again() {
+        use super::reopens;
+        let live = json!({"state": "ready", "pid": 41});
+        assert!(reopens(&live, &json!({"state": "stopped", "reopen": true}), true), "on show: a fresh KiCad");
+        assert!(!reopens(&live, &json!({"state": "stopped", "reopen": true}), false), "off screen: nothing starts by itself");
+        assert!(!reopens(&live, &json!({"state": "stopped", "reopen": false}), true), "an ordinary stop: the pane says so");
+        assert!(!reopens(&json!({"state": "stopped"}), &json!({"state": "stopped", "reopen": true}), true), "once");
     }
     #[test] fn a_pane_waits_on_a_closing_kicad_until_its_process_is_gone() {
         use super::{still_closing, waiting_on};
