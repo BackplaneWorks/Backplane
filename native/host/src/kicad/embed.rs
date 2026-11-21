@@ -295,8 +295,11 @@ impl Session {
     }
     /// KiCad refused the Close (an answer with a status): live as it was, unless KiCad's own Quit has come meanwhile. True when it changed.
     pub fn on_close_refused(&mut self, now: u64) -> bool {
-        if !self.close_pending || self.closing { self.close_asked_as.clear(); return false }
-        self.live_again(now); self.close_asked_as.clear(); true
+        self.close_asked_as.clear();
+        self.close_overtaken = false;
+        if !self.close_pending || self.closing { return false }
+        self.live_again(now);
+        true
     }
     /// The Close got no answer at all (its socket went, or nothing within CLOSE_ANSWER_WAIT_MS): live as it was, unless KiCad's own Quit
     /// has come meanwhile (the same socket loss: `socket_gone`). Its reason is kept (`close_asked_as`): KiCad may still act on it.
@@ -332,17 +335,20 @@ impl Session {
             if code != 0 || !how.is_empty() { eprintln!("kicad embed: {} ended after its close ({}): an abort at exit, recorded as the close ({})", self.pro, if how.is_empty() { format!("code {code}") } else { how.to_string() }, self.stop_reason); }
             return self.stopped("")
         }
-        // KiCad's own Quit whose exit aborts (the bp.13.x teardown, ~1 in 3 on Linux): every frame it had was closed before it ended
-        // (ET_FRAME_CLOSED for each: measured, the last frame closes, then the socket, then the exit), which no crash does: closed by the
-        // person, the abort logged. A signal with a frame still open is a crash, shown as one
-        if code != 0 && quit_by_frames(&self) {
-            eprintln!("kicad embed: {} ended after KiCad's own Quit ({}): every frame closed before, an abort at exit, recorded as the person's close", self.pro, if how.is_empty() { format!("code {code}") } else { how.to_string() });
-            let mut s = self; if s.stop_reason.is_empty() { s.stop_reason = "kicadQuit".into(); } return s.stopped("KiCad was closed")
+        // A clean exit or an abort after every frame closed is a close. The reason of a Close the hub
+        // stopped waiting on still applies if KiCad later acts on it.
+        let teardown_abort = code != 0 && quit_by_frames(&self);
+        if teardown_abort || (code == 0 && how.is_empty()) {
+            let mut s = self;
+            if s.stop_reason.is_empty() {
+                s.stop_reason = if s.close_asked_as.is_empty() { "kicadQuit".into() } else { s.close_asked_as.clone() };
+            }
+            if teardown_abort {
+                let exit = if how.is_empty() { format!("code {code}") } else { how.to_string() };
+                eprintln!("kicad embed: {} ended after all frames closed ({exit}): an abort at exit, recorded as the close ({})", s.pro, s.stop_reason);
+            }
+            return s.stopped("KiCad was closed");
         }
-        // KiCad quit by itself (its window closed, its own File > Exit): said, so the pane and a later request never read "stopped ()"; a
-        // close the hub was asked for (stop_reason set by `close`) keeps its reason
-        // (a Close the hub stopped waiting on, still queued in KiCad, is what ended it: its reason, not the person's Quit)
-        if code == 0 && how.is_empty() { let mut s = self; if s.stop_reason.is_empty() { s.stop_reason = if s.close_asked_as.is_empty() { "kicadQuit".into() } else { s.close_asked_as.clone() }; } return s.stopped("KiCad was closed") }
         let how = if how.is_empty() { format!("code {code}") } else { how.to_string() };
         if !tail.trim().is_empty() { eprintln!("kicad embed: {} ended ({how}); its last output:\n{}", self.pro, tail.trim_end()) }
         if matches!(self.state.as_str(), "ready" | "unresponsive") {
@@ -6062,6 +6068,13 @@ mod tests {
         // a retire while one is pending is no second Close either
         let mut p = seq_session(pid); assert!(p.close_sent("agentClosed")); a.sessions.insert(p.pro.clone(), p);
         a.retire("/p/a.kicad_pro", "idle"); assert_eq!(a.sessions["/p/a.kicad_pro"].stop_reason, "agentClosed");
+        a.sessions.get_mut("/p/a.kicad_pro").unwrap().close_overtaken = true;
+        a.handle(Msg::CloseRefused { pro: "/p/a.kicad_pro".into(), gen: 3 });
+        assert!(!a.sessions["/p/a.kicad_pro"].close_overtaken);
+        a.handle(Msg::ChildExited { pro: "/p/a.kicad_pro".into(), gen: 3, pid, code: 0, how: String::new(), tail: String::new(), reply: None });
+        let stopped = &a.sessions["/p/a.kicad_pro"];
+        assert_eq!(stopped.stop_reason, "kicadQuit");
+        assert!(!stopped.reopen);
         let _ = child.kill(); let _ = child.wait();
     }
     #[tokio::test] async fn a_close_the_hub_gave_up_on_is_never_the_persons_quit_nor_closes_an_attached_pane() {
@@ -6250,6 +6263,14 @@ mod tests {
         // the abort before the hub saw the socket go (no `closing` yet): every frame closed is enough
         let mut q2 = live(); q2.gone_kinds = vec!["SCH".into(), "PCB".into()];
         let e2 = q2.exited_how(-6, "signal 6 (SIGABRT)", ""); assert_eq!(runtime_session(&e2.state, &e2.reason, &e2.stop_reason), "closedByPerson");
+        for reason in ["idle", "evicted", "agentClosed"] {
+            let mut queued = live();
+            assert!(queued.close_sent(reason));
+            assert!(queued.on_close_unanswered(1));
+            queued.gone_kinds = vec!["SCH".into(), "PCB".into()];
+            let stopped = queued.exited_how(-6, "signal 6 (SIGABRT)", "");
+            assert_eq!(stopped.stop_reason, reason);
+        }
         let mut q3 = live(); q3.gone_kinds = vec!["PCB".into()]; q3.frames.clear(); assert!(quit_by_frames(&q3), "its last GetFrames listed none");
         let mut n = live(); n.frames.clear(); assert!(!quit_by_frames(&n), "no frame ever closed: not a quit");
         // the socket gone with a frame still open: no quit; the signal after it is a crash, shown as today
