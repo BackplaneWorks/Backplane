@@ -199,7 +199,7 @@ pub fn read(st: &State, w: &World, rooms: &[RoomNews], now: u64, idle: bool) -> 
     let bot_thread = |p: &str| st.bot_threads_has(p);
     let mut hidden: HashSet<&str> = st.tasks.values().filter(|t| !bot_thread(&t.0) && st.threads.contains_key(t.1.as_str()) && parent(st, &t.1).is_some()).map(|t| t.1.as_str()).collect();
     // a swarm's members are its row: what the swarm wants of the person, in one line with the actions that resolve it (present/swarm_need.rs)
-    hidden.extend(st.swarm_of.keys().map(String::as_str));
+    hidden.extend(st.swarm_of.keys().map(String::as_str).filter(|t| crate::state::visible::swarm_member(st, t)));
     let mut all: Vec<Row> = vec![];
     for s in crate::sidebar::live_swarms(st) {
         let (state, sub) = match &s.need { Some(n) => ("swarm".to_string(), format!("{} · {}", n.line, n.acts.iter().map(|a| a.label.as_str()).collect::<Vec<_>>().join(" / "))),
