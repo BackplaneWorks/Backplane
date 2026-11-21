@@ -225,8 +225,11 @@ pub fn line(a: &mut Acp, t: &Turn, o: &Value) -> Out {
 }
 
 /// The driver of one Pi turn.
-pub struct PiDriver { acp: Acp, turn: Turn }
-impl PiDriver { pub fn new() -> PiDriver { PiDriver { acp: Acp::default(), turn: Turn::default() } } }
+pub struct PiDriver { acp: Acp, turn: Turn, windows: bool, prompt_path: Option<String>, prompt_file: Option<crate::agents::proc::RunFile> }
+impl PiDriver {
+    pub fn new() -> PiDriver { PiDriver { acp: Acp::default(), turn: Turn::default(), windows: cfg!(windows), prompt_path: None, prompt_file: None } }
+    pub fn for_windows() -> PiDriver { PiDriver { windows: true, ..Self::new() } }
+}
 impl Default for PiDriver { fn default() -> Self { Self::new() } }
 
 /// PiRun.args: `pi --mode rpc` with its session, Backplane's extension and the instructions; the model ("provider/id") and thinking level are flags.
@@ -254,12 +257,26 @@ impl Driver for PiDriver {
     fn install_hint(&self) -> Option<String> { Some("Install Pi (https://pi.dev), then sign in: run `pi` and use /login.".into()) }
     /// Proto.gone
     fn exit_why(&self, _code: i32) -> Option<String> { Some("pi exited before the turn ended (is it signed in? run `pi` and use /login)".into()) }
+    /// On Windows, writes the instructions to a private 0600 file inside a 0700 run dir (removed when the process exits via `take_files`),
+    /// so long prompts never enter argv or risk CreateProcess's 32K limit. Linux/macOS unchanged.
+    fn prepare(&mut self, a: &TurnIn) -> Result<(), String> {
+        if !self.windows { return Ok(()) }
+        let dir = crate::agents::proc::run_dir(std::path::Path::new(&a.home));
+        let name = format!("pi-{}-{}.prompt.md", safe(&a.thread), crate::agents::proc::unique());
+        let file = crate::agents::proc::RunFile::private(&dir, &name, &a.prompt).map_err(|e| format!("could not write Pi prompt file: {e}"))?;
+        self.prompt_path = Some(file.path().to_string_lossy().into_owned());
+        self.prompt_file = Some(file);
+        Ok(())
+    }
     /// The extension is written before each turn (`<home>/pi/backplane.js`), as PiRun.go does.
     fn argv(&self, a: &TurnIn) -> Vec<String> {
         let dir = std::path::Path::new(&a.home).join("pi");
         let _ = write_atomic(&dir, "backplane.js", EXT);
-        // Windows: the instructions go as a file (pi's --append-system-prompt takes text or a path): no launcher there carries their newlines (proc.rs `carries`)
-        let mut v = args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &prompt_arg(&dir, &a.thread, &a.prompt, cfg!(windows)), &a.model, &a.effort);
+        let prompt = match &self.prompt_path {
+            Some(p) => p.clone(),
+            None => prompt_arg(&dir, &a.thread, &a.prompt, self.windows),
+        };
+        let mut v = args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &prompt, &a.model, &a.effort);
         v.extend(kistack_arg(&a.home)); v
     }
     /// BACKPLANE_PI_MCP and BACKPLANE_PI_MODE: what Backplane's extension reads.
@@ -274,6 +291,7 @@ impl Driver for PiDriver {
     fn ask_info(&self, request: &Value) -> Option<AskInfo> { dl::ask_info(request) }
     fn answer(&mut self, request: &Value, answer: &str) -> Vec<String> { vec![dl::reply(request, answer)] }
     fn ends_on_turn_end(&self) -> bool { true }
+    fn take_files(&mut self) -> Vec<crate::agents::proc::RunFile> { self.prompt_file.take().into_iter().collect() }
 }
 
 pub fn driver(provider: &str) -> Option<Made> { if provider == "pi" { Some(Made { cli: "pi", driver: Box::new(PiDriver::new()) }) } else { None } }
