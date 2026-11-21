@@ -73,6 +73,12 @@ pub fn shown(r: &Repo) -> String { if r.github.is_empty() { r.origin.clone() } e
 
 /// The folder clones went into last (set by each clone; read once from the log at start).
 static LAST_PARENT: Mutex<String> = Mutex::new(String::new());
+/// Tests only: `LAST_PARENT` is one per process (one hub in the product), but the test binary runs many hubs side by side. A test that clones
+/// (`clone.start` sets it) or that reads the default (and so needs it empty) holds this for its run; a reader clears it first (`clear`).
+#[cfg(test)] static TEST_PARENT: Mutex<()> = Mutex::new(());
+#[cfg(test)] pub(crate) fn test_parent(clear: bool) -> std::sync::MutexGuard<'static, ()> {
+    let g = TEST_PARENT.lock().unwrap_or_else(|e| e.into_inner()); if clear { LAST_PARENT.lock().unwrap_or_else(|e| e.into_inner()).clear(); } g
+}
 /// The folder a clone goes into unless the person picks another: the one used last, else ~/Documents, else the home folder.
 pub fn default_parent(home: &str) -> String {
     let last = LAST_PARENT.lock().unwrap().clone();
