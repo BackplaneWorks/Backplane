@@ -106,6 +106,11 @@ pub struct Session {
     /// The client (its `cid`, stable across a reconnect) whose window holds the pane: set by an attach with a container, cleared by a
     /// detach, a park and a stop (`viewer.runtime.holder` reads the client's current connection)
     pub pane_cid: String,
+    /// Who made `active` what it is (published as `activeBy`, `active_by`): a client's show `{"cid", "seq"}` (its own sequence number,
+    /// null for an attach), "agent" for the hub's own show (xprobe, an agent's select), "kicad" for KiCad's own switch. Set with every
+    /// change of `active`, kept when KiCad then refuses the show (the hub set it for that request), so a pane tells its own echo, an
+    /// older one of its own, another window's and KiCad's apart with no record of its own.
+    pub active_by: Value,
     /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
     pub task_wait: String,
     /// a start's last step ("spawned", "socket", "answering", "first show") and when KiCad was started (epoch ms): a pane waiting on it
@@ -133,7 +138,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, peak_mb: 0, mem_pub: (0, 0), peak_logged: false, stop_reason: String::new(), stopped_at: 0, closed_frames: vec![], pane_cid: String::new(), active_by: Value::Null, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -244,6 +249,7 @@ impl Session {
             "pid": self.pid,
             "reason": self.reason,
             "active": self.active,
+            "active_by": self.active_by,
             "container": self.container,
             "toplevel": self.toplevel,
             "holder": self.holder,
@@ -951,6 +957,14 @@ pub fn note_client_cid(client: u64, cid: &str) {
     if holds { rt_bump(); }
 }
 /// The `cid` a connection said at its `view.open` (None: no desktop view on it: an agent's or a tool's connection).
+/// `active_by` for a change a client asked for: its cid and the sequence number it sent with the show (null for none: an attach, an
+/// older client); "agent" with no client cid (the hub's own drive). Pure.
+pub fn show_by(cid: Option<String>, seq: &Value) -> Value {
+    match cid.filter(|c| !c.is_empty()) {
+        Some(c) => json!({"cid": c, "seq": seq.as_u64()}),
+        None => json!("agent"),
+    }
+}
 pub fn client_cid(client: u64) -> Option<String> { rt().lock().unwrap().cid_of.get(&client).cloned() }
 /// The holder of a pane held by `cid`: that client's latest connection while it is attached (`attached`: the hub's own test, or a test's).
 fn holder_of(r: &Rt, cid: &str, attached: &dyn Fn(u64) -> bool) -> Option<u64> {
@@ -1517,7 +1531,7 @@ pub async fn commit_as(route: &GuiRoute, client: &str, doc: &Value, items: Vec<V
 pub async fn show_for(pro: &str, frame: &str, item: &str) -> Result<Value, String> {
     let Some(r) = gui_route(pro) else { return Err("KiCad is not open for this project".into()) };
     let (tx, rx) = oneshot::channel();
-    r.tx.send(Msg::Show { client: 0, pro: r.pro, frame: frame.into(), doc: String::new(), item: item.into(), focus: false, remount: false, reply: tx })
+    r.tx.send(Msg::Show { client: 0, pro: r.pro, frame: frame.into(), doc: String::new(), item: item.into(), focus: false, remount: false, by: json!("agent"), reply: tx })
         .map_err(|_| "the embedded KiCad actor stopped".to_string())?;
     rx.await.unwrap_or_else(|_| Err("no reply from embedded KiCad actor".into()))
 }
@@ -1681,9 +1695,12 @@ enum Msg {
         reply: oneshot::Sender<Result<Value, String>>,
     },
     Show {
-        client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, focus: bool,
+        client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, focus: bool, by: Value,
         reply: oneshot::Sender<Result<Value, String>>,
     },
+    /// a show refused after the hub set `active` for it (KiCad's error, the lock answered Cancel): the session published as it is, so the
+    /// change and who made it (`active_by`) reach the clients now, not with whatever publishes next
+    Republish { pro: String, gen: u64 },
     Detach {
         client: u64, pro: String, keep: bool, reply: oneshot::Sender<Result<Value, String>>,
     },
@@ -1992,7 +2009,7 @@ impl Actor {
                 if container > 0 { existing.container = container; existing.pane_cid = pane_cid.clone(); }
                 if toplevel > 0 { existing.toplevel = toplevel; }
                 if !display.is_empty() { existing.display = display; }
-                existing.active = canon_frame(&frame).into();
+                existing.active = canon_frame(&frame).into(); existing.active_by = show_by(client_cid(client), &Value::Null);
                 existing.touched_at = now; existing.parked = false;
                 let snap = existing.clone();
                 if wait {
@@ -2012,7 +2029,7 @@ impl Actor {
                 let asked = canon_frame(&frame); existing.closed_frames.retain(|k| k != asked);
                 if toplevel > 0 { existing.toplevel = toplevel; }
                 if !display.is_empty() { existing.display = display; }
-                existing.active = canon_frame(&frame).into();
+                existing.active = canon_frame(&frame).into(); existing.active_by = show_by(client_cid(client), &Value::Null);
                 existing.touched_at = now; existing.parked = false;
                 let snap = existing.clone();
                 // the client's kept container again (its last View kept KiCad's frames in it): nothing to re-parent, and a realized frame is the
@@ -2115,6 +2132,7 @@ impl Actor {
         };
 
         let mut sess = Session::new(&pro, &root, mode, &frame, gen, now);
+        sess.active_by = show_by(client_cid(client), &Value::Null);
         sess.container = container;
         sess.pane_cid = pane_cid;
         sess.toplevel = toplevel;
@@ -2197,13 +2215,13 @@ impl Actor {
         });
     }
 
-    fn show(&mut self, client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, focus: bool, reply: oneshot::Sender<Result<Value, String>>) {
+    fn show(&mut self, client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, focus: bool, by: Value, reply: oneshot::Sender<Result<Value, String>>) {
         let Some(s) = self.sessions.get_mut(&pro) else {
             let _ = reply.send(Err("no embedded KiCad session for this project; attach first".into())); return;
         };
         if let Some(why) = frame_refused(&frame, &s.caps) { let _ = reply.send(Err(why.into())); return; }
         if s.state == "starting" {
-            s.active = canon_frame(&frame).into();
+            s.active = canon_frame(&frame).into(); s.active_by = by;
             s.touched_at = ipc::now_s();
             let snap = s.clone();
             let out = snap.info_json();
@@ -2213,7 +2231,7 @@ impl Actor {
         if s.state != "ready" {
             let _ = reply.send(Err(format!("KiCad is {} ({})", s.state, s.reason))); return;
         }
-        s.active = canon_frame(&frame).into();
+        s.active = canon_frame(&frame).into(); s.active_by = by;
         s.touched_at = ipc::now_s();
         let snap = s.clone();
         let me = self.me.clone();
@@ -2241,6 +2259,7 @@ impl Actor {
                     // answer through the frames' update
                     if matches!(lock_verdict(&doc), super::locks::Verdict::Foreign { .. }) { if let Some(r) = take() { let _ = r.send(Ok(snap.info_json())); } }
                     if !lock_gate(&me, &snap.pro, snap.gen, &doc, "before KiCad opens it").await {
+                        let _ = me.send(Msg::Republish { pro: snap.pro.clone(), gen: snap.gen });
                         if let Some(r) = take() { let _ = r.send(Err(format!("Not opened: {} is open in another KiCad, and you chose Cancel", Path::new(&doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()))); }
                         return;
                     }
@@ -2248,7 +2267,7 @@ impl Actor {
                 let synced = match switch_fork_frame_n(&me, &snap.sock, &snap.desc, &snap.active, &doc, &item, remount, focus, Some(seq)).await {
                     Ok(v) => v,
                     Err(e) if e == SUPERSEDED => { if let Some(r) = take() { let _ = r.send(Ok(snap.info_json())); } return; }
-                    Err(e) => { if let Some(r) = take() { let _ = r.send(Err(e)); } return; }
+                    Err(e) => { let _ = me.send(Msg::Republish { pro: snap.pro.clone(), gen: snap.gen }); if let Some(r) = take() { let _ = r.send(Err(e)); } return; }
                 };
                 let reply = take().map(|r| (cid, r));
                 if let Some((holder, _, frames)) = synced {
@@ -2425,13 +2444,13 @@ impl Actor {
                 self.note_user(client);
                 self.attach(client, pro, root, files, frame, container, toplevel, display, wait, env, reply);
             }
-            Msg::Show { client, pro, frame, doc, item, remount, focus, reply } => {
+            Msg::Show { client, pro, frame, doc, item, remount, focus, by, reply } => {
                 self.note_user(client);
                 // the person's switch (a client's show): for SWITCH_HOLD a show request KiCad makes with no actor for another frame is KiCad's own,
                 // not followed. A schematic opening cold made KiCad ask for the board ~250 ms after Ctrl+Tab to it (ET_SHOW_REQUESTED FK_PCB,
                 // no actor: lane M's Mac mini, bp.13 batch 13), the hub showed the board, and the pane followed KiCad back to it
                 if client != 0 { hold_shows_after_switch(&pro); }
-                self.show(client, pro, frame, doc, item, remount, focus, reply)
+                self.show(client, pro, frame, doc, item, remount, focus, by, reply)
             }
             Msg::Detach { client, pro, keep, reply } => self.detach(client, pro, keep, reply),
             Msg::Warm { client, pro, root, files, frame, display, hardware, locked, env, reply } => {
@@ -2685,7 +2704,7 @@ impl Actor {
                 } else {
                     s.editor_req = Default::default();
                 }
-                s.active = canon_frame(&kind).into();
+                s.active = canon_frame(&kind).into(); s.active_by = json!("kicad");
                 let snap = s.clone();
                 let me = self.me.clone();
                 tokio::spawn(async move {
@@ -2748,6 +2767,9 @@ impl Actor {
                 eprintln!("kicad embed: KiCad lost its parent {}: the next Edit re-parents", s.container);
                 s.lost_parent = true;
                 let _ = self.me.send(Msg::ForkSync { pro, gen });
+            }
+            Msg::Republish { pro, gen } => {
+                if let Some(s) = self.sessions.get(&pro).filter(|s| s.gen == gen && s.is_live()) { self.publish(s, None); }
             }
             Msg::ForkSync { pro, gen } => {
                 let Some(s) = self.sessions.get(&pro).filter(|s| s.gen == gen && s.is_live()).cloned() else { return };
@@ -3985,8 +4007,9 @@ impl RpcHandler for EmbedRpc {
                     let item = p["item"].as_str().unwrap_or("").to_string();
                     let remount = p["remount"].as_bool().unwrap_or(false);
                     let focus = p["focus"].as_bool().unwrap_or(false);
+                    let by = show_by(client_cid(client), &p["seq"]);
                     actor_tx.send(Msg::Show {
-                        client, pro: resolved.pro, frame: resolved.frame, doc, item, remount, focus, reply: tx,
+                        client, pro: resolved.pro, frame: resolved.frame, doc, item, remount, focus, by, reply: tx,
                     })
                 }
                 "editor.kicad.warm" => {
@@ -4749,6 +4772,20 @@ mod tests {
         assert_eq!(runtime_stop_reason("failed", ""), "startFailed");
         assert_eq!(runtime_stop_reason(CLOSED, ""), "crashed");
         assert_eq!(runtime_stop_reason("stopped", "idle"), "idle");
+    }
+    #[test] fn every_active_says_who_made_it() {
+        // a client's show: its cid and the sequence number it sent; an attach (no seq): the cid, seq null; the hub's own drive: "agent"
+        assert_eq!(show_by(Some("gpui-1-2".into()), &json!(7)), json!({"cid": "gpui-1-2", "seq": 7}));
+        assert_eq!(show_by(Some("gpui-1-2".into()), &Value::Null), json!({"cid": "gpui-1-2", "seq": null}));
+        assert_eq!(show_by(Some("gpui-1-2".into()), &json!("x")), json!({"cid": "gpui-1-2", "seq": null}), "a seq that is no number");
+        assert_eq!(show_by(None, &json!(7)), json!("agent"));
+        assert_eq!(show_by(Some(String::new()), &json!(7)), json!("agent"), "a client with no cid");
+        // published with active, null before anyone set it
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0);
+        assert_eq!(s.info_json()["active_by"], Value::Null);
+        s.active = "SCH".into(); s.active_by = show_by(Some("gpui-1-2".into()), &json!(3));
+        let v = s.info_json();
+        assert_eq!((v["active"].as_str(), v["active_by"]["seq"].as_u64()), (Some("SCH"), Some(3)));
     }
     #[test] fn a_stop_keeps_who_ended_it() {
         let live = || Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 3, 0).ready("/s", "", 0);
