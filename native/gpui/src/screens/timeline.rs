@@ -661,7 +661,9 @@ impl Backplane {
         let link = pos.filter(|_| collapsed).and_then(|p| self.screens.reg.borrow().link_at(p).cloned());
         if let Some(l) = link {
             self.screens.reg.borrow_mut().hover.clear();
-            self.open_link(&l, cx);
+            // the row the link was pressed in: its `files` decide (the same path may be a link in another row too)
+            let entry = pos.and_then(|p| self.screens.reg.borrow().blocks.get(p.block).map(|b| b.id.clone())).unwrap_or_default();
+            self.open_link_in(&l, &entry, cx);
         }
         self.timeline_selection_made(window, cx);
         cx.notify();
@@ -680,12 +682,14 @@ impl Backplane {
         }
     }
     /// Open a link of the timeline or a document: a file in the viewer, a web address in the browser, a document's `#anchor` scrolled to.
-    pub(crate) fn open_link(&mut self, l: &Link, cx: &mut Context<Self>) {
+    pub(crate) fn open_link(&mut self, l: &Link, cx: &mut Context<Self>) { self.open_link_in(l, "", cx) }
+    /// `entry`: the thread row the link was pressed in ("" when unknown: the first row drawn with that link).
+    pub(crate) fn open_link_in(&mut self, l: &Link, entry: &str, cx: &mut Context<Self>) {
         if let Some(id) = l.href.strip_prefix('#') { self.jump_to_anchor(id); cx.notify(); return; }
         match super::linkroute::route(&l.href, l.file) {
             super::linkroute::Route::File(p) => { self.note.clear();
                 // on another computer's hub a file the hub lists as a download comes down to this one (docs/file-links.md)
-                let files = self.link_files(l);
+                let files = if entry.is_empty() { self.link_files(l) } else { self.row_files(entry) };
                 match super::linkroute::file_go(&p, &files, self.screens.elsewhere.is_some(), &self.thread_raw_id()) {
                     super::linkroute::FileGo::Download { url, name } => self.download(url, name, super::dlbar::From::Other, cx),
                     super::linkroute::FileGo::Open(p) => self.link_file(&p, false, cx),

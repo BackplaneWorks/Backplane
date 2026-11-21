@@ -24,7 +24,7 @@ impl Downloads {
         self.next += 1;
         self.list.push(Dl { id: self.next, url: url.into(), name: downloads::safe_name(name), got: 0, total: None, state: State::Going, from, resume: Resume::default(), stop: Default::default() });
         // keep every one still coming, and the newest finished ones up to SHOWN in all
-        while self.list.len() > SHOWN { match self.list.iter().position(|d| d.state != State::Going) { Some(i) => { self.list.remove(i); } None => break } }
+        while self.list.len() > SHOWN { match self.list.iter().position(|d| d.state != State::Going) { Some(i) => { forget(&self.list.remove(i)); } None => break } }
         self.next
     }
     /// What a report changes; true when the strip draws differently.
@@ -32,13 +32,19 @@ impl Downloads {
         let Some(d) = self.list.iter_mut().find(|d| d.id == id) else { return false };
         match e {
             Event::Progress { got, total } => { let before = line(d); d.got = got; d.total = total; line(d) != before }
-            Event::Done { path, bytes } => { d.got = bytes; d.total = Some(bytes); d.state = State::Done(path); d.resume = Resume::default(); true }
+            // the name it was saved as (`big (2).bin` when big.bin was there)
+            Event::Done { path, bytes } => { if let Some(n) = path.file_name() { d.name = n.to_string_lossy().into_owned(); } d.got = bytes; d.total = Some(bytes); d.state = State::Done(path); d.resume = Resume::default(); true }
             Event::Failed { why, part, etag, got } => { d.got = got; d.state = State::Failed(why); d.resume = Resume { part, etag }; true }
         }
     }
     /// Gone from the strip; one still coming stops, its part file deleted.
-    pub fn close(&mut self, id: u64) { for d in self.list.iter().filter(|d| d.id == id) { d.stop.store(true, std::sync::atomic::Ordering::Relaxed); } self.list.retain(|d| d.id != id) }
+    pub fn close(&mut self, id: u64) { if let Some(i) = self.list.iter().position(|d| d.id == id) { forget(&self.list.remove(i)); } }
     pub fn get(&self, id: u64) -> Option<&Dl> { self.list.iter().find(|d| d.id == id) }
+}
+/// A download leaves the list: one still coming stops (its thread deletes its part file), a failed one's part file goes now.
+fn forget(d: &Dl) {
+    d.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+    if let (State::Failed(_), Some(p)) = (&d.state, &d.resume.part) { let _ = std::fs::remove_file(p); }
 }
 /// The strip's words for a download.
 pub fn line(d: &Dl) -> String {
@@ -92,8 +98,11 @@ impl Backplane {
         match (what, path) {
             ("open", Some(p)) => cx.open_with_system(&p),
             ("reveal", Some(p)) => cx.reveal_path(&p),
-            ("retry", _) => { if let Some(d) = self.screens.downloads.list.iter_mut().find(|d| d.id == id) { d.state = State::Going; } self.download_run(id, cx); }
-            _ => self.screens.downloads.close(id),
+            // only a failed one starts again (two presses on one frame start it once)
+            ("retry", _) => { let failed = self.screens.downloads.list.iter_mut().find(|d| d.id == id && matches!(d.state, State::Failed(_)));
+                if let Some(d) = failed { d.state = State::Going; self.download_run(id, cx); } }
+            ("close", _) => self.screens.downloads.close(id),
+            _ => {}
         }
         cx.notify();
     }
@@ -135,7 +144,7 @@ mod tests {
         assert!(l.apply(id, Event::Failed { why: "the download ended early".into(), part: Some("/d/a.zip.part".into()), etag: "\"t\"".into(), got: 120 }));
         assert_eq!(line(l.get(id).unwrap()), "a.zip: download failed: the download ended early");
         assert_eq!(l.get(id).unwrap().resume.etag, "\"t\"", "Retry goes on from the part file");
-        assert!(l.apply(id, Event::Done { path: "/d/a.zip".into(), bytes: 200 })); assert_eq!(line(l.get(id).unwrap()), "Saved a.zip");
+        assert!(l.apply(id, Event::Done { path: "/d/a (2).zip".into(), bytes: 200 })); assert_eq!(line(l.get(id).unwrap()), "Saved a (2).zip", "the name it got");
         assert!(!l.apply(99, Event::Progress { got: 1, total: None }), "a download closed meanwhile");
     }
     #[test] fn the_strip_keeps_what_is_coming_and_the_newest_finished() {
@@ -145,6 +154,8 @@ mod tests {
         assert_eq!(l.list.iter().map(|d| d.id).collect::<Vec<_>>(), [b, c, d], "the finished one went first");
         let e = l.add("/x", "e", From::Other); assert_eq!(l.list.len(), 4, "every one still coming stays");
         l.close(e); assert!(l.get(e).is_none());
+        let dir = crate::tmp::uncreated("dl-forget"); std::fs::create_dir_all(&*dir).unwrap(); let part = dir.join("f.bin.part"); std::fs::write(&part, "half").unwrap();
+        l.apply(d, Event::Failed { why: "x".into(), part: Some(part.clone()), etag: "\"t\"".into(), got: 4 }); l.close(d); assert!(!part.exists(), "a failed download closed leaves no part file");
         assert_eq!(line(l.get(b).unwrap()), "b · 0.0 MB", "no size yet");
     }
 }

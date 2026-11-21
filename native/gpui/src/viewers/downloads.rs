@@ -23,7 +23,18 @@ fn bring_to(dir: &Path, file: &Path, suggested: &str) -> PathBuf {
     let to = unique_path(dir, &safe_name(suggested));
     if std::fs::rename(file, &to).is_ok() || std::fs::copy(file, &to).is_ok() { to } else { file.to_path_buf() }
 }
-pub fn safe_name(n: &str) -> String { let n: String = n.chars().map(|c| if c == '/' || c == '\\' || c.is_control() { '_' } else { c }).collect(); let n = n.trim_matches('.').trim().to_string(); if n.is_empty() { "download".into() } else { n } }
+/// A file name from the hub or a message made safe to create in one folder on every system: no separator, drive (`D:x`), stream (`a:x`),
+/// wildcard or control character, not a device name of Windows (`NUL`, `COM1.txt`), not `.`/`..`, at most 200 bytes.
+pub fn safe_name(n: &str) -> String {
+    let n: String = n.chars().map(|c| if matches!(c, '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|') || c.is_control() { '_' } else { c }).collect();
+    let mut n = n.trim().trim_matches(['.', ' ']).to_string();
+    let stem = n.split('.').next().unwrap_or("").trim().to_ascii_uppercase();
+    let device = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL") || ((stem.starts_with("COM") || stem.starts_with("LPT")) && stem.len() == 4 && stem.as_bytes()[3].is_ascii_digit()); // i18n-ok: device names of Windows
+    if device { n.insert(0, '_') }
+    if n.len() > 200 { let keep_ext = n.rsplit_once('.').map(|(_, e)| e.len() <= 16).unwrap_or(false); let ext = if keep_ext { format!(".{}", n.rsplit_once('.').unwrap().1) } else { String::new() };
+        let mut cut = 200 - ext.len(); while !n.is_char_boundary(cut) { cut -= 1 } n = format!("{}{ext}", &n[..cut]); }
+    if n.is_empty() { "download".into() } else { n }
+}
 /// `dir/name`, or `dir/name (2)`... when that file exists
 pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
     let first = dir.join(name); if !first.exists() { return first }
@@ -31,9 +42,26 @@ pub fn unique_path(dir: &Path, name: &str) -> PathBuf {
     /* i18n-ok: a file name pattern */ (2..).map(|n| dir.join(format!("{stem} ({n}){ext}"))).find(|p| !p.exists()).unwrap()
 }
 /// Where a download is written while it comes: `<name>.part` beside where it will be, one no other download holds.
-pub fn part_path(dir: &Path, name: &str) -> PathBuf {
-    let first = dir.join(format!("{name}.part")); if !first.exists() { return first }
-    (2..).map(|n| dir.join(format!("{name}.{n}.part"))).find(|p| !p.exists()).unwrap()
+/// The file is made here, atomically (`create_new`): two downloads of one name never share a part file.
+pub fn part_path(dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+    for n in 1..10_000 {
+        let p = if n == 1 { dir.join(format!("{name}.part")) } else { dir.join(format!("{name}.{n}.part")) };
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&p) { Ok(_) => return Ok(p), Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue, Err(e) => return Err(e) }
+    }
+    Err(std::io::ErrorKind::AlreadyExists.into())
+}
+/// The finished part file moved to a free name in `dir`, never over a file another download (or the person) put there meanwhile: a hard link
+/// that fails when the name is taken, then the part removed. A folder that has no hard links (FAT) falls back to a rename after the check.
+pub fn finish(part: &Path, dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+    for _ in 0..64 {
+        let to = unique_path(dir, name);
+        match std::fs::hard_link(part, &to) {
+            Ok(()) => { let _ = std::fs::remove_file(part); return Ok(to) }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(_) => { if to.exists() { continue } std::fs::rename(part, &to)?; return Ok(to) }
+        }
+    }
+    Err(std::io::ErrorKind::AlreadyExists.into())
 }
 
 /// A query value percent-encoded (everything but unreserved characters).
@@ -101,7 +129,8 @@ pub fn next(p: &Plan, h: &Head) -> Next {
         _ if h.chunked => Next::Fail { why: "the hub sent the file in a form this client does not read".into(), retry: false }, // i18n-ok: English kept, drawn through trs; or HTTP
         (200, _) => Next::Write { at: 0, total: h.length, etag: h.etag.clone() },
         (206, Plan::Rest { from, etag }) => match h.range {
-            Some((Some(a), total)) if a == *from => Next::Write { at: a, total, etag: if h.etag.is_empty() { etag.clone() } else { h.etag.clone() } },
+            // the tag must still be ours: a 206 of another version would mix two files
+            Some((Some(a), total)) if a == *from && (h.etag.is_empty() || h.etag == *etag) => Next::Write { at: a, total, etag: if h.etag.is_empty() { etag.clone() } else { h.etag.clone() } },
             _ => Next::Restart,
         },
         (206, Plan::Whole) => Next::Restart,
@@ -121,7 +150,7 @@ pub fn refusal_words(b: &[u8]) -> Option<String> {
 /// Percent done, when the size is known.
 pub fn percent(got: u64, total: Option<u64>) -> Option<u32> { total.filter(|t| *t > 0).map(|t| ((got.min(t) as f64 / t as f64) * 100.).floor() as u32) }
 
-/// A request's endpoint and credential: the hub's address, TLS or not, and its token (none for a share).
+/// A request's endpoint and credential: the hub's address, TLS or not, and its token (sent to that hub only, a share's request too).
 #[derive(Clone, Debug)]
 pub struct Source { pub addr: String, pub tls: bool, pub token: String }
 impl Source { pub fn of(t: &crate::screens::attach::Target) -> Self { Self { addr: t.addr.clone(), tls: t.tls, token: t.token.clone() } } }
@@ -146,7 +175,8 @@ pub struct Resume { pub part: Option<PathBuf>, pub etag: String }
 pub fn fetch(src: &Source, url: &str, dir: &Path, name: &str, resume: Resume, stop: &std::sync::atomic::AtomicBool, mut report: impl FnMut(Event)) {
     let name = safe_name(name);
     if let Err(e) = std::fs::create_dir_all(dir) { return report(Event::Failed { why: e.to_string(), part: None, etag: String::new(), got: 0 }) }
-    let part = resume.part.filter(|p| p.is_file()).unwrap_or_else(|| part_path(dir, &name));
+    // a part file to go on with must be one of ours: in this folder
+    let part = match resume.part.filter(|p| p.is_file() && p.parent() == Some(dir)) { Some(p) => p, None => match part_path(dir, &name) { Ok(p) => p, Err(e) => return report(Event::Failed { why: e.to_string(), part: None, etag: String::new(), got: 0 }) } };
     let mut etag = resume.etag;
     let mut have = std::fs::metadata(&part).map_or(0, |m| m.len());
     if have > 0 && etag.is_empty() { have = 0 }
@@ -168,9 +198,15 @@ pub fn fetch(src: &Source, url: &str, dir: &Path, name: &str, resume: Resume, st
         if stop.load(std::sync::atomic::Ordering::Relaxed) { let _ = std::fs::remove_file(&part); return }
         why.clear();
     }
-    if !why.is_empty() { return report(Event::Failed { why, part: Some(part.clone()).filter(|p| p.is_file()), etag, got: have }) }
-    let to = unique_path(dir, &name);
-    match std::fs::rename(&part, &to) { Ok(()) => report(Event::Done { path: to, bytes: have }), Err(e) => report(Event::Failed { why: e.to_string(), part: Some(part), etag, got: have }) }
+    // closed meanwhile: nobody waits for it any more
+    if stop.load(std::sync::atomic::Ordering::Relaxed) { let _ = std::fs::remove_file(&part); return }
+    if !why.is_empty() {
+        // nothing of the file came: no part file to go on from
+        let kept = std::fs::metadata(&part).map_or(0, |m| m.len()) > 0 && !etag.is_empty();
+        if !kept { let _ = std::fs::remove_file(&part); }
+        return report(Event::Failed { why, part: kept.then(|| part.clone()), etag, got: have })
+    }
+    match finish(&part, dir, &name) { Ok(to) => report(Event::Done { path: to, bytes: have }), Err(e) => report(Event::Failed { why: e.to_string(), part: Some(part), etag, got: have }) }
 }
 enum Step { Restart, Again(String), Stop(String), Cancel }
 /// One request: the head read, the body written to `part` from where `next` says; `have` and `etag` follow what is on disk.
@@ -189,8 +225,8 @@ fn once(src: &Source, url: &str, part: &Path, p: &Plan, have: &mut u64, etag: &m
         if let Some(x) = head(&got) { break x }
         if got.len() > 64 << 10 { return Err(Step::Stop("the hub's answer has no end to its head".into())) } // i18n-ok: English kept, drawn through trs; or HTTP
     };
-    let (from, total) = match next(p, &h) {
-        Next::Write { at, total, etag: tag } => { *etag = tag; (at, total) }
+    let (from, total, tag) = match next(p, &h) {
+        Next::Write { at, total, etag: tag } => (at, total, tag),
         Next::Complete => return Ok(()),
         Next::Restart => return Err(Step::Restart),
         Next::Fail { why, retry } => {
@@ -203,6 +239,8 @@ fn once(src: &Source, url: &str, part: &Path, p: &Plan, have: &mut u64, etag: &m
     };
     let mut f = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(part).map_err(|e| Step::Stop(e.to_string()))?;
     f.set_len(from).map_err(|e| Step::Stop(e.to_string()))?; f.seek(SeekFrom::Start(from)).map_err(|e| Step::Stop(e.to_string()))?;
+    // the file's tag is the answer's only once the part file holds nothing of another (a failure above keeps the old pair: bytes and tag)
+    *etag = tag;
     let mut w = std::io::BufWriter::with_capacity(256 << 10, f);
     *have = from;
     let body_len = h.length;
@@ -271,6 +309,7 @@ mod tests {
         assert_eq!(next(&rest, &h(206, Some((Some(4), Some(9))), "\"t\"")), Next::Write { at: 4, total: Some(9), etag: "\"t\"".into() }, "206: append");
         assert_eq!(next(&rest, &h(200, None, "\"u\"")), Next::Write { at: 0, total: Some(5), etag: "\"u\"".into() }, "200: the file changed, start over with its new tag");
         assert_eq!(next(&rest, &h(206, Some((Some(2), Some(9))), "\"t\"")), Next::Restart, "a range that is not ours");
+        assert_eq!(next(&rest, &h(206, Some((Some(4), Some(9))), "\"other\"")), Next::Restart, "a 206 of another version of the file");
         assert_eq!(next(&Plan::Whole, &h(206, Some((Some(0), Some(9))), "")), Next::Restart);
         assert_eq!(next(&rest, &h(416, Some((None, Some(4))), "")), Next::Complete, "every byte is already here");
         assert_eq!(next(&rest, &h(416, Some((None, Some(3))), "")), Next::Restart, "the file shrank");
@@ -285,7 +324,12 @@ mod tests {
     }
     #[test] fn names_never_overwrite_and_parts_never_collide() {
         let d = crate::tmp::uncreated("dl-names"); std::fs::create_dir_all(&*d).unwrap();
-        assert_eq!(part_path(&d, "a.zip"), d.join("a.zip.part")); std::fs::write(d.join("a.zip.part"), "").unwrap(); assert_eq!(part_path(&d, "a.zip"), d.join("a.zip.2.part"));
+        assert_eq!(part_path(&d, "a.zip").unwrap(), d.join("a.zip.part")); assert_eq!(part_path(&d, "a.zip").unwrap(), d.join("a.zip.2.part"), "claimed: the next one takes another");
+        std::fs::write(d.join("b.bin.part"), "x").unwrap(); std::fs::write(d.join("b.bin"), "theirs").unwrap();
+        assert_eq!(finish(&d.join("b.bin.part"), &d, "b.bin").unwrap(), d.join("b (2).bin")); assert_eq!(std::fs::read_to_string(d.join("b.bin")).unwrap(), "theirs", "never over a file");
+        assert!(!d.join("b.bin.part").exists());
+        for (bad, want) in [("D:setup.bat", "D_setup.bat"), ("report.pdf:x", "report.pdf_x"), ("NUL", "_NUL"), ("com1.txt", "_com1.txt"), ("a*?<>|\"b", "a______b"), ("..", "download")] { assert_eq!(safe_name(bad), want, "{bad}"); }
+        let long = format!("{}.step", "é".repeat(150)); let s = safe_name(&long); assert!(s.len() <= 200 && s.ends_with(".step"), "{s}");
         std::fs::write(d.join("a.zip"), "").unwrap(); assert_eq!(unique_path(&d, "a.zip"), d.join("a (2).zip"));
         assert_eq!(safe_name("../x/y"), "_x_y"); assert_eq!(safe_name(".."), "download");
         assert_eq!(pct("/a b/ü.txt"), "%2Fa%20b%2F%C3%BC.txt"); assert_eq!(unpct(&pct("/a b/ü.txt")), "/a b/ü.txt");
