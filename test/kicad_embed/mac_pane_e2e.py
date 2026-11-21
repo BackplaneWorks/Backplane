@@ -512,6 +512,24 @@ try:
                     except Exception: pass
             _kp[0], _kp[1] = pid, time.time()
             return pid
+        def kicad_frame_bounds(kp):
+            # KiCad's frame to click, as a person sees it: KiCad's largest on-screen window at a normal level (any layer under the
+            # status bar's 25; the runner listed none at layer 0 in run 44808099471), else the window the client names as KiCad's frame
+            # (kicad_host_push "frame"); when neither, every window KiCad owns is printed
+            allw = Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionAll, Quartz.kCGNullWindowID) or []
+            mine = [w for w in allw if int(w.get('kCGWindowOwnerPID', 0)) == kp]
+            def bounds(w): return [round(w['kCGWindowBounds'][k]) for k in ('X', 'Y', 'Width', 'Height')]
+            on = [w for w in mine if w.get('kCGWindowIsOnscreen') and 0 <= int(w.get('kCGWindowLayer', 0)) < 25 and bounds(w)[2] > 100 and bounds(w)[3] > 100]
+            if on: return bounds(max(on, key=lambda w: bounds(w)[2] * bounds(w)[3]))
+            fr = None
+            for l in client_log().splitlines():
+                m = re.search(r'"kicad_host_push".*?"frame":(\d+)', l)
+                if m: fr = int(m.group(1))
+            hit = [w for w in allw if fr and int(w.get('kCGWindowNumber', 0)) == fr]
+            print(f'INFO KiCad frame lookup: pid {kp}; client frame {fr} -> {[(int(w.get("kCGWindowOwnerPID", 0)), bounds(w), w.get("kCGWindowIsOnscreen")) for w in hit]}; '
+                  f'KiCad windows {[(int(w.get("kCGWindowNumber", 0)), int(w.get("kCGWindowLayer", 0)), bounds(w), bool(w.get("kCGWindowIsOnscreen"))) for w in mine][:8]}', flush=True)
+            if hit and hit[0].get('kCGWindowIsOnscreen'): return bounds(hit[0])
+            return None
         def frame_over_pane():
             order = wins(); ours = next((i for i, w in enumerate(order) if w[0] == cw[0]), None)
             if ours is None: return None
@@ -621,11 +639,9 @@ try:
                     time.sleep(1.0); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300)
                     check(bool(wait_for(lambda: active(client.pid), 4, 0.1)), 'auto E-mainpane: a click in Backplane takes the keyboard back')
                     time.sleep(1.0); n_log = len(client_log().splitlines())
-                kp = kicad_pid()
-                ws = [w for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or []
-                      if int(w.get('kCGWindowLayer', 0)) == 0 and int(w.get('kCGWindowOwnerPID', 0)) == kp]
-                if not ws: check(False, 'auto E-pane: no KiCad window on screen to click'); return
-                fb = [round(ws[0]['kCGWindowBounds'][k]) for k in ('X', 'Y', 'Width', 'Height')]; t0 = time.time()
+                kp = kicad_pid(); fb = kicad_frame_bounds(kp)
+                if not fb: check(False, 'auto E-pane: no KiCad window on screen to click'); return
+                t0 = time.time()
                 click(fb[0] + fb[2] * 0.5, fb[1] + fb[3] * 0.5)
             else:
                 r = wait_for(lambda: rects_now().get('ui:Edit'), 10, 0.3)
@@ -674,9 +690,9 @@ try:
                 return False
             def kicad_by_own_click():
                 b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300); wait_for(lambda: active(client.pid), 4, 0.1); time.sleep(0.8)
-                ws = [w for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or [] if int(w.get('kCGWindowLayer', 0)) == 0 and int(w.get('kCGWindowOwnerPID', 0)) == kp]
-                if not ws: return False
-                fb = [ws[0]['kCGWindowBounds'][k] for k in ('X', 'Y', 'Width', 'Height')]; click(fb[0] + fb[2] * 0.5, fb[1] + fb[3] * 0.5)
+                fb = kicad_frame_bounds(kp)
+                if not fb: return False
+                click(fb[0] + fb[2] * 0.5, fb[1] + fb[3] * 0.5)
                 ok = bool(wait_for(lambda: active(kp), 4, 0.1)); key(K_ESC); time.sleep(0.8); return ok and active(kp)
             def via_chord(): key(50, CTRL)
             def via_click(): b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300)
@@ -709,9 +725,7 @@ try:
             # no app has the keys; a person gets KiCad back by clicking its own frame, which a host hide leaves on screen. Click it, check
             # KiCad active with Backplane still hidden, then type the chord. No open -a / Dock: if the frame is gone, the state is not
             # reachable by the person and that is recorded with a screenshot
-            def kicad_frame():
-                ws = [w for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or [] if int(w.get('kCGWindowLayer', 0)) == 0 and int(w.get('kCGWindowOwnerPID', 0)) == kp]
-                return [ws[0]['kCGWindowBounds'][k] for k in ('X', 'Y', 'Width', 'Height')] if ws else None
+            def kicad_frame(): return kicad_frame_bounds(kp)
             def ours_hidden():
                 a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); return bool(a and a.isHidden()) and not ours_on_screen()
             def trace_since(t, pat):
