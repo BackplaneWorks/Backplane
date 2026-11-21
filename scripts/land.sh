@@ -115,6 +115,11 @@ while :; do
   n=$((n + 1))
   rebase_or_stop "in the land lock"
   sha=$(git rev-parse HEAD)
+  # main moved since the gate: the catalogs generated from i18n/*.msg again (a second; a .msg change of main's merges cleanly into a branch whose
+  # catalogs were made without it: Nov 20, 5,890 lines of Msg.kt), on the rebased tree
+  if [ "$sha" != "${LAND_GATED:-$sha}" ] && [ -f "$(git rev-parse --show-toplevel)/scripts/i18n-gate.sh" ]; then
+    bash "$(git rev-parse --show-toplevel)/scripts/i18n-gate.sh" > /dev/null || die "after the rebase onto main in the land lock, $br's i18n catalogs are stale (above): run the generator it names, commit, and land again; nothing pushed"
+  fi
   # the branch: forced with a lease (a rebase rewrote it; nothing else pushes to a lane's branch)
   git fetch -q origin "$br" 2>/dev/null || true
   [ "$br" != main ] && [ "$br" != master ] || die "refusing to push $br: land.sh never pushes to main, only a lane's branch (main takes the pull request's merge)"
