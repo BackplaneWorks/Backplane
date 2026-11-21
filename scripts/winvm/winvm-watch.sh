@@ -87,7 +87,16 @@ for entry in "${vms[@]}"; do
     --query "instanceView.statuses[?starts_with(code,'PowerState/')].code|[0]" -o tsv 2>>"$state/watch.log")
   power=${power#PowerState/}
   case "$power" in
-    deallocated|deallocating) rm -f "$state/$vm.free-since"; continue ;;
+    deallocated|deallocating) rm -f "$state/$vm.free-since"
+      # a deallocated VM keeps no port 22 open: the direct path's rules (winbuild-up.sh's winbuild-ssh, land-windows.sh's land-gate-ssh) a run
+      # left (--keep-up, a caller without winbuild-down.sh, the VM's own watchdog) are closed here
+      for r in winbuild-ssh land-gate-ssh; do
+        az network nsg rule show -g "$rg" --nsg-name "$vm-gate-nsg" -n "$r" -o none 2>/dev/null || continue
+        if [ -n "$dry" ]; then log "$vm: deallocated, NSG rule $r still open: dry run, not closed"
+        elif az network nsg rule delete -g "$rg" --nsg-name "$vm-gate-nsg" -n "$r" -o none 2>>"$state/watch.log"; then log "$vm: deallocated, closed the NSG rule $r a run left"
+        else log "$vm: deallocated, could not close the NSG rule $r"; fi
+      done
+      continue ;;
     stopped|stopping) deallocate "$vm" "powered off but not deallocated: it still bills"; continue ;;
     running|starting) ;;
     *) log "$vm: power state unknown ('$power')"; continue ;;
