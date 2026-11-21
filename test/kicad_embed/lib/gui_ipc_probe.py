@@ -409,7 +409,7 @@ def main() -> None:
     sock_path = sys.argv[2]
     args = sys.argv[3:]
 
-    cli = KiCadIpc(sock_path)
+    cli = KiCadIpc(sock_path, float(os.environ.get("KIPC_TIMEOUT", "8")))  # KIPC_TIMEOUT: a close that saves can take longer
     try:
         if cmd == "ping":
             cli.call("kiapi.common.commands.Ping")
