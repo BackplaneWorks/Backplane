@@ -464,8 +464,9 @@ mod tests {
         // presenter.rs: loopback to our own policy child; kicad/nng.rs: the KiCad unix socket; net/tailnet.rs: `hello_with` returns at once on a copy;
         // agents/mcp_stdio.rs: the `--mcp-stdio` bridge an agent starts, loopback only (`endpoint` refuses any other host) to the hub's own MCP server;
         // net/alwayson/tunnel.rs: `run_local`, 127.0.0.1 only, to this hub's own untrusted door for calls that came over the reverse link (never started on a copy);
-        // net/webprovision.rs: `system_proxy_identity` reads peer_cred() on /run/tailscale/tailscaled.sock (sends no bytes; returns PermissionDenied immediately on a copy)
-        const ALLOWED: [&str; 6] = ["presenter.rs", "kicad/nng.rs", "net/tailnet.rs", "agents/mcp_stdio.rs", "net/alwayson/tunnel.rs", "net/webprovision.rs"];
+        // net/webprovision.rs: `system_proxy_identity` reads peer_cred() on /run/tailscale/tailscaled.sock (sends no bytes; returns PermissionDenied immediately on a copy);
+        // net/peerws.rs: `start` and `connect_outbound` return at once on a copy, never opening an outbound socket
+        const ALLOWED: [&str; 7] = ["presenter.rs", "kicad/nng.rs", "net/tailnet.rs", "agents/mcp_stdio.rs", "net/alwayson/tunnel.rs", "net/webprovision.rs", "net/peerws.rs"];
         fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { if p.file_name().map_or(false, |n| n == "bin") { continue } walk(&p, out) } else if p.extension().map_or(false, |x| x == "rs") { out.push(p) } } }
         let mut files = vec![]; walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
         let mut bad = vec![];
