@@ -11,9 +11,9 @@ set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 . "$HERE/scripts/lib-winmingw.sh"; tc=
 # the check (host, gpui, all) with BUILD_SLOTS=0 (the merge gate, or a lane sending it to Boat): every cargo-q runs on a Boat box, which sets up
-# its own llvm-mingw and target (scripts/cargo-q): none needed here. Anything else: this machine's (fetched once on a Boat box).
+# its own llvm-mingw and target (scripts/cargo-q): none needed here (BQ_MAIN unset: it would take a local slot). Anything else: this machine's (fetched once on a Boat box).
 case "${1:-}" in --xwin|--build) win_mingw_env || exit 2; tc=$WIN_TC;;
-  *) if [ "${BUILD_SLOTS:-}" = 0 ] && [ -z "${BP_ON_BOAT:-}" ] && [ -z "${BP_NO_BOAT:-}" ]; then :; else win_mingw_env || exit 2; tc=$WIN_TC; fi;; esac
+  *) if [ "${BUILD_SLOTS:-}" = 0 ] && [ -z "${BP_ON_BOAT:-}" ] && [ -z "${BP_NO_BOAT:-}" ]; then unset BQ_MAIN; else win_mingw_env || exit 2; tc=$WIN_TC; fi;; esac
 if [ "${1:-}" = --xwin ]; then
   # x86_64-pc-windows-msvc through cargo-xwin (Microsoft's CRT and SDK, fetched once into ~/.cache/cargo-xwin): the release target.
   # The client is built with PROFILE (default fast: no debug assertions), so it draws with the shader bytes in native/gpui/vendor/gpui/windows-shaders.
@@ -61,7 +61,7 @@ rc=0
 for c in ${1:-all}; do case $c in all) set -- host gpui;; *) set -- "$c";; esac
   for k in "$@"; do
     echo "== $k"
-    (cd "$HERE/native/$k" && CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$HERE/native/$k/target} "$HERE/scripts/cargo-q" check --offline --target x86_64-pc-windows-gnu --all-targets) || rc=1
+    (cd "$HERE/native/$k" && CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$HERE/native/$k/target} "$HERE/scripts/cargo-q" check --locked --offline --target x86_64-pc-windows-gnu --all-targets) || rc=1
   done
 done
 exit $rc
