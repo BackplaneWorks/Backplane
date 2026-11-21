@@ -46,7 +46,14 @@ for i in $(seq "$CYCLES"); do
   if kill -0 "$P" 2>/dev/null; then
     # what is on screen of its own (a dialog that held the close is not a hang of its exit)
     WINS=$(xwininfo -root -tree 2>/dev/null | grep -E '"[^"]+"' | grep -iE "kicad|pcb|schematic|library|footprint|symbol" | sed 's/^ *//' | cut -c1-80 | tr '\n' ';')
-    HUNG=$((HUNG + 1)); echo "cycle $i: still running 30 s after its window was closed; on screen: $WINS"; kill -9 "$P" 2>/dev/null; wait "$P" 2>/dev/null
+    HUNG=$((HUNG + 1)); echo "cycle $i: still running 30 s after its window was closed; on screen: $WINS"
+    # CLOSE_HANG_STACK=attach: the editor (started through bin/ptracer-any, a -ptr runtime) read where it hangs, every thread's stack
+    if [ "${CLOSE_HANG_STACK:-0}" = attach ]; then
+      RP=$(pgrep -P "$P" | head -1); RP=${RP:-$P}
+      timeout 120 gdb -p "$RP" -batch -ex "set pagination off" -ex "info threads" -ex "thread apply all bt" >"$OUT/hang-stack-$i.txt" 2>&1
+      echo "INFO cycle $i: hung editor's stacks in hang-stack-$i.txt ($(grep -c '^Thread ' "$OUT/hang-stack-$i.txt") threads)"
+    fi
+    kill -9 "$P" 2>/dev/null; wait "$P" 2>/dev/null
   else
     wait "$P"; st=$?
     if [ "$st" = 0 ]; then CLEAN=$((CLEAN + 1)); echo "cycle $i: clean$([ "$ASKED" = 1 ] && echo " (Save Changes? answered Save)")"
