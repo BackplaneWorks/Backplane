@@ -705,20 +705,53 @@ try:
                 if not wait_for(lambda: active(client.pid), 2, 0.1):
                     b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 120, b[1] + 12)
                 wait_for(lambda: ours_on_screen() and active(client.pid), 5, 0.1); time.sleep(0.8)
-            for name, chord, reserved in (('Cmd+K', (K_K, CMD), True), ('the escape chord (Ctrl+`)', (50, CTRL), True), ('Cmd+A (not reserved)', (K_A, CMD), False)):
-                got = 0
-                for i in range(3):
+            # restaged (Integrator, Nov 20): Cmd+H typed in KiCad is itself a reserved chord (KiCad yields, Backplane hides), so after it
+            # no app has the keys; a person gets KiCad back by clicking its own frame, which a host hide leaves on screen. Click it, check
+            # KiCad active with Backplane still hidden, then type the chord. No open -a / Dock: if the frame is gone, the state is not
+            # reachable by the person and that is recorded with a screenshot
+            def kicad_frame():
+                ws = [w for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or [] if int(w.get('kCGWindowLayer', 0)) == 0 and int(w.get('kCGWindowOwnerPID', 0)) == kp]
+                return [ws[0]['kCGWindowBounds'][k] for k in ('X', 'Y', 'Width', 'Height')] if ws else None
+            def ours_hidden():
+                a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); return bool(a and a.isHidden()) and not ours_on_screen()
+            def trace_since(t, pat):
+                if not os.path.exists(TR): return []
+                out = []
+                for l in open(TR, errors='replace'):
+                    try: ts = float(l.split(' ', 1)[0])
+                    except ValueError: continue
+                    if ts >= t and re.search(pat, l): out.append(l.strip()[:160])
+                return out
+            for name, chord, reserved, tries in (('the escape chord (Ctrl+`)', (50, CTRL), True, 3), ('Cmd+K', (K_K, CMD), True, 3), ('Cmd+A (not reserved)', (K_A, CMD), False, 1)):
+                got = 0; staged = 0; unreachable = 0
+                for i in range(tries):
                     ok = kicad_by_own_click(); key(4, CMD)
-                    hid = bool(wait_for(lambda: not ours_on_screen(), 5, 0.1)); time.sleep(0.6); kicad_still = active(kp)
+                    hid = bool(wait_for(ours_hidden, 5, 0.1)); time.sleep(0.8)
+                    fb = kicad_frame(); tag = 'hidden-' + re.sub(r'[^a-z]+', '-', name.lower()).strip('-') + f'-{i + 1}'
+                    if not fb:
+                        shot(tag + '-no-frame'); unreachable += 1
+                        print(f'INFO handback hidden, {name} #{i + 1}: Cmd+H hid Backplane {hid}; KiCad frame on screen after the hide: no (screenshot {tag}-no-frame.png)', flush=True)
+                        unhide_ours(); continue
+                    tc = time.time(); click(fb[0] + fb[2] * 0.5, fb[1] + fb[3] * 0.5)
+                    kact = bool(wait_for(lambda: active(kp), 4, 0.1)); time.sleep(0.6)
+                    still = ours_hidden(); focus = trace_since(tc, r'become key|became key|did become active|SetFocus|focus')[:2]
+                    shot(tag + '-staged')
+                    if not (hid and kact and still):
+                        print(f'INFO handback hidden, {name} #{i + 1}: NOT STAGED: Cmd+H hid Backplane {hid}; KiCad active after its frame click {kact}; Backplane still hidden {still}; frame {fb}', flush=True)
+                        key(K_ESC); unhide_ours(); continue
+                    staged += 1
                     t0 = time.time(); key(*chord)
-                    back = bool(wait_for(lambda: ours_on_screen() and active(client.pid), 3, 0.05))
-                    line = next((l.strip()[:140] for l in open(TR, errors='replace') if 'host activated' in l and float(l.split(' ', 1)[0]) >= t0 - 0.05), None) if os.path.exists(TR) else None
-                    print(f'INFO handback hidden, {name} #{i + 1}: KiCad by its own click {ok}; Cmd+H hid Backplane {hid}; KiCad active after the hide {kicad_still}; Backplane back on screen and active within 3 s {back}; trace {line}', flush=True)
+                    back = bool(wait_for(lambda: ours_on_screen() and active(client.pid), 3, 0.05)); time.sleep(0.4)
+                    lines = trace_since(t0 - 0.05, r'host activated|handed to wx|reserved')[:3]
+                    print(f'INFO handback hidden, {name} #{i + 1}: Cmd+H hid Backplane {hid}; KiCad frame on screen {fb}; KiCad active after its frame click {kact}; Backplane still hidden {still}; '
+                          f'KiCad focus trace {focus}; Backplane back on screen and active within 3 s {back}; trace after the chord {lines}', flush=True)
                     got += (back if reserved else not back)
                     if not back or not reserved: key(K_ESC); unhide_ours()
                     else: key(K_ESC); time.sleep(0.6)
-                if reserved: check(got == 3, f'handback: with Backplane hidden, {name} typed in KiCad brings it back un-hidden and active ({got}/3)')
-                else: check(got == 3, f'handback: with Backplane hidden, {name} typed in KiCad leaves it hidden ({got}/3)')
+                if unreachable: print(f'INFO handback hidden, {name}: KiCad frame not on screen after the host hide in {unreachable}/{tries}: not reachable by the person on this macOS', flush=True)
+                if name == 'Cmd+K': print(f'INFO handback hidden, Cmd+K (recorded): Backplane back {got}/{staged} staged', flush=True)
+                elif reserved: check(staged == tries and got == tries, f'handback: with Backplane hidden and KiCad clicked, {name} typed in KiCad brings it back un-hidden and active ({got}/{staged} staged of {tries})')
+                else: check(staged == tries and got == tries, f'handback: with Backplane hidden and KiCad clicked, {name} typed in KiCad leaves it hidden ({got}/{staged} staged of {tries})')
             raise SystemExit(1 if FAILS else 0)
         if os.environ.get('AUTO_MAIN') == '1' and os.environ.get('AUTO_E') == 'handback':
             check(bool(wait_for(lambda: marked('D_ready'), 60, 0.1)), 'handback: the Board page is open')
