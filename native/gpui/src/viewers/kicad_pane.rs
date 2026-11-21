@@ -923,7 +923,7 @@ impl KicadPane {
     /// KiCad has it already (no placement again, no geometry pushed). Placed again on the next frame: the hand-in is the placement's.
     pub fn edit_keys(&mut self, cx: &mut Context<Self>) {
         if self.keys { return }
-        self.chose("edit"); self.ask_keys(); self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        self.chose("edit"); self.ask_keys(true); self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_edit_keys": {"open": self.open}})); }
     }
     /// A key typed in Backplane (`ui.rs`): a waiting hand-in is dropped, past the Edit's own key (`key_turns_to_backplane`).
@@ -938,7 +938,9 @@ impl KicadPane {
     }
     /// The pane asks for the keyboard (an Edit, a tab, Full size, the popped window closing): `want_keys`, and the key that pressed it, if a
     /// key did, remembered so its repeats never drop this hand-in.
-    pub fn ask_keys(&mut self) { self.want_keys = true; self.edit_key = trigger_key(); }
+    /// `by_key`: a person's act a key may have pressed (an Edit, a tab, Ctrl+Tab); every other asker (a timer, a re-home, Full size by
+    /// the mouse, the frame on show closing in KiCad) takes no key, so a key held in Backplane meanwhile still drops the hand-in.
+    pub fn ask_keys(&mut self, by_key: bool) { self.want_keys = true; self.edit_key = if by_key { trigger_key() } else { None }; }
     /// The person turned to Backplane (`how`) with a hand-in still waiting: dropped, the keyboard stays theirs in Backplane.
     pub fn turned_to_backplane(&mut self, how: TurnedTo) {
         if hand_in_dropped(self.want_keys, self.keys, how) {
@@ -950,7 +952,7 @@ impl KicadPane {
     pub fn deliberate(&mut self, cx: &mut Context<Self>) {
         // placed again on the next frame: the hand-in is the placement's (`after_frame` returns early on an unchanged placement, so
         // want_keys alone waited for the next layout change: the #1198 lane's row E, 9.2 s until the viewer closed)
-        self.chose("deliberate"); self.ask_keys(); self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        self.chose("deliberate"); self.ask_keys(true); self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
     }
     /// The person acted on the pane (`by`): an automatic pane is deliberate from now on.
     fn chose(&mut self, by: &str) {
@@ -1034,7 +1036,7 @@ impl KicadPane {
         if let Some((k, next)) = closed {
             eprintln!("GPUI_LOG {}", json!({"kicad_frame_closed": k, "to": next}));
             match next {
-                Some(to) => { self.override_kind = None; self.show_kind_inner(&to, ShowBy::Deliberate, cx); cause = "the frame shown closed in KiCad: the page's own editor".into(); } // i18n-ok: a debug log cause
+                Some(to) => { self.override_kind = None; self.show_kind_inner(&to, ShowBy::Deliberate, cx); self.edit_key = None; cause = "the frame shown closed in KiCad: the page's own editor".into(); } // i18n-ok: a debug log cause
                 None => cx.emit(PaneFrameClosed(k)),
             }
         }
@@ -1116,7 +1118,7 @@ impl KicadPane {
         // the editor in another window now (popped out, or back in): its keys are handed in when it is placed there
         // (bp9 Nov 15: set at open_window, the old window's next frame used the request before the move, and the editor
         // in the new window never got the keys)
-        self.chose("rehome"); self.ask_keys(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        self.chose("rehome"); self.ask_keys(false); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         self.grab_click(new, !self.keys);
         self.reattach();
     }
@@ -1174,7 +1176,7 @@ impl KicadPane {
         let was_tab = self.tab(); self.show_kind_inner(kind, by, cx); self.note_tab(&was_tab, cause, cx);
     }
     fn show_kind_inner(&mut self, kind: &str, by: ShowBy, cx: &mut Context<Self>) {
-        if by.takes_keys() { self.chose("show_kind"); self.ask_keys(); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        if by.takes_keys() { self.chose("show_kind"); self.ask_keys(true); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         self.chosen();
         // the person's own choice while KiCad opens a library editor: the hub does not put that editor on show over it when it comes
         // (another frame than the one on show: a re-click of the tab on show is no choice)
@@ -1314,7 +1316,7 @@ impl KicadPane {
             let activated = nc::activated_after_close(self.toplevel, popped);
             if activated || at.elapsed() >= std::time::Duration::from_millis(1000) {
                 self.await_close = None;
-                self.chose("popped window closed"); self.ask_keys(); self.placed = None; // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+                self.chose("popped window closed"); self.ask_keys(false); self.placed = None; // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
                     eprintln!("GPUI_LOG {}", json!({"kicad_close_handin": {"path": if activated { "activated" } else { "timeout" }, "after_ms": at.elapsed().as_millis() as u64}}));
                 }
@@ -2080,6 +2082,13 @@ mod tests {
         assert!(super::hand_in_dropped(true, false, super::TurnedTo::Click));
         assert!(!super::hand_in_dropped(true, true, super::TurnedTo::Click), "KiCad has the keys already: nothing waits");
         assert!(!super::hand_in_dropped(false, false, super::TurnedTo::Click), "nothing waiting");
+    }
+    #[test] fn only_an_ask_a_key_may_have_pressed_remembers_the_key() {
+        // the trigger key is read only by_key; a timer's or a mouse-only ask takes none, so a held key in Backplane drops its hand-in
+        *super::LAST_KEY.lock().unwrap() = Some(("backspace".into(), std::time::Instant::now()));
+        assert!(super::trigger_key().is_some(), "an Edit pressed by a key: that key");
+        let none: Option<(&str, u128)> = None;
+        assert!(super::key_turns_to_backplane(none, "backspace").is_some(), "an ask that took no key: Backspace held in the composer drops it");
     }
     #[test] fn an_edits_waiting_hand_in_is_dropped_by_typing_in_backplane() {
         // every key, bound ones included (Enter, Backspace, Ctrl+V are the composer's actions): the interceptor runs before them
@@ -3391,9 +3400,9 @@ impl crate::Backplane {
     }
     /// The strip's buttons in the main window.
     pub(crate) fn kicad_strip_act(&mut self, a: &str, cx: &mut Context<Self>) {
-        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.ask_keys(); p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => { self.screens.kicad_screen = false; crate::screens::mgmt_checks::open_panel(self, cx) }
+        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.ask_keys(false); p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => { self.screens.kicad_screen = false; crate::screens::mgmt_checks::open_panel(self, cx) }
             // the strip's Install Backplane KiCad (a stock KiCad in the pane): Settings, CAD, where the install says what it downloads and asks
-            "screen" => { self.screens.kicad_screen = !self.screens.kicad_screen; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.ask_keys(); p.placed = None; }); } cx.notify(); }
+            "screen" => { self.screens.kicad_screen = !self.screens.kicad_screen; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.ask_keys(false); p.placed = None; }); } cx.notify(); }
             "cad" => { self.screens.kicad_screen = false; crate::screens::settings::go_page(self, "cad"); cx.notify(); }
             _ => {} }
     }
