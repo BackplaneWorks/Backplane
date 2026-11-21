@@ -125,6 +125,43 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
     let r = signed(&b, &a, &l, body).await;
     assert_eq!(r.code, 403, "{}", r.body);
 }
+#[tokio::test]
+async fn proxy_gateway_errors_mark_the_home_away_until_the_hub_answers() {
+    use std::sync::atomic::{AtomicU16, Ordering};
+    let code = Arc::new(AtomicU16::new(502));
+    let reply_code = code.clone();
+    let extra: Extra = Arc::new(move |_, req| {
+        let code = reply_code.load(Ordering::Relaxed);
+        Box::pin(async move {
+            let status = match code {
+                502 => "502 Bad Gateway", 503 => "503 Service Unavailable", 504 => "504 Gateway Timeout",
+                _ => "501 Not Implemented",
+            };
+            (req.route() == "/far/rpc").then(|| HttpReply::text(status, "upstream response"))
+        })
+    });
+    let a = node_extra("home-proxy-a", false, false, Some(extra)).await;
+    let (b, _) = side("home-proxy-b", false, false).await;
+    let link = link(&a, &b, true).await;
+    b.hub.commit(&json!({"$":"SettingSet","key":"home.at","value":json!({"link":link}).to_string(),"at":1})).await.unwrap();
+    let mut since = None;
+    for unavailable in [502, 503, 504] {
+        code.store(unavailable, Ordering::Relaxed);
+        crate::mirror::ask_origins(&b.hub, &link).await;
+        let home = crate::net::home::now(&b.hub).await;
+        assert_eq!(home["online"], false);
+        assert_eq!(home["canMoveHere"], false);
+        let at = home["awaySince"].as_u64().expect("the outage has a start");
+        assert_eq!(*since.get_or_insert(at), at);
+    }
+    code.store(501, Ordering::Relaxed);
+    crate::mirror::ask_origins(&b.hub, &link).await;
+    let home = crate::net::home::now(&b.hub).await;
+    assert_eq!(home["online"], true);
+    assert_eq!(home["canMoveHere"], true);
+    assert!(home.get("awaySince").is_none());
+}
+
 #[tokio::test] async fn far_a_hub_on_a_copy_takes_no_far_rpc() {
     let (a, fa) = side("ra8", true, false).await;
     let p = PReq { method: "POST".into(), target: "/far/rpc".into(), headers: vec![], body: b"{}".to_vec(), trusted: false, own_device: false , peer: String::new()};

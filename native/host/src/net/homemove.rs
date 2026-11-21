@@ -146,7 +146,8 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
     match m {
         "home.state" => {
             let uber = uber(hub).await;
-            ok(json!({"uber": uber, "version": hub.cfg.version, "lines": hub.store.len(), "here": hub.setting("home.here").await.unwrap_or_default(), "at": hub.setting("home.at").await.unwrap_or_default(), "move": STATE.lock().unwrap().clone().unwrap_or(Value::Null)}))
+            let mid = crate::bots::api::of(hub).map(|bots| bots.my_mid()).unwrap_or_default();
+            ok(json!({"mid":mid,"uber": uber, "version": hub.cfg.version, "lines": hub.store.len(), "here": hub.setting("home.here").await.unwrap_or_default(), "at": hub.setting("home.at").await.unwrap_or_default(), "move": STATE.lock().unwrap().clone().unwrap_or(Value::Null)}))
         }
         "home.adopt" => {
             let ds = p["devices"].as_array().cloned().unwrap_or_default();
@@ -238,10 +239,20 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
             // the ring's front door (bots/front.rs): this hub owns its hooks now. When it is the front, it takes them itself; otherwise it asks the front to pass them here
             let front = hub.setting("ring.front").await.unwrap_or_default();
             let me = crate::bots::ring::base(hub).await;
+            let front_link = hub.setting("ring.front.link").await.unwrap_or_default();
+            let front_is_local = front_link == "here" || (front_link.is_empty()
+                && (front.is_empty() || front.trim_end_matches('/') == me.trim_end_matches('/')));
+            let front_peer = if front_is_local { None } else if !front_link.is_empty() { Some(front_link) } else {
+                hub.far_machines().into_iter().find(|(_, _, url)| same_host(url, &front)).map(|(id, _, _)| id)
+            };
             for h in p["hooks"].as_array().cloned().unwrap_or_default().iter().filter_map(|h| h.as_str()) {
-                if front.is_empty() || front.trim_end_matches('/') == me.trim_end_matches('/') { let _ = hub.commit(&json!({"$":"SettingSet","key":format!("ring.front.to.{h}"),"value":"","at":now})).await; }
-                else if let Some(fl) = hub.far_machines().into_iter().find(|(_, _, u)| front.starts_with(u.trim_end_matches('/')) || same_host(u, &front)).map(|(id, _, _)| id) {
-                    let _ = hub.far_raw(&fl, "ring.front", &json!({"hook": h, "on": true})).await; }
+                if front_is_local {
+                    let _ = hub.commit(&json!({"$":"SettingSet","key":format!("ring.front.to.{h}"),"value":"","at":now})).await;
+                } else if let Some(peer) = &front_peer {
+                    if let Err(error) = far_move(hub, peer, "ring.front", &json!({"hook": h, "on": true})).await {
+                        eprintln!("backplane: home move: could not refresh the ring front for {h}: {error}");
+                    }
+                }
             }
             ok(json!({}))
         }
@@ -676,7 +687,7 @@ pub async fn move_to(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
         far_move(hub, link, "home.finish", &json!({"revive": c.revive, "leaseTerm":lease_term, "hooks": c.hooks, "apns": apns.clone().unwrap_or(Value::Null)})).await?;
         Ok(())
     }.await;
-    let at = json!({"link": link, "name": name, "url": url, "at": now_s()}).to_string();
+    let at = json!({"link": link, "mid": gs(&st, "mid"), "name": name, "url": url, "at": now_s()}).to_string();
     let verified = match fin { Ok(()) => verify(hub, link, &c).await, Err(e) => Err(e) };
     if let Err(e) = verified {
         // undo: this hub takes the home back as it was, the receiver lets go
@@ -851,7 +862,10 @@ impl RpcHandler for HomeRpc {
                     let mut base = String::new();
                     for h in &hooks { match far(hub, &l, "ring.front", &json!({"hook": h, "on": true})).await { Ok(v) => base = gs(&v, "base").to_string(), Err(e) => return fail(&e) } }
                     if base.is_empty() { return fail("no webhook here to front") }
-                    let _ = hub.commit(&json!({"$":"SettingSet","key":"ring.front","value":base,"at":now_s()})).await;
+                    if let Err(e) = hub.commit_many(&[
+                        json!({"$":"SettingSet","key":"ring.front","value":base,"at":now_s()}),
+                        json!({"$":"SettingSet","key":"ring.front.link","value":l,"at":now_s()}),
+                    ]).await { return fail(&format!("{e:#}")) }
                     reply(json!({"base": base, "hooks": hooks}))
                 }
                 "hub.offer.done" => { eprintln!("backplane: hub offer {} taken: {}", gs(p, "id"), p["ok"]); reply(json!({})) }

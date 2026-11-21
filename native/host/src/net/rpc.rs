@@ -19,13 +19,15 @@ fn now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EP
 /// `Fr.nonced`: a body of its own, so two equal requests in one second are two signed bodies, not a replay of one
 pub(super) fn nonced(body: &str) -> String { format!("{{\"n\":{},{}", Value::String(format!("{}.{}", now(), NONCE.fetch_add(1, Relaxed))), &body[1..]) }
 
+pub(crate) fn unavailable(code: u16) -> bool { matches!(code, 0 | 502 | 503 | 504) }
+
 /// One signed POST to `link`'s /far/rpc: (status, body); status 0 when it could not be made (no address, away, a copy).
 pub(super) async fn post(sync: &FarSync, hub: &Arc<Hub>, link: &str, body: &str) -> (u16, String) {
     let url = sync.peering.table.with(|p| p.url(link));
     if url.is_empty() { return (0, String::new()) }
     let r = super::botnet::to_peer(&hub.cfg.home, &url, link, now(), "/far/rpc", true, &nonced(body)).await;
     // the link's own answer says whether that machine is up, at once (the sidebar's "desktop is off"; mirror.rs also asks each minute)
-    hub.mirrors().set_away(link, r.code == 0); hub.mirrors().publish(hub).await;
+    hub.mirrors().set_away(link, unavailable(r.code)); hub.mirrors().publish(hub).await;
     (r.code, r.body)
 }
 fn err(id: &Value, e: &str) -> Vec<Value> { vec![json!({"t":"reply","id":id,"ok":false,"error":e})] }
@@ -187,7 +189,7 @@ impl FarRouter for Router {
             let body = json!({"id": 0, "m": "mcp.call", "p": {"tool": tool, "from": from, "args": args}}).to_string();
             let (code, text) = post(&self.sync, hub, link, &body).await;
             match code {
-                0 => Err("that machine is away".into()),
+                c if unavailable(c) => Err("that machine is away".into()),
                 // an older Backplane there answers but cannot run this yet (it predates mcp.call): it is not away, it needs the update
                 501 => Err(format!("{OLDER}: {}", text.chars().take(160).collect::<String>())),
                 200 => { let v: Value = serde_json::from_str(&text).map_err(|_| "invalid reply from that machine".to_string())?; Ok((v["ok"].as_bool().unwrap_or(false), v.get("body").cloned().unwrap_or(Value::Null))) }
