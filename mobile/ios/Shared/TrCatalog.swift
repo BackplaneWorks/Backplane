@@ -1974,6 +1974,16 @@ gpui.paste.a.pairing.link.pair	Paste a pairing link (…/pair#invite=…)	ペア
 gpui.hub.address.e.g.https	Hub address, e.g. https://desktop.tail9e0cf2.ts.net:8451	ハブのアドレス（例: https://desktop.tail9e0cf2.ts.net:8451）	Dirección del hub, p. ej. https://desktop.tail9e0cf2.ts.net:8451
 gpui.on.the.hub.s.machine	On the hub's machine: Settings → Devices → Add a device, then paste its link here.	ハブのマシンで: 設定 → デバイス → デバイスを追加、そのリンクをここに貼り付けます。	En la máquina del hub: Ajustes → Dispositivos → Añadir un dispositivo, y pega aquí su enlace.
 gpui.select.all	Select all	すべて選択	Seleccionar todo
+home.away	Home ({name}) is away	ホーム（{name}）はオフラインです	El inicio ({name}) no está disponible
+home.away.since	Home ({name}) is away since {time}	ホーム（{name}）は {time} からオフラインです	El inicio ({name}) no está disponible desde las {time}
+home.away.queued	Home ({name}) is away · {n} queued	ホーム（{name}）はオフラインです · {n} 件待機中	El inicio ({name}) no está disponible · {n} en cola
+home.away.since.queued	Home ({name}) is away since {time} · {n} queued	ホーム（{name}）は {time} からオフラインです · {n} 件待機中	El inicio ({name}) no está disponible desde las {time} · {n} en cola
+home.moving	Moving home to {to}…	ホームを {to} へ移動中…	Moviendo el inicio a {to}…
+home.moving.step	Moving home to {to}: {step}	ホームを {to} へ移動中: {step}	Moviendo el inicio a {to}: {step}
+home.move.failed	Home move failed	ホームの移動に失敗しました	No se pudo mover el inicio
+home.move.failed.note	Home move failed: {note}	ホームの移動に失敗しました: {note}	No se pudo mover el inicio: {note}
+home.machine	Home machine	ホームマシン	Máquina de inicio
+home.move.here	Make this machine the home	このマシンをホームにする	Hacer de esta máquina el inicio
 gpui.imp.could.not.keep.this.draft	Could not keep this draft on this device. Retry.	この下書きをこの端末に保存できませんでした。再試行してください。	No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change	Describe the change…	変更内容を書いてください…	Describe el cambio…
 gpui.imp.describe.the.behavior.in.detail	Describe the behavior in detail: what you did and what you saw.	操作した内容と、そのとき見えたことを詳しく書いてください。	Describe el comportamiento en detalle: qué hiciste y qué viste.
@@ -2365,6 +2375,17 @@ gpui.show.all	Show All	すべてを表示	Mostrar todo
 gpui.close.window	Close Window	ウインドウを閉じる	Cerrar ventana
 gpui.close.the.window.on.a	Close the window, on a Mac: the hub keeps running	ウインドウを閉じる（Mac）：ハブは動き続けます	Cerrar la ventana, en Mac: el hub sigue ejecutándose
 gpui.hide.backplane.on.a.mac	Hide Backplane, on a Mac: KiCad's editor hides with it and comes back with it	Backplane を隠す（Mac）：KiCad のエディタも一緒に隠れ、一緒に戻ります	Ocultar Backplane, en Mac: el editor de KiCad se oculta con él y vuelve con él
+gpui.dl.percent	{name} · {pct}%	{name} · {pct}%	{name} · {pct}%
+gpui.dl.mb	{name} · {mb} MB	{name} · {mb} MB	{name} · {mb} MB
+gpui.dl.saved	Saved {name}	{name} を保存しました	Guardado {name}
+gpui.dl.failed	{name}: download failed: {why}	{name}: ダウンロードに失敗しました: {why}	{name}: la descarga falló: {why}
+gpui.dl.manufacturing	Manufacturing	製造	Fabricación
+gpui.dl.the.download.ended.early	the download ended early	ダウンロードが途中で終わりました	la descarga terminó antes de tiempo
+gpui.dl.the.hub.closed.the.connection	the hub closed the connection	ハブが接続を閉じました	el hub cerró la conexión
+gpui.dl.that.file.is.not.there	that file is not there any more	そのファイルはもうありません	ese archivo ya no está
+gpui.dl.the.hub.does.not.share	the hub does not share that file	ハブはそのファイルを共有していません	el hub no comparte ese archivo
+gpui.dl.the.hub.kept.changing.the	the hub kept changing the file	ハブ上のファイルが変わり続けました	el archivo del hub no dejaba de cambiar
+gpui.dl.the.hub.sent.the.file	the hub sent the file in a form this client does not read	ハブがこのクライアントの読めない形式でファイルを送りました	el hub envió el archivo en una forma que este cliente no lee
 gpui.c.commit	Commit	コミット	Commit
 gpui.c.diff.cut	… the rest of the diff is not shown	… 差分の残りは表示されていません	… el resto del diff no se muestra
 gpui.c.loading.board	Loading the board…	基板を読み込み中…	Cargando la placa…
@@ -5527,6 +5548,27 @@ web.clone.no.folders	No folders here	フォルダがありません	No hay carpe
     /// gpui.google.bots = Bots: {bots}
     static func gpui_google_bots(bots: String) -> String { f("gpui.google.bots", ["bots": bots]) }
 
+    /// home.away = Home ({name}) is away
+    static func home_away(name: String) -> String { f("home.away", ["name": name]) }
+
+    /// home.away.since = Home ({name}) is away since {time}
+    static func home_away_since(name: String, time: String) -> String { f("home.away.since", ["name": name, "time": time]) }
+
+    /// home.away.queued = Home ({name}) is away · {n} queued
+    static func home_away_queued(name: String, n: String) -> String { f("home.away.queued", ["name": name, "n": n]) }
+
+    /// home.away.since.queued = Home ({name}) is away since {time} · {n} queued
+    static func home_away_since_queued(name: String, time: String, n: String) -> String { f("home.away.since.queued", ["name": name, "time": time, "n": n]) }
+
+    /// home.moving = Moving home to {to}…
+    static func home_moving(to: String) -> String { f("home.moving", ["to": to]) }
+
+    /// home.moving.step = Moving home to {to}: {step}
+    static func home_moving_step(to: String, step: String) -> String { f("home.moving.step", ["to": to, "step": step]) }
+
+    /// home.move.failed.note = Home move failed: {note}
+    static func home_move_failed_note(note: String) -> String { f("home.move.failed.note", ["note": note]) }
+
     /// gpui.imp.why.choose.image = {why} Choose an image instead.
     static func gpui_imp_why_choose_image(why: String) -> String { f("gpui.imp.why.choose.image", ["why": why]) }
 
@@ -5724,6 +5766,18 @@ web.clone.no.folders	No folders here	フォルダがありません	No hay carpe
 
     /// gpui.the.hub.answered = the hub answered {status}
     static func gpui_the_hub_answered(status: String) -> String { f("gpui.the.hub.answered", ["status": status]) }
+
+    /// gpui.dl.percent = {name} · {pct}%
+    static func gpui_dl_percent(name: String, pct: String) -> String { f("gpui.dl.percent", ["name": name, "pct": pct]) }
+
+    /// gpui.dl.mb = {name} · {mb} MB
+    static func gpui_dl_mb(name: String, mb: String) -> String { f("gpui.dl.mb", ["name": name, "mb": mb]) }
+
+    /// gpui.dl.saved = Saved {name}
+    static func gpui_dl_saved(name: String) -> String { f("gpui.dl.saved", ["name": name]) }
+
+    /// gpui.dl.failed = {name}: download failed: {why}
+    static func gpui_dl_failed(name: String, why: String) -> String { f("gpui.dl.failed", ["name": name, "why": why]) }
 
     /// gpui.c.kicad.open.on = Open in KiCad on {machine}
     static func gpui_c_kicad_open_on(machine: String) -> String { f("gpui.c.kicad.open.on", ["machine": machine]) }

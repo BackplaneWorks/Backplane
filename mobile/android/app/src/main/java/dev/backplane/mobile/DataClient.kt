@@ -32,6 +32,8 @@ object DataClient {
     var listsLoaded by mutableStateOf(false); private set
     var features by mutableStateOf<Set<String>>(emptySet()); private set
     var notice by mutableStateOf(HubNotice()); private set   // hello `notice`, newer from /hub/status: the banner
+    /** The designated home machine for Bub and shared state (docs/PHONE-DATA.md, The home). */
+    var home by mutableStateOf<DHome?>(null); private set
     var star by mutableStateOf<DStarOffer?>(null); private set
     // the hub's restart in the connection strip (feature "restarting", RestartStrip.kt): what it said as it went, its crash note as we join
     var restarting by mutableStateOf<RestartNote?>(null); private set
@@ -167,6 +169,8 @@ object DataClient {
         saveJob?.cancel()
         shellHashes.clear(); threadHashes.clear(); threadIds.clear(); subEntriesById.clear(); subEntryIds = emptyList()
         Swarms.reset(); restarting = null; hubBack = null; notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
+        home = null
+        Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
         if (clearDisk) link?.let { Pairing.key(it) }?.let { cacheFile(it).delete() }
     }
 
@@ -254,6 +258,7 @@ object DataClient {
                 inflater?.end()
                 inflater = if (o.optString("z") == "deflate") java.util.zip.Inflater(true) else null
                 features = o.optJSONArray("features")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() } ?: emptySet()
+                home = parseHome(o.optJSONObject("home"))
                 notice = HubRescue.notice(o.optJSONObject("notice"))
                 heardMigrating(o.optJSONObject("migrating"))
                 commands = o.optJSONArray("commands")?.let { a -> (0 until a.length()).map { val w = a.getJSONObject(it); Word(w.optString("word"), w.optString("label"), w.optString("desc")) } } ?: emptyList()
@@ -512,6 +517,8 @@ object DataClient {
         scope.launch { runCatching { call("telemetry.notice.act", DTelemetryNotice.act(n.token, action)) } }
     }
     private suspend fun loadLocks() { if (has("work")) locks = parseLocks(call("locks.list").optJSONArray("locks")) }
+    /** Move the designated home (Bub and shared state) onto this hub (`home.move {to:"back"}`). */
+    fun moveHomeHere() { scope.launch { runCatching { call("home.move", JSONObject().put("to", "back")) } } }
     private suspend fun loadWork(id: String) { if (has("work")) setWork(id, call("thread.work", JSONObject().put("thread", id)).optJSONObject("subs")) }
     private fun setWork(id: String, o: JSONObject?) { work = if (o == null) work - id else work + (id to parseWork(o)) }
     /** A row's button; what it changes comes back as a push. */
@@ -712,6 +719,7 @@ object DataClient {
             "term" -> Terms.push(o)
             "clone", "clone.repos", "clone.signin" -> Clones.pushed(o) // Clone from git (DataClone.kt): a job moved, the repository list was read again, GitHub's sign-in moved
             "locks" -> locks = parseLocks(o.optJSONArray("locks"))
+            "home" -> home = parseHome(o.optJSONObject("home"))
             "swarm" -> Swarms.pushed(o.optString("room")) // a swarm's board, state or member turns moved: its list again, and an open board reads what is newer
             "text" -> {
                 val tid = o.optString("thread"); val eid = o.optString("entry"); val add = o.optString("append")

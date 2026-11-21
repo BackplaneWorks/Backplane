@@ -29,10 +29,34 @@ pub fn local_now() -> (i32, i32, i32, i32, i32, i32) {
     let tm = unsafe { let mut tm: libc::tm = std::mem::zeroed(); libc::localtime_r(&secs, &mut tm); tm };
     (tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec)
 }
+/// Local (hour 0-23, minute 0-59) for a unix timestamp in milliseconds.
+#[cfg(unix)]
+pub fn local_hm(ms: i64) -> (u32, u32) {
+    let secs = ms.div_euclid(1000) as libc::time_t;
+    // SAFETY: both pointers are to live locals; localtime_r writes only to `tm`.
+    let tm = unsafe { let mut tm: libc::tm = std::mem::zeroed(); libc::localtime_r(&secs, &mut tm); tm };
+    (tm.tm_hour.clamp(0, 23) as u32, tm.tm_min.clamp(0, 59) as u32)
+}
 #[cfg(windows)]
 pub fn local_now() -> (i32, i32, i32, i32, i32, i32) {
     let t = unsafe { let mut t = std::mem::zeroed(); windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut t); t };
     (t.wYear as i32, t.wMonth as i32, t.wDay as i32, t.wHour as i32, t.wMinute as i32, t.wSecond as i32)
+}
+/// Local (hour 0-23, minute 0-59) for a unix timestamp in milliseconds.
+#[cfg(windows)]
+pub fn local_hm(ms: i64) -> (u32, u32) {
+    // Derive the current local UTC offset from GetLocalTime vs GetSystemTime (both in Win32_System_SystemInformation).
+    let (lt, ut) = unsafe {
+        let mut lt = std::mem::zeroed();
+        let mut ut = std::mem::zeroed();
+        windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut lt);
+        windows_sys::Win32::System::SystemInformation::GetSystemTime(&mut ut);
+        (lt, ut)
+    };
+    let mut off_min = (lt.wHour as i64 * 60 + lt.wMinute as i64) - (ut.wHour as i64 * 60 + ut.wMinute as i64);
+    if off_min > 720 { off_min -= 1440; } else if off_min < -720 { off_min += 1440; }
+    let mins = (ms.div_euclid(60_000) + off_min).rem_euclid(1440);
+    ((mins / 60) as u32, (mins % 60) as u32)
 }
 
 /// A folder only this user may enter (0700). Windows: the user's profile folders are already private.

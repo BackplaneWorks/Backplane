@@ -213,6 +213,21 @@ struct DataSettingsPageView: View {
                     if client.has("mcpsettings") { NavigationLink(value: DPage(name: "mcp")) { Text(Tr.t("MCP servers")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.mcp") }
                     if client.has("voice") { if client.has("mcpsettings") { DLine() }; DataVoiceSection(client: client) }
                 case .machines:
+                    if let h = client.home {
+                        VStack(alignment: .leading, spacing: 6) {
+                            DHeading(text: Tr.k("home.machine"))
+                            let whereText = h.kind == "local" ? "\(h.name.isEmpty ? "This machine" : h.name) (this machine)" : (h.kind == "boat" ? "\(h.name.isEmpty ? "Boat" : h.name) (Boat)" : (h.name.isEmpty ? "Linked machine" : h.name))
+                            Text(whereText).dmono(13)
+                            if let away = h.awayLine() {
+                                Text(away.text).dmono(11).foregroundStyle(away.isError ? BackplaneDesign.bad : BackplaneDesign.dim)
+                            }
+                            if h.canMoveHere {
+                                Button(Tr.k("home.move.here")) { Task { await client.moveHomeHere() } }
+                                    .buttonStyle(DButton(primary: true)).accessibilityIdentifier("settings.home.move")
+                            }
+                        }
+                        DLine()
+                    }
                     if client.has("machines") { DataMachinesSection(client: client) }
                     if client.has("devices") { if client.has("machines") { DLine() }; DataDevicesSection(client: client) }
                 case .updates: DataUpdateSection(client: client)

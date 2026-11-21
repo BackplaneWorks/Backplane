@@ -4,6 +4,7 @@
 // and bottom-left Connected status footer.
 import { t } from "./i18n";
 import { needPress, parseNeed, type NeedAction } from "./swarm-need";
+import type { HomeInfo } from "./ws";
 
 export interface ProjectItem {
   id: string;
@@ -162,6 +163,7 @@ function formatAge(ts: number): string {
 export class SidebarView {
   private el: HTMLElement;
   private hostLabel: HTMLElement;
+  private homeBanner: HTMLElement;
   private filterInput: HTMLInputElement;
   private listEl: HTMLElement;
   private connEl: HTMLElement;
@@ -236,6 +238,13 @@ export class SidebarView {
 
     head.append(this.filterInput, quickAdd);
 
+    this.homeBanner = document.createElement("div");
+    this.homeBanner.className = "bp-side-home bp-hidden";
+    this.homeBanner.setAttribute("data-testid", "home-away-banner");
+    this.homeBanner.style.padding = "6px 10px";
+    this.homeBanner.style.fontSize = "11px";
+    this.homeBanner.style.borderBottom = "1px solid var(--line, #2a2a2a)";
+
     this.listEl = document.createElement("div");
     this.listEl.className = "bp-side-list";
     this.listEl.setAttribute("data-testid", "sidebar-list");
@@ -248,7 +257,54 @@ export class SidebarView {
     this.connEl.setAttribute("data-testid", "conn-status");
     footer.appendChild(this.connEl);
 
-    this.el.append(hostRow, head, this.listEl, footer);
+    this.el.append(hostRow, head, this.homeBanner, this.listEl, footer);
+  }
+
+  public setHome(home: HomeInfo | null): void {
+    if (!home) {
+      this.homeBanner.classList.add("bp-hidden");
+      this.homeBanner.textContent = "";
+      return;
+    }
+    let text = "";
+    let isErr = false;
+    if (home.moving?.state === "moving") {
+      text = home.moving.step
+        ? t("home.moving.step", "Moving home to {to}: {step}").replace("{to}", home.moving.to).replace("{step}", home.moving.step)
+        : t("home.moving", "Moving home to {to}…").replace("{to}", home.moving.to);
+    } else if (home.moving?.state === "failed") {
+      text = home.moving.note
+        ? t("home.move.failed.note", "Home move failed: {note}").replace("{note}", home.moving.note)
+        : t("home.move.failed", "Home move failed");
+      isErr = true;
+    } else if (!home.online) {
+      const name = home.name || "home";
+      let time = "";
+      if (home.awaySince && home.awaySince > 0) {
+        const d = new Date(home.awaySince);
+        time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      }
+      if (time && home.queuedCount > 0) {
+        text = t("home.away.since.queued", "Home ({name}) is away since {time} · {n} queued")
+          .replace("{name}", name).replace("{time}", time).replace("{n}", String(home.queuedCount));
+      } else if (time) {
+        text = t("home.away.since", "Home ({name}) is away since {time}")
+          .replace("{name}", name).replace("{time}", time);
+      } else if (home.queuedCount > 0) {
+        text = t("home.away.queued", "Home ({name}) is away · {n} queued")
+          .replace("{name}", name).replace("{n}", String(home.queuedCount));
+      } else {
+        text = t("home.away", "Home ({name}) is away").replace("{name}", name);
+      }
+    }
+    if (!text) {
+      this.homeBanner.classList.add("bp-hidden");
+      this.homeBanner.textContent = "";
+    } else {
+      this.homeBanner.textContent = text;
+      this.homeBanner.className = isErr ? "bp-side-home bp-bad" : "bp-side-home bp-dim";
+      this.homeBanner.classList.remove("bp-hidden");
+    }
   }
 
   public setHostName(name: string): void {

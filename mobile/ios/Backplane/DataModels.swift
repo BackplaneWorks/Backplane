@@ -80,11 +80,12 @@ struct DEntry: Codable, Equatable, Identifiable {
     var restore: DRestore?   // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
     var copy: [DCopyPiece]?   // what to copy in it, as the hub lists it (`copy: [{text, cmd}]`, md/copy.rs); nil: the phone's own rules (Copyable)
     var h: String = ""        // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
+    var queued = false        // queued for an away home machine (docs/PHONE-DATA.md, The home)
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h, queued }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -106,6 +107,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         voice = try? c.decode(DVoiceMark.self, forKey: .voice)
         restore = try? c.decode(DRestore.self, forKey: .restore)
         h = c.str(.h)
+        queued = c.bool(.queued)
     }
 }
 
@@ -468,7 +470,7 @@ struct DShellSyncReply: Decodable {
     let removed: [String]?
     let sections: DSections?
     let h: [String: String]?
-    enum CodingKeys: String, CodingKey { case sub, projects, threads, removed, sections, h }
+    enum CodingKeys: String, CodingKey { case sub, projects, threads, removed, sections, h, queued }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
@@ -478,29 +480,30 @@ struct DShellSyncReply: Decodable {
         sections = try? c.decode(DSections.self, forKey: .sections)
         h = try? c.decode([String: String].self, forKey: .h)
     }
-}
-struct DThreadOpenReply: Decodable {
-    let sub: Int
-    let thread: DThread?
-    let ids: [String]?
-    let entries: [DEntry]
-    let hasNext: Bool
-    let next: String?
-    let work: DWorkReply?
-    let queue: DQueueReply?
-    let h: [String: String]?
-    enum CodingKeys: String, CodingKey { case sub, thread, ids, entries, next, work, queue, h }
-    init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: CodingKeys.self)
-        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
-        thread = try? c.decode(DThread.self, forKey: .thread)
-        ids = try? c.decode([String].self, forKey: .ids)
-        entries = (try? c.decode([DEntry].self, forKey: .entries)) ?? []
-        hasNext = c.contains(.next)
-        next = try? c.decode(String.self, forKey: .next)
-        work = try? c.decode(DWorkReply.self, forKey: .work)
-        queue = try? c.decode(DQueueReply.self, forKey: .queue)
-        h = try? c.decode([String: String].self, forKey: .h)
+    func awayLine() -> (text: String, isError: Bool)? {
+        if let mv = moving {
+            if mv.state == "moving" {
+                let step = mv.step ?? ""
+                return (step.isEmpty ? Tr.home_moving(to: mv.to) : Tr.home_moving_step(to: mv.to, step: step), false)
+            }
+            if mv.state == "failed" {
+                let note = mv.note ?? ""
+                return (note.isEmpty ? Tr.k("home.move.failed") : Tr.home_move_failed_note(note: note), true)
+            }
+        }
+        guard !online else { return nil }
+        let n = name.isEmpty ? "home" : name
+        let time: String? = awaySince.flatMap { ms -> String? in
+            guard ms > 0 else { return nil }
+            let fmt = DateFormatter(); fmt.timeZone = .current; fmt.dateFormat = "HH:mm"
+            return fmt.string(from: Date(timeIntervalSince1970: Double(ms) / 1000.0))
+        }
+        switch (time, queuedCount > 0) {
+        case (let tm?, true): return (Tr.home_away_since_queued(name: n, time: tm, n: String(queuedCount)), false)
+        case (let tm?, false): return (Tr.home_away_since(name: n, time: tm), false)
+        case (nil, true): return (Tr.home_away_queued(name: n, n: String(queuedCount)), false)
+        case (nil, false): return (Tr.home_away(name: n), false)
+        }
     }
 }
 /// A long result shows three lines until tapped (the desktop's subview.rs `result_lines`).

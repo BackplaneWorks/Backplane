@@ -2,6 +2,24 @@
 // Authenticates strictly via the HttpOnly __Host-bp_web cookie (never ?token=).
 import { RawInflater } from "./inflate";
 
+export interface HomeMoving {
+  to: string;
+  state: "moving" | "failed";
+  step?: string;
+  note?: string;
+}
+
+export interface HomeInfo {
+  kind: "local" | "peer" | "boat";
+  id: string;
+  name: string;
+  online: boolean;
+  awaySince?: number;
+  queuedCount: number;
+  canMoveHere: boolean;
+  moving?: HomeMoving;
+}
+
 export interface HelloFrame {
   t: "hello";
   proto: string;
@@ -11,6 +29,7 @@ export interface HelloFrame {
   epoch: string;
   now: number;
   z?: string;
+  home?: HomeInfo;
   features?: string[];
   commands?: Array<{ word: string; label: string; desc: string }>;
   theme?: string;

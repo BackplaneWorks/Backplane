@@ -1593,6 +1593,16 @@ gpui.paste.a.pairing.link.pair = Paste a pairing link (…/pair#invite=…)
 gpui.hub.address.e.g.https = Hub address, e.g. https://desktop.tail9e0cf2.ts.net:8451
 gpui.on.the.hub.s.machine = On the hub's machine: Settings → Devices → Add a device, then paste its link here.
 gpui.select.all = Select all
+home.away = Home ({name}) is away
+home.away.since = Home ({name}) is away since {time}
+home.away.queued = Home ({name}) is away · {n} queued
+home.away.since.queued = Home ({name}) is away since {time} · {n} queued
+home.moving = Moving home to {to}…
+home.moving.step = Moving home to {to}: {step}
+home.move.failed = Home move failed
+home.move.failed.note = Home move failed: {note}
+home.machine = Home machine
+home.move.here = Make this machine the home
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = Could not keep this draft on this device. Retry.
