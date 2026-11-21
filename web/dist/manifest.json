@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 172030,
+  "totalAssetGzipBytes": 172106,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -174,7 +174,8 @@
     "web/src/chat.ts": "0c5d99ecf121463d13f930affdb79f4d33a81a8a1ebcbca221e271a95ecf6037",
     "web/src/clone-model.ts": "d265df49436e14f415bbeb2a271ffa3552f9163be62bdc0158cecc10c3cdae45",
     "web/src/composer.ts": "11e5b7e09743821f83c05201cebd8a9fbfbef0ce3c38e3f3a22000a4fabe1976",
-    "web/src/i18n.ts": "40bb973e3acda75aea4bc5d16746757e59487b95225f5ed36cdfe13c813cf66d",
+    "web/src/i18n-format.ts": "8561ca443ba371ad804b1cba75c144df666b1871a8250026c9806b66318c0c7b",
+    "web/src/i18n.ts": "068561f33d911ed7c71d8c5f86d7a024b2ea9fe1dcd0bb766169cf19b82513b8",
     "web/src/index.html": "a661afef2f425bd880bccd134f90969b4d037cf455da827c921a99764ffd83a4",
     "web/src/inflate.ts": "bc10ed23159668193d6de6d582e60baf009cae0a619018f0588f836a77dde831",
     "web/src/md.ts": "c606d1ec598b3ce132c7cc9366383dacafc3fcb71c0fccd97b41ec0e19a96c78",
@@ -215,9 +216,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 252580,
-      "gzipBytes": 72126,
-      "sha256": "fd8141a622ae9514ac617a0428695399f0b5d37b73aac90f7328fdb32ea93cff"
+      "bytes": 252652,
+      "gzipBytes": 72156,
+      "sha256": "4ad562aec9b8de6c9880045cfa525491c49139d63f00849eb2518d00740bee52"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -235,9 +236,9 @@
       "sha256": "123b6a27f255d339b505c8fd83609674f0bddf9b46c0e907fce23befa96b1eec"
     },
     "assets/pair.js": {
-      "bytes": 34581,
-      "gzipBytes": 11319,
-      "sha256": "8bfd71fa6b89af37fb31a821b94962e046a2330d55d26dc41ec7ceaf767610f6"
+      "bytes": 34654,
+      "gzipBytes": 11365,
+      "sha256": "4a7ce28cdbe18779971efe1bede78e7c70f66a22a79a455dbb36063b2c9d8c9c"
     },
     "assets/style.css": {
       "bytes": 56184,
