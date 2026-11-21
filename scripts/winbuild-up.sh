@@ -13,10 +13,19 @@ if [ "$power" != PowerState/running ]; then
   echo "$vm: ${power#PowerState/}, starting" >&2
   az vm start -g "$rg" -n "$vm" -o none
 fi
-for _ in $(seq 60); do
+# Two ways in: Tailscale (bp-winbuild), else the vnet through bp-win (bp-winbuild-vnet, ProxyJump bp-win).
+# When neither answers and bp-win itself is not running, the jump path cannot come: say so within a
+# few tries instead of waiting out the boot (2026-11-21: Tailscale on bp-winbuild logged out, bp-win
+# deallocated by its idle watcher, two build attempts lost). Keep bp-win up for a build: hold its
+# `winbuild` lock (scripts/bp-lock.sh winbuild -- ...) or scripts/winvm/winvm-hold.sh bp-win 3h.
+jump_power() { az vm get-instance-view -g "$rg" -n bp-win --query "instanceView.statuses[?starts_with(code,'PowerState/')].code|[0]" -o tsv 2>/dev/null; }
+for i in $(seq 60); do
   for host in bp-winbuild bp-winbuild-vnet; do
     if ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" 'hostname' >/dev/null 2>&1; then echo "$host"; exit 0; fi
   done
+  if [ "$i" -ge 3 ] && [ "$(jump_power)" != PowerState/running ]; then
+    echo "$vm: Tailscale does not answer and bp-win is $(jump_power | sed 's,PowerState/,,'); the jump path needs it (start it: scripts/winvm/winvm-hold.sh bp-win 3h)" >&2; exit 1
+  fi
   sleep 5
 done
-echo "$vm: running but ssh does not answer" >&2; exit 1
+echo "$vm: running but ssh does not answer, by Tailscale or through bp-win" >&2; exit 1
