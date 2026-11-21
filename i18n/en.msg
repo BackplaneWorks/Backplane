@@ -4721,3 +4721,7 @@ viewer.layout.refusal.toomany = Too many tiles open
 viewer.layout.refusal.toomanysources = Too many sources in one layout
 viewer.footprinteditor = Footprint Editor
 viewer.symboleditor = Symbol Editor
+settings.web.unavailable.platform = This release supports browser access on Linux hubs only.
+settings.web.unavailable.socket = Start Tailscale. Backplane needs its system socket at /run/tailscale/tailscaled.sock.
+settings.web.unavailable.cli = HTTPS setup requires the Tailscale command at /usr/bin/tailscale.
+settings.web.unavailable.curl = HTTPS verification requires curl at /usr/bin/curl.

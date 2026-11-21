@@ -4720,3 +4720,7 @@ viewer.layout.refusal.toomany = Demasiados mosaicos abiertos
 viewer.layout.refusal.toomanysources = Demasiadas fuentes en un diseño
 viewer.footprinteditor = Editor de huellas
 viewer.symboleditor = Editor de símbolos
+settings.web.unavailable.platform = Esta versión solo permite el acceso desde un navegador a hubs Linux.
+settings.web.unavailable.socket = Inicia Tailscale. Backplane necesita su socket de sistema en /run/tailscale/tailscaled.sock.
+settings.web.unavailable.cli = Para configurar HTTPS se necesita el comando de Tailscale en /usr/bin/tailscale.
+settings.web.unavailable.curl = Para verificar HTTPS se necesita curl en /usr/bin/curl.
