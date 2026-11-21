@@ -276,7 +276,8 @@ export function decodePlotChunk(o: Record<string, CborValue>): PlotChunk {
 
 export function decodePlot2DFrame(
   map: Record<string, CborValue>,
-  held: PlotChunk[]
+  held: PlotChunk[],
+  chunkCache?: Map<string, PlotChunk>
 ): Plot2DFrame {
   const rect = (v: CborValue | undefined): [number, number, number, number] =>
     Array.isArray(v) && v.length >= 4
@@ -294,8 +295,25 @@ export function decodePlot2DFrame(
     const entry = cs[i];
     if (typeof entry === "number") {
       if (entry >= 0 && entry < held.length) chunks.push(held[entry]);
+    } else if (typeof entry === "string") {
+      const cached = chunkCache?.get(entry);
+      if (cached) {
+        chunkCache!.delete(entry);
+        chunkCache!.set(entry, cached);
+        chunks.push(cached);
+      }
     } else if (entry && typeof entry === "object" && !Array.isArray(entry) && !(entry instanceof Uint8Array)) {
-      chunks.push(decodePlotChunk(entry));
+      const ch = decodePlotChunk(entry);
+      chunks.push(ch);
+      if (chunkCache && typeof entry.h === "string" && entry.h.length > 0) {
+        chunkCache.delete(entry.h);
+        chunkCache.set(entry.h, ch);
+        while (chunkCache.size > 1024) {
+          const oldest = chunkCache.keys().next().value;
+          if (oldest !== undefined) chunkCache.delete(oldest);
+          else break;
+        }
+      }
     }
   }
 

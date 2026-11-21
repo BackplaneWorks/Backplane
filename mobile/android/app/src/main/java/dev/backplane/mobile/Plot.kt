@@ -391,6 +391,9 @@ class PlotStore {
     var mesh by mutableStateOf<MeshFrame?>(null)
         private set
     private var held: List<PlotChunk> = emptyList()
+    // Content-addressed 2D chunk cache (keptChunks) surviving board/tab switches.
+    private val chunkCache = LinkedHashMap<String, PlotChunk>(64, 0.75f, true)
+    fun keptChunkHashes(): List<String> = chunkCache.keys.toList()
     val parts = PartsStore()
     /** A 3D model's frames other than the model (`parts`, `part`: kicad's native board mesher streams the parts after the board), already
      *  gated to the view on show (route), to the parts store. A `parts` frame may come alone when the phone's kept model was the board. */
@@ -492,6 +495,9 @@ class PlotStore {
                 return@execute
             }
             val refs = o["cs"] as? List<Any?> ?: emptyList()
+            val hashes = refs.mapIndexedNotNull { i, r ->
+                ((r as? Map<String, Any?>)?.get("h") as? String)?.takeIf { it.isNotEmpty() }?.let { i to it }
+            }
             val jobs = refs.mapIndexedNotNull { i, r -> (r as? Map<String, Any?>)?.let { obj -> i to Callable { PlotChunk.decode(obj) } } }
             val done = pool.invokeAll(jobs.map { it.second })
             val decoded = HashMap<Int, PlotChunk>()
@@ -502,9 +508,17 @@ class PlotStore {
             // the main thread keeps arrival order: each plot applies to the one before
             main.post {
                 if (gen != generation) return@post
+                for ((i, h) in hashes) {
+                    decoded[i]?.let { ch ->
+                        chunkCache[h] = ch
+                        while (chunkCache.size > 1024) chunkCache.remove(chunkCache.keys.first())
+                    }
+                }
                 val all = ArrayList<PlotChunk>(refs.size)
                 for (i in refs.indices) {
-                    val c = decoded[i] ?: (refs[i] as? Long)?.let { k -> held.getOrNull(k.toInt()) }
+                    val c = decoded[i]
+                        ?: (refs[i] as? Long)?.let { k -> held.getOrNull(k.toInt()) }
+                        ?: (refs[i] as? String)?.let { h -> chunkCache[h] }
                     if (c != null) all.add(c)
                 }
                 held = all // the hub's deltas count on what it sent, shown or not

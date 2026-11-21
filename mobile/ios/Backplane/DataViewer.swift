@@ -71,6 +71,10 @@ extension DataClient {
         // (a stop changes nothing here: it may come after the next viewer has begun, and that one drops the last one's plots itself)
         var serial = 0
         if !kind.isEmpty { let b = plots.begin(slot); serial = b.serial; if !b.kept.isEmpty { p["kept"] = b.kept } }
+        if has("keptChunks") && (kind == "board" || kind == "schematic" || kind == "gerbers" || kind == "split") {
+            let kc = plots.keptChunkHashes()
+            if !kc.isEmpty { p["keptChunks"] = kc }
+        }
         do {
             let r: DWatch = try await call("viewer.watch", p)
             if !kind.isEmpty { plots.shown(r.keys.isEmpty ? PlotStore.keys(kind: kind, root: r.root, path: path) : r.keys, of: serial) }
