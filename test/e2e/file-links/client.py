@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
-"""Box B of the file-links E2E (run.sh): every check of docs/file-links.md against box A's hub, over the network between the boxes.
+"""Box B of the file-links E2E (run.sh): checks of docs/file-links.md against box A's hub, over the network between the boxes.
 
   client.py PHASE BASE ARGS_JSON
 
 PHASE is one of setup, download, checks, stale, deny, shares, revoke (run.sh runs them in that order, with box A's steps between). ARGS_JSON
-carries what box A said: {token, proj, outside, sha, size}. State between phases is kept in ~/fl/state.json (on this box only).
-Prints one line per check ("pass  name  detail" / "fail  name  detail") and ends with "summary pass=N fail=N". Exit 1 when a check failed.
-Python 3, standard library only. The hub's credentials are ephemeral test ones and never printed.
+carries what box A said: {token, proj, outside, home, far, sha, size}. State between phases is kept in ~/fl/state.json (on this box only).
+Prints one line per check ("pass  [phase] name  (detail)" / "FAIL ...") and ends with "summary [phase] pass=N fail=N". Exit 1 when a check failed.
+Python 3, standard library only. The hub's credentials are ephemeral test ones: never printed (share tokens are masked; run.sh masks again).
+
+Covered: pairing a device; data/1 entry `files` (open download/view, secrets left out); /file and /files/get whole, HEAD, Range, 416, an
+interrupted download resumed with If-Range, a changed file with a stale If-Range (200 whole) and a fresh one (206); the guard headers (CSP
+sandbox, CORP, no-referrer, nosniff) on answers and refusals; 401 without or with a revoked credential; 403 for .env, id_rsa, .git/config, a
+link out of the project, a file outside every project, the hub's own token, /etc/passwd; 404 missing; climbs refused on both routes; a file in
+<home>/far-files (device and share); shares made by the MCP tool file_share (a stand-in agent with its thread's token): open with the token
+alone, ranged, a secret refused, /ws shares.list and shares.revoke, expiry, 30 unknown tokens a minute from one address then 429.
+Not covered here: the far `thread=<link>~<id>` route and the web ingress (they need a linked machine or a browser), `?token=` and cookie
+credentials, `inline=1` and content types, `files.share.roots`, the closed folders `secrets`/`vault`/`node_modules`, `tailnet: true`,
+shares-v1.json's mode, a shared file that later becomes a secret.
 """
 import base64, hashlib, http.client, json, os, re, socket, struct, sys, time, urllib.parse
 
@@ -20,6 +30,7 @@ RES = []
 
 def check(name, ok, detail=""):
     RES.append(bool(ok))
+    detail = re.sub(r"[0-9a-f]{48}", "<token>", detail)
     print(f"{'pass' if ok else 'FAIL'}  [{PHASE}] {name}{'  (' + detail + ')' if detail else ''}", flush=True)
     return ok
 
@@ -240,6 +251,46 @@ BIG = f"{P}/mfg/big.bin"
 FILE = lambda p: f"/file?path={q(p)}"  # noqa: E731
 
 
+def guarded(h):
+    """The headers every answer of these routes carries, a refusal too: a sandboxing CSP, CORP and no-referrer (and nosniff)."""
+    csp = h.get("content-security-policy", "")
+    return ("default-src 'none'" in csp and "sandbox" in csp and h.get("cross-origin-resource-policy") == "same-origin"
+            and h.get("referrer-policy") == "no-referrer" and h.get("x-content-type-options") == "nosniff")
+
+
+def hdrs(h):
+    return f"csp={h.get('content-security-policy', '-')!r} corp={h.get('cross-origin-resource-policy', '-')} referrer={h.get('referrer-policy', '-')}"
+
+
+def hub_rpc(m, p=None):
+    """A hub RPC on the plain /ws socket with the hub token (CBOR answers): shares.list and shares.revoke live there, not on data/1."""
+    w = Data(HUB, "/ws?token=" + q(HUB))
+    try:
+        if w.status != 101:
+            return {"ok": None, "error": f"the /ws upgrade answered {w.status}"}
+        return w.request(m, p or {}, wait=20)
+    except Exception as e:  # noqa: BLE001  (a transport failure is never the hub's "no")
+        return {"ok": None, "error": f"{type(e).__name__}: {e}"}
+    finally:
+        w.close()
+
+
+def raw_head(path, headers):
+    """HEAD over a bare socket, read to EOF: (status, bytes after the header block). http.client never reads a HEAD body, so it cannot tell."""
+    s = socket.create_connection((HOST, PORT), timeout=20)
+    s.sendall((f"HEAD {path} HTTP/1.1\r\nHost: {HOST}:{PORT}\r\n" + "".join(f"{k}: {v}\r\n" for k, v in headers.items()) + "Connection: close\r\n\r\n").encode())
+    buf = b""
+    while True:
+        d = s.recv(65536)
+        if not d:
+            break
+        buf += d
+    s.close()
+    head, _, rest = buf.partition(b"\r\n\r\n")
+    p = head.split(b" ", 2)
+    return (int(p[1]) if len(p) > 1 and p[1].isdigit() else 0), rest
+
+
 def setup():
     c = http.client.HTTPConnection(HOST, PORT, timeout=20)
     c.request("POST", "/auth/invitations", headers=bearer(HUB)); r = c.getresponse(); inv = json.loads(r.read() or b"{}"); c.close()
@@ -287,8 +338,10 @@ def checks():
     st["etag"] = h.get("etag", ""); save()
     check("HEAD /file: 200, Content-Length, Accept-Ranges, strong ETag, attachment, no body",
           s == 200 and h.get("content-length") == str(ARGS["size"]) and h.get("accept-ranges") == "bytes" and h.get("etag", "").startswith('"')
-          and "attachment" in h.get("content-disposition", "") and n == 0 and h.get("x-content-type-options") == "nosniff",
+          and "attachment" in h.get("content-disposition", "") and guarded(h),
           f"HTTP {s} len={h.get('content-length')} etag={h.get('etag')}")
+    rs, rest = raw_head(FILE(BIG), bearer(DEV))
+    check("HEAD /file: no body bytes on the wire", rs == 200 and rest == b"", f"HTTP {rs}, {len(rest)} bytes after the headers")
     cut = 60 << 20
     acc = hashlib.sha256()
     s1, h1, _, n1, _ = get(FILE(BIG), bearer(DEV), stop_at=cut, keep=acc)
@@ -300,7 +353,7 @@ def checks():
     s, h, _, n, _ = get(FILE(BIG), {**bearer(DEV), "Range": "bytes=100-199"})
     check("Range bytes=100-199: 206, 100 bytes", s == 206 and n == 100 and h.get("content-range") == f"bytes 100-199/{ARGS['size']}", f"HTTP {s}")
     s, h, _, n, _ = get(FILE(BIG), {**bearer(DEV), "Range": f"bytes={ARGS['size'] + 10}-"})
-    check("Range past the end: 416", s == 416, f"HTTP {s}")
+    check("Range past the end: 416, with the CSP sandbox, CORP and no-referrer", s == 416 and guarded(h), f"HTTP {s} {hdrs(h)}")
     t0 = time.time()
     s, h, sha, n, _ = get(f"/files/get?thread={q(st['t1'])}&path={q('mfg/big.bin')}", bearer(DEV))
     check("/files/get?thread=&path=mfg/big.bin streamed, sha256 matches", s == 200 and sha == ARGS["sha"], f"HTTP {s}, {n} bytes in {time.time() - t0:.1f}s")
@@ -319,22 +372,24 @@ def stale():
 
 
 def deny():
-    s = get(FILE(BIG))[0]
+    s, h, _, _, _ = get(FILE(BIG))
     check("/file with no credential: 401", s == 401, f"HTTP {s}")
+    check("401 refusal carries the CSP sandbox, CORP and no-referrer", guarded(h), hdrs(h))
     s = get(FILE(BIG), bearer("0" * 64))[0]
     check("/file with a made-up token: 401", s == 401, f"HTTP {s}")
     s = get(f"/files/get?thread={q(st['t1'])}&path={q('mfg/big.bin')}")[0]
     check("/files/get with no credential: 401", s == 401, f"HTTP {s}")
     for label, p in ((".env", f"{P}/.env"), ("id_rsa", f"{P}/id_rsa"), (".git/config", f"{P}/.git/config"), ("symlink to outside", f"{P}/link-out.txt"),
                      ("a file outside every project", ARGS["outside"]), ("the hub's own token", f"{ARGS['home']}/token"), ("/etc/passwd", "/etc/passwd")):
-        s, _, _, n, body = get(FILE(p), bearer(DEV))
-        check(f"/file {label}: 403", s == 403 and n < 100, f"HTTP {s} {body[:60]!r}")
-    s, _, _, _, body = get(FILE(f"{P}/mfg/none.bin"), bearer(DEV))
-    check("/file missing file: 404", s == 404, f"HTTP {s} {body[:40]!r}")
+        s, h, _, n, body = get(FILE(p), bearer(DEV))
+        check(f"/file {label}: 403 with the CSP sandbox, CORP and no-referrer", s == 403 and n < 100 and guarded(h), f"HTTP {s} {body[:60]!r}{'' if guarded(h) else ' ' + hdrs(h)}")
+    s, h, _, _, body = get(FILE(f"{P}/mfg/none.bin"), bearer(DEV))
+    check("/file missing file: 404 with the CSP sandbox, CORP and no-referrer", s == 404 and guarded(h), f"HTTP {s} {body[:40]!r}{'' if guarded(h) else ' ' + hdrs(h)}")
     s, _, _, _, body = get(FILE(f"{P}/mfg/../../outside/notes.txt"), bearer(DEV))
     check("/file .. climb: refused", s in (400, 403), f"HTTP {s} {body[:40]!r}")
-    s, _, _, _, body = get(FILE(f"{P}/mfg/..%2F..%2Foutside/notes.txt"), bearer(DEV))
-    check("/file encoded .. climb: refused", s in (400, 403, 404), f"HTTP {s} {body[:40]!r}")
+    # percent-encoded once on the wire (not by q() again): the hub decodes it to .../mfg/../../outside/notes.txt
+    s, _, _, _, body = get(f"/file?path={q(P + '/mfg/')}..%2F..%2Foutside%2Fnotes.txt", bearer(DEV))
+    check("/file encoded .. climb: refused", s in (400, 403), f"HTTP {s} {body[:40]!r}")
     s, _, _, _, body = get(FILE("mfg/big.bin"), bearer(DEV))
     check("/file relative path: refused", s in (400, 403), f"HTTP {s} {body[:40]!r}")
     fg = lambda rel: get(f"/files/get?thread={q(st['t1'])}&path={q(rel)}", bearer(DEV))  # noqa: E731
@@ -342,15 +397,18 @@ def deny():
         s, _, _, n, body = fg(rel)
         check(f"/files/get {label}: refused", s in (400, 403, 404) and n < 100, f"HTTP {s} {body[:40]!r}")
     for label, rel in ((".env", ".env"), ("id_rsa", "id_rsa"), (".git/config", ".git/config")):
-        s, _, _, n, body = fg(rel)
-        check(f"/files/get {label}: refused (the access rule's secrets)", s in (403, 404) and n < 100, f"HTTP {s} {n} bytes {body[:30]!r}")
+        s, h, _, n, body = fg(rel)
+        check(f"/files/get {label}: refused (the access rule's secrets), guarded headers", s in (403, 404) and n < 100 and guarded(h), f"HTTP {s} {n} bytes {body[:30]!r}{'' if guarded(h) else ' ' + hdrs(h)}")
     s = get(f"/files/get?thread={q('t000-nope')}&path={q('mfg/big.bin')}", bearer(DEV))[0]
     check("/files/get unknown thread: 404", s == 404, f"HTTP {s}")
+    s, h, sha, n, _ = get(FILE(ARGS["far"]), bearer(DEV))
+    check("/file of a file in <home>/far-files with the device: 200", s == 200 and n == 576, f"HTTP {s}, {n} bytes")
 
 
 def shares():
     d = Data(DEV); d.next_json()
     t2 = st["t2"]
+    miss = 0  # unknown-token requests this box made (the hub counts them per address, 30 a minute)
     ans = mcp_call(d, t2, {"path": BIG, "expires": "1h"}, "big")
     link, sid = share_of(ans)
     check("MCP file_share (stand-in agent, thread token) answers a link", bool(link) and bool(sid), ans[:160])
@@ -360,37 +418,56 @@ def shares():
         check("/s/<token>/<name> with no credential from box B: 200, sha256 matches", s == 200 and sha == ARGS["sha"], f"HTTP {s}, {n} bytes in {time.time() - t0:.1f}s")
         s, h, _, n, _ = get(link, {"Range": "bytes=0-9"})
         check("/s/ share: ranged 206", s == 206 and n == 10, f"HTTP {s}")
+        rs, rest = raw_head(link, {})
+        check("HEAD /s/ share: 200, no body bytes", rs == 200 and rest == b"", f"HTTP {rs}, {len(rest)} bytes")
         s = get(link[:-3] + "zzz")[0]
-        print(f"info  [shares] /s/<token>/<another name>: HTTP {s} (the token alone picks the share)", flush=True)
-        s = get("/s/" + "0" * 48 + "/big.bin")[0]
-        check("/s/ unknown token: 404", s == 404, f"HTTP {s}")
+        check("/s/<token>/<another name>: 200 (the token picks the share; a live token is no miss)", s == 200, f"HTTP {s}")
+    s, h, _, _, _ = get("/s/" + "0" * 48 + "/big.bin"); miss += 1
+    check("/s/ unknown token: 404 with the CSP sandbox, CORP and no-referrer", s == 404 and guarded(h), f"HTTP {s}{'' if guarded(h) else ' ' + hdrs(h)}")
     ans2 = mcp_call(d, t2, {"path": f"{P}/.env"}, "env")
     check("MCP file_share of .env: refused", "isError" in ans2 and "/s/" not in ans2, ans2[:160])
-    r = d.request("shares.list")
+    # a file in <home>/far-files (what another machine's thread sent): shared, then opened with the token alone
+    ansf = mcp_call(d, t2, {"path": ARGS["far"], "expires": "1h"}, "far")
+    linkf, sidf = share_of(ansf)
+    s, h, _, n, _ = get(linkf) if linkf else (0, {}, "", 0, b"")
+    check("share of a file in <home>/far-files: /s/ with the token alone 200", s == 200 and n == 576, f"HTTP {s}, {n} bytes {'' if linkf else ansf[:160]}")
+    # Settings' list and revoke: hub RPCs on /ws (by design not data/1; phones revoke through devices.page)
+    r = hub_rpc("shares.list")
     listed = [x.get("id") for x in ((r.get("result") or {}).get("shares") or [])]
-    check("data/1 shares.list lists the share", sid in listed, json.dumps(r.get("error", ""))[:160] if not r.get("ok") else ",".join(listed))
-    r = d.request("shares.revoke", {"id": sid})
-    via = "data/1"
-    if not check("data/1 shares.revoke answers ok", r.get("ok") is True, json.dumps(r.get("error", ""))[:200]):
-        # the hub RPC on the plain /ws socket with the hub token
-        w = Data(HUB, "/ws?token=" + q(HUB))
-        try:
-            r = w.request("shares.revoke", {"id": sid}); via = "/ws hub RPC"
-        except Exception as e:  # noqa: BLE001
-            r = {"error": str(e)}
-        w.close()
-        check("shares.revoke over the hub's /ws RPC (fallback)", r.get("ok") is True, json.dumps(r.get("error", ""))[:200])
+    check("/ws shares.list lists both shares", r.get("ok") is True and sid in listed and sidf in listed, json.dumps(r.get("error", ""))[:160] if r.get("ok") is not True else ",".join(listed))
+    r = hub_rpc("shares.revoke", {"id": sid})
+    left = [x.get("id") for x in ((r.get("result") or {}).get("shares") or [])]
+    check("/ws shares.revoke answers the list without it", r.get("ok") is True and sid not in left and sidf in left, json.dumps(r.get("error", ""))[:200] if r.get("ok") is not True else ",".join(left))
+    r = hub_rpc("shares.revoke", {"id": "sh000000000000"})
+    check("/ws shares.revoke of an unknown id: the hub says no such share", r.get("ok") is False and "no such share" in json.dumps(r.get("error", "")), json.dumps(r.get("error", ""))[:120])
     if link:
-        s = get(link)[0]
-        check(f"/s/ after shares.revoke ({via}): 404", s == 404, f"HTTP {s}")
+        s = get(link)[0]; miss += 1
+        check("/s/ after shares.revoke: 404", s == 404, f"HTTP {s}")
     ans3 = mcp_call(d, t2, {"path": f"{P}/mech/bracket.step", "expires": "2s"}, "exp")
     link3, _ = share_of(ans3)
     s = get(link3)[0] if link3 else 0
     check("short share (expires 2s): 200 at once", s == 200, f"HTTP {s} {ans3[:100] if not link3 else ''}")
     time.sleep(3.5)
-    s = get(link3)[0] if link3 else 0
+    s = get(link3)[0] if link3 else 0; miss += 1
     check("short share after expiry: 404", s == 404, f"HTTP {s}")
     d.close()
+    # last (it shuts this address out of /s/ for a minute): unknown tokens, 30 a minute from one address, then 429. The hub's minute for an
+    # address starts at its first /s/ request and starts again at the first one 60 s later: so wait 61 s from the last /s/ request made above,
+    # and the count below starts from zero in a fresh minute
+    time.sleep(61)
+    miss = 0
+    seen = []
+    for i in range(40):
+        s, h, _, _, _ = get("/s/" + os.urandom(24).hex() + "/x.bin")
+        seen.append(s)
+        if s == 429:
+            break
+    n404 = sum(1 for x in seen if x == 404)
+    check("/s/ unknown tokens: 404 until 30 misses from this address, then 429 (guarded headers)",
+          seen and seen[-1] == 429 and n404 == 30 - miss and all(x == 404 for x in seen[:-1]) and guarded(h),
+          f"{n404} x 404, then {seen[-1] if seen else '-'}")
+    s = get(linkf)[0] if linkf else 0
+    check("/s/ with a live token from the shut-out address: 429 too", s == 429, f"HTTP {s}")
 
 
 def revoke():
