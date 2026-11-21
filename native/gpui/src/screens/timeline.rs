@@ -494,7 +494,7 @@ fn doc_img(cx: &mut Context<Backplane>, light: bool, img: &Img, key: &str, doc: 
                 .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); let s = &open2; this.screens.ctx_img = Some(s.img.clone());
                     this.screens.ctx_save = Some(super::images::Save { img: s.img.clone(), name: s.name.clone(), src: s.src.clone(), shrunk: s.shrunk.is_some() }); this.ctx_open(e.position, super::ctxmenu::image_items(&s.file), cx); }))
                 .on_click(cx.listener(move |this, _, window, cx| { match &link { Some(l) => this.open_link(l, cx), None => this.lightbox_open(open.clone(), window, cx) } cx.notify(); }))
-                .child(gpui::img(src_img).size_full().object_fit(ObjectFit::Contain)).into_any_element()
+                .child(gpui::img(src_img).id(SharedString::from(format!("dimg-pic-{key}"))).size_full().object_fit(ObjectFit::Contain)).into_any_element()
         }
         (None, Some(Slot::Failed)) => {
             // GitHub shows the words of a picture that cannot be drawn
@@ -559,7 +559,7 @@ pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str,
                 let save = super::images::Save { img: copy.clone(), name: open.name.clone(), src: open.src.clone(), shrunk: open.shrunk.is_some() };
                 frame.overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); this.screens.ctx_img = Some(copy.clone()); this.screens.ctx_save = Some(save.clone()); this.ctx_open(e.position, super::ctxmenu::image_items(&ipath), cx); }))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| { this.lightbox_open(open.clone(), window, cx); }))
-                    .child(gpui::img(imgs.decoded(url).map_or(ImageSource::Image(img), ImageSource::Render)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
+                    .child(gpui::img(imgs.decoded(url).map_or(ImageSource::Image(img), ImageSource::Render)).id(SharedString::from(format!("timg-{key}-{i}"))).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
             Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.loading", &[("name", name.as_str().into())])).into_any_element(),
             Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(crate::i18n::tf("gpui.timeline.could.not.load", &[("name", name.as_str().into())])).into_any_element(),
         };

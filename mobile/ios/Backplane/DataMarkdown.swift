@@ -206,12 +206,13 @@ func dMdInline(_ text: String, size: CGFloat, bold: Bool = false) -> AttributedS
 // MARK: pictures
 
 final class DMdPics {
-    nonisolated(unsafe) static let cache = NSCache<NSString, UIImage>()
-    static func load(_ url: String) async -> UIImage? {
+    nonisolated(unsafe) static let cache = NSCache<NSString, DDecodedImage>()
+    static func load(_ url: String) async -> DDecodedImage? {
         if let i = cache.object(forKey: url as NSString) { return i }
         guard let u = URL(string: url), u.scheme == "https" || u.scheme == "http", let (d, r) = try? await URLSession.shared.data(from: u),
-              (r as? HTTPURLResponse)?.statusCode == 200, let img = UIImage(data: d) else { return nil }
-        cache.setObject(img, forKey: url as NSString); return img
+              (r as? HTTPURLResponse)?.statusCode == 200,
+              let dec = await Task.detached(priority: .userInitiated, operation: { DDecodedImage.decode(d, maxPixelSize: 1400) }).value else { return nil }
+        cache.setObject(dec, forKey: url as NSString); return dec
     }
 }
 
@@ -372,15 +373,16 @@ private struct DMdTable: View {
 
 private struct DMdImage: View {
     let alt: String, url: String
-    @State private var img: UIImage?
+    @State private var img: DDecodedImage?
     @State private var failed = false
     @State private var full = false
     var body: some View {
         Group {
             if let i = img ?? DMdPics.cache.object(forKey: url as NSString) {
                 // tap for the full size; a long press saves it to Photos or shares it
-                Image(uiImage: i).resizable().scaledToFit().frame(maxWidth: i.size.width, maxHeight: 360).dbox().onTapGesture { full = true }.dImageMenu(i)
-                    .fullScreenCover(isPresented: $full) { DImageFull(image: i) { full = false } }.accessibilityIdentifier("md.image")
+                DPictureView(image: i.image, animated: i.animated, contentMode: .fit)
+                    .frame(maxWidth: i.image.size.width, maxHeight: 360).dbox().onTapGesture { full = true }.dImageMenu(i.image)
+                    .fullScreenCover(isPresented: $full) { DImageFull(image: i.image, animated: i.animated) { full = false } }.accessibilityIdentifier("md.image")
             }
             else if failed { Text(alt.isEmpty ? url : alt).dmono(12).foregroundStyle(BackplaneDesign.dim) }
             else { Rectangle().fill(BackplaneDesign.panel).frame(height: 96) }
@@ -398,7 +400,8 @@ struct DMdPreview: View {
         self.full = full; self.stream = stream
         // the check's picture stands in for any image address
         if let f = ProcessInfo.processInfo.environment["BACKPLANE_MDPREVIEW"], let img = UIImage(contentsOfFile: (f as NSString).deletingLastPathComponent + "/pic.png") {
-            for b in dMdBlocks(full) { if case .image(_, let u) = b { DMdPics.cache.setObject(img, forKey: u as NSString) } }
+            let dec = DDecodedImage(image: img)
+            for b in dMdBlocks(full) { if case .image(_, let u) = b { DMdPics.cache.setObject(dec, forKey: u as NSString) } }
         }
     }
     /// BACKPLANE_MDPREVIEW_PICS=<folder>: the reply's absolute image paths are its pictures, each read from that folder by its file name
@@ -406,7 +409,7 @@ struct DMdPreview: View {
     private var pics: [String] {
         guard ProcessInfo.processInfo.environment["BACKPLANE_MDPREVIEW_PICS"] != nil else { return [] }
         var out: [String] = []
-        for w in full.split(whereSeparator: { " \n\t`()*".contains($0) }).map(String.init) where w.hasPrefix("/") && [".png", ".jpg", ".jpeg"].contains(where: { w.lowercased().hasSuffix($0) }) && !out.contains(w) { out.append(w) }
+        for w in full.split(whereSeparator: { " \n\t`()*".contains($0) }).map(String.init) where w.hasPrefix("/") && [".png", ".jpg", ".jpeg", ".gif"].contains(where: { w.lowercased().hasSuffix($0) }) && !out.contains(w) { out.append(w) }
         return out
     }
     var body: some View {

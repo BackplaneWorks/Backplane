@@ -600,8 +600,7 @@ private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () 
             failed -> DMono(Msg.android_file_bad, dcs.error, 12, Modifier.padding(16.dp))
             b == null -> CircularProgressIndicator(Modifier.padding(24.dp))
             ext(path) in imageExt -> {
-                val bmp = remember(b) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
-                if (bmp != null) Image(bmp, null, Modifier.fillMaxSize().padding(8.dp).testTag("preview.image"), contentScale = ContentScale.Fit) else DMono(Msg.android_file_noimage, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp))
+                AnimatedPic(b, Modifier.fillMaxSize().padding(8.dp).testTag("preview.image"), contentScale = ContentScale.Fit)
             }
             ext(path) == "pdf" -> PdfPreview(b)
             ext(path) in textExt || b.size < 200_000 && b.none { it.toInt() == 0 } -> {

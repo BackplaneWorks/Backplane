@@ -495,7 +495,8 @@ fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
     let meta = std::fs::metadata(&path).map_err(|_| err("unknown attachment"))?;
     if !meta.is_file() || meta.len() as usize > MAX_ATTACH_BYTES { return Err(err("unknown attachment")) }
     let bytes = std::fs::read(&path).map_err(|_| err("unknown attachment"))?;
-    Ok(json!({"mime":mime_of(file),"data":base64::engine::general_purpose::STANDARD.encode(bytes)}))
+    let mime = match mime_of(file) { "application/octet-stream" => crate::files::webimg::kind(&bytes).unwrap_or("application/octet-stream"), m => m };
+    Ok(json!({"mime":mime,"data":base64::engine::general_purpose::STANDARD.encode(bytes)}))
 }
 
 async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool) -> Result<Value, Value> {

@@ -673,7 +673,9 @@ struct DataFilePreview: View {
             Divider()
             if failed { Text(Tr.t("This file could not be read.")).foregroundStyle(BackplaneDesign.bad).padding(16) }
             else if let d = data {
-                if imageExt.contains(ext(path)), let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().padding(8).accessibilityIdentifier("data.preview.image") }
+                if imageExt.contains(ext(path)), let dec = DDecodedImage.decode(d) {
+                    DPictureView(image: dec.image, animated: dec.animated, contentMode: .fit).padding(8).accessibilityIdentifier("data.preview.image")
+                }
                 else if ext(path) == "pdf" { DataPDFView(data: d).accessibilityIdentifier("data.preview.pdf") }
                 else if d.count < 200_000, !d.contains(0) {
                     let t = String(decoding: d, as: UTF8.self)

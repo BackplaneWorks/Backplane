@@ -787,7 +787,9 @@ object DataClient {
             if (voice != null) p.put("voice", voice)
             if (reply != null) p.put("replyTo", JSONObject(reply))
             if (images.isNotEmpty()) p.put("attachments", JSONArray(images.mapIndexed { i, b ->
-                JSONObject().put("name", "photo-${i + 1}.jpg").put("mime", "image/jpeg").put("data", android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)) }))
+                val ext = GifFormat.extOf(b)
+                val name = if (ext == "gif") "image-${i + 1}.gif" else "photo-${i + 1}.jpg"
+                JSONObject().put("name", name).put("mime", GifFormat.mimeOf(b)).put("data", android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)) }))
             val r = call("message.send", p)
             val e = r.optJSONObject("entry")?.let(::parseEntry)
             // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
@@ -1249,9 +1251,17 @@ object DataClient {
         val b = runCatching { android.util.Base64.decode(r.optString("data"), android.util.Base64.DEFAULT) }.getOrNull() ?: return null
         pictures.put(id, b); return b
     }
-    // a picture chosen: the longest side at most 2048 px, JPEG at 80 (about a megabyte at most; the hub takes 8 MB)
+    suspend fun replyImage(entry: String, path: String): ByteArray? {
+        val key = "mi:$entry\n$path"
+        pictures.get(key)?.let { return it }
+        val r = runCatching { call("message.image", JSONObject().put("entry", entry).put("path", path)) }.getOrNull() ?: return null
+        val b = runCatching { android.util.Base64.decode(r.optString("data"), android.util.Base64.DEFAULT) }.getOrNull() ?: return null
+        pictures.put(key, b); return b
+    }
+    // a picture chosen: GIFs under 8 MB stay raw to preserve animation; others are capped at 2048 px JPEG at 80
     fun prepared(ctx: Context, uri: android.net.Uri): ByteArray? = runCatching {
         val bytes = ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes() }
+        if (GifFormat.isGif(bytes) && bytes.size <= GifFormat.MAX_UPLOAD_BYTES) return@runCatching bytes
         val o = android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds = true }
         android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size, o)
         var sample = 1; while (maxOf(o.outWidth, o.outHeight) / sample > 4096) sample *= 2

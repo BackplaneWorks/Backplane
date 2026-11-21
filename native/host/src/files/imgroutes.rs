@@ -190,4 +190,42 @@ mod tests {
         for (e, p) in [("gone1", pb.as_str()), ("old1", pa.as_str()), ("live1", pb.as_str()), ("nope", pa.as_str()), ("live1", "/etc/passwd"), ("live1", "/x/../a.png")] { assert_eq!(get(&hub, &tok, e, p).await.status, "404 Not Found", "{e} {p}") }
         assert_eq!(get(&hub, "wrong", "live1", &pa).await.status, "401 Unauthorized"); assert_eq!(get(&hub, "", "live1", &pa).await.status, "401 Unauthorized");
     }
+
+    /// Minimal valid 2-frame animated GIF89a (2x2) with NETSCAPE2.0 loop extension and two image descriptors.
+    fn animated_gif() -> Vec<u8> {
+        vec![
+            b'G', b'I', b'F', b'8', b'9', b'a', // Header
+            2, 0, 2, 0, 0x80, 0, 0,             // Logical Screen Descriptor: 2x2, GCT(2 colors)
+            0xff, 0x00, 0x00, 0x00, 0x00, 0xff, // Global Color Table: red, blue
+            0x21, 0xff, 11, b'N', b'E', b'T', b'S', b'C', b'A', b'P', b'E', b'2', b'.', b'0', 3, 1, 0, 0, 0, // Loop forever
+            0x21, 0xf9, 4, 0x00, 10, 0, 0, 0,   // GCE frame 1: 100ms
+            0x2c, 0, 0, 0, 0, 2, 0, 2, 0, 0,    // Image Descriptor 1
+            2, 2, 0x44, 0x01, 0,                // LZW data (all color 0)
+            0x21, 0xf9, 4, 0x00, 15, 0, 0, 0,   // GCE frame 2: 150ms
+            0x2c, 0, 0, 0, 0, 2, 0, 2, 0, 0,    // Image Descriptor 2
+            2, 2, 0x4c, 0x01, 0,                // LZW data (all color 1)
+            0x3b,                               // Trailer
+        ]
+    }
+
+    #[tokio::test] async fn message_image_serves_animated_gif_raw_without_flattening() {
+        let home = crate::plat::tmp::canonical("migif");
+        let g = home.join("src/anim.gif"); std::fs::create_dir_all(g.parent().unwrap()).unwrap();
+        let raw = animated_gif(); std::fs::write(&g, &raw).unwrap();
+        let pg = g.to_string_lossy().into_owned();
+        let ev = |v: Value| v.to_string();
+        std::fs::write(home.join("events.jsonl"), [
+            ev(json!({"$":"ProjectCreated","id":"p1","title":"p","root":"/x","at":1})),
+            ev(json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})),
+            ev(json!({"$":"MessagePosted","thread":"t1","msg":"g1","role":"assistant","text":format!("look {pg}"),"at":3})),
+        ].join("\n") + "\n").unwrap();
+        let cfg = crate::hub::Cfg { home: home.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        start(&hub);
+        std::fs::write(home.join("token"), "0123456789abcdef-test-token\n").unwrap();
+        let r = get(&hub, "0123456789abcdef-test-token", "g1", &pg).await;
+        assert_eq!(r.status, "200 OK");
+        assert_eq!(r.ctype, "image/gif");
+        assert_eq!(r.body, raw, "animated GIF bytes must be served verbatim without flattening");
+    }
 }
