@@ -1727,6 +1727,66 @@ try:
             check(s[5] < s[4] * 0.9, f'zoom: Cmd+- zooms out again ({s[4]:.0f} -> {s[5]:.0f})')
             check(abs(s[6] - s[0]) <= s[0] * 0.08, f'zoom: Cmd+0 zooms to fit ({s[5]:.0f} -> {s[6]:.0f}, the fit {s[0]:.0f})')
         raise SystemExit(1 if FAILS else 0)
+    # ---- MAC_MODE=reopen (Lane M, bp.13.4; local copy) ----
+    if os.environ.get('MAC_MODE') == 'reopen':
+        import threading as _th
+        K_W_, K_RET_ = 13, 36
+        board_ = os.path.join(OUT, 'proj', 'ecc83-pp.kicad_pcb')
+        def alive(pid): return pid and subprocess.run(['kill', '-0', str(pid)], capture_output=True).returncode == 0
+        def session():
+            v = None
+            for l in hub_log().splitlines():
+                if 'kicad embed: publish editor.kicad.' in l:
+                    try: v = json.loads(l.split(' ', 4)[4])
+                    except Exception:
+                        try: v = json.loads(l[l.index('{'):])
+                        except Exception: pass
+            v = v or {}
+            return {k: v.get(k) for k in ('state', 'pid', 'closing', 'stop_reason', 'reason')} | {'session': (v.get('runtime') or {}).get('session'), 'stopReason': (v.get('runtime') or {}).get('stopReason')}
+        def watch_exit(pid, t0, box):
+            while alive(pid) and time.time() - t0 < 120: time.sleep(0.01)
+            box.append(round(time.time() - t0, 3) if not alive(pid) else None)
+        def close_and_time(tag, keys):
+            f = kicad_frame(); pid = f and f[1]; n0 = len(hub_log().splitlines()); box = []
+            keys(); t0 = time.time()
+            _th.Thread(target=watch_exit, args=(pid, t0, box), daemon=True).start()
+            return pid, t0, box, n0
+        def edit(tag, pid, t0, box, n0):
+            e = rects().get('ui:Edit'); cw2 = next((w for w in wins() if w[0] == cw[0]), cw)
+            wait_for(lambda: rects().get('ui:Edit'), 8, 0.1); e = rects().get('ui:Edit')
+            st = session(); was_alive = alive(pid); t_press = time.time()
+            if e: click(cw2[3][0] + e['x'] + e['w'] / 2, cw2[3][1] + 28 + e['y'] + e['h'] / 2)
+            f = wait_for(kicad_frame, 60, 0.05); dt = time.time() - t_press
+            wait_for(lambda: box, 125, 0.1)
+            exit_s = box[0] if box else None
+            print(f'INFO reopen {tag}: old KiCad {pid} exited {exit_s} s after the Cmd+W; Edit pressed {t_press - t0:.2f} s after the Cmd+W (Edit offered {bool(e)}); '
+                  f'at the press old alive {was_alive}, hub session {json.dumps(st)}; frame over the pane {bool(f)} {f and f[1]} in {dt:.2f} s', flush=True)
+            if not f:
+                shot(f'reopen-{tag}-fail')
+                for l in hub_log().splitlines()[n0:]:
+                    if 'publish editor' not in l and ('kicad embed' in l or 'kicad:' in l): print('INFO reopen hub: ' + l[:240], flush=True)
+            RES[f'reopen_{tag}'] = {'exit_s': exit_s, 'edit_after_s': round(t_press - t0, 2), 'old_alive_at_edit': was_alive, 'session_at_edit': st, 'ok': bool(f), 'frame_s': round(dt, 2)}
+            return f
+        p = last_push(); click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9); time.sleep(0.6)
+        a = close_and_time('fresh', lambda: key(K_W_, CMD))
+        wait_for(lambda: not kicad_frame(), 6, 0.1)
+        check(bool(edit('fresh', *a)), 'Cmd+W with nothing unsaved, then Edit opens a fresh editor over the pane')
+        time.sleep(1.0)
+        p = last_push(); click(p[0][0] + p[0][2] * 0.5, p[0][1] + p[0][3] * 0.5); time.sleep(0.8)
+        m0 = hub_log().count('ET_MODIFIED_CHANGED') + hub_log().count('ET_DOCUMENT_EDITED'); key(K_DEL)
+        how = 'backspace' if wait_for(lambda: hub_log().count('ET_MODIFIED_CHANGED') + hub_log().count('ET_DOCUMENT_EDITED') > m0, 2.5) else None
+        if not how:
+            key(K_FDEL); how = 'forward delete' if wait_for(lambda: hub_log().count('ET_MODIFIED_CHANGED') + hub_log().count('ET_DOCUMENT_EDITED') > m0, 2.5) else 'neither'
+        print(f'INFO reopen: the unsaved edit by {how}', flush=True); time.sleep(0.6)
+        before = open(board_, 'rb').read()
+        key(K_W_, CMD); time.sleep(1.5); key(K_ESC); time.sleep(1.5)
+        cancel_ok = bool(kicad_frame()) and open(board_, 'rb').read() == before
+        b = close_and_time('save', lambda: (key(K_W_, CMD), time.sleep(1.5), key(K_RET_)))
+        saved = bool(wait_for(lambda: open(board_, 'rb').read() != before, 8))
+        closed = bool(wait_for(lambda: not kicad_frame(), 6))
+        print(f'INFO reopen: Cancel kept the editor and the file {cancel_ok}; Save wrote the file {saved}; the editor closed {closed}', flush=True)
+        check(bool(edit('save', *b)), 'and Edit opens it again')
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=first: a fresh home's first Edit puts KiCad over the pane within 30 s (the checks above), and stops ----
     if os.environ.get('MAC_MODE') == 'first':
         check(RES['edit_to_frame_s'] <= 30, f'first Edit on a fresh home: KiCad over the pane within 30 s ({RES["edit_to_frame_s"]} s)')

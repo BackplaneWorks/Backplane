@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       jobs:
-        description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), pairing (test/e2e/pairing/gpui.sh, hub and client on this runner), kicad-proto (test/kicad_embed/mac/proto: a borderless window in another process kept over a moving window, its lag and stacking; not in all), browser (the embedded Browser and the agent's browser tools, test/cef/agent_proof.py), all"
+        description: "kicad-reopen (Lane M bp.13.4), probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), pairing (test/e2e/pairing/gpui.sh, hub and client on this runner), kicad-proto (test/kicad_embed/mac/proto: a borderless window in another process kept over a moving window, its lag and stacking; not in all), browser (the embedded Browser and the agent's browser tools, test/cef/agent_proof.py), all"
         default: all
       archive_run:
         description: "release dry run whose darwin-arm64 archive the client rows run from, installed with its install.sh"
@@ -155,6 +155,56 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: kicad-pane, path: out }
+
+  kicad-reopen:
+    # Lane M, bp.13.4 (the Lead): "and Edit opens it again" (mac_pane_e2e.py MAC_MODE=reopen, the default rows' Cmd+W tail alone) on two
+    # runtimes strictly alternating: kicad_run's package (b2) and kicad_release's (bp.13.3), 10 each, one hub and client from this checkout.
+    if: inputs.jobs == 'kicad-reopen'
+    runs-on: macos-15
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            native/host
+            native/gpui
+          shared-key: e2e-macos
+          save-if: false
+      - name: the two runtimes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu; mkdir -p "$RUNNER_TEMP/new" "$RUNNER_TEMP/base"
+          gh run download ${{ inputs.kicad_run }} -R BackplaneWorks/Backplane_KiCad -n backplane-kicad-macos-native -D "$RUNNER_TEMP/new"
+          gh release download "${{ inputs.kicad_release }}" -R BackplaneWorks/Backplane_KiCad -p 'backplane-kicad-darwin-arm64-*[0-9].tar.gz' -D "$RUNNER_TEMP/base"
+          for d in new base; do (cd "$RUNNER_TEMP/$d" && shasum -a 256 backplane-kicad-darwin-arm64-*[0-9].tar.gz && tar xzf backplane-kicad-darwin-arm64-*[0-9].tar.gz)
+            R=$(ls -d "$RUNNER_TEMP"/$d/backplane-kicad-darwin-arm64-*/ | head -1)
+            python3 -c "import json,sys;m=json.load(open(sys.argv[1]));print(sys.argv[2],m['version'],m['sourceCommit'][:10])" "$R/manifest.json" $d
+            echo "RT_${d}=${R%/}" >> "$GITHUB_ENV"; done
+      - name: build the hub and the client
+        run: |
+          export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)
+          (cd native/host && cargo build --release --bin backplane-hub) & a=$!
+          (cd native/gpui && cargo build --release) & b=$!
+          wait $a; ra=$?; wait $b; rb=$?; [ $ra = 0 ] && [ $rb = 0 ]
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: reopen x10 per runtime, strictly alternating
+        run: |
+          mkdir -p out; python -m pip install --quiet pyobjc-framework-Quartz pyobjc-framework-Cocoa
+          for i in $(seq 1 10); do for d in new base; do
+            R=$([ $d = new ] && echo "$RT_new" || echo "$RT_base"); O="$PWD/out/reopen-$d-$i"
+            MAC_MODE=reopen python test/kicad_embed/mac_pane_e2e.py "$PWD/native/gpui/target/release/backplane-gpui" "$PWD/native/host/target/release/backplane-hub" "$PWD/assets" "$R" "$O" > "$O.txt" 2>&1 || true
+            echo "== $d $i: ok=$(grep -c '^ok ' $O.txt) fail=$(grep -c '^FAIL' $O.txt) tb=$(grep -c Traceback $O.txt)"
+            grep -E '^(FAIL|REFUSED)|Traceback|^INFO reopen' "$O.txt" | cut -c1-700 || true
+            pkill -f backplane-hub || true; pkill -f backplane-gpui || true; pkill -f 'bin/kicad' || true; sleep 2
+            rm -rf "$O/home/kicad" "$O/proj" "$O/origin.git"
+          done; done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: kicad-reopen, path: out }
 
   kicad-runtime:
     # What a Mac gets from a macOS Backplane KiCad release before the MAC pin moves to it: the package fetched and checked as the hub's
