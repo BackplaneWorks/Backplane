@@ -19,7 +19,8 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 CYCLES=${CYCLES:-30}
 # a slow KiCad (under valgrind): CLOSE_SLOW=1 gives each step minutes, not seconds
 if [ "${CLOSE_SLOW:-0}" = 1 ]; then READY_TRIES=7200; PAINT_MS=1500000; EXIT_TRIES=2400; CLIENT_S=3000; export BACKPLANE_KICAD_START_WINDOW_S=1500
-else READY_TRIES=600; PAINT_MS=120000; EXIT_TRIES=240; CLIENT_S=400; fi
+# EXIT_TRIES: a hang is still alive 30 s after the Close answered (the batch criteria's bound)
+else READY_TRIES=600; PAINT_MS=120000; EXIT_TRIES=120; CLIENT_S=400; fi
 # CLOSE_CORES=1: core dumps allowed for KiCad (apport keeps them in /var/lib/apport/coredump), for a backtrace of a crash
 [ "${CLOSE_CORES:-0}" = 1 ] && ulimit -c unlimited
 discover_bins
@@ -107,7 +108,7 @@ for i in $(seq "$CYCLES"); do
     echo "cycle $i: CRASHED ($HOW) frames=$FRAMES; last: $LAST"; SUMMARY+=("$HOW: $LAST")
     { echo "== cycle $i (frames $FRAMES)"; tail -n +"$((N0 + 1))" "$OUT/hub.log" | sed -n -E '/ ended (while closing |after its close )?\(/,/^kicad embed: publish/p' | head -60; } >>"$OUT/crashes.txt"
   elif kill -0 "$KPID" 2>/dev/null; then
-    echo "cycle $i: KiCad still running after the close ($(cat "$OUT/close-$i.out" | tail -c 200))"; OTHER=$((OTHER + 1))
+    echo "cycle $i: KiCad still running 30 s after the close ($(cat "$OUT/close-$i.out" | tail -c 200))"; OTHER=$((OTHER + 1))
     # CLOSE_HANG_STACK=1: a KiCad running under gdb (the -gdb runtimes) is interrupted, so gdb writes every thread's stack, then killed
     if [ "${CLOSE_HANG_STACK:-0}" = 1 ]; then kill -INT "$KPID" 2>/dev/null; sleep 15; fi
     # CLOSE_HANG_STACK=attach: a KiCad started through bin/ptracer-any (the -ptr runtimes: it lets this user attach under Yama ptrace_scope 1)
