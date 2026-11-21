@@ -131,7 +131,10 @@ if [ "${DEADKEY:-1}" = 1 ] && command -v setxkbmap >/dev/null; then
   restore_layout() { local L0 V0 O0; IFS='|' read -r L0 V0 O0 <<<"$LAYOUT0"
     setxkbmap -layout "${L0:-us}" ${V0:+-variant "$V0"} ${O0:+-option "" -option "$O0"} 2>/dev/null; }
   # put back on any exit too (a signal during the typing must not leave us intl), before the lib's own cleanup
-  trap 'restore_layout; kembed_cleanup' EXIT INT TERM
+  # (kembed_cleanup exits with the $? it finds: the run's own status is handed on past restore_layout, and a signal's as 128+N)
+  trap 'rc=$?; restore_layout; (exit "$rc"); kembed_cleanup' EXIT
+  trap 'restore_layout; (exit 130); kembed_cleanup' INT
+  trap 'restore_layout; (exit 143); kembed_cleanup' TERM
   setxkbmap -layout us -variant intl 2>/dev/null; sleep 1.0
   # DEADKEY_OVER=composer: the pointer over the composer instead (the same key on a client without the proxy: what main does with it)
   [ "${DEADKEY_OVER:-pane}" = composer ] && { python3 "$XINPUT_PY" move "$CX" "$CY" >/dev/null; sleep 0.5; }
