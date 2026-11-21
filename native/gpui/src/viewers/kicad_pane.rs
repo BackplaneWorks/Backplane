@@ -144,9 +144,10 @@ pub fn on_active(pending: &mut Option<String>, act: &str, by: &Value, me: &str, 
 }
 /// Whether the hub says KiCad has `kind` hidden in wx: neither `realized` (wx's IsShown, bp.9) nor `shown` (IsShown AND natively mapped:
 /// false for every frame the client has unmapped, so on its own it would send every local switch through the hub), or no such frame
-/// listed (stale or missing info counts as hidden). The hub's own show of another frame hides the others through wx (HideFrame), and a native map of a wx-hidden frame can be
-/// withdrawn again by GTK: a local switch to such a frame asks KiCad to show it too (one show too many costs nothing; one too few is the
-/// Board->Schematic bounce). Pure.
+/// listed (stale or missing info counts as hidden). A native map of a wx-hidden frame can be withdrawn again by GTK, so a local switch
+/// to such a frame asks KiCad to show it too (one show too many costs nothing; one too few was the Board->Schematic bounce). Since the
+/// hub no longer hides frames in Linux local-map mode (embed.rs `hides_others`), a frame is wx-hidden there only by a hub from before
+/// that, Windows (not a local switch) or KiCad itself. Pure.
 pub fn kicad_hides(frames: &Value, kind: &str) -> bool {
     !frames.as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(kind) && (f["realized"] == true || f["shown"] == true)))
 }
@@ -2535,7 +2536,7 @@ mod tests {
         use super::kicad_hides;
         use serde_json::json;
         let frames = json!([{"kind": "PCB", "shown": false, "realized": false}, {"kind": "SCH", "shown": true, "realized": true}, {"kind": "PCB_3D", "shown": false, "realized": true}]);
-        assert!(kicad_hides(&frames, "PCB"), "the hub's show of another frame hid it (HideFrame): asked for");
+        assert!(kicad_hides(&frames, "PCB"), "wx-hidden (an older hub's HideFrame, KiCad itself): asked for");
         assert!(!kicad_hides(&frames, "SCH"), "shown in KiCad: a pure local switch");
         assert!(!kicad_hides(&frames, "PCB_3D"), "shown in wx, unmapped by the client (GetFrames' shown is IsShown AND mapped): a pure local switch");
         assert!(!kicad_hides(&json!([{"kind": "PCB", "shown": true}]), "PCB"), "a runtime without realized: shown is enough");
