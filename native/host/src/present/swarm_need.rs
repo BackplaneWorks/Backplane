@@ -35,9 +35,9 @@ pub fn provider_say(p: &str) -> &'static str {
 /// Whether a failed turn's words are a sign-in or account problem the person has to fix (an expired or missing sign-in, a key that is refused), not the work's.
 pub fn signin_cause(text: &str) -> bool {
     let l = text.to_lowercase();
-    ["not logged in", "not logged into", "not signed in", "sign-in expired", "sign in again", "sign-in needed", "login expired", "please log in", "please login", "run `agy`", "/login",
-     "oauth token has expired", "token has expired", "invalid api key", "invalid_api_key", "missing api key", "authentication failed", "authentication_error", "unauthenticated",
-     "401 unauthorized", "status 401", "silent auth failed", "invalid_grant", "refresh token", "credentials", "subscription_required"]
+    ["not logged in", "not logged into", "not signed in", "sign-in expired", "sign in again", "sign-in needed", "login expired", "please log in", "please login", "run `agy`",
+     "oauth token has expired", "token has expired", "invalid api key", "invalid_api_key", "missing api key", "authentication_error", "unauthenticated",
+     "401 unauthorized", "status 401", "silent auth failed", "invalid_grant", "subscription_required"]
         .iter().any(|k| l.contains(k))
 }
 
@@ -175,7 +175,7 @@ mod tests {
     }
     #[test] fn sign_in_words_are_told_from_the_works() {
         for t in ["You are not logged into Antigravity (silent auth failed)", "Claude sign-in expired: tap to sign in again", "Error: 401 Unauthorized", "invalid api key", "OAuth token has expired"] { assert!(signin_cause(t), "{t}") }
-        for t in ["cargo test failed", "agent was killed (signal 9, likely out of memory)", "Context full"] { assert!(!signin_cause(t), "{t}") }
+        for t in ["cargo test failed", "agent was killed (signal 9, likely out of memory)", "Context full", "git push: could not read credentials for https://example.com", "authentication failed for 'https://example.com/repo.git'"] { assert!(!signin_cause(t), "{t}") }
         assert_eq!(short("  The build broke. Then more.\nline 2"), "The build broke");
     }
 }

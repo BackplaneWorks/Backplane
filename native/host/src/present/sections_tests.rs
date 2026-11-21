@@ -560,3 +560,14 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let labels: Vec<&str> = r["need"]["actions"].as_array().unwrap().iter().map(|a| a["label"].as_str().unwrap()).collect(); assert_eq!(labels, ["Sign in to Gemini", "Move to Claude"]);
     assert_eq!(r["need"]["actions"][0]["thread"], "h|b");
 }
+
+#[test] fn a_member_of_a_swarm_that_is_over_is_a_thread_again_and_its_open_ask_is_in_needs_you() {
+    let room = |state: &str| json!({"$":"RoomSet","id":"r1","name":"Web UI","members":"thread:a\nthread:b","kind":"swarm","project":"p1","state":state,"reason":"","at":NOW-30});
+    let s = st(&[pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3), room("done"), ask("q", "a", "approval")]);
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let n = sec(&build(&s, &rows, &Value::Null, &ctx(&HashSet::new())), "needs").clone();
+    assert_eq!(n["count"], 1, "{n}"); assert_eq!(n["rows"][0]["kind"], Value::Null, "the thread itself, no swarm row: {n}");
+    assert!(!crate::state::visible::swarm_member(&s, "a"));
+    let live = st(&[pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3), room(""), ask("q", "a", "approval")]);
+    assert!(crate::state::visible::swarm_member(&live, "a"), "a live swarm's member is its row's");
+}

@@ -69,7 +69,7 @@ fn facts_here<'a>(t: &'a MergedThread<'a>) -> Th<'a> {
             let w = status(st, &t.id); let lk = looked(st, &t.id); let se = settled(st, &t.id);
             // a delegated child hangs under its parent: it is listed alone only when it asks the person
             let kid = st.tasks.values().any(|(p, c, _, _)| c == &t.id && st.threads.contains_key(p) && !st.bot_threads_has(p));
-            let member = st.swarm_of.contains_key(&t.id); // (its swarm's row carries it)
+            let member = crate::state::visible::swarm_member(st, &t.id); // (its live swarm's row carries it)
             Th { t, word: w, show: visible(st, &t.id), needs: !member && needs_you(w, own(st, &t.id), lk, se), kid: kid || member, settled: se }
         }
         None => { let w = word_of(&t.status); Th { t, word: w, show: visible_word(w, t.pinned), needs: w == "needs", kid: false, settled: w == "done" || w == "idle" } }
@@ -416,7 +416,7 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
       let mut states: Vec<(&State, String)> = vec![(st, String::new())];
       for p in rows { for t in &p.threads { if let Some(s) = t.src { if !t.machine.is_empty() && !states.iter().any(|(x, _)| std::ptr::eq(*x, s)) { states.push((s, t.machine.clone())); } } } }
       for (s, machine) in states { // (another machine's ask is believed for ACTIVE, as `far_word` has it)
-      for (id, t) in s.threads.iter().filter(|(id, t)| !t.deleted && !listed.contains(id.as_str()) && !s.swarm_of.contains_key(id.as_str()) && wants_person(s, id) && (machine.is_empty() || (far_word("needs", false, c.now.saturating_sub(t.activity)) == "needs" && hidden_at(st, id) < t.activity.max(1)))) {
+      for (id, t) in s.threads.iter().filter(|(id, t)| !t.deleted && !listed.contains(id.as_str()) && !crate::state::visible::swarm_member(s, id) && wants_person(s, id) && (machine.is_empty() || (far_word("needs", false, c.now.saturating_sub(t.activity)) == "needs" && hidden_at(st, id) < t.activity.max(1)))) {
           let place = s.bots_nav.values().find(|b| &b.thread == id).map(|b| b.name.clone()).unwrap_or_else(|| crate::sidebar::NO_PROJECT.into());
           if !c.query.is_empty() && !hit(&t.title, c.query) && !hit(&place, c.query) { continue }
           let mt = MergedThread { machine: machine.clone(), id: id.clone(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(s), status: String::new() };

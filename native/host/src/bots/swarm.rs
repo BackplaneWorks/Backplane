@@ -122,8 +122,10 @@ fn auto_key(room: &str) -> String { format!("room.auto.{room}") }
 fn part_of(b: &Budget, part: &str) -> u64 { match part { "posts" => b.posts, "turns" => b.turns, "tokens" => b.tokens, _ => 0 } }
 fn set_part(b: &mut Budget, part: &str, v: u64) { match part { "posts" => b.posts = v, "turns" => b.turns = v, "tokens" => b.tokens = v, _ => {} } }
 /// The member posts held while the swarm was paused, since the swarm last resumed (oldest first): a resume delivers them (`released`).
+/// A post after which the room ran again: the hub's resume, or the person's own post (it resumes a paused room: rpc.rs `post_k`).
+fn resumes(e: &Value) -> bool { if e["guard"] == true { e["tags"].as_array().map_or(false, |t| t.iter().any(|x| x == "resume")) } else { gs(e, "from") == "you" } }
 fn held_since_resume(posts: &[Value]) -> Vec<Value> {
-    let start = posts.iter().rposition(|e| e["guard"] == true && e["tags"].as_array().map_or(false, |t| t.iter().any(|x| x == "resume"))).map_or(0, |i| i + 1);
+    let start = posts.iter().rposition(resumes).map_or(0, |i| i + 1);
     posts[start..].iter().filter(|e| e["guard"] != true && !gs(e, "held").is_empty() && gs(e, "held") != "backstop").cloned().collect()
 }
 /// The sign-in command a provider's CLI takes in a terminal (Sign in on a member that failed on its sign-in), when it has one.
@@ -269,6 +271,7 @@ impl Bots {
             if !rel.is_empty() { posts.splice(0..0, rel); }
             (r, posts, hk) };
         if posts.is_empty() { return }
+        let back = |me: &Self| { let rel: Vec<Value> = posts.iter().filter(|p| !gs(p, "held").is_empty()).cloned().collect(); if !rel.is_empty() { me.swarm.released.lock().unwrap().entry(key.clone()).or_default().splice(0..0, rel); } };
         // the newest post it heard now (a released one is older than its mark: the mark stays where it is)
         let newest = posts.iter().rev().find(|p| gs(p, "held").is_empty()).map(|p| gs(p, "id").to_string());
         let last = posts.last().map(|p| gs(p, "id").to_string()).unwrap_or_default();
@@ -276,9 +279,9 @@ impl Bots {
         let person = posts.iter().any(|p| gs(p, "from") == "you" && p["guard"] != true);
         let note = batch_note(&r, &posts, &HashMap::new());
         let now = now_s();
-        if let Some(n) = &newest { if self.hub.commit(&json!({"$":"SettingSet","key":hk,"value":n,"at":now})).await.is_err() { return } }
-        self.swarm.last.lock().unwrap().insert(key, now);
-        let Some(info) = self.inbox.info(th).await else { return }; if info.gone { return }
+        if let Some(n) = &newest { if self.hub.commit(&json!({"$":"SettingSet","key":hk,"value":n,"at":now})).await.is_err() { back(self); return } }
+        self.swarm.last.lock().unwrap().insert(key.clone(), now);
+        let Some(info) = self.inbox.info(th).await else { back(self); return }; if info.gone { return }
         let id = format!("room:{room}:{last}");
         // a running non-Claude turn takes it with its next Backplane tool result or at its end (never restarted by a peer's post); the person's post steers
         let _ = if !person && info.turn == "running" && info.provider != "claude" { self.inbox_note(th, &id, &note).await } else { self.inbox_ride(th, &id, &note).await };
@@ -362,6 +365,15 @@ impl Bots {
         let Some(me) = self.arc() else { return Ok(()) }; let (by, id, text) = (r.by.clone(), r.id.clone(), text.to_string());
         tokio::spawn(async move { let _ = me.inbox_note(&by, &format!("room:{id}:policy:{now}"), &text).await; }); Ok(())
     }
+    /// What any resume of a paused swarm does besides its RoomSet (`swarm_control` resume and raise, the person's post: rpc.rs `post_k`): the posts held while it was
+    /// paused are released to the members, the pause's facts go, and the person's own resume starts the policy's count again. Before the commit.
+    pub(super) fn resume_facts(&self, w: &World, r: &Room, person: bool, now: u64) -> Vec<Value> {
+        if !r.swarm() { return vec![] }
+        self.release_held(w, r);
+        let mut ev = vec![need_ev(&r.id, &with_pause(&need_rec(w, &r.id), None), now)];
+        if person || !by_bot(w, r) { ev.push(json!({"$":"SettingSet","key":auto_key(&r.id),"value":"","at":now})) }
+        ev
+    }
     /// The posts held while the swarm was paused go to every member with its next batch (none is held for good: #4 of the Nov 20 swarm review).
     fn release_held(&self, w: &World, r: &Room) {
         let lines = w.room_lines.get(&r.id).cloned().unwrap_or_default();
@@ -399,8 +411,8 @@ impl Bots {
                 }
             }
         }
-        let mut next = rec.clone(); next["failed"] = json!(failed);
-        if next != rec { evs.push(need_ev(&r.id, &next, now)) }
+        // written only when the list changed (an unchanged one, empty or not, writes nothing: no event a minute per swarm)
+        if failed != old { let mut next = rec.clone(); next["failed"] = json!(failed); evs.push(need_ev(&r.id, &next, now)) }
         for (th, prov) in &back { let nm = member_meta(&w, &r.id, &format!("{THREAD}{th}"))["name"].as_str().unwrap_or("peer").to_string();
             evs.push(self.guard_post(&r.id, &format!("{nm} is back: its {} sign-in works again.", need::provider_say(prov)), &[], false, now)); }
         if evs.is_empty() { return }
@@ -495,7 +507,7 @@ impl Bots {
     pub async fn swarm_control(self: &Arc<Self>, by: &str, a: &Value) -> Res {
         let now = now_s(); let act = gs(a, "action");
         let w = self.world().await;
-        let room = gs(a, "room"); let room = if w.rooms.contains_key(room) { room } else { room.rsplit('|').next().unwrap_or(room) }; // a row's id may carry its hub ("<hub>|<room>")
+        let room = gs(a, "room"); let room = match room.rsplit_once('|') { Some((_, id)) if !w.rooms.contains_key(room) && w.rooms.contains_key(id) => id, _ => room }; // a row's id may carry its hub ("<hub>|<room>")
         let Some(r) = w.rooms.values().find(|r| !r.deleted && r.swarm() && (r.id == room || r.name.eq_ignore_ascii_case(room))).cloned() else { return fail("no such swarm") };
         if !by.is_empty() && by != r.by && w.triage_thread() != by { return fail("only the person or the swarm's starter controls it; members are equals and post on the board instead") }
         if r.ended() && act != "budget" { return fail(&format!("the swarm is over ({})", r.state)) }
@@ -511,10 +523,8 @@ impl Bots {
                 let mut budget = r.budget; let mut said = String::new();
                 if let Some(part) = hit { let (cur, dflt) = (part_of(&r.budget, part).max(part_of(&used, part)), part_of(&gate::SWARM_BUDGET, part));
                     let to = if act == "raise" { cur + (cur / 2).max(dflt / 2).max(1) } else { cur + (dflt / 4).max(1) }; set_part(&mut budget, part, to); said = format!(" Budget {part}: {to}.") }
-                let mut ev = vec![r.set_ev(now, |x| { x.state = String::new(); x.reason = String::new(); x.budget = budget }), self.guard_post(&r.id, &format!("Resumed by {who}.{said} Carry on from the board."), &["resume"], false, now),
-                    need_ev(&r.id, &with_pause(&need_rec(&w, &r.id), None), now)];
-                if by.is_empty() || !by_bot(&w, &r) { ev.push(json!({"$":"SettingSet","key":auto_key(&r.id),"value":"","at":now})) }
-                self.release_held(&w, &r);
+                let mut ev = vec![r.set_ev(now, |x| { x.state = String::new(); x.reason = String::new(); x.budget = budget }), self.guard_post(&r.id, &format!("Resumed by {who}.{said} Carry on from the board."), &["resume"], false, now)];
+                ev.extend(self.resume_facts(&w, &r, by.is_empty(), now));
                 if let Err(e) = self.hub.commit_many(&w.also(now, ev)).await { return fail(&format!("{e:#}")) }
                 let ths = r.threads(); drop(w); self.give_later(&r.id, &ths, &ths, now).await; (true, json!({"room":r.id,"state":"active","budget":budget})) }
             // a member that failed: its sign-in (a Claude or Codex account opens its own sign-in; another CLI's sign-in runs in a terminal on the member's thread),
@@ -542,9 +552,11 @@ impl Bots {
                         (true, json!({"room":r.id,"thread":th})) }
                     _ => { // move: a Claude member with the same role joins, then the failed one leaves (its claims go)
                         let role = meta["role"].as_str().unwrap_or("").to_string();
+                        let full = r.members.len() >= MAX_MEMBERS; // a full swarm frees the failed member's place first
+                        if full { let (ok, x) = Box::pin(self.swarm_control(by, &json!({"room":r.id,"action":"remove","thread":th}))).await; if !ok { return (false, x) } }
                         let (ok, added) = Box::pin(self.swarm_control(by, &json!({"room":r.id,"action":"add","member":{"provider":"claude","role":role}}))).await;
                         if !ok { return (false, added) }
-                        let (_, _) = Box::pin(self.swarm_control(by, &json!({"room":r.id,"action":"remove","thread":th}))).await;
+                        if !full { let (ok, x) = Box::pin(self.swarm_control(by, &json!({"room":r.id,"action":"remove","thread":th}))).await; if !ok { return (false, x) } }
                         let w = self.world().await; let mut rec = need_rec(&w, &r.id); if let Some(f) = rec["failed"].as_array_mut() { f.retain(|x| x["thread"] != th.as_str()) }
                         let _ = self.hub.commit_many(&w.also(now, vec![need_ev(&r.id, &rec, now), self.guard_post(&r.id, &format!("{nm}'s part moved to {} (Claude).", added["name"].as_str().unwrap_or("a new member")), &[], false, now)])).await;
                         (true, json!({"room":r.id,"removed":th,"thread":added["thread"],"name":added["name"]}))
@@ -604,7 +616,7 @@ impl Bots {
                 "model":info.as_ref().map(|x| x.model.clone()).unwrap_or_else(|| meta["model"].as_str().unwrap_or("").into()),"state":info.as_ref().map_or(if thread.is_empty() { "bot" } else { "removed" }, |x| x.word()),"title":info.map(|x| x.title).unwrap_or_default()}));
         }
         // a post held while the swarm was paused and released by a resume after it is no longer held (it was delivered)
-        let resumed = posts.iter().rposition(|e| e["guard"] == true && e["tags"].as_array().map_or(false, |t| t.iter().any(|x| x == "resume")));
+        let resumed = posts.iter().rposition(resumes);
         let posts: Vec<Value> = posts.into_iter().enumerate().map(|(i, mut e)| { if resumed.map_or(false, |at| i < at) && e["guard"] != true && !gs(&e, "held").is_empty() && gs(&e, "held") != "backstop" { e["held"] = json!(""); e["released"] = json!(true) } e })
             .map(|e| { let th = gs(&e, "thread"); let key = if th.is_empty() { String::new() } else { format!("{THREAD}{th}") };
             let mut p = json!({"id":e["id"],"from":e["from"],"thread":th,"color":color.get(&key).cloned().unwrap_or_default(),"text":e["text"],"tags":e.get("tags").cloned().unwrap_or(json!([])),"reply":e.get("reply").cloned().unwrap_or(json!("")),

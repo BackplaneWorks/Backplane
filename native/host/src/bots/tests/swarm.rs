@@ -175,6 +175,9 @@ fn line(b: &Value) -> String { b["room"]["need"]["line"].as_str().unwrap_or("").
     let (ok, r) = bots.tool_call("t-boss", "swarm_create", &json!({"topic":"quiet","members":[{"provider":"claude"},{"provider":"codex"}]})).await; assert!(ok, "{r}");
     let room = r["room"].as_str().unwrap().to_string();
     let (a, b) = { let l = peers.launched.lock().unwrap(); (l[0]["_id"].as_str().unwrap().to_string(), l[1]["_id"].as_str().unwrap().to_string()) };
+    // a tick with nothing new writes nothing (the need facts are written only when they change)
+    bots.swarm_tick(now_s()).await; let n0 = log(&hub).len(); bots.swarm_tick(now_s()).await; bots.swarm_tick(now_s()).await;
+    assert_eq!(log(&hub).len(), n0, "quiet ticks add no events: {:?}", &log(&hub)[n0..]);
     bots.swarm_tick(now_s() + crate::bots::gate::LIMITS.idle + 1).await;
     let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
     assert_eq!(line(&g), "Paused: all members idle 10 min", "{}", g["room"]);
@@ -193,6 +196,14 @@ fn line(b: &Value) -> String { b["room"]["need"]["line"].as_str().unwrap_or("").
     let p = g["posts"].as_array().unwrap().iter().find(|p| p["text"].as_str().map_or(false, |t| t.contains("clock was gated"))).unwrap().clone();
     assert_eq!((p["held"].clone(), p["released"].clone()), (json!(""), json!(true)), "{p}");
     assert!(g["room"]["need"].is_null(), "resumed: nothing needed: {}", g["room"]);
+    // paused again; this time the person posts on the board instead of pressing Resume: the held post is delivered all the same
+    assert_eq!(rpc(&hub, "swarm.act", json!({"room":room,"action":"pause"})).await["ok"], true);
+    let (_, h) = post(&bots, &b, json!({"room":room,"text":"The LDO runs hot at 2 A.","tags":["idea"]})).await; assert_eq!(h["held"], true, "{h}");
+    assert_eq!(rpc(&hub, "swarm.post", json!({"room":room,"text":"Go on, both of you."})).await["ok"], true);
+    for _ in 0..100 { if rides_to(&peers, &a).iter().any(|x| x.contains("LDO runs hot")) { break } tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+    assert!(rides_to(&peers, &a).iter().any(|x| x.contains("LDO runs hot")), "the person's post resumes it and the held post reaches the others: {:?}", rides_to(&peers, &a));
+    let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
+    assert!(g["posts"].as_array().unwrap().iter().any(|p| p["text"].as_str().map_or(false, |t| t.contains("LDO runs hot")) && p["released"] == true), "{}", g["posts"]);
 }
 
 #[tokio::test] async fn a_bots_swarm_resumes_and_raises_its_budget_by_policy_and_only_money_past_the_cap_reaches_the_person() {

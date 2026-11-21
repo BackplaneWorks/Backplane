@@ -103,12 +103,15 @@ pub fn looked(st: &State, id: &str) -> bool {
 }
 pub fn settled(st: &State, id: &str) -> bool { st.threads.get(id).map_or(false, |t| shelf_of(t) == Shelf::Settled || t.archived) }
 
+/// A member of a live swarm (active or paused): its swarm's row stands for it. A member of one that is over is a thread like any other again, so an ask it
+/// still has open is never hidden.
+pub fn swarm_member(st: &State, id: &str) -> bool { st.swarm_of.get(id).and_then(|r| st.rooms_nav.get(r)).map_or(false, |r| r.swarm_live()) }
 /// D11 for a thread of a live state: whether the sidebar shows it.
 pub fn visible(st: &State, id: &str) -> bool {
     let Some(t) = st.threads.get(id) else { return false };
     if t.deleted || st.run_hidden(id) { return false }
     // a swarm's member is no row of its own: its swarm's row stands for it, and says when a member asks the person (present/sections.rs)
-    if st.swarm_of.contains_key(id) { return false }
+    if swarm_member(st, id) { return false }
     let w = status(st, id);
     // never hidden: what asks the person, whatever else is true of it (settled, archived, snoozed)
     if w == "needs" { return true }

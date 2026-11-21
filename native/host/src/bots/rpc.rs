@@ -388,7 +388,8 @@ impl Bots {
         let tags: Vec<String> = p.get("tags").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
         let tags = super::gate::tags_of(&tags); if !tags.is_empty() { heard.fields.insert("tags".into(), json!(tags)); }
         let ms = super::gate::mentions(text, &super::swarm::names(&w, &room)); if !ms.is_empty() { heard.fields.insert("mentions".into(), json!(ms)); }
-        if room.paused() && !room.ended() { extra.insert(0, room.set_ev(now, |x| { x.state = String::new(); x.reason = String::new() })) }
+        if room.paused() && !room.ended() { extra.insert(0, room.set_ev(now, |x| { x.state = String::new(); x.reason = String::new() }));
+            extra.extend(self.resume_facts(&w, &room, true, now)) } // a swarm: what Resume does too (held posts released, the pause's facts gone)
         let pending = self.post_decide(&w, now, "", "you", "", &rr, text, 0, &mid, extra, heard).await?;
         if let Some((c, f)) = offer { self.hub.push(c, f); }
         let syn = room.swarm() && !room.ended() && tags.iter().any(|t| t == "synthesis");
