@@ -6,7 +6,7 @@
 //!
 //! Owning side (`RpcRoutes`): the same signature check and owner-only gate as `/far/log`; then `owner.mail` goes to the bots lane's `Bots::owner_received`; a
 //! request of `Fr.methods` runs as a local client's request, only when it is about something this hub shares (`Fr.allowed`, `Feed::allowed`); everything else is
-//! refused 403. NOT ported here: `mcp.call` (remote agents' tools, `Fm.serve`), `uber.sync`, and the viewers' reads: they answer 501 and say so.
+//! refused 403. The same signed owner link carries the uberbot op exchange.
 //!
 //! `OwnerLink` (the bots lane's transport for `owner.mail`): a signed POST of the request to a linked machine, only to one of the owner's own.
 use super::{far, farsend::{self, Outbox}, farsync::FarSync, peering::PReq};
@@ -101,7 +101,7 @@ impl Router {
         let th = p[key].as_str().unwrap_or("").to_string();
         let msg = local["msg"].as_str().unwrap_or("").to_string();
         self.out.hold_m(&th, &l, m, &msg, local, farsend::now_ms()); self.work(hub);
-        Some(json!({"t":"reply","id":id,"ok":true,"result":{"held":true}}))
+        Some(json!({"t":"reply","id":id,"ok":true,"result":{"held":true,"state":"queued"}}))
     }
     fn plan(&self, client: u64, id: &Value, m: &str, p: &Value) -> Result<String, Vec<Value>> {
         let viewer = super::farview::is_viewer(m);
@@ -329,7 +329,7 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     if m == "signin.state" || m == "signin.act" { return json_reply(&crate::settings::accounts_there::serve(hub, &link, m, &p).await) }
     // the project registry (net/registry.rs): kept on the home, from the owner's own machines only (checked above)
     if m == "registry.put" || m == "registry.get" { return json_reply(&super::registry::serve(hub, &link, m, &p).await) }
-    if m == "uber.sync" { return HttpReply::text("501 Not Implemented", "uber.sync is not ported on this hub yet") }
+    if m == "uber.sync" { return json_reply(&crate::bots::ubsync::serve(hub, &p).await) }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");
         if !MCP_REMOTE.contains(&tool) { return HttpReply::text("403 Forbidden", "not something this machine shares") }

@@ -96,6 +96,17 @@ def uber(hub):
     return u
 
 
+def lease(hub):
+    current = {}
+    for event in events(hub):
+        if event.get("$") != "UberOp":
+            continue
+        op = json.loads(event["op"])
+        if op.get("k") == "lease" and op["term"] > current.get("term", 0):
+            current = op
+    return current
+
+
 def live_bots(hub):
     b = {}
     for e in events(hub):
@@ -174,6 +185,8 @@ def main():
     done = wait(lambda: (lambda s: s if s.get("state") in ("done", "failed") else None)(rpc(A, "home.status")), 180)
     check("the move is done", (done or {}).get("state") == "done", json.dumps(done))
     check("B's uberbot is Bub (same id)", uber(B) == bub)
+    first_lease = lease(B)
+    check("B holds the lease after the move", first_lease.get("holder") == setting(B, "machine.id"))
     check("B has Bub, Calendar", {"Bub", "Calendar"} <= {b.get("name") for b in live_bots(B).values()})
     check("A has no bots and no uberbot", not live_bots(A) and uber(A) == "")
     check("B holds Bub's memory", any(e.get("$") == "MemorySaved" and e.get("bot") == bub for e in events(B)))
@@ -196,6 +209,9 @@ def main():
     check("home.move back starts", r.get("started") is True, json.dumps(r)[:200])
     back = wait(lambda: uber(A) == bub and uber(B) == "", 180)
     check("Bub is A's uberbot again, B has none", bool(back))
+    returned_lease = lease(A)
+    check("the return advances the lease to A", returned_lease.get("holder") == setting(A, "machine.id")
+          and returned_lease.get("term", 0) > first_lease.get("term", 0))
     check("A has Bub and Calendar again", {"Bub", "Calendar"} <= {b.get("name") for b in live_bots(A).values()})
     n_mem = sum(1 for e in events(A) if e.get("$") == "MemorySaved" and e.get("bot") == bub)
     check("no line came back twice (one memory)", n_mem == 1, str(n_mem))

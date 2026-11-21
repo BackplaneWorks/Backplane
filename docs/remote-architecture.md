@@ -279,7 +279,7 @@ Every phase is independently shippable, gated by `hello.features` capability neg
 |---|---|---|
 | One home holds Bub, bots, rooms, hooks, mail, memories, routines, vault, APNs, paired devices | `net/homemove.rs` (`home.move`, `home.status`, settings `home.at` / `home.here`): copy → check → switch → retire, undone when the check fails | Works (the move to boat-hub) |
 | Clients find the home | `hub.offer` (a client adds the holder by itself); the clients' home failover (GPUI `hub.rs`, `DataClient`) | Works |
-| Bub's state on every machine, and who holds the conversation | `bots/uber.rs` + `bots/world.rs`: ops (memory, space, page, persona, routines) folded into registers; a lease `{holder, term}` (`lease`, `holder_me`, `b_lease`); `bots.uber_home`, `bots.uber_join`, `bots.pin` | Ops and lease exist; **the exchange `uber.sync` is not ported** (`net/rpc.rs` answers 501) |
+| Bub's state on every machine, and who holds the conversation | `bots/uber.rs` + `bots/world.rs`: ops (memory, space, page, persona, routines) folded into registers; a lease `{holder, term}` (`lease`, `holder_me`, `b_lease`); `bots.uber_home`, `bots.uber_join`, `bots.pin` | Signed `uber.sync` exchanges missing ops by origin and sequence. Manual moves advance the lease term. |
 | Threads and history of other machines | `net/feed.rs` → `net/outbox.rs` (one push at a time, backoff, gap pull) → `net/farsync.rs` → `net/farstore.rs` (mirrors outside `events.jsonl`) | Works; **streamed text is dropped** (`farsync.rs`) |
 | Sending to another machine, held while it is away | `net/farsend.rs`, the outbox's held sends and launches | Works |
 | Bots and rooms across machines | `bots/far.rs`, `bots/mesh.rs` (machine ids) | Works |

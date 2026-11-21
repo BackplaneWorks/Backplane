@@ -37,9 +37,12 @@ pub fn b_bind(machine: &str, bot: &str, thread: &str, name: &str) -> String { sh
 impl World {
     /// Ub.ops.with: these bodies as this machine's next ops under `uid` (none without a machine id or a uid)
     pub fn ops_with(&self, uid: &str, now: u64, bodies: &[String]) -> Vec<Value> {
-        let me = self.me(); if me.is_empty() || uid.is_empty() { return vec![] }
-        let (mut n, mut last) = (self.vv(uid, &me) + 1, self.hlc(uid)); let mut out = vec![];
-        for b in bodies { let s = stamp_next(&last, now, &me); out.push(json!({"$":"UberOp","uid":uid,"origin":me,"n":n,"stamp":s,"op":b,"at":now})); last = s; n += 1 }
+        self.ops_as(uid, &self.me(), now, bodies)
+    }
+    pub(crate) fn ops_as(&self, uid: &str, me: &str, now: u64, bodies: &[String]) -> Vec<Value> {
+        if me.is_empty() || uid.is_empty() { return vec![] }
+        let (mut n, mut last) = (self.vv(uid, me) + 1, self.hlc(uid)); let mut out = vec![];
+        for b in bodies { let s = stamp_next(&last, now, me); out.push(json!({"$":"UberOp","uid":uid,"origin":me,"n":n,"stamp":s,"op":b,"at":now})); last = s; n += 1 }
         out
     }
     pub fn ops(&self, now: u64, bodies: &[String]) -> Vec<Value> { self.ops_with(&self.uid(), now, bodies) }

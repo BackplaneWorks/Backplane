@@ -26,6 +26,7 @@ pub mod rpc;
 pub mod tools;
 pub mod sched_text;
 pub mod uber;
+pub(crate) mod ubsync;
 pub mod world;
 pub use api::{chat_thread, default_tab, page as bot_page, page_from as bot_page_from, room_page};
 pub use rpc::{Bots, Inbox};
