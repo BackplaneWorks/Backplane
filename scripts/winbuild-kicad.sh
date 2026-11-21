@@ -30,11 +30,14 @@ out=$HOME/.cache/bp-winbuild; mkdir -p "$out/logs"
 log=$out/logs/$(date -u +%Y%m%dT%H%M%SZ)-${commit:0:10}.log
 exec > >(tee -a "$log") 2>&1
 stamp() { echo "== $(date -u +%FT%TZ) $*"; }
-host=$("$here/winbuild-up.sh")
-stamp "host $host, commit $commit${scripts_from:+, scripts from $scripts_from}${clean:+, clean build}"
+# the VM goes down and its port-22 rule closes however this ends, a failed start included (winbuild-down.sh), unless --keep-up
 [ -n "$keep" ] || trap '"$here/winbuild-down.sh" || true' EXIT
+host=$("$here/winbuild-up.sh")
+# the direct path's host (bpadmin@<address>) takes the VMs' key and bp-winbuild's known host key; Tailscale's and the jump's come from ~/.ssh/config
+sx=(); case "$host" in *@*) sx=(-i "${WINBUILD_KEY:-$HOME/.ssh/bp-win}" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o HostKeyAlias="${WINBUILD_VM:-bp-winbuild}");; esac
+stamp "host $host, commit $commit${scripts_from:+, scripts from $scripts_from}${clean:+, clean build}"
 # sshd keeps the PATH it started with: each command reads the machine's current one (the toolchain adds to it)
-win() { ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 "$host" \
+win() { ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 "${sx[@]}" "$host" \
   "\$env:Path=[Environment]::GetEnvironmentVariable('Path','Machine')+';'+[Environment]::GetEnvironmentVariable('Path','User'); $1"; }
 
 # The toolchain first (git comes with it), from the ref that has the build scripts
@@ -72,7 +75,7 @@ stamp "build done in $(( ($(date +%s) - start) / 60 )) min $(( ($(date +%s) - st
 mkdir -p "$out/out/$commit"
 # What the workflow uploads: the runtime and symbol zips, the source archive, SHA256SUMS (not the unpacked folder)
 for f in $(win "Get-ChildItem C:\\src\\kicad\\release\\windows -File | ForEach-Object Name" | tr -d '\r'); do
-  scp -q "$host:C:/src/kicad/release/windows/$f" "$out/out/$commit/"
+  scp -q "${sx[@]}" "$host:C:/src/kicad/release/windows/$f" "$out/out/$commit/"
 done
 (cd "$out/out/$commit" && sha256sum -c --ignore-missing SHA256SUMS)
 ls -la "$out/out/$commit"
