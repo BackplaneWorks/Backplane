@@ -35,7 +35,10 @@ final class DDownloads {
         if tasks[key] != nil { return }
         asks[key] = (route, query)
         put(Row(id: key, name: name, have: 0, total: size, state: .run))
+        let before = stopping.removeValue(forKey: key)
         tasks[key] = Task { [weak self] in
+            // a cancelled run of the same file finishes (its last write, its file closed) before this one measures the part
+            await before?.value
             let out = await DDownloads.run(key: key, route: route, query: query, name: name, size: size) { have, total in
                 Task { @MainActor in if let self, self.tasks[key] != nil { self.put(Row(id: key, name: name, have: have, total: total, state: .run)) } }
             }
@@ -44,7 +47,11 @@ final class DDownloads {
             if out.state == .done, let f = out.file { DDownloads.present(f) }
         }
     }
-    func cancel(_ key: String) { tasks.removeValue(forKey: key)?.cancel(); rows.removeAll { $0.id == key } }
+    @ObservationIgnored private var stopping: [String: Task<Void, Never>] = [:]
+    func cancel(_ key: String) {
+        if let t = tasks.removeValue(forKey: key) { t.cancel(); stopping[key] = t; Task { [weak self] in await t.value; if self?.stopping[key] == t { self?.stopping[key] = nil } } }
+        rows.removeAll { $0.id == key }
+    }
     func dismiss(_ key: String) { if tasks[key] == nil { rows.removeAll { $0.id == key } } }
     func retry(_ key: String) { guard let r = rows.first(where: { $0.id == key }), let a = asks[key] else { return }; start(route: a.route, query: a.query, name: r.name, size: r.total) }
     private func put(_ r: Row) { if let i = rows.firstIndex(where: { $0.id == r.id }) { rows[i] = r } else { rows.append(r) } }
@@ -53,10 +60,12 @@ final class DDownloads {
         let h = key.utf8.reduce(UInt64(1469598103934665603)) { ($0 ^ UInt64($1)) &* 1099511628211 }
         return FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0].appendingPathComponent("downloads").appendingPathComponent(String(h, radix: 16))
     }
-    /// Older downloads in the caches go after a day (never the one running).
-    private static func sweep(keep: URL) {
+    /// Older downloads in the caches go after a day (never one running: each touches its folder as it starts).
+    private static func sweep(keep: URL, live: Set<URL>) {
         let fm = FileManager.default; let root = keep.deletingLastPathComponent(); let day = Date().addingTimeInterval(-86400)
-        for d in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] where d != keep {
+        try? fm.setAttributes([.modificationDate: Date()], ofItemAtPath: keep.path)
+        let live = Set(live.map(\.standardizedFileURL.path))
+        for d in (try? fm.contentsOfDirectory(at: root, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [] where !live.contains(d.standardizedFileURL.path) {
             if let m = try? d.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate, m < day { try? fm.removeItem(at: d) }
         }
     }
@@ -64,43 +73,24 @@ final class DDownloads {
     nonisolated private static func bytes(_ u: URL) -> Int64 { ((try? FileManager.default.attributesOfItem(atPath: u.path))?[.size] as? NSNumber)?.int64Value ?? 0 }
 
     private static func run(key: String, route: String, query: [URLQueryItem], name: String, size: Int64, progress: @escaping @Sendable (Int64, Int64) -> Void) async -> Row {
-        let fm = FileManager.default; let d = dir(key); let part = d.appendingPathComponent(name + ".part"); let tagFile = d.appendingPathComponent("etag")
-        try? fm.createDirectory(at: d, withIntermediateDirectories: true); sweep(keep: d)
-        func fail(_ why: String) -> Row { Row(id: key, name: name, have: bytes(part), total: size, state: .fail, note: why) }
-        var tries = 0; var total = size
-        while !Task.isCancelled {
-            guard let link = DataClient.shared.link, let url = Pairing.http(link, path: route, query: query, token: false) else { return fail("Not connected to the hub.") }
-            let have = fm.fileExists(atPath: part.path) ? bytes(part) : 0
-            let tag = (try? String(contentsOf: tagFile, encoding: .utf8)) ?? ""
-            let ask = FileFetch.ask(have: have, etag: tag)
-            var req = URLRequest(url: url); req.timeoutInterval = 60
-            if let t = Pairing.token(link) { req.setValue("Bearer " + t, forHTTPHeaderField: "Authorization") }
-            for (k, v) in ask { req.setValue(v, forHTTPHeaderField: k) }
-            let one = DFetchOne(part: part, tagFile: tagFile, from: ask.isEmpty ? 0 : have, progress: progress)
-            let (step, got, err) = await one.go(req)
-            if case .write(_, let t) = step, t >= 0 { total = t }
-            if got > 0 { tries = 0 }   // it moved on: a dropped connection starts its count again
-            switch step {
-            case .fail(let why): return fail(why)
-            case .again:
-                try? fm.removeItem(at: part); try? fm.removeItem(at: tagFile)
-                tries += 1; if tries >= FileFetch.tries { return fail("That link did not open.") }; continue
-            case .done: break
-            case .write:
-                if err != nil || !(FileFetch.complete(have: bytes(part), total: total) || total < 0) {
-                    // the connection dropped, or the body ended short (the file changed): ask for the rest
-                    tries += 1; if tries >= FileFetch.tries { return fail(err?.localizedDescription ?? "That link did not open.") }
-                    try? await Task.sleep(nanoseconds: UInt64(FileFetch.backoff(tries) * 1e9)); continue
-                }
-            }
-            let done = d.appendingPathComponent(name)
+        // the file and its part in a folder of their own, the tag beside it: no name the hub sends can be the tag's
+        let fm = FileManager.default; let d = dir(key); let files = d.appendingPathComponent("f"); let part = files.appendingPathComponent(name + ".part"); let tagFile = d.appendingPathComponent("etag")
+        try? fm.createDirectory(at: files, withIntermediateDirectories: true)
+        sweep(keep: d, live: Set((shared.tasks.keys.map { $0 } + shared.stopping.keys.map { $0 }).map(dir)).union([d]))
+        let out = await FileFetchRun.fetch(where: { @MainActor in
+            guard let link = DataClient.shared.link, let base = Pairing.http(link, path: "/", query: query, token: false), let url = FileFetch.url(base: base, route: route) else { return nil }
+            return FileFetchRun.Where(url: url, token: FileFetch.isShare(route) ? nil : Pairing.token(link))
+        }, part: part, tagFile: tagFile, size: size, offline: "Not connected to the hub.", failed: "That link did not open.", progress: progress)
+        switch out {
+        case .fail(let why): return Row(id: key, name: name, have: bytes(part), total: size, state: .fail, note: why)
+        case .whole:
+            let done = files.appendingPathComponent(name)
             try? fm.removeItem(at: done)
-            do { try fm.moveItem(at: part, to: done) } catch { return fail(error.localizedDescription) }
+            do { try fm.moveItem(at: part, to: done) } catch { return Row(id: key, name: name, have: bytes(part), total: size, state: .fail, note: error.localizedDescription) }
             try? fm.removeItem(at: tagFile)
             let n = bytes(done)
             return Row(id: key, name: name, have: n, total: n, state: .done, file: done)
         }
-        return fail("That link did not open.")
     }
 
     /// The system's share sheet for a finished file: Save to Files, AirDrop, Open in another app.
@@ -111,57 +101,6 @@ final class DDownloads {
         vc.popoverPresentationController?.sourceView = at?.view
         if let v = at?.view { vc.popoverPresentationController?.sourceRect = CGRect(x: v.bounds.midX, y: v.bounds.maxY - 80, width: 1, height: 1) }
         at?.present(vc, animated: true)
-    }
-}
-
-/// One request of a download: the answer's head decides (FileFetch.step) whether its body is written to the `.part` (appended, or from the start),
-/// and the body goes straight to the file as it comes. A refusal's body (the hub's words) is kept, at most 4 KiB.
-private final class DFetchOne: NSObject, URLSessionDataDelegate, @unchecked Sendable {
-    let part: URL; let tagFile: URL; let from: Int64; let progress: @Sendable (Int64, Int64) -> Void
-    private var handle: FileHandle?; private var step: FileFetch.Step = .fail("That link did not open."); private var code = 0
-    private var refusal = Data(); private var got: Int64 = 0; private var at: Int64 = 0; private var total: Int64 = -1; private var shown = Date.distantPast
-    private var cont: CheckedContinuation<(FileFetch.Step, Int64, Error?), Never>?
-    private var task: URLSessionDataTask?
-    init(part: URL, tagFile: URL, from: Int64, progress: @escaping @Sendable (Int64, Int64) -> Void) { self.part = part; self.tagFile = tagFile; self.from = from; self.progress = progress }
-
-    func go(_ req: URLRequest) async -> (FileFetch.Step, Int64, Error?) {
-        let q = OperationQueue(); q.maxConcurrentOperationCount = 1
-        let s = URLSession(configuration: .ephemeral, delegate: self, delegateQueue: q)
-        defer { s.finishTasksAndInvalidate() }
-        return await withTaskCancellationHandler {
-            await withCheckedContinuation { c in q.addOperation { self.cont = c; let t = s.dataTask(with: req); self.task = t; t.resume() } }
-        } onCancel: { q.addOperation { self.task?.cancel() } }
-    }
-
-    func urlSession(_ s: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
-        let h = response as? HTTPURLResponse; code = h?.statusCode ?? 0
-        guard (200..<300).contains(code) || code == 416 else { completionHandler(.allow); return }   // a refusal: its words come as the body
-        step = FileFetch.step(code: code, have: from, contentRange: h?.value(forHTTPHeaderField: "Content-Range"), contentLength: response.expectedContentLength)
-        guard case .write(let a, let t) = step else { completionHandler(.cancel); return }
-        let fm = FileManager.default
-        if a == 0 || !fm.fileExists(atPath: part.path) { fm.createFile(atPath: part.path, contents: nil) }
-        if let tag = h?.value(forHTTPHeaderField: "ETag") { try? tag.write(to: tagFile, atomically: true, encoding: .utf8) } else { try? fm.removeItem(at: tagFile) }
-        guard let fh = try? FileHandle(forWritingTo: part) else { step = .fail("That link did not open."); completionHandler(.cancel); return }
-        if a > 0 { _ = try? fh.seekToEnd() } else { try? fh.truncate(atOffset: 0) }
-        handle = fh; at = a
-        total = t >= 0 ? t : (response.expectedContentLength >= 0 ? a + response.expectedContentLength : -1)
-        step = .write(from: a, total: total)
-        completionHandler(.allow)
-    }
-    func urlSession(_ s: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        guard let fh = handle else { if refusal.count < 4096 { refusal.append(data.prefix(4096 - refusal.count)) }; return }
-        do { try fh.write(contentsOf: data) } catch { dataTask.cancel(); return }
-        got += Int64(data.count)
-        if Date().timeIntervalSince(shown) > 0.25 { shown = Date(); progress(at + got, total) }
-    }
-    func urlSession(_ s: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
-        try? handle?.close(); handle = nil
-        if !(200..<300).contains(code) && code != 416 && code != 0 { step = FileFetch.step(code: code, have: from, contentRange: nil, contentLength: 0, body: String(decoding: refusal, as: UTF8.self)) }
-        // a cancel this request asked for (a .done or .again head) is not an error
-        let e: Error? = { if case .write = step { return error }; return nil }()
-        if code == 0, let error { cont?.resume(returning: (.write(from: from, total: -1), 0, error)); cont = nil; return }
-        if case .write = step { progress(at + got, total) }
-        cont?.resume(returning: (step, got, e)); cont = nil
     }
 }
 

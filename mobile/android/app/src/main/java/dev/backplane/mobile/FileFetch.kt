@@ -7,11 +7,19 @@ package dev.backplane.mobile
 data class DFileLink(val path: String, val name: String, val size: Long, val open: String)
 
 object FileFetch {
-    private val share = Regex("^/s/[0-9A-Fa-f]{48}/[^\\s/]+$")
+    // what the hub's share_route writes: the token, then the name with everything but [A-Za-z0-9._~-] percent-encoded (never `\`, `?`, `#`, `..`)
+    private val share = Regex("^/s/[0-9A-Fa-f]{48}/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+$")
     private val lineTail = Regex("(?::\\d{1,6}){1,2}$|#L\\d{1,6}(?:-L?\\d{1,6})?$")
 
     /** A share's address (`/s/<token>/<name>`, written in a message): fetched as it is, the token its own credential. */
-    fun shareRoute(p: String): String? = p.trim().takeIf { share.matches(it) }
+    fun shareRoute(p: String): String? = p.trim().takeIf { share.matches(it) && it.substringAfterLast('/') !in setOf(".", "..") }
+    /** A share's route carries its own credential: the device's token is not sent with it. */
+    fun isShare(route: String) = route.startsWith("/s/")
+    /** Whether the address made from a route still asks for that route (no `..` or `\` in it took it elsewhere). */
+    fun sameRoute(encodedPath: String, route: String) = encodedPath == route
+
+    /** A name safe to be a file's: no folder in it, never `.` or `..`. */
+    fun safeName(n: String): String { val t = n.replace('/', '_').replace('\\', '_').trim(); return if (t.isEmpty() || t == "." || t == "..") "download" else t }
 
     /** A path as a link carries it, without the line it points at (`a.rs:12`, `a.rs:3:4`, `a.rs#L4-L9`). */
     fun bare(p: String): String = lineTail.replace(p, "")

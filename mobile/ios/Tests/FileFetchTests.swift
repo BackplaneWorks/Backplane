@@ -12,6 +12,12 @@ check(FileFetch.shareRoute("/s/\(tok)/gerbers.zip") == "/s/\(tok)/gerbers.zip", 
 check(FileFetch.shareRoute("/s/\(tok)/my%20case.step") == "/s/\(tok)/my%20case.step", "share, encoded name")
 check(FileFetch.shareRoute("/s/short/gerbers.zip") == nil, "short token")
 check(FileFetch.shareRoute("/s/\(tok)/a/b.zip") == nil, "a folder in the name")
+for bad in ["..\\..\\file?path=%2Fx", "..", ".", "a?b", "a#b", "a\\b", "%zz", "a b"] { check(FileFetch.shareRoute("/s/\(tok)/\(bad)") == nil, "not a share: \(bad)") }
+check(FileFetch.isShare("/s/\(tok)/a.zip") && !FileFetch.isShare("/file"), "is share")
+let base = URL(string: "http://h:3787/")!
+check(FileFetch.url(base: base, route: "/s/\(tok)/my%20case.step")?.absoluteString == "http://h:3787/s/\(tok)/my%20case.step", "share url kept as written \(String(describing: FileFetch.url(base: base, route: "/s/\(tok)/my%20case.step")))")
+check(FileFetch.url(base: base, route: "/s/\(tok)/..") == nil, "no share url for ..")
+check(FileFetch.url(base: URL(string: "http://h:3787/?path=%2Fa%20b")!, route: "/file")?.absoluteString == "http://h:3787/file?path=%2Fa%20b", "file url")
 check(kinds("get /s/\(tok)/my%20case.step.") == ["path:/s/\(tok)/my%20case.step|/s/\(tok)/my%20case.step"], "share in text \(kinds("get /s/\(tok)/my%20case.step."))")
 check(kinds("(/s/\(tok)/README)") == ["path:/s/\(tok)/README|/s/\(tok)/README"], "share without an extension \(kinds("(/s/\(tok)/README)"))")
 check(FileFetch.shareName("/s/\(tok)/my%20case.step") == "my case.step", "share name")

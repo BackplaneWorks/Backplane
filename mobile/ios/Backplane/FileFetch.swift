@@ -17,14 +17,24 @@ struct DFileLink: Codable, Equatable {
 }
 
 enum FileFetch {
-    private static let share = try! NSRegularExpression(pattern: "^/s/[0-9A-Fa-f]{48}/[^\\s/]+$")
+    // what the hub's share_route writes: the token, then the name with everything but [A-Za-z0-9._~-] percent-encoded (never `\`, `?`, `#`, `..`)
+    private static let share = try! NSRegularExpression(pattern: "^/s/[0-9A-Fa-f]{48}/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+$")
     private static let lineTail = try! NSRegularExpression(pattern: "(?::\\d{1,6}){1,2}$|#L\\d{1,6}(?:-L?\\d{1,6})?$")
     private static func whole(_ s: String) -> NSRange { NSRange(location: 0, length: (s as NSString).length) }
 
     /// A share's address (`/s/<token>/<name>`, written in a message): fetched as it is, the token its own credential.
     static func shareRoute(_ p: String) -> String? {
         let t = p.trimmingCharacters(in: .whitespaces)
-        return share.firstMatch(in: t, range: whole(t)) != nil ? t : nil
+        guard share.firstMatch(in: t, range: whole(t)) != nil, ![".", ".."].contains(t.split(separator: "/").last.map(String.init) ?? "") else { return nil }
+        return t
+    }
+    /// A share's route carries its own credential: the device's token is not sent with it.
+    static func isShare(_ route: String) -> Bool { route.hasPrefix("/s/") }
+    /// The address of a route on the hub at `base`: a share's route as written (it is already percent-encoded), any other path encoded here.
+    static func url(base: URL, route: String) -> URL? {
+        guard var c = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return nil }
+        if isShare(route) { guard shareRoute(route) != nil else { return nil }; c.percentEncodedPath = route } else { c.path = route }
+        return c.url
     }
     /// A path as a link carries it, without the line it points at (`a.rs:12`, `a.rs:3:4`, `a.rs#L4-L9`).
     static func bare(_ p: String) -> String { lineTail.stringByReplacingMatches(in: p, range: whole(p), withTemplate: "") }
