@@ -796,6 +796,14 @@ pub fn opening_wants_keys(why: ShowBy) -> bool { why.takes_keys() }
 /// before: the first show, a tab, the frames-change re-show) gets it when the pane wants the keys or KiCad already has them, unless a
 /// KiCad dialog has them; the frame already on show gets it only when the pane wants the keys (Full size, the tab of the editor shown, an
 /// Edit), and never from under a KiCad dialog that has them either (an Edit with KiCad's question up left the question without keys).
+/// `hand_in_now`, for a pane on the page with its rect (`on_page`, `placed`) only: off the page nothing is handed in (no focus, no
+/// `keys`, no Escape grab, no touch of the idle clock of a KiCad the person left).
+pub fn hand_in_on_page(on_page: bool, placed: bool, keys: bool, want_keys: bool, show: Option<u64>, prev_show: Option<u64>, dialog_has_keys: bool) -> bool {
+    on_page && placed && hand_in_now(keys, want_keys, show, prev_show, dialog_has_keys)
+}
+/// What a pane leaving the page does to a hand-in it was waiting to make: dropped (the person's Edit was for a pane on show; on return
+/// a new act of theirs hands the keys in).
+pub fn hand_in_after_leave(want_keys: bool, in_page: bool) -> bool { want_keys && in_page }
 pub fn hand_in_now(keys: bool, want_keys: bool, show: Option<u64>, prev_show: Option<u64>, dialog_has_keys: bool) -> bool {
     show.is_some() && !dialog_has_keys && if show != prev_show { keys || want_keys } else { want_keys }
 }
@@ -1887,7 +1895,8 @@ impl KicadPane {
         if cfg!(windows) && show != prev_show && show.is_some() && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
             eprintln!("GPUI_LOG {}", json!({"kicad_switch_busy": {"frame": show, "jobs": self.jobs.iter().map(|j| j["title"].clone()).collect::<Vec<_>>(), "task_wait": self.info["task_wait"], "keys": self.keys, "want_keys": self.want_keys, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64}}));
         }
-        let hand_in = hand_in_now(self.keys, self.want_keys, show, prev_show, kicad_dialog_has_keys);
+        // a pane off the page takes no input and no focus (#1470, the KiCad lead's rule): a hand-in waits for the page and the pane's rect
+        let hand_in = hand_in_on_page(self.in_page, at.is_some(), self.keys, self.want_keys, show, prev_show, kicad_dialog_has_keys);
         // a KiCad dialog has the keys: a waiting hand-in to the frame under it is over (not handed in late at the next placement change)
         if self.want_keys && kicad_dialog_has_keys && show.is_some() && show == prev_show { self.want_keys = false; }
         if hand_in && show != prev_show {
@@ -2085,6 +2094,7 @@ impl KicadPane {
     /// that waits on KiCad.
     pub fn set_in_page(&mut self, in_page: bool, why: &'static str, cx: &mut Context<Self>) {
         self.in_page = in_page;
+        self.want_keys = hand_in_after_leave(self.want_keys, in_page); // off the page: no hand-in waits to complete there
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_in_page": in_page, "why": why, "project": self.project})); }
         match self.leave.on(in_page, why, std::time::Instant::now()) {
             Some(s) => self.send_leave(s),
@@ -2409,6 +2419,23 @@ mod tests {
     }
     /// #1345: a leave reaches the hub once the pane has been off screen LEAVE_SETTLE, once; a quick away-and-back sends nothing; a back
     /// only after a leave
+    /// #1470 interaction review: an agent's viewer_show switches the page while KiCad is still starting after the person's Edit; when the
+    /// frame arrives, nothing is handed to the editor off screen (no focus, `keys` stays false, no touch of the left KiCad's idle clock)
+    #[test] fn a_hand_in_pending_across_a_leave_never_focuses_an_editor_off_screen() {
+        use super::{hand_in_after_leave, hand_in_on_page, opening_wants_keys, ShowBy};
+        let mut want = opening_wants_keys(ShowBy::Deliberate); assert!(want, "the Edit wants the keys once its frame is on show");
+        // the agent's viewer_show takes the page away (set_in_page(false)): the waiting hand-in is dropped
+        want = hand_in_after_leave(want, false); assert!(!want);
+        // KiCad's frame arrives while off the page: no hand-in (the branch that focuses, sets `keys`, grabs Escape and touches is not taken)
+        let frame = Some(7001u64);
+        assert!(!hand_in_on_page(false, false, false, want, frame, None, false));
+        // even had it still wanted the keys: off the page, or without the pane's rect, nothing is handed in
+        assert!(!hand_in_on_page(false, true, false, true, frame, None, false), "off the page");
+        assert!(!hand_in_on_page(true, false, false, true, frame, None, false), "no rect yet");
+        assert!(!hand_in_on_page(false, true, true, false, frame, Some(7000), false), "a frame switch off the page keeps nothing it had");
+        // back on the page with a new act of the person's: handed in as before
+        assert!(hand_in_on_page(true, true, false, true, frame, None, false));
+    }
     #[test] fn a_pane_off_screen_is_told_to_the_hub_once_settled_and_back_at_once() {
         use super::{LeaveSend, LeaveState, LEAVE_SETTLE};
         let t0 = std::time::Instant::now(); let ms = |n: u64| t0 + std::time::Duration::from_millis(n);
