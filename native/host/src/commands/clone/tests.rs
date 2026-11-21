@@ -6,6 +6,11 @@ use crate::hub::{Cfg, Hub};
 use serde_json::json;
 use std::process::Command;
 
+/// The folder used last is one for the process (`LAST_PARENT`): the tests that read it or clone (which sets it) take turns, so a whole clone's
+/// folder is never the "used last" of the test that expects none yet (it failed the land gate when they ran at once).
+static PARENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+fn parent_turn() -> std::sync::MutexGuard<'static, ()> { PARENT.lock().unwrap_or_else(|e| e.into_inner()) }
+
 #[test] fn every_address_form_people_paste_is_a_repository_and_a_folder_is_not() {
     let r = parse("o/Board").unwrap();
     assert_eq!((r.origin.as_str(), r.name.as_str(), r.github.as_str()), ("github.com/o/Board", "Board", "o/Board"));
@@ -45,6 +50,7 @@ use std::process::Command;
 }
 
 #[test] fn a_clone_goes_to_the_folder_used_last_and_never_into_one_that_holds_something() {
+    let _turn = parent_turn(); LAST_PARENT.lock().unwrap().clear();
     let home = crate::plat::tmp::dir("clone-dest"); let h = home.to_str().unwrap();
     let r = parse("o/Board").unwrap();
     assert_eq!(default_parent(h), h, "no Documents: the home");
@@ -126,6 +132,7 @@ async fn until_over(id: &str) -> Value {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_bare_repository_is_cloned_added_with_its_thread_and_its_folder_then_refused() {
+    let _turn = parent_turn();
     let h = hub("whole").await; let (fx, url) = fixture("whole");
     let dest = fx.join("into/kit-copy");
     let j = call(&h, "clone.start", &json!({"repo": url, "dest": dest.to_string_lossy(), "thread": true})).await.unwrap();
@@ -162,6 +169,7 @@ async fn server(answer: Option<&'static str>) -> u16 {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_hung_clone_is_cancelled_and_leaves_no_folder() {
+    let _turn = parent_turn();
     let h = hub("cancel").await; let port = server(None).await;
     let fx = crate::plat::tmp::dir("clone-cancel"); let dest = fx.join("hung");
     let j = call(&h, "clone.start", &json!({"repo": format!("http://127.0.0.1:{port}/o/hung.git"), "dest": dest.to_string_lossy()})).await.unwrap();
@@ -175,6 +183,7 @@ async fn a_hung_clone_is_cancelled_and_leaves_no_folder() {
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_refusal_for_access_is_said_as_one() {
+    let _turn = parent_turn();
     let h = hub("auth").await;
     let port = server(Some("HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm=\"x\"\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")).await;
     let fx = crate::plat::tmp::dir("clone-auth"); let dest = fx.join("secret");
