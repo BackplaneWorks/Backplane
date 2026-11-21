@@ -394,6 +394,12 @@ pub fn raise_step(above: bool, on_screen: bool, st: &mut RaiseState, buried: &mu
 /// `Above`: the frame is above ours with nothing but KiCad's own windows between. `Idle`: the frame or our window is not on screen.
 /// `OursBelow`: the frame is behind ours with only our own and KiCad's windows between: ours goes just below the frame.
 #[derive(Debug, PartialEq)] pub enum OrderPlan { Above, Idle, OursBelow, AskKicad }
+/// Whether a pane's frame is on screen (the Linux focus proxy's condition): the pane in the page, placed somewhere, a frame on show
+pub fn pane_shows(in_page: bool, placed: Option<(nc::R, Option<u64>)>) -> bool { in_page && placed.is_some_and(|(_, show)| show.is_some()) }
+
+/// The on-screen key moving to `key`: the old one to take back (when it differs) and the key now held
+pub fn screen_rekey(old: Option<(u64, u64)>, key: (u64, u64)) -> (Option<(u64, u64)>, (u64, u64)) { (old.filter(|k| *k != key), key) }
+
 /// macOS: whether KiCad's frame is to be on show over the pane, from the state alone (never our window's activity or focus): an editor
 /// wanted (`show`), our window seen (`host_visible`), and the pane's hitbox drawn this frame. A frame with no hitbox (our window inactive
 /// while KiCad has the keyboard draws such frames, d563d8a5ab) keeps a frame on show while the page still holds the editor (`in_page`) or
@@ -401,12 +407,6 @@ pub fn raise_step(above: bool, on_screen: bool, st: &mut RaiseState, buried: &mu
 /// or the hub; another thread; Files, Mech, Browser, Gerbers; a Diff over it) hides it (#1199). Shown again only once the hitbox is
 /// drawn: there is a rect to show it at. `covered`: a screen of Backplane's drawn over the whole pane (Settings, the palette, the
 /// lightbox, Improvements: `covers_pane`): macOS cannot cut holes in KiCad's frame, which would stay above it, so it is hidden too.
-/// Whether a pane's frame is on screen (the Linux focus proxy's condition): the pane in the page, placed somewhere, a frame on show
-pub fn pane_shows(in_page: bool, placed: Option<(nc::R, Option<u64>)>) -> bool { in_page && placed.is_some_and(|(_, show)| show.is_some()) }
-
-/// The on-screen key moving to `key`: the old one to take back (when it differs) and the key now held
-pub fn screen_rekey(old: Option<(u64, u64)>, key: (u64, u64)) -> (Option<(u64, u64)>, (u64, u64)) { (old.filter(|k| *k != key), key) }
-
 pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, covered: bool, dialog: bool, was_visible: bool) -> bool {
     show && host_visible && (!covered || (dialog && was_visible)) && (hitbox || (was_visible && (in_page || dialog)))
 }
@@ -1139,6 +1139,9 @@ impl KicadPane {
         let Some(old) = self.container else { return };
         if t == self.toplevel { return }
         let Some(new) = nc::container_for(t, &self.project) else { return };
+        // off screen for the Linux focus proxy before the old container goes: the old window would else redirect with no frame in it until
+        // the next tick (as detach() does)
+        if let Some((tk, k)) = self.screen_key.take() { nc::note_pane_on_screen(tk, k, false); }
         if new != old { nc::move_frames(old, new); nc::destroy(old); }
         self.toplevel = t; self.container = Some(new); self.placed = None; self.unmapped_since = None; self.last_root = (i32::MIN, 0);
         // the editor in another window now (popped out, or back in): its keys are handed in when it is placed there
