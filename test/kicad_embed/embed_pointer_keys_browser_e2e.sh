@@ -23,11 +23,13 @@ start_xvfb_and_wm
 export BACKPLANE_KICAD_DEBUG=1
 start_hub
 PAGE='data:text/html,<body style="margin:0;background:%23e8f0ff"><h1>keys</h1><input id=t><script>let k="";document.addEventListener("keydown",e=>{k+=e.key;document.title="k:"+k})</script></body>'
+# (the page as a JSON string: it has quotes of its own)
+PAGE_JSON=$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$PAGE")
 if [ "$WITH_PANE" = 1 ]; then
   OPEN='{"select":0},{"wait":1500},{"click":"rail:Board"},{"wait":1500},{"click":"ui:Edit"},{"kicad":{"wait_painted":120000,"kind":"PCB","tag":"up"}},{"wait":3000},'
 else OPEN='{"select":0},{"wait":2000},'; fi
 cat >"$OUT/script.json" <<JSON
-[$OPEN{"click":"rail:Browser"},{"wait":5000},{"cef":{"goto":"$PAGE"}},{"wait":4000},{"cef":{"report":true}},{"mark":"ready"},
+[$OPEN{"click":"rail:Browser"},{"wait":5000},{"cef":{"goto":$PAGE_JSON}},{"wait":4000},{"cef":{"report":true}},{"mark":"ready"},
  {"wait":${READ_MS:-40000}},{"read":"composer"},{"cef":{"report":true}},{"mark":"done"},{"wait":600000}]
 JSON
 HOME="$OUT/fh" LC_ALL=C.UTF-8 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_CEF_PROFILE="$OUT/prof" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" \
@@ -93,6 +95,8 @@ grep -o '"window_active":[a-z]*' "$OUT/client.log" | uniq -c | tr '\n' ' ' | sed
 has() { python3 -c 'import json,sys; print(1 if sys.argv[2] in (json.loads(sys.argv[1]) or "") else 0)' "$1" "$2"; }
 check "B1 control: keys over the composer land in it" "$(has "$TEXT" ctl)" "$TEXT"
 check "B2 with the pointer over the page (no click) the keys land in the composer" "$(has "$TEXT" ctlpg)" "composer $TEXT, page $TITLE"
-check "B3 a click in the page gives it the keyboard (the page logs them)" "$(has "$TITLE" in)" "page $TITLE"
+# (the page's log is its title "k:<keys>"; a page whose script never ran keeps its URL as the title, which may contain any letters)
+logged() { python3 -c 'import json,sys; t=json.loads(sys.argv[1]) or ""; print(1 if t.startswith("k:") and sys.argv[2] in t[2:] else 0)' "$1" "$2"; }
+check "B3 a click in the page gives it the keyboard (the page logs them)" "$(logged "$TITLE" in)" "page $TITLE"
 check "B4 back in the composer, the pointer over the page: keys in the composer" "$(has "$TEXT" bk)" "composer $TEXT, page $TITLE"
 finish_suite "embed_pointer_keys_browser_e2e (with pane $WITH_PANE)"
