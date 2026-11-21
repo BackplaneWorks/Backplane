@@ -8,8 +8,8 @@ use std::process::Command;
 
 /// The folder used last is one for the process (`LAST_PARENT`): the tests that read it or clone (which sets it) take turns, so a whole clone's
 /// folder is never the "used last" of the test that expects none yet (it failed the land gate when they ran at once).
-static PARENT: std::sync::Mutex<()> = std::sync::Mutex::new(());
-fn parent_turn() -> std::sync::MutexGuard<'static, ()> { PARENT.lock().unwrap_or_else(|e| e.into_inner()) }
+/// The lock is the module's own (`test_parent`), so tests elsewhere that read the default (commands/actions.rs) take the same turns.
+fn parent_turn() -> std::sync::MutexGuard<'static, ()> { test_parent(false) }
 
 #[test] fn every_address_form_people_paste_is_a_repository_and_a_folder_is_not() {
     let r = parse("o/Board").unwrap();

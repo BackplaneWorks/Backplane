@@ -386,8 +386,13 @@ mod tests {
         let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{"@runon.p1":"L~p9"},"info":{}}), sel: "", action: "new-thread", value: "p1", title_of: &t }).unwrap();
         let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap(); assert_eq!((sent["m"].as_str(), sent["p"]["project"].as_str()), (Some("thread.create"), Some("L~p9")));
         // Clone it here opens the folder picker on ~/Documents/<repo> to confirm it
+        let _parent = crate::commands::clone::test_parent(true); // the default folder: no other test's clone has set the folder used last
+        // act() reads the machine's real home: ~/Documents/<repo> where it has a Documents folder, else ~/<repo>; a Board already there takes the next name
+        let home = crate::plat::dirs::home_or_empty(); let parent = if std::path::Path::new(&home).join("Documents").is_dir() { format!("{home}/Documents") } else { home.clone() };
+        let docs_board = crate::commands::clone::tilde(&crate::commands::clone::default_dest(&parent, &crate::commands::clone::parse("github.com/o/Board").unwrap(), &home).to_string_lossy(), &home);
+        assert!(docs_board.ends_with("/Board") || docs_board.contains("/Board-"), "{docs_board}");
         let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{}}), sel: "", action: "proj-clone", value: "github.com/o/Board", title_of: &t }).unwrap();
-        assert_eq!((o.session_patch["drafts"]["@proj.open"].as_str(), o.session_patch["drafts"]["@proj.text"].as_str(), o.session_patch["drafts"]["@proj.clone"].as_str()), (Some("1"), Some("~/Documents/Board"), Some("github.com/o/Board")));
+        assert_eq!((o.session_patch["drafts"]["@proj.open"].as_str(), o.session_patch["drafts"]["@proj.text"].as_str(), o.session_patch["drafts"]["@proj.clone"].as_str()), (Some("1"), Some(docs_board.as_str()), Some("github.com/o/Board")));
         assert!(o.cmds.is_empty(), "nothing is cloned before the folder is confirmed");
     }
 }
