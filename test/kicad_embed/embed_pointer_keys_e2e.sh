@@ -125,7 +125,7 @@ kill "$XM" 2>/dev/null
 # P6: a dead key over the pane (us intl: ' is dead_acute, then e): the composed letter reaches the composer, nothing of it KiCad
 if [ "${DEADKEY:-1}" = 1 ] && command -v setxkbmap >/dev/null; then
   # which compose ran: an XIM input method (XMODIFIERS and the root's XIM_SERVERS: ibus, fcitx) or GPUI's own xkb compose (a private Xvfb)
-  echo "INFO P6 compose path: XMODIFIERS=${XMODIFIERS:-none}, XIM_SERVERS: $(xprop -root XIM_SERVERS 2>/dev/null | cut -d= -f2- | tr -d ' ' || echo none)"
+  echo "INFO P6 compose path: XMODIFIERS=${XMODIFIERS:-none}, XIM_SERVERS: $(xprop -root XIM_SERVERS 2>/dev/null | grep '=' | cut -d= -f2- | tr -d ' ' | grep . || echo none)"
   # the display's own layout, put back after (a run on a person's or a Boat's real desktop must not leave it us)
   LAYOUT0=$(setxkbmap -query 2>/dev/null | awk '/^layout/{l=$2} /^variant/{v=$2} /^options/{o=$2} END{printf "%s|%s|%s", l, v, o}')
   setxkbmap -layout us -variant intl 2>/dev/null; sleep 1.0
