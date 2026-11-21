@@ -426,7 +426,7 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
     let bar = bar.child(actions);
     let img_el = |url: &str| -> AnyElement {
         match images.get(target, url) {
-            Slot::Ready(img) => { let (w, h) = super::images::dims(&img.bytes).map_or((480., 360.), |(w, h)| super::images::fit(w, h, 480., 4000.)); div().p_3().child(div().w(px(w)).h(px(h)).flex_none().child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain))).into_any_element() }
+            Slot::Ready(img) => { let (w, h) = super::images::dims(&img.bytes).map_or((480., 360.), |(w, h)| super::images::fit(w, h, 480., 4000.)); div().p_3().child(div().w(px(w)).h(px(h)).flex_none().child(gpui::img(images.decoded(url).map_or(ImageSource::Image(img), ImageSource::Render)).id(SharedString::from(format!("fimg-{url}"))).size_full().object_fit(ObjectFit::Contain))).into_any_element() }
             Slot::Loading => div().p_3().text_color(c("dim")).child(trs("Loading…")).into_any_element(),
             Slot::Failed => div().p_3().text_color(c("bad")).child(trs("Could not load the file")).into_any_element(),
         }

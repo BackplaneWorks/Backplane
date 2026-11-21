@@ -1608,20 +1608,26 @@ struct DataUpdateSection: View {
 struct DataAttachmentImage: View {
     let client: DataClient
     let attachment: DAttachment
-    @State private var image: UIImage?
+    @State private var decoded: DDecodedImage?
     @State private var data: Data?
     @State private var failed = false
     @State private var full = false
     var body: some View {
         Group {
-            if let image { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(image, data: data) }
+            if let decoded {
+                DPictureView(image: decoded.image, animated: decoded.animated, contentMode: .fit)
+                    .frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(decoded.image, data: data)
+            }
             else if failed { Label(attachment.name, systemImage: "photo").font(.footnote).foregroundStyle(.secondary) }
             else { ProgressView().frame(width: 80, height: 80) }
         }
         .task(id: attachment.id) {
-            if let d = await client.attachmentData(attachment.id), let u = UIImage(data: d) { image = u; data = d } else { failed = true }
+            if let d = await client.attachmentData(attachment.id),
+               let dec = await Task.detached(priority: .userInitiated, operation: { DDecodedImage.decode(d, maxPixelSize: 1400) }).value {
+                decoded = dec; data = d
+            } else { failed = true }
         }
-        .fullScreenCover(isPresented: $full) { if let image { DImageFull(image: image, data: data) { full = false } } }
+        .fullScreenCover(isPresented: $full) { if let decoded { DImageFull(image: decoded.image, data: data, animated: decoded.animated) { full = false } } }
         .accessibilityIdentifier("data.entry.image")
     }
 }
@@ -1629,12 +1635,25 @@ struct DataAttachmentImage: View {
 // a picture this phone just sent, from its own copy until the hub has it: tap for the full size, long press to save or share
 struct DataLocalImage: View {
     let data: Data
+    @State private var decoded: DDecodedImage?
     @State private var full = false
     var body: some View {
-        if let u = UIImage(data: data) {
-            Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(u, data: data)
-                .fullScreenCover(isPresented: $full) { DImageFull(image: u, data: data) { full = false } }
-                .accessibilityIdentifier("data.entry.image")
+        Group {
+            if let decoded {
+                DPictureView(image: decoded.image, animated: decoded.animated, contentMode: .fit)
+                    .frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(decoded.image, data: data)
+                    .fullScreenCover(isPresented: $full) { DImageFull(image: decoded.image, data: data, animated: decoded.animated) { full = false } }
+                    .accessibilityIdentifier("data.entry.image")
+            } else if let u = UIImage(data: data) {
+                Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(u, data: data)
+                    .fullScreenCover(isPresented: $full) { DImageFull(image: u, data: data) { full = false } }
+                    .accessibilityIdentifier("data.entry.image")
+            }
+        }
+        .task(id: data) {
+            if AnimatedImage.isGIF(data) {
+                decoded = await Task.detached(priority: .userInitiated, operation: { DDecodedImage.decode(data, maxPixelSize: 1400) }).value
+            }
         }
     }
 }

@@ -43,18 +43,26 @@ extension View {
 struct DImageFull: View {
     let image: UIImage
     var data: Data? = nil
+    var animated: AnimatedImage? = nil
     let close: () -> Void
     @State private var note = ""
     @State private var zoom: CGFloat = 1
     @GestureState private var pinch: CGFloat = 1
+    @State private var decodedAnim: AnimatedImage?
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            Image(uiImage: image).resizable().scaledToFit().scaleEffect(max(1, zoom * pinch))
+            DPictureView(image: image, animated: animated ?? decodedAnim, contentMode: .fit)
+                .scaleEffect(max(1, zoom * pinch))
                 .gesture(MagnificationGesture().updating($pinch) { v, s, _ in s = v }.onEnded { zoom = min(6, max(1, zoom * $0)) })
                 .onTapGesture(count: 2) { zoom = zoom > 1 ? 1 : 2.5 }
                 .dImageMenu(image, data: data)
                 .accessibilityIdentifier("image.full")
+        }
+        .task(id: data) {
+            if animated == nil, let d = data, AnimatedImage.isGIF(d) {
+                decodedAnim = await Task.detached(priority: .userInitiated, operation: { AnimatedImage.decode(d) }).value
+            }
         }
         .overlay(alignment: .topTrailing) {
             Button(action: close) { Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white) }.padding()

@@ -88,11 +88,45 @@ pub fn shrink_to(img: Arc<Image>, side: u32) -> Arc<Image> {
     if enc.write_image(small.as_raw(), small.width(), small.height(), image::ExtendedColorType::Rgba8).is_err() { return img }
     Arc::new(Image::from_bytes(ImageFormat::Png, out))
 }
+/// Bounds for decoding an animated GIF on the fetch thread so a huge GIF cannot exhaust memory.
+pub const MAX_GIF_FRAMES: usize = 300;
+pub const MAX_GIF_BYTES: usize = 64 << 20;
+/// Browsers clamp GIF frame delays below 20 ms (including 0 ms) to 100 ms so animations do not spin at max FPS.
+pub const MIN_GIF_DELAY_MS: u32 = 20;
+pub const DEFAULT_GIF_DELAY_MS: u32 = 100;
+
+/// Decode a GIF's frames (BGRA) with sanitized delays so GPUI's `img` element animates them without stalling or spinning.
+pub fn decode_gif(bytes: &[u8]) -> Option<Arc<RenderImage>> {
+    use image::AnimationDecoder;
+    let dec = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(bytes)).ok()?;
+    let mut frames = Vec::new();
+    let mut total_bytes = 0usize;
+    for item in dec.into_frames().take(MAX_GIF_FRAMES) {
+        let frame = item.ok()?;
+        let (left, top, raw_delay) = (frame.left(), frame.top(), frame.delay());
+        let (num, den) = raw_delay.numer_denom_ms();
+        let delay = if den == 0 || num / den < MIN_GIF_DELAY_MS {
+            image::Delay::from_numer_denom_ms(DEFAULT_GIF_DELAY_MS, 1)
+        } else {
+            raw_delay
+        };
+        let mut buf = frame.into_buffer();
+        let frame_bytes = buf.as_raw().len();
+        if !frames.is_empty() && total_bytes.saturating_add(frame_bytes) > MAX_GIF_BYTES { break; }
+        total_bytes = total_bytes.saturating_add(frame_bytes);
+        for px in buf.chunks_exact_mut(4) { px.swap(0, 2); }
+        frames.push(image::Frame::from_parts(buf, left, top, delay));
+    }
+    if frames.is_empty() { return None; }
+    Some(Arc::new(RenderImage::new(frames)))
+}
+
 /// The picture decoded here, on the fetch thread, as GPUI paints it (BGRA). Handed to `img` as a RenderImage it is drawn in the first frame
 /// it is on; as an Image, GPUI decodes it on its own executor and draws an empty box until that ends: a reply's pictures showed as blank boxes
 /// for a few frames each time they came on screen (Nov 10). None for a format this build does not decode (GPUI decodes those as before).
 pub fn decode(img: &Image) -> Option<Arc<RenderImage>> {
     if img.format == ImageFormat::Svg { return svg_raster(&img.bytes) }
+    if img.format == ImageFormat::Gif { return decode_gif(&img.bytes) }
     let format = match img.format { ImageFormat::Png => image::ImageFormat::Png, ImageFormat::Jpeg => image::ImageFormat::Jpeg, _ => return None };
     let mut buf = image::load_from_memory_with_format(&img.bytes, format).ok()?.into_rgba8();
     for px in buf.chunks_exact_mut(4) { px.swap(0, 2); }
@@ -216,9 +250,10 @@ impl Images {
             let painted = img.as_deref().and_then(decode);
             let Ok(mut st) = self.s.0.lock() else { return };
             match smaller { Some(d) => { st.shrunk.insert(job.0.clone(), d); } None => { st.shrunk.remove(&job.0); } }
+            let frames = painted.as_ref().map_or(1, |r| r.frame_count().max(1));
             if let Some(r) = painted { st.decoded.insert(job.0.clone(), r); }
-            // what it costs once drawn: GPUI's decoded copy (BGRA), whatever the file's own size
-            let bytes = img.as_ref().map_or(0, |i| dims(&i.bytes).map_or(i.bytes.len() * 4, |(w, h)| w as usize * h as usize * 4));
+            // what it costs once drawn: GPUI's decoded copy (BGRA, times frames for animated GIFs), whatever the file's own size
+            let bytes = img.as_ref().map_or(0, |i| dims(&i.bytes).map_or(i.bytes.len() * 4, |(w, h)| (w as usize * h as usize * 4).saturating_mul(frames)));
             if let Some(e) = st.items.get_mut(&job.0) { e.slot = img.map_or(Slot::Failed, Slot::Ready); e.bytes = bytes; }
             st.done += 1;
             // over the byte cap: drop the least recently drawn images that were not drawn in the current frame
@@ -449,7 +484,7 @@ pub fn lightbox(cx: &mut Context<crate::Backplane>, lb: Option<&Lightbox>, scale
     if let Some(g) = g {
         let (x, y, w, h) = lb.zoom.rect(&g);
         let src = match &lb.full { Full::Ready(_, Some(r)) => ImageSource::Render(r.clone()), Full::Ready(i, None) => ImageSource::Image(i.clone()), _ => lb.paint.clone().map_or(ImageSource::Image(lb.shown.img.clone()), ImageSource::Render) };
-        area = area.child(crate::ui::with_rect(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)), || "lightbox:pic".to_string()).child(gpui::img(src).size_full().object_fit(ObjectFit::Fill)));
+        area = area.child(crate::ui::with_rect(div().absolute().left(px(x)).top(px(y)).w(px(w)).h(px(h)), || "lightbox:pic".to_string()).child(gpui::img(src).id(SharedString::from(format!("lightbox-img-{}", lb.id))).size_full().object_fit(ObjectFit::Fill)));
         if lb.zoom.pannable(&g) { area = area.cursor(if lb.drag.is_some() { CursorStyle::ClosedHand } else { CursorStyle::OpenHand }); }
     }
     let area = area
@@ -547,6 +582,29 @@ mod tests {
         let blue = svg_raster(b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"2\"><rect width=\"4\" height=\"2\" fill=\"#1f6feb\"/></svg>").unwrap();
         assert_eq!(blue.size(0), gpui::size(gpui::DevicePixels(8), gpui::DevicePixels(4)), "drawn at twice its size");
         assert_eq!(&blue.as_bytes(0).unwrap()[..4], &[0xeb, 0x6f, 0x1f, 0xff], "BGRA: blue stays blue");
+    }
+    #[test] fn animated_gif_decodes_all_frames_with_sanitized_delays_and_is_not_shrunk() {
+        // 2x2 GIF89a with 2 frames: frame 0 has 0ms delay (sanitized to 100ms), frame 1 has 150ms delay (kept).
+        let mut gif_bytes = Vec::new();
+        {
+            let mut enc = image::codecs::gif::GifEncoder::new(&mut gif_bytes);
+            enc.set_repeat(image::codecs::gif::Repeat::Infinite).unwrap();
+            let red = image::RgbaImage::from_pixel(2, 2, image::Rgba([255, 0, 0, 255]));
+            let blue = image::RgbaImage::from_pixel(2, 2, image::Rgba([0, 0, 255, 255]));
+            enc.encode_frame(image::Frame::from_parts(red, 0, 0, image::Delay::from_numer_denom_ms(0, 1))).unwrap();
+            enc.encode_frame(image::Frame::from_parts(blue, 0, 0, image::Delay::from_numer_denom_ms(150, 1))).unwrap();
+        }
+        assert!(matches!(sniff(&gif_bytes), Some(ImageFormat::Gif)));
+        assert_eq!(dims(&gif_bytes), Some((2, 2)));
+        let img = Arc::new(Image::from_bytes(ImageFormat::Gif, gif_bytes));
+        assert!(Arc::ptr_eq(&shrink_to(img.clone(), 1), &img), "GIFs must never be flattened by shrink");
+        let rendered = decode(&img).expect("animated GIF should decode");
+        assert_eq!(rendered.frame_count(), 2);
+        assert_eq!(Duration::from(rendered.delay(0)), Duration::from_millis(DEFAULT_GIF_DELAY_MS as u64));
+        assert_eq!(Duration::from(rendered.delay(1)), Duration::from_millis(150));
+        // BGRA pixels: frame 0 is red (0, 0, 255, 255), frame 1 is blue (255, 0, 0, 255)
+        assert_eq!(&rendered.as_bytes(0).unwrap()[..4], &[0, 0, 255, 255]);
+        assert_eq!(&rendered.as_bytes(1).unwrap()[..4], &[255, 0, 0, 255]);
     }
     #[test] fn only_hub_paths_are_requested() {
         for ok in ["/message-image?entry=e&path=%2Fa.png", "/img?path=x"] { assert!(safe_url(ok), "{ok}"); }

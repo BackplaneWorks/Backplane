@@ -1044,7 +1044,10 @@ final class DataClient {
             if let voice { p["voice"] = voice }
             if let reply { p["replyTo"] = reply }
             if !images.isEmpty {
-                p["attachments"] = images.enumerated().map { ["name": "photo-\($0.offset + 1).jpg", "mime": "image/jpeg", "data": $0.element.base64EncodedString()] }
+                p["attachments"] = images.enumerated().map {
+                    let gif = AnimatedImage.isGIF($0.element)
+                    return ["name": gif ? "image-\($0.offset + 1).gif" : "photo-\($0.offset + 1).jpg", "mime": gif ? "image/gif" : "image/jpeg", "data": $0.element.base64EncodedString()]
+                }
             }
             let r: DEntryReply = try await call("message.send", p)
             // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
@@ -1147,8 +1150,9 @@ final class DataClient {
         Self.attachmentCache.setObject(d as NSData, forKey: id as NSString)
         return d
     }
-    // a picture chosen or pasted: the longest side at most 2048 px, JPEG at 0.8 (about a megabyte at most; the hub takes 8 MB)
+    // a picture chosen or pasted: GIFs under 8 MB stay raw to preserve animation; others are capped at 2048 px JPEG at 0.8
     nonisolated static func prepared(_ data: Data) -> Data? {
+        if AnimatedImage.isGIF(data) && data.count <= AnimatedImage.maxUploadBytes { return data }
         guard let image = UIImage(data: data) else { return nil }
         let longest = max(image.size.width, image.size.height) * image.scale
         let factor = longest > 2048 ? 2048 / longest : 1

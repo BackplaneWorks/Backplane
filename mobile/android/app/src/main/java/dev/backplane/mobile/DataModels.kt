@@ -30,6 +30,7 @@ data class DEntry(
     val h: String = "", // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
     val queued: Boolean = false, // queued for an away home machine (docs/PHONE-DATA.md, The home)
     val files: List<DFileLink> = emptyList(), // the files a reply names that the hub serves (feature `fileLinks`): a tap on one downloads it (FileFetch.kt)
+    val images: List<String> = emptyList(), // the images a reply names (feature `replyImages`): drawn inline, fetched via `message.image`
     val replyParam: Map<String, String>? = null, // phone-only: the `replyTo {id, text}` a message this phone is sending carries (feature `reply`), for Retry
 )
 /** Restore to before this (data/1 `restore`): the turn (0: a snapshot from before it was named), its short commit, the short info its confirm shows. */
@@ -109,6 +110,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     h = o.str("h"),
     queued = o.optBoolean("queued", false),
     files = parseFileLinks(o.optJSONArray("files")),
+    images = o.optJSONArray("images")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotEmpty) } } ?: emptyList(),
 )
 fun parseFileLinks(a: JSONArray?) = a.list { DFileLink(it.str("path"), it.str("name"), it.lng("size"), it.str("open").ifEmpty { "download" }) }.filter { it.path.isNotEmpty() }
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
