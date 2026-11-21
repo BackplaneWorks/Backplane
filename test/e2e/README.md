@@ -9,7 +9,7 @@ Scripted end-to-end journeys for GPUI, iOS and Android against the Rust hub, wit
 - `lib/capture.mjs` — Xvfb + i3 + ffmpeg capture (Boat only).
 - `adapters/{desktop,android,ios}.mjs (`--client gpui` loads desktop.mjs)` — one per client; a missing capability makes the journey `blocked`, never pass.
 - `run.mjs` — the runner; writes `out/e2e/<client>/summary.json` with a gate mapping (pass / fail / open) and the capture paths.
-- `bp-run.sh` — desktop-side launcher for h@backplane (Xvfb, own D-Bus; `scripts/boat-job.sh` no longer exists, so `boat-run.sh` is stale): `selftest`, or `run HUB GPUI [journey]`.
+- `bp-run.sh` — desktop-side launcher for h@backplane (Xvfb, own D-Bus); `boat-run.sh` is the same on a Boat build box (`scripts/boat-job.sh`; a client built on the desktop runs in `desktop.Dockerfile` there): `selftest`, or `run HUB GPUI [journey]`.
 
 Rules: nothing runs on the desktop (no Xvfb, hub or client) without the person's word; Boat renders in software, so its frame numbers
 validate the harness and are labelled software-rendered, they are not GPU evidence; simulated agents only; captures are handed to the

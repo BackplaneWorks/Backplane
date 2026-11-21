@@ -4,5 +4,5 @@
 set -eu
 [ -x stage/backplane-hub ] || { echo "stage/backplane-hub missing"; exit 2; }
 exec scripts/boat-job.sh --size default --timeout 900 --idle 3600 --artifact out/prove \
-  --include-file stage/backplane-hub $ \
+  --include-file stage/backplane-hub \
   -- sh -c 'which bun >/dev/null 2>&1 || export PATH="$HOME/.bun/bin:$PATH"; which bun >/dev/null 2>&1 || { curl -fsSL https://bun.sh/install | BUN_INSTALL=$HOME/.bun bash >/dev/null 2>&1; export PATH="$HOME/.bun/bin:$PATH"; }; mkdir -p out/prove; chmod +x stage/backplane-hub; BP_ROOT=$PWD bun test/wire/reconnect_prove.mjs $PWD/stage/backplane-hub 3875 20 out/prove/rust.json > out/prove/rust.txt 2>&1; rc=$?; echo rc=$rc >> out/prove/rust.txt; grep -E "PASS|FAIL|RESULT|rc=|Error" out/prove/rust.txt; exit $rc'
