@@ -123,7 +123,7 @@ fn part_of(b: &Budget, part: &str) -> u64 { match part { "posts" => b.posts, "tu
 fn set_part(b: &mut Budget, part: &str, v: u64) { match part { "posts" => b.posts = v, "turns" => b.turns = v, "tokens" => b.tokens = v, _ => {} } }
 /// The member posts held while the swarm was paused, since the swarm last resumed (oldest first): a resume delivers them (`released`).
 /// A post after which the room ran again: the hub's resume, or the person's own post (it resumes a paused room: rpc.rs `post_k`).
-fn resumes(e: &Value) -> bool { if e["guard"] == true { e["tags"].as_array().map_or(false, |t| t.iter().any(|x| x == "resume")) } else { gs(e, "from") == "you" } }
+fn resumes(e: &Value) -> bool { if e["guard"] == true { e["tags"].as_array().map_or(false, |t| t.iter().any(|x| x == "resume")) } else { gs(e, "from") == "you" && gs(e, "thread").is_empty() } }
 fn held_since_resume(posts: &[Value]) -> Vec<Value> {
     let start = posts.iter().rposition(resumes).map_or(0, |i| i + 1);
     posts[start..].iter().filter(|e| e["guard"] != true && !gs(e, "held").is_empty() && gs(e, "held") != "backstop").cloned().collect()
@@ -381,7 +381,9 @@ impl Bots {
         let held = held_since_resume(&posts); // (called before the resume is committed: what was held since the last one)
         if held.is_empty() { return }
         let mut m = self.swarm.released.lock().unwrap();
-        for th in r.threads() { let mine: Vec<Value> = held.iter().filter(|e| gs(e, "thread") != th).cloned().collect(); if !mine.is_empty() { m.entry((r.id.clone(), th)).or_default().extend(mine) } }
+        // (each post once: a resume whose commit failed, then the next one, queues the same posts again)
+        for th in r.threads() { let q = m.entry((r.id.clone(), th.clone())).or_default(); for e in held.iter().filter(|e| gs(e, "thread") != th) { if !q.iter().any(|x| x["id"] == e["id"]) { q.push(e.clone()) } } }
+        m.retain(|_, q| !q.is_empty());
     }
     /// The members whose turn failed: the cause read once (a sign-in or account problem is the person's: `swarm_need::signin_cause`) and kept in the need facts,
     /// the member told on its own thread; one that works again leaves them, and one whose sign-in works again goes on by itself.
