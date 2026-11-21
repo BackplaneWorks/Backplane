@@ -1521,8 +1521,11 @@ impl KicadPane {
         let in_dialog = self.info["mode"] == "fork" && nc::focus_in_pid(self.info["pid"].as_u64().unwrap_or(0) as u32) && !nc::has_focus(c);
         // a press on another top-level over the pane (a KiCad dialog, another program) is not the editor's: nothing is taken or given
         let elsewhere = self.want().is_some_and(|w| nc::button_over(w).is_some() && nc::pointer_on_other_window(w));
-        if elsewhere { self.press_focus = None; }
-        if let (Some(w), false, false) = (self.want(), in_dialog, elsewhere) {
+        // a pane not in the page (another viewer on show: the Browser tab) takes no press: its frame's rectangle is where that viewer's
+        // page now is, and a click there handed the keyboard to the hidden editor's frame, taking it from the page the person clicked
+        // (the Browser's Chromium, a click in its page with a KiCad pane in the window: the keys went nowhere they were typed)
+        if elsewhere || !self.in_page { self.press_focus = None; self.press_in = false; }
+        if let (Some(w), false, false, true) = (self.want(), in_dialog, elsewhere, self.in_page) {
             // BACKPLANE_KICAD_FOCUS_ON_PRESS: the old way (focus mid-press), to check a KiCad that must cope with it
             let fork = self.info["mode"] == "fork" && std::env::var_os("BACKPLANE_KICAD_FOCUS_ON_PRESS").is_none();
             match (nc::button_over(w), nc::has_focus(c)) {
