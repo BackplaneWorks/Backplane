@@ -52,9 +52,59 @@ mod imp {
         let id = c.generate_id().ok()?;
         c.create_window(scr.root_depth, id, parent, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
             &CreateWindowAux::new().background_pixel(scr.white_pixel).border_pixel(scr.black_pixel).colormap(scr.default_colormap)).ok()?.check().ok()?;
-        let _ = c.flush(); Some(Host::X11(id))
+        let _ = c.flush(); containers().lock().unwrap().insert(id); watch_presses(); Some(Host::X11(id))
     }
     pub fn close(_w: u64) {}
+    /// Every container of ours (a tab's `container`), until it is destroyed: what a recorded press is matched against.
+    fn containers() -> &'static Mutex<std::collections::HashSet<u32>> { static C: OnceLock<Mutex<std::collections::HashSet<u32>>> = OnceLock::new(); C.get_or_init(Default::default) }
+    /// The person's last press on the display that was inside a container of ours: when, and which container. Nothing else of a press is kept
+    /// (no position, no other window). Taken by the one focus it explains (`pressed_in`).
+    static PRESS: Mutex<Option<(std::time::Instant, u32)>> = Mutex::new(None);
+    /// Whether the press watcher runs (XInput 2 on the display): without it `pressed_in` is never true, and on_set_focus falls back to `button_down`.
+    static PRESSES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    /// How long after the person's press a focus of the page is still that press's. The press reaches us (a raw event, sent before the
+    /// press is delivered or grabbed) before Chromium has it; Chromium focuses its window on it and CEF says so 15-25 ms later on Xvfb, more
+    /// under load, and later still when a KiCad pane's button grab holds the press until the pane's tick replays it (40 ms ticks). Neither
+    /// the press nor CEF's callback carries an X time to order them by, so the order is the press's arrival here, and a press explains one
+    /// focus only: a script's focus after the person's own click has nothing left to claim.
+    const PRESS_SPAN: std::time::Duration = std::time::Duration::from_millis(400);
+    /// The press watcher: a connection and a thread of its own, XInput 2 raw button presses selected on the root (every press on the display,
+    /// whatever grabs it; no other client's delivery is changed). On each, the window under the pointer is followed down from the root and the
+    /// press is recorded only when a container of ours is on that path. Started with the first container. XWayland sends raw events only
+    /// while one of its own clients has the focus: a click from a Wayland window into the page is then not seen, and button_down decides.
+    fn watch_presses() {
+        static ONCE: std::sync::Once = std::sync::Once::new();
+        ONCE.call_once(|| {
+            use x11rb::protocol::xinput::{self, ConnectionExt as _};
+            let Ok((c, n)) = RustConnection::connect(None) else { return };
+            let Some(root) = c.setup().roots.get(n).map(|s| s.root) else { return };
+            if !c.xinput_xi_query_version(2, 2).ok().and_then(|r| r.reply().ok()).is_some_and(|v| v.major_version >= 2) { return }
+            let mask = [xinput::EventMask { deviceid: 1 /* XIAllMasterDevices */, mask: vec![xinput::XIEventMask::RAW_BUTTON_PRESS] }];
+            if c.xinput_xi_select_events(root, &mask).ok().and_then(|k| k.check().ok()).is_none() { return }
+            PRESSES.store(true, std::sync::atomic::Ordering::Relaxed);
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_presses": "watched"})); }
+            std::thread::Builder::new().name("cef-presses".into()).spawn(move || while let Ok(e) = c.wait_for_event() {
+                let x11rb::protocol::Event::XinputRawButtonPress(_) = e else { continue };
+                // said at once (container 0: not yet known), so a focus that CEF reports while the pointer is followed waits for it (pressed_in)
+                let at = std::time::Instant::now(); *PRESS.lock().unwrap() = Some((at, 0));
+                let ours = containers().lock().unwrap().clone();
+                let (mut w, mut hit) = (root, None);
+                for _ in 0..16 { let Some(r) = c.query_pointer(w).ok().and_then(|r| r.reply().ok()) else { break }; if r.child == x11rb::NONE { break } w = r.child; if ours.contains(&w) { hit = Some(w); break } }
+                *PRESS.lock().unwrap() = hit.map(|h| (at, h));
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_press_in_page": hit.is_some()})); }
+            }).ok();
+        });
+    }
+    /// Whether the person pressed a mouse button inside container `frame` within PRESS_SPAN (taken: it answers yes once); None without the watcher.
+    pub fn pressed_in(frame: u64) -> Option<bool> {
+        if !PRESSES.load(std::sync::atomic::Ordering::Relaxed) { return None }
+        // a press still being followed down (a few round trips): waited for, 50 ms at most
+        let t0 = std::time::Instant::now();
+        let mut p = loop { let p = PRESS.lock().unwrap(); if !p.is_some_and(|(at, w)| w == 0 && at.elapsed() <= PRESS_SPAN) || t0.elapsed().as_millis() >= 50 { break p } drop(p); std::thread::sleep(std::time::Duration::from_millis(1)); };
+        let yes = p.is_some_and(|(at, w)| w as u64 == frame && at.elapsed() <= PRESS_SPAN);
+        if yes { *p = None; }
+        Some(yes)
+    }
     /// Whether a mouse button is down now (a focus change while one is, is the person's click; without, a window manager's focus-follows-mouse).
     pub fn button_down() -> bool {
         let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
@@ -62,7 +112,7 @@ mod imp {
         c.query_pointer(root).ok().and_then(|r| r.reply().ok()).map_or(false, |p| u16::from(p.mask) & (u16::from(KeyButMask::BUTTON1) | u16::from(KeyButMask::BUTTON2) | u16::from(KeyButMask::BUTTON3)) != 0)
     }
     /// The container gone (its browser closed).
-    pub fn destroy(frame: u64) { let Some(g) = conn() else { return }; let c = g.as_ref().unwrap(); let _ = c.destroy_window(frame as u32); let _ = c.flush(); }
+    pub fn destroy(frame: u64) { containers().lock().unwrap().remove(&(frame as u32)); let Some(g) = conn() else { return }; let c = g.as_ref().unwrap(); let _ = c.destroy_window(frame as u32); let _ = c.flush(); }
     /// The container (and Chromium's window filling it) over the pane at `r`, mapped; or unmapped.
     pub fn place_in(frame: u64, w: u64, r: Option<R>) {
         { let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
@@ -138,6 +188,8 @@ mod imp {
     pub fn container(_h: Host) -> Option<Host> { None }
     pub fn place_in(_frame: u64, _w: u64, _r: Option<R>) {}
     pub fn destroy(_frame: u64) {}
+    /// X11 only (its press watcher): here on_set_focus asks `button_down`.
+    pub fn pressed_in(_frame: u64) -> Option<bool> { None }
     #[cfg(windows)] pub fn close(w: u64) { unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(w as isize as _); } }
     #[cfg(target_os = "macos")] pub fn close(w: u64) { unsafe { send0(v(w), c"removeFromSuperview"); } }
     /// Every window under `h` (class, rect in the screen, visible, style), for the report.
@@ -196,6 +248,8 @@ mod imp {
     pub fn container(_h: Host) -> Option<Host> { None }
     pub fn place_in(_frame: u64, _w: u64, _r: Option<R>) {}
     pub fn destroy(_frame: u64) {}
+    /// X11 only (its press watcher): here on_set_focus asks `button_down`.
+    pub fn pressed_in(_frame: u64) -> Option<bool> { None }
     #[cfg(windows)] pub fn close(w: u64) { unsafe { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(w as isize as _); } }
     #[cfg(target_os = "macos")] pub fn close(w: u64) { unsafe { send0(v(w), c"removeFromSuperview"); } }
     /// Every window under `h` (class, rect in the screen, visible, style), for the report.
