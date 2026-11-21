@@ -181,12 +181,23 @@ wrap_focus_handler! {
     struct FocusH { tab: Arc<Tab> }
     impl FocusHandler {
         /// windowed: the person clicked into the page (Chromium has the keyboard now); the page gives it gpui's focus too
-        fn on_got_focus(&self, _b: Option<&mut Browser>) { if self.tab.host.is_some() { self.tab.st.lock().unwrap().got_focus = true; let _ = self.tab.wake.try_send(()); } }
+        /// (and when it got it on the person's press in the page: their click, though CEF did not ask on_set_focus first; it does not when it
+        /// counts the browser focused already, as after a yank that moved only the X focus away: with a KiCad pane, a click in the page then
+        /// came here alone and the keyboard was taken back)
+        fn on_got_focus(&self, _b: Option<&mut Browser>) { if self.tab.host.is_some() {
+            let clicked = native::pressed_in(self.tab.outer()) == Some(true);
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_got_focus": {"clicked": clicked}})); }
+            let mut st = self.tab.st.lock().unwrap(); st.got_focus = true; if clicked { st.person = true; } drop(st); let _ = self.tab.wake.try_send(()); } }
         /// Tab past the page's last element: the keyboard goes back to the client
         /// a click into the page (the system moving the keyboard there) is the person's, unlike our own SetFocus calls
         fn on_set_focus(&self, _b: Option<&mut Browser>, source: FocusSource) -> ::std::os::raw::c_int {
-            // (with a mouse button down: a window manager that focuses what is under the pointer moves it there too, and that is nobody's click)
-            if self.tab.host.is_some() && source == FocusSource::SYSTEM && native::button_down() { self.tab.st.lock().unwrap().person = true; let _ = self.tab.wake.try_send(()); }
+            // (the person's press inside this page's container, recorded when it happened (cef_native `pressed_in`, X11 with XInput 2): a window
+            // manager that focuses what is under the pointer moves it there too, and that is nobody's click; nor is a script's focus. Asking
+            // whether a button is down when this callback runs missed the click whenever the press reached Chromium late (a KiCad pane's button
+            // grab replaying it): the page was given the keyboard and taken it back. Elsewhere, and without XInput 2: a button down now)
+            let clicked = self.tab.host.is_some() && source == FocusSource::SYSTEM && native::pressed_in(self.tab.outer()).unwrap_or_else(native::button_down);
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_set_focus": {"system": source == FocusSource::SYSTEM, "clicked": clicked}})); }
+            if clicked { self.tab.st.lock().unwrap().person = true; let _ = self.tab.wake.try_send(()); }
             false as _
         }
         fn on_take_focus(&self, _b: Option<&mut Browser>, _next: ::std::os::raw::c_int) { if self.tab.host.is_some() { self.tab.st.lock().unwrap().took_focus = true; let _ = self.tab.wake.try_send(()); } }

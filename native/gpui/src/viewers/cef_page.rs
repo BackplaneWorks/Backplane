@@ -232,7 +232,9 @@ impl Render for CefPage {
         if self.host.is_none() { self.decide(window, cx); }
         if self.tabs.is_empty() { self.new_tab(&self.start.clone(), cx); }
         if std::mem::take(&mut self.want_focus) && !self.focus.is_focused(window) { window.focus(&self.focus); self.bar_edit = false; }
-        if std::mem::take(&mut self.want_yank) && !self.focus.is_focused(window) && window.is_window_active() { if let Some(t) = self.tab() { t.give_keyboard(false); } }
+        if std::mem::take(&mut self.want_yank) && !self.focus.is_focused(window) && window.is_window_active() { if let Some(t) = self.tab() {
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_yank": true})); }
+            t.give_keyboard(false); } }
         if !self.from_page.is_empty() {
             let keys = std::mem::take(&mut self.from_page); let flag = self.dispatching.clone(); let tab = self.tab().cloned();
             window.defer(cx, move |window, cx| for (ks, e) in keys {
