@@ -1255,7 +1255,7 @@ mod imp {
         /// The keyboard to our window `w` (`activate`: made the foreground too), from `ui` (Backplane's UI thread id).
         pub fn ours(w: u64, activate: bool, ui: u32) {
             let (q, cv) = st();
-            super::HANDBACK_ASKED_AT.store(super::mono_ms(), std::sync::atomic::Ordering::SeqCst);
+            super::HANDBACK_ASKED_AT.store(super::mono_ms().max(1), std::sync::atomic::Ordering::SeqCst);
             let spawn = q.lock().unwrap().ask(To::Ours { window: w, activate }, Instant::now());
             if let Some(era) = spawn { std::thread::Builder::new().name("kicad-focus".into()).spawn(move || worker(era, ui)).ok(); }
             cv.notify_all();
@@ -2651,6 +2651,9 @@ mod tests {
         use super::focusq::focus_notice_is_hand_in;
         assert!(focus_notice_is_hand_in(2000, 1500), "a press in the pane after the hand-back: KiCad took the keys on it");
         assert!(!focus_notice_is_hand_in(1000, 1500), "no press since the hand-back (KiCad freed from a DRC, an old queued activate): not noted, the retry stands");
+        assert!(focus_notice_is_hand_in(1500, 1500), "a press in the same ms as the hand-back's ask: the press is the later act");
+        assert!(focus_notice_is_hand_in(5, 0), "no hand-back ever asked (0): any press counts");
+        assert!(focus_notice_is_hand_in(0, 0), "neither yet: KiCad's own notice is noted, as before the queue");
     }
     #[test] fn a_hand_back_collapses_to_the_latest_wanted_owner() {
         use super::focusq::{Q, To, STUCK_AFTER, MAX_STUCK};

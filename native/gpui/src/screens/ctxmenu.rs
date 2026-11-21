@@ -181,7 +181,7 @@ impl Backplane {
         let Some((stem, at)) = self.screens.edit_after.clone() else { return };
         if at.elapsed() > std::time::Duration::from_secs(10) { self.screens.edit_after = None; return }
         let viewer = &self.data["thread"]["viewer"];
-        if super::linkroute::shows_file(viewer["open"].as_str().unwrap_or(""), &super::viewer::shown_key(viewer), &stem) { self.screens.edit_after = None; self.kicad_edit(cx); }
+        if super::linkroute::shows_file(viewer["open"].as_str().unwrap_or(""), &super::viewer::shown_key(viewer), &stem) { self.screens.edit_after = None; crate::viewers::kicad_pane::as_deferred_open(|| self.kicad_edit(cx)); }
     }
     /// Copy image: the picture as its file is (a picture drawn from a smaller copy is fetched again, whole, as Save image as does), as one
     /// image entry (other programs get image/png; the composer attaches it); the clipboard is written on the window's thread once the bytes are in hand.

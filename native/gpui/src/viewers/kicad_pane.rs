@@ -740,6 +740,19 @@ pub struct KicadPane {
     was_dialog: bool,
 }
 
+/// The key an ask for the keyboard remembers: the trigger key only for an ask a key may have pressed (`by_key`). Pure.
+pub fn asked_key(by_key: bool, trigger: Option<(String, std::time::Instant)>) -> Option<(String, std::time::Instant)> { trigger.filter(|_| by_key) }
+/// An Edit acted on later, from a redraw (`edit_pending_due` up to 60 s after the press, the Boards menu's and Open in KiCad's
+/// `edit_due`): no key pressed it, so no key is remembered for it, whatever was typed just before.
+static DEFERRED_OPEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub fn deferred_open() -> bool { DEFERRED_OPEN.load(std::sync::atomic::Ordering::SeqCst) }
+/// Runs `f` as a deferred open (`deferred_open` true for its length).
+pub fn as_deferred_open<R>(f: impl FnOnce() -> R) -> R {
+    DEFERRED_OPEN.store(true, std::sync::atomic::Ordering::SeqCst);
+    let r = f();
+    DEFERRED_OPEN.store(false, std::sync::atomic::Ordering::SeqCst);
+    r
+}
 /// The keystroke that triggered what is asking for the keyboard now (seen by the interceptor just before), if one did.
 pub fn trigger_key() -> Option<(String, std::time::Instant)> {
     LAST_KEY.lock().ok()?.as_ref().filter(|(_, t)| t.elapsed().as_millis() < EDIT_KEY_TRIGGER_MS).cloned()
@@ -907,7 +920,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), edit_key: trigger_key(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
+        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0, opening_timer: Arc::default() }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -940,7 +953,7 @@ impl KicadPane {
     /// key did, remembered so its repeats never drop this hand-in.
     /// `by_key`: a person's act a key may have pressed (an Edit, a tab, Ctrl+Tab); every other asker (a timer, a re-home, Full size by
     /// the mouse, the frame on show closing in KiCad) takes no key, so a key held in Backplane meanwhile still drops the hand-in.
-    pub fn ask_keys(&mut self, by_key: bool) { self.want_keys = true; self.edit_key = if by_key { trigger_key() } else { None }; }
+    pub fn ask_keys(&mut self, by_key: bool) { self.want_keys = true; self.edit_key = asked_key(by_key && !deferred_open(), trigger_key()); }
     /// The person turned to Backplane (`how`) with a hand-in still waiting: dropped, the keyboard stays theirs in Backplane.
     pub fn turned_to_backplane(&mut self, how: TurnedTo) {
         if hand_in_dropped(self.want_keys, self.keys, how) {
@@ -2084,11 +2097,12 @@ mod tests {
         assert!(!super::hand_in_dropped(false, false, super::TurnedTo::Click), "nothing waiting");
     }
     #[test] fn only_an_ask_a_key_may_have_pressed_remembers_the_key() {
-        // the trigger key is read only by_key; a timer's or a mouse-only ask takes none, so a held key in Backplane drops its hand-in
-        *super::LAST_KEY.lock().unwrap() = Some(("backspace".into(), std::time::Instant::now()));
-        assert!(super::trigger_key().is_some(), "an Edit pressed by a key: that key");
-        let none: Option<(&str, u128)> = None;
-        assert!(super::key_turns_to_backplane(none, "backspace").is_some(), "an ask that took no key: Backspace held in the composer drops it");
+        // a fresh key, as when Backspace is held in the composer while a timer, a re-home, Full size or a deferred Edit asks
+        let fresh = || Some(("backspace".to_string(), std::time::Instant::now()));
+        assert_eq!(super::asked_key(false, fresh()), None, "an ask no key pressed remembers no key, however fresh the last one");
+        assert!(super::asked_key(true, fresh()).is_some(), "an Edit pressed by a key: that key");
+        assert!(super::key_turns_to_backplane(None, "backspace").is_some(), "with no key remembered, the held Backspace drops the hand-in");
+        assert!(super::as_deferred_open(super::deferred_open) && !super::deferred_open(), "a deferred open is marked for its length only");
     }
     #[test] fn an_edits_waiting_hand_in_is_dropped_by_typing_in_backplane() {
         // every key, bound ones included (Enter, Backspace, Ctrl+V are the composer's actions): the interceptor runs before them
@@ -3025,7 +3039,7 @@ impl crate::Backplane {
         let key = crate::screens::viewer::shown_key(&thread["viewer"]);
         let has = edit_target(&self.data, &key, &crate::keys::project_of(&self.data, &tid)).is_some() && !test_holding();
         match pending_edit_now(pending.as_ref().map(|(t, at)| (t.as_str(), at.elapsed())), &tid, has) {
-            Some(true) => { *EDIT_PENDING.lock().unwrap() = None; let why = *EDIT_PENDING_WHY.lock().unwrap(); self.kicad_open(None, why, cx); }
+            Some(true) => { *EDIT_PENDING.lock().unwrap() = None; let why = *EDIT_PENDING_WHY.lock().unwrap(); as_deferred_open(|| self.kicad_open(None, why, cx)); }
             Some(false) => { *EDIT_PENDING.lock().unwrap() = None; *EDIT_TAB.lock().unwrap() = None; }
             None => {}
         }
