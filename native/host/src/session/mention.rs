@@ -68,7 +68,7 @@ struct Cand { word: String, about: String, score: u32, same: bool, at: u64 }
 /// What the `$` popup and the chips need of a thread: the folder it works in, its provider, and whether its Claude runs under an account profile.
 pub fn thread_skill_facts(st: &State, thread: &str) -> (String, String, bool) {
     let Some(t) = st.threads.get(thread) else { return (String::new(), String::new(), false) };
-    let cwd = if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() };
+    let cwd = if !t.worktree.is_empty() && st.settings.get(&format!("kicad.main.{thread}")).is_none_or(|s| s != "on") { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() };
     let bound = st.settings.get(&format!("account.thread.{thread}.{}", t.provider)).map_or(false, |r| serde_json::from_str::<Value>(r).ok().map_or(true, |j| !j["id"].as_str().unwrap_or("").is_empty()));
     (cwd, t.provider.clone(), bound)
 }
@@ -80,7 +80,9 @@ pub fn about(st: &State, id: &str, plain: String) -> String { st.settings.get(&f
 pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
     if token(draft).starts_with('$') {
         let (cwd, provider, isolated) = thread_skill_facts(st, here);
-        return crate::agents::skills::rows(&crate::agents::skills::popup_index(&cwd), token(draft), &provider, isolated);
+        let model = st.threads.get(here).map(|t| t.model.as_str()).unwrap_or("");
+        let skills = crate::agents::skills::for_model(&crate::agents::skills::popup_index(&cwd), &provider, model);
+        return crate::agents::skills::rows(&skills, token(draft), &provider, isolated);
     }
     let Some((sig, q)) = typing(token(draft)) else { return vec![] };
     let ms = machines();

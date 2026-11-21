@@ -4772,6 +4772,34 @@ web.composer.voice	Voice dictation	音声入力	Dictado por voz
 web.composer.unsupported	Unsupported image type: {type}	未対応の画像形式です: {type}	Tipo de imagen no compatible: {type}
 web.composer.maximages	At most {max} images per message.	1 件のメッセージに添付できる画像は最大 {max} 枚です。	Como máximo {max} imágenes por mensaje.
 web.logout.failed	Could not confirm sign-out. Try again.	サインアウトを確認できませんでした。もう一度お試しください。	No se pudo confirmar el cierre de sesión. Inténtalo de nuevo.
+thread.context.title	Context & Prompt	コンテキストとプロンプト	Contexto e instrucciones
+thread.context.instructions	Instructions	指示	Instrucciones
+thread.context.system	System Prompt	システムプロンプト	Instrucciones del sistema
+thread.context.skills	Skills	スキル	Habilidades
+thread.context.mcp	Project MCPs	プロジェクトの MCP	MCP del proyecto
+thread.context.mcp.short	MCPs	MCP	MCP
+thread.context.reading	Reading thread context…	スレッドのコンテキストを読み込み中…	Leyendo el contexto del hilo…
+thread.context.none.instructions	No project instructions found.	プロジェクトの指示が見つかりません。	No se encontraron instrucciones del proyecto.
+thread.context.none.mcp	No project MCP configurations found.	プロジェクトの MCP 設定が見つかりません。	No se encontraron configuraciones MCP del proyecto.
+thread.context.native.note	Backplane’s launch prompt. Native files are loaded by the provider.	Backplane が起動時に渡すプロンプトです。ネイティブファイルはプロバイダーが読み込みます。	Instrucciones de inicio de Backplane. El proveedor carga los archivos nativos.
+thread.context.copy	Copy prompt	プロンプトをコピー	Copiar instrucciones
+thread.context.copied	Prompt copied.	プロンプトをコピーしました。	Se copiaron las instrucciones.
+thread.context.base	Backplane	Backplane	Backplane
+thread.context.injected.label	Injected project instructions	追加されたプロジェクトの指示	Instrucciones del proyecto añadidas
+thread.context.index	Available skills index	利用可能なスキルの一覧	Índice de habilidades disponibles
+thread.context.scope.user	User	ユーザー	Usuario
+thread.context.scope.bundled	Bundled	同梱	Incluidas
+thread.context.native	Native	ネイティブ	Nativo
+thread.context.injected	Injected	追加済み	Añadido
+thread.context.cross	Cross-provider	プロバイダー共通	Entre proveedores
+thread.context.explicit	Explicit invocation	明示的な呼び出し	Invocación explícita
+thread.context.untrusted	Untrusted	未承認	Sin aprobar
+thread.context.invalid	Invalid	無効	No válido
+thread.context.trust	Trust and enable	承認して有効にする	Confiar y activar
+thread.context.enable	Enable	有効にする	Activar
+thread.context.disable	Disable	無効にする	Desactivar
+thread.context.size	{bytes} B · ≈{tokens} tokens	{bytes} B・約{tokens}トークン	{bytes} B · ≈{tokens} tokens
+thread.context.unreachable	Could not reach the hub.	ハブに接続できませんでした。	No se pudo conectar con el hub.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7680,4 +7708,7 @@ web.logout.failed	Could not confirm sign-out. Try again.	サインアウトを�
 
     /// web.composer.maximages = At most {max} images per message.
     static func web_composer_maximages(max: String) -> String { f("web.composer.maximages", ["max": max]) }
+
+    /// thread.context.size = {bytes} B · ≈{tokens} tokens
+    static func thread_context_size(bytes: String, tokens: String) -> String { f("thread.context.size", ["bytes": bytes, "tokens": tokens]) }
 }

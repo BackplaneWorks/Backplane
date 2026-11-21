@@ -280,7 +280,11 @@ impl Driver for PiDriver {
         v.extend(kistack_arg(&a.home)); v
     }
     /// BACKPLANE_PI_MCP and BACKPLANE_PI_MODE: what Backplane's extension reads.
-    fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_PCBPARTS".into(), a.pcbparts_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())] }
+    fn env(&self, a: &TurnIn) -> Vec<(String, String)> {
+        let mut env = vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_PCBPARTS".into(), a.pcbparts_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())];
+        env.extend(crate::mcpx::gen::extension_env(&a.mcp.acp, "BACKPLANE_PI_SERVERS"));
+        env
+    }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.turn = Turn { text: a.text.clone(), session: a.session.clone(), ask: asks(&a.runtime) }; self.acp = Acp::default(); vec![init()]
     }
@@ -350,7 +354,7 @@ mod tests {
         assert_eq!(d.argv(&a)[3], "sess-1"); assert_eq!(d.argv(&a).len(), 8);
     }
     // the file is generated from pi by test/agents/prov-pi/gen_ext.py (its source, the Bend hub, is gone: this file is the source now, with pcbparts added); its bytes are pinned
-    #[test] fn the_extension_is_pi_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "83f96d0c0cb7d68d42bd9e0a8948ae5077b3554d62bcb8c53b6465bea0756c42") }
+    #[test] fn the_extension_is_pi_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "e8fcfc311e8ff453d7db88e4f9122cbaec8adebc0b3f64eb7481fbf8cd2fc405") }
 
     #[test] fn a_turn_streams_a_reply_and_ends() {
         let mut d = PiDriver::new(); assert_eq!(d.start(&ti("full-access")), vec![r#"{"id":"1","type":"get_state"}"#]);

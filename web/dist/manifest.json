@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 172579,
+  "totalAssetGzipBytes": 176221,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -11,6 +11,7 @@
     "common.close",
     "common.copy",
     "common.delete",
+    "common.refresh",
     "common.remove",
     "common.save",
     "composer.placeholder",
@@ -100,6 +101,24 @@
     "sheet.rename",
     "sidebar.add.project",
     "sidebar.search.projects",
+    "thread.context.base",
+    "thread.context.copied",
+    "thread.context.copy",
+    "thread.context.disable",
+    "thread.context.enable",
+    "thread.context.index",
+    "thread.context.injected.label",
+    "thread.context.instructions",
+    "thread.context.mcp",
+    "thread.context.native.note",
+    "thread.context.none.instructions",
+    "thread.context.none.mcp",
+    "thread.context.reading",
+    "thread.context.size",
+    "thread.context.skills",
+    "thread.context.system",
+    "thread.context.title",
+    "thread.context.trust",
     "thread.new",
     "tools.pinned",
     "tools.retry",
@@ -168,10 +187,10 @@
     "web.pair.subtitle",
     "web.pair.unreachable"
   ],
-  "i18nSubsetSha256": "38a5aa169aa24805f1fed0da8b6fbc45af2f985fe9081a3bab809b2a5226acc6",
+  "i18nSubsetSha256": "69725b96676d71f43196609aaa8ac5ff48f24a97663c94077a72c3624be5961f",
   "inputs": {
     "web/src/addproject.ts": "06a7ff3e13cd78d993ebca7f638d5d623da06c0099186ad534bae8f184dbe44f",
-    "web/src/app.ts": "f04a51107c373383ebdffa4c0d88ded6e2379edf22f0770613e440df5b79560b",
+    "web/src/app.ts": "0ece95ecbbb502b1f09b6073209c1c38d58161d0304d43bbd30ab63b2506ca20",
     "web/src/chat.ts": "f9a496a25d0a71e1ffb0da2ce53aba60eeb253d67084aa836fc7270e000a7ac6",
     "web/src/clone-model.ts": "d265df49436e14f415bbeb2a271ffa3552f9163be62bdc0158cecc10c3cdae45",
     "web/src/composer.ts": "11e5b7e09743821f83c05201cebd8a9fbfbef0ce3c38e3f3a22000a4fabe1976",
@@ -190,9 +209,10 @@
     "web/src/qr.ts": "04b634557884b8f512a7b03ad9638c1c15a299ffaea0103d1bdeec6338d9b9d3",
     "web/src/rail.ts": "5fb391094992578cb6f54d35d53559951a584c43fcfc2ee6f4f2cc3897acfe46",
     "web/src/settings.ts": "7b4d8be26fabc6c2a0b8af94a64572a0e3c1e589bf079bfa58c8985a8acd984a",
-    "web/src/shell.css": "4fbaa672080d666bf43fa9d3eec89cccf0b06ae75740fd3baaba8217778d0b9c",
+    "web/src/shell.css": "a1ef4f799cc6a25c22c1bc0a64706a4735f0fcc8e549889c40f6fc8599aee17c",
     "web/src/sidebar.ts": "a75a47cfe576f4d637fcddee6981ac597d1e6ab79c1046d241375a3213e03909",
     "web/src/swarm-need.ts": "503bbf5ffe0389f068847571c792321b0ad5c8d26a18c73b8e41c0a8989e227f",
+    "web/src/thread-context.ts": "b9fbd5b3ef0b1357b5a4444a1e9a0ac0606afe1c8a5377c4777752e918af0ac2",
     "web/src/viewers/browser-input.ts": "2be7672b8bfaded19f385ef56196793b9125130bffee7ac70afd493a3a91a9ab",
     "web/src/viewers/browser.ts": "44ba909e0e7d4c2d31672c97d41ad7e8039a8654e9929c2ba2650c7581f398ba",
     "web/src/viewers/cbor.ts": "0d2778a46998ab0c22c607dbca757494ad2ff6640b43a833356d227c09b80483",
@@ -218,9 +238,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 253737,
-      "gzipBytes": 72561,
-      "sha256": "e60f4f5664ab848583641d31ae060203a2e5f8f8b7ac4d612b62da90ee119ec5"
+      "bytes": 262037,
+      "gzipBytes": 74997,
+      "sha256": "303dd9435d4345a553d3fa24d777d3e802e3e413c81a6ba5f8bbb60f085cd24b"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -238,14 +258,14 @@
       "sha256": "123b6a27f255d339b505c8fd83609674f0bddf9b46c0e907fce23befa96b1eec"
     },
     "assets/pair.js": {
-      "bytes": 34914,
-      "gzipBytes": 11433,
-      "sha256": "a820e5c76e88dc79ace136fcbbcce483cac7579906c4bec776233f05a049989e"
+      "bytes": 38015,
+      "gzipBytes": 12198,
+      "sha256": "245dbc584241743e229c382512534c6d3da10571a5a325767e07c9ab63823deb"
     },
     "assets/style.css": {
-      "bytes": 56184,
-      "gzipBytes": 10286,
-      "sha256": "793b208b97d22f0c865b6a44266029a26de8a6416f2d237d69222005a131f668"
+      "bytes": 58368,
+      "gzipBytes": 10727,
+      "sha256": "0badc1c201f166b2922120ad78b7f2cae8969be606b736c6ba6e2f957a9b7359"
     },
     "assets/terminal.js": {
       "bytes": 296616,

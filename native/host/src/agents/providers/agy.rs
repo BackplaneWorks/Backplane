@@ -455,7 +455,11 @@ impl Driver for AgyDriver {
     /// Agx.write before the run: the runner script, renamed into place, so a turn starting from it never sees half of it. Without the pinned agent,
     /// the person's agy CLI if there is one, with Backplane's MCP server kept in its mcp_config.json.
     fn prepare(&mut self, a: &TurnIn) -> Result<(), String> {
-        if !pinned(&a.home) { if let Some(p) = super::agy_cli::find() {
+        let standalone = !pinned(&a.home);
+        if let Some(path) = crate::mcpx::project::ambient_conflict(&a.cwd, "antigravity", standalone) {
+            return Err(format!("Antigravity can start project MCP servers outside Backplane’s approval. This runtime cannot safely open {}", path.display()))
+        }
+        if standalone { if let Some(p) = super::agy_cli::find() {
             let home = std::path::PathBuf::from(crate::plat::dirs::home_or_empty());
             if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home), !a.pcbparts_url.is_empty()) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
             self.bases = bases_from(&std::fs::read_to_string(bases_path(&a.home)).unwrap_or_default()); // the probe's folded list: model + effort -> agy's variant

@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 /// MspTurn: what a turn needs. `nonce` is the turn's gen: Muse refuses a command id it has seen, in any session.
 #[derive(Clone, Debug, Default)]
-pub struct MspTurn { pub cwd: String, pub mcp: String, /** the built-in parts search's URL; empty when it is off */ pub pcbparts: String, pub prompt: String, pub text: String, pub session: String, pub mode: String, pub effort: String, pub nonce: String, pub model: String }
+pub struct MspTurn { pub cwd: String, pub mcp: String, /** the built-in parts search's URL; empty when it is off */ pub pcbparts: String, pub prompt: String, pub text: String, pub session: String, pub mode: String, pub effort: String, pub nonce: String, pub model: String, pub servers: Value }
 
 /// AcpOut: lines to write to Muse, shapes for the log, approval requests for the person (the raw request line each).
 #[derive(Debug, Default)]
@@ -41,6 +41,20 @@ pub fn init() -> String {
 fn config(t: &MspTurn) -> Value {
     let mut m = json!({"backplane":{"transport":"streamableHttp","url":t.mcp,"mode":"optional"}});
     if !t.pcbparts.is_empty() { m["pcbparts"] = json!({"transport":"streamableHttp","url":t.pcbparts,"mode":"optional"}) }
+    let pairs = |v: &Value| -> Value {
+        Value::Object(v.as_array().into_iter().flatten().filter_map(|entry| {
+            Some((entry["name"].as_str()?.to_string(), entry["value"].clone()))
+        }).collect())
+    };
+    for server in t.servers.as_array().into_iter().flatten() {
+        let Some(name) = server["name"].as_str().filter(|n| n.starts_with("project-")) else { continue };
+        if server["command"].is_string() {
+            m[name] = json!({"transport":"stdio","command":server["command"],"args":server["args"],
+                "env":pairs(&server["env"]),"mode":"optional"});
+        } else if server["type"] == "http" {
+            m[name] = json!({"transport":"streamableHttp","url":server["url"],"headers":pairs(&server["headers"]),"mode":"optional"});
+        }
+    }
     json!({"mcpServers": m})
 }
 /// Msp.open: a new session or the thread's own.
@@ -186,7 +200,7 @@ pub fn mode(runtime: &str) -> &'static str { mode_k(match runtime { "approval-re
 mod tests {
     use super::*;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
-    fn turn(sid: &str) -> MspTurn { MspTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), pcbparts: "https://pcbparts.dev/mcp".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), mode: "promptUnmatched".into(), effort: "".into(), nonce: "1791825557-42".into(), model: "".into() } }
+    fn turn(sid: &str) -> MspTurn { MspTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), pcbparts: "https://pcbparts.dev/mcp".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), mode: "promptUnmatched".into(), effort: "".into(), nonce: "1791825557-42".into(), model: "".into(), servers: Value::Null } }
     fn turn_hi(sid: &str) -> MspTurn { MspTurn { mode: "allowAll".into(), effort: "high".into(), nonce: "1791825557-43".into(), ..turn(sid) } }
     fn m(l: &str) -> String { j(l)["method"].as_str().unwrap_or("").to_string() }
     fn p(l: &str) -> Value { j(l)["params"].clone() }

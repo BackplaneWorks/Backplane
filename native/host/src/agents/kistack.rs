@@ -47,7 +47,7 @@ pub fn describe(d: &Path) -> Copy {
     let rev = std::fs::read_to_string(d.join("REVISION")).map(|s| s.trim().to_string()).unwrap_or_default();
     let mut skills: Vec<(String, String, String)> = std::fs::read_dir(d.join("skills")).into_iter().flatten().flatten().filter_map(|e| {
         let p = e.path().join("SKILL.md"); let t = std::fs::read_to_string(&p).ok()?;
-        let s = crate::agents::inputs::parse_skill(&t, &e.file_name().to_string_lossy(), &p.to_string_lossy()); Some((s.name, s.description, s.path))
+        let s = crate::agents::skills::parse_skill(&t, &e.file_name().to_string_lossy(), &p.to_string_lossy()); Some((s.name, s.description, s.path))
     }).collect();
     skills.sort();
     Copy { dir: d.to_string_lossy().into_owned(), pinned: rev == REV, rev, skills }
@@ -103,9 +103,9 @@ mod tests {
         std::fs::write(&stale, "---\nname: kicad-schematic\ndescription: an older copy\n---\nold\n").unwrap();
         let ss = crate::agents::skills::scan_all(&env, &home.to_string_lossy());
         let f = crate::agents::skills::lookup(&ss, "kicad-schematic").expect("listed");
-        assert_eq!((f.group.as_str(), f.kind), ("Backplane", crate::agents::skills::Kind::Hub), "the pinned copy wins the name");
+        assert_eq!((f.group.as_str(), f.kind), ("Agents · yours", crate::agents::skills::Kind::Agents), "the user copy wins the name");
         assert_eq!(ss.iter().filter(|f| f.name == "kicad-schematic" && f.kind == crate::agents::skills::Kind::Hub).count(), 1, "one entry, not one per root");
-        assert!(crate::agents::skills::prepare("$kicad-schematic draw it", &ss, "codex", false).replace('\\', "/").contains("hub/kistack/skills/schematic/SKILL.md"), "Codex is told the file");
+        assert!(crate::agents::skills::prepare("$kicad-schematic draw it", &ss, "codex", false).replace('\\', "/").contains(".agents/skills/schematic/SKILL.md"), "Codex is told the user file");
         let _ = std::fs::remove_dir_all(&h);
     }
 }

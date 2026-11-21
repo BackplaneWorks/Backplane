@@ -16,6 +16,6 @@
   "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/home/attachments",
   "--settings",
   "{\"fastMode\":false}",
-  "--mcp-config",
+  "--strict-mcp-config", "--mcp-config",
   "{\"mcpServers\":{\"backplane\":{\"type\":\"http\",\"url\":\"http://127.0.0.1:3845/mcp/t1700000001-2.1793846406-157?k=REDACTED\"},\"pcbparts\":{\"type\":\"http\",\"url\":\"https://pcbparts.dev/mcp\"}}}"
 ]
