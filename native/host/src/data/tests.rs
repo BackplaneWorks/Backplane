@@ -1189,7 +1189,7 @@ async fn socket_with_browser_drops_in_flight_handle_reply_when_disabled_mid_call
 }
 
 #[tokio::test]
-async fn viewer_rail_omits_split_for_browser_only() {
+async fn viewer_rail_includes_split_for_browser_and_native() {
     let base = crate::plat::tmp::dir("rail-principal-split");
     let proj = base.join("proj");
     std::fs::create_dir_all(&proj).unwrap();
@@ -1207,7 +1207,7 @@ async fn viewer_rail_omits_split_for_browser_only() {
     assert_eq!(rn["ok"], true, "{rn}");
     assert!(rn["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "split"), "native/phone rail must keep split: {rn}");
 
-    // Browser principal omits `split` in viewer.rail.
+    // Browser principal also receives `split` now that viewer.layout exists on data/1.
     let (reg, _routes) = crate::net::start::open(&hub.hub.cfg.home, "127.0.0.1", 0).unwrap();
     let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Rail Browser").unwrap();
     assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
@@ -1222,7 +1222,7 @@ async fn viewer_rail_omits_split_for_browser_only() {
     bws.send(Message::Text(json!({"id":2,"m":"viewer.rail","p":{"thread":"tr","page":"board"}}).to_string().into())).await.unwrap();
     let rb: Value = serde_json::from_str(&tokio::time::timeout(Duration::from_secs(2), bws.next()).await.unwrap().unwrap().unwrap().into_text().unwrap()).unwrap();
     assert_eq!(rb["ok"], true, "{rb}");
-    assert!(!rb["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "split"), "browser rail must omit split: {rb}");
+    assert!(rb["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "split"), "browser rail must include split now that viewer.layout exists: {rb}");
     assert!(rb["result"]["rail"].as_array().unwrap().iter().any(|x| x["id"] == "board"), "browser rail keeps other entries: {rb}");
     drop(bws);
     let _ = tokio::time::timeout(Duration::from_secs(1), srv).await;

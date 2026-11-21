@@ -551,7 +551,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
             "viewer.rail" => {
                 use crate::present::rail::{rail, RailInput};
                 let (page, diff) = (s(p, "page"), p["diff"] == true);
-                let (mut items, has) = if machines::is_far(th) {
+                let (items, has) = if machines::is_far(th) {
                     machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
                     (
                         rail(RailInput { board: true, schematic: true, mech: true, gerbers: false, simulation: false, altium: false, page, diff, present: &[] }),
@@ -565,12 +565,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                         json!({"board": src.board, "schematic": src.schematic, "mech": src.mech, "gerbers": src.gerbers}),
                     )
                 };
-                // Goes away when viewer.layout exists on data/1: browser clients omit Split while phones keep it.
-                if is_browser {
-                    if let Some(arr) = items.as_array_mut() {
-                        arr.retain(|it| it["id"].as_str() != Some("split"));
-                    }
-                }
+                let _ = is_browser;
                 Ok(json!({"rail": items, "has": has, "mode": "viewer"}))
             }
             "viewer.follow" => {
