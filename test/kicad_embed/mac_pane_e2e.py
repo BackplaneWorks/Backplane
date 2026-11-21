@@ -529,6 +529,19 @@ try:
             print(f'INFO KiCad frame lookup: pid {kp}; client frame {fr} -> {[(int(w.get("kCGWindowOwnerPID", 0)), bounds(w), w.get("kCGWindowIsOnscreen")) for w in hit]}; '
                   f'KiCad windows {[(int(w.get("kCGWindowNumber", 0)), int(w.get("kCGWindowLayer", 0)), bounds(w), bool(w.get("kCGWindowIsOnscreen"))) for w in mine][:8]}', flush=True)
             if hit and hit[0].get('kCGWindowIsOnscreen'): return bounds(hit[0])
+            # the macos-15 runner lists KiCad's embedded frame as off screen while the client has it placed and shown over the pane (run
+            # 44854731665: kicad_place visible, frame 34; the client's own kicad_unmapped_check saw no frame windows either): click the
+            # pane as a person does, at the client's latest kicad_place rect, only while Backplane's window is on screen and the frame shown
+            pl = None
+            for l in client_log().splitlines():
+                if l.startswith('GPUI_LOG {"kicad_place"'):
+                    try: pl = json.loads(l[9:])
+                    except Exception: pass
+            ours = next((w for w in wins() if w[0] == cw[0]), None)
+            if pl and pl.get('visible') and pl.get('frame') and ours:
+                sc = backing_scale() or 1.0; x, y, w_, h_ = (v / sc for v in pl['kicad_place']); b = ours[3]
+                print(f'INFO KiCad frame lookup: clicking the pane at the client\'s kicad_place {pl["kicad_place"]} (frame {pl.get("frame")}), the window list has no on-screen KiCad frame', flush=True)
+                return [b[0] + x, b[1] + 28 + y, w_, h_]
             return None
         def frame_over_pane():
             order = wins(); ours = next((i for i, w in enumerate(order) if w[0] == cw[0]), None)
