@@ -240,13 +240,21 @@ pub fn start(hub: &Arc<Hub>) {
                 .unwrap_or(Value::Null);
             let home_link = home["link"].as_str().unwrap_or("");
             if !home_link.is_empty() {
-                // A retired source has no uid to sync, but its clients still need the home's presence.
+                // A retired source has no uid to sync, but its clients still need the home's presence and shared settings.
                 let _ = hub.far_raw_paired(home_link, "home.state", &json!({})).await;
+                if let Err(e) = crate::net::settings_sync::sync_with(&hub, home_link).await {
+                    eprintln!("settings: {e}");
+                }
             }
             for link in links {
                 if let Err(e) = sync_with(&hub, &link, seen.entry(link.clone()).or_default()).await
                 {
                     eprintln!("bots: {e}");
+                }
+                if link != home_link {
+                    if let Err(e) = crate::net::settings_sync::sync_with(&hub, &link).await {
+                        eprintln!("settings: {e}");
+                    }
                 }
             }
         }
