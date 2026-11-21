@@ -2,7 +2,7 @@
 // Matches docs/MANAGEMENT.md, DataMgmt.kt, and native/gpui/src/screens/mgmt*.rs.
 // All tab order, badges, counts, and rows come from the hub's `mgmt.*` and `kicad.checks.*`
 // info frames; clicking a tab calls `mgmt.panel { project, toggle }` and opens the panel.
-import { trs } from "./i18n";
+import { t, trs } from "./i18n";
 import {
   abbrev,
   badgeOf,
@@ -295,8 +295,8 @@ export class MgmtStrip {
       closeBtn.type = "button";
       closeBtn.className = "icon bp-mgmt-close";
       closeBtn.textContent = "×";
-      closeBtn.title = "Close panel";
-      closeBtn.setAttribute("aria-label", "Close management panel");
+      closeBtn.title = t("gpui.mgmt.close", "Close the panel");
+      closeBtn.setAttribute("aria-label", t("gpui.mgmt.close", "Close the panel"));
       closeBtn.setAttribute("data-testid", "mgmt-close");
       closeBtn.addEventListener("click", () => this.closePanel());
       stripFrag.appendChild(closeBtn);
@@ -436,7 +436,7 @@ export class MgmtStrip {
       if (l.dnp) {
         const dnp = document.createElement("span");
         dnp.className = "bp-mgmt-pill";
-        dnp.textContent = "DNP";
+        dnp.textContent = t("gpui.mgmt.bom.dnp", "DNP");
         top.appendChild(dnp);
       } else {
         const st = stockSummary(l.stock);
@@ -475,7 +475,7 @@ export class MgmtStrip {
         mpnEl.textContent = l.mpn;
       } else if (started && !l.dnp) {
         mpnEl.className += " bp-tone-warn";
-        mpnEl.textContent = "no MPN";
+        mpnEl.textContent = t("gpui.mgmt.bom.nompn", "no MPN");
       }
       sub.append(descEl, mpnEl);
       if (!l.dnp && typeof l.stock?.price === "number") {
@@ -628,7 +628,7 @@ export class MgmtStrip {
     const allBtn = document.createElement("button");
     allBtn.type = "button";
     allBtn.className = "bp-mgmt-btn" + (this.checksSource === "" ? " active" : "");
-    allBtn.textContent = "All";
+    allBtn.textContent = t("gpui.mgmt.checks.all", "All");
     allBtn.addEventListener("click", () => {
       this.checksSource = "";
       this.render();
@@ -652,7 +652,7 @@ export class MgmtStrip {
     const runBtn = document.createElement("button");
     runBtn.type = "button";
     runBtn.className = "bp-mgmt-btn";
-    runBtn.textContent = "Run";
+    runBtn.textContent = t("gpui.mgmt.checks.run", "Run");
     runBtn.addEventListener("click", () => {
       const gen = this.watchGen;
       const proj = this.project;
@@ -720,7 +720,7 @@ export class MgmtStrip {
               const fixBtn = document.createElement("button");
               fixBtn.type = "button";
               fixBtn.className = "bp-mgmt-btn accent";
-              fixBtn.textContent = "Fix with agent";
+              fixBtn.textContent = t("gpui.mgmt.checks.fix", "Fix with agent");
               fixBtn.addEventListener("click", (e) => {
                 e.stopPropagation();
                 const start: ChecksFixSnapshot = {
@@ -862,14 +862,14 @@ export class MgmtStrip {
         const detail = document.createElement("div");
         detail.className = "bp-mgmt-row-sub bp-mgmt-faint";
         if (this.lifePartLoading) {
-          detail.textContent = "Loading history…";
+          detail.textContent = t("gpui.mgmt.life.reading", "Reading its history…");
         } else if (this.lifePartSamples && this.lifePartSamples.length > 0) {
           const last = this.lifePartSamples[this.lifePartSamples.length - 1];
           detail.textContent = `${this.lifePartSamples.length} samples · latest ${last.at ? formatUtcDay(last.at) : ""}` +
             (typeof last.stock === "number" ? ` · stock ${abbrev(last.stock)}` : "") +
             (typeof last.price === "number" ? ` · ${money(last.price)}` : "");
         } else {
-          detail.textContent = "No history samples yet.";
+          detail.textContent = t("gpui.mgmt.life.nopart", "No reading of this part yet.");
         }
         row.appendChild(detail);
       }
@@ -947,14 +947,14 @@ export class MgmtStrip {
     if (!d.live) {
       const saved = document.createElement("span");
       saved.className = "bp-mgmt-faint";
-      saved.textContent = "saved plan";
+      saved.textContent = t("gpui.mgmt.plan.saved", "saved plan");
       head.appendChild(saved);
     }
     if (awaiting > 0) {
       const okAll = document.createElement("button");
       okAll.type = "button";
       okAll.className = "bp-mgmt-btn";
-      okAll.textContent = "Approve all";
+      okAll.textContent = t("gpui.mgmt.plan.all", "Approve all");
       okAll.addEventListener("click", () => sendPlan("plan.approve", { layer: "", ids: [], approve: true }));
       head.appendChild(okAll);
     }
@@ -962,7 +962,7 @@ export class MgmtStrip {
       const stop = document.createElement("button");
       stop.type = "button";
       stop.className = "bp-mgmt-btn";
-      stop.textContent = "Stop routing";
+      stop.textContent = t("gpui.mgmt.plan.stop", "Stop routing");
       stop.addEventListener("click", () => sendPlan("plan.stop", {}));
       head.appendChild(stop);
     }
@@ -1002,12 +1002,12 @@ export class MgmtStrip {
         const okLayer = document.createElement("button");
         okLayer.type = "button";
         okLayer.className = "bp-mgmt-btn";
-        okLayer.textContent = "Approve layer";
+        okLayer.textContent = t("gpui.mgmt.plan.layer", "Approve layer");
         okLayer.addEventListener("click", () => sendPlan("plan.approve", { layer: l.layer, ids: [], approve: true }));
         const rejLayer = document.createElement("button");
         rejLayer.type = "button";
         rejLayer.className = "bp-mgmt-btn";
-        rejLayer.textContent = "Reject";
+        rejLayer.textContent = t("gpui.mgmt.plan.reject", "Reject");
         rejLayer.addEventListener("click", () => sendPlan("plan.approve", { layer: l.layer, ids: [], approve: false }));
         gh.append(okLayer, rejLayer);
       }
@@ -1084,14 +1084,14 @@ export class MgmtStrip {
     head.className = "bp-mgmt-head";
     const title = document.createElement("span");
     title.className = "bp-mgmt-strong";
-    title.textContent = "The fab";
+    title.textContent = t("gpui.mgmt.fab.thefab", "The fab");
     const meta = document.createElement("span");
     meta.className = "bp-dim bp-mgmt-flex1";
     meta.textContent = `rev ${d.rev ?? 0}${d.updated ? ` · ${d.updated}` : ""}${d.board ? ` · ${d.board}` : ""} · ${tierWords(d.tier ?? "")}`;
     const refreshBtn = document.createElement("button");
     refreshBtn.type = "button";
     refreshBtn.className = "bp-mgmt-btn";
-    refreshBtn.textContent = "Refresh";
+    refreshBtn.textContent = t("gpui.mgmt.fab.refresh", "Refresh");
     refreshBtn.addEventListener("click", () => sendFab("refresh"));
     head.append(title, meta, refreshBtn);
     wrap.appendChild(head);
@@ -1126,7 +1126,7 @@ export class MgmtStrip {
       const fBtn = document.createElement("button");
       fBtn.type = "button";
       fBtn.className = "bp-mgmt-btn";
-      fBtn.textContent = "Findings";
+      fBtn.textContent = t("gpui.mgmt.fab.findings", "Findings");
       fBtn.addEventListener("click", () => this.togglePanel("checks"));
       rvLine.appendChild(fBtn);
     }
@@ -1134,7 +1134,7 @@ export class MgmtStrip {
       const rBtn = document.createElement("button");
       rBtn.type = "button";
       rBtn.className = "bp-mgmt-btn";
-      rBtn.textContent = "Review";
+      rBtn.textContent = t("gpui.mgmt.fab.reviewbtn", "Review");
       rBtn.addEventListener("click", () => sendFab("review"));
       rvLine.appendChild(rBtn);
     }
@@ -1142,7 +1142,7 @@ export class MgmtStrip {
       const jBtn = document.createElement("button");
       jBtn.type = "button";
       jBtn.className = "bp-mgmt-btn";
-      jBtn.textContent = "Datasheets";
+      jBtn.textContent = t("gpui.mgmt.fab.judge", "Datasheets");
       jBtn.addEventListener("click", () => { if (rv.judge) this.cb.onSendText(rv.judge); });
       rvLine.appendChild(jBtn);
     }
@@ -1188,7 +1188,7 @@ export class MgmtStrip {
       const btn = document.createElement("button");
       btn.type = "button";
       btn.className = "bp-mgmt-btn";
-      btn.textContent = "Apply";
+      btn.textContent = t("gpui.mgmt.fab.apply", "Apply");
       btn.addEventListener("click", () => sendFab("apply", { key: s.key }));
       sl.append(st, btn);
       sr.appendChild(sl);
@@ -1211,7 +1211,7 @@ export class MgmtStrip {
         const btn = document.createElement("button");
         btn.type = "button";
         btn.className = "bp-mgmt-btn";
-        btn.textContent = "Use";
+        btn.textContent = t("gpui.mgmt.fab.use", "Use");
         btn.addEventListener("click", () => sendFab("stackup", { id }));
         stLine.appendChild(btn);
       }
@@ -1227,11 +1227,11 @@ export class MgmtStrip {
       chHead.className = "bp-mgmt-row-line";
       const chLbl = document.createElement("span");
       chLbl.className = "bp-mgmt-flex1 bp-tone-warn";
-      chLbl.textContent = "Changed since you last looked";
+      chLbl.textContent = t("gpui.mgmt.fab.changed", "Changed since you last looked");
       const seenBtn = document.createElement("button");
       seenBtn.type = "button";
       seenBtn.className = "bp-mgmt-btn";
-      seenBtn.textContent = "Seen";
+      seenBtn.textContent = t("gpui.mgmt.fab.seen", "Seen");
       seenBtn.addEventListener("click", () => sendFab("seen"));
       chHead.append(chLbl, seenBtn);
       chRow.appendChild(chHead);
@@ -1251,16 +1251,16 @@ export class MgmtStrip {
       lh.className = "bp-mgmt-group-head";
       const c0 = document.createElement("span");
       c0.className = "bp-mgmt-flex1";
-      c0.textContent = "Limit";
+      c0.textContent = t("gpui.mgmt.fab.limit", "Limit");
       const c1 = document.createElement("span");
       c1.className = "bp-mgmt-col";
-      c1.textContent = "Base price";
+      c1.textContent = t("gpui.mgmt.fab.free", "Base price");
       const c2 = document.createElement("span");
       c2.className = "bp-mgmt-col";
-      c2.textContent = "Costs more";
+      c2.textContent = t("gpui.mgmt.fab.extra", "Costs more");
       const c3 = document.createElement("span");
       c3.className = "bp-mgmt-col bp-mgmt-col-read";
-      c3.textContent = "Read";
+      c3.textContent = t("gpui.mgmt.fab.readcol", "Read");
       lh.append(c0, c1, c2, c3);
       listEl.appendChild(lh);
 
@@ -1306,7 +1306,10 @@ export class MgmtStrip {
 
       const foot = document.createElement("div");
       foot.className = "bp-mgmt-note bp-mgmt-faint";
-      foot.textContent = "* worked out from the fab's page. Dimmed: the rigid board's value. A date opens the source page.";
+      foot.textContent = t(
+        "gpui.mgmt.fab.derived",
+        "* worked out from the fab's page. Dimmed: the rigid board's value. A date opens the source page.",
+      );
       listEl.appendChild(foot);
     }
 
