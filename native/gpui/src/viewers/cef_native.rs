@@ -52,11 +52,19 @@ mod imp {
         let id = c.generate_id().ok()?;
         c.create_window(scr.root_depth, id, parent, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
             &CreateWindowAux::new().background_pixel(scr.white_pixel).border_pixel(scr.black_pixel).colormap(scr.default_colormap)).ok()?.check().ok()?;
-        let _ = c.flush(); containers().lock().unwrap().insert(id); watch_presses(); Some(Host::X11(id))
+        let _ = c.flush(); drop(g);
+        containers().lock().unwrap().insert(id, parent); watch_presses();
+        // a native child in the client's window like a KiCad pane's: while it is on screen (place_in) Backplane's keyboard is on the window's
+        // focus proxy, not the window itself, or core X gives every key typed with the pointer over the page to Chromium (#1505's fault)
+        nc::adopt_child(parent as u64, id as u64);
+        Some(Host::X11(id))
     }
     pub fn close(_w: u64) {}
     /// Every container of ours (a tab's `container`), until it is destroyed: what a recorded press is matched against.
-    fn containers() -> &'static Mutex<std::collections::HashSet<u32>> { static C: OnceLock<Mutex<std::collections::HashSet<u32>>> = OnceLock::new(); C.get_or_init(Default::default) }
+    /// (each with the client's top-level it is in)
+    fn containers() -> &'static Mutex<std::collections::HashMap<u32, u32>> { static C: OnceLock<Mutex<std::collections::HashMap<u32, u32>>> = OnceLock::new(); C.get_or_init(Default::default) }
+    fn top_of(frame: u64) -> Option<u64> { containers().lock().unwrap().get(&(frame as u32)).map(|t| *t as u64) }
+    use crate::viewers::native_child as nc;
     /// The person's last press on the display that was inside a container of ours: when, and which container. Nothing else of a press is kept
     /// (no position, no other window). Taken by the one focus it explains (`pressed_in`).
     static PRESS: Mutex<Option<(std::time::Instant, u32)>> = Mutex::new(None);
@@ -89,7 +97,7 @@ mod imp {
                 let at = std::time::Instant::now(); *PRESS.lock().unwrap() = Some((at, 0));
                 let ours = containers().lock().unwrap().clone();
                 let (mut w, mut hit) = (root, None);
-                for _ in 0..16 { let Some(r) = c.query_pointer(w).ok().and_then(|r| r.reply().ok()) else { break }; if r.child == x11rb::NONE { break } w = r.child; if ours.contains(&w) { hit = Some(w); break } }
+                for _ in 0..16 { let Some(r) = c.query_pointer(w).ok().and_then(|r| r.reply().ok()) else { break }; if r.child == x11rb::NONE { break } w = r.child; if ours.contains_key(&w) { hit = Some(w); break } }
                 *PRESS.lock().unwrap() = hit.map(|h| (at, h));
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_press_in_page": hit.is_some()})); }
             }).ok();
@@ -112,9 +120,10 @@ mod imp {
         c.query_pointer(root).ok().and_then(|r| r.reply().ok()).map_or(false, |p| u16::from(p.mask) & (u16::from(KeyButMask::BUTTON1) | u16::from(KeyButMask::BUTTON2) | u16::from(KeyButMask::BUTTON3)) != 0)
     }
     /// The container gone (its browser closed).
-    pub fn destroy(frame: u64) { containers().lock().unwrap().remove(&(frame as u32)); let Some(g) = conn() else { return }; let c = g.as_ref().unwrap(); let _ = c.destroy_window(frame as u32); let _ = c.flush(); }
+    pub fn destroy(frame: u64) { if let Some(t) = containers().lock().unwrap().remove(&(frame as u32)) { nc::release_child(t as u64, frame); } let Some(g) = conn() else { return }; let c = g.as_ref().unwrap(); let _ = c.destroy_window(frame as u32); let _ = c.flush(); }
     /// The container (and Chromium's window filling it) over the pane at `r`, mapped; or unmapped.
     pub fn place_in(frame: u64, w: u64, r: Option<R>) {
+        if let Some(t) = top_of(frame) { nc::note_pane_on_screen(t, frame, r.is_some()); }
         { let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
           if let Some(r) = r { let _ = c.configure_window(frame as u32, &ConfigureWindowAux::new().x(r.x).y(r.y).width(r.w.max(1) as u32).height(r.h.max(1) as u32));
                                if w != 0 { let _ = c.configure_window(w as u32, &ConfigureWindowAux::new().x(0).y(0).width(r.w.max(1) as u32).height(r.h.max(1) as u32)); } }
@@ -148,10 +157,8 @@ mod imp {
         if viewable { let _ = c.set_input_focus(InputFocus::PARENT, t, x11rb::CURRENT_TIME); let _ = c.flush(); }
     }
     /// The keyboard back to the client's window.
-    pub fn focus_host(h: Host) {
-        let Host::X11(w) = h else { return }; let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); let _ = c.flush();
-    }
+    /// (to its focus proxy while a native child is on screen there: native_child `focus_home`)
+    pub fn focus_host(h: Host) { if let Host::X11(w) = h { nc::focus_home(w as u64) } }
     /// Where the child is (its geometry in the parent) and whether it is mapped: what the e2e checks.
     pub fn geometry(w: u64) -> Option<(R, bool)> {
         let g = conn()?; let c = g.as_ref().unwrap();
