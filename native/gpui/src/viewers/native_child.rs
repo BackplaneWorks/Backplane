@@ -308,7 +308,7 @@ mod imp {
     fn watch_focus(top: u32) {
         let Some(watcher) = WATCHER.get_or_init(|| match FocusWatcher::start() {
             Ok(watcher) => Some(watcher),
-            Err(error) => { watcher_error("failed to start", error); None }
+            Err(error) => { watcher_error("failed to start", error); None } // i18n-ok: structured diagnostic log
         }) else { return };
         let result = watcher.connection.change_window_attributes(top,
             &ChangeWindowAttributesAux::new().event_mask(EventMask::FOCUS_CHANGE));
@@ -316,7 +316,7 @@ mod imp {
             Ok(request) => request.check().err().map(|e| e.to_string()),
             Err(error) => Some(error.to_string()),
         };
-        if let Some(error) = error { watcher_error("could not subscribe", error); }
+        if let Some(error) = error { watcher_error("could not subscribe", error); } // i18n-ok: structured diagnostic log
         // The checked request can queue events in x11rb while draining the socket.
         let _ = watcher.wake.send(&[0]);
     }
