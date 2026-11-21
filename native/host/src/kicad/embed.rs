@@ -1227,6 +1227,11 @@ pub fn bound_check(s: &Session, job: Option<&str>) -> BoundStep {
     if !hubs_own && !s.close_answered && left > 0 { return BoundStep::Wait(format!("{left} frame(s) not closed yet, and its Close had no answer")) }
     BoundStep::Kill
 }
+/// The project whose KiCad, on socket `sock` (its API or its events stream), is closing (`exiting` answered, or its own Quit with every
+/// frame closed): the hub sends it nothing more.
+pub fn quiet_for(sessions: &HashMap<String, Session>, sock: &str) -> Option<String> {
+    sessions.values().find(|s| s.closing && s.is_live() && !sock.is_empty() && (s.sock == sock || s.events_sock == sock)).map(|s| s.pro.clone())
+}
 /// (B) Whether a closing session's process `pid` has ended (`alive` false) while the session still runs it: its exit was not reported
 /// (ChildExited waits on its output pipes) and is recorded by the hub.
 pub fn exit_unreported(s: &Session, pid: u32, alive: bool) -> bool { !alive && s.closing && s.is_live() && s.pid == pid }
@@ -3100,6 +3105,15 @@ impl Actor {
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() && !ty.ends_with("NextEvents") && !ty.ends_with("Ping") {
                     let pid = self.sessions.values().find(|s| s.sock == sock).map_or(0, |s| s.pid);
                     eprintln!("kicad embed: request {ty} kind={} client={client} rss={}MB (at {})", msg["kind"].as_str().unwrap_or(""), super::mem::proc_mb(pid).map_or(0, |m| m.0), ipc::now_ms());
+                }
+                // a KiCad that answered `exiting`, or whose socket went with every frame closed (`closing`), is sent no request at all (no
+                // poll, no GetFrames, no Ping, no events read) until its process is gone or the bound ends it: a request arriving while its API
+                // server stops is what hangs its exit (a lost wake-up in KiCad's own Stop, Windows bp.13.3 2/30 discard-closes:
+                // qa-logs-bp134/win-hang-dumps/RESULT.md)
+                if let Some(pro) = quiet_for(&self.sessions, &sock) {
+                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed: {pro}: {ty} not sent: KiCad is closing"); }
+                    let _ = reply.send(json!({"ok": false, "error": "KiCad is closing: no request is sent to it", "closing": true}));
+                    return
                 }
                 self.raw_call(&sock, &desc, &ty, msg, timeout, &client, reply)
             }
@@ -6091,6 +6105,28 @@ mod tests {
         let s = &a.sessions["/p/a.kicad_pro"];
         assert_eq!(s.state, "starting", "a fresh KiCad starts: {} {}", s.state, s.reason);
         assert!(s.gen != 3 && s.reason != HELD_REASON, "a new generation (the test actor counts from 1), not held");
+    }
+    #[tokio::test] async fn a_kicad_that_answered_exiting_is_sent_no_request_until_it_is_gone() {
+        // Windows bp.13.3: a request arriving while KiCad's API server stops hangs its exit (a lost wake-up in its Stop): after `exiting`
+        // nothing is sent, whatever asks (a poll, GetFrames, a Ping, the events stream), until the process is gone or the bound ends it
+        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let (mut a, _h) = test_actor().await;
+        let mut s = seq_session(pid); s.events_sock = "/no/sock.events".into(); assert!(s.close_sent("agentClosed")); a.sessions.insert(s.pro.clone(), s);
+        let send = |a: &mut Actor, sock: &str, ty: &str| { let (tx, rx) = oneshot::channel(); a.handle(Msg::Raw { sock: sock.into(), desc: String::new(), ty: ty.into(), msg: json!({}), timeout: 500, client: String::new(), reply: tx }); rx };
+        // before the answer (pending, not closing): requests go as usual (quiet_for says nothing holds them back)
+        assert!(quiet_for(&a.sessions, "/no/sock").is_none() && quiet_for(&a.sessions, "/no/sock.events").is_none());
+        a.handle(Msg::CloseAnswered { pro: "/p/a.kicad_pro".into(), gen: 3, pid, answered: true, reply: None });
+        for (sock, ty) in [("/no/sock", "kiapi.common.commands.Ping"), ("/no/sock", "kiapi.backplane.embed.GetFrames"), ("/no/sock", "kiapi.common.commands.GetOpenDocuments"), ("/no/sock.events", "kiapi.backplane.embed.NextEvents")] {
+            let r = send(&mut a, sock, ty).await.unwrap();
+            assert_eq!(r["closing"], json!(true), "{ty} on {sock}: not sent: {r}");
+        }
+        // its process gone: the session ends, and a request to its socket is no longer held back by it
+        let _ = child.kill(); let _ = child.wait();
+        a.handle(Msg::ChildExited { pro: "/p/a.kicad_pro".into(), gen: 3, pid, code: -9, how: "signal 9 (SIGKILL)".into(), tail: String::new(), reply: None });
+        assert!(quiet_for(&a.sessions, "/no/sock").is_none());
+        // KiCad's own Quit (its socket gone with every frame closed) is as quiet
+        let mut q = seq_session(77); q.gone_kinds = vec!["PCB".into()]; assert!(socket_gone(&mut q));
+        let m: HashMap<String, Session> = [(q.pro.clone(), q)].into_iter().collect(); assert!(quiet_for(&m, "/no/sock").is_some());
     }
     #[test] fn a_start_held_for_the_previous_kicad_is_one_session_that_every_attach_joins() {
         let prev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 7, 0).ready("/s", "", 0).spawned(41).stopped("");
