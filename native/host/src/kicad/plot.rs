@@ -15,7 +15,7 @@ pub struct Solid { pub n: u32, pub b: [u32; 6], pub d: Vec<u8>, pub faces: Vec<u
 /// `note`: a line the page shows over the drawing (a Gerber set's: kicad/gerber), `warn` when it is a warning (amber); empty for others.
 pub struct Plot { pub cs: Vec<Chunk>, pub b: Rect, pub thick: u32, pub solid: Option<Solid>, pub edge: Rect, pub note: String, pub warn: bool }
 #[derive(Clone, Debug, PartialEq)]
-pub enum Ref { Keep(usize), Fresh(usize) } // Fresh: index into the plot's chunks
+pub enum Ref { Keep(usize), KeepHash(u64), Fresh(usize) } // Fresh: index into the plot's chunks
 
 /// Scan.plot: the lines `Line.plot` prints. Chars, not bytes: a chunk's bytes are chars 0..255 (UTF-8 on the wire),
 /// counted in chars. A plot with a malformed tail yields what was read, as scan does.
@@ -63,15 +63,32 @@ pub fn parse_child(out: &str) -> Plot {
 
 fn same(a: &Chunk, b: &Chunk) -> bool { a.sig == b.sig && a.layer == b.layer && a.color == b.color && a.alpha == b.alpha && a.mode == b.mode && a.width == b.width && a.d == b.d && a.info == b.info }
 
+/// Content-addressed 64-bit FNV-1a id of a 2D plot chunk (`keptChunks` cache across board switches).
+pub fn chunk_id(c: &Chunk) -> u64 {
+    let mut h = 0xcbf29ce484222325u64;
+    let mut feed = |bytes: &[u8]| { for &b in bytes { h = (h ^ b as u64).wrapping_mul(0x100000001b3); } };
+    for n in [c.sig, c.layer, c.color, c.alpha, c.mode, c.width] { feed(&n.to_le_bytes()); }
+    feed(&c.d);
+    h
+}
+
 /// Plot.delta: each new chunk as the index of the first equal chunk the phone holds, else itself.
 pub fn delta(ns: &[Chunk], held: &[Chunk]) -> Vec<Ref> {
     ns.iter().enumerate().map(|(i, n)| match held.iter().position(|o| same(n, o)) { Some(k) => Ref::Keep(k), None => Ref::Fresh(i) }).collect()
+}
+/// Content-addressed delta: uses `Keep(idx)` for current-view chunks, `KeepHash(h)` for chunks in the
+/// client's persistent `keptChunks` cache, and `Fresh(i)` only for chunks the client does not hold anywhere.
+pub fn delta_kept(ns: &[Chunk], held: &[Chunk], kept: &std::collections::HashSet<u64>) -> Vec<Ref> {
+    ns.iter().enumerate().map(|(i, n)| {
+        if let Some(k) = held.iter().position(|o| same(n, o)) { Ref::Keep(k) }
+        else { let id = chunk_id(n); if kept.contains(&id) { Ref::KeepHash(id) } else { Ref::Fresh(i) } }
+    }).collect()
 }
 /// Plot.quiet: the delta changes nothing for a phone holding `held` chunks (each kept where it was).
 pub fn quiet(rs: &[Ref], held: usize) -> bool { rs.len() == held && rs.iter().enumerate().all(|(i, r)| *r == Ref::Keep(i)) }
 /// Plot.apply: what the phone rebuilds.
 pub fn apply(rs: &[Ref], ns: &[Chunk], held: &[Chunk]) -> Vec<Chunk> {
-    rs.iter().map(|r| match r { Ref::Keep(k) => held[*k].clone(), Ref::Fresh(i) => ns[*i].clone() }).collect()
+    rs.iter().enumerate().map(|(pos, r)| match r { Ref::Keep(k) => held[*k].clone(), Ref::KeepHash(_) => ns[pos].clone(), Ref::Fresh(i) => ns[*i].clone() }).collect()
 }
 
 // --- CBOR, in the hub's dialect, written straight onto the frame
@@ -87,7 +104,9 @@ fn rect(o: &mut Vec<u8>, r: &Rect) { head(o, 4, 4); int(o, r.x0); int(o, r.y0); 
 fn bytes(o: &mut Vec<u8>, d: &[u8]) { head(o, 2, d.len() as u32); o.extend(d) }
 
 /// Plot.msg.fam: `{1: "plot", 31: key, fam, base, box, thick, edge, cs}`.
-pub fn frame(key: &str, fam: &str, base: &str, p: &Plot, rs: &[Ref]) -> Vec<u8> {
+pub fn frame(key: &str, fam: &str, base: &str, p: &Plot, rs: &[Ref]) -> Vec<u8> { frame_kept(key, fam, base, p, rs, false) }
+/// `frame` with optional content-addressed chunk hashes (`h` on fresh chunks, 16-hex string entries for `KeepHash`).
+pub fn frame_kept(key: &str, fam: &str, base: &str, p: &Plot, rs: &[Ref], with_hash: bool) -> Vec<u8> {
     let mut o = Vec::with_capacity(256 + p.cs.iter().map(|c| c.d.len() + 32).sum::<usize>());
     head(&mut o, 5, 8 + (!p.note.is_empty()) as u32 * 2); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
     if !p.note.is_empty() { text(&mut o, "note"); text(&mut o, &p.note); text(&mut o, "warn"); uint(&mut o, p.warn as u32); }
@@ -96,9 +115,11 @@ pub fn frame(key: &str, fam: &str, base: &str, p: &Plot, rs: &[Ref]) -> Vec<u8> 
     text(&mut o, "cs"); head(&mut o, 4, rs.len() as u32);
     for r in rs { match r {
         Ref::Keep(k) => uint(&mut o, *k as u32),
-        Ref::Fresh(i) => { let c = &p.cs[*i]; head(&mut o, 5, 7);
+        Ref::KeepHash(h) => text(&mut o, &format!("{h:016x}")),
+        Ref::Fresh(i) => { let c = &p.cs[*i]; head(&mut o, 5, if with_hash { 8 } else { 7 });
             text(&mut o, "s"); uint(&mut o, c.sig); text(&mut o, "l"); uint(&mut o, c.layer); text(&mut o, "c"); uint(&mut o, c.color); text(&mut o, "a"); uint(&mut o, c.alpha);
-            text(&mut o, "m"); uint(&mut o, c.mode); text(&mut o, "w"); uint(&mut o, c.width); text(&mut o, "d"); bytes(&mut o, &c.d) }
+            text(&mut o, "m"); uint(&mut o, c.mode); text(&mut o, "w"); uint(&mut o, c.width); text(&mut o, "d"); bytes(&mut o, &c.d);
+            if with_hash { text(&mut o, "h"); text(&mut o, &format!("{:016x}", chunk_id(c))); } }
     } }
     o
 }
@@ -172,6 +193,17 @@ mod tests {
         assert!(quiet(&delta(&o, &o), 4)); assert!(!quiet(&delta(&o[..3], &o), 4)); assert!(!quiet(&delta(&[o[1].clone(), o[0].clone()], &o[..2]), 2)); assert!(quiet(&delta(&[], &[]), 0));
         let mut changed = o.clone(); changed[2].color += 1; assert!(!quiet(&delta(&changed, &o), 4));
         let mut info = o.clone(); info[1].info = "x".into(); assert!(!quiet(&delta(&info, &o), 4)); // equality includes the info table
+    }
+    #[test] fn kept_chunks_avoids_resending_unchanged_board_geometry() {
+        let cs: Vec<Chunk> = (0..12).map(|i| ch(i, &vec![i as u8; 1500], "")).collect();
+        let p = Plot { cs: cs.clone(), b: Rect { x0: 0, y0: 0, x1: 100, y1: 100 }, thick: 1600, solid: None, edge: Rect::default(), note: String::new(), warn: false };
+        let cold = frame_kept("0|/p|b.kicad_pcb", "0|/p|b.kicad_pcb", "", &p, &delta(&cs, &[]), true);
+        let kept: std::collections::HashSet<u64> = cs.iter().map(chunk_id).collect();
+        let rs = delta_kept(&cs, &[], &kept);
+        assert!(rs.iter().all(|r| matches!(r, Ref::KeepHash(_))), "all chunks resolved from cache");
+        let warm = frame_kept("0|/p|b.kicad_pcb", "0|/p|b.kicad_pcb", "", &p, &rs, true);
+        assert!(cold.len() > 18_000, "cold={}", cold.len());
+        assert!(warm.len() < 350, "re-opening unchanged board should be header+hashes only, got {}B", warm.len());
     }
     #[test] fn frame_bytes() {
         let p = Plot { cs: vec![ch(7, &[1, 2], "")], b: Rect { x0: 0, y0: 0, x1: 10, y1: u32::MAX - 1 }, thick: 1600, solid: None, edge: Rect::default(), note: String::new(), warn: false };

@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -482,7 +482,11 @@ async fn message_image(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let file = snap.path.clone();
     let bytes = tokio::task::spawn_blocking(move || std::fs::read(&file)).await.map_err(|_| err("image unavailable"))?.map_err(|_| err("image unavailable"))?;
     if bytes.len() > MAX_ATTACH_BYTES { return Err(err("image too large for the phone")) }
-    Ok(json!({"mime":crate::files::fm::ctype(&snap.path.to_string_lossy()),"data":base64::engine::general_purpose::STANDARD.encode(bytes)}))
+    let mime = crate::files::fm::ctype(&snap.path.to_string_lossy());
+    let sha = crate::files::blob::register_bytes(&hub.cfg.home, snap.path, mime, &bytes);
+    let mut out = json!({"mime":mime,"sha256":sha,"bytes":bytes.len(),"blob":format!("/blob/{sha}")});
+    if p["metaOnly"] != true { out["data"] = json!(base64::engine::general_purpose::STANDARD.encode(bytes)); }
+    Ok(out)
 }
 /// `attachment.get {id}`: an image a message carries, from the thread's folder; the id names the thread and the stored file.
 fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
@@ -496,7 +500,10 @@ fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
     if !meta.is_file() || meta.len() as usize > MAX_ATTACH_BYTES { return Err(err("unknown attachment")) }
     let bytes = std::fs::read(&path).map_err(|_| err("unknown attachment"))?;
     let mime = match mime_of(file) { "application/octet-stream" => crate::files::webimg::kind(&bytes).unwrap_or("application/octet-stream"), m => m };
-    Ok(json!({"mime":mime,"data":base64::engine::general_purpose::STANDARD.encode(bytes)}))
+    let sha = crate::files::blob::register_bytes(&hub.cfg.home, path, mime, &bytes);
+    let mut out = json!({"mime":mime,"sha256":sha,"bytes":bytes.len(),"blob":format!("/blob/{sha}")});
+    if p["metaOnly"] != true { out["data"] = json!(base64::engine::general_purpose::STANDARD.encode(bytes)); }
+    Ok(out)
 }
 
 async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool) -> Result<Value, Value> {
