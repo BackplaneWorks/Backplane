@@ -267,9 +267,9 @@ struct DEmpty: Decodable { init(from d: Decoder) throws {} }
 /// One project an improvement may go to (`improvements.projects`): `short` names the linked machine it is on, "" for the hub's own.
 struct DImpProject: Decodable, Identifiable { var id: String; var title: String; var root: String; var machine: String; var short: String }
 struct DImpProjects: Decodable { var project: String; var projects: [DImpProject] }
-struct DAttachmentData: Decodable { var mime: String; var data: String
-    enum CodingKeys: String, CodingKey { case mime, data }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); mime = c.str(.mime); data = c.str(.data) } }
+struct DAttachmentData: Decodable { var mime: String; var data: String; var blob: String
+    enum CodingKeys: String, CodingKey { case mime, data, blob }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); mime = c.str(.mime); data = c.str(.data); blob = c.str(.blob) } }
 
 /// `thread.queue` → `{rows, more}`; `queue.act` → `{}`, or `{text}` from q-edit / o-edit (rows: Outbox.swift `DQueueRow`)
 struct DQueueReply: Decodable {

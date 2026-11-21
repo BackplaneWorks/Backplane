@@ -378,7 +378,10 @@ function mountApp(): void {
     },
     onLoadImage: async (entryId, path) => {
       try {
-        const res = await hub.rpc<{ mime?: string; data?: string }>("message.image", { entry: entryId, path });
+        const params: Record<string, unknown> = { entry: entryId, path };
+        if (hub.hasFeature("blobs")) params.metaOnly = true;
+        const res = await hub.rpc<{ mime?: string; data?: string; blob?: string }>("message.image", params);
+        if (res.blob && res.blob.startsWith("/blob/")) return { url: res.blob };
         if (res.mime && res.data) return { mime: res.mime, data: res.data };
       } catch { /* ignore */ }
       return null;

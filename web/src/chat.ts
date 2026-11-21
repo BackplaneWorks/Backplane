@@ -52,7 +52,7 @@ export interface ChatCallbacks {
   onReplyEntry: (entry: EntryItem) => void;
   /** a reply's quote: go to the message it answers, reading older pages until it is loaded */
   onGoToEntry?: (entryId: string) => void;
-  onLoadImage: (entryId: string, path: string) => Promise<{ mime: string; data: string } | null>;
+  onLoadImage: (entryId: string, path: string) => Promise<{ url?: string; mime?: string; data?: string } | null>;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -626,7 +626,8 @@ export class ChatView {
           else {
             void this.cb.onLoadImage(entry.id, p).then((res) => {
               if (!res) return;
-              const url = `data:${res.mime};base64,${res.data}`;
+              const url = res.url ?? (res.mime && res.data ? `data:${res.mime};base64,${res.data}` : "");
+              if (!url) return;
               this.imageCache.set(cacheKey, url);
               img.src = url;
             });

@@ -176,6 +176,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let pendingQueue: PendingFrame[] = [];
   let pendingBytes = 0;
   let heldChunks = new Map<string, PlotChunk[]>();
+  const chunkCache = new Map<string, PlotChunk>();
   let filesInfo: ViewerFilesReply = {};
   let mechParts: string[] = [];
   let selectedMech = "";
@@ -1023,6 +1024,9 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         const kept = solid3d.keptToken();
         if (kept) params.kept = kept;
       }
+      if ((page === "board" || page === "schematic" || page === "gerbers") && !force && api.hub.hasFeature("keptChunks") && chunkCache.size > 0) {
+        params.keptChunks = Array.from(chunkCache.keys());
+      }
     }
 
     watchPending = true;
@@ -1111,7 +1115,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     }
 
     const prev = heldChunks.get(key) || [];
-    const frame = decodePlot2DFrame(map, prev);
+    const frame = decodePlot2DFrame(map, prev, chunkCache);
     heldChunks.set(key, frame.chunks);
     setOverlay("none");
     setBanner(frame.note, frame.warn);

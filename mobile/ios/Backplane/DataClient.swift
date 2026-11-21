@@ -1136,17 +1136,38 @@ final class DataClient {
 
     // MARK: pictures
     nonisolated(unsafe) static let attachmentCache = NSCache<NSString, NSData>()
+    private func blobBytes(_ path: String) async -> Data? {
+        guard path.hasPrefix("/blob/"), let link, let u = Pairing.http(link, path: path, token: false) else { return nil }
+        var req = URLRequest(url: u)
+        if let w = Pairing.socket(link),
+           let tok = URLComponents(url: w, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "token" })?.value,
+           !tok.isEmpty {
+            req.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (d, r) = try? await URLSession.shared.data(for: req), (r as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return d
+    }
     /// An image a reply names (feature replyImages): the hub's snapshot of it (`message.image`), so it reads the same over the relay as on the tailnet.
     func replyImage(entry: String, path: String) async -> Data? {
         let key = "mi:" + entry + "\n" + path
         if let d = Self.attachmentCache.object(forKey: key as NSString) { return d as Data }
-        guard let r: DAttachmentData = try? await call("message.image", ["entry": entry, "path": path]), let d = Data(base64Encoded: r.data) else { return nil }
+        var params: [String: Any] = ["entry": entry, "path": path]
+        if has("blobs") { params["metaOnly"] = true }
+        guard let r: DAttachmentData = try? await call("message.image", params) else { return nil }
+        let fetched: Data?
+        if !r.blob.isEmpty { fetched = await blobBytes(r.blob) } else { fetched = nil }
+        guard let d = fetched ?? (r.data.isEmpty ? nil : Data(base64Encoded: r.data)) else { return nil }
         Self.attachmentCache.setObject(d as NSData, forKey: key as NSString)
         return d
     }
     func attachmentData(_ id: String) async -> Data? {
         if let d = Self.attachmentCache.object(forKey: id as NSString) { return d as Data }
-        guard let r: DAttachmentData = try? await call("attachment.get", ["id": id]), let d = Data(base64Encoded: r.data) else { return nil }
+        var params: [String: Any] = ["id": id]
+        if has("blobs") { params["metaOnly"] = true }
+        guard let r: DAttachmentData = try? await call("attachment.get", params) else { return nil }
+        let fetched: Data?
+        if !r.blob.isEmpty { fetched = await blobBytes(r.blob) } else { fetched = nil }
+        guard let d = fetched ?? (r.data.isEmpty ? nil : Data(base64Encoded: r.data)) else { return nil }
         Self.attachmentCache.setObject(d as NSData, forKey: id as NSString)
         return d
     }

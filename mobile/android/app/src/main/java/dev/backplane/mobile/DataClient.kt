@@ -1190,7 +1190,10 @@ object DataClient {
         val slot = if (kind.startsWith("3d")) listOf(hubName, tid, kind, path).joinToString("|") else ""
         val begun = if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.begin(slot) } else null
         val kept = begun?.kept.orEmpty(); val serial = begun?.serial ?: 0
-        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept); if (board.isNotEmpty()) put("board", board); if (tree.isNotEmpty()) put("tree", tree) }) }
+        val keptChunks = if (has("keptChunks") && (kind == "board" || kind == "schematic" || kind == "gerbers" || kind == "split")) {
+            withContext(Dispatchers.Main) { plots.keptChunkHashes() }
+        } else emptyList()
+        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept); if (keptChunks.isNotEmpty()) put("keptChunks", JSONArray(keptChunks)); if (board.isNotEmpty()) put("board", board); if (tree.isNotEmpty()) put("tree", tree) }) }
             catch (e: Exception) { if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.failed(serial) }; throw e }
         if (kind.isEmpty()) return
         val keys = r.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
@@ -1245,17 +1248,33 @@ object DataClient {
 
     // ---- pictures
     private val pictures = object : android.util.LruCache<String, ByteArray>(16 shl 20) { override fun sizeOf(k: String, v: ByteArray) = v.size }
+    private fun httpGetBlob(path: String): ByteArray? = runCatching {
+        if (!path.startsWith("/blob/")) return null
+        val l = link ?: return null
+        val u = Pairing.http(l, path, "", token = false) ?: return null
+        val rb = Request.Builder().url(u)
+        Pairing.token(l)?.takeIf { it.isNotEmpty() }?.let { rb.header("Authorization", "Bearer $it") }
+        http.newCall(rb.build()).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
+    }.getOrNull()
     suspend fun picture(id: String): ByteArray? {
         pictures.get(id)?.let { return it }
-        val r = runCatching { call("attachment.get", JSONObject().put("id", id)) }.getOrNull() ?: return null
-        val b = runCatching { android.util.Base64.decode(r.optString("data"), android.util.Base64.DEFAULT) }.getOrNull() ?: return null
+        val params = JSONObject().put("id", id).apply { if (has("blobs")) put("metaOnly", true) }
+        val r = runCatching { call("attachment.get", params) }.getOrNull() ?: return null
+        val blob = r.optString("blob")
+        val b = (if (blob.startsWith("/blob/")) withContext(Dispatchers.IO) { httpGetBlob(blob) } else null)
+            ?: r.optString("data").takeIf { it.isNotEmpty() }?.let { runCatching { android.util.Base64.decode(it, android.util.Base64.DEFAULT) }.getOrNull() }
+            ?: return null
         pictures.put(id, b); return b
     }
     suspend fun replyImage(entry: String, path: String): ByteArray? {
         val key = "mi:$entry\n$path"
         pictures.get(key)?.let { return it }
-        val r = runCatching { call("message.image", JSONObject().put("entry", entry).put("path", path)) }.getOrNull() ?: return null
-        val b = runCatching { android.util.Base64.decode(r.optString("data"), android.util.Base64.DEFAULT) }.getOrNull() ?: return null
+        val params = JSONObject().put("entry", entry).put("path", path).apply { if (has("blobs")) put("metaOnly", true) }
+        val r = runCatching { call("message.image", params) }.getOrNull() ?: return null
+        val blob = r.optString("blob")
+        val b = (if (blob.startsWith("/blob/")) withContext(Dispatchers.IO) { httpGetBlob(blob) } else null)
+            ?: r.optString("data").takeIf { it.isNotEmpty() }?.let { runCatching { android.util.Base64.decode(it, android.util.Base64.DEFAULT) }.getOrNull() }
+            ?: return null
         pictures.put(key, b); return b
     }
     // a picture chosen: GIFs under 8 MB stay raw to preserve animation; others are capped at 2048 px JPEG at 80
