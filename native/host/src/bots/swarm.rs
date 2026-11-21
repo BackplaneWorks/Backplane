@@ -2,6 +2,7 @@
 //! (`thread:<id>`); every room post goes through the guards (`gate`); a member thread hears the board in batches (`give`); a claim takes
 //! hub locks; a synthesis ends the swarm and is reported to whoever started it. The client requests `swarm.*` are here too.
 use super::gate::{self, Budget, PostMeta, Verdict, LIMITS};
+use crate::present::swarm_need as need;
 use super::post::{Heard, Pending, RoomRef};
 use super::rpc::{now_s, Bots};
 use super::world::{Room, World, THREAD};
@@ -17,15 +18,21 @@ fn gs<'a>(a: &'a Value, k: &str) -> &'a str { a.get(k).and_then(Value::as_str).u
 
 /// A thread as a swarm sees it (agents' world): its agent, turn, whether it waits on the person, and where it works.
 #[derive(Clone, Debug, Default)]
-pub struct ThreadInfo { pub provider: String, pub model: String, pub title: String, pub turn: String, pub asking: bool, pub gone: bool, pub project: String, pub root: String }
+pub struct ThreadInfo { pub provider: String, pub model: String, pub title: String, pub turn: String, pub asking: bool, pub gone: bool, pub project: String, pub root: String,
+    /// the plain words of the error its newest turn ended on (agents world `T.why`), "" while it runs or ended well
+    pub why: String,
+    /// the work it owns between turns (background work, a watched work_run, a wake it set): a member that owns some is not idle
+    pub busy: u64 }
 impl ThreadInfo {
-    /// the chip's word: working, waiting (an ask open), failed, idle
-    pub fn word(&self) -> &'static str { if self.gone { "removed" } else if self.asking { "waiting" } else { match self.turn.as_str() { "running" => "working", "failed" => "failed", _ => "idle" } } }
+    /// the chip's word: working, waiting (an ask open), failed, monitoring (its turn is over, work it owns still runs: a landing, a build), idle
+    pub fn word(&self) -> &'static str { if self.gone { "removed" } else if self.asking { "waiting" } else { match self.turn.as_str() { "running" => "working", "failed" => "failed", _ if self.busy > 0 => "monitoring", _ => "idle" } } }
 }
 
 /// The batching clock of the member threads: when each was last given the board, and when it is due next (a timer runs for it).
 #[derive(Default)]
-pub struct Give { me: std::sync::OnceLock<Weak<Bots>>, pub(super) members: std::sync::RwLock<HashSet<String>>, last: Mutex<HashMap<(String, String), u64>>, due: Mutex<HashMap<(String, String), u64>> }
+pub struct Give { me: std::sync::OnceLock<Weak<Bots>>, pub(super) members: std::sync::RwLock<HashSet<String>>, last: Mutex<HashMap<(String, String), u64>>, due: Mutex<HashMap<(String, String), u64>>,
+    /// the posts a resume released (held while the swarm was paused), each member's to hear with its next batch
+    released: Mutex<HashMap<(String, String), Vec<Value>>> }
 
 pub const NAMES: [&str; 2] = ["swarm_create", "swarm_control"];
 pub const MAX_MEMBERS: usize = 8;
@@ -97,6 +104,34 @@ fn claims(w: &World, room: &str) -> Vec<(String, Value)> {
     v.sort_by(|a, b| a.0.cmp(&b.0)); v
 }
 
+/// The hub's need facts of a swarm (present/swarm_need.rs `key`): who a pause is for, the budget part that ran out, the members that failed and why.
+fn need_rec(w: &World, room: &str) -> Value { serde_json::from_str::<Value>(&w.setting(&need::key(room), "")).ok().filter(Value::is_object).unwrap_or_else(|| json!({})) }
+fn need_ev(room: &str, rec: &Value, now: u64) -> Value {
+    let empty = rec.as_object().map_or(true, |o| o.iter().all(|(_, v)| v.is_null() || v == &json!("") || v == &json!([])));
+    json!({"$":"SettingSet","key":need::key(room),"value":if empty { String::new() } else { rec.to_string() },"at":now})
+}
+/// the pause's facts in `rec`: for whom and which budget part (none: the pause is over)
+fn with_pause(rec: &Value, to: Option<(&str, &str)>) -> Value {
+    let mut r = rec.clone(); let o = r.as_object_mut().unwrap();
+    match to { Some((f, part)) => { o.insert("for".into(), json!(f)); if part.is_empty() { o.remove("part"); } else { o.insert("part".into(), json!(part)); } } None => { o.remove("for"); o.remove("part"); } }
+    r
+}
+/// Whether a bot or the uberbot started the swarm (its routine pauses are the starter's, by policy: swarm_need::policy).
+fn by_bot(w: &World, r: &Room) -> bool { !r.by.is_empty() && (w.run_bot(&r.by).is_some() || w.chat_is(&r.by) || w.triage_thread() == r.by) }
+fn auto_key(room: &str) -> String { format!("room.auto.{room}") }
+fn part_of(b: &Budget, part: &str) -> u64 { match part { "posts" => b.posts, "turns" => b.turns, "tokens" => b.tokens, _ => 0 } }
+fn set_part(b: &mut Budget, part: &str, v: u64) { match part { "posts" => b.posts = v, "turns" => b.turns = v, "tokens" => b.tokens = v, _ => {} } }
+/// The member posts held while the swarm was paused, since the swarm last resumed (oldest first): a resume delivers them (`released`).
+fn held_since_resume(posts: &[Value]) -> Vec<Value> {
+    let start = posts.iter().rposition(|e| e["guard"] == true && e["tags"].as_array().map_or(false, |t| t.iter().any(|x| x == "resume"))).map_or(0, |i| i + 1);
+    posts[start..].iter().filter(|e| e["guard"] != true && !gs(e, "held").is_empty() && gs(e, "held") != "backstop").cloned().collect()
+}
+/// The sign-in command a provider's CLI takes in a terminal (Sign in on a member that failed on its sign-in), when it has one.
+fn signin_cmd(provider: &str) -> Option<&'static str> { match provider { "antigravity" | "agy" => Some("agy"), "grok" => Some("grok login"), "codex" => Some("codex login"), "claude" => Some("claude /login"), _ => None } }
+
+/// What `guard_pause` leaves to its caller, after the world lock.
+enum After { Nothing, Tell(String), Wake }
+
 impl Bots {
     fn arc(&self) -> Option<Arc<Bots>> { self.swarm.me.get().and_then(Weak::upgrade) }
     pub(super) fn swarm_start(self: &Arc<Self>) { let _ = self.swarm.me.set(Arc::downgrade(self)); self.hub.register_rpc(Arc::new(SwarmRpc(self.clone()))); }
@@ -114,7 +149,11 @@ impl Bots {
         let posts: Vec<PostMeta> = w.room_meta.get(&rr.id).map(|q| q.iter().cloned().collect()).unwrap_or_default();
         let meta = PostMeta { id: String::new(), member: who.meta.clone(), tags: tags.clone(), text: text.chars().take(gate::TEXT).collect(), at: now, held: false };
         let (budget, used) = (rec.as_ref().map(|r| r.budget).unwrap_or_default(), w.room_used.get(&rr.id).copied().unwrap_or_default());
-        let v = gate::verdict(&posts, &meta, rec.as_ref().map_or(false, Room::paused), who.hop, &budget, &used, &LIMITS);
+        let mut v = gate::verdict(&posts, &meta, rec.as_ref().map_or(false, Room::paused), who.hop, &budget, &used, &LIMITS);
+        // a bot's swarm whose budget ran out is raised by policy (up to its cap) and the post goes on; past the cap it is the person's
+        if v == Verdict::Pause("budget") { if let Some(r) = &rec { let next = Budget { posts: used.posts + 1, ..used }; if self.raise_by_policy(w, r, &next, now).await { v = Verdict::Live } } }
+        // work moving again: the idle pauses the policy resumed count from here
+        if tags.iter().any(|t| t == "claim" || t == "done") && !w.setting(&auto_key(&rr.id), "").is_empty() { let _ = self.hub.commit(&json!({"$":"SettingSet","key":auto_key(&rr.id),"value":"","at":now})).await; }
         let held = match &v { Verdict::Refuse(m) => return Err(m.clone()), Verdict::Live => None, Verdict::Hold(w) | Verdict::Pause(w) => Some(*w) };
         let mut f = Map::new();
         if !tags.is_empty() { f.insert("tags".into(), json!(tags)); }
@@ -131,7 +170,12 @@ impl Bots {
         if !ms.is_empty() { ans["mentioned"] = json!(ms) }
         if let (Verdict::Pause(why), Some(r)) = (&v, &rec) { // the post that tripped a guard is held, and the room pauses (an exchange closes, as it did at the cap)
             let note = gate::pause_text(why, &LIMITS);
-            self.hub.commit_many(&w.also(now, vec![r.set_ev(now, |x| { x.state = "paused".into(); x.reason = (*why).into(); if x.ephemeral { x.closed = true } }), self.guard_post(&r.id, &note, &["pause"], true, now)])).await.map_err(|e| format!("{e:#}"))?;
+            let part = if *why == "budget" { budget.hit(&Budget { posts: used.posts + 1, ..used }).unwrap_or("") } else { "" };
+            let to = if r.swarm() && by_bot(w, r) && need::policy(true, why, 0, 0, 0) == need::Policy::Starter { "starter" } else { "person" };
+            let mut evs = vec![r.set_ev(now, |x| { x.state = "paused".into(); x.reason = (*why).into(); if x.ephemeral { x.closed = true } }), self.guard_post(&r.id, &note, &["pause"], true, now)];
+            if r.swarm() { evs.push(need_ev(&r.id, &with_pause(&need_rec(w, &r.id), Some((to, part))), now)) }
+            self.hub.commit_many(&w.also(now, evs)).await.map_err(|e| format!("{e:#}"))?;
+            if r.swarm() && to == "starter" { self.tell_starter(w, r, &note, now).await }
             ans["held"] = json!(true); ans["paused"] = json!(why); ans["note"] = json!(format!("{note} Your post is on the board for the person; don't send it again or anywhere else."));
             if r.ephemeral { ans["closed"] = json!(true) }
         } else if let Some(h) = held { ans["held"] = json!(true); ans["note"] = json!(match h { "paused" => "held: the room is paused, so nobody was woken. Your post is on the board for the person; don't send it again or anywhere else.", _ => "held: this conversation is too deep, so nobody was woken. Your post is on the board for the person; don't send it again or anywhere else." }) }
@@ -219,41 +263,159 @@ impl Bots {
             out.reverse();
             // a member that joined later hears what came after it joined (the board before is its room_read)
             if heard.is_empty() { let joined = w.setting(&format!("room.joined.{room}.{member}"), ""); if let Some(i) = out.iter().position(|e| gs(e, "id") == joined) { out.drain(..=i); } }
-            let posts: Vec<Value> = out.into_iter().filter(|e| gs(e, "thread") != th && gs(e, "held").is_empty()).collect();
+            let mut posts: Vec<Value> = out.into_iter().filter(|e| gs(e, "thread") != th && gs(e, "held").is_empty()).collect();
+            // what a resume released: the posts held while it was paused, before the new ones
+            let rel: Vec<Value> = self.swarm.released.lock().unwrap().remove(&key).unwrap_or_default().into_iter().filter(|e| gs(e, "thread") != th && !posts.iter().any(|p| p["id"] == e["id"])).collect();
+            if !rel.is_empty() { posts.splice(0..0, rel); }
             (r, posts, hk) };
         if posts.is_empty() { return }
-        let newest = posts.last().map(|p| gs(p, "id").to_string()).unwrap_or_default();
+        // the newest post it heard now (a released one is older than its mark: the mark stays where it is)
+        let newest = posts.iter().rev().find(|p| gs(p, "held").is_empty()).map(|p| gs(p, "id").to_string());
+        let last = posts.last().map(|p| gs(p, "id").to_string()).unwrap_or_default();
         // only the person's word steers a running turn; a mention got here early, but a peer never restarts a running non-Claude turn (it would never finish)
         let person = posts.iter().any(|p| gs(p, "from") == "you" && p["guard"] != true);
         let note = batch_note(&r, &posts, &HashMap::new());
         let now = now_s();
-        if self.hub.commit(&json!({"$":"SettingSet","key":hk,"value":newest,"at":now})).await.is_err() { return }
+        if let Some(n) = &newest { if self.hub.commit(&json!({"$":"SettingSet","key":hk,"value":n,"at":now})).await.is_err() { return } }
         self.swarm.last.lock().unwrap().insert(key, now);
         let Some(info) = self.inbox.info(th).await else { return }; if info.gone { return }
-        let id = format!("room:{room}:{newest}");
+        let id = format!("room:{room}:{last}");
         // a running non-Claude turn takes it with its next Backplane tool result or at its end (never restarted by a peer's post); the person's post steers
         let _ = if !person && info.turn == "running" && info.provider != "claude" { self.inbox_note(th, &id, &note).await } else { self.inbox_ride(th, &id, &note).await };
     }
-    /// The minute tick: a member that has posts it never heard (a restart cut its timer) is given them; an active swarm whose members are all idle
-    /// for `LIMITS.idle`, or whose turns or tokens are used up, pauses.
+    /// The minute tick: a member that has posts it never heard (a restart cut its timer) is given them; a member whose turn failed has its cause read (a sign-in is
+    /// the person's: its row says so, and the member goes on by itself once the sign-in works again); an active swarm whose members are all idle for
+    /// `LIMITS.idle`, or whose turns or tokens are used up, pauses, as the policy has it (`guard_pause`).
     pub async fn swarm_tick(&self, now: u64) {
         let rooms: Vec<Room> = { let w = self.world().await; w.rooms.values().filter(|r| !r.deleted && r.swarm() && !r.ended()).cloned().collect() };
         for r in rooms {
-            let mut all_idle = true;
+            let mut all_idle = true; let mut infos = vec![];
             for th in r.threads() {
                 let info = self.inbox.info(&th).await; if info.as_ref().map_or(true, |i| i.word() != "idle" && i.word() != "removed") { all_idle = false }
+                infos.push((th.clone(), info));
                 if r.paused() { continue }
                 let due = self.swarm.due.lock().unwrap().contains_key(&(r.id.clone(), th.clone())); if !due { self.give_later(&r.id, &[th.clone()], &[], now).await }
             }
+            self.members_failed(&r, &infos, now).await;
             if r.paused() { continue }
             let w = self.world().await; let Some(cur) = w.room(&r.id).cloned() else { continue }; if cur.paused() { continue }
             let used = w.room_used.get(&r.id).copied().unwrap_or_default();
             let why = if cur.budget.hit(&used).is_some() { Some("budget") } else if all_idle && now.saturating_sub(cur.last) >= LIMITS.idle && self.swarm.due.lock().unwrap().keys().all(|k| k.0 != r.id) { Some("idle") } else { None };
-            if let Some(why) = why { let note = gate::pause_text(why, &LIMITS);
-                let _ = self.hub.commit_many(&w.also(now, vec![cur.set_ev(now, |x| { x.state = "paused".into(); x.reason = why.into() }), self.guard_post(&r.id, &note, &["pause"], true, now)])).await;
-                let (by, name, id) = (cur.by.clone(), cur.name.clone(), cur.id.clone()); drop(w);
-                if !by.is_empty() && !self.member_of(&by) { let _ = self.inbox_deliver_raw(&by, &format!("t:room:{id}:pause:{now}"), &format!("[Backplane] Swarm \"{name}\" (room {id}) paused itself: {note}"), Some((format!("room:{id}"), "launch".into(), id.clone()))).await; }
+            if let Some(why) = why { let after = self.guard_pause(&w, &cur, why, &used, now).await; drop(w);
+                match after { After::Tell(n) => self.tell_starter_now(&cur, &n, now).await, After::Wake => { let ths = cur.threads(); self.give_later(&cur.id, &ths, &ths, now).await } After::Nothing => {} } }
+        }
+    }
+    /// A guard's pause of a swarm (idle, budget: the tick's), as `swarm_need::policy` has it: a bot's swarm is resumed or raised at once (up to the cap), or
+    /// left paused for its starter; the person's (and money past the cap) is theirs, with its line in Needs you. The starter hears of every pause left standing.
+    /// What the caller does once it let the world lock go (a delivery takes it: `give_now`, the mailroom): tell the starter the pause stands, or wake the members.
+    async fn guard_pause(&self, w: &World, r: &Room, why: &str, used: &Budget, now: u64) -> After {
+        let bot = by_bot(w, r);
+        let part = if why == "budget" { r.budget.hit(used).unwrap_or("") } else { "" };
+        let auto = w.setting(&auto_key(&r.id), "").parse::<u64>().unwrap_or(0);
+        let pol = need::policy(bot, why, auto, part_of(&r.budget, part), part_of(&gate::SWARM_BUDGET, part));
+        match pol {
+            need::Policy::Raise(_) => { self.raise_by_policy(w, r, used, now).await; After::Nothing }
+            need::Policy::Resume => {
+                let text = format!("Every member was idle for {} minutes: the hub woke them ({} of {}). Carry on from the board, or post a synthesis if the goal is met.", LIMITS.idle / 60, auto + 1, need::AUTO_RESUMES);
+                let evs = vec![self.guard_post(&r.id, &text, &["resume"], false, now), json!({"$":"SettingSet","key":auto_key(&r.id),"value":(auto + 1).to_string(),"at":now})];
+                self.release_held(w, r);
+                if self.hub.commit_many(&w.also(now, evs)).await.is_err() { return After::Nothing }
+                After::Wake
             }
+            need::Policy::Starter | need::Policy::Person => {
+                let note = gate::pause_text(why, &LIMITS);
+                let to = if pol == need::Policy::Starter { "starter" } else { "person" };
+                let evs = vec![r.set_ev(now, |x| { x.state = "paused".into(); x.reason = why.into() }), self.guard_post(&r.id, &note, &["pause"], true, now), need_ev(&r.id, &with_pause(&need_rec(w, &r.id), Some((to, part))), now)];
+                if self.hub.commit_many(&w.also(now, evs)).await.is_ok() { After::Tell(note) } else { After::Nothing }
+            }
+        }
+    }
+    /// A bot's swarm whose budget part `used` reached: raised by policy (half again, up to `RAISE_CAP` times the default), said on the board and to the starter.
+    /// False: not a bot's swarm, or the cap is reached (money: the person's).
+    async fn raise_by_policy(&self, w: &World, r: &Room, used: &Budget, now: u64) -> bool {
+        if !r.swarm() || !by_bot(w, r) { return false }
+        let Some(part) = r.budget.hit(used) else { return false };
+        let need::Policy::Raise(to) = need::policy(true, "budget", 0, part_of(&r.budget, part), part_of(&gate::SWARM_BUDGET, part)) else { return false };
+        let from = part_of(&r.budget, part);
+        let text = format!("The budget's {part} ran out at {from}: raised by policy to {to} (at most {} without the person).", part_of(&gate::SWARM_BUDGET, part) * need::RAISE_CAP);
+        let evs = vec![r.set_ev(now, |x| set_part(&mut x.budget, part, to)), self.guard_post(&r.id, &text, &[], false, now)];
+        if self.hub.commit_many(&w.also(now, evs)).await.is_err() { return false }
+        let _ = self.inbox_note_starter(w, r, &format!("[Backplane] Swarm \"{}\" (room {}): {text}", r.name, r.id), now).await;
+        true
+    }
+    /// The starter (a thread that is no member) hears a pause its guards left standing, with what resolves it.
+    async fn tell_starter_now(&self, r: &Room, note: &str, now: u64) {
+        if r.by.is_empty() || self.member_of(&r.by) { return }
+        let _ = self.inbox_deliver_raw(&r.by, &format!("t:room:{}:pause:{now}", r.id), &format!("[Backplane] Swarm \"{}\" (room {}) paused itself: {note} swarm_control resumes it, raises its budget or stops it.", r.name, r.id), Some((format!("room:{}", r.id), "launch".into(), r.id.clone()))).await;
+    }
+    /// `tell_starter_now` from under the world lock (a delivery may go through the mailroom, which takes it).
+    async fn tell_starter(&self, _w: &World, r: &Room, note: &str, now: u64) {
+        if r.by.is_empty() || self.member_of(&r.by) { return }
+        let note = note.to_string();
+        let Some(me) = self.arc() else { return };
+        // after the caller's world lock is let go: a delivery may go through the mailroom, which takes it
+        let r = r.clone();
+        tokio::spawn(async move { me.tell_starter_now(&r, &note, now).await });
+    }
+    async fn inbox_note_starter(&self, _w: &World, r: &Room, text: &str, now: u64) -> Result<(), String> {
+        if r.by.is_empty() || self.member_of(&r.by) { return Ok(()) }
+        let Some(me) = self.arc() else { return Ok(()) }; let (by, id, text) = (r.by.clone(), r.id.clone(), text.to_string());
+        tokio::spawn(async move { let _ = me.inbox_note(&by, &format!("room:{id}:policy:{now}"), &text).await; }); Ok(())
+    }
+    /// The posts held while the swarm was paused go to every member with its next batch (none is held for good: #4 of the Nov 20 swarm review).
+    fn release_held(&self, w: &World, r: &Room) {
+        let lines = w.room_lines.get(&r.id).cloned().unwrap_or_default();
+        let posts: Vec<Value> = lines.iter().rev().take(200).filter_map(|l| self.hub.store.get(l - 1).ok()).filter_map(|raw| serde_json::from_str::<Value>(&raw).ok()).collect::<Vec<_>>().into_iter().rev().collect();
+        let held = held_since_resume(&posts); // (called before the resume is committed: what was held since the last one)
+        if held.is_empty() { return }
+        let mut m = self.swarm.released.lock().unwrap();
+        for th in r.threads() { let mine: Vec<Value> = held.iter().filter(|e| gs(e, "thread") != th).cloned().collect(); if !mine.is_empty() { m.entry((r.id.clone(), th)).or_default().extend(mine) } }
+    }
+    /// The members whose turn failed: the cause read once (a sign-in or account problem is the person's: `swarm_need::signin_cause`) and kept in the need facts,
+    /// the member told on its own thread; one that works again leaves them, and one whose sign-in works again goes on by itself.
+    async fn members_failed(&self, r: &Room, infos: &[(String, Option<ThreadInfo>)], now: u64) {
+        let mut alerts: HashMap<String, bool> = HashMap::new();
+        for (_, i) in infos.iter().filter_map(|(t, i)| i.as_ref().filter(|i| i.turn == "failed").map(|i| (t, i))) { if !alerts.contains_key(&i.provider) {
+            let on = !self.hub.setting(&crate::settings::accounts_hub::alert_key(&i.provider)).await.unwrap_or_default().is_empty(); alerts.insert(i.provider.clone(), on); } }
+        let w = self.world().await; let rec = need_rec(&w, &r.id);
+        let old: Vec<Value> = rec["failed"].as_array().cloned().unwrap_or_default();
+        let mut failed: Vec<Value> = vec![]; let mut evs = vec![]; let mut back: Vec<(String, String)> = vec![];
+        for (th, info) in infos {
+            let Some(i) = info else { continue };
+            let prev = old.iter().find(|f| f["thread"] == th.as_str()).cloned();
+            if i.turn != "failed" { continue } // working again (or idle after a turn that went well): it leaves the facts
+            let cause = if need::signin_cause(&i.why) { "sign-in" } else { "other" };
+            match prev {
+                Some(p) if p["cause"] == cause => {
+                    // a sign-in fixed since: the member goes on by itself
+                    if cause == "sign-in" && self.signin_back(alerts.get(&i.provider).copied().unwrap_or(false), &i.provider, &p) { back.push((th.clone(), i.provider.clone())); continue }
+                    failed.push(p)
+                }
+                _ => {
+                    let alert = alerts.get(&i.provider).copied().unwrap_or(false);
+                    failed.push(json!({"thread":th,"provider":i.provider,"cause":cause,"say":need::short(&i.why),"at":now,"alert":alert}));
+                    if cause == "sign-in" { let p = need::provider_say(&i.provider);
+                        evs.push(json!({"$":"ActivityLogged","thread":th,"act":format!("swarm-signin:{}:{now}", r.id),"tone":"warn","kind":"swarm","summary":format!("{p} sign-in expired: this swarm member cannot start a turn. Sign in to {p} (the swarm's row in Needs you has the button); it goes on by itself once the sign-in works."),"at":now})); }
+                }
+            }
+        }
+        let mut next = rec.clone(); next["failed"] = json!(failed);
+        if next != rec { evs.push(need_ev(&r.id, &next, now)) }
+        for (th, prov) in &back { let nm = member_meta(&w, &r.id, &format!("{THREAD}{th}"))["name"].as_str().unwrap_or("peer").to_string();
+            evs.push(self.guard_post(&r.id, &format!("{nm} is back: its {} sign-in works again.", need::provider_say(prov)), &[], false, now)); }
+        if evs.is_empty() { return }
+        if self.hub.commit_many(&w.also(now, evs)).await.is_err() { return }
+        drop(w);
+        for (th, prov) in back { let _ = self.inbox_ride(&th, &format!("room:{}:signin:{now}", r.id), &format!("[#{}] The {} sign-in works again: carry on from the board (room_read {{room: \"{}\"}}).", r.name, need::provider_say(&prov), r.id)).await; }
+    }
+    /// Whether a member's provider sign-in works again since it failed (`f`: its failed record): Antigravity's token file was written after the failure (a sign-in
+    /// or a refresh; agy keeps it in `~/.gemini/antigravity-cli/antigravity-oauth-token`, its keyring store leaves the file's metadata written too), or the hub's own expired-sign-in record of a Claude or Codex account, there when it failed, is gone.
+    fn signin_back(&self, alert_now: bool, provider: &str, f: &Value) -> bool {
+        let at = f["at"].as_u64().unwrap_or(0);
+        match provider {
+            "antigravity" | "agy" => { let home = std::path::PathBuf::from(crate::plat::dirs::home_or_empty());
+                std::fs::metadata(home.join(".gemini/antigravity-cli/antigravity-oauth-token")).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(false, |d| d.as_secs() > at) }
+            _ => f["alert"] == true && !alert_now,
         }
     }
 
@@ -333,16 +495,62 @@ impl Bots {
     pub async fn swarm_control(self: &Arc<Self>, by: &str, a: &Value) -> Res {
         let now = now_s(); let act = gs(a, "action");
         let w = self.world().await;
-        let Some(r) = w.rooms.values().find(|r| !r.deleted && r.swarm() && (r.id == gs(a, "room") || r.name.eq_ignore_ascii_case(gs(a, "room")))).cloned() else { return fail("no such swarm") };
+        let room = gs(a, "room"); let room = if w.rooms.contains_key(room) { room } else { room.rsplit('|').next().unwrap_or(room) }; // a row's id may carry its hub ("<hub>|<room>")
+        let Some(r) = w.rooms.values().find(|r| !r.deleted && r.swarm() && (r.id == room || r.name.eq_ignore_ascii_case(room))).cloned() else { return fail("no such swarm") };
         if !by.is_empty() && by != r.by && w.triage_thread() != by { return fail("only the person or the swarm's starter controls it; members are equals and post on the board instead") }
         if r.ended() && act != "budget" { return fail(&format!("the swarm is over ({})", r.state)) }
         let who = if by.is_empty() { "the person".to_string() } else { w.run_bot(by).map(|b| b.name.clone()).unwrap_or_else(|| "its starter".into()) };
         match act {
             "pause" => { let ev = vec![r.set_ev(now, |x| { x.state = "paused".into(); x.reason = "person".into() }), self.guard_post(&r.id, &format!("Paused by {who}."), &["pause"], true, now)];
                 self.hub.commit_many(&w.also(now, ev)).await.map_or_else(|e| fail(&format!("{e:#}")), |_| (true, json!({"room":r.id,"state":"paused"}))) }
-            "resume" => { let ev = vec![r.set_ev(now, |x| { x.state = String::new(); x.reason = String::new() }), self.guard_post(&r.id, &format!("Resumed by {who}. Carry on from the board."), &["resume"], false, now)];
+            // resume: the pause's facts go, the posts held while it was paused are delivered, and a budget that is still used up gets a little more
+            // (resuming into a spent budget would pause again at the next post); raise: the part that ran out half again (the person's own word has no cap)
+            "resume" | "raise" => {
+                let used = w.room_used.get(&r.id).copied().unwrap_or_default();
+                let hit = r.budget.hit(&used).or_else(|| need_rec(&w, &r.id)["part"].as_str().filter(|_| act == "raise").and_then(|p| ["posts", "turns", "tokens"].into_iter().find(|x| *x == p)));
+                let mut budget = r.budget; let mut said = String::new();
+                if let Some(part) = hit { let (cur, dflt) = (part_of(&r.budget, part).max(part_of(&used, part)), part_of(&gate::SWARM_BUDGET, part));
+                    let to = if act == "raise" { cur + (cur / 2).max(dflt / 2).max(1) } else { cur + (dflt / 4).max(1) }; set_part(&mut budget, part, to); said = format!(" Budget {part}: {to}.") }
+                let mut ev = vec![r.set_ev(now, |x| { x.state = String::new(); x.reason = String::new(); x.budget = budget }), self.guard_post(&r.id, &format!("Resumed by {who}.{said} Carry on from the board."), &["resume"], false, now),
+                    need_ev(&r.id, &with_pause(&need_rec(&w, &r.id), None), now)];
+                if by.is_empty() || !by_bot(&w, &r) { ev.push(json!({"$":"SettingSet","key":auto_key(&r.id),"value":"","at":now})) }
+                self.release_held(&w, &r);
                 if let Err(e) = self.hub.commit_many(&w.also(now, ev)).await { return fail(&format!("{e:#}")) }
-                let ths = r.threads(); drop(w); self.give_later(&r.id, &ths, &ths, now).await; (true, json!({"room":r.id,"state":"active"})) }
+                let ths = r.threads(); drop(w); self.give_later(&r.id, &ths, &ths, now).await; (true, json!({"room":r.id,"state":"active","budget":budget})) }
+            // a member that failed: its sign-in (a Claude or Codex account opens its own sign-in; another CLI's sign-in runs in a terminal on the member's thread),
+            // its turn again, or its work moved to a new Claude member (the failed one leaves)
+            "signin" | "retry" | "move" => {
+                let th = gs(a, "thread").rsplit('|').next().unwrap_or("").to_string(); let key = format!("{THREAD}{th}");
+                if th.is_empty() || !r.members.contains(&key) { return fail("no such member (its thread)") }
+                let meta = member_meta(&w, &r.id, &key); let nm = meta["name"].as_str().unwrap_or("peer").to_string();
+                drop(w);
+                let info = self.inbox.info(&th).await.unwrap_or_default();
+                let prov = if info.provider.is_empty() { meta["provider"].as_str().unwrap_or("").to_string() } else { info.provider.clone() };
+                match act {
+                    "signin" => {
+                        if matches!(prov.as_str(), "claude" | "codex") {
+                            let raw = self.hub.setting(&crate::settings::accounts::binding_key(&th, &prov)).await.unwrap_or_default();
+                            let id = serde_json::from_str::<Value>(&raw).ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
+                            if !id.is_empty() { return (true, json!({"room":r.id,"thread":th,"open":format!("account:{id}")})) }
+                        }
+                        let Some(cmd) = signin_cmd(&prov) else { return fail(&format!("{} signs in under Settings › Agents", need::provider_say(&prov))) };
+                        let (ok, o) = crate::term::tools::call(&self.hub, &th, "terminal_open", &json!({"command":cmd,"title":format!("Sign in to {}", need::provider_say(&prov))})).await.unwrap_or((false, json!({"error":"terminals are not available"})));
+                        if !ok { return fail(o["error"].as_str().unwrap_or("could not open a terminal")) }
+                        (true, json!({"room":r.id,"thread":th,"open":format!("thread:{th}"),"terminal":o["id"]}))
+                    }
+                    "retry" => { let _ = self.inbox_ride(&th, &format!("room:{}:retry:{now}", r.id), &format!("[#{}] {who} asks you to carry on: your last turn failed. Read the board (room_read {{room: \"{}\"}}) and go on with your part.", r.name, r.id)).await;
+                        (true, json!({"room":r.id,"thread":th})) }
+                    _ => { // move: a Claude member with the same role joins, then the failed one leaves (its claims go)
+                        let role = meta["role"].as_str().unwrap_or("").to_string();
+                        let (ok, added) = Box::pin(self.swarm_control(by, &json!({"room":r.id,"action":"add","member":{"provider":"claude","role":role}}))).await;
+                        if !ok { return (false, added) }
+                        let (_, _) = Box::pin(self.swarm_control(by, &json!({"room":r.id,"action":"remove","thread":th}))).await;
+                        let w = self.world().await; let mut rec = need_rec(&w, &r.id); if let Some(f) = rec["failed"].as_array_mut() { f.retain(|x| x["thread"] != th.as_str()) }
+                        let _ = self.hub.commit_many(&w.also(now, vec![need_ev(&r.id, &rec, now), self.guard_post(&r.id, &format!("{nm}'s part moved to {} (Claude).", added["name"].as_str().unwrap_or("a new member")), &[], false, now)])).await;
+                        (true, json!({"room":r.id,"removed":th,"thread":added["thread"],"name":added["name"]}))
+                    }
+                }
+            }
             "stop" => { self.end(&w, &r, "stopped", "", &who, now).await; (true, json!({"room":r.id,"state":"stopped"})) }
             "budget" => { let x: Budget = serde_json::from_value(a.get("budget").cloned().unwrap_or(Value::Null)).unwrap_or_default();
                 let ev = r.set_ev(now, |y| { if x.posts > 0 { y.budget.posts = x.posts } if x.turns > 0 { y.budget.turns = x.turns } if x.tokens > 0 { y.budget.tokens = x.tokens } });
@@ -373,15 +581,15 @@ impl Bots {
                 match self.inbox.launch(&r.by, args).await { Ok(t) => (true, json!({"room":r.id,"thread":t,"name":nm})), Err(e) => {
                     let w = self.world().await; if let Some(r2) = w.room(&r.id).cloned() { let _ = self.hub.commit_many(&w.also(now_s(), vec![r2.set_ev(now_s(), |x| x.members.retain(|m| m != &key))])).await; }
                     fail(&format!("{nm} did not start: {e}")) } } }
-            _ => fail("action: pause, resume, stop, add, remove or budget"),
+            _ => fail("action: pause, resume, raise, stop, add, remove, budget, signin, retry or move"),
         }
     }
 
     /// The board as the clients and room_read show it: the room, its members with their live state, the posts (after `since`), the open claims.
     pub async fn board(&self, room: &str, since: &str, limit: usize, for_agent: bool) -> Option<Value> {
-        let (r, members, lines, cl) = { let w = self.world().await; let r = w.room(room)?.clone();
+        let (r, members, lines, cl, need_rec) = { let w = self.world().await; let r = w.room(room)?.clone(); let nr = need_rec(&w, room);
             let members: Vec<(String, String, Value)> = names(&w, &r).into_iter().map(|(m, n)| { let meta = member_meta(&w, &r.id, &m); (m, n, meta) }).collect();
-            (r.clone(), members, w.room_lines.get(room).cloned().unwrap_or_default(), claims(&w, room)) };
+            (r.clone(), members, w.room_lines.get(room).cloned().unwrap_or_default(), claims(&w, room), nr) };
         let used = self.world().await.room_used.get(room).copied().unwrap_or_default();
         let mut posts: Vec<Value> = vec![];
         for l in lines.iter().rev() { let Ok(raw) = self.hub.store.get(l - 1) else { continue }; let Ok(e) = serde_json::from_str::<Value>(&raw) else { continue };
@@ -395,15 +603,21 @@ impl Bots {
             ms.push(json!({"member":m,"thread":thread,"name":n,"color":c,"role":meta["role"],"provider":info.as_ref().map(|x| x.provider.clone()).unwrap_or_else(|| meta["provider"].as_str().unwrap_or("").into()),
                 "model":info.as_ref().map(|x| x.model.clone()).unwrap_or_else(|| meta["model"].as_str().unwrap_or("").into()),"state":info.as_ref().map_or(if thread.is_empty() { "bot" } else { "removed" }, |x| x.word()),"title":info.map(|x| x.title).unwrap_or_default()}));
         }
-        let posts: Vec<Value> = posts.into_iter().map(|e| { let th = gs(&e, "thread"); let key = if th.is_empty() { String::new() } else { format!("{THREAD}{th}") };
+        // a post held while the swarm was paused and released by a resume after it is no longer held (it was delivered)
+        let resumed = posts.iter().rposition(|e| e["guard"] == true && e["tags"].as_array().map_or(false, |t| t.iter().any(|x| x == "resume")));
+        let posts: Vec<Value> = posts.into_iter().enumerate().map(|(i, mut e)| { if resumed.map_or(false, |at| i < at) && e["guard"] != true && !gs(&e, "held").is_empty() && gs(&e, "held") != "backstop" { e["held"] = json!(""); e["released"] = json!(true) } e })
+            .map(|e| { let th = gs(&e, "thread"); let key = if th.is_empty() { String::new() } else { format!("{THREAD}{th}") };
             let mut p = json!({"id":e["id"],"from":e["from"],"thread":th,"color":color.get(&key).cloned().unwrap_or_default(),"text":e["text"],"tags":e.get("tags").cloned().unwrap_or(json!([])),"reply":e.get("reply").cloned().unwrap_or(json!("")),
-                "mentions":e.get("mentions").cloned().unwrap_or(json!([])),"files":e.get("files").cloned().unwrap_or(json!([])),"guard":e["guard"] == true,"held":e.get("held").cloned().unwrap_or(json!("")),"at":e["at"]});
+                "mentions":e.get("mentions").cloned().unwrap_or(json!([])),"files":e.get("files").cloned().unwrap_or(json!([])),"guard":e["guard"] == true,"held":e.get("held").cloned().unwrap_or(json!("")),"released":e["released"] == true,"at":e["at"]});
             // what a client draws a copy button (and Run in terminal) for: the post's code (md/copy.rs)
             if !for_agent { let c = crate::md::copy::spans(e["text"].as_str().unwrap_or("")); if !c.is_empty() { p["copy"] = json!(c); } }
             if for_agent { let o = p.as_object_mut().unwrap(); o.retain(|k, v| !matches!(k.as_str(), "color") && !(v == &json!("") || v == &json!([]) || v == &json!(false))); } p }).collect();
         let claims: Vec<Value> = cl.into_iter().map(|(p, c)| json!({"post":p,"thread":c["thread"],"files":c["files"],"state":c["state"]})).collect();
+        // what it wants of the person, as its row in Needs you says it (present/swarm_need.rs)
+        let need_now = { let ms: Vec<need::Member> = ms.iter().filter(|m| !gs(m, "thread").is_empty()).map(|m| need::Member { thread: gs(m, "thread"), name: gs(m, "name"), provider: gs(m, "provider"), failed: m["state"] == "failed", asking: m["state"] == "waiting" }).collect();
+            need::of(&r.state, &r.reason, &need_rec, &ms).map_or(Value::Null, |n| n.json("", &r.id)) };
         let _ = HashSet::<()>::new;
-        Some(json!({"room":{"id":r.id,"name":r.name,"kind":r.kind,"project":r.project,"goal":r.goal,"state":if r.state.is_empty() { "active" } else { r.state.as_str() },"reason":r.reason,"by":r.by,"budget":r.budget,"used":used},
+        Some(json!({"room":{"id":r.id,"name":r.name,"kind":r.kind,"project":r.project,"goal":r.goal,"state":if r.state.is_empty() { "active" } else { r.state.as_str() },"reason":r.reason,"by":r.by,"budget":r.budget,"used":used,"need":need_now},
             "members":ms,"posts":posts,"claims":claims}))
     }
     /// The swarms of a project (all with ""), newest first: the sidebar's rows and swarm.list.
@@ -434,8 +648,8 @@ pub fn defs() -> Vec<Value> {
             "budget":{"type":"object","description":"Optional limits: posts, turns, tokens (defaults 300, 120, 4000000).","properties":{"posts":{"type":"number"},"turns":{"type":"number"},"tokens":{"type":"number"}}}},"required":["topic","members"]}},
         {"name":"swarm_control","description":"For the swarm's starter acting for the person: pause, resume, stop it, add or remove a member, or change its budget. Members cannot control it; they post on the board.","inputSchema":{"type":"object","properties":{
             "room":{"type":"string","description":"The swarm's room id or name."},
-            "action":{"type":"string","enum":["pause","resume","stop","add","remove","budget"]},
-            "thread":{"type":"string","description":"remove: the member's thread (or member: its name)."},
+            "action":{"type":"string","enum":["pause","resume","raise","stop","add","remove","budget","signin","retry","move"]},
+            "thread":{"type":"string","description":"remove, retry, move, signin: the member's thread (remove also takes member: its name). raise: the budget part that ran out half again, then resume; move: a Claude member takes a failed member's part."},
             "member":{"description":"add: {provider, model?, role?, account?}; remove: the member's name."},
             "budget":{"type":"object","properties":{"posts":{"type":"number"},"turns":{"type":"number"},"tokens":{"type":"number"}}}},"required":["room","action"]}}
     ])).unwrap()

@@ -17,7 +17,9 @@ struct DSecRow: Decodable, Identifiable, Equatable {
     var menu: [DMenuItem]
     /// the fold the hub keeps for a project row (`sidebar.fold.<key>`): the action its chevron sends, folded now, the rows it hides or would hide
     var fold: String; var folded: Bool; var under: Int
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under }
+    /// a swarm row's: what it wants of the person, one line and its buttons (the hub's present/swarm_need.rs); nil when it wants nothing
+    var need: DSwarmNeed?
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under, need }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
@@ -26,6 +28,7 @@ struct DSecRow: Decodable, Identifiable, Equatable {
         icon = c.str(.icon); css = c.str(.css); dots = (try? c.decode([DSecDot].self, forKey: .dots)) ?? []; more = c.int(.more); rest = c.int(.rest)
         menu = (try? c.decode([DMenuItem].self, forKey: .menu)) ?? []
         fold = c.str(.fold); folded = c.bool(.folded); under = c.int(.under)
+        need = kind == "swarm" ? DSwarmNeed.of(c, .need) : nil
     }
     var isProject: Bool { !key.isEmpty }
     /// a chevron on the row: something is under it, or it is folded (an older hub sends no fold)
@@ -86,9 +89,53 @@ struct DataSectionThread: View {
                 Spacer(minLength: 0)
                 if let m = r.mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                 if quiet { Text(r.ago).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                else if r.need != nil {}   // its line is drawn under it (DataSwarmNeedRow)
                 else { Text(r.want.isEmpty ? Tr.t(r.say.isEmpty ? r.ago : r.say) : Tr.t(r.want)).dmono(11).foregroundStyle(r.want.isEmpty ? BackplaneDesign.faint : BackplaneDesign.bad) }
             }.padding(.leading, indent).padding(.trailing, 12).frame(minHeight: 36).contentShape(Rectangle()).opacity(r.off ? 0.55 : 1)
         }.buttonStyle(.plain).accessibilityIdentifier("data.section.thread." + r.id)
+    }
+}
+/// A swarm row that wants the person (its `need`): the row, the need's line, and one small button per action under it. A press on the row or on
+/// "board" opens the swarm's page; "open" the member's thread; the others call `swarm.act` (Swarm.press), and its reply may open an account's
+/// sign-in or a thread. A refusal shows the hub's words under the buttons. `after` runs once the hub has answered (a project page reads its lists again).
+struct DataSwarmNeedRow: View {
+    let client: DataClient; let r: DSecRow; let need: DSwarmNeed; let room: String
+    let openRoom: () -> Void; let openThread: (String) -> Void; var after: () async -> Void = {}
+    @State private var busy = false
+    @State private var error = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DataSectionThread(r: r) { _ in openRoom() }
+            Text(Tr.t(need.line)).dmono(11).foregroundStyle(BackplaneDesign.bad).lineLimit(1).truncationMode(.tail)
+                .padding(.leading, 27).padding(.trailing, 12).padding(.top, -6).accessibilityIdentifier("data.section.need." + r.id)
+            HStack(spacing: 6) {
+                ForEach(Swarm.buttons(need, rowRoom: room)) { a in
+                    Button(Tr.t(a.label)) { press(a) }.buttonStyle(DButton(primary: false, compact: true)).disabled(busy)
+                        .accessibilityIdentifier("data.section.need." + a.act + "." + r.id)
+                }
+                Spacer(minLength: 0)
+            }.padding(.leading, 27).padding(.trailing, 12).padding(.top, 6).padding(.bottom, error.isEmpty ? 8 : 4)
+            if !error.isEmpty { Text(error).dmono(11).foregroundStyle(BackplaneDesign.bad).lineLimit(2).padding(.leading, 27).padding(.trailing, 12).padding(.bottom, 8).accessibilityIdentifier("data.section.need.error." + r.id) }
+        }
+    }
+    private func press(_ a: DSwarmNeedAct) {
+        switch Swarm.press(a, rowRoom: room) {
+        case .board?: openRoom()
+        case .thread(let t)?: openThread(t)
+        case .request(let p)?:
+            busy = true; error = ""
+            Task {
+                do {
+                    switch try await client.swarmNeedAct(p) {
+                    case .account(let id)?: client.pushAccount = id
+                    case .thread(let t)?: openThread(t)
+                    case nil: break
+                    }
+                } catch { self.error = error.localizedDescription }
+                busy = false; await after()
+            }
+        case nil: break
+        }
     }
 }
 extension View {
@@ -160,7 +207,10 @@ struct DataProjectPageView: View {
             if let page {
                 ForEach(page.sections.filter { !$0.rows.isEmpty || ($0.fold && $0.count > 0) }) { s in
                     DataSectionHead(s: s) { if s.toggle == "page-older" { older.toggle() } else { done.toggle() }; Task { await load() } }.dataRow()
-                    ForEach(s.rows) { r in DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.farHide(r, client) { await load() }.dataRow() }
+                    ForEach(s.rows) { r in
+                        if let room = r.swarmRoom, let n = r.need { DataSwarmNeedRow(client: client, r: r, need: n, room: room, openRoom: { path.append(DSwarmRoute(id: room, name: r.title)) }, openThread: { path.append($0) }) { await load() }.dataRow() }
+                        else { DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.farHide(r, client) { await load() }.dataRow() }
+                    }
                 }
                 if page.sections.allSatisfy({ $0.rows.isEmpty && $0.count == 0 }) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(14).dataRow() }
             } else { DLoading(text: Tr.t("Loading…")).dataRow() }

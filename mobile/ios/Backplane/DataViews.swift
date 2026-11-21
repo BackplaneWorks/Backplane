@@ -332,7 +332,8 @@ struct DataThreadsView: View {
                 // Needs you: the title has the row (no project name), and a stop says so by its dot; an ask keeps its red word
                 ForEach(s.rows) { r in
                     // a swarm that waits on the person opens the swarm's page
-                    if let room = r.swarmRoom { DataSectionThread(r: r) { _ in path.append(DSwarmRoute(id: room, name: r.title)) }.dataRow() }
+                    if let room = r.swarmRoom, let n = r.need { DataSwarmNeedRow(client: client, r: r, need: n, room: room, openRoom: { path.append(DSwarmRoute(id: room, name: r.title)) }, openThread: { path.append($0) }).dataRow() }
+                    else if let room = r.swarmRoom { DataSectionThread(r: r) { _ in path.append(DSwarmRoute(id: room, name: r.title)) }.dataRow() }
                     else { DataSectionThread(r: r, quiet: r.want == "failed" || r.want == "stopped") { path.append($0) }.farHide(r, client).dataRow() }
                 }
             } else {

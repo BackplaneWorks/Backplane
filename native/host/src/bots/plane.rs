@@ -29,7 +29,7 @@ fn blank() -> Thread {
 }
 
 /// Plane.rank: how much a state waits on the person (0: not at all)
-fn rank(s: &str) -> u8 { match s { "approval" => 8, "question" | "secret" => 7, "failed" => 6, "stalled" => 5, _ => 0 } }
+fn rank(s: &str) -> u8 { match s { "approval" => 8, "question" | "secret" => 7, "failed" | "swarm" => 6, "stalled" => 5, _ => 0 } }
 /// Plane.sec: the section a state goes to: 0 need, 1 run, 2 the rest
 fn sec(s: &str) -> u8 { if rank(s) > 0 { 0 } else if s == "working" || s == "waiting" { 1 } else { 2 } }
 
@@ -197,8 +197,15 @@ pub fn read(st: &State, w: &World, rooms: &[RoomNews], now: u64, idle: bool) -> 
     let c = Ctx { st, ix: signal::index(st), asks, secrets: secrets(st), blank: blank() };
     // Plane.of.f: the live threads of every project, then the bots' own threads that wait on the person or run
     let bot_thread = |p: &str| st.bot_threads_has(p);
-    let hidden: HashSet<&str> = st.tasks.values().filter(|t| !bot_thread(&t.0) && st.threads.contains_key(t.1.as_str()) && parent(st, &t.1).is_some()).map(|t| t.1.as_str()).collect();
+    let mut hidden: HashSet<&str> = st.tasks.values().filter(|t| !bot_thread(&t.0) && st.threads.contains_key(t.1.as_str()) && parent(st, &t.1).is_some()).map(|t| t.1.as_str()).collect();
+    // a swarm's members are its row: what the swarm wants of the person, in one line with the actions that resolve it (present/swarm_need.rs)
+    hidden.extend(st.swarm_of.keys().map(String::as_str));
     let mut all: Vec<Row> = vec![];
+    for s in crate::sidebar::live_swarms(st) {
+        let (state, sub) = match &s.need { Some(n) => ("swarm".to_string(), format!("{} · {}", n.line, n.acts.iter().map(|a| a.label.as_str()).collect::<Vec<_>>().join(" / "))),
+            None => (if st.rooms_nav.get(&s.id).map_or(false, |r| r.state == "paused") { "idle" } else { "working" }.to_string(), st.rooms_nav.get(&s.id).map_or(String::new(), |r| if r.state == "paused" { format!("paused ({})", r.reason) } else { "running".into() })) };
+        all.push(Row { kind: "swarm", id: s.id.clone(), title: s.title.clone(), sub, state, at: s.activity });
+    }
     let mut projects: Vec<(&String, &Project)> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != "scratch").collect(); projects.sort_by(|a, b| b.1.created.cmp(&a.1.created).then(a.0.cmp(b.0)));
     for (pid, p) in projects {
         for id in live_threads(st, pid, now, &hidden) {

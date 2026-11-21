@@ -5,7 +5,7 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 struct Peers { launched: StdMutex<Vec<Value>>, rides: StdMutex<Vec<(String, String, String)>>, notes: StdMutex<Vec<(String, String, String)>>, got: StdMutex<Vec<(String, String)>>,
-    turn: StdMutex<HashMap<String, String>>, locks: StdMutex<HashMap<String, String>>,
+    turn: StdMutex<HashMap<String, String>>, locks: StdMutex<HashMap<String, String>>, why: StdMutex<HashMap<String, String>>, busy: StdMutex<HashMap<String, u64>>,
     /// the bots, so `unclaim` takes their world lock as the real one does (a freed lock is granted to its waiter, and that delivery takes it)
     bots: std::sync::OnceLock<std::sync::Weak<Bots>> }
 impl Inbox for Arc<Peers> {
@@ -14,10 +14,10 @@ impl Inbox for Arc<Peers> {
     fn note<'a>(&'a self, th: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { self.notes.lock().unwrap().push((th.into(), id.into(), text.into())); Ok(()) }) }
     fn ride<'a>(&'a self, th: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { self.rides.lock().unwrap().push((th.into(), id.into(), text.into())); Ok(()) }) }
     fn info<'a>(&'a self, th: &'a str) -> Fut<'a, Option<ThreadInfo>> { Box::pin(async move {
-        let known = th == "t-boss" || self.launched.lock().unwrap().iter().any(|a| a["_id"] == th);
+        let known = th == "t-boss" || th == "t-bot" || self.launched.lock().unwrap().iter().any(|a| a["_id"] == th);
         if !known { return None }
         let provider = self.launched.lock().unwrap().iter().find(|a| a["_id"] == th).map(|a| a["provider"].as_str().unwrap_or("").to_string()).unwrap_or("claude".into());
-        Some(ThreadInfo { provider, turn: self.turn.lock().unwrap().get(th).cloned().unwrap_or_else(|| "completed".into()), project: "p1".into(), root: "/w".into(), ..Default::default() })
+        Some(ThreadInfo { provider, turn: self.turn.lock().unwrap().get(th).cloned().unwrap_or_else(|| "completed".into()), project: "p1".into(), root: "/w".into(), why: self.why.lock().unwrap().get(th).cloned().unwrap_or_default(), busy: self.busy.lock().unwrap().get(th).copied().unwrap_or(0), ..Default::default() })
     }) }
     fn launch<'a>(&'a self, _by: &'a str, a: Value) -> Fut<'a, Result<String, String>> { Box::pin(async move { let id = a["_id"].as_str().unwrap().to_string(); self.launched.lock().unwrap().push(a); Ok(id) }) }
     fn claim<'a>(&'a self, th: &'a str, files: Vec<String>, _n: String) -> Fut<'a, Vec<(String, String, bool, String)>> { Box::pin(async move {
@@ -126,6 +126,13 @@ async fn post(b: &Arc<Bots>, th: &str, a: Value) -> (bool, Value) { b.tool_call(
     let room = r["room"].as_str().unwrap().to_string();
     bots.swarm_tick(now_s()).await;
     { let w = bots.world().await; assert_eq!(w.room(&room).unwrap().state, "", "not idle long enough yet"); }
+    // a member whose turn is over but whose work still runs (a landing under work_run, a wake it set) is busy, not idle: no pause mid-landing
+    let m0 = peers.launched.lock().unwrap()[0]["_id"].as_str().unwrap().to_string();
+    peers.busy.lock().unwrap().insert(m0.clone(), 1);
+    bots.swarm_tick(now_s() + crate::bots::gate::LIMITS.idle + 1).await;
+    { let w = bots.world().await; assert_eq!(w.room(&room).unwrap().state, "", "a member monitoring its work keeps the swarm going"); }
+    let g = rpc(&hub, "swarm.get", json!({"room":room})).await; assert_eq!(g["result"]["members"][0]["state"], "monitoring");
+    peers.busy.lock().unwrap().remove(&m0);
     bots.swarm_tick(now_s() + crate::bots::gate::LIMITS.idle + 1).await;
     { let w = bots.world().await; let rm = w.room(&room).unwrap(); assert_eq!((rm.state.as_str(), rm.reason.as_str()), ("paused", "idle")); }
     assert!(peers.got.lock().unwrap().iter().any(|(t, x)| t == "t-boss" && x.contains("paused itself")));
@@ -159,4 +166,93 @@ async fn post(b: &Arc<Bots>, th: &str, a: Value) -> (bool, Value) { b.tool_call(
     // removed: no longer a member
     assert_eq!(rpc(&hub, "swarm.act", json!({"room":room,"action":"remove","thread":tst})).await["ok"], true);
     let (ok, _) = post(&bots, &tst, json!({"room":room,"text":"am I still here?"})).await; assert!(!ok);
+}
+
+fn line(b: &Value) -> String { b["room"]["need"]["line"].as_str().unwrap_or("").to_string() }
+
+#[tokio::test] async fn a_person_started_swarm_that_goes_idle_says_so_in_one_line_with_resume_and_resume_delivers_what_was_held() {
+    let (hub, bots, peers) = hub_of("idle-line").await;
+    let (ok, r) = bots.tool_call("t-boss", "swarm_create", &json!({"topic":"quiet","members":[{"provider":"claude"},{"provider":"codex"}]})).await; assert!(ok, "{r}");
+    let room = r["room"].as_str().unwrap().to_string();
+    let (a, b) = { let l = peers.launched.lock().unwrap(); (l[0]["_id"].as_str().unwrap().to_string(), l[1]["_id"].as_str().unwrap().to_string()) };
+    bots.swarm_tick(now_s() + crate::bots::gate::LIMITS.idle + 1).await;
+    let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
+    assert_eq!(line(&g), "Paused: all members idle 10 min", "{}", g["room"]);
+    assert_eq!(g["room"]["need"]["actions"], json!([{"label":"Resume","act":"resume","room":room,"thread":""}]));
+    let told = peers.got.lock().unwrap().clone(); assert!(told.iter().any(|(t, x)| t == "t-boss" && x.contains("idle for 10 minutes")), "the starter hears: {told:?}");
+    // a member posts while it is paused: held, nobody woken
+    let before = rides_to(&peers, &b).len();
+    let (_, h) = post(&bots, &a, json!({"room":room,"text":"Found it: the clock was gated.","tags":["idea"]})).await; assert_eq!(h["held"], true, "{h}");
+    assert_eq!(rides_to(&peers, &b).len(), before);
+    assert_eq!(rpc(&hub, "swarm.get", json!({"room":room})).await["result"]["posts"].as_array().unwrap().iter().filter(|p| p["held"] == "paused").count(), 1);
+    // the person presses Resume: the held post reaches the others, and the board no longer shows it held
+    assert_eq!(rpc(&hub, "swarm.act", json!({"room":room,"action":"resume"})).await["ok"], true);
+    let heard = rides_to(&peers, &b); assert!(heard.last().unwrap().contains("the clock was gated"), "the held post is delivered on resume: {heard:?}");
+    assert!(!rides_to(&peers, &a).iter().any(|x| x.contains("the clock was gated")), "not to its own poster");
+    let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
+    let p = g["posts"].as_array().unwrap().iter().find(|p| p["text"].as_str().map_or(false, |t| t.contains("clock was gated"))).unwrap().clone();
+    assert_eq!((p["held"].clone(), p["released"].clone()), (json!(""), json!(true)), "{p}");
+    assert!(g["room"]["need"].is_null(), "resumed: nothing needed: {}", g["room"]);
+}
+
+#[tokio::test] async fn a_bots_swarm_resumes_and_raises_its_budget_by_policy_and_only_money_past_the_cap_reaches_the_person() {
+    let (hub, bots, peers) = hub_of("bot-policy").await;
+    hub.hub.commit(&json!({"$":"BotSet","id":"b1","name":"Bub","thread":"t-bot","at":2})).await.unwrap();
+    let (ok, r) = bots.tool_call("t-bot", "swarm_create", &json!({"topic":"web ui","project":"p1","members":[{"provider":"claude"},{"provider":"codex"}],"budget":{"posts":4}})).await; assert!(ok, "{r}");
+    let room = r["room"].as_str().unwrap().to_string();
+    let (a, b) = { let l = peers.launched.lock().unwrap(); (l[0]["_id"].as_str().unwrap().to_string(), l[1]["_id"].as_str().unwrap().to_string()) };
+    // idle: woken by the hub, twice, then left for the starter; never the person's
+    let t0 = now_s();
+    for i in 1..=2u64 { bots.swarm_tick(t0 + i * (crate::bots::gate::LIMITS.idle + 1)).await;
+        let w = bots.world().await; assert_eq!(w.room(&room).unwrap().state, "", "idle {i}: resumed by policy"); }
+    assert!(rides_to(&peers, &a).iter().any(|x| x.contains("the hub woke them (1 of 2)")), "{:?}", rides_to(&peers, &a));
+    bots.swarm_tick(t0 + 3 * (crate::bots::gate::LIMITS.idle + 1)).await;
+    { let w = bots.world().await; let rm = w.room(&room).unwrap(); assert_eq!((rm.state.as_str(), rm.reason.as_str()), ("paused", "idle")); }
+    let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
+    assert!(g["room"]["need"].is_null(), "a bot's routine pause is no Needs you of the person's: {}", g["room"]);
+    { let w = bots.world().await; assert_eq!(w.setting(&crate::present::swarm_need::key(&room), "").contains("\"for\":\"starter\""), true, "the facts say whose it is (the sidebar reads them)"); }
+    assert!(peers.got.lock().unwrap().iter().any(|(t, x)| t == "t-bot" && x.contains("paused itself")), "its starter hears");
+    assert_eq!(rpc(&hub, "swarm.act", json!({"room":room,"action":"resume"})).await["ok"], true);
+    // the budget: when its posts run out the policy raises them (half the default at least, up to four times it) and the post goes on, said on the board
+    for (i, th) in [&a, &b, &a, &b].into_iter().enumerate() { let (ok, x) = post(&bots, th, json!({"room":room,"text":format!("step {i} of the layout"),"tags":["claim"],"files":[format!("f{i}.rs")]})).await; assert!(ok, "{x}"); assert!(x["held"].is_null(), "post {i}: {x}"); }
+    let rm = { let w = bots.world().await; w.room(&room).unwrap().clone() };
+    assert_eq!((rm.state.as_str(), rm.budget.posts), ("", 154), "raised by policy, not paused");
+    assert!(rpc(&hub, "swarm.get", json!({"room":room})).await["result"]["posts"].as_array().unwrap().iter().any(|p| p["guard"] == true && p["text"].as_str().unwrap().contains("raised by policy to 154")));
+    assert!(rpc(&hub, "swarm.get", json!({"room":room})).await["result"]["room"]["need"].is_null());
+}
+
+#[tokio::test] async fn the_persons_swarm_out_of_budget_offers_raise_and_a_member_whose_sign_in_expired_says_so_and_goes_on_once_it_works() {
+    let (hub, bots, peers) = hub_of("budget-signin").await;
+    let (ok, r) = bots.tool_call("t-boss", "swarm_create", &json!({"topic":"ui","members":[{"provider":"claude"},{"provider":"codex"}],"budget":{"posts":2}})).await; assert!(ok, "{r}");
+    let room = r["room"].as_str().unwrap().to_string();
+    let (a, b) = { let l = peers.launched.lock().unwrap(); (l[0]["_id"].as_str().unwrap().to_string(), l[1]["_id"].as_str().unwrap().to_string()) };
+    post(&bots, &a, json!({"room":room,"text":"first idea about the grid"})).await;
+    let (_, x) = post(&bots, &b, json!({"room":room,"text":"second idea about the header"})).await; assert_eq!(x["paused"], "budget", "{x}");
+    let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
+    assert_eq!(line(&g), "Paused: budget used (posts)");
+    let acts: Vec<&str> = g["room"]["need"]["actions"].as_array().unwrap().iter().map(|a| a["act"].as_str().unwrap()).collect(); assert_eq!(acts, ["raise", "resume"]);
+    assert_eq!(rpc(&hub, "swarm.act", json!({"room":format!("h|{room}"),"action":"raise"})).await["ok"], true, "a row's hub-prefixed room id is taken");
+    { let w = bots.world().await; let rm = w.room(&room).unwrap(); assert_eq!((rm.state.as_str(), rm.budget.posts), ("", 152)); }
+    // the codex member fails on its sign-in: the tick reads why, its thread says so, the swarm's line names it with Sign in and Move to Claude
+    peers.turn.lock().unwrap().insert(b.clone(), "failed".into());
+    peers.why.lock().unwrap().insert(b.clone(), "Codex sign-in expired: tap to sign in again".into());
+    hub.hub.commit(&json!({"$":"SettingSet","key":"account.signin.alert.codex","value":"{\"provider\":\"codex\"}","at":now_s()})).await.unwrap();
+    bots.swarm_tick(now_s()).await;
+    let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
+    // (the board reads the members' state from the stand-in's turn: "failed")
+    assert_eq!(line(&g), "Member codex failed: Codex sign-in expired", "{}", g["room"]);
+    let acts: Vec<(&str, &str)> = g["room"]["need"]["actions"].as_array().unwrap().iter().map(|a| (a["label"].as_str().unwrap(), a["act"].as_str().unwrap())).collect();
+    assert_eq!(acts, [("Sign in to Codex", "signin"), ("Move to Claude", "move")]);
+    assert!(log(&hub).iter().any(|e| e["$"] == "ActivityLogged" && e["thread"] == b.as_str() && e["summary"].as_str().unwrap_or("").starts_with("Codex sign-in expired: this swarm member")), "the member's own thread says it");
+    bots.swarm_tick(now_s()).await;
+    assert!(rides_to(&peers, &b).iter().all(|x| !x.contains("sign-in works again")), "still expired: no restart");
+    // the person signs in (the hub's expired record goes): the member goes on by itself
+    hub.hub.commit(&json!({"$":"SettingSet","key":"account.signin.alert.codex","value":"","at":now_s()})).await.unwrap();
+    bots.swarm_tick(now_s()).await;
+    assert!(rides_to(&peers, &b).iter().any(|x| x.contains("Codex sign-in works again")), "{:?}", rides_to(&peers, &b));
+    assert!(rpc(&hub, "swarm.get", json!({"room":room})).await["result"]["posts"].as_array().unwrap().iter().any(|p| p["text"].as_str().unwrap_or("").contains("codex is back")));
+    // Move to Claude: a Claude member with its role joins and the failed one leaves
+    let m = rpc(&hub, "swarm.act", json!({"room":room,"action":"move","thread":a})).await; assert_eq!(m["ok"], true, "{m}");
+    assert_eq!(peers.launched.lock().unwrap().last().unwrap()["provider"], "claude");
+    { let w = bots.world().await; assert!(!w.room(&room).unwrap().threads().contains(&a)); }
 }

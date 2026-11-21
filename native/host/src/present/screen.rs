@@ -361,6 +361,28 @@ pub fn settings_link(href: &str) -> Option<&'static str> {
     let page=href.trim().strip_prefix("backplane://settings/")?.split(['#','?']).next()?.trim_end_matches('/');
     super::settings::PAGES.iter().map(|(id,_)|*id).find(|id|*id==page)
 }
+/// A swarm row's button (`swarm-need`): the request to present instead (its page, the member's thread, Settings › Agents, or nothing new) and the `swarm.act`
+/// parameters to send with it. None: not a live swarm of this hub, or not one of its members.
+pub fn swarm_need_act(st: &State,p: &Value) -> Option<(Value,Option<Value>)> {
+    let hub=text(p,"hub"); let bare=|v: &str| v.strip_prefix(&format!("{hub}|")).unwrap_or(v).to_string();
+    let mut it=text(p,"value").split('\u{1f}'); let (room,act,thread)=(bare(it.next()?),it.next()?.to_string(),bare(it.next().unwrap_or("")));
+    let r=st.rooms_nav.get(&room).filter(|r| r.swarm_live())?;
+    if !thread.is_empty() && !r.threads.contains(&thread) { return None }
+    let mut c=p.clone();
+    let go=|c: &mut Value,a: &str,v: String| { c["action"]=json!(a); c["value"]=json!(v); };
+    let q=|a: &str| { let mut q=json!({"room":room,"action":a}); if !thread.is_empty() { q["thread"]=json!(thread) } Some(q) };
+    match act.as_str() {
+        "board" => { go(&mut c,"room",room.clone()); Some((c,None)) }
+        "open" if !thread.is_empty() => { go(&mut c,"select",format!("{hub}|{thread}")); Some((c,None)) }
+        "signin" if !thread.is_empty() => {
+            let prov=st.threads.get(&thread).map(|t| t.provider.as_str()).unwrap_or("");
+            if matches!(prov,"claude"|"codex") { go(&mut c,"settings-page","agents".into()) } else { go(&mut c,"select",format!("{hub}|{thread}")) }
+            Some((c,q("signin"))) }
+        "resume"|"raise" => { go(&mut c,"open-thread",String::new()); Some((c,q(&act))) }
+        "retry"|"move" if !thread.is_empty() => { go(&mut c,"open-thread",String::new()); Some((c,q(&act))) }
+        _ => None,
+    }
+}
 /// What `view` and `view-show` do with a page change the viewer made: the session's patch, its commands after the request's reads, the fab's look
 /// (`fab_tail`) and, when the viewer opened on a drawing from anything else, the project's boards asked for.
 fn applied_view(st: &State,hub: &str,thread: &str,session: &mut Value,read_cmds: &[Value],o: super::viewer::ViewOut) -> Vec<Value> {
@@ -384,6 +406,14 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         let Some(path)=super::filelink::file_ref(st,&r.rest) else { let mut c=p.clone(); c["action"]=json!("link-note"); c["value"]=json!("That file is not on this hub."); return recent_unified(st,far,un,&c) };
         return link_file(st,far,un,p,&path) } }
     // `backplane://settings/<page>` (an agent's "Open Settings, CAD" when KiCad or FreeCAD is missing): Settings on that page, as its own button
+    // a swarm's Needs you row's buttons (present/swarm_need.rs): "<room>\u{1f}<act>\u{1f}<thread>". Read board opens its page and Answer the member's thread;
+    // the rest is the hub's `swarm.act` (resume, raise, retry, move, signin), and a sign-in also opens where it happens: a Claude or Codex account's sign-in
+    // (Settings › Agents), another agent's terminal on the member's thread
+    if text(p,"action")=="swarm-need" { if let Some(c)=swarm_need_act(st,p) { let mut cmd=c.1; let mut out=recent_unified(st,far,un,&c.0)?;
+        if let Some(q)=cmd.take() { let rid=out["session"]["rid"].as_u64().unwrap_or(0); let hub=text(p,"hub").to_string();
+            let send=json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"swarm.act","p":q}).to_string()});
+            if let Some(a)=out["cmds"].as_array_mut() { a.insert(0,send) } else { out["cmds"]=json!([send]) } out["session"]["rid"]=json!(rid+1); }
+        return Some(out) } else { return refused("action.swarm-need") } }
     if text(p,"action")=="link-open" { if let Some(page)=settings_link(text(p,"value")) { let mut c=p.clone(); c["action"]=json!("settings-page"); c["value"]=json!(page); return recent_unified(st,far,un,&c) } }
     // a link clicked in a message: what it opens is decided here (present/linkopen.rs); a thread on a linked machine moves the target itself
     if text(p,"action")=="link-open" {

@@ -9,6 +9,7 @@ import { onLocaleChange, setLocale, t } from "./i18n";
 import { MgmtStrip } from "./mgmt";
 import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
 import { RailView, type RailEntry } from "./rail";
+import { needAfter, needPress } from "./swarm-need";
 import { SettingsModal, type SettingsRow } from "./settings";
 import {
   SidebarView,
@@ -328,6 +329,17 @@ function mountApp(): void {
       sidebarEl.classList.remove("bp-sidebar-open");
       sidebarEl.classList.add("bp-sidebar-collapsed");
     },
+    // a swarm need's button: swarm.act, then what its reply opens (this client has no room view or account page: those are left out)
+    onNeedAct: async (a) => {
+      const go = needPress(a, false);
+      if (!go) return;
+      if (go.kind === "thread") { void openThread(go.id); return; }
+      if (go.kind !== "call") return;
+      const next = needAfter(await hub.rpc(go.method, go.params));
+      if (next?.kind === "thread") void openThread(next.id);
+      void refreshSections();
+    },
+    hasRoomView: false,
   });
 
   const chat = new ChatView(centerEl, {

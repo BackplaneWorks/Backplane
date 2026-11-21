@@ -51,21 +51,33 @@ pub fn side_rows(cx: &mut Context<Backplane>, light: bool, project: &Value, open
     let c = |n: &str| theme::color(light, n);
     arr(project, "swarms").filter_map(|r| {
         let (action, room) = nav_action(&string(r, "nav"))?;
-        let name = string(r, "name");
+        let name = { let n = string(r, "name"); if n.is_empty() { string(r, "title") } else { n } };
         ctl.push(CtlEntry { id: format!("swarm:{name}"), label: name.clone(), ctl: Ctl::Node(action.clone(), room.clone()) });
         let sel = room == open_room;
-        let line = tf("gpui.swarm.row", &[("n", r["members"].as_u64().unwrap_or(0).into()), ("w", r["working"].as_u64().unwrap_or(0).into())]);
-        let el = crate::ui::with_rect(div().id(SharedString::from(format!("swarm-{}", string(r, "id")))), { let n = name.clone(); move || format!("swarm:{n}") })
-            .flex().items_center().gap_2().pl(px(30.)).pr_3().h(crate::scale::tpx(38.)).border_l_2().border_color(if sel { c("accent") } else { c("panel") })
+        // what it wants of the person, in the hub's one line (present/swarm_need.rs), with the buttons that resolve it; else its members at work
+        let need = &r["need"];
+        let line = if need.is_object() { string(need, "line") } else { tf("gpui.swarm.row", &[("n", r["members"].as_u64().unwrap_or(0).into()), ("w", r["working"].as_u64().unwrap_or(0).into())]) };
+        let rid = string(r, "id");
+        let btns: Vec<AnyElement> = need_buttons(r).into_iter().enumerate().map(|(i, (label, v))| {
+            ctl.push(CtlEntry { id: format!("swarm-need:{name}:{i}"), label: label.clone(), ctl: Ctl::Node("swarm-need".into(), v.clone()) });
+            need_button(cx, light, format!("swarm-need-{rid}-{i}"), trs(&label), i == 0, v) }).collect();
+        let has = !btns.is_empty();
+        let el = crate::ui::with_rect(div().id(SharedString::from(format!("swarm-{rid}"))), { let n = name.clone(); move || format!("swarm:{n}") })
+            .flex().items_center().gap_2().pl(px(30.)).pr_3().when(!has, |d| d.h(crate::scale::tpx(38.))).when(has, |d| d.py_1()).border_l_2().border_color(if sel { c("accent") } else { c("panel") })
             .bg(if sel { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| this.go(&action, room.clone(), cx)))
             .child(dot(light, &string(r, "state")))
             .child(div().flex_1().min_w_0().flex().flex_col().line_height(crate::scale::tpx(16.))
                 .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name))
-                .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).overflow_hidden().whitespace_nowrap().child(line)))
-            .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(string(r, "ago")));
+                .child(div().text_size(crate::scale::tpx(11.)).text_color(if has { c("warn") } else { c("faint") }).overflow_hidden().whitespace_nowrap().text_ellipsis().child(line))
+                .when(has, |d| d.child(div().pt_1().flex().gap_1().children(btns))))
+            .when(!has, |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(string(r, "ago"))));
         Some(el.into_any_element())
     }).collect()
+}
+/// A swarm row's buttons (its `need.actions`): each one's label and the `swarm-need` value the hub's presenter maps ("<room>\u{1f}<act>\u{1f}<thread>").
+pub fn need_buttons(r: &Value) -> Vec<(String, String)> {
+    arr(&r["need"], "actions").filter(|a| !string(a, "act").is_empty()).map(|a| (string(a, "label"), format!("{}{SEP}{}{SEP}{}", string(a, "room"), string(a, "act"), string(a, "thread")))).collect()
 }
 
 // ---- typed fields ----
@@ -99,6 +111,13 @@ fn button(cx: &mut Context<Backplane>, light: bool, id: String, label: String, o
     let d = div().id(SharedString::from(id)).px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().whitespace_nowrap();
     let d = if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
     d.child(label).on_click(cx.listener(move |this, _, _, cx| send(this, a, &v, cx))).into_any_element()
+}
+/// A Needs you row's button: as `button`, smaller, and its press is not the row's (which opens the swarm's page).
+fn need_button(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, v: String) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let d = div().id(SharedString::from(id)).px_2().text_size(crate::scale::tpx(11.)).cursor_pointer().border_1().whitespace_nowrap();
+    let d = if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
+    d.child(label).on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); send(this, "swarm-need", &v, cx) })).into_any_element()
 }
 fn inert(light: bool, label: String) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
@@ -281,6 +300,9 @@ mod tests {
     use serde_json::json;
     #[test] fn a_rows_nav_opens_its_room_and_nothing_else() {
         assert_eq!(nav_action("@room:r7"), Some(("room".into(), "r7".into())));
+        let r = serde_json::json!({"need":{"line":"Member gemini failed: Gemini sign-in expired","actions":[{"label":"Sign in to Gemini","act":"signin","room":"h|r1","thread":"h|t2"},{"label":"Move to Claude","act":"move","room":"h|r1","thread":"h|t2"}]}});
+        assert_eq!(need_buttons(&r), vec![("Sign in to Gemini".to_string(), "h|r1\u{1f}signin\u{1f}h|t2".to_string()), ("Move to Claude".to_string(), "h|r1\u{1f}move\u{1f}h|t2".to_string())]);
+        assert!(need_buttons(&serde_json::json!({"need":null})).is_empty(), "a swarm that needs nothing has no buttons");
         assert!(over_thread(&json!({"bot": {"kind": "room", "swarm": {}}, "thread": {"id": "h|t1"}}))); assert!(!over_thread(&json!({"bot": {"kind": "bot"}, "thread": {"id": "h|t1"}}))); assert!(!over_thread(&json!({"bot": null})));
         for n in ["", "@room:", "h|t1", "@remote:b"] { assert_eq!(nav_action(n), None, "{n}"); }
     }

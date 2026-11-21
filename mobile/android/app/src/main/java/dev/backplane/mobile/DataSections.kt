@@ -40,12 +40,14 @@ data class DSecRow(val id: String, val title: String, val word: String, val say:
     /** the fold the hub keeps for a project row (`sidebar.fold.<key>`): the action its chevron sends, folded now, the rows it hides or would hide */
     val fold: String = "", val folded: Boolean = false, val under: Int = 0, val needsCount: Int = 0,
     /** a project's threads with no row under it (finished ones, on its page): counted on its row so none seems lost */
-    val rest: Int = 0) {
+    val rest: Int = 0,
+    /** a swarm row's need (present/swarm_need.rs): the line saying what happened and the actions that resolve it; null when nothing waits on the person */
+    val need: DNeed? = null) {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
             list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"), DMenuItem.list(o.optJSONArray("menu")),
-            o.optString("fold"), o.optBoolean("folded"), o.optInt("under"), o.optInt("needsCount"), o.optInt("rest"))
+            o.optString("fold"), o.optBoolean("folded"), o.optInt("under"), o.optInt("needsCount"), o.optInt("rest"), DNeed.of(o.optJSONObject("need")))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
     /** a chevron on the row: something is under it, or it is folded (an older hub sends no fold) */
@@ -53,6 +55,35 @@ data class DSecRow(val id: String, val title: String, val word: String, val say:
     /** a live swarm's row (`kind` swarm): it opens the swarm's page, its room */
     val swarmRoom: String? get() = if (kind == "swarm") nav.removePrefix("@room:").takeIf { it.isNotEmpty() && nav.startsWith("@room:") } else null
 }
+/** One button of a swarm's need: `act` says what a press does (NeedUi.press), `room` and `thread` are the hub's ids (a far hub's with its prefix). */
+data class DNeedAct(val label: String, val act: String, val room: String, val thread: String)
+data class DNeed(val line: String, val why: String, val actions: List<DNeedAct>) {
+    companion object {
+        fun of(o: JSONObject?): DNeed? = o?.let { n -> DNeed(n.optString("line"), n.optString("why"), (0 until (n.optJSONArray("actions")?.length() ?: 0)).mapNotNull { n.getJSONArray("actions").optJSONObject(it) }
+            .map { DNeedAct(it.optString("label"), it.optString("act"), it.optString("room"), it.optString("thread")) }).takeIf { it.line.isNotEmpty() || it.actions.isNotEmpty() } }
+    }
+}
+/** What a press of a need's button does: open the swarm's page (as a tap on its row), open a thread or an account's sign-in, or ask the hub (`swarm.act`). */
+sealed interface NeedGo {
+    object Board : NeedGo
+    data class Thread(val id: String) : NeedGo
+    data class Account(val id: String) : NeedGo
+    data class Call(val method: String, val params: JSONObject) : NeedGo
+}
+/** The need's presses, pure (SwarmNeedTest). */
+object NeedUi {
+    private val asks = setOf("resume", "raise", "retry", "move", "signin")
+    fun press(a: DNeedAct): NeedGo? = when {
+        a.act == "board" -> NeedGo.Board
+        a.act == "open" -> a.thread.takeIf { it.isNotEmpty() }?.let { NeedGo.Thread(it) }
+        a.act in asks -> NeedGo.Call("swarm.act", JSONObject().put("room", a.room).put("action", a.act).also { if (a.thread.isNotEmpty()) it.put("thread", a.thread) })
+        else -> null
+    }
+    /** what `swarm.act`'s reply opens next: `open` "account:<id>" (that account's sign-in) or "thread:<id>" (the terminal of a provider's sign-in is on it) */
+    fun after(reply: JSONObject?): NeedGo? { val o = reply?.optString("open").orEmpty()
+        return when { o.startsWith("account:") -> NeedGo.Account(o.removePrefix("account:")); o.startsWith("thread:") -> NeedGo.Thread(o.removePrefix("thread:")); else -> null }.takeIf { o.substringAfter(':').isNotEmpty() } }
+}
+
 /** An item of a project row's menu, the hub's (present/sections.rs `project_menu`): `id` says what it does here, `sub` is Move to group's list. */
 data class DMenuItem(val id: String, val label: String, val action: String, val value: String, val confirm: Boolean, val sub: List<DMenuItem>) {
     companion object {
@@ -85,9 +116,11 @@ fun SectionHead(s: DSection, onLong: (() -> Unit)?) {
  *  a thread of this hub offers the hub's `menu`: Pin or Unpin (a pinned thread stays under its project and never settles by itself), Settle or Unsettle, Archive. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, open: (String) -> Unit) {
+fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, openThread: (String) -> Unit = {}, open: (String) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     val acts = if (r.key.isEmpty() && r.swarmRoom == null) r.menu.filter { it.label.isNotEmpty() } else emptyList()
+    val need = r.need?.takeIf { r.kind == "swarm" }
+    Column {
     Box {
         Row(Modifier.fillMaxWidth().height(36.dp).alpha(if (r.off) .55f else 1f).combinedClickable(onClick = { if (!r.off) open(r.nav) }, onLongClick = if (r.hide.isNotEmpty() || acts.isNotEmpty()) ({ menu = true }) else null).padding(start = indent.dp, end = 12.dp).testTag("home.section.thread.${r.id}"), verticalAlignment = Alignment.CenterVertically) {
             DDot(toneOf(r.word), 7); Spacer(Modifier.width(8.dp))
@@ -99,12 +132,37 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
             }
             Spacer(Modifier.width(8.dp))
             r.mark?.let { DMono(it.short + if (it.away) " · " + Msg.android_away else "", dfaint, 11); Spacer(Modifier.width(6.dp)) }
-            if (r.want.isNotEmpty()) DMono(Tr.t(r.want), dcs.error, 11) else DMono(Tr.t(r.say.ifEmpty { r.ago }), dfaint, 11)
+            // a need's line is drawn under the row; the right keeps only how long ago
+            if (need != null) DMono(r.ago, dfaint, 11) else if (r.want.isNotEmpty()) DMono(Tr.t(r.want), dcs.error, 11) else DMono(Tr.t(r.say.ifEmpty { r.ago }), dfaint, 11)
         }
         DropdownMenu(menu, { menu = false }) {
             if (r.hide.isNotEmpty()) DropdownMenuItem(text = { Text(Msg.common_hide) }, onClick = { menu = false; DataClient.sidebarAct("thread-hide", r.hide) }, modifier = Modifier.testTag("home.section.hide.${r.id}"))
             acts.forEach { m -> DropdownMenuItem(text = { Text(Tr.t(m.label)) }, onClick = { menu = false; DataClient.sectionThreadAct(r.id, m.id) }, modifier = Modifier.testTag("home.section.${m.id}.${r.id}")) }
         }
+    }
+    if (need != null) SwarmNeedLine(r, need, indent, { open(r.nav) }, openThread)
+    }
+}
+/** A swarm's need under its row: the hub's line and a small button per action; a refusal's words under them. */
+@Composable
+private fun SwarmNeedLine(r: DSecRow, n: DNeed, indent: Int, board: () -> Unit, openThread: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var busy by remember(r.id) { mutableStateOf(false) }
+    var err by remember(r.id) { mutableStateOf("") }
+    fun go(g: NeedGo?) { when (g) {
+        NeedGo.Board -> board()
+        is NeedGo.Thread -> openThread(g.id)
+        is NeedGo.Account -> DataClient.openAccount = g.id
+        is NeedGo.Call -> { busy = true; err = ""
+            scope.launch { try { go(NeedUi.after(DataClient.call(g.method, g.params))); Swarms.load() } catch (e: Exception) { err = e.message ?: "" } finally { busy = false } } }
+        null -> {}
+    } }
+    Column(Modifier.fillMaxWidth().alpha(if (r.off) .55f else 1f).padding(start = (indent + 15).dp, end = 12.dp, bottom = 6.dp).testTag("home.section.need.${r.id}")) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DMono(Tr.t(n.line), dcs.error, 11, Modifier.weight(1f).testTag("home.section.need.line.${r.id}"))
+            n.actions.forEach { a -> Spacer(Modifier.width(6.dp)); DBtn(Tr.t(a.label), false, !busy && NeedUi.press(a) != null, Modifier.testTag("home.section.need.${a.act}.${r.id}"), small = true) { go(NeedUi.press(a)) } }
+        }
+        if (err.isNotEmpty()) DMono(Tr.t(err), dcs.error, 11, Modifier.padding(top = 2.dp), lines = 3)
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
@@ -140,7 +198,7 @@ fun LazyListScope.sectionItems(open: (String) -> Unit, page: (DSecRow) -> Unit, 
         item("sec:${s.id}") { SectionHead(s, if (s.rename) ({ rename(s) }) else null) }
         // Needs you: the title has the row (no project name), and a stop says so by its dot; an ask keeps its red word
         if (s.kind == "threads") items(s.rows, key = { "sn:${it.id}" }) { r -> val room = r.swarmRoom
-            if (room != null) SectionThread(r) { openSwarm(room) } else SectionThread(if (r.want == "failed" || r.want == "stopped") r.copy(want = "", say = "") else r, open = open) }
+            if (room != null) SectionThread(r, openThread = open) { openSwarm(room) } else SectionThread(if (r.want == "failed" || r.want == "stopped") r.copy(want = "", say = "") else r, open = open) }
         else for (p in s.rows) {
             item("sp:${s.id}:${p.key}") { SectionProject(p, s.id == "quiet" || s.id == "archived" || (p.off && p.key.isNotEmpty()), { page(p) }, { menu(p) }) }
             // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
@@ -250,7 +308,7 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
                         DMono(Tr.t(s.title).uppercase(), dcs.onSurfaceVariant, 11)
                     }
                 }
-                items(s.rows, key = { "pgt:${s.id}:${it.id}" }) { r -> val room = r.swarmRoom; SectionThread(r) { if (room != null) openSwarm(room) else open(it) } }
+                items(s.rows, key = { "pgt:${s.id}:${it.id}" }) { r -> val room = r.swarmRoom; SectionThread(r, openThread = open) { if (room != null) openSwarm(room) else open(it) } }
             }
             if (ls.all { it.rows.isEmpty() && it.count == 0 }) item("pg:none") { DMono(Msg.android_threads_none, dfaint, 12, Modifier.padding(16.dp)) }
         }

@@ -20,6 +20,7 @@ pub mod onboard_uber;
 pub mod signin_there;
 pub mod botforms;
 pub mod swarmform;
+pub mod swarm_need;
 pub mod ready;
 pub mod badge;
 mod refusal;
