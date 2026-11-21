@@ -164,19 +164,19 @@ export function buildPaletteItems(state: PaletteState, labels: PaletteLabels = D
       action: { type: "thread-act", action: cur.archived ? "unarchive" : "archive" },
     });
     out.push({
-      label: "Rename thread",
+      label: t("sheet.rename", "Rename thread"),
       place: "",
       kind: "action",
       action: { type: "rename" },
     });
     out.push({
-      label: "Previous thread",
+      label: t("gpui.previous.thread", "Previous thread"),
       place: "",
       kind: "action",
       action: { type: "prev-thread" },
     });
     out.push({
-      label: "Next thread",
+      label: t("gpui.next.thread", "Next thread"),
       place: "",
       kind: "action",
       action: { type: "next-thread" },
@@ -211,7 +211,7 @@ export function buildPaletteItems(state: PaletteState, labels: PaletteLabels = D
     action: { type: "settings" },
   });
   out.push({
-    label: "Fold or unfold the sidebar",
+    label: t("gpui.fold.or.unfold.the.sidebar", "Fold or unfold the sidebar"),
     place: "",
     kind: "action",
     action: { type: "sidebar" },
