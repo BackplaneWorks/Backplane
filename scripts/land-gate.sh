@@ -12,7 +12,10 @@
 set -u
 ROOT=$(git rev-parse --show-toplevel); cd "$ROOT"
 cargo=${LAND_GATE_CARGO:-$ROOT/scripts/cargo-q}
-[ -n "${LAND_GATE_LOCAL:-}" ] || export BUILD_SLOTS=0 BQ_OFFLOAD_AFTER=0   # every build slot "taken": cargo-q goes to a Boat box at once
+# every local slot "taken": cargo-q goes to a Boat box at once. BP_NO_BOAT=1 (a lead's stopgap: build here) or LAND_GATE_LOCAL=1: the local slots,
+# as for any build. Either way a wait for a slot ends after LAND_GATE_WAIT_MAX (300) seconds with a line, never holding the land lock forever.
+[ -n "${LAND_GATE_LOCAL:-}${BP_NO_BOAT:-}" ] || export BUILD_SLOTS=0 BQ_OFFLOAD_AFTER=0
+export BQ_WAIT_MAX=${LAND_GATE_WAIT_MAX:-300}
 base=$(git merge-base "${LAND_GATE_BASE:-origin/main}" HEAD) || { echo "gate: no merge base with ${LAND_GATE_BASE:-origin/main}" >&2; exit 1; }
 changed=$(git diff --name-only "$base" HEAD)
 say() { echo "gate: $*" >&2; }
