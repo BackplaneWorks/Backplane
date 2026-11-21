@@ -3057,7 +3057,15 @@ pub fn first_show_outcome(active: &str, ms: u64, r: &Result<Option<Vec<Frame>>, 
     }
 }
 
-/// Show `kind` in fork mode and hide every other currently-shown frame via `HideFrame` so GTK3/wxMSW owns frame map state cleanly.
+/// Whether a fork show hides the other frames KiCad has on screen (`HideFrame`, wx's Show(false)). Not where the client maps frames itself
+/// (`local_map`, Linux): it unmaps the previous frame natively on every switch, so all KiCad's frames stay wx-shown (the state every
+/// local switch leaves; no CPU or memory cost measured, Nov 20), and the one frame the hub used to hide, the one on screen as a show came,
+/// was the Board->Schematic bounce's trigger: a local switch back mapped a wx-hidden frame and GTK withdrew it. Windows keeps HideFrame
+/// (a frame shown only by the client's ShowWindowAsync kept its canvas unpainted, so the hub's ShowFrame switches it there) and so does
+/// macOS (not local-map: KiCad places its own frames). Pure.
+pub fn hides_others(local_map: bool, windows: bool, macos: bool) -> bool { !(local_map && !windows && !macos) }
+/// Show `kind` in fork mode and hide every other currently-shown frame via `HideFrame` so GTK3/wxMSW owns frame map state cleanly
+/// (`hides_others`: not in Linux local-map mode).
 async fn switch_fork_frame(
     me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, remount: bool, focus: bool,
 ) -> Result<Option<(u64, String, Vec<Frame>)>, String> {
@@ -3087,10 +3095,11 @@ async fn switch_fork_frame_n(
     let gf = raw_on(me, sock, desc, "kiapi.backplane.embed.GetFrames", json!({}), 10000).await;
     if !gf["ok"].as_bool().unwrap_or(false) { return Ok(None) }
     let (mut holder, mut events_sock, mut frames) = parse_get_frames(&gf["message"]);
-    let others: Vec<u64> = frames.iter()
+    let local_map = proto::load(desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm");
+    let others: Vec<u64> = if !hides_others(local_map, cfg!(windows), cfg!(target_os = "macos")) { Vec::new() } else { frames.iter()
         .filter(|f| f.shown && f.xid > 0 && match target_win { Some(w) => f.xid != w, None => f.kind != target_kind })
         .map(|f| f.xid)
-        .collect();
+        .collect() };
     if !others.is_empty() {
         for win in others {
             let _ = raw_gated(me, sock, desc, "kiapi.backplane.embed.HideFrame", json!({ "window": win }), 5000, "", seq).await;
@@ -4790,6 +4799,12 @@ mod tests {
         assert!(matches!(after_kicad_switch("/p".into(), 2, Ok(Some((9, String::new(), vec![f])))), Some(Msg::FramesUpdated { gen: 2, holder: Some(9), ref frames, .. }) if frames.len() == 1));
         assert!(after_kicad_switch("/p".into(), 2, Ok(None)).is_none(), "frames unread: nothing more (published before)");
         assert!(after_kicad_switch("/p".into(), 2, Err("AS_BUSY".into())).is_none(), "refused or held: nothing more (published before)");
+    }
+    #[test] fn a_show_hides_the_other_frames_only_where_the_client_does_not_map_them() {
+        assert!(!hides_others(true, false, false), "Linux local-map: the client unmaps the previous frame, KiCad keeps it wx-shown");
+        assert!(hides_others(false, false, false), "an older fork (no local map): HideFrame as before");
+        assert!(hides_others(true, true, false), "Windows: HideFrame as before (the client's own show leaves the canvas unpainted)");
+        assert!(hides_others(true, false, true), "macOS: HideFrame as before (not local-map)");
     }
     #[test] fn every_active_says_who_made_it() {
         // a client's show: its cid and the sequence number it sent; an attach (no seq): the cid, seq null; the hub's own drive: "agent"
