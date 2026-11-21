@@ -240,8 +240,15 @@ pub fn start(hub: &Arc<Hub>) {
                 .unwrap_or(Value::Null);
             let home_link = home["link"].as_str().unwrap_or("");
             if !home_link.is_empty() {
-                // A retired source has no uid to sync, but its clients still need the home's presence and shared settings.
-                let _ = hub.far_raw_paired(home_link, "home.state", &json!({})).await;
+                // A retired source has no uid to sync, but its clients still need the home's presence, version, and shared settings.
+                let (hcode, hbody) = hub.far_raw_paired(home_link, "home.state", &json!({})).await;
+                if hcode == 200 {
+                    if let Ok(v) = serde_json::from_str::<Value>(&hbody) {
+                        if let Some(res) = v.get("result") {
+                            crate::net::peerver::record_json(&hub.cfg.home, home_link, res);
+                        }
+                    }
+                }
                 if let Err(e) = crate::net::settings_sync::sync_with(&hub, home_link).await {
                     eprintln!("settings: {e}");
                 }
