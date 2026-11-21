@@ -12,10 +12,12 @@
 set -u
 ROOT=$(git rev-parse --show-toplevel); cd "$ROOT"
 cargo=${LAND_GATE_CARGO:-$ROOT/scripts/cargo-q}
-# every local slot "taken": cargo-q goes to a Boat box at once. BP_NO_BOAT=1 (a lead's stopgap: build here) or LAND_GATE_LOCAL=1: the local slots,
-# as for any build. Either way a wait for a slot ends after LAND_GATE_WAIT_MAX (300) seconds with a line, never holding the land lock forever.
-[ -n "${LAND_GATE_LOCAL:-}${BP_NO_BOAT:-}" ] || export BUILD_SLOTS=0 BQ_OFFLOAD_AFTER=0
-export BQ_WAIT_MAX=${LAND_GATE_WAIT_MAX:-300}
+# every local slot "taken": cargo-q goes to a Boat box at once, from a pool of LAND_GATE_BOATS (8) boxes (each stops itself after 5 idle minutes:
+# boat-pool.sh reap). BP_NO_BOAT=1 (a lead's stopgap: build here) or LAND_GATE_LOCAL=1: the local slots, as for any build. The gate holds no lock
+# (land.sh gates outside it), so a gate that finds no slot and no box waits its turn in a fair queue (BQ_FAIR: first come, first served, its place
+# said) for up to LAND_GATE_WAIT_MAX (2700 s, 45 min), then says so.
+[ -n "${LAND_GATE_LOCAL:-}${BP_NO_BOAT:-}" ] || export BUILD_SLOTS=0 BQ_OFFLOAD_AFTER=0 BP_BOAT_POOL=${LAND_GATE_BOATS:-8}
+export BQ_WAIT_MAX=${LAND_GATE_WAIT_MAX:-2700} BQ_FAIR=1
 base=$(git merge-base "${LAND_GATE_BASE:-origin/main}" HEAD) || { echo "gate: no merge base with ${LAND_GATE_BASE:-origin/main}" >&2; exit 1; }
 changed=$(git diff --name-only "$base" HEAD)
 say() { echo "gate: $*" >&2; }
@@ -32,7 +34,22 @@ step() { # step NAME DIR ARGS...: one cargo command, timed
 skips=(); [ -f "$ROOT/scripts/gate-skip.txt" ] && while IFS= read -r l; do case "$l" in ''|'#'*) ;; *) skips+=(--skip "$l");; esac; done < "$ROOT/scripts/gate-skip.txt"
 for c in host gpui guard voice; do
   d=native/$c; [ -d "$d" ] || continue
-  touched "$d" || continue
+  # what of the PR this crate builds from: a file under it, or one it reads outside it
+  # what it reads outside it; not known (the scanner failed): every change counts, and the crate is built
+  if out=$(python3 -I "$ROOT/scripts/hub-outside-files.py" --crate "$d" "$ROOT"); then scan=1; else say "$c: could not list what it reads outside $d: building it"; out=; scan=; fi
+  if [ -z "$scan" ]; then hits=$(printf '%s\n' "$changed" | grep .); else
+  hits=$(printf '%s\n' "$changed" | while IFS= read -r f; do [ -n "$f" ] || continue
+    case "$f" in "$d"/*) echo "$f"; continue;; esac
+    for i in $out; do if [ "$f" = "$i" ] || [ "${f#"$i"/}" != "$f" ]; then echo "$f"; break; fi; done; done); fi
+  [ -n "$hits" ] || continue
+  # web/dist alone (the hub embeds it, it does not compile it): no cargo, no build slot; a file the crate's sources name must not go
+  if [ -n "$scan" ] && [ -z "$(printf '%s\n' "$hits" | grep -v '^web/dist/')" ]; then
+    gone=; while IFS=$'\t' read -r st old _; do [ -n "$old" ] || continue; git grep -q -F "$(basename "$old")" HEAD -- "$d/src" && gone="$gone $old"; done \
+      < <(git -c core.quotepath=off diff --name-status --diff-filter=DR "$base" HEAD -- web/dist)
+    if [ -n "$gone" ]; then say "$c: it embeds a file the PR deletes or renames:$gone"; ran="${ran:+$ran, }$c embeds FAILED"; rc=1
+    else say "$c: web/dist only: every file it names is there; no build"; ran="${ran:+$ran, }$c embeds ok"; fi
+    continue
+  fi
   step "$c: cargo check --all-targets" "$d" check --all-targets --locked --offline || { rc=1; continue; }
   if [ "$c" = host ]; then step "$c: unit tests" "$d" test --locked --offline -- --skip e2e "${skips[@]}" || rc=1
   elif [ "$c" = voice ]; then RUSTC_WRAPPER= step "$c: unit tests" "$d" test --locked --offline -- --skip e2e || rc=1
