@@ -2211,11 +2211,11 @@ impl Actor {
         let pane_cid = if container > 0 { client_cid(client).unwrap_or_default() } else { String::new() };
         if let Some(existing) = self.sessions.get_mut(&pro) {
             if existing.state == "starting" {
-                if container > 0 { existing.container = container; existing.pane_cid = pane_cid.clone(); }
+                if container > 0 { existing.container = container; existing.pane_cid = pane_cid.clone(); existing.left.clear(); existing.holder_gone_at = 0; }
                 if toplevel > 0 { existing.toplevel = toplevel; }
                 if !display.is_empty() { existing.display = display; }
                 existing.active = canon_frame(&frame).into(); existing.active_by = show_by(client_cid(client), &Value::Null);
-                existing.touched_at = now; existing.parked = false; existing.left.clear(); existing.holder_gone_at = 0;
+                existing.touched_at = now; existing.parked = false;
                 let snap = existing.clone();
                 if wait {
                     self.publish(&snap, Some(client));
@@ -5146,7 +5146,7 @@ mod tests {
         let mut a = Actor {
             hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
             pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(),
-            users: HashSet::new(), users_gone: None,
+            users: HashSet::new(), users_gone: None, leave_seqs: HashMap::new(),
         };
         let pro = base.join("p/o.kicad_pro").to_string_lossy().to_string();
         let mut s = Session::new(&pro, "/p", "fork", "SCH", 1, 0).ready(&base.join("none.sock").to_string_lossy(), "", 0);

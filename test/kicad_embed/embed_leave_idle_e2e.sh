@@ -11,6 +11,7 @@
 #       the same project shows the editor too: on screen, no leave.)
 #   L6  that, as intended: the other thread of the same project on its Board shows the editor (on screen), and no leave is sent; the
 #       leave is sent once the last page showing it goes (its viewer on Files)
+#   L7  the first Edit starts from Files and gives the PCB editor the keyboard after navigation, without a second Edit or click.
 # On main (2b6f5300af) L1, L2, L3 and L5 fail (no leave: nothing closes after a thread switch); L4 passes there too (nothing closes).
 # Fork only; copies (seed_project.py).
 set -euo pipefail
@@ -36,7 +37,7 @@ agent_read() { ask "mcpcall:{\"name\":\"kicad_ipc\",\"arguments\":{\"path\":\"$P
 python3 - "$OUT/script.json" <<'PY'
 import json, sys
 # the sidebar lists the newest thread first: 0 is "Other thread 2" (t2), 1 is "Embedded KiCad E2E" (t1), where the editor is opened
-s = [{"select": 1}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "edit"}}, {"wait": 3000}, {"mark": "edited"},
+s = [{"select": 1}, {"wait": 2200}, {"click": "rail:Files"}, {"wait": 2500}, {"click": "script:kicad-edit"}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "edit"}}, {"wait": 3000}, {"kicad": {"report": True, "tag": "files_edit"}}, {"mark": "edited"},
      {"select": 0}, {"select": 1}, {"wait": 1500}, {"mark": "quick"},
      {"select": 0}, {"wait": 6000}, {"mark": "away1"}, {"select": 1}, {"kicad": {"wait_painted": 8000, "kind": "PCB", "tag": "back1"}}, {"wait": 1500}, {"mark": "back1"},
      {"select": 0}, {"mark": "agentaway"}, {"wait": 40000}, {"mark": "agentdone"}, {"wait": 40000}, {"mark": "idlewait"},
@@ -53,6 +54,25 @@ leaves() { grep -c "\"kicad_leave\":$1" "$OUT/client.log" 2>/dev/null || true; }
 
 mark edited || { echo "INFO the editor did not come"; }
 PID0=$(kpid); echo "INFO KiCad $PID0"
+FILES_EDIT=$(last_kicad_report "$OUT/client.log" files_edit)
+check "L7 Edit from Files gives the PCB editor the keyboard" "$(python3 - "$OUT/client.log" "$FILES_EDIT" <<'PYTHON'
+import json, sys
+
+def navigation_from_files(line):
+    if not line.startswith("GPUI_LOG {"):
+        return False
+    try:
+        notice = json.loads(line.removeprefix("GPUI_LOG "))
+    except ValueError:
+        return False
+    return notice.get("kicad_edit") == "to the design page" and notice.get("from") == "files"
+
+with open(sys.argv[1]) as log:
+    from_files = any(navigation_from_files(line) for line in log)
+report = json.loads(sys.argv[2] or "{}")
+print(int(from_files and report.get("want") == "PCB" and report.get("keys", False)))
+PYTHON
+)"
 mark quick || true
 Q_LEAVE=$(leaves true); Q_BACK=$(leaves false)
 mark back1 || true
