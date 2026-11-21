@@ -177,6 +177,11 @@ internal fun DBar(title: String, back: (() -> Unit)?, titleMenu: (@Composable Co
 private fun ConnBanner(hub: () -> Unit, settings: () -> Unit) {
     MigrateBanner()
     HubBanner(hub)
+    DataClient.home?.awayLine()?.let { (line, isErr) ->
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("home.away"), verticalAlignment = Alignment.CenterVertically) {
+            DMono(line, if (isErr) dcs.error else dcs.onSurfaceVariant, 12, Modifier.weight(1f))
+        }
+    }
     TelemetryBanner(settings)
     StarBanner()
     AlertsBanner()
@@ -1021,6 +1026,20 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             DLine()
             if (DataVoice.available) VoiceSettings()
             if (DataDevices.available) { DevicesSettings(); DLine() }
+            DataClient.home?.let { h ->
+                DMono(Msg.home_machine, dfaint)
+                val whereText = when (h.kind) {
+                    "local" -> "${h.name.ifEmpty { "This machine" }} (this machine)"
+                    "boat" -> "${h.name.ifEmpty { "Boat" }} (Boat)"
+                    else -> h.name.ifEmpty { "Linked machine" }
+                }
+                DMono(whereText, dcs.onSurface, 13)
+                h.awayLine()?.let { (line, isErr) -> DMono(line, if (isErr) dcs.error else dcs.onSurfaceVariant, 12) }
+                if (h.canMoveHere) {
+                    DBtn(Msg.home_move_here, true, modifier = Modifier.testTag("settings.home.move")) { DataClient.moveHomeHere() }
+                }
+                DLine()
+            }
             if (DataMachines.available) { MachinesSettings(); DLine() }
             if (DataNotify.available) { NotifySettings(); DLine() }
             if (DataBrowserStart.available) { BrowserStartSettings(); DLine() }

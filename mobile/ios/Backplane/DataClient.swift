@@ -132,6 +132,8 @@ final class DataClient {
     private(set) var features: Set<String> = []
     // hello `notice`, newer from /hub/status: the banner
     private(set) var notice = HubNotice()
+    // the designated home machine for Bub and shared state (docs/PHONE-DATA.md, The home)
+    private(set) var home: DHome?
     // a 0.14 home coming across (hello `migrating`, then `migrating` frames): the hub's card, until one of its buttons answers it (Migration.swift)
     private(set) var migration = DMigration()
     /// the card is open over the screen (a tap on its banner)
@@ -308,6 +310,7 @@ final class DataClient {
         saveTask?.cancel()
         shellHashes = [:]; threadHashes = [:]; threadIds = [:]; subEntriesById = [:]; subEntryIds = []
         restarting = nil; hubBack = nil; restartStrip()
+        home = nil
         notice = HubNotice(); star = nil; telemetryNotice = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
@@ -508,6 +511,7 @@ final class DataClient {
             guard (o["proto"] as? String)?.hasPrefix("data/") == true else { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
             inflater = (o["z"] as? String) == "deflate" ? RawInflater() : nil
             features = Set((o["features"] as? [String]) ?? [])
+            home = WireJSON.decode(o["home"], as: DHome.self)
             notice = HubRescue.notice(o["notice"] as? [String: Any])
             heardMigration(o["migrating"])
             commands = ((o["commands"] as? [[String: Any]]) ?? []).map { Word(word: $0["word"] as? String ?? "", label: $0["label"] as? String ?? "", desc: $0["desc"] as? String ?? "") }
@@ -684,6 +688,8 @@ final class DataClient {
         }
     }
     func loadLocks() async { guard has("work"), let r: DLocks = try? await call("locks.list") else { return }; locks = r.locks }
+    /// Move the designated home (Bub and shared state) onto this hub (`home.move {to:"back"}`).
+    func moveHomeHere() async { _ = try? await call("home.move", ["to": "back"], as: DEmpty.self) }
     private func loadWork(_ id: String) async { guard has("work"), let r: DWorkReply = try? await call("thread.work", ["thread": id]) else { return }; work[id] = r.subs }
     // a row's button; what it changes comes back as a push
     func workAct(_ id: String, _ row: DWorkRow) { Task { _ = try? await call("work.act", ["thread": id, "act": row.act ?? "", "value": row.value ?? ""], as: DEmpty.self) } }
@@ -922,6 +928,8 @@ final class DataClient {
             if let tid = o["thread"] as? String { Task { await self.loadQueue(tid) } }
         case "locks":
             locks = decode("locks", [DLock].self) ?? []
+        case "home":
+            home = decode("home", DHome.self)
         case "text":
             if let tid = o["thread"] as? String, let eid = o["entry"] as? String, let add = o["append"] as? String,
                var l = entries[tid], let i = l.firstIndex(where: { $0.id == eid }) {

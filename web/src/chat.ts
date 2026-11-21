@@ -28,6 +28,7 @@ export interface EntryItem {
   at: number;
   clientId?: string;
   live?: boolean;
+  queued?: boolean;
   agentOnly?: boolean;
   tool?: EntryTool;
   ask?: EntryAsk;

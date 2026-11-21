@@ -266,6 +266,11 @@ struct DataThreadsView: View {
                 }.padding(14).dataRow()
             }
             ForEach(client.bots.filter { $0.uber && !$0.thread.isEmpty }) { b in botRow(b) }
+            if let away = client.home?.awayLine() {
+                Text(away.text).dmono(11).foregroundStyle(away.isError ? BackplaneDesign.bad : BackplaneDesign.dim)
+                    .padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(BackplaneDesign.panel).dataRow().accessibilityIdentifier("data.home.away")
+            }
             // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
             if client.has("sections") && !client.sections.isEmpty { sectionRows } else {
             ForEach(client.projects) { p in

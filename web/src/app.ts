@@ -23,7 +23,7 @@ import {
   type ThreadItem,
 } from "./sidebar";
 import { VoiceController } from "./voice";
-import { HubClient, type DataPush, type HelloFrame } from "./ws";
+import { HubClient, type DataPush, type HelloFrame, type HomeInfo } from "./ws";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore resolved by web/build.ts to ./viewers/viewer-pane.ts when present
 import { mountViewerPane } from "virtual:viewer-pane";
@@ -528,6 +528,7 @@ function mountApp(): void {
     else openViewer(id);
   });
 
+  let homeInfo: HomeInfo | null = null;
   const settings = new SettingsModal(root, {
     onLoadDevices: async () => {
       const res = await hub.rpc<{ rows?: SettingsRow[] }>("devices.page", {});
@@ -535,6 +536,10 @@ function mountApp(): void {
     },
     onDevicesAct: async (action, value) => {
       await hub.rpc("devices.page.act", { action, value });
+    },
+    onGetHome: () => homeInfo,
+    onMoveHomeHere: async () => {
+      await hub.rpc("home.move", { to: "back" });
     },
     onLogout: async () => {
       try {
@@ -1353,6 +1358,9 @@ function mountApp(): void {
       if (hello.locale) setLocale(hello.locale);
       if (hello.theme) applyHubTheme(hello.theme);
       if (hello.name) sidebar.setHostName(hello.name);
+      homeInfo = hello.home ?? null;
+      sidebar.setHome(homeInfo);
+      if (settings.isOpen()) void settings.refresh();
       renderConnStatus(state);
       // back after a crash (hello.hubBack): said once, for a few seconds
       const back = typeof (hello as { hubBack?: unknown }).hubBack === "string" ? String((hello as { hubBack?: unknown }).hubBack) : "";
@@ -1457,6 +1465,12 @@ function mountApp(): void {
       }
       case "theme": {
         if (typeof p.theme === "string") applyHubTheme(p.theme);
+        break;
+      }
+      case "home": {
+        homeInfo = (p.home as HomeInfo | null | undefined) ?? null;
+        sidebar.setHome(homeInfo);
+        if (settings.isOpen()) void settings.refresh();
         break;
       }
       default:

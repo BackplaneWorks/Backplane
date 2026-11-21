@@ -591,6 +591,9 @@ impl Backplane {
                 .child(div().flex().flex_col().min_w_0().line_height(crate::scale::tpx(22.)).child(div().text_size(crate::scale::tpx(16.)).overflow_hidden().whitespace_nowrap().child(bname.clone()))
                     .child(div().flex().gap_2().items_center().child(div().text_size(crate::scale::tpx(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
         }
+        if let Some((line, bad)) = home_away_line(&self.data["home"]) {
+            rows.push(div().id("home-away-row").px_3().py_1().border_b_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(11.)).text_color(if bad { c("bad") } else { c("dim") }).child(line).into_any_element());
+        }
         let new_here = crate::keys::new_target(&self.data, &self.selected, self.project_page.as_deref());
         // the hub's sections (Needs you, Pinned, Active, groups, Quiet: screens/sections.rs); an older hub sends projects and the Active view
         let sectioned = crate::screens::sections::on(&self.data);
@@ -1545,5 +1548,66 @@ mod tests {
         assert_eq!(inv[2]["disabled"], true);
         assert_eq!(inv[2]["tooltip"], "No schematic");
         assert_eq!(inv[2]["palette_label"], "");
+    }
+}
+
+/// Status line for `shown.home` (docs/PHONE-DATA.md, The home) when the home machine is away or a home move is in flight/failed.
+/// Returns `(text, is_error)`. None when the home is online and idle (or absent on older hubs).
+pub(crate) fn home_away_line(home: &Value) -> Option<(String, bool)> {
+    if !home.is_object() { return None; }
+    if let Some(mv) = home.get("moving").filter(|m| m.is_object()) {
+        let state = mv["state"].as_str().unwrap_or("");
+        if state == "moving" {
+            let to = mv["to"].as_str().unwrap_or("");
+            let step = mv["step"].as_str().unwrap_or("");
+            let s = if !step.is_empty() {
+                crate::i18n::tf("home.moving.step", &[("to", to.into()), ("step", step.into())])
+            } else {
+                crate::i18n::tf("home.moving", &[("to", to.into())])
+            };
+            return Some((s, false));
+        }
+        if state == "failed" {
+            let note = mv["note"].as_str().unwrap_or("");
+            let s = if !note.is_empty() {
+                crate::i18n::tf("home.move.failed.note", &[("note", note.into())])
+            } else {
+                crate::i18n::tr("home.move.failed").to_string()
+            };
+            return Some((s, true));
+        }
+    }
+    if home["online"].as_bool() != Some(false) { return None; }
+    let name = home["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("home");
+    let time = home["awaySince"].as_i64().filter(|&n| n > 0).map(|ms| {
+        let (h, m) = crate::plat::local_hm(ms);
+        format!("{h:02}:{m:02}")
+    });
+    let q = home["queuedCount"].as_u64().unwrap_or(0);
+    let s = match (time.as_deref(), q > 0) {
+        (Some(tm), true) => crate::i18n::tf("home.away.since.queued", &[("name", name.into()), ("time", tm.into()), ("n", q.into())]),
+        (Some(tm), false) => crate::i18n::tf("home.away.since", &[("name", name.into()), ("time", tm.into())]),
+        (None, true) => crate::i18n::tf("home.away.queued", &[("name", name.into()), ("n", q.into())]),
+        (None, false) => crate::i18n::tf("home.away", &[("name", name.into())]),
+    };
+    Some((s, false))
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::home_away_line;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn home_away_line_formats_offline_queued_and_moving_states() {
+        assert_eq!(home_away_line(&Value::Null), None);
+        assert_eq!(home_away_line(&json!({"kind":"local","name":"desk","online":true,"queuedCount":0})), None);
+        let (away_txt, away_err) = home_away_line(&json!({"kind":"peer","name":"desktop","online":false,"awaySince":50520000,"queuedCount":3})).unwrap();
+        assert!(!away_err);
+        /* i18n-ok: test */ assert!(away_txt.starts_with("Home (desktop) is away since ") && away_txt.ends_with(" \u{b7} 3 queued"), "{away_txt}");
+        let mv = home_away_line(&json!({"kind":"peer","name":"desktop","online":true,"moving":{"to":"laptop","state":"moving","step":"copying"}}));
+        /* i18n-ok: test */ assert_eq!(mv, Some(("Moving home to laptop: copying".into(), false)));
+        let fail = home_away_line(&json!({"kind":"peer","name":"desktop","online":true,"moving":{"to":"laptop","state":"failed","note":"disk full"}}));
+        /* i18n-ok: test */ assert_eq!(fail, Some(("Home move failed: disk full".into(), true)));
     }
 }

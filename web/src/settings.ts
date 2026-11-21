@@ -1,5 +1,6 @@
-// Settings › Devices modal + Appearance (Dark/Light) + Browser Sign Out.
+// Settings › Devices modal + Appearance (Dark/Light) + Browser Sign Out + Home machine.
 import { t } from "./i18n";
+import type { HomeInfo } from "./ws";
 
 export interface SettingsRowButton {
   label: string;
@@ -21,6 +22,8 @@ export interface SettingsCallbacks {
   onLoadDevices: () => Promise<SettingsRow[]>;
   onDevicesAct: (action: string, value: string) => Promise<void>;
   onLogout: () => Promise<void>;
+  onGetHome?: () => HomeInfo | null;
+  onMoveHomeHere?: () => Promise<void>;
 }
 
 export class SettingsModal {
@@ -87,6 +90,63 @@ export class SettingsModal {
 
   public async refresh(): Promise<void> {
     const frag = document.createDocumentFragment();
+
+    // Home machine section (docs/PHONE-DATA.md, The home)
+    const home = this.cb.onGetHome?.() ?? null;
+    if (home) {
+      const homeSec = document.createElement("section");
+      homeSec.className = "bp-set-section";
+      homeSec.setAttribute("data-testid", "settings-home");
+      const homeHead = document.createElement("div");
+      homeHead.className = "bp-set-head";
+      homeHead.textContent = t("home.machine", "Home machine");
+      const homeRow = document.createElement("div");
+      homeRow.className = "bp-set-row";
+      const info = document.createElement("div");
+      info.className = "bp-set-info";
+      const title = document.createElement("div");
+      const where =
+        home.kind === "local"
+          ? `${home.name || "This machine"} (this machine)`
+          : home.kind === "boat"
+            ? `${home.name || "Boat"} (Boat)`
+            : home.name || "Linked machine";
+      title.textContent = where;
+      info.appendChild(title);
+      const sub = document.createElement("div");
+      sub.className = "bp-dim";
+      if (home.moving?.state === "moving") {
+        sub.textContent = home.moving.step
+          ? t("home.moving.step", "Moving home to {to}: {step}").replace("{to}", home.moving.to).replace("{step}", home.moving.step)
+          : t("home.moving", "Moving home to {to}…").replace("{to}", home.moving.to);
+      } else if (home.moving?.state === "failed") {
+        sub.textContent = home.moving.note
+          ? t("home.move.failed.note", "Home move failed: {note}").replace("{note}", home.moving.note)
+          : t("home.move.failed", "Home move failed");
+      } else if (!home.online) {
+        sub.textContent = home.queuedCount > 0
+          ? t("home.away.queued", "Home ({name}) is away · {n} queued").replace("{name}", home.name || "home").replace("{n}", String(home.queuedCount))
+          : t("home.away", "Home ({name}) is away").replace("{name}", home.name || "home");
+      } else {
+        sub.textContent = "Online";
+      }
+      info.appendChild(sub);
+      homeRow.appendChild(info);
+      if (home.canMoveHere && this.cb.onMoveHomeHere) {
+        const moveBtn = document.createElement("button");
+        moveBtn.type = "button";
+        moveBtn.className = "primary";
+        moveBtn.textContent = t("home.move.here", "Make this machine the home");
+        moveBtn.setAttribute("data-testid", "home-move-here-btn");
+        moveBtn.addEventListener("click", () => {
+          moveBtn.disabled = true;
+          void this.cb.onMoveHomeHere?.().finally(() => { void this.refresh(); });
+        });
+        homeRow.appendChild(moveBtn);
+      }
+      homeSec.append(homeHead, homeRow);
+      frag.appendChild(homeSec);
+    }
 
     // This Browser section (self-logout)
     const selfSec = document.createElement("section");

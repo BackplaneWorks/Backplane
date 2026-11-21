@@ -28,6 +28,7 @@ data class DEntry(
     val copy: List<CopyPiece>? = null, // what of a reply or a notice is to copy (feature `copy`, data/1 `copy`); null: the hub said nothing
     val restore: DRestore? = null, // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
     val h: String = "", // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
+    val queued: Boolean = false, // queued for an away home machine (docs/PHONE-DATA.md, The home)
 )
 /** Restore to before this (data/1 `restore`): the turn (0: a snapshot from before it was named), its short commit, the short info its confirm shows. */
 data class DRestore(val turn: Long, val commit: String, val info: String)
@@ -104,6 +105,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     copy = parseCopy(o.optJSONArray("copy")),
     restore = o.optJSONObject("restore")?.let { DRestore(it.lng("turn"), it.str("commit"), it.str("info")) },
     h = o.str("h"),
+    queued = o.optBoolean("queued", false),
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))
@@ -144,3 +146,53 @@ data class DHistory(val count: Int = 0, val live: List<DThread> = emptyList(), v
 /** A row of the queue strip over the composer (`thread.queue`, docs/PHONE-DATA.md), the hub's or this phone's own outbox's. */
 data class QButton(val label: String, val action: String, val value: String)
 data class QRow(val msg: String, val tag: String, val text: String, val buttons: List<QButton>)
+
+/** The designated home machine for Bub and shared state (docs/PHONE-DATA.md, The home). */
+data class DHomeMoving(val to: String, val state: String, val step: String = "", val note: String = "")
+data class DHome(
+    val kind: String,
+    val id: String,
+    val name: String,
+    val online: Boolean,
+    val awaySince: Long? = null,
+    val queuedCount: Int = 0,
+    val canMoveHere: Boolean = false,
+    val moving: DHomeMoving? = null,
+) {
+    fun awayLine(): Pair<String, Boolean>? {
+        val mv = moving
+        if (mv != null) {
+            if (mv.state == "moving") {
+                return (if (mv.step.isNotEmpty()) Msg.home_moving_step(mv.to, mv.step) else Msg.home_moving(mv.to)) to false
+            }
+            if (mv.state == "failed") {
+                return (if (mv.note.isNotEmpty()) Msg.home_move_failed_note(mv.note) else Msg.home_move_failed) to true
+            }
+        }
+        if (online) return null
+        val n = name.ifEmpty { "home" }
+        val time = if (awaySince != null && awaySince > 0L) {
+            java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(awaySince))
+        } else null
+        val text = when {
+            time != null && queuedCount > 0 -> Msg.home_away_since_queued(n, time, queuedCount)
+            time != null -> Msg.home_away_since(n, time)
+            queuedCount > 0 -> Msg.home_away_queued(n, queuedCount)
+            else -> Msg.home_away(n)
+        }
+        return text to false
+    }
+}
+fun parseHome(o: JSONObject?): DHome? = o?.takeIf { it.optString("kind").isNotEmpty() }?.let {
+    val mv = it.optJSONObject("moving")?.let { m -> DHomeMoving(m.str("to"), m.str("state"), m.str("step"), m.str("note")) }
+    DHome(
+        kind = it.str("kind"),
+        id = it.str("id"),
+        name = it.str("name"),
+        online = it.optBoolean("online", true),
+        awaySince = if (it.has("awaySince") && !it.isNull("awaySince")) it.lng("awaySince") else null,
+        queuedCount = it.optInt("queuedCount", 0),
+        canMoveHere = it.optBoolean("canMoveHere", false),
+        moving = mv,
+    )
+}

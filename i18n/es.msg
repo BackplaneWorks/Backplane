@@ -1595,6 +1595,16 @@ gpui.hub.address.e.g.https = Dirección del hub, p. ej. https://desktop.tail9e0c
 gpui.on.the.hub.s.machine = En la máquina del hub: Ajustes → Dispositivos → Añadir un dispositivo, y pega aquí su enlace.
 gpui.select.all = Seleccionar todo
 
+home.away = El inicio ({name}) no está disponible
+home.away.since = El inicio ({name}) no está disponible desde las {time}
+home.away.queued = El inicio ({name}) no está disponible · {n} en cola
+home.away.since.queued = El inicio ({name}) no está disponible desde las {time} · {n} en cola
+home.moving = Moviendo el inicio a {to}…
+home.moving.step = Moviendo el inicio a {to}: {step}
+home.move.failed = No se pudo mover el inicio
+home.move.failed.note = No se pudo mover el inicio: {note}
+home.machine = Máquina de inicio
+home.move.here = Hacer de esta máquina el inicio
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change = Describe el cambio…

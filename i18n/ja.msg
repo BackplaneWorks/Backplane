@@ -1616,6 +1616,16 @@ gpui.paste.a.pairing.link.pair = ペアリングリンクを貼り付け (…/pa
 gpui.hub.address.e.g.https = ハブのアドレス（例: https://desktop.tail9e0cf2.ts.net:8451）
 gpui.on.the.hub.s.machine = ハブのマシンで: 設定 → デバイス → デバイスを追加、そのリンクをここに貼り付けます。
 gpui.select.all = すべて選択
+home.away = ホーム（{name}）はオフラインです
+home.away.since = ホーム（{name}）は {time} からオフラインです
+home.away.queued = ホーム（{name}）はオフラインです · {n} 件待機中
+home.away.since.queued = ホーム（{name}）は {time} からオフラインです · {n} 件待機中
+home.moving = ホームを {to} へ移動中…
+home.moving.step = ホームを {to} へ移動中: {step}
+home.move.failed = ホームの移動に失敗しました
+home.move.failed.note = ホームの移動に失敗しました: {note}
+home.machine = ホームマシン
+home.move.here = このマシンをホームにする
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = この下書きをこの端末に保存できませんでした。再試行してください。
