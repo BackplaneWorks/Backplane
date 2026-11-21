@@ -6,6 +6,7 @@ pub mod cad;
 pub mod canonical;
 pub mod checks;
 pub mod embed;
+pub mod remote;
 pub mod hostlibs;
 pub mod ipc;
 pub mod kedit;
@@ -92,6 +93,7 @@ pub fn start(hub: &Arc<Hub>) {
     pins::start(hub);
     ipc::start(hub);
     embed::start(hub);
+    hub.register_rpc(Arc::new(remote::RemoteKicadRpc));
     xprobe::start(hub);
     reload::start(hub);
     comment::start(hub);

@@ -340,6 +340,7 @@ pub(crate) async fn serve_authenticated(copy: bool, sync: &Arc<FarSync>, hub: &A
     if m == "registry.put" || m == "registry.get" { return json_reply(&super::registry::serve(hub, &link, m, &p).await) }
     if m == "uber.sync" { return json_reply(&crate::bots::ubsync::serve(hub, &p).await) }
     if m == "settings.sync" { return json_reply(&super::settings_sync::serve(hub, &p).await) }
+    if matches!(m, "kicad.manifest" | "kicad.blob" | "kicad.push") { return json_reply(&crate::files::kicad::remote::serve(hub, m, &p).await) }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");
         if !MCP_REMOTE.contains(&tool) { return HttpReply::text("403 Forbidden", "not something this machine shares") }
