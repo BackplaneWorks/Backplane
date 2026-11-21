@@ -148,7 +148,14 @@ impl RedirectCap {
         if self.n > self.per { self.rest_until = Some(now + self.rest); self.recheck_due = true; return (false, true) }
         (true, false)
     }
-    /// The pane's tick at `now`: true once when a rest has run out (the re-check: the focus looked at again), then false until a cap trips again
+    /// Milliseconds to the next recovery check, or an indefinite wait with no recovery pending.
+    #[cfg(target_os = "linux")]
+    fn recheck_timeout(&self, now: std::time::Instant) -> i32 {
+        if !self.recheck_due { return -1 }
+        let remaining = self.rest_until.map_or(std::time::Duration::ZERO, |until| until.saturating_duration_since(now));
+        remaining.as_nanos().div_ceil(1_000_000).min(i32::MAX as u128) as i32
+    }
+    /// True once when a rest has run out, then false until the cap trips again.
     pub(crate) fn recheck(&mut self, now: std::time::Instant) -> bool {
         if !self.recheck_due || self.rest_until.is_some_and(|r| now < r) { return false }
         self.recheck_due = false;
@@ -159,7 +166,7 @@ impl RedirectCap {
 #[cfg(target_os = "linux")]
 mod imp {
     use super::{Frame, R};
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::{os::{fd::AsRawFd, unix::net::UnixDatagram}, sync::{Arc, Mutex, MutexGuard, OnceLock, atomic::{AtomicBool, Ordering}}, time::Instant};
     use x11rb::{connection::Connection, protocol::{shape::{self, ConnectionExt as _}, xproto::*}, rust_connection::RustConnection, wrapper::ConnectionExt as _};
 
     static SCREEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -193,6 +200,9 @@ mod imp {
             &CreateWindowAux::new().background_pixmap(x11rb::NONE).border_pixel(scr.black_pixel).colormap(scr.default_colormap)
                 .event_mask(EventMask::SUBSTRUCTURE_NOTIFY)).ok()?.check().ok()?;
         let _ = c.flush(); containers().lock().unwrap().insert(id);
+        // Keep a second subscription for the pane's pump if the watcher is unavailable.
+        let mask = c.get_window_attributes(parent).ok().and_then(|r| r.reply().ok()).map_or(EventMask::NO_EVENT, |a| a.your_event_mask);
+        let _ = c.change_window_attributes(parent, &ChangeWindowAttributesAux::new().event_mask(mask | EventMask::FOCUS_CHANGE));
         focus_proxy(c, parent);
         Some(id as u64)
     }
@@ -212,10 +222,8 @@ mod imp {
         // window manager, GPUI's activate) moves on to the proxy at once (watch_focus)
         proxies().lock().unwrap().insert(top, id);
         watch_focus(top);
-        // the focus already on the top-level (it had the keyboard before the pane came: an automatic attach) has no FocusIn to come: moved now
-        if !PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) && pane_on_screen(top) && c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top) {
-            let _ = c.set_input_focus(InputFocus::PARENT, id, x11rb::CURRENT_TIME);
-        }
+        // The top-level can already have focus when a child attaches, with no FocusIn to come.
+        redirect_focus(c, Some(top));
         let _ = c.flush();
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy": id, "top": top})); }
         Some(id)
@@ -229,27 +237,104 @@ mod imp {
     /// (has_focus of its container), and a focus on the top-level or on its proxy reads the same there; a hand-in that follows focuses
     /// KiCad's frame from either. Its own thread, not the pane's wake thread: a window with only the Browser has no pane to wake, and the
     /// thread waits on nothing but these events (the wake thread also reads the pane's own).
-    fn watcher() -> Option<&'static RustConnection> {
-        static W: OnceLock<Option<std::sync::Arc<RustConnection>>> = OnceLock::new();
-        W.get_or_init(|| {
-            let c = std::sync::Arc::new(RustConnection::connect(None).ok()?.0);
-            let t = c.clone();
-            std::thread::Builder::new().name("x11-focus-proxy".into()).spawn(move || while let Ok(e) = t.wait_for_event() {
-                let x11rb::protocol::Event::FocusIn(f) = e else { continue };
-                let proxy = proxies().lock().unwrap().get(&f.event).copied().filter(|_| pane_on_screen(f.event));
-                if let Some(p) = proxy {
-                    if t.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == f.event) && redirect_allowed() {
-                        let _ = t.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = t.flush();
+    struct FocusWatcher {
+        connection: Arc<RustConnection>,
+        wake: UnixDatagram,
+    }
+    static WATCHER: OnceLock<Option<FocusWatcher>> = OnceLock::new();
+    static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+    fn watcher_error(stage: &str, error: impl std::fmt::Display) {
+        eprintln!("GPUI_LOG {}", serde_json::json!({"native_focus_watcher": stage, "error": error.to_string()}));
+    }
+
+    impl FocusWatcher {
+        fn start() -> Result<Self, Box<dyn std::error::Error>> {
+            let connection = Arc::new(RustConnection::connect(None)?.0);
+            let (wake, notices) = UnixDatagram::pair()?;
+            wake.set_nonblocking(true)?;
+            let receiver = connection.clone();
+            WATCHER_RUNNING.store(true, Ordering::Release);
+            let thread = std::thread::Builder::new().name("x11-focus-proxy".into()).spawn(move || {
+                let result = watch_focus_events(&receiver, &notices);
+                WATCHER_RUNNING.store(false, Ordering::Release);
+                watcher_error("stopped", result);
+                // FocusIn may already have been consumed by the pump before the failure.
+                if let Some(g) = conn() {
+                    redirect_focus(g.as_ref().unwrap(), None);
+                }
+            });
+            if let Err(error) = thread {
+                WATCHER_RUNNING.store(false, Ordering::Release);
+                return Err(error.into());
+            }
+            Ok(Self { connection, wake })
+        }
+    }
+
+    fn watch_focus_events(c: &RustConnection, notices: &UnixDatagram) -> Box<dyn std::error::Error> {
+        let mut fds = [
+            libc::pollfd { fd: c.stream().as_raw_fd(), events: libc::POLLIN, revents: 0 },
+            libc::pollfd { fd: notices.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+        ];
+        loop {
+            let timeout = {
+                let mut cap = CAP.lock().unwrap_or_else(|e| e.into_inner());
+                let now = Instant::now();
+                let timeout = cap.recheck_timeout(now);
+                let due = cap.recheck(now);
+                drop(cap);
+                if due { redirect_focus(c, None); }
+                timeout
+            };
+            match c.poll_for_event() {
+                Ok(Some(x11rb::protocol::Event::FocusIn(f))) => { redirect_focus(c, Some(f.event)); }
+                Ok(Some(_)) => {}
+                Err(error) => return error.into(),
+                Ok(None) => {
+                    if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, timeout) } < 0 {
+                        let error = std::io::Error::last_os_error();
+                        if error.kind() == std::io::ErrorKind::Interrupted { continue }
+                        return error.into();
+                    }
+                    if fds[1].revents & libc::POLLIN != 0 {
+                        if let Err(error) = notices.recv(&mut [0]) { return error.into() }
                     }
                 }
-            }).ok()?;
-            Some(c)
-        }).as_deref()
+            }
+        }
     }
+
     fn watch_focus(top: u32) {
-        let Some(w) = watcher() else { return };
-        let _ = w.change_window_attributes(top, &ChangeWindowAttributesAux::new().event_mask(EventMask::FOCUS_CHANGE)); let _ = w.flush();
+        let Some(watcher) = WATCHER.get_or_init(|| match FocusWatcher::start() {
+            Ok(watcher) => Some(watcher),
+            Err(error) => { watcher_error("failed to start", error); None }
+        }) else { return };
+        let result = watcher.connection.change_window_attributes(top,
+            &ChangeWindowAttributesAux::new().event_mask(EventMask::FOCUS_CHANGE));
+        let error = match result {
+            Ok(request) => request.check().err().map(|e| e.to_string()),
+            Err(error) => Some(error.to_string()),
+        };
+        if let Some(error) = error { watcher_error("could not subscribe", error); }
+        // The checked request can queue events in x11rb while draining the socket.
+        let _ = watcher.wake.send(&[0]);
     }
+
+    // The event may have been queued before focus moved elsewhere. With no event (cap recovery),
+    // look up the top-level that actually holds focus, across all registered native children.
+    fn redirect_focus(c: &RustConnection, event_top: Option<u32>) {
+        let proxy_for = |top| proxies().lock().unwrap().get(&top).copied().filter(|_| pane_on_screen(top));
+        let event_proxy = event_top.and_then(proxy_for);
+        if event_top.is_some() && event_proxy.is_none() { return }
+        let Some(focus) = c.get_input_focus().ok().and_then(|request| request.reply().ok()).map(|r| r.focus) else { return };
+        if event_top.is_some_and(|top| top != focus) { return }
+        if let Some(proxy) = event_proxy.or_else(|| proxy_for(focus)).filter(|_| redirect_allowed()) {
+            let _ = c.set_input_focus(InputFocus::PARENT, proxy, x11rb::CURRENT_TIME);
+            let _ = c.flush();
+        }
+    }
+
     /// Native children that are not a KiCad pane's container (the Browser's page: cef_native), per top-level: the proxy is kept while any is.
     fn others() -> &'static Mutex<std::collections::HashMap<u32, std::collections::HashSet<u64>>> { static O: OnceLock<Mutex<std::collections::HashMap<u32, std::collections::HashSet<u64>>>> = OnceLock::new(); O.get_or_init(Default::default) }
     /// A native child `child` of ours (not KiCad's) made in top-level `top`: the top-level's proxy found and watched, as for a pane.
@@ -267,14 +352,21 @@ mod imp {
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let parent_of = |w: u32| c.query_tree(w).ok().and_then(|q| q.reply().ok()).map(|t| t.parent);
         let ours = containers().lock().unwrap().iter().copied().collect::<Vec<_>>();
+        // The watcher can keep its FocusChange selection until X destroys the top-level. Without a proxy it ignores those events.
         if !ours.into_iter().any(|o| parent_of(o) == Some(top)) { proxies().lock().unwrap().remove(&top); }
     }
-    /// The keyboard back to top-level `top` (the Browser giving it back): to its proxy while a native child is on screen there, else the
-    /// top-level itself.
-    pub fn focus_home(top: u64) {
-        let w = home_of(top as u32);
+    /// Return the keyboard only from this Browser container. Serialize the ownership check
+    /// and the focus change on the X server so a click in another window cannot intervene.
+    #[cfg(feature = "cef")]
+    pub fn focus_home(top: u64, container: u64) {
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); let _ = c.flush();
+        let w = home_of(top as u32);
+        if c.grab_server().ok().and_then(|request| request.check().ok()).is_none() { return }
+        if focus_in(c, container as u32) {
+            let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME);
+        }
+        let _ = c.ungrab_server();
+        let _ = c.flush();
     }
     /// The redirect, at most REDIRECTS_PER within REDIRECT_SPAN: a window manager that puts the focus back on the top-level
     /// each time it moves (none seen; the review's guard) gets the proxy a few times, then the top-level is left focused for REDIRECT_REST,
@@ -285,7 +377,11 @@ mod imp {
     static CAP: Mutex<super::RedirectCap> = Mutex::new(super::RedirectCap::new(REDIRECTS_PER, REDIRECT_SPAN, REDIRECT_REST));
     fn redirect_allowed() -> bool {
         let (ok, tripped) = CAP.lock().unwrap_or_else(|e| e.into_inner()).allow(std::time::Instant::now());
-        if tripped { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_rest": {"redirects": REDIRECTS_PER, "within_ms": REDIRECT_SPAN.as_millis() as u64, "rest_ms": REDIRECT_REST.as_millis() as u64}})); }
+        if tripped {
+            // The cap can also trip on the UI thread as a native child comes on screen.
+            // Interrupt the watcher's indefinite wait so it schedules the recovery.
+            if let Some(Some(watcher)) = WATCHER.get() { let _ = watcher.wake.send(&[0]); }
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_rest": {"redirects": REDIRECTS_PER, "within_ms": REDIRECT_SPAN.as_millis() as u64, "rest_ms": REDIRECT_REST.as_millis() as u64}})); }
         ok
     }
     static SCREENS: std::sync::LazyLock<Mutex<super::PaneScreens>> = std::sync::LazyLock::new(Default::default);
@@ -295,11 +391,10 @@ mod imp {
     pub fn note_pane_on_screen(top: u64, child: u64, on: bool) {
         if top == 0 { return }
         let came = SCREENS.lock().unwrap_or_else(|e| e.into_inner()).set(top, child, on);
-        if !came || PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) { return }
-        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let Some(p) = proxies().lock().unwrap().get(&(top as u32)).copied() else { return };
-        // (counted against the redirect cap like every other move: a pane flapping on and off screen cannot trade the focus without bound)
-        if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top as u32) && redirect_allowed() { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
+        if !came { return }
+        // Check actual X focus. A pane's last tick may report keys after it closes,
+        // and a pane in another window says nothing about this top-level.
+        if let Some(g) = conn() { redirect_focus(g.as_ref().unwrap(), Some(top as u32)); }
     }
     /// The window the keyboard goes to when it is Backplane's in top-level `w`: its focus proxy while a pane's frame is on screen there,
     /// else `w` itself
@@ -763,19 +858,17 @@ mod imp {
     pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
     pub fn keep_focus(_top: u64) -> bool { false }
     /// Whether KiCad has the keyboard now (the pane's tick). Its change to Backplane moves a focus left on a top-level to its proxy; the
-    /// wake thread's redirect (pump) does not wait for it
+    /// focus watcher's redirect does not wait for it
     static PANE_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     pub fn note_pane_keys(kicad: bool) {
         // (called every tick: only a change to Backplane's keyboard looks at the focus)
         let was = PANE_KEYS.swap(kicad, std::sync::atomic::Ordering::SeqCst);
         // a rest of the redirect cap run out with Backplane holding the keyboard: a focus still on a top-level goes to its proxy (else the
         // cap would leave #1505's fault in place until the next focus change)
-        if !kicad && CAP.lock().unwrap_or_else(|e| e.into_inner()).recheck(std::time::Instant::now()) {
-            let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-            let f = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|r| r.focus);
-            let p = f.filter(|&f| pane_on_screen(f)).and_then(|f| proxies().lock().unwrap().get(&f).copied());
-            if let Some(p) = p.filter(|_| redirect_allowed()) { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
-            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_recheck": {"focus": f, "moved_to": p}})); }
+        if !kicad && !WATCHER_RUNNING.load(Ordering::Acquire)
+            && CAP.lock().unwrap_or_else(|e| e.into_inner()).recheck(Instant::now())
+        {
+            if let Some(g) = conn() { redirect_focus(g.as_ref().unwrap(), None); }
             return;
         }
         // the keyboard Backplane's again with the focus left on a top-level itself (a FocusIn seen while KiCad still had the keys): its proxy
@@ -846,8 +939,12 @@ mod imp {
     }
     /// Whether the X keyboard focus is in `container` (on one of its frames or their windows): the editor has the keys.
     pub fn has_focus(container: u64) -> bool {
-        let container = container as u32;
-        let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
+        let Some(g) = conn() else { return false };
+        focus_in(g.as_ref().unwrap(), container as u32)
+    }
+
+    fn focus_in(c: &RustConnection, container: u32) -> bool {
+        if container <= 1 { return false }
         let Some(mut w) = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|f| f.focus) else { return false };
         let root = root(c).unwrap_or(0);
         for _ in 0..32 { if w == container { return true } if w == root || w == 0 || w == 1 { return false }
@@ -921,6 +1018,39 @@ mod imp {
         let per = m.keysyms_per_keycode as usize;
         m.keysyms.chunks(per.max(1)).position(|k| k.contains(&keysym)).map(|i| lo + i as u8)
     }
+    fn pane_fallback_top(watcher_running: bool, top: u32) -> Option<u32> {
+        (!watcher_running).then_some(top)
+    }
+
+    #[cfg(test)]
+    mod focus_watcher_tests {
+        use super::*;
+        use std::time::Duration;
+
+        #[test]
+        fn watcher_waits_for_and_recovers_from_each_cap_rest() {
+            let ms = Duration::from_millis;
+            let now = Instant::now();
+            let mut cap = super::super::RedirectCap::new(1, ms(100), ms(1000));
+            assert_eq!(cap.recheck_timeout(now), -1);
+            for start in [now, now + ms(1010)] {
+                assert_eq!(cap.allow(start), (true, false));
+                assert_eq!(cap.allow(start + ms(5)), (false, true));
+                assert_eq!(cap.recheck_timeout(start + ms(6)), 999);
+                assert_eq!(cap.recheck_timeout(start + ms(1005)), 0);
+                assert!(cap.recheck(start + ms(1005)));
+                assert_eq!(cap.recheck_timeout(start + ms(1005)), -1);
+                assert!(!cap.recheck(start + ms(1006)));
+            }
+        }
+
+        #[test]
+        fn pane_pump_redirects_only_without_a_watcher() {
+            assert_eq!(pane_fallback_top(false, 42), Some(42));
+            assert_eq!(pane_fallback_top(true, 42), None);
+        }
+    }
+
     /// What came to our own connection since the last call (drained): the grabbed escape chord, and the fork's ClientMessages to the container
     /// (`_BACKPLANE_KEY`: a reserved chord pressed in KiCad, as a gpui keystroke; `_BACKPLANE_FOCUS`: a click gave KiCad the keyboard).
     /// What our connection read for the pane and it has not taken yet (`pump` fills it, `events` empties it).
@@ -943,7 +1073,11 @@ mod imp {
                     let _ = c.allow_events(Allow::REPLAY_POINTER, b.time);
                     out.push(super::Ev::Click);
                 }
-                // (a focus put on a top-level itself: the focus watcher's, on its own connection: watcher)
+                x11rb::protocol::Event::FocusIn(f) => {
+                    if let Some(top) = pane_fallback_top(WATCHER_RUNNING.load(Ordering::Acquire), f.event) {
+                        redirect_focus(c, Some(top));
+                    }
+                }
                 x11rb::protocol::Event::ClientMessage(m) if m.format == 32 => {
                     let d = m.data.as_data32();
                     if m.type_ == key { if let Some(k) = super::chord(d[1], d[2]) { out.push(if k == "ctrl-`" { super::Ev::Escape } else { super::Ev::Key(k) }); } }

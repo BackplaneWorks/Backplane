@@ -67,7 +67,9 @@ mod imp {
     use crate::viewers::native_child as nc;
     /// The person's last press on the display that was inside a container of ours: when, and which container. Nothing else of a press is kept
     /// (no position, no other window). Taken by the one focus it explains (`pressed_in`).
-    static PRESS: Mutex<Option<(std::time::Instant, u32)>> = Mutex::new(None);
+    #[derive(Clone, Copy)]
+    enum PressTarget { Pending, Page(u32), Unavailable }
+    static PRESS: Mutex<Option<(std::time::Instant, PressTarget)>> = Mutex::new(None);
     /// Whether the press watcher runs (XInput 2 on the display): without it `pressed_in` is never true, and on_set_focus falls back to `button_down`.
     static PRESSES: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
     /// How long after the person's press a focus of the page is still that press's. The press reaches us (a raw event, sent before the
@@ -90,34 +92,66 @@ mod imp {
             let mask = [xinput::EventMask { deviceid: 1 /* XIAllMasterDevices */, mask: vec![xinput::XIEventMask::RAW_BUTTON_PRESS] }];
             if c.xinput_xi_select_events(root, &mask).ok().and_then(|k| k.check().ok()).is_none() { return }
             PRESSES.store(true, std::sync::atomic::Ordering::Relaxed);
-            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_presses": "watched"})); }
-            std::thread::Builder::new().name("cef-presses".into()).spawn(move || while let Ok(e) = c.wait_for_event() {
-                let x11rb::protocol::Event::XinputRawButtonPress(_) = e else { continue };
-                // said at once (container 0: not yet known), so a focus that CEF reports while the pointer is followed waits for it (pressed_in)
-                let at = std::time::Instant::now(); *PRESS.lock().unwrap() = Some((at, 0));
-                let ours = containers().lock().unwrap().clone();
-                let (mut w, mut hit) = (root, None);
-                for _ in 0..16 { let Some(r) = c.query_pointer(w).ok().and_then(|r| r.reply().ok()) else { break }; if r.child == x11rb::NONE { break } w = r.child; if ours.contains_key(&w) { hit = Some(w); break } }
-                *PRESS.lock().unwrap() = hit.map(|h| (at, h));
-                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_press_in_page": hit.is_some()})); }
-            }).ok();
+            let started = std::thread::Builder::new().name("cef-presses".into()).spawn(move || {
+                while let Ok(e) = c.wait_for_event() {
+                    let x11rb::protocol::Event::XinputRawButtonPress(press) = e else { continue };
+                    if !matches!(press.detail, 1..=3 | 8..=9)
+                        || press.flags.contains(xinput::PointerEventFlags::POINTER_EMULATED)
+                    { continue }
+                    let at = std::time::Instant::now();
+                    *PRESS.lock().unwrap() = Some((at, PressTarget::Pending));
+                    let ours = containers().lock().unwrap().clone();
+                    let hit = pointer_target(&c, root, |w| ours.contains_key(&w));
+                    *PRESS.lock().unwrap() = Some((at, hit.map_or(PressTarget::Unavailable, PressTarget::Page)));
+                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                        eprintln!("GPUI_LOG {}", serde_json::json!({"cef_press_in_page": hit.is_some()}));
+                    }
+                }
+                PRESSES.store(false, std::sync::atomic::Ordering::Relaxed);
+            });
+            if started.is_err() { PRESSES.store(false, std::sync::atomic::Ordering::Relaxed); }
         });
     }
-    /// Whether the person pressed a mouse button inside container `frame` within PRESS_SPAN (taken: it answers yes once); None without the watcher.
+
+    fn pointer_target(c: &RustConnection, mut w: u32, matches: impl Fn(u32) -> bool) -> Option<u32> {
+        for _ in 0..16 {
+            w = c.query_pointer(w).ok()?.reply().ok()?.child;
+            if w == x11rb::NONE { break }
+            if matches(w) { return Some(w) }
+        }
+        None
+    }
+
+    /// A recent press is consumed once. Preserve the record after consumption so the
+    /// second CEF callback cannot treat the same press as missing.
     pub fn pressed_in(frame: u64) -> Option<bool> {
         if !PRESSES.load(std::sync::atomic::Ordering::Relaxed) { return None }
-        // a press still being followed down (a few round trips): waited for, 50 ms at most
         let t0 = std::time::Instant::now();
-        let mut p = loop { let p = PRESS.lock().unwrap(); if !p.is_some_and(|(at, w)| w == 0 && at.elapsed() <= PRESS_SPAN) || t0.elapsed().as_millis() >= 50 { break p } drop(p); std::thread::sleep(std::time::Duration::from_millis(1)); };
-        let yes = p.is_some_and(|(at, w)| w as u64 == frame && at.elapsed() <= PRESS_SPAN);
-        if yes { *p = None; }
-        Some(yes)
+        let mut record = loop {
+            let record = PRESS.lock().unwrap();
+            if !record.is_some_and(|(at, target)| matches!(target, PressTarget::Pending) && at.elapsed() <= PRESS_SPAN)
+                || t0.elapsed().as_millis() >= 50
+            { break record }
+            drop(record);
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        };
+        if let Some((at, target)) = record.filter(|(at, _)| at.elapsed() <= PRESS_SPAN) {
+            let clicked = matches!(target, PressTarget::Page(w) if w as u64 == frame);
+            if clicked { *record = Some((at, PressTarget::Unavailable)); }
+            return Some(clicked);
+        }
+        // XWayland can omit the press when the previously focused app is native Wayland.
+        if std::env::var_os("WAYLAND_DISPLAY").is_some() { None } else { Some(false) }
     }
-    /// Whether a mouse button is down now (a focus change while one is, is the person's click; without, a window manager's focus-follows-mouse).
-    pub fn button_down() -> bool {
+
+    /// Fallback for SYSTEM focus when XI2 did not supply a press. Require the held
+    /// button and the pointer inside the page that reported focus.
+    pub fn button_down(frame: u64) -> bool {
         let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
         let Some(root) = c.setup().roots.get(SCREEN.load(std::sync::atomic::Ordering::Relaxed)).map(|s| s.root) else { return false };
-        c.query_pointer(root).ok().and_then(|r| r.reply().ok()).map_or(false, |p| u16::from(p.mask) & (u16::from(KeyButMask::BUTTON1) | u16::from(KeyButMask::BUTTON2) | u16::from(KeyButMask::BUTTON3)) != 0)
+        let held = c.query_pointer(root).ok().and_then(|r| r.reply().ok()).is_some_and(|p|
+            u16::from(p.mask) & u16::from(KeyButMask::BUTTON1 | KeyButMask::BUTTON2 | KeyButMask::BUTTON3) != 0);
+        held && pointer_target(c, root, |w| w as u64 == frame).is_some()
     }
     /// The container gone (its browser closed).
     pub fn destroy(frame: u64) { if let Some(t) = containers().lock().unwrap().remove(&(frame as u32)) { nc::release_child(t as u64, frame); } let Some(g) = conn() else { return }; let c = g.as_ref().unwrap(); let _ = c.destroy_window(frame as u32); let _ = c.flush(); }
@@ -158,7 +192,7 @@ mod imp {
     }
     /// The keyboard back to the client's window.
     /// (to its focus proxy while a native child is on screen there: native_child `focus_home`)
-    pub fn focus_host(h: Host) { if let Host::X11(w) = h { nc::focus_home(w as u64) } }
+    pub fn focus_host(h: Host, frame: u64) { if let Host::X11(w) = h { nc::focus_home(w as u64, frame) } }
     /// Where the child is (its geometry in the parent) and whether it is mapped: what the e2e checks.
     pub fn geometry(w: u64) -> Option<(R, bool)> {
         let g = conn()?; let c = g.as_ref().unwrap();
@@ -213,8 +247,8 @@ mod imp {
             EnumChildWindows(p as HWND, Some(cb), &mut out as *mut _ as LPARAM); }
         out
     }
-    #[cfg(windows)] pub fn button_down() -> bool { use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState; unsafe { [0x01, 0x02, 0x04].iter().any(|k| GetAsyncKeyState(*k) as u16 & 0x8000 != 0) } }
-    #[cfg(target_os = "macos")] pub fn button_down() -> bool {
+    #[cfg(windows)] pub fn button_down(_frame: u64) -> bool { use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState; unsafe { [0x01, 0x02, 0x04].iter().any(|k| GetAsyncKeyState(*k) as u16 & 0x8000 != 0) } }
+    #[cfg(target_os = "macos")] pub fn button_down(_frame: u64) -> bool {
         #[link(name = "objc")] unsafe extern "C" { fn objc_getClass(n: *const std::ffi::c_char) -> *mut c_void; }
         unsafe { let cls = objc_getClass(c"NSEvent".as_ptr()); !cls.is_null() && !send0(cls, c"pressedMouseButtons").is_null() } // i18n-ok: an Objective-C class name
     }
@@ -226,7 +260,7 @@ mod imp {
     /// CEF's SetFocus does it on Windows (its UI thread owns the child); nothing more here.
     pub fn focus_child(_w: u64) {}
     /// The client's window is gpui's, on this (its) thread.
-    pub fn focus_host(h: Host) { if let Host::Win(p) = h { unsafe { SetFocus(p as HWND); } } }
+    pub fn focus_host(h: Host, _frame: u64) { if let Host::Win(p) = h { unsafe { SetFocus(p as HWND); } } }
     pub fn geometry(w: u64) -> Option<(R, bool)> {
         unsafe {
             let mut rc = std::mem::zeroed::<windows_sys::Win32::Foundation::RECT>();
@@ -273,8 +307,8 @@ mod imp {
             EnumChildWindows(p as HWND, Some(cb), &mut out as *mut _ as LPARAM); }
         out
     }
-    #[cfg(windows)] pub fn button_down() -> bool { use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState; unsafe { [0x01, 0x02, 0x04].iter().any(|k| GetAsyncKeyState(*k) as u16 & 0x8000 != 0) } }
-    #[cfg(target_os = "macos")] pub fn button_down() -> bool {
+    #[cfg(windows)] pub fn button_down(_frame: u64) -> bool { use windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState; unsafe { [0x01, 0x02, 0x04].iter().any(|k| GetAsyncKeyState(*k) as u16 & 0x8000 != 0) } }
+    #[cfg(target_os = "macos")] pub fn button_down(_frame: u64) -> bool {
         #[link(name = "objc")] unsafe extern "C" { fn objc_getClass(n: *const std::ffi::c_char) -> *mut c_void; }
         unsafe { let cls = objc_getClass(c"NSEvent".as_ptr()); !cls.is_null() && !send0(cls, c"pressedMouseButtons").is_null() } // i18n-ok: an Objective-C class name
     }
@@ -303,7 +337,7 @@ mod imp {
     }
     pub fn show(w: u64, on: bool) { unsafe { send_flag(v(w), c"setHidden:", !on); } }
     pub fn focus_child(w: u64) { unsafe { let win = send0(v(w), c"window"); if !win.is_null() { send_obj(win, c"makeFirstResponder:", v(w)); } } }
-    pub fn focus_host(h: Host) { if let Host::Mac(p) = h { unsafe { let win = send0(p as *mut c_void, c"window"); if !win.is_null() { send_obj(win, c"makeFirstResponder:", p as *mut c_void); } } } }
+    pub fn focus_host(h: Host, _frame: u64) { if let Host::Mac(p) = h { unsafe { let win = send0(p as *mut c_void, c"window"); if !win.is_null() { send_obj(win, c"makeFirstResponder:", p as *mut c_void); } } } }
     pub fn geometry(w: u64) -> Option<(R, bool)> {
         unsafe {
             let parent = send0(v(w), c"superview"); if parent.is_null() { return None }

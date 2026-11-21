@@ -195,7 +195,7 @@ wrap_focus_handler! {
             // manager that focuses what is under the pointer moves it there too, and that is nobody's click; nor is a script's focus. Asking
             // whether a button is down when this callback runs missed the click whenever the press reached Chromium late (a KiCad pane's button
             // grab replaying it): the page was given the keyboard and taken it back. Elsewhere, and without XInput 2: a button down now)
-            let clicked = self.tab.host.is_some() && source == FocusSource::SYSTEM && native::pressed_in(self.tab.outer()).unwrap_or_else(native::button_down);
+            let clicked = self.tab.host.is_some() && source == FocusSource::SYSTEM && native::pressed_in(self.tab.outer()).unwrap_or_else(|| native::button_down(self.tab.outer()));
             if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_set_focus": {"system": source == FocusSource::SYSTEM, "clicked": clicked}})); }
             if clicked { self.tab.st.lock().unwrap().person = true; let _ = self.tab.wake.try_send(()); }
             false as _
@@ -544,7 +544,7 @@ impl Tab {
     /// windowed: the keyboard to the page (`on`) or back to the client's window
     pub fn give_keyboard(&self, on: bool) {
         self.focus(on);
-        if on { native::focus_child(self.native()) } else if let Some(h) = self.host { native::focus_host(h) }
+        if on { native::focus_child(self.native()) } else if let Some(h) = self.host { native::focus_host(h, self.frame) }
     }
     /// windowed: a key the client did not want goes to the page after all (on_pre_key_event lets it through this time)
     pub fn reinject(&self, e: &KeyEvent) {
