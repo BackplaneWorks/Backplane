@@ -1652,7 +1652,8 @@ impl KicadPane {
         // Windows: while the pane pre-warms or a hand-in is being verified (the F5 windows), KiCad's keys moving to Backplane's
         // own window with no press in it is a pre-warmed frame's activation ending (Windows passes it on), not the person
         // taking them (run S7w): the hand-in is posted once more instead of flipping the state and raising the shield.
-        if cfg!(windows) && self.keys && !has && (self.prewarm_guard.is_some() || self.verify_handin.is_some())
+        // (a pane off the page takes no focus: #1470, the KiCad lead's rule, for this and the two below)
+        if cfg!(windows) && self.in_page && self.keys && !has && (self.prewarm_guard.is_some() || self.verify_handin.is_some())
             && nc::backplane_press_ms_ago() > 600 && !self.unexplained_reposted {
             if let Some(w) = self.want() {
                 self.unexplained_reposted = true;
@@ -1667,11 +1668,11 @@ impl KicadPane {
             // (never when the person went to Backplane itself: the focus is then in our window, outside KiCad's container)
             let to_dialog = if nc::has_focus(self.toplevel) { None } else { nc::open_dialogs(self.info["pid"].as_u64().unwrap_or(0) as u32).last().copied() };
             if let Some(d) = to_dialog { nc::activate(d); self.was_dialog = true; has = true; }
-            else if let Some(w) = self.want() { nc::focus(w); has = true; }
+            else if let Some(w) = self.want().filter(|_| self.in_page) { nc::focus(w); has = true; }
         }
         // KiCad took the keyboard on a click (`_BACKPLANE_FOCUS`) and a window manager that focuses on click (i3) gave it straight back to
         // Backplane's window: the click was KiCad's, so is the keyboard (once, within moments of it)
-        if !has && self.keys {
+        if !has && self.keys && self.in_page {
             if let Some((w, at)) = self.took.take() { if at.elapsed() < std::time::Duration::from_millis(600) { nc::focus(w); has = true; } }
         }
         if has != self.keys && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
