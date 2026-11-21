@@ -97,7 +97,10 @@ bo_guard() { local id=$1 out
 # bo_run ID JOB CWD BODY: write the job script (the allowed env, cd CWD, BODY) to the box and run it; stdout and stderr are the command's, the exit code is its own
 bo_run() { local id=$1 job=$2 cwd=$3 body=$4 s
   s=$({ echo '#!/bin/bash'; echo 'export PATH="$HOME/.cargo/bin:/usr/local/cargo/bin:$HOME/.bun/bin:/usr/local/bin:$PATH" BP_NO_BOAT=1 BP_ON_BOAT=1 BP_JOB=$HOME/.bpjobs/'"$job"
-             bo_env; printf 'cd ~/ws/src/%q || exit 96\n' "$cwd"; printf '%s\n' "$body"; })
+             bo_env
+             # agent CLIs a job installed in the home go (scripts/boat-agents-clean.sh; Boat's own stay, warned about): one that cannot go makes the box unusable (98)
+             echo '[ ! -f ~/ws/src/scripts/boat-agents-clean.sh ] || bash ~/ws/src/scripts/boat-agents-clean.sh || exit 98'
+             printf 'cd ~/ws/src/%q || exit 96\n' "$cwd"; printf '%s\n' "$body"; })
   bo_b exec "$id" --timeout 60 "echo $(printf '%s\n' "$s" | base64 -w0) | base64 -d > ~/.bpjobs/$job/run.sh" > /dev/null || return 98
   python3 -I "$BO_HERE/boat-run.py" "$id" bash "/home/user/.bpjobs/$job/run.sh" & BO_PID=$!
   trap 'kill -TERM "$BO_PID" 2>/dev/null; wait "$BO_PID" 2>/dev/null; exit 143' TERM HUP; trap 'kill -INT "$BO_PID" 2>/dev/null; wait "$BO_PID" 2>/dev/null; exit 130' INT
