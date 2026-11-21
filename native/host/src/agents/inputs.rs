@@ -1,50 +1,6 @@
-//! What a message and a project give an agent besides the prompt: the project's KiCad files,
-//! skills and `$skill` mentions, and attached images.
+//! What a message and a project give an agent besides the prompt: skills, `$skill` mentions, and attached images.
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-
-// ---- KiCad project files ----
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Files { pub pro: String, pub pcb: String, pub sch: String, pub all: String }
-
-/// A folder's name that says it holds copies.
-fn copies(c: &str) -> bool {
-    let l = c.to_lowercase();
-    l.starts_with("archive") || l.starts_with("build") || l.contains("backup") || l == "old" || l == "out" || l.starts_with("output") || l == "tmp" || l == "temp" || l == "staging" || l == "scratch" || l == "renders" || l.starts_with("export")
-}
-fn walk(root: &Path, rel: &str, depth: usize, out: &mut Vec<String>) {
-    let Ok(rd) = std::fs::read_dir(root.join(rel)) else { return };
-    for e in rd.flatten() {
-        let name = e.file_name().to_string_lossy().into_owned(); let p = if rel.is_empty() { name.clone() } else { format!("{rel}/{name}") };
-        let Ok(t) = e.file_type() else { continue };
-        if t.is_dir() { if depth < 4 && !name.starts_with('.') && name != "node_modules" && !name.ends_with("-backups") { walk(root, &p, depth + 1, out) } }
-        else if name.ends_with(".kicad_pro") && depth >= 1 { out.push(p) }
-    }
-}
-/// Files.found: every .kicad_pro four folders deep, paths from the root, shallowest first, folders of copies after the rest, at most 50.
-pub fn found(root: &Path) -> Vec<String> {
-    let mut v = vec![]; walk(root, "", 1, &mut v);
-    let key = |p: &String| { let parts: Vec<&str> = p.split('/').collect(); let c = parts[..parts.len() - 1].iter().any(|d| copies(d)) as u8; (c, parts.len(), p.clone()) };
-    v.sort_by_key(key); v.truncate(50); v
-}
-fn abs(root: &str, rel: &str) -> String { if rel.is_empty() { String::new() } else if crate::plat::fs::is_abs(rel) { rel.into() } else { format!("{root}/{rel}") } }
-fn dir_of(p: &str) -> &str { p.rsplit_once('/').map_or("", |x| x.0) }
-fn last(p: &str) -> &str { p.rsplit('/').next().unwrap_or(p) }
-fn named(ns: &[String], stem: &str, ext: &str) -> String { let want = format!("{stem}{ext}"); if ns.contains(&want) { want } else { ns.iter().find(|n| n.ends_with(ext)).cloned().unwrap_or_default() } }
-/// Files.read: `.backplane.json`'s project/pcb/schematic win; else the .kicad_pro in the root, else the shallowest found.
-pub fn read(root: &str) -> Files {
-    let cfg: Value = std::fs::read_to_string(format!("{root}/.backplane.json")).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
-    let g = |k: &str| cfg.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let names = |d: &str| -> Vec<String> { let mut v: Vec<String> = std::fs::read_dir(d).map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default(); v.sort(); v };
-    let all = found(Path::new(root));
-    let top = names(root).into_iter().find(|n| n.ends_with(".kicad_pro")).unwrap_or_default();
-    let pro = if !g("project").is_empty() { g("project") } else if !top.is_empty() { top } else { all.first().cloned().unwrap_or_default() };
-    let ns = names(&if dir_of(&pro).is_empty() { root.to_string() } else { abs(root, dir_of(&pro)) });
-    let stem = last(&pro).strip_suffix(".kicad_pro").unwrap_or(last(&pro)).to_string();
-    let inn = |d: &str, n: &str| if d.is_empty() || n.is_empty() { n.to_string() } else { format!("{d}/{n}") };
-    let pick = |k: &str, ext: &str| abs(root, &if g(k).is_empty() { inn(dir_of(&pro), &named(&ns, &stem, ext)) } else { g(k) });
-    Files { pro: abs(root, &pro), pcb: pick("pcb", ".kicad_pcb"), sch: pick("schematic", ".kicad_sch"), all: all.join("\n") }
-}
 
 // ---- skills ----
 #[derive(Clone, Debug, PartialEq)]
@@ -145,22 +101,10 @@ pub fn claude_line_p(text: &str, imgs: &[(String, String)], uuid: &str, now: boo
 mod tests {
     use super::*;
     fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("in-{n}")) }
-    fn touch(p: &Path) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "x").unwrap() }
     #[test] fn a_steering_line_carries_priority_now_and_a_plain_one_does_not() {
         let l: Value = serde_json::from_str(&claude_line_p("x", &[], "U", true)).unwrap(); assert_eq!(l["priority"], "now");
         let l: Value = serde_json::from_str(&claude_line("x", &[], "U")).unwrap(); assert!(l.get("priority").is_none());
     }
-    #[test] fn kicad_files_prefer_the_root_then_the_shallowest() {
-        let r = tmp("k1"); touch(&r.join("hw/a/a.kicad_pro")); touch(&r.join("hw/a/a.kicad_pcb")); touch(&r.join("hw/a/a.kicad_sch")); touch(&r.join("archive/old/z.kicad_pro")); touch(&r.join(".hidden/h.kicad_pro")); touch(&r.join("node_modules/n.kicad_pro"));
-        let f = read(r.to_str().unwrap()); let rs = r.to_str().unwrap();
-        assert_eq!(f.pro, format!("{rs}/hw/a/a.kicad_pro")); assert_eq!(f.pcb, format!("{rs}/hw/a/a.kicad_pcb")); assert_eq!(f.sch, format!("{rs}/hw/a/a.kicad_sch")); assert_eq!(f.all, "hw/a/a.kicad_pro\narchive/old/z.kicad_pro");
-        touch(&r.join("top.kicad_pro")); assert_eq!(read(rs).pro, format!("{rs}/top.kicad_pro"));
-    }
-    #[test] fn backplane_json_wins() {
-        let r = tmp("k2"); touch(&r.join("a/a.kicad_pro")); touch(&r.join("b/b.kicad_pro")); std::fs::write(r.join(".backplane.json"), r#"{"project":"b/b.kicad_pro","pcb":"b/x.kicad_pcb"}"#).unwrap();
-        let f = read(r.to_str().unwrap()); assert!(f.pro.ends_with("b/b.kicad_pro") && f.pcb.ends_with("b/x.kicad_pcb")); assert_eq!(f.sch, "");
-    }
-    #[test] fn none_found_is_empty() { assert_eq!(read(tmp("k3").to_str().unwrap()), Files { pro: "".into(), pcb: "".into(), sch: "".into(), all: "".into() }); }
     #[test] fn skills_read_their_frontmatter_including_folded_values() {
         let s = parse_skill("---\nname: pcb-review\ndescription: >\n  Review a board\n  with care.\nuser-invocable: false\n---\nbody", "dir", "/p");
         assert_eq!((s.name.as_str(), s.description.as_str(), s.user, s.model), ("pcb-review", "Review a board with care.", false, true));

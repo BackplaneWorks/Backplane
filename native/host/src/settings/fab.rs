@@ -467,14 +467,17 @@ mod tests {
         let c = card("t1", "", &ps, 0, &json!({"error":"x","parts":[{"lead_days":3}]}), true, &[], "", ""); assert_eq!((c["lead_days"].clone(), c["estimate_warnings"].clone()), (json!(0), json!("")), "no estimate, no lead time");
         assert_eq!(card("t1", "", &ps, 0, &est, false, &[], "", "")["lead_days"], 0, "estimates off");
     }
-    /// The fab.json contract is the order server's catalog (`GET /v1/catalog`, order/fabsrv/catalog.py); the agents learn it from a hand-written list (`ORDER_PROMPT_FAB`).
-    /// Every kind, option, choice and feature the server knows must be named there, so a catalog change that forgets the prompt turns this red.
+    /// The fab.json contract is the order server's catalog (`GET /v1/catalog`, order/fabsrv/catalog.py); the agents learn it from the bundled `fab-spec` skill.
+    /// Every kind, option, choice and feature the server knows must be named there, so a catalog change that forgets the skill turns this red.
     #[test] fn the_agents_fab_json_contract_names_everything_the_order_servers_catalog_has() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../order");
         let py = "import importlib.util,json,sys\nsp=importlib.util.spec_from_file_location('catalog',sys.argv[1]+'/fabsrv/catalog.py');m=importlib.util.module_from_spec(sp);sp.loader.exec_module(m)\nprint(json.dumps({'schema':m.schema(),'min_assembled':m.MIN_ASSEMBLED}))";
         let Ok(o) = std::process::Command::new("python3").args(["-I", "-c", py]).arg(&root).output() else { return }; // no python3 here: the order server's own tests cover the catalog
         assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stderr));
-        let cat: Value = serde_json::from_slice(&o.stdout).unwrap(); let prompt = crate::agents::prompt_text::ORDER_PROMPT_FAB.join("\n");
+        let cat: Value = serde_json::from_slice(&o.stdout).unwrap();
+        let bundled_skill = |rel: &str| crate::agents::bundled::FILES.iter().find(|(p, _)| *p == rel).map(|(_, s)| *s).unwrap_or_else(|| panic!("missing bundled skill {rel}"));
+        let prompt = bundled_skill("skills/fab-spec/SKILL.md");
+        assert!(crate::agents::prompt_text::ORDER_PROMPT_FAB.join("\n").contains("fab-spec"), "prompt points to the bundled fab-spec skill");
         let word = |w: &str| prompt.match_indices(w).any(|(i, _)| { let b = prompt.as_bytes(); let ok = |c: u8| c.is_ascii_alphanumeric() || c == b'_'; (i == 0 || !ok(b[i - 1])) && (i + w.len() >= b.len() || !ok(b[i + w.len()])) });
         let mut missing = vec![];
         for (kind, k) in cat["schema"].as_object().unwrap() {
@@ -486,7 +489,8 @@ mod tests {
         }
         assert!(missing.is_empty(), "the order server's catalog has what the agents' instructions do not name: {missing:?}");
         let (n, asm) = (cat["schema"]["pcb"]["min_qty"].as_u64().unwrap(), cat["min_assembled"].as_u64().unwrap());
-        let buy = crate::agents::prompt_text::ORDER_PROMPT_BUY.join("\n");
+        let buy = bundled_skill("skills/backplane-buy/SKILL.md");
+        assert!(crate::agents::prompt_text::ORDER_PROMPT_BUY.join("\n").contains("backplane-buy"), "buy prompt points to the bundled backplane-buy skill");
         assert!(buy.contains(&format!("at least {n} and assembly starts at {asm} boards")), "the buy instructions state the order minimums ({n} boards, assembly from {asm})");
     }
     #[test] fn a_server_without_its_price_models_is_not_a_healthy_one() {

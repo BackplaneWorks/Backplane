@@ -187,12 +187,12 @@ impl Agents {
             // KiCad's files are the main checkout's, even when this thread's folder is a worktree:
             // the agent is handed main's real paths, where its code goes, and each document's lock
             let main = crate::files::kicad::canonical::main_of(&root);
-            let f = inputs::read(&main); let keys_path = home.join("secrets/api.env");
+            let cad = prompt::read_cad(&main); let f = cad.canonical; let keys_path = home.join("secrets/api.env");
             let locks: Vec<(String, String)> = [&f.pcb, &f.sch].into_iter().filter(|d| !d.is_empty()).map(|d| (d.clone(), crate::files::kicad::canonical::doc_lock(d))).collect();
             let design = if f.pcb.is_empty() && f.sch.is_empty() { String::new() } else { prompt::design_words(&main, code.as_ref().filter(|c| !c.0.is_empty()).map(|c| (c.0.as_str(), c.1.as_str())), &locks) };
             let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
             prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders, routing_plan: plan,
-                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, design, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default(), kistack: host.kistack.as_deref().map(kistack::describe) })
+                root: main, pro: f.pro, pcb: f.pcb, sch: f.sch, all: cad.kicad.join("\n"), altium_projects: cad.altium, design, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default(), kistack: host.kistack.as_deref().map(kistack::describe) })
         }).await.unwrap_or_default()
     }
     /// PendingChanged: the number of open asks on a thread, written after an ask opens or closes (`extra` asks counted on top).

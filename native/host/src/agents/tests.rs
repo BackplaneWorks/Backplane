@@ -699,7 +699,7 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     let note = ev.iter().find(|e| is(e, "ActivityLogged") && e["kind"] == "restart").unwrap(); assert!(note["summary"].as_str().unwrap().ends_with("Its request to use Bash was not answered: \u{201C}make all\u{201D}"));
     ag.shutdown();
 }
-#[tokio::test(flavor = "multi_thread")] async fn the_agent_is_started_with_the_arguments_and_prompt_the_js_hub_gives_it() {
+#[tokio::test(flavor = "multi_thread")] async fn the_agent_is_started_with_the_golden_arguments_and_prompt() {
     use crate::plat::fs::PermissionsExt;
     let sd = dir("a-bin"); let argfile = sd.join("argv.json");
     // a stand-in that writes its own argv as JSON, then behaves as a Claude that answers once

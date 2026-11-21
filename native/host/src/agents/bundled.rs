@@ -10,6 +10,12 @@ const MANIFEST: &str = "{\"name\":\"backplane\",\"description\":\"Backplane's ow
 
 /// (path under `<home>/bundled`, contents)
 pub const FILES: &[(&str, &str)] = &[
+    ("skills/backplane-buy/SKILL.md", include_str!("../../../../deploy/skills/backplane-buy/SKILL.md")),
+    ("skills/manufacturing-review/SKILL.md", include_str!("../../../../deploy/skills/manufacturing-review/SKILL.md")),
+    ("skills/fab-spec/SKILL.md", include_str!("../../../../deploy/skills/fab-spec/SKILL.md")),
+    ("skills/kicad-sim/SKILL.md", include_str!("../../../../deploy/skills/kicad-sim/SKILL.md")),
+    ("skills/freecad/SKILL.md", include_str!("../../../../deploy/skills/freecad/SKILL.md")),
+    ("skills/kicad-ipc/SKILL.md", include_str!("../../../../deploy/skills/kicad-ipc/SKILL.md")),
     ("skills/sendcutsend/SKILL.md", include_str!("../../../../deploy/skills/sendcutsend/SKILL.md")),
     ("skills/sendcutsend/scripts/scs.py", include_str!("../../../../deploy/skills/sendcutsend/scripts/scs.py")),
     ("skills/sendcutsend/scripts/scs_step.py", include_str!("../../../../deploy/skills/sendcutsend/scripts/scs_step.py")),
@@ -112,7 +118,10 @@ mod tests {
         let t0 = std::fs::metadata(d.join("skills/sendcutsend/SKILL.md")).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20)); install(&h).unwrap();
         assert_eq!(std::fs::metadata(d.join("skills/sendcutsend/SKILL.md")).unwrap().modified().unwrap(), t0, "an unchanged file is not rewritten");
-        let l = list(&d); assert_eq!(l.len(), 2); assert_eq!(l[0].0, "sendcutsend"); assert_eq!(l[1].0, "altium"); assert!(l[1].1.contains("Altium")); assert!(l[0].1.contains("SendCutSend")); assert!(l[0].2.replace('\\', "/").ends_with("bundled/skills/sendcutsend/SKILL.md"));
+        let l = list(&d); for name in ["backplane-buy", "manufacturing-review", "fab-spec", "kicad-sim", "freecad", "kicad-ipc", "altium", "sendcutsend"] {
+            let (_, trigger, path) = l.iter().find(|s| s.0 == name).expect(name);
+            assert!(!trigger.is_empty() && Path::new(path).is_file(), "{name}");
+        }
         let _ = std::fs::remove_dir_all(&h);
     }
 
