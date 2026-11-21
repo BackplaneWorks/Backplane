@@ -184,6 +184,7 @@ mod tests {
             let mut out = vec![]; a.read_to_end(&mut out).await.unwrap(); let _ = t.await; String::from_utf8_lossy(&out).into_owned() } };
         let missing = format!("/file?path={}", enc(&proj.join("none.csv")));
         let (h1, h2) = (head(bom.clone(), String::new()).await, head(missing.clone(), String::new()).await);
+        assert!(h1.contains("sandbox") && h1.contains("Cross-Origin-Resource-Policy: same-origin") && h1.contains("Referrer-Policy: no-referrer") && h1.contains("nosniff"), "the unpaired 401 carries the file routes' guards: {h1}");
         assert!(h1.starts_with("HTTP/1.1 401") && h1.contains("unpaired") && h1 == h2, "HEAD unpaired: 401 alike for a file that is there and one that is not: {h1}");
         let h = head(bom.clone(), format!("Cookie: __Host-bp_web={cookie}\r\n")).await;
         assert!(h.starts_with("HTTP/1.1 200") && h.contains("Content-Length: 4") && h.ends_with("\r\n\r\n"), "HEAD paired: the headers, no body: {h}");
@@ -458,7 +459,8 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
         // nothing but pairing), streamed and ranged, never inline as anything that runs, never stored (files/share.rs `Who::Browser`)
         let device = crate::net::start::registry(&hub.cfg.home).and_then(|r| crate::auth::browser_device(&r, &req, &login));
         if device.is_none() {
-            json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
+            // the file routes' own guards on top of the ingress's (a second CSP only narrows it)
+            json_response("401 Unauthorized", json!({"state":"unpaired"}), "Content-Security-Policy: default-src 'none'; sandbox\r\nCross-Origin-Resource-Policy: same-origin\r\n")
         } else {
             use crate::files::share::{serve_file, serve_files_get, serve_share, Who};
             let r = match req.route() { "/file" => serve_file(&hub, &mut writer, Who::Browser, &req).await, "/files/get" => serve_files_get(&hub, &mut writer, Who::Browser, &req).await, _ => serve_share(&hub, &mut writer, Who::Browser, &format!("browser:{}", device.as_deref().unwrap_or("")), &req).await };
