@@ -320,7 +320,10 @@ pub async fn publish_cad(hub: &Arc<Hub>) {
     let library = if env.root.is_empty() || status == "stock" { String::new() } else { library_label(&manifest_of(&env.root)) };
     // the update a person is offered where they work (the pane's strip at Edit, as well as Settings): this hub's package over an older
     // Backplane runtime, with what it brings and its size; "" when there is none (install.rs `update_offer`)
-    let update = super::install::update_offer(super::install::package(), &status, &version, &env.caps).map_or(String::new(), |v| v.to_string());
+    // and with no KiCad at all, the install (missing_offer): shown after the person's Edit press, installed only on their Install press
+    let folder = super::install::folder_words(&super::install::parent(&hub.cfg.home), std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(std::path::PathBuf::from).as_deref(), cfg!(windows));
+    let update = super::install::update_offer(super::install::package(), &status, &version, &env.caps)
+        .or_else(|| super::install::missing_offer(super::install::package(), &status, &folder, super::install::this_os())).map_or(String::new(), |v| v.to_string());
     eprintln!("kicad: runtime {} {} at {}; update offer: {}", status, if version.is_empty() { "-" } else { &version }, if env.cli.is_empty() { "-" } else { &env.cli }, if update.is_empty() { "none" } else { &update });
     for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("kicad.caps", caps.as_str()), ("kicad.library", library.as_str()), ("kicad.update", update.as_str()), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
     // the libraries the selected runtime registers by default reach the person's existing tables (libtables.rs); a copy of the log changes nothing
