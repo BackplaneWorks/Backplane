@@ -1671,10 +1671,14 @@ impl KicadPane {
         // a KiCad dialog closed with the keyboard in it: to the dialog still open under it (a dialog of a dialog closed: back to its parent),
         // else to the editor's frame
         if std::mem::replace(&mut self.was_dialog, in_dialog) && !has {
-            // (never when the person went to Backplane itself: the focus is then in our window, outside KiCad's container)
-            let to_dialog = if nc::has_focus(self.toplevel) { None } else { nc::open_dialogs(self.info["pid"].as_u64().unwrap_or(0) as u32).last().copied() };
+            let backplane_focused = nc::has_focus(self.toplevel);
+            let to_dialog = if backplane_focused { None } else { nc::open_dialogs(self.info["pid"].as_u64().unwrap_or(0) as u32).last().copied() };
             if let Some(d) = to_dialog { nc::activate(d); self.was_dialog = true; has = true; }
-            else if let Some(w) = editor_focus_target(self.in_page, self.want()) { nc::focus(w); has = true; }
+            // On X11 the user may have clicked the composer while KiCad owned focus
+            // outside its container. That transition also clears in_dialog.
+            else if !cfg!(target_os = "linux") || !backplane_focused {
+                if let Some(w) = editor_focus_target(self.in_page, self.want()) { nc::focus(w); has = true; }
+            }
         }
         // KiCad took the keyboard on a click (`_BACKPLANE_FOCUS`) and a window manager that focuses on click (i3) gave it straight back to
         // Backplane's window: the click was KiCad's, so is the keyboard (once, within moments of it)
