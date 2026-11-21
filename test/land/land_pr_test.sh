@@ -165,5 +165,23 @@ LAND_TEST="echo more > $T/l-p8/docs/p8b.md; git -C $T/l-p8 add -A; git -C $T/l-p
 nl p9 docs/p9.md
 LAND_TEST="git -C $T/main pull -q origin main && echo 'a.z = Z' >> $T/main/i18n/en.msg && git -C $T/main commit -qam 'main: a.z, no catalog' && git -C $T/main push -q origin HEAD:main" lland p9 > "$T/o36"; rc=$?
 [ $rc != 0 ] && grep -q "i18n catalogs are stale" "$T/o36" && ! git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/p9 >/dev/null && flock -n "$T/locks/bp-land.lock" true; ok $? "an i18n change main took during the gate: the catalogs made again in the lock, stale, nothing pushed (rc $rc)"
+# 37. main gains a catalog key, the PR adds another: the .msg files merge, the generated Msg.kt (one line here) conflicts; land.sh makes it again
+# from the merged .msg, the rebase goes on, and it lands with both keys. 38. a conflict in a .msg itself still stops it.
+M=$T/main; git -C "$M" pull -q origin main
+printf 'import pathlib\nr = pathlib.Path(__file__).resolve().parent.parent\nt = (r / "i18n/en.msg").read_text().split()\n(r / "mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt").write_text("// " + " ".join(t) + "\\n")\n' > "$M/scripts/i18n-android.py"
+printf 'k1.a = A\nk2.a = A\nk3.a = A\nk4.a = A\nk5.a = A\nk6.a = A\nk7.a = A\nk8.a = A\n' > "$M/i18n/en.msg"; (cd "$M" && python3 scripts/i18n-android.py)
+git -C "$M" add -A; git -C "$M" commit -qm "main: one-line catalog"; git -C "$M" push -q origin HEAD:main
+nl p10 docs/p10.md; sed -i 's/^k8.a = A$/&\nk9.pr = P/' "$T/l-p10/i18n/en.msg"; (cd "$T/l-p10" && python3 scripts/i18n-android.py); git -C "$T/l-p10" commit -qam "p10: k9.pr"
+nl p11 docs/p11.md; sed -i 's/^k1.a = A$/k0.main = M\n&/' "$T/l-p11/i18n/en.msg"; (cd "$T/l-p11" && python3 scripts/i18n-android.py); git -C "$T/l-p11" commit -qam "p11: k0.main"
+(cd "$T/l-p11" && LAND_TEST=true sh scripts/land.sh) > /dev/null 2>&1
+LAND_TEST=true lland p10 > "$T/o37"; rc=$?
+cat=$(git --git-dir="$ORIGIN" show main:mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt)
+[ $rc = 0 ] && grep -q "conflicted only in generated catalogs (mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt): made again" "$T/o37" \
+  && case "$cat" in *k0.main*k9.pr*) true;; *) false;; esac; ok $? "main and the PR each add a key: Msg.kt conflicts alone, made again from the merged .msg, landed with both (rc $rc)"
+nl p12 docs/p12.md; sed -i 's/^k5.a = A$/k5.a = PR/' "$T/l-p12/i18n/en.msg"; (cd "$T/l-p12" && python3 scripts/i18n-android.py); git -C "$T/l-p12" commit -qam "p12: k5"
+nl p13 docs/p13.md; sed -i 's/^k5.a = A$/k5.a = MAIN/' "$T/l-p13/i18n/en.msg"; (cd "$T/l-p13" && python3 scripts/i18n-android.py); git -C "$T/l-p13" commit -qam "p13: k5"
+(cd "$T/l-p13" && LAND_TEST=true sh scripts/land.sh) > /dev/null 2>&1; h12=$(git -C "$T/l-p12" rev-parse HEAD)
+LAND_TEST=true lland p12 > "$T/o38"; rc=$?
+[ $rc != 0 ] && grep -q "p12 conflicts with main" "$T/o38" && [ "$(git -C "$T/l-p12" rev-parse HEAD)" = "$h12" ] && [ -z "$(git -C "$T/l-p12" status --porcelain)" ]; ok $? "a conflict in a .msg itself: stopped as before, the branch as it was (rc $rc)"
 unset FAKE_LOCKFILE
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }

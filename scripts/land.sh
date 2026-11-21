@@ -75,9 +75,35 @@ fi
 if [ "$resume" = 1 ]; then [ -n "$(pr_number)" ] || die "--resume: no open pull request for $br on $repo (run scripts/land.sh)"; fi
 phase=${LAND_PHASE:-gate}
 # 1-3 the gate, outside any lock (lanes gate side by side): rebased on main as it is now, checked, gated
+# catalogs_only WHEN: the rebase stopped; when every conflicted file is a catalog the i18n generators write (Msg.kt, TrCatalog.swift, the
+# InfoPlist.strings), and no .msg source conflicts, they are made again from the merged .msg files, added, and the rebase goes on (again at each
+# commit that conflicts so); at the end scripts/i18n-gate.sh checks the result. Anything else conflicting: 1 (the caller stops as before).
+# (#1501, #1449, #1470, #1418: main gained catalog keys, a PR touching i18n conflicted in Msg.kt or TrCatalog.swift on every rebase.)
+catalogs_only() { local top c f made=
+  top=$(git rev-parse --show-toplevel)
+  while :; do
+    c=$(git diff --name-only --diff-filter=U); [ -n "$c" ] || return 1
+    for f in $c; do case "$f" in
+      mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt|mobile/ios/Shared/TrCatalog.swift|mobile/ios/Backplane/*.lproj/InfoPlist.strings) ;;
+      *) return 1;; esac; done
+    for g in i18n-android.py i18n-ios.py; do [ -f "$top/scripts/$g" ] || continue
+      (cd "$top" && python3 -I "scripts/$g" > /dev/null) || { say "rebase ($1): scripts/$g failed on the merged .msg files"; return 1; }; done
+    # what the generators write: the conflicted files and the other catalogs they touched
+    git add -- $c && git add -u -- mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt mobile/ios/Shared/TrCatalog.swift 'mobile/ios/Backplane/*.lproj/InfoPlist.strings' 2> /dev/null
+    git diff --name-only --diff-filter=U | grep -q . && return 1
+    say "rebase ($1): $(git rev-parse --short REBASE_HEAD 2>/dev/null) conflicted only in generated catalogs ($(echo $c)): made again from the merged i18n/*.msg (i18n-android.py, i18n-ios.py)"
+    made=1
+    if git diff --cached --quiet; then GIT_EDITOR=true git rebase --skip > /dev/null 2>&1 && break   # the commit held only those catalogs: nothing left of it
+    elif GIT_EDITOR=true git rebase --continue > /dev/null 2>&1; then break; fi
+    [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ] || return 1
+  done
+  [ -n "$made" ] || return 1
+  [ ! -f "$top/scripts/i18n-gate.sh" ] || bash "$top/scripts/i18n-gate.sh" > /dev/null || { say "rebase ($1): the catalogs made again do not check (above)"; return 1; }
+  say "rebase ($1): onto main $(git rev-parse --short origin/main), its catalog conflicts resolved by the generators"; }
 rebase_or_stop() { # rebase_or_stop WHEN: onto origin/main as it is now; a conflict stops the land (the lock, if held, goes with this process)
   git fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
-  if ! git rebase -q origin/main; then git rebase --abort 2>/dev/null || true
+  pre=$(git rev-parse HEAD)
+  if ! git rebase -q origin/main && ! catalogs_only "$1"; then git rebase --abort 2>/dev/null || true; git reset -q --hard "$pre"
     die "$br conflicts with main $(git rev-parse --short origin/main) ($1): resolve it (git rebase origin/main), then land again (the gate runs again outside the lock); nothing pushed"; fi
   [ -n "$(git rev-list -1 origin/main..HEAD)" ] || { say "nothing to land: $br is already on origin/main"; exit 0; }
   "$here/check-author.sh" origin/main..HEAD || die "a commit has the wrong author or committer (see above)"
