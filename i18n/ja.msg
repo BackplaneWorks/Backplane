@@ -4902,3 +4902,4 @@ viewer.tile.left = 左に追加
 viewer.tile.right = 右に追加
 viewer.tile.top = 上に追加
 viewer.tile.bottom = 下に追加
+web.logout.failed = サインアウトを確認できませんでした。もう一度お試しください。

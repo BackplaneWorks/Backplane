@@ -4879,3 +4879,4 @@ viewer.tile.left = Add on the left
 viewer.tile.right = Add on the right
 viewer.tile.top = Add above
 viewer.tile.bottom = Add below
+web.logout.failed = Could not confirm sign-out. Try again.
