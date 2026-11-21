@@ -5,7 +5,7 @@
 set -eu
 RUST=${BP_BOAT_RUST:-stable}; SCCACHE=${BP_BOAT_SCCACHE:-v0.10.0}
 export DEBIAN_FRONTEND=noninteractive
-sudo -n apt-get update -qq
+sudo -n apt-get update -qq --allow-releaseinfo-change   # a PPA of the Boat image renamed its Label (Nov 21): accept it, not fail
 sudo -n apt-get install -y -qq --no-install-recommends build-essential clang lld mold pkg-config cmake git rsync curl ca-certificates unzip xz-utils python3 \
   libxkbcommon-x11-dev libxkbcommon-dev libxcb1-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libasound2-dev libwayland-dev libvulkan-dev libssl-dev libxcb-render0-dev \
   libxcb-shape0-dev libxcb-xfixes0-dev libgtk-3-dev libnss3 libatk1.0-0t64 libatk-bridge2.0-0t64 libdrm2 libgbm1 libxdamage1 libxrandr2 libxcomposite1 libxfixes3 libcups2t64 libpango-1.0-0

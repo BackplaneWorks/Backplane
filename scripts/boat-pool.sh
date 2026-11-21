@@ -47,7 +47,7 @@ d=json.load(sys.stdin); sys.stdout.write((d.get("stderr") or "") + "exit %s" % d
   base) # a clean source box: no environment, so no logins of the person's are on it, then the snapshot
       src=$(bo_b new --name bp-build-base-src --environment bp-build --no-env --type default --ttl 3000 --json 2>&1 | tail -1 | bo_py 'import sys,json;print(json.load(sys.stdin)["id"])') || exit 1
       bo_b scp "$HERE/boat-base.sh" "$src:/home/user/boat-base.sh" > /dev/null 2>&1; bo_b scp "$HERE/lib-winmingw.sh" "$src:/home/user/lib-winmingw.sh" > /dev/null 2>&1
-      python3 -I "$HERE/boat-run.py" "$src" bash -c "'set -o pipefail; BP_BOAT_RUST=$(rustc --version | awk '{print $2}') bash /home/user/boat-base.sh 2>&1 | tail -3'" || exit 1
+      python3 -I "$HERE/boat-run.py" "$src" bash -c "'set -o pipefail; BP_BOAT_RUST=$(rustc --version | awk '{print $2}') bash /home/user/boat-base.sh 2>&1 | tail -3'" || { bo_b delete "$src" --yes > /dev/null 2>&1; echo "boat-pool: the base build failed (above): no snapshot taken" >&2; exit 1; }
       bo_b snapshot "$src" "${BP_BOAT_BASE:-bp-build-base}" && bo_b delete "$src" --yes > /dev/null 2>&1 ;;
   *) sed -n '2,8p' "$0"; exit 2 ;;
 esac
