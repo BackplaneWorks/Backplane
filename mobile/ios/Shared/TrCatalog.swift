@@ -2568,6 +2568,12 @@ gpui.keys.kcomment	Comment on what is selected in KiCad, from Backplane or from 
 gpui.c.kicad.dialog	KiCad has “{title}” open	KiCad で「{title}」が開いています	KiCad tiene “{title}” abierto
 gpui.c.kicad.asking	KiCad is asking: {title}	KiCad からの確認: {title}	KiCad pregunta: {title}
 gpui.kicad.update.installed	Backplane KiCad {version} is installed: reopen KiCad on it (your unsaved changes are kept until you save or close)	Backplane KiCad {version} をインストールしました。KiCad を開き直すと新しい版になります（未保存の変更は保存か閉じるまで残ります）	Backplane KiCad {version} está instalado: vuelve a abrir KiCad con él (tus cambios sin guardar se conservan hasta que guardes o cierres)
+gpui.kicad.update.missing	KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}, with no administrator password.	KiCad がインストールされていません。Backplane KiCad {version}（{size}）を {folder} に入れます。管理者のパスワードは要りません。	KiCad no está instalado. Backplane KiCad {version} ({size}) se instala en {folder}, sin contraseña de administrador.
+gpui.kicad.update.missing.admin	KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}.	KiCad がインストールされていません。Backplane KiCad {version}（{size}）を {folder} に入れます。	KiCad no está instalado. Backplane KiCad {version} ({size}) se instala en {folder}.
+gpui.kicad.update.install	Install KiCad	KiCad をインストール	Instalar KiCad
+gpui.kicad.update.set.path	Set a path…	パスを設定…	Indicar una ruta…
+gpui.c.kicad.missing.row	Install KiCad above to edit here, or set the path of a KiCad you have.	ここで編集するには上で KiCad をインストールするか、お持ちの KiCad のパスを設定してください。	Instala KiCad arriba para editar aquí, o indica la ruta de un KiCad que tengas.
+gpui.c.kicad.missing.edit	KiCad isn't installed. Press Edit to install it here.	KiCad がインストールされていません。編集を押すとここにインストールできます。	KiCad no está instalado. Pulsa Editar para instalarlo aquí.
 gpui.c.kicad.full.screen	Full screen	全画面	Pantalla completa
 gpui.c.kicad.exit.full.screen	Exit full screen	全画面を終了	Salir de pantalla completa
 gpui.c.kicad.the.editor.takes.the.whole	The editor takes the whole window; only this row stays	エディタがウィンドウ全体を使います。この行だけが残ります	El editor ocupa toda la ventana; solo queda esta fila
@@ -5937,6 +5943,12 @@ gpui.c.kicad.openfailed	The {editor} did not open	{editor}が開きませんで�
 
     /// gpui.kicad.update.installed = Backplane KiCad {version} is installed: reopen KiCad on it (your unsaved changes are kept until you save or close)
     static func gpui_kicad_update_installed(version: String) -> String { f("gpui.kicad.update.installed", ["version": version]) }
+
+    /// gpui.kicad.update.missing = KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}, with no administrator password.
+    static func gpui_kicad_update_missing(version: String, size: String, folder: String) -> String { f("gpui.kicad.update.missing", ["version": version, "size": size, "folder": folder]) }
+
+    /// gpui.kicad.update.missing.admin = KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}.
+    static func gpui_kicad_update_missing_admin(version: String, size: String, folder: String) -> String { f("gpui.kicad.update.missing.admin", ["version": version, "size": size, "folder": folder]) }
 
     /// gpui.assets.missing = Assets missing in {dir}: {files}
     static func gpui_assets_missing(dir: String, files: String) -> String { f("gpui.assets.missing", ["dir": dir, "files": files]) }

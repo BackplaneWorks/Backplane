@@ -584,7 +584,14 @@ pub fn open_again(info: &Value) -> bool { info["state"] == "closed_unexpectedly"
 
 /// The pane offers the KiCad app under its message where the editor cannot be in the pane: its start failed (no window to hold it, no
 /// KiCad that starts), or this is stock KiCad on Windows. The app opens only on that press: the pane never falls back to it by itself.
-pub fn app_instead(info: &Value, windows: bool) -> bool { try_again(info) || (windows && info["mode"] == "stock") }
+pub fn app_instead(info: &Value, windows: bool) -> bool { (try_again(info) && !no_kicad(info)) || (windows && info["mode"] == "stock") }
+/// The Edit was refused for want of a KiCad (the hub's "KiCad was not found", embed.rs kicad_gui_bin): Try again and Open the KiCad app
+/// would do nothing; the pane points at the install row above it (after the person's Edit) or at Edit. Pure.
+pub fn no_kicad(info: &Value) -> bool { info["state"] == "failed" && info["reason"].as_str().is_some_and(|r| r.starts_with("KiCad was not found")) }
+/// What the pane says for `no_kicad`: the row above it is the person's after their Edit (`deliberate`); on any other pane the Edit is. Pure.
+pub fn no_kicad_words(deliberate: bool) -> String {
+    crate::i18n::t(if deliberate { "gpui.c.kicad.missing.row" } else { "gpui.c.kicad.missing.edit" })
+}
 
 /// The strip offers Backplane KiCad while the pane holds a stock KiCad (the hub's `mode`; on Windows the pane says it in its middle instead).
 pub fn stock_hint(info: &Value, windows: bool) -> bool { !windows && info["mode"] == "stock" && matches!(info["state"].as_str(), Some("starting" | "ready")) }
@@ -1629,7 +1636,7 @@ impl KicadPane {
     }
     /// Re-send `editor.kicad.attach` after a WebSocket reconnect so any info transition missed while disconnected is recovered.
     /// KiCad's start failed: the pane offers Try again.
-    pub fn failed(&self) -> bool { try_again(&self.seen_info()) }
+    pub fn failed(&self) -> bool { try_again(&self.seen_info()) && !no_kicad(&self.seen_info()) }
     /// Whether this pane holds a container but no KiCad of the project is in it (`adrift`).
     pub fn is_adrift(&self) -> bool { adrift(self.container, &self.info, &crate::hub::cid()) }
     pub fn reattach(&mut self) {
@@ -1995,6 +2002,8 @@ impl Render for KicadPane {
         // a notice during the start: said under "Starting KiCad…" (and in the strip, where it stays once the editor is up)
         let notice = say.as_ref().and_then(|_| open_notice(&self.info)).map(|(_, t)| t);
         let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows)); let again = open_again(&self.seen_info()); let asked = lock_asked(&self.info);
+        // no KiCad: the install row above (the person's Edit) or Edit, never a dead Try again
+        let say = if no_kicad(&self.seen_info()) { Some(no_kicad_words(self.why == ShowBy::Deliberate)) } else { say };
         // macOS: in full screen KiCad's frame cannot be over the pane; it says so and offers the editor in a window of its own
         let say = if self.mac_full && self.info["state"] == "ready" { Some(crate::i18n::trs("KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.")) } else { say };
         // macOS: KiCad's frame stays behind our window though we ordered it above (mac_host's bound): said, with Pop out, never a blank pane
@@ -2583,6 +2592,18 @@ mod tests {
         assert!(kicad_hides(&frames, "FOOTPRINT_EDITOR"), "not listed (stale): taken as hidden");
         assert!(kicad_hides(&json!(null), "PCB"), "no frames at all: taken as hidden (one show too many costs nothing)");
         assert!(kicad_hides(&json!([{"kind": "PCB"}]), "PCB"), "no shown field: taken as hidden");
+    }
+    #[test] fn a_pane_with_no_kicad_offers_no_dead_control() {
+        use serde_json::json;
+        let none = json!({"state": "failed", "reason": "KiCad was not found: set its path in Settings > CAD"});
+        assert!(super::no_kicad(&none));
+        assert!(!super::app_instead(&none, false) && !super::app_instead(&none, true), "no KiCad app to open instead");
+        // a start that failed for another reason keeps Try again and the app
+        let other = json!({"state": "failed", "reason": "KiCad's start window was missed"});
+        assert!(!super::no_kicad(&other) && super::try_again(&other) && super::app_instead(&other, false));
+        assert!(!super::no_kicad(&json!({"state": "ready", "reason": "KiCad was not found"})), "only a failed start");
+        // the words: the row above after the person's Edit, Edit otherwise (an agent's show, an automatic attach, a tile restore)
+        assert_ne!(super::no_kicad_words(true), super::no_kicad_words(false));
     }
     #[test] fn idle_prewarm_waits_on_windows_without_prewarm_keeps_focus() {
         assert!(super::idle_prewarm(false, false), "Linux: the pre-warm starts by itself");
