@@ -1768,6 +1768,10 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
     let wrapped = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\nprintf '%s\\n' \"$@\" > {rec}/argv; env > {rec}/env; pwd > {rec}/cwd\n", rec = crate::plat::fs::script_path(&rec)), 1);
     script(&bin, "claude", &wrapped);
+    // the person's claude is this stand-in, whatever the machine has installed: the parent puts its folder first on the hub's PATH, which `person_dirs`
+    // searches before the person's login shell's (a Boat box's has a real, logged-out /usr/local/bin/claude). Checked with the hub's own lookup before any turn, so a real CLI never runs
+    let found = person::person_dirs(&person).into_iter().map(|d| d.join("claude")).find(|p| p.is_file());
+    assert_eq!(found.as_deref(), Some(bin.join("claude").as_path()), "the person's claude must be the test's stand-in, never a real CLI");
     let sd = dir("sbs-bin"); perf_standin(&sd, 1); // the hub's own stand-in: a PersonTurn must never use it, nor an Agent turn the person's
     let rows = vec![work::row("w-open-run", "watching", "a build", "run", "sleep 99", "123:456", 0), work::row("w-open-pid", "watching", "a pid", "pid", "999999", "-", 0)];
     let old_ride = format!("{{\"$\":\"SettingSet\",\"key\":\"ride.{T1}\",\"value\":\"copied mail\",\"at\":1700000006}}\n");
@@ -1805,9 +1809,10 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     ag.shutdown();
 }
 #[test] fn side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards() {
-    // the child gets a clean PATH below: `person_dirs` puts the hub's own PATH first, so a real `claude` on the machine's PATH (~/.local/bin) would be run instead of the person's stand-in
+    // the child's PATH is the person's stand-in folder, then a clean system one: `person_dirs` searches the hub's own PATH first, then the person's login
+    // shell's, so without it a real `claude` on the machine (~/.local/bin, or /usr/local/bin from the login shell) would run instead of the stand-in
     let me = std::env::current_exe().unwrap(); let person = dir("sbs-person"); let live_d = dir("sbs-live"); let live = live_d.join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
-    let o = std::process::Command::new(me).args(["agents::tests::sbs_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("PATH", "/usr/bin:/bin").env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_PROBE", "1").env("BP_SBS_PERSON", &person).env("BP_SBS_LIVE", &live).env_remove("BACKPLANE_AGENTS").output().unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::sbs_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("PATH", std::env::join_paths([person.join(".local/bin"), "/usr/bin".into(), "/bin".into()]).unwrap()).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_PROBE", "1").env("BP_SBS_PERSON", &person).env("BP_SBS_LIVE", &live).env_remove("BACKPLANE_AGENTS").output().unwrap();
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
@@ -1857,6 +1862,10 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let person = PathBuf::from(std::env::var("BP_SBS_PERSON").unwrap()); let rec = person.join("rec"); std::fs::create_dir_all(&rec).unwrap();
     let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
     script(&bin, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\n", rec = crate::plat::fs::script_path(&rec)), 1));
+    // the person's claude is this stand-in, whatever the machine has installed: the parent puts its folder first on the hub's PATH, which `person_dirs`
+    // searches before the person's login shell's (a Boat box's has a real, logged-out /usr/local/bin/claude). Checked with the hub's own lookup before any turn, so a real CLI never runs
+    let found = person::person_dirs(&person).into_iter().map(|d| d.join("claude")).find(|p| p.is_file());
+    assert_eq!(found.as_deref(), Some(bin.join("claude").as_path()), "the person's claude must be the test's stand-in, never a real CLI");
     let sd = dir("sbr-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("sbr", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let _bots = crate::bots::start(hub.clone(), ag.clone()).await;
     let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let bot = r["bot"].as_str().expect("a bot").to_string();
@@ -1869,8 +1878,10 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     ag.shutdown();
 }
 #[test] fn a_routine_run_in_side_by_side_reaches_no_real_agent() {
-    let me = std::env::current_exe().unwrap(); let person = dir("sbr-person"); let live_d = dir("sbr-live"); let live = live_d.join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
-    let o = std::process::Command::new(me).args(["agents::tests::sbs_routine_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_ROUTINE", "1").env("BP_SBS_PERSON", &person).env_remove("BACKPLANE_AGENTS").output().unwrap();
+    // the person's stand-in folder first on the child's PATH (see side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards): a real `claude` is never the person's
+    let me = std::env::current_exe().unwrap(); let person = dir("sbr-person");
+    let path = std::env::join_paths(std::iter::once(person.join(".local/bin")).chain(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default())).unwrap(); let live_d = dir("sbr-live"); let live = live_d.join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::sbs_routine_probe", "--exact", "--nocapture", "--test-threads=1"]).env("PATH", &path).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_ROUTINE", "1").env("BP_SBS_PERSON", &person).env_remove("BACKPLANE_AGENTS").output().unwrap();
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_routine_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
