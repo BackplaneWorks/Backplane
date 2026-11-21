@@ -4932,3 +4932,4 @@ web.composer.attach = 画像を添付
 web.composer.voice = 音声入力
 web.composer.unsupported = 未対応の画像形式です: {type}
 web.composer.maximages = 1 件のメッセージに添付できる画像は最大 {max} 枚です。
+web.logout.failed = サインアウトを確認できませんでした。もう一度お試しください。

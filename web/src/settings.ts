@@ -166,7 +166,11 @@ export class SettingsModal {
     logoutBtn.setAttribute("data-testid", "logout-btn");
     logoutBtn.addEventListener("click", () => {
       logoutBtn.disabled = true;
-      void this.cb.onLogout();
+      void this.cb.onLogout().catch(() => {
+        selfText.setAttribute("role", "alert");
+        selfText.textContent = t("web.logout.failed", "Could not confirm sign-out. Try again.");
+        logoutBtn.disabled = false;
+      });
     });
     selfRow.append(selfText, logoutBtn);
     selfSec.append(selfHead, selfRow);

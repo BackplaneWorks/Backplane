@@ -7,6 +7,7 @@ import { AddProjectDialog } from "./addproject";
 import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { onLocaleChange, setLocale, t } from "./i18n";
+import { signOut } from "./logout";
 import { MgmtStrip } from "./mgmt";
 import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
 import { RailView, type RailEntry } from "./rail";
@@ -548,19 +549,10 @@ function mountApp(): void {
     onMoveHomeHere: async () => {
       await hub.rpc("home.move", { to: "back" });
     },
-    onLogout: async () => {
-      try {
-        await fetch("/auth/web/logout", {
-          method: "POST",
-          credentials: "same-origin",
-          headers: { "Content-Type": "application/json" },
-          body: "{}",
-        });
-      } finally {
-        hub.disconnect();
-        window.location.replace("/");
-      }
-    },
+    onLogout: () => signOut(() => {
+      hub.disconnect();
+      window.location.replace("/");
+    }),
   });
 
   pinBtn.addEventListener("click", () => {

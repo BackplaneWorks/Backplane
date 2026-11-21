@@ -4909,3 +4909,4 @@ web.composer.attach = Adjuntar imagen
 web.composer.voice = Dictado por voz
 web.composer.unsupported = Tipo de imagen no compatible: {type}
 web.composer.maximages = Como máximo {max} imágenes por mensaje.
+web.logout.failed = No se pudo confirmar el cierre de sesión. Inténtalo de nuevo.

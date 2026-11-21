@@ -4909,3 +4909,4 @@ web.composer.attach = Attach image
 web.composer.voice = Voice dictation
 web.composer.unsupported = Unsupported image type: {type}
 web.composer.maximages = At most {max} images per message.
+web.logout.failed = Could not confirm sign-out. Try again.
