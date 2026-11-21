@@ -8,6 +8,7 @@ import type { ViewerHostApi } from "../app";
 import { decodeCbor, decodePlot2DFrame, isPlotFrame, type CborValue, type PlotChunk } from "./cbor";
 import { mountBrowserPane } from "./browser";
 import { mountDiffPane, mountFilesPane, mountReviewPane, type PaneHandle } from "./panes";
+import { resolveMechDownload } from "./file-links";
 import { Plot2DViewer, type LayerMasks } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
 import {
@@ -603,6 +604,19 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         void startWatch(false);
       });
       controlsEl.append(sel);
+    }
+
+    if (page === "mech" && selectedMech && api.hub.hasFeature("fileLinks")) {
+      const dlInfo = resolveMechDownload(threadId, selectedMech);
+      if (dlInfo) {
+        const dlBtn = document.createElement("a");
+        dlBtn.className = "bp-v-btn";
+        dlBtn.textContent = t("files.download", "Download");
+        dlBtn.href = dlInfo.url;
+        dlBtn.download = dlInfo.name;
+        dlBtn.setAttribute("data-testid", "mech-download");
+        controlsEl.append(dlBtn);
+      }
     }
 
     if (isLayerPage(page)) {

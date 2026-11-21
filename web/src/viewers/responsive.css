@@ -310,6 +310,37 @@ html.light .bp-v-overlay {
   color: var(--accent);
 }
 
+.bp-file-row-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.bp-file-dl {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 11px;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.bp-file-dl:hover {
+  color: var(--text);
+  border-color: var(--rule);
+  background: var(--well);
+}
+
 .bp-file-icon {
   color: var(--dim);
   width: 12px;
