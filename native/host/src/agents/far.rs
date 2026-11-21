@@ -154,6 +154,22 @@ impl Agents {
             "thread_list" => self.list_for_far(a).await,
             "machine_list" => (true, json!({"projects":self.local_projects().await})),
             "launch_report" => self.far_report(link, from, a).await,
+            "lock_acquire" => {
+                let mut args = a.clone();
+                if !args["holder"].as_str().is_some_and(|h| h.starts_with("pid:")) {
+                    args["holder"] = json!(format!("pid:remote-{link}-{}", from.replace('~', "-")));
+                }
+                let r = self.lock_http("acquire", &args).await;
+                (r.get("error").is_none(), r)
+            }
+            "lock_release" => {
+                let mut args = a.clone();
+                if !args["holder"].as_str().is_some_and(|h| h.starts_with("pid:")) {
+                    args["holder"] = json!(format!("pid:remote-{link}-{}", from.replace('~', "-")));
+                }
+                let r = self.lock_http("release", &args).await;
+                (r.get("error").is_none(), r)
+            }
             _ => fail("not something this machine shares"),
         }
     }

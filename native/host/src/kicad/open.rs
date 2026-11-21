@@ -119,6 +119,9 @@ const NOTHING: &str = "Nothing KiCad is on show in this thread's viewer: show a 
 /// `viewer.state` report), else the thread's design; the runtime, the launch, and its line in the thread.
 pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, String> {
     if crate::copy::on() { return Err("a copy of the log opens nothing".into()) }
+    if let Some((link, far_th)) = thread.split_once('~') {
+        return super::remote::open_for_thread(hub, link, far_th, key).await;
+    }
     let rt = super::ipc::runtime(hub).await; let cli = rt.cli.clone();
     // Backplane's own runtime: never its first-run wizard on a press of Open in KiCad (seed_first_run; a stock KiCad's is left as it is)
     if let Some(root) = super::libtables::config_root() { let v = rt.version.clone(); let _ = tokio::task::spawn_blocking(move || seed_first_run(&root, &v)).await; }

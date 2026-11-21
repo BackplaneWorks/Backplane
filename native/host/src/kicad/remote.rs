@@ -165,10 +165,36 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 
 // ---- Remote owning hub side (/far/rpc & /far/ws) ----
 
-pub async fn serve(hub: &Arc<Hub>, m: &str, p: &Value) -> Value {
+pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
+    if m == "kicad.project" {
+        let th = p["thread"].as_str().unwrap_or("");
+        if th.is_empty() {
+            return json!({"t":"reply","ok":false,"error":"thread is required"});
+        }
+        let proj = {
+            let model = hub.model().await;
+            model.threads.get(th).filter(|t| !t.deleted).map(|t| t.project.clone()).unwrap_or_default()
+        };
+        if proj.is_empty() {
+            return json!({"t":"reply","ok":false,"error":"thread has no project here"});
+        }
+        return json!({"t":"reply","ok":true,"result":{"project":proj}});
+    }
     let project_id = p["project"].as_str().unwrap_or("");
     if project_id.is_empty() {
         return json!({"t":"reply","ok":false,"error":"project is required"});
+    }
+    if m == "kicad.lock" || m == "kicad.unlock" {
+        let lock_name = format!("kicad.{project_id}");
+        let holder = p["holder"].as_str().filter(|h| h.starts_with("pid:")).map(str::to_string)
+            .unwrap_or_else(|| format!("pid:remote-{link}-{project_id}"));
+        let Some(srv) = hub.far_mcp() else {
+            return json!({"t":"reply","ok":true,"result":{"held":true,"name":lock_name,"holder":holder}});
+        };
+        let tool = if m == "kicad.lock" { "lock_acquire" } else { "lock_release" };
+        let args = json!({"name":lock_name,"holder":holder,"note":p["note"].as_str().unwrap_or("Remote KiCad edit")});
+        let (ok, body) = srv.serve(link, &holder, tool, &args).await;
+        return json!({"t":"reply","ok":ok,"result":body});
     }
     let Some(root) = resolve_project_root(hub, project_id).await else {
         return json!({"t":"reply","ok":false,"error":"no such project here"});
@@ -437,7 +463,8 @@ fn active_watchers() -> &'static Mutex<HashSet<(PathBuf, String, String)>> {
 }
 
 /// Start a background local save-back watcher for `(link, project_id)` (idempotent).
-pub fn start_watcher(hub: Arc<Hub>, link: String, project_id: String) {
+/// Renews the remote document lock while local KiCad is running and releases it on exit.
+pub fn start_watcher(hub: Arc<Hub>, link: String, project_id: String, pro_file: String, lock_holder: String) {
     let key = (hub.cfg.home.clone(), link.clone(), project_id.clone());
     if !active_watchers().lock().unwrap().insert(key.clone()) {
         return;
@@ -445,15 +472,24 @@ pub fn start_watcher(hub: Arc<Hub>, link: String, project_id: String) {
     tokio::spawn(async move {
         let dir = cache_dir(&hub.cfg.home, &link, &project_id);
         let mut idle_ticks = 0u32;
+        let mut renew_ticks = 0u32;
         loop {
             tokio::time::sleep(Duration::from_millis(750)).await;
             if !dir.is_dir() {
                 break;
             }
+            let kicad_alive = !pro_file.is_empty() && open::detached_open(&pro_file).is_some();
+            if !lock_holder.is_empty() {
+                renew_ticks += 1;
+                if renew_ticks >= 40 {
+                    renew_ticks = 0;
+                    let _ = hub.far_raw(&link, "kicad.lock", &json!({"project":project_id,"holder":lock_holder,"note":"Remote KiCad edit"})).await;
+                }
+            }
             let meta = load_meta(&dir, &link, &project_id);
             if !meta.conflicts.is_empty() {
                 idle_ticks += 1;
-                if idle_ticks > 2400 {
+                if !kicad_alive && idle_ticks > 20 {
                     break;
                 }
                 continue;
@@ -469,14 +505,66 @@ pub fn start_watcher(hub: Arc<Hub>, link: String, project_id: String) {
                 }
                 _ => {
                     idle_ticks += 1;
-                    if idle_ticks > 2400 {
+                    if (!kicad_alive && idle_ticks > 8) || idle_ticks > 2400 {
                         break;
                     }
                 }
             }
         }
+        if !lock_holder.is_empty() {
+            let _ = hub.far_raw(&link, "kicad.unlock", &json!({"project":project_id,"holder":lock_holder})).await;
+        }
         active_watchers().lock().unwrap().remove(&key);
     });
+}
+
+/// Seamless `kicad.open` for a remote thread (`<link>~<far_th>`): resolves remote project, pulls design files,
+/// acquires the remote document lock, launches local native KiCad on the synced folder, and starts live save-back.
+pub async fn open_for_thread(hub: &Arc<Hub>, link: &str, far_th: &str, _key: &str) -> Result<String, String> {
+    let (code, body) = hub.far_raw(link, "kicad.project", &json!({"thread": far_th})).await;
+    if code != 200 {
+        return Err(format!("could not resolve remote project ({code})"));
+    }
+    let rep: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    if rep["ok"] != true {
+        return Err(rep["error"].as_str().unwrap_or("remote thread has no project").into());
+    }
+    let project_id = rep["result"]["project"].as_str().unwrap_or("").to_string();
+    if project_id.is_empty() {
+        return Err("remote thread has no project".into());
+    }
+    let _synced = sync_pull(hub, link, &project_id).await?;
+    let holder = format!("pid:remote-{link}-{project_id}-{}", std::process::id());
+    let (lcode, lbody) = hub.far_raw(link, "kicad.lock", &json!({"project":project_id,"holder":holder,"note":"Remote KiCad edit"})).await;
+    let locked = if lcode == 200 {
+        serde_json::from_str::<Value>(&lbody).ok().is_some_and(|v| v["ok"] == true && v["result"]["held"] == true)
+    } else {
+        false
+    };
+    let dir = cache_dir(&hub.cfg.home, link, &project_id);
+    let files = project::read(&dir.to_string_lossy());
+    let Some((tool, file)) = open::pick(&files) else {
+        if locked {
+            let _ = hub.far_raw(link, "kicad.unlock", &json!({"project":project_id,"holder":holder})).await;
+        }
+        return Err("no KiCad board or schematic in remote project".into());
+    };
+    let rt = super::ipc::runtime(hub).await;
+    let Some(bin) = open::program(&rt.cli, tool) else {
+        if locked {
+            let _ = hub.far_raw(link, "kicad.unlock", &json!({"project":project_id,"holder":holder})).await;
+        }
+        return Err("KiCad is not installed on this machine".into());
+    };
+    if let Err(e) = open::launch(&bin, &file) {
+        if locked {
+            let _ = hub.far_raw(link, "kicad.unlock", &json!({"project":project_id,"holder":holder})).await;
+        }
+        return Err(e);
+    }
+    let pro_file = super::ipc::pro_of(&super::canonical::route(&file));
+    start_watcher(hub.clone(), link.to_string(), project_id, pro_file, if locked { holder } else { String::new() });
+    Ok(format!("{tool} {file}"))
 }
 
 fn parse_target(p: &Value) -> Option<(String, String)> {
@@ -551,11 +639,16 @@ impl RpcHandler for RemoteKicadRpc {
                     let Some(bin) = open::program(&rt.cli, tool) else {
                         return vec![json!({"t":"reply","id":id,"ok":false,"error":"KiCad is not installed on this machine"})];
                     };
+                    let holder = format!("pid:remote-{link}-{project_id}-{}", std::process::id());
+                    let (lcode, lbody) = hub.far_raw(&link, "kicad.lock", &json!({"project":project_id,"holder":holder,"note":"Remote KiCad edit"})).await;
+                    let locked = lcode == 200 && serde_json::from_str::<Value>(&lbody).ok().is_some_and(|v| v["ok"] == true && v["result"]["held"] == true);
                     if let Err(e) = open::launch(&bin, &file) {
+                        if locked { let _ = hub.far_raw(&link, "kicad.unlock", &json!({"project":project_id,"holder":holder})).await; }
                         return vec![json!({"t":"reply","id":id,"ok":false,"error":e})];
                     }
-                    start_watcher(hub.clone(), link, project_id);
-                    vec![json!({"t":"reply","id":id,"ok":true,"result":{"opened":file,"tool":tool,"sync":synced}})]
+                    let pro_file = super::ipc::pro_of(&super::canonical::route(&file));
+                    start_watcher(hub.clone(), link, project_id, pro_file, if locked { holder } else { String::new() });
+                    vec![json!({"t":"reply","id":id,"ok":true,"result":{"opened":file,"tool":tool,"locked":locked,"sync":synced}})]
                 }
                 _ => vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})],
             }
@@ -607,7 +700,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn manifest_includes_design_files_and_skips_git_locks_and_non_design() {
         let (_d, hub, _proj) = hub_with_project("man").await;
-        let rep = serve(&hub, "kicad.manifest", &json!({"project":"p1"})).await;
+        let rep = serve(&hub, "link1", "kicad.manifest", &json!({"project":"p1"})).await;
         assert_eq!(rep["ok"], true, "{rep}");
         let rels: Vec<String> = rep["result"]["files"]
             .as_array()
@@ -621,6 +714,16 @@ mod tests {
         assert!(rels.contains(&"libs.pretty/R1.kicad_mod".into()), "{rels:?}");
         assert!(rels.contains(&".backplane.json".into()), "{rels:?}");
         assert!(!rels.iter().any(|r| r.contains(".lck") || r.contains(".git") || r == "notes.txt"), "{rels:?}");
+
+        // kicad.project resolves thread -> project, and kicad.lock / kicad.unlock round-trip
+        hub.commit(&json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})).await.unwrap();
+        let pr = serve(&hub, "link1", "kicad.project", &json!({"thread":"t1"})).await;
+        assert_eq!(pr["ok"], true, "{pr}");
+        assert_eq!(pr["result"]["project"], "p1");
+        let lk = serve(&hub, "link1", "kicad.lock", &json!({"project":"p1","holder":"pid:remote-test"})).await;
+        assert_eq!(lk["ok"], true, "{lk}");
+        let ul = serve(&hub, "link1", "kicad.unlock", &json!({"project":"p1","holder":"pid:remote-test"})).await;
+        assert_eq!(ul["ok"], true, "{ul}");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -633,6 +736,7 @@ mod tests {
         let v2_sha = sha256_bytes(v2);
         let r1 = serve(
             &hub,
+            "link1",
             "kicad.push",
             &json!({
                 "project":"p1",
@@ -648,6 +752,7 @@ mod tests {
         let v3_sha = sha256_bytes(v3);
         let r2 = serve(
             &hub,
+            "link1",
             "kicad.push",
             &json!({
                 "project":"p1",
@@ -663,6 +768,7 @@ mod tests {
         // 3. Explicit labelled copy saves conflict safely under copies/<label>/ without touching canonical
         let r3 = serve(
             &hub,
+            "link1",
             "kicad.push",
             &json!({
                 "project":"p1",
