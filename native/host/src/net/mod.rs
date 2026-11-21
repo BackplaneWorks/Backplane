@@ -43,6 +43,7 @@ pub mod peers;
 pub mod qr;
 pub mod routes;
 pub mod rpc;
+pub mod settings_sync;
 pub mod sign;
 pub mod start;
 pub mod tailnet;

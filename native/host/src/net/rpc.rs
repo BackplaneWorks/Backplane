@@ -332,6 +332,7 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     // the project registry (net/registry.rs): kept on the home, from the owner's own machines only (checked above)
     if m == "registry.put" || m == "registry.get" { return json_reply(&super::registry::serve(hub, &link, m, &p).await) }
     if m == "uber.sync" { return json_reply(&crate::bots::ubsync::serve(hub, &p).await) }
+    if m == "settings.sync" { return json_reply(&super::settings_sync::serve(hub, &p).await) }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");
         if !MCP_REMOTE.contains(&tool) { return HttpReply::text("403 Forbidden", "not something this machine shares") }
