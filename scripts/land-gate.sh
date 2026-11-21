@@ -23,7 +23,7 @@ cargo=${LAND_GATE_CARGO:-$ROOT/scripts/cargo-q}
 [ -n "${LAND_GATE_LOCAL:-}${BP_NO_BOAT:-}" ] || export BUILD_SLOTS=0 BQ_OFFLOAD_AFTER=0 BP_BOAT_POOL=${LAND_GATE_BOATS:-8}
 export BQ_WAIT_MAX=${LAND_GATE_WAIT_MAX:-2700} BQ_FAIR=1
 base=$(git merge-base "${LAND_GATE_BASE:-origin/main}" HEAD) || { echo "gate: no merge base with ${LAND_GATE_BASE:-origin/main}" >&2; exit 1; }
-changed=$(git diff --name-only "$base" HEAD)
+changed=$(git diff --no-renames --name-only "$base" HEAD)   # a rename: both names (one out of a watched path still counts)
 say() { echo "gate: $*" >&2; }
 t0=$(date +%s); ran=; rc=0
 touched() { # touched CRATE_DIR: a changed file is under it, or among what it reads outside it
@@ -62,28 +62,12 @@ for c in host gpui guard voice; do
     if ${LAND_GATE_WINCHECK:-bash "$ROOT/scripts/windows-check.sh"} "$c"; then say "$c: Windows cross-compile check: ok ($(( $(date +%s) - s ))s)"; ran="${ran:+$ran, }$c: Windows check $(( $(date +%s) - s ))s"
     else say "$c: Windows cross-compile check: FAILED ($(( $(date +%s) - s ))s)"; ran="${ran:+$ran, }$c: Windows check FAILED"; rc=1; fi;; esac
 done
-# the catalogs generated from i18n/*.msg (Android's Msg.kt, iOS's TrCatalog.swift and InfoPlist.strings): made again from the PR's tree in a
-# temporary folder and compared with what it commits, for a PR touching the .msg files, a generator or a generated file. Nov 20: main's
-# catalogs went 5,900 lines stale when a PR whose catalogs were made before its rebase landed after one adding web.clone.* keys (the .msg
-# merged cleanly, the generated files did not know the new keys); CI's mobile jobs saw it, but they are no merge condition. No build, ~1 s.
-gens="scripts/i18n-android.py scripts/i18n-ios.py"
-gen_out="mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt mobile/ios/Shared/TrCatalog.swift mobile/ios/Backplane/en.lproj/InfoPlist.strings mobile/ios/Backplane/ja.lproj/InfoPlist.strings mobile/ios/Backplane/es.lproj/InfoPlist.strings"
-if printf '%s\n' "$changed" | grep -q -x -E 'i18n/.*|scripts/i18n-(android|ios|check)\.py|mobile/android/.*/Msg\.kt|mobile/ios/Shared/TrCatalog\.swift|mobile/ios/Backplane/[a-z]+\.lproj/InfoPlist\.strings'; then
-  s=$(date +%s); say "i18n: the catalogs made again from i18n/*.msg ..."; tmp=$(mktemp -d "${TMPDIR:-/tmp}/land-gate-i18n.XXXXXX"); bad=
-  # shellcheck disable=SC2086
-  git archive HEAD -- $(for f in i18n scripts/i18n-check.py $gens $gen_out; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "$f"; done) | tar -x -C "$tmp"
-  [ ! -f "$tmp/scripts/i18n-check.py" ] || (cd "$tmp" && python3 -I scripts/i18n-check.py) >&2 || bad="the .msg files disagree (python3 scripts/i18n-check.py)"
-  for g in $gens; do [ -f "$tmp/$g" ] || continue
-    (cd "$tmp" && python3 -I "$g" > /dev/null) 2>&1 | sed 's/^/gate: /' >&2
-    [ "${PIPESTATUS[0]}" = 0 ] || bad="${bad:+$bad; }$g failed (above)"; done
-  for f in $gen_out; do [ -e "$tmp/$f" ] || continue
-    case "$f" in *Msg.kt) g=scripts/i18n-android.py;; *) g=scripts/i18n-ios.py;; esac
-    if ! git show "HEAD:$f" 2>/dev/null | cmp -s - "$tmp/$f"; then
-      n=$(git show "HEAD:$f" 2>/dev/null | diff - "$tmp/$f" | grep -c '^[<>]')
-      bad="${bad:+$bad; }$f is stale ($n lines differ): run python3 $g and commit it"; fi; done
-  rm -rf "$tmp"
-  if [ -z "$bad" ]; then say "i18n: the catalogs are what i18n/*.msg makes ($(( $(date +%s) - s ))s)"; ran="${ran:+$ran, }i18n catalogs $(( $(date +%s) - s ))s"
-  else say "i18n: FAILED: $bad"; ran="${ran:+$ran, }i18n catalogs FAILED"; rc=1; fi
+# the catalogs generated from i18n/*.msg (scripts/i18n-gate.sh: made again from the PR's tree and compared), for a PR touching the .msg files, a
+# generator or a generated catalog. No build, ~1 s. land.sh runs it again in the land lock when its last rebase moved the branch.
+if printf '%s\n' "$changed" | grep -q -x -E 'i18n/.*|scripts/i18n-(android|ios|check)\.py|scripts/i18n-gate\.sh|mobile/android/app/src/main/java/dev/backplane/mobile/.*|mobile/ios/Shared/.*|mobile/ios/Backplane/[a-z]+\.lproj/.*'; then
+  s=$(date +%s); say "i18n: the catalogs made again from i18n/*.msg ..."
+  if bash "$ROOT/scripts/i18n-gate.sh"; then ran="${ran:+$ran, }i18n catalogs $(( $(date +%s) - s ))s"
+  else ran="${ran:+$ran, }i18n catalogs FAILED"; rc=1; fi
 fi
 dt=$(( $(date +%s) - t0 ))
 if [ -z "$ran" ]; then say "nothing to compile: the PR touches no crate (docs, scripts, mobile, web sources) ($(git diff --name-only "$base" HEAD | wc -l) files); passed in ${dt}s"

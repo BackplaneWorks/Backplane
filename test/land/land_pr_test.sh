@@ -39,7 +39,7 @@ g() { git -C "$W" "$@"; }
 export GIT_AUTHOR_NAME=i2cjak GIT_AUTHOR_EMAIL=build@amemb.com GIT_COMMITTER_NAME=i2cjak GIT_COMMITTER_EMAIL=build@amemb.com
 git init -q --bare -b main "$ORIGIN"
 W=$T/main; git clone -q "$ORIGIN" "$W" 2>/dev/null; g checkout -q -b main 2>/dev/null
-mkdir -p "$W/scripts"; cp "$ROOT/scripts/land.sh" "$ROOT/scripts/land-windows.sh" "$ROOT/scripts/bp-lock.sh" "$ROOT/scripts/hub-outside-files.py" "$ROOT/scripts/land-gate.sh" "$W/scripts/"; printf '#!/bin/sh\nexit 0\n' > "$W/scripts/check-author.sh"; chmod +x "$W/scripts/"*.sh
+mkdir -p "$W/scripts"; cp "$ROOT/scripts/land.sh" "$ROOT/scripts/land-windows.sh" "$ROOT/scripts/bp-lock.sh" "$ROOT/scripts/hub-outside-files.py" "$ROOT/scripts/land-gate.sh" "$ROOT/scripts/i18n-gate.sh" "$W/scripts/"; printf '#!/bin/sh\nexit 0\n' > "$W/scripts/check-author.sh"; chmod +x "$W/scripts/"*.sh
 echo base > "$W/f"; g add -A; g commit -qm base; g push -q origin main
 LANE=$T/lane; g worktree add -q -b lane "$LANE" 2>/dev/null; W=$LANE
 echo one > "$LANE/doc"; g add -A; g commit -qm "docs: one"
@@ -160,5 +160,10 @@ nl p7 docs/p7.md
 nl p8 docs/p8.md
 LAND_TEST="echo more > $T/l-p8/docs/p8b.md; git -C $T/l-p8 add -A; git -C $T/l-p8 commit -qm 'p8: after the gate'" lland p8 > "$T/o35"; rc=$?
 [ $rc != 0 ] && grep -q "p8 changed since the gate" "$T/o35" && ! git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/p8 >/dev/null; ok $? "a commit made during the gate is refused, nothing pushed (rc $rc)"
+# 36. main takes an i18n change while a lane gates (its catalogs made before): the rebase in the land lock merges cleanly, the catalogs are made
+# again there, found stale, and nothing is pushed
+nl p9 docs/p9.md
+LAND_TEST="git -C $T/main pull -q origin main && echo 'a.z = Z' >> $T/main/i18n/en.msg && git -C $T/main commit -qam 'main: a.z, no catalog' && git -C $T/main push -q origin HEAD:main" lland p9 > "$T/o36"; rc=$?
+[ $rc != 0 ] && grep -q "i18n catalogs are stale" "$T/o36" && ! git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/p9 >/dev/null && flock -n "$T/locks/bp-land.lock" true; ok $? "an i18n change main took during the gate: the catalogs made again in the lock, stale, nothing pushed (rc $rc)"
 unset FAKE_LOCKFILE
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }
