@@ -126,7 +126,7 @@ else:
         return [(int(w['number']), int(w['pid']), w['owner'], tuple(round(v) for v in w['bounds'])) for w in helper('windows') or [] if w['layer'] == 0]
 
     # macOS virtual key codes the checks use, to the keysym names the relay types (Screen Sharing: Super is Command)
-    KEYNAME = {1: 's', 0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return', 117: 'delete', 4: 'h', 122: 'f1'}
+    KEYNAME = {1: 's', 0: 'a', 40: 'k', 53: 'escape', 11: 'b', 38: 'j', 8: 'c', 48: 'tab', 51: 'backspace', 3: 'f', 43: ',', 13: 'w', 36: 'return', 117: 'delete', 4: 'h', 122: 'f1', 50: 'grave'}
 
     def key(code, flags=0):
         mods = [m for m, bit in (('ctrl', CTRL), ('alt', ALT), ('shift', SHIFT), ('cmd', CMD)) if flags & bit]
@@ -655,6 +655,74 @@ try:
             check(bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 4)), 'auto E: and KiCad\'s canvas takes keys again (Cmd+A)')
             key(K_ESC)
             subprocess.run(['osascript', '-e', 'tell application "Calculator" to quit'])
+        def handback():
+            # #1399 (KiCad lead's question 1): after KiCad took the keyboard by a click in its own frame, which of the pane's existing
+            # hand-back paths brings Backplane forward: the escape chord (Ctrl+`), a click in Backplane's window, View. Each 3 times,
+            # KiCad put back in front by a frame click between tries; KiCad's trace says whether it resigned
+            check(bool(wait_for(lambda: marked('E_go'), 60, 0.1)), 'handback: the client script reached E_go')
+            r = wait_for(lambda: rects_now().get('ui:Edit'), 10, 0.3)
+            b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+            if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+            check(bool(wait_for(lambda: kicad_pid() and active(kicad_pid()), 20, 0.1)), 'handback: Edit gives KiCad the keyboard')
+            kp = kicad_pid(); TR = os.path.join(OUT, 'kicad-embed-trace.log')
+            def resigned_since(t):
+                if not os.path.exists(TR): return None
+                for l in open(TR, errors='replace'):
+                    try: ts = float(l.split(' ', 1)[0])
+                    except ValueError: continue
+                    if ts >= t and 'did resign active' in l: return True
+                return False
+            def kicad_by_own_click():
+                b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300); wait_for(lambda: active(client.pid), 4, 0.1); time.sleep(0.8)
+                ws = [w for w in Quartz.CGWindowListCopyWindowInfo(Quartz.kCGWindowListOptionOnScreenOnly, Quartz.kCGNullWindowID) or [] if int(w.get('kCGWindowLayer', 0)) == 0 and int(w.get('kCGWindowOwnerPID', 0)) == kp]
+                if not ws: return False
+                fb = [ws[0]['kCGWindowBounds'][k] for k in ('X', 'Y', 'Width', 'Height')]; click(fb[0] + fb[2] * 0.5, fb[1] + fb[3] * 0.5)
+                ok = bool(wait_for(lambda: active(kp), 4, 0.1)); key(K_ESC); time.sleep(0.8); return ok and active(kp)
+            def via_chord(): key(50, CTRL)
+            def via_click(): b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 200, b[1] + 28 + 300)
+            def via_view():
+                r = rects_now().get('ui:View'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+                if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+            for name, act in (('the escape chord (Ctrl+`)', via_chord), ('a click in Backplane', via_click), ('View', via_view)):
+                got = 0
+                for i in range(3):
+                    ok = kicad_by_own_click(); n0 = len(client_log().splitlines()); t0 = time.time(); act()
+                    took = bool(wait_for(lambda: active(client.pid) and not active(kp), 3, 0.05)); time.sleep(0.5); res = resigned_since(t0)
+                    seq = [l.strip()[:120] for l in client_log().splitlines()[n0:] if re.search(r'kicad_mac_focus|kicad_keys_flip|kicad_key"|kicad_loan|kicad_mac_yield|Escape', l)][:4]
+                    print(f'INFO handback {name} #{i + 1}: KiCad active by its own click {ok}; Backplane active within 3 s {took}; KiCad resigned {res}; {seq}', flush=True)
+                    got += took
+                    if name == 'View':
+                        r = wait_for(lambda: rects_now().get('ui:Edit') or rects_now().get('ui:View'), 5, 0.3)
+                        b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+                        if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2); time.sleep(3)
+                check(got == 3, f'handback: {name} brings Backplane forward after KiCad took the keyboard by its own click ({got}/3)')
+            # bp.13.4 criteria row 2a (the Lead's ruling before b2): with Backplane hidden by Cmd+H typed in KiCad (KiCad stays the active
+            # app, its frame hidden with ours), a reserved chord typed next brings Backplane back un-hidden and active; a non-reserved key
+            # (Cmd+A) leaves it hidden
+            def ours_on_screen(): return any(w[0] == cw[0] for w in wins())
+            def unhide_ours():
+                a = NSRunningApplication.runningApplicationWithProcessIdentifier_(client.pid); a.unhide(); time.sleep(0.4); a.activateWithOptions_(0)
+                if not wait_for(lambda: active(client.pid), 2, 0.1):
+                    b = next((w for w in wins() if w[0] == cw[0]), cw)[3]; click(b[0] + 120, b[1] + 12)
+                wait_for(lambda: ours_on_screen() and active(client.pid), 5, 0.1); time.sleep(0.8)
+            for name, chord, reserved in (('Cmd+K', (K_K, CMD), True), ('the escape chord (Ctrl+`)', (50, CTRL), True), ('Cmd+A (not reserved)', (K_A, CMD), False)):
+                got = 0
+                for i in range(3):
+                    ok = kicad_by_own_click(); key(4, CMD)
+                    hid = bool(wait_for(lambda: not ours_on_screen(), 5, 0.1)); time.sleep(0.6); kicad_still = active(kp)
+                    t0 = time.time(); key(*chord)
+                    back = bool(wait_for(lambda: ours_on_screen() and active(client.pid), 3, 0.05))
+                    line = next((l.strip()[:140] for l in open(TR, errors='replace') if 'host activated' in l and float(l.split(' ', 1)[0]) >= t0 - 0.05), None) if os.path.exists(TR) else None
+                    print(f'INFO handback hidden, {name} #{i + 1}: KiCad by its own click {ok}; Cmd+H hid Backplane {hid}; KiCad active after the hide {kicad_still}; Backplane back on screen and active within 3 s {back}; trace {line}', flush=True)
+                    got += (back if reserved else not back)
+                    if not back or not reserved: key(K_ESC); unhide_ours()
+                    else: key(K_ESC); time.sleep(0.6)
+                if reserved: check(got == 3, f'handback: with Backplane hidden, {name} typed in KiCad brings it back un-hidden and active ({got}/3)')
+                else: check(got == 3, f'handback: with Backplane hidden, {name} typed in KiCad leaves it hidden ({got}/3)')
+            raise SystemExit(1 if FAILS else 0)
+        if os.environ.get('AUTO_MAIN') == '1' and os.environ.get('AUTO_E') == 'handback':
+            check(bool(wait_for(lambda: marked('D_ready'), 60, 0.1)), 'handback: the Board page is open')
+            handback()
         if os.environ.get('AUTO_MAIN') == '1':
             check(bool(wait_for(lambda: marked('D_ready'), 60, 0.1)), 'auto (main control): the Board page is open')
             if os.environ.get('AUTO_E') != 'mainpane':
