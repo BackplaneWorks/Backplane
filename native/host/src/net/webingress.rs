@@ -111,7 +111,7 @@ mod tests {
             let status = raw_status(target.to_owned(), None).await;
             assert!(status.starts_with("HTTP/1.1 401 "), "{target} unpaired: got {status}");
 
-            // Paired upgrade must succeed and answer data/1 RPC uncompressed.
+            // Paired upgrade must succeed and answer data/1 RPC: as it is, or (`z=deflate`, docs/PHONE-DATA.md Compression) a plain hello naming the codec, then raw DEFLATE.
             let (client_io, server_io) = tokio::io::duplex(64 * 1024);
             let h2 = hub.clone();
             let srv = tokio::spawn(async move { serve(h2, server_io, authority).await });
@@ -123,9 +123,23 @@ mod tests {
             let (mut ws, _) = tokio_tungstenite::client_async(ws_req, client_io).await.unwrap();
             let hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
             assert_eq!(hello["t"], "hello", "{target}: expected hello frame");
-            assert!(hello.get("z").is_none(), "{target}: browser ingress stays uncompressed");
+            let deflate = target.ends_with("&z=deflate");
+            assert_eq!(hello["z"].as_str(), deflate.then_some("deflate"), "{target}: the hello names the codec only when it was asked for");
             ws.send(Message::Text(json!({"id":1,"m":"projects.list","p":{}}).to_string().into())).await.unwrap();
-            let reply: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+            let mut z = flate2::Decompress::new(false);
+            let reply: Value = loop {
+                let v: Value = match ws.next().await.unwrap().unwrap() {
+                    Message::Text(t) if !deflate => serde_json::from_str(t.as_str()).unwrap(),
+                    Message::Binary(b) if deflate => {
+                        let mut out = Vec::with_capacity(b.len() * 8 + 1024); let start = z.total_in();
+                        loop { let done = (z.total_in() - start) as usize; if out.capacity() - out.len() < 64 { out.reserve(out.capacity()) }
+                            z.decompress_vec(&b[done..], &mut out, flate2::FlushDecompress::Sync).unwrap(); if (z.total_in() - start) as usize == b.len() && out.len() < out.capacity() { break } }
+                        serde_json::from_slice(&out).unwrap()
+                    }
+                    m => panic!("{target}: a frame of the wrong kind: {m:?}"),
+                };
+                if v["t"] == "reply" { break v }
+            };
             assert_eq!(reply["t"], "reply", "{target}: expected data/1 reply");
             assert_eq!(reply["id"], 1);
             assert_eq!(reply["ok"], true);
