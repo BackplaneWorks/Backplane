@@ -100,6 +100,9 @@ pub fn protected_directory(path: &std::path::Path) -> std::io::Result<()> {
 /// No HTTP request, login header, or hub credential is sent to this socket.
 pub async fn system_proxy_identity() -> std::io::Result<super::webtransport::ProxyIdentity> {
     use std::{io, time::Duration};
+    if crate::copy::on() {
+        return Err(io::Error::new(io::ErrorKind::PermissionDenied, "copy run"));
+    }
     let stream = tokio::time::timeout(
         Duration::from_secs(2),
         tokio::net::UnixStream::connect("/run/tailscale/tailscaled.sock"),
