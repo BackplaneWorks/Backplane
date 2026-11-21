@@ -79,18 +79,22 @@ phase=${LAND_PHASE:-gate}
 # InfoPlist.strings), and no .msg source conflicts, they are made again from the merged .msg files, added, and the rebase goes on (again at each
 # commit that conflicts so); at the end scripts/i18n-gate.sh checks the result. Anything else conflicting: 1 (the caller stops as before).
 # (#1501, #1449, #1470, #1418: main gained catalog keys, a PR touching i18n conflicted in Msg.kt or TrCatalog.swift on every rebase.)
-catalogs_only() { local top c f made=
+catalogs_only() { local top c f out made=
   top=$(git rev-parse --show-toplevel)
   while :; do
     c=$(git diff --name-only --diff-filter=U); [ -n "$c" ] || return 1
     for f in $c; do case "$f" in
-      mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt|mobile/ios/Shared/TrCatalog.swift|mobile/ios/Backplane/*.lproj/InfoPlist.strings) ;;
+      mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt|mobile/ios/Shared/TrCatalog.swift|mobile/ios/Backplane/en.lproj/InfoPlist.strings|mobile/ios/Backplane/ja.lproj/InfoPlist.strings|mobile/ios/Backplane/es.lproj/InfoPlist.strings) ;;
       *) return 1;; esac; done
     for g in i18n-android.py i18n-ios.py; do [ -f "$top/scripts/$g" ] || continue
       (cd "$top" && python3 -I "scripts/$g" > /dev/null) || { say "rebase ($1): scripts/$g failed on the merged .msg files"; return 1; }; done
     # what the generators write: the conflicted files and the other catalogs they touched
-    git add -- $c && git add -u -- mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt mobile/ios/Shared/TrCatalog.swift 'mobile/ios/Backplane/*.lproj/InfoPlist.strings' 2> /dev/null
-    git diff --name-only --diff-filter=U | grep -q . && return 1
+    # each conflicted file rewritten by them (no conflict marker left), then every file they write staged, or stop
+    for f in $c; do ! grep -q -E '^(<<<<<<<|>>>>>>>) ' "$f" 2>/dev/null || { say "rebase ($1): the generators left $f conflicted"; return 1; }; done
+    out=; for f in mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt mobile/ios/Shared/TrCatalog.swift mobile/ios/Backplane/en.lproj/InfoPlist.strings \
+      mobile/ios/Backplane/ja.lproj/InfoPlist.strings mobile/ios/Backplane/es.lproj/InfoPlist.strings; do [ -e "$f" ] && out="$out $f"; done
+    git add -- $c $out || { say "rebase ($1): could not stage the catalogs made again"; return 1; }
+    ! git diff --name-only --diff-filter=U | grep -q . || return 1
     say "rebase ($1): $(git rev-parse --short REBASE_HEAD 2>/dev/null) conflicted only in generated catalogs ($(echo $c)): made again from the merged i18n/*.msg (i18n-android.py, i18n-ios.py)"
     made=1
     if git diff --cached --quiet; then GIT_EDITOR=true git rebase --skip > /dev/null 2>&1 && break   # the commit held only those catalogs: nothing left of it
@@ -103,7 +107,11 @@ catalogs_only() { local top c f made=
 rebase_or_stop() { # rebase_or_stop WHEN: onto origin/main as it is now; a conflict stops the land (the lock, if held, goes with this process)
   git fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
   pre=$(git rev-parse HEAD)
-  if ! git rebase -q origin/main && ! catalogs_only "$1"; then git rebase --abort 2>/dev/null || true; git reset -q --hard "$pre"
+  if ! git rebase -q origin/main && ! catalogs_only "$1"; then
+    if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
+      git rebase --abort || die "$br: the rebase onto main stopped and git rebase --abort failed: run it yourself (git status says where it is); nothing pushed"; fi
+    [ "$(git symbolic-ref -q --short HEAD)" = "$br" ] || die "$br: after the rebase stopped, HEAD is not on $br (git status): put it back, then land again; nothing pushed"
+    git reset -q --hard "$pre"
     die "$br conflicts with main $(git rev-parse --short origin/main) ($1): resolve it (git rebase origin/main), then land again (the gate runs again outside the lock); nothing pushed"; fi
   [ -n "$(git rev-list -1 origin/main..HEAD)" ] || { say "nothing to land: $br is already on origin/main"; exit 0; }
   "$here/check-author.sh" origin/main..HEAD || die "a commit has the wrong author or committer (see above)"
