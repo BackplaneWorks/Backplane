@@ -28,8 +28,8 @@ pub const PCBPARTS_NAME: &str = "pcbparts";
 pub fn pcbparts_entry() -> Value { json!({"serverUrl": crate::mcpx::gen::PCBPARTS}) }
 
 /// How agy is started: `sh -c RUN agy ARGS...` (the hub resolves `sh`; agy is the person's own binary, run as it is). The variables named in
-/// `BACKPLANE_AGY_UNSET` ([`storage_unset`]) are taken out of its environment first.
-pub const RUN: &str = "for v in $BACKPLANE_AGY_UNSET; do unset \"$v\"; done; unset BACKPLANE_AGY_UNSET; exec \"$0\" \"$@\"";
+/// `BACKPLANE_AGY_UNSET` ([`storage_unset`]) and any stale `CHROME_CRASHPAD_PIPE_NAME` are taken out of its environment first.
+pub const RUN: &str = "for v in $BACKPLANE_AGY_UNSET; do unset \"$v\"; done; unset BACKPLANE_AGY_UNSET CHROME_CRASHPAD_PIPE_NAME; exec \"$0\" \"$@\"";
 pub const UNSET_VAR: &str = "BACKPLANE_AGY_UNSET";
 
 // ---- Where agy's sign-in is ----
@@ -59,10 +59,10 @@ pub fn storage_unset_here(home: &Path) -> Vec<&'static str> {
     storage_unset(std::fs::read_to_string(token_file(home)).ok().as_deref(), |k| std::env::var(k).ok())
 }
 
-/// The person's agy, found where the hub finds provider CLIs (its PATH, the login shell's, ~/.local/bin, ...). In tests only `BACKPLANE_TEST_AGY`.
+/// The person's agy, found where the hub finds provider CLIs (its PATH, the login shell's, ~/.local/bin, ...; `.exe`/`.cmd` on Windows). In tests only `BACKPLANE_TEST_AGY`.
 pub fn find() -> Option<PathBuf> {
     if cfg!(test) { return std::env::var_os("BACKPLANE_TEST_AGY").map(PathBuf::from).filter(|p| p.is_file()) }
-    crate::agents::proc::search_dirs().iter().map(|d| d.join("agy")).find(|p| p.is_file())
+    crate::agents::proc::find_in(crate::agents::proc::search_dirs(), "agy", cfg!(windows))
 }
 /// Where agy reads its MCP servers: `$HOME/.gemini/config/mcp_config.json` (the HOME the agent runs with).
 pub fn mcp_config(home: &Path) -> PathBuf { home.join(".gemini/config/mcp_config.json") }
@@ -164,10 +164,22 @@ pub fn tool_line(info: &Value, name: &str) -> String {
     }
 }
 pub const QUOTA_MSG: &str = "Antigravity's quota for this Google account is used up. Backplane does not retry or move to another account: send again once it resets (agy -p /quota shows it).";
+pub const BROKEN_SIG_MSG: &str = "Antigravity's saved conversation can no longer be sent to the model (lost thinking signature). The next message will start a fresh Antigravity session.";
+/// Whether `msg` reports an invalid/missing Claude thinking block signature in the saved Antigravity conversation (every later prompt on that `--conversation` fails the same way).
+pub fn invalid_thinking_signature(msg: &str) -> bool {
+    msg.contains(".thinking.signature: Field required") || msg.contains("Invalid `signature` in `thinking` block")
+}
+/// Whether `msg` reports an HTTP 404 / NOT_FOUND error (before the model answers: unknown/unentitled model; after the model already answered: transient edge error).
+pub fn is_404(msg: &str) -> bool {
+    let l = msg.to_lowercase();
+    l.contains("error 404") || l.contains("(code 404)") || l.contains("status 404") || l.contains("http 404") || (l.contains("not_found") && l.contains("404"))
+}
 pub fn hint(msg: &str) -> String {
     let l = msg.to_lowercase();
     if ["429", "quota", "resource_exhausted", "rate limit", "rate-limit", "too many requests"].iter().any(|k| l.contains(k)) { return format!("{msg} ({QUOTA_MSG})") }
-    if ["auth", "sign in", "signin", "login", "credential", "token"].iter().any(|k| l.contains(k)) { format!("{msg} (sign in once by running `agy` in a terminal)") } else { msg.into() }
+    if ["auth", "sign in", "signin", "login", "logged in", "credential", "no browser is available", "oauth", "token expired", "invalid token", "token revoked", "refresh token", "unauthorized", "401"].iter().any(|k| l.contains(k)) {
+        format!("{msg} (sign in once by running `agy` in a terminal)")
+    } else { msg.into() }
 }
 /// Said when headless agy denied something the thread's mode does not allow.
 pub fn denied_note(xs: &[Value]) -> String {
@@ -175,9 +187,9 @@ pub fn denied_note(xs: &[Value]) -> String {
     format!("Antigravity was not allowed to: {}. agy cannot ask for approval when Backplane runs it, so switch the thread to Auto or Full access, or add an allow rule under permissions.allow in ~/.gemini/settings.json.", names.join(", "))
 }
 
-/// One turn's state: the conversation, the reply text of the step being written, and whether the turn has ended.
+/// One turn's state: the conversation, the reply text of the step being written, whether the model has answered in this turn, any still-open tool calls, and whether the turn has ended.
 #[derive(Debug, Default)]
-pub struct St { pub session: String, pub step: i64, pub buf: String, pub done: bool, pub note: String, pub last_err: String }
+pub struct St { pub session: String, pub step: i64, pub buf: String, pub done: bool, pub note: String, pub last_err: String, pub reached_model: bool, pub emitted_text: bool, pub open_tools: Vec<String> }
 
 /// One stdout line from agy, as Codex shapes.
 pub fn line(s: &mut St, o: &Value) -> Vec<Value> {
@@ -194,34 +206,45 @@ pub fn line(s: &mut St, o: &Value) -> Vec<Value> {
             let (state, ty) = (gs(u, "state"), gs(u, "step_type"));
             match ty {
                 "agent_response" => {
+                    s.reached_model = true;
                     if idx != s.step { flush(s, &mut out); s.step = idx }
-                    let t = gs(u, "text_delta"); if !t.is_empty() { s.buf.push_str(t); out.push(ev("item.delta", json!({"text": t}))) }
+                    let t = gs(u, "text_delta"); if !t.is_empty() { s.emitted_text = true; s.buf.push_str(t); out.push(ev("item.delta", json!({"text": t}))) }
                     if state == "DONE" { flush(s, &mut out) }
                 }
                 "tool" => {
+                    s.reached_model = true;
                     flush(s, &mut out);
                     let id = format!("agy-{}-{idx}", if s.session.is_empty() { "s" } else { &s.session });
                     let info = u.get("tool_info").unwrap_or(&Value::Null); let name = { let x = gs(u, "tool_name"); if x.is_empty() { gs(info, "name") } else { x } };
                     match state {
-                        "ACTIVE" => out.push(ev("item.completed", json!({"item":{"type":"command_execution","id":id,"command":tool_line(info, name)}}))),
-                        "DONE" | "ERROR" | "FAILED" | "CANCELED" | "CANCELLED" => out.push(ev("tool.done", json!({"id": id}))),
+                        "ACTIVE" => { if !s.open_tools.contains(&id) { s.open_tools.push(id.clone()) } out.push(ev("item.completed", json!({"item":{"type":"command_execution","id":id,"command":tool_line(info, name)}}))) }
+                        "DONE" | "ERROR" | "FAILED" | "CANCELED" | "CANCELLED" => { s.open_tools.retain(|x| x != &id); out.push(ev("tool.done", json!({"id": id}))) }
                         _ => {}
                     }
                 }
-                "thinking" | "planner_response" => { let t = gs(u, "text_delta"); if !t.is_empty() { out.push(ev("item.completed", json!({"item":{"type":"reasoning","text":t}}))) } }
+                "thinking" | "planner_response" => { s.reached_model = true; let t = gs(u, "text_delta"); if !t.is_empty() { out.push(ev("item.completed", json!({"item":{"type":"reasoning","text":t}}))) } }
                 _ => {}
             }
         }
         "result" => {
             let r = o.get("result").unwrap_or(&Value::Null); flush(s, &mut out); s.done = true;
+            for id in std::mem::take(&mut s.open_tools) { out.push(ev("tool.done", json!({"id": id}))) }
             let c = gs(r, "conversation_id"); if !c.is_empty() && c != s.session { s.session = c.into(); out.push(ev("thread.started", json!({"thread_id": c}))) }
             if let Some(xs) = r.get("denied_actions").and_then(Value::as_array).filter(|x| !x.is_empty()) { out.push(ev("notice", json!({"message": denied_note(xs)}))) }
             if gs(r, "status") == "SUCCESS" {
+                if !s.emitted_text { let resp = gs(r, "response"); if !resp.trim().is_empty() { out.push(ev("item.completed", json!({"item":{"type":"agent_message","text":resp}}))) } }
                 let u = r.get("usage").unwrap_or(&Value::Null);
                 out.push(ev("turn.completed", json!({"usage":{"input_tokens":n(u, "input_tokens"),"cached_input_tokens":n(u, "cache_read_tokens"),"output_tokens":n(u, "output_tokens"),"reasoning_output_tokens":n(u, "thinking_tokens")}})));
             } else {
                 let e = { let e = gs(r, "error"); if !e.is_empty() { e.to_string() } else if !s.last_err.is_empty() { s.last_err.clone() } else { format!("Antigravity ended the turn: {}", { let st = gs(r, "status"); if st.is_empty() { "no result" } else { st } }) } };
-                out.push(ev("turn.failed", json!({"message": hint(&e)})));
+                if invalid_thinking_signature(&e) {
+                    if !s.session.is_empty() { s.session.clear(); out.push(ev("thread.started", json!({"thread_id": ""}))) }
+                    out.push(ev("turn.failed", json!({"message": BROKEN_SIG_MSG})));
+                } else if s.reached_model && is_404(&e) {
+                    out.push(ev("turn.failed", json!({"message": format!("mid-turn 404 from Antigravity: {e}")})));
+                } else {
+                    out.push(ev("turn.failed", json!({"message": hint(&e)})));
+                }
             }
         }
         _ => {}
@@ -371,5 +394,56 @@ mod tests {
         { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap(); }
         let o = std::process::Command::new("sh").args(["-c", MCP_SH]).env("BACKPLANE_MCP_URL", "http://u").env("BACKPLANE_HUB_EXE", &exe).output().unwrap();
         assert_eq!(String::from_utf8_lossy(&o.stdout), "bridge --mcp-stdio http://u\n");
+    }
+    /// T3 Code #39869: a 404 after the model already responded in this turn is a transient edge error; a 404 before any model step is not.
+    #[test] fn mid_turn_404_is_transient_while_initial_404_is_not() {
+        let mut s = St { session: "C1".into(), ..Default::default() };
+        let pre = feed(&mut s, r#"{"event":"result","result":{"conversation_id":"C1","status":"ERROR","error":"NOT_FOUND (code 404): Model not found"}}"#);
+        let pre_v: Value = serde_json::from_str(&pre[0]).unwrap();
+        assert!(crate::settings::fallback::transient(&pre_v).is_none(), "initial 404 is not retried: {pre_v}");
+        let mut s2 = St { session: "C1".into(), ..Default::default() };
+        let mid = feed(&mut s2, r#"{"event":"step_update","step_update":{"conversation_id":"C1","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"working..."}}
+{"event":"result","result":{"conversation_id":"C1","status":"ERROR","error":"Error 404, Message: Requested entity was not found, Status: NOT_FOUND"}}"#);
+        let mid_v: Value = serde_json::from_str(mid.last().unwrap()).unwrap();
+        assert_eq!(mid_v["type"], "turn.failed");
+        assert!(crate::settings::fallback::transient(&mid_v).is_some(), "mid-turn 404 reconnects: {mid_v}");
+    }
+    /// T3 Code #28889: a lost Claude thinking signature breaks the saved conversation; clearing the session lets the next turn start fresh.
+    #[test] fn invalid_thinking_signature_clears_broken_session() {
+        let mut s = St { session: "C-BROKEN".into(), ..Default::default() };
+        let got = feed(&mut s, r#"{"event":"result","result":{"conversation_id":"C-BROKEN","status":"ERROR","error":"messages.4.content.0.thinking.signature: Field required"}}"#);
+        assert_eq!(s.session, "");
+        assert!(got.iter().any(|l| l == r#"{"type":"thread.started","thread_id":""}"#), "{got:#?}");
+        assert!(got.last().unwrap().contains("lost thinking signature"), "{got:#?}");
+        assert!(invalid_thinking_signature("messages.12.content.1: Invalid `signature` in `thinking` block"));
+    }
+    /// T3 Code #37537/#37377: open tool calls are closed when the turn finishes or fails without a tool DONE update.
+    #[test] fn open_tools_close_on_result() {
+        let mut s = St { session: "C1".into(), ..Default::default() };
+        let got = feed(&mut s, r#"{"event":"step_update","step_update":{"conversation_id":"C1","step_index":2,"state":"ACTIVE","step_type":"tool","tool_name":"run_command","tool_info":{"name":"run_command","parameters":{"CommandLine":"sleep 5"}}}}
+{"event":"result","result":{"conversation_id":"C1","status":"ERROR","error":"interrupted"}}"#);
+        assert!(got.contains(&r#"{"type":"tool.done","id":"agy-C1-2"}"#.to_string()), "{got:#?}");
+        assert!(got.last().unwrap().contains("turn.failed"));
+    }
+    /// Context-full errors mention "token" and must not get a sign-in hint; "not logged in" and "No browser is available here" (T3 Code #36037) must get one.
+    #[test] fn hint_does_not_misfire_on_token_count_and_catches_no_browser() {
+        let ctx = "The input token count (1048977) exceeds the maximum number of tokens allowed (1048576).";
+        assert_eq!(hint(ctx), ctx, "context-full is not a sign-in error");
+        assert!(hint("You are not logged into Antigravity").contains("sign in once by running `agy`"));
+        assert!(hint("No browser is available here. Run agy --login.").contains("sign in once by running `agy`"));
+    }
+    /// Non-streaming SUCCESS results fall back to `result.response` when no `text_delta` arrived.
+    #[test] fn result_response_fallback_when_no_deltas_streamed() {
+        let mut s = St { session: "C1".into(), ..Default::default() };
+        let got = feed(&mut s, r#"{"event":"result","result":{"conversation_id":"C1","status":"SUCCESS","response":"Final answer","usage":{"input_tokens":10,"output_tokens":3}}}"#);
+        assert!(got.iter().any(|l| l.contains("agent_message") && l.contains("Final answer")), "{got:#?}");
+        assert!(got.last().unwrap().contains("turn.completed"));
+    }
+    /// T3 Code #26374: stale CHROME_CRASHPAD_PIPE_NAME is unset before launching agy.
+    #[test] fn runner_unsets_crashpad_pipe() {
+        let d = super::super::muse::e2e::dir("agy-cli-crashpad"); let exe = d.join("agy"); std::fs::write(&exe, "#!/bin/sh\necho \"[$CHROME_CRASHPAD_PIPE_NAME]\"\n").unwrap();
+        { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&exe, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let o = std::process::Command::new("sh").args(["-c", RUN]).arg(&exe).env("CHROME_CRASHPAD_PIPE_NAME", "\\\\.\\pipe\\stale").env(UNSET_VAR, "").output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&o.stdout), "[]\n");
     }
 }
