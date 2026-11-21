@@ -58,10 +58,10 @@ export class RailView {
   private el: HTMLElement;
   private items: RailEntry[] = [];
   private activeId = "";
-  private onPress: (id: string) => void;
+  private onPress: (id: string, beside?: boolean) => void;
   private pagesRo: ResizeObserver | null = null;
 
-  constructor(container: HTMLElement, onPress: (id: string) => void) {
+  constructor(container: HTMLElement, onPress: (id: string, beside?: boolean) => void) {
     this.el = container;
     this.onPress = onPress;
     this.render();
@@ -105,7 +105,13 @@ export class RailView {
     btn.appendChild(lbl);
 
     if (!isDisabled) {
-      btn.addEventListener("click", () => this.onPress(item.id));
+      btn.addEventListener("click", (ev) => this.onPress(item.id, ev.shiftKey));
+      btn.addEventListener("auxclick", (ev) => {
+        if (ev.button === 1) {
+          ev.preventDefault();
+          this.onPress(item.id, true);
+        }
+      });
     }
     return btn;
   }

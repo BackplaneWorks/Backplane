@@ -43,6 +43,7 @@ export interface ViewerHostApi {
 
 type ViewerMountFn = (el: HTMLElement, api: ViewerHostApi) => {
   open: (kind: string, threadId: string) => void;
+  addBeside?: (kind: string, threadId: string) => void;
   close: () => void;
   reconcileHas?: (has: RailHas) => void;
 };
@@ -525,12 +526,16 @@ function mountApp(): void {
     },
   });
 
-  const rail = new RailView(railEl, (id) => {
+  const rail = new RailView(railEl, (id, beside) => {
     if (id === "commands") {
       palette.open();
       return;
     }
     if (!selectedThreadId) return;
+    if (beside && hub.hasFeature("layout") && activeRailKind && id !== "split" && id !== "terminal" && id !== "browser") {
+      addViewerBeside(id);
+      return;
+    }
     if (activeRailKind === id) closeViewer();
     else openViewer(id);
   });
@@ -711,6 +716,28 @@ function mountApp(): void {
     if (notifyHub && selectedThreadId && hub.getState() === "connected") {
       void hub.rpc("viewer.watch", { thread: selectedThreadId, kind: "" }).catch(() => {});
     }
+  }
+
+  function addViewerBeside(kind: string): void {
+    if (!selectedThreadId) return;
+    railGen++;
+    viewerEl.classList.remove("bp-hidden");
+    syncRightArea();
+    if (!viewerController && typeof mountViewerPane === "function") {
+      viewerController = (mountViewerPane as ViewerMountFn)(viewerEl, {
+        hub,
+        getThreadId: () => selectedThreadId,
+        closeViewer: () => closeViewer(true),
+      });
+    }
+    if (viewerController?.addBeside) {
+      activeRailKind = "split";
+      rail.setActive("split");
+      viewerController.addBeside(kind, selectedThreadId);
+    } else {
+      openViewer(kind);
+    }
+    if (window.innerWidth <= 640) setPhoneTab("viewer");
   }
 
   function openViewer(kind: string): void {
