@@ -4784,7 +4784,7 @@ mod tests {
         assert_eq!(runtime_stop_reason(CLOSED, ""), "crashed");
         assert_eq!(runtime_stop_reason("stopped", "idle"), "idle");
     }
-    #[test] fn kicads_own_switch_is_published_whatever_kicad_answers() {
+    #[test] fn after_kicads_own_switch_only_its_frames_follow() {
         let f = Frame { kind: "SCH".into(), doc: String::new(), title: String::new(), modified: false, shown: true, realized: true, xid: 5, min_w: 0, min_h: 0 };
         // (the switch itself is published as the hub sets it, before KiCad is asked; after KiCad's answer only its frames follow)
         assert!(matches!(after_kicad_switch("/p".into(), 2, Ok(Some((9, String::new(), vec![f])))), Some(Msg::FramesUpdated { gen: 2, holder: Some(9), ref frames, .. }) if frames.len() == 1));
