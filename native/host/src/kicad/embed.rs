@@ -4900,7 +4900,7 @@ mod tests {
         { let s = a.sessions.get_mut(&pro).unwrap(); s.active = "SCH".into(); s.editor_req = Default::default(); }
         a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
         let (rtx, _rrx) = oneshot::channel();
-        a.show(0, pro.clone(), "PCB".into(), String::new(), String::new(), false, false, rtx);
+        a.show(0, pro.clone(), "PCB".into(), String::new(), String::new(), false, false, Value::Null, rtx);
         assert_eq!(opening(&a).map(|o| o.person_switched), Some(false), "the hub's own show is not the person's choice");
         // a frame KiCad raised itself (no actor) is not the person's choice either
         a.handle(req("FK_PCB", false, ""));
@@ -4923,7 +4923,7 @@ mod tests {
         // its editor put on show by another road (the person's click on its tab): the label is not current any more
         a.handle(opened("SYMBOL_EDITOR")); a.handle(req("FK_SYMBOL_EDITOR", false, ""));
         let (rtx, _rrx) = oneshot::channel();
-        a.show(0, pro.clone(), "SYMBOL_EDITOR".into(), String::new(), String::new(), false, false, rtx);
+        a.show(0, pro.clone(), "SYMBOL_EDITOR".into(), String::new(), String::new(), false, false, Value::Null, rtx);
         assert!(opening(&a).is_none(), "shown by another road: not said as opening any more");
         // D: another KiCad (a restart) or a stopped one: the label is over
         { let s = a.sessions.get_mut(&pro).unwrap(); s.active = "SCH".into(); s.pid = 777; }
