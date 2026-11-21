@@ -3,7 +3,8 @@
 // sidebar (This computer, ACTIVE/BOTS/ROOMS, bottom-left Connected status),
 // bottom-anchored chat timeline, tall composer + toolbar row, hub-driven right rail
 // with PR #1367 `has` reconciliation + `railGen` staleness guard, and Settings › Devices modal.
-import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
+import { ChatView, type EntryFile, type EntryItem, type ReviewBar, type UnansweredNotice } from "./chat";
+import { viewerKindForFile } from "./chat-files";
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { onLocaleChange, setLocale, t } from "./i18n";
 import { MgmtStrip } from "./mgmt";
@@ -360,6 +361,9 @@ function mountApp(): void {
         if (res.mime && res.data) return { mime: res.mime, data: res.data };
       } catch { /* ignore */ }
       return null;
+    },
+    onOpenFile: (file: EntryFile) => {
+      openViewer(viewerKindForFile(file.path));
     },
   });
 
@@ -1326,6 +1330,7 @@ function mountApp(): void {
       const back = typeof (hello as { hubBack?: unknown }).hubBack === "string" ? String((hello as { hubBack?: unknown }).hubBack) : "";
       if (back) { try { const b = JSON.parse(back) as { reason?: string; text?: string }; if (b.reason === "crash") { sidebar.setConnStatus(t("hub.back.crash", b.text ?? ""), "bp-warn"); window.setTimeout(() => renderConnStatus(hub.getState()), 6000); } } catch { /* nothing to say */ } }
       composer.setFeatures(hub.hasFeature("images"), hub.hasFeature("voice"));
+      chat.setFileLinksEnabled(hub.hasFeature("fileLinks"));
       if (Array.isArray(hello.commands)) {
         helloCommands = hello.commands as SlashCommand[];
         composer.setCommands(helloCommands);

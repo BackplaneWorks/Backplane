@@ -2,9 +2,18 @@
 // Bottom-anchored conversation, right-aligned user bubble with Copy · Reply · time,
 // left-aligned plain assistant reply with Finished time · Copy · Reply,
 // hidden routine git/system notes, load-on-scroll pagination, asks, #1309 review bar, #1311 unanswered notice.
+import {
+  basenameOf,
+  fileDownloadUrl,
+  findChatLinkSpans,
+  formatFileSize,
+  type EntryFile,
+} from "./chat-files";
 import { t } from "./i18n";
 import { renderMarkdown } from "./md";
 import type { ThreadItem } from "./sidebar";
+
+export type { EntryFile };
 
 export interface EntryTool { name: string; summary?: string; state?: string; }
 export interface EntryAsk {
@@ -34,6 +43,7 @@ export interface EntryItem {
   replyTo?: { id: string; quote: string };
   images?: string[];
   attachments?: EntryAttachment[];
+  files?: EntryFile[];
 }
 export interface ReviewBar { on?: boolean; text?: string; button?: string; }
 export interface UnansweredNotice {
@@ -50,6 +60,7 @@ export interface ChatCallbacks {
   onUnansweredAction: (action: string, value: string) => void;
   onReplyEntry: (entry: EntryItem) => void;
   onLoadImage: (entryId: string, path: string) => Promise<{ mime: string; data: string } | null>;
+  onOpenFile?: (file: EntryFile) => void;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -122,6 +133,7 @@ export class ChatView {
   private liveNodes = new Map<string, HTMLElement>();
   private imageCache = new Map<string, string>();
   private pinnedToBottom = true;
+  private fileLinksEnabled = false;
 
   constructor(container: HTMLElement, cb: ChatCallbacks) {
     this.cb = cb;
@@ -214,6 +226,14 @@ export class ChatView {
     btn.addEventListener("click", onRetry);
     box.append(msg, btn);
     this.listEl.replaceChildren(box);
+  }
+
+  public setFileLinksEnabled(on: boolean): void {
+    if (this.fileLinksEnabled === on) return;
+    this.fileLinksEnabled = on;
+    if (this.thread && this.entries.length > 0) {
+      this.renderEntries(false);
+    }
   }
 
   public getEntries(): EntryItem[] {
@@ -546,7 +566,10 @@ export class ChatView {
       const hasBody = Boolean(entry.text && entry.text.trim().length > 0);
       const hasImages = Boolean(entry.images && entry.images.length > 0);
       const hasAtts = Boolean(entry.attachments && entry.attachments.length > 0);
-      if (!hasBody && !hasImages && !hasAtts && !entry.live) continue;
+      const entryFiles = this.fileLinksEnabled && entry.kind === "assistant" && Array.isArray(entry.files)
+        ? entry.files
+        : [];
+      if (!hasBody && !hasImages && !hasAtts && entryFiles.length === 0 && !entry.live) continue;
 
       if (entry.replyTo?.quote) {
         const rq = document.createElement("div");
@@ -559,9 +582,19 @@ export class ChatView {
         const body = document.createElement("div");
         body.className = "bp-entry-body";
         if (entry.kind === "user") body.textContent = entry.text;
-        else body.appendChild(renderMarkdown(entry.text || ""));
+        else {
+          body.appendChild(renderMarkdown(entry.text || ""));
+          if (this.fileLinksEnabled && !entry.live) {
+            this.linkifyFiles(body, entryFiles);
+          }
+        }
         if (entry.live) this.liveNodes.set(entry.id, body);
         row.appendChild(body);
+      }
+
+      if (entryFiles.length > 0 && !entry.live) {
+        const strip = this.renderEntryFiles(entryFiles);
+        if (strip) row.appendChild(strip);
       }
 
       if (hasAtts && entry.attachments) {
@@ -612,5 +645,139 @@ export class ChatView {
     }
     this.listEl.replaceChildren(frag);
     if (scrollToBottom) this.scrollToBottom();
+  }
+
+  private linkifyFiles(root: HTMLElement, files: EntryFile[]): void {
+    const threadId = this.thread?.id;
+    const textNodes: Text[] = [];
+    const walk = (node: Node): void => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        if (node.nodeValue) textNodes.push(node as Text);
+        return;
+      }
+      if (node.nodeType !== Node.ELEMENT_NODE) return;
+      const el = node as HTMLElement;
+      const tag = el.tagName;
+      if (tag === "PRE" || tag === "A" || tag === "BUTTON") return;
+      for (let child = el.firstChild; child; child = child.nextSibling) {
+        walk(child);
+      }
+    };
+    walk(root);
+
+    for (const tn of textNodes) {
+      const val = tn.nodeValue || "";
+      const spans = findChatLinkSpans(val, files);
+      if (spans.length === 0) continue;
+      const frag = document.createDocumentFragment();
+      let cursor = 0;
+      for (const sp of spans) {
+        if (sp.start > cursor) {
+          frag.appendChild(document.createTextNode(val.slice(cursor, sp.start)));
+        }
+        if (sp.kind === "share" && sp.sharePath) {
+          const a = document.createElement("a");
+          a.className = "bp-share-link";
+          a.href = sp.sharePath;
+          a.setAttribute("download", basenameOf(sp.sharePath));
+          a.rel = "noopener noreferrer";
+          a.setAttribute("data-testid", "chat-share-link");
+          a.textContent = sp.label;
+          frag.appendChild(a);
+        } else if (sp.kind === "file" && sp.file) {
+          const f = sp.file;
+          const dlUrl = fileDownloadUrl(f.path, threadId);
+          const dlName = f.name || basenameOf(f.path);
+          if (f.open === "view" && this.cb.onOpenFile) {
+            const btn = document.createElement("button");
+            btn.type = "button";
+            btn.className = "bp-file-link";
+            btn.setAttribute("data-testid", "chat-file-link");
+            btn.textContent = sp.label;
+            btn.addEventListener("click", () => this.cb.onOpenFile?.(f));
+            frag.appendChild(btn);
+            if (dlUrl) {
+              const dl = document.createElement("a");
+              dl.className = "bp-file-dl-mini";
+              dl.href = dlUrl;
+              dl.setAttribute("download", dlName);
+              dl.rel = "noopener noreferrer";
+              dl.title = `${t("common.download", "Download")} ${dlName}`;
+              dl.setAttribute("aria-label", `${t("common.download", "Download")} ${dlName}`);
+              dl.setAttribute("data-testid", "chat-file-dl");
+              dl.textContent = "↓";
+              frag.appendChild(dl);
+            }
+          } else if (dlUrl) {
+            const a = document.createElement("a");
+            a.className = "bp-file-link";
+            a.href = dlUrl;
+            a.setAttribute("download", dlName);
+            a.rel = "noopener noreferrer";
+            a.setAttribute("data-testid", "chat-file-link");
+            a.textContent = sp.label;
+            frag.appendChild(a);
+          } else {
+            frag.appendChild(document.createTextNode(sp.label));
+          }
+        }
+        cursor = sp.end;
+      }
+      if (cursor < val.length) {
+        frag.appendChild(document.createTextNode(val.slice(cursor)));
+      }
+      tn.parentNode?.replaceChild(frag, tn);
+    }
+  }
+
+  private renderEntryFiles(files: EntryFile[]): HTMLElement | null {
+    const threadId = this.thread?.id;
+    const strip = document.createElement("div");
+    strip.className = "bp-entry-files";
+    strip.setAttribute("data-testid", "entry-files");
+    for (const f of files) {
+      const dlUrl = fileDownloadUrl(f.path, threadId);
+      if (!dlUrl) continue;
+      const name = f.name || basenameOf(f.path);
+      const chip = document.createElement("div");
+      chip.className = "bp-file-chip";
+      chip.setAttribute("data-testid", "entry-file-chip");
+
+      const lbl = document.createElement("span");
+      lbl.className = "bp-file-chip-name";
+      lbl.textContent = name;
+      lbl.title = f.path;
+      chip.appendChild(lbl);
+
+      const sz = formatFileSize(f.size);
+      if (sz) {
+        const sizeEl = document.createElement("span");
+        sizeEl.className = "bp-file-chip-size";
+        sizeEl.textContent = sz;
+        chip.appendChild(sizeEl);
+      }
+
+      if (f.open === "view" && this.cb.onOpenFile) {
+        const viewBtn = document.createElement("button");
+        viewBtn.type = "button";
+        viewBtn.className = "bp-file-chip-act";
+        viewBtn.textContent = t("common.view", "View");
+        viewBtn.setAttribute("data-testid", "entry-file-view");
+        viewBtn.addEventListener("click", () => this.cb.onOpenFile?.(f));
+        chip.appendChild(viewBtn);
+      }
+
+      const dl = document.createElement("a");
+      dl.className = "bp-file-chip-act";
+      dl.href = dlUrl;
+      dl.setAttribute("download", name);
+      dl.rel = "noopener noreferrer";
+      dl.textContent = t("common.download", "Download");
+      dl.setAttribute("data-testid", "entry-file-download");
+      chip.appendChild(dl);
+
+      strip.appendChild(chip);
+    }
+    return strip.childElementCount > 0 ? strip : null;
   }
 }

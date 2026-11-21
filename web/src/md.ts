@@ -37,12 +37,20 @@ function appendInline(parent: HTMLElement, text: string): void {
       parent.appendChild(em);
     } else if (tok.startsWith("[")) {
       const label = m[2] ?? "";
-      const href = safeUrl(m[3] ?? "");
+      const rawHref = m[3] ?? "";
+      const href = safeUrl(rawHref);
       if (href) {
         const a = document.createElement("a");
         a.href = href;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
+        if (rawHref.startsWith("/s/") || rawHref.startsWith("/file?") || rawHref.startsWith("/files/get?")) {
+          a.setAttribute("download", "");
+          a.rel = "noopener noreferrer";
+          a.className = "bp-share-link";
+          a.setAttribute("data-testid", "chat-share-link");
+        } else {
+          a.target = "_blank";
+          a.rel = "noopener noreferrer";
+        }
         a.textContent = label;
         parent.appendChild(a);
       } else {

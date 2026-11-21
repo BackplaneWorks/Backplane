@@ -428,6 +428,68 @@ button.primary.stop {
 .bp-entry-images { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .bp-reply-img { max-width: 420px; max-height: 300px; border: 1px solid var(--line); }
 
+/* Chat file & share links (data/1 feature `fileLinks`) */
+.bp-file-link,
+.bp-share-link {
+  color: var(--accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.bp-file-link:hover,
+.bp-share-link:hover { filter: brightness(1.15); }
+.bp-file-dl-mini {
+  display: inline-block;
+  margin-left: 3px;
+  padding: 0 3px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--dim);
+  border: 1px solid var(--line);
+  text-decoration: none;
+}
+.bp-file-dl-mini:hover { color: var(--text); border-color: var(--faint); }
+.bp-entry-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.bp-file-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  font-family: var(--mono);
+  font-size: 11px;
+  max-width: 100%;
+}
+.bp-file-chip-name {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+.bp-file-chip-size { color: var(--faint); flex-shrink: 0; }
+.bp-file-chip-act {
+  color: var(--accent);
+  background: transparent;
+  border: 0;
+  padding: 0;
+  font: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.bp-file-chip-act:hover { text-decoration: underline; }
+
 .bp-tool-pill {
   display: inline-flex;
   align-items: center;
