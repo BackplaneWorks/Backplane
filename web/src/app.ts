@@ -39,11 +39,13 @@ export interface ViewerHostApi {
   hub: HubClient;
   getThreadId: () => string;
   closeViewer: () => void;
+  onPageChange?: (kind: string) => void;
 }
 
 type ViewerMountFn = (el: HTMLElement, api: ViewerHostApi) => {
   open: (kind: string, threadId: string) => void;
   addBeside?: (kind: string, threadId: string) => void;
+  restoreLayout?: (threadId: string) => void;
   close: () => void;
   reconcileHas?: (has: RailHas) => void;
 };
@@ -718,22 +720,69 @@ function mountApp(): void {
     }
   }
 
-  function addViewerBeside(kind: string): void {
-    if (!selectedThreadId) return;
-    railGen++;
-    viewerEl.classList.remove("bp-hidden");
-    syncRightArea();
+  function ensureViewerController(): ReturnType<ViewerMountFn> | null {
     if (!viewerController && typeof mountViewerPane === "function") {
       viewerController = (mountViewerPane as ViewerMountFn)(viewerEl, {
         hub,
         getThreadId: () => selectedThreadId,
         closeViewer: () => closeViewer(true),
+        onPageChange: (nextKind: string) => {
+          activeRailKind = nextKind;
+          rail.setActive(nextKind);
+        },
       });
     }
-    if (viewerController?.addBeside) {
+    return viewerController;
+  }
+
+  function restoreViewerOnReturn(threadId: string, gen: number): void {
+    if (!threadId) return;
+    if (activeRailKind === "split" && hub.hasFeature("layout")) {
+      railGen++;
+      viewerEl.classList.remove("bp-hidden");
+      syncRightArea();
+      const ctrl = ensureViewerController();
+      if (ctrl?.restoreLayout) {
+        ctrl.restoreLayout(threadId);
+        return;
+      }
+    }
+    if (activeRailKind) {
+      openViewer(activeRailKind);
+      return;
+    }
+    // After a page reload (no activeRailKind yet), passively check whether the hub holds a saved multi-tile/overlay layout for this thread.
+    if (hub.hasFeature("layout") && !threadId.includes("~")) {
+      const w = Math.max(100, Math.min(8192, Math.round(viewerEl.clientWidth || Math.round(window.innerWidth * 0.5) || 960)));
+      const h = Math.max(100, Math.min(8192, Math.round(viewerEl.clientHeight || Math.round(window.innerHeight - 60) || 640)));
+      void hub
+        .rpc<{ tiles?: Array<{ overlay?: unknown }> }>("viewer.layout", { thread: threadId, bounds: [w, h] })
+        .then((lay) => {
+          if (gen !== threadGen || selectedThreadId !== threadId || activeRailKind) return;
+          const tiles = Array.isArray(lay?.tiles) ? lay.tiles : [];
+          if (tiles.length >= 2 || tiles.some((x) => x && x.overlay != null)) {
+            activeRailKind = "split";
+            rail.setActive("split");
+            viewerEl.classList.remove("bp-hidden");
+            syncRightArea();
+            const ctrl = ensureViewerController();
+            ctrl?.restoreLayout?.(threadId);
+          }
+        })
+        .catch(() => {});
+    }
+  }
+
+  function addViewerBeside(kind: string): void {
+    if (!selectedThreadId) return;
+    railGen++;
+    viewerEl.classList.remove("bp-hidden");
+    syncRightArea();
+    const ctrl = ensureViewerController();
+    if (ctrl?.addBeside) {
       activeRailKind = "split";
       rail.setActive("split");
-      viewerController.addBeside(kind, selectedThreadId);
+      ctrl.addBeside(kind, selectedThreadId);
     } else {
       openViewer(kind);
     }
@@ -746,13 +795,7 @@ function mountApp(): void {
     rail.setActive(kind);
     viewerEl.classList.remove("bp-hidden");
     syncRightArea();
-    if (!viewerController && typeof mountViewerPane === "function") {
-      viewerController = (mountViewerPane as ViewerMountFn)(viewerEl, {
-        hub,
-        getThreadId: () => selectedThreadId,
-        closeViewer: () => closeViewer(true),
-      });
-    }
+    ensureViewerController();
     if (viewerController) {
       // PR #1367 rule (3): direct destination open replaces active watch without a separate stop first.
       viewerController.open(kind, selectedThreadId);
@@ -1142,7 +1185,7 @@ function mountApp(): void {
       putThreadCache(threadId, { entries, ids, olderCursor, review, unanswered, rail: nextRail, hashes });
       chat.setThread(th, entries, Boolean(olderCursor), review, unanswered);
       void watchMgmtForThread(threadId, gen);
-      if (activeRailKind) openViewer(activeRailKind);
+      restoreViewerOnReturn(threadId, gen);
       return;
     }
 
@@ -1208,7 +1251,7 @@ function mountApp(): void {
 
     void refreshRail(threadId, gen);
     void watchMgmtForThread(threadId, gen);
-    if (activeRailKind) openViewer(activeRailKind);
+    restoreViewerOnReturn(threadId, gen);
   }
 
   async function watchMgmtForThread(threadId: string, gen: number): Promise<void> {

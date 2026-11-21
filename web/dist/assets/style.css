@@ -2434,6 +2434,12 @@ html.light .bp-v-overlay {
   overflow: hidden;
 }
 
+.bp-tile-body-stage {
+  width: 100%;
+  height: 100%;
+  position: relative;
+}
+
 .bp-tile-split {
   position: absolute;
   z-index: 12;

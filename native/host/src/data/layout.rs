@@ -230,7 +230,10 @@ fn owned_key(key: &str, thread: &str) -> bool {
 /// The drafts kept on disk: the stored layout and the picked board, both root-relative.
 fn persisted_key(key: &str, thread: &str) -> bool { key == format!("@view.layout:{thread}") || key == format!("@view.board:{thread}") }
 fn has_layout(drafts: &serde_json::Map<String, Value>, thread: &str) -> bool {
-    drafts.get(&format!("@view.layout:{thread}")).and_then(Value::as_str).is_some_and(|t| serde_json::from_str::<Layout>(t).map_or(false, |l| l.tiles().len() >= 2))
+    drafts.get(&format!("@view.layout:{thread}")).and_then(Value::as_str).is_some_and(|t| {
+        serde_json::from_str::<Layout>(t)
+            .map_or(false, |l| l.tiles().len() >= 2 || l.tiles().iter().any(|x| x.overlay.is_some()))
+    })
 }
 
 /// The synthetic session the hub's layout code reads for this device: its own drafts and nothing else (no `info`, no other thread's drafts).

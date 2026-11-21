@@ -4,24 +4,33 @@
 
 import { t } from "../i18n";
 import type { ViewerHostApi } from "../app";
-import { decodeCbor, decodePlot2DFrame, isPlotFrame, type CborValue, type PlotChunk } from "./cbor";
+import {
+  decodeCbor,
+  decodePlot2DFrame,
+  isPlotFrame,
+  type CborValue,
+  type Plot2DFrame,
+  type PlotChunk,
+} from "./cbor";
 import { mountDiffPane, mountFilesPane, mountReviewPane, type PaneHandle } from "./panes";
 import { Plot2DViewer } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
 import {
   canOverlayGerbers,
+  classifyLayoutTransition,
   formatLayoutError,
   isRowSplit,
-  isTiledOrOverlayLayout,
   normalizeBounds,
   proposedSplitRatio,
-  routeFrameToTiles,
+  resolveGerberOverlayArg,
   TILE_KINDS,
+  TileFrameRouter,
   type LayoutReply,
   type LayoutSplit,
   type LayoutTile,
   type LayoutWatchReply,
   type OverlayMode,
+  type QueuedTileFrame,
 } from "./tiles-state";
 
 interface TileInstance {
@@ -41,9 +50,11 @@ interface TileInstance {
 export interface TileGridCallbacks {
   pageLabel: (kind: string) => string;
   isLight: () => boolean;
-  hasGerbers: () => boolean;
+  gerberSource: () => string;
+  ensureGerberSource: () => Promise<string>;
   onRefusal: (msg: string) => void;
-  onExitToSingle: (kind: string) => void;
+  onExitToSingle: (kind: string, source: string) => void;
+  onEmptyLayout: () => void;
   onOpenFileViewer: (kind: string, relPath: string) => void;
 }
 
@@ -74,7 +85,7 @@ export class TileGridController {
 
   private threadId = "";
   private layout: LayoutReply | null = null;
-  private tileKeys: Record<string, string[]> = {};
+  private router = new TileFrameRouter<Plot2DFrame>();
   private heldChunks = new Map<string, PlotChunk[]>();
   private instances = new Map<string, TileInstance>();
   private splitEls: HTMLElement[] = [];
@@ -115,7 +126,10 @@ export class TileGridController {
 
     this.onDocClick = (e: MouseEvent) => {
       if (this.addMenuEl.hidden) return;
-      if (e.target instanceof Node && (this.addMenuEl.contains(e.target) || (e.target as HTMLElement).closest?.("[data-tile-add-btn]"))) {
+      if (
+        e.target instanceof Node &&
+        (this.addMenuEl.contains(e.target) || (e.target as HTMLElement).closest?.("[data-tile-add-btn]"))
+      ) {
         return;
       }
       this.closeAddMenu();
@@ -136,7 +150,7 @@ export class TileGridController {
         if (this.resizeTimer) window.clearTimeout(this.resizeTimer);
         this.resizeTimer = window.setTimeout(() => {
           this.resizeTimer = 0;
-          void this.refreshLayout(false);
+          void this.refreshLayout(false, true);
         }, 120);
       });
       this.ro.observe(this.canvasEl);
@@ -154,13 +168,28 @@ export class TileGridController {
     return this.layout;
   }
 
+  private setThread(threadId: string): void {
+    if (this.threadId !== threadId) {
+      this.threadId = threadId;
+      this.router.reset();
+      this.heldChunks.clear();
+    }
+  }
+
+  /** Explicit user Split click: calls `viewer.layout.act { op: "show", kind: "split" }`. */
   async openSplit(threadId: string): Promise<void> {
-    this.threadId = threadId;
-    await this.runAct("show", { kind: "split" }, true);
+    this.setThread(threadId);
+    await this.runAct("show", { kind: "split" }, true, false);
+  }
+
+  /** Passive restore on thread return or reconnect: reads `viewer.layout` without replaying `show split`. */
+  async restorePassive(threadId: string): Promise<void> {
+    this.setThread(threadId);
+    await this.refreshLayout(false, true);
   }
 
   async openAddBeside(threadId: string, kind: string, seedPage?: string): Promise<void> {
-    this.threadId = threadId;
+    this.setThread(threadId);
     await this.runAct(
       "add",
       {
@@ -168,31 +197,41 @@ export class TileGridController {
         side: "right",
         ...(seedPage ? { page: seedPage } : {}),
       },
-      true
+      true,
+      false
     );
   }
 
   async openOverlayGerbers(threadId: string, seedPage?: string, mode: OverlayMode = "diff"): Promise<void> {
-    this.threadId = threadId;
+    this.setThread(threadId);
     const bounds = this.measureBounds();
     try {
-      const cur = await this.api.hub.rpc<LayoutReply>("viewer.layout", {
-        thread: threadId,
-        bounds,
-        ...(seedPage ? { page: seedPage } : {}),
-      });
+      const [gerbers, cur] = await Promise.all([
+        this.cb.ensureGerberSource(),
+        this.api.hub.rpc<LayoutReply>("viewer.layout", {
+          thread: threadId,
+          bounds,
+          ...(seedPage ? { page: seedPage } : {}),
+        }),
+      ]);
       if (!this.alive || this.threadId !== threadId) return;
       const boardTile = cur.tiles.find((x) => x.kind === "board") || cur.tiles[0];
       if (!boardTile) return;
+      const arg = resolveGerberOverlayArg(cur, boardTile.id, gerbers, mode);
+      if (!arg) {
+        this.cb.onRefusal("No Gerbers in this project");
+        return;
+      }
       await this.runAct(
         "overlay",
         {
           tile: boardTile.id,
-          overlay: { kind: "gerbers", mode },
-          mode,
+          overlay: arg.overlay,
+          mode: arg.mode,
           ...(seedPage ? { page: seedPage } : {}),
         },
-        true
+        true,
+        false
       );
     } catch (err) {
       this.cb.onRefusal(formatLayoutError(err));
@@ -200,18 +239,18 @@ export class TileGridController {
   }
 
   async syncExisting(threadId: string, layout: LayoutReply): Promise<void> {
-    this.threadId = threadId;
-    this.applyLayout(layout);
+    this.setThread(threadId);
+    if (!this.applyTransition(layout, true)) return;
     await this.installWatch(false);
   }
 
   async handleLayoutPush(pushThread: string, rev: number): Promise<void> {
     if (!this.alive || !this.threadId || pushThread !== this.threadId) return;
     if (this.layout && this.layout.rev === rev) return;
-    await this.refreshLayout(false);
+    await this.refreshLayout(false, true);
   }
 
-  private async refreshLayout(forceWatch: boolean): Promise<void> {
+  private async refreshLayout(forceWatch: boolean, allowCollapse: boolean): Promise<void> {
     if (!this.alive || !this.threadId) return;
     const gen = ++this.gen;
     const bounds = this.measureBounds();
@@ -222,7 +261,7 @@ export class TileGridController {
         bounds,
       });
       if (!this.alive || gen !== this.gen) return;
-      this.applyLayout(next);
+      if (!this.applyTransition(next, allowCollapse)) return;
       await this.installWatch(forceWatch);
     } catch (err) {
       if (!this.alive || gen !== this.gen) return;
@@ -233,13 +272,15 @@ export class TileGridController {
   private async runAct(
     op: string,
     params: Record<string, unknown>,
-    forceInstallWatch: boolean
+    forceInstallWatch: boolean,
+    allowCollapse = true
   ): Promise<void> {
     if (!this.alive || !this.threadId) return;
     const gen = ++this.gen;
     const bounds = this.measureBounds();
     this.lastBounds = bounds;
     this.cb.onRefusal("");
+    this.router.beginWatch();
     try {
       const res = await this.api.hub.rpc<LayoutReply>("viewer.layout.act", {
         thread: this.threadId,
@@ -251,18 +292,17 @@ export class TileGridController {
       if (res.watchError?.message) {
         this.cb.onRefusal(res.watchError.message);
       }
-      if (!isTiledOrOverlayLayout(res) && res.tiles.length === 1 && op === "close") {
-        this.cb.onExitToSingle(res.tiles[0].kind);
-        return;
-      }
-      this.applyLayout(res);
+      if (!this.applyTransition(res, allowCollapse)) return;
       if (res.watch && res.watch.tiles) {
         this.adoptWatch(res.watch);
-      } else if (forceInstallWatch || Object.keys(this.tileKeys).length === 0) {
+      } else if (forceInstallWatch || Object.keys(this.router.tileKeys).length === 0) {
         await this.installWatch(false);
+      } else {
+        this.router.watchPending = false;
       }
     } catch (err) {
       if (!this.alive || gen !== this.gen) return;
+      this.router.watchPending = false;
       this.cb.onRefusal(formatLayoutError(err));
     }
   }
@@ -272,6 +312,7 @@ export class TileGridController {
     const gen = this.gen;
     const bounds = this.measureBounds();
     this.lastBounds = bounds;
+    this.router.beginWatch();
     try {
       const w = await this.api.hub.rpc<LayoutWatchReply>("viewer.watch", {
         thread: this.threadId,
@@ -283,16 +324,100 @@ export class TileGridController {
       this.adoptWatch(w);
     } catch (err) {
       if (!this.alive || gen !== this.gen) return;
+      this.router.watchPending = false;
       this.cb.onRefusal(formatLayoutError(err));
     }
   }
 
+  /** Unified passive / action / push transition handler. Returns false if the grid exited. */
+  private applyTransition(next: LayoutReply, allowCollapse: boolean): boolean {
+    const tr = classifyLayoutTransition(next);
+    if (tr.action === "empty") {
+      this.router.reset();
+      this.heldChunks.clear();
+      this.cb.onEmptyLayout();
+      return false;
+    }
+    if (tr.action === "single" && allowCollapse) {
+      this.router.reset();
+      this.heldChunks.clear();
+      this.cb.onExitToSingle(tr.kind, tr.source);
+      return false;
+    }
+    this.applyLayout(next);
+    return true;
+  }
+
   private adoptWatch(w: LayoutWatchReply): void {
-    this.tileKeys = w && typeof w.tiles === "object" && w.tiles ? w.tiles : {};
-    // Drop cached chunk state for keys no longer watched
+    const visibleIds = Array.from(this.instances.keys());
+    const { drained, emptyTileIds, changedTileIds } = this.router.commitWatch(visibleIds, w);
+
+    // Prune chunk deltas for dropped keys
     const liveKeys = new Set<string>(Array.isArray(w?.keys) ? w.keys : []);
+    for (const ks of Object.values(this.router.tileKeys)) {
+      if (Array.isArray(ks)) {
+        for (const k of ks) liveKeys.add(k);
+      }
+    }
     for (const k of Array.from(this.heldChunks.keys())) {
       if (!liveKeys.has(k)) this.heldChunks.delete(k);
+    }
+
+    // Update data-tile-keys attribute for diagnostics/tests
+    for (const [id, inst] of this.instances.entries()) {
+      const ks = this.router.tileKeys[id] || [];
+      inst.el.setAttribute("data-tile-keys", ks.join(","));
+    }
+
+    // Clear stale artwork on plot/3D tiles whose watch key set became empty
+    for (const id of emptyTileIds) {
+      const inst = this.instances.get(id);
+      if (!inst || (!isPlot2DKind(inst.kind) && !isSolidKind(inst.kind))) continue;
+      this.resetTileCanvas(inst);
+      this.setTileOverlay(inst.overlayEl, "empty", t("viewer.unavailable", "Nothing to display"), false);
+    }
+
+    // Replay cached latest frame for tiles with unchanged/shared subscriptions, or show loading on changed keys
+    for (const id of changedTileIds) {
+      const inst = this.instances.get(id);
+      if (!inst || (!isPlot2DKind(inst.kind) && !isSolidKind(inst.kind))) continue;
+      const replay = this.router.replayForTile(id);
+      if (replay.plots.length > 0 && inst.plot2d) {
+        inst.overlayEl.hidden = true;
+        for (const f of replay.plots) inst.plot2d.setFrame(f);
+      } else if (replay.nones.length > 0) {
+        const last = replay.nones[replay.nones.length - 1];
+        this.setTileOverlay(inst.overlayEl, last.retryable ? "error" : "empty", last.none || "Nothing to display", last.retryable);
+      }
+    }
+
+    // Drain bounded early frames queued while watchPending was true
+    for (const item of drained) {
+      this.processQueuedFrame(item);
+    }
+  }
+
+  private processQueuedFrame(item: QueuedTileFrame): void {
+    if (item.kind === "bin") this.handleBinary(item.buf);
+    else this.handlePlotNone(item.key, item.none, item.retryable);
+  }
+
+  private resetTileCanvas(inst: TileInstance): void {
+    if (inst.plot2d) {
+      inst.plot2d.destroy();
+      inst.bodyEl.replaceChildren();
+      inst.plot2d = new Plot2DViewer(inst.bodyEl, {});
+      inst.plot2d.setTheme(this.cb.isLight());
+    } else if (inst.solid3d) {
+      inst.solid3d.destroy();
+      inst.bodyEl.replaceChildren();
+      inst.solid3d = new Solid3DViewer(inst.bodyEl, {
+        onStatus: (msg, streaming) => {
+          if (streaming || !msg) inst.overlayEl.hidden = true;
+          else this.setTileOverlay(inst.overlayEl, "loading", msg, false);
+        },
+      });
+      inst.solid3d.setTheme(this.cb.isLight());
     }
   }
 
@@ -377,10 +502,12 @@ export class TileGridController {
     // Create or update visible tiles strictly from hub rect
     for (const tile of visibleTiles) {
       let inst = this.instances.get(tile.id);
+      let freshlyMounted = false;
       if (!inst) {
         inst = this.createInstance(tile);
         this.instances.set(tile.id, inst);
         this.canvasEl.append(inst.el);
+        freshlyMounted = true;
       }
       const r = tile.rect!;
       inst.el.style.left = `${(r.x * 100).toFixed(4)}%`;
@@ -389,6 +516,18 @@ export class TileGridController {
       inst.el.style.height = `${(r.h * 100).toFixed(4)}%`;
       inst.el.classList.toggle("is-focused", !!tile.focused);
       this.renderTileHeader(inst, tile, next);
+
+      // Replay latest cached frame for newly mounted tiles sharing an unchanged subscription
+      if (freshlyMounted && !tile.unavailable) {
+        const replay = this.router.replayForTile(tile.id);
+        if (replay.plots.length > 0 && inst.plot2d) {
+          inst.overlayEl.hidden = true;
+          for (const f of replay.plots) inst.plot2d.setFrame(f);
+        } else if (replay.nones.length > 0) {
+          const last = replay.nones[replay.nones.length - 1];
+          this.setTileOverlay(inst.overlayEl, last.retryable ? "error" : "empty", last.none || "Nothing to display", last.retryable);
+        }
+      }
     }
 
     // Render hub splitters (none in stack mode)
@@ -412,14 +551,18 @@ export class TileGridController {
     const headEl = document.createElement("div");
     headEl.className = "bp-tile-head";
 
+    const bodyWrap = document.createElement("div");
+    bodyWrap.className = "bp-tile-body";
+
     const bodyEl = document.createElement("div");
-    bodyEl.className = "bp-tile-body";
+    bodyEl.className = "bp-tile-body-stage";
 
     const overlayEl = document.createElement("div");
     overlayEl.className = "bp-v-overlay";
     overlayEl.hidden = true;
 
-    el.append(headEl, bodyEl, overlayEl);
+    bodyWrap.append(bodyEl, overlayEl);
+    el.append(headEl, bodyWrap);
 
     el.addEventListener("pointerdown", () => {
       if (this.layout && this.layout.focus !== tile.id) {
@@ -432,17 +575,17 @@ export class TileGridController {
     let pane: PaneHandle | null = null;
 
     if (tile.unavailable) {
-      this.setTileOverlay(overlayEl, "empty", t("viewer.unavailable", "Source unavailable"));
+      this.setTileOverlay(overlayEl, "empty", t("viewer.unavailable", "Source unavailable"), false);
     } else if (isPlot2DKind(tile.kind)) {
-      this.setTileOverlay(overlayEl, "loading", "Loading…");
+      this.setTileOverlay(overlayEl, "loading", "Loading…", false);
       plot2d = new Plot2DViewer(bodyEl, {});
       plot2d.setTheme(this.cb.isLight());
     } else if (isSolidKind(tile.kind)) {
-      this.setTileOverlay(overlayEl, "loading", "Loading…");
+      this.setTileOverlay(overlayEl, "loading", "Loading…", false);
       solid3d = new Solid3DViewer(bodyEl, {
         onStatus: (msg, streaming) => {
           if (streaming || !msg) overlayEl.hidden = true;
-          else this.setTileOverlay(overlayEl, "loading", msg);
+          else this.setTileOverlay(overlayEl, "loading", msg, false);
         },
       });
       solid3d.setTheme(this.cb.isLight());
@@ -493,8 +636,9 @@ export class TileGridController {
     const actions = document.createElement("div");
     actions.className = "bp-tile-actions";
 
+    const gerberSrc = this.cb.gerberSource();
     // Gerbers-over-Board overlay controls (Old | Diff | New)
-    if (canOverlayGerbers(tile, this.cb.hasGerbers())) {
+    if (canOverlayGerbers(tile, gerberSrc)) {
       if (tile.overlay) {
         const seg = document.createElement("div");
         seg.className = "bp-tile-overlay-seg";
@@ -512,13 +656,18 @@ export class TileGridController {
           btn.setAttribute("data-testid", `tile-overlay-mode-${m.id}`);
           btn.addEventListener("click", (e) => {
             e.stopPropagation();
+            const src = tile.overlay!.source || gerberSrc;
+            if (!src) {
+              this.cb.onRefusal("No Gerbers in this project");
+              return;
+            }
             void this.runAct(
               "overlay",
               {
                 tile: tile.id,
                 overlay: {
                   kind: tile.overlay!.kind,
-                  ...(tile.overlay!.source ? { source: tile.overlay!.source } : {}),
+                  source: src,
                   mode: m.id,
                 },
                 mode: m.id,
@@ -559,12 +708,17 @@ export class TileGridController {
         ovBtn.setAttribute("data-testid", `tile-overlay-gerbers-${tile.id}`);
         ovBtn.addEventListener("click", (e) => {
           e.stopPropagation();
+          const arg = resolveGerberOverlayArg(this.layout, tile.id, gerberSrc, "diff");
+          if (!arg) {
+            this.cb.onRefusal("No Gerbers in this project");
+            return;
+          }
           void this.runAct(
             "overlay",
             {
               tile: tile.id,
-              overlay: { kind: "gerbers", mode: "diff" },
-              mode: "diff",
+              overlay: arg.overlay,
+              mode: arg.mode,
             },
             false
           );
@@ -674,7 +828,9 @@ export class TileGridController {
       if (!dragging) return;
       dragging = false;
       bar.classList.remove("is-drag");
-      try { bar.releasePointerCapture(ev.pointerId); } catch {}
+      try {
+        bar.releasePointerCapture(ev.pointerId);
+      } catch {}
       void this.runAct("resize", { split: sp.id, ratio: latestRatio }, false);
     };
     bar.addEventListener("pointerup", finishDrag);
@@ -683,7 +839,12 @@ export class TileGridController {
     return bar;
   }
 
-  private setTileOverlay(el: HTMLElement, mode: "loading" | "empty" | "error", text: string): void {
+  private setTileOverlay(
+    el: HTMLElement,
+    mode: "loading" | "empty" | "error",
+    text: string,
+    retryable: boolean
+  ): void {
     el.hidden = false;
     el.className = `bp-v-overlay is-${mode}`;
     const card = document.createElement("div");
@@ -692,19 +853,37 @@ export class TileGridController {
     msg.className = "bp-v-state-msg";
     msg.textContent = text;
     card.append(msg);
+    if (retryable) {
+      const retryBtn = document.createElement("button");
+      retryBtn.type = "button";
+      retryBtn.className = "bp-v-btn is-primary";
+      retryBtn.textContent = t("tools.retry", "Retry");
+      retryBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        void this.installWatch(true);
+      });
+      card.append(retryBtn);
+    }
     el.replaceChildren(card);
   }
 
   handlePlotNone(key: string, none: string, retryable: boolean): void {
-    const targets = routeFrameToTiles(key, this.tileKeys);
+    if (this.router.enqueue({ kind: "none", key, none, retryable })) return;
+    const targets = this.router.recordNone(key, none, retryable);
     for (const tileId of targets) {
       const inst = this.instances.get(tileId);
       if (!inst) continue;
-      this.setTileOverlay(inst.overlayEl, retryable ? "error" : "empty", none || "Nothing to display");
+      this.setTileOverlay(
+        inst.overlayEl,
+        retryable ? "error" : "empty",
+        none || "Nothing to display",
+        retryable
+      );
     }
   }
 
   handleBinary(buf: ArrayBuffer): void {
+    if (this.router.enqueue({ kind: "bin", buf })) return;
     const bytes = new Uint8Array(buf);
     if (!isPlotFrame(bytes)) return;
     const decoded = decodeCbor(bytes);
@@ -714,15 +893,15 @@ export class TileGridController {
     const key = typeof map.key === "string" ? map.key : "";
     if (!key) return;
 
-    const targets = routeFrameToTiles(key, this.tileKeys);
-    if (targets.length === 0) return;
-
     if (typeof map.none === "string") {
       this.handlePlotNone(key, map.none, map.retryable === 1 || (map.retryable as unknown) === true);
       return;
     }
 
     if (map.mesh instanceof Uint8Array || map.parts) {
+      const targets = Object.entries(this.router.tileKeys)
+        .filter(([, ks]) => Array.isArray(ks) && ks.includes(key))
+        .map(([id]) => id);
       for (const tileId of targets) {
         const inst = this.instances.get(tileId);
         if (inst?.solid3d) {
@@ -736,6 +915,7 @@ export class TileGridController {
     const prev = this.heldChunks.get(key) || [];
     const frame = decodePlot2DFrame(map, prev);
     this.heldChunks.set(key, frame.chunks);
+    const targets = this.router.recordPlot(key, frame);
     for (const tileId of targets) {
       const inst = this.instances.get(tileId);
       if (inst?.plot2d) {
@@ -776,7 +956,7 @@ export class TileGridController {
     for (const s of this.splitEls) s.remove();
     this.splitEls = [];
     this.heldChunks.clear();
-    this.tileKeys = {};
+    this.router.reset();
     this.layout = null;
     this.rootEl.remove();
   }

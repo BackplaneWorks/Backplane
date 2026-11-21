@@ -58,6 +58,7 @@ interface ViewerFilesReply {
   pcb?: string;
   sch?: string;
   hasGerbers?: boolean;
+  gerbers?: string;
 }
 
 export interface RailHas {
@@ -118,6 +119,7 @@ function isNonPlotPane(p: string): boolean {
 export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   open: (kind: string, threadId: string) => void;
   addBeside: (kind: string, threadId: string) => void;
+  restoreLayout: (threadId: string) => void;
   close: () => void;
   reconcileHas: (has: RailHas) => void;
 } {
@@ -665,7 +667,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       controlsEl.append(followBtn);
     }
 
-    if (api.hub.hasFeature("layout") && !tileGrid && page === "board" && filesInfo.hasGerbers !== false) {
+    if (api.hub.hasFeature("layout") && !tileGrid && page === "board" && filesInfo.hasGerbers === true && !!filesInfo.gerbers) {
       const ovBtn = document.createElement("button");
       ovBtn.type = "button";
       ovBtn.className = "bp-v-btn";
@@ -938,6 +940,20 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     }
   }
 
+  function gerberSource(): string {
+    return filesInfo.hasGerbers === true && typeof filesInfo.gerbers === "string" ? filesInfo.gerbers : "";
+  }
+
+  async function ensureGerberSource(): Promise<string> {
+    if (!filesInfo.root && threadId) {
+      try {
+        const vf = await api.hub.rpc<ViewerFilesReply>("viewer.files", { thread: threadId });
+        filesInfo = vf || {};
+      } catch {}
+    }
+    return gerberSource();
+  }
+
   function enterTileGrid(): TileGridController {
     watchGen++;
     watchPending = false;
@@ -954,17 +970,23 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     tileGrid = new TileGridController(stage, api, {
       pageLabel,
       isLight,
-      hasGerbers: () => filesInfo.hasGerbers !== false,
+      gerberSource,
+      ensureGerberSource,
       onRefusal: (msg) => setBanner(msg, !!msg),
-      onExitToSingle: (nextKind) => {
+      onExitToSingle: (nextKind, nextSource) => {
         page = nextKind;
-        selectedPath = "";
+        selectedPath = nextSource;
+        api.onPageChange?.(nextKind);
         void startWatch(false);
+      },
+      onEmptyLayout: () => {
+        api.closeViewer();
       },
       onOpenFileViewer: (kind, relPath) => {
         page = kind;
         selectedPath = relPath;
         if (kind === "mech") selectedMech = relPath;
+        api.onPageChange?.(kind);
         void startWatch(false);
       },
     });
@@ -1336,6 +1358,19 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         const grid = enterTileGrid();
         void grid.openAddBeside(threadId, kind, seed);
       }
+    },
+    restoreLayout(nextThread: string) {
+      if (!api.hub.hasFeature("layout")) return;
+      if (nextThread !== threadId) {
+        threadId = nextThread;
+        filesInfo = {};
+        mechParts = [];
+        selectedMech = "";
+        heldChunks.clear();
+      }
+      const grid = enterTileGrid();
+      void ensureGerberSource();
+      void grid.restorePassive(threadId);
     },
     reconcileHas(has: RailHas) {
       if (page && !pageHasBacking(page, has)) {

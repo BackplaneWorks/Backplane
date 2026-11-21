@@ -1734,7 +1734,7 @@ fn parse_stored_layout(drafts: &Value, sel: &str) -> Option<super::layout::Layou
     }
     let l = serde_json::from_str::<super::layout::Layout>(raw).ok()?;
     let ts = l.tiles();
-    let keep = ts.len() >= 2 || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t)));
+    let keep = ts.len() >= 2 || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t) || t.overlay.is_some()));
     keep.then_some(l)
 }
 
@@ -1837,7 +1837,7 @@ fn commit_layout_force(st: &State, hub: &str, session: &Value, sel: &str, root: 
     let prev_multi = parse_stored_layout(&session["drafts"], sel).is_some_and(|l| l.tiles().len() >= 2);
     let ts = next.tiles();
     let multi = ts.len() >= 2;
-    let keep_stored = multi || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t)));
+    let keep_stored = multi || (ts.len() == 1 && ts.iter().all(|t| is_tile_versioned(t) || t.overlay.is_some()));
     let linked = sel.contains('~');
     // Leaving several tiles: the connection still holds the layout's set, whatever single page is left. The page's own watch (or stop) must go out even
     // when its key is the one on show, so the core is told nothing is on show (a value no key equals).
@@ -2127,10 +2127,10 @@ fn commit_layout_core(
         return ViewOut { patch, before, boards_look: false };
     }
 
-    // Stored layout exists while the session has >= 2 tiles OR a single versioned/unresolved tile
-    // (so a surviving historical/unresolved tile never drops back to live default artwork).
+    // Stored layout exists while the session has >= 2 tiles OR a single versioned/overlaid tile
+    // (so a surviving historical/unresolved tile or a single-tile Old/Diff/New overlay never drops back to live default artwork).
     let ts_all = next.tiles();
-    let keep_stored = ts_all.len() >= 2 || (ts_all.len() == 1 && ts_all.iter().all(|t| is_tile_versioned(t)));
+    let keep_stored = ts_all.len() >= 2 || (ts_all.len() == 1 && ts_all.iter().all(|t| is_tile_versioned(t) || t.overlay.is_some()));
     if keep_stored {
         drafts.insert(format!("@view.layout:{sel}"), json!(serde_json::to_string(next).unwrap_or_default()));
     } else if !s(d, &format!("@view.layout:{sel}")).is_empty() {
