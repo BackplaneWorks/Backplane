@@ -80,7 +80,10 @@ function mount(): void {
 
   const subtitle = document.createElement("p");
   subtitle.className = "bp-pair-sub";
-  subtitle.textContent = "Pair this browser with your hub. Approve the 6-digit code in Backplane › Settings › Devices.";
+  subtitle.textContent = t(
+    "web.pair.subtitle",
+    "Pair this browser with your hub. Approve the 6-digit code in Backplane › Settings › Devices.",
+  );
 
   const form = document.createElement("form");
   form.className = "bp-pair-form";
@@ -88,7 +91,7 @@ function mount(): void {
   const label = document.createElement("label");
   label.className = "bp-pair-label";
   label.htmlFor = "bp-device-name";
-  label.textContent = "Browser name";
+  label.textContent = t("web.pair.name", "Browser name");
 
   const input = document.createElement("input");
   input.id = "bp-device-name";
@@ -102,7 +105,7 @@ function mount(): void {
   const submit = document.createElement("button");
   submit.type = "submit";
   submit.className = "primary bp-pair-btn";
-  submit.textContent = "Request pairing";
+  submit.textContent = t("web.pair.request", "Request pairing");
   submit.setAttribute("data-testid", "pair-request-btn");
 
   form.append(label, input, submit);
@@ -113,7 +116,7 @@ function mount(): void {
 
   const codeLabel = document.createElement("div");
   codeLabel.className = "bp-pair-code-label";
-  codeLabel.textContent = "Comparison code";
+  codeLabel.textContent = t("web.pair.code", "Comparison code");
 
   const codeEl = document.createElement("div");
   codeEl.className = "bp-pair-code";
@@ -150,7 +153,7 @@ function mount(): void {
     addrMeta.className = "bp-pair-addr-meta";
     const addrLbl = document.createElement("div");
     addrLbl.className = "bp-pair-code-label";
-    addrLbl.textContent = "Hub address";
+    addrLbl.textContent = t("ios.hub.address.field", "Hub address");
     const addrUrl = document.createElement("code");
     addrUrl.className = "bp-pair-addr-url";
     addrUrl.textContent = fullUrl;
@@ -162,7 +165,7 @@ function mount(): void {
     copyAddr.textContent = copyLbl;
     copyAddr.addEventListener("click", () => {
       navigator.clipboard?.writeText(fullUrl).then(() => {
-        copyAddr.textContent = "Copied";
+        copyAddr.textContent = t("web.clone.copied", "Copied");
         window.setTimeout(() => { copyAddr.textContent = copyLbl; }, 1200);
       }).catch(() => {});
     });
@@ -229,16 +232,20 @@ function mount(): void {
   function updateCountdown(): void {
     const rem = expiresAt - Date.now();
     if (rem <= 0) {
-      showForm("Pairing code expired. Request a new code to try again.", true);
+      showForm(t("web.pair.expired", "Pairing code expired. Request a new code to try again."), true);
       return;
     }
-    metaEl.textContent = `Approve on desktop or paired phone · expires in ${formatRemaining(rem)}`;
+    metaEl.textContent = t(
+      "web.pair.approve.in",
+      "Approve on desktop or paired phone · expires in {time}",
+      { time: formatRemaining(rem) },
+    );
   }
 
   async function pollOnce(seq: number): Promise<void> {
     if (seq !== attemptSeq) return;
     if (expiresAt > 0 && Date.now() >= expiresAt) {
-      showForm("Pairing code expired. Request a new code to try again.", true);
+      showForm(t("web.pair.expired", "Pairing code expired. Request a new code to try again."), true);
       return;
     }
     const ctrl = new AbortController();
@@ -266,17 +273,17 @@ function mount(): void {
         const st = (data.state || data.status || "").toLowerCase();
         if (res.status === 204 || data.approved === true || st === "approved" || st === "ok") {
           stopTimers();
-          statusEl.textContent = "Approved. Opening Backplane…";
+          statusEl.textContent = t("web.pair.approved", "Approved. Opening Backplane…");
           statusEl.className = "bp-pair-status bp-ok";
           window.location.replace("/");
           return;
         }
         if (st === "denied" || st === "rejected") {
-          showForm("Pairing request was denied.", true);
+          showForm(t("web.pair.denied", "Pairing request was denied."), true);
           return;
         }
         if (st === "expired") {
-          showForm("Pairing code expired. Request a new code to try again.", true);
+          showForm(t("web.pair.expired", "Pairing code expired. Request a new code to try again."), true);
           return;
         }
         pollTimer = window.setTimeout(() => { void pollOnce(seq); }, 150);
@@ -296,9 +303,9 @@ function mount(): void {
         } catch { /* ignore */ }
         if (seq !== attemptSeq) return;
         if (st === "denied" || st === "rejected" || res.status === 403) {
-          showForm("Pairing request was denied.", true);
+          showForm(t("web.pair.denied", "Pairing request was denied."), true);
         } else {
-          showForm("Pairing code expired. Request a new code to try again.", true);
+          showForm(t("web.pair.expired", "Pairing code expired. Request a new code to try again."), true);
         }
         return;
       }
@@ -316,14 +323,14 @@ function mount(): void {
   }
 
   cancelBtn.addEventListener("click", () => {
-    showForm("Cancelled.");
+    showForm(t("web.pair.cancelled", "Cancelled."));
   });
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
     const name = input.value.trim() || defaultDeviceName();
     submit.disabled = true;
-    statusEl.textContent = "Requesting pairing code…";
+    statusEl.textContent = t("web.pair.requesting", "Requesting pairing code…");
     statusEl.className = "bp-pair-status";
     try {
       const res = await fetch("/auth/web/request", {
@@ -333,19 +340,21 @@ function mount(): void {
         body: JSON.stringify({ name }),
       });
       if (!res.ok) {
-        let errText = `Pairing request failed (${res.status})`;
+        let errText = t("web.pair.failed", "Pairing request failed ({status})", { status: res.status });
         try {
           const body = (await res.json()) as PairRequestResponse;
           if (body.error) errText = body.error;
         } catch { /* ignore */ }
-        if (res.status === 429) errText = "Too many pairing attempts. Wait a moment and try again.";
+        if (res.status === 429) {
+          errText = t("web.pair.ratelimited", "Too many pairing attempts. Wait a moment and try again.");
+        }
         showForm(errText, true);
         return;
       }
       const data = (await res.json()) as PairRequestResponse;
       const code = data.code || data.checkCode || "";
       if (!code) {
-        showForm("Hub did not return a comparison code.", true);
+        showForm(t("web.pair.nocode", "Hub did not return a comparison code."), true);
         return;
       }
       const now = Date.now();
@@ -365,7 +374,7 @@ function mount(): void {
       tickTimer = window.setInterval(updateCountdown, 1000);
       pollTimer = window.setTimeout(() => { void pollOnce(seq); }, pollIntervalMs);
     } catch {
-      showForm("Could not reach the hub. Check your tailnet connection.", true);
+      showForm(t("web.pair.unreachable", "Could not reach the hub. Check your tailnet connection."), true);
     }
   });
 }

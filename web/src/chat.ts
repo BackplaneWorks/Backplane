@@ -191,7 +191,7 @@ export class ChatView {
     this.olderBtn.classList.add("bp-hidden");
     const el = document.createElement("div");
     el.className = "bp-empty-state";
-    el.textContent = "Loading messages…";
+    el.textContent = t("web.chat.loading", "Loading messages…");
     this.listEl.replaceChildren(el);
   }
 
@@ -355,7 +355,7 @@ export class ChatView {
       bar.className = "bp-banner bp-review-bar";
       bar.setAttribute("data-testid", "review-bar");
       const txt = document.createElement("span");
-      txt.textContent = this.review.text || "Review mode";
+      txt.textContent = this.review.text || t("web.chat.review.mode", "Review mode");
       bar.appendChild(txt);
       if (this.review.button) {
         const btn = document.createElement("button");
@@ -461,8 +461,12 @@ export class ChatView {
       foot.append(copyBtn, ...(replyable ? [replyBtn] : []), timeEl);
     } else {
       const dur = prevUserAt && entry.at ? formatDuration(toMs(entry.at) - toMs(prevUserAt)) : "";
-      const finished = ts ? (dur ? `Finished ${ts} · ${dur}` : `Finished ${ts}`) : "";
-      timeEl.textContent = entry.live ? "Streaming…" : finished;
+      const finished = ts
+        ? (dur
+            ? t("web.chat.finished.dur", "Finished {time} · {dur}", { time: ts, dur })
+            : t("web.chat.finished", "Finished {time}", { time: ts }))
+        : "";
+      timeEl.textContent = entry.live ? t("web.chat.streaming", "Streaming…") : finished;
       foot.append(timeEl, copyBtn, ...(replyable ? [replyBtn] : []));
     }
     return foot;
@@ -475,7 +479,7 @@ export class ChatView {
     if (!this.thread) {
       const empty = document.createElement("div");
       empty.className = "bp-empty-state";
-      empty.textContent = "Choose a project thread on the left to begin.";
+      empty.textContent = t("web.chat.choose", "Choose a project thread on the left to begin.");
       frag.appendChild(empty);
       this.listEl.replaceChildren(frag);
       return;
@@ -483,7 +487,7 @@ export class ChatView {
     if (this.entries.length === 0) {
       const empty = document.createElement("div");
       empty.className = "bp-empty-state";
-      empty.textContent = "No messages yet. Type below to start a turn.";
+      empty.textContent = t("web.chat.empty", "No messages yet. Type below to start a turn.");
       frag.appendChild(empty);
       this.listEl.replaceChildren(frag);
       return;
@@ -537,11 +541,11 @@ export class ChatView {
             const inp = document.createElement("input");
             inp.type = "text";
             inp.className = "bp-input";
-            inp.placeholder = "Type answer…";
+            inp.placeholder = t("web.chat.answer.placeholder", "Type answer…");
             const send = document.createElement("button");
             send.type = "button";
             send.className = "primary";
-            send.textContent = "Answer";
+            send.textContent = t("web.chat.answer.btn", "Answer");
             send.addEventListener("click", () => {
               if (inp.value.trim()) this.cb.onAnswerAsk(ask.id, inp.value.trim());
             });
@@ -551,7 +555,7 @@ export class ChatView {
         } else {
           const ans = document.createElement("div");
           ans.className = "bp-ask-answered";
-          ans.textContent = `Answered: ${ask.answered ?? ""}`;
+          ans.textContent = t("web.chat.answered", "Answered: {answer}", { answer: ask.answered ?? "" });
           card.appendChild(ans);
         }
         row.appendChild(card);
