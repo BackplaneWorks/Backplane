@@ -14,17 +14,22 @@ if [ "$power" != PowerState/running ]; then
   az vm start -g "$rg" -n "$vm" -o none
 fi
 # Two ways in: Tailscale (bp-winbuild), else the vnet through bp-win (bp-winbuild-vnet, ProxyJump bp-win).
-# When neither answers and bp-win itself is not running, the jump path cannot come: say so within a
-# few tries instead of waiting out the boot (2026-11-21: Tailscale on bp-winbuild logged out, bp-win
-# deallocated by its idle watcher, two build attempts lost). Keep bp-win up for a build: hold its
-# `winbuild` lock (scripts/bp-lock.sh winbuild -- ...) or scripts/winvm/winvm-hold.sh bp-win 3h.
-jump_power() { az vm get-instance-view -g "$rg" -n bp-win --query "instanceView.statuses[?starts_with(code,'PowerState/')].code|[0]" -o tsv 2>/dev/null; }
+# When neither answers once the guest has had time to boot, and bp-win is down, the jump path cannot come:
+# say so instead of waiting out the loop (2026-11-21 UTC: Tailscale on bp-winbuild logged out, bp-win
+# deallocated by its idle watcher, two build attempts lost). Keep bp-win up for a build by holding its
+# `winbuild` lock (scripts/bp-lock.sh winbuild -- ...), which the desktop watcher keys on.
+jump_power() { az vm get-instance-view -g "$rg" -n bp-win --query "instanceView.statuses[?starts_with(code,'PowerState/')].code|[0]" -o tsv 2>/dev/null || true; }
+# a VM that was already running has no boot to wait for; a cold start gets ~4 minutes first
+[ "$power" = PowerState/running ] && boot_tries=3 || boot_tries=24
 for i in $(seq 60); do
   for host in bp-winbuild bp-winbuild-vnet; do
     if ssh -o BatchMode=yes -o ConnectTimeout=10 "$host" 'hostname' >/dev/null 2>&1; then echo "$host"; exit 0; fi
   done
-  if [ "$i" -ge 3 ] && [ "$(jump_power)" != PowerState/running ]; then
-    echo "$vm: Tailscale does not answer and bp-win is $(jump_power | sed 's,PowerState/,,'); the jump path needs it (start it: scripts/winvm/winvm-hold.sh bp-win 3h)" >&2; exit 1
+  if [ "$i" -ge "$boot_tries" ]; then
+    jp=$(jump_power)
+    case $jp in PowerState/deallocated|PowerState/deallocating|PowerState/stopped|PowerState/stopping)
+      echo "$vm: neither Tailscale nor the jump path answers, and bp-win is ${jp#PowerState/}: the jump path needs it (hold its lock for the build: scripts/bp-lock.sh winbuild -- ...)" >&2; exit 1 ;;
+    esac # running, starting or unknown (an az error): keep waiting
   fi
   sleep 5
 done
