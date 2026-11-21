@@ -23,16 +23,6 @@ use serde_json::{json, Map, Value};
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, OnceLock}, time::Duration};
 use tokio::sync::{mpsc, oneshot};
 
-/// What agents are told about RunAction's target editor (bp.13 batch 6, `runaction-frame`): with it, name the editor for an action both
-/// editors have (an undo or redo on the schematic); without it, such an action goes to the board editor while one is open.
-pub fn runaction_guidance(caps: &[String]) -> &'static str {
-    if caps.iter().any(|c| c == "runaction-frame") {
-        "kicad_ipc RunAction takes `frame`: name the editor for an action both editors have (`common.*`, an undo or redo): {\"action\": \"common.Interactive.undo\", \"frame\": \"FT_SCHEMATIC_EDITOR\"} for the schematic, FT_PCB_EDITOR for the board. KiCad refuses a frame that is not open or has no such action, saying why."
-    } else {
-        "kicad_ipc RunAction on this KiCad takes no `frame`: an action both editors have (`common.*`, an undo or redo) goes to the board editor while one is open; eeschema.* actions go to the schematic editor."
-    }
-}
-
 /// How long a server that listens may say it is not ready yet before its start counts as failed.
 pub const READY_WAIT: Duration = Duration::from_secs(30);
 /// A reply that says KiCad is up but still loading (AS_NOT_READY, "KiCad is not ready to reply").
@@ -830,10 +820,6 @@ mod tests {
         let mut both = mig.clone(); both["changes"].as_array_mut().unwrap().push(json!({"description": "Move", "actor": "agent:t1"}));
         let r = serve("DMS_MODIFIED", both); assert!(save_gate(&r, &doc, "/p/x.kicad_pcb", true).await.is_ok(), "a real change goes, KiCad's with it (said)");
         let r = serve("DMS_MODIFIED", mig); assert!(save_gate(&r, &json!({"document": {"type": "DOCTYPE_SCHEMATIC"}}), "/p/x.kicad_sch", false).await.is_ok(), "a schematic: the board's migration is not its");
-    }
-    #[test] fn runaction_guidance_follows_the_capability() {
-        assert!(super::runaction_guidance(&["runaction-frame".to_string()]).contains("FT_SCHEMATIC_EDITOR"));
-        assert!(super::runaction_guidance(&[]).contains("goes to the board editor while one is open"));
     }
     #[test] fn status_shows_the_manifests_version_and_kicads_own_only_without_one() {
         assert_eq!(shown_version("10.99.0-bp.13", "backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13"), "10.99.0-bp.13");
