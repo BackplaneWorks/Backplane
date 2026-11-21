@@ -235,8 +235,8 @@ mod imp {
     }
     static SCREENS: std::sync::LazyLock<Mutex<super::PaneScreens>> = std::sync::LazyLock::new(Default::default);
     fn pane_on_screen(top: u32) -> bool { SCREENS.lock().unwrap_or_else(|e| e.into_inner()).on(top as u64) }
-    /// The pane's tick: whether its frame (`child`: its container) is on screen in top-level `top` (in the page, placed). Coming on screen with the focus on the
-    /// top-level itself and Backplane holding the keys, the focus moves to the proxy (the redirect resumes)
+    /// Whether a pane's frame (`child`: its container) is on screen in top-level `top` (in the page, placed), from the pane's placement,
+    /// tick, rehome, detach() and Drop. Coming on screen with the focus on the top-level itself and Backplane holding the keys, the focus moves to the proxy (the redirect resumes)
     pub fn note_pane_on_screen(top: u64, child: u64, on: bool) {
         if top == 0 { return }
         let came = SCREENS.lock().unwrap_or_else(|e| e.into_inner()).set(top, child, on);
