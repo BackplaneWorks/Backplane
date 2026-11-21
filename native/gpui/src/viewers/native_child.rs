@@ -243,7 +243,8 @@ mod imp {
         if !came || PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) { return }
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let Some(p) = proxies().lock().unwrap().get(&(top as u32)).copied() else { return };
-        if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top as u32) { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
+        // (counted against the redirect cap like every other move: a pane flapping on and off screen cannot trade the focus without bound)
+        if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top as u32) && redirect_allowed() { let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = c.flush(); }
     }
     /// The window the keyboard goes to when it is Backplane's in top-level `w`: its focus proxy while a pane's frame is on screen there,
     /// else `w` itself

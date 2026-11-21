@@ -401,6 +401,12 @@ pub fn raise_step(above: bool, on_screen: bool, st: &mut RaiseState, buried: &mu
 /// or the hub; another thread; Files, Mech, Browser, Gerbers; a Diff over it) hides it (#1199). Shown again only once the hitbox is
 /// drawn: there is a rect to show it at. `covered`: a screen of Backplane's drawn over the whole pane (Settings, the palette, the
 /// lightbox, Improvements: `covers_pane`): macOS cannot cut holes in KiCad's frame, which would stay above it, so it is hidden too.
+/// Whether a pane's frame is on screen (the Linux focus proxy's condition): the pane in the page, placed somewhere, a frame on show
+pub fn pane_shows(in_page: bool, placed: Option<(nc::R, Option<u64>)>) -> bool { in_page && placed.is_some_and(|(_, show)| show.is_some()) }
+
+/// The on-screen key moving to `key`: the old one to take back (when it differs) and the key now held
+pub fn screen_rekey(old: Option<(u64, u64)>, key: (u64, u64)) -> (Option<(u64, u64)>, (u64, u64)) { (old.filter(|k| *k != key), key) }
+
 pub fn mac_shown(show: bool, host_visible: bool, hitbox: bool, in_page: bool, covered: bool, dialog: bool, was_visible: bool) -> bool {
     show && host_visible && (!covered || (dialog && was_visible)) && (hitbox || (was_visible && (in_page || dialog)))
 }
@@ -1322,6 +1328,14 @@ impl KicadPane {
         eprintln!("GPUI_LOG {}", json!({"kicad_place": at.map(|r| [r.x, r.y, r.w, r.h]), "visible": at.is_some() && show.is_some(), "changed": pr != at,
             "frame": show, "frame_changed": ps != show, "kind": kind, "container": c, "local": local, "why": why, "noop": noop, "at_ms": crate::screens::kcomment::epoch_ms() as u64}));
     }
+    /// This pane's frame on screen or not, for the Linux focus proxy (nc::note_pane_on_screen), under (top-level, `container`): the key
+    /// last reported is taken back first when it changes (a rehome, a pop-out)
+    fn report_screen(&mut self, container: u64, on: bool) {
+        let (off, key) = screen_rekey(self.screen_key, (self.toplevel, container));
+        if let Some((t, k)) = off { nc::note_pane_on_screen(t, k, false); }
+        self.screen_key = Some(key);
+        nc::note_pane_on_screen(key.0, key.1, on);
+    }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
         // Windows: Backplane in front with nothing holding the keyboard (a jump away from the editor it was lent from) gets it
@@ -1345,10 +1359,8 @@ impl KicadPane {
         }
         nc::note_pane_keys(self.keys);
         // the Linux focus proxy only where this pane's frame is on screen (in the page, placed): another viewer on show leaves the focus to it
-        let key = (self.toplevel, self.container.unwrap_or(0));
-        if let Some(old) = self.screen_key.filter(|k| *k != key) { nc::note_pane_on_screen(old.0, old.1, false); }
-        self.screen_key = Some(key);
-        nc::note_pane_on_screen(key.0, key.1, self.in_page && self.last_place.is_some_and(|(_, _, s)| s.is_some()));
+        let on = pane_shows(self.in_page, self.last_place.map(|(_, r, s)| (r, s)));
+        self.report_screen(self.container.unwrap_or(0), on);
         // the shield never re-raises while the F5 guard is armed (pre-warm or a hand-in being verified)
         let f5_armed = self.prewarm_guard.is_some() || self.verify_handin.is_some();
         if let Some(c) = self.container { nc::shield_tick(c, if cfg!(windows) && self.info["mode"] == "fork" && !(f5_armed && self.keys) { self.want() } else { None }); }
@@ -1643,7 +1655,7 @@ impl KicadPane {
         // it was, with no round trip and no frame of the pane's background
         if let Some(k) = take_kept(top, &self.project) {
             self.container = Some(k.container); self.ever_shown = k.ever_shown; self.frames = nc::frames(k.container);
-            if let (Some(r), Some(w)) = (k.rect, self.want()) { nc::place_local(k.container, Some(r), Some(w), &self.ever_shown, &mut self.last_root); self.log_place("kept", k.container, Some(r), Some(w), None, true, false); self.placed = Some((Some(r), Some(w), Vec::new())); self.last_place = Some((k.container, r, Some(w))); }
+            if let (Some(r), Some(w)) = (k.rect, self.want()) { self.report_screen(k.container, pane_shows(self.in_page, Some((r, Some(w))))); nc::place_local(k.container, Some(r), Some(w), &self.ever_shown, &mut self.last_root); self.log_place("kept", k.container, Some(r), Some(w), None, true, false); self.placed = Some((Some(r), Some(w), Vec::new())); self.last_place = Some((k.container, r, Some(w))); }
             self.handoff_over = true; // mapped in this very frame: nothing to hand over
         } else {
             self.container = nc::container_for(top, &self.project);
@@ -1769,6 +1781,9 @@ impl KicadPane {
         // the switch) only maps the frame on show (raised, the others unmapped), with no configure and no synthetic ConfigureNotify; a
         // move of the pane on screen is still told by sync_root (rail-round4: three same-rect placements per Board<->Schematic switch)
         let shown_only = cfg!(target_os = "linux") && local && no_geometry(prev, at, show);
+        // on screen for the Linux focus proxy before the frame is mapped (the tick's report came up to 40 ms after it: a key typed in
+        // between, the pointer resting where the pane appeared, went to KiCad by the descendant rule)
+        self.report_screen(c, pane_shows(self.in_page, at.map(|r| (r, show))));
         #[allow(unused_mut)] let mut noop = false;
         if shown_only {
             #[cfg(target_os = "linux")]
@@ -1984,6 +1999,9 @@ impl KicadPane {
         nc::cancel_yield(); // the editor leaves the pane: a hand-in still waiting to fall back is void (nc::yield_to)
         #[cfg(target_os = "macos")]
         if let Some((x, y, w, h, true)) = self.host_sent.take() { self.host_rpc(json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": false, "raise": false})); }
+        // off screen for the Linux focus proxy, and the key forgotten: a pane taking this container over (take_kept) owns it from now, and
+        // this pane's later tick or Drop must not take its entry away
+        if let Some((t, k)) = self.screen_key.take() { nc::note_pane_on_screen(t, k, false); }
         let Some(c) = self.container.take() else { return };
         let prev = self.last_place.filter(|(lc, _, _)| *lc == c).map(|(_, r, s)| (Some(r), s));
         nc::place(c, None, None, None, &mut self.last_root); self.log_place("leave", c, None, None, prev, false, false); self.last_place = None; nc::grab_escape(self.toplevel, false);
@@ -2109,6 +2127,19 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_focus_proxy_condition_is_a_frame_shown_in_the_page() {
+        use super::{pane_shows, screen_rekey};
+        let r = super::nc::R { x: 0, y: 0, w: 10, h: 10 };
+        assert!(pane_shows(true, Some((r, Some(5)))), "in the page, placed, a frame on show: on screen");
+        assert!(!pane_shows(false, Some((r, Some(5)))), "another viewer on show (not in the page): off, whatever was placed last");
+        assert!(!pane_shows(true, Some((r, None))), "placed with no frame on show: off");
+        assert!(!pane_shows(true, None), "not placed (the frame unmapped): off");
+        // the key: (top-level, container); a rehome or a pop-out moves it and the old one is taken back once
+        assert_eq!(screen_rekey(None, (1, 10)), (None, (1, 10)), "the first report: nothing to take back");
+        assert_eq!(screen_rekey(Some((1, 10)), (1, 10)), (None, (1, 10)), "the same key: nothing taken back (no flapping)");
+        assert_eq!(screen_rekey(Some((1, 10)), (2, 20)), (Some((1, 10)), (2, 20)), "popped out to another window: the old window's entry is taken back");
+        assert_eq!(screen_rekey(Some((1, 10)), (1, 11)), (Some((1, 10)), (1, 11)), "another container in the same window: the old one taken back");
+    }
     #[test] fn an_edits_waiting_hand_in_is_dropped_by_a_click_in_backplane() {
         assert!(super::hand_in_dropped(true, false, super::TurnedTo::Click));
         assert!(!super::hand_in_dropped(true, true, super::TurnedTo::Click), "KiCad has the keys already: nothing waits");
