@@ -208,11 +208,10 @@ mod imp {
         if let Some(p) = proxies().lock().unwrap().get(&top).copied() { return Some(p) }
         // GPUI's own (vendor gpui PATCH.md, x11 `key_proxy`): it reads the keys, since a key never propagates above the focus window
         let id = prop32(c, top, atom(c, "_BACKPLANE_KEY_PROXY"), AtomEnum::WINDOW).first().copied().filter(|&p| p != 0)?;
-        // the top-level's focus changes come to our connection too (each client selects its own): a focus put on it (the window manager,
-        // GPUI's activate) moves on to the proxy at once (pump)
-        let mask = c.get_window_attributes(top).ok().and_then(|r| r.reply().ok()).map(|a| u32::from(a.your_event_mask)).unwrap_or(0);
-        let _ = c.change_window_attributes(top, &ChangeWindowAttributesAux::new().event_mask(EventMask::from(mask | u32::from(EventMask::FOCUS_CHANGE))));
+        // the top-level's focus changes come to the focus watcher's connection too (each client selects its own): a focus put on it (the
+        // window manager, GPUI's activate) moves on to the proxy at once (watch_focus)
         proxies().lock().unwrap().insert(top, id);
+        watch_focus(top);
         // the focus already on the top-level (it had the keyboard before the pane came: an automatic attach) has no FocusIn to come: moved now
         if !PANE_KEYS.load(std::sync::atomic::Ordering::SeqCst) && pane_on_screen(top) && c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == top) {
             let _ = c.set_input_focus(InputFocus::PARENT, id, x11rb::CURRENT_TIME);
@@ -221,7 +220,63 @@ mod imp {
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy": id, "top": top})); }
         Some(id)
     }
-    /// The wake thread's redirect, at most REDIRECTS_PER within REDIRECT_SPAN: a window manager that puts the focus back on the top-level
+    /// The focus watcher: a connection and a thread of their own, FocusChange selected on every top-level with a proxy, for every native
+    /// child (a KiCad pane's container, the Browser's page): the focus put on a top-level itself (the window manager on a click or
+    /// activation, GPUI's activate) goes on to its proxy at once, while a child is on screen there (pane_on_screen). Not when it went into a
+    /// child (the proxy, KiCad, the Browser's Chromium). Also while the pane still says KiCad has the keys: a click outside the pane that the
+    /// window manager answers by focusing the top-level (openbox, xfwm4) comes before GPUI has handled the click, and in that gap (4-40 ms
+    /// measured) a key over the pane went to KiCad (the race, 1 of 20 on a real desktop). The pane reads its keys from the X focus
+    /// (has_focus of its container), and a focus on the top-level or on its proxy reads the same there; a hand-in that follows focuses
+    /// KiCad's frame from either. Its own thread, not the pane's wake thread: a window with only the Browser has no pane to wake, and the
+    /// thread waits on nothing but these events (the wake thread also reads the pane's own).
+    fn watcher() -> Option<&'static RustConnection> {
+        static W: OnceLock<Option<std::sync::Arc<RustConnection>>> = OnceLock::new();
+        W.get_or_init(|| {
+            let c = std::sync::Arc::new(RustConnection::connect(None).ok()?.0);
+            let t = c.clone();
+            std::thread::Builder::new().name("x11-focus-proxy".into()).spawn(move || while let Ok(e) = t.wait_for_event() {
+                let x11rb::protocol::Event::FocusIn(f) = e else { continue };
+                let proxy = proxies().lock().unwrap().get(&f.event).copied().filter(|_| pane_on_screen(f.event));
+                if let Some(p) = proxy {
+                    if t.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == f.event) && redirect_allowed() {
+                        let _ = t.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME); let _ = t.flush();
+                    }
+                }
+            }).ok()?;
+            Some(c)
+        }).as_deref()
+    }
+    fn watch_focus(top: u32) {
+        let Some(w) = watcher() else { return };
+        let _ = w.change_window_attributes(top, &ChangeWindowAttributesAux::new().event_mask(EventMask::FOCUS_CHANGE)); let _ = w.flush();
+    }
+    /// Native children that are not a KiCad pane's container (the Browser's page: cef_native), per top-level: the proxy is kept while any is.
+    fn others() -> &'static Mutex<std::collections::HashMap<u32, std::collections::HashSet<u64>>> { static O: OnceLock<Mutex<std::collections::HashMap<u32, std::collections::HashSet<u64>>>> = OnceLock::new(); O.get_or_init(Default::default) }
+    /// A native child `child` of ours (not KiCad's) made in top-level `top`: the top-level's proxy found and watched, as for a pane.
+    /// It counts as on screen once `note_pane_on_screen(top, child, true)` says so.
+    pub fn adopt_child(top: u64, child: u64) {
+        others().lock().unwrap().entry(top as u32).or_default().insert(child);
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap(); focus_proxy(c, top as u32);
+    }
+    /// That child gone: off screen, and the proxy dropped when nothing else of ours is in the top-level.
+    pub fn release_child(top: u64, child: u64) {
+        note_pane_on_screen(top, child, false);
+        let top = top as u32;
+        let empty = { let mut o = others().lock().unwrap(); if let Some(s) = o.get_mut(&top) { s.remove(&child); if s.is_empty() { o.remove(&top); } } !o.contains_key(&top) };
+        if !empty { return }
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let parent_of = |w: u32| c.query_tree(w).ok().and_then(|q| q.reply().ok()).map(|t| t.parent);
+        let ours = containers().lock().unwrap().iter().copied().collect::<Vec<_>>();
+        if !ours.into_iter().any(|o| parent_of(o) == Some(top)) { proxies().lock().unwrap().remove(&top); }
+    }
+    /// The keyboard back to top-level `top` (the Browser giving it back): to its proxy while a native child is on screen there, else the
+    /// top-level itself.
+    pub fn focus_home(top: u64) {
+        let w = home_of(top as u32);
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); let _ = c.flush();
+    }
+    /// The redirect, at most REDIRECTS_PER within REDIRECT_SPAN: a window manager that puts the focus back on the top-level
     /// each time it moves (none seen; the review's guard) gets the proxy a few times, then the top-level is left focused for REDIRECT_REST,
     /// said once, instead of the two of them trading the focus as fast as the X server allows
     const REDIRECTS_PER: u32 = 4;
@@ -290,7 +345,8 @@ mod imp {
         let parent_of = |w: u32| c.query_tree(w).ok().and_then(|q| q.reply().ok()).map(|t| t.parent);
         if let Some(top) = parent_of(container) {
             let others = containers().lock().unwrap().iter().copied().collect::<Vec<_>>();
-            if !others.into_iter().any(|o| parent_of(o) == Some(top)) { proxies().lock().unwrap().remove(&top); }
+            let browser = self::others().lock().unwrap().contains_key(&top);
+            if !browser && !others.into_iter().any(|o| parent_of(o) == Some(top)) { proxies().lock().unwrap().remove(&top); }
         }
         let _ = c.allow_events(Allow::REPLAY_POINTER, x11rb::CURRENT_TIME);
         let _ = c.ungrab_button(ButtonIndex::ANY, container, ModMask::ANY);
@@ -887,20 +943,7 @@ mod imp {
                     let _ = c.allow_events(Allow::REPLAY_POINTER, b.time);
                     out.push(super::Ev::Click);
                 }
-                // the focus put on a top-level of ours itself (the window manager on a click or activation, GPUI's activate): on to its proxy at
-                // once, here on the wake thread. Not when it went into a child (the proxy, KiCad, the Browser's Chromium). Also while the pane
-                // still says KiCad has the keys: a click outside the pane that the window manager answers by focusing the top-level (openbox,
-                // xfwm4) comes before GPUI has handled the click, and in that gap (4-40 ms measured) a key over the pane went to KiCad (the race,
-                // 1 of 20 on a real desktop). The pane reads its keys from the X focus (has_focus of its container), and a focus on the
-                // top-level or on its proxy reads the same there; a hand-in that follows focuses KiCad's frame from either.
-                x11rb::protocol::Event::FocusIn(f) => {
-                    let proxy = proxies().lock().unwrap().get(&f.event).copied().filter(|_| pane_on_screen(f.event));
-                    if let Some(p) = proxy {
-                        if c.get_input_focus().ok().and_then(|r| r.reply().ok()).is_some_and(|r| r.focus == f.event) && redirect_allowed() {
-                            let _ = c.set_input_focus(InputFocus::PARENT, p, x11rb::CURRENT_TIME);
-                        }
-                    }
-                }
+                // (a focus put on a top-level itself: the focus watcher's, on its own connection: watcher)
                 x11rb::protocol::Event::ClientMessage(m) if m.format == 32 => {
                     let d = m.data.as_data32();
                     if m.type_ == key { if let Some(k) = super::chord(d[1], d[2]) { out.push(if k == "ctrl-`" { super::Ev::Escape } else { super::Ev::Key(k) }); } }
