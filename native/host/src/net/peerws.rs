@@ -344,6 +344,9 @@ pub async fn connect_outbound(
     link: String,
     url: String,
 ) -> anyhow::Result<()> {
+    if crate::copy::on() {
+        return Ok(());
+    }
     let secret = botnet::peer_secret(&hub.cfg.home, &link);
     if secret.is_empty() {
         return Ok(());
