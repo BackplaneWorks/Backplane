@@ -72,7 +72,9 @@ python3 "$XINPUT_PY" click "$CX" "$CY" >/dev/null; sleep 1.0; say "a click in th
 type_word ctl; sleep 0.4
 python3 "$XINPUT_PY" move "$GX" "$GY" >/dev/null; sleep 0.8; say "pointer over the page"
 type_word pg; sleep 0.8
+python3 "$HERE/lib/focus_trace.py" watch 3 >"$OUT/page-click-focus.log" 2>&1 & FT=$!; sleep 0.2
 python3 "$XINPUT_PY" click "$GX" "$GY" >/dev/null; sleep 1.0; say "a click in the page"
+wait "$FT"; echo "INFO the focus through the page click (ms, window): $(tr '\n' ' ' <"$OUT/page-click-focus.log")"
 type_word in; sleep 0.8
 python3 "$XINPUT_PY" click "$CX" "$CY" >/dev/null; sleep 1.0
 python3 "$XINPUT_PY" move "$GX" "$GY" >/dev/null; sleep 0.8; say "back in the composer, pointer over the page"
