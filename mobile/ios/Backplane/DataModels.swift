@@ -463,22 +463,31 @@ struct DSubView: Decodable, Equatable {
 }
 struct DSubViewReply: Decodable { let view: DSubView? }
 struct DSubRoute: Hashable { let thread: String; let key: String }
-struct DShellSyncReply: Decodable {
-    let sub: Int
-    let projects: [DProject]?
-    let threads: [DThread]?
-    let removed: [String]?
-    let sections: DSections?
-    let h: [String: String]?
-    enum CodingKeys: String, CodingKey { case sub, projects, threads, removed, sections, h, queued }
+/// The designated home machine for Bub and shared state (docs/PHONE-DATA.md, The home).
+struct DHomeMoving: Decodable, Equatable {
+    let to: String
+    let state: String
+    let step: String?
+    let note: String?
+}
+struct DHome: Decodable, Equatable {
+    let kind: String
+    let id: String
+    let name: String
+    let online: Bool
+    let awaySince: Int64?
+    let queuedCount: Int
+    let canMoveHere: Bool
+    let moving: DHomeMoving?
+    enum CodingKeys: String, CodingKey { case kind, id, name, online, awaySince, queuedCount, canMoveHere, moving }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
-        projects = try? c.decode([DProject].self, forKey: .projects)
-        threads = try? c.decode([DThread].self, forKey: .threads)
-        removed = try? c.decode([String].self, forKey: .removed)
-        sections = try? c.decode(DSections.self, forKey: .sections)
-        h = try? c.decode([String: String].self, forKey: .h)
+        kind = c.str(.kind); id = c.str(.id); name = c.str(.name)
+        online = (try? c.decode(Bool.self, forKey: .online)) ?? true
+        awaySince = try? c.decode(Int64.self, forKey: .awaySince)
+        queuedCount = (try? c.decode(Int.self, forKey: .queuedCount)) ?? 0
+        canMoveHere = (try? c.decode(Bool.self, forKey: .canMoveHere)) ?? false
+        moving = try? c.decode(DHomeMoving.self, forKey: .moving)
     }
     func awayLine() -> (text: String, isError: Bool)? {
         if let mv = moving {
@@ -504,6 +513,48 @@ struct DShellSyncReply: Decodable {
         case (nil, true): return (Tr.home_away_queued(name: n, n: String(queuedCount)), false)
         case (nil, false): return (Tr.home_away(name: n), false)
         }
+    }
+}
+struct DShellSyncReply: Decodable {
+    let sub: Int
+    let projects: [DProject]?
+    let threads: [DThread]?
+    let removed: [String]?
+    let sections: DSections?
+    let h: [String: String]?
+    enum CodingKeys: String, CodingKey { case sub, projects, threads, removed, sections, h }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
+        projects = try? c.decode([DProject].self, forKey: .projects)
+        threads = try? c.decode([DThread].self, forKey: .threads)
+        removed = try? c.decode([String].self, forKey: .removed)
+        sections = try? c.decode(DSections.self, forKey: .sections)
+        h = try? c.decode([String: String].self, forKey: .h)
+    }
+}
+struct DThreadOpenReply: Decodable {
+    let sub: Int
+    let thread: DThread?
+    let ids: [String]?
+    let entries: [DEntry]
+    let hasNext: Bool
+    let next: String?
+    let work: DWorkReply?
+    let queue: DQueueReply?
+    let h: [String: String]?
+    enum CodingKeys: String, CodingKey { case sub, thread, ids, entries, next, work, queue, h }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
+        thread = try? c.decode(DThread.self, forKey: .thread)
+        ids = try? c.decode([String].self, forKey: .ids)
+        entries = (try? c.decode([DEntry].self, forKey: .entries)) ?? []
+        hasNext = c.contains(.next)
+        next = try? c.decode(String.self, forKey: .next)
+        work = try? c.decode(DWorkReply.self, forKey: .work)
+        queue = try? c.decode(DQueueReply.self, forKey: .queue)
+        h = try? c.decode([String: String].self, forKey: .h)
     }
 }
 /// A long result shows three lines until tapped (the desktop's subview.rs `result_lines`).
