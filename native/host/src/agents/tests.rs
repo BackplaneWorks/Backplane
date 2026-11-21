@@ -1928,7 +1928,7 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
         let _ = std::fs::remove_dir_all(uh.join(drop)); std::fs::create_dir_all(uh.join(keep)).unwrap(); std::fs::write(uh.join(keep).join("SKILL.md"), "---\nname: zqwhale\ndescription: d\n---\nSECRET=PURPLE-OTTER-77\n").unwrap();
         let sd = dir(&format!("sc-bin-{provider}"));
         if provider == "claude" { script(&sd, "claude", &format!("#!/bin/sh\nwhile IFS= read -r X; do case \"$X\" in *'\"type\":\"user\"'*) {find}; printf '%s\\n' '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\",\"cwd\":\"/tmp\",\"tools\":[],\"model\":\"fake\",\"permissionMode\":\"default\"}}'; printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"The skill says '\"$w\"'\"}}],\"usage\":{{\"input_tokens\":1}}}},\"session_id\":\"s1\"}}'; printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\"session_id\":\"s1\"}}';; esac; done\n")) }
-        else { script(&sd, "codex", &format!("#!/bin/sh\ncase \"$1\" in --version) echo codex-cli 0.0.0; exit 0;; esac\nfor a in \"$@\"; do X=\"$a\"; done\n{find}\necho '{{\"type\":\"thread.started\",\"thread_id\":\"cs-1\"}}'\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"id\":\"i\",\"type\":\"agent_message\",\"text\":\"The skill says %s\"}}}}\\n' \"$w\"\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n")) }
+        else { script(&sd, "codex", &format!("#!/bin/sh\ncase \"$1\" in --version) echo codex-cli 0.0.0; exit 0;; esac\nfor a in \"$@\"; do X=\"$a\"; done\n[ \"$X\" = \"-\" ] && X=$(cat)\n{find}\necho '{{\"type\":\"thread.started\",\"thread_id\":\"cs-1\"}}'\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"id\":\"i\",\"type\":\"agent_message\",\"text\":\"The skill says %s\"}}}}\\n' \"$w\"\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n")) }
         let home = dir(&format!("sc-home-{provider}")); let work = dir(&format!("sc-work-{provider}"));
         let log = if provider == "codex" { codex_log(&work) } else { base_log(&work, 1, "") }; std::fs::write(home.join("events.jsonl"), log).unwrap();
         let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
@@ -2398,4 +2398,49 @@ impl mailroom::Mailroom for ChatRoom {
     let (words, m) = crate::voice::mark::split(p["text"].as_str().unwrap()); assert_eq!(words, "zqshort Route the reset to PA0."); assert_eq!(m.unwrap().stt, "parakeet-v2");
     let t = posted.iter().find(|e| e["text"].as_str().unwrap_or("").contains("typed this one")).unwrap(); assert!(crate::voice::mark::split(t["text"].as_str().unwrap()).1.is_none());
     ag.shutdown();
+}
+
+/// Windows 32K CreateProcess limit workaround: a 200K-character handoff + 20K instructions stays completely off Codex's
+/// argv on Windows (profile TOML + stdin `-`), passes `check_cmdline` and `plan`, carries the full 200K handoff verbatim
+/// on stdin, and cleans up the private profile file when the turn ends.
+#[test] fn a_200k_codex_handoff_stays_off_argv_on_windows_and_keeps_full_context() {
+    use crate::agents::providers::{codex::CodexDriver, Driver, TurnIn};
+    let d = dir("cx200k-win");
+    let codex_home = d.join("codex-home");
+    let full_handoff = format!(
+        "[Backplane] This thread was worked on with claude until now; you (codex) take it over.\n\nUser: Early secret CANARY_EARLY_XK99.\n\n{}\n\n[End of the handed-over context.]\n\nWhat was the early secret?",
+        "filler_word ".repeat(17_000)
+    );
+    assert!(full_handoff.len() > 200_000, "handoff is >200K chars ({})", full_handoff.len());
+    let long_instructions = "You are running in Backplane.\n".repeat(700);
+    let a = TurnIn {
+        thread: "t-200k".into(), cwd: d.to_string_lossy().into(), home: d.to_string_lossy().into(),
+        model: "gpt-5.4".into(), session: String::new(), runtime: "full-access".into(),
+        effort: "high".into(), think: true, text: full_handoff.clone(), prompt: long_instructions.clone(),
+        mcp_url: "http://127.0.0.1:41231/mcp/t-200k.1?k=SECRETKEY".into(),
+        pcbparts_url: crate::mcpx::gen::PCBPARTS.into(),
+        codex_home: codex_home.to_string_lossy().into(),
+        ..Default::default()
+    };
+    let mut drv = CodexDriver::for_windows();
+    drv.prepare(&a).unwrap();
+    let argv = drv.argv(&a);
+    let stdin_lines = drv.start(&a);
+    // 1. Argv is tiny (< 500 chars), uses -p <profile> and `-` for stdin, never puts instructions, MCP key, or handoff on argv
+    let cmd_len = proc::cmdline_len(Path::new("C:\\Users\\x\\codex.exe"), &[], &argv);
+    assert!(cmd_len < 500, "codex argv must stay tiny on Windows, got {cmd_len} chars: {argv:?}");
+    assert_eq!(argv.last().map(String::as_str), Some("-"), "{argv:?}");
+    let prof = argv.windows(2).find(|w| w[0] == "-p").map(|w| w[1].clone()).expect("profile flag set");
+    assert!(!argv.iter().any(|x| x.contains("developer_instructions") || x.contains("CANARY_EARLY_XK99") || x.contains("SECRETKEY")), "{argv:?}");
+    assert!(proc::check_cmdline(Path::new("C:\\Users\\x\\codex.exe"), &[], &argv, true).is_ok());
+    // 2. Full 200K handoff goes over stdin verbatim (nothing trimmed or summarized)
+    assert_eq!(stdin_lines.len(), 1);
+    assert_eq!(stdin_lines[0], full_handoff);
+    // 3. Profile file carries full instructions and MCP URL (without secret key), and is deleted on Drop
+    let prof_path = codex_home.join(format!("{prof}.config.toml"));
+    let toml = std::fs::read_to_string(&prof_path).unwrap();
+    assert!(toml.contains("developer_instructions =") && toml.contains("You are running in Backplane."));
+    assert!(toml.contains("mcp_servers.backplane.url = \"http://127.0.0.1:41231/mcp/t-200k.1\"") && !toml.contains("SECRETKEY"));
+    drop(drv);
+    assert!(!prof_path.exists(), "profile config file removed when turn ends");
 }

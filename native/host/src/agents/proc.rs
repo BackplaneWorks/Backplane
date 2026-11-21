@@ -239,6 +239,33 @@ fn is_standin(program: &Path, dir: &Path) -> bool {
     match (crate::plat::fs::canonicalize(program), crate::plat::fs::canonicalize(dir)) { (Ok(p), Ok(d)) => p.starts_with(d), _ => false }
 }
 
+/// The Windows CreateProcessW lpCommandLine limit (32,767 UTF-16 code units including NUL) and our safe guard below it.
+pub const WIN_CMDLINE_LIMIT: usize = 32_767;
+pub const WIN_CMDLINE_GUARD: usize = 28_000;
+/// Estimates the CreateProcessW command-line length in UTF-16 code units (program + pre + args, with quoting and spaces).
+pub fn cmdline_len(program: &Path, pre: &[String], args: &[String]) -> usize {
+    let one = |s: &str| {
+        let u16s = s.encode_utf16().count();
+        let quotes = s.chars().filter(|&c| c == '"').count();
+        let needs_quote = s.is_empty() || s.chars().any(|c| c.is_whitespace() || c == '"');
+        u16s + quotes + if needs_quote { 2 } else { 0 }
+    };
+    let mut total = one(&program.to_string_lossy());
+    for a in pre.iter().chain(args.iter()) { total += 1 + one(a); }
+    total
+}
+/// Measures the final command line before spawning on every OS. Logs if it nears Windows' 32K limit; on Windows, refuses before CreateProcess.
+pub fn check_cmdline(program: &Path, pre: &[String], args: &[String], windows: bool) -> Result<usize, String> {
+    let len = cmdline_len(program, pre, args);
+    if len > WIN_CMDLINE_GUARD {
+        eprintln!("agents: command line for {} is {len} chars (Windows guard {WIN_CMDLINE_GUARD}, limit {WIN_CMDLINE_LIMIT})", program.display());
+        if windows {
+            return Err(format!("command line for {} is {len} characters, past the safe Windows limit ({WIN_CMDLINE_GUARD} of {WIN_CMDLINE_LIMIT}); move instructions or prompt off argv", program.display()));
+        }
+    }
+    Ok(len)
+}
+
 /// A file an agent reads when it starts, holding what must not be on its command line (Claude's MCP config on Windows: it can hold tokens).
 /// Private (the folder 0700 and the file 0600 on Unix; on Windows under the hub's home in the person's profile, which only they, SYSTEM and
 /// administrators may read), never logged, and removed when the process it was made for ends (it is held by the process's waiter).
@@ -250,6 +277,15 @@ impl RunFile {
         #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?; }
         let f = dir.join(name); let _ = std::fs::remove_file(&f);
         let r = RunFile(f.clone()); // removed again if the write fails
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&f)?.write_all(text.as_bytes())?;
+        Ok(r)
+    }
+    /// Like [`private`], but does not change permissions on an existing directory (e.g. a user's `~/.codex`).
+    pub fn private_in(dir: &Path, name: &str, text: &str) -> std::io::Result<RunFile> {
+        use crate::plat::fs::{DirBuilderExt, OpenOptionsExt}; use std::io::Write;
+        if !dir.exists() { std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?; }
+        let f = dir.join(name); let _ = std::fs::remove_file(&f);
+        let r = RunFile(f.clone());
         std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&f)?.write_all(text.as_bytes())?;
         Ok(r)
     }
@@ -414,6 +450,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     let standin = extra_path.is_some_and(|d| is_standin(program, d) && crate::plat::helper("bp-sh").is_some());
     let api_vars = no_api_key(program, extra_path.is_some()); // by the CLI asked for, before an npm shim or bp-sh stands in for it; test hubs only
     let (program, pre) = plan_for(program, &args, cfg!(windows), &|| find_in(search_dirs(), "node", true), standin).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    check_cmdline(&program, &pre, &args, cfg!(windows)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
     // a launch that fails for its scope (an older systemd, no user manager) starts again unscoped (memscope::spawn), never failing the agent
     let make = |wrap: Option<Vec<String>>| {
@@ -789,7 +826,9 @@ mod tests {
         assert_eq!(serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(f.path()).unwrap()).unwrap()["mcpServers"]["backplane"]["url"], url, "Claude reads the same config from the file");
         let mut lines: Vec<(&str, Vec<String>)> = vec![("claude", ca)];
         for p in ["codex", "grok", "muse", "opencode", "pi", "omp"] {
-            let mut made = providers::driver(p).unwrap_or_else(|| panic!("{p}")); let _ = made.driver.prepare(&a);
+            let mut made = providers::driver(p).unwrap_or_else(|| panic!("{p}"));
+            if p == "codex" { made.driver = Box::new(providers::codex::CodexDriver::for_windows()); }
+            let _ = made.driver.prepare(&a);
             let mut v = made.driver.argv(&a);
             if p == "pi" { let i = v.iter().position(|x| x == "--append-system-prompt").unwrap(); v[i + 1] = providers::pi::prompt_arg(&home.join("pi"), &a.thread, &prompt, true) }
             lines.push((made.cli, v));
@@ -802,13 +841,15 @@ mod tests {
                 assert!(prog == target || (prog == node && pre == vec![target.to_string_lossy().into_owned()]), "{cli}: {prog:?} {pre:?}");
             }
             let own = d.join(format!("own-{cli}.cmd")); std::fs::write(&own, "@echo off\r\nbun \"%~dp0\\s.ts\" %*\r\n").unwrap();
-            match (*cli, plan(&own, v, true, &n)) {
-                ("codex", r) => assert!(r.unwrap_err().contains("batch launcher"), "codex through a launcher of its own is refused with why"),
-                (_, r) => { r.unwrap_or_else(|e| panic!("{cli}: {e}"));
-                    let win: Vec<String> = v.iter().map(|x| x.replace(&*d.to_string_lossy(), "C:\\Users\\x")).collect(); // this test's folders as Windows has them (a `/` path is Unix's)
-                    for l in [Launcher::Batch, Launcher::Sh] { carries(l, &win).unwrap_or_else(|e| panic!("{cli} through {l:?}: {e}")) } }
-            }
+            plan(&own, v, true, &n).unwrap_or_else(|e| panic!("{cli}: {e}"));
+            let win: Vec<String> = v.iter().map(|x| x.replace(&*d.to_string_lossy(), "C:\\Users\\x")).collect(); // this test's folders as Windows has them (a `/` path is Unix's)
+            for l in [Launcher::Batch, Launcher::Sh] { carries(l, &win).unwrap_or_else(|e| panic!("{cli} through {l:?}: {e}")) }
+            check_cmdline(&own, &[], &win, true).unwrap_or_else(|e| panic!("{cli} cmdline guard: {e}"));
         }
+        // Guard refuses oversized command lines before CreateProcess on Windows
+        let huge = vec!["x".repeat(WIN_CMDLINE_GUARD + 100)];
+        assert!(check_cmdline(&d.join("codex.exe"), &[], &huge, true).is_err(), "oversized argv refused on Windows");
+        assert!(check_cmdline(&d.join("codex"), &[], &huge, false).is_ok(), "non-Windows logs and allows");
     }
     /// A real run through npm's own claude.cmd and its sh shim on Windows: the argv the agent logs is the argv the hub gave it, with the MCP config
     /// read from its file. Uses node as the agent (a copy named claude.exe); skipped where there is none.

@@ -6,6 +6,7 @@ case "$1" in --version) echo "codex-cli 0.0.0"; exit 0;; esac
 for a in "$@"; do last="$a"; done
 D=$(dirname "$0"); echo "$@" >> "$D/argv.log"; echo $$ > "$D/pid"
 [ -n "$FAKE_LOG" ] && echo "CODEX $*" >> "$FAKE_LOG"
+if [ "$last" = "-" ]; then last=$(cat); fi
 case " $* " in *" --ephemeral "*)
   m=default; p=; for a in "$@"; do [ "$p" = -m ] && m=$a; p=$a; done
   printf '{"type":"item.completed","item":{"type":"agent_message","text":"Codex title from %s"}}\n' "$m"; exit 0;; esac

@@ -57,6 +57,23 @@ pub fn claude_args(a: &ArgsIn) -> Vec<String> {
     v.push(s("--mcp-config")); v.push(if a.mcp_json.is_empty() { mcp_config(a.mcp_url) } else { a.mcp_json.to_string() });
     v
 }
+/// Moves `--append-system-prompt <text>` to `--append-system-prompt-file <private file>` (0700 dir, 0600 file,
+/// removed when the process ends) so variable-size instructions never sit on argv on any OS.
+pub fn prompt_to_run_file(args: &mut [String], dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
+    flag_to_run_file(args, "--append-system-prompt", "--append-system-prompt-file", dir, name)
+}
+/// Moves `--system-prompt <text>` to `--system-prompt-file <private file>` (for one-shot Claude calls).
+pub fn system_prompt_to_run_file(args: &mut [String], dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
+    flag_to_run_file(args, "--system-prompt", "--system-prompt-file", dir, name)
+}
+fn flag_to_run_file(args: &mut [String], flag: &str, file_flag: &str, dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
+    let Some(i) = args.iter().position(|a| a == flag) else { return Ok(None) };
+    if i + 1 >= args.len() { return Ok(None) }
+    let dir = std::path::absolute(dir)?;
+    let f = super::proc::RunFile::private(&dir, name, &args[i + 1])?;
+    args[i] = file_flag.into(); args[i + 1] = f.path().to_string_lossy().into_owned();
+    Ok(Some(f))
+}
 /// Windows: the system prompt goes to Claude in a file (`--append-system-prompt-file`). A command line there holds 32767 characters,
 /// npm's `claude.cmd` (cmd.exe) 8191 and Git's sh keeps 8186 of a quoted argument, while the prompt is 13 to 20 thousand; and a batch
 /// file's arguments may not hold the prompt's newlines at all.
