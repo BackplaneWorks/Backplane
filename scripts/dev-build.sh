@@ -99,7 +99,7 @@ boat_core() {
     { [ -f "$RT/libcef.so" ] && [ -f "$RT/icudtl.dat" ]; } || pullcef=1; fi   # the Chromium runtime is already cached here, or it comes back with the window
   body="export BP_REMOTE_CORE=1 BQ_HELD=1 BP_PULL_CEF=$pullcef PROFILE=$PROFILE BACKPLANE_COMMIT=${BACKPLANE_COMMIT:-} BUILD_ROOT=\$HOME/ws/src GPUI_DEV_DIR=\$BP_JOB/dev CEF_PATH=\$HOME/.cache/backplane/cef-rs"
   sk=; for k in hub window voice guard; do [ "${SKIP[$k]:-0}" = 1 ] && sk+="$k "; done; body+=" GATE_SKIP_SUITES='${sk% }'"
-  body+=" HOST_TARGET=\$HOME/target/host GPUI_TARGET=\$HOME/target/gpui VOICE_TARGET=\$HOME/target/voice GUARD_TARGET=\$HOME/target/guard"$'\n'"exec bash ~/ws/src/scripts/dev-build.sh$([ "$GATE" = 1 ] && echo ' --gate') --no-cut"
+  body+=" HOST_TARGET=\$HOME/target/native-host GPUI_TARGET=\$HOME/target/native-gpui VOICE_TARGET=\$HOME/target/native-voice GUARD_TARGET=\$HOME/target/native-guard"$'\n'"exec bash ~/ws/src/scripts/dev-build.sh$([ "$GATE" = 1 ] && echo ' --gate') --no-cut"
   bo_run "$BOXID" "$BJOB" "" "$body" > "$LOG" 2>&1; rc=$?
   [ "$rc" = 98 ] && { bo_down "the build could not run on $BOXID"; exit 98; }
   [ "$rc" = 0 ] || fail "$(phase)"
@@ -109,8 +109,8 @@ boat_core() {
   mark "copying"; PULL=$(mktemp -d "$DEV/.pull.XXXX")
   bo_pull "$BOXID" "$BJOB" /home/user/target "$PULL" >> "$LOG" 2>&1 || { rm -rf "$PULL"; fail "copy from the box"; }
   cpart() { mkdir -p "$2/$PROFILE"; cp -f "$PULL/$1/$PROFILE/$3" "$2/$PROFILE/"; }
-  cpart host "$HT" backplane-hub; cpart gpui "$GT" backplane-gpui; cpart voice "$VT" backplane-voice; cpart guard "$UT" backplane
-  [ "$pullcef" = 1 ] && cp -a "$PULL/gpui/$PROFILE/." "$GT/$PROFILE/"
+  cpart native-host "$HT" backplane-hub; cpart native-gpui "$GT" backplane-gpui; cpart native-voice "$VT" backplane-voice; cpart native-guard "$UT" backplane
+  [ "$pullcef" = 1 ] && cp -a "$PULL/native-gpui/$PROFILE/." "$GT/$PROFILE/"
   rm -rf "$PULL"; echo "built on Boat bp-build-$BX ($BOXID)" > "$DEV/.built-on-boat"; }
 # The gate's record (docs/MAIN-BUILD.md, "One gate per commit"): a suite whose inputs are byte-identical (git's index of its files, the compiler, this script) to a run that passed is not
 # run again: the log says "skip: ..." and names that run. Every passed key is kept (one file per key in $GOK/<suite>.d, 7 days), not only the last, so main-build finds the key of the
