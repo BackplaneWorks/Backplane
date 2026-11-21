@@ -81,6 +81,10 @@ pub async fn signed(home: &Path, url: &str, peer: &str, secret: &str, now: u64, 
     if path != "/far/tunnel" {
         if let Some((code, body)) = super::alwayson::tunnel::ends().call(peer, if post { "POST" } else { "GET" }, path, &headers(peer, now, &sig), if post { body } else { "" }).await { return Resp { code, body } }
     }
+    // persistent hub-to-hub binary WS (net/peerws.rs): zero curl, zero temp file, zero fsync when connected
+    if post && matches!(path, "/far/rpc" | "/far/push" | "/far/log") {
+        if let Some((code, body)) = super::peerws::call(home, peer, path, body).await { return Resp { code, body } }
+    }
     if !post { return curl(args(None, &target), headers(peer, now, &sig)).await }
     mkdir(&home.join("secrets")); mkdir(&home.join("secrets/tmp"));
     let file = home.join("secrets/tmp").join(hex::encode(super::pairing::urandom(8)));

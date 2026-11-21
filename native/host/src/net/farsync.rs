@@ -92,8 +92,11 @@ impl FarSync {
     /// POST /far/log: a page of what this hub shares after `since`.
     pub async fn log(self: &Arc<Self>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
         let link = match self.peering.signed_in("far-log", r) { Ok(p) => p, Err(e) => return e };
-        if !self.own(&link) { return forbidden() }
-        let Ok(o) = serde_json::from_slice::<Value>(&r.body) else { return HttpReply::text("400 Bad Request", "not JSON") };
+        self.log_authenticated(hub, &link, &r.body).await
+    }
+    pub(crate) async fn log_authenticated(self: &Arc<Self>, hub: &Arc<Hub>, link: &str, body: &[u8]) -> HttpReply {
+        if !self.own(link) { return forbidden() }
+        let Ok(o) = serde_json::from_slice::<Value>(body) else { return HttpReply::text("400 Bad Request", "not JSON") };
         let Some(feed) = self.feed.get() else { return HttpReply::text("503 Service Unavailable", "not ready") };
         let cat = feed.catalog(hub).await;
         match feed.answer(hub, o["since"].as_u64().unwrap_or(0), o["epoch"].as_str().unwrap_or(""), cat).await {
@@ -104,15 +107,18 @@ impl FarSync {
     /// POST /far/push
     pub async fn push(self: &Arc<Self>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
         let link = match self.peering.signed_in("far-push", r) { Ok(p) => p, Err(e) => return e };
-        if !self.own(&link) { return forbidden() }
-        let Ok(o) = serde_json::from_slice::<Value>(&r.body) else { return HttpReply::text("400 Bad Request", "not JSON") };
+        self.push_authenticated(hub, &link, &r.body).await
+    }
+    pub(crate) async fn push_authenticated(self: &Arc<Self>, hub: &Arc<Hub>, link: &str, body: &[u8]) -> HttpReply {
+        if !self.own(link) { return forbidden() }
+        let Ok(o) = serde_json::from_slice::<Value>(body) else { return HttpReply::text("400 Bad Request", "not JSON") };
         let ok = || HttpReply { status: "200 OK", ctype: "application/json".into(), extra: String::new(), body: br#"{"ok":true}"#.to_vec() };
-        if o.get("live").is_some() || o.get("note").is_some() { return ok() } // (streamed text and desk notes: not here yet)
+        if o.get("live").is_some() || o.get("note").is_some() { return ok() } // (streamed text goes over /far/ws)
         let (epoch, since, head) = (o["epoch"].as_str().unwrap_or("").to_string(), o["since"].as_u64().unwrap_or(0), o["head"].as_u64().unwrap_or(0));
         // a push from another history is only a resync hint: ask the owner for its current epoch instead of trusting a late old push
-        if epoch_changed(&self.store.epoch(&link), &epoch) { self.pull_later(hub, &link); return ok() }
-        match self.take(hub, &link, &epoch, since, head, items_of(&o)).await {
-            Ok(true) => { self.pull_later(hub, &link); ok() }
+        if epoch_changed(&self.store.epoch(link), &epoch) { self.pull_later(hub, link); return ok() }
+        match self.take(hub, link, &epoch, since, head, items_of(&o)).await {
+            Ok(true) => { self.pull_later(hub, link); ok() }
             Ok(false) => ok(),
             Err(_) => HttpReply::text("500 Internal Server Error", "could not keep it"),
         }

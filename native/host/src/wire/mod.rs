@@ -367,6 +367,9 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
         }
     };
     let mut s = s;
+    if req.route() == "/far/ws" && req.header("upgrade").eq_ignore_ascii_case("websocket") {
+        return crate::net::peerws::accept(hub, s, req, head_len).await;
+    }
     if req.route() == "/ws" && req.header("upgrade").eq_ignore_ascii_case("websocket") {
         if !hub.auth.allowed(&req) {
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
