@@ -406,14 +406,19 @@ pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: 
         });
         return Ok(format!("installing {name}"))
     }
+    // Agent updaters can invoke their package manager by name (Codex uses brew for a Homebrew cask).
+    let cli_path = matches!(&p, Plan::Run(..)).then(|| crate::agents::proc::Cli::from_env().child_path()).flatten();
     let Some((prog, args)) = command(&p) else { return Err("open its download page".into()) };
     let tool = tool.to_string(); let name = tool.clone();
     say(hub, &tool, "running", "Starting.").await;
     let h = hub.clone();
     let log = hub.cfg.home.join("installs"); let _ = std::fs::create_dir_all(&log); let log = log.join(format!("{}.log", tool.replace(':', "-")));
     tokio::spawn(async move {
-        let r = run(&h, &tool, &prog, &args, &log).await;
-        match r { Ok(()) => say(&h, &tool, "done", "Installed.").await, Err(why) => say(&h, &tool, "failed", &why).await }
+        let r = run(&h, &tool, &prog, &args, cli_path.as_deref(), &log).await;
+        match r { Ok(()) => say(&h, &tool, "done", "Installed.").await, Err(why) => {
+            eprintln!("onboard: {tool} failed: {why}");
+            say(&h, &tool, "failed", &why).await;
+        } }
         super::models_probe::refresh_soon(&h); // the picker finds what was just installed (or updated) now, not at the next 15-minute round
         after(h).await;
     });
@@ -501,10 +506,16 @@ async fn direct(hub: &Arc<Hub>, tool: &str, p: &'static WinInstaller, dir: &Path
     say(hub, tool, "running", &format!("Installed in {}", dest.display())).await;
     Ok(())
 }
-async fn run(hub: &Arc<Hub>, tool: &str, prog: &str, args: &[String], log: &Path) -> Result<(), String> {
+fn install_command(prog: &str, cli_path: Option<&std::ffi::OsStr>) -> tokio::process::Command {
+    let program = std::env::var_os("BACKPLANE_TOOL_INSTALLER").filter(|s| !s.is_empty()).unwrap_or_else(|| prog.into());
+    let mut command = crate::proc::tokio_cmd(crate::proc::Kind::Net, program);
+    if let Some(path) = cli_path { command.env("PATH", path); }
+    command
+}
+async fn run(hub: &Arc<Hub>, tool: &str, prog: &str, args: &[String], cli_path: Option<&std::ffi::OsStr>, log: &Path) -> Result<(), String> {
     let out = std::fs::File::create(log).map_err(|e| format!("could not write {}: {e}", log.display()))?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, std::env::var_os("BACKPLANE_TOOL_INSTALLER").filter(|s| !s.is_empty()).unwrap_or_else(|| prog.into()));
+    let mut c = install_command(prog, cli_path);
     c.args(args).stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err)).kill_on_drop(false);
     crate::plat::proc::own_group_tokio(&mut c);
     let mut child = c.spawn().map_err(|e| format!("could not start {prog}: {e}"))?;
@@ -522,6 +533,16 @@ async fn run(hub: &Arc<Hub>, tool: &str, prog: &str, args: &[String], log: &Path
 mod tests {
     use super::*;
     #[cfg(unix)] use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn agent_updater_inherits_the_path_used_to_discover_its_cli() {
+        let path = std::ffi::OsStr::new("/usr/bin:/bin:/opt/homebrew/bin");
+        let updater = install_command("/opt/homebrew/bin/codex", Some(path));
+        assert_eq!(
+            updater.as_std().get_envs().find(|(key, _)| *key == "PATH"),
+            Some((std::ffi::OsStr::new("PATH"), Some(path))),
+        );
+    }
 
     /// Every tool on every system: the button it gets (or the page).
     #[test] fn each_tool_gets_its_vendors_own_installer_per_system() {
