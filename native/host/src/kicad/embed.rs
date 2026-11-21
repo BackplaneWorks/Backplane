@@ -956,14 +956,14 @@ pub fn note_client_cid(client: u64, cid: &str) {
     };
     if holds { rt_bump(); }
 }
-/// The `cid` a connection said at its `view.open` (None: no desktop view on it: an agent's or a tool's connection).
-/// What follows KiCad's own switch (its show request the hub followed, `active_by` "kicad"): the frames' update when KiCad answered with
-/// them; otherwise (an error, a task that held it, frames unread) the session published as it is, so the change and who made it reach
-/// the clients at once and never ride a later publish past a tab the person chose meanwhile. Pure.
-fn after_kicad_switch(pro: String, gen: u64, res: Result<Option<(u64, String, Vec<Frame>)>, String>) -> Msg {
+/// What follows KiCad's own switch (its show request the hub followed, `active_by` "kicad"), once KiCad has answered: the frames' update
+/// when it answered with them, nothing more otherwise (an error, a task that held it, frames unread). The switch itself was published as
+/// the hub set it, before asking KiCad (a held ShowFrame waits up to 15 s a try, a GetFrames 10 s: no unrelated publish in that time
+/// carries it first). Pure.
+fn after_kicad_switch(pro: String, gen: u64, res: Result<Option<(u64, String, Vec<Frame>)>, String>) -> Option<Msg> {
     match res {
-        Ok(Some((holder, _, frames))) => Msg::FramesUpdated { pro, gen, holder: Some(holder), frames, reply: None },
-        Ok(None) | Err(_) => Msg::Republish { pro, gen },
+        Ok(Some((holder, _, frames))) => Some(Msg::FramesUpdated { pro, gen, holder: Some(holder), frames, reply: None }),
+        Ok(None) | Err(_) => None,
     }
 }
 /// `active_by` for a change a client asked for: its cid and the sequence number it sent with the show (null for none: an attach, an
@@ -974,6 +974,7 @@ pub fn show_by(cid: Option<String>, seq: &Value) -> Value {
         None => json!("agent"),
     }
 }
+/// The `cid` a connection said at its `view.open` (None: no desktop view on it: an agent's or a tool's connection).
 pub fn client_cid(client: u64) -> Option<String> { rt().lock().unwrap().cid_of.get(&client).cloned() }
 /// The holder of a pane held by `cid`: that client's latest connection while it is attached (`attached`: the hub's own test, or a test's).
 fn holder_of(r: &Rt, cid: &str, attached: &dyn Fn(u64) -> bool) -> Option<u64> {
@@ -2715,10 +2716,12 @@ impl Actor {
                 }
                 s.active = canon_frame(&kind).into(); s.active_by = json!("kicad");
                 let snap = s.clone();
+                // KiCad's switch and who made it, to the clients now: never after a tab the person chooses while KiCad is asked
+                self.publish(&snap, None);
                 let me = self.me.clone();
                 tokio::spawn(async move {
                     let res = switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", &item, false, false).await;
-                    let _ = me.send(after_kicad_switch(snap.pro, snap.gen, res));
+                    if let Some(m) = after_kicad_switch(snap.pro, snap.gen, res) { let _ = me.send(m); }
                 });
             }
             Msg::Dialog { pro, gen, open, title } => {
@@ -4783,9 +4786,10 @@ mod tests {
     }
     #[test] fn kicads_own_switch_is_published_whatever_kicad_answers() {
         let f = Frame { kind: "SCH".into(), doc: String::new(), title: String::new(), modified: false, shown: true, realized: true, xid: 5, min_w: 0, min_h: 0 };
-        assert!(matches!(after_kicad_switch("/p".into(), 2, Ok(Some((9, String::new(), vec![f])))), Msg::FramesUpdated { gen: 2, holder: Some(9), ref frames, .. } if frames.len() == 1));
-        assert!(matches!(after_kicad_switch("/p".into(), 2, Ok(None)), Msg::Republish { gen: 2, .. }), "frames unread: published as it is");
-        assert!(matches!(after_kicad_switch("/p".into(), 2, Err("AS_BUSY".into())), Msg::Republish { gen: 2, .. }), "refused or held: published as it is");
+        // (the switch itself is published as the hub sets it, before KiCad is asked; after KiCad's answer only its frames follow)
+        assert!(matches!(after_kicad_switch("/p".into(), 2, Ok(Some((9, String::new(), vec![f])))), Some(Msg::FramesUpdated { gen: 2, holder: Some(9), ref frames, .. }) if frames.len() == 1));
+        assert!(after_kicad_switch("/p".into(), 2, Ok(None)).is_none(), "frames unread: nothing more (published before)");
+        assert!(after_kicad_switch("/p".into(), 2, Err("AS_BUSY".into())).is_none(), "refused or held: nothing more (published before)");
     }
     #[test] fn every_active_says_who_made_it() {
         // a client's show: its cid and the sequence number it sent; an attach (no seq): the cid, seq null; the hub's own drive: "agent"

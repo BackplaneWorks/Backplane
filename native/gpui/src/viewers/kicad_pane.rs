@@ -142,12 +142,13 @@ pub fn on_active(pending: &mut Option<String>, act: &str, by: &Value, me: &str, 
     let ours = !me.is_empty() && by["cid"].as_str() == Some(me);
     match by["seq"].as_u64() { Some(n) if ours && n < chosen_at => Echo::ChosenPast, _ => Echo::Follow }
 }
-/// Whether the hub says KiCad has `kind` hidden in wx (its `frames[].shown` false, or no such frame listed: stale or missing info counts
-/// as hidden). The hub's own show of another frame hides the others through wx (HideFrame), and a native map of a wx-hidden frame can be
+/// Whether the hub says KiCad has `kind` hidden in wx: neither `realized` (wx's IsShown, bp.9) nor `shown` (IsShown AND natively mapped:
+/// false for every frame the client has unmapped, so on its own it would send every local switch through the hub), or no such frame
+/// listed (stale or missing info counts as hidden). The hub's own show of another frame hides the others through wx (HideFrame), and a native map of a wx-hidden frame can be
 /// withdrawn again by GTK: a local switch to such a frame asks KiCad to show it too (one show too many costs nothing; one too few is the
 /// Board->Schematic bounce). Pure.
 pub fn kicad_hides(frames: &Value, kind: &str) -> bool {
-    !frames.as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(kind) && f["shown"] == true))
+    !frames.as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(kind) && (f["realized"] == true || f["shown"] == true)))
 }
 /// #1389: the show the pane waits for after asking the hub for `kind`: none when the hub's active frame is that already (its answer
 /// changes nothing, so nothing would clear the wait, and the next change of the hub's frame, KiCad's own editor request, was then not
@@ -2527,9 +2528,11 @@ mod tests {
     #[test] fn a_frame_kicad_has_hidden_is_shown_through_kicad_too() {
         use super::kicad_hides;
         use serde_json::json;
-        let frames = json!([{"kind": "PCB", "shown": false}, {"kind": "SCH", "shown": true}, {"kind": "PCB_3D", "shown": true}]);
+        let frames = json!([{"kind": "PCB", "shown": false, "realized": false}, {"kind": "SCH", "shown": true, "realized": true}, {"kind": "PCB_3D", "shown": false, "realized": true}]);
         assert!(kicad_hides(&frames, "PCB"), "the hub's show of another frame hid it (HideFrame): asked for");
         assert!(!kicad_hides(&frames, "SCH"), "shown in KiCad: a pure local switch");
+        assert!(!kicad_hides(&frames, "PCB_3D"), "shown in wx, unmapped by the client (GetFrames' shown is IsShown AND mapped): a pure local switch");
+        assert!(!kicad_hides(&json!([{"kind": "PCB", "shown": true}]), "PCB"), "a runtime without realized: shown is enough");
         assert!(kicad_hides(&frames, "FOOTPRINT_EDITOR"), "not listed (stale): taken as hidden");
         assert!(kicad_hides(&json!(null), "PCB"), "no frames at all: taken as hidden (one show too many costs nothing)");
         assert!(kicad_hides(&json!([{"kind": "PCB"}]), "PCB"), "no shown field: taken as hidden");
