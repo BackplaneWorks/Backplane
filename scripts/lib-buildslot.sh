@@ -32,7 +32,10 @@ bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i
     # every slot is taken: with BQ_OFFLOAD=1, and only once the wait is long or memory is low (bq_offload_now), the same command runs on a Boat box (scripts/lib-boat.sh;
     # the command sees BP_BOAT_IDX and does the run there). 98 = no box could be used (it said why): keep waiting locally. 200 = the boxes are busy too: look again every few seconds.
     if [ -n "${BQ_OFFLOAD:-}" ] && [ -z "${BQ_MAIN:-}" ] && [ $((tick % 5)) = 0 ] && bq_offload_now "$tick" && bo_ready; then bo_try "$@"; rc=$?; case "$rc" in 98|200) ;; *) return "$rc";; esac; fi
-    if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb" "$n"; fi; tick=$((tick + 1)); sleep 1; done; }
+    if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb" "$n"; fi
+    # BQ_WAIT_MAX (seconds; the merge gate sets it): a wait that long ends with a line instead of holding whoever waits (the land lock) forever
+    if [ -n "${BQ_WAIT_MAX:-}" ] && [ "$tick" -ge "$BQ_WAIT_MAX" ]; then echo "cargo-q: no build slot for ${BQ_WAIT_MAX}s ($n here$([ -n "${BQ_OFFLOAD:-}" ] && echo ', and no Boat box free' || echo ', Boat not usable for this command')): giving up" >&2; return 75; fi
+    tick=$((tick + 1)); sleep 1; done; }
 # sccache shares compiled dependencies between worktrees (a new lane no longer compiles tokio, naga, zbus... from cold); through sccache-tmp, so the shared server never lives in a test run's TMPDIR
 bq_cc() { [ -z "${NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && command -v sccache > /dev/null 2>&1 || return 0
   export RUSTC_WRAPPER=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sccache-tmp SCCACHE_DIR=${SCCACHE_DIR:-$BP_DATA/sccache} SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-$([ "$BP_DATA" = "$HOME/.cache" ] && echo 20G || echo 80G)}; }
