@@ -75,7 +75,7 @@ export class CommandPalette {
     input.type = "text";
     input.className = "bp-palette-input";
     input.setAttribute("data-testid", "palette-input");
-    input.placeholder = "Jump to a thread, run a command or find what was said";
+    input.placeholder = t("gpui.jump.to.a.thread.run", "Jump to a thread, run a command or find what was said");
     input.value = this.query;
     input.autocomplete = "off";
     input.spellcheck = false;
@@ -196,7 +196,7 @@ export class CommandPalette {
     if (this.listed.length === 0) {
       const empty = document.createElement("div");
       empty.className = "bp-palette-empty";
-      empty.textContent = "Nothing matches";
+      empty.textContent = t("gpui.nothing.matches", "Nothing matches");
       this.listEl.replaceChildren(empty);
       return;
     }

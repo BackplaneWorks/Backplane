@@ -168,8 +168,8 @@ export class ComposerView {
     this.attachBtn = document.createElement("button");
     this.attachBtn.type = "button";
     this.attachBtn.className = "icon bp-composer-tool";
-    this.attachBtn.title = "Attach image";
-    this.attachBtn.setAttribute("aria-label", "Attach image");
+    this.attachBtn.title = t("web.composer.attach", "Attach image");
+    this.attachBtn.setAttribute("aria-label", t("web.composer.attach", "Attach image"));
     this.attachBtn.setAttribute("data-testid", "composer-attach");
     this.attachBtn.appendChild(makeComposerIcon([
       "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48",
@@ -179,8 +179,8 @@ export class ComposerView {
     this.voiceBtn = document.createElement("button");
     this.voiceBtn.type = "button";
     this.voiceBtn.className = "icon bp-composer-tool";
-    this.voiceBtn.title = "Voice dictation";
-    this.voiceBtn.setAttribute("aria-label", "Voice dictation");
+    this.voiceBtn.title = t("web.composer.voice", "Voice dictation");
+    this.voiceBtn.setAttribute("aria-label", t("web.composer.voice", "Voice dictation"));
     this.voiceBtn.setAttribute("data-testid", "composer-voice");
     this.voiceBtn.appendChild(makeComposerIcon([
       "M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z",
@@ -386,6 +386,10 @@ export class ComposerView {
 
   public refreshLocale(): void {
     this.textarea.placeholder = t("composer.placeholder", "Ask anything: @bot, >thread, %project, #room, $skill, /btw");
+    this.attachBtn.title = t("web.composer.attach", "Attach image");
+    this.attachBtn.setAttribute("aria-label", t("web.composer.attach", "Attach image"));
+    this.voiceBtn.title = t("web.composer.voice", "Voice dictation");
+    this.voiceBtn.setAttribute("aria-label", t("web.composer.voice", "Voice dictation"));
     this.sendBtn.textContent = t("composer.send", "Send");
     this.stopBtn.textContent = t("composer.stop", "Stop");
   }
@@ -515,11 +519,11 @@ export class ComposerView {
     this.clearError();
     for (const file of files) {
       if (!ALLOWED_MIMES.has(file.type)) {
-        this.showError(`Unsupported image type: ${file.type || file.name}`);
+        this.showError(t("web.composer.unsupported", "Unsupported image type: {type}", { type: file.type || file.name }));
         continue;
       }
       if (this.attachments.length >= MAX_ATTACHMENTS) {
-        this.showError(`At most ${MAX_ATTACHMENTS} images per message.`);
+        this.showError(t("web.composer.maximages", "At most {max} images per message.", { max: MAX_ATTACHMENTS }));
         break;
       }
       const dataUrl = await new Promise<string>((resolve, reject) => {
@@ -558,7 +562,7 @@ export class ComposerView {
       rm.type = "button";
       rm.className = "icon bp-attach-rm";
       rm.textContent = "×";
-      rm.title = "Remove";
+      rm.title = t("common.remove", "Remove");
       rm.addEventListener("click", () => {
         this.attachments.splice(idx, 1);
         this.renderAttachments();
