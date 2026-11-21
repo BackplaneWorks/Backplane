@@ -125,15 +125,18 @@ kill "$XM" 2>/dev/null
 # P6: a dead key over the pane (us intl: ' is dead_acute, then e): the composed letter reaches the composer, nothing of it KiCad
 if [ "${DEADKEY:-1}" = 1 ] && command -v setxkbmap >/dev/null; then
   # which compose ran: an XIM input method (XMODIFIERS and the root's XIM_SERVERS: ibus, fcitx) or GPUI's own xkb compose (a private Xvfb)
-  echo "INFO P6 compose path: XMODIFIERS=${XMODIFIERS:-none}, XIM_SERVERS: $(xprop -root XIM_SERVERS 2>/dev/null | grep '=' | cut -d= -f2- | tr -d ' ' | grep . || echo none)"
+  echo "INFO P6 compose environment: XMODIFIERS=${XMODIFIERS:-none}, XIM_SERVERS: $(xprop -root XIM_SERVERS 2>/dev/null | grep '=' | cut -d= -f2- | tr -d ' ' | grep . || echo none)"
   # the display's own layout, put back after (a run on a person's or a Boat's real desktop must not leave it us)
   LAYOUT0=$(setxkbmap -query 2>/dev/null | awk '/^layout/{l=$2} /^variant/{v=$2} /^options/{o=$2} END{printf "%s|%s|%s", l, v, o}')
+  restore_layout() { local L0 V0 O0; IFS='|' read -r L0 V0 O0 <<<"$LAYOUT0"
+    setxkbmap -layout "${L0:-us}" ${V0:+-variant "$V0"} ${O0:+-option "" -option "$O0"} 2>/dev/null; }
+  # put back on any exit too (a signal during the typing must not leave us intl), before the lib's own cleanup
+  trap 'restore_layout; kembed_cleanup' EXIT INT TERM
   setxkbmap -layout us -variant intl 2>/dev/null; sleep 1.0
   # DEADKEY_OVER=composer: the pointer over the composer instead (the same key on a client without the proxy: what main does with it)
   [ "${DEADKEY_OVER:-pane}" = composer ] && { python3 "$XINPUT_PY" move "$CX" "$CY" >/dev/null; sleep 0.5; }
   python3 "$XINPUT_PY" key dead_acute >/dev/null; sleep 0.2; python3 "$XINPUT_PY" key e >/dev/null; sleep 0.5
-  IFS='|' read -r L0 V0 O0 <<<"$LAYOUT0"
-  setxkbmap -layout "${L0:-us}" ${V0:+-variant "$V0"} ${O0:+-option "" -option "$O0"} 2>/dev/null; sleep 0.5
+  restore_layout; sleep 0.5
 fi
 # P5: the wheel over the pane still reaches KiCad's canvas with Backplane holding the keys (no click): the pane's picture changes
 shot wheel-before
