@@ -384,6 +384,14 @@ where
     hub.mirrors().set_away(&link, false);
     hub.mirrors().publish(&hub).await;
 
+    // Immediately announce our version, commit, and supported peer features on the handshake.
+    let _ = tx.try_send(encode_json(&json!({
+        "k": "hello",
+        "version": hub.cfg.version,
+        "commit": hub.cfg.commit,
+        "features": super::peerver::PEER_FEATURES,
+    })));
+
     let writer = tokio::spawn(async move {
         let mut ping = tokio::time::interval(Duration::from_secs(25));
         ping.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -408,6 +416,10 @@ where
                 let Some(frame) = decode_frame(&data) else { continue };
                 match frame {
                     Frame::Json(v) => match v["k"].as_str().unwrap_or("") {
+                        "hello" => {
+                            super::peerver::record_json(&hub.cfg.home, &link, &v);
+                            hub.bump_views();
+                        }
                         "req" => {
                             let id = v["id"].as_u64().unwrap_or(0);
                             let path = v["path"].as_str().unwrap_or("").to_string();

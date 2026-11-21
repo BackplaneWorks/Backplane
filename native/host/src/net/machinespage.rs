@@ -19,15 +19,24 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
     if linked.is_empty() { r.push(row("Linked machines", "None yet. Make a code here and enter it on the other machine, or enter its code below.", vec![])) }
     for l in &linked {
         let shown = if super::peering::over_link(s(l, "url")) { "reached over its own link" } else { s(l, "url") };
-        let (note, mut b) = match s(l, "state") {
+        let (mut note, mut b) = match s(l, "state") {
             // one of the owner's machines: its agents can be signed in from here (present/signin_there.rs)
             "paired" => (format!("{} · Paired", shown), vec![crate::present::signin_there::open_button(s(l, "id"))]),
             "no" => (format!("{} · Not yours", shown), vec![btn("Mine", "machine-mine", s(l, "id"), false)]),
             _ => (format!("{} · Unpaired: nobody approved this link. Confirm it is yours, or pair again with a code.", shown), vec![btn("Mine", "machine-mine", s(l, "id"), false)]),
         };
+        let vlabel = s(l, "versionLabel");
+        if !vlabel.is_empty() {
+            note.push_str(" · ");
+            note.push_str(vlabel);
+        }
+        let older = l["older"].as_bool().unwrap_or(false);
+        if older {
+            note.push_str(" · older version — update for newer features");
+        }
         b.push(btn("Remove", "machine-remove", s(l, "id"), false));
         let mut x = row(s(l, "name"), &note, b);
-        if s(l, "state") == "unpaired" { x["tone"] = json!("warn") }
+        if s(l, "state") == "unpaired" || older { x["tone"] = json!("warn") }
         r.push(x);
     }
     // machines the linked ones are linked to: one press asks for a code through them, the person approves on that machine
@@ -118,5 +127,28 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
             p.pair_with(hub, &addr, &code).await.map(|(id, check)| json!({"attempt": id, "check": check}))
         }
         _ => Err("unknown action".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn linked_machine_rows_show_version_and_warn_when_older() {
+        let d = json!({
+            "linked": [
+                {"id": "p1", "name": "desktop", "url": "http://d:3797", "state": "paired", "versionLabel": "v0.16.0 (d0ac5f6)"},
+                {"id": "p2", "name": "laptop", "url": "http://l:3797", "state": "paired", "versionLabel": "v0.15.2 (abc1234)", "older": true}
+            ]
+        });
+        let rs = rows(&d, &|_| String::new());
+        let desk = rs.iter().find(|r| r["label"] == "desktop").unwrap();
+        assert!(desk["note"].as_str().unwrap().contains("v0.16.0 (d0ac5f6)"));
+        assert!(desk.get("tone").is_none());
+        let lap = rs.iter().find(|r| r["label"] == "laptop").unwrap();
+        assert!(lap["note"].as_str().unwrap().contains("v0.15.2 (abc1234)"));
+        assert!(lap["note"].as_str().unwrap().contains("older version — update for newer features"));
+        assert_eq!(lap["tone"], "warn");
     }
 }

@@ -229,7 +229,9 @@ impl Peering {
         let (reqs, outs, made) = { let mut g = self.flow.inner.lock().unwrap(); self.sweep(&mut g); (g.incoming.clone(), g.outgoing.clone(), g.made.clone()) };
         let linked: Vec<Value> = self.table.with(|p| p.live().into_iter().map(|x| {
             let st = if p.verified(&x.id) { "paired" } else if p.own_how(&x.id) == "no" { "no" } else { "unpaired" };
-            json!({"id": x.id, "name": x.name, "url": x.url, "state": st})
+            let mut row = json!({"id": x.id, "name": x.name, "url": x.url, "state": st});
+            super::peerver::enrich_json(&self.home, env!("CARGO_PKG_VERSION"), &x.id, &mut row);
+            row
         }).collect());
         let mj = self.routes.machines_value();
         let me = mj["self"]["url"].as_str().unwrap_or("");

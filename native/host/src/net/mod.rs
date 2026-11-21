@@ -37,6 +37,7 @@ pub mod pairing;
 pub mod plan;
 pub mod registry;
 pub mod peerrpc;
+pub mod peerver;
 pub mod peerws;
 pub mod peerhttp;
 pub mod peering;

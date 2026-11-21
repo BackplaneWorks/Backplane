@@ -147,7 +147,7 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
         "home.state" => {
             let uber = uber(hub).await;
             let mid = crate::bots::api::of(hub).map(|bots| bots.my_mid()).unwrap_or_default();
-            ok(json!({"mid":mid,"uber": uber, "version": hub.cfg.version, "lines": hub.store.len(), "here": hub.setting("home.here").await.unwrap_or_default(), "at": hub.setting("home.at").await.unwrap_or_default(), "move": STATE.lock().unwrap().clone().unwrap_or(Value::Null)}))
+            ok(json!({"mid":mid,"uber": uber, "version": hub.cfg.version, "commit": hub.cfg.commit, "features": super::peerver::PEER_FEATURES, "lines": hub.store.len(), "here": hub.setting("home.here").await.unwrap_or_default(), "at": hub.setting("home.at").await.unwrap_or_default(), "move": STATE.lock().unwrap().clone().unwrap_or(Value::Null)}))
         }
         "home.adopt" => {
             let ds = p["devices"].as_array().cloned().unwrap_or_default();

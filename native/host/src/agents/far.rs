@@ -111,12 +111,26 @@ impl Agents {
         }
     }
 
-    /// machine_list: this machine and the linked ones, each with its projects (ids for thread_launch)
+    /// machine_list: this machine and the linked ones, each with its projects (ids for thread_launch) and version/commit
     pub async fn tool_machines(self: &Arc<Self>, _thread: &str) -> (bool, Value) {
-        let mut out = vec![json!({"name":"this machine","here":true,"projects":self.local_projects().await})];
+        let mut out = vec![json!({
+            "name": "this machine",
+            "here": true,
+            "version": self.hub.cfg.version,
+            "commit": self.hub.cfg.commit,
+            "features": crate::net::peerver::PEER_FEATURES,
+            "projects": self.local_projects().await,
+        })];
         for (id, name, url) in self.hub.far_machines() {
             let r = self.hub.far_call(&id, "machine_list", "machine_list", &json!({})).await;
-            out.push(machine_row(&id, &name, &url, r));
+            if let Ok((true, ref b)) = r {
+                crate::net::peerver::record_json(&self.hub.cfg.home, &id, b);
+            }
+            let mut row = machine_row(&id, &name, &url, r);
+            if row.get("version").is_none() {
+                crate::net::peerver::enrich_json(&self.hub.cfg.home, &self.hub.cfg.version, &id, &mut row);
+            }
+            out.push(row);
         }
         (true, json!({"machines":out}))
     }
@@ -152,7 +166,12 @@ impl Agents {
             "thread_settle" => self.tool_settle(from, a).await,
             "thread_launch" => self.tool_launch(from, a).await,
             "thread_list" => self.list_for_far(a).await,
-            "machine_list" => (true, json!({"projects":self.local_projects().await})),
+            "machine_list" => (true, json!({
+                "version": self.hub.cfg.version,
+                "commit": self.hub.cfg.commit,
+                "features": crate::net::peerver::PEER_FEATURES,
+                "projects": self.local_projects().await,
+            })),
             "launch_report" => self.far_report(link, from, a).await,
             "lock_acquire" => {
                 let mut args = a.clone();
@@ -204,7 +223,13 @@ impl Agents {
 /// Backplane (`older`, with why, so it is not called away); or away.
 pub fn machine_row(id: &str, name: &str, url: &str, r: Result<(bool, Value), String>) -> Value {
     match r {
-        Ok((true, b)) => json!({"link":id,"name":name,"url":url,"away":false,"projects":b["projects"]}),
+        Ok((true, b)) => {
+            let mut row = json!({"link":id,"name":name,"url":url,"away":false,"projects":b["projects"]});
+            if let Some(v) = b["version"].as_str().filter(|s| !s.is_empty()) { row["version"] = json!(v); }
+            if let Some(c) = b["commit"].as_str().filter(|s| !s.is_empty()) { row["commit"] = json!(c); }
+            if b["features"].is_array() { row["features"] = b["features"].clone(); }
+            row
+        }
         Err(e) if e.starts_with(crate::net::rpc::OLDER) => json!({"link":id,"name":name,"url":url,"away":false,"older":true,"why":e,"projects":[]}),
         _ => json!({"link":id,"name":name,"url":url,"away":true,"projects":[]}),
     }
