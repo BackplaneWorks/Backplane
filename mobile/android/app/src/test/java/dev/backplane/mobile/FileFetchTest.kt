@@ -19,6 +19,10 @@ class FileFetchTest {
         assertNull(FileFetch.shareRoute("/s/short/gerbers.zip"))
         assertNull(FileFetch.shareRoute("/s/$tok/a/b.zip"))
         assertNull(FileFetch.shareRoute("/s/$tok/"))
+        // only what the hub's share_route writes: nothing that takes the address to another route (a review found `..\..\file?path=` did, on OkHttp)
+        listOf("..\\..\\file?path=%2Fx", "..", ".", "a?b", "a#b", "a\\b", "%zz", "a b").forEach { assertNull(it, FileFetch.shareRoute("/s/$tok/$it")) }
+        assertTrue(FileFetch.isShare("/s/$tok/a.zip")); assertFalse(FileFetch.isShare("/file"))
+        assertEquals("download", FileFetch.safeName("..")); assertEquals("download", FileFetch.safeName(" . ")); assertEquals("a_b_c", FileFetch.safeName("a/b\\c"))
         // in running text, a share is a link as a path is (a name without an extension too), and what follows it in a sentence stays out
         assertEquals(listOf("bppath:/s/$tok/my%20case.step|/s/$tok/my%20case.step"), linkRuns("get /s/$tok/my%20case.step.").mapNotNull { (t, u) -> u?.let { "$it|$t" } })
         assertEquals(listOf("bppath:/s/$tok/README|/s/$tok/README"), linkRuns("(/s/$tok/README)").mapNotNull { (t, u) -> u?.let { "$it|$t" } })
@@ -73,6 +77,14 @@ class FileFetchTest {
         assertEquals(FileFetch.Step.Fail("that file is not shared"), FileFetch.step(403, 0, null, 23, "that file is not shared\n"))
         assertEquals(FileFetch.Step.Fail("no such file"), FileFetch.step(404, 0, null, 12, "no such file"))
         assertEquals(FileFetch.Step.Fail("HTTP 502"), FileFetch.step(502, 0, null, 0, ""))
+    }
+
+    @Test fun anAddressStaysOnItsRoute() {
+        val u = { s: String -> okhttp3.HttpUrl.Companion.run { s.toHttpUrlOrNull()!! } }
+        assertTrue(FileFetch.sameRoute(u("http://h:3787/s/$tok/my%20case.step").encodedPath, "/s/$tok/my%20case.step"))
+        assertTrue(FileFetch.sameRoute(u("http://h:3787/file?path=%2Fa").encodedPath, "/file"))
+        // OkHttp resolves `..` and `\`: such an address is another route, and is never asked
+        assertFalse(FileFetch.sameRoute(u("http://h:3787/s/$tok/..\\..\\file?path=%2Fx").encodedPath, "/s/$tok/..\\..\\file"))
     }
 
     @Test fun aShareRowsRevokeGoesToTheHub() {

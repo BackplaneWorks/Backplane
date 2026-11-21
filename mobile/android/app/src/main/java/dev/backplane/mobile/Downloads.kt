@@ -22,14 +22,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
-import okhttp3.Request
 import java.io.File
-import java.io.FileOutputStream
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
@@ -58,86 +55,64 @@ object Downloads {
     fun project(ctx: Context, thread: String, path: String) =
         start(ctx, "/files/get", "thread=" + Uri.encode(thread) + "&path=" + Uri.encode(path), path.substringAfterLast('/'), -1)
 
-    private fun dirOf(c: Context, key: String) = File(File(c.cacheDir, "downloads"), Integer.toHexString(key.hashCode()) + "-" + key.length)
+    private val asks = HashMap<String, Pair<String, String>>()
+    private fun dirOf(c: Context, key: String) = File(File(c.cacheDir, "downloads"),
+        java.security.MessageDigest.getInstance("SHA-256").digest(key.toByteArray()).take(16).joinToString("") { "%02x".format(it) })
 
     fun start(c: Context, route: String, query: String, given: String, size: Long) {
         ctx = c.applicationContext
-        val name = given.replace('/', '_').replace('\\', '_').trim().ifEmpty { "download" }
+        val name = FileFetch.safeName(given)
         val key = "$route?$query"
         if (jobs[key]?.isActive == true) return
+        asks[key] = route to query
         put(DownloadRow(key, name, 0, size, DownloadRow.State.RUN))
-        jobs[key] = DataClient.scope.launch { run(c.applicationContext, key, route, query, name, size) }
+        // a cancelled run of the same file finishes its last write before this one measures the part
+        val before = stopping.remove(key)
+        jobs[key] = DataClient.scope.launch { before?.join(); run(c.applicationContext, key, route, query, name, size) }
     }
+    private val stopping = HashMap<String, Job>()
 
-    fun cancel(key: String) { jobs.remove(key)?.cancel(); rows.removeAll { it.key == key } }
+    fun cancel(key: String) {
+        jobs.remove(key)?.let { j -> j.cancel(); stopping[key] = j; j.invokeOnCompletion { DataClient.scope.launch { if (stopping[key] === j) stopping.remove(key) } } }
+        rows.removeAll { it.key == key }
+    }
     fun dismiss(key: String) { if (jobs[key]?.isActive != true) rows.removeAll { it.key == key } }
     fun retry(key: String) { val r = rows.firstOrNull { it.key == key } ?: return; val c = ctx ?: return
-        val (route, query) = key.substringBefore('?') to key.substringAfter('?', ""); start(c, route, query, r.name, r.total) }
+        val (route, query) = asks[key] ?: return; start(c, route, query, r.name, r.total) }
 
     private fun put(r: DownloadRow) { val i = rows.indexOfFirst { it.key == r.key }; if (i >= 0) rows[i] = r else rows.add(r) }
     private suspend fun show(r: DownloadRow) = withContext(Dispatchers.Main) { put(r) }
 
     private suspend fun run(c: Context, key: String, route: String, query: String, name: String, size: Long) {
-        val dir = dirOf(c, key); val part = File(dir, "$name.part"); val tagFile = File(dir, "etag")
-        val fail = { why: String -> DownloadRow(key, name, if (part.exists()) part.length() else 0, size, DownloadRow.State.FAIL, why) }
+        // the file and its part in a folder of their own, the tag beside it: no name the hub sends can be the tag's
+        val dir = dirOf(c, key); val files = File(dir, "f"); val part = File(files, "$name.part"); val tagFile = File(dir, "etag")
         val out = withContext(Dispatchers.IO) {
-            dir.mkdirs(); sweep(c, dir)
-            var tries = 0; var total = size
-            while (isActive) {
-                val link = DataClient.link ?: return@withContext fail(Msg.android_link_offline)
-                val url = Pairing.http(link, route, query, token = false) ?: return@withContext fail(Msg.android_link_offline)
-                val have = if (part.exists()) part.length() else 0L
-                val tag = if (tagFile.exists()) tagFile.readText() else ""
-                val ask = FileFetch.ask(have, tag)
-                val req = Request.Builder().url(url).apply { Pairing.token(link)?.let { header("Authorization", "Bearer $it") }; ask.forEach { (k, v) -> header(k, v) } }.build()
-                val from = if (ask.isEmpty()) 0L else have
-                try {
-                    val step = http.newCall(req).execute().use { r ->
-                        val body = r.body
-                        val st = FileFetch.step(r.code, from, r.header("Content-Range"), body?.contentLength() ?: -1, if (r.code in 200..299) "" else body?.string()?.take(400) ?: "")
-                        if (st is FileFetch.Step.Write && body != null) {
-                            r.header("ETag")?.let { tagFile.writeText(it) } ?: tagFile.delete()
-                            total = if (st.total >= 0) st.total else if (body.contentLength() >= 0) st.from + body.contentLength() else -1
-                            val before = if (st.from == 0L) 0L else part.length()
-                            FileOutputStream(part, st.from > 0).use { o ->
-                                val inp = body.byteStream(); val buf = ByteArray(BUF); var got = before; var shown = 0L
-                                while (isActive) {
-                                    val n = inp.read(buf); if (n < 0) break
-                                    o.write(buf, 0, n); got += n
-                                    if (got - shown >= (1 shl 20) || shown == 0L) { shown = got; show(DownloadRow(key, name, got, total, DownloadRow.State.RUN)) }
-                                }
-                            }
-                            if (part.length() > before) tries = 0   // it moved on: a dropped connection starts its count again
-                        }
-                        st
-                    }
-                    when (step) {
-                        is FileFetch.Step.Fail -> return@withContext fail(step.why)
-                        FileFetch.Step.Again -> { part.delete(); tagFile.delete(); if (++tries >= FileFetch.TRIES) return@withContext fail(Msg.android_link_failed); continue }
-                        FileFetch.Step.Done -> {}
-                        is FileFetch.Step.Write -> if (!(FileFetch.complete(part.length(), total) || total < 0)) {
-                            // the body ended short (the link dropped, the file changed): ask for the rest
-                            if (++tries >= FileFetch.TRIES) return@withContext fail(Msg.android_link_failed); delay(FileFetch.backoffMs(tries)); continue
-                        }
-                    }
-                    val done = File(dir, name); done.delete(); part.renameTo(done); tagFile.delete()
-                    val saved = runCatching { saveToDownloads(c, done) }.isSuccess
-                    return@withContext DownloadRow(key, name, done.length(), done.length(), DownloadRow.State.DONE, if (saved) Msg.android_download_saved else "", done)
-                } catch (e: IOException) {
-                    if (++tries >= FileFetch.TRIES) return@withContext fail(e.message ?: Msg.android_link_failed)
-                    show(DownloadRow(key, name, if (part.exists()) part.length() else 0, total, DownloadRow.State.RUN))
-                    delay(FileFetch.backoffMs(tries))
+            files.mkdirs(); dir.setLastModified(System.currentTimeMillis()); sweep(c)
+            val where = {
+                DataClient.link?.let { l -> Pairing.http(l, route, query, token = false)?.toHttpUrlOrNull()
+                    // an address that no longer asks for the route (it climbed out of it) is never asked
+                    ?.takeIf { FileFetch.sameRoute(it.encodedPath, route) }
+                    ?.let { FileFetchRun.Where(it.toString(), if (FileFetch.isShare(route)) null else Pairing.token(l)) } }
+            }
+            when (val r = FileFetchRun.fetch(http, where, part, tagFile, size, Msg.android_link_offline, Msg.android_link_failed, { have, total -> show(DownloadRow(key, name, have, total, DownloadRow.State.RUN)) })) {
+                is FileFetchRun.Out.Fail -> DownloadRow(key, name, if (part.exists()) part.length() else 0, size, DownloadRow.State.FAIL, r.why)
+                is FileFetchRun.Out.Whole -> {
+                    val done = File(files, name); done.delete()
+                    if (!part.renameTo(done)) DownloadRow(key, name, part.length(), size, DownloadRow.State.FAIL, Msg.android_link_failed)
+                    else { tagFile.delete()
+                        val saved = runCatching { saveToDownloads(c, done) }.isSuccess
+                        DownloadRow(key, name, done.length(), done.length(), DownloadRow.State.DONE, if (saved) Msg.android_download_saved else "", done) }
                 }
             }
-            fail(Msg.android_link_failed)
         }
-        withContext(Dispatchers.Main) { put(out); jobs.remove(key) }
+        withContext(Dispatchers.Main) { if (jobs.containsKey(key)) { put(out); jobs.remove(key) } }
     }
 
-    /** Older downloads in the cache go after a day (never the one running). */
-    private fun sweep(c: Context, keep: File) {
+    /** Older downloads in the cache go after a day (never one running: each touches its folder as it starts). */
+    private suspend fun sweep(c: Context) {
         val day = System.currentTimeMillis() - 86_400_000L
-        File(c.cacheDir, "downloads").listFiles()?.forEach { d -> if (d != keep && d.lastModified() < day) d.deleteRecursively() }
+        val live = withContext(Dispatchers.Main) { (jobs.keys + stopping.keys).map { dirOf(c, it) }.toSet() }
+        File(c.cacheDir, "downloads").listFiles()?.forEach { d -> if (d !in live && d.lastModified() < day) d.deleteRecursively() }
     }
 
     private fun mime(name: String) = MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
