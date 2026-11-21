@@ -1114,6 +1114,7 @@ function mountApp(): void {
       const hashes = res.h ?? cached?.hashes ?? {};
       putThreadCache(threadId, { entries, ids, olderCursor, review, unanswered, rail: nextRail, hashes });
       chat.setThread(th, entries, Boolean(olderCursor), review, unanswered);
+      void watchMgmtForThread(threadId, gen);
       if (activeRailKind) openViewer(activeRailKind);
       return;
     }
