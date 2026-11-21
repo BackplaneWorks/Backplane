@@ -19,7 +19,7 @@ fi
 # deallocated by its idle watcher, two build attempts lost). Keep bp-win up for a build by holding its
 # `winbuild` lock (scripts/bp-lock.sh winbuild -- ...), which the desktop watcher keys on.
 jump_power() { az vm get-instance-view -g "$rg" -n bp-win --query "instanceView.statuses[?starts_with(code,'PowerState/')].code|[0]" -o tsv 2>/dev/null || true; }
-# a VM that was already running has no boot to wait for; a cold start gets ~4 minutes first
+# a VM that was already running has no boot to wait for; a cold start gets 24 tries first (2 to 10 minutes)
 [ "$power" = PowerState/running ] && boot_tries=3 || boot_tries=24
 for i in $(seq 60); do
   for host in bp-winbuild bp-winbuild-vnet; do
