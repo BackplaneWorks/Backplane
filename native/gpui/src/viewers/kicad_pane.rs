@@ -953,6 +953,9 @@ impl KicadPane {
                     Echo::Pending => {}
                     Echo::Follow => {
                         self.override_kind = (act != frame_for(&self.open)).then(|| act.to_string());
+                        // the hub publishes KiCad's switch before KiCad has shown the frame (a held ShowFrame waits): the stayed-unmapped
+                        // check starts its wait afresh, no remount show for a frame KiCad is still being asked for
+                        self.unmapped_since = None;
                         cause = format!("hub info active {} -> {act} (KiCad's active frame)", self.info["active"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
                     }
                     // #1389's measurement: the hub's active frame changed and the pane does not follow it (a show of its own is pending)
