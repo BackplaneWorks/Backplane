@@ -86,10 +86,49 @@ pub fn reason(o: &Value) -> String {
     parts.extend(o["message"]["content"].as_array().map(|a| a.iter().map(|x| s_of(x, "text").to_string()).collect::<Vec<_>>()).unwrap_or_default());
     parts.join("; ")
 }
-/// Error.reset: the provider's reset time (0 unknown): its own field, else the time Claude Code puts after a bar ("Claude AI usage limit reached|1700000000").
+/// Error.reset: the provider's reset time (0 unknown): its own field, else the time Claude Code puts after a bar ("Claude AI usage limit reached|1700000000"),
+/// else Google/Antigravity's `quotaResetTimeStamp` / `quotaResetDelay` / `retryDelay`, else Claude Code's "resets ..." words.
 pub fn reset_of(o: &Value) -> u64 {
+    let now = crate::hub::now_ms() / 1000;
     o["error"]["resets_at"].as_u64().or(o["resets_at"].as_u64()).or(o["rate_limit_info"]["resetsAt"].as_u64()).or_else(|| reason(o).rsplit_once('|').and_then(|(_, t)| t.trim().parse().ok()))
-        .unwrap_or_else(|| reset_words(&reason(o), crate::hub::now_ms() / 1000, &|z| crate::bots::clock::TzRule::parse(&super::zone::rule(z))))
+        .unwrap_or_else(|| { let r = reason(o); let g = reset_google(&r, now); if g > 0 { g } else { reset_words(&r, now, &|z| crate::bots::clock::TzRule::parse(&super::zone::rule(z))) } })
+}
+/// Google/Antigravity's reset metadata in a rate-limit or quota error: `quotaResetTimeStamp:<ISO>`, `quotaResetDelay:<go-duration>`, or `retryDelay:<go-duration>`.
+pub fn reset_google(text: &str, now: u64) -> u64 {
+    let token_after = |key: &str| -> Option<&str> {
+        let i = text.find(key)?;
+        let rest = &text[i + key.len()..];
+        let tok = rest.split(|c: char| c.is_whitespace() || matches!(c, ']' | '}' | ',' | '"' | '\'')).next()?;
+        if tok.is_empty() { None } else { Some(tok) }
+    };
+    if let Some(ts) = token_after("quotaResetTimeStamp:") {
+        if let Some(secs) = super::accounts_io::parse_iso(ts) { return secs }
+    }
+    let Some(dur) = token_after("quotaResetDelay:").or_else(|| token_after("retryDelay:")) else { return 0 };
+    let ms = parse_go_duration_ms(dur);
+    if ms > 0 { now.saturating_add((ms + 999) / 1000) } else { 0 }
+}
+/// Parses a Go duration string like `1h2m3.5s`, `45s`, `500ms`, `250µs` into milliseconds (0 if invalid).
+pub fn parse_go_duration_ms(s: &str) -> u64 {
+    let bytes = s.as_bytes(); let mut i = 0; let mut total_ms: f64 = 0.0; let mut any = false;
+    while i < bytes.len() {
+        let start = i;
+        while i < bytes.len() && (bytes[i].is_ascii_digit() || bytes[i] == b'.') { i += 1 }
+        if i == start { return 0 }
+        let Ok(num) = s[start..i].parse::<f64>() else { return 0 };
+        let rest = &s[i..];
+        let (unit_len, mult) = if rest.starts_with("ns") { (2, 1e-6) }
+            else if rest.starts_with("us") { (2, 1e-3) }
+            else if rest.starts_with("µs") { ("µs".len(), 1e-3) }
+            else if rest.starts_with("μs") { ("μs".len(), 1e-3) }
+            else if rest.starts_with("ms") { (2, 1.0) }
+            else if rest.starts_with('h') { (1, 3_600_000.0) }
+            else if rest.starts_with('m') { (1, 60_000.0) }
+            else if rest.starts_with('s') { (1, 1_000.0) }
+            else { return 0 };
+        total_ms += num * mult; i += unit_len; any = true;
+    }
+    if any && total_ms > 0.0 && total_ms.is_finite() { total_ms.round() as u64 } else { 0 }
 }
 /// Reset.words: the time Claude Code writes after "resets" ("You've hit your weekly limit · resets Nov 12, 3am (America/New_York)", "resets 4:30pm (Europe/Paris)"), in
 /// unix seconds; 0 when there is none or its zone is not known here (no zone is guessed). A date-less time is the next one to come; a date earlier than now is next year's.
@@ -140,7 +179,7 @@ pub fn transient_text(s: &str) -> bool {
     if not_quota(&low) || quota_words(&low) || missing_text(&low) { return false }
     ["goaway", "server_shutting_down", "connection reset", "reset by peer", "econnreset", "unexpected eof", "unexpected end of", "stream reading error", "stream error", "broken pipe",
      "connection closed", "connection was closed", "socket hang up", "connection refused", "timed out", "deadline exceeded", "temporarily unavailable",
-     "stream disconnected", "network error", "fetch failed", "502", "503", "504", "529", "bad gateway", "service unavailable", "gateway timeout", "overloaded", "server is busy", "internal server error", "unavailable: "].iter().any(|w| low.contains(w))
+     "stream disconnected", "network error", "fetch failed", "mid-turn 404", "502", "503", "504", "529", "bad gateway", "service unavailable", "gateway timeout", "overloaded", "server is busy", "internal server error", "unavailable: "].iter().any(|w| low.contains(w))
 }
 /// The turn's failure line, when it is a transient transport failure: its words.
 pub fn transient(o: &Value) -> Option<String> { if envelope(o) && transient_text(&reason(o)) { Some(reason(o)) } else { None } }
@@ -175,7 +214,7 @@ fn auth_code(c: &str) -> bool { matches!(c, "authentication_error" | "invalid_ap
 fn auth_words(s: &str) -> bool {
     if s.contains("refresh lock") { return false }
     ["please run /login", "run /login", "invalid api key", "oauth token has expired", "authentication failed", "authentication_error", "not logged in", "login required", "unauthorized", "token has been revoked",
-     "failed to authenticate", "oauth session expired", "refresh token is no longer valid", "api error: 401", "status code 401", "401 unauthorized"].iter().any(|w| s.contains(w))
+     "failed to authenticate", "oauth session expired", "refresh token is no longer valid", "api error: 401", "status code 401", "401 unauthorized", "no browser is available here"].iter().any(|w| s.contains(w))
 }
 /// Words a provider CLI's refusal (a control request's error, a status line) says when the login itself is dead: what [`auth_failure`] reads, on any text.
 pub fn auth_text(s: &str) -> bool { let low = s.to_lowercase(); !low.contains("cancelled") && !low.contains("canceled") && auth_words(&low) }
@@ -584,4 +623,20 @@ mod tests {
     }
 
     #[test] fn fallback_never_wraps() { assert_eq!(show(&suffix(&parse("claude/sonnet,codex/gpt-6.1-sol"), "codex/gpt-6.1-sol")), ""); }
+
+    /// T3 Code #29594, #39869, #36037: Google/Antigravity reset timestamps and Go durations, mid-turn 404 transient, no-browser auth failure.
+    #[test] fn google_reset_mid_turn_404_and_no_browser_auth() {
+        assert_eq!(parse_go_duration_ms("1h2m3s"), 3_723_000);
+        assert_eq!(parse_go_duration_ms("1.5s"), 1_500);
+        assert_eq!(parse_go_duration_ms("250ms"), 250);
+        assert_eq!(parse_go_duration_ms("bad"), 0);
+        let iso_secs = super::super::accounts_io::parse_iso("2026-11-21T03:00:00Z").unwrap();
+        assert_eq!(reset_google("[quotaResetTimeStamp:2026-11-21T03:00:00Z quotaResetDelay:45s]", 1_000), iso_secs);
+        assert_eq!(reset_google("[quotaResetDelay:1m30s]", 1_000), 1_090);
+        assert_eq!(reset_google("[retryDelay:12.2s]", 1_000), 1_013);
+        assert_eq!(reset_google("no reset info", 1_000), 0);
+        assert!(transient_text("mid-turn 404 from Antigravity: NOT_FOUND (code 404)"));
+        assert!(!transient_text("NOT_FOUND (code 404): Model not found"));
+        assert!(auth_text("No browser is available here. Run agy --login."));
+    }
 }

@@ -166,8 +166,13 @@ pub fn cache_read(text: &str) -> Option<String> {
 
 /// A program's exit code and stdout, None when it could not start or ran out of time (it is killed then).
 async fn run(cmd: &Path, args: &[&str], env: &[(&str, &str)], limit: Duration) -> Option<(i32, String, String)> {
+    run_unset(cmd, args, env, &[], limit).await
+}
+/// [`run`] with `unset` taken out of the child's environment (used for `agy models` so an SSH-started hub reads a keyring sign-in).
+async fn run_unset(cmd: &Path, args: &[&str], env: &[(&str, &str)], unset: &[&str], limit: Duration) -> Option<(i32, String, String)> {
     let mut c = proc::tokio_cmd(Kind::Agent, cmd);
     if let Some(p) = probe_path() { c.env("PATH", p); }
+    for k in unset { c.env_remove(k); }
     c.args(args).envs(env.iter().copied()).stdin(std::process::Stdio::null()).kill_on_drop(true);
     let out = tokio::time::timeout(limit, c.output()).await.ok()?.ok()?;
     Some((out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()))
@@ -241,8 +246,10 @@ pub async fn detect(home: &Path) -> Found {
         let out = tokio::time::timeout(Duration::from_secs(10), c.output()).await.ok().and_then(Result::ok).map_or(String::new(), |o| String::from_utf8_lossy(&o.stdout).into_owned());
         let mut i = agy::info(&out);
         // no pinned agent: turns run the person's agy CLI (providers/agy_cli.rs), so the picker lists it and the models it offers this sign-in
-        if i.have.is_empty() { if let Some(p) = at("agy") { i.cli = version(&p).await;
-            i.cli_models = run(&p, &["models"], &[], Duration::from_secs(30)).await.filter(|r| r.0 == 0).map_or(vec![], |r| agy::cli_models(&r.1));
+        if i.have.is_empty() { if let Some(p) = at("agy") {
+            let unset = crate::agents::providers::agy_cli::storage_unset_here(&std::path::PathBuf::from(crate::plat::dirs::home_or_empty()));
+            i.cli = version(&p).await;
+            i.cli_models = run_unset(&p, &["models"], &[("AGY_CLI_DISABLE_AUTO_UPDATE", "1")], &unset, Duration::from_secs(30)).await.filter(|r| r.0 == 0).map_or(vec![], |r| agy::cli_models(&r.1));
             // the driver maps a thread's model and effort to agy's variant id from this list (kept only when agy listed something)
             if !i.cli_models.is_empty() { let _ = std::fs::create_dir_all(&root); let _ = std::fs::write(agy::bases_path(&home.to_string_lossy()), agy::bases_json(&agy::fold(&i.cli_models))); } } }
         i };

@@ -64,9 +64,10 @@ mkdir -p \"$p/antigravity-acp\" && printf '%s\\n' \"$5\" > \"$p/antigravity-acp/
 t=\"$p/tmp/$$\"; mkdir -p \"$t\"\n\
 case \"$m\" in gemini-api-key) n=GEMINI_API_KEY;; agent-platform) n=GOOGLE_API_KEY;; *) n=;; esac\n\
 key=; if [ -n \"$n\" ] && [ -f \"$k\" ]; then key=$(unset \"$n\"; . \"$k\" >/dev/null 2>&1; eval \"printf %s \\\"\\${$n:-}\\\"\"); fi\n\
-unset GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION GOOGLE_GENAI_USE_VERTEXAI AGY_ACP_ENABLE_OAUTH AGY_ACP_CCPA_PROJECT ELECTRON_RUN_AS_NODE\n\
+unset GEMINI_API_KEY GOOGLE_API_KEY GOOGLE_CLOUD_PROJECT GOOGLE_CLOUD_LOCATION GOOGLE_GENAI_USE_VERTEXAI AGY_ACP_ENABLE_OAUTH AGY_ACP_CCPA_PROJECT ELECTRON_RUN_AS_NODE CHROME_CRASHPAD_PIPE_NAME\n\
 [ -n \"$key\" ] && export \"$n=$key\"\n\
-export GEMINI_HOME=\"$p\" AGY_ACP_FORCE_FILE_STORAGE=1 PYTHONUNBUFFERED=1 TMPDIR=\"$t\" ANTIGRAVITY_HARNESS_PATH=\"$d/localharness_external\" BROWSER=\"'$0' --open %s\"\n\
+if [ \"$(uname -s)\" = Linux ] && [ -z \"${SSL_CERT_FILE:-}\" ] && [ -z \"${SSL_CERT_DIR:-}\" ]; then for ca in \"${NIX_SSL_CERT_FILE:-}\" /etc/ssl/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem; do [ -n \"$ca\" ] && [ -f \"$ca\" ] && export SSL_CERT_FILE=\"$ca\" && break; done; fi\n\
+export GEMINI_HOME=\"$p\" AGY_ACP_FORCE_FILE_STORAGE=1 AGY_CLI_DISABLE_AUTO_UPDATE=1 PYTHONUNBUFFERED=1 TMPDIR=\"$t\" ANTIGRAVITY_HARNESS_PATH=\"$d/localharness_external\" BROWSER=\"'$0' --open %s\"\n\
 set -- \"$d/agy_acp_server.par\"; [ \"$(uname -s)\" = Linux ] && set -- \"$@\" --uid=\n\
 exec 3<&0\n\
 \"$@\" <&3 3<&- 2>\"$p/agy.log\" &\n\
@@ -142,9 +143,9 @@ impl AcpTurn { fn servers(&self) -> Value { if self.servers.is_array() { self.se
 /// AgyTurn
 #[derive(Clone, Debug, Default)]
 pub struct AgyTurn { pub acp: AcpTurn, pub method: String, pub mode: String, pub model: String }
-/// Acp{sid, buf, done}
+/// Acp{sid, buf, done, open_tools}
 #[derive(Clone, Debug, Default)]
-pub struct Acp { pub sid: String, pub buf: String, pub done: bool }
+pub struct Acp { pub sid: String, pub buf: String, pub done: bool, pub open_tools: Vec<String> }
 #[derive(Debug, Default)]
 pub struct Out { pub send: Vec<String>, pub emit: Vec<Value>, pub asks: Vec<String> }
 fn out_emit(e: Vec<Value>) -> Out { Out { emit: e, ..Default::default() } }
@@ -164,11 +165,19 @@ fn say_rpc(fresh: bool, t: &AcpTurn, sid: &str) -> String {
     rpc(3, "session/prompt", json!({"sessionId":sid,"prompt":[{"type":"text","text":text}]}))
 }
 pub fn hint(msg: &str) -> String {
-    if ["auth", "API key", "credential", "sign"].iter().any(|k| msg.contains(k)) { format!("{msg} (Settings › Agents › Antigravity: add a key or sign in)") } else { msg.into() }
+    let l = msg.to_lowercase();
+    if ["auth", "api key", "credential", "sign", "logged in", "no browser is available"].iter().any(|k| l.contains(k)) { format!("{msg} (Settings › Agents › Antigravity: add a key or sign in)") } else { msg.into() }
 }
-/// Acp.hint: ACP's own failure on the prompt (id 3) says how Grok signs in, as the JS hub's shared reply does.
-fn acp_hint(msg: &str) -> String { let l = msg.to_lowercase(); if l.contains("auth") || l.contains("login") { format!("{msg} (sign in once with `grok login`)") } else { msg.into() } }
-fn err_msg(o: &Value) -> String { o.get("error").and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or("grok failed").to_string() }
+fn err_msg(o: &Value) -> String { o.get("error").and_then(|e| e.get("message")).and_then(Value::as_str).unwrap_or("antigravity failed").to_string() }
+/// Stop reasons where ACP ended without finishing: refusal (Antigravity maps QUOTA_EXHAUSTED to refusal), max_tokens, max_turn_requests.
+fn stop_reason_err(r: &Value) -> Option<&'static str> {
+    match gs(r, "stopReason") {
+        "refusal" => Some("Antigravity refused this request (quota exhausted or policy refusal)."),
+        "max_tokens" => Some("Antigravity stopped because its reply reached the output token limit."),
+        "max_turn_requests" => Some("Antigravity stopped because it reached its request limit for this turn."),
+        _ => None,
+    }
+}
 /// The setting by which the person opts in to the pinned agent signing in with their Google account ("yes"); off by default.
 pub const OAUTH_OPTIN: &str = "agy.oauth.optin";
 pub const OAUTH_REFUSED: &str = "Antigravity's pinned agent is set to sign in with a Google account, which Google's Antigravity terms forbid for other software and can get the account suspended. Use a Gemini API key or a Google Cloud project instead, or Google's own agy CLI (uninstall the pinned agent), or opt in knowingly with the setting agy.oauth.optin = yes";
@@ -178,18 +187,23 @@ pub const MISSING_MSG: &str = "Antigravity is not installed: install Google's An
 fn update(a: &mut Acp, u: &Value) -> Vec<Value> {
     match gs(u, "sessionUpdate") {
         "agent_message_chunk" => { let t = u.get("content").map(|c| gs(c, "text")).unwrap_or(""); a.buf.push_str(t); vec![event("item.delta", json!({"text": t}))] }
-        "tool_call" => { let (t, k) = (gs(u, "title"), gs(u, "kind")); let c = if !t.is_empty() { t } else if !k.is_empty() { k } else { "tool" };
-            vec![event("item.completed", json!({"item":{"type":"command_execution","id":gs(u, "toolCallId"),"command":c}}))] }
+        "tool_call" => { let (t, k, id) = (gs(u, "title"), gs(u, "kind"), gs(u, "toolCallId")); let c = if !t.is_empty() { t } else if !k.is_empty() { k } else { "tool" };
+            if !id.is_empty() && !a.open_tools.iter().any(|x| x == id) { a.open_tools.push(id.into()) }
+            vec![event("item.completed", json!({"item":{"type":"command_execution","id":id,"command":c}}))] }
         "plan" => { let xs: Vec<Value> = u.get("entries").and_then(Value::as_array).map(|e| e.iter().map(|x| { let s = gs(x, "status"); json!({"text":gs(x, "content"),"status":if s.is_empty() { "pending" } else { s }}) }).collect()).unwrap_or_default();
             vec![event("item.updated", json!({"item":{"type":"todo_list","items":xs}}))] }
-        "tool_call_update" => if matches!(gs(u, "status"), "completed" | "failed") { vec![event("tool.done", json!({"id": gs(u, "toolCallId")}))] } else { vec![] },
+        "tool_call_update" => if matches!(gs(u, "status"), "completed" | "failed") { let id = gs(u, "toolCallId"); a.open_tools.retain(|x| x != id); vec![event("tool.done", json!({"id": id}))] } else { vec![] },
         _ => vec![],
     }
 }
-fn finished(a: &mut Acp) -> Vec<Value> {
+fn finished_with(a: &mut Acp, r: &Value) -> Vec<Value> {
     a.done = true; let mut v = vec![];
-    if !a.buf.is_empty() { v.push(event("item.completed", json!({"item":{"type":"agent_message","text":a.buf}}))) }
-    v.push(event("turn.completed", json!({}))); v
+    for id in std::mem::take(&mut a.open_tools) { v.push(event("tool.done", json!({"id": id}))) }
+    if !a.buf.is_empty() { v.push(event("item.completed", json!({"item":{"type":"agent_message","text":std::mem::take(&mut a.buf)}}))) }
+    if let Some(why) = stop_reason_err(r) { v.push(failed(why)); return v }
+    let mut end = event("turn.completed", json!({}));
+    if let Some(u) = super::acp::usage(r) { end["usage"] = u }
+    v.push(end); v
 }
 /// Acp.permit: full access allows at once: the first option whose kind starts with "allow", else the first option.
 pub fn permit_auto(id: &Value, params: &Value) -> String {
@@ -228,7 +242,11 @@ fn acp_request(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
     }
 }
 
-fn fail(a: &mut Acp, msg: &str) -> Out { a.done = true; out_emit(vec![failed(msg)]) }
+fn fail(a: &mut Acp, msg: &str) -> Out {
+    a.done = true;
+    let mut emit: Vec<Value> = std::mem::take(&mut a.open_tools).into_iter().map(|id| event("tool.done", json!({"id": id}))).collect();
+    emit.push(failed(msg)); out_emit(emit)
+}
 fn opened(fresh: bool, a: &mut Acp, t: &AgyTurn, sid: &str) -> Out { a.sid = sid.into(); Out { send: vec![set_mode(if fresh { 5 } else { 15 }, sid, &t.mode)], emit: vec![event("thread.started", json!({"thread_id": sid}))], ..Default::default() } }
 fn say(fresh: bool, a: &Acp, t: &AgyTurn) -> Out { out_send(vec![say_rpc(fresh, &t.acp, &a.sid)]) }
 fn moded(fresh: bool, a: &Acp, t: &AgyTurn) -> Out { if t.model.is_empty() { say(fresh, a, t) } else { out_send(vec![set_model(if fresh { 6 } else { 16 }, &a.sid, &t.model)]) } }
@@ -250,8 +268,8 @@ fn reply(a: &mut Acp, t: &AgyTurn, o: &Value) -> Out {
         (6, true) => say(true, a, t),
         (16, true) => say(false, a, t),
         (6, false) | (16, false) => fail(a, &unmodel(t)),
-        (3, true) => out_emit(finished(a)),
-        (3, false) => fail(a, &acp_hint(&err_msg(o))),
+        (3, true) => out_emit(finished_with(a, o.get("result").unwrap_or(&Value::Null))),
+        (3, false) => fail(a, &hint(&err_msg(o))),
         (_, false) => fail(a, &hint(&err_msg(o))),
         (_, true) => Out::default(),
     }
@@ -457,7 +475,7 @@ impl Driver for AgyDriver {
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> {
         if self.cli.is_none() { return vec![] }
         let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        vec![("BACKPLANE_MCP_URL".into(), a.mcp_url.clone()), ("BACKPLANE_HUB_EXE".into(), exe), ("AGY_CLI_OSC7501".into(), "off".into()), ("NO_COLOR".into(), "1".into()), (super::agy_cli::UNSET_VAR.into(), self.unset.join(" "))]
+        vec![("BACKPLANE_MCP_URL".into(), a.mcp_url.clone()), ("BACKPLANE_HUB_EXE".into(), exe), ("AGY_CLI_OSC7501".into(), "off".into()), ("AGY_CLI_DISABLE_AUTO_UPDATE".into(), "1".into()), ("NO_COLOR".into(), "1".into()), (super::agy_cli::UNSET_VAR.into(), self.unset.join(" "))]
     }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         if self.cli.is_some() { let note = std::mem::take(&mut self.cs.note); self.cs = super::agy_cli::St { session: a.session.clone(), step: -1, note, ..Default::default() }; return vec![super::agy_cli::input(a)] }
@@ -623,6 +641,23 @@ mod tests {
         assert!(super::super::driver("antigravity").is_some());
         assert!(d.ends_on_turn_end() && d.exit_why(1).unwrap().contains("antigravity exited"));
         assert!(d.on_stop().is_empty(), "interrupt_antigravity_stops: Stop ends the process");
+    }
+    /// T3 Code #28797/#28629/#39686/#37537: refusal/limit stopReasons fail the turn, usage rides on turn.completed, open tools close, and prompt errors never say `grok login`.
+    #[test] fn stop_reasons_usage_open_tools_and_hints() {
+        let t = turn("", "", false);
+        let u = |s: &str| format!(r#"{{"jsonrpc":"2.0","method":"session/update","params":{{"sessionId":"S1","update":{s}}}}}"#);
+        let mut a = Acp { sid: "S1".into(), ..Default::default() };
+        feed(&mut a, &t, &u(r#"{"sessionUpdate":"tool_call","toolCallId":"T9","title":"Run cmd","kind":"execute"}"#));
+        let o = feed(&mut a, &t, r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"refusal"}}"#);
+        assert!(emits(&o).contains(r#"{"type":"tool.done","id":"T9"}"#), "{}", emits(&o));
+        assert!(emits(&o).contains(r#""type":"turn.failed""#) && emits(&o).contains("refused"), "{}", emits(&o));
+        let mut b = Acp { sid: "S1".into(), ..Default::default() };
+        let o = feed(&mut b, &t, r#"{"jsonrpc":"2.0","id":3,"result":{"stopReason":"end_turn","usage":{"inputTokens":100,"outputTokens":20,"thoughtTokens":5,"cachedReadTokens":10}}}"#);
+        assert!(emits(&o).contains(r#""output_tokens":20"#) && emits(&o).contains(r#""reasoning_output_tokens":5"#), "{}", emits(&o));
+        let mut c = Acp { sid: "S1".into(), ..Default::default() };
+        let o = feed(&mut c, &t, r#"{"jsonrpc":"2.0","id":3,"error":{"code":-32603,"message":"No browser is available here"}}"#);
+        assert!(emits(&o).contains("Settings › Agents › Antigravity") && !emits(&o).contains("grok"), "{}", emits(&o));
+        assert!(run_sh().contains("AGY_CLI_DISABLE_AUTO_UPDATE=1") && run_sh().contains("CHROME_CRASHPAD_PIPE_NAME") && run_sh().contains("NIX_SSL_CERT_FILE"));
     }
 }
 
