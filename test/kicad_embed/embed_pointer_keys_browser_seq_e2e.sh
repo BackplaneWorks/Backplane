@@ -33,7 +33,7 @@ cat >"$OUT/script.json" <<JSON
  {"click":"rail:Browser"},{"wait":5000},{"cef":{"goto":$PAGE_JSON}},{"wait":4000},$REP,$(bar s1),$REP,{"mark":"r1"},
  {"click":"rail:Board"},{"wait":3000},$REP,$(bar s2a),$REP,$(bar s2b),{"wait":800},$REP,{"mark":"k2c"},
  {"click":"rail:Browser"},{"wait":3000},$REP,$(bar s2d),$REP,{"mark":"r2"},
- {"click":"rail:Board"},{"wait":2000},{"click":"kicad:popout"},{"wait":5000},{"click":"rail:Browser"},{"wait":3000},$REP,$(bar s3),$REP,{"mark":"r3"},
+ {"click":"rail:Board"},{"wait":2000},{"click":"kicad:popout"},{"wait":5000},{"click":"rail:Browser"},{"wait":3000},$REP,$(bar s3layout),{"wait":1500},$REP,$(bar s3),$REP,{"mark":"r3"},
  $(bar s3m),{"wait":800},$REP,{"mark":"k3m"},$(bar s3n),$REP,{"mark":"done"},{"wait":600000}]
 JSON
 HOME="$OUT/fh" LC_ALL=C.UTF-8 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_SHOT_DIR="$SHOTS" BACKPLANE_CEF_PROFILE="$OUT/prof" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" \
@@ -123,6 +123,36 @@ check "S2d back on the Browser, over the page (no click): the composer" "$(has "
 check "S2e a click in the page: the page" "$(logged "$P2D" rp)" "page $P2D"
 check "S2f and the pane says keys=false" "$(is "$K2D" false)" "keys $K2D"
 # S3: the pane popped out, the Browser in the main window
+release s3layout
+case "${KEMBED_WM:-i3}" in
+  openbox|xfwm4)
+    # Both windows must be exposed, even when clicking one raises it above the other.
+    python3 - "$HERE/lib" "$OUT/client.log" "$TOP" <<'LAYOUT'
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from wm_ctl import moveresize, X, D
+pane = None
+with open(sys.argv[2], errors="ignore") as log:
+    for line in log:
+        if "GPUI_METRIC " not in line:
+            continue
+        try:
+            event = json.loads(line.split("GPUI_METRIC ", 1)[1])
+        except ValueError:
+            continue
+        if event.get("event") == "kicad":
+            pane = event.get("toplevel")
+main = int(sys.argv[3], 0)
+if not pane or pane == main:
+    sys.exit("S3 layout: could not find the popped-out window")
+width = X.XDisplayWidth(D, 0)
+height = X.XDisplayHeight(D, 0)
+moveresize(main, 10, 36, width // 2 - 40, height - 100)
+moveresize(pane, width // 2 + 10, 36, width // 2 - 40, height - 100)
+LAYOUT
+    ;;
+esac
+go_on s3layout
 release s3
 # (the window manager may have moved and resized the main window to make room for the popped-out one: everything measured again)
 read -r TX TY < <(top_xy)
