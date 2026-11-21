@@ -4,11 +4,12 @@ Boat build boxes (scripts/lib-boat.sh): ~/target/<slug>. h@backplane (scripts/bp
 there a lane unused for two days goes whole first (after stale incremental state), the job's own lane (--keep) and any lane a running process is in never.
 
 The box keeps ~/target/<slug> (cargo target dirs) and the sccache cache between jobs on purpose, so they grow without bound. Before each job (`guard`):
-  always       job dirs in ~/.bpjobs older than a day (a job that died before bo_finish removed its own);
-  over --high  (default 80 %) remove, oldest first, until under --low (default 70 %):
-               1. cargo `incremental/` entries not touched for a day, 2. every other `incremental/` entry outside the target dirs used in the last hour,
-               3. dependency artifacts (`deps/`, `build/`, `.fingerprint/` entries) not touched for 3 days, 4. whole target dirs not used in the last hour, least recently used first,
-               5. sccache files beyond SCCACHE_CACHE_SIZE (the box's cap, 20G by default), oldest first.
+  always       job dirs in ~/.bpjobs older than a day (a job that died before bo_finish removed its own), and cargo `incremental/` entries not touched for a day
+               (outside --keep and busy lanes when --lanes is set);
+  over --high  (default 70 %) remove, oldest first, until under --low (default 55 %):
+               1. every other `incremental/` entry outside the target dirs used in the last hour,
+               2. dependency artifacts (`deps/`, `build/`, `.fingerprint/` entries) not touched for 3 days, 3. whole target dirs not used in the last hour, least recently used first,
+               4. sccache files beyond SCCACHE_CACHE_SIZE (the box's cap, 20G by default), oldest first.
   Cargo sees a removed artifact as stale and rebuilds it; nothing else on the box is touched (no snapshot, no image, no login).
 `report` prints one JSON line (pct, used_gb, size_gb, target_gb, sccache_gb, at): bo_finish saves it so `scripts/boat-pool.sh status` shows the disk while the box is stopped.
 
@@ -182,19 +183,22 @@ def guard(home, high, low, cap_gb, dry=False, now=None, lanes=None, keep=()):
     for j in sorted(children(os.path.join(home, ".bpjobs")), key=mtime):
         if now - mtime(j) > DAY:
             pr.rm(j)
-    if start >= high:
-        base = lanes or os.path.join(home, "target")
-        units = [os.path.realpath(p) for p in children(base) if os.path.isdir(p) and not os.path.islink(p) and not os.path.basename(p).startswith(".")]
-        tgt = (lambda u: os.path.join(u, ".target")) if lanes else (lambda u: u)
+    base = lanes or os.path.join(home, "target")
+    units = [os.path.realpath(p) for p in children(base) if os.path.isdir(p) and not os.path.islink(p) and not os.path.basename(p).startswith(".")]
+    tgt = (lambda u: os.path.join(u, ".target")) if lanes else (lambda u: u)
+    incr = [e for u in units for p in profiles(tgt(u)) for e in children(os.path.join(p, "incremental"))]
+    active = ({u for u in units if os.path.basename(u) in keep} | busy(units)) if lanes else set()
+    for p in sorted((e for e in incr if now - mtime(e) > DAY and not any(e.startswith(u + os.sep) for u in active)), key=mtime):
+        if os.path.lexists(p):
+            pr.rm(p)
+    if pr.pct() >= high:
         last = {}
         for u in units:
             last[u] = target_use(tgt(u))
             if lanes and not last[u]:   # never built: its tree's newest file
                 last[u] = last_use(u, 2000)
         hot = {u for u in units if now - last[u] < 3600 or os.path.basename(u) in keep} | busy(units)
-        incr = [e for u in units for p in profiles(tgt(u)) for e in children(os.path.join(p, "incremental"))]
         inhot = lambda e: any(e.startswith(u + os.sep) for u in hot)
-        stale_incr = ([e for e in incr if now - mtime(e) > DAY and not inhot(e)] if lanes else [e for e in incr if now - mtime(e) > DAY], mtime)
         other_incr = ([e for e in incr if not inhot(e)], mtime)
         old_deps = ([e for u in units if u not in hot for p in profiles(tgt(u)) for sub in ("deps", "build", ".fingerprint") for e in children(os.path.join(p, sub))
                      if now - mtime(e) > 3 * DAY] if lanes else
@@ -202,8 +206,8 @@ def guard(home, high, low, cap_gb, dry=False, now=None, lanes=None, keep=()):
         by_use = lambda u: last[u]
         cold = ([u for u in units if u not in hot], by_use)
         # a lane tree is a whole copy of a worktree: one unused for two days (its branch landed or was left) goes before any warm build state
-        steps = [stale_incr, ([u for u in units if u not in hot and now - last[u] > 2 * DAY], by_use), other_incr, old_deps, cold] if lanes else \
-                [stale_incr, other_incr, old_deps, cold]
+        steps = [([u for u in units if u not in hot and now - last[u] > 2 * DAY], by_use), other_incr, old_deps, cold] if lanes else \
+                [other_incr, old_deps, cold]
         for cands, key in steps:
             for p in sorted(cands, key=key):
                 if pr.under():
@@ -252,7 +256,7 @@ def main(argv):
     if not argv or argv[0] not in ("guard", "report"):
         print(__doc__.split("\n")[0], file=sys.stderr)
         return 2
-    opts = {"--home": os.path.expanduser("~"), "--high": "80", "--low": "70", "--cap-gb": "", "--lanes": "", "--keep": ""}
+    opts = {"--home": os.path.expanduser("~"), "--high": "70", "--low": "55", "--cap-gb": "", "--lanes": "", "--keep": ""}
     dry, rest = False, argv[1:]
     while rest:
         a = rest.pop(0)

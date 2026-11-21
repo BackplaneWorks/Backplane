@@ -9,8 +9,8 @@ same command on a Boat sandbox and the caller cannot tell, except for a line on 
 2. `bo_box`: pool box `bp-build-N`, running (resumed if stopped, created from the snapshot `bp-build-base` if missing; `boat list --all`, stopped boxes are not in the plain list).
 3. `bo_sync`: `git ls-files --cached --others --exclude-standard` → rsync over `boat ssh` (`scripts/boat-ssh.sh`) into `~/ws/src`, by checksum, mtimes not kept (cargo sees a changed file as new);
    `scripts/boat-prune.py` removes what the worktree does not have. Targets live in `~/target/*`, outside the copy, so they stay warm. sccache: `~/.cache/sccache` on the box.
-   Then `bo_guard` runs `scripts/boat-disk.py guard` there: over `BP_BOAT_DISK_HIGH` % (80) it removes, oldest first, until under `BP_BOAT_DISK_LOW` % (70): stale cargo `incremental/`
-   state, then the rest of it outside target dirs used in the last hour, then dependency artifacts unused for 3 days, then whole cold target dirs; sccache is trimmed to
+   Then `bo_guard` runs `scripts/boat-disk.py guard` there: stale cargo `incremental/` state older than a day always goes, and over `BP_BOAT_DISK_HIGH` % (70) it removes, oldest first, until under `BP_BOAT_DISK_LOW` % (55):
+   the rest of `incremental/` outside target dirs used in the last hour, then dependency artifacts unused for 3 days, then whole cold target dirs; sccache is trimmed to
    `SCCACHE_CACHE_SIZE`. What it removed goes to `BUILD_LOCK_DIR/boat.log`. The box's home is a lazy FUSE mount whose `df` shows only what was hydrated: the guard measures with du.
 4. `bo_run`: the job script (build knobs only, `bo_env`) runs `scripts/cargo-q ...` / `scripts/dev-build.sh` on the box through `scripts/boat-run.py` (detached, attached, re-attached after a cut connection without repeating output; ^C or TERM kills the remote command).
    stdout and stderr stay separate; the exit code is the command's. `--offline` is dropped there (the box has the network, no registry copy).
