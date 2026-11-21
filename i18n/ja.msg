@@ -4744,3 +4744,7 @@ viewer.layout.refusal.toomany = タイルが多すぎます
 viewer.layout.refusal.toomanysources = レイアウトのソースが多すぎます
 viewer.footprinteditor = フットプリントエディター
 viewer.symboleditor = シンボルエディター
+settings.web.unavailable.platform = このバージョンでは、ブラウザからアクセスできるのは Linux のハブのみです。
+settings.web.unavailable.socket = Tailscale を起動してください。Backplane はシステムソケット /run/tailscale/tailscaled.sock を使用します。
+settings.web.unavailable.cli = HTTPS の設定には /usr/bin/tailscale に Tailscale コマンドが必要です。
+settings.web.unavailable.curl = HTTPS の検証には /usr/bin/curl に curl が必要です。
