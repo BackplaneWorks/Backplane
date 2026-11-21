@@ -130,7 +130,8 @@ pub fn safe_id(id: &str) -> bool { !id.is_empty() && id.len() <= 80 && id.chars(
 impl Bots {
     /// Folds the log once, off the runtime's workers, then registers the `bots.*` requests.
     pub async fn start(hub: Arc<Hub>, agents: Arc<Agents>) -> Arc<Bots> {
-        let b = Bots::start_with(hub, Arc::new(agents.clone())).await; b.start_ticker();
+        let b = Bots::start_with(hub.clone(), Arc::new(agents.clone())).await; b.start_ticker();
+        super::ubsync::start(&hub);
         agents.add_tools(Arc::new(super::tools::BotToolSet(b.clone()))); // the bots' own MCP tools join Backplane's in a bot's thread
         agents.add_tools(Arc::new(super::mail::tools::MailTools(b.clone()))); // the mailroom's, listed by what the thread is
         agents.set_mailroom(Arc::new(super::mail::funnel::Room(Arc::downgrade(&b))));
