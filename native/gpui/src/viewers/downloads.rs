@@ -113,6 +113,11 @@ pub fn next(p: &Plan, h: &Head) -> Next {
     }
 }
 
+/// A refusal's body as words to show: one short line of plain text, else None.
+pub fn refusal_words(b: &[u8]) -> Option<String> {
+    let t = std::str::from_utf8(b).ok()?.trim().trim_end_matches('.');
+    (!t.is_empty() && t.len() <= 200 && !t.contains('\n') && !t.contains('<') && t.chars().all(|c| !c.is_control())).then(|| t.to_string())
+}
 /// Percent done, when the size is known.
 pub fn percent(got: u64, total: Option<u64>) -> Option<u32> { total.filter(|t| *t > 0).map(|t| ((got.min(t) as f64 / t as f64) * 100.).floor() as u32) }
 
@@ -188,7 +193,13 @@ fn once(src: &Source, url: &str, part: &Path, p: &Plan, have: &mut u64, etag: &m
         Next::Write { at, total, etag: tag } => { *etag = tag; (at, total) }
         Next::Complete => return Ok(()),
         Next::Restart => return Err(Step::Restart),
-        Next::Fail { why, retry } => return Err(if retry { Step::Again(why) } else { Step::Stop(why) }),
+        Next::Fail { why, retry } => {
+            // a refusal says why in its body (the hub's words: "that file is not shared"): that, when it is a short line of text
+            let mut body = got[at..].to_vec();
+            while body.len() < 512 && h.length.map_or(true, |l| (body.len() as u64) < l) { match s.read(&mut buf[..512]) { Ok(n) if n > 0 => body.extend_from_slice(&buf[..n]), _ => break } }
+            let why = refusal_words(&body).unwrap_or(why);
+            return Err(if retry { Step::Again(why) } else { Step::Stop(why) })
+        }
     };
     let mut f = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(part).map_err(|e| Step::Stop(e.to_string()))?;
     f.set_len(from).map_err(|e| Step::Stop(e.to_string()))?; f.seek(SeekFrom::Start(from)).map_err(|e| Step::Stop(e.to_string()))?;
@@ -268,6 +279,10 @@ mod tests {
         assert!(matches!(next(&Plan::Whole, &h(404, None, "")), Next::Fail { retry: false, .. }));
         assert!(matches!(next(&Plan::Whole, &Head { chunked: true, ..h(200, None, "") }), Next::Fail { retry: false, .. }));
     }
+    #[test] fn a_refusal_says_the_hubs_reason() {
+        assert_eq!(refusal_words(b"that file is not shared").as_deref(), Some("that file is not shared"));
+        assert_eq!(refusal_words(b"<html>x</html>"), None); assert_eq!(refusal_words(b""), None); assert_eq!(refusal_words(b"a\nb"), None); assert_eq!(refusal_words(&[0xff, 0xfe]), None);
+    }
     #[test] fn names_never_overwrite_and_parts_never_collide() {
         let d = crate::tmp::uncreated("dl-names"); std::fs::create_dir_all(&*d).unwrap();
         assert_eq!(part_path(&d, "a.zip"), d.join("a.zip.part")); std::fs::write(d.join("a.zip.part"), "").unwrap(); assert_eq!(part_path(&d, "a.zip"), d.join("a.zip.2.part"));
@@ -329,7 +344,7 @@ mod tests {
         let d = crate::tmp::uncreated("dl-refused"); let mut events = vec![];
         fetch(&Source { addr, tls: false, token: "t".into() }, "/file?path=x", &d, "x.env", Resume::default(), &Default::default(), |e| events.push(e));
         h.join().unwrap();
-        assert!(matches!(events.last(), Some(Event::Failed { part: None, .. })), "{events:?}");
+        assert!(matches!(events.last(), Some(Event::Failed { part: None, why, .. }) if why == "that file is not shared"), "the hub's reason: {events:?}");
         assert!(!d.join("x.env").exists());
     }
 }
