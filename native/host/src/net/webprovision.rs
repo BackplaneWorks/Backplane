@@ -673,8 +673,8 @@ mod tests {
     #[test]
     fn private_socket_directory_rejects_a_writable_parent() {
         use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        let parent =
-            std::env::temp_dir().join(format!("bp-web-unsafe-parent-{}", std::process::id()));
+        let scratch = crate::plat::tmp::dir("web-unsafe-parent");
+        let parent = scratch.join("parent");
         std::fs::DirBuilder::new()
             .mode(0o700)
             .create(&parent)
@@ -691,8 +691,6 @@ mod tests {
                 .kind(),
             std::io::ErrorKind::PermissionDenied
         );
-        std::fs::remove_dir(child).unwrap();
-        std::fs::remove_dir(parent).unwrap();
     }
 
     #[test]
