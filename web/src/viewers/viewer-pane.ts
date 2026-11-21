@@ -10,6 +10,14 @@ import { mountBrowserPane } from "./browser";
 import { mountDiffPane, mountFilesPane, mountReviewPane, type PaneHandle } from "./panes";
 import { Plot2DViewer, type LayerMasks } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
+import { TileGridController } from "./tiles";
+import {
+  isTiledOrOverlayLayout,
+  isTileKind,
+  normalizeBounds,
+  TILE_KINDS,
+  type LayoutReply,
+} from "./tiles-state";
 import {
   HistoryStripState,
   matchesCompareKey,
@@ -94,6 +102,7 @@ function pageLabel(page: string): string {
     case "review": return t("viewer.review", "Review");
     case "browser": return t("bots.tab.browser", "Browser");
     case "terminal": return t("viewer.terminal", "Terminal");
+    case "split": return t("viewer.split", "Split");
     default: return page ? page.charAt(0).toUpperCase() + page.slice(1) : "";
   }
 }
@@ -108,6 +117,7 @@ function isNonPlotPane(p: string): boolean {
 
 export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   open: (kind: string, threadId: string) => void;
+  addBeside: (kind: string, threadId: string) => void;
   close: () => void;
   reconcileHas: (has: RailHas) => void;
 } {
@@ -196,6 +206,13 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let plot2d: Plot2DViewer | null = null;
   let solid3d: Solid3DViewer | null = null;
   let activePane: PaneHandle | null = null;
+  let tileGrid: TileGridController | null = null;
+
+  const singleAddMenu = document.createElement("div");
+  singleAddMenu.className = "bp-tile-add-menu";
+  singleAddMenu.setAttribute("data-testid", "viewer-add-beside-menu");
+  singleAddMenu.hidden = true;
+  stageWrap.append(singleAddMenu);
   let activeTerm: { setTheme(light: boolean): void; destroy(): void } | null = null;
 
   // Board / Schematic bottom history strip state (viewer.refs / viewer.compare)
@@ -534,6 +551,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const light = isLight();
     plot2d?.setTheme(light);
     solid3d?.setTheme(light);
+    tileGrid?.setTheme(light);
     activeTerm?.setTheme(light);
   });
   themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
@@ -645,6 +663,55 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       followBtn.setAttribute("data-testid", "viewer-follow-btn");
       followBtn.addEventListener("click", () => void toggleFollow());
       controlsEl.append(followBtn);
+    }
+
+    if (api.hub.hasFeature("layout") && !tileGrid && page === "board" && filesInfo.hasGerbers !== false) {
+      const ovBtn = document.createElement("button");
+      ovBtn.type = "button";
+      ovBtn.className = "bp-v-btn";
+      ovBtn.textContent = "Overlay Gerbers";
+      ovBtn.setAttribute("data-testid", "viewer-overlay-gerbers");
+      ovBtn.addEventListener("click", () => {
+        const seed = page;
+        const grid = enterTileGrid();
+        void grid.openOverlayGerbers(threadId, seed, "diff");
+      });
+      controlsEl.append(ovBtn);
+    }
+
+    if (api.hub.hasFeature("layout") && !tileGrid && isTileKind(page)) {
+      const besideBtn = document.createElement("button");
+      besideBtn.type = "button";
+      besideBtn.className = "bp-v-btn";
+      besideBtn.textContent = "+ Beside";
+      besideBtn.title = "Add beside";
+      besideBtn.setAttribute("data-testid", "viewer-add-beside");
+      besideBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        if (!singleAddMenu.hidden) {
+          singleAddMenu.hidden = true;
+          return;
+        }
+        singleAddMenu.replaceChildren();
+        for (const k of TILE_KINDS) {
+          const item = document.createElement("button");
+          item.type = "button";
+          item.className = "bp-tile-add-item";
+          item.textContent = pageLabel(k);
+          item.setAttribute("data-testid", `viewer-add-beside-${k}`);
+          item.addEventListener("click", () => {
+            singleAddMenu.hidden = true;
+            const seed = page;
+            const grid = enterTileGrid();
+            void grid.openAddBeside(threadId, k, seed);
+          });
+          singleAddMenu.append(item);
+        }
+        singleAddMenu.style.top = "4px";
+        singleAddMenu.style.right = "8px";
+        singleAddMenu.hidden = false;
+      });
+      controlsEl.append(besideBtn);
     }
 
     const closeBtn = document.createElement("button");
@@ -871,7 +938,44 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     }
   }
 
+  function enterTileGrid(): TileGridController {
+    watchGen++;
+    watchPending = false;
+    activeKeys.clear();
+    clearPending();
+    stopHistoryPlay();
+    compareMenuOpen = false;
+    singleAddMenu.hidden = true;
+    clearStage();
+    header.hidden = true;
+    solidBarEl.hidden = true;
+    historyBarEl.hidden = true;
+    page = "split";
+    tileGrid = new TileGridController(stage, api, {
+      pageLabel,
+      isLight,
+      hasGerbers: () => filesInfo.hasGerbers !== false,
+      onRefusal: (msg) => setBanner(msg, !!msg),
+      onExitToSingle: (nextKind) => {
+        page = nextKind;
+        selectedPath = "";
+        void startWatch(false);
+      },
+      onOpenFileViewer: (kind, relPath) => {
+        page = kind;
+        selectedPath = relPath;
+        if (kind === "mech") selectedMech = relPath;
+        void startWatch(false);
+      },
+    });
+    return tileGrid;
+  }
+
   function clearStage(): void {
+    tileGrid?.destroy();
+    tileGrid = null;
+    header.hidden = false;
+    singleAddMenu.hidden = true;
     activePane?.destroy();
     activePane = null;
     activeTerm?.destroy();
@@ -906,6 +1010,18 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     renderHistoryBar();
     if ((page === "board" || page === "schematic") && threadId) {
       void loadHistoryRefs(threadId);
+    }
+
+    if (page === "split" && api.hub.hasFeature("layout")) {
+      const grid = enterTileGrid();
+      if (!filesInfo.root) {
+        void api.hub
+          .rpc<ViewerFilesReply>("viewer.files", { thread: threadId })
+          .then((vf) => { filesInfo = vf || {}; })
+          .catch(() => {});
+      }
+      await grid.openSplit(threadId);
+      return;
     }
 
     if (isNonPlotPane(page)) {
@@ -1053,6 +1169,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   }
 
   function handlePlotNone(key: string, none: string, retryable: boolean): void {
+    if (tileGrid) {
+      tileGrid.handlePlotNone(key, none, retryable);
+      return;
+    }
     if (watchPending) {
       if (pendingQueue.length < MAX_PENDING_FRAMES) {
         pendingQueue.push({ kind: "none", key, none, retryable });
@@ -1073,6 +1193,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   }
 
   function handleBinary(buf: ArrayBuffer): void {
+    if (tileGrid) {
+      tileGrid.handleBinary(buf);
+      return;
+    }
     if (!page) return;
     if (watchPending) {
       if (pendingQueue.length < MAX_PENDING_FRAMES && pendingBytes + buf.byteLength <= MAX_PENDING_BYTES) {
@@ -1130,6 +1254,22 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   const unsubFrame = api.hub.onFrame((f) => {
     if (f.t === "plot" && typeof f.none === "string" && typeof f.key === "string") {
       handlePlotNone(f.key, f.none, f.retryable === true);
+    } else if (f.t === "layout" && typeof f.thread === "string" && typeof f.rev === "number") {
+      if (tileGrid) {
+        void tileGrid.handleLayoutPush(f.thread, f.rev);
+      } else if (api.hub.hasFeature("layout") && f.thread === threadId && page && page !== "terminal" && page !== "browser") {
+        const rect = stage.getBoundingClientRect();
+        const bounds = normalizeBounds(rect.width || 960, rect.height || 640);
+        void api.hub
+          .rpc<LayoutReply>("viewer.layout", { thread: threadId, bounds })
+          .then((lay) => {
+            if (isTiledOrOverlayLayout(lay) && threadId === f.thread) {
+              const grid = enterTileGrid();
+              void grid.syncExisting(threadId, lay);
+            }
+          })
+          .catch(() => {});
+      }
     }
   });
   const unsubLocale = onLocaleChange(() => {
@@ -1182,6 +1322,20 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       page = kind;
       selectedPath = "";
       void startWatch(false);
+    },
+    addBeside(kind: string, nextThread: string) {
+      if (!api.hub.hasFeature("layout") || !isTileKind(kind)) return;
+      if (nextThread !== threadId) {
+        threadId = nextThread;
+        filesInfo = {};
+      }
+      if (tileGrid) {
+        void tileGrid.openAddBeside(threadId, kind);
+      } else {
+        const seed = isTileKind(page) ? page : undefined;
+        const grid = enterTileGrid();
+        void grid.openAddBeside(threadId, kind, seed);
+      }
     },
     reconcileHas(has: RailHas) {
       if (page && !pageHasBacking(page, has)) {
