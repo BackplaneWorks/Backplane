@@ -1999,15 +1999,41 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
 
 /// A desktop of the new protocol answering the hub's push for `T1`: what it does with the token (`applied`: it answered `view-show`; `refuse`: its reason) and the report it then makes.
 fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, refuse: Option<&'static str>, report: Value) -> tokio::task::JoinHandle<()> {
+    desktop_with_response(hub, client, applied, refuse, report, None, None)
+}
+
+// The mixed-outcome case records the refusal before letting the other desktop apply the token.
+fn desktop_with_response(
+    hub: &std::sync::Arc<crate::hub::Hub>,
+    client: u64,
+    applied: bool,
+    refuse: Option<&'static str>,
+    report: Value,
+    refusal_recorded: Option<tokio::sync::oneshot::Sender<()>>,
+    wait_for_refusal: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> tokio::task::JoinHandle<()> {
     let mut c = hub.attach(hub.fresh_client());
     tokio::spawn(async move {
         while let Some(o) = c.recv().await {
-            if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 {
-                let tok = f["token"].as_str().expect("the push carries a token").to_string();
-                if let Some(why) = refuse { crate::present::viewer::test_refuse(&tok, client, why) }
-                if applied { crate::present::viewer::test_applied(&tok, client) }
-                if !report.is_null() { crate::files::kicad::watch::viewer_report_from(client, T1, report.clone()) }
-                break } }
+            let crate::hub::Out::Value(f) = o else { continue };
+            if f["t"] != "view" || f["thread"] != T1 { continue }
+            let token = f["token"].as_str().expect("the push carries a token");
+            if let Some(why) = refuse {
+                crate::present::viewer::test_refuse(token, client, why);
+            }
+            if let Some(recorded) = refusal_recorded {
+                recorded.send(()).expect("the applying desktop is listening");
+            }
+            if let Some(recorded) = wait_for_refusal {
+                recorded.await.expect("the refusing desktop recorded its answer");
+            }
+            if applied {
+                crate::present::viewer::test_applied(token, client);
+            }
+            if !report.is_null() {
+                crate::files::kicad::watch::viewer_report_from(client, T1, report);
+            }
+            break;
         }
     })
 }
@@ -2039,8 +2065,9 @@ fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, re
     let r = show("mech", "mech/a.step").await;
     assert_eq!(tool_text(&r)["settled"], false, "no session applied this token: {r}");
     // two desktops with different outcomes: one applied and shows it, the other's dialog refused: the agent is told the reason, with settled as observed
-    let refusing = desktop(&hub, 12, false, Some("KiCad has a dialog open"), Value::Null);
-    let applying = desktop(&hub, 11, true, None, json!({"open": "mech", "part": "mech/a.step", "key": "", "report": 2}));
+    let (refused, refusal_recorded) = tokio::sync::oneshot::channel();
+    let refusing = desktop_with_response(&hub, 12, false, Some("KiCad has a dialog open"), Value::Null, Some(refused), None);
+    let applying = desktop_with_response(&hub, 11, true, None, json!({"open": "mech", "part": "mech/a.step", "key": "", "report": 2}), None, Some(refusal_recorded));
     let started = std::time::Instant::now();
     let r = show("mech", "mech/a.step").await; refusing.await.unwrap(); applying.await.unwrap();
     assert!(started.elapsed() < std::time::Duration::from_millis(2500), "a refusal does not wait out the time");
