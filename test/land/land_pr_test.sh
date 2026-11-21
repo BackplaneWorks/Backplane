@@ -124,6 +124,14 @@ gland > "$T/o22"; rc=$?; [ $rc != 0 ] && grep -q "gate: FAILED" "$T/o22" && grep
 # 23. a Windows-only compile error (the cross-compile check fails, Linux is fine) stops the landing
 rm -f "$LANE/native/host/FAIL"; touch "$LANE/WINFAIL"; echo 'fn d() {}' > "$LANE/native/host/src/d.rs"; g add -A; g commit -qm "host: d, Windows-only error"; before=$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)
 gland > "$T/o23"; rc=$?; [ $rc != 0 ] && grep -q "host: Windows cross-compile check: FAILED" "$T/o23" && [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" = "$before" ]; ok $? "a Windows-only compile error fails the gate, nothing pushed (rc $rc)"
+# 24. i18n/*.msg changed, the generated catalog not made again: the gate names the stale file and its generator; made again, it lands
+rm -f "$LANE/WINFAIL"; mkdir -p "$LANE/i18n" "$LANE/mobile/android/app/src/main/java/dev/backplane/mobile"
+printf 'import pathlib\nr = pathlib.Path(__file__).resolve().parent.parent\n(r / "mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt").write_text("// " + (r / "i18n/en.msg").read_text())\n' > "$LANE/scripts/i18n-android.py"
+echo 'a.b = A' > "$LANE/i18n/en.msg"; (cd "$LANE" && python3 scripts/i18n-android.py); g add -A; g commit -qm "i18n: a.b, its catalog"; gland > /dev/null
+echo 'a.c = C' >> "$LANE/i18n/en.msg"; g commit -qam "i18n: a.c, no catalog"
+gland > "$T/o24"; rc=$?; [ $rc != 0 ] && grep -q "i18n: FAILED: mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt is stale ([0-9]* lines differ): run python3 scripts/i18n-android.py and commit it" "$T/o24"; ok $? "a .msg change without its catalog fails the gate, naming the generator (rc $rc)"
+(cd "$LANE" && python3 scripts/i18n-android.py); g commit -qam "i18n: catalog"
+gland > "$T/o24b"; rc=$?; [ $rc = 0 ] && grep -q "i18n: the catalogs are what i18n/\*.msg makes" "$T/o24b"; ok $? "the catalog made again: the gate passes and it lands (rc $rc)"
 # 30. the gate outside the land lock, the merge inside it (held for seconds), lanes gating side by side
 echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; export FAKE_LOCKFILE=$T/locks/bp-land.lock; : > "$FAKE/mergelock"
 nl() { git -C "$T/main" fetch -q origin main; git -C "$T/main" worktree add -q -b "$1" "$T/l-$1" origin/main 2>/dev/null; echo "x $1" > "$T/l-$1/$2"; git -C "$T/l-$1" add -A; git -C "$T/l-$1" commit -qm "$1: $2"; }

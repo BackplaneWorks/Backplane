@@ -8,7 +8,8 @@
 #   3. host and gpui: the Windows cross-compile check (scripts/windows-check.sh: cargo check --target x86_64-pc-windows-gnu --all-targets, with
 #      llvm-mingw; on the Boat box, which fetches it once): a Windows-only compile error (cfg(windows) code, a Windows trait clash) fails here
 # Not here (the release-candidate pass, docs/release-playbook.md): Windows and macOS runs, the e2e suites, the screenshot and size matrix,
-# the KiCad embed suites. A PR touching no crate (docs, scripts, mobile, web sources) compiles nothing and passes.
+# the KiCad embed suites. A PR touching no crate (docs, scripts, mobile, web sources) compiles nothing and passes. A PR touching i18n/*.msg, a
+# catalog generator or a generated catalog: the catalogs made again and compared (below).
 # Says what ran and how long each step took. Exit 0 passed, 1 a step failed.
 # Env: LAND_GATE_CARGO (the cargo command; default scripts/cargo-q), LAND_GATE_WINCHECK (default bash scripts/windows-check.sh), LAND_GATE_BASE
 # (origin/main), LAND_GATE_LOCAL=1 (no Boat).
@@ -61,6 +62,29 @@ for c in host gpui guard voice; do
     if ${LAND_GATE_WINCHECK:-bash "$ROOT/scripts/windows-check.sh"} "$c"; then say "$c: Windows cross-compile check: ok ($(( $(date +%s) - s ))s)"; ran="${ran:+$ran, }$c: Windows check $(( $(date +%s) - s ))s"
     else say "$c: Windows cross-compile check: FAILED ($(( $(date +%s) - s ))s)"; ran="${ran:+$ran, }$c: Windows check FAILED"; rc=1; fi;; esac
 done
+# the catalogs generated from i18n/*.msg (Android's Msg.kt, iOS's TrCatalog.swift and InfoPlist.strings): made again from the PR's tree in a
+# temporary folder and compared with what it commits, for a PR touching the .msg files, a generator or a generated file. Nov 20: main's
+# catalogs went 5,900 lines stale when a PR whose catalogs were made before its rebase landed after one adding web.clone.* keys (the .msg
+# merged cleanly, the generated files did not know the new keys); CI's mobile jobs saw it, but they are no merge condition. No build, ~1 s.
+gens="scripts/i18n-android.py scripts/i18n-ios.py"
+gen_out="mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt mobile/ios/Shared/TrCatalog.swift mobile/ios/Backplane/en.lproj/InfoPlist.strings mobile/ios/Backplane/ja.lproj/InfoPlist.strings mobile/ios/Backplane/es.lproj/InfoPlist.strings"
+if printf '%s\n' "$changed" | grep -q -x -E 'i18n/.*|scripts/i18n-(android|ios|check)\.py|mobile/android/.*/Msg\.kt|mobile/ios/Shared/TrCatalog\.swift|mobile/ios/Backplane/[a-z]+\.lproj/InfoPlist\.strings'; then
+  s=$(date +%s); say "i18n: the catalogs made again from i18n/*.msg ..."; tmp=$(mktemp -d "${TMPDIR:-/tmp}/land-gate-i18n.XXXXXX"); bad=
+  # shellcheck disable=SC2086
+  git archive HEAD -- $(for f in i18n scripts/i18n-check.py $gens $gen_out; do git cat-file -e "HEAD:$f" 2>/dev/null && echo "$f"; done) | tar -x -C "$tmp"
+  [ ! -f "$tmp/scripts/i18n-check.py" ] || (cd "$tmp" && python3 -I scripts/i18n-check.py) >&2 || bad="the .msg files disagree (python3 scripts/i18n-check.py)"
+  for g in $gens; do [ -f "$tmp/$g" ] || continue
+    (cd "$tmp" && python3 -I "$g" > /dev/null) 2>&1 | sed 's/^/gate: /' >&2
+    [ "${PIPESTATUS[0]}" = 0 ] || bad="${bad:+$bad; }$g failed (above)"; done
+  for f in $gen_out; do [ -e "$tmp/$f" ] || continue
+    case "$f" in *Msg.kt) g=scripts/i18n-android.py;; *) g=scripts/i18n-ios.py;; esac
+    if ! git show "HEAD:$f" 2>/dev/null | cmp -s - "$tmp/$f"; then
+      n=$(git show "HEAD:$f" 2>/dev/null | diff - "$tmp/$f" | grep -c '^[<>]')
+      bad="${bad:+$bad; }$f is stale ($n lines differ): run python3 $g and commit it"; fi; done
+  rm -rf "$tmp"
+  if [ -z "$bad" ]; then say "i18n: the catalogs are what i18n/*.msg makes ($(( $(date +%s) - s ))s)"; ran="${ran:+$ran, }i18n catalogs $(( $(date +%s) - s ))s"
+  else say "i18n: FAILED: $bad"; ran="${ran:+$ran, }i18n catalogs FAILED"; rc=1; fi
+fi
 dt=$(( $(date +%s) - t0 ))
 if [ -z "$ran" ]; then say "nothing to compile: the PR touches no crate (docs, scripts, mobile, web sources) ($(git diff --name-only "$base" HEAD | wc -l) files); passed in ${dt}s"
 elif [ "$rc" = 0 ]; then say "passed in $((dt / 60))m$((dt % 60))s: $ran"
