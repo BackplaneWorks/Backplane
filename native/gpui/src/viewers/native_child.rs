@@ -1013,7 +1013,7 @@ pub mod focusq {
     /// Who is to have the keyboard: our window (`activate`: also made the foreground, an explicit hand-back) or KiCad's frame (a hand-in,
     /// posted to KiCad on the UI thread as before: it never waits).
     #[derive(Clone, Copy, Debug, PartialEq)]
-    pub enum To { Ours { window: u64, activate: bool }, Kicad { target: u64 } }
+    pub enum To { Ours { window: u64, activate: bool }, Kicad { target: u64, pid: u32 } }
     /// What a worker does after its call returned (`Q::returned`).
     #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
     pub struct Returned {
@@ -1021,8 +1021,9 @@ pub mod focusq {
         pub record: bool,
         /// apply the latest hand-back once more (a hand-in KiCad had queued took the keyboard back meanwhile)
         pub again: bool,
-        /// a hand-in asked while its call was in flight, which its call then undid (the keyboard ended ours): post it to KiCad again
-        pub hand_in: Option<u64>,
+        /// a hand-in asked while its call was in flight, which its call then undid (the keyboard ended ours): post it to KiCad again (the
+        /// window, and the KiCad process it must still belong to)
+        pub hand_in: Option<(u64, u32)>,
     }
     #[derive(Default)]
     pub struct Q {
@@ -1038,6 +1039,10 @@ pub mod focusq {
         /// the hand-back applied once more already (a hand-in KiCad had queued took the keyboard back): never more than once
         pub retried: u64,
     }
+    /// Whether KiCad's own focus notice (it took the keyboard) is a hand-in to note: only after a press in the pane that came after the last
+    /// hand-back was asked for (ms clocks). KiCad freed from a DRC takes the keyboard from an older queued activate too and says so: noted,
+    /// it would void the hand-back's one retry and leave the keys in KiCad against the person's last act. Pure.
+    pub fn focus_notice_is_hand_in(press_at_ms: u64, hand_back_asked_ms: u64) -> bool { press_at_ms >= hand_back_asked_ms }
     /// How long a call may be in flight before a new request gets a new worker; at most this many are ever left behind.
     pub const STUCK_AFTER: Duration = Duration::from_secs(2);
     pub const MAX_STUCK: u32 = 3;
@@ -1076,7 +1081,7 @@ pub mod focusq {
                     Returned { record: true, again, hand_in: None }
                 }
                 // (never a target of 0: PostMessageW(NULL) posts to the calling thread; a hand-in by a press has nothing to post)
-                Some((s, To::Kicad { target })) if s > seq && focus_ours && target != 0 => Returned { record: false, again: false, hand_in: Some(target) },
+                Some((s, To::Kicad { target, pid })) if s > seq && focus_ours && target != 0 => Returned { record: false, again: false, hand_in: Some((target, pid)) },
                 _ => Returned::default(),
             }
         }
@@ -1242,10 +1247,15 @@ mod imp {
         const IDLE: Duration = Duration::from_secs(10);
         fn dbg() -> bool { std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() }
         /// A hand-in to KiCad (posted on the UI thread as before): noted, so a hand-back still in flight does not pull the keyboard out after.
-        pub fn kicad(target: u64) { let (q, cv) = st(); q.lock().unwrap().ask(To::Kicad { target }, Instant::now()); cv.notify_all(); }
+        pub fn kicad(target: u64) {
+            let mut pid = 0u32;
+            if target != 0 { unsafe { super::GetWindowThreadProcessId(super::hwnd(target), &mut pid); } }
+            let (q, cv) = st(); q.lock().unwrap().ask(To::Kicad { target, pid }, Instant::now()); cv.notify_all();
+        }
         /// The keyboard to our window `w` (`activate`: made the foreground too), from `ui` (Backplane's UI thread id).
         pub fn ours(w: u64, activate: bool, ui: u32) {
             let (q, cv) = st();
+            super::HANDBACK_ASKED_AT.store(super::mono_ms(), std::sync::atomic::Ordering::SeqCst);
             let spawn = q.lock().unwrap().ask(To::Ours { window: w, activate }, Instant::now());
             if let Some(era) = spawn { std::thread::Builder::new().name("kicad-focus".into()).spawn(move || worker(era, ui)).ok(); }
             cv.notify_all();
@@ -1272,10 +1282,11 @@ mod imp {
                     if r.record { super::FOCUS_ESCAPED.store(escaped, std::sync::atomic::Ordering::SeqCst); }
                     // a hand-in that came while the call was in flight, which the call undid: posted to KiCad again, under the lock (a post
                     // never waits), only to a window that still exists and is another process's (KiCad's), never our own
-                    if let Some(t) = r.hand_in {
+                    if let Some((t, kpid)) = r.hand_in {
                         let h = super::hwnd(t);
                         let mut pid = 0u32;
-                        let live = unsafe { super::IsWindow(h) } != 0 && unsafe { super::GetWindowThreadProcessId(h, &mut pid) } != 0 && pid != std::process::id();
+                        // still the same KiCad's window (its handle not reused by another process since)
+                        let live = unsafe { super::IsWindow(h) } != 0 && unsafe { super::GetWindowThreadProcessId(h, &mut pid) } != 0 && pid == kpid && pid != std::process::id();
                         if live { unsafe { super::PostMessageW(h, super::WM_ACTIVATE, 1, 0); } }
                     }
                     r
@@ -1387,6 +1398,8 @@ mod imp {
     /// that followed the hand-back is the click's own, never stale (opening-focus run B5: a canvas click 0.5 s after Ctrl+` lost
     /// its notice to a time-only rule).
     static PANE_PRESS_AT: AtomicU64 = AtomicU64::new(0);
+    /// when a hand-back was last asked for (focuser::ours): KiCad's focus notice is a hand-in only after a press in the pane since
+    static HANDBACK_ASKED_AT: AtomicU64 = AtomicU64::new(0);
     /// The pane's view of who has the keys (true: KiCad's shown editor), noted each tick, for the reclaim's decision.
     static PANE_KEYS: AtomicBool = AtomicBool::new(false);
     pub fn note_pane_keys(kicad: bool) { PANE_KEYS.store(kicad, Ordering::SeqCst); }
@@ -1452,8 +1465,10 @@ mod imp {
                     }
                     return 0;
                 }
-                // KiCad took the keyboard on a click into its frame: a hand-in, noted in the hand-back queue (nothing to post again)
-                focuser::kicad(0);
+                // KiCad took the keyboard on a click into its frame: a hand-in, noted in the hand-back queue, but only when a press in the pane
+                // came after the last hand-back was asked for. KiCad freed from a DRC also takes the keyboard from an older queued activate and
+                // says so: noted, that would have voided the hand-back's one retry and left the keys in KiCad against the person's last act
+                if super::focusq::focus_notice_is_hand_in(PANE_PRESS_AT.load(Ordering::SeqCst), HANDBACK_ASKED_AT.load(Ordering::SeqCst)) { focuser::kicad(fw); }
                 FOCUS_ESCAPED.store(false, Ordering::SeqCst);
                 CHILD_FOCUSED.store(true, Ordering::SeqCst);
                 if fw != 0 {
@@ -2632,6 +2647,11 @@ mod tests {
         for k in 0..20 { assert_eq!(slow.allow(t0 + ms(k * 150)), (true, false), "redirects spread out never trip it"); }
         assert!(!slow.recheck(t0 + ms(5000)), "no rest, no re-check");
     }
+    #[test] fn kicads_focus_notice_is_a_hand_in_only_after_a_press_since_the_last_hand_back() {
+        use super::focusq::focus_notice_is_hand_in;
+        assert!(focus_notice_is_hand_in(2000, 1500), "a press in the pane after the hand-back: KiCad took the keys on it");
+        assert!(!focus_notice_is_hand_in(1000, 1500), "no press since the hand-back (KiCad freed from a DRC, an old queued activate): not noted, the retry stands");
+    }
     #[test] fn a_hand_back_collapses_to_the_latest_wanted_owner() {
         use super::focusq::{Q, To, STUCK_AFTER, MAX_STUCK};
         use std::time::{Duration, Instant};
@@ -2648,21 +2668,21 @@ mod tests {
         // leave the pane during a DRC (hand-back in flight), click back into it before the DRC ends: KiCad keeps the keyboard
         let mut q = Q::default();
         let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
-        q.ask(To::Kicad { target: 9 }, t0);
+        q.ask(To::Kicad { target: 9, pid: 7 }, t0);
         let r = q.returned(g, 1, true);
         assert!(!r.again, "the stale hand-back pulls nothing out after the hand-in");
         assert!(!r.record, "and records nothing about where the keyboard is (the review's A)");
-        assert_eq!(r.hand_in, Some(9), "its call took the keyboard from the hand-in: posted to KiCad again (the review's B)");
+        assert_eq!(r.hand_in, Some((9, 7)), "its call took the keyboard from the hand-in: posted to KiCad again (the review's B)");
         // a hand-in by a press into KiCad's frame (target 0): noted, so the stale call records nothing, and nothing is posted to 0
         let mut q = Q::default();
         let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
-        q.ask(To::Kicad { target: 0 }, t0);
+        q.ask(To::Kicad { target: 0, pid: 0 }, t0);
         let r = q.returned(g, 1, true);
         assert!(!r.record && !r.again && r.hand_in.is_none(), "never a re-post to a target of 0 (PostMessageW(NULL) is the caller's own queue)");
         assert_eq!(q.take(g, t0), None);
         // the reverse: a hand-in KiCad had queued takes the keyboard back after our hand-back: applied once more, then never again
         let mut q = Q::default();
-        q.ask(To::Kicad { target: 9 }, t0);
+        q.ask(To::Kicad { target: 9, pid: 7 }, t0);
         let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
         assert!(q.returned(g, 2, false).again, "the keyboard not ours after the call: once more");
         assert_eq!(q.take(g, t0), Some((2, 1, false)));
