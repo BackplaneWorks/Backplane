@@ -57,7 +57,9 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
 }
 #[tokio::test] async fn an_unknown_command_is_enoent() { let e = pty::Pty::spawn("/no/such/prog", &[], "", 80, 24).err().unwrap(); assert_eq!(e.kind(), std::io::ErrorKind::NotFound) }
 #[tokio::test] async fn cat_echoes_and_a_resize_reaches_the_program() {
-    let sp = pty::Pty::spawn("/bin/sh", &["-c".into(), "read x; echo got:$x; stty size".into()], "", 80, 24).unwrap();
+    // the size is read until the resize has reached the program (at most 5 s): on Windows the pseudo console hands a resize on a moment later
+    // (Git's sh on bp-win printed "24 80", the size it started with); that it arrives is what is checked, not how fast
+    let sp = pty::Pty::spawn("/bin/sh", &["-c".into(), "read x; echo got:$x; i=0; while [ \"$(stty size)\" != '10 50' ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; stty size".into()], "", 80, 24).unwrap();
     let (mut out, exit, p) = (sp.output, sp.exit, sp.pty); p.resize(50, 10); p.write(b"hello\n".to_vec()); let mut all = vec![];
     while let Some(c) = out.recv().await { all.extend(c) }
     let s = String::from_utf8_lossy(&all).into_owned(); assert!(s.contains("got:hello"), "{s}"); assert!(s.contains("10 50"), "{s}"); exit.await.unwrap();
