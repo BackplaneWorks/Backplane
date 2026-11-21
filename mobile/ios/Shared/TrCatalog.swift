@@ -4771,6 +4771,7 @@ web.composer.attach	Attach image	画像を添付	Adjuntar imagen
 web.composer.voice	Voice dictation	音声入力	Dictado por voz
 web.composer.unsupported	Unsupported image type: {type}	未対応の画像形式です: {type}	Tipo de imagen no compatible: {type}
 web.composer.maximages	At most {max} images per message.	1 件のメッセージに添付できる画像は最大 {max} 枚です。	Como máximo {max} imágenes por mensaje.
+web.logout.failed	Could not confirm sign-out. Try again.	サインアウトを確認できませんでした。もう一度お試しください。	No se pudo confirmar el cierre de sesión. Inténtalo de nuevo.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
