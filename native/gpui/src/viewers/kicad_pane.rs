@@ -168,7 +168,12 @@ pub fn on_active(pending: &mut Option<String>, act: &str, by: &Value, me: &str, 
 /// to such a frame asks KiCad to show it too (one show too many costs nothing; one too few was the Board->Schematic bounce). Since the
 /// hub no longer hides frames in Linux local-map mode (embed.rs `hides_others`), a frame is wx-hidden there only by a hub from before
 /// that, Windows (not a local switch) or KiCad itself. Pure.
-pub fn kicad_hides(frames: &Value, kind: &str) -> bool {
+/// Asked only of a hub from before #1522 (its info has no `active_by`) or info with no frames at all: on a current hub it never fired
+/// (embed_window x14 and the one-frame row on main 01757e6a6b, Nov 21: 0 such shows), and each one made a local tab switch a round trip.
+pub fn kicad_hides(info: &Value, kind: &str) -> bool {
+    let frames = &info["frames"];
+    if !frames.is_array() { return true }
+    if info.get("active_by").is_some() { return false }
     !frames.as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(kind) && (f["realized"] == true || f["shown"] == true)))
 }
 /// #1389: the show the pane waits for after asking the hub for `kind`: none when the hub's active frame is that already (its answer
@@ -1091,7 +1096,7 @@ impl KicadPane {
         else if self.attached && self.locally_shown(kind) {
             self.placed = None;
             // KiCad has it hidden (the hub's show of another frame hid it): told to show it too, or GTK can take the native map back
-            if kicad_hides(&self.info["frames"], kind) { self.pending_show = pending_for(self.info["active"].as_str(), kind); self.show_rpc(json!({"project": self.project, "frame": kind, "focus": self.keys})); }
+            if kicad_hides(&self.info, kind) { self.pending_show = pending_for(self.info["active"].as_str(), kind); self.show_rpc(json!({"project": self.project, "frame": kind, "focus": self.keys})); }
         }
         else if self.attached {
             self.pending_show = pending_for(self.info["active"].as_str(), kind);
@@ -1198,7 +1203,7 @@ impl KicadPane {
         self.placed = None;
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
         else if self.attached && self.locally_shown(kind) {
-            if kicad_hides(&self.info["frames"], kind) { self.pending_show = pending_for(self.info["active"].as_str(), kind); self.show_rpc(json!({"project": self.project, "frame": kind})); }
+            if kicad_hides(&self.info, kind) { self.pending_show = pending_for(self.info["active"].as_str(), kind); self.show_rpc(json!({"project": self.project, "frame": kind})); }
         }
         else if self.attached { self.pending_show = pending_for(self.info["active"].as_str(), kind); self.show_rpc(json!({"project": self.project, "frame": kind})); }
         cx.notify();
@@ -2001,7 +2006,10 @@ impl KicadPane {
             }
             v
         });
-        let pane = self.placed.as_ref().and_then(|(at, _, _)| *at).map_or(Value::Null, |p| json!({"x": p.x, "y": p.y, "w": p.w, "h": p.h}));
+        // the placement's rect; between a change of the hub's frames (which clears `placed`) and the next frame's placement, the last one the
+        // container was given (embed_window run 41c280: a report read in that frame said no pane while the container was in place)
+        let pane = self.placed.as_ref().and_then(|(at, _, _)| *at).or_else(|| self.last_place.filter(|(lc, _, _)| Some(*lc) == self.container).map(|(_, r, _)| r))
+            .map_or(Value::Null, |p| json!({"x": p.x, "y": p.y, "w": p.w, "h": p.h}));
         let shown_meta = shown.and_then(|w| nc::window_meta(w, self.container, self.toplevel));
         json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "say": waiting(&self.seen_info(), shown.is_some()), "dialogs": self.seen_info()["dialogs"], "notice": open_notice(&self.info).map(|(_, t)| t), "jobs": self.jobs, "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
             "state": self.info["state"], "reason": self.info["reason"], "mode": self.info["mode"], "pid": self.info["pid"],
@@ -2617,17 +2625,26 @@ mod tests {
         let a = super::next_seq(); let b = super::next_seq();
         assert!(b > a, "one counter for the app: a pane built again never reuses an older pane's numbers");
     }
-    #[test] fn a_frame_kicad_has_hidden_is_shown_through_kicad_too() {
+    #[test] fn a_frame_kicad_has_hidden_is_shown_through_kicad_too_only_by_an_older_hub() {
         use super::kicad_hides;
         use serde_json::json;
         let frames = json!([{"kind": "PCB", "shown": false, "realized": false}, {"kind": "SCH", "shown": true, "realized": true}, {"kind": "PCB_3D", "shown": false, "realized": true}]);
-        assert!(kicad_hides(&frames, "PCB"), "wx-hidden (an older hub's HideFrame, KiCad itself): asked for");
-        assert!(!kicad_hides(&frames, "SCH"), "shown in KiCad: a pure local switch");
-        assert!(!kicad_hides(&frames, "PCB_3D"), "shown in wx, unmapped by the client (GetFrames' shown is IsShown AND mapped): a pure local switch");
-        assert!(!kicad_hides(&json!([{"kind": "PCB", "shown": true}]), "PCB"), "a runtime without realized: shown is enough");
-        assert!(kicad_hides(&frames, "FOOTPRINT_EDITOR"), "not listed (stale): taken as hidden");
-        assert!(kicad_hides(&json!(null), "PCB"), "no frames at all: taken as hidden (one show too many costs nothing)");
-        assert!(kicad_hides(&json!([{"kind": "PCB"}]), "PCB"), "no shown field: taken as hidden");
+        // a hub from before #1522 (no active_by): as before
+        let old = json!({"frames": frames});
+        assert!(kicad_hides(&old, "PCB"), "wx-hidden (that hub's HideFrame): asked for");
+        assert!(!kicad_hides(&old, "SCH"), "shown in KiCad: a pure local switch");
+        assert!(!kicad_hides(&old, "PCB_3D"), "shown in wx, unmapped by the client: a pure local switch");
+        assert!(!kicad_hides(&json!({"frames": [{"kind": "PCB", "shown": true}]}), "PCB"), "a runtime without realized: shown is enough");
+        assert!(kicad_hides(&old, "FOOTPRINT_EDITOR"), "not listed (stale): taken as hidden");
+        assert!(kicad_hides(&json!({"frames": [{"kind": "PCB"}]}), "PCB"), "no shown field: taken as hidden");
+        // a current hub (active_by, even null before anyone set it): never; a local switch stays local
+        for by in [json!(null), json!("kicad"), json!({"cid": "gpui-1-2", "seq": 3})] {
+            let cur = json!({"frames": frames, "active_by": by});
+            for k in ["PCB", "SCH", "PCB_3D", "FOOTPRINT_EDITOR"] { assert!(!kicad_hides(&cur, k), "{k} on a current hub") }
+        }
+        // no frames info at all, either hub: asked for (one show too many costs nothing)
+        assert!(kicad_hides(&json!(null), "PCB"));
+        assert!(kicad_hides(&json!({"active_by": "kicad"}), "PCB"));
     }
     #[test] fn idle_prewarm_waits_on_windows_without_prewarm_keeps_focus() {
         assert!(super::idle_prewarm(false, false), "Linux: the pre-warm starts by itself");
