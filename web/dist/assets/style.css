@@ -410,6 +410,24 @@ button.primary.stop {
   font-weight: 700;
   padding: 1px 5px;
 }
+.bp-need { display: flex; align-items: center; gap: 6px; padding: 0 10px 5px 35px; }
+.bp-need.nested { padding-left: 47px; }
+.bp-need-line { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; color: var(--bad); }
+.bp-need-btn {
+  flex-shrink: 0;
+  background: var(--raise);
+  border: 1px solid var(--line);
+  border-radius: 0;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  cursor: pointer;
+}
+.bp-need-btn:hover:not(:disabled) { border-color: var(--accent); }
+.bp-need-btn:disabled { color: var(--faint); cursor: default; }
+.bp-need-err { padding: 0 10px 5px 35px; font-size: 11px; color: var(--bad); }
+.bp-need-err.nested { padding-left: 47px; }
 .bp-settled-toggle {
   width: 100%;
   text-align: left;

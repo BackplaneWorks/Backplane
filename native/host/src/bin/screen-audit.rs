@@ -11,6 +11,7 @@
 #[path="../shelf.rs"] mod shelf;
 #[path="../signal.rs"] mod signal;
 #[path="../sidebar.rs"] mod sidebar;
+#[path="../present/swarm_need.rs"] #[allow(dead_code)] pub mod swarm_need;
 #[path="../session/slash.rs"] mod slash;
 #[path="../session/composer.rs"] pub mod composer;
 #[path="../session/patch.rs"] pub mod patch;
@@ -38,7 +39,7 @@ mod identity_context {
     pub fn browser(_: &Value, _: &str) -> (String, String) { Default::default() }
     pub fn far_exists(_: &str, _: &str) -> Option<bool> { None }
 }
-mod present { pub use crate::ready; }
+mod present { pub use crate::{ready, swarm_need}; }
 // the issue links' repository (present/thread.rs): the audit reads no project's git config, so it links nothing
 mod mirror { pub fn origin_of_root(_: &str) -> String { String::new() } }
 /// kicad/follow.rs keeps the hub to redraw the views after a follow; the audit has none.

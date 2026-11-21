@@ -175,3 +175,84 @@ enum Swarm {
         return p
     }
 }
+
+// MARK: what a swarm wants of the person (the hub's present/swarm_need.rs): a sidebar swarm row's `need`, its line and the buttons that resolve it
+
+/// One button of a need: `act` board (the swarm's page), open (the member's thread), or resume, raise, retry, move, signin (`swarm.act`).
+/// `room` and `thread` carry the hub's prefix ("<hub>|<id>") as the row's own id has it; `thread` is empty for a swarm-wide act.
+struct DSwarmNeedAct: Decodable, Equatable, Hashable, Identifiable {
+    var label = "", act = "", room = "", thread = ""
+    var id: String { act + "\u{1f}" + thread }
+    enum CodingKeys: String, CodingKey { case label, act, room, thread }
+    init(label: String, act: String, room: String = "", thread: String = "") { self.label = label; self.act = act; self.room = room; self.thread = thread }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        label = c.s(.label); act = c.s(.act); room = c.s(.room); thread = c.s(.thread)
+    }
+}
+/// A row's `need`: null on a swarm that wants nothing; a need with no line is none.
+struct DSwarmNeed: Decodable, Equatable, Hashable {
+    var line = "", why = "", actions: [DSwarmNeedAct] = []
+    enum CodingKeys: String, CodingKey { case line, why, actions }
+    init(line: String, why: String, actions: [DSwarmNeedAct]) { self.line = line; self.why = why; self.actions = actions }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        line = c.s(.line); why = c.s(.why)
+        // one malformed action drops itself, not the need
+        actions = ((try? c.decode([Lenient<DSwarmNeedAct>].self, forKey: .actions)) ?? []).compactMap(\.value)
+    }
+    /// The row's `need`, forgivingly: absent, null, not an object or with no line is nil.
+    static func of<K: CodingKey>(_ c: KeyedDecodingContainer<K>, _ k: K) -> DSwarmNeed? {
+        guard let n = try? c.decodeIfPresent(DSwarmNeed.self, forKey: k), !n.line.isEmpty else { return nil }
+        return n
+    }
+}
+private struct Lenient<T: Decodable>: Decodable { var value: T?
+    init(from d: Decoder) throws { value = try? T(from: d) } }
+
+/// What a need's button does.
+enum SwarmPress: Equatable {
+    /// the swarm's page (what tapping the row does)
+    case board(room: String)
+    /// the member's thread
+    case thread(String)
+    /// `swarm.act` with these parameters
+    case request([String: String])
+}
+/// Where `swarm.act`'s reply sends the person: `open` "account:<id>" (that account's sign-in) or "thread:<id>".
+enum SwarmOpen: Equatable { case account(String), thread(String) }
+
+extension Swarm {
+    /// The acts that call `swarm.act`.
+    static let requestActs: Set<String> = ["resume", "raise", "retry", "move", "signin"]
+    /// A button's press: its room, or the row's when it has none. nil: an act this app does not know (not drawn), or one missing what it needs.
+    static func press(_ a: DSwarmNeedAct, rowRoom: String) -> SwarmPress? {
+        let room = a.room.isEmpty ? rowRoom : a.room
+        switch a.act {
+        case "board": return room.isEmpty ? nil : .board(room: room)
+        case "open": return a.thread.isEmpty ? nil : .thread(a.thread)
+        case let x where requestActs.contains(x):
+            guard !room.isEmpty else { return nil }
+            var p = ["room": room, "action": x]; if !a.thread.isEmpty { p["thread"] = a.thread }
+            return .request(p)
+        default: return nil
+        }
+    }
+    /// The buttons a need draws: those with a known press.
+    static func buttons(_ n: DSwarmNeed, rowRoom: String) -> [DSwarmNeedAct] { n.actions.filter { press($0, rowRoom: rowRoom) != nil && !$0.label.isEmpty } }
+    /// The reply's `open`. A thread id comes bare from the hub that holds the swarm: it gets the room's hub prefix back ("<hub>|"), as the row's ids have it.
+    static func opened(_ open: String, room: String) -> SwarmOpen? {
+        if open.hasPrefix("account:") { let id = String(open.dropFirst(8)); return id.isEmpty ? nil : .account(id) }
+        if open.hasPrefix("thread:") {
+            let id = String(open.dropFirst(7)); guard !id.isEmpty else { return nil }
+            if id.contains("|") { return .thread(id) }
+            let hub = room.lastIndex(of: "|").map { String(room[...$0]) } ?? ""
+            return .thread(hub + id)
+        }
+        return nil
+    }
+}
+/// `swarm.act`'s reply as a need's press reads it.
+struct DSwarmActReply: Decodable { var open: String
+    enum CodingKeys: String, CodingKey { case open }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); open = c.s(.open) } }

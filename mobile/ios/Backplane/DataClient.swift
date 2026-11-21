@@ -1272,6 +1272,13 @@ final class DataClient {
         _ = try await call("swarm.act", extra.merging(["room": room, "action": action]) { _, b in b }, as: DEmpty.self)
         await loadSwarms()
     }
+    /// A swarm need's button (DataSwarmNeed): `swarm.act` with its parameters (Swarm.press), then the sections and swarms again; where the reply sends
+    /// the person (an account's sign-in, a thread) is returned. Throws the hub's refusal.
+    func swarmNeedAct(_ p: [String: String]) async throws -> SwarmOpen? {
+        let r: DSwarmActReply = try await call("swarm.act", p)
+        await loadSections(); await loadSwarms()
+        return Swarm.opened(r.open, room: p["room"] ?? "")
+    }
     func swarmCreate(_ p: [String: Any]) async throws -> String {
         let r: DSwarmCreated = try await call("swarm.create", p)
         await loadSwarms(); return r.room

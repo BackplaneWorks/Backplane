@@ -114,14 +114,50 @@ and what to do.
 | budget | a swarm's posts (300), member turns (120) and member tokens (4 M), all settable | the room pauses with `reason: budget` |
 | circular | in the last 8 posts by members, no `claim`, `done` or person post, and each repeats an earlier one (word-shingle Jaccard ≥ 0.5 on average) | the room pauses with `reason: circular` |
 | chatter | 12 member posts in a row with no `claim`, `done` or person post | the room pauses with `reason: chatter` |
-| idle | every member idle, nothing waiting, for 10 min | the room pauses with `reason: idle` |
+| idle | every member idle, nothing waiting, for 10 min (a member whose turn is over but that owns running work, a `work_run`, background or watched work, or a wake it set, is busy: it shows `monitoring`) | the room pauses with `reason: idle` |
 | backstop | a hop 30 deep (the old hop count, still carried) | the post is held: a safety net only |
 
 - **The post that trips a guard** is held: it stays on the board, it wakes nobody, and a hub post
   says why the room paused.
 - **While paused**, posts are still logged and shown, but they wake nobody (`held`).
 - **Resuming.** A person's post, or `resume`, starts the room again with fresh counters, as a person
-  starting a new exchange did before.
+  starting a new exchange did before. The member posts held while it was paused (not a backstop's) go
+  to every other member with their next batch, and the board shows them `released`, no longer held.
+  A resume into a spent budget adds a quarter of the part's default; `raise` adds half again.
+
+## Needs you (present/swarm_need.rs)
+
+A live swarm that wants something of the person is one row in Needs you (sidebar, project page,
+plane, phones); its members are never rows of their own, and a member's own done or fail is no phone
+alert. The row's `say` is one plain line, and `need` is `{line, why, actions: [{label, act, room,
+thread}]}`:
+
+| what | line | actions |
+|---|---|---|
+| a member's sign-in expired | Member gemini failed: Gemini sign-in expired | Sign in to Gemini (`signin`), Move to Claude (`move`) |
+| a member asks | opus asks you something | Answer (`open`: its thread) |
+| idle | Paused: all members idle 10 min | Resume |
+| budget | Paused: budget used (tokens) | Raise budget (`raise`), Resume |
+| circular / chatter | Paused: going in circles | Read board (`board`: the swarm's page), Resume |
+| another failure | Member codex failed: <its first words> | Retry (`retry`), Read board |
+
+Every act but `board` and `open` is `swarm.act {room, action, thread}`. `signin` answers `open:
+account:<id>` for a Claude or Codex account, or opens a terminal on the member's thread running the
+provider's sign-in (`agy`, `grok login`, …) and answers `open: thread:<id>`. `move` adds a Claude
+member with the same role and removes the failed one.
+
+The hub keeps the facts in `room.need.<room>`: `for` (whose the pause is), `part` (the budget part
+that ran out), `failed` (`[{thread, provider, cause: sign-in|other, say, at, alert}]`, read by the
+minute tick from the member's error). A member that failed on its sign-in is told so on its own
+thread and goes on by itself once the sign-in works: Antigravity's token file is written after the
+failure, or the hub's expired-sign-in record of the Claude or Codex account is gone.
+
+**A swarm a bot or the uberbot started** handles its routine pauses by policy (`swarm_need::policy`),
+and the person hears only what needs them (money, a sign-in, a member's question): all members idle
+is woken by the hub twice (`room.auto.<room>`, cleared by a claim or done or the person's resume),
+then left paused for the starter; a spent budget part is raised by half (at least half its default)
+up to four times its default, said on the board and to the starter; past that cap it is the person's.
+A loop or chatter pause is the starter's: it is told, and reads the board.
 - **Ephemeral rooms** close when a guard pauses them (where they closed at hop 6 before) or after a
   day idle.
 - **Bot rooms.** The old `[held: 6 messages…]` behaviour becomes the chatter and budget guards. The

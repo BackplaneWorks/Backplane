@@ -535,3 +535,28 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let row = r["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Only threads that need attention").expect("the row").clone();
     assert_eq!(row["buttons"].as_array().unwrap().iter().map(|b| (b["value"].as_str().unwrap(), b["on"].as_bool().unwrap())).collect::<Vec<_>>(), [("sidebar.attention=on", false), ("sidebar.attention=off", true)]);
 }
+
+#[test] fn a_swarms_needs_you_row_says_what_happened_in_one_line_and_carries_the_actions_that_resolve_it() {
+    let room = |state: &str, reason: &str| json!({"$":"RoomSet","id":"r1","name":"Web UI","members":"thread:a\nthread:b","kind":"swarm","project":"p1","state":state,"reason":reason,"at":NOW-30});
+    let member = |t: &str, n: &str| set(&format!("room.member.r1.thread:{t}"), &json!({"name":n}).to_string(), NOW - 40);
+    let row = |extra: Vec<Value>| { let mut e = vec![pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3), member("a", "opus"), member("b", "gemini")]; e.extend(extra);
+        let s = st(&e); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); sec(&build(&s, &rows, &Value::Null, &ctx(&HashSet::new())), "needs")["rows"][0].clone() };
+    let r = row(vec![room("paused", "idle")]);
+    assert_eq!((r["say"].as_str(), r["need"]["line"].as_str()), (Some("Paused: all members idle 10 min"), Some("Paused: all members idle 10 min")), "{r}");
+    assert_eq!(r["need"]["actions"], json!([{"label":"Resume","act":"resume","room":"h|r1","thread":""}]));
+    let r = row(vec![room("paused", "budget"), set("room.need.r1", r#"{"for":"person","part":"tokens"}"#, NOW - 20)]);
+    assert_eq!(r["say"], "Paused: budget used (tokens)"); assert_eq!(r["need"]["actions"][0]["act"], "raise");
+    assert_eq!(row(vec![room("paused", "circular")])["need"]["actions"][0]["label"], "Read board");
+    // a bot's swarm paused for its starter: not the person's
+    let mut e = vec![pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3), room("paused", "idle"), set("room.need.r1", r#"{"for":"starter"}"#, NOW - 20)];
+    let s = st(&e); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    assert!(sec(&build(&s, &rows, &Value::Null, &ctx(&HashSet::new())), "needs").is_null(), "a routine pause of a bot's swarm reaches its starter only");
+    // a member that failed on its sign-in: named, with Sign in and Move to Claude, even in a bot's swarm
+    e[2] = json!({"$":"ThreadCreated","id":"b","project":"p1","title":"T b","env":"local","branch":"","worktree":"","provider":"antigravity","model":"","at":3});
+    e.extend([member("b", "gemini"), turn("b", "failed", NOW - 10), set("room.need.r1", r#"{"for":"starter","failed":[{"thread":"b","cause":"sign-in","say":"You are not logged into Antigravity"}]}"#, NOW - 5)]);
+    let s = st(&e); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let r = sec(&build(&s, &rows, &Value::Null, &ctx(&HashSet::new())), "needs")["rows"][0].clone();
+    assert_eq!((r["say"].as_str(), r["want"].as_str()), (Some("Member gemini failed: Gemini sign-in expired"), Some("sign-in")), "{r}");
+    let labels: Vec<&str> = r["need"]["actions"].as_array().unwrap().iter().map(|a| a["label"].as_str().unwrap()).collect(); assert_eq!(labels, ["Sign in to Gemini", "Move to Claude"]);
+    assert_eq!(r["need"]["actions"][0]["thread"], "h|b");
+}

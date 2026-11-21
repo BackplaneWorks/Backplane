@@ -307,10 +307,11 @@ fn swarms_of(p: &MergedProject, c: &Ctx) -> Vec<(Value, &'static str)> {
             for mut r in crate::sidebar::swarm_rows(s, &o, pid) {
                 let room = text_of(&r, "nav").trim_start_matches("@room:").to_string();
                 let Some(l) = live.iter().find(|l| l.id == room) else { continue };
-                let asks = s.swarm_of.iter().any(|(t, sw)| sw == &room && wants_person(s, t));
-                let word = if asks { "needs" } else { l.word };
-                r["kind"] = json!("swarm"); r["word"] = json!(word); r["title"] = json!(l.title); r["say"] = json!(say(word));
-                r["want"] = json!(match word { "needs" => "question", "failed" => "failed", _ => "" });
+                let word = l.word;
+                // what it wants, in one line, with its actions (swarm_need.rs): `say` is that line, so a client that draws only `say` shows why too
+                r["kind"] = json!("swarm"); r["word"] = json!(word); r["title"] = json!(l.title); r["say"] = json!(l.need.as_ref().map_or_else(|| say(word).to_string(), |n| n.line.clone()));
+                r["need"] = l.need.as_ref().map_or(Value::Null, |n| n.json(&if c.hub.is_empty() { String::new() } else { format!("{}|", c.hub) }, &room));
+                r["want"] = json!(match l.need.as_ref().map(|n| n.why) { Some("sign-in") => "sign-in", Some("failed") => "failed", Some(_) => "question", None => "" });
                 r["status"] = json!(dot_word(word)); r["machine"] = json!(machine); r["mark"] = mark_of(p, machine);
                 r["project"] = json!(p.name); r["projectKey"] = json!(p.key); r["off"] = json!(false); r["activity"] = json!(l.activity);
                 out.push((r, word));
@@ -409,12 +410,13 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
     for p in rows { for (r, w) in swarms_of(p, c) { if w == "running" { continue }
         if !c.query.is_empty() && !hit(text_of(&r, "title"), c.query) && !hit(&p.name, c.query) { continue }
         let at = r["activity"].as_u64().unwrap_or(0); needs.push((if w == "needs" { 1 } else { 2 }, at, r)); } }
-    // an ask outside every project (a bot's chat, a room's run, a scratch chat; a linked machine's too) is in Needs you like any other
+    // an ask outside every project (a bot's chat, a room's run, a scratch chat; a linked machine's too) is in Needs you like any other (a swarm's member is
+    // not: its swarm's row says what it asks, swarm_need.rs)
     { let listed: HashSet<&str> = rows.iter().flat_map(|p| p.threads.iter().map(|t| t.id.as_str())).collect();
       let mut states: Vec<(&State, String)> = vec![(st, String::new())];
       for p in rows { for t in &p.threads { if let Some(s) = t.src { if !t.machine.is_empty() && !states.iter().any(|(x, _)| std::ptr::eq(*x, s)) { states.push((s, t.machine.clone())); } } } }
       for (s, machine) in states { // (another machine's ask is believed for ACTIVE, as `far_word` has it)
-      for (id, t) in s.threads.iter().filter(|(id, t)| !t.deleted && !listed.contains(id.as_str()) && wants_person(s, id) && (machine.is_empty() || (far_word("needs", false, c.now.saturating_sub(t.activity)) == "needs" && hidden_at(st, id) < t.activity.max(1)))) {
+      for (id, t) in s.threads.iter().filter(|(id, t)| !t.deleted && !listed.contains(id.as_str()) && !s.swarm_of.contains_key(id.as_str()) && wants_person(s, id) && (machine.is_empty() || (far_word("needs", false, c.now.saturating_sub(t.activity)) == "needs" && hidden_at(st, id) < t.activity.max(1)))) {
           let place = s.bots_nav.values().find(|b| &b.thread == id).map(|b| b.name.clone()).unwrap_or_else(|| crate::sidebar::NO_PROJECT.into());
           if !c.query.is_empty() && !hit(&t.title, c.query) && !hit(&place, c.query) { continue }
           let mt = MergedThread { machine: machine.clone(), id: id.clone(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(s), status: String::new() };

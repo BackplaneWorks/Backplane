@@ -3,6 +3,7 @@
 // and indented thread rows with status dots + relative age, BOTS & ROOMS sections,
 // and bottom-left Connected status footer.
 import { t } from "./i18n";
+import { needPress, parseNeed, type NeedAction } from "./swarm-need";
 
 export interface ProjectItem {
   id: string;
@@ -67,6 +68,8 @@ export interface SectionThreadRow {
   off?: boolean;
   nav?: string;
   kind?: string;
+  /** a swarm row's need (swarm-need.ts): null when nothing waits on the person */
+  need?: unknown;
 }
 
 export interface SectionProjectRow {
@@ -108,6 +111,10 @@ export interface SidebarCallbacks {
   onToggleSection?: (toggle: string) => void;
   onToggleProjectFold?: (projectKey: string) => void;
   onCollapseSidebar?: () => void;
+  /** a press of a swarm need's button; it rejects with the hub's words when the hub refuses */
+  onNeedAct?: (a: NeedAction) => Promise<void>;
+  /** this client has a room view: a need's `board` opens it */
+  hasRoomView?: boolean;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -167,6 +174,9 @@ export class SidebarView {
   private rooms: RoomItem[] = [];
   private selectedThreadId = "";
   private cb: SidebarCallbacks;
+  /** a need's refusal, by row, until its next press */
+  private needErr = new Map<string, string>();
+  private needBusy = new Set<string>();
 
   constructor(container: HTMLElement, cb: SidebarCallbacks) {
     this.el = container;
@@ -332,7 +342,49 @@ export class SidebarView {
     if (!row.off && target && !target.startsWith("@room:")) {
       el.addEventListener("click", () => this.cb.onSelectThread(target));
     }
-    return el;
+    const need = row.kind === "swarm" ? parseNeed(row.need) : null;
+    if (!need) return el;
+    // a swarm's need: its line under the row and a button per action
+    const wrap = document.createElement("div");
+    wrap.className = "bp-need-wrap";
+    const line = document.createElement("div");
+    line.className = "bp-need" + (showTreeBranch ? " nested" : "") + (row.off ? " bp-dim" : "");
+    line.setAttribute("data-testid", `need-${row.id}`);
+    const text = document.createElement("span");
+    text.className = "bp-need-line";
+    text.textContent = need.line;
+    text.title = need.line;
+    line.appendChild(text);
+    for (const a of need.actions) {
+      if (!needPress(a, Boolean(this.cb.hasRoomView))) continue;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "bp-need-btn";
+      b.textContent = a.label;
+      b.setAttribute("data-testid", `need-${a.act}-${row.id}`);
+      b.disabled = Boolean(row.off) || this.needBusy.has(row.id) || !this.cb.onNeedAct;
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        const act = this.cb.onNeedAct;
+        if (!act) return;
+        this.needErr.delete(row.id);
+        this.needBusy.add(row.id);
+        this.render();
+        act(a)
+          .catch((err: unknown) => { this.needErr.set(row.id, err instanceof Error ? err.message : String(err)); })
+          .finally(() => { this.needBusy.delete(row.id); this.render(); });
+      });
+      line.appendChild(b);
+    }
+    wrap.append(el, line);
+    const err = this.needErr.get(row.id);
+    if (err) {
+      const e = document.createElement("div");
+      e.className = "bp-need-err" + (showTreeBranch ? " nested" : "");
+      e.textContent = err;
+      wrap.appendChild(e);
+    }
+    return wrap;
   }
 
   private renderHubSections(frag: DocumentFragment, q: string): void {

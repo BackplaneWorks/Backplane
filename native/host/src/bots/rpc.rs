@@ -55,7 +55,10 @@ impl Inbox for Arc<Agents> {
     fn info<'a>(&'a self, thread: &'a str) -> Fut<'a, Option<super::swarm::ThreadInfo>> { Box::pin(async move {
         let w = self.world().await; let t = w.threads.get(thread)?;
         let asks = w.asks.values().any(|a| a.thread == thread);
-        Some(super::swarm::ThreadInfo { provider: t.provider.clone(), model: t.model.clone(), title: t.title.clone(), turn: t.turn.clone(), asking: asks, gone: t.archived || t.deleted, project: t.project.clone(), root: w.roots.get(&t.project).cloned().unwrap_or_default() })
+        // what it still owns between turns: background work, watched work (work_run), and the wakes it set (wake_on, the state lane's index)
+        let wakes = crate::statehost::with_state_of(&self.hub, |st| st.settings.get(&format!("wakes.by.{thread}")).map_or(0, |v| v.split('\n').filter(|l| !l.is_empty()).count())).unwrap_or(0);
+        let busy = (w.work(thread).0 + wakes) as u64;
+        Some(super::swarm::ThreadInfo { busy, provider: t.provider.clone(), model: t.model.clone(), title: t.title.clone(), turn: t.turn.clone(), asking: asks, gone: t.archived || t.deleted, project: t.project.clone(), root: w.roots.get(&t.project).cloned().unwrap_or_default(), why: t.why.clone() })
     }) }
     fn launch<'a>(&'a self, by: &'a str, args: Value) -> Fut<'a, Result<String, String>> { Box::pin(async move {
         let (ok, r) = self.tool_launch(by, &args).await;

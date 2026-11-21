@@ -281,11 +281,11 @@ internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: Strin
 }
 
 @Composable
-internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modifier: Modifier = Modifier, danger: Boolean = false, onClick: () -> Unit) {
+internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modifier: Modifier = Modifier, danger: Boolean = false, small: Boolean = false, onClick: () -> Unit) {
     val bg = if (primary && enabled) dcs.primary else dcs.surfaceContainerHigh
     val fg = if (primary && enabled) dcs.onPrimary else if (!enabled) dfaint else if (danger) dcs.error else dcs.onSurface
-    Box(modifier.background(bg).border(BorderStroke(1.dp, if (primary && enabled) dcs.primary else dcs.outlineVariant)).clickable(enabled = enabled, onClick = onClick).heightIn(min = 40.dp).padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
-        Text(label, color = fg, fontFamily = BpMono, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    Box(modifier.background(bg).border(BorderStroke(1.dp, if (primary && enabled) dcs.primary else dcs.outlineVariant)).clickable(enabled = enabled, onClick = onClick).heightIn(min = if (small) 28.dp else 40.dp).padding(horizontal = if (small) 8.dp else 14.dp), contentAlignment = Alignment.CenterStart) {
+        Text(label, color = fg, fontFamily = BpMono, fontSize = if (small) 11.sp else 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
