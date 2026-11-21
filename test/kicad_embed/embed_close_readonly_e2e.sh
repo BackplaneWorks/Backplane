@@ -5,6 +5,8 @@
 #   R2  what is on screen meanwhile (KiCad's error box, a modal: the reply waits for it)  [measured, not judged]
 #   R3  after the box is dismissed (Return, as the person's OK): the board frame is still open and still modified
 #   R4  the board file on disk is unchanged (the agent's track not in it, the file not truncated)
+#   CLOSE_RO=sch: the schematic (a sheet that cannot be written) instead of the board, made modified by an agent's wire
+#   With the fork's no-modals Close (next batch): R5 the error comes within 10 s and names the failure, no box on screen
 # Fork mode, copies only. One run.
 set -uo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -34,13 +36,15 @@ SOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("sock") or
 KPID=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("pid") or 0)' "$R")
 [ "$KPID" -gt 0 ] && track_pid "$KPID"
 
-python3 "$IPC_PY" agent-add-track "$SOCK" 100 100 104 100 0.25 3 >"$OUT/track.out" 2>&1 || true
-echo "INFO modified before: $(python3 "$IPC_PY" modified "$SOCK" pcb 2>&1 | tail -1)"
+RO=${CLOSE_RO:-pcb}
+if [ "$RO" = sch ]; then BOARD="$PROJ/ecc83-pp.kicad_sch"; python3 "$IPC_PY" agent-add-wire "$SOCK" 50 50 60 50 >"$OUT/track.out" 2>&1 || true
+else python3 "$IPC_PY" agent-add-track "$SOCK" 100 100 104 100 0.25 3 >"$OUT/track.out" 2>&1 || true; fi
+echo "INFO modified before: $(python3 "$IPC_PY" modified "$SOCK" "$RO" 2>&1 | tail -1)"
 SUM0=$(sha256sum "$BOARD" | cut -c1-16); SEG0=$(grep -c "(segment" "$BOARD" || true)
 chmod a-w "$BOARD"
 READ_S=${READ_S:-20}
 T0=$(date +%s%3N)
-( timeout "$READ_S" python3 "$IPC_PY" close "$SOCK" save >"$OUT/close.out" 2>&1; echo "rc $? at $(( $(date +%s%3N) - T0 )) ms" >>"$OUT/close.out" ) &
+( KIPC_TIMEOUT=$READ_S timeout "$READ_S" python3 "$IPC_PY" close "$SOCK" save >"$OUT/close.out" 2>&1; echo "rc $? at $(( $(date +%s%3N) - T0 )) ms" >>"$OUT/close.out" ) &
 CL=$!
 sleep 6
 WINS=$(xwininfo -root -tree 2>/dev/null | grep -E '"[^"]+"' | grep -viE "i3|Backplane GPUI" | sed 's/^ *//' | cut -c1-90 | grep -iE "error|save|kicad|pcb" | tr '\n' ';')
@@ -50,14 +54,18 @@ wait "$CL"
 echo "INFO the Close's reply: $(tr '\n' ' ' <"$OUT/close.out" | cut -c1-300)"
 EXITING=$(grep -c '"exiting": true' "$OUT/close.out" || true)
 check "R1 no 'exiting': true while the save cannot be written" "$([ "${EXITING:-0}" = 0 ] && echo 1 || echo 0)" "$(head -c 200 "$OUT/close.out")"
+MS=$(grep -o "rc [0-9]* at [0-9]* ms" "$OUT/close.out" | awk '{print $4}')
+NAMED=$(grep -qiE "did not close.*(error|sav|writ|read-only|permission)" "$OUT/close.out" && echo 1 || echo 0)
+echo "INFO R5 (the no-modals Close): reply in ${MS:-?} ms, names the failure: $NAMED, a box on screen: $([ -n "$WINS" ] && echo yes || echo no)"
+[ "${EXPECT_NO_MODALS:-0}" = 1 ] && check "R5 the error comes within 10 s, names the failure, and no box is shown" "$([ "${MS:-99999}" -le 10000 ] && [ "$NAMED" = 1 ] && [ -z "$(echo "$WINS" | grep -i error)" ] && echo 1 || echo 0)" "${MS} ms; $(tail -c 300 "$OUT/close.out" | tr '\n' ' ')"
 # the person's OK on the error box (the focused window's default button), then KiCad asked again
 python3 "$XINPUT_PY" key Return >/dev/null 2>&1; sleep 2
 WINS2=$(xwininfo -root -tree 2>/dev/null | grep -E '"[^"]+"' | grep -viE "i3|Backplane GPUI" | sed 's/^ *//' | cut -c1-90 | grep -iE "error|save" | tr '\n' ';')
 echo "INFO on screen after Return: ${WINS2:-nothing}"
 FR=$(timeout 20 python3 "$IPC_PY" frames "$SOCK" 2>&1 | tail -1)
-MOD=$(timeout 20 python3 "$IPC_PY" modified "$SOCK" pcb 2>&1 | tail -1)
+MOD=$(timeout 20 python3 "$IPC_PY" modified "$SOCK" "$RO" 2>&1 | tail -1)
 echo "INFO frames after: $(echo "$FR" | cut -c1-300)"; echo "INFO modified after: $MOD"
-check "R3 the board frame is still open after the failed save" "$(echo "$FR" | grep -qiE '"kind": *"?(1|PCB|pcb)' && echo 1 || echo 0)" "$(echo "$FR" | cut -c1-200)"
+check "R3 the frame is still open after the failed save" "$(echo "$FR" | grep -q '"frames": \[{' && echo 1 || echo 0)" "$(echo "$FR" | cut -c1-200)"
 check "R3 and still modified" "$(echo "$MOD" | grep -q '"modified": true' && echo 1 || echo 0)" "$MOD"
 check "R4 the board file on disk is unchanged" "$([ "$(sha256sum "$BOARD" | cut -c1-16)" = "$SUM0" ] && echo 1 || echo 0)" "segments $SEG0 -> $(grep -c '(segment' "$BOARD")"
 chmod u+w "$BOARD"
