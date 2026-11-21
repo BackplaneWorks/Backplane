@@ -2,7 +2,14 @@
 // Zero-dependency DOM renderers driven strictly by hub data/1 RPCs and /files/get.
 // All dynamic text uses textContent (never innerHTML).
 
+import { t } from "../i18n";
 import type { ViewerHostApi } from "../app";
+import {
+  isInlineImageContentType,
+  isInlineImageExt,
+  resolveRowDownload,
+  shouldShowMfgButton,
+} from "./file-links";
 
 export interface PaneHandle {
   destroy(): void;
@@ -32,7 +39,7 @@ function fileExt(name: string): string {
 }
 
 function isImageExt(ext: string): boolean {
-  return ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "ico"].includes(ext);
+  return isInlineImageExt(ext);
 }
 
 function isTextExt(ext: string): boolean {
@@ -62,6 +69,8 @@ interface FileEntry {
   dir: boolean;
   size: number;
   name: string;
+  down?: string;
+  downName?: string;
 }
 
 export function mountFilesPane(
@@ -73,16 +82,28 @@ export function mountFilesPane(
   let alive = true;
   let currentDir = "";
   let selectedPath = "";
+  let hasMfgRoot = false;
+  let hubMfgField = "";
+  const fileLinksOn = api.hub.hasFeature("fileLinks");
 
   const root = el("div", "bp-pane bp-files-pane");
   root.setAttribute("data-testid", "pane-files");
 
   const bar = el("div", "bp-pane-bar");
   const crumbs = el("div", "bp-files-crumbs");
+  const mfgBtn = el("button", "bp-v-btn", t("files.mfg", "Manufacturing"));
+  mfgBtn.type = "button";
+  mfgBtn.hidden = true;
+  mfgBtn.setAttribute("data-testid", "files-mfg-btn");
+  mfgBtn.addEventListener("click", () => void loadDir("mfg"));
   const refreshBtn = el("button", "bp-v-btn", "Refresh");
   refreshBtn.type = "button";
   refreshBtn.addEventListener("click", () => void loadDir(currentDir));
-  bar.append(crumbs, refreshBtn);
+  bar.append(crumbs, mfgBtn, refreshBtn);
+
+  function updateMfgButton(): void {
+    mfgBtn.hidden = !fileLinksOn || !shouldShowMfgButton(threadId, currentDir, hasMfgRoot, hubMfgField);
+  }
 
   const split = el("div", "bp-files-split");
   const listEl = el("div", "bp-files-list");
@@ -115,7 +136,7 @@ export function mountFilesPane(
     }
   }
 
-  async function openPreview(relPath: string, name: string, size: number): Promise<void> {
+  async function openPreview(relPath: string, name: string, size: number, downUrl?: string, downName?: string): Promise<void> {
     selectedPath = relPath;
     previewEl.replaceChildren();
 
@@ -130,10 +151,12 @@ export function mountFilesPane(
       openBtn.addEventListener("click", () => onOpenViewer(vk, relPath));
       acts.append(openBtn);
     }
-    const url = `/files/get?thread=${encodeURIComponent(threadId)}&path=${encodeURIComponent(relPath)}`;
-    const dl = el("a", "bp-v-btn", "Download");
+    const dlInfo = resolveRowDownload(threadId, "", { dir: false, name: relPath, down: downUrl, downName: downName || name });
+    const url = dlInfo?.url || `/files/get?thread=${encodeURIComponent(threadId)}&path=${encodeURIComponent(relPath)}`;
+    const dl = el("a", "bp-v-btn", t("files.download", "Download"));
     dl.href = url;
-    dl.download = name;
+    dl.download = dlInfo?.name || name;
+    dl.setAttribute("data-testid", "files-preview-download");
     acts.append(dl);
     head.append(acts);
     previewEl.append(head);
@@ -166,7 +189,7 @@ export function mountFilesPane(
           return;
         }
         const ct = res.headers.get("content-type") || "";
-        if (ct.startsWith("image/")) {
+        if (isInlineImageContentType(ct)) {
           loading.remove();
           const img = document.createElement("img");
           img.className = "bp-files-img";
@@ -236,14 +259,20 @@ export function mountFilesPane(
   async function loadDir(dir: string): Promise<void> {
     currentDir = dir;
     renderCrumbs();
+    updateMfgButton();
     listEl.replaceChildren(el("div", "bp-pane-empty", "Loading…"));
     try {
-      const res = await api.hub.rpc<{ dir?: string; entries?: FileEntry[] }>("files.entries", {
+      const res = await api.hub.rpc<{ dir?: string; entries?: FileEntry[]; mfg?: string }>("files.entries", {
         thread: threadId,
         ...(dir ? { path: dir } : {}),
       });
       if (!alive) return;
       const entries = Array.isArray(res?.entries) ? res.entries.slice() : [];
+      if (typeof res?.mfg === "string") hubMfgField = res.mfg;
+      if (!dir) {
+        hasMfgRoot = entries.some((e) => e.dir && e.name === "mfg");
+      }
+      updateMfgButton();
       entries.sort((a, b) => (a.dir === b.dir ? a.name.localeCompare(b.name) : a.dir ? -1 : 1));
       listEl.replaceChildren();
 
@@ -263,24 +292,47 @@ export function mountFilesPane(
 
       for (const entry of entries) {
         const rel = dir ? `${dir}/${entry.name}` : entry.name;
-        const row = el("button", "bp-file-row" + (entry.dir ? " is-dir" : "") + (rel === selectedPath ? " is-sel" : ""));
-        row.type = "button";
-        row.setAttribute("data-testid", `file-row-${entry.name}`);
-        row.append(
-          el("span", "bp-file-icon", entry.dir ? "▸" : "·"),
+        if (entry.dir) {
+          const row = el("button", "bp-file-row is-dir");
+          row.type = "button";
+          row.setAttribute("data-testid", `file-row-${entry.name}`);
+          row.append(
+            el("span", "bp-file-icon", "▸"),
+            el("span", "bp-file-name", entry.name),
+            el("span", "bp-file-size", "")
+          );
+          row.addEventListener("click", () => void loadDir(rel));
+          listEl.append(row);
+          continue;
+        }
+        const rowWrap = el("div", "bp-file-row" + (rel === selectedPath ? " is-sel" : ""));
+        rowWrap.setAttribute("data-testid", `file-row-${entry.name}`);
+        const mainBtn = el("button", "bp-file-row-main");
+        mainBtn.type = "button";
+        mainBtn.append(
+          el("span", "bp-file-icon", "·"),
           el("span", "bp-file-name", entry.name),
-          el("span", "bp-file-size", entry.dir ? "" : formatSize(entry.size))
+          el("span", "bp-file-size", formatSize(entry.size))
         );
-        row.addEventListener("click", () => {
-          if (entry.dir) {
-            void loadDir(rel);
-          } else {
-            listEl.querySelectorAll(".bp-file-row.is-sel").forEach((n) => n.classList.remove("is-sel"));
-            row.classList.add("is-sel");
-            void openPreview(rel, entry.name, entry.size);
-          }
+        mainBtn.addEventListener("click", () => {
+          listEl.querySelectorAll(".bp-file-row.is-sel").forEach((n) => n.classList.remove("is-sel"));
+          rowWrap.classList.add("is-sel");
+          void openPreview(rel, entry.name, entry.size, entry.down, entry.downName);
         });
-        listEl.append(row);
+        rowWrap.append(mainBtn);
+        if (fileLinksOn) {
+          const dlInfo = resolveRowDownload(threadId, dir, entry);
+          if (dlInfo) {
+            const dl = el("a", "bp-file-dl", "↓");
+            dl.href = dlInfo.url;
+            dl.download = dlInfo.name;
+            dl.title = t("files.download", "Download");
+            dl.setAttribute("aria-label", `${t("files.download", "Download")} ${dlInfo.name}`);
+            dl.setAttribute("data-testid", `file-dl-${entry.name}`);
+            rowWrap.append(dl);
+          }
+        }
+        listEl.append(rowWrap);
       }
     } catch (err) {
       if (!alive) return;
