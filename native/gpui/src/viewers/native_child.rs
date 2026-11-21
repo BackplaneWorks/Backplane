@@ -1075,7 +1075,8 @@ pub mod focusq {
                     if again { self.retried = s; self.taken = s.saturating_sub(1); }
                     Returned { record: true, again, hand_in: None }
                 }
-                Some((s, To::Kicad { target })) if s > seq && focus_ours => Returned { record: false, again: false, hand_in: Some(target) },
+                // (never a target of 0: PostMessageW(NULL) posts to the calling thread; a hand-in by a press has nothing to post)
+                Some((s, To::Kicad { target })) if s > seq && focus_ours && target != 0 => Returned { record: false, again: false, hand_in: Some(target) },
                 _ => Returned::default(),
             }
         }
@@ -1269,10 +1270,16 @@ mod imp {
                     let r = g.returned(era, seq, ours);
                     // recorded only by the latest request's call, under the lock (a stale one woke after a hand-in and said "escaped")
                     if r.record { super::FOCUS_ESCAPED.store(escaped, std::sync::atomic::Ordering::SeqCst); }
+                    // a hand-in that came while the call was in flight, which the call undid: posted to KiCad again, under the lock (a post
+                    // never waits), only to a window that still exists and is another process's (KiCad's), never our own
+                    if let Some(t) = r.hand_in {
+                        let h = super::hwnd(t);
+                        let mut pid = 0u32;
+                        let live = unsafe { super::IsWindow(h) } != 0 && unsafe { super::GetWindowThreadProcessId(h, &mut pid) } != 0 && pid != std::process::id();
+                        if live { unsafe { super::PostMessageW(h, super::WM_ACTIVATE, 1, 0); } }
+                    }
                     r
                 };
-                // a hand-in that came while the call was in flight, which the call undid: posted to KiCad again (it never waits)
-                if let Some(t) = r.hand_in { unsafe { super::PostMessageW(t as usize as _, super::WM_ACTIVATE, 1, 0); } }
                 if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_done": {"seq": seq, "window": w, "ms": t0.elapsed().as_millis() as u64, "focus_ours": ours, "again": r.again, "recorded": r.record, "hand_in_again": r.hand_in}})); }
                 if r.again { cv.notify_all(); }
             }
@@ -1416,6 +1423,8 @@ mod imp {
     unsafe fn handle_child_mouse_down(container: HWND, button_msg: u32) {
         PANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
         let already = unsafe { in_child_focus(container) };
+        // a press in KiCad's frame is a hand-in too: noted in the hand-back queue (nothing to post again: target 0)
+        focuser::kicad(0);
         FOCUS_ESCAPED.store(false, Ordering::SeqCst);
         CHILD_FOCUSED.store(true, Ordering::SeqCst);
         unsafe { attach_visible_child_queue(container); }
@@ -1443,6 +1452,8 @@ mod imp {
                     }
                     return 0;
                 }
+                // KiCad took the keyboard on a click into its frame: a hand-in, noted in the hand-back queue (nothing to post again)
+                focuser::kicad(0);
                 FOCUS_ESCAPED.store(false, Ordering::SeqCst);
                 CHILD_FOCUSED.store(true, Ordering::SeqCst);
                 if fw != 0 {
@@ -1989,14 +2000,15 @@ mod imp {
             let target_tid = GetWindowThreadProcessId(h, null_mut());
             if target_tid != 0 && target_tid != cur {
                 if let Ok(mut set) = handed_in().lock() { set.insert(w); }
+                // the hand-in noted first: a hand-back worker returning now records nothing and pulls nothing (focusq)
+                let target = focus_target_in_frame(h);
+                focuser::kicad(target as usize as u64);
                 FOCUS_ESCAPED.store(false, Ordering::SeqCst);
                 CHILD_FOCUSED.store(true, Ordering::SeqCst);
                 CLICK_GRACE_UNTIL.store(mono_ms() + 500, Ordering::SeqCst);
                 ATTACHED_TID.store(target_tid as u64, Ordering::SeqCst);
                 AttachThreadInput(cur, target_tid, 1);
-                let target = focus_target_in_frame(h);
                 PostMessageW(target, WM_ACTIVATE, 1, 0);
-                focuser::kicad(target as usize as u64);
                 return;
             }
             CHILD_FOCUSED.store(false, Ordering::SeqCst);
@@ -2641,6 +2653,12 @@ mod tests {
         assert!(!r.again, "the stale hand-back pulls nothing out after the hand-in");
         assert!(!r.record, "and records nothing about where the keyboard is (the review's A)");
         assert_eq!(r.hand_in, Some(9), "its call took the keyboard from the hand-in: posted to KiCad again (the review's B)");
+        // a hand-in by a press into KiCad's frame (target 0): noted, so the stale call records nothing, and nothing is posted to 0
+        let mut q = Q::default();
+        let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
+        q.ask(To::Kicad { target: 0 }, t0);
+        let r = q.returned(g, 1, true);
+        assert!(!r.record && !r.again && r.hand_in.is_none(), "never a re-post to a target of 0 (PostMessageW(NULL) is the caller's own queue)");
         assert_eq!(q.take(g, t0), None);
         // the reverse: a hand-in KiCad had queued takes the keyboard back after our hand-back: applied once more, then never again
         let mut q = Q::default();

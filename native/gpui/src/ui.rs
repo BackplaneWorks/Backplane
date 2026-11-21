@@ -1129,8 +1129,10 @@ impl Render for Backplane {
         static KEY_WATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
         if !KEY_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
             let weak = cx.entity().downgrade();
-            cx.intercept_keystrokes(move |_, _, cx| {
-                let _ = weak.update(cx, |this, cx| if let Some(p) = this.screens.kicad.clone() { p.update(cx, |p, _| p.typed_in_backplane()); });
+            cx.intercept_keystrokes(move |ev, _, cx| {
+                let key = ev.keystroke.unparse();
+                if let Ok(mut l) = crate::viewers::kicad_pane::LAST_KEY.lock() { *l = Some((key.clone(), std::time::Instant::now())); }
+                let _ = weak.update(cx, |this, cx| if let Some(p) = this.screens.kicad.clone() { p.update(cx, |p, _| p.typed_in_backplane(&key)); });
             }).detach();
         }
         // a key typed in Backplane (and, below, a press on the window's root): noted, so a KiCad install's reopen hands KiCad the keyboard

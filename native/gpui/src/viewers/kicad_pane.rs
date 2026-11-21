@@ -616,8 +616,8 @@ pub struct KicadPane {
     starting_since: Option<std::time::Instant>, starting_said: u64,
     /// a redraw timer for the strip's opening label is running (one per pane)
     pub opening_timer: Arc<std::sync::atomic::AtomicBool>,
-    born: std::time::Instant, /// when an Edit (edit_keys, deliberate) last asked for the keyboard (the first Edit: `born`)
-    want_keys_at: Option<std::time::Instant>, handoff_placed: Option<(std::time::Instant, u64)>, handoff_over: bool,
+    born: std::time::Instant, /// the key that asked for the keyboard (an Edit chosen with Enter) and when last seen: its repeats drop nothing
+    edit_key: Option<(String, std::time::Instant)>, handoff_placed: Option<(std::time::Instant, u64)>, handoff_over: bool,
     /// macOS: the pane's screen rect (points) and our window's visibility last pushed to KiCad (`editor.kicad.host`)
     pub host_sent: Option<(i32, i32, i32, i32, bool)>,
     /// macOS: our window is in full screen, where KiCad's frame cannot be: the pane offers Pop out instead (a window of its own)
@@ -740,6 +740,10 @@ pub struct KicadPane {
     was_dialog: bool,
 }
 
+/// The keystroke that triggered what is asking for the keyboard now (seen by the interceptor just before), if one did.
+pub fn trigger_key() -> Option<(String, std::time::Instant)> {
+    LAST_KEY.lock().ok()?.as_ref().filter(|(_, t)| t.elapsed().as_millis() < EDIT_KEY_TRIGGER_MS).cloned()
+}
 /// A new pane's `want_keys`: only a deliberate open asks for the keyboard.
 pub fn opening_wants_keys(why: ShowBy) -> bool { why.takes_keys() }
 /// After a placement (`after_frame`): whether the keyboard is handed to the frame on show now. A frame that came on show (another than
@@ -770,13 +774,22 @@ pub enum TurnedTo { Click, Typing, Overlay }
 /// Whether a waiting hand-in is dropped: the person turned to Backplane before KiCad's frame came (an Edit pressed during a DRC, or under
 /// the lock question, gives KiCad the keys only if the person is still waiting for it). Nothing to drop once KiCad has the keys. Pure.
 pub fn hand_in_dropped(want_keys: bool, keys: bool, _how: TurnedTo) -> bool { want_keys && !keys }
-/// How long after the Edit that asked for the keyboard a key typed in Backplane is still taken for that Edit's own key (the Enter or
-/// shortcut that pressed it, held past the repeat delay: X11 says no key is held, so its repeats look like new keys).
-pub const EDIT_KEY_GRACE_MS: u128 = 500;
-/// A key typed in Backplane (`ui.rs`'s keystroke interceptor, before bindings and actions), `since_ms` after the hand-in was asked for:
-/// the person typing in Backplane, unless it comes within EDIT_KEY_GRACE_MS (the Edit's own key and its repeats never drop the hand-in
-/// it asked for). KiCad's reserved keys forwarded to Backplane come while KiCad has the keys (`keys`), so they drop nothing. Pure.
-pub fn key_turns_to_backplane(since_ms: u128) -> Option<TurnedTo> { (since_ms >= EDIT_KEY_GRACE_MS).then_some(TurnedTo::Typing) }
+/// How long a key that pressed what asked for the keyboard (an Edit chosen with Enter, a shortcut) is still taken for its own repeats: the
+/// same keystroke again within this of its last sight. X11's repeat delay is ~660 ms on stock Xorg, and its repeats say no key is held
+/// (`is_held` false), so the key is remembered, not asked.
+pub const EDIT_KEY_REPEAT_MS: u128 = 700;
+/// How recent the last keystroke must be, when a hand-in is asked for, to be taken for the key that asked (the interceptor sees it just
+/// before the action it triggers runs).
+pub const EDIT_KEY_TRIGGER_MS: u128 = 150;
+/// The keystroke Backplane's interceptor saw last, and when (`ui.rs`): the key that pressed an Edit is read from it.
+pub static LAST_KEY: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+/// A key typed in Backplane (`ui.rs`'s keystroke interceptor, before bindings and actions: the composer's Enter, Backspace, Ctrl+V too)
+/// while a hand-in waits: the person typing in Backplane, unless it is the key that asked for the hand-in (`edit_key`: that keystroke and
+/// `ms` since it was last seen) repeating: the same keystroke within EDIT_KEY_REPEAT_MS. KiCad's reserved chords it hands back are
+/// dispatched into Backplane and pass the interceptor too; they come while KiCad has the keys, when no hand-in waits. Pure.
+pub fn key_turns_to_backplane(edit_key: Option<(&str, u128)>, key: &str) -> Option<TurnedTo> {
+    match edit_key { Some((k, ms)) if k == key && ms < EDIT_KEY_REPEAT_MS => None, _ => Some(TurnedTo::Typing) }
+}
 /// macOS: whether the pointer (global points from the top left, `nc::pointer_global`) is over the pane's rect as pushed to KiCad
 /// (`host_sent`, the same coordinates), edges included.
 pub fn pointer_over(p: (f64, f64), r: (i32, i32, i32, i32)) -> bool {
@@ -894,7 +907,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), want_keys_at: None, handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
+        KicadPane { born: std::time::Instant::now(), edit_key: trigger_key(), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0, opening_timer: Arc::default() }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -910,15 +923,22 @@ impl KicadPane {
     /// KiCad has it already (no placement again, no geometry pushed). Placed again on the next frame: the hand-in is the placement's.
     pub fn edit_keys(&mut self, cx: &mut Context<Self>) {
         if self.keys { return }
-        self.chose("edit"); self.want_keys = true; self.want_keys_at = Some(std::time::Instant::now()); self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        self.chose("edit"); self.ask_keys(); self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_edit_keys": {"open": self.open}})); }
     }
     /// A key typed in Backplane (`ui.rs`): a waiting hand-in is dropped, past the Edit's own key (`key_turns_to_backplane`).
-    pub fn typed_in_backplane(&mut self) {
+    pub fn typed_in_backplane(&mut self, key: &str) {
         if !self.want_keys { return }
-        let since = self.want_keys_at.unwrap_or(self.born).elapsed().as_millis();
-        if let Some(how) = key_turns_to_backplane(since) { self.turned_to_backplane(how); }
+        let edit = self.edit_key.as_ref().map(|(k, t)| (k.as_str(), t.elapsed().as_millis()));
+        match key_turns_to_backplane(edit, key) {
+            // the asking key repeating: seen again now (a held key keeps its grace for as long as it repeats)
+            None => { if let Some((_, t)) = self.edit_key.as_mut() { *t = std::time::Instant::now(); } }
+            Some(how) => { self.edit_key = None; self.turned_to_backplane(how); }
+        }
     }
+    /// The pane asks for the keyboard (an Edit, a tab, Full size, the popped window closing): `want_keys`, and the key that pressed it, if a
+    /// key did, remembered so its repeats never drop this hand-in.
+    pub fn ask_keys(&mut self) { self.want_keys = true; self.edit_key = trigger_key(); }
     /// The person turned to Backplane (`how`) with a hand-in still waiting: dropped, the keyboard stays theirs in Backplane.
     pub fn turned_to_backplane(&mut self, how: TurnedTo) {
         if hand_in_dropped(self.want_keys, self.keys, how) {
@@ -930,7 +950,7 @@ impl KicadPane {
     pub fn deliberate(&mut self, cx: &mut Context<Self>) {
         // placed again on the next frame: the hand-in is the placement's (`after_frame` returns early on an unchanged placement, so
         // want_keys alone waited for the next layout change: the #1198 lane's row E, 9.2 s until the viewer closed)
-        self.chose("deliberate"); self.want_keys = true; self.want_keys_at = Some(std::time::Instant::now()); self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        self.chose("deliberate"); self.ask_keys(); self.placed = None; cx.notify(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
     }
     /// The person acted on the pane (`by`): an automatic pane is deliberate from now on.
     fn chose(&mut self, by: &str) {
@@ -1096,7 +1116,7 @@ impl KicadPane {
         // the editor in another window now (popped out, or back in): its keys are handed in when it is placed there
         // (bp9 Nov 15: set at open_window, the old window's next frame used the request before the move, and the editor
         // in the new window never got the keys)
-        self.chose("rehome"); self.want_keys = true; // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        self.chose("rehome"); self.ask_keys(); // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         self.grab_click(new, !self.keys);
         self.reattach();
     }
@@ -1154,7 +1174,7 @@ impl KicadPane {
         let was_tab = self.tab(); self.show_kind_inner(kind, by, cx); self.note_tab(&was_tab, cause, cx);
     }
     fn show_kind_inner(&mut self, kind: &str, by: ShowBy, cx: &mut Context<Self>) {
-        if by.takes_keys() { self.chose("show_kind"); self.want_keys = true; self.want_keys_at = Some(std::time::Instant::now()); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+        if by.takes_keys() { self.chose("show_kind"); self.ask_keys(); } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
         self.chosen();
         // the person's own choice while KiCad opens a library editor: the hub does not put that editor on show over it when it comes
         // (another frame than the one on show: a re-click of the tab on show is no choice)
@@ -1294,7 +1314,7 @@ impl KicadPane {
             let activated = nc::activated_after_close(self.toplevel, popped);
             if activated || at.elapsed() >= std::time::Duration::from_millis(1000) {
                 self.await_close = None;
-                self.chose("popped window closed"); self.want_keys = true; self.placed = None; // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+                self.chose("popped window closed"); self.ask_keys(); self.placed = None; // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
                     eprintln!("GPUI_LOG {}", json!({"kicad_close_handin": {"path": if activated { "activated" } else { "timeout" }, "after_ms": at.elapsed().as_millis() as u64}}));
                 }
@@ -2063,10 +2083,12 @@ mod tests {
     }
     #[test] fn an_edits_waiting_hand_in_is_dropped_by_typing_in_backplane() {
         // every key, bound ones included (Enter, Backspace, Ctrl+V are the composer's actions): the interceptor runs before them
-        let how = super::key_turns_to_backplane(600).expect("a key typed in Backplane after the Edit");
+        let how = super::key_turns_to_backplane(None, "a").expect("an Edit pressed with the pointer: any key typed after drops");
         assert!(super::hand_in_dropped(true, false, how));
-        assert_eq!(super::key_turns_to_backplane(0), None, "the Edit's own key (Enter from a menu) drops nothing");
-        assert_eq!(super::key_turns_to_backplane(450), None, "nor its repeats while held (X11 says no key is held)");
+        assert_eq!(super::key_turns_to_backplane(Some(("enter", 0)), "enter"), None, "the Edit's own key (Enter from a menu) drops nothing");
+        assert_eq!(super::key_turns_to_backplane(Some(("enter", 660)), "enter"), None, "nor its repeat after X11's ~660 ms delay");
+        assert!(super::key_turns_to_backplane(Some(("enter", 800)), "enter").is_some(), "Enter again after a pause: the person typing");
+        assert!(super::key_turns_to_backplane(Some(("enter", 30)), "backspace").is_some(), "another key at once: the person typing");
         assert!(!super::hand_in_dropped(true, true, how), "KiCad's forwarded reserved keys come while KiCad has the keys: nothing dropped");
     }
     #[test] fn an_edits_waiting_hand_in_is_dropped_by_an_overlay_opening() { assert!(super::hand_in_dropped(true, false, super::TurnedTo::Overlay)); }
@@ -3369,9 +3391,9 @@ impl crate::Backplane {
     }
     /// The strip's buttons in the main window.
     pub(crate) fn kicad_strip_act(&mut self, a: &str, cx: &mut Context<Self>) {
-        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.want_keys = true; p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => { self.screens.kicad_screen = false; crate::screens::mgmt_checks::open_panel(self, cx) }
+        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.ask_keys(); p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => { self.screens.kicad_screen = false; crate::screens::mgmt_checks::open_panel(self, cx) }
             // the strip's Install Backplane KiCad (a stock KiCad in the pane): Settings, CAD, where the install says what it downloads and asks
-            "screen" => { self.screens.kicad_screen = !self.screens.kicad_screen; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.want_keys = true; p.placed = None; }); } cx.notify(); }
+            "screen" => { self.screens.kicad_screen = !self.screens.kicad_screen; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.ask_keys(); p.placed = None; }); } cx.notify(); }
             "cad" => { self.screens.kicad_screen = false; crate::screens::settings::go_page(self, "cad"); cx.notify(); }
             _ => {} }
     }
