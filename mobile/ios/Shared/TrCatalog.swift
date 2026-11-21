@@ -2577,6 +2577,7 @@ gpui.c.kicad.missing.edit	KiCad isn't installed. Press Edit to install it here.	
 gpui.c.kicad.full.screen	Full screen	全画面	Pantalla completa
 gpui.c.kicad.exit.full.screen	Exit full screen	全画面を終了	Salir de pantalla completa
 gpui.c.kicad.the.editor.takes.the.whole	The editor takes the whole window; only this row stays	エディタがウィンドウ全体を使います。この行だけが残ります	El editor ocupa toda la ventana; solo queda esta fila
+gpui.c.kicad.closing	KiCad is closing. The editor opens again once it has closed.	KiCad を閉じています。閉じ終わるとエディタがもう一度開きます。	KiCad se está cerrando. El editor vuelve a abrirse cuando termine de cerrarse.
 gpui.assets.missing	Assets missing in {dir}: {files}	{dir} にアセットがありません: {files}	Faltan recursos en {dir}: {files}
 gpui.connecting	Connecting…	接続中…	Conectando…
 gpui.connected	Connected	接続済み	Conectado
