@@ -340,7 +340,7 @@ pub(crate) async fn serve_authenticated(copy: bool, sync: &Arc<FarSync>, hub: &A
     if m == "registry.put" || m == "registry.get" { return json_reply(&super::registry::serve(hub, &link, m, &p).await) }
     if m == "uber.sync" { return json_reply(&crate::bots::ubsync::serve(hub, &p).await) }
     if m == "settings.sync" { return json_reply(&super::settings_sync::serve(hub, &p).await) }
-    if matches!(m, "kicad.manifest" | "kicad.blob" | "kicad.push") { return json_reply(&crate::files::kicad::remote::serve(hub, m, &p).await) }
+    if matches!(m, "kicad.manifest" | "kicad.blob" | "kicad.push" | "kicad.project" | "kicad.lock" | "kicad.unlock") { return json_reply(&crate::files::kicad::remote::serve(hub, &link, m, &p).await) }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");
         if !MCP_REMOTE.contains(&tool) { return HttpReply::text("403 Forbidden", "not something this machine shares") }
@@ -369,5 +369,5 @@ pub(crate) async fn serve_authenticated(copy: bool, sync: &Arc<FarSync>, hub: &A
 /// The bots lane's requests between machines: a room's members, a post in it
 const FAR_BOTS: &[&str] = &["bots.room_sync", "bots.room_post", "bots.list", "bots.room_join", "bots.room_leave", "bots.hello"];
 /// `Fm.names` the owner's machines may call here (Fm.remote)
-const MCP_REMOTE: &[&str] = &["thread_send", "thread_wait_now", "thread_interrupt", "thread_update", "thread_list", "thread_launch", "machine_list", "thread_read", "thread_handoff", "plane_read", "launch_report", "thread_settle"];
+const MCP_REMOTE: &[&str] = &["thread_send", "thread_wait_now", "thread_interrupt", "thread_update", "thread_list", "thread_launch", "machine_list", "thread_read", "thread_handoff", "plane_read", "launch_report", "thread_settle", "lock_acquire", "lock_release"];
 fn status(code: u16) -> &'static str { match code { 200 => "200 OK", 400 => "400 Bad Request", 403 => "403 Forbidden", 409 => "409 Conflict", 503 => "503 Service Unavailable", _ => "500 Internal Server Error" } }
