@@ -1,69 +1,5 @@
-//! What a message and a project give an agent besides the prompt: skills, `$skill` mentions, and attached images.
+//! Message attachments and Claude stream-json input.
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
-
-// ---- skills ----
-#[derive(Clone, Debug, PartialEq)]
-pub struct USkill { pub name: String, pub description: String, pub path: String, pub model: bool, pub user: bool }
-
-fn unquote(s: &str) -> String { if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 { s[1..s.len() - 1].to_string() } else { s.to_string() } }
-fn field(line: &str, key: &str) -> Option<String> { line.strip_prefix(&format!("{key}:")).map(|r| unquote(r.trim())) }
-/// Front.join / Front.cont / Front.fold: a value carried on to indented lines is read whole on its key's line.
-fn fold(ls: &[&str]) -> Vec<String> {
-    let mut acc: Vec<String> = vec![]; let mut open = true;
-    for l in ls {
-        let cont = open && (l.starts_with(' ') || l.starts_with('\t')) && !l.trim().is_empty() && l.trim() != "---";
-        if cont && !acc.is_empty() {
-            let h = acc.pop().unwrap().trim_end().to_string(); let s = l.trim();
-            let one = h.ends_with(": >") || h.ends_with(": |"); let two = [": >-", ": |-", ": >+", ": |+"].iter().any(|e| h.ends_with(e));
-            acc.push(if one { format!("{}{s}", &h[..h.len() - 1]) } else if two { format!("{}{s}", &h[..h.len() - 2]) } else { format!("{h} {s}") });
-        } else { acc.push(l.to_string()) }
-        if l.trim() == "---" { open = false }
-    }
-    acc
-}
-/// USkill.parse: the leading --- block's name, description, disable-model-invocation, user-invocable.
-pub fn parse_skill(text: &str, dflt: &str, path: &str) -> USkill {
-    let ls: Vec<&str> = text.split('\n').collect();
-    let (mut n, mut d, mut m, mut u) = (dflt.to_string(), String::new(), String::new(), String::new());
-    if ls.first().map_or(false, |l| l.trim() == "---") {
-        for l in fold(&ls[1..]) { if l.trim() == "---" { break }
-            if let Some(v) = field(&l, "name") { n = v } if let Some(v) = field(&l, "description") { d = v }
-            if let Some(v) = field(&l, "disable-model-invocation") { m = v } if let Some(v) = field(&l, "user-invocable") { u = v } }
-    }
-    let flag = |v: &str, dv: bool| match v.to_lowercase().as_str() { "true" => true, "false" => false, _ => dv };
-    USkill { name: n, description: d, path: path.into(), model: !flag(&m, false), user: flag(&u, true) }
-}
-fn dir_skills(root: &Path) -> Vec<USkill> {
-    let mut ns: Vec<String> = std::fs::read_dir(root).map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default(); ns.sort();
-    ns.into_iter().filter_map(|d| { let p = root.join(&d).join("SKILL.md"); let t = std::fs::read_to_string(&p).ok()?; if t.is_empty() { None } else { Some(parse_skill(&t, &d, &p.to_string_lossy())) } }).collect()
-}
-/// USkill.merge: the first list wins a name both use.
-pub fn merge(us: Vec<USkill>, ps: Vec<USkill>) -> Vec<USkill> { let mut v = us; for p in ps { if !v.iter().any(|x| x.name == p.name) { v.push(p) } } v }
-/// Skills.scan: ~/.claude/skills, then <cwd>/.claude/skills (the user's win a clash), then KiStack's.
-pub fn scan(home: &str, cwd: &str, kistack: Option<&Path>) -> Vec<USkill> {
-    let ks = kistack.map(|k| dir_skills(&k.join("skills"))).unwrap_or_default();
-    merge(merge(dir_skills(&PathBuf::from(home).join(".claude/skills")), dir_skills(&PathBuf::from(cwd).join(".claude/skills"))), ks)
-}
-fn namec(c: char) -> bool { c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == ':' }
-/// Mention.name: "$pcb-review," -> "pcb-review"; "" for a word that is no mention.
-pub fn mention_name(w: &str) -> String { match w.strip_prefix('$') { Some(r) => r.chars().take_while(|c| namec(*c)).collect(), None => String::new() } }
-/// Mention.expand for Claude: `$name` of a skill the user may invoke becomes `/name`, any other `$word` stays.
-pub fn expand_claude(text: &str, ss: &[USkill]) -> String {
-    if !text.contains('$') { return text.to_string() }
-    text.split('\n').map(|l| l.split(' ').map(|w| { let n = mention_name(w); if !n.is_empty() && ss.iter().any(|s| s.user && s.name == n) { format!("/{}", &w[1..]) } else { w.to_string() } }).collect::<Vec<_>>().join(" ")).collect::<Vec<_>>().join("\n")
-}
-
-/// Mention.note / Mention.others: for providers without skills of their own, the text as written after one instruction per named skill (once each) to read its SKILL.md.
-pub fn mention_others(text: &str, ss: &[USkill]) -> String {
-    if !text.contains('$') { return text.to_string() }
-    let mut seen: Vec<String> = vec![]; let mut notes: Vec<String> = vec![];
-    for w in text.split('\n').flat_map(|l| l.split(' ')) {
-        let n = mention_name(w); if n.is_empty() || seen.contains(&n) { continue }
-        if let Some(s) = ss.iter().find(|s| s.user && s.name == n) { seen.push(n.clone()); notes.push(format!("The user invoked the ${} skill: read \"{}\" completely before anything else and follow its instructions for this request.", s.name, s.path)) }
-    }
-    if notes.is_empty() { text.to_string() } else { format!("<skill_invocations>\n{}\n</skill_invocations>\n\n{}", notes.join("\n"), text) }
-}
 
 // ---- attachments ----
 pub const INLINE_MAX: u64 = 3_932_160;
@@ -105,18 +41,6 @@ mod tests {
         let l: Value = serde_json::from_str(&claude_line_p("x", &[], "U", true)).unwrap(); assert_eq!(l["priority"], "now");
         let l: Value = serde_json::from_str(&claude_line("x", &[], "U")).unwrap(); assert!(l.get("priority").is_none());
     }
-    #[test] fn skills_read_their_frontmatter_including_folded_values() {
-        let s = parse_skill("---\nname: pcb-review\ndescription: >\n  Review a board\n  with care.\nuser-invocable: false\n---\nbody", "dir", "/p");
-        assert_eq!((s.name.as_str(), s.description.as_str(), s.user, s.model), ("pcb-review", "Review a board with care.", false, true));
-        let t = parse_skill("no frontmatter", "dflt", "/p"); assert_eq!(t.name, "dflt"); assert!(t.user);
-        let q = parse_skill("---\ndescription: \"Quoted: yes\"\ndisable-model-invocation: true\n---", "d", "/p"); assert_eq!(q.description, "Quoted: yes"); assert!(!q.model);
-    }
-    #[test] fn dollar_mentions_become_slash_commands_for_known_user_skills_only() {
-        let ss = vec![USkill { name: "pcb-review".into(), description: "".into(), path: "".into(), model: true, user: true }, USkill { name: "secret".into(), description: "".into(), path: "".into(), model: true, user: false }];
-        assert_eq!(expand_claude("run $pcb-review, then $secret and $other\nnext $pcb-review", &ss), "run /pcb-review, then $secret and $other\nnext /pcb-review");
-        assert_eq!(expand_claude("cost is 5", &ss), "cost is 5"); assert_eq!(mention_name("$a:b-c_d."), "a:b-c_d"); assert_eq!(mention_name("a$b"), "");
-    }
-    #[test] fn user_skills_win_a_name_clash() { let u = |n: &str, p: &str| USkill { name: n.into(), description: "".into(), path: p.into(), model: true, user: true }; let m = merge(vec![u("a", "user")], vec![u("a", "proj"), u("b", "proj")]); assert_eq!(m.iter().map(|s| s.path.as_str()).collect::<Vec<_>>(), ["user", "proj"]); }
     #[test] fn attachment_lines_at_the_end_are_the_attachments() {
         assert_eq!(att_paths("Look\n\n[attachment: /a/x.png]\n\n[attachment: /a/y.pdf]"), ["/a/x.png", "/a/y.pdf"]); assert!(att_paths("no\n[attachment: /a/x.png]\nmore").is_empty()); assert_eq!(mime("/a/X.JPEG"), "image/jpeg"); assert_eq!(mime("/a/x.pdf"), "");
     }
@@ -126,16 +50,5 @@ mod tests {
         let text = format!("hi\n\n[attachment: {}]\n[attachment: {}]\n[attachment: {}]", ok.display(), big.display(), empty.display());
         let imgs = read_images(&text); assert_eq!(imgs, vec![("image/png".to_string(), "AQID".to_string())]);
         let l: Value = serde_json::from_str(&claude_line(&text, &imgs, "U")).unwrap(); assert_eq!(l["uuid"], "U"); assert_eq!(l["message"]["content"][0]["type"], "image"); assert_eq!(l["message"]["content"][1]["text"], text.as_str());
-    }
-}
-
-#[cfg(test)] mod others_tests {
-    use super::*;
-    fn sk(n: &str) -> USkill { USkill { name: n.into(), description: String::new(), path: format!("/s/{n}/SKILL.md"), model: true, user: true } }
-    #[test] fn mention_others_names_each_skill_once_and_keeps_the_text() {
-        let t = "use $pcb, then $pcb again and $nope\nplus $bom."; let o = mention_others(t, &[sk("pcb"), sk("bom")]);
-        assert!(o.starts_with("<skill_invocations>\nThe user invoked the $pcb skill: read \"/s/pcb/SKILL.md\" completely before anything else and follow its instructions for this request.\nThe user invoked the $bom skill"));
-        assert!(o.ends_with("</skill_invocations>\n\nuse $pcb, then $pcb again and $nope\nplus $bom.")); assert_eq!(o.matches("$pcb skill").count(), 1);
-        assert_eq!(mention_others("no skills here", &[sk("pcb")]), "no skills here"); assert_eq!(mention_others("$unknown", &[sk("pcb")]), "$unknown");
     }
 }

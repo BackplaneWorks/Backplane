@@ -95,7 +95,7 @@ pub fn install(home: &Path) -> Option<PathBuf> {
 pub fn list(d: &Path) -> Vec<(String, String, String)> {
     FILES.iter().filter(|(rel, _)| rel.ends_with("/SKILL.md")).map(|(rel, text)| {
         let p = d.join(rel); let folder = rel.trim_end_matches("/SKILL.md").rsplit('/').next().unwrap_or("");
-        let s = crate::agents::inputs::parse_skill(text, folder, &p.to_string_lossy()); (s.name, s.description, s.path)
+        let s = crate::agents::skills::parse_skill(text, folder, &p.to_string_lossy()); (s.name, s.description, s.path)
     }).collect()
 }
 

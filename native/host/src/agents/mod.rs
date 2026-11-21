@@ -8,6 +8,7 @@
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
 pub mod account_tools; pub mod halt; pub mod halt_view; pub mod review_mode; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod kistack; pub mod speed; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod snapguard; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod unanswered; pub mod wake; pub mod world;
+pub mod context;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -166,10 +167,30 @@ impl Agents {
         { if let Err(e) = w.sync(&self.hub.store) { eprintln!("agents: reading the log: {e:#}") } }
         w
     }
-    /// Hub.prompt for one thread: the host's facts, the project's files, the settings that change the words.
+    /// The exact context Backplane prepares for this provider, shared by the launch paths and inspector.
+    async fn prompt_context(&self, th: &str, cwd: &str, provider: &str, model: &str, isolated: bool) -> context::Prompt {
+        let bot = match self.mailroom() { Some(m) => m.prompt(th).await, None => String::new() };
+        let base = format!("{}{bot}", self.prompt_base(th, cwd).await);
+        let env = skills::env_from(&self.host.user_home, &self.host.home, self.host.kistack.as_deref());
+        let (cwd, provider, model) = (cwd.to_string(), provider.to_string(), model.to_string());
+        let use_versions = !self.cli.test_mode();
+        tokio::task::spawn_blocking(move || {
+            let claude = if provider == "claude" && use_versions {
+                let models: Value = serde_json::from_str(&crate::settings::models::info()).unwrap_or_default();
+                let version = models["about"]["claude"]["cli"].as_str().unwrap_or("");
+                let settings = if isolated { Value::Null } else {
+                    let dir = std::env::var_os("CLAUDE_CONFIG_DIR").map(std::path::PathBuf::from)
+                        .unwrap_or_else(|| std::path::Path::new(&env.home).join(".claude"));
+                    std::fs::read_to_string(dir.join("settings.json")).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+                };
+                context::ClaudeFiles::configured(version, &settings)
+            } else { context::ClaudeFiles::default() };
+            context::Prompt::build(base, &env, &cwd, &provider, &model, isolated, claude)
+        }).await.unwrap_or_default()
+    }
     pub async fn prompt_for(&self, th: &str, cwd: &str) -> String {
-        let bot = match self.mailroom() { Some(m) => m.prompt(th).await, None => String::new() }; // Bots.prompt
-        format!("{}{bot}", self.prompt_base(th, cwd).await)
+        let (provider, model) = self.world().await.threads.get(th).map(|t| (t.provider.clone(), t.model.clone())).unwrap_or_default();
+        self.prompt_context(th, cwd, &provider, &model, false).await.text()
     }
     async fn prompt_base(&self, th: &str, cwd: &str) -> String {
         let (ipc, orders, lang, buy, code, plan) = { let w = self.world().await;
@@ -192,7 +213,8 @@ impl Agents {
             let design = if f.pcb.is_empty() && f.sch.is_empty() { String::new() } else { prompt::design_words(&main, code.as_ref().filter(|c| !c.0.is_empty()).map(|c| (c.0.as_str(), c.1.as_str())), &locks) };
             let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
             prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders, routing_plan: plan,
-                root: main, pro: f.pro, pcb: f.pcb, sch: f.sch, all: cad.kicad.join("\n"), altium_projects: cad.altium, design, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default(), kistack: host.kistack.as_deref().map(kistack::describe) })
+                // The context index supplies the skill catalog once, with provider scoping and overrides.
+                root: main, pro: f.pro, pcb: f.pcb, sch: f.sch, all: cad.kicad.join("\n"), altium_projects: cad.altium, design, keys, machines, buy, lang, skills: vec![], kistack: None })
         }).await.unwrap_or_default()
     }
     /// PendingChanged: the number of open asks on a thread, written after an ask opens or closes (`extra` asks counted on top).
@@ -466,7 +488,7 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "thread.halt", "thread.again", "thread.restore", "thread.review", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "thread.halt", "thread.again", "thread.restore", "thread.review", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver", "thread.context", "thread.context.mcp"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             // the hub's own requests (`/give`, from commands/give.rs): a connection (client 1 and up) could say anything there, so it is never heard
@@ -494,6 +516,42 @@ impl RpcHandler for Rpc {
             if method == "ask.answer" { return match self.0.answer(p.get("id").and_then(Value::as_str).unwrap_or(""), p.get("answer").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] } }
             let th = p.get("thread").and_then(Value::as_str).unwrap_or("");
             if th.is_empty() || !self.0.world().await.threads.contains_key(th) { eprintln!("agents: {method} refused: unknown thread {th:?}"); return vec![err(id, "unknown thread")] } // refused, and said so on the hub's log
+            if matches!(method, "thread.context" | "thread.context.mcp") {
+                if who.client == 0 { return vec![err(id, "A signed-in client is required")] }
+                let (cwd, provider, model) = {
+                    let world = self.0.world().await;
+                    let t = &world.threads[th];
+                    (world.cwd(th), t.provider.clone(), t.model.clone())
+                };
+                let home = hub.cfg.home.clone();
+                let standalone = provider == "antigravity" && !providers::agy::pinned(&home.to_string_lossy());
+                let (scan_cwd, scan_provider) = (cwd.clone(), provider.clone());
+                let action = (method == "thread.context.mcp").then(|| {
+                    (p["path"].as_str().unwrap_or("").to_string(), p["sha256"].as_str().unwrap_or("").to_string(), p["action"].as_str().unwrap_or("").to_string())
+                });
+                let mcp = tokio::task::spawn_blocking(move || {
+                    use crate::mcpx::project;
+                    if let Some((path, hash, action)) = action {
+                        project::act(&home, &scan_cwd, &path, &hash, &action)?;
+                    }
+                    let blocked = standalone || project::ambient_conflict(&scan_cwd, &scan_provider, standalone).is_some();
+                    Ok::<_, String>(project::scan(&scan_cwd).iter().map(|c| c.view(&home, &scan_provider, blocked)).collect::<Vec<_>>())
+                }).await;
+                let mcp = match mcp {
+                    Ok(Ok(mcp)) => mcp,
+                    Ok(Err(e)) => return vec![err(id, &e)],
+                    Err(_) => return vec![err(id, "Could not read project MCP configurations")],
+                };
+                let binding = hub.setting(&crate::settings::accounts::binding_key(th, &provider)).await.unwrap_or_default();
+                let isolated = serde_json::from_str::<Value>(&binding).ok().is_some_and(|b| b["id"].as_str().is_some_and(|s| !s.is_empty()));
+                let prompt = self.0.prompt_context(th, &cwd, &provider, &model, isolated).await;
+                return vec![json!({"t":"reply","id":id,"ok":true,"result":{
+                    "thread":th, "provider":provider, "model":model, "cwd":cwd, "instructions":prompt.instructions,
+                    "skills":prompt.skills, "mcp":mcp, "prompt":prompt.text(), "sections":{
+                        "base":prompt.base, "instructions":prompt.project, "skills":prompt.index
+                    }
+                }})]
+            }
             if method == "thread.btw" {
                 let q = p.get("q").and_then(Value::as_str).unwrap_or("").trim().to_string();
                 if q.is_empty() { return vec![err(id, crate::session::composer::BTW_EMPTY)] }
@@ -956,7 +1014,7 @@ impl Actor {
             }
         }
         let gen = format!("{now}-{}", self.ag.seq()); self.ag.set_gen(&th, &gen);
-        let prompt = self.ag.prompt_for(&th, cwd).await;
+        let prompt = self.ag.prompt_context(&th, cwd, &t.provider, &t.model, self.person || !acct_env.is_empty()).await.text();
         let (effort, think, session) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.threads.get(&th).map(|x| x.session.clone()).unwrap_or_else(|| t.session.clone())) };
         let session = if self.person { String::new() } else { session_over.unwrap_or(session) }; // a copied session is never resumed in side-by-side mode; another login's is not either (`account_route`)
         // infinite context (agents/recall.rs): a new turn runs in a fresh session with the view ahead of its text; a steer keeps the running turn's session
@@ -964,15 +1022,15 @@ impl Actor {
         let session = if fresh { String::new() } else { session };
         let text = if fresh { let v = self.ag.recall_view(&th).await; if v.is_empty() { text.to_string() } else { format!("{v}\n\n{text}") } } else { text.to_string() };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
-        let (host, cwd2, text2, prov2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone());
-        let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
+        let (host, cwd2, text2, prov2, model2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone(), t.model.clone());
+        let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &skills::for_model(&ss, &prov2, &model2), &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
         if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return }
         let codex_home = if !cfg!(windows) { String::new() }
             else if let Some((_, dir)) = acct_env.iter().find(|(k, _)| k == "CODEX_HOME") { dir.clone() }
             else if self.ag.cli.test_mode() { String::new() }
             else if self.person { self.person_child().map(|pc| pc.home.join(".codex").to_string_lossy().into_owned()).unwrap_or_default() }
             else { std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(|v| v.to_string_lossy().into_owned()).unwrap_or_else(|| std::path::Path::new(&self.ag.host.user_home).join(".codex").to_string_lossy().into_owned()) };
-        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url).await, speed: String::new(), speed_args: vec![], codex_home };
+        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url, cwd).await, speed: String::new(), speed_args: vec![], codex_home };
         let a = providers::TurnIn { pcbparts_url: if a.mcp.pcbparts { crate::mcpx::gen::PCBPARTS.into() } else { String::new() }, ..a };
         // the speed dial (agents/speed.rs): the mode the thread's model takes, passed the provider's way; recorded for the thread's usage (`turn.tier.<thread>`)
         let a = { let info = speed::info_now(); let want = self.ag.world().await.setting(&format!("speed.{th}")).to_string();
@@ -1109,7 +1167,7 @@ impl Actor {
         // the thread's MCP servers are part of the key: a list changed in Settings > MCP (or by an agent) starts Claude again at its next turn, on the same session
         // the speed dial too: a thread turned to Fast starts Claude again at its next turn with fast mode in its settings, on the same session
         let want = self.ag.world().await.setting(&format!("speed.{th}")).to_string(); let tier = speed::effective(&speed::info_now(), "claude", &t.model, &want);
-        let key = format!("{}|speed:{tier}|mcp:{}{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude").await, if self.ag.in_review(&th).await { "|review" } else { "" }); // a review runs with deny rules for design files (snapguard.rs): a change of mode starts Claude again
+        let key = format!("{}|speed:{tier}|mcp:{}{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude", &cwd).await, if self.ag.in_review(&th).await { "|review" } else { "" }); // a review runs with deny rules for design files (snapguard.rs): a change of mode starts Claude again
         self.tier_set(&th, tier, now).await; self.cx.tier_want = tier.to_string(); self.cx.tier = tier.to_string();
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
         // infinite context (agents/recall.rs): a new turn (no command open: a message into a running turn goes on its input) starts a fresh session with the view
@@ -1132,8 +1190,9 @@ impl Actor {
         let steer = std::mem::take(&mut self.steer_now);
         let bound = { let raw = self.ag.hub.setting(&crate::settings::accounts::binding_key(&th, "claude")).await.unwrap_or_default(); !serde_json::from_str::<Value>(&raw).ok().map_or(String::new(), |b| b["id"].as_str().unwrap_or("").to_string()).is_empty() };
         let isolated = self.person || bound; // an account profile or the person mode runs Claude without the person's own skills and plugins
+        let model = t.model.clone();
         let line = { let (text2, cwd2, host, uuid2) = (agent_text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
-            tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, "claude", isolated) } else { text2.clone() }; let imgs = inputs::read_images(&text2); inputs::claude_line_p(&body, &imgs, &uuid2, steer) }).await.unwrap_or_default() };
+            tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &skills::for_model(&ss, "claude", &model), "claude", isolated) } else { text2.clone() }; let imgs = inputs::read_images(&text2); inputs::claude_line_p(&body, &imgs, &uuid2, steer) }).await.unwrap_or_default() };
         let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
         if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
     }
@@ -1294,7 +1353,7 @@ impl Actor {
         }
         if std::mem::take(&mut self.recall_fresh) { session = String::new(); self.handover = false; } // a new turn with infinite context: a fresh session, the view goes with its message
         let gen = format!("{now}-{}", self.ag.seq()); // Hub.gen: the process's generation, which its MCP URL names
-        let prompt = self.ag.prompt_for(&th, cwd).await;
+        let prompt = self.ag.prompt_context(&th, cwd, &t.provider, &t.model, self.person || !acct_env.is_empty()).await.text();
         if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return Err("agents shut down".into()) }
         let own: Vec<String> = self.ag.host.kistack.iter().chain(self.ag.host.bundled.iter()).map(|k| k.to_string_lossy().into_owned()).collect(); // KiStack's and Backplane's own skills
         let mut dirs = own.clone(); dirs.push(self.ag.host.home.join("attachments").to_string_lossy().into_owned());
@@ -1302,7 +1361,7 @@ impl Actor {
         let (effort, think, want) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.setting(&format!("speed.{th}")).to_string()) };
         let speed = speed::effective(&speed::info_now(), "claude", &t.model, &want);
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
-        let mcp = crate::mcpx::svc::launch(&th, "claude", &url).await;
+        let mcp = crate::mcpx::svc::launch(&th, "claude", &url, cwd).await;
         let mut disallowed = mcp.disallowed.clone(); if self.ag.in_review(&th).await { disallowed.extend(snapguard::CLAUDE_DENY.iter().map(|x| x.to_string())) } // a review's design files are read-only to Claude's own tools too
         let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &disallowed, speed });
         let mut keep = vec![]; // the files Claude reads at its start, removed when it ends

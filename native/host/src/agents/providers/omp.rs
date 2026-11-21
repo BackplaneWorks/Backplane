@@ -136,21 +136,31 @@ pub fn prepare(home: &str, prompt: &str, extension: &str) -> std::io::Result<std
     let dir = root.join(format!("launch-{}-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0), n));
     std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
     let put = |name: &str, text: &str| -> std::io::Result<()> { std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(dir.join(name))?.write_all(text.as_bytes()) };
-    if let Err(e) = put("system-prompt.txt", prompt).and_then(|_| put("backplane.js", extension)) { let _ = std::fs::remove_dir_all(&dir); return Err(e) }
+    if let Err(e) = put("system-prompt.txt", prompt).and_then(|_| put("backplane.js", extension)).and_then(|_| put("settings.yml", "mcp:\n  enableProjectConfig: false\n")) { let _ = std::fs::remove_dir_all(&dir); return Err(e) }
     Ok(dir)
 }
 /// OmpLaunch.remove: only the folder `prepare` returned.
 pub fn remove(dir: &std::path::Path) { let _ = std::fs::remove_dir_all(dir); }
 
 /// The driver of one Oh My Pi turn.
-pub struct OmpDriver { acp: Acp, turn: pi::Turn, launch: std::cell::RefCell<Option<std::path::PathBuf>> }
-impl OmpDriver { pub fn new() -> OmpDriver { OmpDriver { acp: Acp::default(), turn: pi::Turn::default(), launch: std::cell::RefCell::new(None) } } }
+pub struct OmpDriver { acp: Acp, turn: pi::Turn, launch: std::cell::RefCell<Option<std::path::PathBuf>>, overlays: std::cell::RefCell<String> }
+impl OmpDriver { pub fn new() -> OmpDriver { OmpDriver { acp: Acp::default(), turn: pi::Turn::default(), launch: std::cell::RefCell::new(None), overlays: Default::default() } } }
 impl Default for OmpDriver { fn default() -> Self { Self::new() } }
 
 impl OmpDriver {
     /// OmpLaunch.prepare + Grok.failed: the turn's private launch folder, or the words of a turn that could not start (the actor says "could not start omp: " first).
     pub fn prepare_turn(&self, a: &TurnIn) -> Result<(), String> {
-        match prepare(&a.home, &a.prompt, EXT) { Ok(d) => { *self.launch.borrow_mut() = Some(d); Ok(()) } Err(e) => Err(launch_why(&e)) }
+        let dir = prepare(&a.home, &a.prompt, EXT).map_err(|e| launch_why(&e))?;
+        let inherited = std::env::var_os("PI_CONFIG_FILES").unwrap_or_default();
+        let paths = std::env::split_paths(&inherited).filter(|p| !p.as_os_str().is_empty()).chain([dir.join("settings.yml")]);
+        let overlays = std::env::join_paths(paths).ok().and_then(|p| p.into_string().ok());
+        let Some(overlays) = overlays else {
+            remove(&dir);
+            return Err("Oh My Pi could not load Backplane’s project MCP policy overlay".into())
+        };
+        *self.overlays.borrow_mut() = overlays;
+        *self.launch.borrow_mut() = Some(dir);
+        Ok(())
     }
 }
 /// Proto.install
@@ -178,7 +188,13 @@ impl Driver for OmpDriver {
         let mut v = args(mode(&a.runtime), &dir(&a.home, &a.thread), &files, pi::model(&a.model), effort(&a.effort));
         v.extend(a.speed_args.iter().cloned()); v // the speed dial: `--service-tier priority|ultrafast` (agents/speed.rs)
     }
-    fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_OMP_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_OMP_PCBPARTS".into(), a.pcbparts_url.clone())] }
+    fn env(&self, a: &TurnIn) -> Vec<(String, String)> {
+        let mut env = vec![("BACKPLANE_OMP_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_OMP_PCBPARTS".into(), a.pcbparts_url.clone())];
+        env.extend(crate::mcpx::gen::extension_env(&a.mcp.acp, "BACKPLANE_OMP_SERVERS"));
+        let overlay = self.overlays.borrow();
+        if !overlay.is_empty() { env.push(("PI_CONFIG_FILES".into(), overlay.clone())); }
+        env
+    }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.turn = pi::Turn { text: a.text.clone(), session: a.session.clone(), ask: pi::asks(&a.runtime) }; self.acp = Acp::default(); init()
     }
@@ -214,7 +230,9 @@ mod tests {
         let a = TurnIn { thread: "th".into(), home: dir_.to_string_lossy().into(), model: "openai/gpt".into(), session: "S9".into(), runtime: "approval-required".into(), text: "say this".into(), prompt: "P".into(), mcp_url: "http://mcp".into(), ..TurnIn::default() };
         let argv = d.argv(&a);
         assert!(argv.windows(2).any(|w| w == ["--model", "openai/gpt"]) && argv.windows(2).any(|w| w == ["--approval-mode", "always-ask"]), "model and runtime reach argv");
-        assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://mcp".to_string()), ("BACKPLANE_OMP_PCBPARTS".into(), String::new())]);
+        let env = d.env(&a);
+        assert_eq!(&env[..2], [("BACKPLANE_OMP_MCP".to_string(), "http://mcp".to_string()), ("BACKPLANE_OMP_PCBPARTS".into(), String::new())]);
+        assert!(env.iter().any(|(k, v)| k == "PI_CONFIG_FILES" && v.ends_with("settings.yml")));
         let on = TurnIn { pcbparts_url: "https://pcbparts.dev/mcp".into(), ..a.clone() }; assert_eq!(d.env(&on)[1], ("BACKPLANE_OMP_PCBPARTS".to_string(), "https://pcbparts.dev/mcp".to_string()), "the parts search, as Claude gets it");
         assert!(EXT.contains("connect(pi, 'pcbparts', parts)"));
         d.start(&a);
@@ -249,7 +267,8 @@ mod tests {
         assert!(!v.iter().any(|x| x == "THE PROMPT")); // never in argv
         assert_eq!(std::fs::read_to_string(launch.join("system-prompt.txt")).unwrap(), "THE PROMPT"); assert_eq!(std::fs::read_to_string(launch.join("backplane.js")).unwrap(), EXT);
         { use crate::plat::fs::PermissionsExt; assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(launch.join("system-prompt.txt")).unwrap().permissions().mode() & 0o777, 0o600), 0o600); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(&launch).unwrap().permissions().mode() & 0o777, 0o700), 0o700); }
-        assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://m".to_string()), ("BACKPLANE_OMP_PCBPARTS".into(), String::new())]);
+        assert_eq!(&d.env(&a)[..2], [("BACKPLANE_OMP_MCP".to_string(), "http://m".to_string()), ("BACKPLANE_OMP_PCBPARTS".into(), String::new())]);
+        assert_eq!(std::fs::read_to_string(launch.join("settings.yml")).unwrap(), "mcp:\n  enableProjectConfig: false\n");
         drop(d); assert!(!launch.exists());
         a.model = "openai/gpt".into(); a.effort = "turbo".into(); let d2 = OmpDriver::new(); let v2 = d2.argv(&a); assert_eq!(&v2[v2.len() - 2..], ["--model", "openai/gpt"]); drop(d2);
     }
@@ -319,5 +338,5 @@ mod tests {
         assert_eq!(r[0].plain()[1], json!({"type":"notice","message":"Oh My Pi had no saved conversation for this thread, so this turn starts without the earlier context. This thread's history in Backplane is kept."}));
     }
     // the file is generated from omp by test/agents/prov-pi/gen_ext.py (its source, the Bend hub, is gone: this file is the source now, with pcbparts added); its bytes are pinned
-    #[test] fn the_extension_is_omp_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "2cc26e2377ddd0c2f9aeb205dde788d0cdf7e1dc997a0fb21ff1c60563ab15dd") }
+    #[test] fn the_extension_is_omp_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "d416263c66f5e4e2082cf4167d7ec0493fedd1fe2a63e6774d6e0e3c4e49b0f8") }
 }

@@ -27,10 +27,16 @@ pub fn ask_shape(request_line: &str) -> Value { json!({"type":"bp.ask","request"
 pub struct MuseDriver { turn: msp::MspTurn, st: msp::Msp, runtime: String }
 impl MuseDriver { pub fn new() -> MuseDriver { MuseDriver { turn: msp::MspTurn::default(), st: msp::Msp::new(), runtime: String::new() } } pub fn done(&self) -> bool { self.st.done } }
 impl Driver for MuseDriver {
+    fn prepare(&mut self, a: &TurnIn) -> Result<(), String> {
+        if let Some(path) = crate::mcpx::project::ambient_conflict(&a.cwd, "muse", false) {
+            return Err(format!("Muse can start project MCP servers outside Backplane’s approval. This runtime cannot safely open {}", path.display()))
+        }
+        Ok(())
+    }
     fn argv(&self, a: &TurnIn) -> Vec<String> { args(&a.runtime, &a.model) }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.runtime = a.runtime.clone();
-        self.turn = msp::MspTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), pcbparts: a.pcbparts_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), mode: msp::mode(&a.runtime).into(), effort: effort(&a.effort).into(), nonce: nonce(&a.gen), model: if a.model == "default" { String::new() } else { a.model.clone() } };
+        self.turn = msp::MspTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), pcbparts: a.pcbparts_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), mode: msp::mode(&a.runtime).into(), effort: effort(&a.effort).into(), nonce: nonce(&a.gen), servers: a.mcp.acp.clone(), model: if a.model == "default" { String::new() } else { a.model.clone() } };
         self.st = msp::Msp::new();
         vec![msp::init()]
     }

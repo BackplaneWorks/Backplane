@@ -704,7 +704,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     for e in entries.iter_mut() {
         if e["kind"] == "term" { let id = e["id"].as_str().unwrap_or("").to_string(); e["key"] = json!(term_key(thread, &id)); }
         if e["kind"] == "user" { let text = e["text"].as_str().unwrap_or("").to_string(); let mut refs = crate::session::composer::mention::refs_in(st, hub, &text);
-            if text.contains('$') { let (cwd, prov, iso) = crate::session::composer::mention::thread_skill_facts(st, thread); refs.extend(crate::agents::skills::chips(&crate::agents::skills::popup_index(&cwd), &text, &prov, iso)); }
+            if text.contains('$') { let (cwd, prov, iso) = crate::session::composer::mention::thread_skill_facts(st, thread); let model = st.threads.get(thread).map(|t| t.model.as_str()).unwrap_or(""); let skills = crate::agents::skills::for_model(&crate::agents::skills::popup_index(&cwd), &prov, model); refs.extend(crate::agents::skills::chips(&skills, &text, &prov, iso)); }
             if !refs.is_empty() { e["refs"] = Value::Array(refs); } }
     }
     o.insert("entries".into(), Value::Array(entries));

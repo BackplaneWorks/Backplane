@@ -9,6 +9,7 @@ pub mod import;
 pub mod model;
 pub mod page;
 pub mod parse;
+pub mod project;
 pub mod run;
 pub mod svc;
 pub mod toml;

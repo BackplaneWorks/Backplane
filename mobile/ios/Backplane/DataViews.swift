@@ -776,6 +776,7 @@ struct DataThreadView: View {
     @State private var reviewing = false
     @State private var buy: DBuy?          // Buy it, when the hub offers it for this thread
     @State private var buying = false
+    @State private var contextOpen = false
     @State private var finding = false     // Search in thread
     @State private var findGo: String?     // the message to go to (Search in thread, the find bar, a search hit), read older pages until it is held
     @State private var mark: String?       // the message marked there, until the find bar closes
@@ -903,6 +904,7 @@ struct DataThreadView: View {
         // the review bar (#1305): asked again when the thread's entries or turn change (a review starts with a turn; a press anywhere logs a line)
         .task(id: "r|\(list.count)|\(thread?.state ?? "")|\(client.conn == .online)") { if client.has("reviewmode") { if let r = try? await client.review(id) { review = r } } else { review = nil } }
         .task(id: "\(thread?.state ?? "")|\(client.conn == .online)") { if client.conn == .online, thread?.state != "working" { buy = await client.buyOf(id) } }
+        .sheet(isPresented: $contextOpen) { DThreadContext(client: client, thread: id) }
         .background(BackplaneDesign.background)
         .dataBar(thread?.title.isEmpty == false ? thread!.title : Tr.t("Thread"))
         // Run in terminal in this chat (a project's thread, a bot's chat, the uberbot's): its own shell (term.new {chat})
@@ -924,6 +926,7 @@ struct DataThreadView: View {
                         // the find bar when the hub has `find`; else the older sheet of hits
                         if client.has("find") { Button(Tr.k("ios.find.bar"), systemImage: "magnifyingglass") { findOpen = true; findFocus = true } }
                         else if client.has("search") { Button(Tr.t("Search in thread"), systemImage: "magnifyingglass") { finding = true } }
+                        if client.has("threadContext") { Button(Tr.t("Context & Prompt"), systemImage: "doc.text.magnifyingglass") { contextOpen = true } }
                         DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting)
                     } label: { Image(systemName: "ellipsis").foregroundStyle(BackplaneDesign.dim) }
                         .accessibilityLabel(Tr.t("Thread actions")).accessibilityIdentifier("data.thread.more")
@@ -1746,5 +1749,153 @@ struct MemoryBar: View {
             Text(Tr.t(m.line)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
             Text(Tr.t(m.status)).dmono(11).foregroundStyle(m.state == "held" ? BackplaneDesign.warn : BackplaneDesign.faint).lineLimit(1)
         }.accessibilityElement(children: .combine).accessibilityIdentifier("data.thread.memory")
+    }
+}
+
+private struct DThreadContext: View {
+    struct Snapshot: Decodable {
+        struct Instruction: Decodable { let path: String; let bytes: Int; let estimated_tokens: Int; let status: String; let preview: String; let note: String }
+        struct Skill: Decodable { let name: String; let description: String; let scope: String; let status: String; let path: String; let source: String; let provider: String; let model: String }
+        struct Server: Decodable { let name: String; let command: String; let args: [String]; let url: String; let cwd: String; let status: String }
+        struct Config: Decodable { let path: String; let sha256: String; let state: String; let error: String; let servers: [Server] }
+        struct Sections: Decodable { let base: String; let instructions: String; let skills: String }
+        let cwd: String
+        let instructions: [Instruction]
+        let skills: [Skill]
+        let mcp: [Config]
+        let sections: Sections
+        let prompt: String
+    }
+
+    let client: DataClient
+    let thread: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var data: Snapshot?
+    @State private var selected = 0
+    @State private var busy = false
+    @State private var problem = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker(Tr.t("Context & Prompt"), selection: $selected) {
+                    Text(Tr.t("Instructions")).tag(0)
+                    Text(Tr.t("Prompt")).tag(1)
+                    Text(Tr.t("Skills")).tag(2)
+                    Text(Tr.t("MCPs")).tag(3)
+                }
+                .pickerStyle(.segmented)
+                .padding()
+                if busy { ProgressView().padding(.bottom, 8) }
+                if !problem.isEmpty { Text(problem).foregroundStyle(.red).padding() }
+                if let data {
+                    List {
+                        switch selected {
+                        case 0:
+                            if data.instructions.isEmpty { Text(Tr.t("No project instructions found.")) }
+                            ForEach(data.instructions, id: \.path) { item in
+                                DisclosureGroup {
+                                    code(item.preview)
+                                    if !item.note.isEmpty { Text(item.note).font(.caption).foregroundStyle(.secondary) }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        summary(URL(fileURLWithPath: item.path).lastPathComponent, item.status)
+                                        Text(item.path).font(.caption).foregroundStyle(.secondary)
+                                        Text(Tr.thread_context_size(bytes: String(item.bytes), tokens: String(item.estimated_tokens))).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        case 1:
+                            Text(Tr.t("Backplane’s launch prompt. Native files are loaded by the provider.")).foregroundStyle(.secondary)
+                            Button(Tr.t("Copy prompt"), systemImage: "doc.on.doc") { UIPasteboard.general.string = data.prompt }
+                            promptSection("Backplane", data.sections.base)
+                            promptSection("Injected project instructions", data.sections.instructions)
+                            promptSection("Available skills index", data.sections.skills)
+                        case 2:
+                            ForEach(["Project", "User", "Bundled"], id: \.self) { scope in
+                                let items = data.skills.filter { $0.scope == scope }
+                                if !items.isEmpty {
+                                    Section(Tr.t(scope)) {
+                                        ForEach(items, id: \.path) { item in
+                                            VStack(alignment: .leading, spacing: 5) {
+                                                summary(item.name, item.status)
+                                                Text(item.description).font(.subheadline)
+                                                Text([item.source, item.provider, item.model].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                                                Text(item.path).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        default:
+                            if data.mcp.isEmpty { Text(Tr.t("No project MCP configurations found.")) }
+                            ForEach(data.mcp, id: \.path) { config in
+                                Section {
+                                    ForEach(config.servers, id: \.name) { server in
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            summary(server.name, server.status)
+                                            code(server.url.isEmpty ? ([server.command] + server.args).map { String(reflecting: $0) }.joined(separator: " ") : server.url)
+                                            if !server.cwd.isEmpty { Text(server.cwd).font(.caption2).foregroundStyle(.secondary) }
+                                        }
+                                    }
+                                    if !config.error.isEmpty { Text(config.error).font(.caption).foregroundStyle(.red) }
+                                    if let action = action(for: config.state) {
+                                        Button(Tr.t(action.label)) { Task { await load(action: action.id, config: config) } }.disabled(busy)
+                                    }
+                                } header: {
+                                    Text(config.path).textCase(nil)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                } else { Spacer() }
+            }
+            .navigationTitle(Tr.t("Context & Prompt"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(Tr.t("Close")) { dismiss() } }
+                ToolbarItem(placement: .primaryAction) { Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel(Tr.t("Refresh")).disabled(busy) }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func summary(_ title: String, _ status: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Spacer(minLength: 8)
+            Text(Tr.t(status)).font(.caption.weight(.medium))
+                .foregroundStyle(status == "Native" || status == "Enabled" ? BackplaneDesign.accent : Color(uiColor: .secondaryLabel))
+        }
+    }
+
+    private func code(_ text: String) -> some View {
+        Text(verbatim: text).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+    }
+
+    @ViewBuilder private func promptSection(_ label: String, _ text: String) -> some View {
+        if !text.isEmpty { Section(Tr.t(label)) { code(text) } }
+    }
+
+    private func action(for state: String) -> (id: String, label: String)? {
+        switch state {
+        case "Untrusted": ("trust", "Trust and enable")
+        case "Enabled": ("disable", "Disable")
+        case "Disabled": ("enable", "Enable")
+        default: nil
+        }
+    }
+
+    @MainActor private func load(action: String? = nil, config: Snapshot.Config? = nil) async {
+        guard !busy else { return }
+        busy = true
+        problem = ""
+        defer { busy = false }
+        do {
+            if let action, let config {
+                data = try await client.call("thread.context.mcp", ["thread": thread, "action": action, "path": config.path, "sha256": config.sha256])
+            } else { data = try await client.call("thread.context", ["thread": thread]) }
+        } catch { problem = error.localizedDescription }
     }
 }

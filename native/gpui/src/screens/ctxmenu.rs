@@ -116,6 +116,7 @@ pub fn title_items(data: &Value) -> Vec<Item> {
     /* i18n-ok: menu labels, drawn through trs in render */ let mut v = vec![item("Find in thread", LOCAL_SEARCH, &rid, false), item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
     /* i18n-ok: menu labels, drawn through trs in render */ if !project.is_empty() && row.map_or(false, |r| r["canChild"].as_bool().unwrap_or(true)) { v.push(item("New subthread", "thread-child", &format!("{rid}|{project}"), false)); }
     /* i18n-ok: menu labels, drawn through trs in render */ if row.map_or(false, |r| r["depth"].as_u64().unwrap_or(0) > 0) { v.push(item("Move to top level", "row-detach", &rid, false)); }
+    /* i18n-ok: menu label translated in render */ v.push(item("Context & Prompt", "local:thread-context", &rid, false));
     v.extend(super::tools::context_items(thread));
     v
 }
@@ -218,6 +219,7 @@ impl Backplane {
         let Some(m) = self.screens.ctx.as_mut() else { return };
         match m.items.get(i).map(|it| (it.action.clone(), it.value.clone())) {
             // the window's own items: the menu shuts as Esc shuts it (an armed Delete is disarmed), then the item opens its place
+            Some((a, v)) if a == "local:thread-context" => { self.ctx_close(cx); super::thread_context::open(self, v, cx); return }
             Some((a, v)) if a == LOCAL_SEARCH => { self.ctx_close(cx); self.find_open_for(&v, cx); return }
             Some((a, v)) if a == LOCAL_INTENT => { self.ctx_close(cx); self.open_project(v, cx); return }
             Some((a, v)) if a == LOCAL_FILE_OPEN || a == LOCAL_FILE_REVEAL => { self.ctx_close(cx); self.file_open(&v, a == LOCAL_FILE_REVEAL); return }
@@ -347,7 +349,7 @@ mod tests {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Snooze","action":"snooze","value":"","options":[{"label":"1 hour","value":"1h"}]},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},
             "projects":[{"id":"http://h:1|p1","threads":[{"id":"http://h:1|t7","title":"x","canChild":true,"depth":0}]}]}"#);
         let it = title_items(&d);
-        assert_eq!(it.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Find in thread", "Rename", "Regenerate title", "New subthread", "Diff", "Snooze 1 hour", "Delete"]);
+        assert_eq!(it.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Find in thread", "Rename", "Regenerate title", "New subthread", "Context & Prompt", "Diff", "Snooze 1 hour", "Delete"]);
         assert_eq!(it[0].action, LOCAL_SEARCH); assert_eq!((it[1].action.as_str(), it[1].value.as_str()), ("row-rename", "t7")); assert_eq!(it[3].value, "t7|p1");
         assert!(title_items(&j(r#"{"thread":null}"#)).is_empty(), "no thread, no menu");
         let sub = j(r#"{"thread":{"id":"h|c1"},"projects":[{"id":"h|p1","threads":[{"id":"h|t1","title":"a","children":[{"id":"h|c1","title":"b","depth":1,"canChild":false}]}]}]}"#);

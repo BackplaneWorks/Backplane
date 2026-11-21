@@ -25,6 +25,15 @@ pub const INSTALL: &str = "Install Grok Build with `curl -fsSL https://x.ai/cli/
 pub struct GrokDriver { pub turn: AcpTurn, pub a: Acp }
 impl GrokDriver { pub fn new() -> GrokDriver { GrokDriver { turn: AcpTurn::default(), a: Acp::new() } } }
 impl Driver for GrokDriver {
+    fn prepare(&mut self, a: &TurnIn) -> Result<(), String> {
+        if let Some(path) = crate::mcpx::project::ambient_conflict(&a.cwd, "grok", false) {
+            return Err(format!("Grok can start project MCP servers outside Backplane’s approval. This runtime cannot safely open {}", path.display()))
+        }
+        Ok(())
+    }
+    fn env(&self, _a: &TurnIn) -> Vec<(String, String)> {
+        vec![("GROK_MCP_RECURSIVE_CONFIG_WATCH".into(), "false".into())]
+    }
     fn argv(&self, a: &TurnIn) -> Vec<String> { args(&a.runtime, &a.model, &a.effort) }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.turn = AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: asks(&a.runtime), servers: a.mcp.acp.clone(), model: if a.model == "default" { String::new() } else { a.model.clone() } };

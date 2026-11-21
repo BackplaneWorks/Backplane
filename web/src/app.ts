@@ -13,6 +13,7 @@ import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./
 import { RailView, type RailEntry } from "./rail";
 import { needAfter, needPress } from "./swarm-need";
 import { SettingsModal, type SettingsRow } from "./settings";
+import { ThreadContextDialog } from "./thread-context";
 import {
   SidebarView,
   type BotItem,
@@ -566,6 +567,8 @@ function mountApp(): void {
     const th = threads.find((x) => x.id === selectedThreadId);
     if (th) void runThreadAct(th.id, th.settled ? "unsettle" : "settle");
   });
+  const threadContext = new ThreadContextDialog(root, (thread, decision) =>
+    decision ? hub.rpc("thread.context.mcp", { thread, ...decision }) : hub.rpc("thread.context", { thread }));
   threadMenuBtn.addEventListener("click", (e) => {
     e.stopPropagation();
     const th = threads.find((x) => x.id === selectedThreadId);
@@ -590,6 +593,7 @@ function mountApp(): void {
         },
       },
     ];
+    if (hub.hasFeature("threadContext")) items.unshift({ label: t("thread.context.title", "Context & Prompt"), run: () => threadContext.open(th.id) });
     const frag = document.createDocumentFragment();
     for (const it of items) {
       const btn = document.createElement("button");

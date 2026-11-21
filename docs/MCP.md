@@ -131,3 +131,9 @@ They use the same list and the same per-provider config as Settings.
 
   Part 2 (`SKIP_REAL=1` runs it alone) imports from a sample `~/.codex/config.toml` and `~/.claude.json`.
 - **Screenshots:** `scripts/desktop-mcp-shot.sh` (desktop, `THEME=dark|light`), `test/e2e/ios/mcp-shot.sh`, and the Android shot script.
+
+## Project MCP discovery follow-up
+
+The thread’s Context & Prompt inspector reviews project MCP commands and URLs before enabling their configuration. Approval applies to the file’s exact bytes at its reviewed checkout path. Changes take effect at the next provider launch.
+
+Grok, Muse, and Antigravity can also discover project MCP files directly. Backplane refuses launches when it detects a conflicting native configuration in those runtimes. Standalone Antigravity also lacks a verified way to pass Backplane’s approved list. Follow-up work is to suppress native discovery per launch, pass the approved list explicitly, and verify both behaviors against each supported CLI with a harmless stand-in MCP server.

@@ -97,18 +97,34 @@ impl Mcpx {
     }
     /// The servers an agent of this thread gets now (launch).
     pub fn for_thread(&self, provider: &str, project: &str, bot: &str) -> Vec<Server> { self.list.lock().unwrap().for_thread(provider, project, bot).into_iter().cloned().collect() }
+    async fn launch_servers(&self, thread: &str, provider: &str, cwd: &str) -> Vec<Server> {
+        let (_, project, bot) = self.thread_ctx(thread).await;
+        let mut servers = self.for_thread(provider, &project, &bot);
+        let own: std::collections::HashSet<_> = servers.iter().map(|s| s.id.clone()).collect();
+        let (home, cwd) = (self.hub.cfg.home.clone(), cwd.to_string());
+        let project = tokio::task::spawn_blocking(move || super::project::selected(&home, &cwd)).await.unwrap_or_default();
+        servers.extend(project.into_iter().filter(|s| !own.contains(&s.id) && s.missing(&|n| vault::person_get(n).is_some()).is_empty()));
+        servers
+    }
+
+    async fn active_server(&self, thread: &str, id: &str) -> Option<Server> {
+        let (provider, project, bot) = self.thread_ctx(thread).await;
+        if !id.starts_with("project-") {
+            return self.for_thread(&provider, &project, &bot).into_iter().find(|s| s.id == id)
+        }
+        let cwd = self.agents()?.world().await.cwd(thread);
+        self.launch_servers(thread, &provider, &cwd).await.into_iter().find(|s| s.id == id)
+    }
     /// The wrapper's ask (`backplane/mcp_spec`): only for a server this thread gets.
     pub async fn spec(&self, thread: &str, id: &str) -> Result<Value, String> {
-        let (p, pr, b) = self.thread_ctx(thread).await;
-        let s = self.for_thread(&p, &pr, &b).into_iter().find(|s| s.id == id).ok_or_else(|| format!("{id} is not one of this thread's MCP servers (Settings > MCP)"))?;
+        let s = self.active_server(thread, id).await.ok_or_else(|| format!("{id} is not one of this thread's MCP servers (Settings > MCP)"))?;
         if s.remote() { return Err(format!("{id} is a remote server")) }
         let r = self.resolve(&s).map_err(|e| { self.failed(id, &e, ""); e })?;
         Ok(json!({"command": r.command, "args": r.args, "env": r.env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(), "cwd": r.cwd, "disabled_tools": s.disabled_tools}))
     }
     /// Claude's headersHelper (`backplane/mcp_headers`).
     pub async fn headers(&self, thread: &str, id: &str) -> Result<Value, String> {
-        let (p, pr, b) = self.thread_ctx(thread).await;
-        let s = self.for_thread(&p, &pr, &b).into_iter().find(|s| s.id == id).ok_or_else(|| format!("{id} is not one of this thread's MCP servers"))?;
+        let s = self.active_server(thread, id).await.ok_or_else(|| format!("{id} is not one of this thread's MCP servers"))?;
         let r = self.resolve(&s)?; Ok(Value::Object(r.headers.into_iter().map(|(k, v)| (k, json!(v))).collect()))
     }
     pub fn used(&self, id: &str, tool: &str, ok: bool, err: &str) {
@@ -192,8 +208,8 @@ pub struct Launch { /** the list's server ids (Codex approves their tools in ful
 /// The hub's own program, for the wrapper (a replaced binary's " (deleted)" is dropped: the new one is at the same path).
 pub fn hub_exe() -> String { std::env::current_exe().map(|p| p.to_string_lossy().trim_end_matches(" (deleted)").to_string()).unwrap_or_default() }
 /// The servers of `thread` (a `provider` agent) as its launch needs them. No hub MCP list (tests, a hub without it): Backplane's own and pcbparts only.
-pub async fn launch(thread: &str, provider: &str, url: &str) -> Launch {
-    let (servers, pcb) = match get() { Some(m) => { let (_, pr, b) = m.thread_ctx(thread).await; (m.for_thread(provider, &pr, &b), m.pcbparts().await) } None => (vec![], true) };
+pub async fn launch(thread: &str, provider: &str, url: &str, cwd: &str) -> Launch {
+    let (servers, pcb) = match get() { Some(m) => { (m.launch_servers(thread, provider, cwd).await, m.pcbparts().await) } None => (vec![], true) };
     let refs: Vec<&Server> = servers.iter().collect();
     let c = gen::Ctx { exe: hub_exe(), url: url.to_string(), pcbparts: pcb };
     let vault_get = |n: &str| vault::person_get(n);
@@ -201,6 +217,6 @@ pub async fn launch(thread: &str, provider: &str, url: &str) -> Launch {
     Launch { ids: refs.iter().map(|s| s.id.clone()).collect(), claude: gen::claude(&refs, &c, &vault_get).to_string(), disallowed: gen::claude_disallowed(&refs), acp: gen::acp(&refs, &c, &vault_get), codex_args, codex_env, fingerprint: gen::fingerprint(&refs, pcb), pcbparts: pcb }
 }
 /// The launch's fingerprint alone (what decides whether a live Claude is started again).
-pub async fn fingerprint(thread: &str, provider: &str) -> String {
-    match get() { Some(m) => { let (_, pr, b) = m.thread_ctx(thread).await; let s = m.for_thread(provider, &pr, &b); gen::fingerprint(&s.iter().collect::<Vec<_>>(), m.pcbparts().await) } None => gen::fingerprint(&[], true) }
+pub async fn fingerprint(thread: &str, provider: &str, cwd: &str) -> String {
+    match get() { Some(m) => { let s = m.launch_servers(thread, provider, cwd).await; gen::fingerprint(&s.iter().collect::<Vec<_>>(), m.pcbparts().await) } None => gen::fingerprint(&[], true) }
 }

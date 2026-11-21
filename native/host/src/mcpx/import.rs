@@ -11,6 +11,14 @@ pub struct Source { pub tool: &'static str, pub path: PathBuf }
 #[derive(Debug, Default)]
 pub struct Scan { pub tool: &'static str, pub path: String, pub found: Found, pub error: String }
 
+pub const PROJECT_FILES: &[(&str, &str)] = &[
+    ("Claude Code", ".mcp.json"),
+    ("Cursor", ".cursor/mcp.json"),
+    ("VS Code", ".vscode/mcp.json"),
+    ("Gemini CLI", ".gemini/settings.json"),
+    ("Antigravity", ".agents/mcp_config.json"),
+];
+
 /// Every place a tool keeps its servers, for this home and these project roots (the files that exist).
 pub fn sources(home: &Path, roots: &[String]) -> Vec<Source> {
     let mut v: Vec<(&'static str, PathBuf)> = vec![("Claude Code", home.join(".claude.json"))];
@@ -26,7 +34,7 @@ pub fn sources(home: &Path, roots: &[String]) -> Vec<Source> {
     v.push(("OpenCode", home.join(".config/opencode/opencode.json")));
     for r in roots.iter().filter(|r| !r.is_empty()) {
         let r = Path::new(r);
-        v.push(("Claude Code", r.join(".mcp.json"))); v.push(("Cursor", r.join(".cursor/mcp.json"))); v.push(("VS Code", r.join(".vscode/mcp.json"))); v.push(("Gemini CLI", r.join(".gemini/settings.json")));
+        v.extend(PROJECT_FILES.iter().map(|(tool, file)| (*tool, r.join(file))));
     }
     let mut seen = vec![];
     v.into_iter().filter(|(_, p)| p.is_file()).filter(|(_, p)| { let k = p.clone(); if seen.contains(&k) { false } else { seen.push(k); true } }).map(|(tool, path)| Source { tool, path }).collect()
