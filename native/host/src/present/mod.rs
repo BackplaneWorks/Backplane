@@ -814,20 +814,21 @@ mod tests {
         std::fs::create_dir_all(d.join("mfg/rev1")).unwrap(); std::fs::write(d.join("mfg/rev1/u-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
         let mut st = crate::state::State::new();
         st.apply_line(&json!({"$":"ProjectCreated","id":"p","title":"Board","root":root,"at":1}).to_string());
-        st.apply_line(&json!({"$":"ThreadCreated","id":"t","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
-        let idle = json!({"sel":"t","rid":1,"drafts":{},"panel":false,"info":{}});
+        // threads of its own (t2a, u2a): the show table is the process's, and another test's show on the same thread would supersede this one's
+        st.apply_line(&json!({"$":"ThreadCreated","id":"t2a","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}).to_string());
+        let idle = json!({"sel":"t2a","rid":1,"drafts":{},"panel":false,"info":{}});
         let shows = [("board", format!("{root}/unit.kicad_pcb")), ("pcb", format!("{root}/alt/alt.kicad_pcb")), ("schematic", format!("{root}/unit.kicad_sch")), ("3d", format!("{root}/unit.kicad_pcb")),
             ("gerbers", format!("{root}/mfg/rev1")), ("split", format!("{root}/unit.kicad_pcb")), ("mech", format!("{root}/mech/case.step")), ("3d", format!("{root}/mech/case.step")),
             ("files", String::new()), ("browser", String::new()), ("review", String::new())];
         for (k, p) in &shows {
-            let tok = viewer::issue_show("t", k, p);
+            let tok = viewer::issue_show("t2a", k, p);
             assert!(!viewer::show_applied_by(&tok, 1) && viewer::show_refusal_of(&tok).is_none());
             let viewer::LayoutOut::Ok(vo) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", k, p, &tok).unwrap() else { panic!("{k} refused") };
             assert!(vo.patch.as_object().is_some_and(|o| !o.is_empty()), "{k} {p}: the show applies");
             assert!(viewer::show_applied_by(&tok, 1), "{k}");
             // the same token with another kind, another path, another thread, or no token of the hub's: nothing applies
             let k2 = if *k == "board" { "schematic" } else { "board" };
-            for (k2, p2, t2, why) in [(k2, p.as_str(), "t", "another kind"), (*k, "/elsewhere/x.kicad_pcb", "t", "another path"), (*k, p.as_str(), "u", "another thread")] {
+            for (k2, p2, t2, why) in [(k2, p.as_str(), "t2a", "another kind"), (*k, "/elsewhere/x.kicad_pcb", "t2a", "another path"), (*k, p.as_str(), "u2a", "another thread")] {
                 let issued = viewer::issue_show(t2, if why == "another kind" { *k } else { k2 }, if why == "another path" { p.as_str() } else { p.as_str() });
                 let viewer::LayoutOut::Ok(none) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", k2, p2, &issued).unwrap() else { panic!() };
                 assert!(none.patch.as_object().unwrap().is_empty() && none.before.is_empty(), "{k}: {why}: a token for something else applies nothing");
@@ -838,7 +839,7 @@ mod tests {
             assert!(none.patch.as_object().unwrap().is_empty(), "an empty token applies nothing");
         }
         // another thread's token never applies here
-        let other = viewer::issue_show("u", "board", &format!("{root}/unit.kicad_pcb"));
+        let other = viewer::issue_show("u2a", "board", &format!("{root}/unit.kicad_pcb"));
         let viewer::LayoutOut::Ok(none) = viewer::view_show_token(&st, "h", &idle, Some(1), "en", "board", &format!("{root}/unit.kicad_pcb"), &other).unwrap() else { panic!() };
         assert!(none.patch.as_object().unwrap().is_empty());
 
@@ -985,9 +986,8 @@ mod tests {
         let past = std::time::Instant::now().checked_sub(viewer::TOKEN_LIFE + std::time::Duration::from_secs(1)).unwrap();
         let stale = viewer::issue_show_at_for_test("tl", "files", "", past);
         assert!(!applies(5, "files", "", &stale), "an expired token applies nothing");
-        // bounded
-        for i in 0..400 { viewer::show_push(&format!("tb{i}"), "files", ""); }
-        assert!(viewer::shows_len_for_test() <= 128, "the token table is bounded: {}", viewer::shows_len_for_test());
+        // bounded, on a table of its own: 400 shows in the shared one evicted what other tests running beside this one had just applied
+        assert_eq!(viewer::bounded_len_for_test(400), 128, "the token table is bounded");
     }
     /// Review round on the agent show: a prior board pick, a linked thread, a stored layout's named board and Split, an already-open preview.
     #[test]
