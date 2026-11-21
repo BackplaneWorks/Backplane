@@ -133,6 +133,7 @@ fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
     assert!(h.starts_with("HTTP/1.1 200") && b == data, "a changed file is sent whole");
     let (h, b) = split(&run(get(vec![], "HEAD")).await); assert!(h.starts_with("HTTP/1.1 200") && b.is_empty());
     let out = run(get(vec![("Range", "bytes=999999-".into())], "GET")).await; assert!(out.starts_with(b"HTTP/1.1 416"));
+    assert!(String::from_utf8_lossy(&out).contains(&format!("Content-Range: bytes */{}\r\n", data.len())), "a 416 says the size");
 }
 
 #[test] fn shares_are_kept_privately_and_listed_newest_first() {

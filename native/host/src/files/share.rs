@@ -251,8 +251,11 @@ pub fn head_bytes(who: Who, status: &str, ctype: &str, len: u64, extra: &str) ->
 }
 /// The types a file may be shown inline as (`inline=1`): pictures, PDF and plain text only; never HTML, SVG or anything a browser runs.
 pub fn inline_ok(ctype: &str) -> bool { matches!(ctype, "image/png" | "image/jpeg" | "image/gif" | "image/webp" | "image/bmp" | "application/pdf" | "text/plain; charset=utf-8") }
-pub fn refusal(status: &str, why: &str) -> Vec<u8> {
-    let mut v = format!("HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: private, no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; sandbox\r\nCross-Origin-Resource-Policy: same-origin\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n\r\n", why.len()).into_bytes();
+pub fn refusal(status: &str, why: &str) -> Vec<u8> { refusal_with(status, why, "") }
+/// A 416 says the file's size (`Content-Range: bytes */<size>`, RFC 9110): a client that has every byte knows it is done.
+pub fn unsatisfiable(size: u64) -> Vec<u8> { refusal_with("416 Range Not Satisfiable", "range not satisfiable", &format!("Content-Range: bytes */{size}\r\n")) }
+fn refusal_with(status: &str, why: &str, extra: &str) -> Vec<u8> {
+    let mut v = format!("HTTP/1.1 {status}\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: private, no-store\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; sandbox\r\nCross-Origin-Resource-Policy: same-origin\r\nReferrer-Policy: no-referrer\r\nConnection: close\r\n{extra}\r\n", why.len()).into_bytes();
     v.extend_from_slice(why.as_bytes()); v
 }
 /// The status a refusal of `check` answers with.
@@ -263,7 +266,7 @@ pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, who: Who, req: &Req, o: Op
     let Opened { file, md, .. } = o;
     let tag = etag(&md); let size = md.len();
     let Ok((status, a, b)) = plan(req.header("range"), req.header("if-range"), &tag, size) else {
-        return w.write_all(&refusal("416 Range Not Satisfiable", "range not satisfiable")).await;
+        return w.write_all(&unsatisfiable(size)).await;
     };
     let len = if size == 0 { 0 } else { b - a + 1 };
     let mut extra = format!("ETag: {tag}\r\n");
@@ -374,7 +377,7 @@ async fn far_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, who: Who, re
     let Some((link, local)) = thread.split_once('~').filter(|(l, t)| !l.is_empty() && !t.is_empty()) else { return w.write_all(&refusal("404 Not Found", "no such thread")).await };
     let first = match far_piece(hub, link, local, path, 0, 1).await { Ok(x) => x, Err(e) => return w.write_all(&refusal("502 Bad Gateway", &e)).await };
     let (size, tag) = (first.1, first.2);
-    let Ok((status, a, b)) = plan(req.header("range"), req.header("if-range"), &tag, size) else { return w.write_all(&refusal("416 Range Not Satisfiable", "range not satisfiable")).await };
+    let Ok((status, a, b)) = plan(req.header("range"), req.header("if-range"), &tag, size) else { return w.write_all(&unsatisfiable(size)).await };
     let len = if size == 0 { 0 } else { b - a + 1 };
     let name = name_of(path);
     let mut extra = format!("ETag: {tag}\r\n");
