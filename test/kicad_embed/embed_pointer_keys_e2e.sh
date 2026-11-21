@@ -123,9 +123,6 @@ python3 "$XINPUT_PY" move "$PAX" "$PAY" >/dev/null; sleep 0.5
 say "back, typed over the pane"
 kill "$XM" 2>/dev/null
 # P6: a dead key over the pane (us intl: ' is dead_acute, then e): the composed letter reaches the composer, nothing of it KiCad
-# not under an XIM input method (XMODIFIERS=@im=...): ibus commits the dead key's accent in COMPOUND_TEXT (Latin-1) and the client panics in
-# zed-xim (main does too; the XIM dead-key lane's fix/xim-latin1-commit), so P6 runs where GPUI composes itself until that is on main
-if [ -n "${XMODIFIERS:-}" ] && [ "${DEADKEY_UNDER_IM:-0}" != 1 ]; then echo "INFO P6 left out: an input method (XMODIFIERS=$XMODIFIERS)"; DEADKEY=0; fi
 if [ "${DEADKEY:-1}" = 1 ] && command -v setxkbmap >/dev/null; then
   setxkbmap -layout us -variant intl 2>/dev/null; sleep 1.0
   # DEADKEY_OVER=composer: the pointer over the composer instead (the same key on a client without the proxy: what main does with it)
