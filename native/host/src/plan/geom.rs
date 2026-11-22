@@ -731,8 +731,8 @@ pub fn guides_for_plan(board: &CachedBoard, plan: &Value) -> HashMap<String, Vec
 
             if !from_pads.is_empty() && !to_pads.is_empty() {
                 let mut best: Option<(f64, [f64; 4])> = None;
-                for a in &from_pads {
-                    for b in &to_pads {
+                for a in from_pads.iter().take(32) {
+                    for b in to_pads.iter().take(32) {
                         let d = (a.1 - b.1).hypot(a.2 - b.2);
                         if d > 0.05 && best.map_or(true, |x| d < x.0) {
                             best = Some((d, [r2(a.1), r2(a.2), r2(b.1), r2(b.2)]));
@@ -747,7 +747,7 @@ pub fn guides_for_plan(board: &CachedBoard, plan: &Value) -> HashMap<String, Vec
             // Nearest-neighbor MST over the net's pads (capped to avoid quadratic blowup on huge power nets).
             let mut rem: Vec<(f64, f64)> = pads.iter().take(16).map(|p| (p.1, p.2)).collect();
             let mut tree = vec![rem.remove(0)];
-            while !rem.is_empty() && segs.len() < MAX_CORRIDOR_GUIDES {
+            while !rem.is_empty() && segs.len() < MAX_CORRIDOR_GUIDES && total_segs + segs.len() < MAX_TOTAL_GUIDES {
                 let mut best: Option<(usize, [f64; 4], f64)> = None;
                 for a in &tree {
                     for (bi, b) in rem.iter().enumerate() {
@@ -771,8 +771,15 @@ pub fn guides_for_plan(board: &CachedBoard, plan: &Value) -> HashMap<String, Vec
 
         // Graceful fallback for early/synthetic plans with from/to refs but unrouted/unassigned pads.
         if segs.is_empty() && !from_refs.is_empty() && !to_refs.is_empty() {
-            for fr in &from_refs {
-                for tr in &to_refs {
+            let mut f_sorted: Vec<&str> = from_refs.iter().copied().collect();
+            let mut t_sorted: Vec<&str> = to_refs.iter().copied().collect();
+            f_sorted.sort_unstable();
+            t_sorted.sort_unstable();
+            'fallback: for fr in f_sorted {
+                for tr in &t_sorted {
+                    if segs.len() >= MAX_CORRIDOR_GUIDES || total_segs + segs.len() >= MAX_TOTAL_GUIDES {
+                        break 'fallback;
+                    }
                     if let (Some(a), Some(b)) = (part_center.get(fr), part_center.get(tr)) {
                         if (a[0] - b[0]).hypot(a[1] - b[1]) > 0.5 {
                             segs.push([a[0], a[1], b[0], b[1]]);
@@ -919,5 +926,19 @@ mod tests {
         });
         let guides = guides_for_plan(&cached, &plan);
         assert_eq!(guides["c1"], vec![[34.0, 40.0, 75.0, 46.0]]);
+
+        // Fallback component-center guides are deterministically sorted and capped at 18
+        let parts_many: Vec<PartBox> = (0..10).map(|i| PartBox { r: format!("A{i}"), s: "F".into(), b: [10.0, (i * 5) as f64, 12.0, (i * 5 + 2) as f64], o: false }).chain(
+            (0..10).map(|i| PartBox { r: format!("B{i}"), s: "F".into(), b: [80.0, (i * 5) as f64, 82.0, (i * 5 + 2) as f64], o: false })
+        ).collect();
+        let dummy = CachedBoard {
+            geom: BoardGeom { bbox: [0.0, 0.0, 100.0, 100.0], outline: vec![], parts: parts_many, copper_layers: vec![] },
+            pad_nets: HashMap::new(),
+        };
+        let p_many = json!({"corridors": [{"id": "cm", "from": (0..10).map(|i| format!("A{i}")).collect::<Vec<_>>(), "to": (0..10).map(|i| format!("B{i}")).collect::<Vec<_>>()}]});
+        let g1 = guides_for_plan(&dummy, &p_many);
+        let g2 = guides_for_plan(&dummy, &p_many);
+        assert_eq!(g1["cm"].len(), 18);
+        assert_eq!(g1, g2);
     }
 }

@@ -160,6 +160,8 @@ pub struct State {
     pub optimistic: HashMap<String, Value>,
     pub optimistic_at: Option<Instant>,
     pub last_rev: Option<u64>,
+    pub hydrated_req_key: String,
+    pub hydrated_req_pro: String,
     pub hydrated_key: String,
     pub hydrated_board: Option<Value>,
     pub hydrated_draw: Option<Value>,
@@ -187,6 +189,8 @@ impl Default for State {
             optimistic: HashMap::new(),
             optimistic_at: None,
             last_rev: None,
+            hydrated_req_key: String::new(),
+            hydrated_req_pro: String::new(),
             hydrated_key: String::new(),
             hydrated_board: None,
             hydrated_draw: None,
@@ -211,6 +215,8 @@ impl State {
         self.optimistic.clear();
         self.optimistic_at = None;
         self.last_rev = None;
+        self.hydrated_req_key.clear();
+        self.hydrated_req_pro.clear();
         self.hydrated_key.clear();
         self.hydrated_board = None;
         self.hydrated_draw = None;
@@ -696,14 +702,31 @@ pub fn resolved_board_and_draw(app: &Backplane, d: &Value) -> (Value, Value) {
     (board, merge_optimistic_into_draw(&raw_draw, &ui.optimistic))
 }
 
+pub fn unwrap_board_panel(reply: &Value) -> Option<&Value> {
+    if reply["ok"] == false {
+        return None;
+    }
+    if reply["result"].is_object() && reply["result"]["panel"].is_object() {
+        Some(&reply["result"]["panel"])
+    } else if reply["panel"].is_object() {
+        Some(&reply["panel"])
+    } else {
+        None
+    }
+}
+
 pub fn board_answered(app: &mut Backplane, reply: &Value, cx: &mut Context<Backplane>) {
+    let Some(panel) = unwrap_board_panel(reply).cloned() else {
+        return;
+    };
+    let pro = app.screens.mgmt.project.clone();
     let ui = &mut app.screens.mgmt.plan_ui;
-    let panel = &reply["panel"];
-    if panel.is_null() {
+    if !ui.hydrated_req_pro.is_empty() && ui.hydrated_req_pro != pro {
         return;
     }
     let rev = panel["revision"].as_u64().unwrap_or(0);
-    ui.hydrated_key = format!("{}:{rev}", app.screens.mgmt.project);
+    ui.hydrated_key = format!("{pro}:{rev}");
+    ui.hydrated_req_key = ui.hydrated_key.clone();
     ui.hydrated_board = Some(panel["board"].clone());
     ui.hydrated_draw = Some(panel["draw"].clone());
     cx.notify();
@@ -724,8 +747,9 @@ pub fn sync_revision_and_hydrate(app: &mut Backplane, d: &Value) {
         }
     }
     let key = format!("{pro}:{}", rev.unwrap_or(0));
-    if d["board_trimmed"] == true && ui.hydrated_key != key && !pro.is_empty() {
-        ui.hydrated_key = key;
+    if d["board_trimmed"] == true && ui.hydrated_req_key != key && !pro.is_empty() {
+        ui.hydrated_req_key = key;
+        ui.hydrated_req_pro = pro.clone();
         let _ = app.tx.try_send(Command::Ask("plan.get".into(), json!({"pro": pro, "board": true}), BOARD_TAG));
     }
 }
@@ -743,10 +767,11 @@ pub fn apply_optimistic(app: &mut Backplane, id: &str, patch: Value) {
 
 pub fn commit_item_fields(app: &mut Backplane, id: &str, fields: Value, cx: &mut Context<Backplane>) {
     apply_optimistic(app, id, fields.clone());
+    let d = app.screens.mgmt.data("plan");
+    let base = d["revision"].as_u64();
     let mut wire_fields = fields;
     if let Some(outer) = wire_fields.get("outline").cloned() {
         if outer.as_array().and_then(|a| a.first()).and_then(|p| p.as_array()).and_then(|p| p.first()).and_then(Value::as_f64).is_some() {
-            let d = app.screens.mgmt.data("plan");
             let (_, draw) = resolved_board_and_draw(app, &d);
             if let Some(holes) = draw["regions"].as_array().into_iter().flatten().find(|r| r["id"] == id).and_then(|r| r["holes"].as_array()).filter(|h| !h.is_empty()) {
                 let mut rings = Vec::with_capacity(1 + holes.len());
@@ -758,7 +783,11 @@ pub fn commit_item_fields(app: &mut Backplane, id: &str, fields: Value, cx: &mut
             }
         }
     }
-    mgmt_plan::send(app, "plan.update", json!({"ops": [{"op": "set", "id": id, "fields": wire_fields}]}), cx);
+    let mut payload = json!({"ops": [{"op": "set", "id": id, "fields": wire_fields}]});
+    if let Some(b) = base {
+        payload["base"] = json!(b);
+    }
+    mgmt_plan::send(app, "plan.update", payload, cx);
 }
 
 fn board_bbox_f32(board: &Value) -> [f32; 4] {
@@ -1264,6 +1293,44 @@ fn set_cam(ui: &mut State, layer: &str, cam: Camera) {
     }
 }
 
+pub fn all_canvas_layers(layers: &[Value], copper_layers: &[Value]) -> Vec<Value> {
+    if copper_layers.is_empty() {
+        return layers.to_vec();
+    }
+    let mut out = Vec::with_capacity(copper_layers.len().max(layers.len()));
+    let mut seen: HashSet<String> = HashSet::new();
+    for cl in copper_layers {
+        let Some(name) = cl["layer"].as_str().filter(|s| !s.is_empty()) else { continue };
+        seen.insert(name.to_string());
+        if let Some(existing) = layers.iter().find(|l| l["layer"].as_str() == Some(name)) {
+            out.push(existing.clone());
+        } else {
+            let idx = cl["index"].as_u64().unwrap_or((out.len() + 1) as u64);
+            let title = cl["title"].as_str().filter(|s| !s.is_empty()).map(str::to_string).unwrap_or_else(|| format!("L{idx} · {name}")); // i18n-ok: layer stackup code
+            out.push(json!({
+                "layer": name,
+                "index": idx,
+                "title": title,
+                "subtitle": cl["subtitle"].as_str().unwrap_or(""),
+                "role": cl["role"].as_str().unwrap_or(""),
+                "status": "proposed",
+                "done": 0,
+                "approved": 0,
+                "total": 0,
+                "items": []
+            }));
+        }
+    }
+    for l in layers {
+        if let Some(name) = l["layer"].as_str() {
+            if !seen.contains(name) {
+                out.push(l.clone());
+            }
+        }
+    }
+    out
+}
+
 pub fn visible_layers(ui: &State, layers: &[Value]) -> Vec<Value> {
     if layers.is_empty() {
         return Vec::new();
@@ -1343,7 +1410,9 @@ pub fn view(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let c = |n: &str| theme::color(light, n);
     let (board, draw) = resolved_board_and_draw(app, d);
     let layers_val = merge_optimistic_into_layers(&d["layers"], &app.screens.mgmt.plan_ui.optimistic);
-    let all_layers = layers_val.as_array().cloned().unwrap_or_default();
+    let raw_layers = layers_val.as_array().cloned().unwrap_or_default();
+    let copper_arr = d["copper_layers"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let all_layers = all_canvas_layers(&raw_layers, copper_arr);
     let shown = visible_layers(&app.screens.mgmt.plan_ui, &all_layers);
 
     if app.screens.mgmt.plan_ui.focus.is_none() {
@@ -1958,5 +2027,24 @@ mod tests {
         assert_eq!(rail_color("+1V8", ""), 0xc084fc);
         assert_eq!(rail_color("+5V", "#123456"), 0x123456);
         assert_eq!(bus_color("USB_DP", "#14b8a6"), 0x14b8a6);
+    }
+
+    #[test]
+    fn board_hydration_unwraps_result_and_all_layers_includes_empty_copper() {
+        assert!(unwrap_board_panel(&json!({"t": "reply", "ok": false, "error": "nope"})).is_none());
+        let wrapped = json!({"t": "reply", "ok": true, "result": {"panel": {"revision": 4, "board": {}, "draw": {}}}});
+        assert_eq!(unwrap_board_panel(&wrapped).unwrap()["revision"], 4);
+        let direct = json!({"panel": {"revision": 9}});
+        assert_eq!(unwrap_board_panel(&direct).unwrap()["revision"], 9);
+
+        let planned = vec![json!({"layer": "F.Cu", "role": "signal", "items": [{"id": "c1", "kind": "corridor"}]})];
+        let copper = vec![
+            json!({"layer": "F.Cu", "index": 1, "role": "signal", "title": "L1 · TOP", "subtitle": ""}),
+            json!({"layer": "In1.Cu", "index": 2, "role": "power", "title": "L2 · GND1", "subtitle": "Faces TOP across 40 µm"}),
+        ];
+        let merged = all_canvas_layers(&planned, &copper);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[1]["layer"], "In1.Cu");
+        assert_eq!(merged[1]["title"], "L2 · GND1");
     }
 }

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 200464,
+  "totalAssetGzipBytes": 200991,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -278,13 +278,13 @@
     "web/src/inflate.ts": "bc10ed23159668193d6de6d582e60baf009cae0a619018f0588f836a77dde831",
     "web/src/logout.ts": "9d29482c4671deee1e868ee477b123e067a4c22f7d8ac30b4c2420cf71b8ebe2",
     "web/src/md.ts": "c606d1ec598b3ce132c7cc9366383dacafc3fcb71c0fccd97b41ec0e19a96c78",
-    "web/src/mgmt-model.ts": "5135cce33f870d5b45b9fd8c2eb91f62fa7d274cd961cd523ed0df599893c955",
-    "web/src/mgmt.ts": "29d968b9601dda45a85dd70f378c4e15f2abb3108124f5974c33b02b84c1ce2d",
+    "web/src/mgmt-model.ts": "89af6290740690cac0bd1fd986098ede9d5bbed96b22f80c5a176f7e625f18ea",
+    "web/src/mgmt.ts": "1a2ae80790f345a38377833ae2b93724ce3fd1d2ba600e6d44faaa26c7b98744",
     "web/src/pair.html": "cf7b94703316f910718356e9ff8e99e088b68211db39b5200213b623c9275f6e",
     "web/src/pair.ts": "af07d19224043f8176f8cd2298d00b6806248eee453fd2f287c183e71a08179b",
     "web/src/palette-model.ts": "ae359cc71e98e84774428355a5048fd9ba0e1da2d45fa18290b4313c50c50ee4",
     "web/src/palette.ts": "bcd5c4585f57cc80a9cf29bf1b9da6ebbd33a3ab68f8f2a918c37c58060c8e48",
-    "web/src/plan-canvas.ts": "be46faf9e3207600516dfac12d93ba6cf8798ba65615a3eb24ff3dfacc0f8507",
+    "web/src/plan-canvas.ts": "fdd06b67480d731ac7baa4f22de1ad72f9fdc6388198408dcd87efedc7126eb6",
     "web/src/qr.ts": "04b634557884b8f512a7b03ad9638c1c15a299ffaea0103d1bdeec6338d9b9d3",
     "web/src/rail.ts": "5fb391094992578cb6f54d35d53559951a584c43fcfc2ee6f4f2cc3897acfe46",
     "web/src/settings.ts": "7b4d8be26fabc6c2a0b8af94a64572a0e3c1e589bf079bfa58c8985a8acd984a",
@@ -317,9 +317,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 333026,
-      "gzipBytes": 93878,
-      "sha256": "c418ffce805c12fcd0733b3515d603e838904c7558daf32207a781a24b13c63d"
+      "bytes": 334768,
+      "gzipBytes": 94405,
+      "sha256": "659b1c4303b47a29f1cc08dfbc83ef0e75fe8dd4ff554c3581ee7642ba5686db"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,

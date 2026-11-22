@@ -18,6 +18,7 @@ import {
   money,
   pkgName,
   planBusColor,
+  planAllCanvasLayers,
   planDefaultLayerPair,
   planDone,
   planMark,
@@ -27,6 +28,7 @@ import {
   refsFit,
   stockSummary,
   tierWords,
+  unwrapPlanGetPanel,
   type BomInfo,
   type BomLine,
   type BomUndoRecord,
@@ -38,6 +40,7 @@ import {
   type MgmtStateInfo,
   type PlanBand,
   type PlanBoardGeom,
+  type PlanCopperLayer,
   type PlanInfo,
   type PlanItem,
   type PlanLayer,
@@ -97,6 +100,7 @@ export class MgmtStrip {
   private planOptimistic = new Map<string, Record<string, unknown>>();
   private planOptimisticRev: number | undefined = undefined;
   private planHydratedKey = "";
+  private planHydrateAskedKey = "";
   private planHydratedBoard: PlanBoardGeom | null = null;
   private planHydratedDraw: { bands?: PlanBand[]; regions?: PlanRegion[] } | null = null;
   private planNoteOpen = false;
@@ -164,6 +168,7 @@ export class MgmtStrip {
     this.planOptimistic.clear();
     this.planOptimisticRev = undefined;
     this.planHydratedKey = "";
+    this.planHydrateAskedKey = "";
     this.planHydratedBoard = null;
     this.planHydratedDraw = null;
     this.planNoteOpen = false;
@@ -204,11 +209,13 @@ export class MgmtStrip {
       this.planOptimistic.clear();
       this.planOptimisticRev = undefined;
       this.planHydratedKey = "";
+      this.planHydrateAskedKey = "";
       this.planHydratedBoard = null;
       this.planHydratedDraw = null;
       this.planNoteOpen = false;
       this.planCanvas?.destroy();
       this.planCanvas = null;
+      this.planCommitFields = null;
       this.fabStatus = "";
       this.lifeSelectedKey = "";
       this.lifePartSamples = null;
@@ -401,7 +408,15 @@ export class MgmtStrip {
         body.appendChild(this.renderFab());
         break;
     }
+    const keepCanvasFocus =
+      this.planCanvas !== null &&
+      document.activeElement instanceof HTMLElement &&
+      this.panelEl.contains(document.activeElement) &&
+      this.planCanvas.root.contains(document.activeElement);
     this.panelEl.replaceChildren(body);
+    if (keepCanvasFocus) {
+      this.planCanvas?.root.focus({ preventScroll: true });
+    }
   }
 
   // ---- BOM panel ----
@@ -1000,15 +1015,17 @@ export class MgmtStrip {
     }
 
     const hydKey = `${this.project}:${d.revision ?? 0}`;
-    if (d.board_trimmed && this.planHydratedKey !== hydKey && this.project) {
-      this.planHydratedKey = hydKey;
+    if (d.board_trimmed && this.planHydrateAskedKey !== hydKey && this.project) {
+      this.planHydrateAskedKey = hydKey;
       const gen = this.watchGen;
       const proj = this.project;
-      void this.cb.hub.rpc<{ panel?: PlanInfo }>("plan.get", { pro: proj, board: true })
+      void this.cb.hub.rpc<unknown>("plan.get", { pro: proj, board: true })
         .then((res) => {
-          if (gen !== this.watchGen || proj !== this.project || !res?.panel) return;
-          this.planHydratedBoard = res.panel.board ?? null;
-          this.planHydratedDraw = res.panel.draw ?? null;
+          const panel = unwrapPlanGetPanel(res);
+          if (gen !== this.watchGen || proj !== this.project || !panel) return;
+          this.planHydratedKey = hydKey;
+          this.planHydratedBoard = panel.board ?? null;
+          this.planHydratedDraw = panel.draw ?? null;
           this.render();
         })
         .catch(() => {});
@@ -1394,24 +1411,25 @@ export class MgmtStrip {
       }
     }
 
+    const canvasLayers = planAllCanvasLayers(mergedLayers, d.copper_layers);
     const activeLayers =
       this.planGridMode === "all"
-        ? mergedLayers.map((l) => l.layer)
+        ? canvasLayers.map((l) => l.layer)
         : this.planGridMode === "single"
           ? [
-              this.planShownLayers.find((n) => mergedLayers.some((l) => l.layer === n)) ??
-                planDefaultLayerPair(mergedLayers)[0] ??
-                mergedLayers[0]?.layer ??
+              this.planShownLayers.find((n) => canvasLayers.some((l) => l.layer === n)) ??
+                planDefaultLayerPair(canvasLayers)[0] ??
+                canvasLayers[0]?.layer ??
                 "",
             ].filter(Boolean)
-          : (this.planShownLayers.length > 0 && this.planShownLayers.every((n) => mergedLayers.some((l) => l.layer === n))
+          : (this.planShownLayers.length > 0 && this.planShownLayers.every((n) => canvasLayers.some((l) => l.layer === n))
               ? this.planShownLayers.slice(0, 2)
-              : planDefaultLayerPair(mergedLayers));
+              : planDefaultLayerPair(canvasLayers));
 
-    if (this.planViewMode !== "list" && mergedLayers.length > 1) {
+    if (this.planViewMode !== "list" && canvasLayers.length > 1) {
       const layerBar = document.createElement("div");
       layerBar.className = "bp-plan-layerbar";
-      for (const l of mergedLayers) {
+      for (const l of canvasLayers) {
         const isShown = activeLayers.includes(l.layer);
         layerBar.appendChild(
           mkChip(l.title || l.layer, isShown, `mgmt-plan-layerpill-${l.layer}`, () => {
@@ -1453,8 +1471,12 @@ export class MgmtStrip {
           wireFields.outline = [fields.outline, ...reg.holes];
         }
       }
+      const baseRev = typeof d.revision === "number" ? d.revision : undefined;
       this.render();
-      sendPlan("plan.update", { ops: [{ op: "set", id, fields: wireFields }] });
+      sendPlan("plan.update", {
+        ops: [{ op: "set", id, fields: wireFields }],
+        ...(baseRev !== undefined ? { base: baseRev } : {}),
+      });
     };
     this.planCommitFields = commitItemFields;
 
@@ -1621,8 +1643,12 @@ export class MgmtStrip {
             if (!txt) return;
             ni.value = "";
             this.planNoteOpen = false;
+            const baseRev = typeof d.revision === "number" ? d.revision : undefined;
             this.render();
-            sendPlan("plan.update", { ops: [{ op: "note", id: selItem!.id, text: txt }] });
+            sendPlan("plan.update", {
+              ops: [{ op: "note", target: selItem!.id, text: txt }],
+              ...(baseRev !== undefined ? { base: baseRev } : {}),
+            });
           });
           ins.appendChild(nf);
         }
@@ -1816,7 +1842,8 @@ export class MgmtStrip {
           board: rawBoard,
           bands: mergedBands,
           regions: mergedRegions,
-          layers: mergedLayers,
+          layers: canvasLayers,
+          copperLayers: d.copper_layers,
         },
         twoCols,
       );

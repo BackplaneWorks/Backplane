@@ -30,6 +30,8 @@ import {
   planRemoveVertex,
   planDefaultLayerPair,
   planLayoutLabels,
+  planAllCanvasLayers,
+  unwrapPlanGetPanel,
 } from "../src/mgmt-model";
 
 describe("Management strip pure model", () => {
@@ -215,5 +217,18 @@ describe("Management strip pure model", () => {
       [],
     );
     expect(labels.map((l) => l.text)).toEqual(["U1", "U2"]);
+
+    expect(unwrapPlanGetPanel(null)).toBeNull();
+    expect(unwrapPlanGetPanel({ result: { panel: { revision: 3 } } })?.revision).toBe(3);
+    expect(unwrapPlanGetPanel({ panel: { revision: 5 } })?.revision).toBe(5);
+    const mergedAll = planAllCanvasLayers(
+      [{ layer: "F.Cu", role: "signal", items: [{ id: "c1", kind: "corridor" }] }],
+      [
+        { layer: "F.Cu", index: 1, role: "signal", title: "L1 · TOP" },
+        { layer: "In1.Cu", index: 2, role: "power", title: "L2 · GND", subtitle: "Faces TOP across 40 µm" },
+      ],
+    );
+    expect(mergedAll.map((l) => l.layer)).toEqual(["F.Cu", "In1.Cu"]);
+    expect(mergedAll[1].title).toBe("L2 · GND");
   });
 });

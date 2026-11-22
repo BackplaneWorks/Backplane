@@ -315,8 +315,15 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
             rpc(hub, c, "order.buy", json!({"thread":th})).await.map(|r| json!({"thread":r["thread"]})) }
         // feature "fabprofile": the project's fab profile (fab/mod.rs Fab.view), the same the desktop and the agents' fab_profile read; `action` get, pick or seen
         // feature "plan": the routing plan's person-side calls (plan/mod.rs): approve, steer/update, stop routing, verify, focus an item, read board geometry, or toggle plan-before-routing
-        "plan.approve" | "plan.update" | "plan.stop" | "plan.verify" | "plan.focus" | "plan.get" | "plan.enable" => { if m != "plan.enable" && s(p, "pro").is_empty() && s(p, "path").is_empty() { return Some(Err(err("pro (the project's .kicad_pro)"))) }
-            rpc(hub, c, m, p.clone()).await.map(|r| json!({"result": r["result"]})) }
+        "plan.approve" | "plan.update" | "plan.stop" | "plan.verify" | "plan.focus" | "plan.get" | "plan.enable" => {
+            if m != "plan.enable" && s(p, "pro").is_empty() && s(p, "path").is_empty() {
+                return Some(Err(err("pro (the project's .kicad_pro)")))
+            }
+            match if is_browser { sanitize_browser_plan_params(hub, m, p).await } else { Ok(p.clone()) } {
+                Ok(q) => rpc(hub, c, m, q).await.map(|r| json!({"result": r["result"]})),
+                Err(e) => Err(e),
+            }
+        }
         // feature "mgmt": the management panels (docs/MANAGEMENT.md) and the design checks, the same calls the desktop makes; a BOM edit from the
         // phone is the person's, as the desktop's (kicad/bomedit.rs)
         "mgmt.watch" | "mgmt.panel" | "mgmt.bom.edit" | "mgmt.bom.alts" | "mgmt.life.part" | "kicad.checks.watch" | "kicad.checks.list" | "kicad.checks.run" | "kicad.checks.focus" | "kicad.checks.fix" => {
@@ -732,6 +739,89 @@ async fn review(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Resu
     }.await)
 }
 
+fn too_wide_plan_root(p: &std::path::Path) -> bool {
+    let home = crate::plat::fs::canonicalize(std::path::Path::new(&crate::plat::dirs::home_or_empty())).ok();
+    p.parent().is_none() || home.as_ref().map_or(false, |h| h == p)
+}
+
+fn check_browser_plan_path(roots: &[std::path::PathBuf], home: &std::path::Path, raw: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), &'static str> {
+    let full = crate::files::share::local_path(raw).ok_or("that path is not in a project")?;
+    let real = crate::plat::fs::canonicalize(&full).map_err(|_| "no such file or project")?;
+    let real_home = crate::plat::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    if real.starts_with(&real_home) || !roots.iter().any(|r| real.starts_with(r)) {
+        return Err("that path is not in a project");
+    }
+    let pcb_raw = if real.extension().and_then(|e| e.to_str()) == Some("kicad_pcb") {
+        real.to_string_lossy().into_owned()
+    } else {
+        let dir = if real.is_dir() { real.as_path() } else { real.parent().unwrap_or(real.as_path()) };
+        crate::files::kicad::project::read(&dir.to_string_lossy()).pcb
+    };
+    if pcb_raw.is_empty() {
+        return Err("no KiCad board in this project");
+    }
+    let real_pcb = crate::plat::fs::canonicalize(std::path::Path::new(&pcb_raw)).map_err(|_| "no such board")?;
+    if real_pcb.starts_with(&real_home) || !roots.iter().any(|r| real_pcb.starts_with(r)) {
+        return Err("that board is not in a project");
+    }
+    if !real_pcb.parent().map_or(false, |p| roots.iter().any(|r| p.starts_with(r))) {
+        return Err("that board is not in a project");
+    }
+    let sidecar = real_pcb.with_extension("kicad_plan");
+    if let Ok(md) = std::fs::symlink_metadata(&sidecar) {
+        if md.file_type().is_symlink() {
+            return Err("that routing plan is not shared");
+        }
+        let real_sidecar = crate::plat::fs::canonicalize(&sidecar).map_err(|_| "that routing plan is not shared")?;
+        if real_sidecar.starts_with(&real_home) || !roots.iter().any(|r| real_sidecar.starts_with(r)) {
+            return Err("that routing plan is not shared");
+        }
+    }
+    Ok((real, real_pcb))
+}
+
+async fn sanitize_browser_plan_params(hub: &Arc<Hub>, m: &str, p: &Value) -> Result<Value, Value> {
+    let raw = if !s(p, "pro").is_empty() { s(p, "pro") } else { s(p, "path") };
+    if raw.is_empty() {
+        if m == "plan.enable" {
+            return Ok(p.clone());
+        }
+        return Err(err("pro (the project's .kicad_pro)"));
+    }
+    let roots = {
+        let g = hub.model().await;
+        let mut raw_roots: Vec<String> = Vec::new();
+        for proj in g.projects.values().filter(|pr| !pr.removed && !pr.root.is_empty()) {
+            raw_roots.push(proj.root.clone());
+            raw_roots.push(crate::files::kicad::canonical::design_root(&proj.root));
+        }
+        for t in g.threads.values().filter(|t| !t.deleted && !t.worktree.is_empty()) {
+            raw_roots.push(crate::files::kicad::canonical::design_root(&t.worktree));
+        }
+        let mut out = Vec::new();
+        for r in raw_roots {
+            if let Ok(c) = crate::plat::fs::canonicalize(std::path::Path::new(&r)) {
+                if c.is_dir() && !out.contains(&c) && !too_wide_plan_root(&c) {
+                    out.push(c);
+                }
+            }
+        }
+        out
+    };
+    let (real, real_pcb) = check_browser_plan_path(&roots, &hub.cfg.home, raw).map_err(err)?;
+    let mut q = p.clone();
+    if let Some(o) = q.as_object_mut() {
+        o.remove("pro");
+        o.remove("path");
+        if real.extension().and_then(|e| e.to_str()) == Some("kicad_pcb") {
+            o.insert("path".into(), json!(real_pcb.to_string_lossy()));
+        } else {
+            o.insert("pro".into(), json!(real.to_string_lossy()));
+        }
+    }
+    Ok(q)
+}
+
 #[cfg(test)]
 mod pick_tests {
     use super::*;
@@ -744,5 +834,40 @@ mod pick_tests {
             let (_, q) = pick_request(a, "t9", "v"); assert_eq!((q["thread"].as_str(), crate::net::far::params_link(&q)), (Some("t9"), String::new()), "{a}");
         }
         assert!(!crate::net::far::may("accounts.select"), "a far thread's account is chosen on its own machine: the router refuses it");
+    }
+
+    #[test] fn browser_plan_path_is_confined_to_authorized_projects() {
+        let base = std::env::temp_dir().join(format!("bp-ext-plan-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let home = base.join("home");
+        let proj = base.join("proj");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let pro = proj.join("demo.kicad_pro");
+        let pcb = proj.join("demo.kicad_pcb");
+        let out_pcb = outside.join("secret.kicad_pcb");
+        std::fs::write(&pro, "{}").unwrap();
+        std::fs::write(&pcb, "(kicad_pcb)").unwrap();
+        std::fs::write(&out_pcb, "(kicad_pcb)").unwrap();
+
+        let roots = vec![crate::plat::fs::canonicalize(&proj).unwrap()];
+        assert!(check_browser_plan_path(&roots, &home, pro.to_str().unwrap()).is_ok());
+        assert!(check_browser_plan_path(&roots, &home, pcb.to_str().unwrap()).is_ok());
+        assert!(check_browser_plan_path(&roots, &home, out_pcb.to_str().unwrap()).is_err());
+        assert!(check_browser_plan_path(&roots, &home, &format!("{}/../outside/secret.kicad_pcb", proj.display())).is_err());
+        assert!(check_browser_plan_path(&roots, &home, home.to_str().unwrap()).is_err());
+
+        #[cfg(unix)]
+        {
+            let sidecar = proj.join("demo.kicad_plan");
+            let outside_plan = outside.join("evil.kicad_plan");
+            std::fs::write(&outside_plan, "{}").unwrap();
+            std::os::unix::fs::symlink(&outside_plan, &sidecar).unwrap();
+            assert!(check_browser_plan_path(&roots, &home, pro.to_str().unwrap()).is_err());
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

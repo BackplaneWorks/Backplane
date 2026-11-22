@@ -3,6 +3,7 @@
 // paint order, hit testing, pan/zoom synchronization, and direct vertex/midpoint/keyboard steering.
 import { t } from "./i18n";
 import {
+  planAllCanvasLayers,
   planBandStrokePx,
   planBusColor,
   planDefaultLayerPair,
@@ -20,6 +21,7 @@ import {
   type PlanBand,
   type PlanBoardGeom,
   type PlanCamera,
+  type PlanCopperLayer,
   type PlanHit,
   type PlanLayer,
   type PlanRegion,
@@ -37,6 +39,7 @@ export interface PlanCanvasStateSnapshot {
   bands: PlanBand[];
   regions: PlanRegion[];
   layers: PlanLayer[];
+  copperLayers?: PlanCopperLayer[];
 }
 
 export interface PlanCanvasCallbacks {
@@ -169,7 +172,7 @@ export class PlanFloorplannerCanvas {
   private selectedVertex: { id: string; idx: number } | null = null;
   private drag:
     | { layer: string; kind: "pan"; lastX: number; lastY: number }
-    | { layer: string; kind: "vertex"; id: string; isPlane: boolean; idx: number; pts: Array<[number, number]> }
+    | { layer: string; kind: "vertex"; id: string; isPlane: boolean; idx: number; pts: Array<[number, number]>; origPts: Array<[number, number]>; moved: boolean }
     | null = null;
   private downPos: { x: number; y: number } | null = null;
   private rafPending = 0;
@@ -202,26 +205,27 @@ export class PlanFloorplannerCanvas {
   }
 
   private visibleLayers(s: PlanCanvasStateSnapshot): PlanLayer[] {
-    if (s.layers.length === 0) return [];
-    if (s.gridMode === "all") return s.layers;
+    const all = planAllCanvasLayers(s.layers, s.copperLayers);
+    if (all.length === 0) return [];
+    if (s.gridMode === "all") return all;
     if (s.gridMode === "single") {
       const target =
-        s.shownLayers.find((n) => s.layers.some((l) => l.layer === n)) ??
-        planDefaultLayerPair(s.layers)[0] ??
-        s.layers[0]?.layer;
-      const found = s.layers.find((l) => l.layer === target);
+        s.shownLayers.find((n) => all.some((l) => l.layer === n)) ??
+        planDefaultLayerPair(all)[0] ??
+        all[0]?.layer;
+      const found = all.find((l) => l.layer === target);
       return found ? [found] : [];
     }
     const pairNames =
-      s.shownLayers.length > 0 && s.shownLayers.every((n) => s.layers.some((l) => l.layer === n))
+      s.shownLayers.length > 0 && s.shownLayers.every((n) => all.some((l) => l.layer === n))
         ? s.shownLayers.slice(0, 2)
-        : planDefaultLayerPair(s.layers);
+        : planDefaultLayerPair(all);
     const out: PlanLayer[] = [];
     for (const name of pairNames) {
-      const found = s.layers.find((l) => l.layer === name);
+      const found = all.find((l) => l.layer === name);
       if (found) out.push(found);
     }
-    return out.length > 0 ? out : s.layers.slice(0, 2);
+    return out.length > 0 ? out : all.slice(0, 2);
   }
 
   public update(snapshot: PlanCanvasStateSnapshot, twoCols: boolean): void {
@@ -397,11 +401,12 @@ export class PlanFloorplannerCanvas {
 
   private attachPointerListeners(canvas: HTMLCanvasElement, layer: string): void {
     canvas.addEventListener("contextmenu", (e) => e.preventDefault());
+    canvas.addEventListener("dblclick", () => this.fitAll());
 
     canvas.addEventListener("pointerdown", (e) => {
       const s = this.state;
       if (!s) return;
-      this.root.focus();
+      this.root.focus({ preventScroll: true });
       const rect = canvas.getBoundingClientRect();
       const mx = e.clientX - rect.left;
       const my = e.clientY - rect.top;
@@ -428,24 +433,21 @@ export class PlanFloorplannerCanvas {
 
       if (hit?.kind === "vertex") {
         const pts = this.getItemPts(hit.id, hit.isPlane);
+        const origPts = pts.map((p) => [p[0], p[1]] as [number, number]);
         this.selectedVertex = { id: hit.id, idx: hit.idx };
-        this.cb.onSelect(hit.id);
-        this.drag = { layer, kind: "vertex", id: hit.id, isPlane: hit.isPlane, idx: hit.idx, pts: pts.map((p) => [p[0], p[1]]) };
+        this.drag = { layer, kind: "vertex", id: hit.id, isPlane: hit.isPlane, idx: hit.idx, pts: pts.map((p) => [p[0], p[1]]), origPts, moved: false };
         this.scheduleDraw();
       } else if (hit?.kind === "midpoint") {
         const curPts = this.getItemPts(hit.id, hit.isPlane);
+        const origPts = curPts.map((p) => [p[0], p[1]] as [number, number]);
         const newPts = planInsertVertex(curPts, hit.segIdx, hit.pos, hit.isPlane);
         const insertedIdx = hit.isPlane && hit.segIdx + 1 >= curPts.length ? newPts.length - 1 : Math.min(hit.segIdx + 1, newPts.length - 1);
-        this.cb.onSelect(hit.id);
         this.selectedVertex = { id: hit.id, idx: insertedIdx };
         this.patchLocalItem(hit.id, hit.isPlane, newPts);
         this.cb.onOptimisticPatch(hit.id, { [hit.isPlane ? "outline" : "path"]: newPts });
-        this.drag = { layer, kind: "vertex", id: hit.id, isPlane: hit.isPlane, idx: insertedIdx, pts: newPts };
+        this.drag = { layer, kind: "vertex", id: hit.id, isPlane: hit.isPlane, idx: insertedIdx, pts: newPts, origPts, moved: true };
         this.scheduleDraw();
       } else {
-        if (hit && (hit.kind === "band" || hit.kind === "region")) {
-          this.cb.onSelect(hit.id);
-        }
         this.selectedVertex = null;
         this.drag = { layer, kind: "pan", lastX: mx, lastY: my };
       }
@@ -469,9 +471,13 @@ export class PlanFloorplannerCanvas {
           this.scheduleDraw();
           return;
         }
+        if (this.downPos && Math.hypot(e.clientX - this.downPos.x, e.clientY - this.downPos.y) < 1.5 && !this.drag.moved) {
+          return;
+        }
         const cam = this.getCam(layer, w, h);
         const [wx, wy] = planPxToWorld(cam, mx, my, w, h);
         const rounded: [number, number] = [Math.round(wx * 1000) / 1000, Math.round(wy * 1000) / 1000];
+        this.drag.moved = true;
         this.drag.pts[this.drag.idx] = rounded;
         const copy = this.drag.pts.map((p) => [p[0], p[1]] as [number, number]);
         this.patchLocalItem(this.drag.id, this.drag.isPlane, copy);
@@ -483,10 +489,11 @@ export class PlanFloorplannerCanvas {
       const cam = this.getCam(layer, w, h);
       const hit = planHitTest(s.bands, s.regions, layer, s.selectedId, cam, w, h, mx, my);
       const prevId = this.hover?.hit ? ("id" in this.hover.hit ? this.hover.hit.id : "") : "";
+      const prevKind = this.hover?.hit.kind ?? "";
       const nextId = hit ? hit.id : "";
       this.hover = hit ? { layer, hit } : null;
-      canvas.style.cursor = hit?.kind === "vertex" || hit?.kind === "midpoint" ? "pointer" : hit ? "pointer" : "crosshair";
-      if (prevId !== nextId || hit?.kind !== this.hover?.hit.kind) {
+      canvas.style.cursor = hit ? "pointer" : "crosshair";
+      if (prevId !== nextId || (hit?.kind ?? "") !== prevKind) {
         this.syncHoverHud(layer);
         this.scheduleDraw();
       }
@@ -500,6 +507,21 @@ export class PlanFloorplannerCanvas {
       }
     });
 
+    const cancelActiveDrag = (restoreOrig: boolean): void => {
+      const d = this.drag;
+      if (!d || d.layer !== layer) return;
+      this.drag = null;
+      this.downPos = null;
+      if (restoreOrig && d.kind === "vertex") {
+        const copy = d.origPts.map((p) => [p[0], p[1]] as [number, number]);
+        this.patchLocalItem(d.id, d.isPlane, copy);
+        this.cb.onOptimisticPatch(d.id, { [d.isPlane ? "outline" : "path"]: copy });
+      }
+      this.scheduleDraw();
+    };
+    canvas.addEventListener("pointercancel", () => cancelActiveDrag(true));
+    canvas.addEventListener("lostpointercapture", () => cancelActiveDrag(false));
+
     canvas.addEventListener("pointerup", (e) => {
       const s = this.state;
       const d = this.drag;
@@ -510,11 +532,11 @@ export class PlanFloorplannerCanvas {
         canvas.releasePointerCapture(e.pointerId);
       }
       if (d && d.kind === "vertex" && d.layer === layer) {
-        this.cb.onCommitFields(d.id, { [d.isPlane ? "outline" : "path"]: d.pts });
-        return;
-      }
-      if (e.detail >= 2) {
-        this.fitAll();
+        if (d.moved) {
+          this.cb.onCommitFields(d.id, { [d.isPlane ? "outline" : "path"]: d.pts });
+        } else {
+          this.scheduleDraw();
+        }
         return;
       }
       if (s && down && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 4.5) {

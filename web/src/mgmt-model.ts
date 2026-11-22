@@ -874,3 +874,49 @@ export function planLayoutLabels(
   }
   return out;
 }
+
+export function unwrapPlanGetPanel(res: unknown): PlanInfo | null {
+  if (!res || typeof res !== "object") return null;
+  const r = res as Record<string, unknown>;
+  if (r.panel && typeof r.panel === "object") return r.panel as PlanInfo;
+  if (r.result && typeof r.result === "object") {
+    const nested = (r.result as Record<string, unknown>).panel;
+    if (nested && typeof nested === "object") return nested as PlanInfo;
+  }
+  return null;
+}
+
+export function planAllCanvasLayers(layers: PlanLayer[], copperLayers?: PlanCopperLayer[]): PlanLayer[] {
+  if (!copperLayers || copperLayers.length === 0) return layers;
+  const byName = new Map<string, PlanLayer>();
+  for (const l of layers) {
+    if (l.layer) byName.set(l.layer, l);
+  }
+  const out: PlanLayer[] = [];
+  const seen = new Set<string>();
+  for (const cl of copperLayers) {
+    if (!cl.layer) continue;
+    seen.add(cl.layer);
+    const existing = byName.get(cl.layer);
+    if (existing) {
+      out.push(existing);
+    } else {
+      out.push({
+        layer: cl.layer,
+        index: cl.index,
+        title: cl.title || `L${cl.index} · ${cl.layer}`,
+        subtitle: cl.subtitle || "",
+        role: cl.role,
+        status: "proposed",
+        done: 0,
+        approved: 0,
+        total: 0,
+        items: [],
+      });
+    }
+  }
+  for (const l of layers) {
+    if (l.layer && !seen.has(l.layer)) out.push(l);
+  }
+  return out;
+}
