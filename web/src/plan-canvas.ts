@@ -46,6 +46,8 @@ export interface PlanCanvasCallbacks {
   onSelect: (id: string) => void;
   onFocusItem: (id: string) => void;
   onOptimisticPatch: (id: string, fields: Record<string, unknown>) => void;
+  onRevertOptimistic?: (id: string) => void;
+  onDragEnd?: () => void;
   onCommitFields: (id: string, fields: Record<string, unknown>) => void;
   onApproveLayer: (layer: string, approve: boolean) => void;
   onQuickApprove: (ids: string[], approve: boolean) => void;
@@ -184,6 +186,10 @@ export class PlanFloorplannerCanvas {
     this.root.tabIndex = 0;
     this.root.setAttribute("data-testid", "mgmt-plan-canvas-grid");
     this.root.addEventListener("keydown", (e) => this.onKeyDown(e));
+  }
+
+  public isDragging(): boolean {
+    return this.drag !== null;
   }
 
   public fitAll(): void {
@@ -507,20 +513,22 @@ export class PlanFloorplannerCanvas {
       }
     });
 
-    const cancelActiveDrag = (restoreOrig: boolean): void => {
+    const cancelActiveDrag = (): void => {
       const d = this.drag;
       if (!d || d.layer !== layer) return;
       this.drag = null;
       this.downPos = null;
-      if (restoreOrig && d.kind === "vertex") {
+      if (d.kind === "vertex") {
         const copy = d.origPts.map((p) => [p[0], p[1]] as [number, number]);
         this.patchLocalItem(d.id, d.isPlane, copy);
-        this.cb.onOptimisticPatch(d.id, { [d.isPlane ? "outline" : "path"]: copy });
+        this.cb.onRevertOptimistic?.(d.id);
+      } else {
+        this.cb.onDragEnd?.();
       }
       this.scheduleDraw();
     };
-    canvas.addEventListener("pointercancel", () => cancelActiveDrag(true));
-    canvas.addEventListener("lostpointercapture", () => cancelActiveDrag(false));
+    canvas.addEventListener("pointercancel", cancelActiveDrag);
+    canvas.addEventListener("lostpointercapture", cancelActiveDrag);
 
     canvas.addEventListener("pointerup", (e) => {
       const s = this.state;
@@ -535,6 +543,7 @@ export class PlanFloorplannerCanvas {
         if (d.moved) {
           this.cb.onCommitFields(d.id, { [d.isPlane ? "outline" : "path"]: d.pts });
         } else {
+          this.cb.onDragEnd?.();
           this.scheduleDraw();
         }
         return;
@@ -550,10 +559,14 @@ export class PlanFloorplannerCanvas {
         if (hit && (hit.kind === "band" || hit.kind === "region")) {
           this.cb.onSelect(hit.id);
           this.cb.onFocusItem(hit.id);
-        } else if (!hit) {
+          return;
+        }
+        if (!hit && s.selectedId) {
           this.cb.onSelect("");
+          return;
         }
       }
+      this.cb.onDragEnd?.();
     });
 
     canvas.addEventListener(

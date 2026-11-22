@@ -32,6 +32,7 @@ import {
   planLayoutLabels,
   planAllCanvasLayers,
   unwrapPlanGetPanel,
+  isPlanHydrationCurrent,
 } from "../src/mgmt-model";
 
 describe("Management strip pure model", () => {
@@ -230,5 +231,11 @@ describe("Management strip pure model", () => {
     );
     expect(mergedAll.map((l) => l.layer)).toEqual(["F.Cu", "In1.Cu"]);
     expect(mergedAll[1].title).toBe("L2 · GND");
+
+    expect(isPlanHydrationCurrent(1, 1, 2, 2, "/p/a", "/p/a", 4, undefined)).toBe(true);
+    expect(isPlanHydrationCurrent(1, 2, 2, 2, "/p/a", "/p/a", 4, undefined)).toBe(false);
+    expect(isPlanHydrationCurrent(1, 1, 1, 2, "/p/a", "/p/a", 4, undefined)).toBe(false);
+    expect(isPlanHydrationCurrent(1, 1, 2, 2, "/p/a", "/p/b", 4, undefined)).toBe(false);
+    expect(isPlanHydrationCurrent(1, 1, 2, 2, "/p/a", "/p/a", 3, 5)).toBe(false);
   });
 });

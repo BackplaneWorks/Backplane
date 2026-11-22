@@ -13,6 +13,7 @@ import {
   formatUtcDay,
   isBomWriteCurrent,
   isChecksFixCurrent,
+  isPlanHydrationCurrent,
   lifeWord,
   mgmtPanelsOf,
   money,
@@ -101,6 +102,9 @@ export class MgmtStrip {
   private planOptimisticRev: number | undefined = undefined;
   private planHydratedKey = "";
   private planHydrateAskedKey = "";
+  private planHydrateGen = 0;
+  private planHydratedRev: number | undefined = undefined;
+  private planRenderDeferred = false;
   private planHydratedBoard: PlanBoardGeom | null = null;
   private planHydratedDraw: { bands?: PlanBand[]; regions?: PlanRegion[] } | null = null;
   private planNoteOpen = false;
@@ -169,6 +173,9 @@ export class MgmtStrip {
     this.planOptimisticRev = undefined;
     this.planHydratedKey = "";
     this.planHydrateAskedKey = "";
+    this.planHydrateGen++;
+    this.planHydratedRev = undefined;
+    this.planRenderDeferred = false;
     this.planHydratedBoard = null;
     this.planHydratedDraw = null;
     this.planNoteOpen = false;
@@ -210,6 +217,9 @@ export class MgmtStrip {
       this.planOptimisticRev = undefined;
       this.planHydratedKey = "";
       this.planHydrateAskedKey = "";
+      this.planHydrateGen++;
+      this.planHydratedRev = undefined;
+      this.planRenderDeferred = false;
       this.planHydratedBoard = null;
       this.planHydratedDraw = null;
       this.planNoteOpen = false;
@@ -302,6 +312,11 @@ export class MgmtStrip {
   }
 
   public render(): void {
+    if (this.openPanel === "plan" && this.planCanvas?.isDragging()) {
+      this.planRenderDeferred = true;
+      return;
+    }
+    this.planRenderDeferred = false;
     const state = this.getStateInfo();
     const tabs = mgmtPanelsOf(state);
     if (!this.digest || tabs.length === 0) {
@@ -384,6 +399,12 @@ export class MgmtStrip {
     this.panelEl.classList.remove("bp-hidden");
     this.panelEl.setAttribute("data-testid", `mgmt-panel-${this.openPanel}`);
     this.cb.onOpenChange?.(true);
+    const keepCanvasFocus =
+      this.openPanel === "plan" &&
+      this.planCanvas !== null &&
+      document.activeElement instanceof HTMLElement &&
+      this.panelEl.contains(document.activeElement) &&
+      (document.activeElement === this.planCanvas.root || this.planCanvas.root.contains(document.activeElement));
     const body = document.createDocumentFragment();
     if (this.errorMsg) {
       const err = document.createElement("div");
@@ -408,11 +429,6 @@ export class MgmtStrip {
         body.appendChild(this.renderFab());
         break;
     }
-    const keepCanvasFocus =
-      this.planCanvas !== null &&
-      document.activeElement instanceof HTMLElement &&
-      this.panelEl.contains(document.activeElement) &&
-      this.planCanvas.root.contains(document.activeElement);
     this.panelEl.replaceChildren(body);
     if (keepCanvasFocus) {
       this.planCanvas?.root.focus({ preventScroll: true });
@@ -1018,12 +1034,19 @@ export class MgmtStrip {
     if (d.board_trimmed && this.planHydrateAskedKey !== hydKey && this.project) {
       this.planHydrateAskedKey = hydKey;
       const gen = this.watchGen;
+      const hydGen = ++this.planHydrateGen;
       const proj = this.project;
+      const fallbackRev = d.revision ?? 0;
       void this.cb.hub.rpc<unknown>("plan.get", { pro: proj, board: true })
         .then((res) => {
           const panel = unwrapPlanGetPanel(res);
-          if (gen !== this.watchGen || proj !== this.project || !panel) return;
-          this.planHydratedKey = hydKey;
+          if (!panel) return;
+          const panelRev = typeof panel.revision === "number" ? panel.revision : fallbackRev;
+          if (!isPlanHydrationCurrent(gen, this.watchGen, hydGen, this.planHydrateGen, proj, this.project, panelRev, this.planHydratedRev)) {
+            return;
+          }
+          this.planHydratedRev = panelRev;
+          this.planHydratedKey = `${proj}:${panelRev}`;
           this.planHydratedBoard = panel.board ?? null;
           this.planHydratedDraw = panel.draw ?? null;
           this.render();
@@ -1352,10 +1375,14 @@ export class MgmtStrip {
     viewBar.append(viewSpacer, expBtn);
     wrap.appendChild(viewBar);
 
-    const rawBoard: PlanBoardGeom = this.planHydratedKey === hydKey && this.planHydratedBoard
+    const isHydrated =
+      Boolean(this.planHydratedBoard) &&
+      this.planHydratedKey.startsWith(`${this.project}:`) &&
+      (this.planHydratedKey === hydKey || (this.planHydratedRev !== undefined && this.planHydratedRev >= (d.revision ?? 0)));
+    const rawBoard: PlanBoardGeom = isHydrated && this.planHydratedBoard
       ? this.planHydratedBoard
       : d.board ?? { bbox: [0, 0, 100, 70], outline: [], parts: [] };
-    const rawDraw = this.planHydratedKey === hydKey && this.planHydratedDraw
+    const rawDraw = isHydrated && this.planHydratedDraw
       ? this.planHydratedDraw
       : d.draw ?? { bands: [], regions: [] };
 
@@ -1460,21 +1487,10 @@ export class MgmtStrip {
           this.planShownLayers = activeLayers.length >= 2 ? [activeLayers[0], fields.layer] : [...activeLayers, fields.layer];
         }
       }
-      const wireFields: Record<string, unknown> = { ...fields };
-      if (
-        Array.isArray(fields.outline) &&
-        Array.isArray((fields.outline as unknown[])[0]) &&
-        typeof ((fields.outline as unknown[])[0] as unknown[])[0] === "number"
-      ) {
-        const reg = mergedRegions.find((r) => r.id === id);
-        if (reg?.holes && reg.holes.length > 0) {
-          wireFields.outline = [fields.outline, ...reg.holes];
-        }
-      }
       const baseRev = typeof d.revision === "number" ? d.revision : undefined;
       this.render();
       sendPlan("plan.update", {
-        ops: [{ op: "set", id, fields: wireFields }],
+        ops: [{ op: "set", id, fields }],
         ...(baseRev !== undefined ? { base: baseRev } : {}),
       });
     };
@@ -1819,6 +1835,19 @@ export class MgmtStrip {
           onOptimisticPatch: (id, fields) => {
             const prev = this.planOptimistic.get(id) ?? {};
             this.planOptimistic.set(id, { ...prev, ...fields });
+          },
+          onRevertOptimistic: (id) => {
+            const had = this.planOptimistic.delete(id);
+            if (had || this.planRenderDeferred) {
+              this.planRenderDeferred = false;
+              this.render();
+            }
+          },
+          onDragEnd: () => {
+            if (this.planRenderDeferred) {
+              this.planRenderDeferred = false;
+              this.render();
+            }
           },
           onCommitFields: (id, fields) => {
             (this.planCommitFields ?? commitItemFields)(id, fields);
