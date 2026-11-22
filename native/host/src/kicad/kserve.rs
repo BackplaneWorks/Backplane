@@ -76,7 +76,10 @@ impl Srv {
     pub fn new(project: &str, now: u64) -> Srv { Srv { project: project.into(), sock: String::new(), state: "starting".into(), pid: 0, started: now, last: now, fails: vec![], why: String::new(), version: String::new() } }
     /// A project with no record (KServe.get): stopped.
     pub fn none(project: &str) -> Srv { Srv::new(project, 0).set("stopped", "") }
-    pub fn set(mut self, state: &str, why: &str) -> Srv { self.state = state.into(); self.why = why.into(); self } // KS.set
+    pub fn set(mut self, state: &str, why: &str) -> Srv {
+        if matches!(state, "stopped" | "failed") { self.sock.clear(); self.pid = 0; }
+        self.state = state.into(); self.why = why.into(); self
+    } // KS.set
     /// KS.touch: asked for again at this time (a held server is released).
     pub fn touch(mut self, now: u64) -> Srv { self.last = now; if self.why == HELD { self.why.clear() } self }
     /// KS.hold: it refused Shutdown: keep it, never force it.
@@ -84,12 +87,17 @@ impl Srv {
     /// KS.up: it answered Ping and GetVersion.
     pub fn up(mut self, sock: &str, version: &str, now: u64) -> Srv { self.sock = sock.into(); self.state = "ready".into(); self.last = now; self.why.clear(); self.version = version.into(); self }
     /// KS.starting: started again; no socket yet; the failures stay on record.
-    pub fn starting(mut self, now: u64) -> Srv { self.sock.clear(); self.state = "starting".into(); self.started = now; self.last = now; self.why.clear(); self }
+    pub fn starting(mut self, now: u64) -> Srv { self.sock.clear(); self.pid = 0; self.state = "starting".into(); self.started = now; self.last = now; self.why.clear(); self }
     pub fn listening(mut self, sock: &str) -> Srv { self.sock = sock.into(); self } // KS.listening
     /// KS.cleared: Retry: failures forgotten, left stopped so the next request starts it.
-    pub fn cleared(mut self) -> Srv { self.state = "stopped".into(); self.fails.clear(); self.why.clear(); self }
+    pub fn cleared(mut self) -> Srv { self.sock.clear(); self.pid = 0; self.state = "stopped".into(); self.fails.clear(); self.why.clear(); self }
+    /// The connection dropped or the spawned process ended before its exit event: clear stale socket and pid and leave it stopped so the next request starts fresh.
+    pub fn disconnected(mut self, why: &str) -> Srv { self.sock.clear(); self.pid = 0; self.state = "stopped".into(); self.why = why.into(); self }
+    /// The live process still owns the project, so keep its socket and pid, but mark IPC unresponsive until a call succeeds or it exits.
+    pub fn unresponsive(mut self, why: &str) -> Srv { self.state = "unresponsive".into(); self.why = why.into(); self }
     /// KS.exited: the process ended with this code: stopped on a clean exit, else the crash is recorded and it waits to start again ("starting") or gives up ("failed").
     pub fn exited(mut self, code: i32, now: u64, tail: &str) -> Srv {
+        self.sock.clear(); self.pid = 0;
         self.fails = fails_add(code, &self.fails, now);
         let state = if code == 0 { "stopped" } else if retry(&self.fails, now).is_some() { "starting" } else { "failed" };
         self.why = match state { "failed" => format!("stopped four times in five minutes: {tail}"), "starting" => format!("restarting after a crash: {tail}"), _ => String::new() };
@@ -99,7 +107,7 @@ impl Srv {
 
 // Room for two ---------------------------------------------------------------------------------------------------------
 
-pub fn active(st: &str) -> bool { st == "starting" || st == "ready" } // KS.active
+pub fn active(st: &str) -> bool { matches!(st, "starting" | "ready" | "unresponsive") } // KS.active
 pub fn count(xs: &[Srv]) -> usize { xs.iter().filter(|s| active(&s.state)).count() } // KS.count
 /// KS.evict: with two servers starting or ready and a third wanted: the project of the least recently used ready one ("" when none can be retired; a held one never is).
 pub fn evict(srvs: &[Srv]) -> String {
@@ -110,10 +118,10 @@ pub fn evict(srvs: &[Srv]) -> String {
 }
 /// KS.state.of: a project's state ("" when no record); the first record wins.
 pub fn state_of(xs: &[Srv], project: &str) -> String { xs.iter().find(|s| s.project == project).map(|s| s.state.clone()).unwrap_or_default() }
-/// KS.plan: "ready", "wait", "failed", "start", "evict:<project>" or "busy".
+/// KS.plan: "ready", "unresponsive", "wait", "failed", "start", "evict:<project>" or "busy".
 pub fn plan(srvs: &[Srv], project: &str, caps: &[String]) -> String {
     match state_of(srvs, project).as_str() {
-        "ready" => "ready".into(), "starting" => "wait".into(), "failed" => "failed".into(),
+        "ready" => "ready".into(), "unresponsive" => "unresponsive".into(), "starting" => "wait".into(), "failed" => "failed".into(),
         _ => if count(srvs) < 2 { "start".into() } else { let v = evict(srvs); if has(caps, "shutdown") && !v.is_empty() { format!("evict:{v}") } else { "busy".into() } },
     }
 }
@@ -294,5 +302,23 @@ mod tests {
         assert_eq!(note("/a/x.kicad_pro|failed|boom\n/b/y.kicad_pro|ready|"), "KiCad server: failed for x: boom · KiCad server: ready for y");
         assert_eq!(desc("/r", &s(&["api-descriptor"])), "/r/share/backplane/api.desc"); assert_eq!(desc("/r", &[]), "");
         assert_eq!(caps_safe(&s(&["idle-exit", "shutdown"]), 1), s(&["shutdown"])); assert_eq!(caps_safe(&s(&["idle-exit"]), 2), s(&["idle-exit"]));
+    }
+    #[test] fn exited_and_disconnected_clear_stale_socket_and_pid() {
+        let mut s = Srv::new("A", 1).up("/s/A/api.sock", "10.99.0-bp.13", 5);
+        s.pid = 4242;
+        let stopped = s.clone().exited(0, 20, "");
+        assert_eq!((stopped.state.as_str(), stopped.sock.as_str(), stopped.pid), ("stopped", "", 0));
+        let crashed = s.clone().exited(1, 20, "boom");
+        assert_eq!((crashed.state.as_str(), crashed.sock.as_str(), crashed.pid), ("starting", "", 0));
+        let failed = s.clone().set("failed", "bad");
+        assert_eq!((failed.state.as_str(), failed.sock.as_str(), failed.pid), ("failed", "", 0));
+        let stopped2 = s.clone().set("stopped", "");
+        assert_eq!((stopped2.state.as_str(), stopped2.sock.as_str(), stopped2.pid), ("stopped", "", 0));
+        let disc = s.clone().disconnected("connection dropped");
+        assert_eq!((disc.state.as_str(), disc.sock.as_str(), disc.pid, disc.why.as_str()), ("stopped", "", 0, "connection dropped"));
+        let unresp = s.unresponsive("connection dropped");
+        assert_eq!((unresp.state.as_str(), unresp.sock.as_str(), unresp.pid, unresp.why.as_str()), ("unresponsive", "/s/A/api.sock", 4242, "connection dropped"));
+        assert!(active(&unresp.state));
+        assert_eq!(plan(&[unresp], "A", &[]), "unresponsive");
     }
 }
