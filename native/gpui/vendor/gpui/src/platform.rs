@@ -90,6 +90,13 @@ pub use keystroke::*;
 pub(crate) use linux::*;
 #[cfg(target_os = "macos")]
 pub(crate) use mac::*;
+
+/// Registers a callback invoked on macOS whenever `GPUIApplication -sendEvent:` dispatches a mouse-down `NSEvent`.
+/// Backplane patch (PATCH.md), used by embedded CEF to identify user clicks before AppKit routes the event to a child NSView.
+#[cfg(target_os = "macos")]
+pub fn set_mac_mouse_down_observer(observer: Option<fn(*mut std::ffi::c_void)>) {
+    mac::set_mouse_down_observer(observer);
+}
 pub use semantic_version::SemanticVersion;
 #[cfg(any(test, feature = "test-support"))]
 pub(crate) use test::*;
