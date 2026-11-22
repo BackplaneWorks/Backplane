@@ -889,8 +889,7 @@ export function planListLayersForView(
   visibleNames: string[],
 ): PlanLayer[] {
   if (viewMode === "split" && visibleNames.length > 0) {
-    const filtered = allLayers.filter((l) => visibleNames.includes(l.layer));
-    if (filtered.length > 0) return filtered;
+    return allLayers.filter((l) => visibleNames.includes(l.layer));
   }
   return allLayers;
 }
@@ -929,8 +928,8 @@ export function planPourLabelPoint(
     [(minx + maxx) * 0.5, (miny + maxy) * 0.5],
     [sx / outer.length, sy / outer.length],
   ];
-  for (const fy of [0.5, 0.25, 0.75]) {
-    for (const fx of [0.5, 0.25, 0.75]) {
+  for (const fy of [0.5, 0.25, 0.75, 0.125, 0.875]) {
+    for (const fx of [0.5, 0.25, 0.75, 0.125, 0.875]) {
       cands.push([minx + (maxx - minx) * fx, miny + (maxy - miny) * fy]);
     }
   }
@@ -939,7 +938,7 @@ export function planPourLabelPoint(
       return c;
     }
   }
-  return [(minx + maxx) * 0.5, (miny + maxy) * 0.5];
+  return null;
 }
 
 export function planPlaceCorridorPills(
@@ -1024,9 +1023,6 @@ export function planPlaceCorridorPills(
             chosen = { id: c.b.id, text: shortTxt, cx, cy, pw, ph, col: c.col, sel: c.sel };
             break;
           }
-        }
-        if (!chosen) {
-          chosen = { id: c.b.id, text: shortTxt, cx, cy: clampCy(ry, ph), pw, ph, col: c.col, sel: c.sel };
         }
       }
     }

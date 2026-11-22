@@ -316,6 +316,7 @@ struct PlanPanel: Codable, Equatable {
         case stackupSummary = "stackup_summary", impedances, keysNote = "keys_note", asks, elsewhere, layers
         case copperLayers = "copper_layers", board, draw
     }
+    private enum ExtraCodingKeys: String, CodingKey { case project }
     init(
         empty: Bool = false, on: Bool = false, live: Bool = false, pro: String = "",
         routing: Bool = false, awaiting: Int = 0, approved: Int = 0, done: Int = 0, blocked: Int = 0,
@@ -335,7 +336,10 @@ struct PlanPanel: Codable, Equatable {
         empty = (try? c.decodeIfPresent(Bool.self, forKey: .empty)) ?? false
         on = (try? c.decodeIfPresent(Bool.self, forKey: .on)) ?? false
         live = (try? c.decodeIfPresent(Bool.self, forKey: .live)) ?? false
-        pro = (try? c.decodeIfPresent(String.self, forKey: .pro)) ?? ""
+        let rawPro = (try? c.decodeIfPresent(String.self, forKey: .pro)) ?? ""
+        let ex = try? d.container(keyedBy: ExtraCodingKeys.self)
+        let rawProject = (try? ex?.decodeIfPresent(String.self, forKey: .project)) ?? ""
+        pro = !rawPro.isEmpty ? rawPro : rawProject
         boardPath = (try? c.decodeIfPresent(String.self, forKey: .boardPath)) ?? ""
         boardRel = (try? c.decodeIfPresent(String.self, forKey: .boardRel)) ?? ""
         routing = (try? c.decodeIfPresent(Bool.self, forKey: .routing)) ?? false
@@ -442,12 +446,37 @@ struct PlanOptimisticPatch: Equatable {
     var locked: Bool? = nil
 }
 
+struct PlanBoardRef: Equatable {
+    var value: String = ""
+    var pcb: String = ""
+    var sch: String = ""
+    var project: String = ""
+}
+
+struct PlanUndoEntry: Equatable {
+    var pro: String
+    var id: String
+    var patch: PlanOptimisticPatch
+    var onlyGeom: String? = nil
+}
+
 private struct PlanPanelEnvelope: Decodable {
+    var pro: String?
+    var project: String?
     var panel: PlanPanel?
     var result: PlanPanelInner?
 }
 private struct PlanPanelInner: Decodable {
+    var pro: String?
+    var project: String?
     var panel: PlanPanel?
+}
+private struct PlanBadgeEnvelope: Decodable {
+    var badge: Badge?
+    struct Badge: Decodable {
+        var n: Int?
+        var tone: String?
+    }
 }
 
 enum PlanFloorplannerLogic {
@@ -469,13 +498,134 @@ enum PlanFloorplannerLogic {
 
     static func unwrapPanel(from data: Data) -> PlanPanel? {
         if let env = try? JSONDecoder().decode(PlanPanelEnvelope.self, from: data) {
-            if let p = env.panel { return p }
-            if let p = env.result?.panel { return p }
+            if var p = env.panel {
+                if p.pro.isEmpty {
+                    p.pro = [env.pro, env.project].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
+                }
+                return p
+            }
+            if var p = env.result?.panel {
+                if p.pro.isEmpty {
+                    p.pro = [env.result?.pro, env.result?.project, env.pro, env.project].compactMap { $0 }.first(where: { !$0.isEmpty }) ?? ""
+                }
+                return p
+            }
         }
         if let direct = try? JSONDecoder().decode(PlanPanel.self, from: data) {
             return direct
         }
         return nil
+    }
+
+    static func decodeBadge(from data: Data) -> (n: Int, tone: String) {
+        guard let env = try? JSONDecoder().decode(PlanBadgeEnvelope.self, from: data),
+              let b = env.badge else {
+            return (0, "warn")
+        }
+        let tone = (b.tone ?? "").isEmpty ? "warn" : (b.tone ?? "warn")
+        return (b.n ?? 0, tone)
+    }
+
+    private static func normPath(_ raw: String, root: String) -> String {
+        var p = raw.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\\", with: "/")
+        while p.count > 1 && p.hasSuffix("/") { p.removeLast() }
+        guard !p.isEmpty else { return "" }
+        if p.hasPrefix("/") { return p }
+        var r = root.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\\", with: "/")
+        while r.count > 1 && r.hasSuffix("/") { r.removeLast() }
+        return r.isEmpty ? p : "\(r)/\(p)"
+    }
+
+    private static func parentDir(_ path: String) -> String {
+        guard let idx = path.lastIndex(of: "/") else { return "" }
+        return idx == path.startIndex ? "/" : String(path[..<idx])
+    }
+
+    static func resolveMgmtProject(
+        targetPath: String?,
+        selectedBoard: PlanBoardRef?,
+        boards: [PlanBoardRef],
+        root: String
+    ) -> String {
+        let absTarget = normPath(targetPath ?? "", root: root)
+        if !absTarget.isEmpty {
+            let boardId: (PlanBoardRef) -> String = { b in
+                for raw in [b.project, b.pcb, b.value] {
+                    let p = normPath(raw, root: root)
+                    if !p.isEmpty { return p }
+                }
+                return absTarget
+            }
+            for b in boards {
+                for raw in [b.pcb, b.sch, b.value, b.project] {
+                    let cand = normPath(raw, root: root)
+                    if !cand.isEmpty && cand == absTarget {
+                        return boardId(b)
+                    }
+                }
+            }
+            let tDir = parentDir(absTarget)
+            if !tDir.isEmpty {
+                var best: (len: Int, id: String)? = nil
+                for b in boards {
+                    for raw in [b.project, b.pcb, b.sch, b.value] {
+                        let cand = normPath(raw, root: root)
+                        guard !cand.isEmpty else { continue }
+                        let bDir = parentDir(cand)
+                        guard !bDir.isEmpty else { continue }
+                        if tDir == bDir || tDir.hasPrefix(bDir + "/") {
+                            if best == nil || bDir.count > best!.len {
+                                best = (bDir.count, boardId(b))
+                            }
+                        }
+                    }
+                }
+                if let best { return best.id }
+            }
+            return absTarget
+        }
+        if let sb = selectedBoard {
+            let p = normPath(sb.project, root: root)
+            if !p.isEmpty { return p }
+            let pcb = normPath(sb.pcb, root: root)
+            if !pcb.isEmpty { return pcb }
+        }
+        return normPath(root, root: "")
+    }
+
+    static func hasUndo(stack: [PlanUndoEntry], pro: String, id: String) -> Bool {
+        !id.isEmpty && stack.contains(where: { $0.pro == pro && $0.id == id })
+    }
+
+    static func popUndo(stack: inout [PlanUndoEntry], pro: String, id: String) -> PlanUndoEntry? {
+        guard !id.isEmpty, let idx = stack.lastIndex(where: { $0.pro == pro && $0.id == id }) else {
+            return nil
+        }
+        return stack.remove(at: idx)
+    }
+
+    static func mergePatch(_ base: PlanOptimisticPatch?, over: PlanOptimisticPatch) -> PlanOptimisticPatch {
+        var cur = base ?? PlanOptimisticPatch()
+        if let p = over.path { cur.path = p }
+        if let o = over.outline { cur.outline = o }
+        if let w = over.width { cur.width = w }
+        if let l = over.layer { cur.layer = l }
+        if let lk = over.locked { cur.locked = lk }
+        return cur
+    }
+
+    static func foldPatches(
+        _ entries: [(id: String, patch: PlanOptimisticPatch)],
+        preview: (id: String, patch: PlanOptimisticPatch)? = nil
+    ) -> [String: PlanOptimisticPatch] {
+        var out: [String: PlanOptimisticPatch] = [:]
+        for (id, patch) in entries {
+            out[id] = mergePatch(out[id], over: patch)
+        }
+        if let preview {
+            out[preview.id] = mergePatch(out[preview.id], over: preview.patch)
+        }
+        return out
     }
 
     static func parseHexRGB(_ hex: String, fallback: UInt32) -> UInt32 {
@@ -639,8 +789,8 @@ enum PlanFloorplannerLogic {
             sx += p[0]; sy += p[1]
         }
         var cands: [[Double]] = [[(minx + maxx) * 0.5, (miny + maxy) * 0.5], [sx / Double(outer.count), sy / Double(outer.count)]]
-        for fy in [0.5, 0.25, 0.75] {
-            for fx in [0.5, 0.25, 0.75] {
+        for fy in [0.5, 0.25, 0.75, 0.125, 0.875] {
+            for fx in [0.5, 0.25, 0.75, 0.125, 0.875] {
                 cands.append([minx + (maxx - minx) * fx, miny + (maxy - miny) * fy])
             }
         }
@@ -649,7 +799,7 @@ enum PlanFloorplannerLogic {
                 return c
             }
         }
-        return [(minx + maxx) * 0.5, (miny + maxy) * 0.5]
+        return nil
     }
 
     private static func distToSegmentSq(px: Double, py: Double, ax: Double, ay: Double, bx: Double, by: Double) -> Double {
@@ -809,9 +959,6 @@ enum PlanFloorplannerLogic {
                         chosen = PlanCorridorPill(id: c.b.id, text: shortTxt, cx: cx, cy: cy, pw: pw, ph: ph, colorRGB: c.color, selected: c.sel)
                         break
                     }
-                }
-                if chosen == nil {
-                    chosen = PlanCorridorPill(id: c.b.id, text: shortTxt, cx: cx, cy: clampY(Double(px.y), ph), pw: pw, ph: ph, colorRGB: c.color, selected: c.sel)
                 }
             }
             if let chosen {

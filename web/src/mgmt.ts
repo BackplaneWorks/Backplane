@@ -1718,6 +1718,14 @@ export class MgmtStrip {
     listEl.setAttribute("data-testid", "mgmt-plan-rows");
     const doneWord = t("gpui.mgmt.plan.done", "done");
     const listLayers = planListLayersForView(this.planViewMode, mergedLayers, activeLayers);
+    if (this.planViewMode === "split" && listLayers.length === 0) {
+      const emptyRow = document.createElement("div");
+      emptyRow.className = "bp-dim";
+      emptyRow.style.padding = "6px 8px";
+      emptyRow.style.fontSize = "11px";
+      emptyRow.textContent = t("gpui.mgmt.plan.noitems", "No corridors or planes on this layer");
+      listEl.appendChild(emptyRow);
+    }
     for (const l of listLayers) {
       const items = l.items ?? [];
       const layerTitle = planLayerDisplayTitle(l.layer, d.copper_layers, canvasLayers) || l.layer;

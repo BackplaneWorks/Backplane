@@ -74,6 +74,21 @@ check(labelsBlocked.isEmpty, "refdes avoids pill box")
 
 let pourPt = PlanFloorplannerLogic.pourLabelPoint(outer: [[0, 0], [100, 0], [100, 100], [0, 100]], holes: [[[35, 35], [65, 35], [65, 65], [35, 65]]])
 check(pourPt != nil && !(pourPt![0] >= 35 && pourPt![0] <= 65 && pourPt![1] >= 35 && pourPt![1] <= 65), "pour label avoids center hole")
+let emptyPourPt = PlanFloorplannerLogic.pourLabelPoint(outer: [[0, 0], [100, 0], [100, 100], [0, 100]], holes: [[[2, 2], [98, 2], [98, 98], [2, 98]]])
+check(emptyPourPt == nil, "pour label returns nil when all candidates hit hole")
+
+let crowded = (0..<8).map { i in
+    PlanBand(id: "k\(i)", layer: "F.Cu", name: "BUS\(i)", nets: i + 1, path: [[50, 50], [51, 50]])
+}
+let crowdedPills = PlanFloorplannerLogic.placeCorridorPills(bands: crowded, cam: cam400, width: 400, height: 400, selectedId: "")
+check(crowdedPills.count < 8, "overlapping corridor pills suppressed", crowdedPills.count)
+var anyOverlap = false
+for i in 0..<crowdedPills.count {
+    for j in (i + 1)..<crowdedPills.count {
+        if crowdedPills[i].rect.intersects(crowdedPills[j].rect) { anyOverlap = true }
+    }
+}
+check(!anyOverlap, "no placed corridor pills overlap")
 
 // 8. Optimistic merge moves item and preserves plane holes
 let basePanel = PlanPanel(
@@ -87,6 +102,59 @@ let mergedPanel = PlanFloorplannerLogic.mergeOptimistic(panel: basePanel, patche
 ])
 check(mergedPanel.draw?.regions.first?.holes.count == 1, "plane holes preserved on outline edit")
 check(mergedPanel.layers.first(where: { $0.layer == "F.Cu" })?.items.contains(where: { $0.id == "c1" && $0.width == 2.25 }) == true, "optimistic layer move")
+
+// 9. Canonical project decoding & nested badge decoding
+let projOnly = Data(#"{"project":"/p/boards/b/b.kicad_pro","revision":5,"layers":[]}"#.utf8)
+check(PlanFloorplannerLogic.unwrapPanel(from: projOnly)?.pro == "/p/boards/b/b.kicad_pro", "project field populates pro")
+let outerPro = Data(#"{"pro":"/p/main.kicad_pro","panel":{"revision":6,"layers":[]}}"#.utf8)
+check(PlanFloorplannerLogic.unwrapPanel(from: outerPro)?.pro == "/p/main.kicad_pro", "outer pro propagates to panel")
+let badBadge = PlanFloorplannerLogic.decodeBadge(from: Data(#"{"badge":{"n":3,"tone":"bad"}}"#.utf8))
+check(badBadge.n == 3 && badBadge.tone == "bad", "nested bad badge")
+let warnBadge = PlanFloorplannerLogic.decodeBadge(from: Data(#"{"badge":{"n":2,"tone":"warn"}}"#.utf8))
+check(warnBadge.n == 2 && warnBadge.tone == "warn", "nested warn badge")
+
+// 10. File-link management project resolution
+let boardRefs = [
+    PlanBoardRef(value: "boards/main/main.kicad_pcb", pcb: "", sch: "", project: "/proj/boards/main/main.kicad_pro"),
+    PlanBoardRef(value: "boards/sub/sub.kicad_pcb", pcb: "/proj/boards/sub/sub.kicad_pcb", sch: "/proj/boards/sub/sub.kicad_sch", project: "/proj/boards/sub/sub.kicad_pro"),
+]
+check(
+    PlanFloorplannerLogic.resolveMgmtProject(targetPath: "/proj/boards/sub/sub.kicad_pcb", selectedBoard: boardRefs[0], boards: boardRefs, root: "/proj") == "/proj/boards/sub/sub.kicad_pro",
+    "file link beats default picker board"
+)
+check(
+    PlanFloorplannerLogic.resolveMgmtProject(targetPath: "boards/sub/power.kicad_sch", selectedBoard: boardRefs[0], boards: boardRefs, root: "/proj") == "/proj/boards/sub/sub.kicad_pro",
+    "relative sub-sheet resolves to matching board dir"
+)
+check(
+    PlanFloorplannerLogic.resolveMgmtProject(targetPath: "extra/test_jig.kicad_pcb", selectedBoard: boardRefs[0], boards: boardRefs, root: "/proj") == "/proj/extra/test_jig.kicad_pcb",
+    "unlisted relative board file resolves to abs path"
+)
+check(
+    PlanFloorplannerLogic.resolveMgmtProject(targetPath: nil, selectedBoard: boardRefs[0], boards: boardRefs, root: "/proj") == "/proj/boards/main/main.kicad_pro",
+    "nil target uses selected board"
+)
+
+// 11. Per-item undo isolation & selective rollback patch folding
+var ustack: [PlanUndoEntry] = [
+    PlanUndoEntry(pro: "/p/a", id: "c1", patch: PlanOptimisticPatch(path: [[0, 0], [10, 0]]), onlyGeom: "path"),
+    PlanUndoEntry(pro: "/p/a", id: "c2", patch: PlanOptimisticPatch(width: 1.5)),
+]
+check(!PlanFloorplannerLogic.hasUndo(stack: ustack, pro: "/p/a", id: "c3"), "unrelated item has no undo")
+check(PlanFloorplannerLogic.popUndo(stack: &ustack, pro: "/p/a", id: "c1")?.id == "c1", "pops matching item undo")
+check(!PlanFloorplannerLogic.hasUndo(stack: ustack, pro: "/p/a", id: "c1"), "only matching entry popped")
+check(PlanFloorplannerLogic.hasUndo(stack: ustack, pro: "/p/a", id: "c2"), "other item undo intact")
+
+let folded = PlanFloorplannerLogic.foldPatches(
+    [
+        ("c1", PlanOptimisticPatch(width: 2.0)),
+        ("c2", PlanOptimisticPatch(width: 3.0)),
+    ],
+    preview: ("c1", PlanOptimisticPatch(path: [[1, 1], [2, 2]]))
+)
+check(folded["c1"]?.width == 2.0 && folded["c1"]?.path == [[1, 1], [2, 2]], "preview overlays without dropping pending fields")
+let withoutPreview = PlanFloorplannerLogic.foldPatches([("c1", PlanOptimisticPatch(width: 2.0))])
+check(withoutPreview["c1"]?.width == 2.0 && withoutPreview["c1"]?.path == nil, "cancelled drag leaves accepted patch intact")
 
 print("plan-floorplanner: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

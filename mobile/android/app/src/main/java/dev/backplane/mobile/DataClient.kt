@@ -1184,10 +1184,10 @@ object DataClient {
     suspend fun planApprove(pro: String, layer: String, ids: List<String>, approve: Boolean) {
         call("plan.approve", JSONObject().put("pro", pro.ifEmpty { mgmtProject }).put("layer", layer).put("ids", JSONArray(ids)).put("approve", approve))
     }
-    suspend fun planUpdate(pro: String, ops: List<JSONObject>, base: Int? = null) {
+    suspend fun planUpdate(pro: String, ops: List<JSONObject>, base: Int? = null): JSONObject {
         val p = JSONObject().put("pro", pro.ifEmpty { mgmtProject }).put("ops", JSONArray(ops))
         if (base != null) p.put("base", base)
-        call("plan.update", p)
+        return call("plan.update", p)
     }
     suspend fun planVerify(pro: String) { call("plan.verify", JSONObject().put("pro", pro.ifEmpty { mgmtProject })) }
     suspend fun planStop(pro: String) { call("plan.stop", JSONObject().put("pro", pro.ifEmpty { mgmtProject })) }
