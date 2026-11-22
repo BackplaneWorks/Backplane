@@ -4859,6 +4859,19 @@ gpui.mgmt.plan.rejectlayer	Reject layer	レイヤーを却下	Rechazar capa
 gpui.mgmt.plan.edited	Edited	編集済み	Editado
 gpui.mgmt.plan.locked	Locked	ロック中	Bloqueado
 gpui.mgmt.plan.noitems	No corridors or planes on this layer	このレイヤーにコリドーまたはプレーンがありません	Sin corredores ni planos en esta capa
+gpui.mgmt.plan.stackup.short	Stackup	スタックアップ	Apilamiento
+gpui.mgmt.plan.layer.short	Layer	レイヤー	Capa
+gpui.mgmt.plan.awaiting.short	{n} awaiting	{n} 承認待ち	{n} pendientes
+gpui.mgmt.plan.done.of	{done}/{total} done	{done}/{total} 完了	{done}/{total} listo
+gpui.planmode.chip.review	Plan · review	計画 · レビュー	Plan · revisar
+mobile.plan.steer	Steer	誘導	Guiar
+mobile.plan.details	Details	詳細	Detalles
+mobile.plan.reset	Reset	リセット	Restablecer
+mobile.plan.removepoint	Remove point	頂点を削除	Quitar punto
+mobile.plan.touchhint	Drag waypoints to steer · Tap + to add · Tap point to remove	頂点をドラッグして誘導 · + をタップで追加 · 頂点をタップで削除	Arrastra vértices para guiar · Toca + para añadir · Toca un vértice para quitar
+mobile.plan.copied	Copied	コピーしました	Copiado
+mobile.plan.widthmm	{v} mm	{v} mm	{v} mm
+mobile.plan.coord	({x}, {y} mm)	({x}, {y} mm)	({x}, {y} mm)
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7779,4 +7792,16 @@ gpui.mgmt.plan.noitems	No corridors or planes on this layer	このレイヤー�
 
     /// web.plan.nets = {n} nets
     static func web_plan_nets(n: String) -> String { f("web.plan.nets", ["n": n]) }
+
+    /// gpui.mgmt.plan.awaiting.short = {n} awaiting
+    static func gpui_mgmt_plan_awaiting_short(n: String) -> String { f("gpui.mgmt.plan.awaiting.short", ["n": n]) }
+
+    /// gpui.mgmt.plan.done.of = {done}/{total} done
+    static func gpui_mgmt_plan_done_of(done: String, total: String) -> String { f("gpui.mgmt.plan.done.of", ["done": done, "total": total]) }
+
+    /// mobile.plan.widthmm = {v} mm
+    static func mobile_plan_widthmm(v: String) -> String { f("mobile.plan.widthmm", ["v": v]) }
+
+    /// mobile.plan.coord = ({x}, {y} mm)
+    static func mobile_plan_coord(x: String, y: String) -> String { f("mobile.plan.coord", ["x": x, "y": y]) }
 }

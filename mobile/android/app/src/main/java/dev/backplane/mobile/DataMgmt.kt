@@ -78,21 +78,28 @@ object Mgmt {
 /** The tabs under the drawing, and the open panel above them. `project`: what the panels are of (the root is enough; a board picked in the viewer: the
  *  hub's `project` of its row). `home`: the viewer's project, which the open panel is kept by, so it stays open over a change of board. */
 @Composable
-internal fun MgmtHost(project: String, home: String = project, modifier: Modifier = Modifier) {
+internal fun MgmtHost(
+    project: String,
+    home: String = project,
+    modifier: Modifier = Modifier,
+    onStateChanged: (hasPanels: Boolean, open: String) -> Unit = { _, _ -> },
+) {
     val online = DataClient.conn == DataClient.Conn.ONLINE
     LaunchedEffect(project, online) { if (project.isNotEmpty() && online && DataClient.has("mgmt")) runCatching { DataClient.mgmtWatch(project) } }
     val d = DataClient.mgmtDigest
     val state = if (d.isEmpty()) null else DataClient.mgmt["mgmt.state.$d"]
     // the panels this app draws (a panel the hub has that the phone has no view for stays on the desktop)
-    val panels = Mgmt.objs(state?.optJSONArray("panels")).filter { it.optString("id") in setOf("bom", "checks", "life", "fab") }
+    val panels = Mgmt.objs(state?.optJSONArray("panels")).filter { it.optString("id") in setOf("bom", "checks", "life", "plan", "fab") }
     // (kept above the return: while another board's panels come there are none for a moment, and the open one must not be forgotten)
     var open by rememberSaveable(home) { mutableStateOf("") }
+    LaunchedEffect(panels.isNotEmpty(), open) { onStateChanged(panels.isNotEmpty(), open) }
     if (panels.isEmpty()) return
-    Column(modifier.fillMaxWidth()) {
+    Column(if (open == "plan") modifier.fillMaxSize() else modifier.fillMaxWidth()) {
         if (open.isNotEmpty()) {
-            Column(Modifier.fillMaxWidth().fillMaxHeight(.55f).background(dcs.background).testTag("mgmt.panel.$open")) {
+            val panelMod = if (open == "plan") Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth().fillMaxHeight(.55f)
+            Column(panelMod.background(dcs.background).testTag("mgmt.panel.$open")) {
                 DLine()
-                when (open) { "bom" -> BomPanel(); "checks" -> ChecksPanel(); "life" -> LifePanel(); "fab" -> FabPanel(); else -> {} }
+                when (open) { "bom" -> BomPanel(); "checks" -> ChecksPanel(); "life" -> LifePanel(); "plan" -> PlanFloorplannerPanel(project); "fab" -> FabPanel(); else -> {} }
             }
         }
         DLine()

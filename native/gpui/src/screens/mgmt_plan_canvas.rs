@@ -171,6 +171,7 @@ pub struct State {
     pub hydrated_board: Option<Value>,
     pub hydrated_draw: Option<Value>,
     pub note_open: bool,
+    pub move_layer_open: bool,
     pub note_input: Option<Entity<super::composer::Composer>>,
     pub focus: Option<FocusHandle>,
 }
@@ -202,6 +203,7 @@ impl Default for State {
             hydrated_board: None,
             hydrated_draw: None,
             note_open: false,
+            move_layer_open: false,
             note_input: None,
             focus: None,
         }
@@ -230,6 +232,7 @@ impl State {
         self.hydrated_board = None;
         self.hydrated_draw = None;
         self.note_open = false;
+        self.move_layer_open = false;
         self.note_input = None;
     }
 
@@ -315,14 +318,15 @@ pub fn pts_to_val(pts: &[[f64; 2]]) -> Value {
     Value::Array(arr)
 }
 
-/// Exact arc-length 50% midpoint of a multi-segment polyline (for net-count badge placement).
-pub fn polyline_midpoint(pts: &[[f64; 2]]) -> Option<[f64; 2]> {
+/// Exact arc-length point along a multi-segment polyline at fraction `frac` in `0.0..=1.0`.
+pub fn polyline_point_at_frac(pts: &[[f64; 2]], frac: f64) -> Option<[f64; 2]> {
     if pts.is_empty() {
         return None;
     }
     if pts.len() == 1 {
         return Some(pts[0]);
     }
+    let frac = frac.clamp(0.0, 1.0);
     let mut total = 0.0f64;
     for w in pts.windows(2) {
         total += (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]);
@@ -330,7 +334,7 @@ pub fn polyline_midpoint(pts: &[[f64; 2]]) -> Option<[f64; 2]> {
     if total < 1e-6 {
         return Some(pts[0]);
     }
-    let target = total * 0.5;
+    let target = total * frac;
     let mut acc = 0.0;
     for w in pts.windows(2) {
         let len = (w[1][0] - w[0][0]).hypot(w[1][1] - w[0][1]);
@@ -344,6 +348,55 @@ pub fn polyline_midpoint(pts: &[[f64; 2]]) -> Option<[f64; 2]> {
         acc += len;
     }
     pts.last().copied()
+}
+
+/// Exact arc-length 50% midpoint of a multi-segment polyline (for net-count badge placement).
+pub fn polyline_midpoint(pts: &[[f64; 2]]) -> Option<[f64; 2]> {
+    polyline_point_at_frac(pts, 0.5)
+}
+
+/// Canonical display title for a KiCad copper layer (`L6 · SIG1`), falling back to raw `layer`.
+pub fn layer_display_title(layer: &str, copper_layers: &[Value], all_layers: &[Value]) -> String {
+    for src in [copper_layers, all_layers] {
+        for l in src {
+            if l["layer"].as_str() == Some(layer) {
+                if let Some(t) = l["title"].as_str().filter(|s| !s.is_empty()) {
+                    return t.to_string();
+                }
+            }
+        }
+    }
+    layer.to_string()
+}
+
+/// Representative interior world-space point for labelling a power plane pour without hitting holes.
+pub fn pour_label_point(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Option<[f64; 2]> {
+    if outer.len() < 3 {
+        return None;
+    }
+    let (mut minx, mut miny, mut maxx, mut maxy) = (f64::MAX, f64::MAX, f64::MIN, f64::MIN);
+    let (mut sx, mut sy) = (0.0f64, 0.0f64);
+    for p in outer {
+        minx = minx.min(p[0]);
+        miny = miny.min(p[1]);
+        maxx = maxx.max(p[0]);
+        maxy = maxy.max(p[1]);
+        sx += p[0];
+        sy += p[1];
+    }
+    let n = outer.len() as f64;
+    let mut cands = vec![[(minx + maxx) * 0.5, (miny + maxy) * 0.5], [sx / n, sy / n]];
+    for fy in [0.5, 0.25, 0.75] {
+        for fx in [0.5, 0.25, 0.75] {
+            cands.push([minx + (maxx - minx) * fx, miny + (maxy - miny) * fy]);
+        }
+    }
+    for cand in &cands {
+        if point_in_ring(cand[0], cand[1], outer) && !holes.iter().any(|h| point_in_ring(cand[0], cand[1], h)) {
+            return Some(*cand);
+        }
+    }
+    Some([(minx + maxx) * 0.5, (miny + maxy) * 0.5])
 }
 
 pub fn insert_vertex(pts: &[[f64; 2]], seg_idx: usize, pos: [f64; 2], closed: bool) -> Vec<[f64; 2]> {
@@ -555,8 +608,143 @@ pub fn default_layer_pair(layers: &[Value]) -> Vec<String> {
     out
 }
 
-/// Greedy screen-space collision-free placement of component refdes labels.
-pub fn layout_labels(parts: &[Value], cam: &Camera, w: f32, h: f32, pinned: &[&str]) -> Vec<PlacedLabel> {
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlacedPill {
+    pub id: String,
+    pub text: String,
+    pub cx: f32,
+    pub cy: f32,
+    pub pw: f32,
+    pub ph: f32,
+    pub col: u32,
+    pub sel: bool,
+}
+
+impl PlacedPill {
+    pub fn rect(&self, pad: f32) -> [f32; 4] {
+        [
+            self.cx - self.pw * 0.5 - pad,
+            self.cy - self.ph * 0.5 - pad,
+            self.cx + self.pw * 0.5 + pad,
+            self.cy + self.ph * 0.5 + pad,
+        ]
+    }
+}
+
+fn rects_overlap(a: &[f32; 4], b: &[f32; 4]) -> bool {
+    !(a[2] <= b[0] || a[0] >= b[2] || a[3] <= b[1] || a[1] >= b[3])
+}
+
+/// Collision-free screen-space placement of corridor net pills (`{name} · {nets}` or `{nets}`).
+pub fn place_corridor_pills(
+    bands: &[&Value],
+    cam: &Camera,
+    w: f32,
+    h: f32,
+    selected_id: Option<&str>,
+    hover_id: Option<&str>,
+) -> Vec<PlacedPill> {
+    struct BandCand<'a> {
+        b: &'a Value,
+        id: &'a str,
+        pts: Vec<[f64; 2]>,
+        nets: u64,
+        sel: bool,
+        hov: bool,
+        px_len: f32,
+        col: u32,
+    }
+    let mut cands = Vec::new();
+    for &b in bands {
+        let nets = b["nets"].as_u64().unwrap_or(0);
+        if nets == 0 {
+            continue;
+        }
+        let pts = pts_from_val(&b["path"]);
+        if pts.len() < 2 {
+            continue;
+        }
+        let id = b["id"].as_str().unwrap_or("");
+        let sel = selected_id == Some(id);
+        let hov = hover_id == Some(id);
+        let mut px_len = 0.0f32;
+        for pair in pts.windows(2) {
+            let (ax, ay) = cam.to_px(pair[0][0] as f32, pair[0][1] as f32, w, h);
+            let (bx, by) = cam.to_px(pair[1][0] as f32, pair[1][1] as f32, w, h);
+            px_len += (bx - ax).hypot(by - ay);
+        }
+        let col = bus_color(b["name"].as_str().unwrap_or(id), b["color"].as_str().unwrap_or(""));
+        cands.push(BandCand { b, id, pts, nets, sel, hov, px_len, col });
+    }
+    cands.sort_by(|a, b| {
+        let pa = u8::from(a.sel || a.hov);
+        let pb = u8::from(b.sel || b.hov);
+        pb.cmp(&pa).then_with(|| b.nets.cmp(&a.nets)).then_with(|| a.id.cmp(b.id))
+    });
+
+    let mut placed_boxes: Vec<[f32; 4]> = Vec::new();
+    let mut out = Vec::with_capacity(cands.len());
+    for c in cands {
+        let name = c.b["name"].as_str().unwrap_or("");
+        let short_txt = c.nets.to_string();
+        let full_txt = if !name.is_empty() { format!("{name} · {}", c.nets) } else { short_txt.clone() };
+        let try_full = (c.sel || c.hov || c.px_len >= 95.0) && !name.is_empty();
+        let texts: Vec<&str> = if try_full { vec![&full_txt, &short_txt] } else { vec![&short_txt] };
+        let mut chosen: Option<PlacedPill> = None;
+
+        'outer: for txt in &texts {
+            let pw = (txt.chars().count() as f32 * 5.9 + 10.0).max(16.0);
+            let ph = 15.0f32;
+            for frac in [0.5, 0.35, 0.65, 0.22, 0.78] {
+                let Some(pt_w) = polyline_point_at_frac(&c.pts, frac) else { continue };
+                let (cx_raw, cy_raw) = cam.to_px(pt_w[0] as f32, pt_w[1] as f32, w, h);
+                let cx = cx_raw.clamp(pw * 0.5 + 3.0, (w - pw * 0.5 - 3.0).max(pw * 0.5 + 3.0));
+                let cy = cy_raw.clamp(ph * 0.5 + 3.0, (h - ph * 0.5 - 3.0).max(ph * 0.5 + 3.0));
+                let pill = PlacedPill { id: c.id.to_string(), text: (*txt).to_string(), cx, cy, pw, ph, col: c.col, sel: c.sel };
+                let r = pill.rect(2.0);
+                if !placed_boxes.iter().any(|o| rects_overlap(&r, o)) {
+                    chosen = Some(pill);
+                    break 'outer;
+                }
+            }
+        }
+        if chosen.is_none() {
+            if let Some(pt_w) = polyline_point_at_frac(&c.pts, 0.5) {
+                let (cx_raw, cy_raw) = cam.to_px(pt_w[0] as f32, pt_w[1] as f32, w, h);
+                let pw = (short_txt.len() as f32 * 6.5 + 8.0).max(16.0);
+                let ph = 15.0f32;
+                let cx = cx_raw.clamp(pw * 0.5 + 3.0, (w - pw * 0.5 - 3.0).max(pw * 0.5 + 3.0));
+                for dy in [-(ph + 3.0), ph + 3.0] {
+                    let cy = (cy_raw + dy).clamp(ph * 0.5 + 3.0, (h - ph * 0.5 - 3.0).max(ph * 0.5 + 3.0));
+                    let pill = PlacedPill { id: c.id.to_string(), text: short_txt.clone(), cx, cy, pw, ph, col: c.col, sel: c.sel };
+                    if !placed_boxes.iter().any(|o| rects_overlap(&pill.rect(2.0), o)) {
+                        chosen = Some(pill);
+                        break;
+                    }
+                }
+                if chosen.is_none() {
+                    let cy = cy_raw.clamp(ph * 0.5 + 3.0, (h - ph * 0.5 - 3.0).max(ph * 0.5 + 3.0));
+                    chosen = Some(PlacedPill { id: c.id.to_string(), text: short_txt, cx, cy, pw, ph, col: c.col, sel: c.sel });
+                }
+            }
+        }
+        if let Some(pill) = chosen {
+            placed_boxes.push(pill.rect(2.0));
+            out.push(pill);
+        }
+    }
+    out
+}
+
+/// Greedy screen-space collision-free placement of component refdes labels, avoiding pre-placed boxes.
+pub fn layout_labels_avoiding(
+    parts: &[Value],
+    cam: &Camera,
+    w: f32,
+    h: f32,
+    pinned: &[&str],
+    blocked: &[[f32; 4]],
+) -> Vec<PlacedLabel> {
     let pin_set: HashSet<&str> = pinned.iter().copied().collect();
     struct Cand<'a> {
         r: &'a str,
@@ -602,7 +790,7 @@ pub fn layout_labels(parts: &[Value], cam: &Camera, w: f32, h: f32, pinned: &[&s
     }
     cands.sort_by(|a, b| b.score.total_cmp(&a.score));
 
-    let mut placed_boxes: Vec<[f32; 4]> = Vec::new();
+    let mut placed_boxes: Vec<[f32; 4]> = blocked.to_vec();
     let mut out = Vec::new();
     for c in cands {
         let rect = [
@@ -611,15 +799,17 @@ pub fn layout_labels(parts: &[Value], cam: &Camera, w: f32, h: f32, pinned: &[&s
             c.cx + c.box_w * 0.5,
             c.cy + c.box_h * 0.5,
         ];
-        let overlaps = placed_boxes
-            .iter()
-            .any(|o| !(rect[2] <= o[0] || rect[0] >= o[2] || rect[3] <= o[1] || rect[1] >= o[3]));
-        if !overlaps {
+        if !placed_boxes.iter().any(|o| rects_overlap(&rect, o)) {
             placed_boxes.push(rect);
             out.push(PlacedLabel { text: c.r.to_string(), cx: c.cx, cy: c.cy });
         }
     }
     out
+}
+
+/// Greedy screen-space collision-free placement of component refdes labels.
+pub fn layout_labels(parts: &[Value], cam: &Camera, w: f32, h: f32, pinned: &[&str]) -> Vec<PlacedLabel> {
+    layout_labels_avoiding(parts, cam, w, h, pinned, &[])
 }
 
 pub fn merge_optimistic_into_draw(draw: &Value, optimistic: &HashMap<String, Value>) -> Value {
@@ -977,6 +1167,7 @@ fn paint_layer_scene(
                 if i == 0 { fpb.move_to(q); } else { fpb.line_to(q); }
             }
             fpb.close();
+            let mut holes_pts: Vec<Vec<[f64; 2]>> = Vec::new();
             for hole_v in r["holes"].as_array().into_iter().flatten() {
                 let hole = pts_from_val(hole_v);
                 if hole.len() >= 3 {
@@ -985,6 +1176,7 @@ fn paint_layer_scene(
                         if i == 0 { fpb.move_to(q); } else { fpb.line_to(q); }
                     }
                     fpb.close();
+                    holes_pts.push(hole);
                 }
             }
             if let Ok(path) = fpb.build() {
@@ -1005,6 +1197,34 @@ fn paint_layer_scene(
             if let Ok(path) = spb.build() {
                 let scol = if bad { alpha_col(BAD_RED, 0xf2) } else if sel { alpha_col(0xffffff, 0xe8) } else { alpha_col(col, oa) };
                 window.paint_path(path, scol);
+            }
+
+            // In-pour rail net label when plane polygon is large enough to hold it
+            let net_lbl = r["net"].as_str().unwrap_or("");
+            if !net_lbl.is_empty() {
+                let (mut sx0, mut sy0, mut sx1, mut sy1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
+                for p in &outer {
+                    let (px_x, px_y) = cam.to_px(p[0] as f32, p[1] as f32, w, h);
+                    sx0 = sx0.min(px_x);
+                    sy0 = sy0.min(px_y);
+                    sx1 = sx1.max(px_x);
+                    sy1 = sy1.max(px_y);
+                }
+                if (sx1 - sx0).abs() >= 38.0 && (sy1 - sy0).abs() >= 18.0 {
+                    if let Some(lp) = pour_label_point(&outer, &holes_pts) {
+                        let (lx, ly) = cam.to_px(lp[0] as f32, lp[1] as f32, w, h);
+                        paint_shaped_text(
+                            window,
+                            cx,
+                            net_lbl,
+                            10.0,
+                            alpha_col(col, if sel { 0xe8 } else { 0xaa }),
+                            ox + lx,
+                            oy + ly,
+                            true,
+                        );
+                    }
+                }
             }
         }
 
@@ -1062,13 +1282,15 @@ fn paint_layer_scene(
             if let Ok(path) = dash_pb.build() { window.paint_path(path, alpha_col(PART_OVERHANG, 0xd8)); }
         }
 
-        // 6. Collision-free component refdes labels
+        // 6. Collision-free component refdes labels (avoiding corridor pills)
         let bands: Vec<&Value> = draw["bands"]
             .as_array()
             .into_iter()
             .flatten()
             .filter(|b| b["layer"] == layer)
             .collect();
+        let pills = place_corridor_pills(&bands, cam, w, h, selected_id, hover.map(Hit::item_id));
+        let pill_boxes: Vec<[f32; 4]> = pills.iter().map(|p| p.rect(1.0)).collect();
         let mut pinned_refs: Vec<&str> = Vec::new();
         for b in &bands {
             for k in ["from", "to"] {
@@ -1077,8 +1299,8 @@ fn paint_layer_scene(
                 }
             }
         }
-        for lbl in layout_labels(&parts, cam, w, h, &pinned_refs) {
-            paint_shaped_text(window, cx, &lbl.text, 9.5, alpha_col(REFDES_COLOR, 0xdd), ox + lbl.cx, oy + lbl.cy, false);
+        for lbl in layout_labels_avoiding(&parts, cam, w, h, &pinned_refs, &pill_boxes) {
+            paint_shaped_text(window, cx, &lbl.text, 9.5, alpha_col(REFDES_COLOR, 0xbb), ox + lbl.cx, oy + lbl.cy, false);
         }
 
         // 7. Faint color-tinted signal ratsnest guides
@@ -1182,30 +1404,23 @@ fn paint_layer_scene(
                     }
                 }
             }
+        }
 
-            // 10. Centered net-count pill at arc-length midpoint
-            let nets = b["nets"].as_u64().unwrap_or(0);
-            if nets > 0 {
-                if let Some(mid) = polyline_midpoint(&pts) {
-                    let txt = nets.to_string();
-                    let (mx_px, my_px) = cam.to_px(mid[0] as f32, mid[1] as f32, w, h);
-                    let pw = (txt.len() as f32 * 6.5 + 8.0).max(16.0);
-                    let ph = 15.0f32;
-                    let badge_bounds = Bounds::new(
-                        point(px(ox + mx_px - pw * 0.5), px(oy + my_px - ph * 0.5)),
-                        size(px(pw), px(ph)),
-                    );
-                    window.paint_quad(gpui::quad(
-                        badge_bounds,
-                        px(0.),
-                        alpha_col(BADGE_BG, 0xf2),
-                        px(1.2),
-                        alpha_col(if sel { 0xffffff } else { col }, 0xee),
-                        BorderStyle::Solid,
-                    ));
-                    paint_shaped_text(window, cx, &txt, 10.0, alpha_col(BADGE_FG, 0xff), ox + mx_px, oy + my_px, true);
-                }
-            }
+        // 10. Collision-avoiding corridor pills along polylines
+        for pill in &pills {
+            let badge_bounds = Bounds::new(
+                point(px(ox + pill.cx - pill.pw * 0.5), px(oy + pill.cy - pill.ph * 0.5)),
+                size(px(pill.pw), px(pill.ph)),
+            );
+            window.paint_quad(gpui::quad(
+                badge_bounds,
+                px(0.),
+                alpha_col(BADGE_BG, 0xf2),
+                px(1.2),
+                alpha_col(if pill.sel { 0xffffff } else { pill.col }, 0xee),
+                BorderStyle::Solid,
+            ));
+            paint_shaped_text(window, cx, &pill.text, 10.0, alpha_col(BADGE_FG, 0xff), ox + pill.cx, oy + pill.cy, true);
         }
 
         // 11. Interactive vertex & midpoint handles on selected item (if unlocked)
@@ -1560,7 +1775,14 @@ pub fn view(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                     .gap(px(6.))
                     .child(div().w(px(3.)).h(px(14.)).bg(c(if is_power { "warn" } else { "accent" })))
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(12.)).text_color(c("text")).child(title))
-                    .child(div().px_1().border_1().border_color(c(st_tone)).bg(c("raise")).text_size(crate::scale::tpx(10.)).text_color(c(st_tone)).child(st_label))
+                    .when(!items.is_empty(), |hdr| {
+                        let st_col = if matches!(st_tone, "bad" | "warn" | "accent" | "ok") && st_tone != "dim" {
+                            if st_tone == "warn" { "dim" } else { st_tone }
+                        } else {
+                            "faint"
+                        };
+                        hdr.child(div().text_size(crate::scale::tpx(10.)).text_color(c(st_col)).child(st_label))
+                    })
                     .when(has_awaiting, |hdr| {
                         let lo = ln_ok.clone();
                         let ln = ln_no.clone();
@@ -2076,5 +2298,29 @@ mod tests {
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[1]["layer"], "In1.Cu");
         assert_eq!(merged[1]["title"], "L2 · GND1");
+        assert_eq!(layer_display_title("In1.Cu", &copper, &merged), "L2 · GND1");
+        assert_eq!(layer_display_title("B.Cu", &copper, &merged), "B.Cu");
+    }
+
+    #[test]
+    fn corridor_pills_avoid_overlap_and_pour_label_avoids_holes() {
+        let cam = Camera::fit([0.0, 0.0, 100.0, 100.0], 400.0, 400.0, 0.0);
+        let b1 = json!({"id": "b1", "name": "SPI", "nets": 4, "path": [[10.0, 50.0], [90.0, 50.0]]});
+        let b2 = json!({"id": "b2", "name": "I2C", "nets": 2, "path": [[10.0, 50.0], [90.0, 50.0]]});
+        let bands = [&b1, &b2];
+        let pills = place_corridor_pills(&bands, &cam, 400.0, 400.0, Some("b1"), None);
+        assert_eq!(pills.len(), 2);
+        assert_eq!(pills[0].id, "b1");
+        assert_eq!(pills[0].text, "SPI · 4");
+        assert!(!rects_overlap(&pills[0].rect(0.0), &pills[1].rect(0.0)), "pills must not overlap");
+
+        let parts = vec![json!({"r": "U_BLOCKED", "b": [40.0, 40.0, 60.0, 60.0], "o": false})];
+        assert_eq!(layout_labels_avoiding(&parts, &cam, 400.0, 400.0, &[], &[pills[0].rect(0.0)]).len(), 0);
+
+        let outer = vec![[0.0, 0.0], [100.0, 0.0], [100.0, 100.0], [0.0, 100.0]];
+        let center_hole = vec![vec![[35.0, 35.0], [65.0, 35.0], [65.0, 65.0], [35.0, 65.0]]];
+        let pt = pour_label_point(&outer, &center_hole).unwrap();
+        assert!(!point_in_ring(pt[0], pt[1], &center_hole[0]));
+        assert!(point_in_ring(pt[0], pt[1], &outer));
     }
 }

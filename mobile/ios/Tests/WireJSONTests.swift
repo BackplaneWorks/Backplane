@@ -53,5 +53,14 @@ check(ro?.value == true && ro?.on == false, "review bar off: pressed again, back
 check(try! JSONDecoder().decode(DReviewReply.self, from: Data(#"{"review":null}"#.utf8)).review == nil, "no review: no bar", "")
 check(try! JSONDecoder().decode(DReviewReply.self, from: Data(#"{"review":{"on":true}}"#.utf8)).review?.drawn == false, "nothing to draw", "")
 
+// Thread plan mode + Proposed plan ask head
+let thPlan = try! JSONDecoder().decode(DThread.self, from: Data(#"{"id":"t1","project":"p","title":"T","state":"idle","updatedAt":1,"pinned":false,"pinOrder":0,"settled":false,"settledAt":0,"archived":false,"provider":"claude","model":"opus","effort":"high","runtime":"","chip":"","preview":"","waiting":0,"parent":"","history":false,"status":"","swarm":"","planMode":{"phase":"armed","interaction":"default","once":true,"scope":"once","label":"Plan (1 turn)","pending":false,"executing":false}}"#.utf8))
+check(thPlan.planMode?.phase == "armed" && thPlan.planMode?.scope == "once", "DThread decodes planMode", "")
+check(DPlanMode.nextCycle(for: thPlan.planMode!) == .always, "once -> always cycle", "")
+let thOmitted = try! JSONDecoder().decode(DThread.self, from: Data(#"{"id":"t2","project":"p","title":"T","state":"idle","updatedAt":1,"pinned":false,"pinOrder":0,"settled":false,"settledAt":0,"archived":false,"provider":"claude","model":"opus","effort":"","runtime":"","chip":"","preview":"","waiting":0,"parent":"","history":false,"status":"","swarm":""}"#.utf8))
+check(DPlanMode.effective(for: thOmitted)?.phase == "off", "Claude thread with omitted planMode defaults to off", "")
+let askPlan = try! JSONDecoder().decode(DAsk.self, from: Data(#"{"id":"a1","state":"open","kind":"plan","head":"Proposed plan","question":"Do step 1","options":[],"revise":true}"#.utf8))
+check(askPlan.head == "Proposed plan" && askPlan.revise && askPlan.kind == "plan", "DAsk decodes head & revise", "")
+
 print("wire-json: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

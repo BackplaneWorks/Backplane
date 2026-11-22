@@ -10,7 +10,49 @@ private fun <T> JSONArray?.list(f: (JSONObject) -> T): List<T> = if (this == nul
 
 data class DOption(val id: String, val label: String)
 data class DTool(val name: String, val summary: String, val state: String, val sub: String = "", val result: String = "") // sub: an Agent call's subagent (feature subview); result: a subagent's tool result
-data class DAsk(val id: String, val state: String, val question: String, val options: List<DOption>, val answered: String?, val kind: String = "", val revise: Boolean = false) { val open get() = state == "open" }
+data class DAsk(val id: String, val state: String, val question: String, val options: List<DOption>, val answered: String?, val kind: String = "", val revise: Boolean = false, val head: String = "") { val open get() = state == "open" }
+data class DPlanMode(
+    val phase: String = "off",
+    val interaction: String = "default",
+    val once: Boolean = false,
+    val scope: String = "off",
+    val label: String = "",
+    val pending: Boolean = false,
+    val executing: Boolean = false,
+) {
+    val isActive: Boolean get() = phase.isNotEmpty() && phase != "off"
+}
+enum class PlanModeTarget { OFF, ONCE, ALWAYS }
+fun parsePlanMode(o: JSONObject?): DPlanMode? = o?.let {
+    DPlanMode(
+        phase = it.optString("phase", "off").ifEmpty { "off" },
+        interaction = it.optString("interaction", "default").ifEmpty { "default" },
+        once = it.optBoolean("once", false),
+        scope = it.optString("scope", "off").ifEmpty { "off" },
+        label = it.optString("label", ""),
+        pending = it.optBoolean("pending", false),
+        executing = it.optBoolean("executing", false),
+    )
+}
+fun planModeJson(m: DPlanMode?): Any = if (m == null) JSONObject.NULL else JSONObject()
+    .put("phase", m.phase)
+    .put("interaction", m.interaction)
+    .put("once", m.once)
+    .put("scope", m.scope)
+    .put("label", m.label)
+    .put("pending", m.pending)
+    .put("executing", m.executing)
+fun effectivePlanMode(t: DThread?): DPlanMode? = when {
+    t == null -> null
+    t.planMode != null -> t.planMode
+    t.provider == "claude" -> DPlanMode()
+    else -> null
+}
+fun nextPlanModeCycle(m: DPlanMode): PlanModeTarget = when (m.phase) {
+    "off", "" -> PlanModeTarget.ONCE
+    "armed", "planning" -> if (m.scope == "once") PlanModeTarget.ALWAYS else PlanModeTarget.OFF
+    else -> PlanModeTarget.OFF
+}
 data class DAttachment(val id: String, val name: String, val mime: String, val bytes: Long)
 data class DEntry(
     val id: String, val kind: String, val text: String, val at: Long, val clientId: String? = null, val replaces: String? = null,
@@ -69,6 +111,7 @@ data class DThread(
     val status: String = "", // the sidebar dot's word (feature status): active, waiting, blocked, failed, stalled, finished (the desktop's green dot: done, not yet settled), settled, inactive; "" from an older hub
     val swarm: String = "", // the swarm room this thread is a member of (feature swarm), "" for none: left out of its project's list, which shows the swarm once
     val memory: DMemory? = null, // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); null for a thread without it
+    val planMode: DPlanMode? = null,
 )
 /** A thread's memory progress, every word the hub's: the bar is [done] of [total], [state] caught | behind | held. */
 data class DMemory(val done: Long, val total: Long, val state: String, val line: String, val status: String, val lines: String, val viewLine: String) {
@@ -93,7 +136,7 @@ object DialGeometry {
 }
 
 fun parseOption(o: JSONObject) = DOption(o.str("id"), o.str("label").ifEmpty { o.str("id") })
-fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"), o.optJSONArray("options").list(::parseOption), if (o.has("answered") && !o.isNull("answered")) o.str("answered") else null, o.str("kind"), o.optBoolean("revise", false))
+fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"), o.optJSONArray("options").list(::parseOption), if (o.has("answered") && !o.isNull("answered")) o.str("answered") else null, o.str("kind"), o.optBoolean("revise", false), o.str("head"))
 fun parseEntry(o: JSONObject) = DEntry(
     o.str("id"), o.str("kind"), o.str("text"), o.lng("at"), o.optString("clientId", "").ifEmpty { null }, o.optString("replaces", "").ifEmpty { null },
     o.optBoolean("live", false),
@@ -117,7 +160,7 @@ fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("r
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"), parseMemory(o.optJSONObject("memory")),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"), parseMemory(o.optJSONObject("memory")), parsePlanMode(o.optJSONObject("planMode")),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)

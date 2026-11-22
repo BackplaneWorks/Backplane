@@ -171,6 +171,12 @@ final class DataClient {
     private(set) var replying: [String: DReplyRef] = [:]
     struct ReplyFocus: Equatable { var thread = ""; var rev = 0 }
     private(set) var replyFocus = ReplyFocus()
+    // Project management panels (BOM, Checks, Lifecycle, Plan, Fab) watched via mgmt.watch & info pushes
+    private(set) var mgmt: [String: Data] = [:]
+    private(set) var mgmtRev: Int = 0
+    private(set) var mgmtDigest: String = ""
+    private(set) var mgmtProject: String = ""
+    @ObservationIgnored private var mgmtAsked: String = ""
 
     // a tapped notification: the thread to open and the approval to land on. The views follow these
     var pushThread = ""
@@ -318,6 +324,7 @@ final class DataClient {
         notice = HubNotice(); star = nil; telemetryNotice = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
+        mgmt = [:]; mgmtDigest = ""; mgmtProject = ""; mgmtAsked = ""; mgmtRev += 1
         if clearDisk, let k = link.flatMap({ Pairing.key($0) }) { try? FileManager.default.removeItem(at: Self.cacheURL(for: k)) }
     }
 
@@ -359,6 +366,7 @@ final class DataClient {
         for (_, k) in calls { k.resume(throwing: DError(code: "OFFLINE", message: "Offline")) }
         calls = [:]
         listSub = 0; threadSub = 0
+        mgmtAsked = ""
         terms.disconnected()
     }
     // the app came back to the front: a socket that died while suspended is replaced at once
@@ -541,17 +549,37 @@ final class DataClient {
         case "hub.restarting": if let t = HubRestart.restarting(o) { restarting = HubRestart.Note(text: t, heard: Date()); restartStrip() }
         case "telemetry.notice": telemetryNotice = DTelemetryNotice.of(o["notice"])
         case "migrating": heardMigration(o)
-        case "info": if let v = (o["info"] as? [String: Any])?["hub.offer"] as? String { heardOffer(v) }
+        case "info":
+            if let info = o["info"] as? [String: Any] {
+                if let v = info["hub.offer"] as? String { heardOffer(v) }
+                heardMgmt(info)
+            }
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
         default: break
         }
     }
 
-    func call<T: Decodable>(_ m: String, _ p: [String: Any] = [:], as: T.Type = T.self) async throws -> T {
+    private func heardMgmt(_ info: [String: Any]) {
+        let keys = info.keys.filter { $0.hasPrefix("mgmt.") || $0.hasPrefix("kicad.checks.") || $0.hasPrefix("review.") }
+        guard !keys.isEmpty else { return }
+        var next = mgmt
+        for k in keys {
+            if let s = info[k] as? String {
+                if s.isEmpty { next.removeValue(forKey: k) }
+                else { next[k] = Data(s.utf8) }
+            } else if let obj = info[k] as? [String: Any], let data = WireJSON.data(obj) {
+                next[k] = data
+            }
+        }
+        mgmt = next
+        mgmtRev += 1
+    }
+
+    private func callRaw(_ m: String, _ p: [String: Any] = [:]) async throws -> Data {
         guard conn != .offline, let task else { throw DError(code: "OFFLINE", message: "Offline") }
         let id = nextId; nextId += 1
         guard let msg = WireJSON.data(["id": id, "m": m, "p": p]) else { throw DError(code: "BAD_PARAMS", message: "Not JSON: \(m)") }
-        let data: Data = try await withCheckedThrowingContinuation { k in
+        return try await withCheckedThrowingContinuation { k in
             calls[id] = k
             task.send(.string(String(decoding: msg, as: UTF8.self))) { [weak self] e in
                 if let e { Task { @MainActor in self?.calls.removeValue(forKey: id)?.resume(throwing: e) } }
@@ -561,6 +589,10 @@ final class DataClient {
                 self?.calls.removeValue(forKey: id)?.resume(throwing: DError(code: "TIMEOUT", message: "The hub did not answer"))
             }
         }
+    }
+
+    func call<T: Decodable>(_ m: String, _ p: [String: Any] = [:], as: T.Type = T.self) async throws -> T {
+        let data = try await callRaw(m, p)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
@@ -1300,6 +1332,78 @@ final class DataClient {
     func pick(_ id: String, action: String, value: String) async throws {
         let r: DThreadOpt = try await call("thread.pick", ["thread": id, "action": action, "value": value])
         if let t = r.thread { upsert(t) }
+    }
+    func setPlanMode(_ id: String, target: DPlanMode.Target) async throws {
+        let cur = threads.first(where: { $0.id == id })?.planMode
+        switch target {
+        case .off:
+            if cur?.interaction == "plan" {
+                try await pick(id, action: "interaction", value: "default")
+            }
+            let r: DThreadOpt = try await call("thread.planonce", ["thread": id, "on": false])
+            if let t = r.thread { upsert(t) }
+        case .once:
+            if cur?.interaction == "plan" {
+                try await pick(id, action: "interaction", value: "default")
+            }
+            let r: DThreadOpt = try await call("thread.planonce", ["thread": id, "on": true])
+            if let t = r.thread { upsert(t) }
+        case .always:
+            if cur?.once == true {
+                let r: DThreadOpt = try await call("thread.planonce", ["thread": id, "on": false])
+                if let t = r.thread { upsert(t) }
+            }
+            try await pick(id, action: "interaction", value: "plan")
+        }
+    }
+    func mgmtRaw(_ id: String) -> Data? {
+        guard !mgmtDigest.isEmpty else { return nil }
+        return mgmt["mgmt.\(id).\(mgmtDigest)"]
+    }
+    func mgmtWatch(_ project: String) async {
+        guard !project.isEmpty else { return }
+        if project != mgmtAsked { mgmtAsked = project; mgmtDigest = ""; mgmtProject = "" }
+        guard let raw = try? await callRaw("mgmt.watch", ["project": project]),
+              let o = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any],
+              let d = o["digest"] as? String, !d.isEmpty, project == mgmtAsked else { return }
+        var next = mgmt
+        if let state = o["state"] as? [String: Any], let sd = WireJSON.data(state) {
+            next["mgmt.state.\(d)"] = sd
+        }
+        if let dataObj = o["data"] as? [String: Any] {
+            for (k, v) in dataObj {
+                if let vo = v as? [String: Any], let vd = WireJSON.data(vo) {
+                    next["mgmt.\(k).\(d)"] = vd
+                }
+            }
+        }
+        mgmt = next
+        mgmtDigest = d
+        mgmtProject = (o["project"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? project
+        mgmtRev += 1
+    }
+    func planGet(_ pro: String, board: Bool = true) async throws -> Data {
+        try await callRaw("plan.get", ["pro": pro, "board": board])
+    }
+    func planApprove(_ pro: String, layer: String, ids: [String], approve: Bool) async throws {
+        _ = try await call("plan.approve", ["pro": pro, "layer": layer, "ids": ids, "approve": approve], as: DEmpty.self)
+    }
+    func planUpdate(_ pro: String, ops: [[String: Any]], base: Int?) async throws {
+        var p: [String: Any] = ["pro": pro, "ops": ops]
+        if let base { p["base"] = base }
+        _ = try await call("plan.update", p, as: DEmpty.self)
+    }
+    func planVerify(_ pro: String) async throws {
+        _ = try await call("plan.verify", ["pro": pro], as: DEmpty.self)
+    }
+    func planStop(_ pro: String) async throws {
+        _ = try await call("plan.stop", ["pro": pro], as: DEmpty.self)
+    }
+    func planEnable(_ pro: String, on: Bool) async throws {
+        _ = try await call("plan.enable", ["pro": pro, "on": on], as: DEmpty.self)
+    }
+    func planFocus(_ pro: String, id: String) async throws {
+        _ = try await call("plan.focus", ["pro": pro, "id": id], as: DEmpty.self)
     }
     func mentions(_ q: String, kind: String) async -> [DMention] {
         ((try? await call("mentions.list", ["q": q, "kind": kind, "limit": 8]) as DMentions)?.items) ?? []
