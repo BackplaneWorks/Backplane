@@ -212,6 +212,18 @@ pub mod hub {
     pub fn program(p: &std::ffi::OsStr) -> std::ffi::OsString { p.to_os_string() }
     /// What to start for `p` and the arguments before the caller's: the program itself (the kernel reads `#!`).
     pub fn launch(p: &std::ffi::OsStr) -> (std::ffi::OsString, Vec<std::ffi::OsString>) { (p.to_os_string(), vec![]) }
+    /// This machine's host name via `gethostname(2)`: no child process, no PATH lookup, no SIGCHLD wait (#1607).
+    pub fn hostname() -> String {
+        let mut buf = [0u8; 256];
+        if unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) } != 0 { return String::new() }
+        let n = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        String::from_utf8_lossy(&buf[..n]).trim().to_string()
+    }
+    /// Monotonic awake seconds since first call (pauses while macOS/Linux sleeps, matching tokio timers).
+    pub fn awake_s() -> u64 {
+        static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        T0.get_or_init(std::time::Instant::now).elapsed().as_secs()
+    }
 }
 
 pub mod time {

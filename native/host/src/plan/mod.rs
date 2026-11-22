@@ -972,9 +972,8 @@ mod tests {
     }
 
     #[test] fn saved_plan_update_checks_base_revision_and_unique_note_ids() {
-        let dir = std::env::temp_dir().join(format!("bp-plan-mod-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir_guard = crate::plat::tmp::dir("plan-mod");
+        let dir = dir_guard.path();
         let pcb = dir.join("demo.kicad_pcb");
         let plan_f = dir.join("demo.kicad_plan");
         std::fs::write(&pcb, "").unwrap();
@@ -1005,7 +1004,6 @@ mod tests {
         assert_eq!(disk_after["revision"], 6);
         assert_eq!(disk_after["notes"].as_array().unwrap().len(), 2);
         assert_eq!(disk_after["notes"][0]["target"], "c1");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test] fn live_merge_preserved_holes_keeps_authoritative_holes_and_allows_explicit_clear() {

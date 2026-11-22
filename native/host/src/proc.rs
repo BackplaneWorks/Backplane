@@ -441,6 +441,94 @@ mod tests {
         assert!(out.matches("chld=DFL").count() == 2 && out.matches("blocked=0 waited=true").count() == 2, "std and tokio children: {out}");
     }
 
+    /// Non-test source lines up to the first inline `#[cfg(test)] mod <name> {` module (forward declarations such as `#[cfg(test)] mod tests;` stay).
+    fn non_test_code(text: &str) -> String {
+        fn is_cfg_test(t: &str) -> bool {
+            let Some(rest) = t.strip_prefix("#[cfg(") else { return false };
+            let Some((args, _)) = rest.split_once(")]") else { return false };
+            // Strip balanced `not(...)` clauses so `#[cfg(not(test))]` and `#[cfg(all(not(test), unix))]` stay production code.
+            let mut filtered = String::with_capacity(args.len());
+            let b = args.as_bytes();
+            let mut i = 0;
+            while i < b.len() {
+                if b[i..].starts_with(b"not(") {
+                    let mut depth = 1usize;
+                    let mut j = i + 4;
+                    while j < b.len() && depth > 0 {
+                        if b[j] == b'(' { depth += 1; } else if b[j] == b')' { depth -= 1; }
+                        j += 1;
+                    }
+                    i = j;
+                } else {
+                    let ch = args[i..].chars().next().unwrap();
+                    filtered.push(ch);
+                    i += ch.len_utf8();
+                }
+            }
+            filtered.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').any(|w| w == "test")
+        }
+        fn starts_mod(rest: &str) -> Option<&str> {
+            let mut item = rest.trim_start();
+            while item.starts_with("#[") {
+                let Some((_, after)) = item.split_once(']') else { return None };
+                item = after.trim_start();
+            }
+            let s = item.strip_prefix("pub").map(|r| {
+                let r = r.trim_start();
+                if r.starts_with('(') { r.split_once(')').map_or(r, |x| x.1).trim_start() } else { r }
+            }).unwrap_or(item).trim_start();
+            s.strip_prefix("mod ")
+        }
+        fn inline_mod_at(lines: &[&str], idx: usize, same_line: &str) -> bool {
+            let first = if same_line.is_empty() {
+                let mut k = idx + 1;
+                while k < lines.len() {
+                    let s = lines[k].trim();
+                    if s.is_empty() || s.starts_with("//") || s.starts_with("#[") { k += 1; } else { break; }
+                }
+                if k >= lines.len() { return false }
+                (k, lines[k].trim())
+            } else {
+                (idx, same_line)
+            };
+            let Some(after) = starts_mod(first.1) else { return false };
+            if let Some((name, _)) = after.split_once('{') {
+                return !name.contains(';') && !name.trim().is_empty();
+            }
+            if after.contains(';') { return false }
+            let mut k = first.0 + 1;
+            while k < lines.len() {
+                let s = lines[k].trim();
+                if s.is_empty() || s.starts_with("//") { k += 1; continue }
+                return s.starts_with('{');
+            }
+            false
+        }
+        let lines: Vec<&str> = text.lines().collect();
+        let mut out = String::new();
+        for (i, &l) in lines.iter().enumerate() {
+            let t = l.trim();
+            if is_cfg_test(t) {
+                if let Some((_, after)) = l.split_once(")]") {
+                    if inline_mod_at(&lines, i, after.trim()) { break }
+                }
+            }
+            out.push_str(l);
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test] fn non_test_code_keeps_code_after_forward_test_mod_declarations() {
+        let s = "fn a() {}\n#[cfg(test)] mod tests;\n#[cfg(test)] mod laws;\n#[cfg(not(test))] mod prod { Command::new(\"git\"); }\n#[cfg(all(not(test), unix))] mod prod2 { Command::new(\"sh\"); }\nfn b() { Command::new(\"git\"); }\n#[cfg(test)]\n#[allow(dead_code)]\nmod inline_tests\n{\n    fn t() { Command::new(\"x\"); }\n}\n";
+        let got = non_test_code(s);
+        assert!(got.contains("fn b()"), "must keep code after `#[cfg(test)] mod tests;`: {got}");
+        assert!(got.contains("mod prod"), "must keep #[cfg(not(test))] production module: {got}");
+        assert!(got.contains("mod prod2"), "must keep #[cfg(all(not(test), unix))] production module: {got}");
+        assert!(!got.contains("inline_tests"), "must stop at inline test module with intervening attrs / next-line brace: {got}");
+        assert!(non_test_code("#[cfg(test)] pub(crate) mod t { fn x() {} }\n").is_empty());
+    }
+
     /// The gate is the only way to make a process: no other non-test `Command::new` anywhere under src/ (src/bin has its own crates' helpers).
     #[test] fn every_child_process_is_made_through_proc() {
         fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { if p.file_name().map_or(false, |n| n == "bin") { continue } walk(&p, out) } else if p.extension().map_or(false, |x| x == "rs") { out.push(p) } } }
@@ -450,9 +538,8 @@ mod tests {
             if f.ends_with("proc.rs") { continue }
             let text = std::fs::read_to_string(&f).unwrap();
             let name = f.to_string_lossy().replace('\\', "/");
-            if name.ends_with("tests.rs") || name.contains("/tests/") { continue }
-            // everything after the first #[cfg(test)] line is test code
-            let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
+            if name.ends_with("tests.rs") || name.ends_with("copy_gate.rs") || name.ends_with("copy_outs.rs") || name.contains("/tests/") { continue }
+            let code = non_test_code(&text);
             for (i, l) in code.lines().enumerate() { if l.contains("Command::new(") && !l.trim_start().starts_with("//") { bad.push(format!("{}:{}", name, i + 1)) } }
         }
         assert!(bad.is_empty(), "build children with crate::proc::{{tokio_cmd, std_cmd}}: {bad:?}");
@@ -472,9 +559,9 @@ mod tests {
         let mut bad = vec![];
         for f in files {
             let name = f.to_string_lossy().replace('\\', "/");
-            if name.ends_with("tests.rs") || name.ends_with("e2e.rs") || name.contains("/tests/") || ALLOWED.iter().any(|a| name.ends_with(a)) { continue }
+            if name.ends_with("tests.rs") || name.ends_with("e2e.rs") || name.ends_with("copy_gate.rs") || name.ends_with("copy_outs.rs") || name.contains("/tests/") || ALLOWED.iter().any(|a| name.ends_with(a)) { continue }
             let text = std::fs::read_to_string(&f).unwrap();
-            let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
+            let code = non_test_code(&text);
             for (i, l) in code.lines().enumerate() {
                 let l = l.trim_start(); if l.starts_with("//") { continue }
                 if ["TcpStream::connect", "UdpSocket", "TcpSocket", "connect_async", "UnixStream::connect"].iter().any(|k| l.contains(k)) { bad.push(format!("{name}:{}", i + 1)) }

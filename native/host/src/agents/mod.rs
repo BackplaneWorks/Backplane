@@ -632,9 +632,9 @@ async fn remake_folder(cwd: &str, root: &str) -> Result<(), String> {
     let p = std::path::Path::new(cwd);
     if cwd.is_empty() { return Err("the thread has no folder".into()) }
     if p.is_dir() { return Ok(()) }
-    if !root.is_empty() && std::path::Path::new(root).join(".git").exists() {
+    if !crate::copy::on() && !root.is_empty() && std::path::Path::new(root).join(".git").exists() {
         if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
-        let run = |args: Vec<&str>| { let mut c = tokio::process::Command::new("git"); c.arg("-C").arg(root).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()); c.status() };
+        let run = |args: Vec<&str>| { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, "git"); c.arg("-C").arg(root).args(args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()); c.status() };
         let _ = run(vec!["worktree", "prune"]).await;
         let _ = run(vec!["worktree", "add", "--detach", cwd, "HEAD"]).await;
     }

@@ -117,7 +117,7 @@ async fn machine_git() -> Option<PathBuf> {
 async fn elevated() -> bool {
     if !cfg!(windows) { return false }
     let Some(f) = std::env::var_os("SystemRoot").map(|r| Path::new(&r).join("System32").join("fltmc.exe")) else { return false };
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, f); c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, f); c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
     matches!(tokio::time::timeout(std::time::Duration::from_secs(20), c.status()).await, Ok(Ok(s)) if s.success())
 }
 /// Git for Windows' command line from an elevated hub: its switches less `/CURRENTUSER` and no `/DIR`, so the all-users install it makes stays in Program Files.
@@ -128,7 +128,7 @@ async fn registered_in(hive: &str, p: &WinInstaller) -> Option<PathBuf> {
     if !cfg!(windows) { return None }
     let reg = std::env::var_os("SystemRoot").map(|r| Path::new(&r).join("System32").join("reg.exe"))?;
     let key = if hive.contains('\\') { format!("{hive}\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", uninstall_key(p)) } else { format!("{hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", uninstall_key(p)) };
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, reg); c.args(["query", &key, "/v", "UninstallString"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, reg); c.args(["query", &key, "/v", "UninstallString"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     let o = tokio::time::timeout(std::time::Duration::from_secs(20), c.output()).await.ok()?.ok()?;
     registered_dir(&String::from_utf8_lossy(&o.stdout))
 }

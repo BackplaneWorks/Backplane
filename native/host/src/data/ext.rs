@@ -849,8 +849,8 @@ mod pick_tests {
     }
 
     #[test] fn browser_plan_path_is_confined_to_authorized_projects() {
-        let base = std::env::temp_dir().join(format!("bp-ext-plan-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base_guard = crate::plat::tmp::dir("ext-plan");
+        let base = base_guard.path();
         let home = base.join("home");
         let proj = base.join("proj");
         let outside = base.join("outside");
@@ -891,6 +891,5 @@ mod pick_tests {
             std::os::unix::fs::symlink(&outside_plan, &sub_sidecar).unwrap();
             assert!(check_browser_plan_path(&roots, &home, sub_pro.to_str().unwrap()).is_err());
         }
-        let _ = std::fs::remove_dir_all(&base);
     }
 }

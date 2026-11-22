@@ -323,6 +323,31 @@ pub mod hub {
     pub fn reset_inherited_signals() -> Option<String> { None }
     /// Windows waits on process handles, never on a signal: nothing to watch.
     pub fn watch_reaping(_every: std::time::Duration) {}
+    /// This machine's host name via `GetComputerNameExW(ComputerNameDnsHostname)` (falling back to `COMPUTERNAME`): no child process (#1607).
+    pub fn hostname() -> String {
+        use windows_sys::Win32::System::SystemInformation::{ComputerNameDnsHostname, GetComputerNameExW};
+        let mut n: u32 = 256;
+        let mut buf = vec![0u16; n as usize];
+        let ok = unsafe { GetComputerNameExW(ComputerNameDnsHostname, buf.as_mut_ptr(), &mut n) } != 0;
+        if ok && n > 0 {
+            return String::from_utf16_lossy(&buf[..(n as usize).min(buf.len())]).trim().to_string()
+        }
+        if !ok && n > buf.len() as u32 {
+            let mut buf = vec![0u16; n as usize];
+            if unsafe { GetComputerNameExW(ComputerNameDnsHostname, buf.as_mut_ptr(), &mut n) } != 0 && n > 0 {
+                return String::from_utf16_lossy(&buf[..(n as usize).min(buf.len())]).trim().to_string()
+            }
+        }
+        std::env::var("COMPUTERNAME").unwrap_or_default().trim().to_string()
+    }
+    /// Monotonic awake seconds since first call (`QueryUnbiasedInterruptTime` excludes standby/hibernation, unlike `Instant`/QPC).
+    pub fn awake_s() -> u64 {
+        #[link(name = "kernel32")] extern "system" { fn QueryUnbiasedInterruptTime(unbiased_time: *mut u64) -> i32; }
+        static T0: std::sync::OnceLock<(Option<u64>, std::time::Instant)> = std::sync::OnceLock::new();
+        let read = || { let mut t = 0u64; (unsafe { QueryUnbiasedInterruptTime(&mut t) } != 0).then_some(t / 10_000_000) };
+        let (base, fallback) = *T0.get_or_init(|| (read(), std::time::Instant::now()));
+        match (base, read()) { (Some(b), Some(now)) => now.saturating_sub(b), _ => fallback.elapsed().as_secs() }
+    }
     /// Ctrl+C or Ctrl+Break, the console closing, logoff or shutdown end the hub, said in hub.log, exit 130 (as SIGINT).
     pub fn exit_on_signals(on_exit: fn()) {
         tokio::spawn(async move { if tokio::signal::ctrl_c().await.is_ok() { on_exit(); eprintln!("backplane-hub: Ctrl+C received, exiting"); std::process::exit(130) } });
