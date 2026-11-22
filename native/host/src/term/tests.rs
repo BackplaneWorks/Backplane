@@ -230,7 +230,9 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     let reader = Tap::new(&hub, 1);
     let mut stalled = hub.attach(2); // never read until we say so
     assert_eq!(rpc(&hub, "term.open", json!({"thread":"t1","cols":80,"rows":24})).await["ok"], true);
-    rpc(&hub, "term.input", json!({"thread":"t1","b":"yes flood | head -c 20000000; echo FLOODDONE\n".bytes().collect::<Vec<u8>>()})).await;
+    // Long lines keep ConPTY's screen-buffer scroll count bounded while still overflowing the 128 KB half-outbox cap;
+    // split FLOODDONE so the echoed command line never matches before the flood completes.
+    rpc(&hub, "term.input", json!({"thread":"t1","b":"yes floodfloodfloodfloodfloodfloodfloodfloodfloodflood | head -c 4000000; printf 'FLOOD''DONE\\n'\n".bytes().collect::<Vec<u8>>()})).await;
     let t = get(&hub).unwrap();
     assert!(wait(90, || { reader.take(); t.inner.try_lock().map_or(false, |g| g.screens.get("t1").map_or(false, |sc| emb::text(&sc.vt).contains("FLOODDONE"))) }).await, "the flood ran to its end");
     assert!(hub.is_attached(2), "a skipped client is not dropped");
