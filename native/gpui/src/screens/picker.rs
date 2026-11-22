@@ -451,18 +451,37 @@ fn speed_dial(cx: &mut Context<Backplane>, light: bool, rows: &[Section], cur: &
 }
 fn detent_at_value(values: &[String], v: &str) -> usize { values.iter().position(|x| x == v).unwrap_or(0) }
 
-/// "Plan first, this turn only" (a Claude thread): its plan mode for the next turn, then the thread goes back on its own (the hub's thread.planonce);
-/// lit while set. A press flips it.
+/// "Plan first, this turn only" / Plan mode selector (a Claude thread): `1 turn`, `Always`, or `Off` synced with `thread.planMode`.
 fn plan_once_row(cx: &mut Context<Backplane>, light: bool, thread: &Value) -> Option<AnyElement> {
     if thread["claude"] != true { return None }
     let c = |n: &str| theme::color(light, n);
     let on = thread["planOnce"] == true;
+    let always = thread["planMode"]["interaction"] == "plan" && !on;
+    let mode_chip = |id: &'static str, lbl: String, lit: bool| div().id(id).px(px(6.)).py(px(1.)).text_size(crate::scale::tpx(10.)).border_1()
+        .border_color(c(if lit { "input" } else { "line" }))
+        .bg(c(if lit { "raise" } else { "panel" }))
+        .text_color(c(if lit { "input" } else { "dim" }))
+        .hover(|s| s.bg(c("raise")).text_color(c("text")))
+        .child(lbl);
     Some(crate::ui::with_rect(div().id("pick-plan-once"), || "pick:plan-once".to_string()).mx_3().mb_2().px_2().py_1().flex().items_center().gap_2().cursor_pointer().border_1()
-        .border_color(c(if on { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
-        .child(div().w(px(12.)).text_color(c("accent")).child(if on { "\u{2713}" } else { "" }))
+        .border_color(c(if on || always { "input" } else { "line" })).hover(|s| s.bg(c("raise")))
+        .child(div().w(px(12.)).text_color(c("input")).child(if on || always { "\u{2713}" } else { "" }))
         .child(div().flex_1().min_w_0().flex().flex_col()
-            .child(div().text_size(crate::scale::tpx(12.)).text_color(c(if on { "accent" } else { "text" })).child(crate::i18n::trs("Plan first, this turn only")))
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c(if on || always { "input" } else { "text" })).child(crate::i18n::trs("Plan first, this turn only")))
             .child(div().text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(crate::i18n::trs("Claude proposes a plan and waits for Implement; the thread goes back to its own mode after."))))
+        .child(mode_chip("pick-plan-always", crate::i18n::trs("Always"), always).on_click(cx.listener(move |this, _, _, cx| {
+            let th = this.selected.clone(); if th.is_empty() { return }
+            let target = if always { "default" } else { "plan" };
+            let _ = this.tx.try_send(crate::hub::Command::Rpc("thread.modes".into(), super::settings::Secret(serde_json::json!({"thread": th, "interaction": target})), "planmode"));
+            cx.stop_propagation();
+            cx.notify();
+        })))
+        .when(on || always, |d| d.child(mode_chip("pick-plan-off", crate::i18n::trs("Off"), false).on_click(cx.listener(move |this, _, _, cx| {
+            let th = this.selected.clone(); if th.is_empty() { return }
+            let _ = this.tx.try_send(crate::hub::Command::Rpc("thread.modes".into(), super::settings::Secret(serde_json::json!({"thread": th, "interaction": "default"})), "planmode"));
+            cx.stop_propagation();
+            cx.notify();
+        }))))
         .on_click(cx.listener(move |this, _, _, cx| {
             let th = this.selected.clone(); if th.is_empty() { return }
             let _ = this.tx.try_send(crate::hub::Command::Rpc("thread.planonce".into(), super::settings::Secret(serde_json::json!({"thread": th, "on": !on})), "planonce"));

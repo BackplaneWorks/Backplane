@@ -954,7 +954,8 @@ impl Render for Backplane {
         // infinite context (the hub's bots/recall/progress.rs): the context chip draws the memory's bar and its words instead of the session's context
         let memory = self.data["memory"].clone(); let mem_on = memory.is_object();
         let (tok, ctx) = if mem_on { (crate::i18n::trs(&string(&memory, "line")), crate::i18n::trs(&string(&memory, "short"))) } else { (string(&self.data, "tokChip"), ctx) };
-        let (combo_avail, tok_words) = crate::screens::combo::split(if mem_on && bar_w > 0. { bar_w - crate::screens::combo::MEM_BAR } else { bar_w }, &thread["combo"], &tok, &ctx);
+        let plan_chip_w = if crate::screens::planmode::parse(&thread["planMode"]).is_some() { 92. } else { 0. };
+        let (combo_avail, tok_words) = crate::screens::combo::split(if bar_w > 0. { (bar_w - if mem_on { crate::screens::combo::MEM_BAR } else { 0. } - plan_chip_w).max(0.) } else { 0. }, &thread["combo"], &tok, &ctx);
         // the thread's header (screens/head.rs): its state and tools beside the name in the top bar when it has the room, else a row of their own
         // a project's page over a thread: the header is the page's (its project's name), not the thread's
         // a swarm's page over the thread its viewer is drawn for: the page is what is open, so that thread has no header
@@ -1136,6 +1137,7 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ for (id, label, c) in crate::screens::bots::controls(&self.data).into_iter().chain(crate::screens::swarm::controls(&self.data)) { ctl.push(CtlEntry { id, label, ctl: c }); }
         /* i18n-ok: registered controls the e2e drivers press */ if has_thread { ctl.push(CtlEntry { id: "ui:Thread menu".into(), label: "Thread actions".into(), ctl: Ctl::ThreadMenu }); }
         /* i18n-ok: registered controls the e2e drivers press */ if has_thread { ctl.push(CtlEntry { id: "ui:Model".into(), label: "Model".into(), ctl: Ctl::ModelChip }); }
+        /* i18n-ok: registered controls the e2e drivers press */ if has_thread && crate::screens::planmode::parse(&thread["planMode"]).is_some() { ctl.push(CtlEntry { id: "ui:Plan mode".into(), label: "Plan".into(), ctl: Ctl::None }); }
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) { for (id, label) in [("@device", "This device"), ("@hubs", "Hubs"), ("@accounts", "Accounts")] { ctl.push(CtlEntry { id: format!("set-nav:{id}"), label: label.into(), ctl: Ctl::SettingsPage(id.into()) }); } }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         /* i18n-ok: registered controls the e2e drivers press */ if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
@@ -1208,6 +1210,7 @@ impl Render for Backplane {
                     // a thread in review mode says so by its name too (#1305); the bar over the message box says why and switches it
                     .when(head_thread && thread["review"]["on"] == true, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("review-mark").flex().items_center().gap(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("warn"))
                         .tooltip(crate::keys::tip("Review mode: the design files are read-only for this thread", "", light)).child(ic(light, "search", 12., "warn")).child(trs("Read-only"))))
+                    .children(head_thread.then(|| crate::screens::planmode::top_mark(light, thread)).flatten())
                     .when(head_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").relative().min_w_0().flex().font_weight(FontWeight::BOLD).child(crate::screens::head::measure(cx, self.screens.head.title.clone())).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(thread, "title")))
                         // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu
                         .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
@@ -1251,10 +1254,11 @@ impl Render for Backplane {
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("rule")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
                         .children(crate::screens::review::view(cx, light, &thread["review"]))
+                        .children(crate::screens::planmode::bar(cx, light, thread))
                         .children(crate::screens::order::view(cx, light, &thread["order"]))
                         // #1304: the agent has not answered the person's mid-turn message (screens/unanswered.rs)
                         .children(crate::screens::unanswered::view(cx, light, &thread["unanswered"]))
-                        .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
+                        .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"], &self.screens.plan_expanded, self.screens.plan_revising.as_deref()))
                         .children(crate::screens::voice::pending_view(cx, light, &self.screens.voice, &self.selected.clone()))
                         .children(self.screens.voice.views.get(&self.selected).cloned().and_then(|v| crate::screens::voice::view(cx, light, &v, self.screens.voice.level, self.screens.voice.fix.clone().as_ref())))
                         .children(crate::screens::sidebox::btw(cx, light, &thread["btw"]))
@@ -1263,7 +1267,7 @@ impl Render for Backplane {
                         .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
                         // the messages waiting for the agent (screens/queue.rs)
                         .children(crate::screens::queue::strip(cx, light, thread, &self.screens.unsent.rows(thread["id"].as_str().unwrap_or(""))))
-                        .child(div().id("composer-box").relative().child(canvas({ let at = self.screens.box_at.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
+                        .child(div().id("composer-box").relative().child(canvas({ let at = self.screens.box_at.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).border_1().border_color(c(crate::screens::planmode::composer_border(thread))).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
                         // another machine's thread: where an agent sent from here runs
                         .children(if self.project_page.is_some() { None } else { crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)) })
                         // a project's page: what the hub said when it would not do what the page asked (a New thread refused), one line by the box
@@ -1297,6 +1301,7 @@ impl Render for Backplane {
                             .child(crate::screens::bar::fit(with_rect(crate::screens::combo::chip(cx, light, thread, combo_avail, (&crate::keys::hint(&self.local, "models"), &crate::keys::hint(&self.local, "account")), &self.screens.pick.chip, self.screens.picker_open), || "ui:Model".to_string()))
                                 // held Ctrl: the menu's key over the chip's end (0.14's "Ctrl M"), so the chip keeps its width
                                 .when(self.screens.held == crate::keys::Held::Threads, |d| d.relative().child(div().absolute().right(px(4.)).top_0().bottom_0().flex().items_center().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "models")).iter().map(|k| crate::screens::hints::cap(light, k, false))))))
+                            .children(crate::screens::planmode::chip(cx, light, thread, &crate::keys::hint(&self.local, "plan-mode")))
                             // (the Draw button is gone for now: screens/pad.rs stays, to come back redone)
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).min_w_0().overflow_hidden().cursor_pointer().tooltip(crate::keys::tip("Tokens, cost and context: the thread's numbers", "", light)).on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).relative().flex().items_center().gap_2().when(self.screens.ctx_open, |d| d.border_color(c("accent"))).child(canvas({ let at = self.screens.ctx_chip.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).child(ic(light, "gauge", 14., if self.screens.ctx_open { "accent" } else { "dim" }))
                                 .children(mem_on.then(|| crate::screens::combo::mem_bar(light, &memory)))
@@ -1306,7 +1311,8 @@ impl Render for Backplane {
                             .children(crate::screens::voice::always_pill(cx, light, &self.screens.voice))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("dictate"), || "ui:Dictate".to_string())).flex_shrink_0().cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_down(cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
-                            .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(if crate::screens::voice::flashing(&self.screens.voice) { "ok" } else { "accent" })).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&crate::screens::sidebox::send_label(thread))).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
+                            .child({ let (lbl, bg) = crate::screens::planmode::send_button(thread, crate::screens::voice::flashing(&self.screens.voice));
+                                crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(bg)).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&lbl)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx))) }))))
                     .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b)))
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data, side_shown))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))

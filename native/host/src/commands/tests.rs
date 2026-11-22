@@ -156,6 +156,10 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
         json!({"$":"SettingSet","key":"account.failover.preference.t1","value":"","at":0}), json!({"$":"SettingSet","key":"fallback.intent.t1","value":"","at":0})]);
     let (e, _) = ask(&h, "thread.modes", json!({"thread":"t1","runtime":"nonsense"})).await;
     assert_eq!(e[0], json!({"$":"ModesSet","id":"t1","runtime":"full-access","interaction":"plan","model":"opus","at":0}));
+    let (e, r) = ask(&h, "thread.planonce", json!({"thread":"t1","on":true})).await; assert_eq!(r, ok());
+    assert!(e.iter().any(|x| x["$"] == "SettingSet" && x["key"] == "plan.once.t1" && x["value"] == "1"));
+    let (e, r) = ask(&h, "thread.modes", json!({"thread":"t1","interaction":"plan"})).await; assert_eq!(r, ok());
+    assert!(e.iter().any(|x| x["$"] == "SettingSet" && x["key"] == "plan.once.t1" && x["value"] == ""), "switching to always-plan clears plan.once");
 }
 #[tokio::test] async fn effort_is_kept_only_as_a_level_the_provider_offers() {
     let h = hub("effort").await;

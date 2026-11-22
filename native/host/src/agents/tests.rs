@@ -912,6 +912,50 @@ async fn recovered_when(extra: &str, state: &str, done: Option<fn(&[Value]) -> b
     assert!(ev.iter().any(|e| is(e, "ModesSet") && e["id"] == T1 && e["interaction"] == "default" && e["runtime"] == "full-access"), "back to its own mode: {ev:?}");
     ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn plan_ask_answers_handle_implement_revise_and_dismiss() {
+    let sd = dir("planask-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("planask", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    hub.commit_many(&[
+        json!({"$":"ModesSet","id":T1,"runtime":"full-access","interaction":"default","model":"","at":1700000050}),
+        json!({"$":"AskOpened","id":"qp1","thread":T1,"kind":"plan","tool":"ExitPlanMode","detail":"## Plan\n1. Step one","options":"","at":1700000051}),
+        json!({"$":"SettingSet","key":"plan.ask.once.qp1","value":"1","at":1700000051}),
+        json!({"$":"AskOpened","id":"qp2","thread":T1,"kind":"plan","tool":"ExitPlanMode","detail":"## Plan 2","options":"","at":1700000052}),
+        json!({"$":"AskOpened","id":"qp3","thread":T1,"kind":"plan","tool":"ExitPlanMode","detail":"## Plan 3","options":"","at":1700000053}),
+        json!({"$":"AskOpened","id":"qp4","thread":"t-missing","kind":"plan","tool":"ExitPlanMode","detail":"## Plan 4","options":"","at":1700000054}),
+    ]).await.unwrap();
+    // sync agents world to committed asks before calling ask.answer
+    let _ = ag.world().await;
+    // empty feedback is refused without closing the ask
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp1","answer":"revise:   "})).await["ok"], false);
+    assert!(ag.world().await.asks.contains_key("qp1"));
+
+    // failed delivery keeps the plan ask open and retryable
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp4","answer":"implement"})).await["ok"], false);
+    assert!(ag.world().await.asks.contains_key("qp4"));
+
+    // revise delivers revision prompt, restores plan interaction and one-turn scope, and clears ask.once flag
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp1","answer":"revise:Use LDO instead"})).await["ok"], true);
+    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"].as_str().unwrap_or("").contains("Use LDO instead"))).await;
+    assert!(ev.iter().any(|e| is(e, "ModesSet") && e["id"] == T1 && e["interaction"] == "plan"));
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("plan.once.{T1}") && e["value"] == "1"));
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == "plan.ask.once.qp1" && e["value"] == ""));
+
+    // dismiss closes ask cleanly with an activity note
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp2","answer":"dismiss"})).await["ok"], true);
+    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"] == "Proposed plan dismissed")).await;
+    assert!(ev.iter().any(|e| is(e, "AskClosed") && e["id"] == "qp2"));
+
+    // implement switches interaction to default, clears plan.once, marks plan.executing, and delivers Implement message
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp3","answer":"implement"})).await["ok"], true);
+    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "Implement the proposed plan.")).await;
+    assert!(ev.iter().any(|e| is(e, "ModesSet") && e["id"] == T1 && e["interaction"] == "default"));
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("plan.once.{T1}") && e["value"] == ""));
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("plan.executing.{T1}") && e["value"] == "1"));
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn recover_leaves_idle() { let ev = recovered("", "idle").await; assert!(!ev.iter().any(|e| turn_is(e, "interrupted")) && !ev.iter().any(|e| e["kind"] == "restart")) }
 #[tokio::test(flavor = "multi_thread")] async fn recover_empty_nothing() { let sd = dir("re-bin"); perf_standin(&sd, 1); let (hub, ag, _h, _w) = start("re", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let n = len(&hub).await; tokio::time::sleep(Duration::from_millis(300)).await; assert_eq!(len(&hub).await, n); ag.shutdown() }
 

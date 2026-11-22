@@ -11,7 +11,7 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailGerbers, RailSimulation, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, CommentKicad, Quit, CloseWindow, HideApp, HideOthers, ShowAll]);
+    RailBoard, RailSchematic, Rail3d, RailGerbers, RailSimulation, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, MgmtPlan, TogglePlanMode, CommentKicad, Quit, CloseWindow, HideApp, HideOthers, ShowAll]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -51,6 +51,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("focus", "Put the keyboard in the message box", "Composer", "/", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("focus-key", "Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)", "Composer", "secondary-l", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("models", "Agent, model and effort", "Composer", "ctrl-m", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("plan-mode", "Toggle Plan mode (off · 1 turn · always)", "Composer", "shift-tab", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("account", "Account of this thread, with what each has left", "Composer", "secondary-shift-a", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("account-pick", "Pick account 1…9 in the account menu", "Composer", "1…9", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("menu-up", "Previous row: wraps round, and scrolls into view", "Model menu and popups", "up", Fixed),
@@ -95,6 +96,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-checks", "Checks panel beside the design: open or close", "Viewer", "alt-shift-c", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-life", "Lifecycle panel beside the design: open or close", "Viewer", "alt-shift-l", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-fab", "Fab panel beside the design: open or close", "Viewer", "alt-shift-f", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-plan", "Plan panel beside the design: open or close", "Viewer", "alt-shift-p", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("help", "Keyboard shortcuts: this list. ? outside a text box, F1 anywhere", "Window", "? or F1", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("quit", "Quit Backplane, on a Mac: the hub keeps running", "Window", "secondary-q", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("close-window", "Close the window, on a Mac: the hub keeps running", "Window", "secondary-w", Fixed),
@@ -188,7 +190,8 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     v.extend([KeyBinding::new("b", RailBoard, Some(RAIL)), KeyBinding::new("s", RailSchematic, Some(RAIL)), KeyBinding::new("3", Rail3d, Some(RAIL)), KeyBinding::new("v", RailSplit, Some(RAIL)),
         KeyBinding::new("m", RailMech, Some(RAIL)), KeyBinding::new("f", RailFiles, Some(RAIL)), KeyBinding::new("d", RailDiff, Some(RAIL)), KeyBinding::new("r", RailReview, Some(RAIL)),
         KeyBinding::new("g", RailGerbers, Some(RAIL)), KeyBinding::new("i", RailSimulation, Some(RAIL)), KeyBinding::new("w", RailBrowser, Some(RAIL))]);
-    v.extend([KeyBinding::new(&k("mgmt-bom"), MgmtBom, alt), KeyBinding::new(&k("mgmt-checks"), MgmtChecks, alt), KeyBinding::new(&k("mgmt-life"), MgmtLife, alt), KeyBinding::new(&k("mgmt-fab"), MgmtFab, alt)]);
+    v.extend([KeyBinding::new(&k("mgmt-bom"), MgmtBom, alt), KeyBinding::new(&k("mgmt-checks"), MgmtChecks, alt), KeyBinding::new(&k("mgmt-life"), MgmtLife, alt), KeyBinding::new(&k("mgmt-fab"), MgmtFab, alt), KeyBinding::new(&k("mgmt-plan"), MgmtPlan, alt),
+        KeyBinding::new(&k("plan-mode"), TogglePlanMode, Some("Composer"))]);
     let key = |id: &str| find(id).map_or("", |x| x.key);
     for c in PICK_SCOPES.map(Some) {
         v.extend([KeyBinding::new(key("menu-up"), PickUp, c), KeyBinding::new(key("menu-down"), PickDown, c), KeyBinding::new(key("menu-left"), PickLeft, c), KeyBinding::new(key("menu-right"), PickRight, c),
@@ -509,6 +512,8 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, MgmtChecks, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "checks", cx));
     let el = on!(el, MgmtLife, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "life", cx));
     let el = on!(el, MgmtFab, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "fab", cx));
+    let el = on!(el, MgmtPlan, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "plan", cx));
+    let el = on!(el, TogglePlanMode, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::planmode::cycle(this, cx));
     macro_rules! rail { ($el:expr, $($a:ty => ($k:literal, $v:literal)),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail($k, $v, cx)); )* e }} }
     let el = on!(el, RailSimulation, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { if !this.covered() && crate::ui::rail_enabled(&this.data["thread"]["viewer"], "simulation") { this.open_simulation(cx); } });
     let el = rail!(el, RailGerbers => ("view-kind", "gerbers"), RailBoard => ("view-kind", "board"), RailSchematic => ("view-kind", "schematic"), Rail3d => ("view-kind", "3d"), RailSplit => ("view-kind", "split"),
@@ -606,6 +611,9 @@ mod tests {
         for k in ["ctrl-a", "ctrl-c", "ctrl-x", "ctrl-v", "ctrl-z", "ctrl-y", "ctrl-shift-z", "ctrl-left", "ctrl-right", "ctrl-backspace", "ctrl-home", "ctrl-end", "home", "end", "tab", "backspace", "delete"] {
             let a = d(k, &["Composer"]); assert!(a.starts_with("composer::"), "{k} must stay the composer's, got {a}");
         }
+        assert_eq!(d("shift-tab", &["Composer"]), "keys::TogglePlanMode");
+        assert_eq!(d("shift-tab", &["Picker", "Composer"]), "keys::PickBackTab");
+        assert_eq!(d("alt-shift-p", &[]), "keys::MgmtPlan");
     }
     #[test] fn timeline_scope_bare_keys_act_only_outside_fields_and_viewers() {
         assert_eq!(d("/", &[]), "keys::FocusComposer"); assert_eq!(d("b", &[]), "keys::RailBoard"); assert_eq!(d("3", &[]), "keys::Rail3d"); assert_eq!(d("d", &[]), "keys::RailDiff");

@@ -3,6 +3,7 @@
 // slash-command popup (hello.commands), mentions popup, and bottom toolbar row
 // with model chip on the left and accent-blue Send / red Stop on the right.
 import { t } from "./i18n";
+import type { PlanModeInfo } from "./sidebar";
 
 export interface SlashCommand {
   word: string;
@@ -31,6 +32,8 @@ export interface ComposerCallbacks {
   onInterrupt: () => void;
   onQueryMentions: (q: string, kind?: string) => Promise<MentionItem[]>;
   onToggleVoice?: () => void;
+  onCyclePlanMode?: () => void;
+  onSetPlanMode?: (mode: "once" | "always" | "off") => void;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -54,6 +57,20 @@ function makeComposerIcon(paths: string[]): SVGSVGElement {
   return svg;
 }
 
+function makePlanDocIcon(): SVGSVGElement {
+  return makeComposerIcon([
+    "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z",
+    "M14 2v6h6",
+    "M16 13H8",
+    "M16 17H8",
+    "M10 9H8",
+  ]);
+}
+
+function makePlanPlayIcon(): SVGSVGElement {
+  return makeComposerIcon(["M6 4l14 8-14 8z"]);
+}
+
 function providerBadge(provider?: string): { glyph: string; color: string; title: string } {
   const p = (provider || "").toLowerCase();
   if (p.includes("claude") || p.includes("anthropic")) return { glyph: "A", color: "#d97706", title: "Claude" };
@@ -66,6 +83,7 @@ function providerBadge(provider?: string): { glyph: string; color: string; title
 export class ComposerView {
   private popupEl: HTMLElement;
   private attachStripEl: HTMLElement;
+  private planBarEl: HTMLElement;
   private fileInput: HTMLInputElement;
   private textarea: HTMLTextAreaElement;
   private memoryEl: HTMLElement;
@@ -74,6 +92,9 @@ export class ComposerView {
   private providerMarkEl: HTMLElement;
   private modelTextEl: HTMLElement;
   private ctxEl: HTMLElement;
+  private planChipBtn: HTMLButtonElement;
+  private planChipIconHost: HTMLElement;
+  private planChipLbl: HTMLElement;
   private attachBtn: HTMLButtonElement;
   private voiceBtn: HTMLButtonElement;
   private sendBtn: HTMLButtonElement;
@@ -89,6 +110,7 @@ export class ComposerView {
   private popupIdx = 0;
   private enabled = false;
   private attachments: PendingAttachment[] = [];
+  private planMode: PlanModeInfo | null = null;
 
   constructor(container: HTMLElement, cb: ComposerCallbacks) {
     this.cb = cb;
@@ -115,6 +137,10 @@ export class ComposerView {
     this.attachStripEl = document.createElement("div");
     this.attachStripEl.className = "bp-attach-strip bp-hidden";
     this.attachStripEl.setAttribute("data-testid", "composer-attachments");
+
+    this.planBarEl = document.createElement("div");
+    this.planBarEl.className = "bp-plan-bar bp-hidden";
+    this.planBarEl.setAttribute("data-testid", "composer-plan-bar");
 
     this.fileInput = document.createElement("input");
     this.fileInput.type = "file";
@@ -149,6 +175,19 @@ export class ComposerView {
     this.ctxEl.className = "bp-ctx-pct bp-hidden";
     this.ctxEl.setAttribute("data-testid", "composer-ctx");
     modelWrap.append(this.providerMarkEl, this.modelTextEl, this.ctxEl);
+
+    this.planChipBtn = document.createElement("button");
+    this.planChipBtn.type = "button";
+    this.planChipBtn.className = "bp-plan-chip bp-hidden";
+    this.planChipBtn.setAttribute("data-testid", "composer-plan-chip");
+    this.planChipBtn.setAttribute("aria-pressed", "false");
+    this.planChipIconHost = document.createElement("span");
+    this.planChipIconHost.className = "bp-plan-chip-ic";
+    this.planChipIconHost.appendChild(makePlanDocIcon());
+    this.planChipLbl = document.createElement("span");
+    this.planChipLbl.textContent = t("gpui.mgmt.plan.tab", "Plan");
+    this.planChipBtn.append(this.planChipIconHost, this.planChipLbl);
+    this.planChipBtn.addEventListener("click", () => this.cb.onCyclePlanMode?.());
 
     // infinite context: the memory's bar and the hub's words (bots/recall/progress.rs), shown only for a thread that has it
     this.memoryEl = document.createElement("div");
@@ -205,8 +244,8 @@ export class ComposerView {
     this.sendBtn.addEventListener("click", () => this.submit());
 
     btns.append(this.attachBtn, this.voiceBtn, this.stopBtn, this.sendBtn);
-    bar.append(modelWrap, this.memoryEl, btns);
-    inner.append(this.popupEl, this.errorEl, this.replyEl, this.attachStripEl, this.fileInput, this.textarea, bar);
+    bar.append(modelWrap, this.planChipBtn, this.memoryEl, btns);
+    inner.append(this.popupEl, this.errorEl, this.replyEl, this.attachStripEl, this.planBarEl, this.fileInput, this.textarea, bar);
     wrap.appendChild(inner);
     container.appendChild(wrap);
 
@@ -257,6 +296,11 @@ export class ComposerView {
           this.closePopup();
           return;
         }
+      }
+      if (e.key === "Tab" && e.shiftKey && this.planMode !== null) {
+        e.preventDefault();
+        this.cb.onCyclePlanMode?.();
+        return;
       }
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -319,12 +363,106 @@ export class ComposerView {
     this.memoryEl.title = [m.status, m.lines, m.viewLine].filter(Boolean).join("\n");
   }
 
+  public setPlanMode(mode: PlanModeInfo | null): void {
+    this.planMode = mode;
+    this.textarea.classList.remove("is-plan", "is-plan-exec");
+    this.sendBtn.classList.remove("is-plan", "is-plan-exec");
+    this.planChipBtn.classList.remove("is-plan", "is-exec");
+    this.planBarEl.classList.remove("is-exec");
+
+    if (!mode) {
+      this.planChipBtn.classList.add("bp-hidden");
+      this.planChipBtn.setAttribute("aria-pressed", "false");
+      this.planBarEl.classList.add("bp-hidden");
+      this.planBarEl.replaceChildren();
+      this.sendBtn.textContent = t("composer.send", "Send");
+      return;
+    }
+
+    const phase = mode.phase;
+    const active = phase !== "off";
+    const isPlanTone = phase === "armed" || phase === "planning" || phase === "pending";
+    const isExec = phase === "executing";
+
+    this.planChipBtn.classList.remove("bp-hidden");
+    this.planChipBtn.classList.toggle("is-plan", isPlanTone);
+    this.planChipBtn.classList.toggle("is-exec", isExec);
+    this.planChipBtn.setAttribute("aria-pressed", active ? "true" : "false");
+    const tip = `${t("gpui.planmode.tip", "Plan before acting (1 turn, always, or off)")} · Shift+Tab`;
+    this.planChipBtn.title = tip;
+    this.planChipBtn.setAttribute("aria-label", tip);
+    this.planChipIconHost.replaceChildren(isExec ? makePlanPlayIcon() : makePlanDocIcon());
+    this.planChipLbl.textContent = isExec
+      ? t("gpui.planmode.chip.building", "Building")
+      : phase === "pending"
+        ? t("gpui.mgmt.fab.reviewbtn", "Review")
+        : isPlanTone && mode.once
+          ? t("gpui.planmode.chip.once", "Plan · 1t")
+          : t("gpui.mgmt.plan.tab", "Plan");
+
+    this.textarea.classList.toggle("is-plan", isPlanTone);
+    this.textarea.classList.toggle("is-plan-exec", isExec);
+    this.sendBtn.classList.toggle("is-plan", isPlanTone);
+    this.sendBtn.classList.toggle("is-plan-exec", isExec);
+    this.sendBtn.textContent = isPlanTone
+      ? t("gpui.mgmt.plan.tab", "Plan")
+      : t("composer.send", "Send");
+
+    if (!active) {
+      this.planBarEl.classList.add("bp-hidden");
+      this.planBarEl.replaceChildren();
+      return;
+    }
+
+    this.planBarEl.classList.remove("bp-hidden");
+    this.planBarEl.classList.toggle("is-exec", isExec);
+    const barIcon = document.createElement("span");
+    barIcon.className = "bp-plan-bar-ic";
+    barIcon.appendChild(isExec ? makePlanPlayIcon() : makePlanDocIcon());
+    const barMsg = document.createElement("span");
+    barMsg.className = "bp-plan-bar-text";
+    barMsg.textContent = phase === "armed" && mode.once
+      ? t("gpui.planmode.bar.once", "Plan mode (1 turn) — explores and proposes a plan before editing")
+      : phase === "armed"
+        ? t("gpui.planmode.bar.always", "Plan mode — explores and proposes a plan before editing")
+        : phase === "planning"
+          ? t("gpui.planmode.bar.planning", "Planning — drafting a plan before edits")
+          : phase === "pending"
+            ? t("gpui.planmode.bar.pending", "Proposed plan awaits review below")
+            : t("gpui.planmode.bar.executing", "Building the approved plan");
+
+    const nodes: HTMLElement[] = [barIcon, barMsg];
+    if (phase === "armed" || phase === "planning") {
+      const scopes = document.createElement("div");
+      scopes.className = "bp-plan-scopes";
+      const mkScope = (lbl: string, on: boolean, target: "once" | "always" | "off", tid: string) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "bp-plan-scope-btn" + (on ? " active" : "");
+        b.textContent = lbl;
+        b.disabled = !this.enabled;
+        b.setAttribute("data-testid", tid);
+        b.addEventListener("click", () => this.cb.onSetPlanMode?.(target));
+        return b;
+      };
+      scopes.append(
+        mkScope(t("gpui.planmode.scope.once", "1 turn"), mode.once, "once", "plan-scope-once"),
+        mkScope(t("gpui.planmode.scope.always", "Always"), !mode.once, "always", "plan-scope-always"),
+        mkScope(t("gpui.bots.recall.off", "Off"), false, "off", "plan-scope-off"),
+      );
+      nodes.push(scopes);
+    }
+    this.planBarEl.replaceChildren(...nodes);
+  }
+
   public setState(enabled: boolean, running: boolean): void {
     this.enabled = enabled;
     this.textarea.disabled = !enabled;
     this.sendBtn.disabled = !enabled;
     this.attachBtn.disabled = !enabled;
     this.voiceBtn.disabled = !enabled;
+    this.planChipBtn.disabled = !enabled;
+    this.planBarEl.querySelectorAll<HTMLButtonElement>(".bp-plan-scope-btn").forEach((b) => { b.disabled = !enabled; });
     this.stopBtn.classList.toggle("bp-hidden", !running);
   }
 
@@ -392,6 +530,7 @@ export class ComposerView {
     this.voiceBtn.setAttribute("aria-label", t("web.composer.voice", "Voice dictation"));
     this.sendBtn.textContent = t("composer.send", "Send");
     this.stopBtn.textContent = t("composer.stop", "Stop");
+    this.setPlanMode(this.planMode);
   }
 
   private autoGrow(): void {

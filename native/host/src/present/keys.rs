@@ -477,9 +477,34 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     m.insert("claude".into(), json!(t.provider == "claude"));
     // "Plan first, this turn only" set (commands/plan.rs thread.planonce): the picker's toggle is on until the turn it was set for ends
     m.insert("planOnce".into(), json!(!get(format!("plan.once.{id}")).is_empty()));
+    m.insert("planMode".into(), plan_mode(st, id));
     m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
     m.insert("combo".into(), combo_of(st, id, now_s));
     Some(m)
+}
+
+/// Thread Plan Mode snapshot (`present::keys::plan_mode`): driven from state, open asks, and settings across five phases.
+pub fn plan_mode(st: &State, id: &str) -> Value {
+    let Some(t) = st.threads.get(id) else { return Value::Null };
+    let pending = st.ask_data.iter().any(|(_, th, k, _, _, _)| th == id && k == "plan");
+    if t.provider != "claude" && !pending { return Value::Null }
+    let interaction = st.interaction.get(id).map(String::as_str).unwrap_or("default");
+    let once = !st.settings.get(&format!("plan.once.{id}")).map_or(true, String::is_empty);
+    let exec = !st.settings.get(&format!("plan.executing.{id}")).map_or(true, String::is_empty);
+    let running = matches!(t.turn, crate::state::Turn::Running);
+    let phase = if pending { "pending" }
+        else if interaction == "plan" { if running { "planning" } else { "armed" } }
+        else if exec && running { "executing" }
+        else { "off" };
+    let scope = if interaction == "plan" { if once { "once" } else { "always" } } else { "off" };
+    let label = match phase {
+        "pending" => "Plan awaiting review",
+        "executing" => "Building plan",
+        "planning" => "Planning",
+        "armed" => if once { "Plan (1 turn)" } else { "Plan" },
+        _ => "",
+    };
+    json!({"phase": phase, "interaction": interaction, "once": once, "scope": scope, "label": label, "pending": pending, "executing": phase == "executing"})
 }
 
 #[cfg(test)]
@@ -672,5 +697,37 @@ mod tests {
         assert_eq!(l, [("".to_string(), false), ("fable".to_string(), false), ("opus".to_string(), true)]);
         let v = model_choices(&ms, "codex", "gpt-x"); assert_eq!(v.as_array().unwrap().len(), 2); assert_eq!(v[1]["value"], "gpt-x");
         assert_eq!(model_choices(&ms, "grok", "")[0]["on"], true);
+    }
+    #[test] fn plan_mode_tracks_all_five_phases_and_only_shows_for_claude_or_open_plan() {
+        let mut st = State::new();
+        for l in [
+            r#"{"$":"ProjectCreated","id":"p1","title":"P","folder":"/p","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t1","project":"p1","title":"Claude","provider":"claude","model":"","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t2","project":"p1","title":"Codex","provider":"codex","model":"","at":1}"#,
+        ] { st.apply_line(l); }
+        assert!(plan_mode(&st, "t2").is_null());
+        assert_eq!(plan_mode(&st, "t1")["phase"], "off");
+
+        st.apply_line(r#"{"$":"ModesSet","id":"t1","runtime":"full-access","interaction":"plan","model":"","at":2}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["scope"].as_str(), plan_mode(&st, "t1")["label"].as_str()), (Some("armed"), Some("always"), Some("Plan")));
+
+        st.apply_line(r#"{"$":"SettingSet","key":"plan.once.t1","value":"1","at":3}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["scope"].as_str(), plan_mode(&st, "t1")["label"].as_str()), (Some("armed"), Some("once"), Some("Plan (1 turn)")));
+
+        st.apply_line(r#"{"$":"TurnChanged","thread":"t1","state":"running","at":4}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["label"].as_str()), (Some("planning"), Some("Planning")));
+
+        st.apply_line(r#"{"$":"AskOpened","id":"q1","thread":"t1","kind":"plan","tool":"ExitPlanMode","detail":"1. step","options":"","at":5}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["pending"].as_bool()), (Some("pending"), Some(true)));
+
+        st.apply_line(r#"{"$":"AskClosed","id":"q1","answer":"implement","at":6}"#);
+        st.apply_line(r#"{"$":"ModesSet","id":"t1","runtime":"full-access","interaction":"default","model":"","at":6}"#);
+        st.apply_line(r#"{"$":"SettingSet","key":"plan.once.t1","value":"","at":6}"#);
+        st.apply_line(r#"{"$":"SettingSet","key":"plan.executing.t1","value":"1","at":6}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["executing"].as_bool()), (Some("executing"), Some(true)));
+
+        st.apply_line(r#"{"$":"TurnChanged","thread":"t1","state":"idle","at":7}"#);
+        assert_eq!(plan_mode(&st, "t1")["phase"], "off");
+        assert!(!st.settings.contains_key("plan.executing.t1"));
     }
 }

@@ -1469,6 +1469,8 @@ struct DataAskCard: View {
     let thread: String
     let entry: DEntry
     @State private var answer = ""
+    @State private var revising = false
+    @State private var revision = ""
     var body: some View {
         let ask = entry.ask
         VStack(alignment: .leading, spacing: 8) {
@@ -1483,14 +1485,32 @@ struct DataAskCard: View {
                 } else {
                     VStack(alignment: .leading, spacing: 6) { ForEach(ask!.options) { o in
                         Button { Task { await client.answer(thread, ask: ask!.id, option: o.id) } } label: { Text(Tr.t(o.label)).frame(maxWidth: .infinity, alignment: .leading) }
-                            .buttonStyle(DButton(primary: o.id == "accept", danger: o.id == "deny" || o.id == "decline"))
+                            .buttonStyle(DButton(primary: o.id == "accept" || o.id == "implement", danger: o.id == "deny" || o.id == "decline"))
                             .accessibilityIdentifier("data.ask." + o.id)
                     } }
+                    if ask?.revise == true {
+                        Button { revising.toggle() } label: { Text(Tr.k("gpui.ask.plan.revise")).frame(maxWidth: .infinity, alignment: .leading) }
+                            .buttonStyle(DButton())
+                            .accessibilityIdentifier("data.ask.revise")
+                        if revising {
+                            VStack(alignment: .leading, spacing: 6) {
+                                TextField(Tr.k("gpui.ask.plan.reviseph"), text: $revision).dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
+                                Button(Tr.k("gpui.ask.plan.sendrev")) {
+                                    let fb = revision.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !fb.isEmpty else { return }
+                                    revising = false; revision = ""
+                                    Task { await client.answer(thread, ask: ask!.id, option: "revise:" + fb) }
+                                }
+                                .buttonStyle(DButton(primary: true))
+                                .disabled(revision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                            }
+                        }
+                    }
                 }
             } else if let a = ask?.answered { Text(Tr.ios_ask_answered(answer: Tr.t(a))).dmono(12).foregroundStyle(BackplaneDesign.dim) }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .dbox(ask?.isOpen == true ? BackplaneDesign.bad : BackplaneDesign.line, fill: BackplaneDesign.panel)
+        .dbox(ask?.isOpen == true ? (ask?.kind == "plan" ? PhaseColor.input : BackplaneDesign.bad) : BackplaneDesign.line, fill: BackplaneDesign.panel)
         .accessibilityIdentifier("data.entry.ask")
     }
 }

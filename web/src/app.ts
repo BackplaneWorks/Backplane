@@ -17,6 +17,7 @@ import { ThreadContextDialog } from "./thread-context";
 import {
   SidebarView,
   type BotItem,
+  type PlanModeInfo,
   type ProjectItem,
   type RoomItem,
   type SectionProjectRow,
@@ -139,7 +140,10 @@ function mountApp(): void {
   const threadCrumb = document.createElement("span");
   threadCrumb.className = "bp-crumb-thread";
   threadCrumb.setAttribute("data-testid", "thread-title");
-  brand.append(logo, brandName, sep1, projCrumb, sep2, threadCrumb);
+  const planTopBadge = document.createElement("span");
+  planTopBadge.className = "bp-plan-top-badge bp-hidden";
+  planTopBadge.setAttribute("data-testid", "plan-top-badge");
+  brand.append(logo, brandName, sep1, projCrumb, sep2, threadCrumb, planTopBadge);
 
   // STATE indicator (desktop)
   const stateBox = document.createElement("div");
@@ -350,7 +354,9 @@ function mountApp(): void {
     onLoadOlder: () => { void loadOlderEntries(); },
     onGoToEntry: (id) => { void goToEntry(id); },
     onAnswerAsk: (askId, answer) => {
-      void hub.rpc("ask.answer", { ask: askId, answer }).catch(() => {});
+      void hub.rpc("ask.answer", { ask: askId, answer }).catch((e) => {
+        composer.showError(e instanceof Error ? e.message : "Could not send answer");
+      });
     },
     onToggleReview: (nextOn) => {
       if (!selectedThreadId) return;
@@ -389,6 +395,37 @@ function mountApp(): void {
     },
   });
 
+  function effectivePlanMode(th: ThreadItem | null): PlanModeInfo | null {
+    if (!th) return null;
+    if (th.planMode) return th.planMode;
+    if (th.provider === "claude") return { phase: "off", interaction: "default", once: false };
+    return null;
+  }
+
+  function applyPlanModeRpc(method: string, params: Record<string, unknown>): void {
+    if (!selectedThreadId) return;
+    const gen = threadGen;
+    const tid = selectedThreadId;
+    void hub.rpc<{ thread?: ThreadItem }>(method, params)
+      .then((res) => {
+        if (gen !== threadGen || selectedThreadId !== tid) return;
+        if (res.thread) {
+          const idx = threads.findIndex((x) => x.id === res.thread!.id);
+          if (idx >= 0) threads[idx] = res.thread;
+          else threads.unshift(res.thread);
+          sidebar.setData(projects, threads, bots, rooms);
+          chat.updateThreadMeta(res.thread);
+          updateHeader();
+          composer.setState(true, res.thread.state === "working");
+        }
+      })
+      .catch((e) => {
+        if (gen === threadGen && selectedThreadId === tid) {
+          composer.showError(e instanceof Error ? e.message : "Could not change Plan mode");
+        }
+      });
+  }
+
   let voice: VoiceController;
   const composer = new ComposerView(centerEl, {
     onSend: (text, attachments) => { void sendMessage(text, attachments); },
@@ -405,6 +442,28 @@ function mountApp(): void {
       }
     },
     onToggleVoice: () => { void voice.toggle(); },
+    onCyclePlanMode: () => {
+      const th = threads.find((x) => x.id === selectedThreadId) ?? null;
+      const pm = effectivePlanMode(th);
+      if (!pm || !selectedThreadId) return;
+      if (pm.interaction !== "plan") {
+        applyPlanModeRpc("thread.planonce", { thread: selectedThreadId, on: true });
+      } else if (pm.once) {
+        applyPlanModeRpc("thread.pick", { thread: selectedThreadId, action: "interaction", value: "plan" });
+      } else {
+        applyPlanModeRpc("thread.pick", { thread: selectedThreadId, action: "interaction", value: "default" });
+      }
+    },
+    onSetPlanMode: (mode) => {
+      if (!selectedThreadId) return;
+      if (mode === "once") {
+        applyPlanModeRpc("thread.planonce", { thread: selectedThreadId, on: true });
+      } else if (mode === "always") {
+        applyPlanModeRpc("thread.pick", { thread: selectedThreadId, action: "interaction", value: "plan" });
+      } else {
+        applyPlanModeRpc("thread.pick", { thread: selectedThreadId, action: "interaction", value: "default" });
+      }
+    },
   });
 
   voice = new VoiceController(hub, {
@@ -683,6 +742,27 @@ function mountApp(): void {
     sep1.classList.toggle("bp-hidden", !proj);
     sep2.classList.toggle("bp-hidden", !th);
     threadCrumb.textContent = th ? (th.title || "Untitled thread") : "";
+
+    const pm = effectivePlanMode(th);
+    composer.setPlanMode(pm);
+    if (!pm || pm.phase === "off") {
+      planTopBadge.classList.add("bp-hidden");
+      planTopBadge.classList.remove("is-exec");
+      planTopBadge.textContent = "";
+    } else {
+      planTopBadge.classList.remove("bp-hidden");
+      planTopBadge.classList.toggle("is-exec", pm.phase === "executing");
+      planTopBadge.title = t("gpui.planmode.tip", "Plan before acting (1 turn, always, or off)");
+      planTopBadge.textContent = pm.phase === "armed" && pm.once
+        ? t("gpui.planmode.top.once", "Plan (1 turn)")
+        : pm.phase === "armed"
+          ? t("gpui.mgmt.plan.tab", "Plan")
+          : pm.phase === "planning"
+            ? t("gpui.planmode.top.planning", "Planning")
+            : pm.phase === "pending"
+              ? t("gpui.planmode.top.pending", "Review plan")
+              : t("gpui.planmode.top.executing", "Building plan");
+    }
 
     stateBox.classList.toggle("bp-hidden", !th);
     topActs.classList.toggle("bp-hidden", !th);
@@ -1527,6 +1607,7 @@ function mountApp(): void {
       if (palette.isOpen()) palette.close();
       else if (addProject.isOpen()) addProject.escape();
       else if (settings.isOpen()) settings.close();
+      else if (chat.closePlanRevise()) { /* handled by plan revise drawer */ }
       else if (mgmt.isOpen()) mgmt.closePanel();
     }
   });

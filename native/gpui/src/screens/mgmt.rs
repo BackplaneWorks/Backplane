@@ -44,6 +44,8 @@ pub struct Mgmt {
     pub life: super::mgmt_life::Ui,
     /// a plan review link pressed (screens/linkroute.rs `Route::Plan`): its board (from the project folder), when, and whether that board was picked
     pub plan_next: Option<(String, Instant, bool)>,
+    pub plan_sel: Option<String>,
+    pub plan_stackup_open: bool,
 }
 /// What a pressed plan review link does now, on the page drawn: open the Plan panel (the board shown is the plan's, or its board could not be shown
 /// within a few seconds: the panel then names the board whose plan waits), show its board first, or wait for the page.
@@ -120,7 +122,7 @@ impl Mgmt {
 fn want(app: &mut Backplane, project: &str) {
     if app.screens.mgmt.asked == project { return }
     app.screens.mgmt.asked = project.to_string();
-    if app.screens.mgmt.project != project { app.screens.mgmt.digest.clear(); app.screens.mgmt.bom = Default::default(); app.screens.mgmt.checks.reset(); app.screens.mgmt.error.clear(); }
+    if app.screens.mgmt.project != project { app.screens.mgmt.digest.clear(); app.screens.mgmt.bom = Default::default(); app.screens.mgmt.checks.reset(); app.screens.mgmt.error.clear(); app.screens.mgmt.plan_sel = None; app.screens.mgmt.plan_stackup_open = false; }
     let _ = app.tx.try_send(Command::Ask("mgmt.watch".into(), json!({"project": project}), WATCH_TAG));
 }
 /// `mgmt.watch`'s answer: the project's digest (what its info keys end in).

@@ -10,7 +10,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
     Some(match method {
         "devices.page" => Devices,
         "thread.pick" => match params["action"].as_str() {
-            Some("provider" | "model" | "effort" | "speed" | "runtime") => Activity,
+            Some("provider" | "model" | "effort" | "speed" | "runtime" | "interaction") => Activity,
             _ => Denied,
         },
         "composer.run" => {
@@ -49,7 +49,13 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "thread.context.mcp"
         | "thread.create"
         | "thread.model"
+        | "thread.planonce"
         | "thread.review"
+        | "plan.approve"
+        | "plan.enable"
+        | "plan.focus"
+        | "plan.stop"
+        | "plan.verify"
         | "turn.interrupt"
         | "viewer.compare"
         | "viewer.follow"
@@ -91,9 +97,6 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "mgmt.life.part"
         | "mgmt.watch"
         | "models.list"
-        | "plan.approve"
-        | "plan.focus"
-        | "plan.stop"
         | "project.card"
         | "projects.list"
         | "review.list"

@@ -4800,6 +4800,44 @@ thread.context.enable	Enable	有効にする	Activar
 thread.context.disable	Disable	無効にする	Desactivar
 thread.context.size	{bytes} B · ≈{tokens} tokens	{bytes} B・約{tokens}トークン	{bytes} B · ≈{tokens} tokens
 thread.context.unreachable	Could not reach the hub.	ハブに接続できませんでした。	No se pudo conectar con el hub.
+gpui.planmode.top.once	Plan (1 turn)	計画 (1回)	Plan (1 turno)
+gpui.planmode.top.planning	Planning	計画中	Planificando
+gpui.planmode.top.pending	Review plan	計画を確認	Revisar plan
+gpui.planmode.top.executing	Building plan	計画を実行中	Ejecutando plan
+gpui.planmode.tip	Plan before acting (1 turn, always, or off)	実行前に計画を作成 (1回・常時・オフ)	Planificar antes de actuar (1 turno, siempre u off)
+gpui.planmode.chip.building	Building	実行中	Ejecutando
+gpui.planmode.chip.once	Plan · 1t	計画 · 1回	Plan · 1t
+gpui.planmode.bar.once	Plan mode (1 turn) — explores and proposes a plan before editing	計画モード (1回) — 編集前に調査して計画を提案します	Modo plan (1 turno) — explora y propone un plan antes de editar
+gpui.planmode.bar.always	Plan mode — explores and proposes a plan before editing	計画モード — 編集前に調査して計画を提案します	Modo plan — explora y propone un plan antes de editar
+gpui.planmode.bar.planning	Planning — drafting a plan before edits	計画中 — 編集前の計画を作成しています	Planificando — redactando un plan antes de editar
+gpui.planmode.bar.pending	Proposed plan awaits review below	提案された計画が下のレビューを待っています	El plan propuesto espera revisión abajo
+gpui.planmode.bar.executing	Building the approved plan	承認された計画を実行しています	Ejecutando el plan aprobado
+gpui.planmode.scope.once	1 turn	1回	1 turno
+gpui.planmode.scope.always	Always	常時	Siempre
+gpui.ask.plan.ready	Ready for review	確認待ち	Listo para revisar
+gpui.ask.plan.revise	Revise	修正	Revisar
+gpui.ask.plan.sendrev	Send revision	修正を送る	Enviar revisión
+gpui.ask.plan.reviseph	What should change in the plan?	計画のどこを変更しますか？	¿Qué debería cambiar en el plan?
+gpui.mgmt.plan.st.blocked	Blocked	ブロック	Bloqueado
+gpui.mgmt.plan.st.routing	Routing	配線中	Ruteando
+gpui.mgmt.plan.st.awaiting	Awaiting review	承認待ち	Esperando revisión
+gpui.mgmt.plan.st.verified	Verified	検証済み	Verificado
+gpui.mgmt.plan.st.routed	Routed	配線済み	Ruteado
+gpui.mgmt.plan.st.approved	Approved	承認済み	Aprobado
+gpui.mgmt.plan.st.partial	Partial	一部完了	Parcial
+gpui.mgmt.plan.st.rejected	Rejected	却下	Rechazado
+gpui.mgmt.plan.st.empty	Empty	空	Vacío
+gpui.mgmt.plan.refused	KiCad refused	KiCad が拒否しました	KiCad lo rechazó
+gpui.mgmt.plan.emptysub	Layers, corridors, and planes appear here once a plan is proposed.	計画が提案されると、レイヤー・コリドー・ベタ領域がここに表示されます。	Las capas, corredores y planos aparecerán aquí cuando se proponga un plan.
+gpui.mgmt.plan.verify	Verify	検証	Verificar
+gpui.mgmt.plan.reqplain	Approval requested	承認が求められています	Aprobación solicitada
+gpui.mgmt.plan.requested	Approval requested: {what}	承認が求められています: {what}	Aprobación solicitada: {what}
+gpui.mgmt.plan.stackup	Stackup & impedances	スタックアップとインピーダンス	Apilado e impedancias
+gpui.keys.planmode	Toggle Plan mode (off · 1 turn · always)	計画モードを切り替え (オフ・1回・常時)	Alternar modo plan (off · 1 turno · siempre)
+gpui.keys.mgmt.plan	Plan panel beside the design: open or close	設計横の計画パネル: 開くまたは閉じる	Panel de plan junto al diseño: abrir o cerrar
+web.plan.awaiting	{n} awaiting approval	{n} 件が承認待ち	{n} esperando aprobación
+web.plan.net.one	1 net	1 ネット	1 red
+web.plan.nets	{n} nets	{n} ネット	{n} redes
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7711,4 +7749,13 @@ thread.context.unreachable	Could not reach the hub.	ハブに接続できませ�
 
     /// thread.context.size = {bytes} B · ≈{tokens} tokens
     static func thread_context_size(bytes: String, tokens: String) -> String { f("thread.context.size", ["bytes": bytes, "tokens": tokens]) }
+
+    /// gpui.mgmt.plan.requested = Approval requested: {what}
+    static func gpui_mgmt_plan_requested(what: String) -> String { f("gpui.mgmt.plan.requested", ["what": what]) }
+
+    /// web.plan.awaiting = {n} awaiting approval
+    static func web_plan_awaiting(n: String) -> String { f("web.plan.awaiting", ["n": n]) }
+
+    /// web.plan.nets = {n} nets
+    static func web_plan_nets(n: String) -> String { f("web.plan.nets", ["n": n]) }
 }

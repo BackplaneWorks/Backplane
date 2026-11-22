@@ -25,6 +25,25 @@ fn home_log() -> String {
     line(json!({"$":"AskOpened","id":"q82","thread":"t003","kind":"approval","tool":"Bash","detail":"make flash","options":"","at":at}));
     l
 }
+fn plan_heavy_log() -> String {
+    let mut l = home_log();
+    let mut at = 1_700_050_000u64;
+    let mut line = |mut v: Value| { v["at"] = json!(at); at += 1; l.push_str(&v.to_string()); l.push('\n'); };
+    line(json!({"$":"ModesSet","id":"t002","runtime":"full-access","interaction":"plan","model":""}));
+    line(json!({"$":"AskOpened","id":"qp1","thread":"t002","kind":"plan","tool":"ExitPlanMode","detail":"## Plan 1\n- Step A\n- Step B","options":""}));
+    line(json!({"$":"ModesSet","id":"t003","runtime":"full-access","interaction":"plan","model":""}));
+    line(json!({"$":"AskOpened","id":"qp2","thread":"t003","kind":"plan","tool":"ExitPlanMode","detail":"## Plan 2\n- Step C\n- Step D","options":""}));
+    for th in ["t004", "t005"] { line(json!({"$":"ModesSet","id":th,"runtime":"full-access","interaction":"plan","model":""})); }
+    for th in ["t006", "t007"] {
+        line(json!({"$":"ModesSet","id":th,"runtime":"full-access","interaction":"plan","model":""}));
+        line(json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":"1"}));
+    }
+    line(json!({"$":"ModesSet","id":"t008","runtime":"full-access","interaction":"plan","model":""}));
+    line(json!({"$":"TurnChanged","thread":"t008","state":"running"}));
+    line(json!({"$":"TurnChanged","thread":"t009","state":"running"}));
+    line(json!({"$":"SettingSet","key":"plan.executing.t009","value":"1"}));
+    l
+}
 
 // ---- ?view=1 (the remote desktop) ----
 struct View { c: Conn, id: u64, rev: u64, token: String, by_target: HashMap<String, String>, z: crate::wire::z::Deflater, zbytes: usize }
@@ -47,8 +66,8 @@ impl View {
 fn thread(id: &str) -> Value { json!({"kind":"thread","id":id}) }
 
 /// The hub as main.rs starts it: the Rust screens (the native sidebar and threads) behind the presenter, the state policies booted; serving data/1 too.
-async fn real_hub(name: &str) -> (crate::hub::TestHub, u16) {
-    let dir = crate::plat::tmp::dir(name); std::fs::write(dir.join("token"), "tok").unwrap(); std::fs::write(dir.join("events.jsonl"), home_log()).unwrap();
+async fn real_hub_with(name: &str, log: String) -> (crate::hub::TestHub, u16) {
+    let dir = crate::plat::tmp::dir(name); std::fs::write(dir.join("token"), "tok").unwrap(); std::fs::write(dir.join("events.jsonl"), log).unwrap();
     let cfg = Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
     let recent = crate::present::screen::Recent::new();
     let hub = Hub::start(cfg, Arc::new(crate::present::Routed::new(Arc::new(crate::present::NotPorted), vec![Box::new(recent.clone())], &dir, false))).await.unwrap();
@@ -59,6 +78,7 @@ async fn real_hub(name: &str) -> (crate::hub::TestHub, u16) {
     { let hub = hub.clone(); tokio::spawn(async move { loop { let (st, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = wire::serve_with(h, st, false).await; }); } }); }
     (crate::hub::TestHub { hub, _tmp: dir }, port)
 }
+async fn real_hub(name: &str) -> (crate::hub::TestHub, u16) { real_hub_with(name, home_log()).await }
 #[test] fn budgets() {
     let o = std::process::Command::new(std::env::current_exe().unwrap()).args(["data::tests::budget::budget_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_BUDGET_CHILD", "1").output().unwrap();
     let (out, err) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
@@ -70,6 +90,18 @@ async fn real_hub(name: &str) -> (crate::hub::TestHub, u16) {
     let (h, port) = real_hub("data-budget").await;
     view_budget(&h.hub).await; data_budget(port).await; phase1_budget(port).await;
     println!("budget_child_ok");
+}
+#[test] fn plan_mode_budgets() {
+    let o = std::process::Command::new(std::env::current_exe().unwrap()).args(["data::tests::budget::plan_budget_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_PLAN_BUDGET_CHILD", "1").output().unwrap();
+    let (out, err) = (String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    for l in err.lines().chain(out.lines()).filter(|l| l.starts_with("BUDGET")) { eprintln!("{l}") }
+    assert!(o.status.success() && out.contains("plan_budget_child_ok"), "{out}{err}");
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn plan_budget_child() {
+    if std::env::var_os("BP_PLAN_BUDGET_CHILD").is_none() { return }
+    let (_h, port) = real_hub_with("data-plan-budget", plan_heavy_log()).await;
+    data_budget(port).await;
+    println!("plan_budget_child_ok");
 }
 /// `?view=1`: a thread switch is ops from a body the client holds, a return to a held thread and an update with nothing changed are near nothing.
 async fn view_budget(hub: &Arc<Hub>) {

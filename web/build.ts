@@ -97,6 +97,15 @@ function collectI18nKeys(tsFiles: string[]): string[] {
     "gpui.rail.no.schematic",
     "gpui.rail.no.mech",
     "gpui.rail.split.needs.both",
+    "gpui.mgmt.plan.st.blocked",
+    "gpui.mgmt.plan.st.routing",
+    "gpui.mgmt.plan.st.awaiting",
+    "gpui.mgmt.plan.st.verified",
+    "gpui.mgmt.plan.st.routed",
+    "gpui.mgmt.plan.st.approved",
+    "gpui.mgmt.plan.st.partial",
+    "gpui.mgmt.plan.st.rejected",
+    "gpui.mgmt.plan.st.empty",
   ]);
   const re = /\bt\(\s*["']([a-zA-Z0-9_.-]+)["']/g;
   for (const f of tsFiles) {

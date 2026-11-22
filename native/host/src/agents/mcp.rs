@@ -348,7 +348,13 @@ impl Mcp {
             return Some(result(id, perm_text(&perm_allow(&input)))) }
         let ev = json!({"$":"AskOpened","id":ask,"thread":thread,"kind":kind,"tool":tool,"detail":detail,"options":options,"at":now});
         let pend = ag.pending_ev(thread, 1, "", now).await;
-        if kind == "plan" { ag.commit_events(vec![ev, pend]).await; return Some(result(id, perm_text(&perm_deny(PLAN_NOTE)))) }
+        if kind == "plan" {
+            let mut evs = vec![ev, pend];
+            let was_once = { let w = ag.world().await; !w.setting(&format!("plan.once.{thread}")).is_empty() };
+            if was_once { evs.push(json!({"$":"SettingSet","key":format!("plan.ask.once.{ask}"),"value":"1","at":now})); }
+            ag.commit_events(evs).await;
+            return Some(result(id, perm_text(&perm_deny(PLAN_NOTE))))
+        }
         let (tx, mut rx) = oneshot::channel();
         { let mut m = ag.parked.lock().unwrap(); if m.values().filter(|x| x.thread == thread).count() >= MAX_PARKED_PER_THREAD { return Some(result(id, content(false, &json!({"error":"too many questions are waiting for the person"})))) }
           m.insert(ask.clone(), Parked { thread: thread.into(), tool: tool.clone(), input: input.clone(), id: id.clone(), tx }); }

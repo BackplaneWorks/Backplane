@@ -336,6 +336,7 @@ fn modes(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
     let th = s(p, "thread", ""); let t = f.threads.get(&th).cloned().unwrap_or_default();
     let (rt, im, mo) = (if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() }, if t.interaction.is_empty() { "default".to_string() } else { t.interaction.clone() }, t.model.clone());
     let mut ev = vec![json!({"$":"ModesSet","id":th,"runtime":runtime_of(&s(p, "runtime", &rt)),"interaction":if s(p, "interaction", &im) == "plan" { "plan" } else { "default" },"model":s(p, "model", &mo),"at":at})];
+    if p.get("interaction").is_some() && !f.setting(&format!("plan.once.{th}")).is_empty() { ev.push(json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":"","at":at})) }
     if p.get("model").is_some() { ev.extend(hold(f, &th, at)) }
     done(ev, id)
 }

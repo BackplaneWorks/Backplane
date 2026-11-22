@@ -624,6 +624,7 @@ fn asks_json(st: &State, thread: &str, draft: &str) -> Result<Vec<Value>, &'stat
         let head = if files { format!("Backplane needs · {head}") } else { head };
         let mut card = json!({"id": id, "kind": kind, "head": head, "detail": if kind == "plan" { String::new() } else { detail.clone() },
             "blocks": if kind == "plan" { md_blocks(detail) } else { vec![] }, "buttons": buttons});
+        if kind == "plan" { card["revise"] = json!(true); card["revisePre"] = json!(format!("{id}|revise:")); card["raw"] = json!(detail); }
         if files { card["needs"] = json!(true) }
         out.push(card);
     }
@@ -795,7 +796,12 @@ mod tests {
         let mut v = v.clone();
         if let Some(viewer) = v.get_mut("viewer").and_then(Value::as_object_mut) { assert_eq!(viewer.remove("mode").unwrap()["want"], "viewer"); assert!(viewer.get("tiled").is_none()); viewer.remove("runtime"); viewer.remove("rail"); viewer.remove("has"); viewer.remove("layout"); viewer.remove("tiles"); viewer.remove("showToken"); }
         let fix = |e: &mut Value| { if let Some(h) = e.as_object_mut().and_then(|o| o.remove("hover")) { e["stamp"] = h } if let Some(o) = e.as_object_mut() { o.remove("now"); } };
-        match &mut v { Value::Array(a) => a.iter_mut().for_each(fix), Value::Object(o) => if let Some(Value::Array(a)) = o.get_mut("entries") { a.iter_mut().for_each(fix) }, _ => {} }
+        match &mut v { Value::Array(a) => a.iter_mut().for_each(fix), Value::Object(o) => {
+            if let Some(Value::Array(a)) = o.get_mut("entries") { a.iter_mut().for_each(fix) }
+            if let Some(Value::Array(asks)) = o.get_mut("asks") {
+                for a in asks { if let Some(ao) = a.as_object_mut() { ao.remove("revise"); ao.remove("revisePre"); ao.remove("raw"); } }
+            }
+        }, _ => {} }
         v
     }
     fn fixture() -> Value { serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json")).unwrap()).unwrap() }
@@ -816,7 +822,7 @@ mod tests {
         let got = as_helper(&got);
         for (k, w) in want.as_object().unwrap() { if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w); continue } assert_eq!(got.get(k), Some(w), "key {k}"); }
         // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`), the picker's other agents (`pickerAgents`) and the header's project (`project`) are Backplane's own: the recorded helper reply has no such keys
-        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView" | "planOnce" | "review" | "unanswered")).count(), want.as_object().unwrap().len());
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView" | "planOnce" | "planMode" | "review" | "unanswered")).count(), want.as_object().unwrap().len());
     }
     // Diff opened on thread A leaves the session's panel on; a view of thread B (the + makes it and goes there) is accepted, not refused as an unported page
     #[test] fn a_view_of_another_thread_after_diff_on_one_is_accepted() {
