@@ -969,6 +969,48 @@ pub fn prewarm_free_mb() -> Option<u64> { if cfg!(target_os = "linux") { super::
 /// The pre-warm's memory gate: Some(free) when `free` is under `floor` (refused), None when allowed or unknown.
 pub fn prewarm_refused(free: Option<u64>, floor: u64) -> Option<u64> { free.filter(|f| *f < floor) }
 
+/// #1185: upper bound on embedded window/pane coordinates and sizes sent to KiCad IPC (matches `geomguard::LIMIT`).
+pub const MAX_EMBED_COORD: i64 = 20_000;
+
+/// Whether a pre-warm frame size is in a sane range for KiCad (`1..MAX_EMBED_COORD`); None falls back to KiCad's default.
+pub fn sane_prewarm_size(w: u64, h: u64) -> Option<(u64, u64)> {
+    (w > 0 && h > 0 && w < MAX_EMBED_COORD as u64 && h < MAX_EMBED_COORD as u64).then_some((w, h))
+}
+
+/// Sanitize an `editor.kicad.host` (`SetHostGeometry`) rectangle. Valid rectangles pass through unchanged (`sanitized = false`).
+/// Out-of-range or non-positive visible rectangles are converted to a safe hide `(0, 0, 0, 0, visible=false)` (`sanitized = true`)
+/// so macOS never drops a hide and never leaves a floating KiCad window stranded or moved off-screen.
+pub fn sanitize_host_geometry(x: i64, y: i64, w: i64, h: i64, visible: bool) -> (i64, i64, i64, i64, bool, bool) {
+    let valid = x > -MAX_EMBED_COORD && x < MAX_EMBED_COORD
+        && y > -MAX_EMBED_COORD && y < MAX_EMBED_COORD
+        && w >= 0 && h >= 0 && w < MAX_EMBED_COORD && h < MAX_EMBED_COORD
+        && (!visible || (w > 0 && h > 0));
+    if valid { (x, y, w, h, visible, false) } else { (0, 0, 0, 0, false, true) }
+}
+
+fn parse_host_coord(v: Option<&Value>, visible: bool) -> Option<i64> {
+    match v {
+        None => (!visible).then_some(0),
+        Some(val) => val.as_i64(),
+    }
+}
+
+/// Strictly parse and sanitize `editor.kicad.host` JSON params into `(x, y, w, h, visible, raise, sanitized)`.
+/// Any malformed/non-integer/missing-when-visible coordinate or non-bool flag collapses to a safe hide with `raise = false`.
+pub fn sanitize_host_geometry_params(p: &Value) -> (i64, i64, i64, i64, bool, bool, bool) {
+    let safe_hide = (0, 0, 0, 0, false, false, true);
+    let Some(visible) = p.get("visible").map_or(Some(true), |v| v.as_bool()) else { return safe_hide };
+    let Some(raise) = p.get("raise").map_or(Some(false), |v| v.as_bool()) else { return safe_hide };
+    let (Some(x), Some(y), Some(w), Some(h)) = (
+        parse_host_coord(p.get("x"), visible),
+        parse_host_coord(p.get("y"), visible),
+        parse_host_coord(p.get("width"), visible),
+        parse_host_coord(p.get("height"), visible),
+    ) else { return safe_hide };
+    let (sx, sy, sw, sh, sv, sanitized) = sanitize_host_geometry(x, y, w, h, visible);
+    if sanitized { safe_hide } else { (sx, sy, sw, sh, sv, raise, false) }
+}
+
 // The runtime state the presenter reads (`viewer.runtime`) ----------------------------------------------------------------------
 //
 // Per canonical project (norm_pro_key): whether this machine's KiCad can be embedded (`support`), what its session is (`session`,
@@ -2550,8 +2592,9 @@ impl Actor {
         let mode_s = mode.to_string();
         let root_s = root.clone();
         let caps = env.caps.clone();
-        let version = env.version.clone();
+        let version = sess.version.clone();
         let lock_docs = launch_docs(&files, &sess.active);
+        let mut launch = super::geomguard::begin_launch();
         tokio::spawn(async move {
             // Retire any headless kserve for this project before the GUI opens its files: it holds the project's lock while it runs (the
             // GUI KiCad would ask "File Open Warning" outside the pane). It refuses while it has unsaved work (an agent's commit not yet
@@ -2573,9 +2616,15 @@ impl Actor {
                     return;
                 }
             }
-            // #1185: window geometry an older runtime's embedded KiCad saved into the person's settings, repaired while no KiCad runs
-            if mode_s == "fork" { let (v, h) = (version.clone(), home.clone()); let _ = tokio::task::spawn_blocking(move || super::geomguard::guard(&v, &h)).await; }
-            spawn_gui_session(me, home, pro, root_s, gen, mode_s, argv_vec, sock_dir, req_sock, eff_display, desc, active, spawn_container, sweep_locks, caps).await;
+            // #1185: window geometry an older runtime's embedded KiCad saved into the person's settings, repaired while no KiCad runs;
+            // keep the launch permit held until spawn_gui_session actually spawns KiCad.
+            let launch = if mode_s == "fork" {
+                let (v, h) = (version.clone(), home.clone());
+                tokio::task::spawn_blocking(move || { super::geomguard::guard_for_launch(&mut launch, &v, &h); launch }).await.ok()
+            } else {
+                tokio::task::spawn_blocking(move || { super::geomguard::fence_deferred(&mut launch); launch }).await.ok()
+            };
+            spawn_gui_session(me, home, pro, root_s, gen, mode_s, argv_vec, sock_dir, req_sock, eff_display, desc, active, spawn_container, sweep_locks, caps, launch).await;
         });
     }
 
@@ -3442,6 +3491,11 @@ impl Actor {
                 if windows_lost { s.container = 0; s.reason = "KiCad lost its window and is starting again to offer back the unsaved changes".into(); }
                 let snap = s.clone();
                 self.cleanup_session_sockets(&old);
+                if reply.is_none() && !windows_lost && old.mode == "fork" && !old.version.is_empty() && !self.sessions.values().any(|o| o.is_live()) {
+                    let epoch = super::geomguard::epoch();
+                    let (v, h) = (old.version.clone(), self.hub.cfg.home.clone());
+                    tokio::task::spawn_blocking(move || super::geomguard::guard_if_epoch(epoch, &v, &h));
+                }
                 if let Some(tx) = reply {
                     self.publish_and_reply(&snap, None, tx, Ok(json!({"closed":true})));
                 } else {
@@ -3933,7 +3987,7 @@ fn embed_sock_exists(sock: &str) -> bool {
 async fn spawn_gui_session(
     me: mpsc::UnboundedSender<Msg>, home: PathBuf, pro: String, root: String, gen: u64, mode: String,
     argv: Vec<String>, sock_dir: PathBuf, req_sock: String, display: String, desc: String, active: String, spawn_container: u64, sweep_locks: bool,
-    caps: Vec<String>,
+    caps: Vec<String>, launch: Option<super::geomguard::LaunchPermit>,
 ) {
     // where a cold start's time goes: one line per phase (hub log), for the perf e2e and the person's own log
     let t0 = std::time::Instant::now();
@@ -4017,6 +4071,7 @@ async fn spawn_gui_session(
             }
         }
     };
+    drop(launch);
     let pid = child.id().unwrap_or(0);
     crate::memscope::watch_helper(pid, "KiCad");
     crate::plat::proc::adopt(pid, true); crate::memscope::cap_job(pid, "kicad");
@@ -4614,7 +4669,7 @@ impl RpcHandler for EmbedRpc {
                     let _release = Release(pro.clone());
                     for k in kinds {
                         let mut body = json!({"kind": fk_of(k), "prewarm": true});
-                        if w > 0 && h > 0 { body["width"] = json!(w); body["height"] = json!(h); }
+                        if let Some((w, h)) = sane_prewarm_size(w, h) { body["width"] = json!(w); body["height"] = json!(h); }
                         let _ = gui_call(&gui2, "kiapi.backplane.embed.ShowFrame", body).await;
                         // KiCad marks it realized ~0.4 s after painting it, with no event: the frames are read again then
                         tokio::time::sleep(Duration::from_millis(900)).await;
@@ -4638,9 +4693,13 @@ impl RpcHandler for EmbedRpc {
                 // macOS: where the pane is on screen (points) and whether the client's window can be seen; KiCad places its frames there
                 let Some(gui) = gui_route(&resolved.pro) else { return ok_reply(id, json!({"applied": false, "why": "KiCad is not running"})) };
                 if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_own("kiapi.backplane.embed.SetHostGeometry") { return ok_reply(id, json!({"applied": false, "why": "this KiCad cannot follow a host window (needs embed-host-geometry)"})) }
-                let n = |k: &str| p[k].as_i64().unwrap_or(0);
-                let o = gui_call(&gui, "kiapi.backplane.embed.SetHostGeometry", json!({"x": n("x"), "y": n("y"), "width": n("width"), "height": n("height"),
-                    "visible": p["visible"].as_bool().unwrap_or(true), "raise": p["raise"].as_bool().unwrap_or(false)})).await;
+                let (sx, sy, sw, sh, sv, raise, sanitized) = sanitize_host_geometry_params(&p);
+                if sanitized {
+                    eprintln!("kicad embed: {}: out-of-range SetHostGeometry ({}, {}, {}x{}, visible={}, raise={}); hiding safely",
+                        resolved.pro, p["x"], p["y"], p["width"], p["height"], p["visible"], p["raise"]);
+                }
+                let o = gui_call(&gui, "kiapi.backplane.embed.SetHostGeometry", json!({"x": sx, "y": sy, "width": sw, "height": sh,
+                    "visible": sv, "raise": raise})).await;
                 return if o["ok"].as_bool().unwrap_or(false) { ok_reply(id, json!({"applied": true})) } else { err_reply(id, &format!("SetHostGeometry: {}", o["error"].as_str().unwrap_or(""))) }
             }
             if method == "editor.kicad.notice.dismiss" {
@@ -7042,6 +7101,41 @@ mod unsaved_tests {
         assert!(!super::is_persons_edit(&ev("agent:t9")) && !super::is_persons_edit(&ev("hub:bom")) && !super::is_persons_edit(&json!({"type": "ET_SELECTION_CHANGED", "detail": "{}"})));
         // no editor route: the old rule (counted)
         assert!(super::touched_counts("/nowhere/x.kicad_pro"));
+    }
+}
+
+#[cfg(test)]
+mod geom_guard_tests {
+    use super::{sane_prewarm_size, sanitize_host_geometry, sanitize_host_geometry_params, MAX_EMBED_COORD};
+    use serde_json::json;
+
+    #[test]
+    fn prewarm_and_host_geometry_reject_corrupt_or_offscreen_values() {
+        assert_eq!(sane_prewarm_size(1200, 800), Some((1200, 800)));
+        assert_eq!(sane_prewarm_size(0, 800), None);
+        assert_eq!(sane_prewarm_size(800, 0), None);
+        assert_eq!(sane_prewarm_size(MAX_EMBED_COORD as u64, 800), None);
+        assert_eq!(sane_prewarm_size(u64::MAX, 800), None);
+
+        assert_eq!(sanitize_host_geometry(100, 50, 1200, 800, true), (100, 50, 1200, 800, true, false));
+        assert_eq!(sanitize_host_geometry(-1920, -100, 1200, 800, true), (-1920, -100, 1200, 800, true, false), "multi-monitor negative coords");
+        assert_eq!(sanitize_host_geometry(0, 0, 0, 0, false), (0, 0, 0, 0, false, false), "hidden push may have zero size");
+        assert_eq!(sanitize_host_geometry(-32000, -32000, 800, 600, false), (0, 0, 0, 0, false, true), "hidden with bad coords still hides safely");
+        assert_eq!(sanitize_host_geometry(0, 0, 0, 0, true), (0, 0, 0, 0, false, true), "visible zero size hides safely");
+        assert_eq!(sanitize_host_geometry(-32000, -32000, 800, 600, true), (0, 0, 0, 0, false, true), "Windows minimized coords");
+        assert_eq!(sanitize_host_geometry(-30000, -30000, 800, 600, true), (0, 0, 0, 0, false, true), "parked coords");
+        assert_eq!(sanitize_host_geometry(-1_137_246_128, 10, 2_071_176_320, 32_245, true), (0, 0, 0, 0, false, true), "#1185 huge coords");
+        assert_eq!(sanitize_host_geometry(i64::MIN, i64::MIN, 800, 600, true), (0, 0, 0, 0, false, true));
+        assert_eq!(sanitize_host_geometry(10, 10, -50, 400, true), (0, 0, 0, 0, false, true));
+
+        assert_eq!(sanitize_host_geometry_params(&json!({"x": 100, "y": 50, "width": 1200, "height": 800, "visible": true, "raise": true})), (100, 50, 1200, 800, true, true, false));
+        assert_eq!(sanitize_host_geometry_params(&json!({"visible": false})), (0, 0, 0, 0, false, false, false), "hidden may omit coords");
+        assert_eq!(sanitize_host_geometry_params(&json!({"x": "bad", "y": 50, "width": 1200, "height": 800, "visible": true, "raise": true})), (0, 0, 0, 0, false, false, true));
+        assert_eq!(sanitize_host_geometry_params(&json!({"x": 1e30, "y": 50, "width": 1200, "height": 800, "visible": true, "raise": true})), (0, 0, 0, 0, false, false, true));
+        assert_eq!(sanitize_host_geometry_params(&json!({"x": null, "y": 50, "width": 1200, "height": 800, "visible": true, "raise": true})), (0, 0, 0, 0, false, false, true));
+        assert_eq!(sanitize_host_geometry_params(&json!({"y": 50, "width": 1200, "height": 800, "visible": true, "raise": true})), (0, 0, 0, 0, false, false, true));
+        assert_eq!(sanitize_host_geometry_params(&json!({"x": 100, "y": 50, "width": 1200, "height": 800, "visible": "yes", "raise": true})), (0, 0, 0, 0, false, false, true));
+        assert_eq!(sanitize_host_geometry_params(&json!({"x": 100, "y": 50, "width": 1200, "height": 800, "visible": true, "raise": "yes"})), (0, 0, 0, 0, false, false, true));
     }
 }
 

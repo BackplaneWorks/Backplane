@@ -13,6 +13,47 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct R { pub x: i32, pub y: i32, pub w: i32, pub h: i32 }
 
+/// #1185: upper bound on physical coordinates/dimensions sent to an embedded KiCad container or frame (matches host `geomguard::LIMIT`).
+pub const MAX_COORD: i32 = 20_000;
+/// Initial hidden size for a newly created container before the first `place()` (matches KiCad's `CreateHolder` 800x600 so `fitToParent`/`PrepareFrame` never shrinks a frame to 1x1).
+pub const INIT_CONTAINER_W: i32 = 800;
+pub const INIT_CONTAINER_H: i32 = 600;
+
+/// Validate a physical pane rectangle before applying it to a container or child frame.
+pub fn sane_rect(r: R) -> Option<R> {
+    (r.w > 0 && r.h > 0 && r.w < MAX_COORD && r.h < MAX_COORD && r.x > -MAX_COORD && r.x < MAX_COORD && r.y > -MAX_COORD && r.y < MAX_COORD).then_some(r)
+}
+
+/// Convert logical GPUI bounds and scale factor into a validated physical `R`, rejecting NaN, infinity, non-positive scale/size, and out-of-range coordinates before `as i32` saturation.
+pub fn pane_rect_from_f32(x: f32, y: f32, w: f32, h: f32, scale: f32) -> Option<R> {
+    if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite() && scale.is_finite() && scale > 0.0) {
+        return None;
+    }
+    let s = scale as f64;
+    let (rx, ry, rw, rh) = ((x as f64 * s).round(), (y as f64 * s).round(), (w as f64 * s).round(), (h as f64 * s).round());
+    let lim = MAX_COORD as f64;
+    if rx.abs() >= lim || ry.abs() >= lim || rw <= 0.0 || rh <= 0.0 || rw >= lim || rh >= lim {
+        return None;
+    }
+    sane_rect(R { x: rx as i32, y: ry as i32, w: rw as i32, h: rh as i32 })
+}
+
+/// Windows: center position `(x, y)` for a floating KiCad dialog over `owner` `(left, top, right, bottom)` using raw `dialog`
+/// `(left, top, right, bottom)` bounds, or `None` when `owner` is minimized/off-screen or dimensions overflow/are out of range.
+pub fn dialog_center_pos(owner: (i32, i32, i32, i32), dialog: (i32, i32, i32, i32)) -> Option<(i32, i32)> {
+    let (l, t, r, b) = owner;
+    let (dl, dt, dr, db) = dialog;
+    let (ow, oh) = (r.checked_sub(l)?, b.checked_sub(t)?);
+    let (dw, dh) = (dr.checked_sub(dl)?, db.checked_sub(dt)?);
+    if l <= -MAX_COORD || t <= -MAX_COORD || l >= MAX_COORD || t >= MAX_COORD
+        || ow <= 0 || oh <= 0 || ow >= MAX_COORD || oh >= MAX_COORD
+        || dw <= 0 || dh <= 0 || dw >= MAX_COORD || dh >= MAX_COORD
+    {
+        return None;
+    }
+    Some((l + (ow - dw) / 2, t + (oh - dh) / 2))
+}
+
 /// The kind of an editor frame from its title, for stock KiCad (the fork reports kinds itself), named as the hub and the fork's embed IPC name
 /// them: `PCB`, `SCH`, `PCB_3D`, `SYMBOL_EDITOR`, `FOOTPRINT_EDITOR`, or `MANAGER` (the project manager, hosting the editors; never shown).
 pub fn kind_of_title(title: &str) -> &'static str {
@@ -196,7 +237,7 @@ mod imp {
         let g = conn()?; let c = g.as_ref().unwrap();
         let scr = c.setup().roots.get(SCREEN.load(std::sync::atomic::Ordering::Relaxed))?;
         let id = c.generate_id().ok()?;
-        c.create_window(scr.root_depth, id, parent, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
+        c.create_window(scr.root_depth, id, parent, 0, 0, super::INIT_CONTAINER_W as u16, super::INIT_CONTAINER_H as u16, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
             &CreateWindowAux::new().background_pixmap(x11rb::NONE).border_pixel(scr.black_pixel).colormap(scr.default_colormap)
                 .event_mask(EventMask::SUBSTRUCTURE_NOTIFY)).ok()?.check().ok()?;
         let _ = c.flush(); containers().lock().unwrap().insert(id);
@@ -793,7 +834,7 @@ mod imp {
         let container = container as u32;
         let show = show.map(|x| x as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let Some(r) = r else { let _ = c.unmap_window(container); let _ = c.flush(); return };
+        let Some(r) = r.and_then(super::sane_rect) else { let _ = c.unmap_window(container); let _ = c.flush(); return };
         let (w, h) = (r.w.max(1) as u32, r.h.max(1) as u32);
         let _ = c.configure_window(container, &ConfigureWindowAux::new().x(r.x).y(r.y).width(w).height(h));
         if let Some(t) = c.query_tree(container).ok().and_then(|q| q.reply().ok()) {
@@ -826,6 +867,7 @@ mod imp {
     /// Re-check the container's root coordinates and `show`'s geometry (e.g. on a pure WM top-level move, or right after GTK's deferred
     /// `gtk_widget_show` maps `show` at its own default size) and sync `show` to `(0, 0, w, h)` + current root position.
     pub fn sync_root(container: u64, r: R, show: u64, last_root: &mut (i32, i32)) {
+        let Some(r) = super::sane_rect(r) else { return };
         let (container, show) = (container as u32, show as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let (uw, uh) = (r.w.max(1) as u32, r.h.max(1) as u32);
@@ -1821,7 +1863,7 @@ mod imp {
                 cls.as_ptr(),
                 null_mut(),
                 WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-                0, 0, 1, 1,
+                0, 0, super::INIT_CONTAINER_W, super::INIT_CONTAINER_H,
                 p,
                 null_mut(),
                 null_mut(),
@@ -1981,10 +2023,9 @@ mod imp {
             if first_seen {
                 let (mut tr, mut dr) = (RECT::default(), RECT::default());
                 if unsafe { GetWindowRect(ctx.toplevel, &mut tr) != 0 && GetWindowRect(w, &mut dr) != 0 } {
-                    let (dw, dh) = (dr.right - dr.left, dr.bottom - dr.top);
-                    let x = tr.left + ((tr.right - tr.left) - dw) / 2;
-                    let y = tr.top + ((tr.bottom - tr.top) - dh) / 2;
-                    placer::set_pos(id_of(w), 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS, 0);
+                    if let Some((x, y)) = super::dialog_center_pos((tr.left, tr.top, tr.right, tr.bottom), (dr.left, dr.top, dr.right, dr.bottom)) {
+                        placer::set_pos(id_of(w), 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS, 0);
+                    }
                 }
             }
             1
@@ -2043,7 +2084,7 @@ mod imp {
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
         ACTIVE_CONTAINER.store(container, Ordering::SeqCst);
-        let Some(r) = r else {
+        let Some(r) = r.and_then(super::sane_rect) else {
             unsafe { ShowWindowAsync(c, SW_HIDE); }
             return;
         };
@@ -2070,6 +2111,7 @@ mod imp {
 
     /// Keep `show` sized to `(0, 0, w, h)` asynchronously (e.g. right after KiCad's `ShowFrame` reveals a frame at its default size).
     pub fn sync_root(container: u64, r: R, show: u64, last_root: &mut (i32, i32)) {
+        let Some(r) = super::sane_rect(r) else { return };
         let (c, s) = (hwnd(container), hwnd(show));
         if c.is_null() || s.is_null() { return }
         let (w, h) = (r.w.max(1), r.h.max(1));
@@ -3044,5 +3086,34 @@ mod tests {
         for r in &k { assert!(!(r.x < 200 && r.x + r.w > 100 && r.y < 150 && r.y + r.h > 50), "{r:?} overlaps the hole"); }
         let all = cut(pane, &[R { x: 0, y: 0, w: 1000, h: 1000 }]);
         assert!(all.is_empty(), "covered whole");
+    }
+    #[test] fn pane_geometry_and_dialog_centering_reject_invalid_or_offscreen_rects() {
+        assert_eq!(sane_rect(R { x: 100, y: 50, w: 800, h: 600 }), Some(R { x: 100, y: 50, w: 800, h: 600 }));
+        assert_eq!(sane_rect(R { x: 0, y: 0, w: 10, h: 10 }), Some(R { x: 0, y: 0, w: 10, h: 10 }));
+        assert_eq!(sane_rect(R { x: -1920, y: -100, w: 1200, h: 900 }), Some(R { x: -1920, y: -100, w: 1200, h: 900 }));
+        assert_eq!(sane_rect(R { x: 0, y: 0, w: 0, h: 600 }), None);
+        assert_eq!(sane_rect(R { x: 0, y: 0, w: 800, h: -5 }), None);
+        assert_eq!(sane_rect(R { x: -32000, y: 10, w: 800, h: 600 }), None);
+        assert_eq!(sane_rect(R { x: i32::MIN, y: i32::MIN, w: 800, h: 600 }), None);
+        assert_eq!(sane_rect(R { x: 10, y: 10, w: 20_000, h: 600 }), None);
+
+        assert_eq!(pane_rect_from_f32(10.0, 20.0, 500.0, 400.0, 1.5), Some(R { x: 15, y: 30, w: 750, h: 600 }));
+        assert_eq!(pane_rect_from_f32(f32::NAN, 0.0, 500.0, 400.0, 1.0), None);
+        assert_eq!(pane_rect_from_f32(f32::INFINITY, 0.0, 500.0, 400.0, 1.0), None);
+        assert_eq!(pane_rect_from_f32(0.0, 0.0, f32::INFINITY, 400.0, 1.0), None);
+        assert_eq!(pane_rect_from_f32(0.0, 0.0, 500.0, 400.0, 0.0), None);
+        assert_eq!(pane_rect_from_f32(0.0, 0.0, 500.0, 400.0, -1.0), None);
+        assert_eq!(pane_rect_from_f32(-32000.0, -32000.0, 500.0, 400.0, 1.0), None);
+        assert_eq!(pane_rect_from_f32(0.0, 0.0, 1e9, 400.0, 1.0), None);
+
+        assert_eq!(dialog_center_pos((100, 100, 1100, 900), (0, 0, 400, 300)), Some((400, 350)));
+        assert_eq!(dialog_center_pos((-1920, 0, 0, 1080), (10, 20, 410, 320)), Some((-1160, 390)), "multi-monitor negative x");
+        assert_eq!(dialog_center_pos((-11_520, 0, -7_680, 2_160), (0, 0, 400, 300)), Some((-9_800, 930)), "far-left multi-monitor owner");
+        assert_eq!(dialog_center_pos((-32000, -32000, -31840, -31970), (0, 0, 400, 300)), None, "Windows minimized toplevel");
+        assert_eq!(dialog_center_pos((i32::MIN, i32::MIN, 0, 0), (0, 0, 400, 300)), None);
+        assert_eq!(dialog_center_pos((100, 100, 1100, 900), (i32::MIN, 0, 0, 100)), None);
+        assert_eq!(dialog_center_pos((100, 100, 100, 900), (0, 0, 400, 300)), None);
+        assert_eq!(dialog_center_pos((100, 100, 1100, 900), (0, 0, 0, 300)), None);
+        assert_eq!(dialog_center_pos((100, 100, 30000, 900), (0, 0, 400, 300)), None);
     }
 }
