@@ -218,6 +218,19 @@ mod tests {
         // a share a native client may open, of a file the browser may not reach: the browser gets the intersection
         let far = crate::files::share::create(&hub, "t1", &serde_json::json!({"path": home.join("far-files/L/x.zip").to_string_lossy()})).await.unwrap();
         assert!(ask(far["link"].as_str().unwrap().to_string(), c.clone()).await.0.starts_with("HTTP/1.1 403"), "a share opens to a browser only within the browser's roots");
+        // /blob/<sha256>: unpaired -> 401; paired -> 200 with ETag + immutable private cache; If-None-Match -> 304
+        hub.register_http(std::sync::Arc::new(crate::files::blob::BlobHttp));
+        let sha = crate::files::blob::register_bytes(&home, proj.join("mfg/bom.csv"), "text/csv", b"a,b\n");
+        let blob_route = format!("/blob/{sha}");
+        assert!(ask(blob_route.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "unpaired /blob must be 401");
+        let (bh, bb) = ask(blob_route.clone(), c.clone()).await;
+        assert!(bh.starts_with("HTTP/1.1 200") && bb == b"a,b\n", "paired /blob: {bh}");
+        assert!(bh.contains("Cache-Control: private, max-age=31536000, immutable"), "immutable private cache: {bh}");
+        assert!(bh.contains("Cross-Origin-Resource-Policy: same-origin"), "corp header: {bh}");
+        let blob_etag = bh.lines().find_map(|l| l.strip_prefix("ETag: ").map(str::trim).map(str::to_string)).expect("ETag on /blob");
+        let (bh304, bb304) = ask(blob_route.clone(), format!("{c}If-None-Match: {blob_etag}\r\n")).await;
+        assert!(bh304.starts_with("HTTP/1.1 304") && bb304.is_empty(), "304 on /blob: {bh304}");
+
         let tag = ask(bom.clone(), c.clone()).await.0.lines().find_map(|l| l.strip_prefix("ETag: ").map(str::to_string)).unwrap();
         let device = reg.list()["devices"].as_array().unwrap().iter().find(|d| d["kind"] == "browser").unwrap()["id"].as_str().unwrap().to_string();
         assert_eq!(reg.revoke(&device)["ok"], true);
@@ -503,13 +516,26 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             } else {
                 crate::api::HttpReply::text("404 Not Found", "Unavailable")
             };
-            // Only carry the content disposition from the underlying resource.
-            let mut headers = SECURITY_HEADERS.to_owned();
+            // Only carry the content disposition (and ETag for immutable /blob/ assets) from the underlying resource.
+            let is_blob = req.route().starts_with("/blob/");
+            let mut headers = if is_blob && matches!(result.status, "200 OK" | "304 Not Modified") {
+                SECURITY_HEADERS.replacen(
+                    "Cache-Control: private, no-store\r\n",
+                    "Cache-Control: private, max-age=31536000, immutable\r\n",
+                    1,
+                )
+            } else {
+                SECURITY_HEADERS.to_owned()
+            };
             for line in result.extra.lines() {
-                if line.to_ascii_lowercase().starts_with("content-disposition:") {
+                let lower = line.to_ascii_lowercase();
+                if lower.starts_with("content-disposition:") || (is_blob && lower.starts_with("etag:")) {
                     headers.push_str(line.trim_end());
                     headers.push_str("\r\n");
                 }
+            }
+            if is_blob {
+                headers.push_str("Cross-Origin-Resource-Policy: same-origin\r\n");
             }
             if result.ctype.eq_ignore_ascii_case("image/svg+xml") {
                 headers.push_str("Content-Disposition: attachment\r\n");
@@ -572,6 +598,7 @@ fn is_browser_ws_target(target: &str) -> bool {
 
 fn is_protected_asset(path: &str) -> bool {
     matches!(path, "/files/get" | "/message-image") ||
+        path.strip_prefix("/blob/").is_some_and(|h| h.len() == 64 && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))) ||
         path.strip_prefix("/bots/").and_then(|p| p.strip_suffix("/screen.jpg"))
             .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
 }

@@ -158,7 +158,7 @@ impl Plots {
               let (mesh, parts_at) = had.iter().position(|h| h.0 == ky).map(|i| { let h = had.swap_remove(i); (h.1, h.2) }).unwrap_or_default();
               let held_already = fold && st.subs.get(&client).is_some_and(|v| v.iter().any(|s| s.key == ky));
               let room = st.subs.get(&client).map_or(0, |v| v.len()) < MAX_WATCH_SOURCES;
-              let (kc, wch) = if force { (Default::default(), false) } else { match st.client_kept_chunks.get(&client) { Some(s) => (s.clone(), true), None => (Default::default(), false) } };
+              let (kc, wch) = if force { (Default::default(), false) } else { (st.client_kept_chunks.get(&client).cloned().unwrap_or_default(), true) };
               if !held_already && (!fold || room) { st.subs.entry(client).or_default().push(Sub { key: ky.clone(), held: if carries { carry.0.clone() } else { vec![] }, mesh, fresh: true, base: if carries { carry.1.clone() } else { String::new() }, kept: if !force && solid_kind(k) && (kept.0.is_empty() || kept.0 == ky) { kept.1 } else { 0 }, kept_chunks: kc, with_chunk_hashes: wch, parts_at }); }
               else if !held_already { continue }
               let s = st.srcs.entry(ky.clone()).or_insert_with(|| Src { kind: k, root: root.to_string(), file: f.clone(), ..Default::default() });
