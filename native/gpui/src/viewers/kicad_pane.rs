@@ -1916,12 +1916,12 @@ impl KicadPane {
         let seen = self.marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id));
         self.at_px = seen.as_ref().map(|(b, _)| *b);
         let scale = window.scale_factor();
-        let r = |b: &Bounds<Pixels>| nc::R { x: (f32::from(b.origin.x) * scale).round() as i32, y: (f32::from(b.origin.y) * scale).round() as i32, w: (f32::from(b.size.width) * scale).round() as i32, h: (f32::from(b.size.height) * scale).round() as i32 };
-        let at = seen.as_ref().map(|(b, _)| r(b)).filter(|r| r.w > 0 && r.h > 0);
+        let r = |b: &Bounds<Pixels>| nc::pane_rect_from_f32(f32::from(b.origin.x), f32::from(b.origin.y), f32::from(b.size.width), f32::from(b.size.height), scale);
+        let at = seen.as_ref().and_then(|(b, _)| r(b));
         let after = self.end_marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id));
-        let mut over: Vec<nc::R> = after.as_ref().map(|(_, o)| o.iter().filter(|b| f32::from(b.size.width) >= 12. && f32::from(b.size.height) >= 12.).map(|b| r(b)).collect()).unwrap_or_default();
+        let mut over: Vec<nc::R> = after.as_ref().map(|(_, o)| o.iter().filter(|b| f32::from(b.size.width) >= 12. && f32::from(b.size.height) >= 12.).filter_map(|b| r(b)).collect()).unwrap_or_default();
         // Centered modals (keysheet, improvements) draw a full-window dim backdrop plus a smaller card: cut out the card so the uncovered pane stays visible.
-        if let Some(p) = after.as_ref().map(|(b, _)| r(b)).or(at) {
+        if let Some(p) = after.as_ref().and_then(|(b, _)| r(b)).or(at) {
             if over.iter().any(|o| *o != p) { over.retain(|o| *o != p); }
         }
         // the pane asks about another KiCad's lock: no editor over the question (KiCad's frame, mapped in its container, covered the
