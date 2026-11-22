@@ -36,8 +36,8 @@ impl Mailroom for Room {
         })
     }
     fn hidden<'a>(&'a self, caller: &'a str, thread: &'a str) -> Fut<'a, bool> {
-        Box::pin(async move { let Some(b) = self.0.upgrade() else { return false }; let w = b.world().await;
-            match w.run_of(thread) { None => false, Some(r) => !(w.run_is(caller) && r.live && w.run_bot(caller).map_or(false, |x| x.id == r.bot)) } })
+        Box::pin(async move { let Some(b) = self.0.upgrade() else { return crate::state::is_mail_run_id(thread) }; let w = b.world().await;
+            match w.mail.run_of(thread) { None => w.private_is(thread) || crate::state::is_mail_run_id(thread), Some(r) => !(w.run_is(caller) && r.live && w.run_bot(caller).map_or(false, |x| x.id == r.bot)) } })
     }
     fn launcher<'a>(&'a self, thread: &'a str) -> Fut<'a, String> {
         Box::pin(async move { let Some(b) = self.0.upgrade() else { return thread.to_string() }; let w = b.world().await; if w.private_is(thread) { w.triage_thread() } else { thread.to_string() } })

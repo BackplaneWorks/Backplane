@@ -608,3 +608,25 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     bots.queues_due().await; settle(&bots).await;
     if now_s() / 60 == w.parse::<u64>().unwrap() { assert_eq!(runs(&hub).len(), cap, "within the same minute the tick starts nothing more") }
 }
+
+#[tokio::test] async fn a_launch_report_mailroom_run_is_not_assigned_to_the_project() {
+    let (hub, bots, _r, bub, _) = uber("launch-proj").await;
+    hub.commit_many(&[
+        json!({"$":"ProjectCreated","id":"p1","title":"Thermostat","root":"/tmp/p1","at":1}),
+        json!({"$":"ThreadCreated","id":"tw","project":"p1","title":"Fix sensor","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}),
+    ]).await.unwrap();
+    // File a launch-origin mail from tw to Bub (same path as a launched thread reporting back)
+    let w = bots.world().await;
+    let o = crate::bots::mail::Origin::new("thread:tw", "launch", "");
+    bots.file_operational(&w, 10, &o, &format!("bot:{bub}"), "Sensor fixed and tested.", "t:tw:lr-1", "act", vec![]).await.unwrap();
+    drop(w);
+    until(&hub, |l| l.iter().any(|e| e["$"] == "RunSet")).await;
+    settle(&bots).await;
+    let l = log(&hub);
+    let conv = l.iter().find(|e| e["$"] == "ConvSet" && e["subject"] == "Launch: Fix sensor").expect("ConvSet for launch");
+    assert_eq!(conv["project"], "p1", "conversation keeps project context for mail_list/escalation");
+    let run_id = runs(&hub)[0]["thread"].as_str().unwrap().to_string();
+    assert!(crate::state::is_mail_run_id(&run_id), "run id shape: {run_id}");
+    let tc = l.iter().find(|e| e["$"] == "ThreadCreated" && e["id"] == run_id.as_str()).expect("ThreadCreated for run");
+    assert_eq!(tc["project"], "", "new mailroom run must not be assigned to a user project");
+}

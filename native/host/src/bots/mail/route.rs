@@ -265,7 +265,7 @@ impl<'a> Ctx<'a> {
         let parent = self.bot_th(bot); let model = self.run_model(bot); let cwd = self.cwd(&parent); let owner = self.triage_owner(bot);
         let c = &body.conv; let id = body.mail.id.clone();
         let mut cs = vec![
-            json!({"$":"ThreadCreated","id":th,"project":c.project,"title":format!("{}: {}", self.bot_name(bot), c.subject),"env":"local","branch":"","worktree":cwd,"provider":self.run_provider(bot),"model":model,"at":self.now}),
+            json!({"$":"ThreadCreated","id":th,"project":"","title":format!("{}: {}", self.bot_name(bot), c.subject),"env":"local","branch":"","worktree":cwd,"provider":self.run_provider(bot),"model":model,"at":self.now}),
             json!({"$":"WorktreeSet","id":th,"branch":"","worktree":cwd,"at":self.now}),
             json!({"$":"ModesSet","id":th,"runtime":"approval-required","interaction":"default","model":model,"at":self.now}),
             json!({"$":"RunSet","thread":th,"bot":bot,"conv":conv,"mail":id,"at":self.now}),

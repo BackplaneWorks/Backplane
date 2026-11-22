@@ -99,6 +99,7 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("~{s}"), about: format!("machine · {}", if m.away { "away" } else { "here" }), score: sc + if m.away { 0 } else { 5 }, same: false, at: 0 }) }
         },
         '>' if on.is_some() => for (id, t) in &on.unwrap().threads {
+            if crate::state::is_mail_run_id(id) { continue }
             let s = slug(t); let sc = score(&s, t, &q);
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!(">{s}"), about: format!("thread · {}", on.unwrap().name), score: sc, same: false, at: id.len() as u64 }) }
         },
@@ -107,7 +108,7 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("%{s}"), about: format!("project · {}", on.unwrap().name), score: sc, same: false, at: 0 }) }
         },
         '>' => {
-            let live: Vec<(&String, &crate::state::Thread)> = st.threads.iter().filter(|(i, t)| !t.deleted && i.as_str() != here && !t.title.trim().is_empty()).collect();
+            let live: Vec<(&String, &crate::state::Thread)> = st.threads.iter().filter(|(i, t)| !t.deleted && !st.run_hidden(i) && i.as_str() != here && !t.title.trim().is_empty()).collect();
             let mut seen: std::collections::HashMap<String, usize> = Default::default();
             for (_, t) in &live { *seen.entry(slug(&t.title)).or_default() += 1 }
             for (id, t) in live {

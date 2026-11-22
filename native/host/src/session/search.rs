@@ -48,7 +48,9 @@ async fn live(hub: &Arc<Hub>) -> (HashMap<String, (String, String)>, HashMap<Str
          m.projects.iter().map(|(i, p)| (i.clone(), p.title.clone())).collect(),
          m.threads.iter().filter(|(_, t)| !t.deleted).map(|(i, t)| (i.clone(), t.activity.max(t.created))).collect())
     };
-    let hidden: HashSet<String> = crate::statehost::policies().and_then(|x| x.with_state(|st| meta.keys().filter(|i| st.run_hidden(i)).cloned().collect::<HashSet<String>>())).unwrap_or_default();
+    let hidden: HashSet<String> = crate::statehost::policies()
+        .and_then(|x| x.with_state(|st| meta.keys().filter(|i| st.run_hidden(i)).cloned().collect::<HashSet<String>>()))
+        .unwrap_or_else(|| meta.keys().filter(|i| crate::state::is_mail_run_id(i)).cloned().collect());
     (meta, projects, activity, hidden)
 }
 fn place(projects: &HashMap<String, String>, pid: &str) -> String { if pid == crate::sidebar::SCRATCH { crate::sidebar::NO_PROJECT.to_string() } else { projects.get(pid).cloned().unwrap_or_default() } }
