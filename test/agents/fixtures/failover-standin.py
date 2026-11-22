@@ -134,6 +134,9 @@ if "app-server" in a:
         else: say({"id": i, "result": {}})
     sys.exit(0)
 text = a[-1] if a else ""
+if text == "-":
+    text = sys.stdin.buffer.read().decode("utf-8", "replace")
+    if text.endswith("\n"): text = text[:-1]
 resume = a[a.index("resume") + 1] if "resume" in a else ""
 record(resume, text)
 tid = resume or "cs-" + who + "-" + uuid.uuid4().hex[:8]

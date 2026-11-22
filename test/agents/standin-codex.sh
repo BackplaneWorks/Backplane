@@ -1,12 +1,12 @@
 #!/bin/sh
 # A stand-in for `codex exec --json` (one process per turn) and for its one-shot writing calls (`--ephemeral`). Never a real model.
 # A turn reads its text from the last argument; "slow" waits 2 s, "die" exits 3, "hang" waits a minute; every turn says thread.started, a delta, a command
-# and a reply that echoes the text. The argv goes to argv.log beside the script and to $FAKE_LOG; a one-shot answers one agent_message naming its model.
+# and a reply that echoes the text. The argv goes to argv.log beside the script (and stdin prompts when the last argument is "-" go to stdin.log) and to $FAKE_LOG; a one-shot answers one agent_message naming its model.
 case "$1" in --version) echo "codex-cli 0.0.0"; exit 0;; esac
 for a in "$@"; do last="$a"; done
 D=$(dirname "$0"); echo "$@" >> "$D/argv.log"; echo $$ > "$D/pid"
 [ -n "$FAKE_LOG" ] && echo "CODEX $*" >> "$FAKE_LOG"
-if [ "$last" = "-" ]; then last=$(cat); fi
+if [ "$last" = "-" ]; then last=$(tee -a "$D/stdin.log"); fi
 case " $* " in *" --ephemeral "*)
   m=default; p=; for a in "$@"; do [ "$p" = -m ] && m=$a; p=$a; done
   printf '{"type":"item.completed","item":{"type":"agent_message","text":"Codex title from %s"}}\n' "$m"; exit 0;; esac

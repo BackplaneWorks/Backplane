@@ -444,13 +444,59 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
     assert_eq!(carried(&ev).into_iter().map(|c| c.0).collect::<Vec<_>>(), vec![tid(0)]);
     assert_eq!(waiting(&ev), Vec::<String>::new()); ag.shutdown();
 }
+fn codex_carry_args_ok(argv: &[&str], stdin: &str, windows: bool) -> bool {
+    if windows {
+        argv.len() >= 6
+            && argv[0] == "exec"
+            && argv[1] == "-p"
+            && argv[2].strip_prefix("bp-").is_some_and(|s| !s.is_empty())
+            && argv[3] == "resume"
+            && argv[4] == "S-cut"
+            && argv.last() == Some(&"-")
+            && !argv.iter().any(|a| a.contains(world::CARRY_TEXT))
+            && stdin.contains(world::CARRY_TEXT)
+    } else {
+        argv.len() >= 4
+            && argv[..3] == ["exec", "resume", "S-cut"]
+            && argv.last().is_some_and(|a| a.contains(world::CARRY_TEXT))
+            && stdin.is_empty()
+    }
+}
+fn codex_argv_runs(argv: &str) -> Vec<String> {
+    let mut runs = Vec::<String>::new();
+    for l in argv.lines() {
+        if l.starts_with("exec ") && l.contains("--json") {
+            runs.push(l.to_string());
+        } else if let Some(cur) = runs.last_mut() {
+            cur.push('\n');
+            cur.push_str(l);
+        }
+    }
+    runs
+}
+fn codex_exec_line_ok(inv: &str, rest: &str, prompt: &str, windows: bool) -> bool {
+    let inv = inv.trim_end();
+    if windows {
+        inv.strip_prefix("exec -p bp-")
+            .and_then(|s| s.split_once(' '))
+            .is_some_and(|(prof, tail)| !prof.is_empty() && tail.starts_with(rest) && tail.ends_with(" -") && !tail.ends_with(&format!(" {prompt}")))
+    } else {
+        inv.starts_with(&format!("exec {rest}")) && inv.ends_with(&format!(" {prompt}"))
+    }
+}
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_carries_a_codex_thread_on_in_its_own_session() {
-    let sd = dir("cx-bin"); let args = sd.join("args");
-    script(&sd, "codex", &format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n", crate::plat::fs::script_path(&args)));
+    let sd = dir("cx-bin"); let args = sd.join("args"); let stdin = sd.join("stdin");
+    script(&sd, "codex", &format!("#!/bin/sh\nfor x in \"$@\"; do last=\"$x\"; done\nprintf '%s\\0' \"$@\" > \"{}\"\nif [ \"$last\" = \"-\" ]; then cat > \"{}\"; fi\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n", crate::plat::fs::script_path(&args), crate::plat::fs::script_path(&stdin)));
     let (hub, ag, _h, _w) = start("cx", |w| { let l = cut_log(w, 1).replace("\"provider\":\"claude\"", "\"provider\":\"codex\""); l + &format!("{{\"$\":\"SessionSet\",\"id\":\"{T1}\",\"session\":\"S-cut\",\"at\":1700000120}}\n") }, |_| Cli::standin(&sd)).await;
-    let ev = until(&hub, 0, 10, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let ev = until(&hub, 0, 60, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert_eq!(carried(&ev).len(), 1, "{ev:?}");
-    let a = std::fs::read_to_string(&args).unwrap(); assert!(a.starts_with("exec\nresume\nS-cut\n") && a.contains(world::CARRY_TEXT), "{a}"); ag.shutdown();
+    assert!(ev.iter().any(|e| turn_is(e, "completed")), "carried Codex turn did not complete in 60s: {ev:?}");
+    let raw = std::fs::read(&args).unwrap();
+    let trimmed = raw.strip_suffix(&[0]).unwrap_or(&raw);
+    let argv: Vec<String> = if trimmed.is_empty() { vec![] } else { trimmed.split(|&b| b == 0).map(|s| String::from_utf8_lossy(s).into_owned()).collect() };
+    let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let stdin_text = std::fs::read_to_string(&stdin).unwrap_or_default();
+    assert!(codex_carry_args_ok(&argv_refs, &stdin_text, cfg!(windows)), "argv={argv:?} stdin={stdin_text:?}"); ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_carries_on_at_most_a_burst_at_once() {
     let sd = dir("cb-bin"); script(&sd, "claude", DEAF);
@@ -981,11 +1027,87 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::Te
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_second_codex_turn_resumes_the_session() {
     let (hub, ag, sd) = codex_start("cx2").await;
-    for t in ["one", "two"] { let from = len(&hub).await; rpc(&hub, "turn.start", json!({"thread":T1,"text":t})).await; until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(300)).await }
-    let argv = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default(); let ls: Vec<&str> = argv.lines().filter(|l| l.starts_with("exec ")).collect();
-    assert!(ls[0].starts_with("exec --json --skip-git-repo-check"), "{argv}"); assert!(ls[1].starts_with("exec resume cs-1 --json"), "{argv}");
+    for (i, t) in ["one", "two"].into_iter().enumerate() {
+        let from = len(&hub).await;
+        rpc(&hub, "turn.start", json!({"thread":T1,"text":t})).await;
+        let ev = until(&hub, from, 60, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+        assert!(ev.iter().any(|e| turn_is(e, "completed")), "codex turn {t:?} did not complete: {ev:?}");
+        let end = Instant::now() + Duration::from_secs(15);
+        while ag.stats.procs_exited.load(Relaxed) < (i + 1) as u64 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(25)).await }
+        assert_eq!(ag.stats.procs_exited.load(Relaxed), (i + 1) as u64, "codex turn {t:?} process was not reaped");
+    }
+    let argv = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default(); let ls = codex_argv_runs(&argv);
+    assert!(ls.len() >= 2 && codex_exec_line_ok(&ls[0], "--json --skip-git-repo-check", "one", cfg!(windows)) && codex_exec_line_ok(&ls[1], "resume cs-1 --json", "two", cfg!(windows)), "{argv}");
+    if cfg!(windows) {
+        let stdin = std::fs::read_to_string(sd.join("stdin.log")).unwrap_or_default();
+        assert_eq!(stdin.lines().collect::<Vec<_>>(), ["one", "two"], "windows prompts arrive on stdin: {stdin:?}");
+    }
     let ev = log_from(&hub, 0).await; let us: Vec<&Value> = ev.iter().filter(|e| is(e, "TurnUsage")).collect();
     assert_eq!(us.len(), 1, "the same totals are one turn's usage"); ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn codex_standins_read_stdin_when_prompt_arg_is_dash() {
+    async fn run_standin(mut p: proc::Proc, input: &str) -> (Vec<String>, proc::Exit) {
+        let pid = p.pid;
+        let res = tokio::time::timeout(Duration::from_secs(15), async move {
+            p.input.send(input.into()).await.unwrap();
+            drop(p.input);
+            let mut out = Vec::new();
+            while let Some(l) = p.lines.recv().await { out.push(l); }
+            let ex = p.exit.await.unwrap();
+            (out, ex)
+        }).await;
+        match res {
+            Ok(v) => v,
+            Err(_) => { proc::terminate(pid, Duration::from_millis(100)); panic!("stand-in pid {pid} timed out after 15s") }
+        }
+    }
+
+    assert!(codex_carry_args_ok(&["exec", "resume", "S-cut", "--json", world::CARRY_TEXT], "", false));
+    assert!(codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", "--json", "-"], world::CARRY_TEXT, true));
+    assert!(!codex_carry_args_ok(&["exec", "resume", "S-cut", world::CARRY_TEXT], "", true));
+    assert!(!codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", world::CARRY_TEXT], "", true));
+    assert!(!codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", "-", world::CARRY_TEXT], world::CARRY_TEXT, true));
+    assert!(!codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", "-"], "other", true));
+    assert!(!codex_carry_args_ok(&["exec", "resume", "S-cut", world::CARRY_TEXT, "tail"], "", false));
+    assert!(!codex_carry_args_ok(&["exec", "resume", "S-cut", world::CARRY_TEXT], "unexpected", false));
+    assert!(!codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", world::CARRY_TEXT], "", false));
+
+    assert!(codex_exec_line_ok("exec --json --skip-git-repo-check one", "--json --skip-git-repo-check", "one", false));
+    assert!(codex_exec_line_ok("exec -p bp-1-0 --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", true));
+    assert!(codex_exec_line_ok("exec -p bp-1-1 resume cs-1 --json --skip-git-repo-check -", "resume cs-1 --json", "two", true));
+    assert!(!codex_exec_line_ok("exec -p bp-1-0 --json --skip-git-repo-check one", "--json --skip-git-repo-check", "one", true));
+    assert!(!codex_exec_line_ok("exec --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", true));
+    assert!(!codex_exec_line_ok("exec -p bp- --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", true));
+    assert!(!codex_exec_line_ok("exec -p bp-1-0 --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", false));
+    assert!(!codex_exec_line_ok("exec --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", false));
+
+    // 1. standin-codex.sh captures raw stdin (preserving intentional trailing LF) into stdin.log and echoes prompt
+    let sd = dir("cx-stdin-sh");
+    script(&sd, "codex", CODEX_STANDIN);
+    let args: Vec<String> = ["exec", "-p", "bp-1", "--json", "--skip-git-repo-check", "-"].into_iter().map(String::from).collect();
+    let p = proc::spawn(&sd.join("codex"), &args, &sd, Some(&sd), &[]).unwrap();
+    let (out, ex) = run_standin(p, "stdin prompt text\n").await;
+    assert_eq!(ex.code, Some(0), "standin-codex.sh stderr: {}", ex.stderr);
+    assert!(out.iter().any(|l| l.contains("re: stdin prompt text")), "{out:?}");
+    let argv_log = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default();
+    let stdin_log = std::fs::read_to_string(sd.join("stdin.log")).unwrap_or_default();
+    assert!(argv_log.contains("exec -p bp-1 --json --skip-git-repo-check -"), "{argv_log}");
+    assert_eq!(stdin_log, "stdin prompt text\n\n", "raw stdin (prompt trailing LF + proc framing LF) preserved: {stdin_log:?}");
+
+    // 2. failover-standin.py reads UTF-8 stdin prompt preserving internal CRLF and intentional trailing LF (stripping only proc's single framing LF)
+    let rec = dir("cx-stdin-py-rec");
+    let bin = dir("cx-stdin-py-bin");
+    let py = include_str!("../../../../test/agents/fixtures/failover-standin.py").replace("@DIR@", &crate::plat::fs::script_path(&rec));
+    script(&bin, "codex", &py);
+    let py_args: Vec<String> = ["exec", "-p", "bp-1", "resume", "cs-prev", "--json", "-"].into_iter().map(String::from).collect();
+    let p = proc::spawn(&bin.join("codex"), &py_args, &bin, Some(&bin), &[]).unwrap();
+    let prompt = "handed over — UTF-8\r\nsecond\n";
+    let (_, ex) = run_standin(p, prompt).await;
+    assert_eq!(ex.code, Some(0), "failover-standin.py stderr: {}", ex.stderr);
+    let turns: Vec<Value> = std::fs::read_to_string(rec.join("turns.jsonl")).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["resume"], "cs-prev");
+    assert_eq!(turns[0]["text"], prompt);
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_person_message_to_a_running_codex_turn_steers_it() {
     let (hub, ag, _sd) = codex_start("cx3").await; let from = len(&hub).await;
@@ -2359,26 +2481,36 @@ const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_bots_message_and_a_report_restart_a_running_codex_turn_at_once() {
     let (hub, ag, sd) = codex_start("cxcut").await; let from = len(&hub).await;
-    // the stand-in streams "par", then waits 2 s: the message must come inside that wait, once the text has streamed (a fixed 500 ms was
-    // before the first text on a loaded Windows runner, where the turn's snapshot and the process start take longer: nothing had streamed to keep)
+    // the stand-in streams "par", then waits 60 s ("hang"): the message must come once the text has streamed, not before
+    // (a fixed wait could race process start on a loaded Windows runner before anything had streamed to keep)
     let streamed = |d0: u64| { let ag = ag.clone(); async move { let end = Instant::now() + Duration::from_secs(60); while ag.stats.deltas.load(Relaxed) == d0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await } assert!(ag.stats.deltas.load(Relaxed) > d0, "no text streamed") } };
     let d0 = ag.stats.deltas.load(Relaxed);
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow first"})).await; streamed(d0).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang first"})).await; streamed(d0).await;
     ag.deliver_as("user", T1, "m-bot-2", "a bot says stop", Some(("bot:b1".into(), "bot".into(), String::new())), vec![]).await.unwrap();
     let ev = log_from(&hub, from).await;
     assert!(!ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("ride.{T1}") && !e["value"].as_str().unwrap_or("").is_empty()), "nothing waits as a ride");
     assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "steered at once");
     assert!(ev.iter().any(|e| is(e, "MessageFrom") && e["msg"] == "m-bot-2"), "who sent it is kept");
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["msg"].as_str().map_or(false, |m| m.ends_with(":before"))), "what had streamed is kept");
-    until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    let ev1 = until(&hub, from, 60, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev1.iter().any(|e| turn_is(e, "completed")), "first steered turn did not complete: {ev1:?}");
+    let end = Instant::now() + Duration::from_secs(15);
+    while ag.stats.procs_exited.load(Relaxed) < 1 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(25)).await }
+    assert_eq!(ag.stats.procs_exited.load(Relaxed), 1, "first steered turn's completed process was not reaped");
     let from2 = len(&hub).await;
     let d0 = ag.stats.deltas.load(Relaxed);
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow second"})).await; streamed(d0).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang second"})).await; streamed(d0).await;
     ag.wake_ride(T1, "rep-2", "a launched thread reported").await.unwrap();
     let ev = log_from(&hub, from2).await;
     assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "a report steers too: {ev:?}");
-    let mut argv = String::new(); for _ in 0..50 { argv = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default(); if argv.contains("a launched thread reported") { break } tokio::time::sleep(Duration::from_millis(100)).await }
-    assert!(argv.contains("a launched thread reported"), "the turn started again with it");
+    let prompt_log = sd.join(if cfg!(windows) { "stdin.log" } else { "argv.log" });
+    let mut logged = String::new();
+    for _ in 0..100 {
+        logged = std::fs::read_to_string(&prompt_log).unwrap_or_default();
+        if logged.contains("a launched thread reported") { break }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(logged.contains("a launched thread reported"), "the turn started again with it ({}: {logged:?})", prompt_log.display());
     assert_eq!(ag.stats.procs_spawned.load(Relaxed), 4); ag.shutdown();
 }
 
