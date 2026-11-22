@@ -545,6 +545,9 @@ def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
             {"shot": f"b7-close-{side}", "settle": "board", "timeout_ms": tmo},
         ]
     steps += [
+        # Escape preserves a tiled layout: close one tile down to single-pane before resetting to idle.
+        *_tile_row("kind=gerbers", "close", via),
+        {"wait": 250},
         # the pair (swap, resize, maximize, restore) is Schematic and Board: the genuine two-input route again (Schematic, then a Shift+click on Board beside it)
         *_reset_idle("b7-pair-idle", tmo),
         *seed_two_tiles("rail:Schematic", "rail:Board", "b7:pair"),
@@ -567,7 +570,11 @@ def build_b7_steps(settle_timeout_ms: int = 15000) -> list[dict]:
         {"wait": 250},
         {"shot": "b7-restored", "settle": "schematic", "timeout_ms": tmo},
     ]
-    steps += _reset_idle("b7-overlay-idle", tmo)
+    steps += [
+        *_tile_row("kind=schematic", "close", via),
+        {"wait": 250},
+        *_reset_idle("b7-overlay-idle", tmo),
+    ]
     steps += [
         {"press": "rail:Board"},
         {"wait_settled": "board", "tag": "b7-overlay-base", "timeout_ms": tmo},

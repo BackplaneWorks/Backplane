@@ -246,7 +246,7 @@ struct DataViewerView: View {
                     }
                 // unknown files (no hub yet) still open the 3D view: it shows the model it showed last
                 case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: board?.pcb ?? "", has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil, none: "No board in this project yet")
-                case "Gerbers": DataPlotTab(client: client, thread: thread, kind: "gerbers", path: "", has: true, none: "No Gerbers in this project yet")
+                case "Gerbers": DataPlotTab(client: client, thread: thread, kind: "gerbers", path: "", has: true, none: "No Gerber files in this project yet")
                 case "Split": DataSplitTab(client: client, thread: thread, files: files, board: board)
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)

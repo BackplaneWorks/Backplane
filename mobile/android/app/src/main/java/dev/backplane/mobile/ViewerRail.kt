@@ -22,7 +22,7 @@ data class ViewerRailHas(
     fun available(tab: String): Boolean = when (tab) {
         "Board", "3D" -> board
         "Schematic" -> schematic
-        "Split" -> board || schematic
+        "Split" -> board && schematic
         "Mech" -> mech
         "Gerbers" -> gerbers
         else -> true

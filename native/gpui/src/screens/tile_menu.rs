@@ -521,6 +521,16 @@ fn add_tool(
     super::pane_header::hint(tool, t("viewer.tile.add.tip"), "")
 }
 
+/// Build `(control_id, i18n_label_key, hub_command)` for a tile's Maximize / Restore menu entry.
+fn menu_maximize(id: &str, restored: bool) -> (String, &'static str, &'static str) {
+    let (verb, label, command) = if restored {
+        ("restore", "viewer.tile.restore", "layout-restore")
+    } else {
+        ("maximize", "viewer.tile.maximize", "layout-maximize")
+    };
+    (format!("tile:{id}:{verb}"), label, command)
+}
+
 /// Pass the original thread picture and the painted layout leaf, including for a maximized tile.
 pub fn decorate(
     cx: &Context<Backplane>,
@@ -563,15 +573,10 @@ pub fn decorate(
             t("viewer.tile.add"),
             Press::Tile(Action::Open(Some(owner.clone()))),
         ));
-        let restored = viewer["layout"]["maximized"] == id;
-        let (verb, label, command) = if restored {
-            ("restore", "viewer.tile.restore", "layout-restore")
-        } else {
-            ("maximize", "viewer.tile.maximize", "layout-maximize")
-        };
+        let (control_id, label, command) = menu_maximize(id, viewer["layout"]["maximized"] == id);
         h.controls.tools.push(button(
             cx,
-            format!("tile:{id}:more:{verb}"),
+            control_id,
             t(label),
             action(command, json!({"tile": id})),
         ));
@@ -761,6 +766,26 @@ mod tests {
                 .add_payload(&owner, "board", None)
                 .get("bounds")
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn maximize_and_restore_use_direct_tile_control_ids() {
+        assert_eq!(
+            super::menu_maximize("t1", false),
+            (
+                "tile:t1:maximize".to_owned(),
+                "viewer.tile.maximize",
+                "layout-maximize"
+            )
+        );
+        assert_eq!(
+            super::menu_maximize("t1", true),
+            (
+                "tile:t1:restore".to_owned(),
+                "viewer.tile.restore",
+                "layout-restore"
+            )
         );
     }
 }

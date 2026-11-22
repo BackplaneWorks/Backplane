@@ -157,5 +157,19 @@ tr.nextFetch = DViewerRailReply(
 ctrl.applyReply(cr2, reply: reply1, hasRail: true, gerbersSupported: true)
 check(ctrl.tab == "Files" && tr.log == ["fetch:t1:gerbers", "stop:t1"], "stale localSelectionSeq refetches and stops watch before landing on Files", tr.log)
 
+// Split requires both board and schematic (matching hub present::rail::rail)
+check(!DViewerRailHas(board: true, schematic: false, mech: false, gerbers: false).available("Split"), "split unavailable without schematic")
+check(!DViewerRailHas(board: false, schematic: true, mech: false, gerbers: false).available("Split"), "split unavailable without board")
+check(DViewerRailHas(board: true, schematic: true, mech: false, gerbers: false).available("Split"), "split available when board and schematic exist")
+
+let splitStale = [
+    DViewerRailEntry(id: "board", label: "Board", group: "design", state: "off"),
+    DViewerRailEntry(id: "schematic", label: "Schematic", group: "design", state: "disabled", why: "No schematic in this project"),
+    DViewerRailEntry(id: "split", label: "Split", group: "design", state: "on"),
+]
+let (ss, sr) = ViewerRailState(threadId: "t1").beginRequest(threadId: "t1", hasRail: true)
+let splitOut = ss.onReply(sr, entries: splitStale, has: DViewerRailHas(board: true, schematic: false, mech: false, gerbers: false), hasRail: true, gerbersSupported: false, currentTab: "Split", hasFileLink: false)
+check(splitOut.accepted && splitOut.tab == "Board" && !splitOut.stopWatch, "reconciles away from Split to Board without stopWatch when schematic missing", splitOut)
+
 print("viewer-rail: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

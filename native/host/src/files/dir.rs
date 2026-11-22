@@ -19,9 +19,9 @@ pub fn list(root: &Path, rel: &str) -> Result<String, &'static str> {
     let (mut nd, mut nf) = (0, 0);
     for n in &names {
         let Some(name) = n.to_str() else { continue };
-        // `*` skips dotfiles; a name holding a newline or tab would break the line format: left out
-        // zip_listing: hidden names and names that could forge a listing record (tab, CR, LF, backslash) are left out
-        if name.starts_with('.') || name.contains(['\n', '\t', '\r', '\\']) { continue }
+        // `*` skips dotfiles; KiCad writes `~<name>.lck` temporary lock files beside open documents;
+        // a name holding a newline, tab, CR or backslash would break the listing format: left out
+        if name.starts_with('.') || (name.starts_with('~') && name.ends_with(".lck")) || name.contains(['\n', '\t', '\r', '\\']) { continue }
         let p = dir.join(n);
         // symlinks and non-regular entries are never exposed (a link to a file is not listed either)
         let Ok(lm) = std::fs::symlink_metadata(&p) else { continue };
@@ -50,5 +50,11 @@ mod tests {
     #[test] fn bounded_at_2000_each() {
         let b = tmp("m"); for i in 0..2105 { std::fs::write(b.join(format!("f{i:05}")), "").unwrap() } for i in 0..2005 { std::fs::create_dir(b.join(format!("d{i:05}"))).unwrap() }
         let t = list(&b, "").unwrap(); assert_eq!(t.lines().filter(|l| l.starts_with("d\t")).count(), 2000); assert_eq!(t.lines().filter(|l| l.starts_with("f\t")).count(), 2000); let _ = std::fs::remove_dir_all(&b);
+    }
+    #[test] fn hides_kicad_lock_files() {
+        let b = tmp("lck"); std::fs::write(b.join("a.kicad_pcb"), "").unwrap(); std::fs::write(b.join("~a.kicad_pcb.lck"), "{}").unwrap();
+        std::fs::write(b.join("~a.kicad_sch.lck"), "{}").unwrap(); std::fs::write(b.join("notes.lck"), "ok").unwrap();
+        assert_eq!(list(&b, "").unwrap(), "f\t0\ta.kicad_pcb\nf\t2\tnotes.lck\n");
+        let _ = std::fs::remove_dir_all(&b);
     }
 }
