@@ -803,6 +803,15 @@ class RailDockHarnessTests(unittest.TestCase):
             # Scored over all seven: one unmeasured check is not earned
             self.assertEqual(b7_ng["total"], 7)
 
+    def test_b7_steps_collapse_two_tile_layout_before_idle_resets(self) -> None:
+        steps = DOCK.build_b7_steps()
+        pair_idle = next(i for i, s in enumerate(steps) if isinstance(s, dict) and s.get("tag") == "b7-pair-idle")
+        overlay_idle = next(i for i, s in enumerate(steps) if isinstance(s, dict) and s.get("tag") == "b7-overlay-idle")
+        b7_restore = next(i for i, s in enumerate(steps) if isinstance(s, dict) and s.get("mark") == "b7:restore")
+        b7_close_top = next(i for i, s in enumerate(steps) if isinstance(s, dict) and s.get("mark") == "b7:close-top")
+        self.assertIn({"press": "@tile[kind=gerbers].more:close"}, steps[b7_close_top:pair_idle])
+        self.assertIn({"press": "@tile[kind=schematic].more:close"}, steps[b7_restore:overlay_idle])
+
 
 
 if __name__ == "__main__":
