@@ -59,7 +59,7 @@ pub fn response_for(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<
     let names: Vec<String> = extra.lines().filter_map(|l| l.split_once(':').map(|(k, _)| k.trim().to_ascii_lowercase())).collect();
     let mut head = format!("HTTP/1.1 {status}\r\n");
     if !names.contains(&"content-type".to_string()) { head.push_str(&format!("Content-Type: {ctype}\r\n")); }
-    head.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    if !status.starts_with("304 ") && status != "304" { head.push_str(&format!("Content-Length: {}\r\n", body.len())); }
     if !names.contains(&"cache-control".to_string()) { head.push_str("Cache-Control: no-cache\r\n"); }
     head.push_str("Connection: close\r\n");
     for l in extra.split("\r\n").filter(|l| !l.is_empty() && !l.to_ascii_lowercase().starts_with("content-length")) { head.push_str(l); head.push_str("\r\n"); }
@@ -170,7 +170,7 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         other => match hub.http_for(other) {
             // DEFAULT-DENY: the credential is checked here for every route unless its handler says `own_auth`
             Some(h) if h.own_auth() || hub.auth.allowed(&req) => { let r = h.call_with(&hub.arc(), &req, hub.fresh_client()).await; response_for(r.status, &r.ctype, &r.extra, &r.body) }
-            Some(_) => response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token"),
+            Some(_) => response_for("401 Unauthorized", "text/plain; charset=utf-8", &format!("Cache-Control: private, no-store\r\n{}", crate::files::serve::MEDIA_SECURITY_HEADERS), b"this Backplane needs its pairing token"),
             None => response("404 Not Found", "text/plain; charset=utf-8", "", b"not found"),
         },
     };
