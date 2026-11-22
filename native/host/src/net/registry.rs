@@ -46,7 +46,7 @@ pub fn rows_of(st: &State, machine: &str, now: u64, origin: &dyn Fn(&str) -> Str
         projects.push(json!({"key":key,"name":p.title,"origin":o,"id":id,"folder":p.root}));
         keys.insert(id.as_str(), key);
     }
-    let mut ts: Vec<(&String, &crate::state::Thread)> = st.threads.iter().filter(|(_, t)| !t.deleted && keys.contains_key(t.project.as_str())).collect();
+    let mut ts: Vec<(&String, &crate::state::Thread)> = st.threads.iter().filter(|(id, t)| !t.deleted && !st.run_hidden(id) && keys.contains_key(t.project.as_str())).collect();
     ts.sort_by(|a, b| (status(st, b.0) == "needs").cmp(&(status(st, a.0) == "needs")).then(b.1.activity.max(b.1.created).cmp(&a.1.activity.max(a.1.created))).then(a.0.cmp(b.0)));
     let threads: Vec<Value> = ts.into_iter().filter(|(id, t)| !t.archived || status(st, id) == "needs").take(MAX_THREADS).map(|(id, t)| {
         let title: String = t.title.chars().take(80).collect();
@@ -68,8 +68,10 @@ pub fn merge(machines: &[Value]) -> Vec<RegProject> {
             out[i].machines.push(RegMachine { machine: name.into(), id: p["id"].as_str().unwrap_or("").into(), folder: p["folder"].as_str().unwrap_or("").into(), seen });
         }
         for t in m["threads"].as_array().into_iter().flatten() {
+            let tid = t["id"].as_str().unwrap_or("");
+            if crate::state::is_mail_run_id(tid) { continue }
             let Some(&i) = at.get(t["key"].as_str().unwrap_or("")) else { continue };
-            out[i].threads.push(RegThread { machine: name.into(), id: format!("{name}~{}", t["id"].as_str().unwrap_or("")), title: t["title"].as_str().unwrap_or("").into(),
+            out[i].threads.push(RegThread { machine: name.into(), id: format!("{name}~{tid}"), title: t["title"].as_str().unwrap_or("").into(),
                 status: t["status"].as_str().unwrap_or("idle").into(), activity: t["activity"].as_u64().unwrap_or(0), pinned: t["pinned"] == true });
         }
     }
@@ -287,5 +289,25 @@ mod tests {
         assert_eq!(clone_dir(h, "github.com/o/Backplane", &|_| None), std::path::PathBuf::from("/h/Documents/Backplane"));
         assert_eq!(clone_dir(h, "github.com/o/Backplane", &|d| (d.ends_with("Backplane")).then(|| "github.com/x/Backplane".to_string())), std::path::PathBuf::from("/h/Documents/Backplane-2"));
         assert_eq!(clone_dir(h, "github.com/o/Backplane", &|d| (d.ends_with("Backplane")).then(|| "github.com/o/Backplane".to_string())), std::path::PathBuf::from("/h/Documents/Backplane"), "the same repository: added as it is");
+    }
+    #[test] fn registry_rows_and_merge_exclude_mailroom_runs() {
+        let a = st(&[
+            json!({"$":"ProjectCreated","id":"p1","title":"Backplane","root":"/a/bp","at":1}),
+            json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"User work","at":5}),
+            json!({"$":"ThreadCreated","id":"run1794092771-1","project":"p1","title":"Bub: Launch: User work","at":9}),
+            json!({"$":"ThreadCreated","id":"mailcoord-b1-turn1","project":"p1","title":"Bub: private coordination","at":10}),
+            json!({"$":"ThreadCreated","id":"tr","project":"p1","title":"Bub: other","at":11}),
+            json!({"$":"RunSet","thread":"tr","bot":"b1","conv":"c1","mail":"m1","at":11}),
+        ]);
+        let r = rows_of(&a, "desktop", 100, &|_| "github.com/o/bp".to_string(), &|_| String::new());
+        let ids: Vec<&str> = r["threads"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["t1"], "rows_of excludes run*, mailcoord-*, and RunSet threads");
+        // An older remote machine's snapshot with a run* thread is also filtered during merge
+        let old = json!({"machine":"oldbox","seen":90,"projects":[{"key":"github.com/o/bp","name":"bp","origin":"github.com/o/bp","id":"p7","folder":"/f/bp"}],
+            "threads":[{"key":"github.com/o/bp","id":"t7","title":"seven","status":"idle","activity":50,"pinned":false},
+                       {"key":"github.com/o/bp","id":"run1794092771-9","title":"Bub: Launch: seven","status":"idle","activity":60,"pinned":false}]});
+        let m = merge(&[r, old]);
+        let merged_ids: Vec<&str> = m[0].threads.iter().map(|t| t.id.as_str()).collect();
+        assert_eq!(merged_ids, ["desktop~t1", "oldbox~t7"]);
     }
 }

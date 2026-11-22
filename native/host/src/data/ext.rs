@@ -427,7 +427,7 @@ async fn search(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let q = s(p, "q").trim().to_lowercase(); let lim = limit_of(p, 30, 100); let arch = p["archived"] == true;
     if q.is_empty() { return Ok(json!({"threads":[],"projects":[]})) }
     let g = hub.model().await; let asks = open_ask_counts(hub);
-    let mut ts: Vec<(u64, String)> = g.threads.iter().filter(|(_, t)| !t.deleted && (arch || !t.archived) && (contains(&t.title, &q) || (t.project != crate::sidebar::SCRATCH && g.projects.get(&t.project).map_or(false, |x| contains(&x.title, &q))))).map(|(i, t)| (ms(t.activity.max(t.created)), i.clone())).collect();
+    let mut ts: Vec<(u64, String)> = g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i) && (arch || !t.archived) && (contains(&t.title, &q) || (t.project != crate::sidebar::SCRATCH && g.projects.get(&t.project).map_or(false, |x| contains(&x.title, &q))))).map(|(i, t)| (ms(t.activity.max(t.created)), i.clone())).collect();
     ts.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1))); ts.truncate(lim);
     let threads: Vec<Value> = ts.iter().filter_map(|(_, i)| thread_json(hub, &g, i, &asks)).collect();
     let mut ps: Vec<(u64, String)> = g.projects.iter().filter(|(_, x)| !x.removed && (contains(&x.title, &q) || contains(&x.root, &q))).map(|(i, _)| (0, i.clone())).collect(); ps.truncate(lim);
@@ -471,8 +471,8 @@ async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     if want(">") || want("%") {
         let g = hub.model().await;
         if want(">") {
-            let mut seen: HashMap<String, usize> = HashMap::new(); for t in g.threads.values().filter(|t| !t.deleted) { *seen.entry(slug(&t.title)).or_default() += 1 }
-            let mut ts: Vec<_> = g.threads.iter().filter(|(_, t)| !t.deleted && !t.archived && !slug(&t.title).is_empty()).collect(); ts.sort_by(|a, b| b.1.activity.cmp(&a.1.activity));
+            let mut seen: HashMap<String, usize> = HashMap::new(); for (i, t) in g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i)) { *seen.entry(slug(&t.title)).or_default() += 1 }
+            let mut ts: Vec<_> = g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i) && !t.archived && !slug(&t.title).is_empty()).collect(); ts.sort_by(|a, b| b.1.activity.cmp(&a.1.activity));
             for (i, t) in ts.into_iter().take(200) { let w = slug(&t.title); let w = if seen.get(&w).copied().unwrap_or(0) > 1 { format!("{w}-{}", i.rsplit('-').next().unwrap_or("")) } else { w };
                 push(">", i, &t.title, g.projects.get(&t.project).map_or("", |x| x.title.as_str()), format!(">{w}")) }
         }

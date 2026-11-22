@@ -43,7 +43,7 @@ impl Agents {
         let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(_, t)| (if bot { !t.project.is_empty() } else { t.project == project }) && !t.deleted).map(|(k, _)| k.clone()).collect() };
         ids.sort(); let mut out = vec![];
         for id in ids {
-            if let Some(m) = &room { if m.hidden(thread, &id).await { continue } } // Mcp.run.threads
+            if let Some(m) = &room { if m.hidden(thread, &id).await { continue } } else if crate::state::is_mail_run_id(&id) { continue } // Mcp.run.threads
             if let Some(j) = self.thread_json(&id).await { out.push(j) }
         }
         (true, json!({"threads":out}))

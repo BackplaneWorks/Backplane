@@ -571,3 +571,66 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let live = st(&[pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3), room(""), ask("q", "a", "approval")]);
     assert!(crate::state::visible::swarm_member(&live, "a"), "a live swarm's member is its row's");
 }
+
+#[test] fn mailroom_runs_and_historical_bub_launch_threads_are_hidden_everywhere() {
+    // Historical run* ("Bub: Launch: ...") and mailcoord-* threads in events.jsonl, with or without RunSet, plus mirrored and registry rows
+    let mk_tc = |id: &str, proj: &str, title: &str, at: u64| json!({"$":"ThreadCreated","id":id,"project":proj,"title":title,"env":"local","branch":"","worktree":"","provider":"claude","model":"","at":at});
+    let s = st(&[
+        pc("p1", "Backplane", "/n/bp", 1),
+        mk_tc("t1", "p1", "User thread", NOW - 500),
+        mk_tc("runner", "p1", "Test runner", NOW - 400), // normal id starting with "run" + letter: must NOT be hidden
+        // Historical mailroom run with project="p1" and RunSet, currently running + has an open ask
+        mk_tc("run1794092771-1", "p1", "Bub: Launch: Fix bug", NOW - 10),
+        json!({"$":"RunSet","thread":"run1794092771-1","bot":"b1","conv":"c1","mail":"m1","at":NOW - 10}),
+        turn("run1794092771-1", "running", NOW - 10),
+        ask("a1", "run1794092771-1", "question"),
+        // Historical mailroom run with project="p1" and NO RunSet (e.g. older log)
+        mk_tc("run1794092771-2", "p1", "Bub: Launch: Old report", NOW - 5),
+        // Private coordination lane (with project="" and with project="p1")
+        mk_tc("mailcoord-b1-turn1", "p1", "Bub: private coordination", NOW - 4),
+        mk_tc("mailcoord-b1-turn2", "", "Bub: private coordination", NOW - 3),
+        ask("a2", "mailcoord-b1-turn2", "question"),
+        // Show-all-threads mode ("Only threads that need attention" = off)
+        set(ATTENTION, "off", NOW - 1),
+    ]);
+    let far_st = st(&[
+        pc("L~p1", "Backplane", "/f/bp", 1),
+        mk_tc("L~t2", "L~p1", "Remote user thread", NOW - 300),
+        mk_tc("L~run1794092771-9", "L~p1", "Bub: Launch: Remote run", NOW - 2),
+        mk_tc("L~mailcoord-b1-turn9", "L~p1", "Bub: private coordination", NOW - 1),
+    ]);
+    let reg = vec![RegProject {
+        key: "desk/p1".into(), name: "Backplane".into(), origin: String::new(),
+        machines: vec![RegMachine { machine: "offbox".into(), id: "p9".into(), folder: "/o/bp".into(), seen: NOW - 600 }],
+        threads: vec![
+            RegThread { machine: "offbox".into(), id: "offbox~t3".into(), title: "Offline user thread".into(), status: "idle".into(), activity: NOW - 600, pinned: false },
+            RegThread { machine: "offbox".into(), id: "offbox~run1794092771-7".into(), title: "Bub: Launch: Offline run".into(), status: "running".into(), activity: NOW - 1, pinned: false },
+        ],
+    }];
+    let origin = |id: &str| if id == "L~p1" { "desk/p1".to_string() } else { String::new() };
+    let far = vec![("laptop".to_string(), &far_st)];
+    let rows = merged_projects(&s, &far, &|_| false, &origin, "desk", &reg);
+    let bp = rows.iter().find(|p| p.key == "desk/p1").unwrap();
+    let thread_ids: Vec<&str> = bp.threads.iter().map(|t| t.id.as_str()).collect();
+    assert!(thread_ids.contains(&"t1") && thread_ids.contains(&"runner"), "normal threads kept: {thread_ids:?}");
+    assert!(!thread_ids.iter().any(|id| id.contains("run1794") || id.contains("mailcoord-")), "no mailroom runs in merged project: {thread_ids:?}");
+    assert_eq!(bp.last_activity, NOW - 300, "mailroom runs must not bump project last_activity");
+
+    // Sidebar (with attention_only=off AND Needs you)
+    let side = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    let side_str = side.to_string();
+    assert!(!side_str.contains("Bub: Launch:") && !side_str.contains("mailcoord-"), "no mailroom runs in sidebar or Needs you: {side_str}");
+    assert!(side_str.contains("User thread") && side_str.contains("Test runner"));
+
+    // Project page (Running, Needs you, Recent, Done)
+    let pg = page(&s, &rows, &bp.key, &ctx(&HashSet::new()), true);
+    let pg_str = pg.to_string();
+    assert!(!pg_str.contains("Bub: Launch:") && !pg_str.contains("mailcoord-"), "no mailroom runs on project page: {pg_str}");
+    assert!(pg_str.contains("User thread") && pg_str.contains("Test runner"));
+
+    // Ctrl+K command palette
+    let jmp = jump(&rows, &ctx(&HashSet::new()));
+    let jmp_str = jmp.to_string();
+    assert!(!jmp_str.contains("Bub: Launch:") && !jmp_str.contains("mailcoord-"), "no mailroom runs in Ctrl+K: {jmp_str}");
+    assert!(jmp_str.contains("User thread") && jmp_str.contains("Test runner"));
+}

@@ -149,9 +149,14 @@ impl Agents {
     /// thread_list for a thread elsewhere: every project's threads, or the one `project` names
     async fn list_for_far(&self, a: &Value) -> (bool, Value) {
         let want = { let p = sv(a, "project").trim(); if p.is_empty() { None } else { let w = self.world().await; match w.project_find(p) { Some(id) => Some(id), None => return fail(&format!("no project {p} on this machine (machine_list shows them)")) } } };
-        let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(_, t)| !t.deleted && !t.project.is_empty() && want.as_ref().map_or(true, |p| &t.project == p)).map(|(k, _)| k.clone()).collect() };
+        let room = self.mailroom();
+        let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(k, t)| !t.deleted && !crate::state::is_mail_run_id(k) && !t.project.is_empty() && want.as_ref().map_or(true, |p| &t.project == p)).map(|(k, _)| k.clone()).collect() };
         ids.sort();
-        let mut out = vec![]; for id in ids { if let Some(j) = self.thread_json(&id).await { out.push(j) } }
+        let mut out = vec![];
+        for id in ids {
+            if let Some(m) = &room { if m.hidden("", &id).await { continue } }
+            if let Some(j) = self.thread_json(&id).await { out.push(j) }
+        }
         (true, json!({"threads":out}))
     }
 

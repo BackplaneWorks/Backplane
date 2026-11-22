@@ -139,11 +139,15 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     if !plan_mode.is_null() && plan_mode["phase"] != "off" { row["planMode"] = plan_mode; }
     Some(row)
 }
+fn run_hidden(thread: &str) -> bool {
+    crate::state::is_mail_run_id(thread)
+        || crate::statehost::policies().and_then(|p| p.with_state(|st| st.run_hidden(thread))).unwrap_or(false)
+}
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
-    let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && flags_of(i).1).count();
+    let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && !run_hidden(i) && flags_of(i).1).count();
     if id == crate::sidebar::SCRATCH { return None } // Conversation history (`history.list`), not a project to start a thread in
     let p = m.projects.get(id).filter(|p| !p.removed)?;
-    let ts: Vec<_> = m.threads.iter().filter(|(_, t)| t.project == id && !t.deleted).collect();
+    let ts: Vec<_> = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !run_hidden(i)).collect();
     let count = ts.iter().filter(|(_, t)| !t.archived).count();
     let updated = ts.iter().map(|(_, t)| t.activity.max(t.created)).max().unwrap_or(0);
     let waiting: u64 = ts.iter().map(|(i, _)| asks.get(*i).copied().unwrap_or(0)).sum();
@@ -563,7 +567,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
             let lim = limit_of(p, 50, 200);
             // the linked machines' threads are listed with this hub's, newest first across machines (`machine`: "" every machine, "@here", or one machine's name)
             let (mut keyed, join, chips) = with_far(hub, s(p, "machine"), |far, un, pick| {
-                let mut keyed: Vec<(u64, String)> = if machines::here_on(pick) { g.threads.iter().filter(|(i, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj) && t.project != crate::sidebar::SCRATCH && !moved(i, &t.project)).filter_map(|(i, t)| {
+                let mut keyed: Vec<(u64, String)> = if machines::here_on(pick) { g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i) && t.archived == arch && (proj.is_empty() || t.project == proj) && t.project != crate::sidebar::SCRATCH && !moved(i, &t.project)).filter_map(|(i, t)| {
                     let (_, settled, at) = flags_of(i);
                     if want.map_or(false, |w| w != settled) { return None }
                     Some((if want == Some(true) { at } else { ms(t.activity.max(t.created)) }, i.clone())) }).collect() } else { vec![] };
@@ -762,9 +766,12 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     for r in &swarms { for sub in subs.lists() { out.push(d(sub, "swarm", json!({"room":r}))) } }
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
     let g = hub.model().await; let asks = open_ask_counts(hub);
-    for th in &upsert { if let Some(t) = thread_json(hub, &g, th, &asks) { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread", json!({"thread":t}))) } } }
+    for th in &upsert { if let Some(t) = thread_json(hub, &g, th, &asks) {
+        let targets: Vec<u64> = if run_hidden(th) { subs.threads(th) } else { subs.lists().into_iter().chain(subs.threads(th)).collect() };
+        for sub in targets { out.push(d(sub, "thread", json!({"thread":t}))) }
+    } }
     // a project's counts (threads, settled) move with its threads
-    let moved: Vec<String> = { let mut v: Vec<String> = vec![]; for th in upsert.iter() { if let Some(t) = g.threads.get(th) { if !projects.iter().any(|(i, _)| *i == t.project) && !v.contains(&t.project) { v.push(t.project.clone()) } } } v };
+    let moved: Vec<String> = { let mut v: Vec<String> = vec![]; for th in upsert.iter() { if !run_hidden(th) { if let Some(t) = g.threads.get(th) { if !projects.iter().any(|(i, _)| *i == t.project) && !v.contains(&t.project) { v.push(t.project.clone()) } } } } v };
     // pushed only when a count moved (a message in a thread leaves them as they were)
     for pid in &moved { if let Some(pj) = merged_row(hub, &g, &asks, pid) { let key = (pj["threadCount"].as_u64().unwrap_or(0), pj["settledCount"].as_u64().unwrap_or(0));
         if subs.counts.insert(pid.clone(), key) != Some(key) { for sub in subs.lists() { out.push(d(sub, "project", json!({"project":pj}))) } } } }

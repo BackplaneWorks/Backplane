@@ -145,6 +145,13 @@ fn blank_gone(k: &str) -> bool {
     ["told.", "rule.", "board.", "launch.input.", "fallback.input.", "voice.e.", "voice.l.", "turn.live."].iter().any(|p| k.starts_with(p))
 }
 
+/// Whether a thread id (local or mirrored `<link>~<id>`) has the id shape of an internal mailroom run (`run<digit>...`, `run-...`) or private coordination lane (`mailcoord-...`).
+pub fn is_mail_run_id(thread: &str) -> bool {
+    let local = thread.rsplit_once('~').map_or(thread, |(_, r)| r);
+    local.starts_with("mailcoord-")
+        || local.strip_prefix("run").is_some_and(|rest| rest.starts_with('-') || rest.as_bytes().first().is_some_and(u8::is_ascii_digit))
+}
+
 impl State {
     pub fn new() -> State { State::default() }
     /// Uber.is: the uberbot of this machine
@@ -154,13 +161,9 @@ impl State {
         let owner = self.settings.get(&format!("mail.private.owner.{thread}")).map(|s| s.as_str()).unwrap_or("");
         !owner.is_empty() && self.uber_is(owner) && thread.starts_with(&format!("mailcoord-{owner}-"))
     }
-    /// Run.is: a private thread, or a mail run the person's setting or triage makes visible work of a bot (Runs.keep hides these from the sidebar)
+    /// Run.is: an internal mailroom run or private coordination lane (never shown in user-facing project lists, sidebar, or search).
     pub fn run_hidden(&self, thread: &str) -> bool {
-        if self.private_thread(thread) { return true }
-        match self.runs.get(thread) {
-            Some(bot) => self.settings.get("mail.on").map_or(false, |v| v == "on") || (self.uber_is(bot) && self.bot_threads.get(bot).map_or(false, |t| !t.is_empty())),
-            None => false,
-        }
+        self.private_thread(thread) || self.runs.contains_key(thread) || is_mail_run_id(thread)
     }
     /// BotSet's thread: a task delegated by a bot's thread is not hidden under it
     pub fn bot_threads_has(&self, thread: &str) -> bool { self.bot_threads.values().any(|t| t == thread) }
