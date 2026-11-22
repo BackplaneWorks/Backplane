@@ -723,22 +723,64 @@ fn low_priority(argv: &[String]) -> tokio::process::Command {
 /// never used for this: design files leave the person's machines only where they say so.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Remote { pub host: String, pub cli: String }
-/// (setting, local version) -> the probe's answer, so a host is asked once
-static PROBED: Mutex<Option<((String, String, String), Option<Remote>)>> = Mutex::new(None);
+fn remote_version_probe_script(cands: &str, timeout_secs: u64) -> String {
+    format!(
+        "t=$(mktemp -d) || exit 1; trap 'rm -rf \"$t\"' EXIT; trap 'rm -rf \"$t\"; exit 129' HUP; trap 'rm -rf \"$t\"; exit 130' INT; trap 'rm -rf \"$t\"; exit 143' TERM; \
+         for s in 10.99:7 10.0:6 9.0:3 8.0:3; do d=${{s%:*}}; sv=${{s#*:}}; mkdir -p \"$t/$d\"; printf '{{\"api\":{{\"enable_server\":false,\"interpreter_path\":\"/nonexistent/bp-probe-python\"}},\"meta\":{{\"filename\":\"kicad_common.json\",\"version\":%s}}}}' \"$sv\" > \"$t/$d/kicad_common.json\"; done; \
+         export KICAD_CONFIG_HOME=\"$t\" KICAD_CACHE_HOME=\"$t/cache\" KICAD_DOCUMENTS_HOME=\"$t/documents\" KICAD_INHIBIT_SETTINGS_WRITES=1; \
+         if command -v python3 >/dev/null 2>&1 && python3 -c \"\" >/dev/null 2>&1; then \
+           run_bounded() {{ python3 -c 'import os,signal,subprocess,sys,time
+p=subprocess.Popen([sys.argv[1],\"--version\"],stdout=subprocess.PIPE,stderr=subprocess.PIPE,start_new_session=True)
+try:
+ o,_=p.communicate(timeout={timeout_secs})
+except subprocess.TimeoutExpired:
+ try: os.killpg(p.pid,signal.SIGTERM)
+ except OSError: pass
+ time.sleep(0.2)
+ try: os.killpg(p.pid,signal.SIGKILL)
+ except OSError: pass
+ p.wait()
+ sys.exit(124)
+sys.stdout.buffer.write(o)
+sys.exit(p.returncode)' \"$1\"; }}; \
+         else \
+           exit 127; \
+         fi; \
+         for c in {cands}; do if [ -x \"$c\" ]; then \
+           v=$(run_bounded \"$c\") || continue; \
+           [ -n \"$v\" ] || continue; \
+           printf '%s\\t%s\\n' \"$c\" \"$v\"; exit 0; \
+         fi; done; exit 1"
+    )
+}
+
+fn remote_probe_ssh_secs(cands: &str, per_cand_secs: u64) -> u64 {
+    let count = cands.split_whitespace().count().max(1) as u64;
+    count.saturating_mul(per_cand_secs.saturating_add(2)).saturating_add(10)
+}
+
+/// (host, remote cli, local cli, local version) -> the probe's answer, so a host is asked once per local build version
+static PROBED: Mutex<Option<((String, String, String, String), Option<Remote>)>> = Mutex::new(None);
 async fn remote_ready(hub: &Arc<Hub>) -> Option<Remote> {
+    const REMOTE_PROBE_SECS: u64 = 15;
     let host = hub.setting("checks.remote").await.unwrap_or_default();
     if host.is_empty() || crate::copy::on() { return None }
     let cli_set = hub.setting("checks.remote.cli").await.unwrap_or_default();
     let rt = ipc::runtime(hub).await;
     if rt.cli.is_empty() { return None }
-    let key = (host.clone(), cli_set.clone(), rt.cli.clone());
+    let cli = rt.cli.clone();
+    let here = tokio::task::spawn_blocking(move || ipc::cli_version_output(&cli)).await.ok().flatten().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    if here.is_empty() {
+        eprintln!("checks: local kicad-cli at {} did not report a version; checks stay on this machine", rt.cli);
+        return None;
+    }
+    let key = (host.clone(), cli_set.clone(), rt.cli.clone(), here.clone());
     if let Some((k, v)) = PROBED.lock().unwrap().clone() { if k == key { return v } }
     let name = Path::new(&rt.cli).parent().and_then(Path::parent).and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
-    let here = { let (mut c, _home) = crate::proc::kicad_probe_tokio(&rt.cli); c.arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true); /* bounded (#1160): killed on expiry */ tokio::time::timeout(crate::proc::PROBE_LIMIT, c.output()).await.ok().and_then(|r| r.ok()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default() };
     let cands = if cli_set.is_empty() { format!("$HOME/.cache/bp-kembed-remote/kicad/{name}/bin/kicad-cli $HOME/.backplane-gpui-fresh/home/kicad/{name}/bin/kicad-cli") } else { cli_set.clone() };
-    let script = format!("for c in {cands}; do if [ -x \"$c\" ]; then printf '%s\\t' \"$c\"; \"$c\" --version; exit 0; fi; done; exit 1");
-    let out = ssh(&host, &script, 20).await;
-    let found = out.ok().and_then(|o| { let (c, v) = o.trim().split_once('\t')?; (v.trim() == here && !here.is_empty()).then(|| Remote { host: host.clone(), cli: c.to_string() }) });
+    let script = remote_version_probe_script(&cands, REMOTE_PROBE_SECS);
+    let out = ssh(&host, &script, remote_probe_ssh_secs(&cands, REMOTE_PROBE_SECS)).await;
+    let found = out.ok().and_then(|o| { let (c, v) = o.trim().split_once('\t')?; (v.trim() == here).then(|| Remote { host: host.clone(), cli: c.to_string() }) });
     if found.is_none() { eprintln!("checks: {host} has no kicad-cli of this build ({here}); checks stay on this machine"); }
     *PROBED.lock().unwrap() = Some((key, found.clone()));
     found
@@ -1126,5 +1168,203 @@ mod tests {
         x.sched.disk_rev = "b".into(); assert_eq!(state_word(&x), "stale");
         x.sched.running_since = 5; assert_eq!(state_word(&x), "running");
         x.sched.running_since = 0; x.state = "failed".into(); assert_eq!(state_word(&x), "failed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn remote_version_probe_script_isolates_and_bounds_probes() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        use std::process::Command;
+
+        fn find_bin(name: &str) -> Option<PathBuf> {
+            let path = std::env::var_os("PATH")?;
+            std::env::split_paths(&path).map(|d| d.join(name)).find(|p| p.is_file())
+        }
+
+        let d = crate::plat::tmp::dir("remote-probe");
+        let (bad, ok, cfg_rec) = (d.join("bad-cli"), d.join("ok-cli"), d.join("cfg.path"));
+        std::fs::write(&bad, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::write(
+            &ok,
+            format!(
+                "#!/bin/sh\n\
+                 [ \"$1\" = --version ] || exit 2\n\
+                 [ \"$KICAD_INHIBIT_SETTINGS_WRITES\" = 1 ] || exit 3\n\
+                 grep -q '/nonexistent/bp-probe-python' \"$KICAD_CONFIG_HOME/10.99/kicad_common.json\" || exit 4\n\
+                 printf '%s' \"$KICAD_CONFIG_HOME\" > '{}'\n\
+                 echo 10.99.0\n",
+                cfg_rec.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&bad, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&ok, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        // Case 1: skips failing candidate, seeds & isolates settings, removes temp folder on exit.
+        let cands = format!("{} {}", bad.display(), ok.display());
+        let out = Command::new("/bin/sh").args(["-c", &remote_version_probe_script(&cands, 5)]).output().unwrap();
+        assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), format!("{}\t10.99.0", ok.display()));
+        let cfg_home = std::fs::read_to_string(&cfg_rec).unwrap();
+        assert!(!Path::new(&cfg_home).exists(), "remote probe temp folder leaked: {cfg_home}");
+
+        // Helper restricted bin without timeout/gtimeout (only core POSIX tools + sleep).
+        let no_watchdog_bin = d.join("bin-none");
+        std::fs::create_dir_all(&no_watchdog_bin).unwrap();
+        for tool in ["mktemp", "mkdir", "rm", "sleep"] {
+            if let Some(src) = find_bin(tool) {
+                symlink(src, no_watchdog_bin.join(tool)).unwrap();
+            }
+        }
+
+        // Case 2: when neither timeout nor gtimeout is on PATH, python3 watchdog bounds & kills sleeper.
+        if let Some(py3) = find_bin("python3") {
+            let py_bin = d.join("bin-py");
+            std::fs::create_dir_all(&py_bin).unwrap();
+            for tool in ["mktemp", "mkdir", "rm", "sleep", "grep"] {
+                if let Some(src) = find_bin(tool) {
+                    symlink(src, py_bin.join(tool)).unwrap();
+                }
+            }
+            symlink(py3, py_bin.join("python3")).unwrap();
+
+            let started_rec = d.join("hang.started");
+            let hang = d.join("hang-cli");
+            std::fs::write(
+                &hang,
+                format!("#!/bin/sh\n: > '{}'\nexec sleep 30\n", started_rec.display()),
+            )
+            .unwrap();
+            std::fs::set_permissions(&hang, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            let t0 = std::time::Instant::now();
+            let hang_out = Command::new("/bin/sh")
+                .args(["-c", &remote_version_probe_script(&hang.to_string_lossy(), 1)])
+                .env("PATH", &py_bin)
+                .output()
+                .unwrap();
+            let elapsed = t0.elapsed();
+            assert!(!hang_out.status.success(), "hanging remote probe should fail");
+            assert!(started_rec.is_file(), "hanging probe never started before timeout");
+            assert!(elapsed < Duration::from_secs(5), "python3 watchdog took too long: {elapsed:?}");
+        }
+
+        // Case 3: without a working python3 process-group watchdog (empty PATH, timeout-only PATH, or failing python3 stub),
+        // script exits 127 without executing any candidate.
+        let ran_rec = d.join("unbounded.ran");
+        let touch = d.join("touch-cli");
+        std::fs::write(&touch, format!("#!/bin/sh\n: > '{}'\necho 10.99.0\n", ran_rec.display())).unwrap();
+        std::fs::set_permissions(&touch, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let skipped = Command::new("/bin/sh")
+            .args(["-c", &remote_version_probe_script(&touch.to_string_lossy(), 1)])
+            .env("PATH", &no_watchdog_bin)
+            .output()
+            .unwrap();
+        assert_eq!(skipped.status.code(), Some(127));
+        assert!(!ran_rec.exists(), "unbounded remote probe must not execute without a watchdog");
+
+        if let Some(to) = find_bin("timeout") {
+            let to_bin = d.join("bin-timeout");
+            std::fs::create_dir_all(&to_bin).unwrap();
+            for tool in ["mktemp", "mkdir", "rm", "sleep", "grep"] {
+                if let Some(src) = find_bin(tool) {
+                    symlink(src, to_bin.join(tool)).unwrap();
+                }
+            }
+            symlink(to, to_bin.join("timeout")).unwrap();
+            let skipped_to = Command::new("/bin/sh")
+                .args(["-c", &remote_version_probe_script(&touch.to_string_lossy(), 1)])
+                .env("PATH", &to_bin)
+                .output()
+                .unwrap();
+            assert_eq!(skipped_to.status.code(), Some(127));
+            assert!(!ran_rec.exists(), "non-process-group timeout watchdog must not run probe without python3");
+        }
+
+        let stub_bin = d.join("bin-py-stub");
+        std::fs::create_dir_all(&stub_bin).unwrap();
+        for tool in ["mktemp", "mkdir", "rm", "sleep", "grep"] {
+            if let Some(src) = find_bin(tool) {
+                symlink(src, stub_bin.join(tool)).unwrap();
+            }
+        }
+        let py_stub = stub_bin.join("python3");
+        std::fs::write(&py_stub, "#!/bin/sh\nexit 1\n").unwrap();
+        std::fs::set_permissions(&py_stub, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let skipped_stub = Command::new("/bin/sh")
+            .args(["-c", &remote_version_probe_script(&touch.to_string_lossy(), 1)])
+            .env("PATH", &stub_bin)
+            .output()
+            .unwrap();
+        assert_eq!(skipped_stub.status.code(), Some(127));
+        assert!(!ran_rec.exists(), "failing python3 stub must not run probe");
+
+        // Case 4: multi-candidate SSH budget gives every candidate its timeout window plus SSH overhead.
+        assert_eq!(remote_probe_ssh_secs("/a/kicad-cli", 15), 27);
+        assert_eq!(remote_probe_ssh_secs("/a/kicad-cli /b/kicad-cli", 15), 44);
+
+        // Case 5: descendant holding stdout open while ignoring SIGTERM is killed on both restricted-python3 and
+        // default PATHs, allowing a healthy second candidate to be discovered cleanly with zero orphan processes.
+        let run_pipe_leak_case = |label: &str, path_env: Option<&Path>| {
+            let pid_rec = d.join(format!("{label}.pid"));
+            let fallback_cfg = d.join(format!("{label}.cfg"));
+            let leak = d.join(format!("{label}-leak-cli"));
+            let fallback = d.join(format!("{label}-ok-cli"));
+            std::fs::write(
+                &leak,
+                format!(
+                    "#!/bin/sh\n\
+                     echo 10.99.0\n\
+                     (trap '' TERM; exec sleep 30) &\n\
+                     echo $! > '{}'\n\
+                     exit 0\n",
+                    pid_rec.display()
+                ),
+            )
+            .unwrap();
+            std::fs::write(
+                &fallback,
+                format!(
+                    "#!/bin/sh\n\
+                     printf '%s' \"$KICAD_CONFIG_HOME\" > '{}'\n\
+                     echo 10.99.0\n",
+                    fallback_cfg.display()
+                ),
+            )
+            .unwrap();
+            std::fs::set_permissions(&leak, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&fallback, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+            let cands = format!("{} {}", leak.display(), fallback.display());
+            let t0 = std::time::Instant::now();
+            let mut cmd = Command::new("/bin/sh");
+            cmd.args(["-c", &remote_version_probe_script(&cands, 1)]);
+            if let Some(p) = path_env {
+                cmd.env("PATH", p);
+            }
+            let out = cmd.output().unwrap();
+            let elapsed = t0.elapsed();
+            assert!(out.status.success(), "{label} failed: {}", String::from_utf8_lossy(&out.stderr));
+            assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), format!("{}\t10.99.0", fallback.display()), "{label}");
+            assert!(elapsed < Duration::from_secs(6), "{label} took too long: {elapsed:?}");
+
+            let cfg_dir = std::fs::read_to_string(&fallback_cfg).unwrap();
+            assert!(!Path::new(&cfg_dir).exists(), "{label} temp config dir leaked: {cfg_dir}");
+
+            let desc_pid = std::fs::read_to_string(&pid_rec).unwrap().trim().to_string();
+            assert!(!desc_pid.is_empty() && desc_pid.bytes().all(|b| b.is_ascii_digit()), "{label} bad pid: {desc_pid:?}");
+            let reap_deadline = std::time::Instant::now() + Duration::from_millis(800);
+            while crate::proc::is_live_non_zombie(&desc_pid) {
+                assert!(std::time::Instant::now() < reap_deadline, "{label} descendant pid {desc_pid} survived watchdog");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        };
+
+        if find_bin("python3").is_some() {
+            run_pipe_leak_case("py3", Some(&d.join("bin-py")));
+            run_pipe_leak_case("default", None);
+        }
+
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

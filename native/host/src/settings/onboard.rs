@@ -79,17 +79,19 @@ async fn kicad(hub: &Arc<Hub>, typed: &str) -> Value {
     let Some(cli) = first_of(typed, &set, "BACKPLANE_KICAD_CLI", pf.kicad_names, places) else { return json!({"path": "", "runs": false}) };
     kicad_version(&cli, TIMEOUT).await
 }
-/// The KiCad at `cli` asked its version, as a probe (#1204): KiCad loads, migrates and saves its settings even for `--version`, and one
-/// killed at the limit mid-save left `kicad_common.json.kicad-save-<pid>-0` in the person's settings; its settings, cache and documents
-/// folders are a throwaway one (proc::kicad_probe_tokio), removed once it has answered or been killed.
+/// The KiCad at `cli` asked its version, via the shared single-flight probe cache (`ipc::cli_version_cached`) with pre-seeded
+/// settings (`proc::ProbeHome`, #1204 / #1160) so it never writes the person's KiCad folders or triggers `FindPythonInterpreter`,
+/// and any hung process group is killed and reaped on timeout.
 async fn kicad_version(cli: &Path, limit: Duration) -> Value {
+    use crate::files::kicad::ipc::{cli_version_cached_path, ProbeOutcome};
     let path = cli.to_string_lossy().into_owned();
-    let (mut c, _home) = proc::kicad_probe_tokio(cli);
-    c.arg("--version");
-    match output_or_why(c, limit).await {
-        Ok((0, out, _)) => json!({"path": path, "version": version_of(&out), "runs": true}),
-        Ok((code, _, err)) => json!({"path": path, "runs": false, "why": why(code, &err)}),
-        Err(w) => json!({"path": path, "runs": false, "why": w}),
+    let probe_path = cli.to_path_buf();
+    match tokio::task::spawn_blocking(move || cli_version_cached_path(&probe_path, limit, 1)).await {
+        Ok(ProbeOutcome::Output(o)) if o.status.success() => json!({"path": path, "version": version_of(&String::from_utf8_lossy(&o.stdout)), "runs": true}),
+        Ok(ProbeOutcome::Output(o)) => json!({"path": path, "runs": false, "why": why(o.status.code().unwrap_or(-1), &String::from_utf8_lossy(&o.stderr))}),
+        Ok(ProbeOutcome::Timeout { limit: d, .. }) => json!({"path": path, "runs": false, "why": format!("it did not answer within {} s", d.as_secs())}),
+        Ok(ProbeOutcome::SpawnErr(e)) => json!({"path": path, "runs": false, "why": format!("it did not start: {e}")}),
+        Err(e) => json!({"path": path, "runs": false, "why": format!("it did not start: {e}")}),
     }
 }
 fn why(code: i32, err: &str) -> String { let l = err.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("").chars().take(120).collect::<String>(); if l.is_empty() { format!("exit code {code}") } else { format!("exit code {code}, {l}") } }
