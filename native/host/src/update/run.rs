@@ -318,4 +318,26 @@ mod tests {
         let e = stage(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &|a, d| { good_tree(a, d)?; fs::write(d.join("f"), b"x").unwrap(); fs::hard_link(d.join("f"), d.join("g")).unwrap(); Ok(()) }).unwrap_err();
         assert!(e.contains("hard link"), "{e}"); assert!(left(&r).is_empty());
     }
+    #[test] fn a_nightly_hub_ignores_a_stable_hotfix_and_waits_for_the_next_nightly() {
+        let r = Rig::new("nightly-hotfix"); let mut f = Feed::new(); let k = keys();
+        let hotfix = f.release("v0.16.4", b"hotfix");
+        let n1 = f.release("v0.16.5-nightly.20261120.1", b"n1");
+        let n2 = f.release("v0.16.5-nightly.20261121.1", b"n2");
+        let find_nightly = |list: &[Listed], bad: &[String]| {
+            let a = Ask { current: "0.16.4-nightly.20261119.2", channel: "nightly", target: T, keys: &k, bad };
+            find(&a, list, &r.d.join("scratch"), &|u, o, m| f.get(u, o, m))
+        };
+
+        assert_eq!(find_nightly(&[hotfix.clone()], &[]).unwrap(), None);
+        assert!(f.asked.borrow().is_empty(), "a stable hotfix is never fetched on the nightly channel");
+
+        let got = find_nightly(&[hotfix.clone(), n1.clone()], &[]).unwrap().unwrap();
+        assert_eq!(got.tag, "v0.16.5-nightly.20261120.1");
+
+        let bad = vec!["v0.16.5-nightly.20261120.1".to_string()];
+        assert_eq!(find_nightly(&[hotfix.clone(), n1.clone()], &bad).unwrap(), None, "a rolled-back nightly never falls back to a stable hotfix");
+
+        let got2 = find_nightly(&[hotfix, n1, n2], &bad).unwrap().unwrap();
+        assert_eq!(got2.tag, "v0.16.5-nightly.20261121.1");
+    }
 }

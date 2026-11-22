@@ -1,14 +1,16 @@
 # Nightly builds
 
-A build of main each night, for people who choose **Settings, Network and updates, Update channel: nightly**. Stable takes releases; beta takes those and the
-betas; nightly takes all three and the nightlies (`native/host/src/update/rel.rs`: `channel`, `rank`, `wants`). This is alpha: nightly is for people who
-choose it.
+A build of main each night, for people who choose **Settings, Network and updates, Update channel: nightly**. Stable takes releases; beta takes releases and
+betas; nightly tracks nightly builds of `main` only (`native/host/src/update/rel.rs`: `channel`, `takes`, `wants`, `offer`, `pick`), so a stable hotfix
+or release branch never overwrites a patched nightly hub (older nightly hubs from 0.15.4–0.16.4 still accepted stable releases until they update to a
+newer nightly with this fix). This is alpha: nightly is for people who choose it.
 
 ## What a nightly is
 
 - Tag `vX.Y.Z-nightly.YYYYMMDD.N`. X.Y.Z is one past the newest `vX.Y.Z` tag or `release/X.Y.Z` branch (a release being cut counts), so during 0.15.3's cut
-  the nightlies are `v0.15.4-nightly.*`. A nightly sorts after its version's betas and before the release itself: a nightly hub moves on to the release
-  when it comes. Every updater since 0.14 accepts the shape (`tag_ok`).
+  the nightlies are `v0.15.4-nightly.*`. Once a release or hotfix claims `vX.Y.Z` (or `release/X.Y.Z`), the next nightly advances to `vX.Y.(Z+1)-nightly.*`
+  and nightly hubs move straight to it; switching a nightly hub back to `stable` waits for `vX.Y.Z` or a later stable release. Every updater since 0.14
+  accepts the shape (`tag_ok`).
 - Built, signed and packaged by `release.yml` exactly as a release (called by `nightly.yml` with `nightly: true`), telemetry baked in (the server sorts
   the version as nightly), its manifest saying `"channel": "nightly"`.
 - Published as a **prerelease of BackplaneWorks/Backplane**, so it is on the releases page (marked Pre-release) and in the one feed every hub reads.

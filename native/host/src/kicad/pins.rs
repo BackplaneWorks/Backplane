@@ -445,7 +445,7 @@ mod tests {
             let files: std::collections::HashMap<String, Vec<u8>> = [("manifest.json", m.clone()), ("manifest.json.sig", sig.as_ref().to_vec()), ("manifest.json.keyid", b"k1".to_vec())].into_iter().map(|(n, b)| (format!("mem://{n}"), b)).collect();
             let get = |u: &str, out: &Path, _: u64| -> Result<(), String> { std::fs::write(out, files.get(u).ok_or("404")?).map_err(|e| e.to_string()) };
             let listed = crate::update::run::listing(br#"[{"tag_name":"v0.16.2","prerelease":false,"draft":false,"assets":[{"name":"manifest.json","browser_download_url":"mem://manifest.json"},{"name":"manifest.json.sig","browser_download_url":"mem://manifest.json.sig"},{"name":"manifest.json.keyid","browser_download_url":"mem://manifest.json.keyid"}]}]"#).unwrap();
-            let r = crate::update::run::find(&crate::update::run::Ask { current: "0.16.0", channel: "nightly", target: "linux-x64", keys: &keys(), bad: &[] }, &listed, &d, &get);
+            let r = crate::update::run::find(&crate::update::run::Ask { current: "0.16.0", channel: "stable", target: "linux-x64", keys: &keys(), bad: &[] }, &listed, &d, &get);
             assert!(r.as_ref().is_err_and(|e| e.contains("lists no assets") || e.contains("newer Backplane")), "{what}: {r:?}");
         }
     }
