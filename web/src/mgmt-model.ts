@@ -920,3 +920,21 @@ export function planAllCanvasLayers(layers: PlanLayer[], copperLayers?: PlanCopp
   }
   return out;
 }
+
+export function isPlanHydrationCurrent(
+  reqWatchGen: number,
+  curWatchGen: number,
+  reqHydGen: number,
+  curHydGen: number,
+  reqProject: string,
+  curProject: string,
+  panelRev: number,
+  prevHydratedRev: number | undefined,
+): boolean {
+  return (
+    reqWatchGen === curWatchGen &&
+    reqHydGen === curHydGen &&
+    reqProject === curProject &&
+    (prevHydratedRev === undefined || panelRev >= prevHydratedRev)
+  );
+}

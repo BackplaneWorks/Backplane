@@ -9,7 +9,10 @@ use serde_json::{json, Value};
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 
-pub const BOARD_TAG: u64 = 9042;
+pub const BOARD_TAG_BASE: u64 = 0x706c_0000;
+pub const BOARD_TAG_END: u64 = 0x706c_ffff;
+pub fn is_board_tag(id: u64) -> bool { (BOARD_TAG_BASE..=BOARD_TAG_END).contains(&id) }
+static BOARD_TAG_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub const COMPACT_PANEL_W: u64 = 400;
 pub const EXPANDED_PANEL_W: u64 = 880;
 const SIDE_BY_SIDE_MIN_W: f32 = 540.0;
@@ -160,8 +163,10 @@ pub struct State {
     pub optimistic: HashMap<String, Value>,
     pub optimistic_at: Option<Instant>,
     pub last_rev: Option<u64>,
+    pub hydrated_req_tag: Option<u64>,
     pub hydrated_req_key: String,
     pub hydrated_req_pro: String,
+    pub hydrated_rev: Option<u64>,
     pub hydrated_key: String,
     pub hydrated_board: Option<Value>,
     pub hydrated_draw: Option<Value>,
@@ -189,8 +194,10 @@ impl Default for State {
             optimistic: HashMap::new(),
             optimistic_at: None,
             last_rev: None,
+            hydrated_req_tag: None,
             hydrated_req_key: String::new(),
             hydrated_req_pro: String::new(),
+            hydrated_rev: None,
             hydrated_key: String::new(),
             hydrated_board: None,
             hydrated_draw: None,
@@ -215,8 +222,10 @@ impl State {
         self.optimistic.clear();
         self.optimistic_at = None;
         self.last_rev = None;
+        self.hydrated_req_tag = None;
         self.hydrated_req_key.clear();
         self.hydrated_req_pro.clear();
+        self.hydrated_rev = None;
         self.hydrated_key.clear();
         self.hydrated_board = None;
         self.hydrated_draw = None;
@@ -688,7 +697,9 @@ pub fn resolved_board_and_draw(app: &Backplane, d: &Value) -> (Value, Value) {
     let pro = &app.screens.mgmt.project;
     let rev = d["revision"].as_u64().unwrap_or(0);
     let key = format!("{pro}:{rev}");
-    let use_hyd = ui.hydrated_key == key;
+    let use_hyd = ui.hydrated_board.is_some()
+        && ui.hydrated_key.starts_with(&format!("{pro}:"))
+        && (ui.hydrated_key == key || ui.hydrated_rev.map_or(false, |hr| hr >= rev));
     let board = if use_hyd {
         ui.hydrated_board.clone().unwrap_or_else(|| d["board"].clone())
     } else {
@@ -715,20 +726,38 @@ pub fn unwrap_board_panel(reply: &Value) -> Option<&Value> {
     }
 }
 
-pub fn board_answered(app: &mut Backplane, reply: &Value, cx: &mut Context<Backplane>) {
-    let Some(panel) = unwrap_board_panel(reply).cloned() else {
+pub fn accept_hydration_reply(req_tag: Option<u64>, reply_tag: u64, cur_pro: &str, reply: &Value) -> Option<(u64, Value, Value)> {
+    if req_tag != Some(reply_tag) {
+        return None;
+    }
+    let panel = unwrap_board_panel(reply)?;
+    let r = if reply["result"].is_object() { &reply["result"] } else { reply };
+    if let Some(rp) = r["pro"].as_str().filter(|s| !s.is_empty()) {
+        if rp != cur_pro {
+            return None;
+        }
+    }
+    let rev = panel["revision"].as_u64().unwrap_or(0);
+    Some((rev, panel["board"].clone(), panel["draw"].clone()))
+}
+
+pub fn board_answered(app: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) {
+    let pro = app.screens.mgmt.project.clone();
+    let Some((rev, board, draw)) = accept_hydration_reply(app.screens.mgmt.plan_ui.hydrated_req_tag, tag, &pro, reply) else {
         return;
     };
-    let pro = app.screens.mgmt.project.clone();
     let ui = &mut app.screens.mgmt.plan_ui;
     if !ui.hydrated_req_pro.is_empty() && ui.hydrated_req_pro != pro {
         return;
     }
-    let rev = panel["revision"].as_u64().unwrap_or(0);
+    if ui.hydrated_rev.map_or(false, |prev| rev < prev) {
+        return;
+    }
+    ui.hydrated_rev = Some(rev);
     ui.hydrated_key = format!("{pro}:{rev}");
     ui.hydrated_req_key = ui.hydrated_key.clone();
-    ui.hydrated_board = Some(panel["board"].clone());
-    ui.hydrated_draw = Some(panel["draw"].clone());
+    ui.hydrated_board = Some(board);
+    ui.hydrated_draw = Some(draw);
     cx.notify();
 }
 
@@ -748,9 +777,11 @@ pub fn sync_revision_and_hydrate(app: &mut Backplane, d: &Value) {
     }
     let key = format!("{pro}:{}", rev.unwrap_or(0));
     if d["board_trimmed"] == true && ui.hydrated_req_key != key && !pro.is_empty() {
+        let tag = BOARD_TAG_BASE + (BOARD_TAG_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % 0xffff);
+        ui.hydrated_req_tag = Some(tag);
         ui.hydrated_req_key = key;
         ui.hydrated_req_pro = pro.clone();
-        let _ = app.tx.try_send(Command::Ask("plan.get".into(), json!({"pro": pro, "board": true}), BOARD_TAG));
+        let _ = app.tx.try_send(Command::Ask("plan.get".into(), json!({"pro": pro, "board": true}), tag));
     }
 }
 
@@ -768,23 +799,8 @@ pub fn apply_optimistic(app: &mut Backplane, id: &str, patch: Value) {
 pub fn commit_item_fields(app: &mut Backplane, id: &str, fields: Value, cx: &mut Context<Backplane>) {
     apply_optimistic(app, id, fields.clone());
     let d = app.screens.mgmt.data("plan");
-    let base = d["revision"].as_u64();
-    let mut wire_fields = fields;
-    if let Some(outer) = wire_fields.get("outline").cloned() {
-        if outer.as_array().and_then(|a| a.first()).and_then(|p| p.as_array()).and_then(|p| p.first()).and_then(Value::as_f64).is_some() {
-            let (_, draw) = resolved_board_and_draw(app, &d);
-            if let Some(holes) = draw["regions"].as_array().into_iter().flatten().find(|r| r["id"] == id).and_then(|r| r["holes"].as_array()).filter(|h| !h.is_empty()) {
-                let mut rings = Vec::with_capacity(1 + holes.len());
-                rings.push(outer);
-                rings.extend(holes.iter().cloned());
-                if let Some(obj) = wire_fields.as_object_mut() {
-                    obj.insert("outline".into(), Value::Array(rings));
-                }
-            }
-        }
-    }
-    let mut payload = json!({"ops": [{"op": "set", "id": id, "fields": wire_fields}]});
-    if let Some(b) = base {
+    let mut payload = json!({"ops": [{"op": "set", "id": id, "fields": fields}]});
+    if let Some(b) = d["revision"].as_u64() {
         payload["base"] = json!(b);
     }
     mgmt_plan::send(app, "plan.update", payload, cx);
@@ -2032,8 +2048,11 @@ mod tests {
     #[test]
     fn board_hydration_unwraps_result_and_all_layers_includes_empty_copper() {
         assert!(unwrap_board_panel(&json!({"t": "reply", "ok": false, "error": "nope"})).is_none());
-        let wrapped = json!({"t": "reply", "ok": true, "result": {"panel": {"revision": 4, "board": {}, "draw": {}}}});
+        let wrapped = json!({"t": "reply", "ok": true, "result": {"pro": "/p/a.kicad_pro", "panel": {"revision": 4, "board": {}, "draw": {}}}});
         assert_eq!(unwrap_board_panel(&wrapped).unwrap()["revision"], 4);
+        assert!(accept_hydration_reply(Some(BOARD_TAG_BASE + 1), BOARD_TAG_BASE, "/p/a.kicad_pro", &wrapped).is_none(), "stale tag rejected");
+        assert!(accept_hydration_reply(Some(BOARD_TAG_BASE), BOARD_TAG_BASE, "/p/b.kicad_pro", &wrapped).is_none(), "wrong project rejected");
+        assert_eq!(accept_hydration_reply(Some(BOARD_TAG_BASE), BOARD_TAG_BASE, "/p/a.kicad_pro", &wrapped).unwrap().0, 4);
         let direct = json!({"panel": {"revision": 9}});
         assert_eq!(unwrap_board_panel(&direct).unwrap()["revision"], 9);
 

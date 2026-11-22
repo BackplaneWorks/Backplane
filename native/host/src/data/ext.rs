@@ -744,8 +744,24 @@ fn too_wide_plan_root(p: &std::path::Path) -> bool {
     p.parent().is_none() || home.as_ref().map_or(false, |h| h == p)
 }
 
+fn check_plan_sidecar(roots: &[std::path::PathBuf], real_home: &std::path::Path, sidecar: &std::path::Path) -> Result<(), &'static str> {
+    if let Ok(md) = std::fs::symlink_metadata(sidecar) {
+        if md.file_type().is_symlink() {
+            return Err("that routing plan is not shared");
+        }
+        let real_sidecar = crate::plat::fs::canonicalize(sidecar).map_err(|_| "that routing plan is not shared")?;
+        if real_sidecar.starts_with(real_home) || !roots.iter().any(|r| real_sidecar.starts_with(r)) {
+            return Err("that routing plan is not shared");
+        }
+    }
+    Ok(())
+}
+
 fn check_browser_plan_path(roots: &[std::path::PathBuf], home: &std::path::Path, raw: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), &'static str> {
     let full = crate::files::share::local_path(raw).ok_or("that path is not in a project")?;
+    if std::fs::symlink_metadata(&full).is_ok_and(|md| md.file_type().is_symlink()) {
+        return Err("that path is not shared");
+    }
     let real = crate::plat::fs::canonicalize(&full).map_err(|_| "no such file or project")?;
     let real_home = crate::plat::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
     if real.starts_with(&real_home) || !roots.iter().any(|r| real.starts_with(r)) {
@@ -760,23 +776,19 @@ fn check_browser_plan_path(roots: &[std::path::PathBuf], home: &std::path::Path,
     if pcb_raw.is_empty() {
         return Err("no KiCad board in this project");
     }
-    let real_pcb = crate::plat::fs::canonicalize(std::path::Path::new(&pcb_raw)).map_err(|_| "no such board")?;
+    let pcb_path = std::path::Path::new(&pcb_raw);
+    if std::fs::symlink_metadata(pcb_path).is_ok_and(|md| md.file_type().is_symlink()) {
+        return Err("that board is not shared");
+    }
+    let real_pcb = crate::plat::fs::canonicalize(pcb_path).map_err(|_| "no such board")?;
     if real_pcb.starts_with(&real_home) || !roots.iter().any(|r| real_pcb.starts_with(r)) {
         return Err("that board is not in a project");
     }
     if !real_pcb.parent().map_or(false, |p| roots.iter().any(|r| p.starts_with(r))) {
         return Err("that board is not in a project");
     }
-    let sidecar = real_pcb.with_extension("kicad_plan");
-    if let Ok(md) = std::fs::symlink_metadata(&sidecar) {
-        if md.file_type().is_symlink() {
-            return Err("that routing plan is not shared");
-        }
-        let real_sidecar = crate::plat::fs::canonicalize(&sidecar).map_err(|_| "that routing plan is not shared")?;
-        if real_sidecar.starts_with(&real_home) || !roots.iter().any(|r| real_sidecar.starts_with(r)) {
-            return Err("that routing plan is not shared");
-        }
-    }
+    check_plan_sidecar(roots, &real_home, &pcb_path.with_extension("kicad_plan"))?;
+    check_plan_sidecar(roots, &real_home, &real_pcb.with_extension("kicad_plan"))?;
     Ok((real, real_pcb))
 }
 
@@ -813,10 +825,10 @@ async fn sanitize_browser_plan_params(hub: &Arc<Hub>, m: &str, p: &Value) -> Res
     if let Some(o) = q.as_object_mut() {
         o.remove("pro");
         o.remove("path");
-        if real.extension().and_then(|e| e.to_str()) == Some("kicad_pcb") {
-            o.insert("path".into(), json!(real_pcb.to_string_lossy()));
-        } else {
+        if matches!(m, "plan.focus" | "plan.enable") && real.extension().and_then(|e| e.to_str()) != Some("kicad_pcb") {
             o.insert("pro".into(), json!(real.to_string_lossy()));
+        } else {
+            o.insert("path".into(), json!(real_pcb.to_string_lossy()));
         }
     }
     Ok(q)
@@ -867,6 +879,17 @@ mod pick_tests {
             std::fs::write(&outside_plan, "{}").unwrap();
             std::os::unix::fs::symlink(&outside_plan, &sidecar).unwrap();
             assert!(check_browser_plan_path(&roots, &home, pro.to_str().unwrap()).is_err());
+
+            // Symlinked .kicad_pcb alias inside project with malicious .kicad_plan beside it is also rejected
+            let sub = proj.join("sub");
+            std::fs::create_dir_all(&sub).unwrap();
+            let sub_pro = sub.join("alias.kicad_pro");
+            let sub_pcb = sub.join("alias.kicad_pcb");
+            let sub_sidecar = sub.join("alias.kicad_plan");
+            std::fs::write(&sub_pro, "{}").unwrap();
+            std::os::unix::fs::symlink(&pcb, &sub_pcb).unwrap();
+            std::os::unix::fs::symlink(&outside_plan, &sub_sidecar).unwrap();
+            assert!(check_browser_plan_path(&roots, &home, sub_pro.to_str().unwrap()).is_err());
         }
         let _ = std::fs::remove_dir_all(&base);
     }

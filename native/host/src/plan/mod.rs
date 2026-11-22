@@ -613,16 +613,55 @@ fn update_saved_plan_sync(pcb: &str, base: Option<u64>, ops: &[NormOp]) -> Resul
     Ok((plan["revision"].clone(), touched))
 }
 
+fn merge_preserved_holes_into_ops(plan: &Value, ops: &[NormOp]) -> Vec<Value> {
+    let planes = plan["planes"].as_array();
+    ops.iter().map(|nop| {
+        if !nop.preserve_holes {
+            return nop.wire.clone();
+        }
+        let mut wire = nop.wire.clone();
+        let id = wire["id"].as_str().unwrap_or("");
+        let new_len = wire["fields"]["outline"].as_array().map_or(0, Vec::len);
+        if new_len == 1 {
+            if let Some(old_raw) = planes.and_then(|ps| ps.iter().find(|p| p["id"] == id)).and_then(|p| p.get("outline")) {
+                if let Ok(Value::Array(old_rings)) = norm_outline(old_raw) {
+                    if old_rings.len() > 1 {
+                        let mut merged = Vec::with_capacity(old_rings.len());
+                        merged.push(wire["fields"]["outline"][0].clone());
+                        merged.extend(old_rings[1..].iter().cloned());
+                        if let Some(flds) = wire["fields"].as_object_mut() {
+                            flds.insert("outline".into(), Value::Array(merged));
+                        }
+                    }
+                }
+            }
+        }
+        wire
+    }).collect()
+}
+
 /// The person's steering edits (the Plan canvas/inspector): sends KiCad's `UpdatePlan` as the person when open,
 /// else updates `<board>.kicad_plan` atomically on disk and broadcasts the settled panel update.
 pub async fn update(hub: &Arc<Hub>, pcb: &str, base: Option<u64>, ops: &[Value]) -> Result<Value, String> {
     let norm_ops = normalize_person_ops_checked(ops)?;
-    let wire_ops: Vec<Value> = norm_ops.iter().map(|n| n.wire.clone()).collect();
     let pro = crate::files::kicad::project::read(&Path::new(pcb).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).pro;
     if let Some(r) = crate::files::kicad::embed::gui_route(&pro) {
+        let needs_holes = norm_ops.iter().any(|n| n.preserve_holes);
+        let live_plan = if needs_holes {
+            Some(read_plan(hub, None, pcb, false).await?)
+        } else if base.is_none() {
+            read_plan(hub, None, pcb, false).await.ok()
+        } else {
+            None
+        };
         let rev = match base {
             Some(b) => b,
-            None => read_plan(hub, None, pcb, false).await.ok().and_then(|p| p["revision"].as_u64()).unwrap_or(0),
+            None => live_plan.as_ref().and_then(|p| p["revision"].as_u64()).unwrap_or(0),
+        };
+        let wire_ops: Vec<Value> = if let Some(lp) = live_plan.as_ref().filter(|_| needs_holes) {
+            merge_preserved_holes_into_ops(lp, &norm_ops)
+        } else {
+            norm_ops.iter().map(|n| n.wire.clone()).collect()
         };
         let msg = json!({"board": spec(pcb), "base": rev, "ops": Value::Array(wire_ops).to_string()});
         let o = crate::files::kicad::embed::gui_call_as(&r, &format!("{NS}UpdatePlan"), msg, &crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Person)).await;
@@ -717,7 +756,7 @@ impl RpcHandler for Rpc {
                     _ if p["board"] == true || p["panel"] == true => {
                         let (plan, live) = panel::plan_now(hub, &pcb).await;
                         let pan = if plan.is_null() { Value::Null } else { panel::data_with_board(&plan, &events::open_asks(&pcb), live, Some(&pcb)) };
-                        Ok(json!({"plan": plan, "panel": pan}))
+                        Ok(json!({"plan": plan, "panel": pan, "pro": path}))
                     }
                     _ => read_plan(hub, None, &pcb, true).await,
                 }
@@ -939,5 +978,23 @@ mod tests {
         assert_eq!(disk_after["notes"].as_array().unwrap().len(), 2);
         assert_eq!(disk_after["notes"][0]["target"], "c1");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test] fn live_merge_preserved_holes_keeps_authoritative_holes_and_allows_explicit_clear() {
+        let hole1 = json!([[2.0, 2.0], [3.0, 2.0], [3.0, 3.0]]);
+        let hole2 = json!([[6.0, 6.0], [7.0, 6.0], [7.0, 7.0]]);
+        let live_plan = json!({
+            "planes": [{"id": "p1", "outline": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]], hole1, hole2]}]
+        });
+        let flat = normalize_person_ops_checked(&[json!({"op": "set", "id": "p1", "outline": [[0.0, 0.0], [12.0, 0.0], [12.0, 10.0]]})]).unwrap();
+        let merged = merge_preserved_holes_into_ops(&live_plan, &flat);
+        let rings = merged[0]["fields"]["outline"].as_array().unwrap();
+        assert_eq!(rings.len(), 3);
+        assert_eq!(rings[1], hole1);
+        assert_eq!(rings[2], hole2);
+
+        let clear = normalize_person_ops_checked(&[json!({"op": "set", "id": "p1", "outline": [[[0.0, 0.0], [12.0, 0.0], [12.0, 10.0]]]})]).unwrap();
+        let cleared = merge_preserved_holes_into_ops(&live_plan, &clear);
+        assert_eq!(cleared[0]["fields"]["outline"].as_array().unwrap().len(), 1);
     }
 }

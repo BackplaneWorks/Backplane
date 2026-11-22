@@ -131,7 +131,7 @@ pub fn answered(app: &mut Backplane, id: u64, reply: &Value, cx: &mut Context<Ba
     if id == super::mgmt_bom::EDIT_TAG { super::mgmt_bom::edited(app, reply, cx); return true }
     if id == super::mgmt_life::PART_TAG { super::mgmt_life::answered(app, reply, cx); return true }
     if id == super::mgmt_bom::ALTS_TAG { super::mgmt_bom::alts_answered(app, reply, cx); return true }
-    if id == super::mgmt_plan_canvas::BOARD_TAG { super::mgmt_plan_canvas::board_answered(app, reply, cx); return true }
+    if super::mgmt_plan_canvas::is_board_tag(id) { super::mgmt_plan_canvas::board_answered(app, id, reply, cx); return true }
     if id != WATCH_TAG { return false }
     let r = if reply["result"].is_object() { &reply["result"] } else { reply };
     if reply["ok"] == false { app.screens.mgmt.error = crate::hub::rpc_error(reply); }

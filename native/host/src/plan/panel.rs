@@ -271,6 +271,21 @@ pub fn fit_info_budget(d: &mut Value) {
             break;
         }
     }
+    if d.to_string().len() > BUDGET {
+        if let Some(obj) = d.as_object_mut() {
+            for k in ["copper_layers", "elsewhere", "asks"] {
+                if obj.contains_key(k) {
+                    obj.insert(k.into(), json!([]));
+                }
+                if serde_json::Value::Object(obj.clone()).to_string().len() <= BUDGET {
+                    return;
+                }
+            }
+            if obj.contains_key("keys_note") {
+                obj.insert("keys_note".into(), json!(""));
+            }
+        }
+    }
 }
 
 /// The board of a project's .kicad_pro.
@@ -281,7 +296,12 @@ pub async fn plan_now(hub: &Arc<Hub>, pcb: &str) -> (Value, bool) {
     let pro = crate::files::kicad::project::read(&Path::new(pcb).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).pro;
     if crate::files::kicad::embed::gui_route(&pro).is_some() { if let Ok(p) = super::read_plan(hub, None, pcb, true).await { return (p, true) } }
     let f = Path::new(pcb).with_extension("kicad_plan");
-    (tokio::task::spawn_blocking(move || std::fs::read_to_string(f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())).await.ok().flatten().unwrap_or(Value::Null), false)
+    (tokio::task::spawn_blocking(move || {
+        if std::fs::symlink_metadata(&f).is_ok_and(|md| md.file_type().is_symlink()) {
+            return None;
+        }
+        std::fs::read_to_string(f).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok())
+    }).await.ok().flatten().unwrap_or(Value::Null), false)
 }
 /// Publish the panel for a project (its .kicad_pro): the open KiCad's plan, else the saved one.
 pub async fn publish(hub: &Arc<Hub>, pro: &str) {
@@ -465,6 +485,9 @@ mod tests {
         huge_plan["notes"] = json!((0..400).map(|i| json!({"id": format!("n{i}"), "text": "a".repeat(250)})).collect::<Vec<_>>());
         huge_plan["corridors"] = json!((0..250).map(|i| json!({"id": format!("c{i}"), "group": "g1", "layer": "F.Cu", "path": [[1, 1], [2, 2]], "status": "proposed"})).collect::<Vec<_>>());
         let mut huge_d = data(&huge_plan, &[], false);
+        huge_d["copper_layers"] = json!((0..500).map(|i| json!({"layer": format!("In{i}.Cu"), "subtitle": "x".repeat(80)})).collect::<Vec<_>>());
+        huge_d["asks"] = json!((0..200).map(|i| json!({"id": format!("a{i}"), "note": "y".repeat(120)})).collect::<Vec<_>>());
+        huge_d["elsewhere"] = json!((0..200).map(|i| json!({"name": format!("b{i}"), "rel": "z".repeat(120)})).collect::<Vec<_>>());
         assert!(huge_d.to_string().len() > 58 * 1024);
         fit_info_budget(&mut huge_d);
         assert!(huge_d.to_string().len() <= 58 * 1024);

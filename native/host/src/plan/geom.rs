@@ -775,15 +775,17 @@ pub fn guides_for_plan(board: &CachedBoard, plan: &Value) -> HashMap<String, Vec
             let mut t_sorted: Vec<&str> = to_refs.iter().copied().collect();
             f_sorted.sort_unstable();
             t_sorted.sort_unstable();
-            'fallback: for fr in f_sorted {
-                for tr in &t_sorted {
-                    if segs.len() >= MAX_CORRIDOR_GUIDES || total_segs + segs.len() >= MAX_TOTAL_GUIDES {
+            let f_pts: Vec<[f64; 2]> = f_sorted.into_iter().filter_map(|r| part_center.get(r).copied()).take(MAX_CORRIDOR_GUIDES).collect();
+            let t_pts: Vec<[f64; 2]> = t_sorted.into_iter().filter_map(|r| part_center.get(r).copied()).take(MAX_CORRIDOR_GUIDES).collect();
+            let mut checks = 0usize;
+            'fallback: for a in &f_pts {
+                for b in &t_pts {
+                    if checks >= MAX_CORRIDOR_GUIDES * 4 || segs.len() >= MAX_CORRIDOR_GUIDES || total_segs + segs.len() >= MAX_TOTAL_GUIDES {
                         break 'fallback;
                     }
-                    if let (Some(a), Some(b)) = (part_center.get(fr), part_center.get(tr)) {
-                        if (a[0] - b[0]).hypot(a[1] - b[1]) > 0.5 {
-                            segs.push([a[0], a[1], b[0], b[1]]);
-                        }
+                    checks += 1;
+                    if (a[0] - b[0]).hypot(a[1] - b[1]) > 0.5 {
+                        segs.push([a[0], a[1], b[0], b[1]]);
                     }
                 }
             }
@@ -940,5 +942,8 @@ mod tests {
         let g2 = guides_for_plan(&dummy, &p_many);
         assert_eq!(g1["cm"].len(), 18);
         assert_eq!(g1, g2);
+
+        let p_missing = json!({"corridors": [{"id": "cmiss", "from": (0..50).map(|i| format!("M{i}")).collect::<Vec<_>>(), "to": (0..50).map(|i| format!("N{i}")).collect::<Vec<_>>()}]});
+        assert!(guides_for_plan(&dummy, &p_missing).is_empty());
     }
 }
