@@ -22,10 +22,12 @@ t=$(mktemp -d "${TMPDIR:-/tmp}/bp-release.XXXXXX")
 stage=$(mktemp -d "$final.pending.XXXXXX")
 git archive --format=tar "$c" -o "$t/source.tar"
 mkdir "$t/src"
-tar -xf "$t/source.tar" -C "$t/src"
+tar -xf - -C "$t/src" < "$t/source.tar"
 links=$(find "$t/src" -type l -print)
 [ -z "$links" ] || { echo 'snapshot contains symlinks; release inputs must be committed regular files'; exit 1; }
 # the paths as the hub can open them: Git for Windows' sh says /c/x and /tmp/x, which only it understands; cygpath -m says C:/x
 w() { if command -v cygpath >/dev/null 2>&1; then cygpath -m -- "$1"; else printf '%s\n' "$1"; fi; }
-printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$(w "$t")" "$(w "$t/src/$p")" "$(w "$gd")" "$(w "$top")" "$c" "$prev" "$pc" "$(w "$final")" "$(w "$stage")" "$(w "$lock")" "$object"
+wt=$(w "$t"); wsrc=$(w "$t/src/$p"); wgd=$(w "$gd"); wtop=$(w "$top"); wfin=$(w "$final"); wstage=$(w "$stage"); wlock=$(w "$lock")
+[ -n "$wt" ] && [ -n "$wsrc" ] && [ -n "$wgd" ] && [ -n "$wtop" ] && [ -n "$wfin" ] && [ -n "$wstage" ] && [ -n "$wlock" ] || exit 1
+printf '%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n%s\n' "$wt" "$wsrc" "$wgd" "$wtop" "$c" "$prev" "$pc" "$wfin" "$wstage" "$wlock" "$object"
 trap - 0

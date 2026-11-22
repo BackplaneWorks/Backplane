@@ -10,7 +10,7 @@ pub struct Paths { pub base: String, pub output: String, pub report: String }
 /// KX.hash: FNV over the code points
 fn hash(s: &str, h: u32) -> u32 { s.chars().fold(h, |h, c| (h ^ c as u32).wrapping_mul(16777619)) }
 /// KX.name: the project's stem
-pub fn name(pro: &str) -> String { let f = pro.rsplit('/').next().unwrap_or("project.kicad_pro"); bj::take(f, bj::len(f).saturating_sub(10)) }
+pub fn name(pro: &str) -> String { let f = pro.rsplit(crate::plat::fs::SEPS).next().unwrap_or("project.kicad_pro"); bj::take(f, bj::len(f).saturating_sub(10)) }
 /// KX.slug: names in managed paths hold only ASCII letters, numbers, '-' and '_'
 pub fn slug(s: &str) -> String { s.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '-' }).collect() }
 /// KX.paths
