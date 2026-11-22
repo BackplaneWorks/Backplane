@@ -167,7 +167,16 @@ jobs:
       - name: no test trust in a release
         run: |
           # feature e2e-trust (test/update's feed) trusts a key from the environment; its code carries this mark, so a release that has it is refused
-          if grep -aq backplane-e2e-trust-enabled native/host/target/release/backplane-hub${{ runner.os == 'Windows' && '.exe' || '' }}; then echo "::error::backplane-hub was built with feature e2e-trust"; exit 1; fi
+          check_no_e2e_trust() {
+            local bin="$1" label="$2" rc=0
+            [ -f "$bin" ] && [ -r "$bin" ] || { echo "::error::missing or unreadable $label at $bin"; exit 1; }
+            grep -aq backplane-e2e-trust-enabled "$bin" || rc=$?
+            if [ "$rc" -eq 0 ]; then echo "::error::$label was built with feature e2e-trust"; exit 1; fi
+            if [ "$rc" -ne 1 ]; then echo "::error::failed to scan $label (grep exit $rc)"; exit 1; fi
+          }
+          check_no_e2e_trust "native/host/target/release/backplane-hub${{ runner.os == 'Windows' && '.exe' || '' }}" "backplane-hub"
+          # the guard compiles the same updater for `backplane builds keep` (the desktop app's own updates where no guard runs)
+          check_no_e2e_trust "native/guard/target/release/backplane${{ runner.os == 'Windows' && '.exe' || '' }}" "backplane"
       # The Bun version here is deploy/bun-version's: change them together, and update deploy/licenses/bun (NOTICE.md and Bun's LICENSE.md at that tag)
       # whenever it changes. scripts/licenses.sh refuses a package built with a Bun the notices do not name.
       # bun for the browser helper. Its download server has answered 504 more than once: a pinned version, kept in the Actions cache, and

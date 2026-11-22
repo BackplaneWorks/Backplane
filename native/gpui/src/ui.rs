@@ -1237,6 +1237,8 @@ impl Render for Backplane {
                     // linked machines: All, this one, each other one (the hub filters the list below)
                     .children(crate::screens::machines::switch(cx, light, &self.data["machines"], &mut ctl))
                     .child(self.screens.parts.el(Backplane::sidebar_part, StyleRefinement::default().flex_1().min_h_0(), cx))
+                    // this app beside its hub: a newer build waiting (Restart to update), or the two versions apart (selfupdate.rs)
+                    .children(crate::selfupdate::notice(cx, light))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(crate::i18n::trs(&self.status)))
                     // held Ctrl: the short legend over the sidebar's foot (0.14's keys-legend)
                     .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(crate::screens::hints::legend(cx, light, &self.local))))

@@ -1,6 +1,16 @@
 //! `backplane hub ...`: one command to look after a hub, the same on Windows, Linux and macOS.
-mod http; mod pair; mod plan; mod run; mod store; mod sys;
+#[allow(dead_code)] mod appkeep; // shared with the desktop app (native/gpui), which uses all of it
+mod http; mod keep; mod pair; mod plan; mod run; mod store; mod sys;
 #[path = "../../host/src/scopeprobe.rs"] mod scopeprobe; // what systemd-run --user --scope takes here, shared with the hub
+// The hub's updater, compiled in by path (as scopeprobe is), for `backplane builds keep`: the same trust rules, not a copy of them. run.rs reaches
+// rel.rs as `super::rel`, so both sit at the top here.
+#[allow(dead_code)] #[path = "../../host/src/update/rel.rs"] mod rel;
+#[allow(dead_code)] #[path = "../../host/src/update/run.rs"] mod upd_run;
+/// What the hub's updater asks of its `plat` (run.rs: file modes and links; its tests: temp folders).
+#[allow(unused_imports)] mod plat {
+    #[cfg(unix)] pub mod fs { pub use std::os::unix::fs::{symlink, MetadataExt, PermissionsExt}; }
+    #[cfg(test)] pub(crate) use crate::tmp;
+}
 #[cfg(test)] mod tmp;
 #[cfg(all(test, unix))] mod scripts;
 use serde_json::{json, Value};
@@ -20,6 +30,7 @@ const USAGE: &str = "usage: backplane                            the desktop app
        backplane hub stop                     stop the hub and its guard (only at the machine)
        backplane hub log                      where the logs are, and the last incidents
        backplane hub run --home DIR --port N [--host A] [--builds DIR] [--build ID | --bin DIR] [--log F] [--pidfile F] [--safe] [--default] [-- HUB ARGS]
+       backplane builds keep --builds PREFIX --running TAG [--channel C]   stage the newest release for the desktop app where no guard runs (it starts this)
 Which hub: --home DIR, else $BACKPLANE_HOME, else the one started with --default.
 Another machine: --url http://HOST:PORT --token-file F (restart, safe, normal, rollback, status).
 ";
@@ -240,6 +251,7 @@ fn main() {
         Some("hub") => hub(&a[1..]),
         Some("--headless") => headless(&a),
         Some("pair") => pair::run(&a[1..]),
+        Some("builds") => keep::keep(&a[1..]),
         Some("--version") => { println!("backplane {}", env!("CARGO_PKG_VERSION")); 0 }
         None => open_app(),
         _ => { eprint!("{USAGE}"); 2 }

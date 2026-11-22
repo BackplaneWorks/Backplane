@@ -459,7 +459,15 @@ impl Backplane {
                     }).is_ok()
                 }));
                 let me = this.clone(); window.on_frame_drawn(move |_, cx| me.update(cx, |v, cx| v.drawn_marks(cx)).is_ok()); }
-            window.on_next_frame(move |_, _| metric(started, "first_frame", json!({})));
+            let app_this = this.clone();
+            window.on_next_frame(move |window, _cx| {
+                metric(started, "first_frame", json!({}));
+                // Promote only on the subsequent frame callback, after this first frame has completed `window.draw` and `window.present`.
+                window.on_next_frame(move |_, cx| {
+                    let _ = app_this.update(cx, |v, cx| v.app_opened(cx));
+                });
+                window.request_animation_frame();
+            });
             match window.gpu_specs() {
                 Some(g) => metric(started, "gpu", json!({"device": g.device_name, "driver": g.driver_name, "driver_info": g.driver_info, "software": g.is_software_emulated})),
                 None => metric(started, "gpu", json!({"device": null})),

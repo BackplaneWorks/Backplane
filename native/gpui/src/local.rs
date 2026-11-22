@@ -10,6 +10,8 @@ use std::{collections::BTreeMap, path::PathBuf};
 /* i18n-ok: labels the settings page draws through tr; colour names */ pub const VIEWER_BG_SWATCHES: [(&str, u32); 8] = [("Slate", 0x8a94a6), ("Graphite", 0x5a5f66), ("Sand", 0xd9cfb8), ("Sky", 0xa9c7e8), ("Mint", 0xa8d8c0), ("Rose", 0xe2b4bd), ("Plum", 0x6b5b7b), ("Navy", 0x2f4468)];
 /* i18n-ok: labels the settings page draws through tr; font names */ pub const FONTS: [(&str, &str); 3] = [("Noto Sans Mono CJK JP", "Noto Sans Mono"), ("JetBrains Mono", "JetBrains Mono"), (".SystemUIFont", "System UI")];
 /* i18n-ok: labels the settings page draws through tr; font names */ pub const VIEWS: [(&str, &str); 2] = [("last", "Where I left off"), ("list", "The thread list")];
+/// This device's app's release channels (`update::rel::channel`'s names): stable, beta, or nightly.
+pub const APP_CHANNELS: [&str; 3] = ["stable", "beta", "nightly"];
 pub const TEXT_PCT: (u32, u32, u32) = (80, 160, 5);   // min, max, step (the slider's stops)
 pub const SIDEBAR_PX: (u32, u32, u32) = (180, 420, 24);
 /// The viewer pane's width: 0 is the default (VIEWER_PX_DEFAULT); a drag on its left edge sets it, a double click puts it back.
@@ -35,9 +37,12 @@ pub struct Local {
     pub streamer: bool, pub streamer_share: bool, pub streamer_apps: bool,
     /// the Backplane KiCad update put off with "Not now": "<version>|<epoch s>" (offered again a day later, or a newer one at once)
     pub kicad_update_later: String,
+    /// The release channel of this device's own app, where it updates itself (a hub on another machine: selfupdate.rs): "" follows the hub's own
+    /// `update.channel` (the default, so the two move together), or stable, beta or nightly for this computer alone.
+    pub app_channel: String,
 }
 impl Default for Local {
-    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0., streamer: false, streamer_share: true, streamer_apps: false, kicad_update_later: String::new() } }
+    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0., streamer: false, streamer_share: true, streamer_apps: false, kicad_update_later: String::new(), app_channel: String::new() } }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -58,6 +63,7 @@ impl Local {
         l.text_pct = l.text_pct.clamp(TEXT_PCT.0, TEXT_PCT.1); l.sidebar_px = l.sidebar_px.clamp(SIDEBAR_PX.0, SIDEBAR_PX.1);
         if l.viewer_px != 0 { l.viewer_px = l.viewer_px.clamp(VIEWER_PX.0, VIEWER_PX.1); }
         if !crate::i18n::CHOICES.iter().any(|(k, _)| *k == l.lang) { l.lang = "auto".into() }
+        if !l.app_channel.is_empty() && !APP_CHANNELS.contains(&l.app_channel.as_str()) { l.app_channel = String::new() }
         if !THEMES.iter().any(|(k, _)| *k == l.theme) { l.theme = "hub".into() }
         if !VIEWER_BGS.iter().any(|(k, _)| *k == l.viewer_bg) { l.viewer_bg = "auto".into() }
         l.viewer_bg_rgb &= 0xff_ffff;
@@ -102,6 +108,7 @@ impl Local {
             "streamer-share" => self.streamer_share = value == "on",
             "streamer-apps" => self.streamer_apps = value == "on",
             "default-view" if VIEWS.iter().any(|(k, _)| *k == value) => self.default_view = value.into(),
+            "app-channel" if value.is_empty() || APP_CHANNELS.contains(&value) => self.app_channel = value.into(),
             "shortcut" => { // "<action>\u{1f}<key>", or just "<action>" to take the next key in the list
                 let (a, k) = value.split_once('\u{1f}').unwrap_or((value, ""));
                 if !crate::keys::rebindable(a) { return false }
@@ -147,6 +154,12 @@ mod tests {
     #[test] fn unknown_names_and_values_change_nothing() {
         let mut l = Local::default(); let before = l.clone();
         assert!(!l.set("theme", "neon") && !l.set("font", "Comic") && !l.set("shortcut", "send\u{1f}ctrl-q") && !l.set("shortcut", "nope") && !l.set("nope", "x")); assert_eq!(l, before);
+        assert!(l.set("app-channel", "nightly") && l.app_channel == "nightly");
+        assert!(l.set("app-channel", "") && l.app_channel.is_empty());
+        assert!(!l.set("app-channel", "canary") && l.app_channel.is_empty());
+        let p_ch = tmp("appch");
+        std::fs::write(&p_ch, br#"{"app_channel":"canary"}"#).unwrap(); assert_eq!(Local::read(&p_ch).app_channel, "");
+        std::fs::write(&p_ch, br#"{"app_channel":"beta"}"#).unwrap(); assert_eq!(Local::read(&p_ch).app_channel, "beta");
     }
     #[test] fn the_viewer_background_follows_the_theme_or_the_choice() {
         let mut l = Local::default(); use crate::viewers::raster::Backdrop as B;

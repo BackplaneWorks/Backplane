@@ -27,13 +27,14 @@ pub fn busy<'a>(mut turns: impl Iterator<Item = &'a str>) -> bool { turns.any(|t
 /// The hourly check is due: never checked, or an hour on. A clock that went back does not stop it for good.
 pub fn due(now: u64, last: u64) -> bool { last == 0 || now < last || now - last >= EVERY }
 
-pub(crate) fn curl(url: &str, out: &Path, max: u64) -> Result<(), String> {
+pub(crate) fn curl_for_feed(url: &str, feed_url: &str, out: &Path, max: u64) -> Result<(), String> {
+    let https = run::curl_url_ok(url, feed_url)?;
     let mut c = proc::std_cmd(Kind::Net, "curl");
-    c.args(["-fsSL", "--max-time", "1800", "--max-filesize", &max.to_string(), "-A", "backplane-hub", "-o"]).arg(out);
-    if url.starts_with("https://") { c.args(["--proto", "=https", "--proto-redir", "=https"]); } // the real feed never falls to plain http on a redirect
-    let o = c.arg(url).output().map_err(|e| format!("curl: {e}"))?;
+    c.args(run::curl_args(https, max, "backplane-hub")).arg("-o").arg(out).arg("--").arg(url);
+    let o = c.output().map_err(|e| format!("curl: {e}"))?;
     if o.status.success() { Ok(()) } else { Err(format!("could not reach the release feed (curl {})", o.status.code().unwrap_or(-1))) }
 }
+pub(crate) fn curl(url: &str, out: &Path, max: u64) -> Result<(), String> { curl_for_feed(url, &feed(), out, max) }
 /// Listed and checked (`run::members_ok`) before anything is written, then unpacked owning nothing but what this hub owns.
 /// A zip (a Windows build, `run::stage` names it `archive.zip`) goes through Windows' own `tar.exe`, bsdtar, which reads zip and lists it the same way;
 /// Git's GNU tar, often first on PATH there, reads no zip.
@@ -58,11 +59,56 @@ fn bad_lines(builds: &Path) -> Vec<(String, String)> {
 }
 fn lines_of(p: &Path) -> Vec<String> { fs::read_to_string(p).unwrap_or_default().lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty()).collect() }
 fn prune(home: &Path, b: &Path) {
-    let all: Vec<String> = fs::read_dir(b.join("builds")).map(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
-    let pins: Vec<String> = fs::read_dir(b.join(".pins")).map(|d| d.filter_map(|e| e.ok()).flat_map(|e| lines_of(&e.path())).collect()).unwrap_or_default();
-    let cur = lines_of(&b.join("CURRENT")).into_iter().next().unwrap_or_default();
-    if cur.is_empty() { return } // nothing says what runs: delete nothing
-    for x in run::prunable(&all, &cur, &pins, &lines_of(&home.join("guard/good"))) { if rel::tag_ok(&x) { let _ = fs::remove_dir_all(b.join("builds").join(x)); } }
+    if !b.join("builds").is_dir() { return }
+    let au = b.join("app-update");
+    if fs::create_dir_all(&au).is_err() { return }
+    let Ok(_state_lock) = fs::OpenOptions::new().create(true).truncate(false).write(true).open(au.join("state.lock"))
+        .and_then(|f| f.lock().map(|()| f)) else { return };
+    let Ok(rd) = fs::read_dir(b.join("builds")) else { return };
+    let mut all = Vec::new();
+    for e in rd {
+        let Ok(e) = e else { return };
+        all.push(e.file_name().to_string_lossy().into_owned());
+    }
+    let Ok(raw_cur) = fs::read_to_string(b.join("CURRENT")) else { return };
+    let Some(cur) = run::valid_current(&raw_cur) else { return };
+    if !b.join("builds").join(&cur).is_dir() { return }
+    let mut pins = Vec::new();
+    match fs::read_dir(b.join(".pins")) {
+        Ok(rd) => {
+            for e in rd {
+                let Ok(e) = e else { return };
+                match fs::read_to_string(e.path()) {
+                    Ok(s) => pins.extend(s.lines().map(|l| l.trim().to_string()).filter(|l| !l.is_empty())),
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => return,
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return,
+    }
+    match fs::read_to_string(au.join("next")) {
+        Ok(raw) => {
+            let Some(n) = run::valid_current(&raw) else { return };
+            pins.push(n);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return,
+    }
+    match fs::read_to_string(au.join("trial")) {
+        Ok(raw) => {
+            let Some((tag, from)) = run::valid_trial_tags(&raw) else { return };
+            pins.push(tag);
+            pins.push(from);
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return,
+    }
+    let Ok(app_good) = run::try_tag_list(&au.join("good")) else { return };
+    pins.extend(app_good[app_good.len().saturating_sub(3)..].iter().cloned());
+    let Ok(guard_good) = run::try_tag_list(&home.join("guard/good")) else { return };
+    for x in run::prunable(&all, &cur, &pins, &guard_good) { if rel::tag_ok(&x) { let _ = fs::remove_dir_all(b.join("builds").join(x)); } }
 }
 
 #[derive(Default)]
@@ -251,5 +297,51 @@ mod tests {
         for (a, why) in [(&up, "outside"), (&abs, "outside")] { let e = tar(a, &out).unwrap_err(); assert!(e.contains(why), "{a:?}: {e}"); assert_eq!(fs::read_dir(&out).unwrap().count(), 0, "nothing written"); }
         let good = mk("good.zip", &[("backplane-hub.exe", b"MZ"), ("assets/", b""), ("assets/a.txt", b"hi")]);
         tar(&good, &out).unwrap(); assert_eq!(fs::read(out.join("backplane-hub.exe")).unwrap(), b"MZ"); assert_eq!(fs::read(out.join("assets/a.txt")).unwrap(), b"hi");
+    }
+    #[test] fn prune_preserves_app_update_trial_next_and_good_builds() {
+        let d = crate::plat::tmp::dir("upd-prune-app");
+        let (home, builds) = (d.join("home"), d.join("b"));
+        for t in ["v0.14.9", "v0.15.0", "v0.15.1", "v0.15.2", "v0.15.3", "v0.16.0", "v0.16.1"] {
+            fs::create_dir_all(builds.join("builds").join(t)).unwrap();
+        }
+        fs::create_dir_all(home.join("guard")).unwrap();
+        fs::write(builds.join("CURRENT"), "v0.16.0\n").unwrap();
+        fs::create_dir_all(builds.join("app-update")).unwrap();
+        fs::write(builds.join("app-update/next"), "v0.16.1\n").unwrap();
+        fs::write(builds.join("app-update/trial"), r#"{"tag":"v0.15.3","from":"v0.15.2","at":1,"pid":99,"nonce":"n1"}"#).unwrap();
+        fs::write(builds.join("app-update/good"), "v0.14.9\nv0.15.0\nv0.15.1\nv0.15.2\n").unwrap();
+        prune(&home, &builds);
+        assert!(!builds.join("builds/v0.14.9").exists(), "oldest stale app good beyond 3 is pruned");
+        for keep in ["v0.15.0", "v0.15.1", "v0.15.2", "v0.15.3", "v0.16.0", "v0.16.1"] {
+            assert!(builds.join("builds").join(keep).is_dir(), "{keep} must be kept from pruning");
+        }
+
+        // Malformed CURRENT (including trailing blank lines), malformed next, or partial/malformed trial fails closed and prunes nothing
+        fs::create_dir_all(builds.join("builds/v0.14.8")).unwrap();
+        fs::write(builds.join("CURRENT"), "v0.16.0\nextra\n").unwrap();
+        prune(&home, &builds);
+        assert!(builds.join("builds/v0.14.8").is_dir(), "malformed CURRENT must fail closed");
+        fs::write(builds.join("CURRENT"), "v0.16.0\n\n").unwrap();
+        prune(&home, &builds);
+        assert!(builds.join("builds/v0.14.8").is_dir(), "trailing blank line in CURRENT must fail closed");
+        fs::write(builds.join("CURRENT"), "v0.16.0\n").unwrap();
+        fs::write(builds.join("app-update/next"), "v0.16.1\nv0.16.2\n").unwrap();
+        prune(&home, &builds);
+        assert!(builds.join("builds/v0.14.8").is_dir(), "malformed next must fail closed");
+        fs::write(builds.join("app-update/next"), "v0.16.1\n").unwrap();
+        fs::write(builds.join("app-update/trial"), r#"{"tag":"v0.15.3"}"#).unwrap();
+        prune(&home, &builds);
+        assert!(builds.join("builds/v0.14.8").is_dir(), "trial missing `from` must fail closed");
+        fs::write(builds.join("app-update/trial"), r#"{"tag":"v0.15.3","from":"v0.15.2"}"#).unwrap();
+        prune(&home, &builds);
+        assert!(builds.join("builds/v0.14.8").is_dir(), "partial trial missing `at`/`pid`/`nonce` must fail closed");
+        fs::write(builds.join("app-update/trial"), r#"{"tag":"v0.15.3","from":"v0.15.2","at":1,"pid":99,"nonce":"n1"}"#).unwrap();
+        fs::write(builds.join("app-update/good"), "v0.15.0\r\r\n").unwrap();
+        prune(&home, &builds);
+        assert!(builds.join("builds/v0.14.8").is_dir(), "malformed app-update/good must fail closed");
+        fs::write(builds.join("app-update/good"), "v0.14.9\nv0.15.0\nv0.15.1\nv0.15.2\n").unwrap();
+        fs::write(home.join("guard/good"), "../bad\n").unwrap();
+        prune(&home, &builds);
+        assert!(builds.join("builds/v0.14.8").is_dir(), "malformed guard/good must fail closed");
     }
 }

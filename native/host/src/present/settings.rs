@@ -62,7 +62,8 @@ fn update_row(version: &str, status: &str) -> Value {
     let waiting = serde_json::from_str::<Value>(status).map_or(false, |v| v["state"] == "waiting");
     let mut b = if check { vec![btn("Check now", "update-check", "", false)] } else { vec![] };
     if waiting { b.push(btn("Update now", "update-now", "", false)); }
-    row(&format!("Backplane {version}"), &line, b)
+    // "Hub": a desktop client puts its own version beside this row (native/gpui selfupdate.rs), and the two can differ
+    row(&format!("Hub: Backplane {version}"), &line, b)
 }
 
 /// Settings › Browser: the start page a new or empty Browser tab opens (settings/browser_start.rs, the phones draw the same rows from `browser.page`).
@@ -176,7 +177,7 @@ fn developer(st: &State) -> Vec<Value> {
 fn about(st: &State, info: &Value) -> Vec<Value> {
     let v = VERSION.get().map(String::as_str).unwrap_or("");
     let _ = st;
-    let mut r = vec![row(&format!("Backplane {v}"), "Updates are under Network.", vec![])];
+    let mut r = vec![row(&format!("Hub: Backplane {v}"), "Updates are under Network.", vec![])];
     // what this window's Browser tab is (a desktop client says; a phone says nothing)
     match info["client"]["browser"].as_str() {
         Some("frames") => r.push(row("Browser", "Frame mode: the hub's browser draws each page and this window shows it.", vec![])),
@@ -1150,6 +1151,7 @@ mod tests {
     }
     #[test] fn about_says_what_this_windows_browser_tab_is() {
         let about = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); labels(&v) };
+        assert!(about(json!({"kind": "desktop"})).iter().any(|l| l.starts_with("Hub: Backplane ")));
         let notes = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); v["rows"].as_array().unwrap().iter().map(|r| r["note"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
         assert!(about(json!({"kind": "desktop", "browser": "frames"})).contains(&"Browser".to_string()));
         assert!(notes(json!({"kind": "desktop", "browser": "frames"})).iter().any(|n| n.starts_with("Frame mode")));
@@ -1607,6 +1609,7 @@ mod tests {
     }
     #[test] fn the_update_line_says_what_the_hub_is_doing() {
         let r = |s: &str| update_row("0.15.0", s);
+        assert_eq!(r("")["label"], "Hub: Backplane 0.15.0");
         assert_eq!(r("")["note"], "Updated by its package."); assert_eq!(r(r#"{"state":"package"}"#)["buttons"], json!([]), "nothing to press");
         assert_eq!(r(r#"{"state":"idle"}"#)["note"], "Up to date, checked hourly."); assert_eq!(r(r#"{"state":"idle"}"#)["buttons"][0]["action"], "update-check");
         assert_eq!(r(r#"{"state":"waiting","available":"v9"}"#)["buttons"][0]["action"], "update-now", "waiting on turns: Update now goes ahead"); assert!(r(r#"{"state":"idle"}"#)["buttons"].as_array().unwrap().iter().all(|b| b["action"] != "update-now"));

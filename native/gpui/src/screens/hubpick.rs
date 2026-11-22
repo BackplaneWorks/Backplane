@@ -72,6 +72,10 @@ fn switch_hub(this: &mut Backplane, prev_key: &str, cx: &mut Context<Backplane>)
             crate::screens::hubbar::watch(cx, new_target, &token_file);
             this.paired = paired;
             this.screens.elsewhere = hubs::elsewhere(&ws);
+            this.hub_upd_ready = false;
+            if crate::selfupdate::switch_hub(paired && !hubs::is_loopback(&ws), &new_key) {
+                this.ensure_app_updates(cx);
+            }
             this.screens.offers.on_home = None;
             this.error.clear();
             this.note.clear();

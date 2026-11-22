@@ -11,7 +11,7 @@ pub struct Opts { pub home: PathBuf, pub port: u16, pub host: String, pub builds
 struct Times { probe: u64, misses: u32, stable: u64, stall: u64, boot: u64, floor: u64, warn: u64 }
 fn env(n: &str, d: u64) -> u64 { std::env::var(n).ok().and_then(|v| v.parse().ok()).unwrap_or(d) }
 
-struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, swept: Vec<String>, sweep: Option<(Child, Instant)>, down: Vec<String>, down_before: Vec<String>, /** the hub before this start ended badly (a crash, a hang): it tells its clients so (BACKPLANE_PREV_END) */ crashed: bool }
+struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, swept: Vec<String>, sweep: Option<(Child, Instant)>, down: Vec<String>, down_before: Vec<String>, /** the hub before this start ended badly (a crash, a hang): it tells its clients so (BACKPLANE_PREV_END) */ crashed: bool, _guard_lock: Option<File> }
 
 /// What a request changed.
 enum Move { Nothing, Restart, Exit }
@@ -460,13 +460,27 @@ pub fn run(o: Opts) -> i32 {
     let _ = d.put("launch.json", &json!({"home": o.home, "port": o.port, "host": o.host, "builds": o.builds, "log": o.log, "pidfile": o.pidfile, "mem": o.mem, "default": o.default_home, "hubArgs": o.hub_args,
         "env": std::env::vars().filter(|(k, _)| k.starts_with("BACKPLANE_GUARD_") || ["BACKPLANE_HTTPS_PORT", "BACKPLANE_NO_UPDATE", "BACKPLANE_AGENTS", "BACKPLANE_COPY", "BACKPLANE_SIDE_BY_SIDE"].contains(&k.as_str())).map(|(k, v)| (k, Value::String(v))).collect::<serde_json::Map<_, _>>()}).to_string());
     let b = o.builds.clone().map(Builds);
+    let _guard_lock = match o.builds.as_ref() {
+        Some(p) => {
+            let r = crate::appkeep::try_with_state_lock(p, || -> std::io::Result<std::fs::File> {
+                let f = OpenOptions::new().create(true).write(true).truncate(false).open(p.join(".guard.lock"))?;
+                f.lock_shared()?;
+                Ok(f)
+            }).and_then(|inner| inner);
+            match r {
+                Ok(f) => Some(f),
+                Err(e) => { say(&format!("cannot lock {}: {e}", p.display())); return 1 }
+            }
+        }
+        None => None,
+    };
     let mut build = o.build.clone();
     if build.is_empty() { build = b.as_ref().map_or(String::new(), Builds::current); }
     let bad = b.as_ref().map_or(vec![], Builds::bad);
     let t = Tuning { tries: env("BACKPLANE_GUARD_TRIES", 3) as usize, window: env("BACKPLANE_GUARD_WINDOW", 600), pause: env("BACKPLANE_GUARD_PAUSE", 1), machine_pause: env("BACKPLANE_GUARD_MACHINE_PAUSE", 5), rescue_retry: env("BACKPLANE_GUARD_RESCUE_RETRY", 120) };
     let tm = Times { probe: env("BACKPLANE_GUARD_PROBE", 5), misses: env("BACKPLANE_GUARD_MISSES", 6) as u32, stable: env("BACKPLANE_GUARD_STABLE", 60), stall: env("BACKPLANE_GUARD_STALL", 300), boot: env("BACKPLANE_GUARD_BOOT", 900), floor: env("BACKPLANE_GUARD_MIN_FREE", 1 << 30), warn: env("BACKPLANE_DISK_WARN_GB", 75).saturating_mul(1_000_000_000) };
     let mode = if o.safe { Mode::Safe } else { Mode::Normal };
-    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, swept: vec![], sweep: None, down: vec![], down_before: vec![], crashed: false, o };
+    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, swept: vec![], sweep: None, down: vec![], down_before: vec![], crashed: false, _guard_lock, o };
     // a build already marked bad is not started: the newest one that is not
     if bad.contains(&g.build) { if let Some(to) = g.rollback_to() { say(&format!("{} is marked bad: starting {to}", g.build)); g.build = to; } }
     g.pin(); g.go()

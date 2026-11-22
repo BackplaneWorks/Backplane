@@ -9,9 +9,17 @@ description = "`backplane`: keeps a Backplane hub running and restarts it on Win
 name = "backplane"
 path = "src/main.rs"
 
+[features]
+# test/update only: also trust the E2E's fresh key for releases below 0.1.0 (the hub's update::rel, compiled in for `builds keep`). Release builds refuse it (release.yml).
+e2e-trust = []
+
 [dependencies]
 serde_json = "1"
 sha2 = "0.10"
+# `backplane builds keep` runs the hub's updater (update::rel, update::run), whose signature check, encodings and hashes these are
+ed25519-compact = { path = "../host/vendor/ed25519-compact", default-features = false }
+base64 = "0.22"
+hex = "0.4"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
