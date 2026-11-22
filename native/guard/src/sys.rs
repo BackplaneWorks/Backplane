@@ -33,6 +33,11 @@ use std::{path::Path, process::{Child, Command, ExitStatus}};
     }
     pub fn detach(c: &mut std::process::Command) { use std::os::unix::process::CommandExt; unsafe { c.pre_exec(|| { libc::setsid(); Ok(()) }); } }
     pub fn signal_of(s: &std::process::ExitStatus) -> Option<i32> { use std::os::unix::process::ExitStatusExt; s.signal() }
+    /// Monotonic awake seconds since first call (pauses while macOS/Linux sleeps).
+    pub fn awake_s() -> u64 {
+        static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        T0.get_or_init(std::time::Instant::now).elapsed().as_secs()
+    }
 }
 #[cfg(windows)] mod os {
     pub fn watch_stop() {}
@@ -41,7 +46,17 @@ use std::{path::Path, process::{Child, Command, ExitStatus}};
     pub fn term(pid: u32) { let _ = quiet("taskkill").args(["/PID", &pid.to_string()]).output(); }
     pub fn abort(pid: u32) { let _ = quiet("taskkill").args(["/F", "/PID", &pid.to_string()]).output(); }
     pub fn alive(pid: u32) -> bool { quiet("tasklist").args(["/FI", &format!("PID eq {pid}"), "/NH"]).output().map_or(false, |o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string())) }
-    #[link(name = "kernel32")] extern "system" { fn GetDiskFreeSpaceExW(dir: *const u16, free: *mut u64, total: *mut u64, all: *mut u64) -> i32; }
+    #[link(name = "kernel32")] extern "system" {
+        fn GetDiskFreeSpaceExW(dir: *const u16, free: *mut u64, total: *mut u64, all: *mut u64) -> i32;
+        fn QueryUnbiasedInterruptTime(unbiased_time: *mut u64) -> i32;
+    }
+    /// Monotonic awake seconds since first call (`QueryUnbiasedInterruptTime` excludes standby/hibernation).
+    pub fn awake_s() -> u64 {
+        static T0: std::sync::OnceLock<(Option<u64>, std::time::Instant)> = std::sync::OnceLock::new();
+        let read = || { let mut t = 0u64; (unsafe { QueryUnbiasedInterruptTime(&mut t) } != 0).then_some(t / 10_000_000) };
+        let (base, fallback) = *T0.get_or_init(|| (read(), std::time::Instant::now()));
+        match (base, read()) { (Some(b), Some(now)) => now.saturating_sub(b), _ => fallback.elapsed().as_secs() }
+    }
     pub fn space(p: &std::path::Path) -> Option<(u64, u64)> {
         use std::os::windows::ffi::OsStrExt;
         let w: Vec<u16> = p.as_os_str().encode_wide().chain(Some(0)).collect(); let (mut a, mut b, mut c) = (0u64, 0u64, 0u64);
@@ -54,7 +69,7 @@ use std::{path::Path, process::{Child, Command, ExitStatus}};
     fn quiet(name: &str) -> std::process::Command { use std::os::windows::process::CommandExt; let mut c = std::process::Command::new(name); c.creation_flags(NO_WINDOW); c }
     pub fn signal_of(_: &std::process::ExitStatus) -> Option<i32> { None }
 }
-pub use os::{abort, alive, clean_signals, detach, signal_of, space, stop_asked, term, watch_stop};
+pub use os::{abort, alive, awake_s, clean_signals, detach, signal_of, space, stop_asked, term, watch_stop};
 pub fn free_bytes(p: &Path) -> Option<u64> { space(p).map(|s| s.0) }
 
 /// The hub program in a build folder.

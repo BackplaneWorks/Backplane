@@ -246,8 +246,14 @@ impl Guard {
         self.stable = false; self.hub_pid = 0; self.set("starting");
         let mut child = match self.spawn() { Ok(c) => c, Err(e) => return e };
         self.hub_pid = child.id(); self.pin(); self.publish();
-        let (t0, mut ready_at, mut misses, mut last_probe, mut last_said) = (Instant::now(), None::<Instant>, 0u32, Instant::now(), String::new());
+        let (t0, mut ready_at, mut misses, mut last_probe, mut last_said) = (Instant::now(), None::<u64>, 0u32, Instant::now(), String::new());
+        let start_awake = sys::awake_s();
+        // the start's progress on the suspend-excluding awake clock (`sys::awake_s`): both the phase file's age by the wall clock
+        // and Windows QPC/`Instant` count a night's sleep as a stall ("start stalled for 904 s" at the first wake after sleep, #1607 / #1497)
+        let (mut phase_seen, mut phase_at) = (None::<std::time::SystemTime>, start_awake);
+        let mut clock = plan::SleepClock::new();
         loop {
+            if clock.tick(std::time::SystemTime::now(), sys::awake_s()) { misses = 0; say("the machine slept; health checks start counting again"); }
             if sys::stop_asked() { self.quit(Some(&mut child)) }
             match child.try_wait() {
                 Ok(Some(s)) => { self.hub_pid = 0; return self.classify(s) }
@@ -264,6 +270,7 @@ impl Guard {
             if last_probe.elapsed().as_secs() >= self.tm.probe {
                 last_probe = Instant::now(); self.watch_space();
                 let (answered, well, said, control) = self.probe();
+                if clock.tick(std::time::SystemTime::now(), sys::awake_s()) { misses = 0; say("the machine slept; health checks start counting again"); }
                 if well {
                     let down: Vec<String> = serde_json::from_str::<Value>(&said).ok().and_then(|v| v["degraded"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())).unwrap_or_default();
                     // on probation, a part the build before had running and this one has not is the update failing: a start step panicked or ran out of time
@@ -279,19 +286,24 @@ impl Guard {
                         let why = self.wrong_build(&said).unwrap_or_default(); say(&format!("{} is not the build it was staged as: {why}; ending it", Self::short(&self.build)));
                         sys::stop_child(&mut child, 10_000); self.hub_pid = 0; return End::Failed(why)
                     }
-                    None if well => { ready_at = Some(Instant::now()); say(&format!("{} answers, {} ms after its start", Self::short(&self.build), t0.elapsed().as_millis())); self.set(if self.mode == Mode::Safe { "safe" } else { "running" }); if control && !self.has_control(&self.build) { let mut c = self.d.lines("control"); c.push(self.build.clone()); let from = c.len().saturating_sub(32); let _ = self.d.put("control", &(c[from..].join("\n") + "\n")); } }
+                    None if well => { ready_at = Some(sys::awake_s()); say(&format!("{} answers, {} ms after its start", Self::short(&self.build), t0.elapsed().as_millis())); self.set(if self.mode == Mode::Safe { "safe" } else { "running" }); if control && !self.has_control(&self.build) { let mut c = self.d.lines("control"); c.push(self.build.clone()); let from = c.len().saturating_sub(32); let _ = self.d.put("control", &(c[from..].join("\n") + "\n")); } }
                     None => {
-                        let quiet = fs::metadata(self.d.path("phase")).ok().and_then(|m| m.modified().ok()).and_then(|m| m.elapsed().ok()).map_or(t0.elapsed().as_secs(), |e| e.as_secs());
-                        if quiet >= self.tm.stall || t0.elapsed().as_secs() >= self.tm.boot { let ph = self.d.text("phase"); return self.kill_hung(&mut child, &format!("start stalled for {quiet} s at {}", if ph.trim().is_empty() { "its first step" } else { ph.trim() })) }
+                        let now_awake = sys::awake_s();
+                        let m = fs::metadata(self.d.path("phase")).ok().and_then(|m| m.modified().ok());
+                        if m.is_some() && m != phase_seen { phase_seen = m; phase_at = now_awake; }
+                        let quiet = now_awake.saturating_sub(phase_at);
+                        if quiet >= self.tm.stall || now_awake.saturating_sub(start_awake) >= self.tm.boot { let ph = self.d.text("phase"); return self.kill_hung(&mut child, &format!("start stalled for {quiet} s at {}", if ph.trim().is_empty() { "its first step" } else { ph.trim() })) }
                     }
                     Some(at) => {
-                        if well || answered { misses = 0 } else { misses += 1; last_said = said.clone(); say(&format!("health check {misses} of {} failed: {}", self.tm.misses, said.chars().take(160).collect::<String>())) }
+                        let now_awake = sys::awake_s();
+                        if well || answered { misses = 0 } else if clock.waking(now_awake) { say(&format!("health check failed just after a wake, not counted: {}", said.chars().take(160).collect::<String>())) } else { misses += 1; last_said = said.clone(); say(&format!("health check {misses} of {} failed: {}", self.tm.misses, said.chars().take(160).collect::<String>())) }
                         if misses >= self.tm.misses { let why = format!("stopped answering: {}", last_said.chars().take(160).collect::<String>()); return self.kill_hung(&mut child, &why) }
                         // the clock that proves a build starts when its folds and any migration are over: a crash at the end of a long fold or import is the
                         // start failing, while a long import itself is not (plan::holds_proof)
-                        let busy = plan::holds_proof(&serde_json::from_str::<Value>(&said).unwrap_or(Value::Null));
-                        if busy { ready_at = Some(Instant::now()); }
-                        if !busy && !self.stable && at.elapsed().as_secs() >= self.tm.stable { self.stable = true; self.d.add_good(&self.build); self.pin(); say(&format!("{} started cleanly", Self::short(&self.build))); if self.probation.take().is_some() { if let Some(b) = &self.b { b.publish(&self.build); } } self.publish(); }
+                        let body = serde_json::from_str::<Value>(&said).unwrap_or(Value::Null);
+                        let busy = plan::holds_proof(&body);
+                        if busy { ready_at = Some(now_awake); }
+                        if plan::proven(well, &body, self.stable, now_awake.saturating_sub(at), self.tm.stable) { self.stable = true; self.d.add_good(&self.build); self.pin(); say(&format!("{} started cleanly", Self::short(&self.build))); if self.probation.take().is_some() { if let Some(b) = &self.b { b.publish(&self.build); } } self.publish(); }
                     }
                 }
             }

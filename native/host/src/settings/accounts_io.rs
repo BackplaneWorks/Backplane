@@ -513,7 +513,7 @@ impl Accounts {
             loop { let n = out.read(&mut chunk).await.map_err(|_| ())?; if n == 0 { break } buf.extend_from_slice(&chunk[..n]); if buf.len() > 131072 { return Err(()) } }
             Ok::<i32, ()>(child.wait().await.map_err(|_| ())?.code().unwrap_or(-1))
         }).await;
-        let code = match ran { Ok(Ok(code)) => code, _ => { let _ = child.start_kill(); return Err(()) } };
+        let code = match ran { Ok(Ok(code)) => code, _ => { let _ = child.start_kill(); let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await; return Err(()) } };
         let data = if args.get(1) == Some(&"logout") { json!({}) } else { serde_json::from_slice(&buf).map_err(|_| ())? };
         Ok((code, data))
     }
@@ -528,27 +528,31 @@ impl Accounts {
         c.current_dir(&self.root); apply_env(&mut c, &self.environment(p).map_err(|_| "This account's private folder could not be verified.".to_string())?, p.is_some());
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let mut child = spawn(&mut c).await.map_err(|_| "The Claude CLI could not be started.".to_string())?;
-        let (mut stdin, stdout) = (child.stdin.take().ok_or("The Claude CLI could not be started.")?, child.stdout.take().ok_or("The Claude CLI could not be started.")?);
-        let first = json!({"type":"control_request","request_id":if want == "models" { "models" } else { "init" },"request":{"subtype":"initialize"}}).to_string();
-        stdin.write_all(format!("{first}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?;
-        let r = tokio::time::timeout(Duration::from_secs(30), async {
-            let mut lines = BufReader::new(stdout).lines(); let mut total = 0usize;
-            while let Ok(Some(l)) = lines.next_line().await {
-                total += l.len(); if total > 524288 { return Err("The Claude CLI's reply was too large.".to_string()) }
-                let Ok(r) = serde_json::from_str::<Value>(&l) else { continue };
-                if r["type"] != "control_response" { continue }
-                let bad = r["response"]["subtype"] == "error";
-                let why = || format!("Claude refused the request: {}", label(r["response"]["error"].as_str().unwrap_or("no reason given")));
-                match (want, r["response"]["request_id"].as_str()) {
-                    ("models", Some("models")) => return if bad { Err(why()) } else { Ok(r["response"]["response"].clone()) },
-                    ("usage", Some("init")) => { if bad { return Err(why()) } let q = json!({"type":"control_request","request_id":"usage","request":{"subtype":"get_usage","skip_behaviors":true}}).to_string(); stdin.write_all(format!("{q}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?; }
-                    ("usage", Some("usage")) => return if bad { Err(why()) } else { Ok(r["response"]["response"].clone()) },
-                    _ => {}
+        let r = async {
+            let (mut stdin, stdout) = (child.stdin.take().ok_or_else(|| "The Claude CLI could not be started.".to_string())?, child.stdout.take().ok_or_else(|| "The Claude CLI could not be started.".to_string())?);
+            let first = json!({"type":"control_request","request_id":if want == "models" { "models" } else { "init" },"request":{"subtype":"initialize"}}).to_string();
+            stdin.write_all(format!("{first}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?;
+            tokio::time::timeout(Duration::from_secs(30), async {
+                let mut lines = BufReader::new(stdout).lines(); let mut total = 0usize;
+                while let Ok(Some(l)) = lines.next_line().await {
+                    total += l.len(); if total > 524288 { return Err("The Claude CLI's reply was too large.".to_string()) }
+                    let Ok(r) = serde_json::from_str::<Value>(&l) else { continue };
+                    if r["type"] != "control_response" { continue }
+                    let bad = r["response"]["subtype"] == "error";
+                    let why = || format!("Claude refused the request: {}", label(r["response"]["error"].as_str().unwrap_or("no reason given")));
+                    match (want, r["response"]["request_id"].as_str()) {
+                        ("models", Some("models")) => return if bad { Err(why()) } else { Ok(r["response"]["response"].clone()) },
+                        ("usage", Some("init")) => { if bad { return Err(why()) } let q = json!({"type":"control_request","request_id":"usage","request":{"subtype":"get_usage","skip_behaviors":true}}).to_string(); stdin.write_all(format!("{q}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?; }
+                        ("usage", Some("usage")) => return if bad { Err(why()) } else { Ok(r["response"]["response"].clone()) },
+                        _ => {}
+                    }
                 }
-            }
-            Err("The Claude CLI closed before reporting usage.".to_string())
-        }).await.unwrap_or_else(|_| Err("The Claude CLI did not answer within 30 seconds.".to_string()));
-        let _ = child.start_kill(); r
+                Err("The Claude CLI closed before reporting usage.".to_string())
+            }).await.unwrap_or_else(|_| Err("The Claude CLI did not answer within 30 seconds.".to_string()))
+        }.await;
+        let _ = child.start_kill();
+        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await;
+        r
     }
     /// A test's usage request and CLI store (the real hub's are set in `open`).
     #[cfg(test)]

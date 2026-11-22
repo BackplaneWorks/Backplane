@@ -510,7 +510,7 @@ fn uses_lfs(dest: &Path) -> bool {
     std::fs::read_to_string(dest.join(".gitattributes")).map_or(false, |t| t.contains("filter=lfs")) || dest.join(".lfsconfig").is_file()
 }
 async fn lfs_installed() -> bool {
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, "git"); c.args(["lfs", "version"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, "git"); c.args(["lfs", "version"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true);
     matches!(tokio::time::timeout(std::time::Duration::from_secs(10), c.status()).await, Ok(Ok(s)) if s.success())
 }
 

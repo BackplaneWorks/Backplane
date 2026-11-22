@@ -85,6 +85,22 @@ fn a_project_turn_reaches_its_agent(start: Start) {
     wait_for(40, "the agent gets the turn (the snapshot's git exits seen)", &log, || std::fs::read_to_string(&agent_log).unwrap_or_default().contains("TURN").then_some(()));
     assert!(proj.join(".git").exists(), "the project folder is a repository");
     assert!(hub.try_wait().unwrap().is_none(), "the hub still runs");
+    // #1607: landing-page probes and /healthz answer fast while a turn is running, without creating zombie children
+    let http_get = |path: String| {
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+        use std::io::{Read, Write};
+        s.write_all(format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").as_bytes()).unwrap();
+        let mut out = String::new();
+        s.read_to_string(&mut out).unwrap();
+        out
+    };
+    for i in 0..5 {
+        let resp = http_get("/".into());
+        assert!(resp.starts_with("HTTP/1.1 200 OK\r\n") && resp.contains("This is Backplane on"), "GET / probe {i}: {resp}");
+    }
+    let hz = http_get("/healthz".into());
+    assert!(hz.starts_with("HTTP/1.1 200 OK\r\n"), "GET /healthz: {hz}");
     // a child that exits is reaped at once, or by the hub's reaping watch within its 2 s look: none stays a zombie across 5 s
     let first = zombies(pid); std::thread::sleep(Duration::from_secs(5));
     let left: Vec<u32> = zombies(pid).into_iter().filter(|z| first.contains(z)).collect();

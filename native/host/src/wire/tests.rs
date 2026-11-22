@@ -231,3 +231,23 @@ fn sbs_wire_child(mode: &str, copy: Option<&str>, flag: Option<&str>) -> String 
     assert!(!p.contains("token"), "no secret words on the page");
     assert!(landing_page("", "1").contains("this machine"));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn landing_page_answers_burst_of_get_root_probes_fast() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let (_hub, port) = test_hub("wire-landing", FIXTURE).await;
+    let probes = futures_util::future::join_all((0..20).map(|i| async move {
+        let path = if i % 2 == 0 { "/" } else { "/pair" };
+        let resp = tokio::time::timeout(Duration::from_secs(2), async {
+            let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+            s.write_all(format!("GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            let mut buf = Vec::new();
+            s.read_to_end(&mut buf).await.unwrap();
+            String::from_utf8_lossy(&buf).into_owned()
+        }).await.expect("landing page answered within 2 s");
+        (i, path, resp)
+    })).await;
+    for (i, path, resp) in probes {
+        assert!(resp.starts_with("HTTP/1.1 200 OK\r\n") && resp.contains("This is Backplane on"), "probe {i} ({path}): {resp}");
+    }
+}

@@ -375,7 +375,20 @@ mod reaper {
             #[cfg(test)] c.args(["agents::tests::reaper_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_REAPER_CHILD", "1"); // a test binary takes no such flag: its watcher is a test that only runs as that child
             c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
             crate::plat::proc::own_group(&mut c);
-            match c.spawn() { Ok(mut ch) => { *g = ch.stdin.take(); std::thread::spawn(move || { let _ = ch.wait(); }); } Err(_) => return false }
+            struct Reap(Option<std::process::Child>);
+            impl Drop for Reap { fn drop(&mut self) { if let Some(mut c) = self.0.take() { let _ = c.kill(); let _ = c.wait(); } } }
+            match c.spawn() {
+                Ok(mut ch) => {
+                    let stdin = ch.stdin.take();
+                    let mut guard = Reap(Some(ch));
+                    if std::thread::Builder::new().name("agent-reaper-wait".into()).spawn(move || { if let Some(mut c) = guard.0.take() { let _ = c.wait(); } }).is_ok() {
+                        *g = stdin;
+                    } else {
+                        return false;
+                    }
+                }
+                Err(_) => return false,
+            }
         }
         let ok = g.as_mut().map_or(false, |w| w.write_all(line.as_bytes()).and_then(|_| w.flush()).is_ok());
         if !ok { *g = None }
