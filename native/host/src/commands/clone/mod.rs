@@ -22,7 +22,13 @@ fn seg_ok(s: &str) -> bool { !s.is_empty() && s != "." && s != ".." && !s.starts
 /// A folder name a clone can take: no separator, no `.`/`..`, none of the characters some systems refuse.
 pub fn name_ok(n: &str) -> bool { !n.trim().is_empty() && n != "." && n != ".." && n.len() <= 255 && !n.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | '<' | '>' | ':' | '"' | '|' | '?' | '*')) }
 fn strip_git(s: &str) -> &str { s.strip_suffix(".git").unwrap_or(s) }
-fn name_of(path: &str) -> Option<String> { let n = strip_git(path.trim_end_matches('/').rsplit(['/', ':']).next()?).to_string(); (!n.is_empty() && n != "." && n != ".." && !n.contains(['\\', '\0'])).then_some(n) }
+fn name_of(path: &str) -> Option<String> { name_of_in(path, false) }
+fn name_of_in(path: &str, backslash: bool) -> Option<String> {
+    let trimmed = if backslash { path.trim_end_matches(['/', '\\']) } else { path.trim_end_matches('/') };
+    let last = if backslash { trimmed.rsplit(['/', '\\', ':']).next()? } else { trimmed.rsplit(['/', ':']).next()? };
+    let n = strip_git(last).to_string();
+    (!n.is_empty() && n != "." && n != ".." && !n.contains(['\\', '\0'])).then_some(n)
+}
 
 /// What the repository field takes: an https or ssh URL (`https://host/o/r(.git)`, `ssh://git@host/o/r`, `git@host:o/r.git`), a bare
 /// `host.tld/o/r`, GitHub's `owner/repo`, or a `file://` URL (a repository on this machine). None for anything else (a folder's path).
@@ -32,7 +38,7 @@ pub fn parse(text: &str) -> Option<Repo> {
     let gh_of = |origin: &str| origin.strip_prefix("github.com/").filter(|r| r.split('/').count() == 2).map(str::to_string).unwrap_or_default();
     if let Some(p) = t.strip_prefix("file://") {
         if !crate::plat::fs::is_abs(p) && !p.starts_with('/') { return None }
-        return Some(Repo { urls: vec![t.to_string()], origin: t.to_string(), name: name_of(p)?, github: String::new() });
+        return Some(Repo { urls: vec![t.to_string()], origin: t.to_string(), name: name_of_in(p, cfg!(windows))?, github: String::new() });
     }
     let url = ["https://", "http://", "ssh://", "git://"].iter().any(|s| t.starts_with(s));
     // a password or token in the address would be shown and kept: never taken (the credential helpers and the agent sign in)
@@ -113,16 +119,62 @@ pub fn default_dest(parent: &str, r: &Repo, home: &str) -> PathBuf {
     base.join(&r.name)
 }
 /// A path as the person reads it: "~/..." under the home.
-pub fn tilde(p: &str, home: &str) -> String {
-    let h = home.trim_end_matches('/');
-    if h.is_empty() { return p.to_string() }
-    if p == h { "~".into() } else if let Some(r) = p.strip_prefix(h).filter(|r| r.starts_with('/')) { format!("~{r}") } else { p.to_string() }
+pub fn tilde(p: &str, home: &str) -> String { tilde_in(p, home, cfg!(windows)) }
+fn tilde_in(p: &str, home: &str, win: bool) -> String {
+    let p_s = if win { p.replace('\\', "/") } else { p.to_string() };
+    let h_s = if win { home.replace('\\', "/") } else { home.to_string() };
+    let h_trim = h_s.trim_end_matches('/');
+    let drive_root = win && h_trim.len() == 2 && h_trim.as_bytes()[0].is_ascii_alphabetic() && h_trim.as_bytes()[1] == b':' && h_s.len() > 2;
+    let h = if drive_root { &h_s[..3] } else { h_trim };
+    if h.is_empty() { return p_s }
+    let rest = if win {
+        p_s.get(..h.len()).filter(|pre| pre.eq_ignore_ascii_case(h)).and_then(|_| p_s.get(h.len()..))
+    } else {
+        p_s.strip_prefix(h)
+    };
+    match rest {
+        Some("") => "~".into(),
+        Some(r) if drive_root => format!("~/{}", r.trim_start_matches('/')),
+        Some(r) if r.starts_with('/') => format!("~{r}"),
+        _ => p_s,
+    }
+}
+fn norm_path(p: &str, win: bool) -> String {
+    let s = if win { p.replace('\\', "/") } else { p.to_string() };
+    if s.is_empty() { return String::new() }
+    let prefix = if win && s.starts_with("//") { "//" } else if s.starts_with('/') { "/" } else { "" };
+    let parts: Vec<&str> = s[prefix.len()..].split('/').filter(|seg| !seg.is_empty() && *seg != ".").collect();
+    if parts.is_empty() { return prefix.to_string() }
+    if win && prefix.is_empty() && parts.len() == 1 && parts[0].len() == 2 && parts[0].as_bytes()[0].is_ascii_alphabetic() && parts[0].as_bytes()[1] == b':' && s.contains(":/") {
+        return format!("{}/", parts[0]);
+    }
+    format!("{prefix}{}", parts.join("/"))
+}
+fn path_eq_in(a: &str, b: &str, win: bool) -> bool {
+    let (a, b) = (norm_path(a, win), norm_path(b, win));
+    if win { a.eq_ignore_ascii_case(&b) } else { a == b }
+}
+fn path_eq(a: &str, b: &str) -> bool { path_eq_in(a, b, cfg!(windows)) }
+/// Canonicalize the deepest existing ancestor of `p` and append any non-existent tail (handles 8.3 short paths, symlinks/junctions, and `.` segments before a clone creates its target folder).
+fn canon_dest(p: &Path) -> String {
+    let mut tail: Vec<std::ffi::OsString> = vec![];
+    let mut cur = p;
+    loop {
+        if let Ok(c) = crate::plat::fs::canonicalize(cur) {
+            return tail.into_iter().rev().fold(c, |a, b| a.join(b)).to_string_lossy().into_owned();
+        }
+        let Some(name) = cur.file_name() else { return p.to_string_lossy().into_owned() };
+        tail.push(name.to_os_string());
+        let Some(parent) = cur.parent() else { return p.to_string_lossy().into_owned() };
+        cur = parent;
+    }
 }
 /// A typed destination as an absolute path ("~/x" under the home); Err: the words.
 pub fn resolve(p: &str, home: &str) -> Result<PathBuf, String> {
     let p = p.trim();
     if p.is_empty() { return Err("Say where to clone it.".into()) }
-    let x = if p == "~" { PathBuf::from(home) } else if let Some(r) = p.strip_prefix("~/") { Path::new(home).join(r) } else { PathBuf::from(p) };
+    let rest = p.strip_prefix("~/").or_else(|| cfg!(windows).then(|| p.strip_prefix("~\\")).flatten());
+    let x = if p == "~" { PathBuf::from(home) } else if let Some(r) = rest { Path::new(home).join(r) } else { PathBuf::from(p) };
     if !x.is_absolute() { return Err("The folder must be a full path (or start with ~/).".into()) }
     if x.components().any(|c| matches!(c, std::path::Component::ParentDir)) { return Err("The folder's path can't hold \"..\".".into()) }
     Ok(x)
@@ -136,7 +188,7 @@ impl State { pub fn word(&self) -> &'static str { match self { State::Running =>
 
 #[derive(Clone)]
 pub struct Job {
-    pub id: String, pub repo: String, pub origin: String, pub dest: String, pub name: String, pub state: State,
+    pub id: String, pub repo: String, pub origin: String, pub dest: String, dest_key: String, pub name: String, pub state: State,
     pub phase: String, pub pct: Option<u32>, pub detail: String, pub error: String,
     /// refused for access: the client offers Sign in to GitHub (`github`: the repository is GitHub's)
     pub auth: bool, pub github: bool,
@@ -211,7 +263,7 @@ pub fn start(hub: &Arc<Hub>, s: Start) -> Result<Value, String> {
             let r = parse(&s.repo); let mut spec = s.spec(); spec["repo"] = json!(redact(&s.repo));
             let mut g = JOBS.lock().unwrap();
             if g.iter().any(|j| j.id == s.id) { return why }
-            push(&mut g, Job { id: s.id.clone(), repo: r.as_ref().map(shown).unwrap_or_else(|| redact(&s.repo)), origin: r.as_ref().map(|r| r.origin.clone()).unwrap_or_default(), dest: s.dest.clone(), name: String::new(),
+            push(&mut g, Job { id: s.id.clone(), repo: r.as_ref().map(shown).unwrap_or_else(|| redact(&s.repo)), origin: r.as_ref().map(|r| r.origin.clone()).unwrap_or_default(), dest: s.dest.clone(), dest_key: String::new(), name: String::new(),
                 state: State::Failed, phase: String::new(), pct: None, detail: String::new(), error: why.clone(), auth: false, github: false, hold: false, notes: vec![],
                 project: String::new(), thread: String::new(), started: crate::hub::now_ms(), ended: crate::hub::now_ms(), spec, cancel: Arc::new(tokio::sync::Notify::new()), cancelled: Arc::new(AtomicBool::new(false)) });
             drop(g); tell(&s.id, true);
@@ -229,14 +281,15 @@ fn start_in(hub: &Arc<Hub>, s: Start) -> Result<Value, String> {
     let home = home();
     let dest = dest_of(&s, &r, &home)?;
     let dest_s = dest.to_string_lossy().into_owned();
+    let dest_key = canon_dest(&dest);
     let st = dest_state(&dest, &r.origin, &home);
     if let Dest::Busy(why) = &st { return Err(why.clone()) }
     let id = if id_ok(&s.id) { s.id.clone() } else { new_id() };
     {
         let mut g = JOBS.lock().unwrap();
-        if g.iter().any(|j| j.state == State::Running && (j.dest == dest_s || j.id == id)) { return Err(format!("{} is being cloned already.", tilde(&dest_s, &home))) }
+        if g.iter().any(|j| j.state == State::Running && (path_eq(&j.dest, &dest_s) || path_eq(&j.dest_key, &dest_key) || j.id == id)) { return Err(format!("{} is being cloned already.", tilde(&dest_s, &home))) }
         if g.iter().any(|j| j.id == id) { return Err("That clone was started already.".into()) }
-        push(&mut g, Job { id: id.clone(), repo: shown(&r), origin: r.origin.clone(), dest: dest_s.clone(), name: dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        push(&mut g, Job { id: id.clone(), repo: shown(&r), origin: r.origin.clone(), dest: dest_s.clone(), dest_key, name: dest.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
             state: State::Running, phase: "Starting".into(), pct: None, detail: String::new(), error: String::new(), auth: false, github: !r.github.is_empty(), hold: false, notes: vec![],
             project: String::new(), thread: String::new(), started: crate::hub::now_ms(), ended: 0, spec: s.spec(), cancel: Arc::new(tokio::sync::Notify::new()), cancelled: Arc::new(AtomicBool::new(false)) });
     }
@@ -495,15 +548,41 @@ async fn add(hub: &Arc<Hub>, dest: &Path, thread: bool, text: &str) -> Result<(S
     let mut c = crate::hub::Conn { local_view_socket: false, sent: vec![], client: 0, gen: String::new(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
     let r = hub.request_here(&mut c, &json!({"id": 0, "m": "project.add", "p": {"path": path, "starter": thread}})).await.into_iter().find(|v| v["t"] == "reply").unwrap_or(Value::Null);
     let want = crate::plat::fs::canonicalize(&path).map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|_| path.clone());
-    let find = |g: &crate::model::Model| g.projects.iter().find(|(_, x)| !x.removed && (x.root.trim_end_matches('/') == want.trim_end_matches('/') || x.root.trim_end_matches('/') == path.trim_end_matches('/'))).map(|(id, _)| id.clone());
+    let th = r["thread"].as_str().unwrap_or("").to_string();
+    let exact_eq = |a: &str, b: &str| norm_path(a, cfg!(windows)) == norm_path(b, cfg!(windows));
+    let find_in = |g: &crate::model::Model, th: &str| -> Option<String> {
+        if !th.is_empty() {
+            if let Some(t) = g.threads.get(th).filter(|t| !t.project.is_empty()) { return Some(t.project.clone()) }
+        }
+        g.projects.iter().find(|(_, x)| !x.removed && (exact_eq(&x.root, &want) || exact_eq(&x.root, &path))).map(|(id, _)| id.clone())
+            .or_else(|| g.projects.iter().find(|(_, x)| !x.removed && (path_eq(&x.root, &want) || path_eq(&x.root, &path))).map(|(id, _)| id.clone()))
+    };
+    let find_canon = |roots: Vec<(String, String)>, want: String| -> Option<String> {
+        roots.into_iter().find_map(|(id, root)| {
+            crate::plat::fs::canonicalize(&root).ok().filter(|c| path_eq(&c.to_string_lossy(), &want)).map(|_| id)
+        })
+    };
     if r["ok"] != true {
         // a folder that is a project already (a clone added before): that project
-        if let Some(id) = find(&*hub.model().await) { return Ok((id, String::new(), String::new())) }
+        let (hit, roots) = {
+            let g = hub.model().await;
+            (find_in(&g, ""), g.projects.iter().filter(|(_, x)| !x.removed).map(|(id, x)| (id.clone(), x.root.clone())).collect::<Vec<_>>())
+        };
+        if let Some(id) = hit.or_else(|| find_canon(roots, want.clone())) { return Ok((id, String::new(), String::new())) }
         return Err(r["error"].as_str().unwrap_or("the project was not added").to_string())
     }
     let mut project = String::new();
-    for _ in 0..40 { if let Some(id) = find(&*hub.model().await) { project = id; break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
-    let th = r["thread"].as_str().unwrap_or("").to_string();
+    for _ in 0..40 {
+        let (hit, roots) = {
+            let g = hub.model().await;
+            (find_in(&g, &th), g.projects.iter().filter(|(_, x)| !x.removed).map(|(id, x)| (id.clone(), x.root.clone())).collect::<Vec<_>>())
+        };
+        if let Some(id) = hit { project = id; break }
+        if !roots.is_empty() {
+            if let Some(id) = find_canon(roots, want.clone()) { project = id; break }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
     let mut note = String::new();
     if !th.is_empty() && !text.trim().is_empty() {
         let msg = format!("cl-{}", th.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>());
