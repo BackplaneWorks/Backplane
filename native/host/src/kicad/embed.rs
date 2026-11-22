@@ -2077,6 +2077,9 @@ struct Actor {
     users_gone: Option<u64>,
     /// the last leave or back each pane said (its `seq`), per (project, client): `leave_in_order`
     leave_seqs: HashMap<(String, String), u64>,
+    /// Test-only explicit `BACKPLANE_KICAD_EMBED_MODE` value (`Some(None)` ignores ambient env; `Some(Some(m))` forces `m`).
+    #[cfg(test)]
+    mode_override: Option<Option<String>>,
 }
 
 /// Whether a failed start is tried once more by itself: only a missed start window (KiCad ran but its socket or its first answer came after
@@ -2306,6 +2309,12 @@ impl Actor {
     /// The mode a start of `env`'s KiCad runs in (fork or stock), its API description and what describing the CLI said.
     fn start_mode(&self, env: &Env) -> (&'static str, String, Option<Value>) {
         let (desc, has_embed_schema) = discover_desc(&self.hub.cfg.home, env);
+        #[cfg(test)]
+        let override_mode = match &self.mode_override {
+            Some(v) => v.clone(),
+            None => std::env::var("BACKPLANE_KICAD_EMBED_MODE").ok(),
+        };
+        #[cfg(not(test))]
         let override_mode = std::env::var("BACKPLANE_KICAD_EMBED_MODE").ok();
         let described = if override_mode.is_none() && !has_embed_schema && env.version.is_empty() { describe_cli(&env.cli) } else { None };
         (mode_with(override_mode.as_deref(), env, has_embed_schema, described.as_ref()), desc, described)
@@ -4462,6 +4471,7 @@ pub fn start(hub: &Arc<Hub>) {
         hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
         pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(),
         users: HashSet::new(), users_gone: None, leave_seqs: HashMap::new(),
+        #[cfg(test)] mode_override: None,
     };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     let tick = tx.clone();
@@ -4485,7 +4495,7 @@ async fn test_actor() -> (Actor, crate::plat::tmp::TempDir) {
     let (tx, rx) = mpsc::unbounded_channel(); std::mem::forget(rx);
     let (info_tx, irx) = mpsc::unbounded_channel(); std::mem::forget(irx);
     (Actor { hub, me: tx, info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0, pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(),
-        start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(), users: HashSet::new(), users_gone: None, leave_seqs: HashMap::new() }, home)
+        start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(), users: HashSet::new(), users_gone: None, leave_seqs: HashMap::new(), mode_override: Some(None) }, home)
 }
 
 const METHODS: &[&str] = &[
@@ -5390,7 +5400,7 @@ mod tests {
         let mut a = Actor {
             hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
             pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(),
-            users: HashSet::new(), users_gone: None, leave_seqs: HashMap::new(),
+            users: HashSet::new(), users_gone: None, leave_seqs: HashMap::new(), mode_override: Some(None),
         };
         let pro = base.join("p/o.kicad_pro").to_string_lossy().to_string();
         let mut s = Session::new(&pro, "/p", "fork", "SCH", 1, 0).ready(&base.join("none.sock").to_string_lossy(), "", 0);
@@ -5949,12 +5959,12 @@ mod tests {
     }
     #[test] fn a_fresh_start_waits_for_the_projects_previous_kicad_to_be_gone() {
         // a real process as the previous KiCad: its session stopped (a close's made-up exit) while it still runs
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = sleep_child();
         let pid = child.id();
         let st = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(pid).stopped("");
         assert_eq!((st.pid, st.last_pid), (0, pid), "stopped: its pid kept as the last one");
         assert_eq!(previous_alive(&st, crate::plat::proc::alive), Some(pid), "still there: no spawn until it is gone");
-        let _ = child.kill(); let _ = child.wait();
+        child.stop();
         assert_eq!(previous_alive(&st, crate::plat::proc::alive), None, "gone: the fresh start goes on");
         let f = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).spawned(77).failed("x");
         assert_eq!(f.last_pid, 77, "failed keeps it too");
@@ -6035,13 +6045,45 @@ mod tests {
         let e = s.exited_how(-6, "signal 6 (SIGABRT)", ""); assert!(e.closed_unexpectedly(), "a crash, shown");
     }
 
+    /// Dummy long-lived child process for PID/lifecycle tests (uses `ping` on Windows so tests do not require POSIX `sleep` on PATH).
+    /// Kills and reaps the child on drop so a panicking assertion cannot leave it running until its timer expires.
+    struct SleepChild(Option<std::process::Child>);
+    impl SleepChild {
+        fn id(&self) -> u32 { self.0.as_ref().expect("sleep child still running").id() }
+        fn stop(&mut self) {
+            if let Some(mut child) = self.0.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+        }
+    }
+    impl Drop for SleepChild {
+        fn drop(&mut self) { self.stop(); }
+    }
+    fn sleep_child() -> SleepChild {
+        #[cfg(windows)]
+        let child = {
+            use std::os::windows::process::CommandExt;
+            std::process::Command::new("ping")
+                .args(["-n", "30", "127.0.0.1"])
+                .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+                .creation_flags(crate::plat::proc::NO_WINDOW)
+                .spawn().unwrap()
+        };
+        #[cfg(not(windows))]
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn().unwrap();
+        SleepChild(Some(child))
+    }
     /// A ready KiCad with a board frame for the sequence tests: `pid` a real process (EventsGone and the bound read it).
     fn seq_session(pid: u32) -> Session {
         let fr = Frame { kind: "PCB".into(), doc: "/p/a.kicad_pcb".into(), title: String::new(), modified: false, shown: true, realized: true, xid: 1, min_w: 0, min_h: 0 };
         let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 3, 0).ready("/no/sock", "", 0).spawned(pid); s.frames = vec![fr]; s
     }
     #[tokio::test] async fn kicads_own_quit_during_a_pending_close_is_not_undone_by_the_failed_close() {
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let mut child = sleep_child(); let pid = child.id();
         for order in ["events gone, then close unanswered", "close unanswered, then events gone"] {
             let (mut a, _h) = test_actor().await;
             let mut s = seq_session(pid); assert!(s.close_sent("idle")); s.gone_kinds = vec!["PCB".into()]; // the person quit over the pending Close
@@ -6053,10 +6095,10 @@ mod tests {
             assert!(s.closing && !s.close_pending, "{order}: KiCad's own end stands: closing (the bound runs), not live again");
             assert_eq!(s.stop_reason, "idle", "{order}: the hub's Close it ended, not the person's Quit (no hold)");
         }
-        let _ = child.kill(); let _ = child.wait();
+        child.stop();
     }
     #[tokio::test] async fn a_second_close_while_one_is_pending_keeps_the_first_and_its_reason() {
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let mut child = sleep_child(); let pid = child.id();
         let (mut a, _h) = test_actor().await;
         let mut s = seq_session(pid); assert!(s.close_sent("closeAsked")); a.sessions.insert(s.pro.clone(), s); // the person's Close, pending
         let (tx, rx) = oneshot::channel();
@@ -6075,10 +6117,10 @@ mod tests {
         let stopped = &a.sessions["/p/a.kicad_pro"];
         assert_eq!(stopped.stop_reason, "kicadQuit");
         assert!(!stopped.reopen);
-        let _ = child.kill(); let _ = child.wait();
+        child.stop();
     }
     #[tokio::test] async fn a_close_the_hub_gave_up_on_is_never_the_persons_quit_nor_closes_an_attached_pane() {
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let mut child = sleep_child(); let pid = child.id();
         let (mut a, _h) = test_actor().await;
         let mut s = seq_session(pid); assert!(s.close_sent("idle")); a.sessions.insert(s.pro.clone(), s);
         a.handle(Msg::CloseUnanswered { pro: "/p/a.kicad_pro".into(), gen: 3, why: "no answer in 30 min".into(), reply: None }); // given up
@@ -6092,18 +6134,18 @@ mod tests {
         assert_ne!(runtime_session(&s.state, &s.reason, &s.stop_reason), "closedByPerson", "never the person's quit: {}", s.stop_reason);
         assert_eq!(runtime_session(&s.state, &s.reason, &s.stop_reason), "idleStopped");
         assert!(s.reopen && s.info_json()["reopen"] == json!(true), "the pane on show opens KiCad again");
-        let _ = child.kill(); let _ = child.wait();
+        child.stop();
     }
     #[tokio::test] async fn a_kicad_that_answered_exiting_then_was_killed_leaves_its_session_for_a_fresh_start() {
         // Carbon's Windows row: `exiting`, still alive 30 s later, killed (by anyone): the next Edit must start a new KiCad, never wait on
         // a failed session
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let mut child = sleep_child(); let pid = child.id();
         let (mut a, h) = test_actor().await;
         let s = seq_session(pid); a.sessions.insert(s.pro.clone(), s);
         a.sessions.get_mut("/p/a.kicad_pro").unwrap().close_sent("agentClosed");
         a.handle(Msg::CloseAnswered { pro: "/p/a.kicad_pro".into(), gen: 3, pid, answered: true, reply: None });
         assert!(a.sessions["/p/a.kicad_pro"].closing);
-        let _ = child.kill(); let _ = child.wait();
+        child.stop();
         a.handle(Msg::ChildExited { pro: "/p/a.kicad_pro".into(), gen: 3, pid, code: -9, how: "signal 9 (SIGKILL)".into(), tail: String::new(), reply: None });
         { let s = &a.sessions["/p/a.kicad_pro"]; assert_eq!(s.state, "stopped", "the close it was, not failed: {} {}", s.state, s.reason);
           assert!(!s.closed_unexpectedly() && s.last_pid == 0 && !s.is_live()); }
@@ -6112,17 +6154,19 @@ mod tests {
         for (n, body) in [("kicad-cli", "#!/bin/sh\necho 10.99.0\n"), ("kicad", "#!/bin/sh\nsleep 5\n")] {
             let f = bin.join(n); std::fs::write(&f, body).unwrap(); use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
         }
-        let env = Env { cli: bin.join("kicad-cli").to_string_lossy().into(), ..Env::default() };
+        // Select fork mode via `caps` so Windows does not take the stock no-spawn early return (`state = "ready"`),
+        // and use a non-version placeholder so `start_mode` skips `describe_cli` without `wheel_zoom_once`/`geomguard` touching user KiCad config.
+        let env = Env { cli: bin.join("kicad-cli").to_string_lossy().into(), caps: vec!["embed".into()], version: "test".into(), ..Env::default() };
         let (tx, _rx) = oneshot::channel();
         a.handle(Msg::Attach { client: 0, pro: "/p/a.kicad_pro".into(), root: "/p".into(), files: Files::default(), frame: "PCB".into(), container: 9001, toplevel: 8001, display: String::new(), wait: false, env, reply: tx });
         let s = &a.sessions["/p/a.kicad_pro"];
-        assert_eq!(s.state, "starting", "a fresh KiCad starts: {} {}", s.state, s.reason);
+        assert_eq!((s.state.as_str(), s.mode.as_str()), ("starting", "fork"), "a fresh KiCad starts in fork mode: {} {}", s.state, s.reason);
         assert!(s.gen != 3 && s.reason != HELD_REASON, "a new generation (the test actor counts from 1), not held");
     }
     #[tokio::test] async fn a_kicad_that_answered_exiting_is_sent_no_request_until_it_is_gone() {
         // Windows bp.13.3: a request arriving while KiCad's API server stops hangs its exit (a lost wake-up in its Stop): after `exiting`
         // nothing is sent, whatever asks (a poll, GetFrames, a Ping, the events stream), until the process is gone or the bound ends it
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = child.id();
+        let mut child = sleep_child(); let pid = child.id();
         let (mut a, _h) = test_actor().await;
         let mut s = seq_session(pid); s.events_sock = "/no/sock.events".into(); assert!(s.close_sent("agentClosed")); a.sessions.insert(s.pro.clone(), s);
         let send = |a: &mut Actor, sock: &str, ty: &str| { let (tx, rx) = oneshot::channel(); a.handle(Msg::Raw { sock: sock.into(), desc: String::new(), ty: ty.into(), msg: json!({}), timeout: 500, client: String::new(), reply: tx }); rx };
@@ -6134,7 +6178,7 @@ mod tests {
             assert_eq!(r["closing"], json!(true), "{ty} on {sock}: not sent: {r}");
         }
         // its process gone: the session ends, and a request to its socket is no longer held back by it
-        let _ = child.kill(); let _ = child.wait();
+        child.stop();
         a.handle(Msg::ChildExited { pro: "/p/a.kicad_pro".into(), gen: 3, pid, code: -9, how: "signal 9 (SIGKILL)".into(), tail: String::new(), reply: None });
         assert!(quiet_for(&a.sessions, "/no/sock").is_none());
         // KiCad's own Quit (its socket gone with every frame closed) is as quiet
@@ -6170,11 +6214,11 @@ mod tests {
         let d = ph.clone().detached(120); assert_eq!((d.container, d.left.as_str(), is_held(&d, 8)), (0, "", true));
     }
     #[tokio::test] async fn a_held_start_begins_once_the_previous_kicad_is_gone() {
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = sleep_child();
         let old = child.id();
         assert!(!held_wait(old, Duration::from_millis(300)).await, "still there: held");
         assert!(crate::plat::proc::alive(old), "never killed from the held start");
-        let _ = child.kill(); let _ = child.wait();
+        child.stop();
         assert!(held_wait(old, Duration::from_secs(2)).await, "gone: the held start begins");
         assert_eq!(HELD_WAIT, Duration::from_secs(15));
     }
