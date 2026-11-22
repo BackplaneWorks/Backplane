@@ -89,6 +89,7 @@ pub mod mgmt;
 pub mod mgmt_bom;
 pub mod mgmt_fab;
 pub mod mgmt_plan;
+pub mod mgmt_plan_canvas;
 pub mod kcomment;
 pub mod mgmt_checks;
 pub mod mgmt_life;

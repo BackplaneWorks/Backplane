@@ -2,7 +2,7 @@
 //! corridor and plane region with its state in the floorplanner's language, net count, width/impedance, reference plane, routing progress,
 //! and blocker details; Approve or Reject an item, a layer or all (`plan.approve`), Stop routing (`plan.stop`), Verify (`plan.verify`),
 //! Hide done; a row press selects the item (`plan_sel`) and zooms its nets in KiCad (`plan.focus`). Pure rules first, tested.
-use crate::{hub::Command, i18n::{tf, trs}, screens::settings::Secret, theme, ui::ic, Backplane};
+use crate::{hub::Command, i18n::{tf, trs}, screens::{composer::{Composer, ComposerEvent}, mgmt_plan_canvas::{self, GridMode, ViewMode}, settings::Secret}, theme, ui::ic, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -66,11 +66,12 @@ pub fn progress_segments(d: &Value) -> [(u64, &'static str); 5] {
 pub fn shown(l: &Value, hide_done: bool) -> Vec<Value> { l["items"].as_array().into_iter().flatten().filter(|i| !(hide_done && done(i))).cloned().collect() }
 fn hex(c: &str) -> u32 { u32::from_str_radix(c.trim_start_matches('#'), 16).unwrap_or(0x8a8a8a) }
 
-fn send(app: &mut Backplane, m: &str, mut p: Value, cx: &mut Context<Backplane>) {
+pub(super) fn send(app: &mut Backplane, m: &str, mut p: Value, cx: &mut Context<Backplane>) {
     let pro = app.screens.mgmt.project.clone(); if pro.is_empty() { return }
     p["pro"] = json!(pro);
     eprintln!("GPUI_LOG {}", json!({"event": "plan_press", "method": m, "params": p}));
-    let _ = app.tx.try_send(Command::Rpc(m.into(), Secret(p), if m == "plan.approve" { "plan" } else { "mgmt" }));
+    let tag = if matches!(m, "plan.approve" | "plan.update") { "plan" } else { "mgmt" };
+    let _ = app.tx.try_send(Command::Rpc(m.into(), Secret(p), tag));
     app.ui_epoch += 1; cx.notify();
 }
 pub fn approve(app: &mut Backplane, layer: &str, ids: &[String], yes: bool, cx: &mut Context<Backplane>) { *REFUSED.lock().unwrap() = None; send(app, "plan.approve", json!({"layer": layer, "ids": ids, "approve": yes}), cx) }
@@ -79,12 +80,18 @@ static REFUSED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
 /// plan.approve's answer (tag "plan"): a refusal is said in the panel; an approval shows in the plan itself.
 pub fn answered(app: &mut Backplane, ok: bool, why: &str, cx: &mut Context<Backplane>) {
     *REFUSED.lock().unwrap() = (!ok).then(|| if why.is_empty() { trs("KiCad refused") } else { why.to_string() });
+    if !ok { app.screens.mgmt.plan_ui.optimistic.clear(); }
     app.ui_epoch += 1; cx.notify();
 }
 /// The e2e harness's controls (`mgmt:plan:<what>`).
 pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     if m.peek()["open"] != "plan" { return vec![] }
-    let d = m.data("plan"); let mut v: Vec<(String, String, String)> = vec![("mgmt:plan:on".into(), "On".into(), "plan:enable:on".into()), ("mgmt:plan:off".into(), "Off".into(), "plan:enable:off".into())]; // i18n-ok: ctl ids
+    let d = m.data("plan"); let mut v: Vec<(String, String, String)> = vec![
+        ("mgmt:plan:on".into(), "On".into(), "plan:enable:on".into()), ("mgmt:plan:off".into(), "Off".into(), "plan:enable:off".into()), // i18n-ok: ctl ids
+        ("mgmt:plan:view:canvas".into(), "Canvas".into(), "plan:view:canvas".into()), ("mgmt:plan:view:split".into(), "Split".into(), "plan:view:split".into()), ("mgmt:plan:view:list".into(), "List".into(), "plan:view:list".into()), // i18n-ok: ctl ids
+        ("mgmt:plan:grid:pair".into(), "Side by side".into(), "plan:grid:pair".into()), ("mgmt:plan:grid:all".into(), "All layers".into(), "plan:grid:all".into()), ("mgmt:plan:grid:single".into(), "Single".into(), "plan:grid:single".into()), // i18n-ok: ctl ids
+        ("mgmt:plan:expand".into(), "Expand".into(), "plan:expand".into()), ("mgmt:plan:fit".into(), "Fit".into(), "plan:fit".into()), // i18n-ok: ctl ids
+    ];
     if d["awaiting"].as_u64().unwrap_or(0) > 0 { v.push(("mgmt:plan:approve-all".into(), "Approve all".into(), "plan:all".into())) } // i18n-ok: ctl ids
     if d["routing"] == true { v.push(("mgmt:plan:stop".into(), "Stop routing".into(), "plan:stop".into())) } // i18n-ok: ctl ids
     if d["live"] == true && d["done"].as_u64().unwrap_or(0) > 0 { v.push(("mgmt:plan:verify".into(), "Verify".into(), "plan:verify".into())) } // i18n-ok: ctl ids
@@ -99,11 +106,33 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     else if let Some(x) = a.strip_prefix("enable:") { enable(app, x == "on", cx) }
     else if a == "stop" { send(app, "plan.stop", json!({}), cx) }
     else if a == "verify" { send(app, "plan.verify", json!({}), cx) }
+    else if a == "view:canvas" { app.screens.mgmt.plan_ui.view_mode = ViewMode::Canvas; cx.notify(); }
+    else if a == "view:split" { app.screens.mgmt.plan_ui.view_mode = ViewMode::Split; cx.notify(); }
+    else if a == "view:list" { app.screens.mgmt.plan_ui.view_mode = ViewMode::List; cx.notify(); }
+    else if a == "grid:pair" { app.screens.mgmt.plan_ui.grid_mode = GridMode::Pair; cx.notify(); }
+    else if a == "grid:all" { app.screens.mgmt.plan_ui.grid_mode = GridMode::All; cx.notify(); }
+    else if a == "grid:single" { app.screens.mgmt.plan_ui.grid_mode = GridMode::Single; cx.notify(); }
+    else if a == "expand" { toggle_expand(app, cx); }
+    else if a == "fit" { app.screens.mgmt.plan_ui.fit_all(); cx.notify(); }
     else if let Some(id) = a.strip_prefix("approve:") { approve(app, "", &[id.to_string()], true, cx) }
     else if let Some(id) = a.strip_prefix("reject:") { approve(app, "", &[id.to_string()], false, cx) }
     else if let Some(id) = a.strip_prefix("focus:") {
         app.screens.mgmt.plan_sel = Some(id.to_string());
         send(app, "plan.focus", json!({"id": id}), cx);
+    }
+}
+
+fn toggle_expand(app: &mut Backplane, cx: &mut Context<Backplane>) {
+    let next = !app.screens.mgmt.plan_ui.expanded;
+    app.screens.mgmt.plan_ui.expanded = next;
+    let target = if next { mgmt_plan_canvas::EXPANDED_PANEL_W } else { mgmt_plan_canvas::COMPACT_PANEL_W };
+    let mut st = app.screens.mgmt.state();
+    if !st.is_null() {
+        st["size"] = json!(target);
+        super::mgmt::set(app, st, json!({"size": target}), cx);
+    } else {
+        app.ui_epoch += 1;
+        cx.notify();
     }
 }
 
@@ -178,7 +207,12 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                 .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs("Layers, corridors, and planes appear here once a plan is proposed."))))
             .into_any_element()
     }
+    mgmt_plan_canvas::sync_revision_and_hydrate(app, d);
     let hide = HIDE_DONE.load(Ordering::Relaxed);
+    let view_mode = app.screens.mgmt.plan_ui.view_mode;
+    let grid_mode = app.screens.mgmt.plan_ui.grid_mode;
+    let sync_zoom = app.screens.mgmt.plan_ui.sync_zoom;
+    let expanded = app.screens.mgmt.plan_ui.expanded;
     let awaiting = d["awaiting"].as_u64().unwrap_or(0);
     let blocked = d["blocked"].as_u64().unwrap_or(0);
     let done_n = d["done"].as_u64().unwrap_or(0);
@@ -240,9 +274,223 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         box_el.into_any_element()
     });
 
+    let view_bar = div()
+        .flex_shrink_0()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .gap(px(4.))
+        .px_2()
+        .py(px(4.))
+        .border_b_1()
+        .border_color(c("rule"))
+        .bg(c("panel"))
+        .text_size(crate::scale::tpx(11.))
+        .child(chip(cx, light, "mgmt:plan:view:canvas", trs("Canvas"), view_mode == ViewMode::Canvas, |a, cx| { a.screens.mgmt.plan_ui.view_mode = ViewMode::Canvas; cx.notify(); }))
+        .child(chip(cx, light, "mgmt:plan:view:split", trs("Split"), view_mode == ViewMode::Split, |a, cx| { a.screens.mgmt.plan_ui.view_mode = ViewMode::Split; cx.notify(); }))
+        .child(chip(cx, light, "mgmt:plan:view:list", trs("List"), view_mode == ViewMode::List, |a, cx| { a.screens.mgmt.plan_ui.view_mode = ViewMode::List; cx.notify(); }))
+        .when(view_mode != ViewMode::List, |bar| {
+            bar.child(div().w(px(1.)).h(px(12.)).bg(c("line")))
+                .child(chip(cx, light, "mgmt:plan:grid:pair", trs("Side by side"), grid_mode == GridMode::Pair, |a, cx| { a.screens.mgmt.plan_ui.grid_mode = GridMode::Pair; cx.notify(); }))
+                .child(chip(cx, light, "mgmt:plan:grid:all", trs("All layers"), grid_mode == GridMode::All, |a, cx| { a.screens.mgmt.plan_ui.grid_mode = GridMode::All; cx.notify(); }))
+                .child(chip(cx, light, "mgmt:plan:grid:single", trs("Single"), grid_mode == GridMode::Single, |a, cx| { a.screens.mgmt.plan_ui.grid_mode = GridMode::Single; cx.notify(); }))
+                .child(div().w(px(1.)).h(px(12.)).bg(c("line")))
+                .child(chip(cx, light, "mgmt:plan:sync", trs("Link zoom"), sync_zoom, |a, cx| { a.screens.mgmt.plan_ui.sync_zoom = !a.screens.mgmt.plan_ui.sync_zoom; cx.notify(); }))
+                .child(btn(cx, light, "mgmt:plan:fit".into(), trs("Fit"), false, |a, cx| { a.screens.mgmt.plan_ui.fit_all(); cx.notify(); }))
+        })
+        .child(div().flex_1())
+        .child(btn(cx, light, "mgmt:plan:expand".into(), if expanded { trs("Compact") } else { trs("Expand") }, false, |a, cx| toggle_expand(a, cx)));
+
+    let layers_merged = mgmt_plan_canvas::merge_optimistic_into_layers(&d["layers"], &app.screens.mgmt.plan_ui.optimistic);
+    let all_layers_arr = layers_merged.as_array().cloned().unwrap_or_default();
+    let shown_names: Vec<String> = mgmt_plan_canvas::visible_layers(&app.screens.mgmt.plan_ui, &all_layers_arr)
+        .iter()
+        .filter_map(|l| l["layer"].as_str().map(str::to_string))
+        .collect();
+    let layer_bar = (view_mode != ViewMode::List && all_layers_arr.len() > 1).then(|| {
+        let mut row = div().flex_shrink_0().flex().flex_wrap().items_center().gap(px(4.)).px_2().py(px(3.)).border_b_1().border_color(c("rule")).bg(c("bg")).text_size(crate::scale::tpx(10.));
+        for l in &all_layers_arr {
+            let lname = s(l, "layer").to_string();
+            let title = l["title"].as_str().filter(|x| !x.is_empty()).unwrap_or(&lname).to_string();
+            let active = shown_names.contains(&lname);
+            let lc = lname.clone();
+            row = row.child(chip(cx, light, &format!("mgmt:plan:layerpill:{lname}"), title, active, move |a, cx| {
+                mgmt_plan_canvas::pick_layer_in_grid(&mut a.screens.mgmt.plan_ui, lc.clone());
+                cx.notify();
+            }));
+        }
+        row.into_any_element()
+    });
+
+    let sel_inspector = app.screens.mgmt.plan_sel.as_ref().and_then(|sel_id| {
+        let mut found: Option<(String, Value)> = None;
+        for l in &all_layers_arr {
+            for it in l["items"].as_array().into_iter().flatten() {
+                if it["id"].as_str() == Some(sel_id.as_str()) {
+                    found = Some((s(l, "layer").to_string(), it.clone()));
+                    break;
+                }
+            }
+            if found.is_some() { break }
+        }
+        let (cur_layer, item) = found?;
+        let id = sel_id.clone();
+        let name = s(&item, "name").to_string();
+        let stt = s(&item, "state").to_string();
+        let locked = item["locked"] == true;
+        let edited = item["edited"] == true || stt == "edited";
+        let is_corridor = s(&item, "kind") == "corridor";
+        let width_mm = item["width"].as_f64().unwrap_or(1.5);
+        let col = if is_corridor {
+            mgmt_plan_canvas::bus_color(&name, s(&item, "color"))
+        } else {
+            mgmt_plan_canvas::rail_color(&name, s(&item, "color"))
+        };
+        let copper_opts: Vec<String> = d["copper_layers"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|c| c["layer"].as_str().map(str::to_string))
+            .collect();
+        let move_layers = if copper_opts.is_empty() {
+            all_layers_arr.iter().filter_map(|l| l["layer"].as_str().map(str::to_string)).collect()
+        } else {
+            copper_opts
+        };
+
+        let id_lock = id.clone();
+        let id_ok = id.clone();
+        let id_no = id.clone();
+        let id_wdown = id.clone();
+        let id_wup = id.clone();
+
+        let mut box_el = div()
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .px_2()
+            .py(px(6.))
+            .border_b_1()
+            .border_color(c("rule"))
+            .bg(c("panel"))
+            .text_size(crate::scale::tpx(11.))
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(div().size(px(10.)).bg(rgb(col)))
+                    .child(div().font_weight(FontWeight::BOLD).text_color(c("text")).child(name))
+                    .child(div().text_color(c("dim")).child(cur_layer.clone()))
+                    .when(edited, |x| x.child(div().px_1().border_1().border_color(c("warn")).text_size(crate::scale::tpx(10.)).text_color(c("warn")).child(trs("Edited"))))
+                    .when(locked, |x| x.child(div().px_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(10.)).text_color(c("dim")).child(trs("Locked"))))
+                    .child(div().flex_1())
+                    .child(btn(cx, light, "mgmt:plan:ins:lock".into(), if locked { trs("Unlock") } else { trs("Lock") }, false, move |a, cx| {
+                        mgmt_plan_canvas::commit_item_fields(a, &id_lock, json!({"locked": !locked}), cx);
+                    }))
+                    .when(matches!(stt.as_str(), "proposed" | "edited"), |x| {
+                        let a_id = id_ok.clone();
+                        let r_id = id_no.clone();
+                        x.child(btn(cx, light, "mgmt:plan:ins:ok".into(), trs("Approve"), true, move |a, cx| approve(a, "", &[a_id.clone()], true, cx)))
+                            .child(btn(cx, light, "mgmt:plan:ins:no".into(), trs("Reject"), false, move |a, cx| approve(a, "", &[r_id.clone()], false, cx)))
+                    })
+                    .child(btn(cx, light, "mgmt:plan:ins:note".into(), trs("Add note"), false, |a, cx| {
+                        a.screens.mgmt.plan_ui.note_open = !a.screens.mgmt.plan_ui.note_open;
+                        cx.notify();
+                    }))
+                    .child(div().id("plan-ins-close").cursor_pointer().px_1().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("\u{d7}")
+                        .on_click(cx.listener(|a, _, _, cx| { a.screens.mgmt.plan_sel = None; a.screens.mgmt.plan_ui.selected_vertex = None; cx.notify(); }))),
+            );
+
+        if !locked {
+            let mut steer_row = div().flex().flex_wrap().items_center().gap(px(5.)).text_size(crate::scale::tpx(10.));
+            if is_corridor {
+                let wd_dn = (((width_mm - 0.25).clamp(0.15, 25.0)) * 100.0).round() / 100.0;
+                let wd_up = (((width_mm + 0.25).clamp(0.15, 25.0)) * 100.0).round() / 100.0;
+                steer_row = steer_row
+                    .child(div().text_color(c("dim")).child(trs("Width")))
+                    .child(btn(cx, light, "mgmt:plan:ins:w-".into(), "-".into(), false, move |a, cx| {
+                        mgmt_plan_canvas::commit_item_fields(a, &id_wdown, json!({"width": wd_dn}), cx);
+                    }))
+                    /* i18n-ok: metric width readout */
+                    .child(div().px_1().font(crate::art::mono_font()).text_color(c("text")).child(format!("{width_mm:.2}mm")))
+                    .child(btn(cx, light, "mgmt:plan:ins:w+".into(), "+".into(), false, move |a, cx| {
+                        mgmt_plan_canvas::commit_item_fields(a, &id_wup, json!({"width": wd_up}), cx);
+                    }))
+                    .child(div().w(px(1.)).h(px(12.)).bg(c("line")));
+            }
+            if !move_layers.is_empty() {
+                steer_row = steer_row.child(div().text_color(c("dim")).child(trs("Move to layer")));
+                for ml in move_layers {
+                    let is_cur = ml == cur_layer;
+                    let id_mv = id.clone();
+                    let ml_c = ml.clone();
+                    steer_row = steer_row.child(chip(cx, light, &format!("mgmt:plan:ins:mv:{ml}"), ml, is_cur, move |a, cx| {
+                        if !is_cur {
+                            mgmt_plan_canvas::commit_item_fields(a, &id_mv, json!({"layer": ml_c.clone()}), cx);
+                            mgmt_plan_canvas::pick_layer_in_grid(&mut a.screens.mgmt.plan_ui, ml_c.clone());
+                        }
+                    }));
+                }
+            }
+            box_el = box_el.child(steer_row);
+        }
+
+        if app.screens.mgmt.plan_ui.note_open {
+            if app.screens.mgmt.plan_ui.note_input.is_none() {
+                let f = cx.new(|cx| {
+                    let mut comp = Composer::with_context(cx, "AskInput");
+                    comp.set_placeholder(&trs("Steering note for router…"));
+                    comp.max_lines = 1.0;
+                    comp
+                });
+                cx.subscribe(&f, |this, e, ev: &ComposerEvent, cx| {
+                    if matches!(ev, ComposerEvent::Submit) {
+                        let txt = e.read(cx).content.to_string().trim().to_string();
+                        if !txt.is_empty() {
+                            if let Some(target_id) = this.screens.mgmt.plan_sel.clone() {
+                                send(this, "plan.update", json!({"ops": [{"op": "note", "id": target_id, "text": txt}]}), cx);
+                            }
+                            e.update(cx, |comp, cx| comp.set(String::new(), cx));
+                            this.screens.mgmt.plan_ui.note_open = false;
+                            cx.notify();
+                        }
+                    }
+                }).detach();
+                app.screens.mgmt.plan_ui.note_input = Some(f);
+            }
+            if let Some(field) = app.screens.mgmt.plan_ui.note_input.clone() {
+                let f_sub = field.clone();
+                box_el = box_el.child(
+                    div().flex().items_center().gap_1()
+                        .child(div().flex_1().min_w_0().bg(c("bg")).border_1().border_color(c("line")).px_1().child(field))
+                        .child(btn(cx, light, "mgmt:plan:ins:notesend".into(), trs("Add note"), true, move |this, cx| {
+                            let txt = f_sub.read(cx).content.to_string().trim().to_string();
+                            if !txt.is_empty() {
+                                if let Some(target_id) = this.screens.mgmt.plan_sel.clone() {
+                                    send(this, "plan.update", json!({"ops": [{"op": "note", "id": target_id, "text": txt}]}), cx);
+                                }
+                                f_sub.update(cx, |comp, cx| comp.set(String::new(), cx));
+                                this.screens.mgmt.plan_ui.note_open = false;
+                                cx.notify();
+                            }
+                        })),
+                );
+            }
+        }
+
+        if view_mode != ViewMode::List && !locked {
+            box_el = box_el.child(div().text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(trs("Drag waypoints to steer · Click + on edge to insert · Right-click vertex to remove")));
+        }
+
+        Some(box_el.into_any_element())
+    });
+
     let mut list = div().id("plan-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(crate::scale::tpx(12.));
     let sel = app.screens.mgmt.plan_sel.clone();
-    for l in d["layers"].as_array().cloned().unwrap_or_default() {
+    for l in all_layers_arr {
         let layer = s(&l, "layer").to_string();
         let total = l["items"].as_array().map_or(0, Vec::len);
         let stack = s(&l, "stackup").to_string();
@@ -331,7 +579,20 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     });
     let drawn = (d["draw"]["bands"].as_array().map_or(false, |a| !a.is_empty()) || d["draw"]["regions"].as_array().map_or(false, |a| !a.is_empty()))
         .then(|| div().flex_shrink_0().px_2().py(px(3.)).border_t_1().border_color(c("rule")).text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(trs("The plan's corridors and planes are drawn on the board while this panel is open. Close it to hide them.")).into_any_element());
-    div().size_full().flex().flex_col().children(head).child(status_row).child(act_row).children(ask_banner).children(refused).children(keys).children(stackup_box).child(list).children(drawn).into_any_element()
+    let canvas_el = (view_mode != ViewMode::List).then(|| mgmt_plan_canvas::view(app, d, light, cx));
+    let main_body = match view_mode {
+        ViewMode::Canvas => div().flex_1().min_h_0().children(canvas_el).into_any_element(),
+        ViewMode::Split => div()
+            .flex_1()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(div().flex_1().min_h(px(210.)).border_b_1().border_color(c("rule")).children(canvas_el))
+            .child(div().h(px(190.)).flex_shrink_0().min_h(px(120.)).flex().flex_col().child(list))
+            .into_any_element(),
+        ViewMode::List => list.into_any_element(),
+    };
+    div().size_full().flex().flex_col().children(head).child(status_row).child(act_row).child(view_bar).children(layer_bar).children(ask_banner).children(refused).children(keys).children(stackup_box).children(sel_inspector).child(main_body).children(drawn).into_any_element()
 }
 
 #[cfg(test)]

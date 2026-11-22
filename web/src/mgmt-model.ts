@@ -121,10 +121,76 @@ export interface PlanItem {
   impedance?: string | null;
   problems?: number;
   problem_text?: string;
+  edited?: boolean;
+  order?: number;
+  priority?: number;
+  from?: string[];
+  to?: string[];
+}
+
+export interface PlanPartBox {
+  r: string;
+  s: "F" | "B" | string;
+  b: [number, number, number, number];
+  o: boolean;
+}
+
+export interface PlanCopperLayer {
+  layer: string;
+  index: number;
+  role: string;
+  alias?: string;
+  title?: string;
+  subtitle?: string;
+}
+
+export interface PlanBoardGeom {
+  bbox: [number, number, number, number];
+  outline: Array<Array<[number, number]>>;
+  parts: PlanPartBox[];
+}
+
+export interface PlanBand {
+  id: string;
+  layer: string;
+  width?: number;
+  path?: Array<[number, number]>;
+  state?: string;
+  color?: string;
+  nets?: number;
+  vias?: Array<[number, number]>;
+  name?: string;
+  group?: string;
+  locked?: boolean;
+  edited?: boolean;
+  order?: number;
+  from?: string[];
+  to?: string[];
+  impedance?: string | null;
+  guides?: Array<[number, number, number, number]>;
+  problem_text?: string;
+}
+
+export interface PlanRegion {
+  id: string;
+  layer: string;
+  net?: string;
+  outline?: Array<[number, number]>;
+  holes?: Array<Array<[number, number]>>;
+  state?: string;
+  color?: string;
+  locked?: boolean;
+  edited?: boolean;
+  reference?: string;
+  priority?: number;
+  problem_text?: string;
 }
 
 export interface PlanLayer {
   layer: string;
+  index?: number;
+  title?: string;
+  subtitle?: string;
   role?: string;
   stackup?: string;
   status?: string;
@@ -154,9 +220,34 @@ export interface PlanInfo {
   impedances?: string[];
   asks?: Array<{ id?: string; what?: string; note?: string }>;
   elsewhere?: Array<{ pcb?: string; rel?: string; name?: string }>;
-  draw?: { bands?: unknown[]; regions?: unknown[] };
+  board?: PlanBoardGeom;
+  board_trimmed?: boolean;
+  copper_layers?: PlanCopperLayer[];
+  notes?: Array<{ id?: string; text?: string; by?: string }>;
+  constraints?: unknown;
+  draw?: { bands?: PlanBand[]; regions?: PlanRegion[] };
   keys_note?: string;
   layers?: PlanLayer[];
+}
+
+export interface PlanCamera {
+  cx: number;
+  cy: number;
+  scale: number;
+  fitted: number;
+  touched: boolean;
+}
+
+export type PlanHit =
+  | { kind: "vertex"; id: string; isPlane: boolean; idx: number }
+  | { kind: "midpoint"; id: string; isPlane: boolean; segIdx: number; pos: [number, number] }
+  | { kind: "band"; id: string }
+  | { kind: "region"; id: string };
+
+export interface PlanPlacedLabel {
+  text: string;
+  cx: number;
+  cy: number;
 }
 
 export interface FabLimitSide {
@@ -480,4 +571,306 @@ export function isChecksFixCurrent(start: ChecksFixSnapshot, now: ChecksFixSnaps
     start.threadId === now.threadId &&
     start.threadGen === now.threadGen
   );
+}
+
+// ---- Interactive Floorplanner Canvas pure helpers ----
+
+const PLAN_RAIL_PALETTE = [
+  "#f59e0b", "#38bdf8", "#c084fc", "#2dd4bf", "#ef4444", "#a3e635", "#f97316", "#ec4899",
+];
+const PLAN_BUS_PALETTE = [
+  "#14b8a6", "#f59e0b", "#c084fc", "#22c55e", "#38bdf8", "#ef4444", "#e879f9", "#84cc16",
+];
+
+function fnv1aHash(s: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h;
+}
+
+export function planRailColor(net: string, fallback = ""): string {
+  const low = fallback.trim().toLowerCase();
+  if (low && low !== "#5a7a9a" && low !== "#8a8a8a") return fallback;
+  const up = net.toUpperCase();
+  if (up.includes("3V3A") || up.includes("AVDD") || up.includes("VDDA")) return "#38bdf8";
+  if (up.includes("1V8") || up.includes("1.8V")) return "#c084fc";
+  if (up.includes("2V5") || up.includes("2.5V")) return "#a3e635";
+  if (up.includes("3V3") || up.includes("3.3V") || up.includes("VCC")) return "#f59e0b";
+  if (up.includes("5V") || up.startsWith("+5")) return "#ef4444";
+  if (up.includes("12V") || up.includes("24V")) return "#f97316";
+  if (up.includes("VBAT") || up.includes("VIN")) return "#ec4899";
+  if (up.includes("GND")) return "#2dd4bf";
+  return PLAN_RAIL_PALETTE[fnv1aHash(up) % PLAN_RAIL_PALETTE.length];
+}
+
+export function planBusColor(name: string, fallback = ""): string {
+  const low = fallback.trim().toLowerCase();
+  if (low && low !== "#8a8a8a") return fallback;
+  return PLAN_BUS_PALETTE[fnv1aHash(name) % PLAN_BUS_PALETTE.length];
+}
+
+export function planFitCamera(bbox: [number, number, number, number], w: number, h: number, pad = 14): PlanCamera {
+  const bw = Math.max(1, Math.abs(bbox[2] - bbox[0]));
+  const bh = Math.max(1, Math.abs(bbox[3] - bbox[1]));
+  const uw = Math.max(20, w - pad * 2);
+  const uh = Math.max(20, h - pad * 2);
+  const scale = Math.max(0.05, Math.min(200, Math.min(uw / bw, uh / bh)));
+  return {
+    cx: (bbox[0] + bbox[2]) * 0.5,
+    cy: (bbox[1] + bbox[3]) * 0.5,
+    scale,
+    fitted: scale,
+    touched: false,
+  };
+}
+
+export function planWorldToPx(cam: PlanCamera, x: number, y: number, w: number, h: number): [number, number] {
+  return [w * 0.5 + (x - cam.cx) * cam.scale, h * 0.5 + (y - cam.cy) * cam.scale];
+}
+
+export function planPxToWorld(cam: PlanCamera, pxX: number, pxY: number, w: number, h: number): [number, number] {
+  const s = Math.max(1e-4, cam.scale);
+  return [cam.cx + (pxX - w * 0.5) / s, cam.cy + (pxY - h * 0.5) / s];
+}
+
+export function planPanCamera(cam: PlanCamera, dxPx: number, dyPx: number): PlanCamera {
+  const s = Math.max(1e-4, cam.scale);
+  return { ...cam, cx: cam.cx - dxPx / s, cy: cam.cy - dyPx / s, touched: true };
+}
+
+export function planZoomCamera(cam: PlanCamera, factor: number, mx: number, my: number, w: number, h: number): PlanCamera {
+  const minS = Math.max(0.02, cam.fitted * 0.35);
+  const maxS = Math.max(40, cam.fitted * 24);
+  const ns = Math.max(minS, Math.min(maxS, cam.scale * factor));
+  const [wx, wy] = planPxToWorld(cam, mx, my, w, h);
+  return {
+    ...cam,
+    cx: wx - (mx - w * 0.5) / ns,
+    cy: wy - (my - h * 0.5) / ns,
+    scale: ns,
+    touched: true,
+  };
+}
+
+export function planPolylineMidpoint(pts: Array<[number, number]>): [number, number] | null {
+  if (pts.length === 0) return null;
+  if (pts.length === 1) return pts[0];
+  let total = 0;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    total += Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+  }
+  if (total < 1e-6) return pts[0];
+  const target = total * 0.5;
+  let acc = 0;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const segLen = Math.hypot(pts[i + 1][0] - pts[i][0], pts[i + 1][1] - pts[i][1]);
+    if (acc + segLen >= target && segLen > 1e-9) {
+      const t = (target - acc) / segLen;
+      return [
+        pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t,
+        pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t,
+      ];
+    }
+    acc += segLen;
+  }
+  return pts[pts.length - 1];
+}
+
+export function planInsertVertex(
+  pts: Array<[number, number]>,
+  segIdx: number,
+  pos: [number, number],
+  closed: boolean,
+): Array<[number, number]> {
+  const out = pts.map((p) => [p[0], p[1]] as [number, number]);
+  if (out.length === 0) return [pos];
+  const at = closed && segIdx + 1 >= out.length ? out.length : Math.min(segIdx + 1, out.length);
+  out.splice(at, 0, [pos[0], pos[1]]);
+  return out;
+}
+
+export function planRemoveVertex(
+  pts: Array<[number, number]>,
+  idx: number,
+  closed: boolean,
+): Array<[number, number]> | null {
+  const minPts = closed ? 3 : 2;
+  if (pts.length <= minPts || idx < 0 || idx >= pts.length) return null;
+  const out = pts.map((p) => [p[0], p[1]] as [number, number]);
+  out.splice(idx, 1);
+  return out;
+}
+
+function distToSegSq(px: number, py: number, ax: number, ay: number, bx: number, by: number): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 1e-6) return (px - ax) * (px - ax) + (py - ay) * (py - ay);
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  const cx = ax + t * dx;
+  const cy = ay + t * dy;
+  return (px - cx) * (px - cx) + (py - cy) * (py - cy);
+}
+
+function pointInRing(x: number, y: number, ring: Array<[number, number]>): boolean {
+  if (ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersect = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export function planBandStrokePx(widthMm: number, scale: number): number {
+  return Math.max(5, Math.min(32, widthMm * scale));
+}
+
+export function planHitTest(
+  bands: PlanBand[],
+  regions: PlanRegion[],
+  layer: string,
+  selectedId: string,
+  cam: PlanCamera,
+  w: number,
+  h: number,
+  mx: number,
+  my: number,
+): PlanHit | null {
+  if (selectedId) {
+    for (const b of bands) {
+      if (b.layer !== layer || b.id !== selectedId || b.locked) continue;
+      const pts = b.path ?? [];
+      for (let i = 0; i < pts.length; i++) {
+        const [vx, vy] = planWorldToPx(cam, pts[i][0], pts[i][1], w, h);
+        if (Math.hypot(mx - vx, my - vy) <= 9.5) return { kind: "vertex", id: selectedId, isPlane: false, idx: i };
+      }
+      for (let i = 0; i + 1 < pts.length; i++) {
+        const mid: [number, number] = [(pts[i][0] + pts[i + 1][0]) * 0.5, (pts[i][1] + pts[i + 1][1]) * 0.5];
+        const [hx, hy] = planWorldToPx(cam, mid[0], mid[1], w, h);
+        if (Math.hypot(mx - hx, my - hy) <= 8.5) return { kind: "midpoint", id: selectedId, isPlane: false, segIdx: i, pos: mid };
+      }
+    }
+    for (const r of regions) {
+      if (r.layer !== layer || r.id !== selectedId || r.locked) continue;
+      const pts = r.outline ?? [];
+      for (let i = 0; i < pts.length; i++) {
+        const [vx, vy] = planWorldToPx(cam, pts[i][0], pts[i][1], w, h);
+        if (Math.hypot(mx - vx, my - vy) <= 9.5) return { kind: "vertex", id: selectedId, isPlane: true, idx: i };
+      }
+      if (pts.length >= 3) {
+        for (let i = 0; i < pts.length; i++) {
+          const a = pts[i];
+          const b = pts[(i + 1) % pts.length];
+          const mid: [number, number] = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+          const [hx, hy] = planWorldToPx(cam, mid[0], mid[1], w, h);
+          if (Math.hypot(mx - hx, my - hy) <= 8.5) return { kind: "midpoint", id: selectedId, isPlane: true, segIdx: i, pos: mid };
+        }
+      }
+    }
+  }
+
+  let bestBand: { dist: number; id: string } | null = null;
+  for (const b of bands) {
+    if (b.layer !== layer) continue;
+    const pts = b.path ?? [];
+    if (pts.length < 2) continue;
+    const thresh = Math.max(7, planBandStrokePx(b.width ?? 1.5, cam.scale) * 0.5 + 3);
+    let minD2 = Number.POSITIVE_INFINITY;
+    for (let i = 0; i + 1 < pts.length; i++) {
+      const [ax, ay] = planWorldToPx(cam, pts[i][0], pts[i][1], w, h);
+      const [bx, by] = planWorldToPx(cam, pts[i + 1][0], pts[i + 1][1], w, h);
+      minD2 = Math.min(minD2, distToSegSq(mx, my, ax, ay, bx, by));
+    }
+    const dist = Math.sqrt(minD2);
+    if (dist <= thresh && (!bestBand || dist <= bestBand.dist)) {
+      bestBand = { dist, id: b.id };
+    }
+  }
+  if (bestBand) return { kind: "band", id: bestBand.id };
+
+  const [wx, wy] = planPxToWorld(cam, mx, my, w, h);
+  for (let i = regions.length - 1; i >= 0; i--) {
+    const r = regions[i];
+    if (r.layer !== layer) continue;
+    const outer = r.outline ?? [];
+    if (!pointInRing(wx, wy, outer)) continue;
+    const inHole = (r.holes ?? []).some((hRing) => pointInRing(wx, wy, hRing));
+    if (!inHole) return { kind: "region", id: r.id };
+  }
+  return null;
+}
+
+export function planDefaultLayerPair(layers: PlanLayer[]): string[] {
+  let bestSig: { count: number; layer: string } | null = null;
+  let bestPwr: { count: number; layer: string } | null = null;
+  const allNames: string[] = [];
+  for (const l of layers) {
+    if (!l.layer) continue;
+    allNames.push(l.layer);
+    const items = l.items ?? [];
+    const corN = items.filter((it) => it.kind === "corridor").length;
+    const plnN = items.filter((it) => it.kind === "plane").length;
+    if ((corN > 0 || l.role === "signal") && (!bestSig || corN > bestSig.count)) {
+      bestSig = { count: corN, layer: l.layer };
+    }
+    if ((plnN > 0 || l.role === "power" || l.role === "plane") && (!bestPwr || plnN > bestPwr.count)) {
+      bestPwr = { count: plnN, layer: l.layer };
+    }
+  }
+  const out: string[] = [];
+  if (bestSig) out.push(bestSig.layer);
+  if (bestPwr && !out.includes(bestPwr.layer)) out.push(bestPwr.layer);
+  for (const name of allNames) {
+    if (out.length >= 2) break;
+    if (!out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+export function planLayoutLabels(
+  parts: PlanPartBox[],
+  cam: PlanCamera,
+  w: number,
+  h: number,
+  pinned: string[],
+): PlanPlacedLabel[] {
+  const pinSet = new Set(pinned);
+  const cands: Array<{ text: string; cx: number; cy: number; bw: number; bh: number; score: number }> = [];
+  for (const p of parts) {
+    if (!p.r || !p.b || p.b.length !== 4) continue;
+    const [x0, y0] = planWorldToPx(cam, p.b[0], p.b[1], w, h);
+    const [x1, y1] = planWorldToPx(cam, p.b[2], p.b[3], w, h);
+    const pw = Math.abs(x1 - x0);
+    const ph = Math.abs(y1 - y0);
+    if (pw < 13 || ph < 9) continue;
+    const cx = (x0 + x1) * 0.5;
+    const cy = (y0 + y1) * 0.5;
+    if (cx < 8 || cx > w - 8 || cy < 8 || cy > h - 8) continue;
+    cands.push({
+      text: p.r,
+      cx,
+      cy,
+      bw: p.r.length * 5.8 + 4,
+      bh: 11,
+      score: pw * ph + (pinSet.has(p.r) ? 10000 : 0),
+    });
+  }
+  cands.sort((a, b) => b.score - a.score);
+  const placedBoxes: Array<[number, number, number, number]> = [];
+  const out: PlanPlacedLabel[] = [];
+  for (const c of cands) {
+    const rect: [number, number, number, number] = [c.cx - c.bw * 0.5, c.cy - c.bh * 0.5, c.cx + c.bw * 0.5, c.cy + c.bh * 0.5];
+    const overlaps = placedBoxes.some((o) => !(rect[2] <= o[0] || rect[0] >= o[2] || rect[3] <= o[1] || rect[1] >= o[3]));
+    if (!overlaps) {
+      placedBoxes.push(rect);
+      out.push({ text: c.text, cx: c.cx, cy: c.cy });
+    }
+  }
+  return out;
 }
