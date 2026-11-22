@@ -25,6 +25,20 @@ pub fn live(raw: &str) -> bool { send(raw.trim()) }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Seen { File, None, Fail(i32) }
 pub fn seen_fail(code: i32) -> Seen { if code == 2 || code == 4058 { Seen::None } else { Seen::Fail(code) } }
+/// Classify a stat failure; Windows returns `ERROR_PATH_NOT_FOUND` (3) both when an ancestor folder is absent and when an ancestor is a regular file
+/// (POSIX returns `ENOTDIR`), so code 3 counts as `Seen::None` only when the parent itself is absent.
+pub fn seen_fail_with_parent(code: i32, parent: Option<Seen>) -> Seen {
+    if code == 3 { if parent == Some(Seen::None) { Seen::None } else { Seen::Fail(3) } } else { seen_fail(code) }
+}
+fn seen_at(p: &Path) -> Seen {
+    match std::fs::metadata(p) {
+        Ok(_) => Seen::File,
+        Err(e) => {
+            let code = e.raw_os_error().unwrap_or(0);
+            if code == 3 { seen_fail_with_parent(code, p.parent().map(seen_at)) } else { seen_fail(code) }
+        }
+    }
+}
 /// Wn.wants: a secret is wanted when the setting names a file, or unless the default file is surely absent.
 pub fn wants(set: &str, seen: Seen) -> bool { !set.trim().is_empty() || seen != Seen::None }
 /// Wn.mode: 0 a configured secret is missing (do not post), 1 post unsigned, 2 post signed.
@@ -97,7 +111,7 @@ pub async fn deliver(hub: &Arc<Hub>, thread: &str, kind: &str, state: &str, err:
     let home = hub.cfg.home.clone();
     let set = hub.setting(SECRET_KEY).await.unwrap_or_default();
     let p = path(&home, &set);
-    let seen = match std::fs::metadata(&p) { Ok(_) => Seen::File, Err(e) => seen_fail(e.raw_os_error().unwrap_or(0)) };
+    let seen = seen_at(&p);
     let secret = std::fs::read_to_string(&p).map(|t| t.trim().to_string()).unwrap_or_default();
     if mode(wants(&set, seen), &secret) == 0 { return Err("the signing secret could not be read or is empty; not posted".into()) }
     let line = if ended(kind) { end_text(state, reply) } else { reply.to_string() };
@@ -162,7 +176,17 @@ mod tests {
     #[test] fn hook_route_quiet() { assert_eq!(route(""), 0); }
     #[test] fn a_default_secret_that_is_there_but_unreadable_is_not_a_downgrade_to_unsigned() {
         assert!(!wants("", Seen::None)); assert!(wants("", Seen::File)); assert!(wants("", Seen::Fail(13))); assert!(wants("/named", Seen::None));
-        assert_eq!(seen_fail(2), Seen::None); assert_eq!(seen_fail(13), Seen::Fail(13));
+        assert_eq!(seen_fail(2), Seen::None); assert_eq!(seen_fail(4058), Seen::None);
+        assert_eq!(seen_fail(3), Seen::Fail(3)); assert_eq!(seen_fail(5), Seen::Fail(5)); assert_eq!(seen_fail(13), Seen::Fail(13));
+        assert_eq!(seen_fail_with_parent(3, Some(Seen::None)), Seen::None);
+        assert_eq!(seen_fail_with_parent(3, Some(Seen::File)), Seen::Fail(3));
+        assert_eq!(seen_fail_with_parent(3, Some(Seen::Fail(5))), Seen::Fail(3));
+        assert_eq!(seen_fail_with_parent(3, None), Seen::Fail(3));
+        let home = crate::plat::tmp::dir("hook-seen");
+        assert_eq!(seen_at(&default_file(&home)), Seen::None, "missing secrets dir allows unsigned delivery");
+        std::fs::write(home.join("secrets"), "not-a-dir").unwrap();
+        let bad_parent = seen_at(&default_file(&home));
+        assert!(matches!(bad_parent, Seen::Fail(_)) && wants("", bad_parent), "regular file at secrets dir must fail closed: {bad_parent:?}");
     }
     #[test] fn the_signature_is_hmac_sha256_of_timestamp_dot_body_with_the_hex_secret_decoded() {
         // RFC 4231 case 2 through the same path: key "Jefe" as hex, message "what do ya want for nothing?" is not ts.body, so check the shape and the hex/text key rule
