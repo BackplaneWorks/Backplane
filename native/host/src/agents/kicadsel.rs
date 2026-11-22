@@ -65,16 +65,10 @@ pub fn kicad_of(env: &Env, version_of: impl FnOnce(&str) -> Option<String>) -> K
     }
 }
 
-/// `--version` of a CLI, remembered per path and modification time (a stock KiCad is asked once, not every turn).
+/// `--version` of a CLI, resolved via the shared single-flight cache in `ipc::cli_version_output`.
 pub fn version_of(cli: &str) -> Option<String> {
-    use std::{collections::HashMap, sync::{Mutex, OnceLock}};
-    static SEEN: OnceLock<Mutex<HashMap<String, (Option<std::time::SystemTime>, Option<String>)>>> = OnceLock::new();
-    let at = std::fs::metadata(cli).and_then(|m| m.modified()).ok();
-    if let Some((t, v)) = SEEN.get_or_init(Default::default).lock().unwrap().get(cli).cloned() { if t == at { return v } }
-    let out = crate::files::kicad::ipc::cli_version_output(cli);
-    let v = out.filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
-    SEEN.get_or_init(Default::default).lock().unwrap().insert(cli.into(), (at, v.clone()));
-    v
+    let out = crate::files::kicad::ipc::cli_version_output(cli)?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
 /// One shim's text: exec the selected program with the agent's arguments.

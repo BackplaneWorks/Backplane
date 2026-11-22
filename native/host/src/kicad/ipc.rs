@@ -646,11 +646,351 @@ fn newest_in(dirs: &[PathBuf]) -> Vec<PathBuf> {
     v.sort_by(|a, b| match (ks::version_ge(&a.0, &b.0), ks::version_ge(&b.0, &a.0)) { (true, true) => std::cmp::Ordering::Equal, (true, false) => std::cmp::Ordering::Less, _ => std::cmp::Ordering::Greater });
     v.into_iter().flat_map(|(n, d)| [d.join(&n).join("bin").join("kicad-cli"), d.join(n).join("bin").join("kicad-cli.exe")]).collect()
 }
-/// `<cli> --version`, its settings in a throwaway folder (proc::kicad_probe): the probe never writes the person's KiCad settings.
-/// Bounded (proc::probe_output): a run that hangs (#1160, macOS) is killed and the probe asked once more, since only some runs hang.
-pub fn cli_version_output(cli: &str) -> Option<std::process::Output> { cli_version_within(cli, crate::proc::PROBE_LIMIT) }
-pub fn cli_version_within(cli: &str, limit: std::time::Duration) -> Option<std::process::Output> {
-    (0..2).find_map(|_| { let (mut c, _home) = crate::proc::kicad_probe(cli); c.arg("--version"); crate::proc::probe_output(c, limit) })
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub(crate) struct ProbeKey {
+    path: PathBuf,
+    mtime: Option<std::time::SystemTime>,
+    size: u64,
+}
+
+/// Resolve `cli` without probing the working directory for bare command names, then canonicalize so fingerprinting and launching
+/// target the exact same file.
+pub(crate) fn resolve_probe_path(cli: &Path) -> Option<PathBuf> {
+    if cli.as_os_str().is_empty() { return None }
+    let cand = if cli.components().count() > 1 {
+        cli.to_path_buf()
+    } else {
+        let path_env = std::env::var_os("PATH")?;
+        let exts: &[&str] = if cfg!(windows) && cli.extension().is_none() { &["", ".exe", ".cmd", ".bat"] } else { &[""] };
+        let mut hit = None;
+        'outer: for dir in std::env::split_paths(&path_env) {
+            if dir.as_os_str().is_empty() { continue }
+            for ext in exts {
+                let mut file = cli.as_os_str().to_os_string();
+                if !ext.is_empty() { file.push(ext); }
+                let p = dir.join(file);
+                if std::fs::metadata(&p).is_ok_and(|m| crate::plat::fs::runnable(&m)) {
+                    hit = Some(p);
+                    break 'outer;
+                }
+            }
+        }
+        hit?
+    };
+    Some(crate::plat::fs::canonicalize(&cand).unwrap_or(cand))
+}
+
+pub(crate) fn probe_key_for(resolved: &Path) -> Option<ProbeKey> {
+    let meta = std::fs::metadata(resolved).ok()?;
+    Some(ProbeKey { path: resolved.to_path_buf(), mtime: meta.modified().ok(), size: meta.len() })
+}
+
+#[derive(Clone, Debug)]
+pub enum ProbeOutcome {
+    Output(std::process::Output),
+    Timeout { limit: Duration, attempts: usize },
+    SpawnErr(String),
+}
+
+impl ProbeOutcome {
+    pub fn is_ok_success(&self) -> bool {
+        matches!(self, Self::Output(o) if o.status.success())
+    }
+
+    pub fn into_output(self) -> Option<std::process::Output> {
+        match self {
+            Self::Output(o) => Some(o),
+            _ => None,
+        }
+    }
+}
+
+struct Flight {
+    waiters: std::sync::atomic::AtomicUsize,
+    done: std::sync::Mutex<Option<ProbeOutcome>>,
+    cv: std::sync::Condvar,
+}
+
+#[derive(Default)]
+struct CacheState {
+    entries: HashMap<ProbeKey, (std::time::Instant, ProbeOutcome)>,
+    in_flight: HashMap<ProbeKey, Arc<Flight>>,
+}
+
+pub(crate) struct VersionProbeCache {
+    state: std::sync::Mutex<CacheState>,
+    failure_ttl: Duration,
+}
+
+struct FlightGuard<'a> {
+    cache: &'a VersionProbeCache,
+    key: ProbeKey,
+    flight: Arc<Flight>,
+    finished: bool,
+}
+
+impl Drop for FlightGuard<'_> {
+    fn drop(&mut self) {
+        if self.finished { return }
+        {
+            let mut st = self.cache.state.lock().unwrap_or_else(|e| e.into_inner());
+            if st.in_flight.get(&self.key).is_some_and(|f| Arc::ptr_eq(f, &self.flight)) {
+                st.in_flight.remove(&self.key);
+            }
+        }
+        let mut done = self.flight.done.lock().unwrap_or_else(|e| e.into_inner());
+        if done.is_none() {
+            *done = Some(ProbeOutcome::SpawnErr("probe panicked".into()));
+            self.flight.cv.notify_all();
+        }
+    }
+}
+
+const VERSION_CACHE_CAP: usize = 128;
+const VERSION_FAILURE_TTL: Duration = Duration::from_secs(30);
+
+impl VersionProbeCache {
+    pub fn new(failure_ttl: Duration) -> Self {
+        Self { state: std::sync::Mutex::new(CacheState::default()), failure_ttl }
+    }
+
+    pub fn get_or_probe(
+        &self,
+        cli: &Path,
+        limit: Duration,
+        attempts: usize,
+        run: impl FnMut(&Path, Duration, usize, Option<std::time::Instant>) -> ProbeOutcome,
+    ) -> ProbeOutcome {
+        self.get_or_probe_at(cli, limit, attempts, std::time::Instant::now, run)
+    }
+
+    pub(crate) fn get_or_probe_at(
+        &self,
+        cli: &Path,
+        limit: Duration,
+        attempts: usize,
+        now: impl Fn() -> std::time::Instant,
+        mut run: impl FnMut(&Path, Duration, usize, Option<std::time::Instant>) -> ProbeOutcome,
+    ) -> ProbeOutcome {
+        let attempts = attempts.max(1);
+        let Some(resolved) = resolve_probe_path(cli) else { return run(cli, limit, attempts, None) };
+        let Some(key) = probe_key_for(&resolved) else { return run(&resolved, limit, attempts, None) };
+        let wait_deadline = std::time::Instant::now() + limit.saturating_mul(attempts as u32);
+        let mut rem_attempts = attempts;
+        let mut waited_attempts_at_limit = 0usize;
+        let mut waited = false;
+
+        loop {
+            let (flight, waiter) = {
+                let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                if waited && std::time::Instant::now() >= wait_deadline {
+                    return ProbeOutcome::Timeout { limit, attempts };
+                }
+                let check_now = now();
+                if let Some((at, outcome)) = st.entries.get(&key) {
+                    let expired = !outcome.is_ok_success() && check_now.saturating_duration_since(*at) >= self.failure_ttl;
+                    if expired {
+                        st.entries.remove(&key);
+                    } else {
+                        match outcome {
+                            ProbeOutcome::Output(o) if o.status.success() => return ProbeOutcome::Output(o.clone()),
+                            ProbeOutcome::Timeout { limit: fl, attempts: fa } if *fl < limit || *fa < attempts => {}
+                            ProbeOutcome::Timeout { .. } => return ProbeOutcome::Timeout { limit, attempts },
+                            other => return other.clone(),
+                        }
+                    }
+                }
+                if std::time::Instant::now() >= wait_deadline {
+                    return ProbeOutcome::Timeout { limit, attempts };
+                }
+                if let Some(flight) = st.in_flight.get(&key).cloned() {
+                    flight.waiters.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    (flight, true)
+                } else {
+                    let flight = Arc::new(Flight {
+                        waiters: std::sync::atomic::AtomicUsize::new(0),
+                        done: std::sync::Mutex::new(None),
+                        cv: std::sync::Condvar::new(),
+                    });
+                    st.in_flight.insert(key.clone(), flight.clone());
+                    (flight, false)
+                }
+            };
+
+            if waiter {
+                waited = true;
+                let mut done = flight.done.lock().unwrap_or_else(|e| e.into_inner());
+                while done.is_none() {
+                    let Some(rem) = wait_deadline.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero()) else {
+                        return ProbeOutcome::Timeout { limit, attempts };
+                    };
+                    let (next, res) = flight.cv.wait_timeout(done, rem).unwrap_or_else(|e| e.into_inner());
+                    done = next;
+                    if done.is_none() && res.timed_out() {
+                        return ProbeOutcome::Timeout { limit, attempts };
+                    }
+                }
+                if std::time::Instant::now() >= wait_deadline {
+                    return ProbeOutcome::Timeout { limit, attempts };
+                }
+                match done.clone().expect("notified flight always holds an outcome") {
+                    ProbeOutcome::Timeout { limit: fl, attempts: fa } => {
+                        if fl >= limit && fa > 0 {
+                            waited_attempts_at_limit += fa;
+                            rem_attempts = rem_attempts.saturating_sub(fa);
+                            if rem_attempts == 0 {
+                                return ProbeOutcome::Timeout { limit, attempts };
+                            }
+                        }
+                        if std::time::Instant::now() >= wait_deadline {
+                            return ProbeOutcome::Timeout { limit, attempts };
+                        }
+                        continue;
+                    }
+                    other => return other,
+                }
+            }
+
+            let mut guard = FlightGuard { cache: self, key: key.clone(), flight: flight.clone(), finished: false };
+            let raw = run(&resolved, limit, rem_attempts, waited.then_some(wait_deadline));
+            let finished_at = now();
+            let (cached_outcome, notify_outcome, caller_outcome) = match raw {
+                ProbeOutcome::Timeout { limit: _, attempts: 0 } => {
+                    let zero = ProbeOutcome::Timeout { limit: Duration::ZERO, attempts: 0 };
+                    (None, zero, ProbeOutcome::Timeout { limit, attempts })
+                }
+                ProbeOutcome::Timeout { limit: l, attempts: a } => {
+                    let total_at_limit = if l >= limit { a + waited_attempts_at_limit } else { a };
+                    let cached = ProbeOutcome::Timeout { limit: l, attempts: total_at_limit };
+                    let raw_done = ProbeOutcome::Timeout { limit: l, attempts: a };
+                    let ret = if l >= limit && total_at_limit >= attempts {
+                        ProbeOutcome::Timeout { limit: l, attempts: total_at_limit.max(attempts) }
+                    } else {
+                        ProbeOutcome::Timeout { limit, attempts }
+                    };
+                    (Some(cached), raw_done, ret)
+                }
+                other => (Some(other.clone()), other.clone(), other),
+            };
+            {
+                let mut st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+                if st.in_flight.get(&key).is_some_and(|f| Arc::ptr_eq(f, &flight)) {
+                    st.in_flight.remove(&key);
+                }
+                if let Some(cached) = cached_outcome {
+                    if st.entries.len() >= VERSION_CACHE_CAP {
+                        let ttl = self.failure_ttl;
+                        st.entries.retain(|_, (at, o)| o.is_ok_success() || finished_at.saturating_duration_since(*at) < ttl);
+                        while st.entries.len() >= VERSION_CACHE_CAP {
+                            if let Some(oldest) = st.entries.iter().min_by_key(|(_, (at, _))| *at).map(|(k, _)| k.clone()) {
+                                st.entries.remove(&oldest);
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    let keep_existing = st.entries.get(&key).is_some_and(|(at, cur)| {
+                        let cur_fresh = cur.is_ok_success() || finished_at.saturating_duration_since(*at) < self.failure_ttl;
+                        if !cur_fresh { return false }
+                        if cur.is_ok_success() && !cached.is_ok_success() { return true }
+                        match (cur, &cached) {
+                            (ProbeOutcome::Timeout { limit: cl, attempts: ca }, ProbeOutcome::Timeout { limit: nl, attempts: na }) => *cl >= *nl && *ca >= *na,
+                            _ => false,
+                        }
+                    });
+                    if !keep_existing {
+                        st.entries.insert(key, (finished_at, cached));
+                    }
+                }
+            }
+            {
+                let mut done = flight.done.lock().unwrap_or_else(|e| e.into_inner());
+                *done = Some(notify_outcome);
+                flight.cv.notify_all();
+            }
+            guard.finished = true;
+            return caller_outcome;
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn in_flight_waiters(&self, cli: &Path) -> usize {
+        let Some(resolved) = resolve_probe_path(cli) else { return 0 };
+        let Some(key) = probe_key_for(&resolved) else { return 0 };
+        let st = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        st.in_flight.get(&key).map_or(0, |f| f.waiters.load(std::sync::atomic::Ordering::SeqCst))
+    }
+}
+
+static VERSION_CACHE: OnceLock<VersionProbeCache> = OnceLock::new();
+fn version_cache() -> &'static VersionProbeCache {
+    VERSION_CACHE.get_or_init(|| VersionProbeCache::new(VERSION_FAILURE_TTL))
+}
+
+fn probe_cli_version_uncached_until(cli: &Path, limit: Duration, attempts: usize, deadline: Option<std::time::Instant>) -> ProbeOutcome {
+    let attempts = attempts.max(1);
+    let mut full_attempts = 0usize;
+    let mut tried = 0usize;
+    let mut max_limit_tried = Duration::ZERO;
+    for _ in 0..attempts {
+        if deadline.is_some_and(|dl| std::time::Instant::now() >= dl) {
+            break;
+        }
+        let (mut c, _home) = crate::proc::kicad_probe(cli);
+        c.arg("--version");
+        let now_run = std::time::Instant::now();
+        let (step_limit, step_end) = if let Some(dl) = deadline {
+            let Some(rem) = dl.checked_duration_since(now_run).filter(|d| !d.is_zero()) else {
+                break;
+            };
+            let step = limit.min(rem);
+            (step, now_run + step)
+        } else {
+            (limit, now_run + limit)
+        };
+        if step_limit >= limit {
+            full_attempts += 1;
+        }
+        tried += 1;
+        max_limit_tried = max_limit_tried.max(step_limit);
+        match crate::proc::probe_output_until(c, step_end, deadline, step_limit) {
+            Ok(out) => return ProbeOutcome::Output(out),
+            Err(crate::proc::ProbeError::Spawn(e)) => return ProbeOutcome::SpawnErr(e.to_string()),
+            Err(crate::proc::ProbeError::Timeout) => {}
+        }
+    }
+    if full_attempts > 0 {
+        ProbeOutcome::Timeout { limit, attempts: full_attempts }
+    } else {
+        ProbeOutcome::Timeout { limit: max_limit_tried, attempts: tried }
+    }
+}
+
+/// `<cli> --version`, single-flight deduplicated and cached by `(canonical_path, mtime, size)` with budget-aware sharing.
+pub fn cli_version_cached_path(cli: &Path, limit: Duration, attempts: usize) -> ProbeOutcome {
+    version_cache().get_or_probe(cli, limit, attempts, |p, l, a, deadline| {
+        probe_cli_version_uncached_until(p, l, a, deadline)
+    })
+}
+
+pub fn cli_version_cached(cli: &str, limit: Duration, attempts: usize) -> ProbeOutcome {
+    cli_version_cached_path(Path::new(cli), limit, attempts)
+}
+
+/// `<cli> --version`, its settings in a throwaway pre-seeded folder (proc::kicad_probe): the probe never writes the person's KiCad
+/// settings or triggers `FindPythonInterpreter`. Bounded (proc::probe_output_result): a run that hangs (#1160, macOS) has its process
+/// group killed and reaped, and is asked once more; concurrent callers share one probe and results are cached by `(path, mtime, size)`.
+pub fn cli_version_output_path(cli: &Path) -> Option<std::process::Output> {
+    cli_version_cached_path(cli, crate::proc::PROBE_LIMIT, 2).into_output()
+}
+
+pub fn cli_version_output(cli: &str) -> Option<std::process::Output> {
+    cli_version_output_path(Path::new(cli))
+}
+
+/// Uncached bounded `<cli> --version` probe (up to 2 attempts, killing and reaping the process group on timeout).
+pub fn cli_version_within(cli: &str, limit: Duration) -> Option<std::process::Output> {
+    probe_cli_version_uncached_until(Path::new(cli), limit, 2, None).into_output()
 }
 /// Publish what this machine has for Settings > CAD: info `kicad.cli`, `kicad.version`, `kicad.status`, `kicad.source` and `freecad` (empty when absent).
 pub async fn publish_cad(hub: &Arc<Hub>) {
@@ -1986,6 +2326,879 @@ mod tests {
         alive.lock().unwrap().insert(project.clone(), false);
         tx.send(Msg::Clear).unwrap();
         assert!(info_on(&ipc).await.contains("|stopped|"));
+    }
+
+    fn ok_test_out(s: &str) -> ProbeOutcome {
+        #[cfg(unix)]
+        let status = { use std::os::unix::process::ExitStatusExt; std::process::ExitStatus::from_raw(0) };
+        #[cfg(windows)]
+        let status = { use std::os::windows::process::ExitStatusExt; std::process::ExitStatus::from_raw(0) };
+        ProbeOutcome::Output(std::process::Output { status, stdout: s.as_bytes().to_vec(), stderr: vec![] })
+    }
+
+    fn stdout_trimmed(o: ProbeOutcome) -> String {
+        String::from_utf8_lossy(&o.into_output().expect("output").stdout).trim().to_string()
+    }
+
+    fn wait_for_waiters(cache: &VersionProbeCache, cli: &Path, want: usize) {
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while cache.in_flight_waiters(cli) < want {
+            assert!(std::time::Instant::now() < deadline, "timed out waiting for {want} single-flight waiters");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    #[test]
+    fn version_probe_cache_single_flight_and_mtime_size_invalidation() {
+        use std::sync::{atomic::{AtomicUsize, Ordering}, Condvar, Mutex};
+
+        let d = crate::plat::tmp::dir("vprobe-cache");
+        let cli = d.join("kicad-cli");
+        std::fs::write(&cli, "v1-payload").unwrap();
+        let orig_mtime = std::fs::metadata(&cli).unwrap().modified().unwrap();
+        let t0 = std::time::Instant::now();
+
+        let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let active = Arc::new(AtomicUsize::new(0));
+        let max_active = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+
+        let leader = {
+            let (cache, cli, calls, active, max_active, gate) = (cache.clone(), cli.clone(), calls.clone(), active.clone(), max_active.clone(), gate.clone());
+            std::thread::spawn(move || {
+                cache.get_or_probe_at(&cli, Duration::from_secs(5), 1, || t0, |_, _, _, _| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    let cur = active.fetch_add(1, Ordering::SeqCst) + 1;
+                    max_active.fetch_max(cur, Ordering::SeqCst);
+                    let (lk, cv) = &*gate;
+                    let mut st = lk.lock().unwrap();
+                    st.0 = true;
+                    cv.notify_all();
+                    while !st.1 {
+                        st = cv.wait(st).unwrap();
+                    }
+                    drop(st);
+                    active.fetch_sub(1, Ordering::SeqCst);
+                    ok_test_out("10.0.9\n")
+                })
+            })
+        };
+
+        {
+            let (lk, cv) = &*gate;
+            let mut st = lk.lock().unwrap();
+            while !st.0 {
+                st = cv.wait(st).unwrap();
+            }
+        }
+
+        let mut waiters = vec![];
+        for _ in 0..7 {
+            let (cache, cli, calls) = (cache.clone(), cli.clone(), calls.clone());
+            waiters.push(std::thread::spawn(move || {
+                cache.get_or_probe_at(&cli, Duration::from_secs(5), 1, || t0, |_, _, _, _| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    ok_test_out("unexpected\n")
+                })
+            }));
+        }
+        wait_for_waiters(&cache, &cli, 7);
+        {
+            let (lk, cv) = &*gate;
+            let mut st = lk.lock().unwrap();
+            st.1 = true;
+            cv.notify_all();
+        }
+        assert_eq!(stdout_trimmed(leader.join().unwrap()), "10.0.9");
+        for w in waiters {
+            assert_eq!(stdout_trimmed(w.join().unwrap()), "10.0.9");
+        }
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "single-flight deduplicated 8 concurrent probes");
+        assert_eq!(max_active.load(Ordering::SeqCst), 1);
+
+        let hit = cache.get_or_probe_at(&cli, Duration::from_secs(5), 1, || t0, |_, _, _, _| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            ok_test_out("unexpected\n")
+        });
+        assert_eq!(stdout_trimmed(hit), "10.0.9");
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "subsequent call hits cache");
+
+        // Size change with identical mtime -> cache miss
+        std::fs::write(&cli, "v1-payload-longer").unwrap();
+        std::fs::File::options().write(true).open(&cli).unwrap().set_modified(orig_mtime).unwrap();
+        let resolved_cli = resolve_probe_path(&cli).unwrap();
+        assert_eq!(probe_key_for(&resolved_cli).unwrap().mtime, Some(orig_mtime));
+        let hit2 = cache.get_or_probe_at(&cli, Duration::from_secs(5), 1, || t0, |_, _, _, _| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            ok_test_out("10.0.10\n")
+        });
+        assert_eq!(stdout_trimmed(hit2), "10.0.10");
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "size change invalidates cache even with identical mtime");
+
+        // mtime change with identical size -> cache miss
+        std::fs::write(&cli, "v2-payload-longer").unwrap();
+        std::fs::File::options().write(true).open(&cli).unwrap().set_modified(orig_mtime + Duration::from_secs(10)).unwrap();
+        let hit3 = cache.get_or_probe_at(&cli, Duration::from_secs(5), 1, || t0, |_, _, _, _| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            ok_test_out("10.0.11\n")
+        });
+        assert_eq!(stdout_trimmed(hit3), "10.0.11");
+        assert_eq!(calls.load(Ordering::SeqCst), 3, "mtime change invalidates cache even with identical size");
+
+        // Negative cache TTL (deterministic virtual clock) and larger-limit bypass
+        let fail_cli = d.join("fail-cli");
+        std::fs::write(&fail_cli, "fail").unwrap();
+        let fail_calls = AtomicUsize::new(0);
+        let r1 = cache.get_or_probe_at(&fail_cli, Duration::from_secs(2), 1, || t0, |_, l, a, _| {
+            fail_calls.fetch_add(1, Ordering::SeqCst);
+            ProbeOutcome::Timeout { limit: l, attempts: a }
+        });
+        assert!(matches!(r1, ProbeOutcome::Timeout { limit, attempts: 1 } if limit == Duration::from_secs(2)));
+        let r2 = cache.get_or_probe_at(&fail_cli, Duration::from_secs(2), 1, || t0 + Duration::from_secs(10), |_, l, a, _| {
+            fail_calls.fetch_add(1, Ordering::SeqCst);
+            ProbeOutcome::Timeout { limit: l, attempts: a }
+        });
+        assert!(matches!(r2, ProbeOutcome::Timeout { .. }));
+        assert_eq!(fail_calls.load(Ordering::SeqCst), 1, "failure cached within TTL for equal/smaller limit");
+
+        let r3 = cache.get_or_probe_at(&fail_cli, Duration::from_secs(5), 1, || t0 + Duration::from_secs(10), |_, l, a, _| {
+            fail_calls.fetch_add(1, Ordering::SeqCst);
+            ProbeOutcome::Timeout { limit: l, attempts: a }
+        });
+        assert!(matches!(r3, ProbeOutcome::Timeout { limit, attempts: 1 } if limit == Duration::from_secs(5)));
+        assert_eq!(fail_calls.load(Ordering::SeqCst), 2, "larger timeout limit bypasses smaller timeout cache");
+
+        let r4 = cache.get_or_probe_at(&fail_cli, Duration::from_secs(5), 1, || t0 + Duration::from_secs(41), |_, _, _, _| {
+            fail_calls.fetch_add(1, Ordering::SeqCst);
+            ok_test_out("10.0.12\n")
+        });
+        assert_eq!(stdout_trimmed(r4), "10.0.12");
+        assert_eq!(fail_calls.load(Ordering::SeqCst), 3, "expired failure is retried");
+
+        // Failure TTL starts at completion, not probe start: a full 30s timeout stays cached for 30s after completion.
+        let slow_fail_cli = d.join("slow-fail-cli");
+        std::fs::write(&slow_fail_cli, "slow-fail").unwrap();
+        let clock = Arc::new(Mutex::new(t0));
+        let slow_calls = AtomicUsize::new(0);
+        let f1 = cache.get_or_probe_at(
+            &slow_fail_cli,
+            Duration::from_secs(15),
+            2,
+            || *clock.lock().unwrap(),
+            |_, l, a, _| {
+                slow_calls.fetch_add(1, Ordering::SeqCst);
+                *clock.lock().unwrap() += Duration::from_secs(30);
+                ProbeOutcome::Timeout { limit: l, attempts: a }
+            },
+        );
+        assert!(matches!(f1, ProbeOutcome::Timeout { limit, attempts: 2 } if limit == Duration::from_secs(15)));
+
+        *clock.lock().unwrap() = t0 + Duration::from_secs(40);
+        let f2 = cache.get_or_probe_at(
+            &slow_fail_cli,
+            Duration::from_secs(15),
+            2,
+            || *clock.lock().unwrap(),
+            |_, l, a, _| {
+                slow_calls.fetch_add(1, Ordering::SeqCst);
+                ProbeOutcome::Timeout { limit: l, attempts: a }
+            },
+        );
+        assert!(matches!(f2, ProbeOutcome::Timeout { limit, attempts: 2 } if limit == Duration::from_secs(15)));
+        assert_eq!(slow_calls.load(Ordering::SeqCst), 1, "full-budget failure stays cached relative to completion");
+
+        *clock.lock().unwrap() = t0 + Duration::from_secs(61);
+        let f3 = cache.get_or_probe_at(
+            &slow_fail_cli,
+            Duration::from_secs(15),
+            2,
+            || *clock.lock().unwrap(),
+            |_, _, _, _| {
+                slow_calls.fetch_add(1, Ordering::SeqCst);
+                ok_test_out("10.0.14\n")
+            },
+        );
+        assert_eq!(stdout_trimmed(f3), "10.0.14");
+        assert_eq!(slow_calls.load(Ordering::SeqCst), 2, "failure expires 30s after completion");
+
+        // Panic safety: panicking leader wakes registered waiters and clears in-flight entry deterministically
+        let p_cli = d.join("panic-cli");
+        std::fs::write(&p_cli, "p").unwrap();
+        let p_gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+        let p_leader = {
+            let (cache, p_cli, p_gate) = (cache.clone(), p_cli.clone(), p_gate.clone());
+            std::thread::spawn(move || {
+                let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    cache.get_or_probe_at(&p_cli, Duration::from_secs(5), 1, || t0, |_, _, _, _| {
+                        let (lk, cv) = &*p_gate;
+                        let mut st = lk.lock().unwrap();
+                        st.0 = true;
+                        cv.notify_all();
+                        while !st.1 {
+                            st = cv.wait(st).unwrap();
+                        }
+                        panic!("simulated panic in probe leader");
+                    })
+                }));
+            })
+        };
+        {
+            let (lk, cv) = &*p_gate;
+            let mut st = lk.lock().unwrap();
+            while !st.0 {
+                st = cv.wait(st).unwrap();
+            }
+        }
+        let p_waiter = {
+            let (cache, p_cli) = (cache.clone(), p_cli.clone());
+            std::thread::spawn(move || cache.get_or_probe_at(&p_cli, Duration::from_secs(5), 1, || t0, |_, _, _, _| ok_test_out("unused\n")))
+        };
+        wait_for_waiters(&cache, &p_cli, 1);
+        {
+            let (lk, cv) = &*p_gate;
+            let mut st = lk.lock().unwrap();
+            st.1 = true;
+            cv.notify_all();
+        }
+        p_leader.join().unwrap();
+        assert!(matches!(p_waiter.join().unwrap(), ProbeOutcome::SpawnErr(ref m) if m.contains("panicked")));
+        let recovered = cache.get_or_probe_at(&p_cli, Duration::from_secs(5), 1, || t0, |_, _, _, _| ok_test_out("10.0.13\n"));
+        assert_eq!(stdout_trimmed(recovered), "10.0.13");
+    }
+
+    #[test]
+    fn version_probe_cache_mixed_budget_arrival_orders() {
+        use std::sync::{atomic::{AtomicUsize, Ordering}, Condvar, Mutex};
+
+        let d = crate::plat::tmp::dir("vprobe-budget");
+        let t0 = std::time::Instant::now();
+
+        // Case A: weak (2s, 1 attempt) arrives first and times out; strong (2s, 2 attempts) joins in-flight.
+        // Weak must return Timeout { 2s, 1 }; strong must continue with ONLY the remaining 1 attempt and succeed.
+        {
+            let cli = d.join("case-a");
+            std::fs::write(&cli, "a").unwrap();
+            let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+            let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+            let calls = Arc::new(AtomicUsize::new(0));
+            let strong_observed_attempts = Arc::new(AtomicUsize::new(0));
+
+            let weak = {
+                let (cache, cli, gate, calls) = (cache.clone(), cli.clone(), gate.clone(), calls.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_secs(2), 1, || t0, |_, l, a, _| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        assert_eq!(a, 1);
+                        let (lk, cv) = &*gate;
+                        let mut st = lk.lock().unwrap();
+                        st.0 = true;
+                        cv.notify_all();
+                        while !st.1 {
+                            st = cv.wait(st).unwrap();
+                        }
+                        ProbeOutcome::Timeout { limit: l, attempts: a }
+                    })
+                })
+            };
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                while !st.0 {
+                    st = cv.wait(st).unwrap();
+                }
+            }
+            let strong = {
+                let (cache, cli, calls, obs) = (cache.clone(), cli.clone(), calls.clone(), strong_observed_attempts.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_secs(2), 2, || t0, |_, _, a, _| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        obs.store(a, Ordering::SeqCst);
+                        ok_test_out("10.99.0\n")
+                    })
+                })
+            };
+            wait_for_waiters(&cache, &cli, 1);
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                st.1 = true;
+                cv.notify_all();
+            }
+            assert!(matches!(weak.join().unwrap(), ProbeOutcome::Timeout { limit, attempts: 1 } if limit == Duration::from_secs(2)));
+            assert_eq!(stdout_trimmed(strong.join().unwrap()), "10.99.0");
+            assert_eq!(strong_observed_attempts.load(Ordering::SeqCst), 1, "strong runs only remaining 1 attempt after joining weak");
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
+            let cached = cache.get_or_probe_at(&cli, Duration::from_secs(2), 1, || t0, |_, _, _, _| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                ok_test_out("unexpected\n")
+            });
+            assert_eq!(stdout_trimmed(cached), "10.99.0");
+            assert_eq!(calls.load(Ordering::SeqCst), 2, "weak success from strong is cached");
+        }
+
+        // Case B: strong (2s, 2 attempts) arrives first and runs past weak's 150ms budget; weak joins in-flight.
+        // Weak must return Timeout { 150ms, 1 } promptly BEFORE strong finishes, while strong caches success for follow-up callers.
+        {
+            let cli = d.join("case-b");
+            std::fs::write(&cli, "b").unwrap();
+            let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+            let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+            let calls = Arc::new(AtomicUsize::new(0));
+
+            let strong = {
+                let (cache, cli, gate, calls) = (cache.clone(), cli.clone(), gate.clone(), calls.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_secs(2), 2, || t0, |_, _, _, _| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        let (lk, cv) = &*gate;
+                        let mut st = lk.lock().unwrap();
+                        st.0 = true;
+                        cv.notify_all();
+                        while !st.1 {
+                            st = cv.wait(st).unwrap();
+                        }
+                        ok_test_out("10.99.0\n")
+                    })
+                })
+            };
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                while !st.0 {
+                    st = cv.wait(st).unwrap();
+                }
+            }
+            let weak = {
+                let (cache, cli, calls) = (cache.clone(), cli.clone(), calls.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_millis(150), 1, || t0, |_, _, _, _| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        ok_test_out("unexpected\n")
+                    })
+                })
+            };
+            wait_for_waiters(&cache, &cli, 1);
+            let weak_res = weak.join().unwrap();
+            assert!(matches!(weak_res, ProbeOutcome::Timeout { limit, attempts: 1 } if limit == Duration::from_millis(150)));
+            // Only now unblock strong: weak returned strictly before strong finished!
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                st.1 = true;
+                cv.notify_all();
+            }
+            assert_eq!(stdout_trimmed(strong.join().unwrap()), "10.99.0");
+            let cached = cache.get_or_probe_at(&cli, Duration::from_millis(150), 1, || t0, |_, _, _, _| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                ok_test_out("unexpected\n")
+            });
+            assert_eq!(stdout_trimmed(cached), "10.99.0");
+            assert_eq!(calls.load(Ordering::SeqCst), 1);
+        }
+
+        // Case C: both arrival orders when leader succeeds quickly -> 1 probe serves both.
+        for (weak_first, name) in [(true, "case-c-weak"), (false, "case-c-strong")] {
+            let cli = d.join(name);
+            std::fs::write(&cli, "c").unwrap();
+            let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+            let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+            let calls = Arc::new(AtomicUsize::new(0));
+            let (la, wa) = if weak_first { (1, 2) } else { (2, 1) };
+
+            let leader = {
+                let (cache, cli, gate, calls) = (cache.clone(), cli.clone(), gate.clone(), calls.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_secs(2), la, || t0, |_, _, _, _| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        let (lk, cv) = &*gate;
+                        let mut st = lk.lock().unwrap();
+                        st.0 = true;
+                        cv.notify_all();
+                        while !st.1 {
+                            st = cv.wait(st).unwrap();
+                        }
+                        ok_test_out("10.99.0\n")
+                    })
+                })
+            };
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                while !st.0 {
+                    st = cv.wait(st).unwrap();
+                }
+            }
+            let waiter = {
+                let (cache, cli, calls) = (cache.clone(), cli.clone(), calls.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_secs(2), wa, || t0, |_, _, _, _| {
+                        calls.fetch_add(1, Ordering::SeqCst);
+                        ok_test_out("unexpected\n")
+                    })
+                })
+            };
+            wait_for_waiters(&cache, &cli, 1);
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                st.1 = true;
+                cv.notify_all();
+            }
+            assert_eq!(stdout_trimmed(leader.join().unwrap()), "10.99.0");
+            assert_eq!(stdout_trimmed(waiter.join().unwrap()), "10.99.0");
+            assert_eq!(calls.load(Ordering::SeqCst), 1, "{name}");
+        }
+
+        // Case D: waiter taking over from a weaker probe inherits only its remaining wall-clock budget.
+        {
+            let cli = d.join("case-d-mock");
+            std::fs::write(&cli, "d").unwrap();
+            let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+            let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+            let rem_seen_ms = Arc::new(AtomicUsize::new(usize::MAX));
+
+            let weak = {
+                let (cache, cli, gate) = (cache.clone(), cli.clone(), gate.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_millis(140), 1, std::time::Instant::now, |_, l, a, _| {
+                        let (lk, cv) = &*gate;
+                        let mut st = lk.lock().unwrap();
+                        st.0 = true;
+                        cv.notify_all();
+                        while !st.1 {
+                            st = cv.wait(st).unwrap();
+                        }
+                        drop(st);
+                        std::thread::sleep(Duration::from_millis(110));
+                        ProbeOutcome::Timeout { limit: l, attempts: a }
+                    })
+                })
+            };
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                while !st.0 {
+                    st = cv.wait(st).unwrap();
+                }
+            }
+            let strong = {
+                let (cache, cli, rem_seen_ms) = (cache.clone(), cli.clone(), rem_seen_ms.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_millis(200), 1, std::time::Instant::now, |_, l, a, dl| {
+                        let dl = dl.expect("expected continuation deadline after weaker probe");
+                        let rem = dl.saturating_duration_since(std::time::Instant::now()).as_millis() as usize;
+                        rem_seen_ms.store(rem, Ordering::SeqCst);
+                        ProbeOutcome::Timeout { limit: l.min(Duration::from_millis(rem as u64)), attempts: a }
+                    })
+                })
+            };
+            wait_for_waiters(&cache, &cli, 1);
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                st.1 = true;
+                cv.notify_all();
+            }
+            assert!(matches!(weak.join().unwrap(), ProbeOutcome::Timeout { .. }));
+            assert!(matches!(strong.join().unwrap(), ProbeOutcome::Timeout { .. }));
+            let rem = rem_seen_ms.load(Ordering::SeqCst);
+            assert!(rem < 115, "expected remaining continuation deadline < 115ms, got {rem}ms");
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let cli = d.join("case-d-real");
+            std::fs::write(&cli, "#!/bin/sh\nsleep 10\n").unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+            let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+
+            let weak = {
+                let (cache, cli, gate) = (cache.clone(), cli.clone(), gate.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_millis(200), 1, std::time::Instant::now, |_, l, a, _| {
+                        let (lk, cv) = &*gate;
+                        let mut st = lk.lock().unwrap();
+                        st.0 = true;
+                        cv.notify_all();
+                        while !st.1 {
+                            st = cv.wait(st).unwrap();
+                        }
+                        drop(st);
+                        std::thread::sleep(Duration::from_millis(180));
+                        ProbeOutcome::Timeout { limit: l, attempts: a }
+                    })
+                })
+            };
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                while !st.0 {
+                    st = cv.wait(st).unwrap();
+                }
+            }
+            let strong = {
+                let (cache, cli) = (cache.clone(), cli.clone());
+                std::thread::spawn(move || {
+                    let started = std::time::Instant::now();
+                    let res = cache.get_or_probe_at(&cli, Duration::from_millis(300), 1, std::time::Instant::now, probe_cli_version_uncached_until);
+                    (started.elapsed(), res)
+                })
+            };
+            wait_for_waiters(&cache, &cli, 1);
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                st.1 = true;
+                cv.notify_all();
+            }
+            assert!(matches!(weak.join().unwrap(), ProbeOutcome::Timeout { .. }));
+            let (elapsed, strong_res) = strong.join().unwrap();
+            assert!(matches!(strong_res, ProbeOutcome::Timeout { .. }));
+            assert!(elapsed < Duration::from_millis(420), "continuation exceeded caller budget: {elapsed:?}");
+
+            let followup_calls = AtomicUsize::new(0);
+            let retry = cache.get_or_probe_at(&cli, Duration::from_millis(300), 1, std::time::Instant::now, |_, _, _, _| {
+                followup_calls.fetch_add(1, Ordering::SeqCst);
+                ok_test_out("10.99.2\n")
+            });
+            assert_eq!(stdout_trimmed(retry), "10.99.2");
+            assert_eq!(followup_calls.load(Ordering::SeqCst), 1, "capped continuation timeout must not cache as a full 300ms timeout");
+        }
+
+        // Case E: waiter joining a LARGER-limit flight (400ms, 1) with (220ms, 2) must carry its remaining wall-clock
+        // deadline into its second attempt and must not cache a truncated continuation as a full (220ms, 2) timeout.
+        {
+            let cli = d.join("case-e-mock");
+            std::fs::write(&cli, "e").unwrap();
+            let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+            let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+            let rem_seen_ms = Arc::new(AtomicUsize::new(usize::MAX));
+            let attempts_seen = Arc::new(AtomicUsize::new(0));
+
+            let leader = {
+                let (cache, cli, gate) = (cache.clone(), cli.clone(), gate.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_millis(400), 1, std::time::Instant::now, |_, l, a, _| {
+                        let (lk, cv) = &*gate;
+                        let mut st = lk.lock().unwrap();
+                        st.0 = true;
+                        cv.notify_all();
+                        while !st.1 {
+                            st = cv.wait(st).unwrap();
+                        }
+                        drop(st);
+                        std::thread::sleep(Duration::from_millis(300));
+                        ProbeOutcome::Timeout { limit: l, attempts: a }
+                    })
+                })
+            };
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                while !st.0 {
+                    st = cv.wait(st).unwrap();
+                }
+            }
+            let waiter = {
+                let (cache, cli, rem_seen_ms, attempts_seen) = (cache.clone(), cli.clone(), rem_seen_ms.clone(), attempts_seen.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_millis(220), 2, std::time::Instant::now, |_, l, a, dl| {
+                        attempts_seen.store(a, Ordering::SeqCst);
+                        let dl = dl.expect("expected continuation deadline after larger-limit flight");
+                        let rem = dl.saturating_duration_since(std::time::Instant::now()).as_millis() as usize;
+                        rem_seen_ms.store(rem, Ordering::SeqCst);
+                        ProbeOutcome::Timeout { limit: l.min(Duration::from_millis(rem as u64)), attempts: a }
+                    })
+                })
+            };
+            wait_for_waiters(&cache, &cli, 1);
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                st.1 = true;
+                cv.notify_all();
+            }
+            assert!(matches!(leader.join().unwrap(), ProbeOutcome::Timeout { .. }));
+            assert!(matches!(waiter.join().unwrap(), ProbeOutcome::Timeout { .. }));
+            assert_eq!(attempts_seen.load(Ordering::SeqCst), 1);
+            let rem = rem_seen_ms.load(Ordering::SeqCst);
+            assert!(rem < 170, "expected remaining continuation deadline < 170ms (total 440ms - 300ms wait), got {rem}ms");
+        }
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let cli = d.join("case-e-real");
+            std::fs::write(&cli, "#!/bin/sh\ntrap '' TERM\nexec sleep 10\n").unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+            let gate = Arc::new((Mutex::new((false, false)), Condvar::new()));
+
+            let leader = {
+                let (cache, cli, gate) = (cache.clone(), cli.clone(), gate.clone());
+                std::thread::spawn(move || {
+                    cache.get_or_probe_at(&cli, Duration::from_millis(450), 1, std::time::Instant::now, |_, l, a, _| {
+                        let (lk, cv) = &*gate;
+                        let mut st = lk.lock().unwrap();
+                        st.0 = true;
+                        cv.notify_all();
+                        while !st.1 {
+                            st = cv.wait(st).unwrap();
+                        }
+                        drop(st);
+                        std::thread::sleep(Duration::from_millis(360));
+                        ProbeOutcome::Timeout { limit: l, attempts: a }
+                    })
+                })
+            };
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                while !st.0 {
+                    st = cv.wait(st).unwrap();
+                }
+            }
+            let waiter = {
+                let (cache, cli) = (cache.clone(), cli.clone());
+                std::thread::spawn(move || {
+                    let started = std::time::Instant::now();
+                    let res = cache.get_or_probe_at(&cli, Duration::from_millis(250), 2, std::time::Instant::now, probe_cli_version_uncached_until);
+                    (started.elapsed(), res)
+                })
+            };
+            wait_for_waiters(&cache, &cli, 1);
+            {
+                let (lk, cv) = &*gate;
+                let mut st = lk.lock().unwrap();
+                st.1 = true;
+                cv.notify_all();
+            }
+            assert!(matches!(leader.join().unwrap(), ProbeOutcome::Timeout { limit, attempts: 1 } if limit == Duration::from_millis(450)));
+            let (elapsed, waiter_res) = waiter.join().unwrap();
+            assert!(matches!(waiter_res, ProbeOutcome::Timeout { .. }));
+            assert!(elapsed < Duration::from_millis(560), "waiter continuation exceeded 500ms budget (incl. SIGTERM cleanup): {elapsed:?}");
+
+            let leader_followup = AtomicUsize::new(0);
+            let cached_leader = cache.get_or_probe_at(&cli, Duration::from_millis(450), 1, std::time::Instant::now, |_, _, _, _| {
+                leader_followup.fetch_add(1, Ordering::SeqCst);
+                ok_test_out("unexpected\n")
+            });
+            assert!(matches!(cached_leader, ProbeOutcome::Timeout { .. }));
+            assert_eq!(leader_followup.load(Ordering::SeqCst), 0, "leader's 450ms x1 timeout must remain cached");
+
+            let followup_calls = AtomicUsize::new(0);
+            let retry = cache.get_or_probe_at(&cli, Duration::from_millis(250), 2, std::time::Instant::now, |_, _, _, _| {
+                followup_calls.fetch_add(1, Ordering::SeqCst);
+                ok_test_out("10.99.3\n")
+            });
+            assert_eq!(stdout_trimmed(retry), "10.99.3");
+            assert_eq!(followup_calls.load(Ordering::SeqCst), 1, "truncated continuation must not cache as a full (250ms, 2) timeout");
+        }
+
+        // Case F: equal-limit waiter (250ms, 2) joining a SIGTERM-ignoring (250ms, 1) flight obeys its 500ms
+        // wall-clock deadline end-to-end and does not cache a truncated continuation as (250ms, 2).
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let cli = d.join("case-f-real");
+            let log = d.join("case-f-real.log");
+            std::fs::write(&cli, format!("#!/bin/sh\necho $$ >> '{}'\ntrap '' TERM\nexec sleep 10\n", log.display())).unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+            let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+
+            let weak = {
+                let (cache, cli) = (cache.clone(), cli.clone());
+                std::thread::spawn(move || cache.get_or_probe_at(&cli, Duration::from_millis(250), 1, std::time::Instant::now, probe_cli_version_uncached_until))
+            };
+            let wait_start = std::time::Instant::now() + Duration::from_secs(5);
+            while !log.is_file() {
+                assert!(std::time::Instant::now() < wait_start, "weak equal-limit probe did not start");
+                std::thread::sleep(Duration::from_millis(2));
+            }
+            let strong = {
+                let (cache, cli) = (cache.clone(), cli.clone());
+                std::thread::spawn(move || {
+                    let started = std::time::Instant::now();
+                    let res = cache.get_or_probe_at(&cli, Duration::from_millis(250), 2, std::time::Instant::now, probe_cli_version_uncached_until);
+                    (started.elapsed(), res)
+                })
+            };
+            wait_for_waiters(&cache, &cli, 1);
+            assert!(matches!(weak.join().unwrap(), ProbeOutcome::Timeout { limit, attempts: 1 } if limit == Duration::from_millis(250)));
+            let (elapsed, strong_res) = strong.join().unwrap();
+            assert!(matches!(strong_res, ProbeOutcome::Timeout { .. }));
+            assert!(elapsed < Duration::from_millis(570), "equal-limit continuation exceeded 500ms budget: {elapsed:?}");
+
+            let followup_1 = AtomicUsize::new(0);
+            let cached_1 = cache.get_or_probe_at(&cli, Duration::from_millis(250), 1, std::time::Instant::now, |_, _, _, _| {
+                followup_1.fetch_add(1, Ordering::SeqCst);
+                ok_test_out("unexpected\n")
+            });
+            assert!(matches!(cached_1, ProbeOutcome::Timeout { .. }));
+            assert_eq!(followup_1.load(Ordering::SeqCst), 0, "weak (250ms, 1) timeout stays cached");
+
+            let followup_2 = AtomicUsize::new(0);
+            let retry_2 = cache.get_or_probe_at(&cli, Duration::from_millis(250), 2, std::time::Instant::now, |_, _, _, _| {
+                followup_2.fetch_add(1, Ordering::SeqCst);
+                ok_test_out("10.99.4\n")
+            });
+            assert_eq!(stdout_trimmed(retry_2), "10.99.4");
+            assert_eq!(followup_2.load(Ordering::SeqCst), 1, "truncated equal-limit continuation must not cache as (250ms, 2)");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn version_probe_cache_real_timeouts_populate_cache_for_same_budget() {
+        use std::os::unix::fs::PermissionsExt;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        let d = crate::plat::tmp::dir("vprobe-real-to");
+        let make_hang = |name: &str| {
+            let cli = d.join(name);
+            let log = d.join(format!("{name}.log"));
+            std::fs::write(&cli, format!("#!/bin/sh\necho $$ >> '{}'\nexec sleep 10\n", log.display())).unwrap();
+            std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+            (cli, log)
+        };
+        let cache = Arc::new(VersionProbeCache::new(Duration::from_secs(30)));
+        let limit = Duration::from_millis(200);
+
+        // 1. Solo 1-attempt real timeout populates cache for (limit, 1) and serves repeat call from cache.
+        let (c1, l1) = make_hang("solo-1");
+        let r1 = cache.get_or_probe(&c1, limit, 1, probe_cli_version_uncached_until);
+        assert!(matches!(r1, ProbeOutcome::Timeout { limit: l, attempts: 1 } if l == limit), "got {r1:?}");
+        assert_eq!(std::fs::read_to_string(&l1).unwrap().lines().count(), 1);
+        let r1_again = cache.get_or_probe(&c1, limit, 1, probe_cli_version_uncached_until);
+        assert!(matches!(r1_again, ProbeOutcome::Timeout { limit: l, attempts: 1 } if l == limit));
+        assert_eq!(std::fs::read_to_string(&l1).unwrap().lines().count(), 1, "solo 1-attempt timeout cached");
+
+        // 2. Solo 2-attempt real timeout populates cache for (limit, 2) and serves repeat call from cache.
+        let (c2, l2) = make_hang("solo-2");
+        let r2 = cache.get_or_probe(&c2, limit, 2, probe_cli_version_uncached_until);
+        assert!(matches!(r2, ProbeOutcome::Timeout { limit: l, attempts: 2 } if l == limit), "got {r2:?}");
+        assert_eq!(std::fs::read_to_string(&l2).unwrap().lines().count(), 2);
+        let r2_again = cache.get_or_probe(&c2, limit, 2, probe_cli_version_uncached_until);
+        assert!(matches!(r2_again, ProbeOutcome::Timeout { limit: l, attempts: 2 } if l == limit));
+        assert_eq!(std::fs::read_to_string(&l2).unwrap().lines().count(), 2, "solo 2-attempt timeout cached");
+
+        // 3. Same-limit 1-attempt followed mid-flight by 2-attempt continuation populates cache for (limit, 2).
+        let (c3, l3) = make_hang("weak-then-2");
+        let weak_limit = Duration::from_millis(400);
+        let weak = {
+            let (cache, cli) = (cache.clone(), c3.clone());
+            std::thread::spawn(move || cache.get_or_probe(&cli, weak_limit, 1, probe_cli_version_uncached_until))
+        };
+        let wait_start = std::time::Instant::now() + Duration::from_secs(5);
+        while !l3.is_file() {
+            assert!(std::time::Instant::now() < wait_start, "weak probe did not start");
+            std::thread::sleep(Duration::from_millis(2));
+        }
+        std::thread::sleep(Duration::from_millis(80));
+        let strong = {
+            let (cache, cli) = (cache.clone(), c3.clone());
+            std::thread::spawn(move || cache.get_or_probe(&cli, weak_limit, 2, probe_cli_version_uncached_until))
+        };
+        wait_for_waiters(&cache, &c3, 1);
+        assert!(matches!(weak.join().unwrap(), ProbeOutcome::Timeout { limit: l, attempts: 1 } if l == weak_limit));
+        assert!(matches!(strong.join().unwrap(), ProbeOutcome::Timeout { limit: l, attempts: 2 } if l == weak_limit));
+        assert_eq!(std::fs::read_to_string(&l3).unwrap().lines().count(), 2, "1 weak + 1 continuation = 2 total spawns");
+
+        let followup_calls = AtomicUsize::new(0);
+        let hit = cache.get_or_probe(&c3, weak_limit, 2, |p, l, a, dl| {
+            followup_calls.fetch_add(1, Ordering::SeqCst);
+            probe_cli_version_uncached_until(p, l, a, dl)
+        });
+        assert!(matches!(hit, ProbeOutcome::Timeout { limit: l, attempts: 2 } if l == weak_limit));
+        assert_eq!(followup_calls.load(Ordering::SeqCst), 0, "repeat 2-attempt call hits cache");
+    }
+
+    #[test]
+    fn resolve_probe_path_ignores_cwd_file_for_bare_command_name() {
+        // A bare command name must never resolve to a file in the current working directory.
+        if Path::new("Cargo.toml").is_file() {
+            assert_eq!(resolve_probe_path(Path::new("Cargo.toml")), None);
+        }
+        assert_eq!(resolve_probe_path(Path::new("bp-nonexistent-kicad-cli-test-only")), None);
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let d = crate::plat::tmp::dir("resolve-symlink");
+            let (t1, t2, link) = (d.join("t1"), d.join("t2"), d.join("kicad-cli"));
+            std::fs::write(&t1, "a").unwrap();
+            std::fs::write(&t2, "longer-target").unwrap();
+            std::fs::set_permissions(&t1, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::fs::set_permissions(&t2, std::fs::Permissions::from_mode(0o755)).unwrap();
+            std::os::unix::fs::symlink(&t1, &link).unwrap();
+
+            let r1 = resolve_probe_path(&link).unwrap();
+            assert_eq!(r1, crate::plat::fs::canonicalize(&t1).unwrap());
+            assert_eq!(probe_key_for(&r1).unwrap().size, 1);
+
+            std::fs::remove_file(&link).unwrap();
+            std::os::unix::fs::symlink(&t2, &link).unwrap();
+            let r2 = resolve_probe_path(&link).unwrap();
+            assert_eq!(r2, crate::plat::fs::canonicalize(&t2).unwrap());
+            assert_eq!(probe_key_for(&r2).unwrap().size, 13);
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cli_version_output_deduplicates_concurrent_probes_and_invalidates_on_change() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::plat::tmp::dir("cli-cache");
+        let (cli, log) = (d.join("kicad-cli"), d.join("invocations.log"));
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = {NOOP} ] && exit 0\necho $$ >> '{}'\nsleep 0.15\necho 10.0.9\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        started(&cli);
+
+        let cli_s = cli.to_string_lossy().into_owned();
+        let handles: Vec<_> = (0..6)
+            .map(|_| {
+                let s = cli_s.clone();
+                std::thread::spawn(move || {
+                    let o = cli_version_output(&s).expect("probe succeeded");
+                    String::from_utf8_lossy(&o.stdout).trim().to_string()
+                })
+            })
+            .collect();
+        for h in handles {
+            assert_eq!(h.join().unwrap(), "10.0.9");
+        }
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1, "6 concurrent probes spawned kicad-cli only once");
+
+        let seq = cli_version_output(&cli_s).expect("cached hit");
+        assert_eq!(String::from_utf8_lossy(&seq.stdout).trim(), "10.0.9");
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 1);
+
+        let prev_mtime = std::fs::metadata(&cli).unwrap().modified().unwrap();
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = {NOOP} ] && exit 0\necho $$ >> '{}'\necho 10.0.10-updated\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = std::fs::File::options().write(true).open(&cli).and_then(|f| f.set_modified(prev_mtime + Duration::from_secs(2)));
+        started(&cli);
+
+        let updated = cli_version_output(&cli_s).expect("re-probed after file update");
+        assert_eq!(String::from_utf8_lossy(&updated.stdout).trim(), "10.0.10-updated");
+        assert_eq!(std::fs::read_to_string(&log).unwrap().lines().count(), 2);
     }
 }
 

@@ -111,6 +111,30 @@ pub mod proc {
     }
     /// Whether a process is there (kill 0).
     pub fn alive(pid: u32) -> bool { pid > 0 && unsafe { libc::kill(pid as i32, 0) } == 0 }
+    /// State of a direct child PID polled with `WNOWAIT` (leaving the zombie in place so `pid` / its pgid cannot be recycled).
+    #[allow(dead_code)] // bp-plot includes plat/unix.rs
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ChildWait {
+        Running,
+        Exited,
+        NotChild,
+    }
+
+    /// Non-reaping status poll of child `pid`. `ECHILD` returns `NotChild` (distinct from `Exited`, so callers never signal an unowned PID).
+    #[allow(dead_code)] // bp-plot includes plat/unix.rs
+    pub fn poll_child_nowait(pid: u32) -> ChildWait {
+        if pid == 0 || pid > i32::MAX as u32 { return ChildWait::NotChild }
+        unsafe {
+            let mut si: libc::siginfo_t = std::mem::zeroed();
+            if libc::waitid(libc::P_PID, pid as libc::id_t, &mut si, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) != 0 {
+                return match std::io::Error::last_os_error().raw_os_error() {
+                    Some(libc::ECHILD) => ChildWait::NotChild,
+                    _ => ChildWait::Running,
+                };
+            }
+            if si.si_pid() == pid as libc::pid_t { ChildWait::Exited } else { ChildWait::Running }
+        }
+    }
     /// Whether anything is left in the process group a leader made (kill(-pid, 0)), or the leader itself.
     pub fn group_alive(pid: u32) -> bool { pid > 0 && (unsafe { libc::kill(-(pid as i32), 0) } == 0 || alive(pid)) }
     /// Whether a process is there, including another user's (kill 0 answering EPERM).
