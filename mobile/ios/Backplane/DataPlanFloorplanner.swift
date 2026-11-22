@@ -35,9 +35,6 @@ struct DataMgmtHost: View {
         var panels: [MgmtPanelItem]?
         struct MgmtPanelItem: Decodable { var id: String?; var label: String? }
     }
-    private struct MgmtBadgeRaw: Decodable {
-        var n: Int?; var tone: String?
-    }
 
     private func panelsList() -> [MgmtPanelMeta] {
         let d = client.mgmtDigest
@@ -52,11 +49,10 @@ struct DataMgmtHost: View {
     }
 
     private func badgeFor(_ id: String) -> (n: Int, tone: String) {
-        guard let raw = client.mgmtRaw(id),
-              let b = try? JSONDecoder().decode(MgmtBadgeRaw.self, from: raw) else {
+        guard let raw = client.mgmtRaw(id) else {
             return (0, "warn")
         }
-        return (b.n ?? 0, b.tone ?? "warn")
+        return PlanFloorplannerLogic.decodeBadge(from: raw)
     }
 
     var body: some View {
@@ -131,6 +127,16 @@ struct DataMgmtHost: View {
     }
 }
 
+private struct PendingPlanEdit: Identifiable {
+    let seq: Int
+    let pro: String
+    let itemId: String
+    let patch: PlanOptimisticPatch
+    let onlyGeom: String?
+    var committedRev: Int? = nil
+    var id: Int { seq }
+}
+
 struct DataPlanFloorplannerView: View {
     @Bindable var client: DataClient
     let fallbackProject: String
@@ -141,6 +147,7 @@ struct DataPlanFloorplannerView: View {
     @State private var inspectorOpen = false
     @State private var stackupOpen = false
     @State private var cam: PlanCamera? = nil
+    @State private var cameraIsFitted = true
     @State private var canvasSize: CGSize = .zero
 
     // Board geometry hydration (`plan.get {pro, board: true}`)
@@ -148,11 +155,15 @@ struct DataPlanFloorplannerView: View {
     @State private var hydratedRev: Int = -1
     @State private var hydratedBoard: PlanBoardGeom? = nil
     @State private var hydratedDraw: PlanDraw? = nil
+    @State private var hydratedLayers: [PlanLayer]? = nil
 
-    // Optimistic steering edits & undo stack
-    @State private var optimistic: [String: PlanOptimisticPatch] = [:]
-    @State private var optimisticRev: Int? = nil
-    @State private var undoStack: [PlanOptimisticPatch] = []
+    // Serialized steering edits, isolated drag preview, & per-item undo stack
+    @State private var pendingEdits: [PendingPlanEdit] = []
+    @State private var nextEditSeq: Int = 1
+    @State private var drainingEdits = false
+    @State private var ackedRev: Int = 0
+    @State private var dragPreview: (id: String, patch: PlanOptimisticPatch)? = nil
+    @State private var undoStack: [PlanUndoEntry] = []
     @State private var errMsg = ""
 
     // Active drag / finger-lift HUD state
@@ -171,24 +182,34 @@ struct DataPlanFloorplannerView: View {
         return PlanFloorplannerLogic.unwrapPanel(from: d)
     }
 
+    private func canonicalPro(from base: PlanPanel) -> String {
+        if !base.pro.isEmpty { return base.pro }
+        if !client.mgmtProject.isEmpty { return client.mgmtProject }
+        return fallbackProject
+    }
+
     private func effectivePanel(from base: PlanPanel) -> PlanPanel {
         var panel = base
-        let pro = base.pro.isEmpty ? fallbackProject : base.pro
+        let pro = canonicalPro(from: base)
         let matchPrefix = "\(pro):"
-        if let hb = hydratedBoard, hydratedKey.hasPrefix(matchPrefix), hydratedRev >= base.revision {
-            panel.board = hb
+        if hydratedKey.hasPrefix(matchPrefix), hydratedRev >= base.revision {
+            if let hb = hydratedBoard { panel.board = hb }
+            if let hd = hydratedDraw { panel.draw = hd }
+            if hydratedRev > base.revision {
+                panel.revision = hydratedRev
+                if let hl = hydratedLayers { panel.layers = hl }
+            }
         }
-        if let hd = hydratedDraw, hydratedKey.hasPrefix(matchPrefix), hydratedRev >= base.revision {
-            panel.draw = hd
-        }
-        return PlanFloorplannerLogic.mergeOptimistic(panel: panel, patches: optimistic)
+        let entries = pendingEdits.filter { $0.pro == pro }.map { ($0.itemId, $0.patch) }
+        let folded = PlanFloorplannerLogic.foldPatches(entries, preview: dragPreview)
+        return PlanFloorplannerLogic.mergeOptimistic(panel: panel, patches: folded)
     }
 
     var body: some View {
         let _ = client.mgmtRev
         if let base = rawPanel {
             let panel = effectivePanel(from: base)
-            let pro = panel.pro.isEmpty ? fallbackProject : panel.pro
+            let pro = canonicalPro(from: panel)
             let layers = PlanFloorplannerLogic.allCanvasLayers(planned: panel.layers, copper: panel.copperLayers)
             let curLayer = layers.contains(where: { $0.layer == activeLayer })
                 ? activeLayer
@@ -243,9 +264,13 @@ struct DataPlanFloorplannerView: View {
                 }
             }
             .onChange(of: base.revision) { _, rev in
-                if let oRev = optimisticRev, rev > oRev {
-                    optimistic = [:]
-                    optimisticRev = nil
+                ackedRev = max(ackedRev, rev)
+                let p = canonicalPro(from: base)
+                pendingEdits.removeAll { $0.pro == p && ($0.committedRev ?? Int.max) <= rev }
+            }
+            .onChange(of: board.bbox) { _, bbox in
+                if cameraIsFitted, canvasSize.width > 10, canvasSize.height > 10 {
+                    cam = PlanCamera.fit(bbox: bbox, width: Double(canvasSize.width), height: Double(canvasSize.height), pad: 22)
                 }
             }
             .task(id: "\(pro)|\(base.revision)|\(base.boardTrimmed)") {
@@ -266,7 +291,8 @@ struct DataPlanFloorplannerView: View {
                         },
                         onSteer: { inspectorOpen = false },
                         onCommit: { patch in
-                            applyOptimisticAndSend(pro: pro, id: item.item.id, patch: patch, baseRev: base.revision)
+                            let prev = captureUndoSnapshot(id: item.item.id, patch: patch, panel: panel)
+                            enqueueEdit(pro: pro, id: item.item.id, patch: patch, undoPrev: prev, baseRev: panel.revision)
                             if let mv = patch.layer, mv != item.layer {
                                 activeLayer = mv
                             }
@@ -274,7 +300,8 @@ struct DataPlanFloorplannerView: View {
                         onNote: { text in
                             Task {
                                 do {
-                                    try await client.planUpdate(pro, ops: [["op": "note", "target": item.item.id, "text": text]], base: base.revision)
+                                    let sendBase = max(panel.revision, ackedRev)
+                                    _ = try await client.planUpdate(pro, ops: [["op": "note", "target": item.item.id, "text": text]], base: sendBase)
                                 } catch { errMsg = error.localizedDescription }
                             }
                         }
@@ -447,6 +474,7 @@ struct DataPlanFloorplannerView: View {
                 }
                 .buttonStyle(DButton(primary: stackupOpen, compact: true))
                 Button(Tr.k("gpui.mgmt.plan.fit")) {
+                    cameraIsFitted = true
                     let sz = canvasSize
                     if sz.width > 10 && sz.height > 10 {
                         cam = PlanCamera.fit(bbox: board.bbox, width: sz.width, height: sz.height, pad: 22)
@@ -481,7 +509,8 @@ struct DataPlanFloorplannerView: View {
         GeometryReader { geo in
             let w = max(1, Double(geo.size.width))
             let h = max(1, Double(geo.size.height))
-            let activeCam = cam ?? PlanCamera.fit(bbox: board.bbox, width: w, height: h, pad: 22)
+            let fitCam = PlanCamera.fit(bbox: board.bbox, width: w, height: h, pad: 22)
+            let activeCam = cameraIsFitted ? fitCam : (cam ?? fitCam)
             ZStack(alignment: .topLeading) {
                 Canvas { ctx, size in
                     drawScene(
@@ -502,22 +531,28 @@ struct DataPlanFloorplannerView: View {
                         handleTap(pt: pt, w: w, h: h, cam: activeCam, curLayer: curLayer, draw: draw, panel: panel, pro: pro)
                     },
                     onDoubleTap: { _ in
+                        cameraIsFitted = true
                         cam = PlanCamera.fit(bbox: board.bbox, width: w, height: h, pad: 22)
                     },
                     onPanBegin: { pt in
                         handlePanBegin(pt: pt, w: w, h: h, cam: activeCam, curLayer: curLayer, draw: draw)
                     },
                     onPanChange: { pt, trans in
-                        handlePanChange(pt: pt, trans: trans, w: w, h: h, curLayer: curLayer, draw: draw, baseCam: activeCam)
+                        handlePanChange(pt: pt, trans: trans, w: w, h: h, baseCam: activeCam)
                     },
                     onPanEnd: { vel in
-                        handlePanEnd(vel: vel, w: w, h: h, layers: layers, curLayer: curLayer, board: board, draw: draw, panel: panel, pro: pro, baseCam: activeCam)
+                        handlePanEnd(vel: vel, w: w, h: h, layers: layers, curLayer: curLayer, board: board, panel: panel, pro: pro)
+                    },
+                    onPanCancel: {
+                        handlePanCancel()
                     },
                     onPinch: { factor, anchor in
+                        cameraIsFitted = false
                         let base = cam ?? activeCam
                         cam = base.zoomed(factor: factor, anchorX: anchor.x, anchorY: anchor.y, width: w, height: h)
                     },
                     onTwoFingerPan: { delta in
+                        cameraIsFitted = false
                         let base = cam ?? activeCam
                         cam = base.panned(dxPx: delta.x, dyPx: delta.y)
                     }
@@ -550,18 +585,18 @@ struct DataPlanFloorplannerView: View {
             }
             .onAppear {
                 canvasSize = geo.size
-                if cam == nil && w > 10 && h > 10 {
+                if (cameraIsFitted || cam == nil) && w > 10 && h > 10 {
                     cam = PlanCamera.fit(bbox: board.bbox, width: w, height: h, pad: 22)
                 }
             }
             .onChange(of: geo.size) { _, sz in
                 canvasSize = sz
-                if cam == nil && sz.width > 10 && sz.height > 10 {
+                if (cameraIsFitted || cam == nil) && sz.width > 10 && sz.height > 10 {
                     cam = PlanCamera.fit(bbox: board.bbox, width: sz.width, height: sz.height, pad: 22)
                 }
             }
             .onChange(of: curLayer) { _, _ in
-                if cam == nil && w > 10 && h > 10 {
+                if (cameraIsFitted || cam == nil) && w > 10 && h > 10 {
                     cam = PlanCamera.fit(bbox: board.bbox, width: w, height: h, pad: 22)
                 }
             }
@@ -582,6 +617,8 @@ struct DataPlanFloorplannerView: View {
             if let r = draw.regions.first(where: { $0.id == sv.id }) { return r.outline.count > 3 }
             return false
         }()
+        let hasUndoForSel = PlanFloorplannerLogic.hasUndo(stack: undoStack, pro: pro, id: selectedId)
+        let hasPendingForSel = pendingEdits.contains(where: { $0.pro == pro && $0.itemId == selectedId })
 
         return VStack(spacing: 0) {
             DLine()
@@ -600,19 +637,23 @@ struct DataPlanFloorplannerView: View {
                         }
                         .buttonStyle(DButton(danger: true, compact: true))
                     }
-                    if !undoStack.isEmpty {
+                    if hasUndoForSel {
                         Button(Tr.k("voice.cmd.undo")) {
-                            if let prev = undoStack.popLast() {
-                                applyOptimisticAndSend(pro: pro, id: selectedId, patch: prev, baseRev: panel.revision, recordUndo: false)
+                            if let prev = PlanFloorplannerLogic.popUndo(stack: &undoStack, pro: pro, id: selectedId) {
+                                enqueueEdit(pro: pro, id: prev.id, patch: prev.patch, undoPrev: nil, baseRev: panel.revision, onlyGeom: prev.onlyGeom)
+                                if let mv = prev.patch.layer, !mv.isEmpty {
+                                    activeLayer = mv
+                                }
                             }
                         }
                         .buttonStyle(DButton(compact: true))
                     }
-                    if optimistic[selectedId] != nil {
+                    if hasPendingForSel {
                         Button(Tr.k("mobile.plan.reset")) {
-                            optimistic.removeValue(forKey: selectedId)
-                            undoStack.removeAll()
+                            pendingEdits.removeAll { $0.pro == pro && $0.itemId == selectedId }
+                            undoStack.removeAll { $0.pro == pro && $0.id == selectedId }
                             selectedVertex = nil
+                            Task { await refreshAuthoritativePlan(pro: pro) }
                         }
                         .buttonStyle(DButton(compact: true))
                     }
@@ -689,10 +730,16 @@ struct DataPlanFloorplannerView: View {
         let needHydrate = base.boardTrimmed || base.board == nil
         guard needHydrate else {
             hydratedKey = key; hydratedRev = base.revision
-            hydratedBoard = nil; hydratedDraw = nil
+            hydratedBoard = nil; hydratedDraw = nil; hydratedLayers = nil
+            ackedRev = max(ackedRev, base.revision)
             return
         }
         guard hydratedKey != key || hydratedBoard == nil else { return }
+        await refreshAuthoritativePlan(pro: pro)
+    }
+
+    private func refreshAuthoritativePlan(pro: String) async {
+        guard client.conn == .online, !pro.isEmpty else { return }
         guard let d = try? await client.planGet(pro, board: true),
               let full = PlanFloorplannerLogic.unwrapPanel(from: d) else { return }
         guard full.revision >= hydratedRev else { return }
@@ -700,6 +747,25 @@ struct DataPlanFloorplannerView: View {
         hydratedRev = full.revision
         hydratedBoard = full.board
         hydratedDraw = full.draw
+        hydratedLayers = full.layers.isEmpty ? nil : full.layers
+        ackedRev = max(ackedRev, full.revision)
+        pendingEdits.removeAll { $0.pro == pro && ($0.committedRev ?? Int.max) <= full.revision }
+        if cameraIsFitted, canvasSize.width > 10, canvasSize.height > 10, let hb = full.board {
+            cam = PlanCamera.fit(bbox: hb.bbox, width: Double(canvasSize.width), height: Double(canvasSize.height), pad: 22)
+        }
+    }
+
+    private func captureUndoSnapshot(id: String, patch: PlanOptimisticPatch, panel: PlanPanel) -> PlanOptimisticPatch {
+        var prev = PlanOptimisticPatch()
+        let band = panel.draw?.bands.first(where: { $0.id == id })
+        let region = panel.draw?.regions.first(where: { $0.id == id })
+        let found = findItem(id: id, in: panel.layers)
+        if patch.path != nil { prev.path = band?.path }
+        if patch.outline != nil { prev.outline = region?.outline }
+        if patch.width != nil { prev.width = found?.item.width ?? band?.width ?? 1.5 }
+        if patch.layer != nil { prev.layer = found?.layer ?? band?.layer ?? region?.layer }
+        if patch.locked != nil { prev.locked = found?.item.locked ?? band?.locked ?? region?.locked ?? false }
+        return prev
     }
 
     private func handleTap(pt: CGPoint, w: Double, h: Double, cam: PlanCamera, curLayer: String, draw: PlanDraw, panel: PlanPanel, pro: String) {
@@ -716,16 +782,14 @@ struct DataPlanFloorplannerView: View {
                 let nextIdx = (segIdx + 1) % max(1, r.outline.count)
                 let mid = [(r.outline[segIdx][0] + r.outline[nextIdx][0]) * 0.5, (r.outline[segIdx][1] + r.outline[nextIdx][1]) * 0.5]
                 let updated = PlanFloorplannerLogic.insertVertex(pts: r.outline, segIdx: segIdx, pos: mid, closed: true)
-                let prevPatch = optimistic[id] ?? PlanOptimisticPatch(outline: r.outline)
-                undoStack.append(prevPatch)
-                applyOptimisticAndSend(pro: pro, id: id, patch: PlanOptimisticPatch(outline: updated), baseRev: panel.revision, recordUndo: false)
+                let prevPatch = PlanOptimisticPatch(outline: r.outline)
+                enqueueEdit(pro: pro, id: id, patch: PlanOptimisticPatch(outline: updated), undoPrev: prevPatch, baseRev: panel.revision, onlyGeom: "outline")
                 selectedId = id; selectedVertex = (id, segIdx + 1)
             } else if !isPlane, let b = draw.bands.first(where: { $0.id == id }), !b.locked {
                 let mid = [(b.path[segIdx][0] + b.path[segIdx + 1][0]) * 0.5, (b.path[segIdx][1] + b.path[segIdx + 1][1]) * 0.5]
                 let updated = PlanFloorplannerLogic.insertVertex(pts: b.path, segIdx: segIdx, pos: mid, closed: false)
-                let prevPatch = optimistic[id] ?? PlanOptimisticPatch(path: b.path)
-                undoStack.append(prevPatch)
-                applyOptimisticAndSend(pro: pro, id: id, patch: PlanOptimisticPatch(path: updated), baseRev: panel.revision, recordUndo: false)
+                let prevPatch = PlanOptimisticPatch(path: b.path)
+                enqueueEdit(pro: pro, id: id, patch: PlanOptimisticPatch(path: updated), undoPrev: prevPatch, baseRev: panel.revision, onlyGeom: "path")
                 selectedId = id; selectedVertex = (id, segIdx + 1)
             }
         case .band(let id), .region(let id):
@@ -741,6 +805,7 @@ struct DataPlanFloorplannerView: View {
     }
 
     private func handlePanBegin(pt: CGPoint, w: Double, h: Double, cam: PlanCamera, curLayer: String, draw: PlanDraw) {
+        dragPreview = nil
         let hit = PlanFloorplannerLogic.hitTest(
             bands: draw.bands, regions: draw.regions, layer: curLayer,
             selectedId: selectedId, cam: cam, width: w, height: h, x: pt.x, y: pt.y
@@ -750,7 +815,6 @@ struct DataPlanFloorplannerView: View {
                 let vpx = cam.toPx(x: r.outline[idx][0], y: r.outline[idx][1], width: w, height: h)
                 let grab = CGSize(width: vpx.x - pt.x, height: vpx.y - pt.y)
                 selectedId = id; selectedVertex = (id, idx)
-                undoStack.append(optimistic[id] ?? PlanOptimisticPatch(outline: r.outline))
                 dragKind = .vertex(id: id, isPlane: true, idx: idx, startPts: r.outline, grabOffsetPx: grab)
                 dragWorldCoord = r.outline[idx]
                 dragScreenPt = vpx
@@ -759,7 +823,6 @@ struct DataPlanFloorplannerView: View {
                 let vpx = cam.toPx(x: b.path[idx][0], y: b.path[idx][1], width: w, height: h)
                 let grab = CGSize(width: vpx.x - pt.x, height: vpx.y - pt.y)
                 selectedId = id; selectedVertex = (id, idx)
-                undoStack.append(optimistic[id] ?? PlanOptimisticPatch(path: b.path))
                 dragKind = .vertex(id: id, isPlane: false, idx: idx, startPts: b.path, grabOffsetPx: grab)
                 dragWorldCoord = b.path[idx]
                 dragScreenPt = vpx
@@ -769,9 +832,10 @@ struct DataPlanFloorplannerView: View {
         dragKind = .pan(startCam: cam)
     }
 
-    private func handlePanChange(pt: CGPoint, trans: CGPoint, w: Double, h: Double, curLayer: String, draw: PlanDraw, baseCam: PlanCamera) {
+    private func handlePanChange(pt: CGPoint, trans: CGPoint, w: Double, h: Double, baseCam: PlanCamera) {
         switch dragKind {
         case .pan(let startCam):
+            cameraIsFitted = false
             cam = startCam.panned(dxPx: trans.x, dyPx: trans.y)
         case .vertex(let id, let isPlane, let idx, var pts, let grab):
             let targetPx = CGPoint(x: pt.x + grab.width, y: pt.y + grab.height)
@@ -780,23 +844,38 @@ struct DataPlanFloorplannerView: View {
             pts[idx] = [(wpt[0] * 100).rounded() / 100, (wpt[1] * 100).rounded() / 100]
             dragWorldCoord = pts[idx]
             dragScreenPt = targetPx
-            var patch = optimistic[id] ?? PlanOptimisticPatch()
-            if isPlane { patch.outline = pts } else { patch.path = pts }
-            optimistic[id] = patch
+            dragPreview = (id, isPlane ? PlanOptimisticPatch(outline: pts) : PlanOptimisticPatch(path: pts))
         case .none:
             break
         }
     }
 
-    private func handlePanEnd(vel: CGPoint, w: Double, h: Double, layers: [PlanLayer], curLayer: String, board: PlanBoardGeom, draw: PlanDraw, panel: PlanPanel, pro: String, baseCam: PlanCamera) {
-        let kind = dragKind
+    private func handlePanCancel() {
         dragKind = .none
+        dragPreview = nil
+        dragWorldCoord = nil
+        dragScreenPt = nil
+    }
+
+    private func handlePanEnd(vel: CGPoint, w: Double, h: Double, layers: [PlanLayer], curLayer: String, board: PlanBoardGeom, panel: PlanPanel, pro: String) {
+        let kind = dragKind
+        let preview = dragPreview
+        dragKind = .none
+        dragPreview = nil
         dragWorldCoord = nil
         dragScreenPt = nil
         switch kind {
-        case .vertex(let id, let isPlane, _, _, _):
-            if let patch = optimistic[id] {
-                applyOptimisticAndSend(pro: pro, id: id, patch: patch, baseRev: panel.revision, recordUndo: false, onlyGeom: isPlane ? "outline" : "path")
+        case .vertex(let id, let isPlane, _, let startPts, _):
+            if let preview, preview.id == id {
+                let prevPatch = isPlane ? PlanOptimisticPatch(outline: startPts) : PlanOptimisticPatch(path: startPts)
+                enqueueEdit(
+                    pro: pro,
+                    id: id,
+                    patch: preview.patch,
+                    undoPrev: prevPatch,
+                    baseRev: panel.revision,
+                    onlyGeom: isPlane ? "outline" : "path"
+                )
             }
         case .pan(let startCam):
             // Quick horizontal flick when at fit zoom switches layers
@@ -807,6 +886,7 @@ struct DataPlanFloorplannerView: View {
                     let nxt = (idx + step + layers.count) % layers.count
                     activeLayer = layers[nxt].layer
                     selectedVertex = nil
+                    cameraIsFitted = true
                     cam = fitCam
                 }
             }
@@ -818,40 +898,59 @@ struct DataPlanFloorplannerView: View {
     private func removeSelectedVertex(id: String, idx: Int, draw: PlanDraw, pro: String, rev: Int) {
         if let b = draw.bands.first(where: { $0.id == id }),
            let nextPts = PlanFloorplannerLogic.removeVertex(pts: b.path, idx: idx, closed: false) {
-            undoStack.append(optimistic[id] ?? PlanOptimisticPatch(path: b.path))
             selectedVertex = nil
-            applyOptimisticAndSend(pro: pro, id: id, patch: PlanOptimisticPatch(path: nextPts), baseRev: rev, recordUndo: false)
+            enqueueEdit(pro: pro, id: id, patch: PlanOptimisticPatch(path: nextPts), undoPrev: PlanOptimisticPatch(path: b.path), baseRev: rev, onlyGeom: "path")
         } else if let r = draw.regions.first(where: { $0.id == id }),
                   let nextPts = PlanFloorplannerLogic.removeVertex(pts: r.outline, idx: idx, closed: true) {
-            undoStack.append(optimistic[id] ?? PlanOptimisticPatch(outline: r.outline))
             selectedVertex = nil
-            applyOptimisticAndSend(pro: pro, id: id, patch: PlanOptimisticPatch(outline: nextPts), baseRev: rev, recordUndo: false)
+            enqueueEdit(pro: pro, id: id, patch: PlanOptimisticPatch(outline: nextPts), undoPrev: PlanOptimisticPatch(outline: r.outline), baseRev: rev, onlyGeom: "outline")
         }
     }
 
-    private func applyOptimisticAndSend(pro: String, id: String, patch: PlanOptimisticPatch, baseRev: Int, recordUndo: Bool = true, onlyGeom: String? = nil) {
-        if recordUndo, let prev = optimistic[id] { undoStack.append(prev) }
-        var cur = optimistic[id] ?? PlanOptimisticPatch()
-        if let p = patch.path { cur.path = p }
-        if let o = patch.outline { cur.outline = o }
-        if let w = patch.width { cur.width = w }
-        if let l = patch.layer { cur.layer = l }
-        if let lk = patch.locked { cur.locked = lk }
-        optimistic[id] = cur
-        optimisticRev = baseRev
+    private func enqueueEdit(pro: String, id: String, patch: PlanOptimisticPatch, undoPrev: PlanOptimisticPatch?, baseRev: Int, onlyGeom: String? = nil) {
+        if let undoPrev {
+            undoStack.append(PlanUndoEntry(pro: pro, id: id, patch: undoPrev, onlyGeom: onlyGeom))
+        }
+        let seq = nextEditSeq
+        nextEditSeq += 1
+        pendingEdits.append(PendingPlanEdit(seq: seq, pro: pro, itemId: id, patch: patch, onlyGeom: onlyGeom, committedRev: nil))
+        ackedRev = max(ackedRev, baseRev)
+        drainPendingEditsIfNeeded(fallbackBaseRev: baseRev)
+    }
 
-        var fields: [String: Any] = [:]
-        if onlyGeom == "path" || (onlyGeom == nil && patch.path != nil), let p = patch.path { fields["path"] = p }
-        if onlyGeom == "outline" || (onlyGeom == nil && patch.outline != nil), let o = patch.outline { fields["outline"] = o }
-        if let w = patch.width { fields["width"] = w }
-        if let l = patch.layer { fields["layer"] = l }
-        if let lk = patch.locked { fields["locked"] = lk }
-        guard !fields.isEmpty else { return }
-        Task {
-            do {
-                try await client.planUpdate(pro, ops: [["op": "set", "id": id, "fields": fields]], base: baseRev)
-            } catch {
-                errMsg = error.localizedDescription
+    private func drainPendingEditsIfNeeded(fallbackBaseRev: Int) {
+        guard !drainingEdits else { return }
+        drainingEdits = true
+        Task { @MainActor in
+            defer { drainingEdits = false }
+            while let edit = pendingEdits.first(where: { $0.committedRev == nil }) {
+                var fields: [String: Any] = [:]
+                if edit.onlyGeom == "path" || (edit.onlyGeom == nil && edit.patch.path != nil), let p = edit.patch.path { fields["path"] = p }
+                if edit.onlyGeom == "outline" || (edit.onlyGeom == nil && edit.patch.outline != nil), let o = edit.patch.outline { fields["outline"] = o }
+                if let w = edit.patch.width { fields["width"] = w }
+                if let l = edit.patch.layer { fields["layer"] = l }
+                if let lk = edit.patch.locked { fields["locked"] = lk }
+                guard !fields.isEmpty else {
+                    pendingEdits.removeAll { $0.seq == edit.seq }
+                    continue
+                }
+                let serverRev = rawPanel?.revision ?? 0
+                let authRev = max(serverRev, hydratedRev >= serverRev ? hydratedRev : 0)
+                let sendBase = max(max(fallbackBaseRev, authRev), ackedRev)
+                do {
+                    let replyRev = try await client.planUpdate(edit.pro, ops: [["op": "set", "id": edit.itemId, "fields": fields]], base: sendBase)
+                    let targetRev = (replyRev ?? 0) > sendBase ? (replyRev ?? (sendBase + 1)) : (sendBase + 1)
+                    ackedRev = max(ackedRev, targetRev)
+                    if let idx = pendingEdits.firstIndex(where: { $0.seq == edit.seq }) {
+                        pendingEdits[idx].committedRev = targetRev
+                    }
+                    let latestServerRev = rawPanel?.revision ?? 0
+                    pendingEdits.removeAll { $0.pro == edit.pro && ($0.committedRev ?? Int.max) <= latestServerRev }
+                } catch {
+                    pendingEdits.removeAll { $0.seq == edit.seq }
+                    errMsg = error.localizedDescription
+                    await refreshAuthoritativePlan(pro: edit.pro)
+                }
             }
         }
     }
@@ -1201,6 +1300,7 @@ private struct PlanTouchOverlay: UIViewRepresentable {
     var onPanBegin: (CGPoint) -> Void
     var onPanChange: (CGPoint, CGPoint) -> Void
     var onPanEnd: (CGPoint) -> Void
+    var onPanCancel: () -> Void
     var onPinch: (Double, CGPoint) -> Void
     var onTwoFingerPan: (CGPoint) -> Void
 
@@ -1267,7 +1367,8 @@ private struct PlanTouchOverlay: UIViewRepresentable {
             switch g.state {
             case .began: parent.onPanBegin(loc)
             case .changed: parent.onPanChange(loc, tr)
-            case .ended, .cancelled, .failed: parent.onPanEnd(g.velocity(in: g.view))
+            case .ended: parent.onPanEnd(g.velocity(in: g.view))
+            case .cancelled, .failed: parent.onPanCancel()
             default: break
             }
         }
@@ -1275,7 +1376,9 @@ private struct PlanTouchOverlay: UIViewRepresentable {
         @objc func handleTwoPan(_ g: UIPanGestureRecognizer) {
             let tr = g.translation(in: g.view)
             switch g.state {
-            case .began: lastTwoPanTrans = .zero
+            case .began:
+                lastTwoPanTrans = .zero
+                parent.onPanCancel()
             case .changed:
                 let d = CGPoint(x: tr.x - lastTwoPanTrans.x, y: tr.y - lastTwoPanTrans.y)
                 lastTwoPanTrans = tr
@@ -1286,6 +1389,10 @@ private struct PlanTouchOverlay: UIViewRepresentable {
         }
 
         @objc func handlePinch(_ g: UIPinchGestureRecognizer) {
+            if g.state == .began {
+                parent.onPanCancel()
+                return
+            }
             guard g.state == .changed, g.numberOfTouches >= 2 else { return }
             let scale = Double(g.scale)
             g.scale = 1.0

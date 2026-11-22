@@ -99,7 +99,7 @@ internal fun MgmtHost(
             val panelMod = if (open == "plan") Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth().fillMaxHeight(.55f)
             Column(panelMod.background(dcs.background).testTag("mgmt.panel.$open")) {
                 DLine()
-                when (open) { "bom" -> BomPanel(); "checks" -> ChecksPanel(); "life" -> LifePanel(); "plan" -> PlanFloorplannerPanel(project); "fab" -> FabPanel(); else -> {} }
+                when (open) { "bom" -> BomPanel(); "checks" -> ChecksPanel(); "life" -> LifePanel(); "plan" -> key(project) { PlanFloorplannerPanel(project) }; "fab" -> FabPanel(); else -> {} }
             }
         }
         DLine()

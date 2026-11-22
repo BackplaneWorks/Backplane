@@ -196,6 +196,20 @@ data class PlanOptimisticPatch(
     val locked: Boolean? = null,
 )
 
+data class PlanBoardRef(
+    val value: String = "",
+    val pcb: String = "",
+    val sch: String = "",
+    val project: String = "",
+)
+
+data class PlanUndoEntry(
+    val pro: String,
+    val id: String,
+    val patch: PlanOptimisticPatch,
+    val onlyGeom: String? = null,
+)
+
 object PlanFloorplannerModel {
     private const val DEFAULT_STATE = "proposed"
     private val railPalette = intArrayOf(0xF59E0B, 0xC084FC, 0xFB7185, 0x34D399, 0x38BDF8, 0xFACC15, 0x94A3B8)
@@ -260,7 +274,117 @@ object PlanFloorplannerModel {
         val target = json.optJSONObject("panel")
             ?: json.optJSONObject("result")?.optJSONObject("panel")
             ?: if (json.has("layers") || json.has("revision") || json.optBoolean("empty", false)) json else null
-        return target?.let(::parsePanel)
+        val parsed = target?.let(::parsePanel) ?: return null
+        if (parsed.pro.isNotEmpty()) return parsed
+        val outerPro = json.optString("pro").ifEmpty {
+            json.optString("project").ifEmpty {
+                json.optJSONObject("result")?.let { r -> r.optString("pro").ifEmpty { r.optString("project") } }.orEmpty()
+            }
+        }
+        return if (outerPro.isNotEmpty()) parsed.copy(pro = outerPro) else parsed
+    }
+
+    private fun normPath(raw: String, root: String): String {
+        var p = raw.trim().replace('\\', '/')
+        while (p.length > 1 && p.endsWith('/')) p = p.dropLast(1)
+        if (p.isEmpty()) return ""
+        if (p.startsWith('/')) return p
+        var r = root.trim().replace('\\', '/')
+        while (r.length > 1 && r.endsWith('/')) r = r.dropLast(1)
+        return if (r.isEmpty()) p else "$r/$p"
+    }
+
+    private fun parentDir(path: String): String {
+        val idx = path.lastIndexOf('/')
+        if (idx < 0) return ""
+        return if (idx == 0) "/" else path.substring(0, idx)
+    }
+
+    fun resolveMgmtProject(
+        targetPath: String?,
+        selectedBoard: PlanBoardRef?,
+        boards: List<PlanBoardRef>,
+        root: String,
+    ): String {
+        val absTarget = normPath(targetPath.orEmpty(), root)
+        if (absTarget.isNotEmpty()) {
+            fun boardId(b: PlanBoardRef): String {
+                for (raw in listOf(b.project, b.pcb, b.value)) {
+                    val p = normPath(raw, root)
+                    if (p.isNotEmpty()) return p
+                }
+                return absTarget
+            }
+            for (b in boards) {
+                for (raw in listOf(b.pcb, b.sch, b.value, b.project)) {
+                    val cand = normPath(raw, root)
+                    if (cand.isNotEmpty() && cand == absTarget) return boardId(b)
+                }
+            }
+            val tDir = parentDir(absTarget)
+            if (tDir.isNotEmpty()) {
+                var bestLen = -1
+                var bestId = ""
+                for (b in boards) {
+                    for (raw in listOf(b.project, b.pcb, b.sch, b.value)) {
+                        val cand = normPath(raw, root)
+                        if (cand.isEmpty()) continue
+                        val bDir = parentDir(cand)
+                        if (bDir.isEmpty()) continue
+                        if (tDir == bDir || tDir.startsWith("$bDir/")) {
+                            if (bDir.length > bestLen) {
+                                bestLen = bDir.length
+                                bestId = boardId(b)
+                            }
+                        }
+                    }
+                }
+                if (bestLen >= 0) return bestId
+            }
+            return absTarget
+        }
+        if (selectedBoard != null) {
+            val p = normPath(selectedBoard.project, root)
+            if (p.isNotEmpty()) return p
+            val pcb = normPath(selectedBoard.pcb, root)
+            if (pcb.isNotEmpty()) return pcb
+        }
+        return normPath(root, "")
+    }
+
+    fun hasUndo(stack: List<PlanUndoEntry>, pro: String, id: String): Boolean =
+        id.isNotEmpty() && stack.any { it.pro == pro && it.id == id }
+
+    fun popUndo(stack: List<PlanUndoEntry>, pro: String, id: String): Pair<PlanUndoEntry?, List<PlanUndoEntry>> {
+        if (id.isEmpty()) return null to stack
+        val idx = stack.indexOfLast { it.pro == pro && it.id == id }
+        if (idx < 0) return null to stack
+        val entry = stack[idx]
+        val next = stack.toMutableList().also { it.removeAt(idx) }
+        return entry to next
+    }
+
+    fun mergePatch(base: PlanOptimisticPatch?, over: PlanOptimisticPatch): PlanOptimisticPatch =
+        PlanOptimisticPatch(
+            path = over.path ?: base?.path,
+            outline = over.outline ?: base?.outline,
+            width = over.width ?: base?.width,
+            layer = over.layer ?: base?.layer,
+            locked = over.locked ?: base?.locked,
+        )
+
+    fun foldPatches(
+        entries: List<Pair<String, PlanOptimisticPatch>>,
+        preview: Pair<String, PlanOptimisticPatch>? = null,
+    ): Map<String, PlanOptimisticPatch> {
+        val out = LinkedHashMap<String, PlanOptimisticPatch>()
+        for ((id, patch) in entries) {
+            out[id] = mergePatch(out[id], patch)
+        }
+        if (preview != null) {
+            out[preview.first] = mergePatch(out[preview.first], preview.second)
+        }
+        return out
     }
 
     fun parsePanel(o: JSONObject): PlanPanel {
@@ -373,7 +497,7 @@ object PlanFloorplannerModel {
             empty = o.optBoolean("empty", false),
             on = o.optBoolean("on", false),
             live = o.optBoolean("live", false),
-            pro = o.optString("pro"),
+            pro = o.optString("pro").ifEmpty { o.optString("project") },
             boardPath = o.optString("board_path"),
             boardRel = o.optString("board_rel"),
             routing = o.optBoolean("routing", false),
@@ -518,15 +642,15 @@ object PlanFloorplannerModel {
             sx += p.first; sy += p.second
         }
         val cands = mutableListOf(((minx + maxx) * 0.5) to ((miny + maxy) * 0.5), (sx / outer.size) to (sy / outer.size))
-        for (fy in doubleArrayOf(0.5, 0.25, 0.75)) {
-            for (fx in doubleArrayOf(0.5, 0.25, 0.75)) {
+        for (fy in doubleArrayOf(0.5, 0.25, 0.75, 0.125, 0.875)) {
+            for (fx in doubleArrayOf(0.5, 0.25, 0.75, 0.125, 0.875)) {
                 cands.add((minx + (maxx - minx) * fx) to (miny + (maxy - miny) * fy))
             }
         }
         for (c in cands) {
             if (pointInRing(c.first, c.second, outer) && holes.none { pointInRing(c.first, c.second, it) }) return c
         }
-        return ((minx + maxx) * 0.5) to ((miny + maxy) * 0.5)
+        return null
     }
 
     private fun distSqSeg(px: Double, py: Double, ax: Double, ay: Double, bx: Double, by: Double): Double {
@@ -655,7 +779,6 @@ object PlanFloorplannerModel {
                         val cand = PlanCorridorPill(c.b.id, shortTxt, cx, cy, pw, ph, c.col, c.sel)
                         if (placed.none { it.overlaps(cand.rect.pad(2.0)) }) { chosen = cand; break }
                     }
-                    if (chosen == null) chosen = PlanCorridorPill(c.b.id, shortTxt, cx, clampY(ry, ph), pw, ph, c.col, c.sel)
                 }
             }
             if (chosen != null) {

@@ -35,6 +35,7 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
+import androidx.compose.ui.input.pointer.changedToUp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
@@ -67,6 +68,15 @@ private fun rgbColor(rgb: Int, alpha: Float = 1f): Color {
     return Color((a shl 24) or (rgb and 0x00FFFFFF))
 }
 
+private data class PendingPlanEdit(
+    val seq: Int,
+    val pro: String,
+    val itemId: String,
+    val patch: PlanOptimisticPatch,
+    val onlyGeom: String? = null,
+    val committedRev: Int? = null,
+)
+
 @Composable
 internal fun PlanFloorplannerPanel(fallbackProject: String) {
     val scope = rememberCoroutineScope()
@@ -79,17 +89,24 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
     var inspectorOpen by remember(fallbackProject) { mutableStateOf(false) }
     var stackupOpen by remember(fallbackProject) { mutableStateOf(false) }
     var cam by remember(fallbackProject) { mutableStateOf<PlanCamera?>(null) }
+    var cameraIsFitted by remember(fallbackProject) { mutableStateOf(true) }
     var canvasPx by remember { mutableStateOf(IntSize.Zero) }
 
     var hydratedKey by remember(fallbackProject) { mutableStateOf("") }
     var hydratedRev by remember(fallbackProject) { mutableIntStateOf(-1) }
     var hydratedBoard by remember(fallbackProject) { mutableStateOf<PlanBoardGeom?>(null) }
     var hydratedDraw by remember(fallbackProject) { mutableStateOf<PlanDraw?>(null) }
+    var hydratedLayers by remember(fallbackProject) { mutableStateOf<List<PlanLayer>?>(null) }
 
-    var optimistic by remember(fallbackProject) { mutableStateOf<Map<String, PlanOptimisticPatch>>(emptyMap()) }
-    var optimisticRev by remember(fallbackProject) { mutableStateOf<Int?>(null) }
-    var undoStack by remember(fallbackProject) { mutableStateOf<List<PlanOptimisticPatch>>(emptyList()) }
+    var pendingEdits by remember(fallbackProject) { mutableStateOf<List<PendingPlanEdit>>(emptyList()) }
+    var nextEditSeq by remember(fallbackProject) { mutableIntStateOf(1) }
+    var drainingEdits by remember(fallbackProject) { mutableStateOf(false) }
+    var ackedRev by remember(fallbackProject) { mutableIntStateOf(0) }
+    var dragPreview by remember(fallbackProject) { mutableStateOf<Pair<String, PlanOptimisticPatch>?>(null) }
+    var undoStack by remember(fallbackProject) { mutableStateOf<List<PlanUndoEntry>>(emptyList()) }
     var errMsg by remember(fallbackProject) { mutableStateOf("") }
+    var lastCanonicalPro by remember(fallbackProject) { mutableStateOf("") }
+    val revRef = remember(fallbackProject) { intArrayOf(0) }
 
     var dragWorld by remember { mutableStateOf<Pair<Double, Double>?>(null) }
     var dragScreen by remember { mutableStateOf<Offset?>(null) }
@@ -103,15 +120,54 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
         return
     }
 
-    LaunchedEffect(basePanel.revision) {
-        val oRev = optimisticRev
-        if (oRev != null && basePanel.revision > oRev) {
-            optimistic = emptyMap()
-            optimisticRev = null
+    val pro = basePanel.pro.ifEmpty { DataClient.mgmtProject.ifEmpty { fallbackProject } }
+    val authBaseRev = max(basePanel.revision, if (hydratedKey.startsWith("$pro:") && hydratedRev > basePanel.revision) hydratedRev else 0)
+    revRef[0] = authBaseRev
+
+    LaunchedEffect(pro) {
+        if (lastCanonicalPro.isNotEmpty() && lastCanonicalPro != pro) {
+            dragPreview = null
+            dragWorld = null
+            dragScreen = null
+            selectedId = ""
+            selectedVertex = null
+            inspectorOpen = false
+            cameraIsFitted = true
+            cam = null
+            hydratedKey = ""
+            hydratedRev = -1
+            hydratedBoard = null
+            hydratedDraw = null
+            hydratedLayers = null
+            ackedRev = basePanel.revision
+        }
+        lastCanonicalPro = pro
+    }
+
+    LaunchedEffect(basePanel.revision, pro) {
+        ackedRev = max(ackedRev, basePanel.revision)
+        pendingEdits = pendingEdits.filterNot { it.pro == pro && (it.committedRev ?: Int.MAX_VALUE) <= basePanel.revision }
+    }
+
+    suspend fun refreshAuthoritativePlan(targetPro: String) {
+        if (DataClient.conn != DataClient.Conn.ONLINE || targetPro.isEmpty()) return
+        runCatching {
+            val reply = DataClient.planGet(targetPro, board = true)
+            PlanFloorplannerModel.unwrapPanel(reply)?.let { full ->
+                if (full.revision >= hydratedRev) {
+                    hydratedKey = "$targetPro:${full.revision}"
+                    hydratedRev = full.revision
+                    hydratedBoard = full.board
+                    hydratedDraw = full.draw
+                    hydratedLayers = full.layers.takeIf { it.isNotEmpty() }
+                    revRef[0] = max(revRef[0], full.revision)
+                    ackedRev = max(ackedRev, full.revision)
+                    pendingEdits = pendingEdits.filterNot { it.pro == targetPro && (it.committedRev ?: Int.MAX_VALUE) <= full.revision }
+                }
+            }
         }
     }
 
-    val pro = basePanel.pro.ifEmpty { fallbackProject }
     LaunchedEffect(pro, basePanel.revision, basePanel.boardTrimmed, DataClient.conn) {
         if (DataClient.conn != DataClient.Conn.ONLINE || pro.isEmpty()) return@LaunchedEffect
         val key = "$pro:${basePanel.revision}"
@@ -121,29 +177,30 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
             hydratedRev = basePanel.revision
             hydratedBoard = null
             hydratedDraw = null
+            hydratedLayers = null
+            ackedRev = max(ackedRev, basePanel.revision)
             return@LaunchedEffect
         }
         if (hydratedKey == key && hydratedBoard != null) return@LaunchedEffect
-        runCatching {
-            val reply = DataClient.planGet(pro, board = true)
-            PlanFloorplannerModel.unwrapPanel(reply)?.let { full ->
-                if (full.revision >= hydratedRev) {
-                    hydratedKey = "$pro:${full.revision}"
-                    hydratedRev = full.revision
-                    hydratedBoard = full.board
-                    hydratedDraw = full.draw
-                }
-            }
-        }
+        refreshAuthoritativePlan(pro)
     }
 
-    val panel = remember(basePanel, hydratedBoard, hydratedDraw, hydratedKey, hydratedRev, optimistic, pro) {
+    val panel = remember(basePanel, hydratedBoard, hydratedDraw, hydratedLayers, hydratedKey, hydratedRev, pendingEdits, dragPreview, pro) {
         val withHydrated = if (hydratedKey.startsWith("$pro:") && hydratedRev >= basePanel.revision) {
-            basePanel.copy(board = hydratedBoard ?: basePanel.board, draw = hydratedDraw ?: basePanel.draw)
+            basePanel.copy(
+                board = hydratedBoard ?: basePanel.board,
+                draw = hydratedDraw ?: basePanel.draw,
+                layers = if (hydratedRev > basePanel.revision && hydratedLayers != null) hydratedLayers!! else basePanel.layers,
+                revision = max(basePanel.revision, hydratedRev),
+            )
         } else {
             basePanel
         }
-        PlanFloorplannerModel.mergeOptimistic(withHydrated, optimistic)
+        val folded = PlanFloorplannerModel.foldPatches(
+            pendingEdits.filter { it.pro == pro }.map { it.itemId to it.patch },
+            preview = dragPreview,
+        )
+        PlanFloorplannerModel.mergeOptimistic(withHydrated, folded)
     }
 
     val layers = remember(panel.layers, panel.copperLayers) {
@@ -154,34 +211,79 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
     val board = panel.board ?: PlanBoardGeom()
     val draw = panel.draw ?: PlanDraw()
 
-    fun sendPatch(id: String, patch: PlanOptimisticPatch, recordUndo: Boolean = true, onlyGeom: String? = null) {
-        if (recordUndo) optimistic[id]?.let { undoStack = undoStack + it }
-        val prev = optimistic[id] ?: PlanOptimisticPatch()
-        val merged = PlanOptimisticPatch(
-            path = patch.path ?: prev.path,
-            outline = patch.outline ?: prev.outline,
-            width = patch.width ?: prev.width,
-            layer = patch.layer ?: prev.layer,
-            locked = patch.locked ?: prev.locked,
+    fun captureUndoSnapshot(id: String, patch: PlanOptimisticPatch): PlanOptimisticPatch {
+        val band = panel.draw?.bands?.firstOrNull { it.id == id }
+        val region = panel.draw?.regions?.firstOrNull { it.id == id }
+        val found = findPlanItem(id, panel.layers)
+        return PlanOptimisticPatch(
+            path = if (patch.path != null) band?.path else null,
+            outline = if (patch.outline != null) region?.outline else null,
+            width = if (patch.width != null) (found?.second?.width ?: band?.width ?: 1.5) else null,
+            layer = if (patch.layer != null) (found?.first ?: band?.layer ?: region?.layer) else null,
+            locked = if (patch.locked != null) (found?.second?.locked ?: band?.locked ?: region?.locked ?: false) else null,
         )
-        optimistic = optimistic + (id to merged)
-        optimisticRev = basePanel.revision
-        val fields = JSONObject()
-        if (onlyGeom == "path" || (onlyGeom == null && patch.path != null)) {
-            patch.path?.let { pts -> fields.put("path", JSONArray(pts.map { JSONArray(listOf(it.first, it.second)) })) }
-        }
-        if (onlyGeom == "outline" || (onlyGeom == null && patch.outline != null)) {
-            patch.outline?.let { pts -> fields.put("outline", JSONArray(pts.map { JSONArray(listOf(it.first, it.second)) })) }
-        }
-        patch.width?.let { fields.put("width", it) }
-        patch.layer?.let { fields.put("layer", it) }
-        patch.locked?.let { fields.put("locked", it) }
-        if (fields.length() == 0) return
-        val op = JSONObject().put("op", "set").put("id", id).put("fields", fields)
+    }
+
+    fun drainPendingEditsIfNeeded(fallbackBaseRev: Int) {
+        if (drainingEdits) return
+        drainingEdits = true
         scope.launch {
-            runCatching { DataClient.planUpdate(pro, listOf(op), basePanel.revision) }
-                .onFailure { errMsg = it.message ?: Msg.android_failed_generic }
+            try {
+                while (true) {
+                    val edit = pendingEdits.firstOrNull { it.committedRev == null } ?: break
+                    val fields = JSONObject()
+                    if (edit.onlyGeom == "path" || (edit.onlyGeom == null && edit.patch.path != null)) {
+                        edit.patch.path?.let { pts -> fields.put("path", JSONArray(pts.map { JSONArray(listOf(it.first, it.second)) })) }
+                    }
+                    if (edit.onlyGeom == "outline" || (edit.onlyGeom == null && edit.patch.outline != null)) {
+                        edit.patch.outline?.let { pts -> fields.put("outline", JSONArray(pts.map { JSONArray(listOf(it.first, it.second)) })) }
+                    }
+                    edit.patch.width?.let { fields.put("width", it) }
+                    edit.patch.layer?.let { fields.put("layer", it) }
+                    edit.patch.locked?.let { fields.put("locked", it) }
+                    if (fields.length() == 0) {
+                        pendingEdits = pendingEdits.filterNot { it.seq == edit.seq }
+                        continue
+                    }
+                    val sendBase = max(max(fallbackBaseRev, revRef[0]), ackedRev)
+                    val op = JSONObject().put("op", "set").put("id", edit.itemId).put("fields", fields)
+                    runCatching { DataClient.planUpdate(edit.pro, listOf(op), sendBase) }
+                        .onSuccess { reply ->
+                            val replyRev = reply.optInt("revision", 0)
+                            val targetRev = if (replyRev > sendBase) replyRev else (sendBase + 1)
+                            ackedRev = max(ackedRev, targetRev)
+                            pendingEdits = pendingEdits
+                                .map { if (it.seq == edit.seq) it.copy(committedRev = targetRev) else it }
+                                .filterNot { it.pro == edit.pro && (it.committedRev ?: Int.MAX_VALUE) <= revRef[0] }
+                        }
+                        .onFailure { err ->
+                            pendingEdits = pendingEdits.filterNot { it.seq == edit.seq }
+                            errMsg = err.message ?: Msg.android_failed_generic
+                            refreshAuthoritativePlan(edit.pro)
+                        }
+                }
+            } finally {
+                drainingEdits = false
+            }
         }
+    }
+
+    fun enqueueEdit(
+        targetPro: String,
+        id: String,
+        patch: PlanOptimisticPatch,
+        undoPrev: PlanOptimisticPatch?,
+        baseRev: Int,
+        onlyGeom: String? = null,
+    ) {
+        if (undoPrev != null) {
+            undoStack = undoStack + PlanUndoEntry(targetPro, id, undoPrev, onlyGeom)
+        }
+        val seq = nextEditSeq
+        nextEditSeq += 1
+        pendingEdits = pendingEdits + PendingPlanEdit(seq, targetPro, id, patch, onlyGeom, committedRev = null)
+        ackedRev = max(ackedRev, baseRev)
+        drainPendingEditsIfNeeded(baseRev)
     }
 
     val density = LocalDensity.current
@@ -190,6 +292,7 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
     val canvasDpH = canvasPx.height.toDouble() / dpScale
 
     val fitCameraNow: () -> Unit = {
+        cameraIsFitted = true
         if (canvasDpW > 10.0 && canvasDpH > 10.0) {
             cam = PlanCamera.fit(board.bbox, canvasDpW, canvasDpH, 22.0)
         } else {
@@ -197,8 +300,8 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
         }
     }
 
-    LaunchedEffect(curLayer, canvasPx, dpScale, board.bbox) {
-        if (cam == null && canvasDpW > 10.0 && canvasDpH > 10.0) {
+    LaunchedEffect(curLayer, canvasPx, dpScale, board.bbox, cameraIsFitted) {
+        if ((cameraIsFitted || cam == null) && canvasDpW > 10.0 && canvasDpH > 10.0) {
             cam = PlanCamera.fit(board.bbox, canvasDpW, canvasDpH, 22.0)
         }
     }
@@ -349,12 +452,21 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
         DLine()
 
         // Interactive darkroom PCB canvas (all PlanCamera & hitTest math stays in density-independent dp)
-        val activeCam = cam ?: if (canvasDpW > 10.0 && canvasDpH > 10.0) {
+        val fittedCam = if (canvasDpW > 10.0 && canvasDpH > 10.0) {
             PlanCamera.fit(board.bbox, canvasDpW, canvasDpH, 22.0)
         } else {
             PlanCamera.fit(board.bbox, 360.0, 260.0, 22.0)
         }
-        val toDpOffset: (Offset) -> Offset = { p -> Offset(p.x / dpScale, p.y / dpScale) }
+        val activeCam = if (cameraIsFitted) fittedCam else (cam ?: fittedCam)
+        val stDraw by rememberUpdatedState(draw)
+        val stBoard by rememberUpdatedState(board)
+        val stLayers by rememberUpdatedState(layers)
+        val stSelectedId by rememberUpdatedState(selectedId)
+        val stCanvasDpW by rememberUpdatedState(canvasDpW)
+        val stCanvasDpH by rememberUpdatedState(canvasDpH)
+        val stDpScale by rememberUpdatedState(dpScale)
+        val stActiveCam by rememberUpdatedState(activeCam)
+        val stBaseRev by rememberUpdatedState(panel.revision)
         val touchSlopDp = 8f
 
         Box(
@@ -366,37 +478,48 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
                     canvasPx = sz
                     val dw = sz.width.toDouble() / dpScale
                     val dh = sz.height.toDouble() / dpScale
-                    if (cam == null && dw > 10.0 && dh > 10.0) {
+                    if ((cameraIsFitted || cam == null) && dw > 10.0 && dh > 10.0) {
                         cam = PlanCamera.fit(board.bbox, dw, dh, 22.0)
                     }
                 }
-                .pointerInput(curLayer, draw, board, selectedId, pro, basePanel.revision, canvasPx, dpScale) {
-                    val w = canvasDpW.coerceAtLeast(1.0)
-                    val h = canvasDpH.coerceAtLeast(1.0)
+                .pointerInput(pro, curLayer) {
                     awaitEachGesture {
                         val first = awaitFirstDown(requireUnconsumed = false)
-                        val downPos = toDpOffset(first.position)
+                        val gScale = stDpScale
+                        val w = stCanvasDpW.coerceAtLeast(1.0)
+                        val h = stCanvasDpH.coerceAtLeast(1.0)
+                        val gDraw = stDraw
+                        val gBoard = stBoard
+                        val gLayers = stLayers
+                        val gSel = stSelectedId
+                        val startCam = stActiveCam
+                        val gBaseRev = stBaseRev
+                        val toDp: (Offset) -> Offset = { p -> Offset(p.x / gScale, p.y / gScale) }
+
+                        val downPos = toDp(first.position)
                         val downTime = System.currentTimeMillis()
                         var moved = false
                         var wasMulti = false
+                        var liftedNormally = false
                         var prevSpan = 0f
                         var prevCentroid = Offset.Zero
-                        val startCam = cam ?: activeCam
+                        var multiCam = startCam
 
                         val startHit = PlanFloorplannerModel.hitTest(
-                            draw.bands, draw.regions, curLayer, selectedId, startCam, w, h,
+                            gDraw.bands, gDraw.regions, curLayer, gSel, startCam, w, h,
                             downPos.x.toDouble(), downPos.y.toDouble(), 24.0, 20.0,
                         )
                         var dragVertex: PlanHit.Vertex? = null
                         var vertexGrab = Offset.Zero
                         var vertexPts: List<Pair<Double, Double>> = emptyList()
+                        var latestVertexPts: List<Pair<Double, Double>>? = null
                         var totalPan = Offset.Zero
 
                         if (startHit is PlanHit.Vertex) {
                             val pts = if (startHit.isPlane) {
-                                draw.regions.firstOrNull { it.id == startHit.id && !it.locked }?.outline.orEmpty()
+                                gDraw.regions.firstOrNull { it.id == startHit.id && !it.locked }?.outline.orEmpty()
                             } else {
-                                draw.bands.firstOrNull { it.id == startHit.id && !it.locked }?.path.orEmpty()
+                                gDraw.bands.firstOrNull { it.id == startHit.id && !it.locked }?.path.orEmpty()
                             }
                             if (startHit.idx in pts.indices) {
                                 dragVertex = startHit
@@ -406,141 +529,150 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
                             }
                         }
 
-                        while (true) {
-                            val ev = awaitPointerEvent()
-                            val active = ev.changes.filter { it.pressed }
-                            if (active.isEmpty()) break
-
-                            if (active.size >= 2) {
-                                wasMulti = true
-                                dragVertex = null
-                                dragWorld = null
-                                dragScreen = null
-                                val p0 = toDpOffset(active[0].position)
-                                val p1 = toDpOffset(active[1].position)
-                                val centroid = Offset((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f)
-                                val span = hypot((p1.x - p0.x).toDouble(), (p1.y - p0.y).toDouble()).toFloat()
-                                if (prevSpan > 2f && span > 2f) {
-                                    val dc = centroid - prevCentroid
-                                    val factor = (span / prevSpan).toDouble().coerceIn(0.6, 1.8)
-                                    val base = cam ?: startCam
-                                    cam = base.pan(dc.x.toDouble(), dc.y.toDouble())
-                                        .zoom(factor, centroid.x.toDouble(), centroid.y.toDouble(), w, h)
+                        try {
+                            while (true) {
+                                val ev = awaitPointerEvent()
+                                val active = ev.changes.filter { it.pressed }
+                                if (active.isEmpty()) {
+                                    liftedNormally = ev.changes.any { it.changedToUp() }
+                                    break
                                 }
-                                prevSpan = span
-                                prevCentroid = centroid
-                                active.forEach { it.consume() }
-                            } else {
-                                prevSpan = 0f
-                                val ch = active[0]
-                                val curDp = toDpOffset(ch.position)
-                                val deltaDp = toDpOffset(ch.position - ch.previousPosition)
-                                val dv = dragVertex
-                                if (dv != null && !wasMulti) {
-                                    if (!moved && hypot((curDp.x - downPos.x).toDouble(), (curDp.y - downPos.y).toDouble()) > touchSlopDp) {
-                                        moved = true
-                                        selectedId = dv.id
-                                        selectedVertex = dv.id to dv.idx
-                                        undoStack = undoStack + (optimistic[dv.id] ?: if (dv.isPlane) PlanOptimisticPatch(outline = vertexPts) else PlanOptimisticPatch(path = vertexPts))
-                                    }
-                                    if (moved) {
-                                        ch.consume()
-                                        val targetDp = curDp + vertexGrab
-                                        val (wx, wy) = startCam.toWorld(targetDp.x.toDouble(), targetDp.y.toDouble(), w, h)
-                                        val snapped = PlanFloorplannerModel.round2(wx) to PlanFloorplannerModel.round2(wy)
-                                        dragWorld = snapped
-                                        dragScreen = targetDp
-                                        val nextPts = vertexPts.toMutableList().apply { set(dv.idx, snapped) }
-                                        val patch = if (dv.isPlane) PlanOptimisticPatch(outline = nextPts) else PlanOptimisticPatch(path = nextPts)
-                                        optimistic = optimistic + (dv.id to (optimistic[dv.id]?.copy(
-                                            path = patch.path ?: optimistic[dv.id]?.path,
-                                            outline = patch.outline ?: optimistic[dv.id]?.outline,
-                                        ) ?: patch))
-                                    }
-                                } else if (!wasMulti) {
-                                    totalPan += deltaDp
-                                    if (!moved && hypot((curDp.x - downPos.x).toDouble(), (curDp.y - downPos.y).toDouble()) > touchSlopDp) {
-                                        moved = true
-                                    }
-                                    if (moved) {
-                                        ch.consume()
-                                        cam = startCam.pan(totalPan.x.toDouble(), totalPan.y.toDouble())
-                                    }
-                                }
-                            }
-                        }
 
-                        if (!moved && !wasMulti) {
-                            val now = System.currentTimeMillis()
-                            if (now - lastTapAt < 280L && hypot((downPos.x - lastTapPos.x).toDouble(), (downPos.y - lastTapPos.y).toDouble()) < touchSlopDp * 4) {
-                                lastTapAt = 0L
-                                fitCameraNow()
-                            } else {
-                                lastTapAt = now
-                                lastTapPos = downPos
-                                when (startHit) {
-                                    is PlanHit.Vertex -> {
-                                        selectedId = startHit.id
-                                        selectedVertex = startHit.id to startHit.idx
+                                if (active.size >= 2) {
+                                    wasMulti = true
+                                    dragVertex = null
+                                    latestVertexPts = null
+                                    dragPreview = null
+                                    dragWorld = null
+                                    dragScreen = null
+                                    cameraIsFitted = false
+                                    val p0 = toDp(active[0].position)
+                                    val p1 = toDp(active[1].position)
+                                    val centroid = Offset((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f)
+                                    val span = hypot((p1.x - p0.x).toDouble(), (p1.y - p0.y).toDouble()).toFloat()
+                                    if (prevSpan > 2f && span > 2f) {
+                                        val dc = centroid - prevCentroid
+                                        val factor = (span / prevSpan).toDouble().coerceIn(0.6, 1.8)
+                                        multiCam = multiCam.pan(dc.x.toDouble(), dc.y.toDouble())
+                                            .zoom(factor, centroid.x.toDouble(), centroid.y.toDouble(), w, h)
+                                        cam = multiCam
                                     }
-                                    is PlanHit.Midpoint -> {
-                                        if (startHit.isPlane) {
-                                            draw.regions.firstOrNull { it.id == startHit.id && !it.locked }?.let { r ->
-                                                val nxt = r.outline[(startHit.segIdx + 1) % r.outline.size]
-                                                val mid = ((r.outline[startHit.segIdx].first + nxt.first) * 0.5) to ((r.outline[startHit.segIdx].second + nxt.second) * 0.5)
-                                                val updated = PlanFloorplannerModel.insertVertex(r.outline, startHit.segIdx, mid, true)
-                                                undoStack = undoStack + (optimistic[r.id] ?: PlanOptimisticPatch(outline = r.outline))
-                                                sendPatch(r.id, PlanOptimisticPatch(outline = updated), recordUndo = false, onlyGeom = "outline")
-                                                selectedId = r.id
-                                                selectedVertex = r.id to (startHit.segIdx + 1)
-                                            }
-                                        } else {
-                                            draw.bands.firstOrNull { it.id == startHit.id && !it.locked }?.let { b ->
-                                                val mid = ((b.path[startHit.segIdx].first + b.path[startHit.segIdx + 1].first) * 0.5) to ((b.path[startHit.segIdx].second + b.path[startHit.segIdx + 1].second) * 0.5)
-                                                val updated = PlanFloorplannerModel.insertVertex(b.path, startHit.segIdx, mid, false)
-                                                undoStack = undoStack + (optimistic[b.id] ?: PlanOptimisticPatch(path = b.path))
-                                                sendPatch(b.id, PlanOptimisticPatch(path = updated), recordUndo = false, onlyGeom = "path")
-                                                selectedId = b.id
-                                                selectedVertex = b.id to (startHit.segIdx + 1)
-                                            }
+                                    prevSpan = span
+                                    prevCentroid = centroid
+                                    active.forEach { it.consume() }
+                                } else {
+                                    prevSpan = 0f
+                                    val ch = active[0]
+                                    val curDp = toDp(ch.position)
+                                    val deltaDp = toDp(ch.position - ch.previousPosition)
+                                    val dv = dragVertex
+                                    if (dv != null && !wasMulti) {
+                                        if (!moved && hypot((curDp.x - downPos.x).toDouble(), (curDp.y - downPos.y).toDouble()) > touchSlopDp) {
+                                            moved = true
+                                            selectedId = dv.id
+                                            selectedVertex = dv.id to dv.idx
+                                        }
+                                        if (moved) {
+                                            ch.consume()
+                                            val targetDp = curDp + vertexGrab
+                                            val (wx, wy) = startCam.toWorld(targetDp.x.toDouble(), targetDp.y.toDouble(), w, h)
+                                            val snapped = PlanFloorplannerModel.round2(wx) to PlanFloorplannerModel.round2(wy)
+                                            dragWorld = snapped
+                                            dragScreen = targetDp
+                                            val nextPts = vertexPts.toMutableList().apply { set(dv.idx, snapped) }
+                                            latestVertexPts = nextPts
+                                            val patch = if (dv.isPlane) PlanOptimisticPatch(outline = nextPts) else PlanOptimisticPatch(path = nextPts)
+                                            dragPreview = dv.id to patch
+                                        }
+                                    } else if (!wasMulti) {
+                                        totalPan += deltaDp
+                                        if (!moved && hypot((curDp.x - downPos.x).toDouble(), (curDp.y - downPos.y).toDouble()) > touchSlopDp) {
+                                            moved = true
+                                            cameraIsFitted = false
+                                        }
+                                        if (moved) {
+                                            ch.consume()
+                                            cam = startCam.pan(totalPan.x.toDouble(), totalPan.y.toDouble())
                                         }
                                     }
-                                    is PlanHit.Band, is PlanHit.Region -> {
-                                        val id = startHit.id
-                                        val wasSame = selectedId == id
-                                        selectedId = id
-                                        selectedVertex = null
-                                        if (wasSame) inspectorOpen = true
-                                        scope.launch { runCatching { DataClient.planFocus(pro, id) } }
+                                }
+                            }
+
+                            if (liftedNormally && !moved && !wasMulti) {
+                                val now = System.currentTimeMillis()
+                                if (now - lastTapAt < 280L && hypot((downPos.x - lastTapPos.x).toDouble(), (downPos.y - lastTapPos.y).toDouble()) < touchSlopDp * 4) {
+                                    lastTapAt = 0L
+                                    fitCameraNow()
+                                } else {
+                                    lastTapAt = now
+                                    lastTapPos = downPos
+                                    when (startHit) {
+                                        is PlanHit.Vertex -> {
+                                            selectedId = startHit.id
+                                            selectedVertex = (startHit.id to startHit.idx)
+                                        }
+                                        is PlanHit.Midpoint -> {
+                                            if (startHit.isPlane) {
+                                                gDraw.regions.firstOrNull { it.id == startHit.id && !it.locked }?.let { r ->
+                                                    val nxt = r.outline[(startHit.segIdx + 1) % r.outline.size]
+                                                    val mid = ((r.outline[startHit.segIdx].first + nxt.first) * 0.5) to ((r.outline[startHit.segIdx].second + nxt.second) * 0.5)
+                                                    val updated = PlanFloorplannerModel.insertVertex(r.outline, startHit.segIdx, mid, true)
+                                                    enqueueEdit(pro, r.id, PlanOptimisticPatch(outline = updated), PlanOptimisticPatch(outline = r.outline), gBaseRev, onlyGeom = "outline")
+                                                    selectedId = r.id
+                                                    selectedVertex = r.id to (startHit.segIdx + 1)
+                                                }
+                                            } else {
+                                                gDraw.bands.firstOrNull { it.id == startHit.id && !it.locked }?.let { b ->
+                                                    val mid = ((b.path[startHit.segIdx].first + b.path[startHit.segIdx + 1].first) * 0.5) to ((b.path[startHit.segIdx].second + b.path[startHit.segIdx + 1].second) * 0.5)
+                                                    val updated = PlanFloorplannerModel.insertVertex(b.path, startHit.segIdx, mid, false)
+                                                    enqueueEdit(pro, b.id, PlanOptimisticPatch(path = updated), PlanOptimisticPatch(path = b.path), gBaseRev, onlyGeom = "path")
+                                                    selectedId = b.id
+                                                    selectedVertex = b.id to (startHit.segIdx + 1)
+                                                }
+                                            }
+                                        }
+                                        is PlanHit.Band, is PlanHit.Region -> {
+                                            val id = startHit.id
+                                            val wasSame = gSel == id
+                                            selectedId = id
+                                            selectedVertex = null
+                                            if (wasSame) inspectorOpen = true
+                                            scope.launch { runCatching { DataClient.planFocus(pro, id) } }
+                                        }
+                                        null -> {
+                                            selectedId = ""
+                                            selectedVertex = null
+                                        }
                                     }
-                                    null -> {
-                                        selectedId = ""
-                                        selectedVertex = null
+                                }
+                            } else if (liftedNormally && moved && !wasMulti) {
+                                val dv = dragVertex
+                                val draggedPts = latestVertexPts
+                                if (dv != null && draggedPts != null) {
+                                    dragPreview = null
+                                    val prevPatch = if (dv.isPlane) PlanOptimisticPatch(outline = vertexPts) else PlanOptimisticPatch(path = vertexPts)
+                                    val nextPatch = if (dv.isPlane) PlanOptimisticPatch(outline = draggedPts) else PlanOptimisticPatch(path = draggedPts)
+                                    enqueueEdit(pro, dv.id, nextPatch, prevPatch, gBaseRev, onlyGeom = if (dv.isPlane) "outline" else "path")
+                                } else {
+                                    val elapsed = System.currentTimeMillis() - downTime
+                                    val fitCam = PlanCamera.fit(gBoard.bbox, w, h, 22.0)
+                                    if (elapsed < 340L && abs(startCam.scale - fitCam.scale) / max(fitCam.scale, 0.01) < 0.08 && abs(totalPan.x) > 55f && abs(totalPan.x) > abs(totalPan.y) * 1.6f && gLayers.size > 1) {
+                                        val idx = gLayers.indexOfFirst { it.layer == curLayer }
+                                        if (idx >= 0) {
+                                            val step = if (totalPan.x < 0) 1 else -1
+                                            activeLayer = gLayers[(idx + step + gLayers.size) % gLayers.size].layer
+                                            selectedVertex = null
+                                            cameraIsFitted = true
+                                            cam = fitCam
+                                        }
                                     }
                                 }
                             }
-                        } else if (moved && !wasMulti) {
-                            val dv = dragVertex
-                            if (dv != null) {
-                                dragWorld = null
-                                dragScreen = null
-                                optimistic[dv.id]?.let { sendPatch(dv.id, it, recordUndo = false, onlyGeom = if (dv.isPlane) "outline" else "path") }
-                            } else {
-                                val elapsed = System.currentTimeMillis() - downTime
-                                val fitCam = PlanCamera.fit(board.bbox, w, h, 22.0)
-                                if (elapsed < 340L && abs(startCam.scale - fitCam.scale) / max(fitCam.scale, 0.01) < 0.08 && abs(totalPan.x) > 55f && abs(totalPan.x) > abs(totalPan.y) * 1.6f && layers.size > 1) {
-                                    val idx = layers.indexOfFirst { it.layer == curLayer }
-                                    if (idx >= 0) {
-                                        val step = if (totalPan.x < 0) 1 else -1
-                                        activeLayer = layers[(idx + step + layers.size) % layers.size].layer
-                                        selectedVertex = null
-                                        cam = fitCam
-                                    }
-                                }
-                            }
+                        } finally {
+                            dragPreview = null
+                            dragWorld = null
+                            dragScreen = null
                         }
-                        dragWorld = null
-                        dragScreen = null
                     }
                 }
         ) {
@@ -852,31 +984,33 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
                         val r = draw.regions.firstOrNull { it.id == remSv.first }
                         if (b != null) {
                             PlanFloorplannerModel.removeVertex(b.path, remSv.second, false)?.let { pts ->
-                                undoStack = undoStack + (optimistic[b.id] ?: PlanOptimisticPatch(path = b.path))
                                 selectedVertex = null
-                                sendPatch(b.id, PlanOptimisticPatch(path = pts), recordUndo = false, onlyGeom = "path")
+                                enqueueEdit(pro, b.id, PlanOptimisticPatch(path = pts), PlanOptimisticPatch(path = b.path), panel.revision, onlyGeom = "path")
                             }
                         } else if (r != null) {
                             PlanFloorplannerModel.removeVertex(r.outline, remSv.second, true)?.let { pts ->
-                                undoStack = undoStack + (optimistic[r.id] ?: PlanOptimisticPatch(outline = r.outline))
                                 selectedVertex = null
-                                sendPatch(r.id, PlanOptimisticPatch(outline = pts), recordUndo = false, onlyGeom = "outline")
+                                enqueueEdit(pro, r.id, PlanOptimisticPatch(outline = pts), PlanOptimisticPatch(outline = r.outline), panel.revision, onlyGeom = "outline")
                             }
                         }
                     }
                 }
-                if (undoStack.isNotEmpty()) {
+                if (PlanFloorplannerModel.hasUndo(undoStack, pro, selectedId)) {
                     DBtn(Msg.gpui_mgmt_bom_undo, false, small = true) {
-                        val prev = undoStack.last()
-                        undoStack = undoStack.dropLast(1)
-                        sendPatch(selectedId, prev, recordUndo = false)
+                        val (prev, nextStack) = PlanFloorplannerModel.popUndo(undoStack, pro, selectedId)
+                        undoStack = nextStack
+                        if (prev != null) {
+                            enqueueEdit(pro, prev.id, prev.patch, undoPrev = null, baseRev = panel.revision, onlyGeom = prev.onlyGeom)
+                            prev.patch.layer?.takeIf { it.isNotEmpty() }?.let { mv -> activeLayer = mv }
+                        }
                     }
                 }
-                if (selectedId in optimistic) {
+                if (pendingEdits.any { it.pro == pro && it.itemId == selectedId }) {
                     DBtn(Msg.mobile_plan_reset, false, small = true) {
-                        optimistic = optimistic - selectedId
-                        undoStack = emptyList()
+                        pendingEdits = pendingEdits.filterNot { it.pro == pro && it.itemId == selectedId }
+                        undoStack = undoStack.filterNot { it.pro == pro && it.id == selectedId }
                         selectedVertex = null
+                        scope.launch { refreshAuthoritativePlan(pro) }
                     }
                 }
                 DBtn(Msg.tour_done, true, small = true) { selectedId = ""; selectedVertex = null }
@@ -930,12 +1064,14 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
                 onApprove = { ok -> scope.launch { runCatching { DataClient.planApprove(pro, "", listOf(found.second.id), ok) }.onFailure { errMsg = it.message ?: Msg.android_failed_generic } } },
                 onSteer = { inspectorOpen = false },
                 onCommit = { patch ->
-                    sendPatch(found.second.id, patch)
+                    val prev = captureUndoSnapshot(found.second.id, patch)
+                    enqueueEdit(pro, found.second.id, patch, prev, panel.revision)
                     patch.layer?.let { mv -> if (mv != found.first) activeLayer = mv }
                 },
                 onNote = { txt ->
                     val op = JSONObject().put("op", "note").put("target", found.second.id).put("text", txt)
-                    scope.launch { runCatching { DataClient.planUpdate(pro, listOf(op), basePanel.revision) }.onFailure { errMsg = it.message ?: Msg.android_failed_generic } }
+                    val sendBase = max(panel.revision, ackedRev)
+                    scope.launch { runCatching { DataClient.planUpdate(pro, listOf(op), sendBase) }.onFailure { errMsg = it.message ?: Msg.android_failed_generic } }
                 },
                 onDismiss = { inspectorOpen = false },
             )

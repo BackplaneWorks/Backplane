@@ -1383,27 +1383,39 @@ final class DataClient {
         mgmtRev += 1
     }
     func planGet(_ pro: String, board: Bool = true) async throws -> Data {
-        try await callRaw("plan.get", ["pro": pro, "board": board])
+        let target = pro.isEmpty ? mgmtProject : pro
+        return try await callRaw("plan.get", ["pro": target, "board": board])
     }
     func planApprove(_ pro: String, layer: String, ids: [String], approve: Bool) async throws {
-        _ = try await call("plan.approve", ["pro": pro, "layer": layer, "ids": ids, "approve": approve], as: DEmpty.self)
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.approve", ["pro": target, "layer": layer, "ids": ids, "approve": approve], as: DEmpty.self)
     }
-    func planUpdate(_ pro: String, ops: [[String: Any]], base: Int?) async throws {
-        var p: [String: Any] = ["pro": pro, "ops": ops]
+    func planUpdate(_ pro: String, ops: [[String: Any]], base: Int?) async throws -> Int? {
+        let target = pro.isEmpty ? mgmtProject : pro
+        var p: [String: Any] = ["pro": target, "ops": ops]
         if let base { p["base"] = base }
-        _ = try await call("plan.update", p, as: DEmpty.self)
+        let raw = try await callRaw("plan.update", p)
+        if let o = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any] {
+            if let r = o["revision"] as? Int { return r }
+            if let res = o["result"] as? [String: Any], let r = res["revision"] as? Int { return r }
+        }
+        return nil
     }
     func planVerify(_ pro: String) async throws {
-        _ = try await call("plan.verify", ["pro": pro], as: DEmpty.self)
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.verify", ["pro": target], as: DEmpty.self)
     }
     func planStop(_ pro: String) async throws {
-        _ = try await call("plan.stop", ["pro": pro], as: DEmpty.self)
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.stop", ["pro": target], as: DEmpty.self)
     }
     func planEnable(_ pro: String, on: Bool) async throws {
-        _ = try await call("plan.enable", ["pro": pro, "on": on], as: DEmpty.self)
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.enable", ["pro": target, "on": on], as: DEmpty.self)
     }
     func planFocus(_ pro: String, id: String) async throws {
-        _ = try await call("plan.focus", ["pro": pro, "id": id], as: DEmpty.self)
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.focus", ["pro": target, "id": id], as: DEmpty.self)
     }
     func mentions(_ q: String, kind: String) async -> [DMention] {
         ((try? await call("mentions.list", ["q": q, "kind": kind, "limit": 8]) as DMentions)?.items) ?? []

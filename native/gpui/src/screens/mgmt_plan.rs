@@ -164,14 +164,11 @@ fn chip(cx: &mut Context<Backplane>, light: bool, id: &str, label: String, on: b
 /// in `List` mode it shows every planned layer.
 pub fn list_layers_for_view(view_mode: ViewMode, all_layers: &[Value], visible_names: &[String]) -> Vec<Value> {
     if view_mode == ViewMode::Split && !visible_names.is_empty() {
-        let filtered: Vec<Value> = all_layers
+        return all_layers
             .iter()
             .filter(|l| l["layer"].as_str().is_some_and(|n| visible_names.iter().any(|v| v == n)))
             .cloned()
             .collect();
-        if !filtered.is_empty() {
-            return filtered;
-        }
     }
     all_layers.to_vec()
 }
@@ -573,6 +570,16 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let sel = app.screens.mgmt.plan_sel.clone();
     let list_layers = list_layers_for_view(view_mode, &all_layers_arr, &shown_names);
     let list_layer_count = list_layers.len();
+    if view_mode == ViewMode::Split && list_layers.is_empty() {
+        list = list.child(
+            div()
+                .px_2()
+                .py_2()
+                .text_size(crate::scale::tpx(11.))
+                .text_color(c("faint"))
+                .child(trs("No corridors or planes on this layer")),
+        );
+    }
     for l in list_layers {
         let layer = s(&l, "layer").to_string();
         let layer_title = mgmt_plan_canvas::layer_display_title(&layer, copper_arr, &canvas_layers);
@@ -727,6 +734,7 @@ mod tests {
         let split_one = list_layers_for_view(ViewMode::Split, &all, &shown);
         assert_eq!(split_one.len(), 1);
         assert_eq!(split_one[0]["layer"], "In5.Cu");
+        assert!(list_layers_for_view(ViewMode::Split, &all, &["In2.Cu".to_string()]).is_empty());
         assert_eq!(list_layers_for_view(ViewMode::List, &all, &shown).len(), 3);
         assert_eq!(mgmt_plan_canvas::layer_display_title("In5.Cu", &[], &all), "L6 · SIG1");
         assert_eq!(mgmt_plan_canvas::layer_display_title("In9.Cu", &[], &all), "In9.Cu");

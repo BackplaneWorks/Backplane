@@ -145,9 +145,15 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     var boardPick by remember(thread.id) { mutableStateOf("") }
     var sheetPick by remember(thread.id, boardPick) { mutableStateOf("") }
     val board = files?.board(boardPick)
-    // the panels under the drawing (BOM, Checks, Lifecycle, Fab) are of the board on show: the hub's `project` of its row
+    // the panels under the drawing (BOM, Checks, Lifecycle, Fab, Plan) are of the board or file link on show
     val root = files?.root.orEmpty()
-    val panelsOf = board?.let { b -> b.project.ifEmpty { b.pcb.ifEmpty { root } } } ?: root
+    val targetPath = target?.path?.takeIf { target?.tab == tab }
+    val panelsOf = PlanFloorplannerModel.resolveMgmtProject(
+        targetPath,
+        board?.let { PlanBoardRef(it.value, it.pcb, it.sch, it.project) },
+        files?.boards.orEmpty().map { PlanBoardRef(it.value, it.pcb, it.sch, it.project) },
+        root,
+    )
     DisposableEffect(thread.id) { DataClient.viewerThread = thread.id; onDispose { DataClient.stopWatch(thread.id); DataClient.lightRefs = emptyList() } }
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.android_viewer_title(thread.title.ifEmpty { Msg.thread_new }), back)

@@ -215,7 +215,13 @@ struct DataViewerView: View {
                 let on = client.sheets.first { $0.file == schPath } ?? client.sheets[0]
                 DataPickerHead(what: Tr.t("Sheet"), name: on.name, sub: Tr.ios_viewer_sheets_n(n: client.sheets.count)) { choosing = "sheets" }.accessibilityIdentifier("data.viewer.sheets")
             }
-            let panelsOf = board.map { !$0.project.isEmpty ? $0.project : (!$0.pcb.isEmpty ? $0.pcb : (files?.root ?? "")) } ?? (files?.root ?? "")
+            let shownTarget = target?.tab == tab ? target?.path : nil
+            let panelsOf = PlanFloorplannerLogic.resolveMgmtProject(
+                targetPath: shownTarget,
+                selectedBoard: board.map { PlanBoardRef(value: $0.value, pcb: $0.pcb, sch: $0.sch, project: $0.project) },
+                boards: (files?.boards ?? []).map { PlanBoardRef(value: $0.value, pcb: $0.pcb, sch: $0.sch, project: $0.project) },
+                root: files?.root ?? ""
+            )
             Group {
                 switch tab {
                 case "Board":

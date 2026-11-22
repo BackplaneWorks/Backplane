@@ -351,6 +351,7 @@ pub fn polyline_point_at_frac(pts: &[[f64; 2]], frac: f64) -> Option<[f64; 2]> {
 }
 
 /// Exact arc-length 50% midpoint of a multi-segment polyline (for net-count badge placement).
+#[cfg(test)]
 pub fn polyline_midpoint(pts: &[[f64; 2]]) -> Option<[f64; 2]> {
     polyline_point_at_frac(pts, 0.5)
 }
@@ -386,8 +387,8 @@ pub fn pour_label_point(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Option<[
     }
     let n = outer.len() as f64;
     let mut cands = vec![[(minx + maxx) * 0.5, (miny + maxy) * 0.5], [sx / n, sy / n]];
-    for fy in [0.5, 0.25, 0.75] {
-        for fx in [0.5, 0.25, 0.75] {
+    for fy in [0.5, 0.25, 0.75, 0.125, 0.875] {
+        for fx in [0.5, 0.25, 0.75, 0.125, 0.875] {
             cands.push([minx + (maxx - minx) * fx, miny + (maxy - miny) * fy]);
         }
     }
@@ -396,7 +397,7 @@ pub fn pour_label_point(outer: &[[f64; 2]], holes: &[Vec<[f64; 2]>]) -> Option<[
             return Some(*cand);
         }
     }
-    Some([(minx + maxx) * 0.5, (miny + maxy) * 0.5])
+    None
 }
 
 pub fn insert_vertex(pts: &[[f64; 2]], seg_idx: usize, pos: [f64; 2], closed: bool) -> Vec<[f64; 2]> {
@@ -722,10 +723,6 @@ pub fn place_corridor_pills(
                         break;
                     }
                 }
-                if chosen.is_none() {
-                    let cy = cy_raw.clamp(ph * 0.5 + 3.0, (h - ph * 0.5 - 3.0).max(ph * 0.5 + 3.0));
-                    chosen = Some(PlacedPill { id: c.id.to_string(), text: short_txt, cx, cy, pw, ph, col: c.col, sel: c.sel });
-                }
             }
         }
         if let Some(pill) = chosen {
@@ -808,6 +805,7 @@ pub fn layout_labels_avoiding(
 }
 
 /// Greedy screen-space collision-free placement of component refdes labels.
+#[cfg(test)]
 pub fn layout_labels(parts: &[Value], cam: &Camera, w: f32, h: f32, pinned: &[&str]) -> Vec<PlacedLabel> {
     layout_labels_avoiding(parts, cam, w, h, pinned, &[])
 }
@@ -2322,5 +2320,18 @@ mod tests {
         let pt = pour_label_point(&outer, &center_hole).unwrap();
         assert!(!point_in_ring(pt[0], pt[1], &center_hole[0]));
         assert!(point_in_ring(pt[0], pt[1], &outer));
+
+        let thin_hole = vec![vec![[2.0, 2.0], [98.0, 2.0], [98.0, 98.0], [2.0, 98.0]]];
+        assert_eq!(pour_label_point(&outer, &thin_hole), None, "pour label returns None if no sample avoids holes");
+
+        let crowded: Vec<Value> = (0..8).map(|i| json!({"id": format!("k{i}"), "name": format!("BUS{i}"), "nets": i + 1, "path": [[50.0, 50.0], [51.0, 50.0]]})).collect();
+        let crowded_refs: Vec<&Value> = crowded.iter().collect();
+        let crowded_pills = place_corridor_pills(&crowded_refs, &cam, 400.0, 400.0, None, None);
+        assert!(crowded_pills.len() < 8, "excess overlapping corridor pills suppressed: {}", crowded_pills.len());
+        for i in 0..crowded_pills.len() {
+            for j in (i + 1)..crowded_pills.len() {
+                assert!(!rects_overlap(&crowded_pills[i].rect(0.0), &crowded_pills[j].rect(0.0)));
+            }
+        }
     }
 }

@@ -245,6 +245,7 @@ describe("Management strip pure model", () => {
     expect(planLayerDisplayTitle("In5.Cu", [{ layer: "In5.Cu", index: 6, role: "signal", title: "L6 · SIG1" }])).toBe("L6 · SIG1");
     expect(planLayerDisplayTitle("In9.Cu", [])).toBe("In9.Cu");
     expect(planListLayersForView("split", mergedAll, ["In1.Cu"]).map((l) => l.layer)).toEqual(["In1.Cu"]);
+    expect(planListLayersForView("split", mergedAll, ["In2.Cu"])).toEqual([]);
     expect(planListLayersForView("list", mergedAll, ["In1.Cu"]).map((l) => l.layer)).toEqual(["F.Cu", "In1.Cu"]);
 
     const pillCam = planFitCamera([0, 0, 100, 100], 400, 400, 0);
@@ -274,6 +275,30 @@ describe("Management strip pure model", () => {
     expect(pourPt).not.toBeNull();
     if (pourPt) {
       expect(pourPt[0] >= 35 && pourPt[0] <= 65 && pourPt[1] >= 35 && pourPt[1] <= 65).toBe(false);
+    }
+    expect(planPourLabelPoint([[0, 0], [100, 0], [100, 100], [0, 100]], [[[2, 2], [98, 2], [98, 98], [2, 98]]])).toBeNull();
+
+    const crowded = Array.from({ length: 8 }, (_, i) => ({
+      id: `k${i}`,
+      layer: "F.Cu",
+      name: `BUS${i}`,
+      nets: i + 1,
+      path: [[50, 50], [51, 50]] as Array<[number, number]>,
+    }));
+    const crowdedPills = planPlaceCorridorPills(crowded, pillCam, 400, 400, "", "");
+    expect(crowdedPills.length).toBeLessThan(8);
+    for (let i = 0; i < crowdedPills.length; i++) {
+      for (let j = i + 1; j < crowdedPills.length; j++) {
+        const a = crowdedPills[i];
+        const b = crowdedPills[j];
+        const overlap = !(
+          a.cx + a.pw * 0.5 <= b.cx - b.pw * 0.5 ||
+          a.cx - a.pw * 0.5 >= b.cx + b.pw * 0.5 ||
+          a.cy + a.ph * 0.5 <= b.cy - b.ph * 0.5 ||
+          a.cy - a.ph * 0.5 >= b.cy + b.ph * 0.5
+        );
+        expect(overlap).toBe(false);
+      }
     }
   });
 });
