@@ -33,8 +33,16 @@ fn problem_text(d: &Value) -> String {
     }).unwrap_or("").to_string()
 }
 
-/// The panel's data from a plan (with its `derived` when KiCad gave it).
+/// The panel's data from a plan (with its `derived` when KiCad gave it), optionally enriched with `.kicad_pcb` geometry.
 pub fn data(plan: &Value, asks: &[Value], live: bool) -> Value {
+    data_with_board(plan, asks, live, None)
+}
+
+pub fn data_with_board(plan: &Value, asks: &[Value], live: bool, pcb: Option<&str>) -> Value {
+    let cached = pcb.and_then(super::geom::load);
+    let geom = cached.as_ref().map(|b| &b.geom);
+    let guides = cached.as_ref().map(|b| super::geom::guides_for_plan(b, plan)).unwrap_or_default();
+
     let groups = plan["groups"].as_array().cloned().unwrap_or_default();
     let group = |id: &str| groups.iter().find(|g| st(g, "id") == id).cloned().unwrap_or(Value::Null);
     let der = |id: &str| plan["derived"]["items"][id].clone();
@@ -44,24 +52,44 @@ pub fn data(plan: &Value, asks: &[Value], live: bool) -> Value {
         let g = group(st(c, "group")); let d = der(st(c, "id"));
         let (r, t) = (d["routed"].as_u64().or(c["progress"]["routed"].as_u64()), d["total"].as_u64().or(c["progress"]["total"].as_u64()));
         rows.push((st(c, "layer").to_string(), json!({"id": c["id"], "kind": "corridor", "name": g["name"].as_str().unwrap_or(st(c, "group")), "color": g["color"].as_str().unwrap_or("#8a8a8a"),
-            "nets": g["nets"].as_array().map_or(0, Vec::len), "state": state(c, &d), "locked": c["locked"] == true, "order": c["order"], "routed": r, "total": t,
+            "nets": g["nets"].as_array().map_or(0, Vec::len), "state": state(c, &d), "locked": c["locked"] == true, "edited": c["edited"] == true, "order": c["order"], "routed": r, "total": t,
             "width": c["width"].as_f64().or_else(|| g["width"].as_f64()), "impedance": g["impedance"].clone(),
             "problems": d["problems"].as_array().map_or(0, Vec::len), "problem_text": problem_text(&d)})));
     }
     for p in plan["planes"].as_array().into_iter().flatten() {
         let d = der(st(p, "id"));
         rows.push((st(p, "layer").to_string(), json!({"id": p["id"], "kind": "plane", "name": p["net"], "color": p["color"].as_str().unwrap_or("#5a7a9a"), "nets": 1, "state": state(p, &d),
-            "locked": p["locked"] == true, "reference": p["reference"],
+            "locked": p["locked"] == true, "edited": p["edited"] == true, "reference": p["reference"], "priority": p["priority"],
             "problems": d["problems"].as_array().map_or(0, Vec::len), "problem_text": problem_text(&d)})));
     }
     for (l, _) in &rows { if !layers.contains(l) { layers.push(l.clone()) } }
     let stack = |l: &str| plan["derived"]["stackup"][l].as_str().map(str::to_string).unwrap_or_default();
-    let ls: Vec<Value> = layers.iter().map(|l| {
+    let ls: Vec<Value> = layers.iter().enumerate().map(|(li, l)| {
         let its: Vec<&Value> = rows.iter().filter(|(x, _)| x == l).map(|(_, v)| v).collect();
         let lv = plan["layers"].as_array().into_iter().flatten().find(|x| st(x, "layer") == l).cloned().unwrap_or(json!({"status": "proposed", "role": ""}));
         let done = its.iter().filter(|v| matches!(v["state"].as_str(), Some("routed") | Some("verified"))).count();
         let approved = its.iter().filter(|v| v["state"] == "approved").count();
-        json!({"layer": l, "role": lv["role"], "status": lv["status"], "stackup": stack(l), "done": done, "approved": approved, "total": its.len(), "items": its})
+        let cl = geom.and_then(|g| g.copper_layers.iter().find(|c| c.layer == *l));
+        let explicit_role = st(&lv, "role");
+        let inferred_role = if !explicit_role.is_empty() {
+            explicit_role
+        } else if !its.is_empty() && its.iter().all(|v| v["kind"] == "plane") {
+            "power"
+        } else if its.iter().any(|v| v["kind"] == "corridor") {
+            "signal"
+        } else {
+            cl.map(|c| c.role.as_str()).unwrap_or("")
+        };
+        let stackup_txt = stack(l);
+        let subtitle = if !stackup_txt.is_empty() {
+            stackup_txt.clone()
+        } else {
+            cl.map(|c| super::geom::subtitle_for_layer(c, inferred_role)).unwrap_or_default()
+        };
+        let title = cl.map(|c| c.title.clone()).unwrap_or_else(|| format!("L{} · {}", li + 1, l));
+        let index = cl.map(|c| c.index).unwrap_or(li + 1);
+        json!({"layer": l, "index": index, "title": title, "subtitle": subtitle, "role": if explicit_role.is_empty() { json!(inferred_role) } else { lv["role"].clone() },
+            "status": lv["status"], "stackup": stackup_txt, "done": done, "approved": approved, "total": its.len(), "items": its})
     }).collect();
     let total = rows.len();
     let awaiting = rows.iter().filter(|(_, v)| matches!(v["state"].as_str(), Some("proposed") | Some("edited"))).count();
@@ -84,31 +112,91 @@ pub fn data(plan: &Value, asks: &[Value], live: bool) -> Value {
         else { "rejected" };
     let stackup_summary = plan["derived"]["stackup_summary"].as_str().map(str::to_string).unwrap_or_else(|| {
         ls.iter().filter_map(|l| {
-            let txt = l["stackup"].as_str().unwrap_or("");
+            let txt = l["stackup"].as_str().filter(|s| !s.is_empty()).or_else(|| l["subtitle"].as_str()).unwrap_or("");
             (!txt.is_empty()).then(|| format!("{}: {txt}", l["layer"].as_str().unwrap_or("")))
         }).collect::<Vec<_>>().join(" · ")
     });
     let impedances = plan["derived"]["impedances"].clone();
-    let draw = draw(plan, &rows);
-    json!({"draw": draw, "badge": {"n": awaiting + blocked, "tone": if blocked > 0 { "bad" } else if awaiting > 0 { "warn" } else { "" }}, "revision": plan["revision"], "live": live,
+    let draw = draw_enriched(plan, &rows, &guides);
+    let board = geom
+        .map(|g| super::geom::board_json(g, plan, 180))
+        .unwrap_or_else(|| json!({"bbox": super::geom::fallback_bbox(plan), "outline": [], "parts": []}));
+    let copper_layers: Value = if let Some(g) = geom {
+        json!(g.copper_layers)
+    } else {
+        json!(ls.iter().map(|l| json!({"layer": l["layer"], "index": l["index"], "role": l["role"], "title": l["title"], "subtitle": l["subtitle"]})).collect::<Vec<_>>())
+    };
+    json!({"draw": draw, "board": board, "copper_layers": copper_layers, "notes": plan["notes"], "constraints": plan["constraints"],
+        "badge": {"n": awaiting + blocked, "tone": if blocked > 0 { "bad" } else if awaiting > 0 { "warn" } else { "" }}, "revision": plan["revision"], "live": live,
         "total": total, "awaiting": awaiting, "approved": approved, "blocked": blocked, "routing": routing, "done": done, "routed": routed, "verified": verified, "rejected": rejected,
         "status": status, "stackup_summary": stackup_summary, "impedances": impedances, "asks": asks, "layers": ls, "empty": rows.is_empty()})
 }
 
-/// What the viewers draw over the board (read-only bands and regions, the floorplanner's look per state): corridors as bands along their
+/// What the viewers draw over the board (bands and regions, the floorplanner's look per state): corridors as bands along their
 /// path at their width, plane regions as their outline; millimetres, board coordinates. At most `MAX_POINTS` points in all (the info's bound).
 pub const MAX_POINTS: usize = 3000;
 pub fn draw(plan: &Value, rows: &[(String, Value)]) -> Value {
-    let state = |id: &str| rows.iter().find(|(_, v)| v["id"] == id).map(|(_, v)| v["state"].clone()).unwrap_or(json!("proposed"));
-    let colour = |id: &str| rows.iter().find(|(_, v)| v["id"] == id).map(|(_, v)| v["color"].clone()).unwrap_or(json!("#8a8a8a"));
-    let nets = |id: &str| rows.iter().find(|(_, v)| v["id"] == id).map(|(_, v)| v["nets"].clone()).unwrap_or(json!(0));
+    draw_enriched(plan, rows, &std::collections::HashMap::new())
+}
+
+fn draw_enriched(plan: &Value, rows: &[(String, Value)], guides: &std::collections::HashMap<String, Vec<[f64; 4]>>) -> Value {
+    let row = |id: &str| rows.iter().find(|(_, v)| v["id"] == id).map(|(_, v)| v);
+    let state = |id: &str| row(id).map(|v| v["state"].clone()).unwrap_or(json!("proposed"));
+    let colour = |id: &str| row(id).map(|v| v["color"].clone()).unwrap_or(json!("#8a8a8a"));
+    let nets = |id: &str| row(id).map(|v| v["nets"].clone()).unwrap_or(json!(0));
     let mut left = MAX_POINTS;
     let mut take = |pts: &Value| -> Option<Value> { let n = pts.as_array().map_or(0, Vec::len); if n == 0 || n > left { return None } left -= n; Some(pts.clone()) };
-    let bands: Vec<Value> = plan["corridors"].as_array().into_iter().flatten().filter_map(|c| { let id = st(c, "id");
-        Some(json!({"id": id, "layer": c["layer"], "width": c["width"].as_f64().unwrap_or(1.0), "path": take(&c["path"])?, "state": state(id), "color": colour(id), "nets": nets(id), "vias": c["vias"]})) }).collect();
-    let regions: Vec<Value> = plan["planes"].as_array().into_iter().flatten().filter_map(|p| { let id = st(p, "id");
-        Some(json!({"id": id, "layer": p["layer"], "net": p["net"], "outline": take(&p["outline"][0])?, "state": state(id), "color": colour(id)})) }).collect();
+    let bands: Vec<Value> = plan["corridors"].as_array().into_iter().flatten().filter_map(|c| {
+        let id = st(c, "id");
+        let r = row(id);
+        let g = guides.get(id).cloned().unwrap_or_default();
+        Some(json!({"id": id, "layer": c["layer"], "width": c["width"].as_f64().unwrap_or(1.0), "path": take(&c["path"])?, "state": state(id), "color": colour(id), "nets": nets(id), "vias": c["vias"],
+            "name": r.map(|v| v["name"].clone()).unwrap_or(json!(id)), "group": c["group"], "locked": c["locked"] == true, "edited": c["edited"] == true, "order": c["order"],
+            "from": c["from"], "to": c["to"], "impedance": r.map(|v| v["impedance"].clone()).unwrap_or(Value::Null), "guides": g,
+            "problem_text": r.map(|v| v["problem_text"].clone()).unwrap_or(json!(""))}))
+    }).collect();
+    let regions: Vec<Value> = plan["planes"].as_array().into_iter().flatten().filter_map(|p| {
+        let id = st(p, "id");
+        let r = row(id);
+        let holes = p["outline"].as_array().map(|a| a.iter().skip(1).cloned().collect::<Vec<_>>()).unwrap_or_default();
+        Some(json!({"id": id, "layer": p["layer"], "net": p["net"], "outline": take(&p["outline"][0])?, "holes": holes, "state": state(id), "color": colour(id),
+            "locked": p["locked"] == true, "edited": p["edited"] == true, "reference": p["reference"], "priority": p["priority"],
+            "problem_text": r.map(|v| v["problem_text"].clone()).unwrap_or(json!(""))}))
+    }).collect();
     json!({"bands": bands, "regions": regions})
+}
+
+/// Keep the published `mgmt.plan.<digest>` payload safely within the 64 KiB `hub.set_info` limit.
+pub fn fit_info_budget(d: &mut Value) {
+    const BUDGET: usize = 58 * 1024;
+    if d.to_string().len() <= BUDGET { return }
+    let mut trimmed = false;
+    if let Some(bands) = d["draw"]["bands"].as_array_mut() {
+        for b in bands.iter_mut() {
+            if let Some(gs) = b["guides"].as_array_mut() {
+                if gs.len() > 6 { gs.truncate(6); trimmed = true; }
+            }
+        }
+    }
+    if d.to_string().len() <= BUDGET { if trimmed { d["board_trimmed"] = json!(true); } return }
+    if let Some(bands) = d["draw"]["bands"].as_array_mut() {
+        for b in bands.iter_mut() {
+            if b["guides"].as_array().is_some_and(|g| !g.is_empty()) {
+                b["guides"] = json!([]);
+                trimmed = true;
+            }
+        }
+    }
+    if d.to_string().len() <= BUDGET { if trimmed { d["board_trimmed"] = json!(true); } return }
+    if let Some(parts) = d["board"]["parts"].as_array_mut() {
+        if parts.len() > 80 { parts.truncate(80); trimmed = true; }
+    }
+    if d.to_string().len() > BUDGET {
+        if let Some(parts) = d["board"]["parts"].as_array_mut() {
+            if parts.len() > 40 { parts.truncate(40); trimmed = true; }
+        }
+    }
+    if trimmed { d["board_trimmed"] = json!(true); }
 }
 
 /// The board of a project's .kicad_pro.
@@ -125,7 +213,7 @@ pub async fn plan_now(hub: &Arc<Hub>, pcb: &str) -> (Value, bool) {
 pub async fn publish(hub: &Arc<Hub>, pro: &str) {
     let pcb = pcb_of(pro); if pcb.is_empty() { return }
     let (plan, live) = plan_now(hub, &pcb).await;
-    let mut d = if plan.is_null() { json!({"badge": {"n": 0, "tone": ""}, "empty": true, "live": live, "layers": []}) } else { data(&plan, &super::events::open_asks(&pcb), live) };
+    let mut d = if plan.is_null() { json!({"badge": {"n": 0, "tone": ""}, "empty": true, "live": live, "layers": []}) } else { data_with_board(&plan, &super::events::open_asks(&pcb), live, Some(&pcb)) };
     // the person's switch, and plans an agent asked about on the project's other boards (the viewer shows one board; the plan may be another's)
     d["on"] = json!(super::is_on(hub.setting(super::SETTING).await.as_deref().unwrap_or("")));
     let top = project_top(pro);
@@ -133,6 +221,7 @@ pub async fn publish(hub: &Arc<Hub>, pro: &str) {
     if d["empty"] == true && !d["elsewhere"].as_array().map_or(true, Vec::is_empty) { d["badge"] = json!({"n": d["elsewhere"].as_array().map_or(0, Vec::len), "tone": "warn"}) }
     // a KiCad whose own keys in plan view are not the plan's: the panel says to approve here
     if let Some(n) = crate::files::kicad::embed::gui_route(pro).and_then(|r| super::keys_note(&r.caps)) { d["keys_note"] = json!(n); }
+    fit_info_budget(&mut d);
     mgmt::publish(hub, "plan", pro, d).await;
 }
 
@@ -263,5 +352,32 @@ mod tests {
             {"id": "c2", "group": "usb", "layer": "F.Cu", "status": "rejected"}
         ]});
         assert_eq!(data(&partial_plan, &[], false)["status"], "partial");
+    }
+    #[test] fn plan_panel_enriches_board_geometry_and_respects_info_budget() {
+        let pcb = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/files/fixtures/plot/ecc83-pp.kicad_pcb");
+        let plan = json!({
+            "revision": 2,
+            "layers": [{"layer": "F.Cu", "role": "signal", "status": "proposed"}],
+            "groups": [{"id": "g1", "name": "SignalA", "color": "#14b8a6", "nets": ["Net-(U1A-K)", "GND"]}],
+            "corridors": [{"id": "c1", "group": "g1", "layer": "F.Cu", "path": [[120.0, 100.0], [150.0, 100.0]], "width": 2.0, "from": ["U1"], "to": ["P2"], "status": "proposed"}]
+        });
+        let d = data_with_board(&plan, &[], false, Some(pcb.to_str().unwrap()));
+        assert!(!d["board"]["outline"].as_array().unwrap().is_empty());
+        assert!(!d["board"]["parts"].as_array().unwrap().is_empty());
+        assert_eq!(d["layers"][0]["title"], "L1 · F.Cu");
+        assert!(d["layers"][0]["subtitle"].as_str().unwrap().contains("1510 µm"));
+        assert_eq!(d["draw"]["bands"][0]["name"], "SignalA");
+
+        // Ensure oversized payload (>58 KiB) is shrunk safely under 64 KiB
+        let huge_parts: Vec<Value> = (0..1200).map(|i| json!({"r": format!("R{i}"), "s": "F", "b": [1.0, 2.0, 3.0, 4.0], "o": false})).collect();
+        let huge_guides: Vec<Value> = (0..1500).map(|i| json!([i as f64, 1.0, (i + 1) as f64, 2.0])).collect();
+        let mut big = json!({
+            "board": {"bbox": [0, 0, 100, 100], "outline": [], "parts": huge_parts},
+            "draw": {"bands": [{"id": "c1", "guides": huge_guides, "path": vec![json!([0, 0]); 200]}], "regions": []}
+        });
+        assert!(big.to_string().len() > 58 * 1024);
+        fit_info_budget(&mut big);
+        assert!(big.to_string().len() <= 58 * 1024);
+        assert_eq!(big["board_trimmed"], true);
     }
 }

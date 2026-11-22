@@ -1,9 +1,10 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 188137,
+  "totalAssetGzipBytes": 200377,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
+    "android.hub.machines.approve",
     "android.load.earlier",
     "approval.dismiss",
     "approval.implement",
@@ -64,16 +65,29 @@
     "gpui.mgmt.fab.use",
     "gpui.mgmt.life.nopart",
     "gpui.mgmt.life.reading",
+    "gpui.mgmt.plan.addnote",
     "gpui.mgmt.plan.all",
     "gpui.mgmt.plan.before",
+    "gpui.mgmt.plan.compact",
     "gpui.mgmt.plan.done",
     "gpui.mgmt.plan.drawn",
+    "gpui.mgmt.plan.edited",
     "gpui.mgmt.plan.elsewhere",
     "gpui.mgmt.plan.emptysub",
+    "gpui.mgmt.plan.expand",
+    "gpui.mgmt.plan.fit",
+    "gpui.mgmt.plan.grid.all",
+    "gpui.mgmt.plan.grid.pair",
+    "gpui.mgmt.plan.grid.single",
     "gpui.mgmt.plan.hide",
+    "gpui.mgmt.plan.hint",
     "gpui.mgmt.plan.keysnote",
     "gpui.mgmt.plan.layer",
+    "gpui.mgmt.plan.layer.move",
+    "gpui.mgmt.plan.lock",
+    "gpui.mgmt.plan.locked",
     "gpui.mgmt.plan.noboard",
+    "gpui.mgmt.plan.note.placeholder",
     "gpui.mgmt.plan.nothing",
     "gpui.mgmt.plan.offwords",
     "gpui.mgmt.plan.onwords",
@@ -81,6 +95,7 @@
     "gpui.mgmt.plan.reference",
     "gpui.mgmt.plan.refused",
     "gpui.mgmt.plan.reject",
+    "gpui.mgmt.plan.rejectlayer",
     "gpui.mgmt.plan.reqplain",
     "gpui.mgmt.plan.requested",
     "gpui.mgmt.plan.saved",
@@ -96,8 +111,14 @@
     "gpui.mgmt.plan.st.verified",
     "gpui.mgmt.plan.stackup",
     "gpui.mgmt.plan.stop",
+    "gpui.mgmt.plan.sync",
     "gpui.mgmt.plan.tab",
+    "gpui.mgmt.plan.unlock",
     "gpui.mgmt.plan.verify",
+    "gpui.mgmt.plan.view.canvas",
+    "gpui.mgmt.plan.view.list",
+    "gpui.mgmt.plan.view.split",
+    "gpui.mgmt.plan.width",
     "gpui.next.thread",
     "gpui.nothing.matches",
     "gpui.planmode.bar.always",
@@ -244,7 +265,7 @@
     "web.plan.net.one",
     "web.plan.nets"
   ],
-  "i18nSubsetSha256": "255f3188e4d8738ee228c38305a13aeaef637f6fb713e7f5a6f37e900972d2e2",
+  "i18nSubsetSha256": "b079c983cf999a76abef7087f76178a3d7e8417a3eba3bdfaaabcefbb194ee64",
   "inputs": {
     "web/src/addproject.ts": "06a7ff3e13cd78d993ebca7f638d5d623da06c0099186ad534bae8f184dbe44f",
     "web/src/app.ts": "89f69e24aaafeea13d4ec613ac7743a665870ea3b0e238a7f28134f209f2180c",
@@ -257,16 +278,17 @@
     "web/src/inflate.ts": "bc10ed23159668193d6de6d582e60baf009cae0a619018f0588f836a77dde831",
     "web/src/logout.ts": "9d29482c4671deee1e868ee477b123e067a4c22f7d8ac30b4c2420cf71b8ebe2",
     "web/src/md.ts": "c606d1ec598b3ce132c7cc9366383dacafc3fcb71c0fccd97b41ec0e19a96c78",
-    "web/src/mgmt-model.ts": "6eb90e8ac49d7e897207271377e089aed176b6721f569cc60aea6ed88d7543a6",
-    "web/src/mgmt.ts": "eb20231f133c3fa106352f35f7082af0fbc56bc39504b41b28f12df8ab59d897",
+    "web/src/mgmt-model.ts": "5135cce33f870d5b45b9fd8c2eb91f62fa7d274cd961cd523ed0df599893c955",
+    "web/src/mgmt.ts": "c28da4e358ddc0ae1854e7343fb33cdcc89c953f2537ee4a5fee111f687d76fe",
     "web/src/pair.html": "cf7b94703316f910718356e9ff8e99e088b68211db39b5200213b623c9275f6e",
     "web/src/pair.ts": "af07d19224043f8176f8cd2298d00b6806248eee453fd2f287c183e71a08179b",
     "web/src/palette-model.ts": "ae359cc71e98e84774428355a5048fd9ba0e1da2d45fa18290b4313c50c50ee4",
     "web/src/palette.ts": "bcd5c4585f57cc80a9cf29bf1b9da6ebbd33a3ab68f8f2a918c37c58060c8e48",
+    "web/src/plan-canvas.ts": "be46faf9e3207600516dfac12d93ba6cf8798ba65615a3eb24ff3dfacc0f8507",
     "web/src/qr.ts": "04b634557884b8f512a7b03ad9638c1c15a299ffaea0103d1bdeec6338d9b9d3",
     "web/src/rail.ts": "5fb391094992578cb6f54d35d53559951a584c43fcfc2ee6f4f2cc3897acfe46",
     "web/src/settings.ts": "7b4d8be26fabc6c2a0b8af94a64572a0e3c1e589bf079bfa58c8985a8acd984a",
-    "web/src/shell.css": "081eb8f1641c6ee2b1f3e5daaea06bfecd1e5110857ae7c8cb14f4a58871e3d5",
+    "web/src/shell.css": "a91f0817a8cc922d1ca268ab51c8acff67631a14b255a3abcba9fcd08d8466c3",
     "web/src/sidebar.ts": "0c326c895375f8a2718ec424b07ca59006d7bc0938f05fe8e3e231ffb6af375f",
     "web/src/swarm-need.ts": "503bbf5ffe0389f068847571c792321b0ad5c8d26a18c73b8e41c0a8989e227f",
     "web/src/thread-context.ts": "b9fbd5b3ef0b1357b5a4444a1e9a0ac0606afe1c8a5377c4777752e918af0ac2",
@@ -295,9 +317,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 293973,
-      "gzipBytes": 82954,
-      "sha256": "0a6e221533ada874600539687579b4f456fbd87de9eda2b246cc22e4c7740613"
+      "bytes": 332727,
+      "gzipBytes": 93791,
+      "sha256": "7239bcb9bef8033954fc9426efff1938728f548e8bef177a26496f154e9d3e76"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -315,14 +337,14 @@
       "sha256": "123b6a27f255d339b505c8fd83609674f0bddf9b46c0e907fce23befa96b1eec"
     },
     "assets/pair.js": {
-      "bytes": 47833,
-      "gzipBytes": 14860,
-      "sha256": "428e9b0951e440ff175eaa47a6f13515b3f23b83aff69aa4e165c8f46d9c57ce"
+      "bytes": 50565,
+      "gzipBytes": 15659,
+      "sha256": "d89386a3e4f69e4c0754e6f72072bb80dbeb55eb125e5c516fc9bef9b4ac6e7d"
     },
     "assets/style.css": {
-      "bytes": 67975,
-      "gzipBytes": 12024,
-      "sha256": "0310fbb55ab0c8984abdf9ea149c2605660398c2f7f2bac5ff5c3d80f3fa1df2"
+      "bytes": 72271,
+      "gzipBytes": 12628,
+      "sha256": "1a865f0f2abc656317668c30671ff4a688b7af931f04a6725d4aa225a6d0c6ad"
     },
     "assets/terminal.js": {
       "bytes": 296616,

@@ -46,6 +46,7 @@ pub struct Mgmt {
     pub plan_next: Option<(String, Instant, bool)>,
     pub plan_sel: Option<String>,
     pub plan_stackup_open: bool,
+    pub plan_ui: super::mgmt_plan_canvas::State,
 }
 /// What a pressed plan review link does now, on the page drawn: open the Plan panel (the board shown is the plan's, or its board could not be shown
 /// within a few seconds: the panel then names the board whose plan waits), show its board first, or wait for the page.
@@ -122,7 +123,7 @@ impl Mgmt {
 fn want(app: &mut Backplane, project: &str) {
     if app.screens.mgmt.asked == project { return }
     app.screens.mgmt.asked = project.to_string();
-    if app.screens.mgmt.project != project { app.screens.mgmt.digest.clear(); app.screens.mgmt.bom = Default::default(); app.screens.mgmt.checks.reset(); app.screens.mgmt.error.clear(); app.screens.mgmt.plan_sel = None; app.screens.mgmt.plan_stackup_open = false; }
+    if app.screens.mgmt.project != project { app.screens.mgmt.digest.clear(); app.screens.mgmt.bom = Default::default(); app.screens.mgmt.checks.reset(); app.screens.mgmt.error.clear(); app.screens.mgmt.plan_sel = None; app.screens.mgmt.plan_stackup_open = false; app.screens.mgmt.plan_ui.reset(); }
     let _ = app.tx.try_send(Command::Ask("mgmt.watch".into(), json!({"project": project}), WATCH_TAG));
 }
 /// `mgmt.watch`'s answer: the project's digest (what its info keys end in).
@@ -130,6 +131,7 @@ pub fn answered(app: &mut Backplane, id: u64, reply: &Value, cx: &mut Context<Ba
     if id == super::mgmt_bom::EDIT_TAG { super::mgmt_bom::edited(app, reply, cx); return true }
     if id == super::mgmt_life::PART_TAG { super::mgmt_life::answered(app, reply, cx); return true }
     if id == super::mgmt_bom::ALTS_TAG { super::mgmt_bom::alts_answered(app, reply, cx); return true }
+    if id == super::mgmt_plan_canvas::BOARD_TAG { super::mgmt_plan_canvas::board_answered(app, reply, cx); return true }
     if id != WATCH_TAG { return false }
     let r = if reply["result"].is_object() { &reply["result"] } else { reply };
     if reply["ok"] == false { app.screens.mgmt.error = crate::hub::rpc_error(reply); }

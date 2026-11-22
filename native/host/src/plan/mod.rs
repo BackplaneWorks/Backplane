@@ -9,6 +9,7 @@
 //! KiCad's ApprovePlan as the person. `plan_route` is refused here, before KiCad is asked, unless what it would route is approved.
 //! Laws `plan_*`.
 pub mod events;
+pub mod geom;
 pub mod panel;
 
 use crate::{agents::mcp::ToolSet, api::{Caller, Fut, RpcHandler}, hub::Hub};
@@ -74,20 +75,31 @@ const NS: &str = "kiapi.backplane.plan.";
 
 /// One corridor or plane region as the gate and the diff see it.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Item { pub id: String, pub kind: &'static str, pub layer: String, pub group: String, pub status: String, pub edited: bool, pub locked: bool, pub nets: usize, pub progress: Option<(u64, u64)> }
+pub struct Item { pub id: String, pub kind: &'static str, pub layer: String, pub group: String, pub status: String, pub edited: bool, pub locked: bool, pub nets: usize, pub progress: Option<(u64, u64)>, pub geom_hash: u64 }
 fn st<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 pub fn layer_status<'a>(plan: &'a Value, layer: &str) -> &'a str { plan["layers"].as_array().into_iter().flatten().find(|l| st(l, "layer") == layer).map_or("proposed", |l| st(l, "status")) }
 fn group<'a>(plan: &'a Value, id: &str) -> Option<&'a Value> { plan["groups"].as_array().into_iter().flatten().find(|g| st(g, "id") == id) }
+fn fnv_val(v: &Value, mut h: u64) -> u64 {
+    for b in v.to_string().as_bytes() { h = (h ^ *b as u64).wrapping_mul(1099511628211); }
+    h
+}
+fn item_geom_hash(v: &Value, keys: &[&str]) -> u64 {
+    let mut h = 14695981039346656037u64;
+    for k in keys { h = fnv_val(&v[*k], h ^ k.len() as u64); }
+    h
+}
 pub fn items(plan: &Value) -> Vec<Item> {
     let mut v = vec![];
     for c in plan["corridors"].as_array().into_iter().flatten() {
         let nets = group(plan, st(c, "group")).and_then(|g| g["nets"].as_array()).map_or(0, Vec::len);
         v.push(Item { id: st(c, "id").into(), kind: "corridor", layer: st(c, "layer").into(), group: st(c, "group").into(), status: st(c, "status").into(), edited: c["edited"] == true, locked: c["locked"] == true, nets,
-            progress: c["progress"]["total"].as_u64().map(|t| (c["progress"]["routed"].as_u64().unwrap_or(0), t)) });
+            progress: c["progress"]["total"].as_u64().map(|t| (c["progress"]["routed"].as_u64().unwrap_or(0), t)),
+            geom_hash: item_geom_hash(c, &["path", "width", "vias"]) });
     }
     for p in plan["planes"].as_array().into_iter().flatten() {
         v.push(Item { id: st(p, "id").into(), kind: "plane", layer: st(p, "layer").into(), group: st(p, "net").into(), status: st(p, "status").into(), edited: p["edited"] == true, locked: p["locked"] == true, nets: 1,
-            progress: p["progress"]["total"].as_u64().map(|t| (p["progress"]["routed"].as_u64().unwrap_or(0), t)) });
+            progress: p["progress"]["total"].as_u64().map(|t| (p["progress"]["routed"].as_u64().unwrap_or(0), t)),
+            geom_hash: item_geom_hash(p, &["outline", "reference", "priority"]) });
     }
     v
 }
@@ -124,7 +136,7 @@ pub fn diff(old: &Value, new: &Value) -> Vec<Value> {
             None => out.push(json!({"id": i.id, "kind": i.kind, "change": "added", "status": i.status, "layer": i.layer})),
             Some(o) => {
                 if o.status != i.status { out.push(json!({"id": i.id, "kind": i.kind, "change": "status", "from": o.status, "to": i.status})) }
-                if !o.edited && i.edited { out.push(json!({"id": i.id, "kind": i.kind, "change": "edited by the person"})) }
+                if (!o.edited && i.edited) || (i.edited && o.geom_hash != i.geom_hash) { out.push(json!({"id": i.id, "kind": i.kind, "change": "edited by the person"})) }
                 if o.layer != i.layer { out.push(json!({"id": i.id, "kind": i.kind, "change": "layer", "from": o.layer, "to": i.layer})) }
                 if o.locked != i.locked { out.push(json!({"id": i.id, "kind": i.kind, "change": if i.locked { "locked" } else { "unlocked" }})) }
                 if o.progress != i.progress { if let Some((r, t)) = i.progress { out.push(json!({"id": i.id, "kind": i.kind, "change": "progress", "routed": r, "total": t})) } }
@@ -250,13 +262,306 @@ impl ToolSet for Tools {
     }
 }
 
+fn round3(v: f64) -> f64 { (v * 1000.0).round() / 1000.0 }
+fn norm_pt(v: &Value) -> Result<Value, String> {
+    let a = v.as_array().filter(|x| x.len() >= 2).ok_or_else(|| "point must be [x, y]".to_string())?;
+    let (x, y) = (a[0].as_f64().unwrap_or(f64::NAN), a[1].as_f64().unwrap_or(f64::NAN));
+    if !x.is_finite() || !y.is_finite() { return Err("point coordinates must be finite".into()) }
+    Ok(json!([round3(x), round3(y)]))
+}
+fn norm_ring(v: &Value, min_len: usize) -> Result<Vec<Value>, String> {
+    let arr = v.as_array().ok_or_else(|| "points must be an array".to_string())?;
+    if arr.len() < min_len { return Err(format!("need at least {min_len} points")) }
+    arr.iter().map(norm_pt).collect()
+}
+fn norm_outline(v: &Value) -> Result<Value, String> {
+    let arr = v.as_array().filter(|a| !a.is_empty()).ok_or_else(|| "outline must be a polygon".to_string())?;
+    let is_flat = arr[0].as_array().and_then(|p| p.first()).and_then(Value::as_f64).is_some();
+    if is_flat {
+        Ok(Value::Array(vec![Value::Array(norm_ring(v, 3)?)]))
+    } else {
+        let mut rings = Vec::with_capacity(arr.len());
+        for (i, ring) in arr.iter().enumerate() {
+            rings.push(Value::Array(norm_ring(ring, if i == 0 { 3 } else { 3 })?));
+        }
+        Ok(Value::Array(rings))
+    }
+}
+/// Validate and normalize person steering ops into KiCad `UpdatePlan` JSON ops (`set` uses `"fields"`, `"note"` becomes `add` note).
+pub fn normalize_person_ops(ops: &[Value]) -> Result<Vec<Value>, String> {
+    if ops.is_empty() { return Err("ops cannot be empty".into()) }
+    let mut out = Vec::with_capacity(ops.len());
+    for (idx, op) in ops.iter().enumerate() {
+        let kind = op["op"].as_str().unwrap_or("");
+        match kind {
+            "note" => {
+                let text = op["text"].as_str().unwrap_or("").trim();
+                if text.is_empty() { return Err("note text cannot be empty".into()) }
+                let id = op["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string).unwrap_or_else(|| format!("note-{}-{idx}", crate::hub::now_ms()));
+                let mut item = json!({"id": id, "text": text, "author": "person"});
+                if let Some(t) = op.get("target").filter(|v| !v.is_null()) { item["target"] = t.clone(); }
+                out.push(json!({"op": "add", "kind": "note", "item": item}));
+            }
+            "add" => {
+                let k = op["kind"].as_str().unwrap_or("");
+                if k.is_empty() || !op["item"].is_object() { return Err("add needs kind and item".into()) }
+                let mut item = op["item"].clone();
+                if k == "note" {
+                    if item["text"].as_str().unwrap_or("").trim().is_empty() { return Err("note text cannot be empty".into()) }
+                    if item["id"].as_str().unwrap_or("").is_empty() { item["id"] = json!(format!("note-{}-{idx}", crate::hub::now_ms())); }
+                    item["author"] = json!("person");
+                }
+                out.push(json!({"op": "add", "kind": k, "item": item}));
+            }
+            "set" => {
+                let id = op["id"].as_str().unwrap_or("");
+                if id.is_empty() { return Err("set op needs id".into()) }
+                let src = op["fields"].as_object().or_else(|| op.as_object()).ok_or_else(|| "set op needs fields".to_string())?;
+                let mut fields = serde_json::Map::new();
+                for k in ["path", "width", "outline", "layer", "locked", "vias", "reference", "status"] {
+                    let Some(v) = src.get(k) else { continue };
+                    let clean = match k {
+                        "path" => Value::Array(norm_ring(v, 2)?),
+                        "width" => {
+                            let w = v.as_f64().unwrap_or(f64::NAN);
+                            if !w.is_finite() || !(0.1..=50.0).contains(&w) { return Err("width must be between 0.1 and 50.0 mm".into()) }
+                            json!(round3(w))
+                        }
+                        "outline" => norm_outline(v)?,
+                        "layer" | "reference" | "status" => {
+                            let s = v.as_str().map(str::trim).unwrap_or("");
+                            if s.is_empty() && k == "layer" { return Err("layer cannot be empty".into()) }
+                            json!(s)
+                        }
+                        "locked" => json!(v.as_bool().ok_or_else(|| "locked must be a boolean".to_string())?),
+                        "vias" => Value::Array(v.as_array().ok_or_else(|| "vias must be an array".to_string())?.iter().map(norm_pt).collect::<Result<Vec<_>, _>>()?),
+                        _ => v.clone(),
+                    };
+                    fields.insert(k.to_string(), clean);
+                }
+                if fields.is_empty() { return Err(format!("set op for {id} has no supported fields")) }
+                out.push(json!({"op": "set", "id": id, "fields": Value::Object(fields)}));
+            }
+            "status" | "delete" => {
+                let id = op["id"].as_str().unwrap_or("");
+                if id.is_empty() { return Err(format!("{kind} op needs id")) }
+                out.push(op.clone());
+            }
+            other => return Err(format!("unsupported plan op '{other}'")),
+        }
+    }
+    Ok(out)
+}
+
+fn ensure_layer_entry(plan: &mut Value, layer: &str, role: &str) {
+    if layer.is_empty() { return }
+    let arr = plan.as_object_mut().and_then(|m| {
+        if !m.contains_key("layers") || !m["layers"].is_array() { m.insert("layers".into(), json!([])); }
+        m.get_mut("layers").and_then(Value::as_array_mut)
+    });
+    if let Some(layers) = arr {
+        if !layers.iter().any(|l| l["layer"] == layer) {
+            layers.push(json!({"layer": layer, "role": role, "status": "proposed"}));
+        }
+    }
+}
+
+/// Apply normalized person ops directly to a saved `<board>.kicad_plan` JSON document.
+pub fn apply_person_ops(plan: &mut Value, ops: &[Value]) -> Result<Vec<String>, String> {
+    if !plan.is_object() { return Err("invalid routing plan JSON".into()) }
+    let mut touched = Vec::new();
+    for op in ops {
+        match op["op"].as_str().unwrap_or("") {
+            "set" => {
+                let id = op["id"].as_str().unwrap_or("");
+                let fields = op["fields"].as_object().or_else(|| op.as_object()).ok_or_else(|| "set op needs fields".to_string())?;
+                let mut new_layer = String::new();
+                let role = if let Some(it) = plan["corridors"].as_array_mut().and_then(|a| a.iter_mut().find(|x| x["id"] == id)) {
+                    if let Some(obj) = it.as_object_mut() {
+                        for (k, v) in fields {
+                            if matches!(k.as_str(), "op" | "id" | "fields") { continue }
+                            if k == "layer" { if let Some(s) = v.as_str() { new_layer = s.to_string(); } }
+                            obj.insert(k.clone(), v.clone());
+                        }
+                        obj.insert("edited".into(), json!(true));
+                        obj.insert("author".into(), json!("person"));
+                    }
+                    "signal"
+                } else if let Some(it) = plan["planes"].as_array_mut().and_then(|a| a.iter_mut().find(|x| x["id"] == id)) {
+                    if let Some(obj) = it.as_object_mut() {
+                        for (k, v) in fields {
+                            if matches!(k.as_str(), "op" | "id" | "fields") { continue }
+                            if k == "layer" { if let Some(s) = v.as_str() { new_layer = s.to_string(); } }
+                            obj.insert(k.clone(), v.clone());
+                        }
+                        obj.insert("edited".into(), json!(true));
+                        obj.insert("author".into(), json!("person"));
+                    }
+                    "power"
+                } else {
+                    return Err(format!("no such item: {id}"))
+                };
+                if !new_layer.is_empty() { ensure_layer_entry(plan, &new_layer, role); }
+                touched.push(id.to_string());
+            }
+            "add" => {
+                let kind = op["kind"].as_str().unwrap_or("");
+                let arr_k = match kind { "note" => "notes", "constraint" => "constraints", "corridor" => "corridors", "plane" => "planes", _ => return Err(format!("unsupported add kind '{kind}'")) };
+                let Some(obj) = plan.as_object_mut() else { return Err("invalid plan".into()) };
+                if !obj.get(arr_k).is_some_and(Value::is_array) { obj.insert(arr_k.into(), json!([])); }
+                obj.get_mut(arr_k).and_then(Value::as_array_mut).unwrap().push(op["item"].clone());
+                if let Some(id) = op["item"]["id"].as_str() { touched.push(id.to_string()); }
+            }
+            "status" => {
+                let id = op["id"].as_str().unwrap_or("");
+                let mut ok = false;
+                for arr_k in ["corridors", "planes"] {
+                    if let Some(it) = plan[arr_k].as_array_mut().and_then(|a| a.iter_mut().find(|x| x["id"] == id)) {
+                        it["status"] = op["status"].clone();
+                        it["author"] = json!("person");
+                        ok = true;
+                        break;
+                    }
+                }
+                if !ok { return Err(format!("no such item: {id}")) }
+                touched.push(id.to_string());
+            }
+            "delete" => {
+                let id = op["id"].as_str().unwrap_or("");
+                let mut removed = false;
+                for arr_k in ["corridors", "planes", "notes", "constraints"] {
+                    if let Some(arr) = plan[arr_k].as_array_mut() {
+                        let before = arr.len();
+                        arr.retain(|x| x["id"] != id);
+                        if arr.len() < before { removed = true; }
+                    }
+                }
+                if !removed { return Err(format!("no such item: {id}")) }
+                touched.push(id.to_string());
+            }
+            other => return Err(format!("unsupported plan op '{other}'")),
+        }
+    }
+    plan["revision"] = json!(plan["revision"].as_u64().unwrap_or(0) + 1);
+    Ok(touched)
+}
+
+/// Apply person approval/rejection to a saved `<board>.kicad_plan` JSON document.
+pub fn apply_person_approve(plan: &mut Value, layer: &str, ids: &[String], yes: bool) -> Vec<String> {
+    let target = if yes { "approved" } else { "rejected" };
+    let mut changed = Vec::new();
+    let keep_done = |v: &Value| matches!(v["status"].as_str(), Some("routed" | "verified"));
+    if !layer.is_empty() && ids.is_empty() {
+        if let Some(layers) = plan["layers"].as_array_mut() {
+            if let Some(lv) = layers.iter_mut().find(|l| l["layer"] == layer) {
+                lv["status"] = json!(target);
+            } else {
+                layers.push(json!({"layer": layer, "status": target}));
+            }
+        }
+        for k in ["corridors", "planes"] {
+            for it in plan[k].as_array_mut().into_iter().flatten() {
+                if it["layer"] == layer && !keep_done(it) {
+                    it["status"] = json!(target);
+                    if let Some(id) = it["id"].as_str() { changed.push(id.to_string()); }
+                }
+            }
+        }
+    } else if !ids.is_empty() {
+        for k in ["corridors", "planes"] {
+            for it in plan[k].as_array_mut().into_iter().flatten() {
+                let matched = it["id"].as_str().filter(|id| ids.iter().any(|x| x == id)).map(str::to_string);
+                if let Some(id) = matched {
+                    if !keep_done(it) {
+                        it["status"] = json!(target);
+                        changed.push(id);
+                    }
+                }
+            }
+        }
+    } else {
+        for lv in plan["layers"].as_array_mut().into_iter().flatten() {
+            lv["status"] = json!(target);
+        }
+        for k in ["corridors", "planes"] {
+            for it in plan[k].as_array_mut().into_iter().flatten() {
+                if !keep_done(it) {
+                    it["status"] = json!(target);
+                    if let Some(id) = it["id"].as_str() { changed.push(id.to_string()); }
+                }
+            }
+        }
+    }
+    plan["revision"] = json!(plan["revision"].as_u64().unwrap_or(0) + 1);
+    changed
+}
+
+fn write_plan_file(pcb: &str, plan: &Value) -> Result<(), String> {
+    let f = Path::new(pcb).with_extension("kicad_plan");
+    let tmp = f.with_extension("kicad_plan.tmp");
+    let txt = serde_json::to_string_pretty(plan).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, txt).map_err(|e| e.to_string())?;
+    crate::plat::fs::rename(&tmp, &f).map_err(|e| e.to_string())
+}
+
+/// The person's steering edits (the Plan canvas/inspector): sends KiCad's `UpdatePlan` as the person when open,
+/// else updates `<board>.kicad_plan` atomically on disk and broadcasts the settled panel update.
+pub async fn update(hub: &Arc<Hub>, pcb: &str, base: Option<u64>, ops: &[Value]) -> Result<Value, String> {
+    let norm = normalize_person_ops(ops)?;
+    let pro = crate::files::kicad::project::read(&Path::new(pcb).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).pro;
+    if let Some(r) = crate::files::kicad::embed::gui_route(&pro) {
+        let rev = match base {
+            Some(b) => b,
+            None => read_plan(hub, None, pcb, false).await.ok().and_then(|p| p["revision"].as_u64()).unwrap_or(0),
+        };
+        let msg = json!({"board": spec(pcb), "base": rev, "ops": Value::Array(norm).to_string()});
+        let o = crate::files::kicad::embed::gui_call_as(&r, &format!("{NS}UpdatePlan"), msg, &crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Person)).await;
+        if o["ok"].as_bool() != Some(true) {
+            return Err(refused(o["error"].as_str().unwrap_or("no answer")));
+        }
+        let m = &o["message"];
+        if m["refused"].as_array().is_some_and(|a| !a.is_empty()) {
+            let why = m["reasons"].as_array().map(|rs| rs.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("; ")).filter(|s| !s.is_empty()).unwrap_or_else(|| "KiCad refused plan update".into());
+            return Err(why);
+        }
+        events::settle(hub, pcb).await;
+        return Ok(m.clone());
+    }
+    let f = Path::new(pcb).with_extension("kicad_plan");
+    let pcb_s = pcb.to_string();
+    let res = tokio::task::spawn_blocking(move || -> Result<(Value, Vec<String>), String> {
+        let raw = std::fs::read_to_string(&f).map_err(|_| "no saved routing plan for this board".to_string())?;
+        let mut plan: Value = serde_json::from_str(&raw).map_err(|_| "saved routing plan is not valid JSON".to_string())?;
+        let touched = apply_person_ops(&mut plan, &norm)?;
+        write_plan_file(&pcb_s, &plan)?;
+        Ok((plan["revision"].clone(), touched))
+    }).await.map_err(|e| e.to_string())??;
+    events::settle(hub, pcb).await;
+    Ok(json!({"revision": res.0, "applied": res.1, "saved": true}))
+}
+
 /// The person's decision (the Plan panel, a phone): `plan.approve {pro|path, layer?, ids?, approve}` -> KiCad's ApprovePlan as the person.
 pub async fn approve(hub: &Arc<Hub>, pcb: &str, layer: &str, ids: &[String], yes: bool) -> Result<Value, String> {
     let msg = json!({"board": spec(pcb), "layer": layer, "ids": ids, "approve": yes});
     let pro = crate::files::kicad::project::read(&Path::new(pcb).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).pro;
     let o = match crate::files::kicad::embed::gui_route(&pro) {
         Some(r) => { let o = crate::files::kicad::embed::gui_call_as(&r, &format!("{NS}ApprovePlan"), msg, &crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Person)).await; if o["ok"].as_bool().unwrap_or(false) { o["message"].clone() } else { return Err(refused(o["error"].as_str().unwrap_or("no answer"))) } }
-        None => call(hub, None, pcb, "ApprovePlan", msg).await?,
+        None => {
+            let f = Path::new(pcb).with_extension("kicad_plan");
+            if f.exists() {
+                let (pcb_s, layer_s, ids_v) = (pcb.to_string(), layer.to_string(), ids.to_vec());
+                let res = tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let raw = std::fs::read_to_string(&f).map_err(|e| e.to_string())?;
+                    let mut plan: Value = serde_json::from_str(&raw).map_err(|_| "saved routing plan is not valid JSON".to_string())?;
+                    let changed = apply_person_approve(&mut plan, &layer_s, &ids_v, yes);
+                    write_plan_file(&pcb_s, &plan)?;
+                    Ok(json!({"revision": plan["revision"], "changed": changed, "saved": true}))
+                }).await.map_err(|e| e.to_string())??;
+                events::settle(hub, pcb).await;
+                return Ok(res);
+            }
+            call(hub, None, pcb, "ApprovePlan", msg).await?
+        }
     };
     events::settle(hub, pcb).await;
     // KiCad said yes: the plan must say so too (a runtime that accepts and records nothing, as bp.12.1 did, is told, never a silent success)
@@ -281,7 +586,7 @@ pub fn refused(err: &str) -> String {
 }
 pub struct Rpc;
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["plan.approve", "plan.stop", "plan.verify", "plan.get", "plan.focus", "plan.enable"] }
+    fn methods(&self) -> &'static [&'static str] { &["plan.approve", "plan.update", "plan.stop", "plan.verify", "plan.get", "plan.focus", "plan.enable"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let path = if !sv(p, "pro").is_empty() { sv(p, "pro") } else { sv(p, "path") };
@@ -298,9 +603,18 @@ impl RpcHandler for Rpc {
                 let ids: Vec<String> = p["ids"].as_array().map(|x| x.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
                 match m {
                     "plan.approve" => approve(hub, &pcb, sv(p, "layer"), &ids, p["approve"] != false).await,
+                    "plan.update" => {
+                        let ops = p["ops"].as_array().cloned().ok_or_else(|| "ops must be a JSON array".to_string())?;
+                        update(hub, &pcb, p["base"].as_u64(), &ops).await
+                    }
                     "plan.focus" => panel::focus(hub, if sv(p, "pro").is_empty() { sv(p, "path") } else { sv(p, "pro") }, sv(p, "id")).await,
                     "plan.stop" => { let r = call(hub, None, &pcb, "StopPlanRouting", json!({"board": spec(&pcb)})).await; events::settle(hub, &pcb).await; r }
                     "plan.verify" => { let r = call(hub, None, &pcb, "VerifyPlan", json!({"board": spec(&pcb)})).await; events::settle(hub, &pcb).await; r }
+                    _ if p["board"] == true || p["panel"] == true => {
+                        let (plan, live) = panel::plan_now(hub, &pcb).await;
+                        let pan = if plan.is_null() { Value::Null } else { panel::data_with_board(&plan, &events::open_asks(&pcb), live, Some(&pcb)) };
+                        Ok(json!({"plan": plan, "panel": pan}))
+                    }
                     _ => read_plan(hub, None, &pcb, true).await,
                 }
             }.await;
@@ -389,5 +703,52 @@ mod tests {
         assert_eq!(ch, ["c1 edited by the person", "c1 locked", "c2 status", "c3 progress", "c5 added", "p2 removed", "In1.Cu layer status", "n1 note"]);
         assert!(diff(&a, &a).is_empty());
         assert_eq!(summary(&a)["awaiting_approval"], json!(["c2", "p2"]));
+    }
+    #[test] fn person_ops_normalize_apply_approve_and_reedit_diff() {
+        let mut p = json!({
+            "revision": 3,
+            "layers": [{"layer": "In1.Cu", "role": "signal", "status": "proposed"}, {"layer": "In2.Cu", "role": "power", "status": "proposed"}],
+            "groups": [{"id": "g1", "nets": ["A", "B"], "status": "proposed"}],
+            "corridors": [{"id": "c1", "group": "g1", "layer": "In1.Cu", "path": [[10.0, 20.0], [30.0, 20.0]], "width": 2.0, "status": "proposed"}],
+            "planes": [{"id": "p1", "net": "GND", "layer": "In2.Cu", "outline": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]]], "status": "proposed"}]
+        });
+        let ops = normalize_person_ops(&[
+            json!({"op": "set", "id": "c1", "path": [[10.0, 20.0], [20.0, 25.0], [30.0, 20.0]], "width": 2.5, "locked": true, "layer": "In3.Cu"}),
+            json!({"op": "set", "id": "p1", "fields": {"outline": [[0.0, 0.0], [15.0, 0.0], [15.0, 10.0]]}}),
+            json!({"op": "note", "target": "c1", "text": "Steer clear of U2"})
+        ]).unwrap();
+        assert!(ops[0]["fields"].is_object());
+        assert_eq!(ops[1]["fields"]["outline"], json!([[[0.0, 0.0], [15.0, 0.0], [15.0, 10.0]]]));
+        assert_eq!(ops[2]["op"], "add");
+
+        let before = p.clone();
+        let touched = apply_person_ops(&mut p, &ops).unwrap();
+        assert_eq!(touched.len(), 3);
+        assert_eq!(p["revision"], 4);
+        assert_eq!(p["corridors"][0]["edited"], true);
+        assert_eq!(p["corridors"][0]["author"], "person");
+        assert_eq!(p["corridors"][0]["locked"], true);
+        assert_eq!(p["corridors"][0]["layer"], "In3.Cu");
+        assert_eq!(p["notes"][0]["text"], "Steer clear of U2");
+        assert!(p["layers"].as_array().unwrap().iter().any(|l| l["layer"] == "In3.Cu"));
+
+        let d1 = diff(&before, &p);
+        assert!(d1.iter().any(|x| x["id"] == "c1" && x["change"] == "edited by the person"));
+        assert!(d1.iter().any(|x| x["id"] == "c1" && x["change"] == "locked"));
+        assert!(d1.iter().any(|x| x["change"] == "note"));
+
+        // Further geometry edit on an already-edited item is still surfaced by diff
+        let mid = p.clone();
+        let ops2 = normalize_person_ops(&[json!({"op": "set", "id": "c1", "width": 3.2})]).unwrap();
+        apply_person_ops(&mut p, &ops2).unwrap();
+        let d2 = diff(&mid, &p);
+        assert!(d2.iter().any(|x| x["id"] == "c1" && x["change"] == "edited by the person"));
+
+        let approved = apply_person_approve(&mut p, "In3.Cu", &[], true);
+        assert_eq!(approved, ["c1"]);
+        assert_eq!(p["corridors"][0]["status"], "approved");
+        assert!(normalize_person_ops(&[json!({"op": "set", "id": "c1", "width": 0.01})]).is_err());
+        assert!(normalize_person_ops(&[json!({"op": "set", "id": "c1", "path": [[0.0, 0.0]]})]).is_err());
+        assert!(crate::api::RpcHandler::methods(&Rpc).contains(&"plan.update"));
     }
 }

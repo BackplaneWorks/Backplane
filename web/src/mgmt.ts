@@ -17,9 +17,12 @@ import {
   mgmtPanelsOf,
   money,
   pkgName,
+  planBusColor,
+  planDefaultLayerPair,
   planDone,
   planMark,
   planProgressSegments,
+  planRailColor,
   planStatusBadge,
   refsFit,
   stockSummary,
@@ -33,8 +36,14 @@ import {
   type FabInfo,
   type LifeInfo,
   type MgmtStateInfo,
+  type PlanBand,
+  type PlanBoardGeom,
   type PlanInfo,
+  type PlanItem,
+  type PlanLayer,
+  type PlanRegion,
 } from "./mgmt-model";
+import { PlanFloorplannerCanvas, type PlanGridMode, type PlanViewMode } from "./plan-canvas";
 import type { HubClient } from "./ws";
 
 export interface MgmtCallbacks {
@@ -80,6 +89,18 @@ export class MgmtStrip {
   private planStatus = "";
   private planSelectedId = "";
   private planStackupOpen = false;
+  private planViewMode: PlanViewMode = "split";
+  private planGridMode: PlanGridMode = "pair";
+  private planSyncZoom = true;
+  private planExpanded = false;
+  private planShownLayers: string[] = [];
+  private planOptimistic = new Map<string, Record<string, unknown>>();
+  private planOptimisticRev: number | undefined = undefined;
+  private planHydratedKey = "";
+  private planHydratedBoard: PlanBoardGeom | null = null;
+  private planHydratedDraw: { bands?: PlanBand[]; regions?: PlanRegion[] } | null = null;
+  private planNoteOpen = false;
+  private planCanvas: PlanFloorplannerCanvas | null = null;
 
   private fabStatus = "";
 
@@ -138,6 +159,15 @@ export class MgmtStrip {
     this.planStatus = "";
     this.planSelectedId = "";
     this.planStackupOpen = false;
+    this.planShownLayers = [];
+    this.planOptimistic.clear();
+    this.planOptimisticRev = undefined;
+    this.planHydratedKey = "";
+    this.planHydratedBoard = null;
+    this.planHydratedDraw = null;
+    this.planNoteOpen = false;
+    this.planCanvas?.destroy();
+    this.planCanvas = null;
     this.fabStatus = "";
     this.render();
   }
@@ -168,6 +198,15 @@ export class MgmtStrip {
       this.planStatus = "";
       this.planSelectedId = "";
       this.planStackupOpen = false;
+      this.planShownLayers = [];
+      this.planOptimistic.clear();
+      this.planOptimisticRev = undefined;
+      this.planHydratedKey = "";
+      this.planHydratedBoard = null;
+      this.planHydratedDraw = null;
+      this.planNoteOpen = false;
+      this.planCanvas?.destroy();
+      this.planCanvas = null;
       this.fabStatus = "";
       this.lifeSelectedKey = "";
       this.lifePartSamples = null;
@@ -257,6 +296,9 @@ export class MgmtStrip {
     const state = this.getStateInfo();
     const tabs = mgmtPanelsOf(state);
     if (!this.digest || tabs.length === 0) {
+      this.planCanvas?.destroy();
+      this.planCanvas = null;
+      this.panelEl.classList.remove("bp-plan-expanded");
       this.stripEl.classList.add("bp-hidden");
       this.panelEl.classList.add("bp-hidden");
       this.panelEl.removeAttribute("data-testid");
@@ -313,6 +355,9 @@ export class MgmtStrip {
 
     // 2. Render active panel body
     if (!this.openPanel) {
+      this.planCanvas?.destroy();
+      this.planCanvas = null;
+      this.panelEl.classList.remove("bp-plan-expanded");
       this.panelEl.classList.add("bp-hidden");
       this.panelEl.removeAttribute("data-testid");
       this.panelEl.replaceChildren();
@@ -320,6 +365,13 @@ export class MgmtStrip {
       return;
     }
 
+    if (this.openPanel !== "plan") {
+      this.planCanvas?.destroy();
+      this.planCanvas = null;
+      this.panelEl.classList.remove("bp-plan-expanded");
+    } else {
+      this.panelEl.classList.toggle("bp-plan-expanded", this.planExpanded);
+    }
     this.panelEl.classList.remove("bp-hidden");
     this.panelEl.setAttribute("data-testid", `mgmt-panel-${this.openPanel}`);
     this.cb.onOpenChange?.(true);
@@ -934,10 +986,31 @@ export class MgmtStrip {
       void this.cb.hub.rpc(method, { pro: proj, ...params })
         .catch((e) => {
           if (gen !== this.watchGen || proj !== this.project) return;
+          this.planOptimistic.clear();
           this.planStatus = e instanceof Error ? e.message : t("gpui.mgmt.plan.refused", "KiCad refused");
           this.render();
         });
     };
+
+    if (d.revision !== this.planOptimisticRev) {
+      this.planOptimisticRev = d.revision;
+      this.planOptimistic.clear();
+    }
+
+    const hydKey = `${this.project}:${d.revision ?? 0}`;
+    if (d.board_trimmed && this.planHydratedKey !== hydKey && this.project) {
+      this.planHydratedKey = hydKey;
+      const gen = this.watchGen;
+      const proj = this.project;
+      void this.cb.hub.rpc<{ panel?: PlanInfo }>("plan.get", { pro: proj, board: true })
+        .then((res) => {
+          if (gen !== this.watchGen || proj !== this.project || !res?.panel) return;
+          this.planHydratedBoard = res.panel.board ?? null;
+          this.planHydratedDraw = res.panel.draw ?? null;
+          this.render();
+        })
+        .catch(() => {});
+    }
 
     const toggleRow = document.createElement("div");
     toggleRow.className = "bp-plan-toggle";
@@ -1183,11 +1256,381 @@ export class MgmtStrip {
       wrap.appendChild(stackWrap);
     }
 
+    const mkChip = (label: string, active: boolean, testId: string, onClick: () => void): HTMLButtonElement => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "bp-mgmt-btn bp-plan-chip-btn" + (active ? " active" : "");
+      b.setAttribute("data-testid", testId);
+      b.setAttribute("aria-pressed", active ? "true" : "false");
+      b.textContent = label;
+      b.addEventListener("click", onClick);
+      return b;
+    };
+
+    const viewBar = document.createElement("div");
+    viewBar.className = "bp-plan-viewbar";
+    viewBar.append(
+      mkChip(t("gpui.mgmt.plan.view.canvas", "Canvas"), this.planViewMode === "canvas", "mgmt-plan-view-canvas", () => {
+        this.planViewMode = "canvas";
+        this.render();
+      }),
+      mkChip(t("gpui.mgmt.plan.view.split", "Split"), this.planViewMode === "split", "mgmt-plan-view-split", () => {
+        this.planViewMode = "split";
+        this.render();
+      }),
+      mkChip(t("gpui.mgmt.plan.view.list", "List"), this.planViewMode === "list", "mgmt-plan-view-list", () => {
+        this.planViewMode = "list";
+        this.render();
+      }),
+    );
+    if (this.planViewMode !== "list") {
+      const sep1 = document.createElement("span");
+      sep1.className = "bp-plan-sep";
+      const sep2 = document.createElement("span");
+      sep2.className = "bp-plan-sep";
+      const fitBtn = document.createElement("button");
+      fitBtn.type = "button";
+      fitBtn.className = "bp-mgmt-btn bp-plan-mini-btn";
+      fitBtn.setAttribute("data-testid", "mgmt-plan-fit");
+      fitBtn.textContent = t("gpui.mgmt.plan.fit", "Fit");
+      fitBtn.addEventListener("click", () => this.planCanvas?.fitAll());
+
+      viewBar.append(
+        sep1,
+        mkChip(t("gpui.mgmt.plan.grid.pair", "Side by side"), this.planGridMode === "pair", "mgmt-plan-grid-pair", () => {
+          this.planGridMode = "pair";
+          this.render();
+        }),
+        mkChip(t("gpui.mgmt.plan.grid.all", "All layers"), this.planGridMode === "all", "mgmt-plan-grid-all", () => {
+          this.planGridMode = "all";
+          this.render();
+        }),
+        mkChip(t("gpui.mgmt.plan.grid.single", "Single"), this.planGridMode === "single", "mgmt-plan-grid-single", () => {
+          this.planGridMode = "single";
+          this.render();
+        }),
+        sep2,
+        mkChip(t("gpui.mgmt.plan.sync", "Link zoom"), this.planSyncZoom, "mgmt-plan-sync", () => {
+          this.planSyncZoom = !this.planSyncZoom;
+          this.render();
+        }),
+        fitBtn,
+      );
+    }
+    const viewSpacer = document.createElement("span");
+    viewSpacer.className = "bp-mgmt-flex1";
+    const expBtn = document.createElement("button");
+    expBtn.type = "button";
+    expBtn.className = "bp-mgmt-btn bp-plan-mini-btn";
+    expBtn.setAttribute("data-testid", "mgmt-plan-expand");
+    expBtn.textContent = this.planExpanded
+      ? t("gpui.mgmt.plan.compact", "Compact")
+      : t("gpui.mgmt.plan.expand", "Expand");
+    expBtn.addEventListener("click", () => {
+      this.planExpanded = !this.planExpanded;
+      this.render();
+    });
+    viewBar.append(viewSpacer, expBtn);
+    wrap.appendChild(viewBar);
+
+    const rawBoard: PlanBoardGeom = this.planHydratedKey === hydKey && this.planHydratedBoard
+      ? this.planHydratedBoard
+      : d.board ?? { bbox: [0, 0, 100, 70], outline: [], parts: [] };
+    const rawDraw = this.planHydratedKey === hydKey && this.planHydratedDraw
+      ? this.planHydratedDraw
+      : d.draw ?? { bands: [], regions: [] };
+
+    const mergedBands: PlanBand[] = (rawDraw.bands ?? []).map((b) => {
+      const patch = this.planOptimistic.get(b.id);
+      if (!patch) return { ...b };
+      return {
+        ...b,
+        ...patch,
+        edited: true,
+        state: b.state === "proposed" ? "edited" : b.state,
+      };
+    });
+    const mergedRegions: PlanRegion[] = (rawDraw.regions ?? []).map((r) => {
+      const patch = this.planOptimistic.get(r.id);
+      if (!patch) return { ...r };
+      return {
+        ...r,
+        ...patch,
+        edited: true,
+        state: r.state === "proposed" ? "edited" : r.state,
+      };
+    });
+
+    const movedItems: Array<{ target: string; item: PlanItem }> = [];
+    const mergedLayers: PlanLayer[] = (d.layers ?? []).map((l) => {
+      const kept: PlanItem[] = [];
+      for (const it of l.items ?? []) {
+        const patch = this.planOptimistic.get(it.id);
+        if (!patch) {
+          kept.push(it);
+          continue;
+        }
+        const next: PlanItem = {
+          ...it,
+          width: typeof patch.width === "number" ? patch.width : it.width,
+          locked: typeof patch.locked === "boolean" ? patch.locked : it.locked,
+          edited: true,
+          state: it.state === "proposed" ? "edited" : it.state,
+        };
+        if (typeof patch.layer === "string" && patch.layer !== l.layer) {
+          movedItems.push({ target: patch.layer, item: next });
+        } else {
+          kept.push(next);
+        }
+      }
+      return { ...l, items: kept };
+    });
+    for (const mv of movedItems) {
+      const targetLayer = mergedLayers.find((l) => l.layer === mv.target);
+      if (targetLayer) {
+        targetLayer.items = [...(targetLayer.items ?? []), mv.item];
+      }
+    }
+
+    const activeLayers =
+      this.planGridMode === "all"
+        ? mergedLayers.map((l) => l.layer)
+        : this.planGridMode === "single"
+          ? [
+              this.planShownLayers.find((n) => mergedLayers.some((l) => l.layer === n)) ??
+                planDefaultLayerPair(mergedLayers)[0] ??
+                mergedLayers[0]?.layer ??
+                "",
+            ].filter(Boolean)
+          : (this.planShownLayers.length > 0 && this.planShownLayers.every((n) => mergedLayers.some((l) => l.layer === n))
+              ? this.planShownLayers.slice(0, 2)
+              : planDefaultLayerPair(mergedLayers));
+
+    if (this.planViewMode !== "list" && mergedLayers.length > 1) {
+      const layerBar = document.createElement("div");
+      layerBar.className = "bp-plan-layerbar";
+      for (const l of mergedLayers) {
+        const isShown = activeLayers.includes(l.layer);
+        layerBar.appendChild(
+          mkChip(l.title || l.layer, isShown, `mgmt-plan-layerpill-${l.layer}`, () => {
+            if (this.planGridMode === "single") {
+              this.planShownLayers = [l.layer];
+            } else if (this.planGridMode === "pair") {
+              if (!activeLayers.includes(l.layer)) {
+                this.planShownLayers = activeLayers.length >= 2 ? [activeLayers[0], l.layer] : [...activeLayers, l.layer];
+              }
+            } else {
+              this.planGridMode = "single";
+              this.planShownLayers = [l.layer];
+            }
+            this.render();
+          }),
+        );
+      }
+      wrap.appendChild(layerBar);
+    }
+
+    const commitItemFields = (id: string, fields: Record<string, unknown>): void => {
+      const prev = this.planOptimistic.get(id) ?? {};
+      this.planOptimistic.set(id, { ...prev, ...fields });
+      if (typeof fields.layer === "string") {
+        if (this.planGridMode === "single") {
+          this.planShownLayers = [fields.layer];
+        } else if (this.planGridMode === "pair" && !activeLayers.includes(fields.layer)) {
+          this.planShownLayers = activeLayers.length >= 2 ? [activeLayers[0], fields.layer] : [...activeLayers, fields.layer];
+        }
+      }
+      this.render();
+      sendPlan("plan.update", { ops: [{ op: "set", id, fields }] });
+    };
+
+    if (this.planSelectedId) {
+      let selLayer = "";
+      let selItem: PlanItem | null = null;
+      for (const l of mergedLayers) {
+        const found = (l.items ?? []).find((it) => it.id === this.planSelectedId);
+        if (found) {
+          selLayer = l.layer;
+          selItem = found;
+          break;
+        }
+      }
+      if (selItem) {
+        const ins = document.createElement("div");
+        ins.className = "bp-plan-inspector";
+        ins.setAttribute("data-testid", "mgmt-plan-inspector");
+        const top = document.createElement("div");
+        top.className = "bp-plan-ins-row";
+        const sw = document.createElement("span");
+        sw.className = "bp-plan-ins-sw";
+        sw.style.background = selItem.kind === "corridor"
+          ? planBusColor(selItem.name || selItem.id, selItem.color || "")
+          : planRailColor(selItem.name || selItem.id, selItem.color || "");
+        const title = document.createElement("span");
+        title.className = "bp-mgmt-strong";
+        title.textContent = selItem.name || selItem.id;
+        const ltag = document.createElement("span");
+        ltag.className = "bp-dim";
+        ltag.textContent = selLayer;
+        top.append(sw, title, ltag);
+        if (selItem.edited || selItem.state === "edited") {
+          const ep = document.createElement("span");
+          ep.className = "bp-plan-ins-pill warn";
+          ep.textContent = t("gpui.mgmt.plan.edited", "Edited");
+          top.appendChild(ep);
+        }
+        if (selItem.locked) {
+          const lp = document.createElement("span");
+          lp.className = "bp-plan-ins-pill";
+          lp.textContent = t("gpui.mgmt.plan.locked", "Locked");
+          top.appendChild(lp);
+        }
+        const sp = document.createElement("span");
+        sp.className = "bp-mgmt-flex1";
+        top.appendChild(sp);
+
+        const lockBtn = document.createElement("button");
+        lockBtn.type = "button";
+        lockBtn.className = "bp-mgmt-btn bp-plan-mini-btn";
+        lockBtn.setAttribute("data-testid", "mgmt-plan-lock");
+        lockBtn.textContent = selItem.locked
+          ? t("gpui.mgmt.plan.unlock", "Unlock")
+          : t("gpui.mgmt.plan.lock", "Lock");
+        lockBtn.addEventListener("click", () => commitItemFields(selItem!.id, { locked: !selItem!.locked }));
+        top.appendChild(lockBtn);
+
+        if (selItem.state === "proposed" || selItem.state === "edited") {
+          const okB = document.createElement("button");
+          okB.type = "button";
+          okB.className = "primary bp-mgmt-btn bp-plan-mini-btn";
+          okB.textContent = t("android.hub.machines.approve", "Approve");
+          okB.addEventListener("click", () => sendPlan("plan.approve", { layer: "", ids: [selItem!.id], approve: true }));
+          const noB = document.createElement("button");
+          noB.type = "button";
+          noB.className = "bp-mgmt-btn bp-plan-mini-btn";
+          noB.textContent = t("gpui.mgmt.plan.reject", "Reject");
+          noB.addEventListener("click", () => sendPlan("plan.approve", { layer: "", ids: [selItem!.id], approve: false }));
+          top.append(okB, noB);
+        }
+
+        const noteBtn = document.createElement("button");
+        noteBtn.type = "button";
+        noteBtn.className = "bp-mgmt-btn bp-plan-mini-btn";
+        noteBtn.setAttribute("data-testid", "mgmt-plan-note-toggle");
+        noteBtn.textContent = t("gpui.mgmt.plan.addnote", "Add note");
+        noteBtn.addEventListener("click", () => {
+          this.planNoteOpen = !this.planNoteOpen;
+          this.render();
+        });
+        const closeSel = document.createElement("button");
+        closeSel.type = "button";
+        closeSel.className = "icon";
+        closeSel.textContent = "×";
+        closeSel.addEventListener("click", () => {
+          this.planSelectedId = "";
+          this.planNoteOpen = false;
+          this.render();
+        });
+        top.append(noteBtn, closeSel);
+        ins.appendChild(top);
+
+        if (!selItem.locked) {
+          const ctrlRow = document.createElement("div");
+          ctrlRow.className = "bp-plan-ins-row";
+          if (selItem.kind === "corridor") {
+            const curW = typeof selItem.width === "number" ? selItem.width : 1.5;
+            const wLbl = document.createElement("span");
+            wLbl.className = "bp-dim";
+            wLbl.textContent = t("gpui.mgmt.plan.width", "Width");
+            const wMinus = document.createElement("button");
+            wMinus.type = "button";
+            wMinus.className = "bp-mgmt-btn bp-plan-mini-btn";
+            wMinus.setAttribute("data-testid", "mgmt-plan-w-down");
+            wMinus.textContent = "-";
+            wMinus.addEventListener("click", () => {
+              const nw = Math.round(Math.max(0.15, curW - 0.25) * 100) / 100;
+              commitItemFields(selItem!.id, { width: nw });
+            });
+            const wVal = document.createElement("span");
+            wVal.className = "bp-plan-ins-val";
+            wVal.textContent = `${curW.toFixed(2)}mm`;
+            const wPlus = document.createElement("button");
+            wPlus.type = "button";
+            wPlus.className = "bp-mgmt-btn bp-plan-mini-btn";
+            wPlus.setAttribute("data-testid", "mgmt-plan-w-up");
+            wPlus.textContent = "+";
+            wPlus.addEventListener("click", () => {
+              const nw = Math.round(Math.min(25, curW + 0.25) * 100) / 100;
+              commitItemFields(selItem!.id, { width: nw });
+            });
+            const sepW = document.createElement("span");
+            sepW.className = "bp-plan-sep";
+            ctrlRow.append(wLbl, wMinus, wVal, wPlus, sepW);
+          }
+
+          const moveOpts = (d.copper_layers ?? []).length > 0
+            ? (d.copper_layers ?? []).map((c) => c.layer)
+            : mergedLayers.map((l) => l.layer);
+          if (moveOpts.length > 0) {
+            const mLbl = document.createElement("span");
+            mLbl.className = "bp-dim";
+            mLbl.textContent = t("gpui.mgmt.plan.layer.move", "Move to layer");
+            ctrlRow.appendChild(mLbl);
+            for (const ml of moveOpts) {
+              ctrlRow.appendChild(
+                mkChip(ml, ml === selLayer, `mgmt-plan-move-${ml}`, () => {
+                  if (ml !== selLayer) commitItemFields(selItem!.id, { layer: ml });
+                }),
+              );
+            }
+          }
+          ins.appendChild(ctrlRow);
+        }
+
+        if (this.planNoteOpen) {
+          const nf = document.createElement("form");
+          nf.className = "bp-plan-note-form";
+          const ni = document.createElement("input");
+          ni.type = "text";
+          ni.className = "bp-plan-note-input";
+          ni.setAttribute("data-testid", "mgmt-plan-note-input");
+          ni.placeholder = t("gpui.mgmt.plan.note.placeholder", "Steering note for router…");
+          const nb = document.createElement("button");
+          nb.type = "submit";
+          nb.className = "primary bp-mgmt-btn bp-plan-mini-btn";
+          nb.setAttribute("data-testid", "mgmt-plan-note-submit");
+          nb.textContent = t("gpui.mgmt.plan.addnote", "Add note");
+          nf.append(ni, nb);
+          nf.addEventListener("submit", (e) => {
+            e.preventDefault();
+            const txt = ni.value.trim();
+            if (!txt) return;
+            ni.value = "";
+            this.planNoteOpen = false;
+            this.render();
+            sendPlan("plan.update", { ops: [{ op: "note", id: selItem!.id, text: txt }] });
+          });
+          ins.appendChild(nf);
+        }
+
+        if (this.planViewMode !== "list" && !selItem.locked) {
+          const hint = document.createElement("div");
+          hint.className = "bp-plan-hint";
+          hint.textContent = t(
+            "gpui.mgmt.plan.hint",
+            "Drag waypoints to steer · Click + on edge to insert · Right-click vertex to remove",
+          );
+          ins.appendChild(hint);
+        }
+        wrap.appendChild(ins);
+      }
+    }
+
     const listEl = document.createElement("div");
-    listEl.className = "bp-mgmt-rows";
+    listEl.className = "bp-mgmt-rows" + (this.planViewMode === "split" ? " bp-plan-split-list" : "");
     listEl.setAttribute("data-testid", "mgmt-plan-rows");
     const doneWord = t("gpui.mgmt.plan.done", "done");
-    for (const l of d.layers ?? []) {
+    for (const l of mergedLayers) {
       const items = l.items ?? [];
       const gh = document.createElement("div");
       gh.className = "bp-mgmt-group-head bp-plan-layer-head";
@@ -1322,7 +1765,55 @@ export class MgmtStrip {
         listEl.appendChild(row);
       }
     }
-    wrap.appendChild(listEl);
+    if (this.planViewMode !== "list") {
+      if (!this.planCanvas) {
+        this.planCanvas = new PlanFloorplannerCanvas({
+          onSelect: (id) => {
+            this.planSelectedId = id;
+            if (!id) this.planNoteOpen = false;
+            this.render();
+          },
+          onFocusItem: (id) => {
+            sendPlan("plan.focus", { id });
+          },
+          onOptimisticPatch: (id, fields) => {
+            const prev = this.planOptimistic.get(id) ?? {};
+            this.planOptimistic.set(id, { ...prev, ...fields });
+          },
+          onCommitFields: (id, fields) => {
+            commitItemFields(id, fields);
+          },
+          onApproveLayer: (layer, approve) => {
+            sendPlan("plan.approve", { layer, ids: [], approve });
+          },
+          onQuickApprove: (ids, approve) => {
+            sendPlan("plan.approve", { layer: "", ids, approve });
+          },
+        });
+      }
+      const noViewer = this.panelEl.parentElement?.classList.contains("bp-has-viewer") === false;
+      const twoCols = this.planExpanded || this.panelEl.clientWidth >= 540 || noViewer;
+      this.planCanvas.update(
+        {
+          gridMode: this.planGridMode,
+          syncZoom: this.planSyncZoom,
+          shownLayers: activeLayers,
+          selectedId: this.planSelectedId,
+          board: rawBoard,
+          bands: mergedBands,
+          regions: mergedRegions,
+          layers: mergedLayers,
+        },
+        twoCols,
+      );
+      const canvasScroll = document.createElement("div");
+      canvasScroll.className = "bp-plan-canvas-scroll";
+      canvasScroll.appendChild(this.planCanvas.root);
+      wrap.appendChild(canvasScroll);
+    }
+    if (this.planViewMode !== "canvas") {
+      wrap.appendChild(listEl);
+    }
 
     if ((d.draw?.bands?.length ?? 0) > 0 || (d.draw?.regions?.length ?? 0) > 0) {
       const foot = document.createElement("div");

@@ -4838,6 +4838,27 @@ gpui.keys.mgmt.plan	Plan panel beside the design: open or close	設計横の計�
 web.plan.awaiting	{n} awaiting approval	{n} 件が承認待ち	{n} esperando aprobación
 web.plan.net.one	1 net	1 ネット	1 red
 web.plan.nets	{n} nets	{n} ネット	{n} redes
+gpui.mgmt.plan.view.canvas	Canvas	キャンバス	Lienzo
+gpui.mgmt.plan.view.split	Split	分割	Dividido
+gpui.mgmt.plan.view.list	List	リスト	Lista
+gpui.mgmt.plan.grid.all	All layers	全レイヤー	Todas las capas
+gpui.mgmt.plan.grid.pair	Side by side	並べて表示	Lado a lado
+gpui.mgmt.plan.grid.single	Single	単一	Única
+gpui.mgmt.plan.expand	Expand	拡大	Expandir
+gpui.mgmt.plan.compact	Compact	標準	Compacto
+gpui.mgmt.plan.sync	Link zoom	ズーム連動	Vincular zoom
+gpui.mgmt.plan.fit	Fit	全体表示	Ajustar
+gpui.mgmt.plan.lock	Lock	ロック	Bloquear
+gpui.mgmt.plan.unlock	Unlock	ロック解除	Desbloquear
+gpui.mgmt.plan.layer.move	Move to layer	レイヤー移動	Mover a capa
+gpui.mgmt.plan.width	Width	幅	Ancho
+gpui.mgmt.plan.addnote	Add note	メモを追加	Añadir nota
+gpui.mgmt.plan.note.placeholder	Steering note for router…	ルーターへの指示メモ…	Nota de guiado para el router…
+gpui.mgmt.plan.hint	Drag waypoints to steer · Click + on edge to insert · Right-click vertex to remove	頂点をドラッグして誘導 · 辺の + をクリックで追加 · 頂点を右クリックで削除	Arrastra vértices para guiar · Clic en + del borde para insertar · Clic derecho en vértice para quitar
+gpui.mgmt.plan.rejectlayer	Reject layer	レイヤーを却下	Rechazar capa
+gpui.mgmt.plan.edited	Edited	編集済み	Editado
+gpui.mgmt.plan.locked	Locked	ロック中	Bloqueado
+gpui.mgmt.plan.noitems	No corridors or planes on this layer	このレイヤーにコリドーまたはプレーンがありません	Sin corredores ni planos en esta capa
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

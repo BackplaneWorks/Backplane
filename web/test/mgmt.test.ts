@@ -21,6 +21,15 @@ import {
   refsFit,
   stockSummary,
   tierWords,
+  planPolylineMidpoint,
+  planRailColor,
+  planBusColor,
+  planFitCamera,
+  planHitTest,
+  planInsertVertex,
+  planRemoveVertex,
+  planDefaultLayerPair,
+  planLayoutLabels,
 } from "../src/mgmt-model";
 
 describe("Management strip pure model", () => {
@@ -146,5 +155,65 @@ describe("Management strip pure model", () => {
     expect(isChecksFixCurrent(start, { watchGen: 1, project: "/proj/A", threadId: "t1", threadGen: 7 })).toBe(false);
     // Switched project -> discarded
     expect(isChecksFixCurrent(start, { watchGen: 2, project: "/proj/B", threadId: "t1", threadGen: 5 })).toBe(false);
+  });
+
+  test("floorplanner canvas midpoint, hit-testing, vertex edit, label collision, and default pair", () => {
+    expect(planPolylineMidpoint([])).toBeNull();
+    expect(planPolylineMidpoint([[10, 0], [20, 0], [20, 30]])).toEqual([20, 10]);
+
+    expect(planRailColor("+3V3", "#5a7a9a")).toBe("#f59e0b");
+    expect(planRailColor("+1V8")).toBe("#c084fc");
+    expect(planRailColor("+5V", "#123456")).toBe("#123456");
+    expect(planBusColor("USB", "#14b8a6")).toBe("#14b8a6");
+
+    const cam = planFitCamera([0, 0, 100, 100], 200, 200, 0);
+    const bands = [{ id: "c1", layer: "In5.Cu", width: 4, locked: false, path: [[10, 50], [90, 50]] as Array<[number, number]> }];
+    const regions = [{
+      id: "p1",
+      layer: "In5.Cu",
+      locked: false,
+      outline: [[5, 5], [95, 5], [95, 95], [5, 95]] as Array<[number, number]>,
+      holes: [[[30, 70], [45, 70], [45, 85], [30, 85]]] as Array<Array<[number, number]>>,
+    }];
+    expect(planHitTest(bands, regions, "In5.Cu", "c1", cam, 200, 200, 21, 101)).toEqual({
+      kind: "vertex",
+      id: "c1",
+      isPlane: false,
+      idx: 0,
+    });
+    expect(planHitTest(bands, regions, "In5.Cu", "c1", cam, 200, 200, 100, 100)?.kind).toBe("midpoint");
+    expect(planHitTest(bands, regions, "In5.Cu", "", cam, 200, 200, 120, 100)).toEqual({ kind: "band", id: "c1" });
+    expect(planHitTest(bands, regions, "In5.Cu", "", cam, 200, 200, 30, 40)).toEqual({ kind: "region", id: "p1" });
+    expect(planHitTest(bands, regions, "In5.Cu", "", cam, 200, 200, 76, 156)).toBeNull();
+
+    const open: Array<[number, number]> = [[0, 0], [10, 0]];
+    expect(planRemoveVertex(open, 0, false)).toBeNull();
+    const inserted = planInsertVertex(open, 0, [5, 4], false);
+    expect(inserted).toEqual([[0, 0], [5, 4], [10, 0]]);
+    expect(planRemoveVertex(inserted, 1, false)).toEqual(open);
+
+    const tri: Array<[number, number]> = [[0, 0], [10, 0], [10, 10]];
+    expect(planRemoveVertex(tri, 0, true)).toBeNull();
+    expect(planInsertVertex(tri, 2, [0, 10], true).length).toBe(4);
+
+    const pair = planDefaultLayerPair([
+      { layer: "F.Cu", role: "signal", items: [{ id: "a", kind: "corridor" }] },
+      { layer: "In3.Cu", role: "power", items: [{ id: "b", kind: "plane" }, { id: "c", kind: "plane" }] },
+      { layer: "In5.Cu", role: "signal", items: [{ id: "d", kind: "corridor" }, { id: "e", kind: "corridor" }] },
+    ]);
+    expect(pair).toEqual(["In5.Cu", "In3.Cu"]);
+
+    const labels = planLayoutLabels(
+      [
+        { r: "U1", s: "F", b: [20, 20, 40, 40], o: false },
+        { r: "R9", s: "F", b: [26, 26, 34, 34], o: false },
+        { r: "U2", s: "F", b: [70, 70, 85, 85], o: false },
+      ],
+      planFitCamera([0, 0, 100, 100], 400, 400, 0),
+      400,
+      400,
+      [],
+    );
+    expect(labels.map((l) => l.text)).toEqual(["U1", "U2"]);
   });
 });
