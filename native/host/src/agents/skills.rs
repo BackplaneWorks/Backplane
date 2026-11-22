@@ -405,7 +405,7 @@ mod tests {
         put(&home, ".claude/skills/unslop/SKILL.md", &sk("unslop", "cut the filler")); put(&proj, ".claude/skills/local/SKILL.md", &sk("local", "project one"));
         put(&home, ".codex/skills/cdx/SKILL.md", &sk("cdx", "codex one")); put(&home, ".agents/skills/shared/SKILL.md", &sk("shared", "agents one"));
         put(&t, "plug/skills/review/SKILL.md", &sk("review", "plugin one"));
-        put(&home, ".claude/plugins/installed_plugins.json", &format!("{{\"plugins\":{{\"pk@mk\":[{{\"installPath\":\"{}\"}}]}}}}", t.join("plug").display()));
+        put(&home, ".claude/plugins/installed_plugins.json", &serde_json::json!({"plugins":{"pk@mk":[{"installPath": t.join("plug")}]}}).to_string());
         put(&home, ".claude/skills/hidden/SKILL.md", "---\nname: hidden\nuser-invocable: false\n---\n");
         let env = Env { home: home.to_string_lossy().into(), hub_home: t.join("hub"), kistack: None, codex_home: None };
         put(&t, "hub/skills/own/SKILL.md", &sk("own", "backplane one"));
@@ -419,7 +419,7 @@ mod tests {
     #[test] fn a_plugin_settings_turn_off_is_left_out_and_a_new_skill_shows_at_once() {
         let t = tmp("fresh"); let home = t.join("h");
         put(&t, "plug/skills/review/SKILL.md", &sk("review", "x"));
-        put(&home, ".claude/plugins/installed_plugins.json", &format!("{{\"plugins\":{{\"pk@mk\":[{{\"installPath\":\"{}\"}}]}}}}", t.join("plug").display()));
+        put(&home, ".claude/plugins/installed_plugins.json", &serde_json::json!({"plugins":{"pk@mk":[{"installPath": t.join("plug")}]}}).to_string());
         put(&home, ".claude/settings.json", "{\"enabledPlugins\":{\"pk@mk\":false}}");
         let env = Env { home: home.to_string_lossy().into(), hub_home: t.join("hub"), kistack: None, codex_home: None };
         assert!(index(&env, "").is_empty(), "disabled plugin");

@@ -347,8 +347,11 @@ mod tests {
         let d = PiDriver::new(); let mut a = ti("approval-required"); a.model = "anthropic/claude-x".into(); a.effort = "high".into();
         let dir = crate::plat::tmp::uncreated("pi-argv"); a.home = dir.to_string_lossy().into();
         let v = d.argv(&a);
-        assert_eq!(v, vec!["--mode", "rpc", "--session-id", "bp-t1-9-0", "-e", &format!("{}/pi/backplane.js", a.home), "--append-system-prompt", "P", "--model", "anthropic/claude-x", "--thinking", "high"]);
+        let ext = dir.join("pi").join("backplane.js").to_string_lossy().into_owned();
+        let prompt = if cfg!(windows) { dir.join("pi").join("t1.prompt.md").to_string_lossy().into_owned() } else { "P".into() };
+        assert_eq!(v, vec!["--mode", "rpc", "--session-id", "bp-t1-9-0", "-e", &ext, "--append-system-prompt", &prompt, "--model", "anthropic/claude-x", "--thinking", "high"]);
         assert_eq!(std::fs::read_to_string(dir.join("pi/backplane.js")).unwrap(), EXT);
+        if cfg!(windows) { assert_eq!(std::fs::read_to_string(dir.join("pi/t1.prompt.md")).unwrap(), "P"); }
         assert_eq!(d.env(&a), vec![("BACKPLANE_PI_MCP".to_string(), a.mcp_url.clone()), ("BACKPLANE_PI_PCBPARTS".into(), a.pcbparts_url.clone()), ("BACKPLANE_PI_MODE".into(), "ask".into())]);
         a.model = "default".into(); a.effort = "".into(); a.session = "sess-1".into();
         assert_eq!(d.argv(&a)[3], "sess-1"); assert_eq!(d.argv(&a).len(), 8);

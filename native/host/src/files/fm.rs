@@ -35,9 +35,9 @@ pub fn files_safe(rel: &str) -> bool { safe(rel) && !rel.contains('\\') && !driv
 
 /// Fm.join / Fm.last / Fm.parent
 pub fn join(dir: &str, name: &str) -> String { if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") } }
-pub fn last(p: &str) -> &str { p.rsplit('/').next().unwrap_or(p) }
+pub fn last(p: &str) -> &str { p.rsplit(crate::plat::fs::SEPS).next().unwrap_or(p) }
 pub fn parent(dir: &str) -> String {
-    let cut = dir.len() - last(dir).len() - usize::from(dir.contains('/'));
+    let cut = dir.len() - last(dir).len() - usize::from(dir.contains(crate::plat::fs::SEPS));
     dir[..cut].to_string()
 }
 
@@ -99,7 +99,15 @@ mod tests {
     }
     #[test] fn fm_parent_join() {
         assert_eq!(parent(""), ""); assert_eq!(parent("a"), ""); assert_eq!(parent("a/b"), "a"); assert_eq!(parent("a/b/c"), "a/b");
+        assert_eq!(parent("/"), ""); assert_eq!(parent("a/"), "a");
         assert_eq!(join("", "x"), "x"); assert_eq!(join("a", "x"), "a/x"); assert_eq!(last("a/b"), "b");
+        if cfg!(windows) {
+            assert_eq!(last(r"a\b"), "b"); assert_eq!(last(r"C:\p\docs\readme.txt"), "readme.txt"); assert_eq!(last(r"a/b\c"), "c");
+            assert_eq!(parent(r"a\b"), "a"); assert_eq!(parent(r"a\b\c"), r"a\b"); assert_eq!(parent(r"a/b\c"), "a/b");
+            assert_eq!(parent(r"C:\p\docs\readme.txt"), r"C:\p\docs"); assert_eq!(parent(r"a\"), "a"); assert_eq!(parent(r"\"), "");
+        } else {
+            assert_eq!(last(r"a\b"), r"a\b"); assert_eq!(parent(r"a\b"), "");
+        }
     }
     // the corpus: <expected safe 0/1> TAB <decoded rel path as JSON string>; every line is a hostile or odd path
     #[test] fn hostile_corpus() {

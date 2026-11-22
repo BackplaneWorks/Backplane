@@ -330,7 +330,7 @@ fn triage_view(ev: &[Value]) -> Vec<String> {
     let (hub, bots, _r, bub, chat) = uber("prompt").await; let ada = rpc(&hub, "bots.create", json!({"name":"ada","persona":"dry and brief"})).await["bot"].as_str().unwrap().to_string();
     until(&hub, |l| l.iter().filter(|e| e["$"] == "WorktreeSet").count() == 2).await;
     let at = bots.world().await.bot(&ada).unwrap().thread.clone();
-    let p = bots.bot_prompt(&at).await; assert!(p.contains("# You are ada, a Backplane bot") && p.contains("dry and brief") && p.contains(&format!("/bots/{ada})")), "{p}"); assert!(!p.contains("You are the uberbot"));
+    let p = bots.bot_prompt(&at).await; assert!(p.contains("# You are ada, a Backplane bot") && p.contains("dry and brief") && crate::plat::tmp::sl(&p).contains(&format!("/bots/{ada})")), "{p}"); assert!(!p.contains("You are the uberbot"));
     assert!(p.contains("A room pauses after 12 messages in a row") && p.contains("in their time zone, which is "), "{p}"); // the zone itself is the host's, or whatever TZ another test of this process set
     let u = bots.bot_prompt(&chat).await; assert!(u.contains("# You are the uberbot") && u.contains("<recent_private_triage_assessments>"), "{u}");
     assert_eq!(bots.bot_prompt("t-plain").await, "", "a plain thread has no bot part");
