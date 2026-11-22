@@ -4906,6 +4906,7 @@ provider.notice.text.none	Connect Claude, Codex, Antigravity, or another provide
 provider.notice.text.signedout	Sign in to Claude, Codex, or another provider in Settings → Accounts to start chatting.	チャットを始めるには、設定 → アカウントで Claude、Codex などのプロバイダーにサインインしてください。	Inicia sesión en Claude, Codex u otro proveedor en Configuración → Cuentas para empezar a chatear.
 provider.notice.button	Open Settings → Accounts	設定 → アカウントを開く	Abrir Configuración → Cuentas
 provider.notice.senderr	No AI provider connected yet. Open Settings → Accounts to connect Claude, Codex, Antigravity, or another provider.	AI プロバイダーがまだ接続されていません。設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。	Aún no hay ningún proveedor de IA conectado. Abre Configuración → Cuentas para conectar Claude, Codex, Antigravity u otro proveedor.
+provider.notice.senderr.remote	No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.	{machine} に AI プロバイダーが接続されていません。{machine} で設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。	No hay ningún proveedor de IA conectado en {machine}. Abre Configuración → Cuentas en {machine} para conectar Claude, Codex, Antigravity u otro proveedor.
 web.settings.providers	AI providers	AI プロバイダー	Proveedores de IA
 web.settings.providers.browser	Connect a provider in the Backplane desktop or mobile app under Settings → Accounts.	Backplane のデスクトップまたはモバイルアプリの設定 → アカウントからプロバイダーを接続してください。	Conecta un proveedor en la aplicación de escritorio o móvil de Backplane en Configuración → Cuentas.
 """#
@@ -7885,4 +7886,7 @@ web.settings.providers.browser	Connect a provider in the Backplane desktop or mo
 
     /// mobile.plan.coord = ({x}, {y} mm)
     static func mobile_plan_coord(x: String, y: String) -> String { f("mobile.plan.coord", ["x": x, "y": y]) }
+
+    /// provider.notice.senderr.remote = No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.
+    static func provider_notice_senderr_remote(machine: String) -> String { f("provider.notice.senderr.remote", ["machine": machine]) }
 }

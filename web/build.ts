@@ -111,6 +111,7 @@ function collectI18nKeys(tsFiles: string[]): string[] {
     "provider.notice.text.signedout",
     "provider.notice.button",
     "provider.notice.senderr",
+    "provider.notice.senderr.remote",
   ]);
   const re = /\bt\(\s*["']([a-zA-Z0-9_.-]+)["']/g;
   for (const f of tsFiles) {

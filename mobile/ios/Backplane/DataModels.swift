@@ -680,5 +680,5 @@ struct DNoProvider: Equatable {
             url: o["url"] as? String ?? "backplane://settings/accounts"
         )
     }
-    static func isSendError(_ msg: String) -> Bool { msg.contains("No AI provider connected") }
+    static func isSendError(_ msg: String) -> Bool { msg.hasPrefix("No AI provider connected yet.") }
 }

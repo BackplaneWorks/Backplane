@@ -22,7 +22,7 @@ pub fn parse(v: &Value) -> Option<Notice> {
 }
 
 pub fn is_send_error(err: &str) -> bool {
-    err.contains("No AI provider connected")
+    err.starts_with("No AI provider connected yet.")
 }
 
 pub fn view(cx: &mut Context<Backplane>, light: bool, v: &Value, hidden: bool) -> Option<AnyElement> {
@@ -82,6 +82,7 @@ mod tests {
         assert_eq!(parse(&Value::Null), None);
         assert_eq!(parse(&serde_json::json!({"head": ""})), None);
         assert!(is_send_error("No AI provider connected yet. Open Settings → Accounts to connect Claude, Codex, Antigravity, or another provider."));
+        assert!(!is_send_error("No AI provider connected on boat-hub. Open Settings → Accounts on boat-hub to connect Claude, Codex, Antigravity, or another provider."));
         assert!(!is_send_error("Some other error"));
         let icons: serde_json::Map<String, Value> = serde_json::from_str(include_str!("../../../../assets/icons.json")).unwrap();
         assert!(icons.contains_key("plug"));

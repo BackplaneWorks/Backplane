@@ -34,6 +34,37 @@ fn ms(at: u64) -> u64 { if at < 100_000_000_000 { at * 1000 } else { at } }
 fn clip(s: &str, n: usize) -> String { let t: String = s.chars().take(n).collect(); t.replace('\n', " ") }
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 fn err<T: ToString>(e: T) -> Value { json!(e.to_string()) }
+pub(crate) fn no_provider_err(why: &str) -> Value {
+    json!({"message": why, "errorCode": crate::settings::provider_notice::SEND_GUARD_CODE})
+}
+pub(crate) fn err_from_rpc(r: &Value) -> Value {
+    let msg = r["error"].as_str().map(str::to_string).unwrap_or_else(|| r["error"].to_string());
+    if r.get("errorCode").is_some() || r.get("machine").is_some() || r.get("thread").is_some() {
+        let mut obj = json!({"message": msg});
+        if let Some(c) = r.get("errorCode") { obj["errorCode"] = c.clone(); }
+        if let Some(m) = r.get("machine") { obj["machine"] = m.clone(); }
+        if let Some(t) = r.get("thread") { obj["thread"] = t.clone(); }
+        obj
+    } else {
+        json!(msg)
+    }
+}
+fn err_reply(id: Value, e: Value) -> Value {
+    if e.is_object()
+        && e.get("code").is_none()
+        && e.get("key").is_none()
+        && (e.get("errorCode").is_some() || e.get("machine").is_some() || e.get("thread").is_some())
+    {
+        if let Some(msg) = e.get("message").and_then(Value::as_str) {
+            let mut out = json!({"t":"reply","id":id,"ok":false,"error":msg});
+            for k in ["errorCode", "machine", "thread"] {
+                if let Some(v) = e.get(k) { out[k] = v.clone(); }
+            }
+            return out;
+        }
+    }
+    json!({"t":"reply","id":id,"ok":false,"error":e})
+}
 
 // ---- plain CBOR (no key dictionary: the app's decoder knows nothing of the hub's) ----
 fn head(out: &mut Vec<u8>, major: u8, n: u64) {
@@ -412,7 +443,7 @@ async fn rpc(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: Value) -> Result<Value, V
         Some(r) => r,
         None => hub.request_here(c, &json!({"id":0,"m":m,"p":p})).await.into_iter().find(|v| v["t"] == "reply").ok_or_else(|| err("no answer"))?,
     };
-    if r["ok"] == true { Ok(r) } else { Err(r["error"].clone().as_str().map(|e| json!(e)).unwrap_or(r["error"].clone())) }
+    if r["ok"] == true { Ok(r) } else { Err(err_from_rpc(&r)) }
 }
 fn safe_id(x: &str) -> bool { !x.is_empty() && x.len() <= 64 && x.chars().all(|c| c.is_ascii_alphanumeric() || "-_.:".contains(c)) }
 static SENT: Mutex<Option<(HashMap<String, Value>, VecDeque<String>)>> = Mutex::new(None);
@@ -612,8 +643,16 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
         "thread.create" => {
             let project = s(p, "project"); if project.is_empty() { return Err(err("project")) }
             if project == crate::sidebar::SCRATCH { return Err(err(SCRATCH_CLOSED)) }
+            let has_text = !s(p, "text").trim().is_empty();
+            let far_proj = machines::is_far(project);
+            if has_text && !far_proj {
+                if let Some(why) = crate::settings::provider_notice::send_guard(hub).await {
+                    return Err(no_provider_err(why));
+                }
+            }
             // like the desktop's +: the env follows the thread.env setting (auto: a worktree in a git project) unless the phone names one
             let mut q = json!({"project":project});
+            if has_text && far_proj { q["preflightSend"] = json!(true); }
             if !s(p, "env").is_empty() { if !matches!(s(p, "env"), "auto" | "worktree" | "local") { return Err(err("env: auto, worktree or local")) } q["env"] = p["env"].clone() }
             for k in ["title", "provider", "model"] { if !s(p, k).is_empty() { q[k] = p[k].clone() } }
             let r = rpc(hub, c, "thread.create", q).await?;
@@ -624,7 +663,21 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
             if !s(p, "effort").is_empty() { rpc(hub, c, "thread.effort", json!({"thread":id,"effort":s(p, "effort")})).await?; }
             if !s(p, "speed").is_empty() { rpc(hub, c, "thread.speed", json!({"thread":id,"speed":s(p, "speed")})).await?; }
             // (a thread just made on a linked machine is not in the mirror yet: its first message goes straight there)
-            if !s(p, "text").is_empty() { if far { rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await?; } else { send_message(hub, c, &id, s(p, "text"), "", &Value::Null, &Value::Null, &Value::Null).await?; } }
+            if has_text {
+                let sent = if far {
+                    rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await.map(|_| ())
+                } else {
+                    send_message(hub, c, &id, s(p, "text"), "", &Value::Null, &Value::Null, &Value::Null).await.map(|_| ())
+                };
+                if let Err(mut e) = sent {
+                    if !e.is_object() {
+                        let msg = e.as_str().map(str::to_string).unwrap_or_else(|| e.to_string());
+                        e = json!({"message": msg});
+                    }
+                    e["thread"] = json!(id);
+                    return Err(e);
+                }
+            }
             let g = hub.model().await; let asks = open_ask_counts(hub);
             if far { return Ok(json!({"thread":far_made(hub, &g, &id, project, s(p, "title"))})) }
             thread_json(hub, &g, &id, &asks).map(|t| json!({"thread":t})).ok_or_else(|| err("no thread was made"))
@@ -895,7 +948,7 @@ async fn handle_for(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value, is
         "shell.sync" => open::shell_sync(hub, c, subs, &p, is_browser).await,
         _ => match term::call(hub, c.client, &mut subs.terms, m, &p).await { Some(r) => r, None => call(hub, c, m, &p, is_browser).await },
     };
-    match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }
+    match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => err_reply(id, e) }
 }
 
 /// A request that waits on another machine (its thread or project is `<link>~<id>`, or a viewer read about a drawing watched there) is run off the socket's loop,
@@ -1000,6 +1053,9 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
     let name = NAME.get_or_init(crate::net::botnet::name).await.clone();
     let theme = hub.setting("ui.theme").await.unwrap_or_default();
     let locale = hub.setting("ui.lang").await.unwrap_or_default();
+    // Subscribe before taking the hello snapshot so live notice/log changes during setup are never missed.
+    let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
+    let mut seen = hub.store.len();
     let (hub_offer, notice, migrating) = if browser.is_some() {
         (String::new(), Value::Null, Value::Null)
     } else {
@@ -1010,14 +1066,20 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
         )
     };
     let no_provider = crate::settings::provider_notice::for_hub(&hub).await.map_or(Value::Null, |n| n.json());
+    let mut no_provider_sent = no_provider.clone();
     let mut hello = json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating,"noProvider":no_provider}); if let Some(c) = z { hello["z"] = json!(c) }
     // the home (feature "home", net/home.rs): where the uberbot lives, as this hub sees it; `k:"home"` pushes follow it on a lists subscription
     let mut home_sent = crate::net::home::now(&hub).await; hello["home"] = home_sent.clone();
     tx.send(pack(&hello, json_mode)).await?;
     tx.arm(); // the hello went as it is: what follows is compressed (when a codec was chosen)
+    let no_provider_now = crate::settings::provider_notice::for_hub(&hub).await.map_or(Value::Null, |n| n.json());
+    if no_provider_now != no_provider_sent {
+        no_provider_sent = no_provider_now.clone();
+        let val = if no_provider_now.is_null() { String::new() } else { no_provider_now.to_string() };
+        if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&json!({"t":"info","info":{crate::settings::provider_notice::INFO_KEY:val}}), json_mode)).await? { return Ok(()) }
+    }
     let (late_tx, mut late_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
-    let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
-    let mut seen = hub.store.len(); let mut subs = Subs::default();
+    let mut subs = Subs::default();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
     let mut far_beat = tokio::time::interval(Duration::from_millis(2000)); far_beat.tick().await;
     loop {
@@ -1056,7 +1118,7 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                     let mut c2 = Conn { local_view_socket: false, sent: vec![], client: conn.client, gen: conn.gen.clone(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
                     tokio::spawn(async move {
                         let res = match term::far_wait(&m, &p) { true => term::far_call(&hub, c2.client, &m, &p).await, false => call(&hub, &mut c2, &m, &p, is_browser).await };
-                        let _ = late.send(match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) });
+                        let _ = late.send(match res { Ok(r) => json!({"t":"reply","id":id,"ok":true,"result":r}), Err(e) => err_reply(id, e) });
                     });
                     continue
                 }
@@ -1075,9 +1137,19 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                 if len > seen {
                     let lines = hub.store.range(seen, len.min(seen + 2000)).unwrap_or_default();
                     seen += lines.len();
+                    let inv_changed = lines.iter().any(|l| l.contains("\"accounts.inventory\""));
                     for f in deltas(&hub, &lines, &mut subs).await {
                         if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&f, json_mode)).await? { return Ok(()) }
                         sent = true;
+                    }
+                    if inv_changed {
+                        let cur = crate::settings::provider_notice::for_hub(&hub).await.map_or(Value::Null, |n| n.json());
+                        if cur != no_provider_sent {
+                            no_provider_sent = cur.clone();
+                            let val = if cur.is_null() { String::new() } else { cur.to_string() };
+                            if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&json!({"t":"info","info":{crate::settings::provider_notice::INFO_KEY:val}}), json_mode)).await? { return Ok(()) }
+                            sent = true;
+                        }
                     }
                 }
                 if !sent {
@@ -1110,6 +1182,9 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                     },
                     // hub info (set_info): what a phone draws of it (phone_info), as `{"t":"info","info":{...}}`
                     Out::Value(v) if v["t"] == "info" => if let Some(f) = phone_info_frame(&v) {
+                        if let Some(raw) = f["info"].get(crate::settings::provider_notice::INFO_KEY) {
+                            no_provider_sent = raw.as_str().and_then(|s| if s.is_empty() { None } else { serde_json::from_str(s).ok() }).unwrap_or(Value::Null);
+                        }
                         if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&f, json_mode)).await? { return Ok(()) }
                     },
                     Out::Value(v) => if ext::wants_value(&v) {

@@ -342,7 +342,7 @@ impl Bots {
         if star.is_some() && !text.trim().is_empty() {
             drop(w);
             if let Some(why) = crate::settings::provider_notice::send_guard(&self.hub).await {
-                return vec![err(id, why)];
+                return vec![crate::settings::provider_notice::rpc_error_reply(id, why)];
             }
             w = self.world().await;
             if !w.live(bot) { return vec![err(id, "no such bot")] }

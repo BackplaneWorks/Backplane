@@ -1267,7 +1267,7 @@ final class DataClient {
     }
 
     // MARK: the composer's own commands (feature commands): the hub runs them, the draft stays until it said yes
-    struct CommandResult: Decodable { let kind: String; var q: String?; var name: String?; var text: String?; var thread: String?; var path: String?; var error: String?; var note: String?; var repo: String? }
+    struct CommandResult: Decodable { let kind: String; var q: String?; var a: String?; var name: String?; var text: String?; var thread: String?; var path: String?; var error: String?; var note: String?; var repo: String? }
     private struct SecretAsks: Decodable { let asks: [SecretAsk] }
     /// The command this draft is, by the hub's own rule (session/composer.rs command_is): the word alone, or followed by a space or a new line.
     func commandOf(_ draft: String) -> Word? {
@@ -1282,7 +1282,7 @@ final class DataClient {
     func runCommand(_ tid: String, _ text: String) async throws -> CommandResult {
         // `exists`: this app offers Add existing on a folder /project found not empty (the answer's kind "exists")
         let r: CommandResult = try await call("composer.run", ["thread": tid, "text": text, "exists": true])
-        if r.kind == "btw" { btw[tid] = Btw(q: r.q ?? "", a: "Thinking…") }
+        if r.kind == "btw" { btw[tid] = Btw(q: r.q ?? "", a: (r.a?.isEmpty == false ? r.a! : "Thinking…")) }
         return r
     }
     func closeBtw(_ tid: String) { btw[tid] = nil }

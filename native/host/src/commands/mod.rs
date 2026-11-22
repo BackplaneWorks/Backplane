@@ -120,6 +120,16 @@ impl RpcHandler for Commands {
             if method == "accounts.select" && !crate::settings::accounts_hub::is_granted(who) { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::settings::accounts::GATE})] }
             // the hub's own requests: an agent's tool and the failover driver, which name who chose. A connection (client 1 and up) could say anything there, so it is never heard
             if matches!(method, "accounts.choose" | "fallback.switch") && who.client != 0 { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})] }
+            let preflight_send = match method {
+                "project.new" | "project.start" => !p["text"].as_str().map(str::trim).unwrap_or("").is_empty(),
+                "thread.create" => p["preflightSend"] == true || !p["text"].as_str().map(str::trim).unwrap_or("").is_empty(),
+                _ => false,
+            };
+            if who.client > 0 && preflight_send {
+                if let Some(why) = crate::settings::provider_notice::send_guard(hub).await {
+                    return vec![crate::settings::provider_notice::rpc_error_reply(id, why)];
+                }
+            }
             let create_in: Option<String> = match method {
                 "fs.list" => return answer(fs::list(&path).await),
                 "fs.mkdir" => return answer(fs::mkdir(&path).await),
@@ -168,7 +178,14 @@ impl RpcHandler for Commands {
                 if method == "project.new" && !first.is_empty() && pl.reply["ok"] == true { if let Some(th) = pl.reply["thread"].as_str() {
                     let msg = format!("np-{}", th.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-').collect::<String>());
                     let r = match hub.rpc_for("turn.start") { Some(h) => h.call(hub, who, &json!(0), "turn.start", &json!({"thread": th, "text": first, "msg": msg})).await.into_iter().next().unwrap_or(Value::Null), None => json!({"ok": false, "error": "no agent module is running"}) };
-                    if r["ok"] != true { let mut x = pl.reply.clone(); x["note"] = json!(format!("The project is made, but its first message did not go: {}", r["error"].as_str().unwrap_or("send it again"))); return vec![x] }
+                    if r["ok"] != true {
+                        if r["errorCode"].as_str().is_some_and(|c| c == crate::settings::provider_notice::SEND_GUARD_CODE || c == crate::settings::provider_notice::SEND_GUARD_REMOTE_CODE) {
+                            let mut x = json!({"t":"reply","id":id,"ok":false,"error":r["error"].as_str().unwrap_or(crate::settings::provider_notice::SEND_GUARD_ERROR),"errorCode":r["errorCode"],"thread":th});
+                            if let Some(m) = r.get("machine") { x["machine"] = m.clone(); }
+                            return vec![x];
+                        }
+                        let mut x = pl.reply.clone(); x["note"] = json!(format!("The project is made, but its first message did not go: {}", r["error"].as_str().unwrap_or("send it again"))); return vec![x]
+                    }
                 } }
                 return vec![pl.reply];
             }
@@ -201,7 +218,12 @@ impl RpcHandler for Commands {
             if let Some(("post", th, text)) = pl.act.clone() {
                 let msg = th.strip_prefix("home-").unwrap_or("").to_string();
                 let r = match hub.rpc_for("turn.start") { Some(h) => h.call(hub, who, &json!(0), "turn.start", &json!({"thread": th, "text": text, "msg": msg})).await.into_iter().next().unwrap_or(Value::Null), None => json!({"ok": false, "error": "no agent module is running"}) };
-                if r["ok"] != true { return vec![json!({"t":"reply","id":id,"ok":false,"error":r["error"].as_str().unwrap_or("the message could not be delivered; send it again")})] }
+                if r["ok"] != true {
+                    let mut x = json!({"t":"reply","id":id,"ok":false,"error":r["error"].as_str().unwrap_or("the message could not be delivered; send it again"),"thread":th});
+                    if let Some(c) = r.get("errorCode") { x["errorCode"] = c.clone(); }
+                    if let Some(m) = r.get("machine") { x["machine"] = m.clone(); }
+                    return vec![x]
+                }
             } else if let Some((kind, th, text)) = pl.act.clone() {
                 if let Some(s) = self.agents() { match kind { "steer" => s.steer(&th, &text).await, "start_one" => s.start_one(&th, &text).await, _ => s.start_queued(&th, &text).await } }
             }

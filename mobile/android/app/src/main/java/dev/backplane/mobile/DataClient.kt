@@ -913,7 +913,7 @@ object DataClient {
     suspend fun runCommand(tid: String, text: String): JSONObject {
         // `exists`: this app offers Add existing on a folder /project found not empty (the answer's kind "exists")
         val r = call("composer.run", JSONObject().put("thread", tid).put("text", text).put("exists", true))
-        if (r.optString("kind") == "btw") btw = btw + (tid to Btw(r.optString("q"), Msg.android_thinking))
+        if (r.optString("kind") == "btw") btw = btw + (tid to Btw(r.optString("q"), r.optString("a").ifEmpty { Msg.android_thinking }))
         return r
     }
     fun closeBtw(tid: String) { btw = btw - tid }
@@ -1424,6 +1424,6 @@ data class DNoProvider(val reason: String, val head: String, val text: String, v
             if (head.isEmpty()) return null
             return DNoProvider(o.optString("reason"), head, o.optString("text"), o.optString("button"), o.optString("url"))
         }
-        fun isSendError(msg: String): Boolean = msg.contains("No AI provider connected")
+        fun isSendError(msg: String): Boolean = msg.startsWith("No AI provider connected yet.")
     }
 }

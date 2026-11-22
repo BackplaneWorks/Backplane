@@ -49,6 +49,19 @@ export interface DataPush {
 export type JsonFrame = HelloFrame | DataPush | { t: string; [key: string]: unknown };
 export type ConnState = "connecting" | "connected" | "reconnecting" | "revoked";
 
+export class HubRpcError extends Error {
+  public code?: string;
+  public machine?: string;
+  public thread?: string;
+  constructor(message: string, opts?: { code?: string; machine?: string; thread?: string }) {
+    super(message);
+    this.name = "HubRpcError";
+    this.code = opts?.code;
+    this.machine = opts?.machine;
+    this.thread = opts?.thread;
+  }
+}
+
 interface PendingCall {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
@@ -187,7 +200,10 @@ export class HubClient {
                 : (errObj && typeof errObj === "object" && "message" in errObj)
                   ? String((errObj as { message: unknown }).message)
                   : "Request failed";
-            call.reject(new Error(msg));
+            const code = typeof frame.errorCode === "string" ? frame.errorCode : undefined;
+            const machine = typeof frame.machine === "string" ? frame.machine : undefined;
+            const thread = typeof frame.thread === "string" ? frame.thread : undefined;
+            call.reject(new HubRpcError(msg, { code, machine, thread }));
           }
         }
         return;

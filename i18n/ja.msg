@@ -5069,5 +5069,6 @@ provider.notice.text.none = チャットを始めるには、Claude、Codex、An
 provider.notice.text.signedout = チャットを始めるには、設定 → アカウントで Claude、Codex などのプロバイダーにサインインしてください。
 provider.notice.button = 設定 → アカウントを開く
 provider.notice.senderr = AI プロバイダーがまだ接続されていません。設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。
+provider.notice.senderr.remote = {machine} に AI プロバイダーが接続されていません。{machine} で設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。
 web.settings.providers = AI プロバイダー
 web.settings.providers.browser = Backplane のデスクトップまたはモバイルアプリの設定 → アカウントからプロバイダーを接続してください。

@@ -260,7 +260,17 @@ pub async fn detect(home: &Path) -> Found {
 /// One detection: a list that differs from the one in force is cached, pushed to every client and every view is drawn again. Answers whether it changed.
 pub async fn refresh(hub: &Arc<Hub>) -> bool {
     let info = info_of(&detect(&hub.cfg.home).await);
-    if !super::models::set_live(&info) { return false }
+    let first_scan = !super::models::probed_here();
+    let changed = super::models::set_live(&info);
+    // Mark live scan completed only after updating live models so callers never combine probed_here with stale cache data.
+    super::models::mark_probed();
+    if !changed {
+        if first_scan {
+            super::provider_notice::publish(hub).await;
+            hub.bump_views();
+        }
+        return false;
+    }
     let _ = std::fs::write(hub.cfg.home.join("models.cache.part"), cache_text(&info)).and_then(|_| std::fs::rename(hub.cfg.home.join("models.cache.part"), hub.cfg.home.join("models.cache")));
     hub.push_all(&json!({"t":"info","info":{"models":super::models::info(),"models.all":super::models::all()}}));
     super::provider_notice::publish(hub).await;
@@ -292,9 +302,8 @@ pub fn refresh_soon(hub: &Arc<Hub>) {
 pub fn start(hub: Arc<Hub>) {
     let cached = std::fs::read_to_string(hub.cfg.home.join("models.cache")).ok().as_deref().and_then(cache_read);
     if let Some(i) = &cached {
+        // Warm the picker cache at startup, but keep negative notices/send guards quiet until this process's live scan completes.
         super::models::set_live(i);
-        let h = hub.clone();
-        tokio::spawn(async move { super::provider_notice::publish(&h).await; });
     }
     if crate::copy::on() && std::env::var("BACKPLANE_AGENTS").map_or(true, |d| d.is_empty()) { return }
     super::models::set_detects();
