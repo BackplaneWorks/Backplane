@@ -129,6 +129,7 @@ struct DataViewerView: View {
     @State private var boardPick = ""
     @State private var sheetPick = ""
     @State private var choosing: String?
+    @State private var mgmtOpen = ""
     init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0) {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
@@ -214,10 +215,29 @@ struct DataViewerView: View {
                 let on = client.sheets.first { $0.file == schPath } ?? client.sheets[0]
                 DataPickerHead(what: Tr.t("Sheet"), name: on.name, sub: Tr.ios_viewer_sheets_n(n: client.sheets.count)) { choosing = "sheets" }.accessibilityIdentifier("data.viewer.sheets")
             }
+            let panelsOf = board.map { !$0.project.isEmpty ? $0.project : (!$0.pcb.isEmpty ? $0.pcb : (files?.root ?? "")) } ?? (files?.root ?? "")
             Group {
                 switch tab {
-                case "Board": DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : (board?.pcb ?? ""), has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil || target != nil, none: "No board in this project yet")
-                case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: schPath, has: files == nil || !(files?.sch ?? "").isEmpty || board != nil || target != nil, none: "No schematic in this project yet", tree: board?.sch ?? "")
+                case "Board":
+                    ZStack(alignment: .bottom) {
+                        DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : (board?.pcb ?? ""), has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil || target != nil, none: "No board in this project yet")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.bottom, client.has("mgmt") && mgmtOpen.isEmpty ? 42 : 0)
+                            .allowsHitTesting(mgmtOpen.isEmpty)
+                        if client.has("mgmt") {
+                            DataMgmtHost(client: client, project: panelsOf, home: files?.root ?? "", open: $mgmtOpen)
+                        }
+                    }
+                case "Schematic":
+                    ZStack(alignment: .bottom) {
+                        DataPlotTab(client: client, thread: thread, kind: "schematic", path: schPath, has: files == nil || !(files?.sch ?? "").isEmpty || board != nil || target != nil, none: "No schematic in this project yet", tree: board?.sch ?? "")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.bottom, client.has("mgmt") && mgmtOpen.isEmpty ? 42 : 0)
+                            .allowsHitTesting(mgmtOpen.isEmpty)
+                        if client.has("mgmt") {
+                            DataMgmtHost(client: client, project: panelsOf, home: files?.root ?? "", open: $mgmtOpen)
+                        }
+                    }
                 // unknown files (no hub yet) still open the 3D view: it shows the model it showed last
                 case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: board?.pcb ?? "", has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil, none: "No board in this project yet")
                 case "Gerbers": DataPlotTab(client: client, thread: thread, kind: "gerbers", path: "", has: true, none: "No Gerbers in this project yet")

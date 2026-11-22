@@ -1556,22 +1556,29 @@ button.primary.bp-send-btn.is-plan-exec {
   flex-shrink: 0;
 }
 .bp-plan-ask-col { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
-.bp-plan-status {
+.bp-plan-header {
   display: flex;
   flex-direction: column;
-  gap: 5px;
-  padding: 6px 10px;
   background: var(--panel);
   border-bottom: 1px solid var(--rule);
-  font-family: var(--mono);
-  font-size: 11px;
   flex-shrink: 0;
 }
-.bp-plan-status-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bp-plan-header .bp-plan-toggle {
+  border-bottom: 0;
+  gap: 6px;
+}
+.bp-plan-header-counts {
+  font-family: var(--mono);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .bp-plan-status-badge {
   padding: 1px 5px;
   background: var(--raise);
   border: 1px solid var(--line);
+  font-family: var(--mono);
   font-weight: 700;
   font-size: 10px;
   flex-shrink: 0;
@@ -1590,29 +1597,40 @@ button.primary.bp-send-btn.is-plan-exec {
 }
 .bp-plan-seg { height: 100%; min-width: 2px; }
 .bp-plan-err { display: flex; align-items: center; gap: 8px; background: var(--panel); }
-.bp-plan-stackup { border-bottom: 1px solid var(--rule); background: var(--bg); flex-shrink: 0; }
-.bp-plan-stackup-head {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 100%;
-  padding: 5px 10px;
-  background: transparent;
-  border: 0;
-  text-align: left;
-  font-size: 11px;
-  color: var(--dim);
-}
-.bp-plan-stackup-head:hover { background: var(--panel); color: var(--text); }
-.bp-plan-chev { width: 10px; text-align: center; flex-shrink: 0; }
 .bp-plan-stackup-body {
-  padding: 0 12px 8px 22px;
+  padding: 6px 12px 8px 18px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--rule);
   font-family: var(--mono);
   font-size: 11px;
+  flex-shrink: 0;
 }
+.bp-plan-chip-btn.empty-layer {
+  opacity: 0.65;
+  color: var(--faint);
+}
+.bp-plan-split-divider {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+.bp-plan-card-status {
+  font-size: 10px;
+  color: var(--dim);
+  flex-shrink: 0;
+}
+.bp-plan-card-status.tone-bad { color: var(--bad); }
+.bp-plan-card-status.tone-ok { color: var(--ok); }
+.bp-plan-card-status.tone-accent { color: var(--accent); }
+.bp-plan-card-status.tone-faint { color: var(--faint); }
 .bp-plan-layer-head { flex-direction: column; align-items: stretch; gap: 2px; }
 .bp-plan-layer-stackup {
   font-size: 10px;

@@ -200,12 +200,41 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
                 // the management panels (BOM, Checks, Lifecycle, Fab) beside the drawing: tabs under it, a panel over its lower part (DataMgmt.kt)
-                "Board" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard) }; MgmtHost(panelsOf, root) }
+                "Board" -> {
+                    var hasPanels by remember(root) { mutableStateOf(false) }
+                    var mgmtOpen by remember(root) { mutableStateOf("") }
+                    Box(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f)) {
+                                PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard)
+                            }
+                            if (hasPanels && mgmtOpen != "plan") Spacer(Modifier.height(44.dp))
+                        }
+                        MgmtHost(panelsOf, root, Modifier.align(Alignment.BottomCenter)) { has, op ->
+                            hasPanels = has
+                            mgmtOpen = op
+                        }
+                    }
+                }
                 "Schematic" -> Column(Modifier.fillMaxSize()) {
                     // the sheet on show: the one picked, else the board's top sheet; its sheets come with it (the hub's `sheets`, read from `tree`)
                     val schPath = target?.path?.takeIf { target?.tab == "Schematic" } ?: sheetPick.ifEmpty { board?.sch.orEmpty() }
                     if (DataClient.sheets.size > 1) SheetPicker(DataClient.sheets, schPath) { sheetPick = if (it == DataClient.sheets.first().file) "" else it; target = null; DataClient.lightRefs = emptyList() }
-                    Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", schPath, files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch, tree = board?.sch.orEmpty()) }; MgmtHost(panelsOf, root) }
+                    var hasPanels by remember(root) { mutableStateOf(false) }
+                    var mgmtOpen by remember(root) { mutableStateOf("") }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        Column(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f)) {
+                                PlotTab(thread, "schematic", schPath, files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch, tree = board?.sch.orEmpty())
+                            }
+                            if (hasPanels && mgmtOpen != "plan") Spacer(Modifier.height(44.dp))
+                        }
+                        MgmtHost(panelsOf, root, Modifier.align(Alignment.BottomCenter)) { has, op ->
+                            hasPanels = has
+                            mgmtOpen = op
+                        }
+                    }
+                }
                 "3D" -> PlotTab(thread, "3d", board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null, Msg.android_viewer_noboard)
                 "Gerbers" -> PlotTab(thread, "gerbers", "", true, Msg.gpui_panestate_empty_gerbers)
                 "Split" -> SplitTab(thread, files, board)

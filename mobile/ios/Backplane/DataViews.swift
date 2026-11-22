@@ -996,12 +996,50 @@ struct DataThreadView: View {
         }
     }
 
+    private func planPhaseLabel(_ pm: DPlanMode) -> String {
+        switch pm.phase {
+        case "armed": return pm.scope == "once" ? Tr.k("gpui.planmode.chip.once") : Tr.k("gpui.mgmt.plan.tab")
+        case "planning": return Tr.k("gpui.planmode.top.planning")
+        case "pending": return Tr.k("gpui.planmode.chip.review")
+        case "executing": return Tr.k("gpui.planmode.chip.building")
+        default: return Tr.k("gpui.mgmt.plan.tab")
+        }
+    }
+
+    private func planBannerText(_ pm: DPlanMode) -> String {
+        switch pm.phase {
+        case "armed": return pm.scope == "once" ? Tr.k("gpui.planmode.bar.once") : Tr.k("gpui.planmode.bar.always")
+        case "planning": return Tr.k("gpui.planmode.bar.planning")
+        case "pending": return Tr.k("gpui.planmode.bar.pending")
+        case "executing": return Tr.k("gpui.planmode.bar.executing")
+        default: return ""
+        }
+    }
+
+    private func planModeTint(_ pm: DPlanMode?) -> Color {
+        guard let pm else { return BackplaneDesign.accent }
+        switch pm.phase {
+        case "armed", "planning", "pending": return PhaseColor.input
+        case "executing": return BackplaneDesign.ok
+        default: return BackplaneDesign.accent
+        }
+    }
+
     // the desktop's strip under the bar: STATE, then the tools a thread always has
     private var stateStrip: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 DHeading(text: Tr.t("State"))
                 if let t = thread { DStatusDot(thread: t, size: 6); Text(Tr.t(dStatusWord(t))).dmono(11).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("data.thread.state") }
+                if let pm = DPlanMode.effective(for: thread), pm.isActive {
+                    let ptint = planModeTint(pm)
+                    Text(planPhaseLabel(pm))
+                        .dmono(10, bold: true)
+                        .foregroundStyle(ptint)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .overlay(Rectangle().strokeBorder(ptint, lineWidth: 1))
+                        .accessibilityIdentifier("data.thread.planmode")
+                }
                 Spacer()
                 if let t = thread, client.has("actions") {
                     strip(Tr.t(t.pinned ? "Unpin" : "Pin"), on: t.pinned) { Task { await client.threadAct(id, t.pinned ? "unpin" : "pin") } }
@@ -1015,10 +1053,55 @@ struct DataThreadView: View {
         Button(action: run) { Text(label).dmono(11).foregroundStyle(on ? BackplaneDesign.accent : BackplaneDesign.dim).padding(.horizontal, 10).frame(maxHeight: .infinity).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.line).frame(width: 1) }.contentShape(Rectangle()) }.buttonStyle(.plain)
     }
 
+    private func planModeBanner(_ pm: DPlanMode) -> some View {
+        let ptint = planModeTint(pm)
+        return VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Rectangle().fill(ptint).frame(width: 2, height: 14)
+                Text(planBannerText(pm))
+                    .dmono(10.5)
+                    .foregroundStyle(ptint)
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                if pm.phase == "armed" || pm.phase == "planning" {
+                    let isOnce = pm.scope == "once"
+                    Button {
+                        Task { try? await client.setPlanMode(id, target: isOnce ? .always : .once) }
+                    } label: {
+                        Text(Tr.k(isOnce ? "gpui.planmode.scope.always" : "gpui.planmode.scope.once"))
+                            .dmono(10, bold: true)
+                            .foregroundStyle(ptint)
+                            .padding(.horizontal, 6).frame(minHeight: 22)
+                            .overlay(Rectangle().strokeBorder(ptint.opacity(0.6), lineWidth: 1))
+                    }.buttonStyle(.plain)
+                    Button {
+                        Task { try? await client.setPlanMode(id, target: .off) }
+                    } label: {
+                        Text(Tr.k("settings.lang.off"))
+                            .dmono(10)
+                            .foregroundStyle(BackplaneDesign.dim)
+                            .padding(.horizontal, 6).frame(minHeight: 22)
+                            .overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(BackplaneDesign.panel)
+            DLine()
+        }
+    }
+
     // the desktop's composer: the box in accent, under it the model chip, attach and Send
     private var composer: some View {
-        VStack(spacing: 0) {
+        let pm = DPlanMode.effective(for: thread)
+        let planActive = pm?.isActive == true
+        let borderColor = planModeTint(pm)
+        let planPrimary = pm.map { ["armed", "planning", "pending"].contains($0.phase) } ?? false
+        return VStack(spacing: 0) {
             DLine()
+            if let pm, pm.isActive {
+                planModeBanner(pm)
+            }
             VStack(alignment: .leading, spacing: 8) {
                 if !notice.isEmpty { Text(Tr.t(notice)).dmono(12).foregroundStyle(BackplaneDesign.warn).accessibilityIdentifier("data.images.notice") }
                 if let dir = existing {
@@ -1043,7 +1126,7 @@ struct DataThreadView: View {
                            onChange: { text = $0; client.setDraft(id, $0) },
                            onSend: { send() }, onPasteImages: { imgs in add(imgs.compactMap { $0.jpegData(compressionQuality: 0.95) }) },
                            font: UIFontMetrics(forTextStyle: .body).scaledFont(for: Mono.uiFont(size: 14)), caret: caret)
-                    .padding(.horizontal, 10).padding(.vertical, 9).frame(minHeight: 44, alignment: .topLeading).dbox(BackplaneDesign.accent)
+                    .padding(.horizontal, 10).padding(.vertical, 9).frame(minHeight: 44, alignment: .topLeading).dbox(borderColor)
                     .accessibilityLabel(Tr.t("Message"))
                 if let m = thread?.memory { MemoryBar(m: m) }
                 HStack(spacing: 6) {
@@ -1051,6 +1134,34 @@ struct DataThreadView: View {
                         Button { modelSheet = true } label: { Text(chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
                             .buttonStyle(.plain).accessibilityLabel(Tr.ios_model_label(model: chip)).accessibilityIdentifier("data.thread.model")
                     } else { Spacer(minLength: 0) }
+                    if client.has("plan"), let pm {
+                        let pcol = planActive ? borderColor : BackplaneDesign.dim
+                        Button {
+                            let nxt = DPlanMode.nextCycle(for: pm)
+                            Task { try? await client.setPlanMode(id, target: nxt) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: planActive ? "list.bullet.rectangle.fill" : "list.bullet.rectangle")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(pcol)
+                                Text(planActive ? planPhaseLabel(pm) : Tr.k("gpui.mgmt.plan.tab"))
+                                    .dmono(11, bold: planActive)
+                                    .foregroundStyle(pcol)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 8)
+                            .frame(minHeight: 40)
+                            .dbox(planActive ? borderColor : BackplaneDesign.line, fill: BackplaneDesign.panel)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(Tr.k("settings.lang.off")) { Task { try? await client.setPlanMode(id, target: .off) } }
+                            Button(Tr.k("gpui.planmode.scope.once")) { Task { try? await client.setPlanMode(id, target: .once) } }
+                            Button(Tr.k("gpui.planmode.scope.always")) { Task { try? await client.setPlanMode(id, target: .always) } }
+                        }
+                        .accessibilityLabel(Tr.k("gpui.planmode.tip"))
+                        .accessibilityIdentifier("data.composer.plan")
+                    }
                     if client.has("voice"), client.voice.always || client.voice.alwaysWanted {
                         // always on: one tap stops it, the same to listen again
                         let (what, stops) = client.voice.always ? (client.voice.alwaysPaused.isEmpty ? "Listening" : "Paused", true) : ("Always on", false)
@@ -1091,7 +1202,8 @@ struct DataThreadView: View {
                     if working && blank {
                         Button(Tr.t("Stop")) { Task { await client.interrupt(id) } }.buttonStyle(DButton(danger: true)).accessibilityLabel(Tr.t("Stop")).accessibilityIdentifier("thread.send")
                     } else {
-                        Button(Tr.t(client.commandOf(text)?.label ?? "Send")) { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
+                        let sendLbl = client.commandOf(text)?.label ?? (planPrimary ? Tr.k("gpui.mgmt.plan.tab") : Tr.t("Send"))
+                        Button(client.commandOf(text) != nil ? Tr.t(sendLbl) : sendLbl) { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
                     }
                 }
             }
@@ -1471,47 +1583,141 @@ struct DataAskCard: View {
     @State private var answer = ""
     @State private var revising = false
     @State private var revision = ""
+    @State private var expanded = false
+    @State private var copied = false
+
+    private var isPlan: Bool { entry.ask?.kind == "plan" }
+
     var body: some View {
         let ask = entry.ask
+        let accent = ask?.isOpen == true ? (isPlan ? PhaseColor.input : BackplaneDesign.bad) : BackplaneDesign.line
         VStack(alignment: .leading, spacing: 8) {
-            DHeading(text: Tr.t(ask?.isOpen == true ? "Asks" : "Asked"))
-            Text(ask?.question ?? entry.text).dmono(13).foregroundStyle(BackplaneDesign.text).textSelection(.enabled)
-            if ask?.isOpen == true {
-                if (ask?.options ?? []).isEmpty {
-                    HStack(spacing: 6) {
-                        TextField(Tr.t("Your answer"), text: $answer).dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
-                        Button(Tr.t("Send")) { Task { await client.answer(thread, ask: ask!.id, option: answer) } }.buttonStyle(DButton(primary: true)).disabled(answer.isEmpty)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 6) { ForEach(ask!.options) { o in
-                        Button { Task { await client.answer(thread, ask: ask!.id, option: o.id) } } label: { Text(Tr.t(o.label)).frame(maxWidth: .infinity, alignment: .leading) }
-                            .buttonStyle(DButton(primary: o.id == "accept" || o.id == "implement", danger: o.id == "deny" || o.id == "decline"))
-                            .accessibilityIdentifier("data.ask." + o.id)
-                    } }
-                    if ask?.revise == true {
-                        Button { revising.toggle() } label: { Text(Tr.k("gpui.ask.plan.revise")).frame(maxWidth: .infinity, alignment: .leading) }
-                            .buttonStyle(DButton())
-                            .accessibilityIdentifier("data.ask.revise")
-                        if revising {
-                            VStack(alignment: .leading, spacing: 6) {
-                                TextField(Tr.k("gpui.ask.plan.reviseph"), text: $revision).dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
-                                Button(Tr.k("gpui.ask.plan.sendrev")) {
-                                    let fb = revision.trimmingCharacters(in: .whitespacesAndNewlines)
-                                    guard !fb.isEmpty else { return }
-                                    revising = false; revision = ""
-                                    Task { await client.answer(thread, ask: ask!.id, option: "revise:" + fb) }
-                                }
-                                .buttonStyle(DButton(primary: true))
-                                .disabled(revision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            }
-                        }
-                    }
-                }
-            } else if let a = ask?.answered { Text(Tr.ios_ask_answered(answer: Tr.t(a))).dmono(12).foregroundStyle(BackplaneDesign.dim) }
+            if isPlan {
+                planBody(ask: ask)
+            } else {
+                standardBody(ask: ask)
+            }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .dbox(ask?.isOpen == true ? (ask?.kind == "plan" ? PhaseColor.input : BackplaneDesign.bad) : BackplaneDesign.line, fill: BackplaneDesign.panel)
+        .dbox(accent, fill: BackplaneDesign.panel)
+        .overlay(alignment: .leading) {
+            if isPlan && ask?.isOpen == true {
+                Rectangle().fill(PhaseColor.input).frame(width: 3)
+            }
+        }
         .accessibilityIdentifier("data.entry.ask")
+    }
+
+    @ViewBuilder
+    private func standardBody(ask: DAsk?) -> some View {
+        DHeading(text: Tr.t(ask?.isOpen == true ? "Asks" : "Asked"))
+        Text(ask?.question ?? entry.text).dmono(13).foregroundStyle(BackplaneDesign.text).textSelection(.enabled)
+        if ask?.isOpen == true {
+            if (ask?.options ?? []).isEmpty {
+                HStack(spacing: 6) {
+                    TextField(Tr.t("Your answer"), text: $answer).dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
+                    Button(Tr.t("Send")) { Task { await client.answer(thread, ask: ask!.id, option: answer) } }.buttonStyle(DButton(primary: true)).disabled(answer.isEmpty)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 6) { ForEach(ask!.options) { o in
+                    Button { Task { await client.answer(thread, ask: ask!.id, option: o.id) } } label: { Text(Tr.t(o.label)).frame(maxWidth: .infinity, alignment: .leading) }
+                        .buttonStyle(DButton(primary: o.id == "accept" || o.id == "implement", danger: o.id == "deny" || o.id == "decline"))
+                        .accessibilityIdentifier("data.ask." + o.id)
+                } }
+            }
+        } else if let a = ask?.answered { Text(Tr.ios_ask_answered(answer: Tr.t(a))).dmono(12).foregroundStyle(BackplaneDesign.dim) }
+    }
+
+    @ViewBuilder
+    private func planBody(ask: DAsk?) -> some View {
+        let content = ask?.question ?? entry.text
+        HStack(spacing: 6) {
+            Text(Tr.t((ask?.head.isEmpty == false ? ask!.head : "Proposed plan")))
+                .dmono(12, bold: true)
+                .foregroundStyle(BackplaneDesign.text)
+            if ask?.isOpen == true {
+                Text(Tr.k("gpui.ask.plan.ready"))
+                    .dmono(10, bold: true)
+                    .foregroundStyle(PhaseColor.input)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .overlay(Rectangle().strokeBorder(PhaseColor.input.opacity(0.65), lineWidth: 1))
+            }
+            Spacer(minLength: 4)
+            Button(Tr.k(copied ? "mobile.plan.copied" : "common.copy")) {
+                UIPasteboard.general.string = content
+                copied = true
+                Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+            }
+            .buttonStyle(DButton(compact: true))
+            .accessibilityIdentifier("data.ask.copy")
+            Button(Tr.k(expanded ? "gpui.mgmt.plan.compact" : "gpui.mgmt.plan.expand")) {
+                expanded.toggle()
+            }
+            .buttonStyle(DButton(compact: true))
+            .accessibilityIdentifier("data.ask.expand")
+        }
+
+        Group {
+            if expanded {
+                DataMarkdown(text: content, thread: thread, entry: entry.id, images: [], copy: [])
+                    .padding(10)
+            } else {
+                ScrollView {
+                    DataMarkdown(text: content, thread: thread, entry: entry.id, images: [], copy: [])
+                        .padding(10)
+                }
+                .frame(maxHeight: 260)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbox(fill: BackplaneDesign.background)
+
+        if ask?.isOpen == true {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(ask!.options) { o in
+                        let isPrimary = o.id == "accept" || o.id == "implement"
+                        Button {
+                            Task { await client.answer(thread, ask: ask!.id, option: o.id) }
+                        } label: {
+                            Text(Tr.t(o.label))
+                        }
+                        .buttonStyle(DButton(primary: isPrimary, compact: false))
+                        .accessibilityIdentifier("data.ask." + o.id)
+                    }
+                    if ask?.revise == true {
+                        Button(Tr.k("gpui.ask.plan.revise")) {
+                            revising.toggle()
+                        }
+                        .buttonStyle(DButton(primary: revising, compact: false))
+                        .accessibilityIdentifier("data.ask.revise")
+                    }
+                }
+            }
+            if ask?.revise == true && revising {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField(Tr.k("gpui.ask.plan.reviseph"), text: $revision)
+                        .dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
+                    HStack(spacing: 6) {
+                        Button(Tr.k("gpui.ask.plan.sendrev")) {
+                            let fb = revision.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !fb.isEmpty else { return }
+                            revising = false; revision = ""
+                            Task { await client.answer(thread, ask: ask!.id, option: "revise:" + fb) }
+                        }
+                        .buttonStyle(DButton(primary: true, compact: true))
+                        .disabled(revision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button(Tr.k("common.cancel")) {
+                            revising = false; revision = ""
+                        }
+                        .buttonStyle(DButton(compact: true))
+                    }
+                }
+                .padding(.top, 2)
+            }
+        } else if let a = ask?.answered {
+            Text(Tr.ios_ask_answered(answer: Tr.t(a))).dmono(12).foregroundStyle(BackplaneDesign.dim)
+        }
     }
 }
 

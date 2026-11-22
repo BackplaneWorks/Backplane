@@ -1032,6 +1032,25 @@ object DataClient {
         return parsePicker(call("thread.picker", p).getJSONObject("picker"))
     }
     suspend fun pick(tid: String, action: String, value: String) { call("thread.pick", JSONObject().put("thread", tid).put("action", action).put("value", value)).optJSONObject("thread")?.let { upsert(parseThread(it)) } }
+    suspend fun setPlanMode(tid: String, target: PlanModeTarget) {
+        val cur = threads.firstOrNull { it.id == tid }?.planMode
+        when (target) {
+            PlanModeTarget.OFF -> {
+                if (cur?.interaction == "plan") pick(tid, "interaction", "default")
+                call("thread.planonce", JSONObject().put("thread", tid).put("on", false)).optJSONObject("thread")?.let { upsert(parseThread(it)) }
+            }
+            PlanModeTarget.ONCE -> {
+                if (cur?.interaction == "plan") pick(tid, "interaction", "default")
+                call("thread.planonce", JSONObject().put("thread", tid).put("on", true)).optJSONObject("thread")?.let { upsert(parseThread(it)) }
+            }
+            PlanModeTarget.ALWAYS -> {
+                if (cur?.once == true) {
+                    call("thread.planonce", JSONObject().put("thread", tid).put("on", false)).optJSONObject("thread")?.let { upsert(parseThread(it)) }
+                }
+                pick(tid, "interaction", "plan")
+            }
+        }
+    }
     /** `word`: what goes in the draft, the desktop's word (`>bom-review`, `%demo`), which /give and the reference cards read; "" from an older hub. */
     data class Mention(val sigil: String, val id: String, val label: String, val detail: String, val word: String = "")
     suspend fun mentions(q: String, kind: String): List<Mention> {
@@ -1160,6 +1179,20 @@ object DataClient {
     suspend fun lifePart(key: String): JSONObject = call("mgmt.life.part", JSONObject().put("project", mgmtProject).put("key", key))
     suspend fun checksFix(id: String): String = call("kicad.checks.fix", JSONObject().put("project", mgmtProject).put("id", id)).optString("text")
     suspend fun checksFocus(id: String) { call("kicad.checks.focus", JSONObject().put("project", mgmtProject).put("id", id)) }
+    suspend fun planGet(pro: String, board: Boolean = true): JSONObject =
+        call("plan.get", JSONObject().put("pro", pro.ifEmpty { mgmtProject }).put("board", board))
+    suspend fun planApprove(pro: String, layer: String, ids: List<String>, approve: Boolean) {
+        call("plan.approve", JSONObject().put("pro", pro.ifEmpty { mgmtProject }).put("layer", layer).put("ids", JSONArray(ids)).put("approve", approve))
+    }
+    suspend fun planUpdate(pro: String, ops: List<JSONObject>, base: Int? = null) {
+        val p = JSONObject().put("pro", pro.ifEmpty { mgmtProject }).put("ops", JSONArray(ops))
+        if (base != null) p.put("base", base)
+        call("plan.update", p)
+    }
+    suspend fun planVerify(pro: String) { call("plan.verify", JSONObject().put("pro", pro.ifEmpty { mgmtProject })) }
+    suspend fun planStop(pro: String) { call("plan.stop", JSONObject().put("pro", pro.ifEmpty { mgmtProject })) }
+    suspend fun planEnable(pro: String, on: Boolean) { call("plan.enable", JSONObject().put("pro", pro.ifEmpty { mgmtProject }).put("on", on)) }
+    suspend fun planFocus(pro: String, id: String) { call("plan.focus", JSONObject().put("pro", pro.ifEmpty { mgmtProject }).put("id", id)) }
 
     // ---- viewers, files, browser (features viewers, files, browser; native/host/src/data/ext.rs)
     /** A board of the viewer's picker (the hub's `boards`): `pcb` and `sch` are the paths its pages watch, "" for the project's own board (`default`), whose pages follow the project. */
@@ -1304,7 +1337,7 @@ object DataClient {
         o.handoff?.let { put("handoff", handoffJson(it)) }
         o.term?.let { t -> put("term", JSONObject().put("key", t.key).put("id", t.id).put("title", t.title).put("cols", t.cols).put("rows", t.rows).put("cmd", t.cmd)) }
         o.tool?.let { put("tool", JSONObject().put("name", it.name).put("summary", it.summary).put("state", it.state)) }
-        o.ask?.let { a -> put("ask", JSONObject().put("id", a.id).put("state", a.state).put("question", a.question).put("answered", a.answered ?: JSONObject.NULL)
+        o.ask?.let { a -> put("ask", JSONObject().put("id", a.id).put("state", a.state).put("kind", a.kind).put("revise", a.revise).put("head", a.head).put("question", a.question).put("answered", a.answered ?: JSONObject.NULL)
             .put("options", JSONArray(a.options.map { JSONObject().put("id", it.id).put("label", it.label) }))) }
     }
     private fun loadCache() {
@@ -1328,7 +1361,7 @@ object DataClient {
             withContext(Dispatchers.IO) {
                 val j = JSONObject().put("hub", hub)
                     .put("projects", JSONArray(ps.map { JSONObject().put("id", it.id).put("title", it.title).put("root", it.root).put("threadCount", it.threadCount).apply { it.settledCount?.let { n -> put("settledCount", n) } }.put("updatedAt", it.updatedAt).put("waiting", it.waiting).put("also", it.also).put("mark", markJson(it.mark)) }))
-                    .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("pinOrder", it.pinOrder).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting).put("mark", markJson(it.mark)).put("swarm", it.swarm) }))
+                    .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("pinOrder", it.pinOrder).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting).put("mark", markJson(it.mark)).put("swarm", it.swarm).apply { it.planMode?.let { pm -> put("planMode", planModeJson(pm)) } } }))
                     .put("entries", JSONObject().also { o -> es.forEach { (k, v) -> o.put(k, JSONArray(v.map(::J))) } })
                 runCatching { cacheFile(hub).writeText(j.toString()) }
             }

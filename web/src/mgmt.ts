@@ -22,6 +22,8 @@ import {
   planAllCanvasLayers,
   planDefaultLayerPair,
   planDone,
+  planLayerDisplayTitle,
+  planListLayersForView,
   planMark,
   planProgressSegments,
   planRailColor,
@@ -108,6 +110,7 @@ export class MgmtStrip {
   private planHydratedBoard: PlanBoardGeom | null = null;
   private planHydratedDraw: { bands?: PlanBand[]; regions?: PlanRegion[] } | null = null;
   private planNoteOpen = false;
+  private planMoveLayerOpen = false;
   private planCanvas: PlanFloorplannerCanvas | null = null;
   private planCommitFields: ((id: string, fields: Record<string, unknown>) => void) | null = null;
 
@@ -179,6 +182,7 @@ export class MgmtStrip {
     this.planHydratedBoard = null;
     this.planHydratedDraw = null;
     this.planNoteOpen = false;
+    this.planMoveLayerOpen = false;
     this.planCanvas?.destroy();
     this.planCanvas = null;
     this.planCommitFields = null;
@@ -223,6 +227,7 @@ export class MgmtStrip {
       this.planHydratedBoard = null;
       this.planHydratedDraw = null;
       this.planNoteOpen = false;
+      this.planMoveLayerOpen = false;
       this.planCanvas?.destroy();
       this.planCanvas = null;
       this.planCommitFields = null;
@@ -1054,15 +1059,59 @@ export class MgmtStrip {
         .catch(() => {});
     }
 
+    const on = d.on === true;
+    const planHdr = document.createElement("div");
+    planHdr.className = "bp-plan-header";
     const toggleRow = document.createElement("div");
     toggleRow.className = "bp-plan-toggle";
-    const on = d.on === true;
     const toggleLbl = document.createElement("span");
-    toggleLbl.className = "bp-mgmt-flex1 bp-mgmt-strong";
+    toggleLbl.className = "bp-mgmt-strong";
     toggleLbl.textContent = t("gpui.mgmt.plan.before", "Plan before routing");
     toggleLbl.title = on
       ? t("gpui.mgmt.plan.onwords", "Before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes corridors and plane regions here. It routes only what you approve.")
       : t("gpui.mgmt.plan.offwords", "Agents route as you ask. Turn it on to have them propose a routing plan first and route only what you approve here.");
+    toggleRow.appendChild(toggleLbl);
+
+    const awaiting = d.awaiting ?? 0;
+    const blocked = d.blocked ?? 0;
+    const doneN = d.done ?? 0;
+    const totalN = d.total ?? 0;
+    const rev = d.revision ?? 0;
+    const segs = d.empty ? [] : planProgressSegments(d);
+    const segTotal = segs.reduce((acc, s) => acc + s.count, 0);
+
+    if (!d.empty) {
+      const badge = planStatusBadge(d);
+      const statusPill = document.createElement("span");
+      statusPill.className = `bp-plan-status-badge tone-${badge.tone}`;
+      statusPill.textContent = t(badge.key, badge.label);
+      toggleRow.appendChild(statusPill);
+      if (rev > 0) {
+        const revEl = document.createElement("span");
+        revEl.className = "bp-dim";
+        revEl.textContent = `v${rev}`;
+        toggleRow.appendChild(revEl);
+      }
+      const counts = document.createElement("span");
+      counts.className = "bp-plan-header-counts bp-mgmt-flex1 " + (awaiting > 0 ? "bp-tone-warn" : blocked > 0 ? "bp-tone-bad" : "bp-dim");
+      counts.textContent = totalN > 0
+        ? `${doneN}/${totalN} ${t("gpui.mgmt.plan.done", "done")}`
+        : awaiting > 0
+          ? t("web.plan.awaiting", "{n} awaiting approval", { n: awaiting })
+          : t("gpui.mgmt.plan.nothing", "Nothing awaits your approval");
+      toggleRow.appendChild(counts);
+      if (!d.live) {
+        const saved = document.createElement("span");
+        saved.className = "bp-mgmt-pill";
+        saved.textContent = t("gpui.mgmt.plan.saved", "saved plan");
+        toggleRow.appendChild(saved);
+      }
+    } else {
+      const spEmpty = document.createElement("span");
+      spEmpty.className = "bp-mgmt-flex1";
+      toggleRow.appendChild(spEmpty);
+    }
+
     const onBtn = document.createElement("button");
     onBtn.type = "button";
     onBtn.className = "bp-mgmt-btn bp-plan-chip-btn" + (on ? " active" : "");
@@ -1077,8 +1126,21 @@ export class MgmtStrip {
     offBtn.setAttribute("aria-pressed", !on ? "true" : "false");
     offBtn.textContent = t("gpui.bots.recall.off", "Off");
     offBtn.addEventListener("click", () => sendPlan("plan.enable", { on: false }));
-    toggleRow.append(toggleLbl, onBtn, offBtn);
-    wrap.appendChild(toggleRow);
+    toggleRow.append(onBtn, offBtn);
+    planHdr.appendChild(toggleRow);
+    if (segTotal > 0) {
+      const segBar = document.createElement("div");
+      segBar.className = "bp-plan-segbar";
+      for (const s of segs) {
+        if (s.count <= 0) continue;
+        const fill = document.createElement("div");
+        fill.className = `bp-plan-seg bp-tone-bg-${s.tone}`;
+        fill.style.flexGrow = String(s.count);
+        segBar.appendChild(fill);
+      }
+      planHdr.appendChild(segBar);
+    }
+    wrap.appendChild(planHdr);
 
     for (const e of d.elsewhere ?? []) {
       const bar = document.createElement("div");
@@ -1106,57 +1168,9 @@ export class MgmtStrip {
       return wrap;
     }
 
-    const awaiting = d.awaiting ?? 0;
-    const blocked = d.blocked ?? 0;
-    const doneN = d.done ?? 0;
-    const totalN = d.total ?? 0;
-    const rev = d.revision ?? 0;
-    const badge = planStatusBadge(d);
-    const segs = planProgressSegments(d);
-    const segTotal = segs.reduce((acc, s) => acc + s.count, 0);
-
-    const statusStrip = document.createElement("div");
-    statusStrip.className = "bp-plan-status";
-    const statusTop = document.createElement("div");
-    statusTop.className = "bp-plan-status-top";
-    const statusPill = document.createElement("span");
-    statusPill.className = `bp-plan-status-badge tone-${badge.tone}`;
-    statusPill.textContent = t(badge.key, badge.label);
-    statusTop.appendChild(statusPill);
-    if (rev > 0) {
-      const revEl = document.createElement("span");
-      revEl.className = "bp-dim";
-      revEl.textContent = `v${rev}`;
-      statusTop.appendChild(revEl);
-    }
-    const counts = document.createElement("span");
-    counts.className = "bp-mgmt-flex1 " + (awaiting > 0 ? "bp-tone-warn" : blocked > 0 ? "bp-tone-bad" : "bp-dim");
-    counts.textContent = totalN > 0
-      ? `${doneN}/${totalN} ${t("gpui.mgmt.plan.done", "done")}`
-      : awaiting > 0
-        ? t("web.plan.awaiting", "{n} awaiting approval", { n: awaiting })
-        : t("gpui.mgmt.plan.nothing", "Nothing awaits your approval");
-    statusTop.appendChild(counts);
-    if (!d.live) {
-      const saved = document.createElement("span");
-      saved.className = "bp-mgmt-pill";
-      saved.textContent = t("gpui.mgmt.plan.saved", "saved plan");
-      statusTop.appendChild(saved);
-    }
-    statusStrip.appendChild(statusTop);
-    if (segTotal > 0) {
-      const segBar = document.createElement("div");
-      segBar.className = "bp-plan-segbar";
-      for (const s of segs) {
-        if (s.count <= 0) continue;
-        const fill = document.createElement("div");
-        fill.className = `bp-plan-seg bp-tone-bg-${s.tone}`;
-        fill.style.flexGrow = String(s.count);
-        segBar.appendChild(fill);
-      }
-      statusStrip.appendChild(segBar);
-    }
-    wrap.appendChild(statusStrip);
+    const stackupSum = d.stackup_summary ?? "";
+    const impedances = Array.isArray(d.impedances) ? d.impedances : [];
+    const hasStackup = Boolean(stackupSum) || impedances.length > 0;
 
     const head = document.createElement("div");
     head.className = "bp-mgmt-head";
@@ -1189,6 +1203,20 @@ export class MgmtStrip {
     }
     const spacer = document.createElement("span");
     spacer.className = "bp-mgmt-flex1";
+    head.appendChild(spacer);
+    if (hasStackup) {
+      const stToggle = document.createElement("button");
+      stToggle.type = "button";
+      stToggle.className = "bp-mgmt-btn bp-plan-chip-btn" + (this.planStackupOpen ? " active" : "");
+      stToggle.setAttribute("data-testid", "mgmt-plan-stackup-toggle");
+      stToggle.setAttribute("aria-expanded", this.planStackupOpen ? "true" : "false");
+      stToggle.textContent = `${t("gpui.mgmt.plan.stackup.short", "Stackup")} ${this.planStackupOpen ? "▾" : "▸"}`;
+      stToggle.addEventListener("click", () => {
+        this.planStackupOpen = !this.planStackupOpen;
+        this.render();
+      });
+      head.appendChild(stToggle);
+    }
     const hideBtn = document.createElement("button");
     hideBtn.type = "button";
     hideBtn.className = "bp-mgmt-btn";
@@ -1200,7 +1228,7 @@ export class MgmtStrip {
       this.planHideDone = !this.planHideDone;
       this.render();
     });
-    head.append(spacer, hideBtn);
+    head.appendChild(hideBtn);
     wrap.appendChild(head);
 
     const openAsks = Array.isArray(d.asks) ? d.asks : [];
@@ -1256,46 +1284,23 @@ export class MgmtStrip {
       wrap.appendChild(kn);
     }
 
-    const stackupSum = d.stackup_summary ?? "";
-    const impedances = Array.isArray(d.impedances) ? d.impedances : [];
-    if (stackupSum || impedances.length > 0) {
-      const stackWrap = document.createElement("div");
-      stackWrap.className = "bp-plan-stackup";
-      const toggle = document.createElement("button");
-      toggle.type = "button";
-      toggle.className = "bp-plan-stackup-head";
-      toggle.setAttribute("data-testid", "mgmt-plan-stackup-toggle");
-      toggle.setAttribute("aria-expanded", this.planStackupOpen ? "true" : "false");
-      const chev = document.createElement("span");
-      chev.className = "bp-plan-chev";
-      chev.textContent = this.planStackupOpen ? "▾" : "▸";
-      const lbl = document.createElement("span");
-      lbl.textContent = t("gpui.mgmt.plan.stackup", "Stackup & impedances");
-      toggle.append(chev, lbl);
-      toggle.addEventListener("click", () => {
-        this.planStackupOpen = !this.planStackupOpen;
-        this.render();
-      });
-      stackWrap.appendChild(toggle);
-      if (this.planStackupOpen) {
-        const sbody = document.createElement("div");
-        sbody.className = "bp-plan-stackup-body";
-        sbody.setAttribute("data-testid", "mgmt-plan-stackup-body");
-        if (stackupSum) {
-          const sl = document.createElement("div");
-          sl.className = "bp-dim";
-          sl.textContent = stackupSum;
-          sbody.appendChild(sl);
-        }
-        for (const imp of impedances) {
-          const il = document.createElement("div");
-          il.className = "bp-mgmt-faint";
-          il.textContent = `· ${imp}`;
-          sbody.appendChild(il);
-        }
-        stackWrap.appendChild(sbody);
+    if (hasStackup && this.planStackupOpen) {
+      const sbody = document.createElement("div");
+      sbody.className = "bp-plan-stackup-body";
+      sbody.setAttribute("data-testid", "mgmt-plan-stackup-body");
+      if (stackupSum) {
+        const sl = document.createElement("div");
+        sl.className = "bp-dim";
+        sl.textContent = stackupSum;
+        sbody.appendChild(sl);
       }
-      wrap.appendChild(stackWrap);
+      for (const imp of impedances) {
+        const il = document.createElement("div");
+        il.className = "bp-mgmt-faint";
+        il.textContent = `· ${imp}`;
+        sbody.appendChild(il);
+      }
+      wrap.appendChild(sbody);
     }
 
     const mkChip = (label: string, active: boolean, testId: string, onClick: () => void): HTMLButtonElement => {
@@ -1453,26 +1458,29 @@ export class MgmtStrip {
               ? this.planShownLayers.slice(0, 2)
               : planDefaultLayerPair(canvasLayers));
 
-    if (this.planViewMode !== "list" && canvasLayers.length > 1) {
+    if (this.planViewMode !== "list" && this.planGridMode !== "all" && canvasLayers.length > 1) {
       const layerBar = document.createElement("div");
       layerBar.className = "bp-plan-layerbar";
       for (const l of canvasLayers) {
         const isShown = activeLayers.includes(l.layer);
-        layerBar.appendChild(
-          mkChip(l.title || l.layer, isShown, `mgmt-plan-layerpill-${l.layer}`, () => {
-            if (this.planGridMode === "single") {
-              this.planShownLayers = [l.layer];
-            } else if (this.planGridMode === "pair") {
-              if (!activeLayers.includes(l.layer)) {
-                this.planShownLayers = activeLayers.length >= 2 ? [activeLayers[0], l.layer] : [...activeLayers, l.layer];
-              }
-            } else {
-              this.planGridMode = "single";
-              this.planShownLayers = [l.layer];
+        const itemCount = (l.items ?? []).length;
+        const baseTitle = planLayerDisplayTitle(l.layer, d.copper_layers, canvasLayers) || l.title || l.layer;
+        const chipLbl = itemCount > 0 ? `${baseTitle} · ${itemCount}` : baseTitle;
+        const b = mkChip(chipLbl, isShown, `mgmt-plan-layerpill-${l.layer}`, () => {
+          if (this.planGridMode === "single") {
+            this.planShownLayers = [l.layer];
+          } else if (this.planGridMode === "pair") {
+            if (!activeLayers.includes(l.layer)) {
+              this.planShownLayers = activeLayers.length >= 2 ? [activeLayers[0], l.layer] : [...activeLayers, l.layer];
             }
-            this.render();
-          }),
-        );
+          } else {
+            this.planGridMode = "single";
+            this.planShownLayers = [l.layer];
+          }
+          this.render();
+        });
+        if (itemCount === 0 && !isShown) b.classList.add("empty-layer");
+        layerBar.appendChild(b);
       }
       wrap.appendChild(layerBar);
     }
@@ -1508,6 +1516,7 @@ export class MgmtStrip {
         }
       }
       if (selItem) {
+        const selLayerTitle = planLayerDisplayTitle(selLayer, d.copper_layers, canvasLayers);
         const ins = document.createElement("div");
         ins.className = "bp-plan-inspector";
         ins.setAttribute("data-testid", "mgmt-plan-inspector");
@@ -1523,7 +1532,7 @@ export class MgmtStrip {
         title.textContent = selItem.name || selItem.id;
         const ltag = document.createElement("span");
         ltag.className = "bp-dim";
-        ltag.textContent = selLayer;
+        ltag.textContent = selLayerTitle;
         top.append(sw, title, ltag);
         if (selItem.edited || selItem.state === "edited") {
           const ep = document.createElement("span");
@@ -1581,6 +1590,7 @@ export class MgmtStrip {
         closeSel.addEventListener("click", () => {
           this.planSelectedId = "";
           this.planNoteOpen = false;
+          this.planMoveLayerOpen = false;
           this.render();
         });
         top.append(noteBtn, closeSel);
@@ -1626,17 +1636,38 @@ export class MgmtStrip {
           if (moveOpts.length > 0) {
             const mLbl = document.createElement("span");
             mLbl.className = "bp-dim";
-            mLbl.textContent = t("gpui.mgmt.plan.layer.move", "Move to layer");
-            ctrlRow.appendChild(mLbl);
+            mLbl.textContent = t("gpui.mgmt.plan.layer.short", "Layer");
+            ctrlRow.appendChild(
+              mLbl,
+            );
+            ctrlRow.appendChild(
+              mkChip(
+                `${selLayerTitle} ${this.planMoveLayerOpen ? "▴" : "▾"}`,
+                this.planMoveLayerOpen,
+                "mgmt-plan-move-toggle",
+                () => {
+                  this.planMoveLayerOpen = !this.planMoveLayerOpen;
+                  this.render();
+                },
+              ),
+            );
+          }
+          ins.appendChild(ctrlRow);
+          if (this.planMoveLayerOpen && moveOpts.length > 0) {
+            const mvRow = document.createElement("div");
+            mvRow.className = "bp-plan-ins-row";
             for (const ml of moveOpts) {
-              ctrlRow.appendChild(
-                mkChip(ml, ml === selLayer, `mgmt-plan-move-${ml}`, () => {
+              const mlTitle = planLayerDisplayTitle(ml, d.copper_layers, canvasLayers);
+              mvRow.appendChild(
+                mkChip(mlTitle, ml === selLayer, `mgmt-plan-move-${ml}`, () => {
+                  this.planMoveLayerOpen = false;
                   if (ml !== selLayer) commitItemFields(selItem!.id, { layer: ml });
+                  else this.render();
                 }),
               );
             }
+            ins.appendChild(mvRow);
           }
-          ins.appendChild(ctrlRow);
         }
 
         if (this.planNoteOpen) {
@@ -1686,40 +1717,60 @@ export class MgmtStrip {
     listEl.className = "bp-mgmt-rows" + (this.planViewMode === "split" ? " bp-plan-split-list" : "");
     listEl.setAttribute("data-testid", "mgmt-plan-rows");
     const doneWord = t("gpui.mgmt.plan.done", "done");
-    for (const l of mergedLayers) {
+    const listLayers = planListLayersForView(this.planViewMode, mergedLayers, activeLayers);
+    for (const l of listLayers) {
       const items = l.items ?? [];
-      const gh = document.createElement("div");
-      gh.className = "bp-mgmt-group-head bp-plan-layer-head";
-      const gtop = document.createElement("div");
-      gtop.className = "bp-mgmt-row-line";
-      const lbl = document.createElement("span");
-      lbl.className = "bp-mgmt-strong";
-      lbl.textContent = l.layer;
-      const meta = document.createElement("span");
-      meta.className = "bp-dim bp-mgmt-flex1";
-      meta.textContent = `${l.role ? `${l.role} · ` : ""}${l.done ?? 0}/${items.length} ${doneWord}`;
-      gtop.append(lbl, meta);
-      if (l.status !== "approved" && items.length > 0) {
-        const okLayer = document.createElement("button");
-        okLayer.type = "button";
-        okLayer.className = "bp-mgmt-btn";
-        okLayer.textContent = t("gpui.mgmt.plan.layer", "Approve layer");
-        okLayer.addEventListener("click", () => sendPlan("plan.approve", { layer: l.layer, ids: [], approve: true }));
-        const rejLayer = document.createElement("button");
-        rejLayer.type = "button";
-        rejLayer.className = "bp-mgmt-btn";
-        rejLayer.textContent = t("gpui.mgmt.plan.reject", "Reject");
-        rejLayer.addEventListener("click", () => sendPlan("plan.approve", { layer: l.layer, ids: [], approve: false }));
-        gtop.append(okLayer, rejLayer);
+      const layerTitle = planLayerDisplayTitle(l.layer, d.copper_layers, canvasLayers) || l.layer;
+      if (this.planViewMode === "split") {
+        if (listLayers.length > 1) {
+          const divHdr = document.createElement("div");
+          divHdr.className = "bp-plan-split-divider";
+          const isPwr = l.role === "power" || l.role === "plane";
+          const bar = document.createElement("span");
+          bar.className = "bp-plan-card-bar " + (isPwr ? "pwr" : "sig");
+          const lbl = document.createElement("span");
+          lbl.className = "bp-mgmt-strong";
+          lbl.textContent = layerTitle;
+          const meta = document.createElement("span");
+          meta.className = "bp-dim";
+          meta.textContent = `${l.done ?? 0}/${items.length} ${doneWord}`;
+          divHdr.append(bar, lbl, meta);
+          listEl.appendChild(divHdr);
+        }
+      } else {
+        const gh = document.createElement("div");
+        gh.className = "bp-mgmt-group-head bp-plan-layer-head";
+        const gtop = document.createElement("div");
+        gtop.className = "bp-mgmt-row-line";
+        const lbl = document.createElement("span");
+        lbl.className = "bp-mgmt-strong";
+        lbl.textContent = layerTitle;
+        const meta = document.createElement("span");
+        meta.className = "bp-dim bp-mgmt-flex1";
+        meta.textContent = `${l.role ? `${l.role} · ` : ""}${l.done ?? 0}/${items.length} ${doneWord}`;
+        gtop.append(lbl, meta);
+        if (l.status !== "approved" && items.length > 0) {
+          const okLayer = document.createElement("button");
+          okLayer.type = "button";
+          okLayer.className = "bp-mgmt-btn";
+          okLayer.textContent = t("gpui.mgmt.plan.layer", "Approve layer");
+          okLayer.addEventListener("click", () => sendPlan("plan.approve", { layer: l.layer, ids: [], approve: true }));
+          const rejLayer = document.createElement("button");
+          rejLayer.type = "button";
+          rejLayer.className = "bp-mgmt-btn";
+          rejLayer.textContent = t("gpui.mgmt.plan.reject", "Reject");
+          rejLayer.addEventListener("click", () => sendPlan("plan.approve", { layer: l.layer, ids: [], approve: false }));
+          gtop.append(okLayer, rejLayer);
+        }
+        gh.appendChild(gtop);
+        if (l.stackup) {
+          const lstack = document.createElement("div");
+          lstack.className = "bp-plan-layer-stackup";
+          lstack.textContent = l.stackup;
+          gh.appendChild(lstack);
+        }
+        listEl.appendChild(gh);
       }
-      gh.appendChild(gtop);
-      if (l.stackup) {
-        const lstack = document.createElement("div");
-        lstack.className = "bp-plan-layer-stackup";
-        lstack.textContent = l.stackup;
-        gh.appendChild(lstack);
-      }
-      listEl.appendChild(gh);
 
       for (const it of items) {
         if (this.planHideDone && planDone(it)) continue;

@@ -36,18 +36,63 @@ struct DAsk: Codable, Equatable {
     var id: String
     var state: String   // open | answered
     var kind: String = ""
+    var head: String = ""
     var question: String
     var options: [DOption]
     var answered: String?
     var revise: Bool = false
     var isOpen: Bool { state == "open" }
-    enum CodingKeys: String, CodingKey { case id, state, kind, question, options, answered, revise }
+    enum CodingKeys: String, CodingKey { case id, state, kind, head, question, options, answered, revise }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        id = c.str(.id); state = c.str(.state); kind = c.str(.kind); question = c.str(.question)
+        id = c.str(.id); state = c.str(.state); kind = c.str(.kind); head = c.str(.head); question = c.str(.question)
         options = (try? c.decode([DOption].self, forKey: .options)) ?? []
         answered = try? c.decode(String.self, forKey: .answered)
         revise = c.bool(.revise)
+    }
+}
+
+struct DPlanMode: Codable, Equatable, Hashable {
+    var phase: String = "off"       // off | armed | planning | pending | executing
+    var interaction: String = "default"
+    var once: Bool = false
+    var scope: String = "off"       // off | once | always
+    var label: String = ""
+    var pending: Bool = false
+    var executing: Bool = false
+
+    enum Target: String, CaseIterable, Equatable {
+        case off, once, always
+    }
+
+    var isActive: Bool { !phase.isEmpty && phase != "off" }
+
+    static func effective(for thread: DThread?) -> DPlanMode? {
+        guard let thread else { return nil }
+        if let m = thread.planMode { return m }
+        if thread.provider == "claude" { return DPlanMode() }
+        return nil
+    }
+
+    static func nextCycle(for mode: DPlanMode) -> Target {
+        switch mode.phase {
+        case "off", "": return .once
+        case "armed", "planning": return mode.scope == "once" ? .always : .off
+        default: return .off
+        }
+    }
+
+    enum CodingKeys: String, CodingKey { case phase, interaction, once, scope, label, pending, executing }
+    init(phase: String = "off", interaction: String = "default", once: Bool = false, scope: String = "off", label: String = "", pending: Bool = false, executing: Bool = false) {
+        self.phase = phase; self.interaction = interaction; self.once = once; self.scope = scope; self.label = label; self.pending = pending; self.executing = executing
+    }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        let ph = c.str(.phase); phase = ph.isEmpty ? "off" : ph
+        let ia = c.str(.interaction); interaction = ia.isEmpty ? "default" : ia
+        once = c.bool(.once)
+        let sc = c.str(.scope); scope = sc.isEmpty ? "off" : sc
+        label = c.str(.label); pending = c.bool(.pending); executing = c.bool(.executing)
     }
 }
 
@@ -225,13 +270,15 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var mark: DMark?     // the machine it runs on when it is another one; nil for this hub's own
     var swarm: String    // the swarm (its room) this thread is a member of, "" for none (feature swarm): left out of its project's list
     var memory: DMemory? // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); nil for a thread without it
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory }
+    var planMode: DPlanMode? = nil
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory, planMode }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); pinOrder = c.int(.pinOrder); settled = c.bool(.settled); settledAt = c.int(.settledAt); archived = c.bool(.archived)
         provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status); mark = try? c.decode(DMark.self, forKey: .mark); swarm = c.str(.swarm)
         memory = try? c.decode(DMemory.self, forKey: .memory)
+        planMode = try? c.decode(DPlanMode.self, forKey: .planMode)
     }
 }
 /// A thread's memory progress, every word the hub's: the bar is `done` of `total`, `state` caught | behind | held.

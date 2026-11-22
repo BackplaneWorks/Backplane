@@ -57,6 +57,7 @@ internal val dok @Composable get() = Color(if (dlight) 0xFF1C8550 else 0xFF58C28
 internal val dwarn @Composable get() = Color(if (dlight) 0xFF9A6700 else 0xFFE3B341)
 internal val dfaint @Composable get() = Color(if (dlight) 0xFF72777F else 0xFF5C6473)
 internal val dview @Composable get() = Color(if (dlight) 0xFFF5F4EF else 0xFF08090B)
+internal val dinput @Composable get() = Color(if (dlight) 0xFF7446D0 else 0xFFB48CFF)
 // a thread's activity, one colour each (native/gpui/src/ui.rs `side_thread`): green working; red wanting the person or failed; grey otherwise
 @Composable internal fun dStateColor(s: String) = when (s) { "working" -> dok; "asking", "failed" -> dcs.error; else -> dfaint }
 /** A row's dot as the desktop's sidebar draws it (gpui siderow.rs `dot_of`): the hub's word for the thread (`status`) picks the colour and the shape; finished is the
@@ -562,11 +563,46 @@ private fun LocksStrip(open: (String) -> Unit) {
     }
 }
 
+private fun planPhaseLabel(pm: DPlanMode): String = when (pm.phase) {
+    "armed" -> if (pm.scope == "once") Msg.gpui_planmode_chip_once else Msg.gpui_mgmt_plan_tab
+    "planning" -> Msg.gpui_planmode_top_planning
+    "pending" -> Msg.gpui_planmode_chip_review
+    "executing" -> Msg.gpui_planmode_chip_building
+    else -> Msg.gpui_mgmt_plan_tab
+}
+
+private fun planBannerText(pm: DPlanMode): String = when (pm.phase) {
+    "armed" -> if (pm.scope == "once") Msg.gpui_planmode_bar_once else Msg.gpui_planmode_bar_always
+    "planning" -> Msg.gpui_planmode_bar_planning
+    "pending" -> Msg.gpui_planmode_bar_pending
+    "executing" -> Msg.gpui_planmode_bar_executing
+    else -> ""
+}
+
+@Composable
+private fun planModeTint(pm: DPlanMode?): Color = when (pm?.phase) {
+    "armed", "planning", "pending" -> dinput
+    "executing" -> dok
+    else -> dcs.primary
+}
+
 @Composable
 private fun StateStrip(t: DThread) {
+    val pm = effectivePlanMode(t)
     Column(Modifier.background(dcs.surfaceVariant)) {
         Row(Modifier.fillMaxWidth().height(32.dp).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             DMono(Msg.android_state_head, dfaint); Spacer(Modifier.width(8.dp)); StatusDot(t, 6); Spacer(Modifier.width(6.dp)); DMono(statusLabel(dStatusWord(t)), dcs.onSurface, modifier = Modifier.testTag("thread.state"))
+            if (pm != null && pm.isActive) {
+                val ptint = planModeTint(pm)
+                Spacer(Modifier.width(8.dp))
+                DMono(
+                    planPhaseLabel(pm),
+                    ptint,
+                    10,
+                    Modifier.border(BorderStroke(1.dp, ptint)).padding(horizontal = 5.dp, vertical = 1.dp).testTag("thread.planmode"),
+                    bold = true,
+                )
+            }
             Spacer(Modifier.weight(1f))
             if (DataClient.has("actions")) {
                 StripCell(if (t.pinned) Msg.menu_unpin else Msg.menu_pin, t.pinned) { DataClient.threadAct(t.id, if (t.pinned) "unpin" else "pin") }
@@ -588,6 +624,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
     CompositionLocalProvider(LocalChatTerm provides ct) { ThreadBody(id, viewer, hub, go, settings, back, ct) }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (String) -> Unit, settings: () -> Unit, back: () -> Unit, chatTerm: ChatTerm?) {
     val scope = rememberCoroutineScope()
@@ -724,10 +761,70 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             val replyBox = remember { androidx.compose.ui.focus.FocusRequester() }
             val replyAt = DataClient.replyFocus; LaunchedEffect(replyAt) { if (replyAt > 0 && id in DataClient.replying) runCatching { replyBox.requestFocus() } }
             DataClient.replying[id]?.let { r -> ReplyStrip(r, go = { jump(r.id, true) }) { DataClient.dropReply(id) } }
-            DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.focusRequester(replyBox).testTag("thread.composer"), 6, dcs.primary)
+            val planMode = effectivePlanMode(thread)
+            val planActive = planMode?.isActive == true
+            val planTint = planModeTint(planMode)
+            val planPrimary = planMode?.phase in setOf("armed", "planning", "pending")
+            var planMenu by remember { mutableStateOf(false) }
+            if (planMode != null && planActive) {
+                Row(
+                    Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, planTint.copy(alpha = 0.45f))).padding(horizontal = 8.dp, vertical = 5.dp).testTag("thread.plan.banner"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(Modifier.width(2.dp).height(14.dp).background(planTint))
+                    DMono(planBannerText(planMode), planTint, 10, Modifier.weight(1f), lines = 2)
+                    if (planMode.phase == "armed" || planMode.phase == "planning") {
+                        val isOnce = planMode.scope == "once"
+                        DMono(
+                            if (isOnce) Msg.gpui_planmode_scope_always else Msg.gpui_planmode_scope_once,
+                            planTint,
+                            10,
+                            Modifier.border(BorderStroke(1.dp, planTint.copy(alpha = 0.6f))).clickable {
+                                scope.launch { runCatching { DataClient.setPlanMode(id, if (isOnce) PlanModeTarget.ALWAYS else PlanModeTarget.ONCE) } }
+                            }.padding(horizontal = 6.dp, vertical = 2.dp),
+                            bold = true,
+                        )
+                        DMono(
+                            Msg.settings_lang_off,
+                            dcs.onSurfaceVariant,
+                            10,
+                            Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).clickable {
+                                scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.OFF) } }
+                            }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+            DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.focusRequester(replyBox).testTag("thread.composer"), 6, if (planActive) planTint else dcs.primary)
             thread?.memory?.let { MemoryBar(it) }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { Msg.common_default }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
+                if (DataClient.has("plan") && planMode != null) {
+                    val pcol = if (planActive) planTint else dcs.onSurfaceVariant
+                    Box(
+                        Modifier.height(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (planActive) planTint else dcs.outlineVariant))
+                            .combinedClickable(
+                                onClick = {
+                                    val nxt = nextPlanModeCycle(planMode)
+                                    scope.launch { runCatching { DataClient.setPlanMode(id, nxt) } }
+                                },
+                                onLongClick = { planMenu = true },
+                            )
+                            .padding(horizontal = 8.dp).testTag("thread.plan.toggle"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.Checklist, Msg.gpui_planmode_tip, tint = pcol, modifier = Modifier.size(16.dp))
+                            DMono(if (planActive) planPhaseLabel(planMode) else Msg.gpui_mgmt_plan_tab, pcol, 10, bold = planActive)
+                        }
+                        DropdownMenu(planMenu, { planMenu = false }) {
+                            DropdownMenuItem({ Text(Msg.settings_lang_off, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.OFF) } } })
+                            DropdownMenuItem({ Text(Msg.gpui_planmode_scope_once, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.ONCE) } } })
+                            DropdownMenuItem({ Text(Msg.gpui_planmode_scope_always, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.ALWAYS) } } })
+                        }
+                    }
+                }
                 Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) attachMenu = true else notice = Msg.android_pictures_old }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.AttachFile, Msg.composer_attach, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     DropdownMenu(attachMenu, { attachMenu = false }) {
@@ -745,7 +842,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                 }
                 val blank = draft.isBlank() && pending.isEmpty()
                 if (running && blank) DBtn(Msg.composer_stop, false, modifier = Modifier.testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
-                else DBtn(word?.label?.let(Tr::t) ?: Msg.composer_send, true, !blank, Modifier.testTag("thread.send")) {
+                else DBtn(word?.label?.let(Tr::t) ?: (if (planPrimary) Msg.gpui_mgmt_plan_tab else Msg.composer_send), true, !blank, Modifier.testTag("thread.send")) {
                     notice = ""; existing = null
                     // sent: the keyboard goes away, so the reply has the screen (a tap on the box brings it back)
                     // (focus first: the keyboard's word in progress is committed before the box empties, never after it)
@@ -988,7 +1085,93 @@ private fun AskCard(tid: String, e: DEntry) {
     var answer by remember(e.id) { mutableStateOf("") }
     var revising by remember(e.id) { mutableStateOf(false) }
     var revision by remember(e.id) { mutableStateOf("") }
-    val border = if (a?.open == true) (if (a.kind == "plan") dcs.tertiary else dcs.error) else dcs.outlineVariant
+    var expanded by remember(e.id) { mutableStateOf(false) }
+    var copied by remember(e.id) { mutableStateOf(false) }
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    val isPlan = a?.kind == "plan"
+    val border = if (a?.open == true) (if (isPlan) dinput else dcs.error) else dcs.outlineVariant
+
+    if (a != null && isPlan) {
+        val content = a.question.ifEmpty { e.text }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+                .background(dcs.surfaceVariant).border(BorderStroke(1.dp, border))
+                .height(IntrinsicSize.Min).testTag("ask.card"),
+        ) {
+            if (a.open) Box(Modifier.width(3.dp).fillMaxHeight().background(dinput))
+            Column(Modifier.weight(1f).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    DMono(if (a.head.isNotEmpty()) Tr.t(a.head) else Msg.ask_plan, dcs.onSurface, 12, bold = true)
+                    if (a.open) {
+                        DMono(
+                            Msg.gpui_ask_plan_ready,
+                            dinput,
+                            10,
+                            Modifier.border(BorderStroke(1.dp, dinput.copy(alpha = 0.65f))).padding(horizontal = 5.dp, vertical = 1.dp),
+                            bold = true,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    DBtn(if (copied) Msg.mobile_plan_copied else Msg.common_copy, false, small = true, modifier = Modifier.testTag("ask.copy")) {
+                        clip.setText(androidx.compose.ui.text.AnnotatedString(content))
+                        copied = true
+                        scope.launch { kotlinx.coroutines.delay(1500); copied = false }
+                    }
+                    DBtn(if (expanded) Msg.gpui_mgmt_plan_compact else Msg.gpui_mgmt_plan_expand, false, small = true, modifier = Modifier.testTag("ask.expand")) {
+                        expanded = !expanded
+                    }
+                }
+                Box(
+                    Modifier.fillMaxWidth()
+                        .then(if (expanded) Modifier else Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()))
+                        .background(dcs.background)
+                        .border(BorderStroke(1.dp, dcs.outlineVariant))
+                        .padding(10.dp),
+                ) {
+                    MdText(content, thread = tid, copy = CopyLookup(null))
+                }
+                if (a.open) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        a.options.forEach { o ->
+                            val primary = o.id == "accept" || o.id == "implement"
+                            DBtn(Tr.t(o.label), primary, true, Modifier.testTag("ask.opt.${o.id}"), small = false) {
+                                DataClient.answer(tid, a.id, o.id)
+                            }
+                        }
+                        if (a.revise) {
+                            DBtn(Msg.gpui_ask_plan_revise, revising, true, Modifier.testTag("ask.opt.revise"), small = false) {
+                                revising = !revising
+                            }
+                        }
+                    }
+                    if (a.revise && revising) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            DField(revision, { revision = it }, Msg.gpui_ask_plan_reviseph, Modifier.testTag("ask.revise.input"), lines = 3)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                DBtn(Msg.gpui_ask_plan_sendrev, true, revision.isNotBlank(), Modifier.testTag("ask.revise.send"), small = true) {
+                                    val fb = revision.trim()
+                                    if (fb.isNotEmpty()) {
+                                        revising = false
+                                        revision = ""
+                                        DataClient.answer(tid, a.id, "revise:$fb")
+                                    }
+                                }
+                                DBtn(Msg.common_cancel, false, true, small = true) {
+                                    revising = false
+                                    revision = ""
+                                }
+                            }
+                        }
+                    }
+                } else if (a.answered != null) {
+                    DMono(Msg.android_ask_answered(a.options.firstOrNull { it.id == a.answered }?.label?.let(Tr::t) ?: a.answered))
+                }
+            }
+        }
+        return
+    }
+
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, border)).padding(12.dp).testTag("ask.card")) {
         DMono(if (a?.open == true) Msg.android_ask_open else Msg.android_ask_done, dfaint, 11)
         Text(a?.question ?: e.text, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, modifier = Modifier.padding(vertical = 6.dp))
@@ -998,22 +1181,6 @@ private fun AskCard(tid: String, e: DEntry) {
                 DBtn(Msg.composer_send, true, answer.isNotBlank()) { DataClient.answer(tid, a.id, answer) }
             } else Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 a.options.forEach { o -> DBtn(Tr.t(o.label), o.id == "accept" || o.id == "implement", true, Modifier.fillMaxWidth().testTag("ask.opt.${o.id}"), danger = o.id == "deny" || o.id == "decline") { DataClient.answer(tid, a.id, o.id) } }
-                if (a.revise) {
-                    DBtn(Msg.gpui_ask_plan_revise, false, true, Modifier.fillMaxWidth().testTag("ask.opt.revise")) { revising = !revising }
-                    if (revising) {
-                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            DField(revision, { revision = it }, Msg.gpui_ask_plan_reviseph, Modifier.testTag("ask.revise.input"), lines = 3)
-                            DBtn(Msg.gpui_ask_plan_sendrev, true, revision.isNotBlank(), Modifier.testTag("ask.revise.send")) {
-                                val fb = revision.trim()
-                                if (fb.isNotEmpty()) {
-                                    revising = false
-                                    revision = ""
-                                    DataClient.answer(tid, a.id, "revise:$fb")
-                                }
-                            }
-                        }
-                    }
-                }
             }
         } else if (a?.answered != null) DMono(Msg.android_ask_answered(a.options.firstOrNull { it.id == a.answered }?.label?.let(Tr::t) ?: a.answered))
     }

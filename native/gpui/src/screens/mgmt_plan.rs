@@ -158,21 +158,74 @@ fn chip(cx: &mut Context<Backplane>, light: bool, id: &str, label: String, on: b
         .when(on, |d| d.bg(c("accent")).text_color(c("on-accent"))).when(!on, |d| d.bg(c("raise")).text_color(c("dim")).hover(|s| s.bg(c("line"))))
         .child(label).on_click(cx.listener(move |this, _, _, cx| { f(this, cx); cx.notify(); })).into_any_element()
 }
-/// Compact header switch row + cross-board approval banners.
+/// Layers to render in the list section for the current view mode.
+///
+/// In `Split` mode the list mirrors only the layer cards currently visible on the canvas above;
+/// in `List` mode it shows every planned layer.
+pub fn list_layers_for_view(view_mode: ViewMode, all_layers: &[Value], visible_names: &[String]) -> Vec<Value> {
+    if view_mode == ViewMode::Split && !visible_names.is_empty() {
+        let filtered: Vec<Value> = all_layers
+            .iter()
+            .filter(|l| l["layer"].as_str().is_some_and(|n| visible_names.iter().any(|v| v == n)))
+            .cloned()
+            .collect();
+        if !filtered.is_empty() {
+            return filtered;
+        }
+    }
+    all_layers.to_vec()
+}
+
+/// Compact header switch row + status summary + flush progress bar + cross-board approval banners.
 fn heading(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backplane>) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let on = d["on"] == true;
+    let empty = d["empty"] == true;
     let tip_box = if on {
         crate::keys::tip("Before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes corridors and plane regions here. It routes only what you approve.", "", light)
     } else {
         crate::keys::tip("Agents route as you ask. Turn it on to have them propose a routing plan first and route only what you approve here.", "", light)
     };
-    let mut v = vec![div().flex_shrink_0().flex().items_center().gap_2().px_2().py_1().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.))
+    let mut row = div().flex().items_center().gap_2().px_2().py(px(5.))
         .child(ic(light, "layers", 12., if on { "accent" } else { "dim" }))
-        .child(div().id("plan-toggle-lbl").flex_1().min_w_0().text_color(c("text")).tooltip(tip_box).child(trs("Plan before routing")))
+        .child(div().id("plan-toggle-lbl").flex_shrink_0().text_color(c("text")).tooltip(tip_box).child(trs("Plan before routing")));
+
+    if !empty {
+        let awaiting = d["awaiting"].as_u64().unwrap_or(0);
+        let blocked = d["blocked"].as_u64().unwrap_or(0);
+        let done_n = d["done"].as_u64().unwrap_or(0);
+        let total_n = d["total"].as_u64().unwrap_or(0);
+        let rev = d["revision"].as_u64().unwrap_or(0);
+        let (status_lbl, status_tone) = status_badge(d);
+        row = row
+            .child(div().px_1().border_1().border_color(c(status_tone)).bg(c("raise")).text_size(crate::scale::tpx(10.)).text_color(c(status_tone)).font_weight(FontWeight::BOLD).child(status_lbl))
+            .when(rev > 0, |x| x.child(div().text_size(crate::scale::tpx(10.)).text_color(c("dim")).child(format!("v{rev}"))))
+            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(10.)).text_color(c(if awaiting > 0 { "warn" } else if blocked > 0 { "bad" } else { "dim" }))
+                /* i18n-ok: formatted count */ .child(if total_n > 0 { format!("{done_n}/{total_n} {}", trs("done")) } else if awaiting > 0 { tf("gpui.mgmt.plan.awaiting", &[("n", awaiting.into())]) } else { trs("Nothing awaits your approval") }))
+            .when(!d["live"].as_bool().unwrap_or(false), |x| x.child(div().px_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(trs("saved plan"))));
+    } else {
+        row = row.child(div().flex_1());
+    }
+
+    row = row
         .child(chip(cx, light, "mgmt:plan:on", trs("On"), on, |a, cx| enable(a, true, cx)))
-        .child(chip(cx, light, "mgmt:plan:off", trs("Off"), !on, |a, cx| enable(a, false, cx)))
-        .into_any_element()];
+        .child(chip(cx, light, "mgmt:plan:off", trs("Off"), !on, |a, cx| enable(a, false, cx)));
+
+    let mut hdr = div().flex_shrink_0().flex().flex_col().bg(c("panel")).border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.)).child(row);
+    if !empty {
+        let segs = progress_segments(d);
+        let seg_total: u64 = segs.iter().map(|(n, _)| *n).sum();
+        if seg_total > 0 {
+            hdr = hdr.child(div().w_full().h(px(3.)).bg(c("line")).flex()
+                .children(segs.into_iter().filter(|(n, _)| *n > 0).map(|(n, tone)| {
+                    let mut bar = div().h_full().bg(c(tone));
+                    bar.style().flex_grow = Some(n as f32);
+                    bar
+                })));
+        }
+    }
+
+    let mut v = vec![hdr.into_any_element()];
     let _ = app;
     for e in d["elsewhere"].as_array().cloned().unwrap_or_default() {
         let (pcb, rel) = (s(&e, "pcb").to_string(), s(&e, "rel").to_string());
@@ -214,36 +267,24 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let sync_zoom = app.screens.mgmt.plan_ui.sync_zoom;
     let expanded = app.screens.mgmt.plan_ui.expanded;
     let awaiting = d["awaiting"].as_u64().unwrap_or(0);
-    let blocked = d["blocked"].as_u64().unwrap_or(0);
     let done_n = d["done"].as_u64().unwrap_or(0);
-    let total_n = d["total"].as_u64().unwrap_or(0);
-    let rev = d["revision"].as_u64().unwrap_or(0);
-    let (status_lbl, status_tone) = status_badge(d);
-    let segs = progress_segments(d);
-    let seg_total: u64 = segs.iter().map(|(n, _)| *n).sum();
-
-    let mut status_row = div().flex_shrink_0().flex().flex_col().gap_1().px_2().py_1().border_b_1().border_color(c("rule")).bg(c("panel")).text_size(crate::scale::tpx(11.))
-        .child(div().flex().items_center().gap_2()
-            .child(div().px_1().border_1().border_color(c(status_tone)).bg(c("raise")).text_color(c(status_tone)).font_weight(FontWeight::BOLD).child(status_lbl))
-            .when(rev > 0, |x| x.child(div().text_color(c("dim")).child(format!("v{rev}"))))
-            .child(div().text_color(c(if awaiting > 0 { "warn" } else if blocked > 0 { "bad" } else { "dim" }))
-                /* i18n-ok: formatted count */ .child(if total_n > 0 { format!("{done_n}/{total_n} {}", trs("done")) } else if awaiting > 0 { tf("gpui.mgmt.plan.awaiting", &[("n", awaiting.into())]) } else { trs("Nothing awaits your approval") }))
-            .child(div().flex_1())
-            .when(!d["live"].as_bool().unwrap_or(false), |x| x.child(div().px_1().border_1().border_color(c("line")).text_color(c("faint")).child(trs("saved plan")))));
-    if seg_total > 0 {
-        status_row = status_row.child(div().w_full().h(px(3.)).bg(c("line")).flex()
-            .children(segs.into_iter().filter(|(n, _)| *n > 0).map(|(n, tone)| {
-                let mut bar = div().h_full().bg(c(tone));
-                bar.style().flex_grow = Some(n as f32);
-                bar
-            })));
-    }
+    let stackup_sum = s(d, "stackup_summary").to_string();
+    let imps: Vec<String> = d["impedances"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    let has_stackup = !stackup_sum.is_empty() || !imps.is_empty();
+    let stackup_open = app.screens.mgmt.plan_stackup_open;
 
     let mut act_row = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().flex_wrap().items_center().gap(px(6.)).px_2().py_1().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.));
     if awaiting > 0 { act_row = act_row.child(btn(cx, light, "mgmt:plan:approve-all".into(), trs("Approve all"), true, |a, cx| approve(a, "", &[], true, cx))) }
     if d["routing"] == true { act_row = act_row.child(btn(cx, light, "mgmt:plan:stop".into(), trs("Stop routing"), false, |a, cx| send(a, "plan.stop", json!({}), cx))) }
     if d["live"] == true && done_n > 0 { act_row = act_row.child(btn(cx, light, "mgmt:plan:verify".into(), trs("Verify"), false, |a, cx| send(a, "plan.verify", json!({}), cx))) }
-    act_row = act_row.child(div().flex_1()).child(btn(cx, light, "mgmt:plan:hide".into(), if hide { trs("Show done") } else { trs("Hide done") }, false, |_, cx| { HIDE_DONE.fetch_xor(true, Ordering::Relaxed); cx.notify(); }));
+    act_row = act_row.child(div().flex_1());
+    if has_stackup {
+        act_row = act_row.child(chip(cx, light, "plan-stackup-toggle", format!("{} {}", trs("Stackup"), if stackup_open { "▾" } else { "▸" }), stackup_open, |a, cx| {
+            a.screens.mgmt.plan_stackup_open = !a.screens.mgmt.plan_stackup_open;
+            cx.notify();
+        }));
+    }
+    act_row = act_row.child(btn(cx, light, "mgmt:plan:hide".into(), if hide { trs("Show done") } else { trs("Hide done") }, false, |_, cx| { HIDE_DONE.fetch_xor(true, Ordering::Relaxed); cx.notify(); }));
 
     let asks = d["asks"].as_array().cloned().unwrap_or_default();
     let ask_banner = (!asks.is_empty()).then(|| {
@@ -257,21 +298,11 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
             .into_any_element()
     });
 
-    let stackup_sum = s(d, "stackup_summary").to_string();
-    let imps: Vec<String> = d["impedances"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
-    let stackup_open = app.screens.mgmt.plan_stackup_open;
-    let stackup_box = (!stackup_sum.is_empty() || !imps.is_empty()).then(|| {
-        let mut box_el = div().flex_shrink_0().flex().flex_col().border_b_1().border_color(c("rule")).bg(c("bg")).text_size(crate::scale::tpx(11.))
-            .child(div().id("plan-stackup-toggle").flex().items_center().gap_1().px_2().py_1().cursor_pointer().hover(|s| s.bg(c("panel")))
-                .child(ic(light, if stackup_open { "chevron-down" } else { "chevron-right" }, 12., "dim"))
-                .child(div().flex_1().text_color(c("dim")).child(trs("Stackup & impedances")))
-                .on_click(cx.listener(|this, _, _, cx| { this.screens.mgmt.plan_stackup_open = !this.screens.mgmt.plan_stackup_open; cx.notify(); })));
-        if stackup_open {
-            box_el = box_el.child(div().px_3().pb_2().flex().flex_col().gap(px(2.)).text_color(c("dim"))
-                .when(!stackup_sum.is_empty(), |x| x.child(div().child(stackup_sum.clone())))
-                /* i18n-ok: hub impedance spec */ .children(imps.into_iter().map(|imp| div().text_color(c("faint")).child(format!("· {imp}")))));
-        }
-        box_el.into_any_element()
+    let stackup_box = (has_stackup && stackup_open).then(|| {
+        div().flex_shrink_0().flex().flex_col().gap(px(2.)).px_3().py_2().border_b_1().border_color(c("rule")).bg(c("bg")).text_size(crate::scale::tpx(11.)).text_color(c("dim"))
+            .when(!stackup_sum.is_empty(), |x| x.child(div().child(stackup_sum.clone())))
+            /* i18n-ok: hub impedance spec */ .children(imps.into_iter().map(|imp| div().text_color(c("faint")).child(format!("· {imp}"))))
+            .into_any_element()
     });
 
     let view_bar = div()
@@ -309,21 +340,43 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         .iter()
         .filter_map(|l| l["layer"].as_str().map(str::to_string))
         .collect();
-    let layer_bar = (view_mode != ViewMode::List && canvas_layers.len() > 1).then(|| {
+    let layer_bar = (view_mode != ViewMode::List && grid_mode != GridMode::All && canvas_layers.len() > 1).then(|| {
         let mut row = div().flex_shrink_0().flex().flex_wrap().items_center().gap(px(4.)).px_2().py(px(3.)).border_b_1().border_color(c("rule")).bg(c("bg")).text_size(crate::scale::tpx(10.));
         for l in &canvas_layers {
             let lname = s(l, "layer").to_string();
-            let title = l["title"].as_str().filter(|x| !x.is_empty()).unwrap_or(&lname).to_string();
+            let base_title = mgmt_plan_canvas::layer_display_title(&lname, copper_arr, &canvas_layers);
+            let item_n = l["items"].as_array().map_or(0, Vec::len);
+            let title = if item_n > 0 { format!("{base_title} · {item_n}") } else { base_title }; // i18n-ok: item count suffix
             let active = shown_names.contains(&lname);
+            let empty_layer = item_n == 0;
             let lc = lname.clone();
-            row = row.child(chip(cx, light, &format!("mgmt:plan:layerpill:{lname}"), title, active, move |a, cx| {
+            let pill = crate::ui::with_rect(div().id(SharedString::from(format!("mgmt:plan:layerpill:{lname}"))), {
+                let id_s = format!("mgmt:plan:layerpill:{lname}");
+                move || id_s.clone()
+            })
+            .flex_shrink_0()
+            .h(crate::scale::tpx(20.))
+            .px_2()
+            .flex()
+            .items_center()
+            .text_size(crate::scale::tpx(11.))
+            .cursor_pointer()
+            .border_1()
+            .border_color(c(if active { "accent" } else { "line" }))
+            .when(active, |d| d.bg(c("accent")).text_color(c("on-accent")))
+            .when(!active, |d| d.bg(c("raise")).text_color(c(if empty_layer { "faint" } else { "dim" })).hover(|s| s.bg(c("line"))))
+            .when(empty_layer && !active, |d| d.opacity(0.65))
+            .child(title)
+            .on_click(cx.listener(move |a, _, _, cx| {
                 mgmt_plan_canvas::pick_layer_in_grid(&mut a.screens.mgmt.plan_ui, lc.clone());
                 cx.notify();
             }));
+            row = row.child(pill);
         }
         row.into_any_element()
     });
 
+    let move_layer_open = app.screens.mgmt.plan_ui.move_layer_open;
     let sel_inspector = app.screens.mgmt.plan_sel.as_ref().and_then(|sel_id| {
         let mut found: Option<(String, Value)> = None;
         for l in &all_layers_arr {
@@ -336,6 +389,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
             if found.is_some() { break }
         }
         let (cur_layer, item) = found?;
+        let cur_layer_title = mgmt_plan_canvas::layer_display_title(&cur_layer, copper_arr, &canvas_layers);
         let id = sel_id.clone();
         let name = s(&item, "name").to_string();
         let stt = s(&item, "state").to_string();
@@ -385,7 +439,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                     .gap(px(6.))
                     .child(div().size(px(10.)).bg(rgb(col)))
                     .child(div().font_weight(FontWeight::BOLD).text_color(c("text")).child(name))
-                    .child(div().text_color(c("dim")).child(cur_layer.clone()))
+                    .child(div().text_color(c("dim")).child(cur_layer_title.clone()))
                     .when(edited, |x| x.child(div().px_1().border_1().border_color(c("warn")).text_size(crate::scale::tpx(10.)).text_color(c("warn")).child(trs("Edited"))))
                     .when(locked, |x| x.child(div().px_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(10.)).text_color(c("dim")).child(trs("Locked"))))
                     .child(div().flex_1())
@@ -403,7 +457,12 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                         cx.notify();
                     }))
                     .child(div().id("plan-ins-close").cursor_pointer().px_1().text_color(c("dim")).hover(|s| s.text_color(c("text"))).child("\u{d7}")
-                        .on_click(cx.listener(|a, _, _, cx| { a.screens.mgmt.plan_sel = None; a.screens.mgmt.plan_ui.selected_vertex = None; cx.notify(); }))),
+                        .on_click(cx.listener(|a, _, _, cx| {
+                            a.screens.mgmt.plan_sel = None;
+                            a.screens.mgmt.plan_ui.selected_vertex = None;
+                            a.screens.mgmt.plan_ui.move_layer_open = false;
+                            cx.notify();
+                        }))),
             );
 
         if !locked {
@@ -424,20 +483,32 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                     .child(div().w(px(1.)).h(px(12.)).bg(c("line")));
             }
             if !move_layers.is_empty() {
-                steer_row = steer_row.child(div().text_color(c("dim")).child(trs("Move to layer")));
+                steer_row = steer_row
+                    .child(div().text_color(c("dim")).child(trs("Layer")))
+                    .child(chip(cx, light, "mgmt:plan:ins:mvtoggle", format!("{cur_layer_title} {}", if move_layer_open { "▴" } else { "▾" }), move_layer_open, |a, cx| {
+                        a.screens.mgmt.plan_ui.move_layer_open = !a.screens.mgmt.plan_ui.move_layer_open;
+                        cx.notify();
+                    }));
+            }
+            box_el = box_el.child(steer_row);
+            if move_layer_open && !move_layers.is_empty() {
+                let mut mv_row = div().flex().flex_wrap().items_center().gap(px(4.)).pt(px(2.)).text_size(crate::scale::tpx(10.));
                 for ml in move_layers {
                     let is_cur = ml == cur_layer;
+                    let ml_title = mgmt_plan_canvas::layer_display_title(&ml, copper_arr, &canvas_layers);
                     let id_mv = id.clone();
                     let ml_c = ml.clone();
-                    steer_row = steer_row.child(chip(cx, light, &format!("mgmt:plan:ins:mv:{ml}"), ml, is_cur, move |a, cx| {
+                    mv_row = mv_row.child(chip(cx, light, &format!("mgmt:plan:ins:mv:{ml}"), ml_title, is_cur, move |a, cx| {
+                        a.screens.mgmt.plan_ui.move_layer_open = false;
                         if !is_cur {
                             mgmt_plan_canvas::commit_item_fields(a, &id_mv, json!({"layer": ml_c.clone()}), cx);
                             mgmt_plan_canvas::pick_layer_in_grid(&mut a.screens.mgmt.plan_ui, ml_c.clone());
                         }
+                        cx.notify();
                     }));
                 }
+                box_el = box_el.child(mv_row);
             }
-            box_el = box_el.child(steer_row);
         }
 
         if app.screens.mgmt.plan_ui.note_open {
@@ -500,28 +571,45 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
 
     let mut list = div().id("plan-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(crate::scale::tpx(12.));
     let sel = app.screens.mgmt.plan_sel.clone();
-    for l in all_layers_arr {
+    let list_layers = list_layers_for_view(view_mode, &all_layers_arr, &shown_names);
+    let list_layer_count = list_layers.len();
+    for l in list_layers {
         let layer = s(&l, "layer").to_string();
+        let layer_title = mgmt_plan_canvas::layer_display_title(&layer, copper_arr, &canvas_layers);
         let total = l["items"].as_array().map_or(0, Vec::len);
+        let done_layer = l["done"].as_u64().unwrap_or(0);
         let stack = s(&l, "stackup").to_string();
         let role = s(&l, "role").to_string();
         let lid = layer.clone(); let lid2 = layer.clone();
-        let mut head_row = div().flex_shrink_0().flex().flex_col().px_2().py_1().bg(c("panel")).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(11.))
-            .child({
-                let mut top = div().flex().items_center().gap_2()
-                    .child(div().flex_shrink_0().font_weight(FontWeight::BOLD).text_color(c("text")).child(layer.clone()))
-                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("dim"))
-                        /* i18n-ok: layer count */ .child(format!("{}{}/{} {}", if role.is_empty() { String::new() } else { format!("{role} · ") }, l["done"].as_u64().unwrap_or(0), total, trs("done"))));
-                if s(&l, "status") != "approved" && total > 0 {
-                    top = top.child(btn(cx, light, format!("mgmt:plan:layer-ok:{layer}"), trs("Approve layer"), false, move |a, cx| approve(a, &lid, &[], true, cx)))
-                        .child(btn(cx, light, format!("mgmt:plan:layer-no:{layer}"), trs("Reject"), false, move |a, cx| approve(a, &lid2, &[], false, cx)));
-                }
-                top
-            });
-        if !stack.is_empty() {
-            head_row = head_row.child(div().text_size(crate::scale::tpx(10.)).text_color(c("faint")).overflow_hidden().text_ellipsis().whitespace_nowrap().child(stack));
+        if view_mode == ViewMode::Split {
+            if list_layer_count > 1 {
+                let is_power = role == "power" || role == "plane";
+                list = list.child(
+                    div().flex_shrink_0().flex().items_center().gap_2().px_2().py(px(3.)).bg(c("panel")).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(10.))
+                        .child(div().w(px(3.)).h(px(12.)).bg(c(if is_power { "warn" } else { "accent" })))
+                        .child(div().flex_shrink_0().font_weight(FontWeight::BOLD).text_color(c("text")).child(layer_title))
+                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("dim"))
+                            .child(tf("gpui.mgmt.plan.done.of", &[("done", done_layer.into()), ("total", total.into())])))
+                );
+            }
+        } else {
+            let mut head_row = div().flex_shrink_0().flex().flex_col().px_2().py_1().bg(c("panel")).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(11.))
+                .child({
+                    let mut top = div().flex().items_center().gap_2()
+                        .child(div().flex_shrink_0().font_weight(FontWeight::BOLD).text_color(c("text")).child(layer_title))
+                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("dim"))
+                            /* i18n-ok: layer count */ .child(format!("{}{}/{} {}", if role.is_empty() { String::new() } else { format!("{role} · ") }, done_layer, total, trs("done"))));
+                    if s(&l, "status") != "approved" && total > 0 {
+                        top = top.child(btn(cx, light, format!("mgmt:plan:layer-ok:{layer}"), trs("Approve layer"), false, move |a, cx| approve(a, &lid, &[], true, cx)))
+                            .child(btn(cx, light, format!("mgmt:plan:layer-no:{layer}"), trs("Reject"), false, move |a, cx| approve(a, &lid2, &[], false, cx)));
+                    }
+                    top
+                });
+            if !stack.is_empty() {
+                head_row = head_row.child(div().text_size(crate::scale::tpx(10.)).text_color(c("faint")).overflow_hidden().text_ellipsis().whitespace_nowrap().child(stack));
+            }
+            list = list.child(head_row);
         }
-        list = list.child(head_row);
         for i in shown(&l, hide) {
             let id = s(&i, "id").to_string(); let col = hex(s(&i, "color")); let stt = s(&i, "state").to_string();
             let selected = sel.as_deref() == Some(id.as_str());
@@ -602,7 +690,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
             .into_any_element(),
         ViewMode::List => list.into_any_element(),
     };
-    div().size_full().flex().flex_col().children(head).child(status_row).child(act_row).child(view_bar).children(layer_bar).children(ask_banner).children(refused).children(keys).children(stackup_box).children(sel_inspector).child(main_body).children(drawn).into_any_element()
+    div().size_full().flex().flex_col().children(head).child(act_row).child(view_bar).children(layer_bar).children(ask_banner).children(refused).children(keys).children(stackup_box).children(sel_inspector).child(main_body).children(drawn).into_any_element()
 }
 
 #[cfg(test)]
@@ -628,5 +716,19 @@ mod tests {
         assert_eq!(segs, [(2, "ok"), (0, "accent"), (1, "input"), (2, "warn"), (1, "bad")]);
         let icons: serde_json::Map<String, Value> = serde_json::from_str(include_str!("../../../../assets/icons.json")).unwrap();
         for name in ["layers", "chevron-down", "chevron-right"] { assert!(icons.contains_key(name), "missing icon {name}"); }
+    }
+    #[test] fn split_mode_list_layers_follow_visible_canvas_and_titles_canonical() {
+        let all = vec![
+            json!({"layer": "F.Cu", "title": "L1 · TOP"}),
+            json!({"layer": "In1.Cu", "title": "L2 · GND1"}),
+            json!({"layer": "In5.Cu", "title": "L6 · SIG1"}),
+        ];
+        let shown = vec!["In5.Cu".to_string()];
+        let split_one = list_layers_for_view(ViewMode::Split, &all, &shown);
+        assert_eq!(split_one.len(), 1);
+        assert_eq!(split_one[0]["layer"], "In5.Cu");
+        assert_eq!(list_layers_for_view(ViewMode::List, &all, &shown).len(), 3);
+        assert_eq!(mgmt_plan_canvas::layer_display_title("In5.Cu", &[], &all), "L6 · SIG1");
+        assert_eq!(mgmt_plan_canvas::layer_display_title("In9.Cu", &[], &all), "In9.Cu");
     }
 }

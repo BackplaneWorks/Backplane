@@ -833,12 +833,218 @@ export function planDefaultLayerPair(layers: PlanLayer[]): string[] {
   return out;
 }
 
+export interface PlanCorridorPill {
+  id: string;
+  text: string;
+  cx: number;
+  cy: number;
+  pw: number;
+  ph: number;
+  col: string;
+  sel: boolean;
+}
+
+export function planPolylinePointAt(pts: Array<[number, number]>, frac: number): [number, number] | null {
+  if (!pts || pts.length === 0) return null;
+  if (pts.length === 1) return pts[0];
+  const f = Math.max(0, Math.min(1, frac));
+  let total = 0;
+  for (let i = 1; i < pts.length; i++) {
+    total += Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+  }
+  if (total < 1e-6) return pts[0];
+  const target = total * f;
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    const len = Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1]);
+    if (acc + len >= target && len > 1e-9) {
+      const t = (target - acc) / len;
+      return [
+        pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * t,
+        pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * t,
+      ];
+    }
+    acc += len;
+  }
+  return pts[pts.length - 1];
+}
+
+export function planLayerDisplayTitle(
+  layer: string,
+  copperLayers?: PlanCopperLayer[],
+  allLayers?: PlanLayer[],
+): string {
+  for (const cl of copperLayers ?? []) {
+    if (cl.layer === layer && cl.title) return cl.title;
+  }
+  for (const l of allLayers ?? []) {
+    if (l.layer === layer && l.title) return l.title;
+  }
+  return layer;
+}
+
+export function planListLayersForView(
+  viewMode: string,
+  allLayers: PlanLayer[],
+  visibleNames: string[],
+): PlanLayer[] {
+  if (viewMode === "split" && visibleNames.length > 0) {
+    const filtered = allLayers.filter((l) => visibleNames.includes(l.layer));
+    if (filtered.length > 0) return filtered;
+  }
+  return allLayers;
+}
+
+function planRectsOverlap(a: [number, number, number, number], b: [number, number, number, number]): boolean {
+  return !(a[2] <= b[0] || a[0] >= b[2] || a[3] <= b[1] || a[1] >= b[3]);
+}
+
+function planPointInRing(x: number, y: number, ring: Array<[number, number]>): boolean {
+  if (ring.length < 3) return false;
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersect = (yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi + 1e-12) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+export function planPourLabelPoint(
+  outer: Array<[number, number]>,
+  holes: Array<Array<[number, number]>>,
+): [number, number] | null {
+  if (outer.length < 3) return null;
+  let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity, sx = 0, sy = 0;
+  for (const p of outer) {
+    minx = Math.min(minx, p[0]);
+    miny = Math.min(miny, p[1]);
+    maxx = Math.max(maxx, p[0]);
+    maxy = Math.max(maxy, p[1]);
+    sx += p[0];
+    sy += p[1];
+  }
+  const cands: Array<[number, number]> = [
+    [(minx + maxx) * 0.5, (miny + maxy) * 0.5],
+    [sx / outer.length, sy / outer.length],
+  ];
+  for (const fy of [0.5, 0.25, 0.75]) {
+    for (const fx of [0.5, 0.25, 0.75]) {
+      cands.push([minx + (maxx - minx) * fx, miny + (maxy - miny) * fy]);
+    }
+  }
+  for (const c of cands) {
+    if (planPointInRing(c[0], c[1], outer) && !holes.some((h) => planPointInRing(c[0], c[1], h))) {
+      return c;
+    }
+  }
+  return [(minx + maxx) * 0.5, (miny + maxy) * 0.5];
+}
+
+export function planPlaceCorridorPills(
+  bands: PlanBand[],
+  cam: PlanCamera,
+  w: number,
+  h: number,
+  selectedId: string,
+  hoverId: string,
+): PlanCorridorPill[] {
+  const cands: Array<{ b: PlanBand; pts: Array<[number, number]>; nets: number; sel: boolean; hov: boolean; pxLen: number; col: string }> = [];
+  for (const b of bands) {
+    const nets = b.nets ?? 0;
+    const pts = b.path ?? [];
+    if (nets <= 0 || pts.length < 2) continue;
+    let pxLen = 0;
+    for (let i = 1; i < pts.length; i++) {
+      const [ax, ay] = planWorldToPx(cam, pts[i - 1][0], pts[i - 1][1], w, h);
+      const [bx, by] = planWorldToPx(cam, pts[i][0], pts[i][1], w, h);
+      pxLen += Math.hypot(bx - ax, by - ay);
+    }
+    cands.push({
+      b,
+      pts,
+      nets,
+      sel: selectedId === b.id,
+      hov: hoverId === b.id,
+      pxLen,
+      col: planBusColor(b.name || b.id, b.color || ""),
+    });
+  }
+  cands.sort((a, b) => {
+    const pa = a.sel || a.hov ? 1 : 0;
+    const pb = b.sel || b.hov ? 1 : 0;
+    if (pb !== pa) return pb - pa;
+    if (b.nets !== a.nets) return b.nets - a.nets;
+    return a.b.id.localeCompare(b.b.id);
+  });
+
+  const placed: Array<[number, number, number, number]> = [];
+  const out: PlanCorridorPill[] = [];
+  const boxOf = (cx: number, cy: number, pw: number, ph: number, pad: number): [number, number, number, number] => [
+    cx - pw * 0.5 - pad,
+    cy - ph * 0.5 - pad,
+    cx + pw * 0.5 + pad,
+    cy + ph * 0.5 + pad,
+  ];
+  for (const c of cands) {
+    const name = c.b.name || "";
+    const shortTxt = String(c.nets);
+    const fullTxt = name ? `${name} · ${c.nets}` : shortTxt;
+    const texts = (c.sel || c.hov || c.pxLen >= 95) && name ? [fullTxt, shortTxt] : [shortTxt];
+    let chosen: PlanCorridorPill | null = null;
+    const clampCx = (x: number, pw: number) => Math.max(pw * 0.5 + 3, Math.min(Math.max(pw * 0.5 + 3, w - pw * 0.5 - 3), x));
+    const clampCy = (y: number, ph: number) => Math.max(ph * 0.5 + 3, Math.min(Math.max(ph * 0.5 + 3, h - ph * 0.5 - 3), y));
+    outerLoop: for (const txt of texts) {
+      const pw = Math.max(16, txt.length * 5.9 + 10);
+      const ph = 15;
+      for (const frac of [0.5, 0.35, 0.65, 0.22, 0.78]) {
+        const pt = planPolylinePointAt(c.pts, frac);
+        if (!pt) continue;
+        const [rx, ry] = planWorldToPx(cam, pt[0], pt[1], w, h);
+        const cx = clampCx(rx, pw);
+        const cy = clampCy(ry, ph);
+        const rect = boxOf(cx, cy, pw, ph, 2);
+        if (!placed.some((o) => planRectsOverlap(rect, o))) {
+          chosen = { id: c.b.id, text: txt, cx, cy, pw, ph, col: c.col, sel: c.sel };
+          break outerLoop;
+        }
+      }
+    }
+    if (!chosen) {
+      const pt = planPolylinePointAt(c.pts, 0.5);
+      if (pt) {
+        const [rx, ry] = planWorldToPx(cam, pt[0], pt[1], w, h);
+        const pw = Math.max(16, shortTxt.length * 6.5 + 8);
+        const ph = 15;
+        const cx = clampCx(rx, pw);
+        for (const dy of [-(ph + 3), ph + 3]) {
+          const cy = clampCy(ry + dy, ph);
+          if (!placed.some((o) => planRectsOverlap(boxOf(cx, cy, pw, ph, 2), o))) {
+            chosen = { id: c.b.id, text: shortTxt, cx, cy, pw, ph, col: c.col, sel: c.sel };
+            break;
+          }
+        }
+        if (!chosen) {
+          chosen = { id: c.b.id, text: shortTxt, cx, cy: clampCy(ry, ph), pw, ph, col: c.col, sel: c.sel };
+        }
+      }
+    }
+    if (chosen) {
+      placed.push(boxOf(chosen.cx, chosen.cy, chosen.pw, chosen.ph, 2));
+      out.push(chosen);
+    }
+  }
+  return out;
+}
+
 export function planLayoutLabels(
   parts: PlanPartBox[],
   cam: PlanCamera,
   w: number,
   h: number,
   pinned: string[],
+  blockedBoxes: Array<[number, number, number, number]> = [],
 ): PlanPlacedLabel[] {
   const pinSet = new Set(pinned);
   const cands: Array<{ text: string; cx: number; cy: number; bw: number; bh: number; score: number }> = [];
@@ -862,11 +1068,11 @@ export function planLayoutLabels(
     });
   }
   cands.sort((a, b) => b.score - a.score);
-  const placedBoxes: Array<[number, number, number, number]> = [];
+  const placedBoxes: Array<[number, number, number, number]> = [...blockedBoxes];
   const out: PlanPlacedLabel[] = [];
   for (const c of cands) {
     const rect: [number, number, number, number] = [c.cx - c.bw * 0.5, c.cy - c.bh * 0.5, c.cx + c.bw * 0.5, c.cy + c.bh * 0.5];
-    const overlaps = placedBoxes.some((o) => !(rect[2] <= o[0] || rect[0] >= o[2] || rect[3] <= o[1] || rect[1] >= o[3]));
+    const overlaps = placedBoxes.some((o) => planRectsOverlap(rect, o));
     if (!overlaps) {
       placedBoxes.push(rect);
       out.push({ text: c.text, cx: c.cx, cy: c.cy });

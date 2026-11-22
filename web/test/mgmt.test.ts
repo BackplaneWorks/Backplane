@@ -29,7 +29,11 @@ import {
   planInsertVertex,
   planRemoveVertex,
   planDefaultLayerPair,
+  planLayerDisplayTitle,
   planLayoutLabels,
+  planListLayersForView,
+  planPlaceCorridorPills,
+  planPourLabelPoint,
   planAllCanvasLayers,
   unwrapPlanGetPanel,
   isPlanHydrationCurrent,
@@ -237,5 +241,39 @@ describe("Management strip pure model", () => {
     expect(isPlanHydrationCurrent(1, 1, 1, 2, "/p/a", "/p/a", 4, undefined)).toBe(false);
     expect(isPlanHydrationCurrent(1, 1, 2, 2, "/p/a", "/p/b", 4, undefined)).toBe(false);
     expect(isPlanHydrationCurrent(1, 1, 2, 2, "/p/a", "/p/a", 3, 5)).toBe(false);
+
+    expect(planLayerDisplayTitle("In5.Cu", [{ layer: "In5.Cu", index: 6, role: "signal", title: "L6 · SIG1" }])).toBe("L6 · SIG1");
+    expect(planLayerDisplayTitle("In9.Cu", [])).toBe("In9.Cu");
+    expect(planListLayersForView("split", mergedAll, ["In1.Cu"]).map((l) => l.layer)).toEqual(["In1.Cu"]);
+    expect(planListLayersForView("list", mergedAll, ["In1.Cu"]).map((l) => l.layer)).toEqual(["F.Cu", "In1.Cu"]);
+
+    const pillCam = planFitCamera([0, 0, 100, 100], 400, 400, 0);
+    const pills = planPlaceCorridorPills(
+      [
+        { id: "b1", layer: "F.Cu", name: "SPI", nets: 4, path: [[10, 50], [90, 50]] },
+        { id: "b2", layer: "F.Cu", name: "I2C", nets: 2, path: [[10, 50], [90, 50]] },
+      ],
+      pillCam,
+      400,
+      400,
+      "b1",
+      "",
+    );
+    expect(pills.length).toBe(2);
+    expect(pills[0].text).toBe("SPI · 4");
+    expect(Math.hypot(pills[0].cx - pills[1].cx, pills[0].cy - pills[1].cy)).toBeGreaterThan(10);
+    const p0Box: [number, number, number, number] = [
+      pills[0].cx - pills[0].pw * 0.5,
+      pills[0].cy - pills[0].ph * 0.5,
+      pills[0].cx + pills[0].pw * 0.5,
+      pills[0].cy + pills[0].ph * 0.5,
+    ];
+    expect(planLayoutLabels([{ r: "U_BLK", s: "F", b: [40, 40, 60, 60], o: false }], pillCam, 400, 400, [], [p0Box])).toEqual([]);
+
+    const pourPt = planPourLabelPoint([[0, 0], [100, 0], [100, 100], [0, 100]], [[[35, 35], [65, 35], [65, 65], [35, 65]]]);
+    expect(pourPt).not.toBeNull();
+    if (pourPt) {
+      expect(pourPt[0] >= 35 && pourPt[0] <= 65 && pourPt[1] >= 35 && pourPt[1] <= 65).toBe(false);
+    }
   });
 });

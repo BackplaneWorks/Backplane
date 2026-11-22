@@ -10,9 +10,11 @@ import {
   planFitCamera,
   planHitTest,
   planInsertVertex,
+  planLayerDisplayTitle,
   planLayoutLabels,
   planPanCamera,
-  planPolylineMidpoint,
+  planPlaceCorridorPills,
+  planPourLabelPoint,
   planPxToWorld,
   planRailColor,
   planRemoveVertex,
@@ -362,16 +364,18 @@ export class PlanFloorplannerCanvas {
   }
 
   private syncCardHeaderAndLegend(slot: CardSlot, l: PlanLayer): void {
-    slot.titleEl.textContent = l.title || l.layer;
+    slot.titleEl.textContent = planLayerDisplayTitle(l.layer, this.state?.copperLayers, this.state?.layers) || l.title || l.layer;
     const sub = l.subtitle || l.stackup || "";
     slot.subtitleEl.textContent = sub;
     slot.subtitleEl.classList.toggle("bp-hidden", !sub);
 
+    const items = l.items ?? [];
     const st = layerStatusBadge(l);
-    slot.statusEl.className = `bp-plan-status-badge tone-${st.tone}`;
-    slot.statusEl.textContent = t(st.key, st.label);
+    slot.statusEl.className = `bp-plan-card-status tone-${st.tone === "warn" ? "dim" : st.tone}`;
+    slot.statusEl.textContent = items.length > 0 ? t(st.key, st.label) : "";
+    slot.statusEl.classList.toggle("bp-hidden", items.length === 0);
 
-    const hasAwaiting = (l.items ?? []).some((i) => i.state === "proposed" || i.state === "edited");
+    const hasAwaiting = items.some((i) => i.state === "proposed" || i.state === "edited");
     if (slot.okBtn) slot.okBtn.classList.toggle("bp-hidden", !hasAwaiting);
     if (slot.noBtn) slot.noBtn.classList.toggle("bp-hidden", !hasAwaiting);
 
@@ -771,6 +775,29 @@ export class PlanFloorplannerCanvas {
       ctx.lineJoin = "round";
       ctx.strokeStyle = al.bad ? BAD_RED : sel ? "#ffffff" : hexToRgba(col, al.edge);
       ctx.stroke();
+
+      const netLbl = r.net || "";
+      if (netLbl) {
+        let sx0 = Infinity, sy0 = Infinity, sx1 = -Infinity, sy1 = -Infinity;
+        for (const p of outer) {
+          const [px, py] = toPx(p[0], p[1]);
+          if (px < sx0) sx0 = px;
+          if (py < sy0) sy0 = py;
+          if (px > sx1) sx1 = px;
+          if (py > sy1) sy1 = py;
+        }
+        if (Math.abs(sx1 - sx0) >= 38 && Math.abs(sy1 - sy0) >= 18) {
+          const lp = planPourLabelPoint(outer, r.holes ?? []);
+          if (lp) {
+            const [lx, ly] = toPx(lp[0], lp[1]);
+            ctx.fillStyle = hexToRgba(col, sel ? 0.91 : 0.67);
+            ctx.font = "bold 10px ui-monospace, 'SFMono-Regular', Menlo, monospace";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(netLbl, lx, ly);
+          }
+        }
+      }
     }
 
     // 4. Crisp Edge.Cuts outline
@@ -822,18 +849,25 @@ export class PlanFloorplannerCanvas {
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // 6. Collision-free refdes labels
+    // 6. Collision-free refdes labels (avoiding corridor pills)
     const layerBands = s.bands.filter((b) => b.layer === layer);
+    const pills = planPlaceCorridorPills(layerBands, cam, w, h, s.selectedId, hovHit?.id ?? "");
+    const pillBoxes: Array<[number, number, number, number]> = pills.map((p) => [
+      p.cx - p.pw * 0.5 - 1,
+      p.cy - p.ph * 0.5 - 1,
+      p.cx + p.pw * 0.5 + 1,
+      p.cy + p.ph * 0.5 + 1,
+    ]);
     const pinnedRefs: string[] = [];
     for (const b of layerBands) {
       for (const r of b.from ?? []) pinnedRefs.push(r);
       for (const r of b.to ?? []) pinnedRefs.push(r);
     }
-    ctx.fillStyle = REFDES_COLOR;
+    ctx.fillStyle = "rgba(143, 163, 155, 0.72)";
     ctx.font = "9.5px ui-monospace, 'SFMono-Regular', Menlo, monospace";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    for (const lbl of planLayoutLabels(parts, cam, w, h, pinnedRefs)) {
+    for (const lbl of planLayoutLabels(parts, cam, w, h, pinnedRefs, pillBoxes)) {
       ctx.fillText(lbl.text, lbl.cx, lbl.cy);
     }
 
@@ -855,7 +889,7 @@ export class PlanFloorplannerCanvas {
       ctx.stroke();
     }
 
-    // 8, 9, 10. Multi-pass rounded-cap signal bus corridors + diamond vias + net-count badges
+    // 8 & 9. Multi-pass rounded-cap signal bus corridors + diamond vias
     for (const b of layerBands) {
       const pts = b.path ?? [];
       if (pts.length < 2) continue;
@@ -917,28 +951,20 @@ export class PlanFloorplannerCanvas {
         ctx.strokeStyle = sel ? "#ffffff" : col;
         ctx.stroke();
       }
+    }
 
-      // 10. Centered net-count pill
-      const nets = b.nets ?? 0;
-      if (nets > 0) {
-        const mid = planPolylineMidpoint(pts);
-        if (mid) {
-          const [mx, my] = toPx(mid[0], mid[1]);
-          const txt = String(nets);
-          const pw = Math.max(16, txt.length * 6.5 + 8);
-          const ph = 15;
-          ctx.fillStyle = "rgba(17, 25, 23, 0.94)";
-          ctx.fillRect(mx - pw * 0.5, my - ph * 0.5, pw, ph);
-          ctx.lineWidth = 1.2;
-          ctx.strokeStyle = sel ? "#ffffff" : col;
-          ctx.strokeRect(mx - pw * 0.5, my - ph * 0.5, pw, ph);
-          ctx.fillStyle = "#eef5f2";
-          ctx.font = "bold 10px ui-monospace, 'SFMono-Regular', Menlo, monospace";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(txt, mx, my + 0.5);
-        }
-      }
+    // 10. Collision-avoiding corridor pills
+    for (const pill of pills) {
+      ctx.fillStyle = "rgba(17, 25, 23, 0.94)";
+      ctx.fillRect(pill.cx - pill.pw * 0.5, pill.cy - pill.ph * 0.5, pill.pw, pill.ph);
+      ctx.lineWidth = 1.2;
+      ctx.strokeStyle = pill.sel ? "#ffffff" : pill.col;
+      ctx.strokeRect(pill.cx - pill.pw * 0.5, pill.cy - pill.ph * 0.5, pill.pw, pill.ph);
+      ctx.fillStyle = "#eef5f2";
+      ctx.font = "bold 10px ui-monospace, 'SFMono-Regular', Menlo, monospace";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(pill.text, pill.cx, pill.cy + 0.5);
     }
 
     // 11. Selected item vertex & midpoint handles
