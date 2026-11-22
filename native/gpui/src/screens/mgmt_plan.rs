@@ -482,7 +482,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
             if !move_layers.is_empty() {
                 steer_row = steer_row
                     .child(div().text_color(c("dim")).child(trs("Layer")))
-                    .child(chip(cx, light, "mgmt:plan:ins:mvtoggle", format!("{cur_layer_title} {}", if move_layer_open { "▴" } else { "▾" }), move_layer_open, |a, cx| {
+                    .child(chip(cx, light, "mgmt:plan:ins:mvtoggle", format!("{cur_layer_title} {}", if move_layer_open { "▴" } else { "▾" }), move_layer_open, |a, cx| { // i18n-ok: canonical layer title and chevron
                         a.screens.mgmt.plan_ui.move_layer_open = !a.screens.mgmt.plan_ui.move_layer_open;
                         cx.notify();
                     }));
