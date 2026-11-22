@@ -157,9 +157,10 @@ pub async fn checkpoint_capture(cwd: &str, thread: &str, n: u64) -> Result<Strin
     let prev = run(cwd, &["rev-parse", "--verify", "-q", &checkpoint_prev(thread, n)]).await;
     let parents: Vec<String> = if prev.code == 0 { vec!["-p".into(), prev.out.trim().into()] } else { vec![] };
     let msg = format!("backplane checkpoint {thread} turn {n}");
-    let mut a: Vec<&str> = vec!["GIT_AUTHOR_NAME=Backplane", "GIT_AUTHOR_EMAIL=backplane@localhost", "GIT_COMMITTER_NAME=Backplane", "GIT_COMMITTER_EMAIL=backplane@localhost", "git", "commit-tree", "--no-gpg-sign", "-m", &msg, &tree];
+    let mut a: Vec<&str> = vec!["commit-tree", "--no-gpg-sign", "-m", &msg, &tree];
     a.extend(parents.iter().map(String::as_str));
-    let sha = seq(proc("env", &a, cwd, &[]).await, false)?;
+    let env = [("GIT_AUTHOR_NAME", "Backplane"), ("GIT_AUTHOR_EMAIL", "backplane@localhost"), ("GIT_COMMITTER_NAME", "Backplane"), ("GIT_COMMITTER_EMAIL", "backplane@localhost")];
+    let sha = seq(proc("git", &a, cwd, &env).await, false)?;
     seq(run(cwd, &["update-ref", &checkpoint_ref(thread, n), &sha]).await, false)?;
     Ok(sha)
 }
@@ -331,6 +332,7 @@ mod tests {
         let d = tmp("cp"); g(&d, &["init", "-q"]).await; std::fs::write(format!("{d}/a.txt"), "one\n").unwrap(); g(&d, &["add", "."]).await; g(&d, &["commit", "-qm", "i"]).await;
         assert!(is_repo(&d).await); assert_eq!(checkpoint_count(&d, "th").await, 0);
         let c0 = checkpoint_capture(&d, "th", 0).await.unwrap(); assert_eq!(c0.len(), 40);
+        assert_eq!(g(&d, &["show", "-s", "--format=%an <%ae> / %cn <%ce>", &c0]).await.out.trim(), "Backplane <backplane@localhost> / Backplane <backplane@localhost>");
         std::fs::write(format!("{d}/a.txt"), "two\n").unwrap(); std::fs::write(format!("{d}/new.txt"), "n\n").unwrap();
         let df = diff(&d, "th", "0", "-1").await; assert!(df.contains("-one") && df.contains("+two") && df.contains("new.txt"), "{df}");
         checkpoint_capture(&d, "th", 1).await.unwrap(); assert_eq!(checkpoint_count(&d, "th").await, 2);
@@ -350,8 +352,8 @@ mod tests {
         let df = diff(&d, "th", "0", "-1").await; assert!(df.contains("Too big to show here"), "{}", &df[..df.len().min(300)]); assert!(df.len() < 1000);
     }
     #[tokio::test] async fn stacked_actions_against_a_local_bare_remote() {
-        for (k, v) in [("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")] { std::env::set_var(k, v) }
         let d = tmp("act"); let bare = tmp("bare"); g(&bare, &["init", "-q", "--bare"]).await; g(&d, &["init", "-q", "-b", "work"]).await;
+        g(&d, &["config", "user.name", "t"]).await; g(&d, &["config", "user.email", "t@t"]).await;
         g(&d, &["remote", "add", "origin", &bare]).await; std::fs::write(format!("{d}/a.txt"), "1\n").unwrap();
         let r = act(&d, "commit_push", "first", "", "").await; let l: Vec<&str> = r.lines().collect();
         assert!(l[0].starts_with("commit: ") && l[0].ends_with(" first"), "{r}"); assert_eq!(l[1], "push: work -> origin/work", "{r}");
@@ -367,7 +369,22 @@ mod tests {
         // the pull request goes through gh: a stand-in on PATH answers
         let fake = tmp("fakegh"); std::fs::write(format!("{fake}/gh"), "#!/bin/sh\necho creating\necho https://example.invalid/pr/7\n").unwrap();
         use crate::plat::fs::PermissionsExt; std::fs::set_permissions(format!("{fake}/gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        g(&d, &["checkout", "-q", "work"]).await; std::env::set_var("PATH", format!("{fake}:{}", std::env::var("PATH").unwrap()));
+        g(&d, &["checkout", "-q", "work"]).await;
+        let old_path = std::env::var_os("PATH");
+        let mut paths = vec![fake.path().to_path_buf()];
+        if let Some(ref old) = old_path { paths.extend(std::env::split_paths(old)); }
+        let path = std::env::join_paths(paths).unwrap();
+        let o = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["files::git::tests::stacked_actions_pr_probe", "--exact", "--nocapture", "--test-threads=1"])
+            .env("BP_STACKED_PR_DIR", d.as_str())
+            .env("PATH", &path)
+            .env_remove("BACKPLANE_COPY")
+            .output()
+            .unwrap();
+        assert!(o.status.success() && String::from_utf8_lossy(&o.stdout).contains("stacked_actions_pr_probe ... ok"), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+    }
+    #[tokio::test] async fn stacked_actions_pr_probe() {
+        let Ok(d) = std::env::var("BP_STACKED_PR_DIR") else { return };
         assert_eq!(act(&d, "create_pr", "", "", "").await, "pr: https://example.invalid/pr/7");
     }
     #[tokio::test] async fn init_makes_a_repository_only_where_there_is_none() {
