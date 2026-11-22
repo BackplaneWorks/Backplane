@@ -72,8 +72,7 @@ extension DataClient {
         var serial = 0
         if !kind.isEmpty { let b = plots.begin(slot); serial = b.serial; if !b.kept.isEmpty { p["kept"] = b.kept } }
         if has("keptChunks") && (kind == "board" || kind == "schematic" || kind == "gerbers" || kind == "split") {
-            let kc = plots.keptChunkHashes()
-            if !kc.isEmpty { p["keptChunks"] = kc }
+            p["keptChunks"] = plots.keptChunkHashes()
         }
         do {
             let r: DWatch = try await call("viewer.watch", p)

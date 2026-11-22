@@ -1024,7 +1024,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         const kept = solid3d.keptToken();
         if (kept) params.kept = kept;
       }
-      if ((page === "board" || page === "schematic" || page === "gerbers") && !force && api.hub.hasFeature("keptChunks") && chunkCache.size > 0) {
+      if ((page === "board" || page === "schematic" || page === "gerbers") && !force && api.hub.hasFeature("keptChunks")) {
         params.keptChunks = Array.from(chunkCache.keys());
       }
     }

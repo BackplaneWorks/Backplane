@@ -512,9 +512,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
                                 dock_watch = None;
                                 if request["p"]["force"] != true && request["p"].get("keptChunks").is_none() {
                                     let hashes = crate::screens::plot::kept_chunk_hashes();
-                                    if !hashes.is_empty() {
-                                        if let Some(obj) = request["p"].as_object_mut() { obj.insert("keptChunks".into(), json!(hashes)); }
-                                    }
+                                    if let Some(obj) = request["p"].as_object_mut() { obj.insert("keptChunks".into(), json!(hashes)); }
                                 }
                             }
                             v.outgoing.insert(rpc_id,method=="view.action"&&is_post(&m));v.rpc_names.insert(rpc_id,m.clone());

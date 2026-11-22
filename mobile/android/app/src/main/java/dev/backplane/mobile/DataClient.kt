@@ -1190,10 +1190,11 @@ object DataClient {
         val slot = if (kind.startsWith("3d")) listOf(hubName, tid, kind, path).joinToString("|") else ""
         val begun = if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.begin(slot) } else null
         val kept = begun?.kept.orEmpty(); val serial = begun?.serial ?: 0
-        val keptChunks = if (has("keptChunks") && (kind == "board" || kind == "schematic" || kind == "gerbers" || kind == "split")) {
+        val sendKeptChunks = has("keptChunks") && (kind == "board" || kind == "schematic" || kind == "gerbers" || kind == "split")
+        val keptChunks = if (sendKeptChunks) {
             withContext(Dispatchers.Main) { plots.keptChunkHashes() }
         } else emptyList()
-        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept); if (keptChunks.isNotEmpty()) put("keptChunks", JSONArray(keptChunks)); if (board.isNotEmpty()) put("board", board); if (tree.isNotEmpty()) put("tree", tree) }) }
+        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept); if (sendKeptChunks) put("keptChunks", JSONArray(keptChunks)); if (board.isNotEmpty()) put("board", board); if (tree.isNotEmpty()) put("tree", tree) }) }
             catch (e: Exception) { if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.failed(serial) }; throw e }
         if (kind.isEmpty()) return
         val keys = r.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
