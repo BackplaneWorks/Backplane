@@ -282,6 +282,7 @@ mod tests {
     // Add project: open, type, go in, add; the add sends project.add with the path and arms the want for the first thread; close clears
     // Clone from git: the tabs switch the field; Clone names the job and sends clone.start with the thread choice and /project's first message
     #[test] fn the_clone_actions_switch_mode_start_the_job_and_go_back() {
+        let _parent = crate::commands::clone::test_parent(true);
         let run = |action: &str, value: &str, session: &Value| act(&Req { hub: "h", session, sel: "", action, value, title_of: &|_| String::new() }).unwrap();
         let sess = json!({"rid": 3, "drafts": {"@proj.open": "1"}, "info": {}});
         let d = run("proj-mode", "clone", &sess).session_patch["drafts"].clone(); assert_eq!((d["@proj.mode"].as_str(), d["@proj.text"].as_str()), (Some("clone"), Some("")));

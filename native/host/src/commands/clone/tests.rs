@@ -55,7 +55,7 @@ fn parent_turn() -> std::sync::MutexGuard<'static, ()> { test_parent(false) }
     let r = parse("o/Board").unwrap();
     assert_eq!(default_parent(h), h, "no Documents: the home");
     std::fs::create_dir_all(home.join("Documents/Board/src")).unwrap();
-    assert_eq!(default_parent(h), format!("{h}/Documents"));
+    assert_eq!(PathBuf::from(default_parent(h)), home.join("Documents"));
     assert_eq!(default_dest(&format!("{h}/Documents"), &r, h), home.join("Documents/Board-2"), "a folder of that name holding something else: the next name");
     assert!(matches!(dest_state(&home.join("Documents/Board"), &r.origin, h), Dest::Busy(w) if w == "~/Documents/Board already exists and isn't empty. Pick another folder or name."));
     std::fs::create_dir_all(home.join("empty")).unwrap();
@@ -142,7 +142,10 @@ async fn a_bare_repository_is_cloned_added_with_its_thread_and_its_folder_then_r
     assert!(dest.join("boards/kit/kit.kicad_pro").is_file() && dest.join(".git").is_dir(), "the files are there, a parent made for it");
     assert!(j["notes"].as_array().unwrap().iter().any(|n| n.as_str().unwrap().contains("KiCad project: boards/kit/kit.kicad_pro")), "{j}");
     let (pid, th) = (j["project"].as_str().unwrap().to_string(), j["thread"].as_str().unwrap().to_string());
-    { let g = h.model().await; let p = g.projects.get(&pid).expect("the project is added"); assert_eq!(p.root.trim_end_matches('/'), crate::plat::fs::canonicalize(dest.to_str().unwrap()).unwrap().to_string_lossy().trim_end_matches('/'));
+    { let g = h.model().await; let p = g.projects.get(&pid).expect("the project is added");
+      let cdest = crate::plat::fs::canonicalize(dest.to_str().unwrap()).unwrap().to_string_lossy().into_owned();
+      let croot = crate::plat::fs::canonicalize(&p.root).map(|x| x.to_string_lossy().into_owned()).unwrap_or_else(|_| p.root.clone());
+      assert!(path_eq(&p.root, &cdest) || path_eq(&croot, &cdest), "root mismatch: {} vs {cdest}", p.root);
       assert_eq!(g.threads.get(&th).map(|t| t.project.clone()), Some(pid.clone()), "its first thread"); }
     // the same folder again: refused before anything runs, in words
     let e = call(&h, "clone.start", &json!({"repo": "o/other", "dest": dest.to_string_lossy()})).await.unwrap_err();
@@ -195,4 +198,66 @@ async fn a_refusal_for_access_is_said_as_one() {
     // Try again starts it anew, as it was asked
     let again = call(&h, "clone.retry", &json!({"id": j["id"]})).await.unwrap(); assert_ne!(again["id"], j["id"]); assert_eq!(again["dest"], j["dest"]);
     until_over(again["id"].as_str().unwrap()).await;
+}
+
+#[test] fn windows_paths_normalize_file_names_tilde_and_root_matching() {
+    // name_of_in: backslash handling for file:// on Windows while preserving Unix rejections
+    assert_eq!(name_of_in(r"C:\Users\Alex\kit.git", true).as_deref(), Some("kit"));
+    assert_eq!(name_of_in(r"C:\Users\Alex\kit.git\", true).as_deref(), Some("kit"));
+    assert_eq!(name_of_in(r"C:\Users\RUNNER~1\AppData\Local\Temp\bp-clone\kit.git", true).as_deref(), Some("kit"));
+    assert_eq!(name_of_in(r"\\server\share\board.git", true).as_deref(), Some("board"));
+    assert_eq!(name_of_in("C:/Users/Alex/kit.git/", true).as_deref(), Some("kit"));
+    assert_eq!(name_of_in("/C:/Users/Alex/kit.git", true).as_deref(), Some("kit"));
+    assert_eq!(name_of_in("//server/share/repo.git", true).as_deref(), Some("repo"));
+    assert_eq!(name_of_in(r"C:\", true), None);
+    assert_eq!(name_of_in(r"C:\Users\Alex\..", true), None);
+    assert_eq!(name_of_in(r"C:\Users\Alex\.git", true), None);
+    assert_eq!(name_of_in(r"/srv/git/a\b.git", false), None);
+    assert_eq!(parse(r"https://github.com/o/a\b"), None);
+    #[cfg(windows)]
+    assert_eq!(parse(r"file://C:\Users\Alex\kit.git").unwrap().name, "kit");
+
+    // tilde_in: Windows separator & ASCII case normalization vs Unix literal backslashes & case sensitivity
+    assert_eq!(tilde_in(r"C:\Users\Alex\Documents\Board", r"C:\Users\Alex", true), "~/Documents/Board");
+    assert_eq!(tilde_in(r"C:\Users\Alex/Documents\Board", r"C:\Users\Alex\", true), "~/Documents/Board");
+    assert_eq!(tilde_in(r"c:\users\alex\Documents\Board", r"C:\Users\Alex", true), "~/Documents/Board");
+    assert_eq!(tilde_in(r"C:\Users\Alex", r"c:\users\alex\", true), "~");
+    assert_eq!(tilde_in(r"C:\", r"C:\", true), "~");
+    assert_eq!(tilde_in(r"C:\Board", r"C:\", true), "~/Board");
+    assert_eq!(tilde_in("C:", r"C:\", true), "C:");
+    assert_eq!(tilde_in(r"C:\Users\Alex2\Board", r"C:\Users\Alex", true), "C:/Users/Alex2/Board");
+    assert_eq!(tilde_in(r"D:\work\Board", r"C:\Users\Alex", true), "D:/work/Board");
+    assert_eq!(tilde_in(r"D:\work\Board", "", true), "D:/work/Board");
+    assert_eq!(tilde_in("C:/aéééééééé", "C:/Users/Alex", true), "C:/aéééééééé");
+    assert_eq!(tilde_in(r"/home/alex/a\b", "/home/alex", false), r"~/a\b");
+    assert_eq!(tilde_in("/home/Alex/Board", "/home/alex", false), "/home/Alex/Board");
+
+    // resolve: `~\` accepted on Windows, rejected as non-absolute on Unix
+    #[cfg(unix)]
+    assert!(resolve(r"~\x", "/home/alex").is_err());
+    #[cfg(windows)]
+    assert_eq!(resolve(r"~\x", r"C:\Users\Alex").unwrap(), PathBuf::from(r"C:\Users\Alex").join("x"));
+
+    // path_eq_in: separator, dot-segment, trailing-slash, UNC, and Windows case normalization
+    assert!(path_eq_in("C:/Users/Alex/kit", r"c:\users\alex\kit\", true));
+    assert!(path_eq_in(r"C:\work\.\kit", r"C:\work\kit", true));
+    assert!(path_eq_in(r"\\server\share\.\kit", "//server/share/kit/", true));
+    assert!(path_eq_in("C:/", r"C:\", true));
+    assert!(!path_eq_in(r"C:\", "C:", true));
+    assert!(!path_eq_in("C:/Users/Alex/kit", "C:/Users/Alex/other", true));
+    assert!(!path_eq_in("/", "", true));
+    assert!(!path_eq_in("/", "", false));
+    assert!(!path_eq_in(r"/home/alex/a\b", "/home/alex/a/b", false));
+    assert!(!path_eq_in("/home/Alex/kit", "/home/alex/kit", false));
+    assert!(path_eq_in("/home/alex/kit/", "/home/alex/kit", false));
+
+    // canon_dest: canonicalizes deepest existing ancestor even when destination doesn't exist yet
+    #[cfg(unix)] {
+        let base = crate::plat::tmp::dir("clone-canon");
+        let real = base.join("real");
+        std::fs::create_dir_all(&real).unwrap();
+        let alias = base.join("alias");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        assert!(path_eq(&canon_dest(&alias.join("sub/kit")), &canon_dest(&real.join("sub/kit"))));
+    }
 }
