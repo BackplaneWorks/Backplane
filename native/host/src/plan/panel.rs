@@ -126,8 +126,9 @@ pub fn data_with_board(plan: &Value, asks: &[Value], live: bool, pcb: Option<&st
     } else {
         json!(ls.iter().map(|l| json!({"layer": l["layer"], "index": l["index"], "role": l["role"], "title": l["title"], "subtitle": l["subtitle"]})).collect::<Vec<_>>())
     };
+    let rev = plan["revision"].as_u64().map_or(Value::Null, |n| json!(n));
     json!({"draw": draw, "board": board, "copper_layers": copper_layers, "notes": plan["notes"], "constraints": plan["constraints"],
-        "badge": {"n": awaiting + blocked, "tone": if blocked > 0 { "bad" } else if awaiting > 0 { "warn" } else { "" }}, "revision": plan["revision"], "live": live,
+        "badge": {"n": awaiting + blocked, "tone": if blocked > 0 { "bad" } else if awaiting > 0 { "warn" } else { "" }}, "revision": rev, "live": live,
         "total": total, "awaiting": awaiting, "approved": approved, "blocked": blocked, "routing": routing, "done": done, "routed": routed, "verified": verified, "rejected": rejected,
         "status": status, "stackup_summary": stackup_summary, "impedances": impedances, "asks": asks, "layers": ls, "empty": rows.is_empty()})
 }
@@ -285,6 +286,27 @@ pub fn fit_info_budget(d: &mut Value) {
                 obj.insert("keys_note".into(), json!(""));
             }
         }
+    }
+    if d.to_string().len() > BUDGET {
+        let badge_n = d["badge"]["n"].as_u64().unwrap_or(0);
+        let badge_tone = d["badge"]["tone"].as_str().filter(|s| s.len() <= 16).unwrap_or("");
+        let rev = d["revision"].as_u64().map_or(Value::Null, |n| json!(n));
+        let live = d["live"] == true;
+        let empty = d["empty"] == true;
+        let on = d["on"] == true;
+        let status = d["status"].as_str().filter(|s| s.len() <= 32).unwrap_or("empty");
+        *d = json!({
+            "badge": {"n": badge_n, "tone": badge_tone},
+            "on": on,
+            "empty": empty,
+            "live": live,
+            "revision": rev,
+            "status": status,
+            "board_trimmed": true,
+            "board": {"bbox": [0, 0, 100, 70], "outline": [], "parts": []},
+            "draw": {"bands": [], "regions": []},
+            "layers": []
+        });
     }
 }
 
@@ -492,5 +514,10 @@ mod tests {
         fit_info_budget(&mut huge_d);
         assert!(huge_d.to_string().len() <= 58 * 1024);
         assert_eq!(huge_d["board_trimmed"], true);
+
+        let mut crazy_rev = json!({"revision": "x".repeat(100_000), "badge": {"n": 1, "tone": "warn"}, "layers": []});
+        fit_info_budget(&mut crazy_rev);
+        assert!(crazy_rev.to_string().len() <= 58 * 1024);
+        assert_eq!(crazy_rev["board_trimmed"], true);
     }
 }

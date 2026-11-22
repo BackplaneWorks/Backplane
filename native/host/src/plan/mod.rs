@@ -614,29 +614,57 @@ fn update_saved_plan_sync(pcb: &str, base: Option<u64>, ops: &[NormOp]) -> Resul
 }
 
 fn merge_preserved_holes_into_ops(plan: &Value, ops: &[NormOp]) -> Vec<Value> {
-    let planes = plan["planes"].as_array();
-    ops.iter().map(|nop| {
-        if !nop.preserve_holes {
-            return nop.wire.clone();
+    let mut plane_rings: HashMap<String, Vec<Value>> = HashMap::new();
+    for p in plan["planes"].as_array().into_iter().flatten() {
+        if let Some(id) = p["id"].as_str() {
+            if let Ok(Value::Array(rs)) = norm_outline(&p["outline"]) {
+                plane_rings.insert(id.to_string(), rs);
+            }
         }
-        let mut wire = nop.wire.clone();
-        let id = wire["id"].as_str().unwrap_or("");
-        let new_len = wire["fields"]["outline"].as_array().map_or(0, Vec::len);
-        if new_len == 1 {
-            if let Some(old_raw) = planes.and_then(|ps| ps.iter().find(|p| p["id"] == id)).and_then(|p| p.get("outline")) {
-                if let Ok(Value::Array(old_rings)) = norm_outline(old_raw) {
-                    if old_rings.len() > 1 {
-                        let mut merged = Vec::with_capacity(old_rings.len());
-                        merged.push(wire["fields"]["outline"][0].clone());
-                        merged.extend(old_rings[1..].iter().cloned());
-                        if let Some(flds) = wire["fields"].as_object_mut() {
-                            flds.insert("outline".into(), Value::Array(merged));
+    }
+    ops.iter().map(|nop| {
+        let kind = nop.wire["op"].as_str().unwrap_or("");
+        match kind {
+            "add" if nop.wire["kind"] == "plane" => {
+                if let Some(id) = nop.wire["item"]["id"].as_str() {
+                    if let Ok(Value::Array(rs)) = norm_outline(&nop.wire["item"]["outline"]) {
+                        plane_rings.insert(id.to_string(), rs);
+                    }
+                }
+                nop.wire.clone()
+            }
+            "delete" => {
+                if let Some(id) = nop.wire["id"].as_str() {
+                    plane_rings.remove(id);
+                }
+                nop.wire.clone()
+            }
+            "set" => {
+                let id = nop.wire["id"].as_str().unwrap_or("");
+                if nop.wire["fields"].get("outline").is_none() {
+                    return nop.wire.clone();
+                }
+                let mut wire = nop.wire.clone();
+                let new_rings = wire["fields"]["outline"].as_array().cloned().unwrap_or_default();
+                if nop.preserve_holes && new_rings.len() == 1 {
+                    if let Some(old_rings) = plane_rings.get(id) {
+                        if old_rings.len() > 1 {
+                            let mut merged = Vec::with_capacity(old_rings.len());
+                            merged.push(new_rings[0].clone());
+                            merged.extend(old_rings[1..].iter().cloned());
+                            plane_rings.insert(id.to_string(), merged.clone());
+                            if let Some(flds) = wire["fields"].as_object_mut() {
+                                flds.insert("outline".into(), Value::Array(merged));
+                            }
+                            return wire;
                         }
                     }
                 }
+                plane_rings.insert(id.to_string(), new_rings);
+                wire
             }
+            _ => nop.wire.clone(),
         }
-        wire
     }).collect()
 }
 
@@ -996,5 +1024,13 @@ mod tests {
         let clear = normalize_person_ops_checked(&[json!({"op": "set", "id": "p1", "outline": [[[0.0, 0.0], [12.0, 0.0], [12.0, 10.0]]]})]).unwrap();
         let cleared = merge_preserved_holes_into_ops(&live_plan, &clear);
         assert_eq!(cleared[0]["fields"]["outline"].as_array().unwrap().len(), 1);
+
+        let batch = normalize_person_ops_checked(&[
+            json!({"op": "set", "id": "p1", "outline": [[[0.0, 0.0], [12.0, 0.0], [12.0, 10.0]]]}),
+            json!({"op": "set", "id": "p1", "outline": [[0.0, 0.0], [14.0, 0.0], [14.0, 10.0]]}),
+        ]).unwrap();
+        let batch_out = merge_preserved_holes_into_ops(&live_plan, &batch);
+        assert_eq!(batch_out[0]["fields"]["outline"].as_array().unwrap().len(), 1);
+        assert_eq!(batch_out[1]["fields"]["outline"].as_array().unwrap().len(), 1, "subsequent flat move must keep holes cleared");
     }
 }

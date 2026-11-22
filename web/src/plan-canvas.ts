@@ -45,8 +45,6 @@ export interface PlanCanvasStateSnapshot {
 export interface PlanCanvasCallbacks {
   onSelect: (id: string) => void;
   onFocusItem: (id: string) => void;
-  onOptimisticPatch: (id: string, fields: Record<string, unknown>) => void;
-  onRevertOptimistic?: (id: string) => void;
   onDragEnd?: () => void;
   onCommitFields: (id: string, fields: Record<string, unknown>) => void;
   onApproveLayer: (layer: string, approve: boolean) => void;
@@ -450,7 +448,6 @@ export class PlanFloorplannerCanvas {
         const insertedIdx = hit.isPlane && hit.segIdx + 1 >= curPts.length ? newPts.length - 1 : Math.min(hit.segIdx + 1, newPts.length - 1);
         this.selectedVertex = { id: hit.id, idx: insertedIdx };
         this.patchLocalItem(hit.id, hit.isPlane, newPts);
-        this.cb.onOptimisticPatch(hit.id, { [hit.isPlane ? "outline" : "path"]: newPts });
         this.drag = { layer, kind: "vertex", id: hit.id, isPlane: hit.isPlane, idx: insertedIdx, pts: newPts, origPts, moved: true };
         this.scheduleDraw();
       } else {
@@ -487,7 +484,6 @@ export class PlanFloorplannerCanvas {
         this.drag.pts[this.drag.idx] = rounded;
         const copy = this.drag.pts.map((p) => [p[0], p[1]] as [number, number]);
         this.patchLocalItem(this.drag.id, this.drag.isPlane, copy);
-        this.cb.onOptimisticPatch(this.drag.id, { [this.drag.isPlane ? "outline" : "path"]: copy });
         this.scheduleDraw();
         return;
       }
@@ -518,13 +514,11 @@ export class PlanFloorplannerCanvas {
       if (!d || d.layer !== layer) return;
       this.drag = null;
       this.downPos = null;
-      if (d.kind === "vertex") {
+      if (d.kind === "vertex" && d.moved) {
         const copy = d.origPts.map((p) => [p[0], p[1]] as [number, number]);
         this.patchLocalItem(d.id, d.isPlane, copy);
-        this.cb.onRevertOptimistic?.(d.id);
-      } else {
-        this.cb.onDragEnd?.();
       }
+      this.cb.onDragEnd?.();
       this.scheduleDraw();
     };
     canvas.addEventListener("pointercancel", cancelActiveDrag);

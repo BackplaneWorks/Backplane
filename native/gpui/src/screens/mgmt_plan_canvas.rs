@@ -741,24 +741,28 @@ pub fn accept_hydration_reply(req_tag: Option<u64>, reply_tag: u64, cur_pro: &st
     Some((rev, panel["board"].clone(), panel["draw"].clone()))
 }
 
+pub fn record_hydrated_panel(ui: &mut State, pro: &str, rev: u64, board: Value, draw: Value) -> bool {
+    if !ui.hydrated_req_pro.is_empty() && ui.hydrated_req_pro != pro {
+        return false;
+    }
+    if ui.hydrated_rev.map_or(false, |prev| rev < prev) {
+        return false;
+    }
+    ui.hydrated_rev = Some(rev);
+    ui.hydrated_key = format!("{pro}:{rev}");
+    ui.hydrated_board = Some(board);
+    ui.hydrated_draw = Some(draw);
+    true
+}
+
 pub fn board_answered(app: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) {
     let pro = app.screens.mgmt.project.clone();
     let Some((rev, board, draw)) = accept_hydration_reply(app.screens.mgmt.plan_ui.hydrated_req_tag, tag, &pro, reply) else {
         return;
     };
-    let ui = &mut app.screens.mgmt.plan_ui;
-    if !ui.hydrated_req_pro.is_empty() && ui.hydrated_req_pro != pro {
-        return;
+    if record_hydrated_panel(&mut app.screens.mgmt.plan_ui, &pro, rev, board, draw) {
+        cx.notify();
     }
-    if ui.hydrated_rev.map_or(false, |prev| rev < prev) {
-        return;
-    }
-    ui.hydrated_rev = Some(rev);
-    ui.hydrated_key = format!("{pro}:{rev}");
-    ui.hydrated_req_key = ui.hydrated_key.clone();
-    ui.hydrated_board = Some(board);
-    ui.hydrated_draw = Some(draw);
-    cx.notify();
 }
 
 pub fn sync_revision_and_hydrate(app: &mut Backplane, d: &Value) {
@@ -2053,6 +2057,13 @@ mod tests {
         assert!(accept_hydration_reply(Some(BOARD_TAG_BASE + 1), BOARD_TAG_BASE, "/p/a.kicad_pro", &wrapped).is_none(), "stale tag rejected");
         assert!(accept_hydration_reply(Some(BOARD_TAG_BASE), BOARD_TAG_BASE, "/p/b.kicad_pro", &wrapped).is_none(), "wrong project rejected");
         assert_eq!(accept_hydration_reply(Some(BOARD_TAG_BASE), BOARD_TAG_BASE, "/p/a.kicad_pro", &wrapped).unwrap().0, 4);
+
+        let mut st = State::default();
+        st.hydrated_req_pro = "/p/a.kicad_pro".into();
+        st.hydrated_req_key = "/p/a.kicad_pro:10".into();
+        assert!(record_hydrated_panel(&mut st, "/p/a.kicad_pro", 9, json!({}), json!({})));
+        assert_eq!(st.hydrated_req_key, "/p/a.kicad_pro:10", "older reply must not downgrade requested key");
+        assert!(!record_hydrated_panel(&mut st, "/p/a.kicad_pro", 8, json!({}), json!({})));
         let direct = json!({"panel": {"revision": 9}});
         assert_eq!(unwrap_board_panel(&direct).unwrap()["revision"], 9);
 

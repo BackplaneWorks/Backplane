@@ -775,8 +775,24 @@ pub fn guides_for_plan(board: &CachedBoard, plan: &Value) -> HashMap<String, Vec
             let mut t_sorted: Vec<&str> = to_refs.iter().copied().collect();
             f_sorted.sort_unstable();
             t_sorted.sort_unstable();
-            let f_pts: Vec<[f64; 2]> = f_sorted.into_iter().filter_map(|r| part_center.get(r).copied()).take(MAX_CORRIDOR_GUIDES).collect();
-            let t_pts: Vec<[f64; 2]> = t_sorted.into_iter().filter_map(|r| part_center.get(r).copied()).take(MAX_CORRIDOR_GUIDES).collect();
+            let mut f_pts: Vec<[f64; 2]> = Vec::new();
+            for r in f_sorted {
+                if let Some(pt) = part_center.get(r).copied() {
+                    if !f_pts.iter().any(|p| (p[0] - pt[0]).hypot(p[1] - pt[1]) <= 0.5) {
+                        f_pts.push(pt);
+                        if f_pts.len() >= MAX_CORRIDOR_GUIDES { break; }
+                    }
+                }
+            }
+            let mut t_pts: Vec<[f64; 2]> = Vec::new();
+            for r in t_sorted {
+                if let Some(pt) = part_center.get(r).copied() {
+                    if !t_pts.iter().any(|p| (p[0] - pt[0]).hypot(p[1] - pt[1]) <= 0.5) {
+                        t_pts.push(pt);
+                        if t_pts.len() >= MAX_CORRIDOR_GUIDES { break; }
+                    }
+                }
+            }
             let mut checks = 0usize;
             'fallback: for a in &f_pts {
                 for b in &t_pts {
@@ -945,5 +961,18 @@ mod tests {
 
         let p_missing = json!({"corridors": [{"id": "cmiss", "from": (0..50).map(|i| format!("M{i}")).collect::<Vec<_>>(), "to": (0..50).map(|i| format!("N{i}")).collect::<Vec<_>>()}]});
         assert!(guides_for_plan(&dummy, &p_missing).is_empty());
+
+        let mut colo_parts: Vec<PartBox> = (0..25).map(|i| PartBox { r: format!("C{i:02}"), s: "F".into(), b: [20.0, 20.0, 22.0, 22.0], o: false }).collect();
+        colo_parts.push(PartBox { r: "Z_DISTINCT".into(), s: "F".into(), b: [50.0, 50.0, 52.0, 52.0], o: false });
+        colo_parts.push(PartBox { r: "C_TO".into(), s: "F".into(), b: [20.0, 20.0, 22.0, 22.0], o: false });
+        let colo_board = CachedBoard {
+            geom: BoardGeom { bbox: [0.0, 0.0, 100.0, 100.0], outline: vec![], parts: colo_parts, copper_layers: vec![] },
+            pad_nets: HashMap::new(),
+        };
+        let mut from_list: Vec<String> = (0..25).map(|i| format!("C{i:02}")).collect();
+        from_list.push("Z_DISTINCT".into());
+        let p_colo = json!({"corridors": [{"id": "cc", "from": from_list, "to": ["C_TO"]}]});
+        let g_colo = guides_for_plan(&colo_board, &p_colo);
+        assert_eq!(g_colo["cc"], vec![[51.0, 51.0, 21.0, 21.0]]);
     }
 }

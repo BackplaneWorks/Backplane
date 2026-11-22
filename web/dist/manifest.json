@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 201187,
+  "totalAssetGzipBytes": 201097,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -279,12 +279,12 @@
     "web/src/logout.ts": "9d29482c4671deee1e868ee477b123e067a4c22f7d8ac30b4c2420cf71b8ebe2",
     "web/src/md.ts": "c606d1ec598b3ce132c7cc9366383dacafc3fcb71c0fccd97b41ec0e19a96c78",
     "web/src/mgmt-model.ts": "3bf50952af7687afaec3c43e84890176aedf5400a45688fe8ee2e5161040f76b",
-    "web/src/mgmt.ts": "d4e9fb07c8bfebd4f3308b31f8ff3b3dc31cc2470320f7202fe3831c1f437bed",
+    "web/src/mgmt.ts": "f186e4d2127ad671d6b9135fd4646d1eb788a0932bea0520e3250954b9a7faa2",
     "web/src/pair.html": "cf7b94703316f910718356e9ff8e99e088b68211db39b5200213b623c9275f6e",
     "web/src/pair.ts": "af07d19224043f8176f8cd2298d00b6806248eee453fd2f287c183e71a08179b",
     "web/src/palette-model.ts": "ae359cc71e98e84774428355a5048fd9ba0e1da2d45fa18290b4313c50c50ee4",
     "web/src/palette.ts": "bcd5c4585f57cc80a9cf29bf1b9da6ebbd33a3ab68f8f2a918c37c58060c8e48",
-    "web/src/plan-canvas.ts": "c4685c70d76fa7b651a9b008017984139a3909afb7370477151f29b0421375d3",
+    "web/src/plan-canvas.ts": "037d2bbc5d931fce1df1a3f2044e7605b8498590437b24a22ba9d14de7761159",
     "web/src/qr.ts": "04b634557884b8f512a7b03ad9638c1c15a299ffaea0103d1bdeec6338d9b9d3",
     "web/src/rail.ts": "5fb391094992578cb6f54d35d53559951a584c43fcfc2ee6f4f2cc3897acfe46",
     "web/src/settings.ts": "7b4d8be26fabc6c2a0b8af94a64572a0e3c1e589bf079bfa58c8985a8acd984a",
@@ -317,9 +317,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 335684,
-      "gzipBytes": 94601,
-      "sha256": "83e06d714bcfdd30fcf9ae72446381181cd287b22be1a93ee87a0e2c9b5b48b5"
+      "bytes": 335279,
+      "gzipBytes": 94511,
+      "sha256": "977cc1c088bf2c40cac229185c2932b7161fdbed025aaad7ebbfb30d94abcb0a"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,

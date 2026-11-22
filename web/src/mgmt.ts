@@ -1832,17 +1832,6 @@ export class MgmtStrip {
           onFocusItem: (id) => {
             sendPlan("plan.focus", { id });
           },
-          onOptimisticPatch: (id, fields) => {
-            const prev = this.planOptimistic.get(id) ?? {};
-            this.planOptimistic.set(id, { ...prev, ...fields });
-          },
-          onRevertOptimistic: (id) => {
-            const had = this.planOptimistic.delete(id);
-            if (had || this.planRenderDeferred) {
-              this.planRenderDeferred = false;
-              this.render();
-            }
-          },
           onDragEnd: () => {
             if (this.planRenderDeferred) {
               this.planRenderDeferred = false;
