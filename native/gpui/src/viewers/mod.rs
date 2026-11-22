@@ -4,6 +4,7 @@
 pub mod boards;
 pub mod browser;
 pub mod chrome;
+pub mod cef_focus;
 #[cfg(feature = "cef")]
 pub mod cef;
 #[cfg(feature = "cef")]

@@ -70,6 +70,14 @@ static mut APP_CLASS: *const Class = ptr::null();
 static mut APP_DELEGATE_CLASS: *const Class = ptr::null();
 
 const HANDLING_SEND_EVENT_IVAR: &str = "handlingSendEvent";
+static MOUSE_DOWN_OBSERVER: std::sync::atomic::AtomicPtr<c_void> =
+    std::sync::atomic::AtomicPtr::new(ptr::null_mut());
+
+pub(crate) fn set_mouse_down_observer(observer: Option<fn(*mut c_void)>) {
+    let ptr = observer.map_or(ptr::null_mut(), |f| f as *mut c_void);
+    MOUSE_DOWN_OBSERVER.store(ptr, std::sync::atomic::Ordering::Release);
+}
+
 extern "C" fn is_handling_send_event(this: &Object, _: Sel) -> BOOL {
     if unsafe { *this.get_ivar::<bool>(HANDLING_SEND_EVENT_IVAR) } { YES } else { NO }
 }
@@ -78,6 +86,16 @@ extern "C" fn set_handling_send_event(this: &mut Object, _: Sel, on: BOOL) {
 }
 extern "C" fn app_send_event(this: &mut Object, _: Sel, event: id) {
     unsafe {
+        if event != nil {
+            let ty: NSUInteger = msg_send![event, type];
+            if matches!(ty, 1 | 3 | 25) {
+                let observer = MOUSE_DOWN_OBSERVER.load(std::sync::atomic::Ordering::Acquire);
+                if !observer.is_null() {
+                    let f: fn(*mut c_void) = std::mem::transmute(observer);
+                    f(event as *mut c_void);
+                }
+            }
+        }
         let was = *this.get_ivar::<bool>(HANDLING_SEND_EVENT_IVAR);
         this.set_ivar::<bool>(HANDLING_SEND_EVENT_IVAR, true);
         let _: () = msg_send![super(this, class!(NSApplication)), sendEvent: event];
