@@ -264,7 +264,7 @@ fn network(st: &State, info: &Value) -> Vec<Value> {
         row(&format!("Tailscale: {state}"), &note, vec![]),
         // no tailnet link: pairing still works on the local network or this computer, from Devices (where the links are made since 0.15)
         if link.is_empty() { row("Pairing link", PAIR_ELSEWHERE, vec![btn("Devices", "settings-page", "devices", false)]) } else { row("Pairing link", link, vec![]) },
-        row("Update channel", "Stable takes releases; beta also takes betas; nightly also takes a build of main each night.", chips(&["stable", "beta", "nightly"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
+        row("Update channel", "Stable takes releases; beta also takes betas; nightly tracks nightly builds of main.", chips(&["stable", "beta", "nightly"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
         update_row(version, &i("update.status")),
     ].into_iter().chain(boat_hub_rows(i("boathub.cost"), crate::hub::now_ms() / 1000)).collect()
 }
