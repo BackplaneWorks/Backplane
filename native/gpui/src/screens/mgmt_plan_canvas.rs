@@ -688,7 +688,7 @@ pub fn place_corridor_pills(
     for c in cands {
         let name = c.b["name"].as_str().unwrap_or("");
         let short_txt = c.nets.to_string();
-        let full_txt = if !name.is_empty() { format!("{name} · {}", c.nets) } else { short_txt.clone() };
+        let full_txt = if !name.is_empty() { format!("{name} · {}", c.nets) } else { short_txt.clone() }; // i18n-ok: bus name and net count
         let try_full = (c.sel || c.hov || c.px_len >= 95.0) && !name.is_empty();
         let texts: Vec<&str> = if try_full { vec![&full_txt, &short_txt] } else { vec![&short_txt] };
         let mut chosen: Option<PlacedPill> = None;
