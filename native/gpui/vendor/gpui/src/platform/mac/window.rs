@@ -1820,6 +1820,15 @@ extern "C" fn handle_view_event(this: &Object, _: Sel, native_event: id) {
                 lock.first_mouse = false;
             }
 
+            PlatformInput::MouseMove(MouseMoveEvent {
+                pressed_button: button @ Some(MouseButton::Left),
+                modifiers: Modifiers { control, .. },
+                ..
+            }) if *control => {
+                *button = Some(MouseButton::Right);
+                *control = false;
+            }
+
             // Because we map a ctrl-left_down to a right_down -> right_up let's ignore
             // the ctrl-left_up to avoid having a mismatch in button down/up events if the
             // user is still holding ctrl when releasing the left mouse button

@@ -442,15 +442,9 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         .on_mouse_down(crate::mousecfg::BUTTONS[1], cx.listener(move |this, e: &MouseDownEvent, window, cx| { plot_down(this, slot, e, window, cx) }))
         .on_mouse_down(crate::mousecfg::BUTTONS[2], cx.listener(move |this, e: &MouseDownEvent, window, cx| { plot_down(this, slot, e, window, cx) }))
         .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
-            let pv = this.screens.pv(slot);
-            if let (Some((x, y)), Some(v), Some(act), Some(b), true) = (pv.drag, pv.view, pv.drag_act, pv.bounds, plot_drag_held(pv.drag_btn, e.pressed_button)) {
-                let (nx, ny) = (f32::from(e.position.x), f32::from(e.position.y));
-                let moved = match act {
-                    Action::Pan => { pv.view = Some(v.pan(nx - x, ny - y)); true }
-                    Action::Zoom => { pv.view = Some(v.zoom(crate::mousecfg::drag_zoom_factor(ny - y, crate::mousecfg::invert()), f32::from(px(x) - b.origin.x), f32::from(px(y) - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted)); true }
-                    _ => false,
-                };
-                pv.drag = Some((nx, ny)); if moved { person_moved(this, slot); } cx.notify();
+            if plot_drag(this.screens.pv(slot), e) {
+                person_moved(this, slot);
+                cx.notify();
             }
         }))
         .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, _, cx| { plot_up(this, slot, &key, off, e, cx) }))
@@ -488,9 +482,31 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
 /// The person moved or zoomed the view: the one place every plot input ends, so a camera that follows something lets go here (follow pauses).
 fn person_moved(app: &mut Backplane, slot: usize) { app.screens.pv(slot).touched = true; super::follow::person_input(app, slot); }
 
-/// MouseMoveEvent::dragging only reports the left button.
-fn plot_drag_held(started: Option<MouseButton>, pressed: Option<MouseButton>) -> bool {
-    started.is_some() && started == pressed
+/// Apply motion only for the button that began this gesture.
+fn plot_drag(pv: &mut PlotView, event: &MouseMoveEvent) -> bool {
+    if event.pressed_button.is_none() || event.pressed_button != pv.drag_btn {
+        return false;
+    }
+    let (Some((x, y)), Some(view), Some(action), Some(bounds)) =
+        (pv.drag, pv.view, pv.drag_act, pv.bounds)
+    else {
+        return false;
+    };
+    let (nx, ny) = (f32::from(event.position.x), f32::from(event.position.y));
+    pv.drag = Some((nx, ny));
+    pv.view = Some(match action {
+        Action::Pan => view.pan(nx - x, ny - y),
+        Action::Zoom => view.zoom(
+            crate::mousecfg::drag_zoom_factor(ny - y, crate::mousecfg::invert()),
+            f32::from(px(x) - bounds.origin.x),
+            f32::from(px(y) - bounds.origin.y),
+            f32::from(bounds.size.width),
+            f32::from(bounds.size.height),
+            pv.fitted,
+        ),
+        _ => return false,
+    });
+    true
 }
 
 /// A button went down on the plot: the table says whether it drags (and what the drag does) and whether a click of it selects.
@@ -792,19 +808,35 @@ pub fn report_state(app: &mut Backplane) {
 }
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn plot_drag_follows_the_button_that_started_it() {
-        use super::{plot_drag_held, MouseButton};
-        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
-            assert!(plot_drag_held(Some(button), Some(button)));
-            assert!(!plot_drag_held(Some(button), None));
-        }
-        assert!(!plot_drag_held(Some(MouseButton::Right), Some(MouseButton::Left)));
-        assert!(!plot_drag_held(None, None));
-    }
-
     use super::*;
     use core::prelude::v1::test;
+
+    #[test]
+    fn plot_pan_moves_the_camera_with_the_button_that_started_it() {
+        let motion = |pressed_button| MouseMoveEvent {
+            position: point(px(30.), px(50.)),
+            pressed_button,
+            modifiers: Modifiers::default(),
+        };
+        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+            let mut plot = PlotView {
+                drag: Some((10., 10.)),
+                drag_act: Some(Action::Pan),
+                drag_btn: Some(button),
+                view: Some(View { cx: 0., cy: 0., scale: 2. }),
+                bounds: Some(Bounds::new(point(px(0.), px(0.)), size(px(300.), px(200.)))),
+                ..PlotView::default()
+            };
+            assert!(!plot_drag(&mut plot, &motion(None)));
+            let other = if button == MouseButton::Left { MouseButton::Right } else { MouseButton::Left };
+            assert!(!plot_drag(&mut plot, &motion(Some(other))));
+            assert!(plot_drag(&mut plot, &motion(Some(button))));
+            let camera = plot.view.unwrap();
+            assert_eq!((camera.cx, camera.cy), (-10., -20.));
+            assert_eq!(plot.drag, Some((30., 50.)));
+        }
+    }
+
     #[test]
     fn stale_tessellation_releases_its_originating_slot() {
         let slot = PlotView::default();
