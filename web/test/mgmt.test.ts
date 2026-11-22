@@ -16,6 +16,8 @@ import {
   pkgName,
   planDone,
   planMark,
+  planProgressSegments,
+  planStatusBadge,
   refsFit,
   stockSummary,
   tierWords,
@@ -83,6 +85,31 @@ describe("Management strip pure model", () => {
     expect(planDone({ id: "b", state: "proposed" })).toBe(false);
     expect(planMark({ id: "a", state: "routing", routed: 3, total: 8 })).toBe("3/8");
     expect(planMark({ id: "b", state: "blocked", problems: 2 })).toBe("⚠ 2");
+    expect(planMark({ id: "c", state: "failed" })).toBe("✗");
+    expect(planStatusBadge({ status: "blocked" })).toEqual({ key: "gpui.mgmt.plan.st.blocked", label: "Blocked", tone: "bad" });
+    expect(planStatusBadge({ status: "verified" }).tone).toBe("ok");
+    expect(planStatusBadge({ status: "awaiting" }).tone).toBe("warn");
+    expect(planStatusBadge({ status: "partial" })).toEqual({ key: "gpui.mgmt.plan.st.partial", label: "Partial", tone: "warn" });
+    expect(planStatusBadge({ status: "rejected" })).toEqual({ key: "gpui.mgmt.plan.st.rejected", label: "Rejected", tone: "bad" });
+    expect(planProgressSegments({ total: 6, done: 2, approved: 1, awaiting: 2, blocked: 1, routing: false })).toEqual([
+      { count: 2, tone: "ok" },
+      { count: 0, tone: "accent" },
+      { count: 1, tone: "input" },
+      { count: 2, tone: "warn" },
+      { count: 1, tone: "bad" },
+    ]);
+    expect(planProgressSegments({
+      routing: true,
+      layers: [{ layer: "F.Cu", items: [{ id: "1", state: "verified" }, { id: "2", state: "routing" }, { id: "3", state: "approved" }] }],
+      awaiting: 1,
+      blocked: 0,
+    })).toEqual([
+      { count: 1, tone: "ok" },
+      { count: 1, tone: "accent" },
+      { count: 1, tone: "input" },
+      { count: 1, tone: "warn" },
+      { count: 0, tone: "bad" },
+    ]);
     expect(drcWords("stale")).toEqual({ text: "The DRC rules have older fab limits", button: "Update" });
     expect(drcWords("current").button).toBeNull();
     expect(tierWords("extra")).toBe("costs-more limits");

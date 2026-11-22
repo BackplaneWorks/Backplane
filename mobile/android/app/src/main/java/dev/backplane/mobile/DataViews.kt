@@ -986,7 +986,10 @@ private fun HandoffCard(tid: String, e: DEntry) {
 private fun AskCard(tid: String, e: DEntry) {
     val a = e.ask
     var answer by remember(e.id) { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (a?.open == true) dcs.error else dcs.outlineVariant)).padding(12.dp).testTag("ask.card")) {
+    var revising by remember(e.id) { mutableStateOf(false) }
+    var revision by remember(e.id) { mutableStateOf("") }
+    val border = if (a?.open == true) (if (a.kind == "plan") dcs.tertiary else dcs.error) else dcs.outlineVariant
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, border)).padding(12.dp).testTag("ask.card")) {
         DMono(if (a?.open == true) Msg.android_ask_open else Msg.android_ask_done, dfaint, 11)
         Text(a?.question ?: e.text, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, modifier = Modifier.padding(vertical = 6.dp))
         if (a != null && a.open) {
@@ -994,7 +997,23 @@ private fun AskCard(tid: String, e: DEntry) {
                 Box(Modifier.weight(1f)) { DField(answer, { answer = it }, Msg.android_ask_answer, Modifier.testTag("ask.answer")) }
                 DBtn(Msg.composer_send, true, answer.isNotBlank()) { DataClient.answer(tid, a.id, answer) }
             } else Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                a.options.forEach { o -> DBtn(Tr.t(o.label), o.id == "accept", true, Modifier.fillMaxWidth().testTag("ask.opt.${o.id}"), danger = o.id == "deny" || o.id == "decline") { DataClient.answer(tid, a.id, o.id) } }
+                a.options.forEach { o -> DBtn(Tr.t(o.label), o.id == "accept" || o.id == "implement", true, Modifier.fillMaxWidth().testTag("ask.opt.${o.id}"), danger = o.id == "deny" || o.id == "decline") { DataClient.answer(tid, a.id, o.id) } }
+                if (a.revise) {
+                    DBtn(Msg.gpui_ask_plan_revise, false, true, Modifier.fillMaxWidth().testTag("ask.opt.revise")) { revising = !revising }
+                    if (revising) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            DField(revision, { revision = it }, Msg.gpui_ask_plan_reviseph, Modifier.testTag("ask.revise.input"), lines = 3)
+                            DBtn(Msg.gpui_ask_plan_sendrev, true, revision.isNotBlank(), Modifier.testTag("ask.revise.send")) {
+                                val fb = revision.trim()
+                                if (fb.isNotEmpty()) {
+                                    revising = false
+                                    revision = ""
+                                    DataClient.answer(tid, a.id, "revise:$fb")
+                                }
+                            }
+                        }
+                    }
+                }
             }
         } else if (a?.answered != null) DMono(Msg.android_ask_answered(a.options.firstOrNull { it.id == a.answered }?.label?.let(Tr::t) ?: a.answered))
     }

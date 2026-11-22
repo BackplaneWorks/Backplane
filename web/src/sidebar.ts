@@ -19,6 +19,13 @@ export interface ProjectItem {
   icon?: string;
 }
 
+export interface PlanModeInfo {
+  phase: "off" | "armed" | "planning" | "pending" | "executing";
+  interaction: string;
+  once: boolean;
+  pending?: boolean;
+}
+
 export interface ThreadItem {
   id: string;
   project: string;
@@ -38,6 +45,7 @@ export interface ThreadItem {
   parent?: string;
   swarm?: string;
   memory?: import("./composer").MemoryProgress | null;
+  planMode?: PlanModeInfo | null;
 }
 
 export interface BotItem {

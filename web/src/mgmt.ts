@@ -19,6 +19,8 @@ import {
   pkgName,
   planDone,
   planMark,
+  planProgressSegments,
+  planStatusBadge,
   refsFit,
   stockSummary,
   tierWords,
@@ -76,6 +78,8 @@ export class MgmtStrip {
 
   private planHideDone = false;
   private planStatus = "";
+  private planSelectedId = "";
+  private planStackupOpen = false;
 
   private fabStatus = "";
 
@@ -132,6 +136,8 @@ export class MgmtStrip {
     this.bomEditStatus = "";
     this.checksStatus = "";
     this.planStatus = "";
+    this.planSelectedId = "";
+    this.planStackupOpen = false;
     this.fabStatus = "";
     this.render();
   }
@@ -160,6 +166,8 @@ export class MgmtStrip {
       this.checksSelectedId = "";
       this.checksStatus = "";
       this.planStatus = "";
+      this.planSelectedId = "";
+      this.planStackupOpen = false;
       this.fabStatus = "";
       this.lifeSelectedKey = "";
       this.lifePartSamples = null;
@@ -915,7 +923,7 @@ export class MgmtStrip {
     wrap.className = "bp-mgmt-body";
     const d = this.getPanelData<PlanInfo>("plan");
     if (!d) {
-      wrap.appendChild(this.makeEmpty("Reading the routing plan…"));
+      wrap.appendChild(this.makeEmpty(t("gpui.mgmt.plan.reading", "Reading the routing plan…")));
       return wrap;
     }
 
@@ -926,34 +934,122 @@ export class MgmtStrip {
       void this.cb.hub.rpc(method, { pro: proj, ...params })
         .catch((e) => {
           if (gen !== this.watchGen || proj !== this.project) return;
-          this.planStatus = e instanceof Error ? e.message : "Plan action refused";
+          this.planStatus = e instanceof Error ? e.message : t("gpui.mgmt.plan.refused", "KiCad refused");
           this.render();
         });
     };
 
+    const toggleRow = document.createElement("div");
+    toggleRow.className = "bp-plan-toggle";
+    const on = d.on === true;
+    const toggleLbl = document.createElement("span");
+    toggleLbl.className = "bp-mgmt-flex1 bp-mgmt-strong";
+    toggleLbl.textContent = t("gpui.mgmt.plan.before", "Plan before routing");
+    toggleLbl.title = on
+      ? t("gpui.mgmt.plan.onwords", "Before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes corridors and plane regions here. It routes only what you approve.")
+      : t("gpui.mgmt.plan.offwords", "Agents route as you ask. Turn it on to have them propose a routing plan first and route only what you approve here.");
+    const onBtn = document.createElement("button");
+    onBtn.type = "button";
+    onBtn.className = "bp-mgmt-btn bp-plan-chip-btn" + (on ? " active" : "");
+    onBtn.setAttribute("data-testid", "mgmt-plan-on");
+    onBtn.setAttribute("aria-pressed", on ? "true" : "false");
+    onBtn.textContent = t("gpui.bots.recall.on", "On");
+    onBtn.addEventListener("click", () => sendPlan("plan.enable", { on: true }));
+    const offBtn = document.createElement("button");
+    offBtn.type = "button";
+    offBtn.className = "bp-mgmt-btn bp-plan-chip-btn" + (!on ? " active" : "");
+    offBtn.setAttribute("data-testid", "mgmt-plan-off");
+    offBtn.setAttribute("aria-pressed", !on ? "true" : "false");
+    offBtn.textContent = t("gpui.bots.recall.off", "Off");
+    offBtn.addEventListener("click", () => sendPlan("plan.enable", { on: false }));
+    toggleRow.append(toggleLbl, onBtn, offBtn);
+    wrap.appendChild(toggleRow);
+
+    for (const e of d.elsewhere ?? []) {
+      const bar = document.createElement("div");
+      bar.className = "bp-plan-elsewhere";
+      const txt = document.createElement("span");
+      txt.className = "bp-tone-warn bp-mgmt-flex1";
+      txt.textContent = t("gpui.mgmt.plan.elsewhere", "A routing plan for {board} awaits your approval", {
+        board: e.name || e.rel || "",
+      });
+      bar.appendChild(txt);
+      wrap.appendChild(bar);
+    }
+
     if (d.empty) {
-      wrap.appendChild(this.makeEmpty("No routing plan for this board."));
+      const emptyBox = document.createElement("div");
+      emptyBox.className = "bp-mgmt-note";
+      const lead = document.createElement("div");
+      lead.className = "bp-dim";
+      lead.textContent = t("gpui.mgmt.plan.noboard", "No routing plan for this board.");
+      const sub = document.createElement("div");
+      sub.className = "bp-mgmt-faint";
+      sub.textContent = t("gpui.mgmt.plan.emptysub", "Layers, corridors, and planes appear here once a plan is proposed.");
+      emptyBox.append(lead, sub);
+      wrap.appendChild(emptyBox);
       return wrap;
     }
 
-    const head = document.createElement("div");
-    head.className = "bp-mgmt-head";
     const awaiting = d.awaiting ?? 0;
-    const status = document.createElement("span");
-    status.className = "bp-mgmt-flex1 " + (awaiting > 0 ? "bp-tone-warn" : "bp-dim");
-    status.textContent = awaiting > 0 ? `${awaiting} awaiting approval` : "Nothing awaits your approval";
-    head.appendChild(status);
+    const blocked = d.blocked ?? 0;
+    const doneN = d.done ?? 0;
+    const totalN = d.total ?? 0;
+    const rev = d.revision ?? 0;
+    const badge = planStatusBadge(d);
+    const segs = planProgressSegments(d);
+    const segTotal = segs.reduce((acc, s) => acc + s.count, 0);
 
+    const statusStrip = document.createElement("div");
+    statusStrip.className = "bp-plan-status";
+    const statusTop = document.createElement("div");
+    statusTop.className = "bp-plan-status-top";
+    const statusPill = document.createElement("span");
+    statusPill.className = `bp-plan-status-badge tone-${badge.tone}`;
+    statusPill.textContent = t(badge.key, badge.label);
+    statusTop.appendChild(statusPill);
+    if (rev > 0) {
+      const revEl = document.createElement("span");
+      revEl.className = "bp-dim";
+      revEl.textContent = `v${rev}`;
+      statusTop.appendChild(revEl);
+    }
+    const counts = document.createElement("span");
+    counts.className = "bp-mgmt-flex1 " + (awaiting > 0 ? "bp-tone-warn" : blocked > 0 ? "bp-tone-bad" : "bp-dim");
+    counts.textContent = totalN > 0
+      ? `${doneN}/${totalN} ${t("gpui.mgmt.plan.done", "done")}`
+      : awaiting > 0
+        ? t("web.plan.awaiting", "{n} awaiting approval", { n: awaiting })
+        : t("gpui.mgmt.plan.nothing", "Nothing awaits your approval");
+    statusTop.appendChild(counts);
     if (!d.live) {
       const saved = document.createElement("span");
-      saved.className = "bp-mgmt-faint";
+      saved.className = "bp-mgmt-pill";
       saved.textContent = t("gpui.mgmt.plan.saved", "saved plan");
-      head.appendChild(saved);
+      statusTop.appendChild(saved);
     }
+    statusStrip.appendChild(statusTop);
+    if (segTotal > 0) {
+      const segBar = document.createElement("div");
+      segBar.className = "bp-plan-segbar";
+      for (const s of segs) {
+        if (s.count <= 0) continue;
+        const fill = document.createElement("div");
+        fill.className = `bp-plan-seg bp-tone-bg-${s.tone}`;
+        fill.style.flexGrow = String(s.count);
+        segBar.appendChild(fill);
+      }
+      statusStrip.appendChild(segBar);
+    }
+    wrap.appendChild(statusStrip);
+
+    const head = document.createElement("div");
+    head.className = "bp-mgmt-head";
     if (awaiting > 0) {
       const okAll = document.createElement("button");
       okAll.type = "button";
-      okAll.className = "bp-mgmt-btn";
+      okAll.className = "primary bp-mgmt-btn";
+      okAll.setAttribute("data-testid", "mgmt-plan-approve-all");
       okAll.textContent = t("gpui.mgmt.plan.all", "Approve all");
       okAll.addEventListener("click", () => sendPlan("plan.approve", { layer: "", ids: [], approve: true }));
       head.appendChild(okAll);
@@ -962,42 +1058,148 @@ export class MgmtStrip {
       const stop = document.createElement("button");
       stop.type = "button";
       stop.className = "bp-mgmt-btn";
+      stop.setAttribute("data-testid", "mgmt-plan-stop");
       stop.textContent = t("gpui.mgmt.plan.stop", "Stop routing");
       stop.addEventListener("click", () => sendPlan("plan.stop", {}));
       head.appendChild(stop);
     }
+    if (d.live && doneN > 0) {
+      const verify = document.createElement("button");
+      verify.type = "button";
+      verify.className = "bp-mgmt-btn";
+      verify.setAttribute("data-testid", "mgmt-plan-verify");
+      verify.textContent = t("gpui.mgmt.plan.verify", "Verify");
+      verify.addEventListener("click", () => sendPlan("plan.verify", {}));
+      head.appendChild(verify);
+    }
+    const spacer = document.createElement("span");
+    spacer.className = "bp-mgmt-flex1";
     const hideBtn = document.createElement("button");
     hideBtn.type = "button";
     hideBtn.className = "bp-mgmt-btn";
-    hideBtn.textContent = this.planHideDone ? "Show done" : "Hide done";
+    hideBtn.setAttribute("data-testid", "mgmt-plan-hide");
+    hideBtn.textContent = this.planHideDone
+      ? t("gpui.mgmt.plan.show", "Show done")
+      : t("gpui.mgmt.plan.hide", "Hide done");
     hideBtn.addEventListener("click", () => {
       this.planHideDone = !this.planHideDone;
       this.render();
     });
-    head.appendChild(hideBtn);
+    head.append(spacer, hideBtn);
     wrap.appendChild(head);
+
+    const openAsks = Array.isArray(d.asks) ? d.asks : [];
+    if (openAsks.length > 0) {
+      const what = openAsks.map((a) => a.what || "").filter(Boolean).join(", ");
+      const noteText = openAsks[0]?.note || "";
+      const askBar = document.createElement("div");
+      askBar.className = "bp-plan-elsewhere";
+      const col = document.createElement("div");
+      col.className = "bp-plan-ask-col";
+      const lbl = document.createElement("div");
+      lbl.className = "bp-tone-warn";
+      lbl.textContent = what
+        ? t("gpui.mgmt.plan.requested", "Approval requested: {what}", { what })
+        : t("gpui.mgmt.plan.reqplain", "Approval requested");
+      col.appendChild(lbl);
+      if (noteText) {
+        const nt = document.createElement("div");
+        nt.className = "bp-dim";
+        nt.textContent = noteText;
+        col.appendChild(nt);
+      }
+      askBar.appendChild(col);
+      wrap.appendChild(askBar);
+    }
 
     if (this.planStatus) {
       const err = document.createElement("div");
-      err.className = "bp-mgmt-note bp-tone-bad";
-      err.textContent = this.planStatus;
+      err.className = "bp-mgmt-note bp-plan-err bp-tone-bad";
+      const txt = document.createElement("span");
+      txt.className = "bp-mgmt-flex1";
+      txt.textContent = this.planStatus === "KiCad refused" ? t("gpui.mgmt.plan.refused", "KiCad refused") : trs(this.planStatus);
+      const closeErr = document.createElement("button");
+      closeErr.type = "button";
+      closeErr.className = "icon";
+      closeErr.textContent = "×";
+      closeErr.title = t("common.close", "Close");
+      closeErr.addEventListener("click", () => {
+        this.planStatus = "";
+        this.render();
+      });
+      err.append(txt, closeErr);
       wrap.appendChild(err);
+    }
+
+    if (d.keys_note) {
+      const kn = document.createElement("div");
+      kn.className = "bp-mgmt-note bp-dim";
+      const stdKeysNote = "On this KiCad version, approve from this panel: in plan view KiCad's A, R and W keys aren't the plan's yet (A opens Add Footprint). Update KiCad.";
+      kn.textContent = d.keys_note === stdKeysNote
+        ? t("gpui.mgmt.plan.keysnote", stdKeysNote)
+        : trs(d.keys_note);
+      wrap.appendChild(kn);
+    }
+
+    const stackupSum = d.stackup_summary ?? "";
+    const impedances = Array.isArray(d.impedances) ? d.impedances : [];
+    if (stackupSum || impedances.length > 0) {
+      const stackWrap = document.createElement("div");
+      stackWrap.className = "bp-plan-stackup";
+      const toggle = document.createElement("button");
+      toggle.type = "button";
+      toggle.className = "bp-plan-stackup-head";
+      toggle.setAttribute("data-testid", "mgmt-plan-stackup-toggle");
+      toggle.setAttribute("aria-expanded", this.planStackupOpen ? "true" : "false");
+      const chev = document.createElement("span");
+      chev.className = "bp-plan-chev";
+      chev.textContent = this.planStackupOpen ? "▾" : "▸";
+      const lbl = document.createElement("span");
+      lbl.textContent = t("gpui.mgmt.plan.stackup", "Stackup & impedances");
+      toggle.append(chev, lbl);
+      toggle.addEventListener("click", () => {
+        this.planStackupOpen = !this.planStackupOpen;
+        this.render();
+      });
+      stackWrap.appendChild(toggle);
+      if (this.planStackupOpen) {
+        const sbody = document.createElement("div");
+        sbody.className = "bp-plan-stackup-body";
+        sbody.setAttribute("data-testid", "mgmt-plan-stackup-body");
+        if (stackupSum) {
+          const sl = document.createElement("div");
+          sl.className = "bp-dim";
+          sl.textContent = stackupSum;
+          sbody.appendChild(sl);
+        }
+        for (const imp of impedances) {
+          const il = document.createElement("div");
+          il.className = "bp-mgmt-faint";
+          il.textContent = `· ${imp}`;
+          sbody.appendChild(il);
+        }
+        stackWrap.appendChild(sbody);
+      }
+      wrap.appendChild(stackWrap);
     }
 
     const listEl = document.createElement("div");
     listEl.className = "bp-mgmt-rows";
     listEl.setAttribute("data-testid", "mgmt-plan-rows");
+    const doneWord = t("gpui.mgmt.plan.done", "done");
     for (const l of d.layers ?? []) {
       const items = l.items ?? [];
       const gh = document.createElement("div");
-      gh.className = "bp-mgmt-group-head";
+      gh.className = "bp-mgmt-group-head bp-plan-layer-head";
+      const gtop = document.createElement("div");
+      gtop.className = "bp-mgmt-row-line";
       const lbl = document.createElement("span");
       lbl.className = "bp-mgmt-strong";
       lbl.textContent = l.layer;
       const meta = document.createElement("span");
       meta.className = "bp-dim bp-mgmt-flex1";
-      meta.textContent = `${l.role ? `${l.role} · ` : ""}${l.done ?? 0}/${items.length} done`;
-      gh.append(lbl, meta);
+      meta.textContent = `${l.role ? `${l.role} · ` : ""}${l.done ?? 0}/${items.length} ${doneWord}`;
+      gtop.append(lbl, meta);
       if (l.status !== "approved" && items.length > 0) {
         const okLayer = document.createElement("button");
         okLayer.type = "button";
@@ -1009,45 +1211,129 @@ export class MgmtStrip {
         rejLayer.className = "bp-mgmt-btn";
         rejLayer.textContent = t("gpui.mgmt.plan.reject", "Reject");
         rejLayer.addEventListener("click", () => sendPlan("plan.approve", { layer: l.layer, ids: [], approve: false }));
-        gh.append(okLayer, rejLayer);
+        gtop.append(okLayer, rejLayer);
+      }
+      gh.appendChild(gtop);
+      if (l.stackup) {
+        const lstack = document.createElement("div");
+        lstack.className = "bp-plan-layer-stackup";
+        lstack.textContent = l.stackup;
+        gh.appendChild(lstack);
       }
       listEl.appendChild(gh);
 
       for (const it of items) {
         if (this.planHideDone && planDone(it)) continue;
+        const selected = this.planSelectedId === it.id;
         const row = document.createElement("div");
-        row.className = "bp-mgmt-row";
+        row.className = "bp-mgmt-row bp-plan-row" + (selected ? " active" : "");
+        row.setAttribute("data-testid", `mgmt-plan-row-${it.id}`);
+
         const line = document.createElement("div");
         line.className = "bp-mgmt-row-line";
+
+        const swatch = document.createElement("span");
+        swatch.className = `bp-plan-swatch bp-plan-st-${it.state || "proposed"}`;
+        swatch.style.setProperty("--swatch-color", it.color || "#8a8a8a");
+
         const name = document.createElement("span");
-        name.className = "bp-mgmt-flex1" + (it.state === "blocked" ? " bp-tone-bad" : it.state === "edited" ? " bp-tone-warn" : "");
+        name.className = "bp-mgmt-flex1" + (
+          it.state === "blocked" || it.state === "failed"
+            ? " bp-tone-bad"
+            : it.state === "edited"
+              ? " bp-tone-warn"
+              : (it.state === "rejected" || it.state === "routed" || it.state === "verified")
+                ? " bp-dim"
+                : ""
+        );
         name.textContent = `${it.name || it.id}${it.locked ? " 🔒" : ""}`;
-        const detail = document.createElement("span");
-        detail.className = "bp-dim";
-        detail.textContent = it.kind === "plane" ? (it.reference ? `ref ${it.reference}` : "") : `${it.nets ?? 0} nets`;
+
+        const parts: string[] = [];
+        if (it.kind === "plane") {
+          if (it.reference) parts.push(t("gpui.mgmt.plan.reference", "over {layer}", { layer: it.reference }));
+        } else {
+          const nc = it.nets ?? 0;
+          parts.push(nc === 1 ? t("web.plan.net.one", "1 net") : t("web.plan.nets", "{n} nets", { n: nc }));
+        }
+        if (typeof it.width === "number" && Number.isFinite(it.width)) {
+          parts.push(`${it.width.toFixed(2)}mm`);
+        }
+        if (it.impedance) parts.push(it.impedance);
+        const detailText = parts.join(" · ");
+
         const mk = document.createElement("span");
-        mk.className = it.state === "blocked" ? "bp-tone-bad" : "bp-dim";
+        mk.className = "bp-plan-mark " + (
+          it.state === "blocked" || it.state === "failed"
+            ? "bp-tone-bad"
+            : it.state === "verified" || it.state === "routed"
+              ? "bp-tone-ok"
+              : it.state === "approved"
+                ? "bp-tone-accent"
+                : "bp-dim"
+        );
         mk.textContent = planMark(it);
-        line.append(name, detail, mk);
+
+        line.append(swatch, name, mk);
         if (it.state === "proposed" || it.state === "edited") {
           const ok = document.createElement("button");
           ok.type = "button";
           ok.className = "bp-mgmt-btn";
           ok.textContent = "✓";
+          ok.title = t("gpui.mgmt.plan.layer", "Approve layer");
           ok.addEventListener("click", (e) => { e.stopPropagation(); sendPlan("plan.approve", { layer: "", ids: [it.id], approve: true }); });
           const no = document.createElement("button");
           no.type = "button";
           no.className = "bp-mgmt-btn";
           no.textContent = "✗";
+          no.title = t("gpui.mgmt.plan.reject", "Reject");
           no.addEventListener("click", (e) => { e.stopPropagation(); sendPlan("plan.approve", { layer: "", ids: [it.id], approve: false }); });
           line.append(ok, no);
         }
         row.appendChild(line);
-        row.addEventListener("click", () => sendPlan("plan.focus", { id: it.id }));
+        if (detailText) {
+          const detail = document.createElement("div");
+          detail.className = "bp-mgmt-row-sub bp-plan-detail bp-dim";
+          detail.textContent = detailText;
+          row.appendChild(detail);
+        }
+
+        if (it.state === "routing" && typeof it.total === "number" && it.total > 0) {
+          const micro = document.createElement("div");
+          micro.className = "bp-plan-microbar";
+          const fill = document.createElement("div");
+          fill.className = "bp-plan-microbar-fill";
+          const pct = Math.max(0, Math.min(100, Math.round(((it.routed ?? 0) / it.total) * 100)));
+          fill.style.width = `${pct}%`;
+          micro.appendChild(fill);
+          row.appendChild(micro);
+        }
+        if (it.problem_text) {
+          const prob = document.createElement("div");
+          prob.className = "bp-plan-problem";
+          prob.textContent = it.problem_text;
+          row.appendChild(prob);
+        }
+
+        row.addEventListener("click", () => {
+          this.planSelectedId = it.id;
+          sendPlan("plan.focus", { id: it.id });
+          this.render();
+        });
         listEl.appendChild(row);
       }
     }
     wrap.appendChild(listEl);
+
+    if ((d.draw?.bands?.length ?? 0) > 0 || (d.draw?.regions?.length ?? 0) > 0) {
+      const foot = document.createElement("div");
+      foot.className = "bp-plan-footer";
+      foot.textContent = t(
+        "gpui.mgmt.plan.drawn",
+        "The plan's corridors and planes are drawn on the board while this panel is open. Close it to hide them.",
+      );
+      wrap.appendChild(foot);
+    }
+
     return wrap;
   }
 

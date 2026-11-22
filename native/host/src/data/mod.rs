@@ -116,16 +116,28 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let (pinned, settled, settled_at) = flags(hub, id);
     // a model chosen within the provider is a ModesSet (the policy state), a switch of provider a ProviderSet (the model's fold)
     // `status`: the sidebar dot's word (signal.rs, children's work included): "finished" is the desktop's green dot, a turn done and not yet settled
-    let (model, effort, runtime, combo, status, pin_order, swarm) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default(),
-        crate::present::keys::combo_of(st, id, crate::hub::now_ms() / 1000), crate::signal::index(st).get(id).map_or("", |n| crate::signal::display_name(st, *n, id)), crate::sidebar::pin_place(st, id), st.swarm_of.get(id).cloned().unwrap_or_default()))).unwrap_or_default();
+    let read_st = |st: &crate::state::State| (
+        st.threads.get(id).map_or(String::new(), |t| t.model.clone()),
+        st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(),
+        st.runtime.get(id).cloned().unwrap_or_default(),
+        crate::present::keys::plan_mode(st, id),
+        crate::present::keys::combo_of(st, id, crate::hub::now_ms() / 1000),
+        crate::signal::index(st).get(id).map_or("", |n| crate::signal::display_name(st, *n, id)).to_string(),
+        crate::sidebar::pin_place(st, id),
+        st.swarm_of.get(id).cloned().unwrap_or_default(),
+    );
+    let (model, effort, runtime, plan_mode, combo, status, pin_order, swarm) = crate::statehost::with_state_of(hub, read_st)
+        .or_else(|| crate::statehost::policies().and_then(|p| p.with_state(read_st))).unwrap_or_default();
     let model = if model.is_empty() { t.model.clone() } else { model };
     // the composer's one chip: the model and what the account has left (present/keys.rs `combo`, its short form: a phone's row has room for about 20 characters;
     // the picker's title says it all)
     let chip = combo["short"].as_str().filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, &effort));
-    Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"pinOrder":pin_order,"settled":settled,"settledAt":settled_at,"archived":t.archived,
+    let mut row = json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"pinOrder":pin_order,"settled":settled,"settledAt":settled_at,"archived":t.archived,
         "provider":t.provider,"model":model,"effort":effort,"speed":setting_of(&format!("speed.{id}")),"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH,"swarm":swarm,
         // infinite context (bots/recall/progress.rs): how far its memory is written, the composer's bar; null for a thread without it
-        "memory":crate::bots::recall::progress::shown(&hub.cfg.home, id).unwrap_or(Value::Null)}))
+        "memory":crate::bots::recall::progress::shown(&hub.cfg.home, id).unwrap_or(Value::Null)});
+    if !plan_mode.is_null() && plan_mode["phase"] != "off" { row["planMode"] = plan_mode; }
+    Some(row)
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && flags_of(i).1).count();
@@ -192,6 +204,7 @@ fn limit_of(p: &Value, dflt: usize, max: usize) -> usize { p.get("limit").and_th
 
 /// The buttons of an ask, in the desktop's words (present/thread.rs asks_json): the files' approval of a buy thread is Send or Not now, a settings proposal Approve or Reject.
 fn ask_options(kind: &str, tool: &str, options: &str) -> Value {
+    if kind == "plan" { return json!([{"id":"implement","label":"Implement"},{"id":"dismiss","label":"Dismiss"}]) }
     if kind == "approval" { return match tool {
         "order_quote" => json!([{"id":"accept","label":"Send"},{"id":"decline","label":"Not now"}]),
         "settings_proposal" => json!([{"id":"accept","label":"Approve"},{"id":"decline","label":"Reject"}]),
@@ -210,7 +223,8 @@ fn ask_entry(e: &Value, answered: Option<&str>) -> Value {
     let q = if pick { format!("{detail}\n{}\n{}", s(e, "options").lines().filter(|l| !l.trim().is_empty()).map(|l| format!("\u{2022} {}", l.trim())).collect::<Vec<_>>().join("\n"), crate::settings::order::PICK_PHONE_HINT) }
         else if kind == "approval" && tool == "order_quote" { format!("Send these files for a quote?\n{detail}") }
         else if kind == "approval" { if detail.is_empty() { tool.to_string() } else { format!("{tool}: {detail}") } } else { detail.to_string() };
-    let mut ask = json!({"id":s(e,"id"),"state":if answered.is_some() {"answered"} else {"open"},"question":q,"options":if pick { json!([]) } else { ask_options(kind, tool, s(e, "options")) }});
+    let mut ask = json!({"id":s(e,"id"),"kind":kind,"head":if kind == "plan" { json!("Proposed plan") } else { Value::Null },"state":if answered.is_some() {"answered"} else {"open"},"question":q,"options":if pick { json!([]) } else { ask_options(kind, tool, s(e, "options")) }});
+    if kind == "plan" { ask["revise"] = json!(true); }
     if let Some(a) = answered { ask["answered"] = json!(a) }
     json!({"id":format!("ask:{}",s(e,"id")),"kind":"ask","text":q,"at":ms(e["at"].as_u64().unwrap_or(0)),"ask":ask})
 }
@@ -683,6 +697,10 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
             // the bots, the uberbot or where the home is changed (a home move): the phones read bots.list again, and an open chat of the uberbot follows it
             "BotSet" | "BotDeleted" | "UberSet" => bots_moved = true,
             "SettingSet" if matches!(s(&e, "key"), "home.moving" | "home.at") => bots_moved = true,
+            "SettingSet" if s(&e, "key").starts_with("plan.once.") || s(&e, "key").starts_with("plan.executing.") => {
+                let t = s(&e, "key").rsplit_once('.').map(|x| x.1).unwrap_or("");
+                if !t.is_empty() && !upsert.contains(&t.to_string()) { upsert.push(t.to_string()) }
+            }
             "ProjectCreated" | "ProjectRenamed" => projects.push((s(&e, "id").to_string(), true)),
             "ProjectRemoved" => projects.push((s(&e, "id").to_string(), false)),
             "MessagePosted" => {

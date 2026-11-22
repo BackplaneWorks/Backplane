@@ -834,6 +834,13 @@ impl Actor {
         let sbs = crate::copy::person_turn_allowed();
         if crate::copy::turn_gated(person) { return self.codex_ride(&msg, &text, &role, origin).await } // Copy.turns, default-deny: on a copy only the person's own turn.start starts or writes to an agent; anything else (a carry, a retry, a resume, failover, a routine, a bot, mail, a far-send) waits in the ride
         let mut t = t;
+        for e in &extra {
+            if e["$"] == "ModesSet" && e["id"].as_str() == Some(self.th.as_str()) {
+                if let Some(i) = e["interaction"].as_str() { t.interaction = i.to_string(); }
+                if let Some(r) = e["runtime"].as_str() { if !r.is_empty() { t.runtime = r.to_string(); } }
+                if let Some(m) = e["model"].as_str() { t.model = m.to_string(); }
+            }
+        }
         if sbs { // the person's turn here (SIDE-BY-SIDE.md checks 2-5; 1 is the caller, 6 the child's environment): refused with its reason, or forced permissions and a fresh session
             if let Err(why) = Self::person_checks(self.ag.clone(), cwd.clone()).await {
                 let (now, th) = (now_s(), self.th.clone()); self.commit(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("rf", now, self.ag.seq()),"tone":"error","kind":"refused","summary":format!("not started: {why}"),"at":now})]).await; return Err(why) }

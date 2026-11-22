@@ -116,6 +116,7 @@ fn pick_request(action: &str, th: &str, value: &str) -> (&'static str, Value) {
         "speed" => ("thread.speed", json!({"thread":th,"speed":value})),
         "provider" => ("thread.provider", json!({"thread":th,"provider":value})),
         "runtime" => ("thread.modes", json!({"thread":th,"runtime":value})),
+        "interaction" => ("thread.modes", json!({"thread":th,"interaction":value})),
         _ => ("thread.modes", json!({"thread":th,"model":value})),
     }
 }
@@ -237,11 +238,18 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "thread.picker" => picker(hub, p).await,
+        "thread.planonce" => {
+            let th = s(p, "thread"); if !known_any(hub, &*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
+            match rpc(hub, c, "thread.planonce", json!({"thread":th,"on":p["on"] == true})).await {
+                Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})),
+                Err(e) => Err(e),
+            }
+        }
         "thread.pick" => {
             // this hub's thread or a linked machine's (its picks go there: `rpc`, net/far.rs METHODS; its account is chosen on its own machine, the router says so)
             let (th, value) = (s(p, "thread"), s(p, "value")); if !known_any(hub, &*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
             let r = match s(p, "action") {
-                a @ ("model" | "effort" | "speed" | "provider" | "runtime") => { let (m, q) = pick_request(a, th, value); rpc(hub, c, m, q).await }
+                a @ ("model" | "effort" | "speed" | "provider" | "runtime" | "interaction") => { let (m, q) = pick_request(a, th, value); rpc(hub, c, m, q).await }
                 // the account the thread runs on: the desktop's accounts.select, as the binding is now
                 "account" => {
                     let (profile, epoch) = value.split_once('\u{1f}').map_or((value, 0), |(a, b)| (a, b.parse::<u64>().unwrap_or(0)));
@@ -250,7 +258,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
                     rpc(hub, c, "accounts.select", json!({"thread":th,"profile":profile,"epoch":epoch,"expected":expected})).await
                 }
                 "usage" => return Some(Err(err("usage rows are to read"))),
-                _ => return Some(Err(err("action: model, effort, provider, runtime or account"))),
+                _ => return Some(Err(err("action: model, effort, speed, provider, runtime, interaction or account"))),
             };
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
@@ -306,8 +314,8 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
         "order.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
             rpc(hub, c, "order.buy", json!({"thread":th})).await.map(|r| json!({"thread":r["thread"]})) }
         // feature "fabprofile": the project's fab profile (fab/mod.rs Fab.view), the same the desktop and the agents' fab_profile read; `action` get, pick or seen
-        // feature "plan": the routing plan's person-side calls (plan/mod.rs): approve or reject items, a layer or all, stop routing, focus an item
-        "plan.approve" | "plan.stop" | "plan.focus" => { if s(p, "pro").is_empty() && s(p, "path").is_empty() { return Some(Err(err("pro (the project's .kicad_pro)"))) }
+        // feature "plan": the routing plan's person-side calls (plan/mod.rs): approve or reject items, a layer or all, stop routing, verify, focus an item, or toggle plan-before-routing
+        "plan.approve" | "plan.stop" | "plan.verify" | "plan.focus" | "plan.enable" => { if m != "plan.enable" && s(p, "pro").is_empty() && s(p, "path").is_empty() { return Some(Err(err("pro (the project's .kicad_pro)"))) }
             rpc(hub, c, m, p.clone()).await.map(|r| json!({"result": r["result"]})) }
         // feature "mgmt": the management panels (docs/MANAGEMENT.md) and the design checks, the same calls the desktop makes; a BOM edit from the
         // phone is the person's, as the desktop's (kicad/bomedit.rs)

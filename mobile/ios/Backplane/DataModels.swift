@@ -35,16 +35,19 @@ struct DTool: Codable, Equatable {
 struct DAsk: Codable, Equatable {
     var id: String
     var state: String   // open | answered
+    var kind: String = ""
     var question: String
     var options: [DOption]
     var answered: String?
+    var revise: Bool = false
     var isOpen: Bool { state == "open" }
-    enum CodingKeys: String, CodingKey { case id, state, question, options, answered }
+    enum CodingKeys: String, CodingKey { case id, state, kind, question, options, answered, revise }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        id = c.str(.id); state = c.str(.state); question = c.str(.question)
+        id = c.str(.id); state = c.str(.state); kind = c.str(.kind); question = c.str(.question)
         options = (try? c.decode([DOption].self, forKey: .options)) ?? []
         answered = try? c.decode(String.self, forKey: .answered)
+        revise = c.bool(.revise)
     }
 }
 

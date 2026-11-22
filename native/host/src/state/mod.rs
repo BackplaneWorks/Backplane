@@ -95,6 +95,9 @@ pub struct State {
     pub snooze_until: HashMap<String, u64>,
     /// ModesSet: a thread's permission mode when it is not the default ("approval-required", "auto-accept-edits", "auto"); absent: full access
     pub runtime: HashMap<String, String>,
+    /// ModesSet: a thread's interaction mode when it is not default ("plan"); absent: default
+    #[serde(default)]
+    pub interaction: HashMap<String, String>,
     /// AskOpened/AskClosed: the open asks' content, oldest first: (id, thread, kind, tool, detail, options). Bounded by the asks that are open.
     pub ask_data: Vec<(String, String, String, String, String, String)>,
     /// ThreadOrdered/ProjectOrdered: manual order keys (hex) per thread id, and per "project:<id>" for a project's place; (pinned key, active key)
@@ -204,6 +207,7 @@ impl State {
                 let th = s(e, "thread")?; let st = Turn::parse(s(e, "state")?).unwrap_or(Turn::Idle); let at = n(e, "at")?;
                 self.todos_turn(st, th, at);
                 self.settings.remove(&format!("turn.live.{th}")); // a turn's running numbers are its own: one that began or ended has none yet
+                if st != Turn::Running { self.settings.remove(&format!("plan.executing.{th}")); }
                 let t = self.thread_mut(th); t.activity = t.activity.max(at); t.turn = st;
             }
             "PendingChanged" => { let th = s(e, "thread")?; let c = n(e, "count")?; self.thread_mut(th).pending = c; }
@@ -232,9 +236,10 @@ impl State {
             "SessionSet" => { let id = s(e, "id")?; let se = s(e, "session")?.to_string();
                 if self.threads.get(id).map_or(true, |t| t.session != se) { self.ext.sess.entry(id.into()).or_default().began = e.get("at").and_then(Value::as_u64).unwrap_or(0) }
                 self.thread_mut(id).session = se; }
-            "ModesSet" => { let id = s(e, "id")?; let m = s(e, "model")?.to_string(); let rt = s(e, "runtime")?.to_string(); s(e, "interaction")?; self.thread_mut(id).model = m;
+            "ModesSet" => { let id = s(e, "id")?; let m = s(e, "model")?.to_string(); let rt = s(e, "runtime")?.to_string(); let im = s(e, "interaction")?.to_string(); self.thread_mut(id).model = m;
                 // the permission mode (Thread.runtime): only a mode other than the default is kept, so the map is bounded by the threads that changed it
-                if matches!(rt.as_str(), "approval-required" | "auto-accept-edits" | "auto") { self.runtime.insert(id.to_string(), rt); } else { self.runtime.remove(id); } }
+                if matches!(rt.as_str(), "approval-required" | "auto-accept-edits" | "auto") { self.runtime.insert(id.to_string(), rt); } else { self.runtime.remove(id); }
+                if im == "plan" { self.interaction.insert(id.to_string(), im); } else { self.interaction.remove(id); } }
             "ThreadMerged" => {
                 let id = s(e, "id")?; let url = s(e, "url")?.to_string(); let at = n(e, "at")?;
                 let t = self.thread_mut(id); t.override_ = Override::ForcedSettled; t.settled_at = at; t.pinned = false;

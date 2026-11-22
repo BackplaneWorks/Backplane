@@ -10,7 +10,7 @@ private fun <T> JSONArray?.list(f: (JSONObject) -> T): List<T> = if (this == nul
 
 data class DOption(val id: String, val label: String)
 data class DTool(val name: String, val summary: String, val state: String, val sub: String = "", val result: String = "") // sub: an Agent call's subagent (feature subview); result: a subagent's tool result
-data class DAsk(val id: String, val state: String, val question: String, val options: List<DOption>, val answered: String?) { val open get() = state == "open" }
+data class DAsk(val id: String, val state: String, val question: String, val options: List<DOption>, val answered: String?, val kind: String = "", val revise: Boolean = false) { val open get() = state == "open" }
 data class DAttachment(val id: String, val name: String, val mime: String, val bytes: Long)
 data class DEntry(
     val id: String, val kind: String, val text: String, val at: Long, val clientId: String? = null, val replaces: String? = null,
@@ -93,7 +93,7 @@ object DialGeometry {
 }
 
 fun parseOption(o: JSONObject) = DOption(o.str("id"), o.str("label").ifEmpty { o.str("id") })
-fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"), o.optJSONArray("options").list(::parseOption), if (o.has("answered") && !o.isNull("answered")) o.str("answered") else null)
+fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"), o.optJSONArray("options").list(::parseOption), if (o.has("answered") && !o.isNull("answered")) o.str("answered") else null, o.str("kind"), o.optBoolean("revise", false))
 fun parseEntry(o: JSONObject) = DEntry(
     o.str("id"), o.str("kind"), o.str("text"), o.lng("at"), o.optString("clientId", "").ifEmpty { null }, o.optString("replaces", "").ifEmpty { null },
     o.optBoolean("live", false),

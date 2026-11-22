@@ -117,7 +117,10 @@ export interface PlanItem {
   reference?: string;
   routed?: number;
   total?: number;
+  width?: number | null;
+  impedance?: string | null;
   problems?: number;
+  problem_text?: string;
 }
 
 export interface PlanLayer {
@@ -126,6 +129,8 @@ export interface PlanLayer {
   stackup?: string;
   status?: string;
   done?: number;
+  approved?: number;
+  total?: number;
   items?: PlanItem[];
 }
 
@@ -135,7 +140,21 @@ export interface PlanInfo {
   empty?: boolean;
   live?: boolean;
   routing?: boolean;
+  revision?: number;
+  total?: number;
   awaiting?: number;
+  approved?: number;
+  blocked?: number;
+  done?: number;
+  routed?: number;
+  verified?: number;
+  rejected?: number;
+  status?: string;
+  stackup_summary?: string;
+  impedances?: string[];
+  asks?: Array<{ id?: string; what?: string; note?: string }>;
+  elsewhere?: Array<{ pcb?: string; rel?: string; name?: string }>;
+  draw?: { bands?: unknown[]; regions?: unknown[] };
   keys_note?: string;
   layers?: PlanLayer[];
 }
@@ -326,7 +345,8 @@ export function planMark(item: PlanItem): string {
     case "edited": return "✎";
     case "verified": return "✓✓";
     case "routed": return "100%";
-    case "rejected": return "✗";
+    case "rejected":
+    case "failed": return "✗";
     case "routing":
       return typeof item.routed === "number" && typeof item.total === "number" && item.total > 0
         ? `${item.routed}/${item.total}`
@@ -336,6 +356,59 @@ export function planMark(item: PlanItem): string {
     default:
       return "";
   }
+}
+
+export function planStatusBadge(d: PlanInfo): {
+  key: string;
+  label: string;
+  tone: "ok" | "warn" | "bad" | "accent" | "faint";
+} {
+  switch (d.status) {
+    case "blocked": return { key: "gpui.mgmt.plan.st.blocked", label: "Blocked", tone: "bad" };
+    case "routing": return { key: "gpui.mgmt.plan.st.routing", label: "Routing", tone: "accent" };
+    case "awaiting": return { key: "gpui.mgmt.plan.st.awaiting", label: "Awaiting review", tone: "warn" };
+    case "verified": return { key: "gpui.mgmt.plan.st.verified", label: "Verified", tone: "ok" };
+    case "routed": return { key: "gpui.mgmt.plan.st.routed", label: "Routed", tone: "ok" };
+    case "ready": return { key: "gpui.mgmt.plan.st.approved", label: "Approved", tone: "accent" };
+    case "partial": return { key: "gpui.mgmt.plan.st.partial", label: "Partial", tone: "warn" };
+    case "rejected": return { key: "gpui.mgmt.plan.st.rejected", label: "Rejected", tone: "bad" };
+    default:
+      if ((d.blocked ?? 0) > 0) return { key: "gpui.mgmt.plan.st.blocked", label: "Blocked", tone: "bad" };
+      if (d.routing) return { key: "gpui.mgmt.plan.st.routing", label: "Routing", tone: "accent" };
+      if ((d.awaiting ?? 0) > 0) return { key: "gpui.mgmt.plan.st.awaiting", label: "Awaiting review", tone: "warn" };
+      return { key: "gpui.mgmt.plan.st.empty", label: "Empty", tone: "faint" };
+  }
+}
+
+export function planProgressSegments(d: PlanInfo): Array<{
+  count: number;
+  tone: "ok" | "accent" | "input" | "warn" | "bad";
+}> {
+  let doneN = d.done ?? 0;
+  let approvedN = d.approved ?? 0;
+  const awaitingN = d.awaiting ?? 0;
+  const blockedN = d.blocked ?? 0;
+  let routingN = 0;
+
+  if (typeof d.total !== "number") {
+    for (const l of d.layers ?? []) {
+      for (const it of l.items ?? []) {
+        if (it.state === "routed" || it.state === "verified") doneN += 1;
+        else if (it.state === "routing") routingN += 1;
+        else if (it.state === "approved") approvedN += 1;
+      }
+    }
+  } else if (d.routing) {
+    routingN = Math.max(0, d.total - (doneN + approvedN + awaitingN + blockedN));
+  }
+
+  return [
+    { count: doneN, tone: "ok" },
+    { count: routingN, tone: "accent" },
+    { count: approvedN, tone: "input" },
+    { count: awaitingN, tone: "warn" },
+    { count: blockedN, tone: "bad" },
+  ];
 }
 
 export function drcWords(state: string): { text: string; button: string | null } {

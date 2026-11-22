@@ -26,6 +26,13 @@ pub fn state(item: &Value, derived: &Value) -> &'static str {
         _ => "proposed",
     }
 }
+/// First human-readable audit/DRC problem text on an item's derived entry, if any.
+fn problem_text(d: &Value) -> String {
+    d["problems"].as_array().and_then(|a| a.first()).and_then(|p| {
+        p["message"].as_str().or_else(|| p["text"].as_str()).or_else(|| p["kind"].as_str())
+    }).unwrap_or("").to_string()
+}
+
 /// The panel's data from a plan (with its `derived` when KiCad gave it).
 pub fn data(plan: &Value, asks: &[Value], live: bool) -> Value {
     let groups = plan["groups"].as_array().cloned().unwrap_or_default();
@@ -38,12 +45,14 @@ pub fn data(plan: &Value, asks: &[Value], live: bool) -> Value {
         let (r, t) = (d["routed"].as_u64().or(c["progress"]["routed"].as_u64()), d["total"].as_u64().or(c["progress"]["total"].as_u64()));
         rows.push((st(c, "layer").to_string(), json!({"id": c["id"], "kind": "corridor", "name": g["name"].as_str().unwrap_or(st(c, "group")), "color": g["color"].as_str().unwrap_or("#8a8a8a"),
             "nets": g["nets"].as_array().map_or(0, Vec::len), "state": state(c, &d), "locked": c["locked"] == true, "order": c["order"], "routed": r, "total": t,
-            "problems": d["problems"].as_array().map_or(0, Vec::len)})));
+            "width": c["width"].as_f64().or_else(|| g["width"].as_f64()), "impedance": g["impedance"].clone(),
+            "problems": d["problems"].as_array().map_or(0, Vec::len), "problem_text": problem_text(&d)})));
     }
     for p in plan["planes"].as_array().into_iter().flatten() {
         let d = der(st(p, "id"));
         rows.push((st(p, "layer").to_string(), json!({"id": p["id"], "kind": "plane", "name": p["net"], "color": p["color"].as_str().unwrap_or("#5a7a9a"), "nets": 1, "state": state(p, &d),
-            "locked": p["locked"] == true, "reference": p["reference"], "problems": d["problems"].as_array().map_or(0, Vec::len)})));
+            "locked": p["locked"] == true, "reference": p["reference"],
+            "problems": d["problems"].as_array().map_or(0, Vec::len), "problem_text": problem_text(&d)})));
     }
     for (l, _) in &rows { if !layers.contains(l) { layers.push(l.clone()) } }
     let stack = |l: &str| plan["derived"]["stackup"][l].as_str().map(str::to_string).unwrap_or_default();
@@ -51,14 +60,39 @@ pub fn data(plan: &Value, asks: &[Value], live: bool) -> Value {
         let its: Vec<&Value> = rows.iter().filter(|(x, _)| x == l).map(|(_, v)| v).collect();
         let lv = plan["layers"].as_array().into_iter().flatten().find(|x| st(x, "layer") == l).cloned().unwrap_or(json!({"status": "proposed", "role": ""}));
         let done = its.iter().filter(|v| matches!(v["state"].as_str(), Some("routed") | Some("verified"))).count();
-        json!({"layer": l, "role": lv["role"], "status": lv["status"], "stackup": stack(l), "done": done, "items": its})
+        let approved = its.iter().filter(|v| v["state"] == "approved").count();
+        json!({"layer": l, "role": lv["role"], "status": lv["status"], "stackup": stack(l), "done": done, "approved": approved, "total": its.len(), "items": its})
     }).collect();
+    let total = rows.len();
     let awaiting = rows.iter().filter(|(_, v)| matches!(v["state"].as_str(), Some("proposed") | Some("edited"))).count();
+    let approved = rows.iter().filter(|(_, v)| v["state"] == "approved").count();
     let blocked = rows.iter().filter(|(_, v)| v["state"] == "blocked").count();
     let routing = rows.iter().any(|(_, v)| v["state"] == "routing");
+    let done = rows.iter().filter(|(_, v)| matches!(v["state"].as_str(), Some("routed") | Some("verified"))).count();
+    let routed = rows.iter().filter(|(_, v)| v["state"] == "routed").count();
+    let verified = rows.iter().filter(|(_, v)| v["state"] == "verified").count();
+    let failed = rows.iter().filter(|(_, v)| v["state"] == "failed").count();
+    let rejected = rows.iter().filter(|(_, v)| matches!(v["state"].as_str(), Some("rejected") | Some("failed"))).count();
+    let status = if total == 0 { "empty" }
+        else if blocked > 0 || failed > 0 { "blocked" }
+        else if routing { "routing" }
+        else if awaiting > 0 { "awaiting" }
+        else if verified == total { "verified" }
+        else if done == total { "routed" }
+        else if approved > 0 { "ready" }
+        else if done > 0 { "partial" }
+        else { "rejected" };
+    let stackup_summary = plan["derived"]["stackup_summary"].as_str().map(str::to_string).unwrap_or_else(|| {
+        ls.iter().filter_map(|l| {
+            let txt = l["stackup"].as_str().unwrap_or("");
+            (!txt.is_empty()).then(|| format!("{}: {txt}", l["layer"].as_str().unwrap_or("")))
+        }).collect::<Vec<_>>().join(" · ")
+    });
+    let impedances = plan["derived"]["impedances"].clone();
     let draw = draw(plan, &rows);
     json!({"draw": draw, "badge": {"n": awaiting + blocked, "tone": if blocked > 0 { "bad" } else if awaiting > 0 { "warn" } else { "" }}, "revision": plan["revision"], "live": live,
-        "awaiting": awaiting, "blocked": blocked, "routing": routing, "asks": asks, "layers": ls, "empty": rows.is_empty()})
+        "total": total, "awaiting": awaiting, "approved": approved, "blocked": blocked, "routing": routing, "done": done, "routed": routed, "verified": verified, "rejected": rejected,
+        "status": status, "stackup_summary": stackup_summary, "impedances": impedances, "asks": asks, "layers": ls, "empty": rows.is_empty()})
 }
 
 /// What the viewers draw over the board (read-only bands and regions, the floorplanner's look per state): corridors as bands along their
@@ -193,5 +227,41 @@ mod tests {
         let e = elsewhere(&asking, "/p/Nodes/A/A.kicad_pcb", "/p");
         assert_eq!(e, vec![json!({"pcb": "/p/Nodes/A_new/A_new.kicad_pcb", "rel": "Nodes/A_new/A_new.kicad_pcb", "name": "A_new"})], "this board and other projects' boards are left out");
         assert!(elsewhere(&asking, "/p/x.kicad_pcb", "").is_empty());
+    }
+    #[test] fn plan_panel_counts_summary_impedances_and_item_details() {
+        let plan = json!({
+            "revision": 7,
+            "layers": [{"layer": "F.Cu", "role": "signal", "status": "approved"}],
+            "groups": [{"id": "usb", "name": "USB_DP/DM", "color": "#4f8df5", "nets": ["USB_P", "USB_N"], "width": 0.25, "impedance": "90 ohm diff"}],
+            "corridors": [
+                {"id": "c1", "group": "usb", "layer": "F.Cu", "status": "verified", "progress": {"routed": 2, "total": 2}},
+                {"id": "c2", "group": "usb", "layer": "F.Cu", "status": "approved"}
+            ],
+            "planes": [{"id": "p1", "net": "GND", "layer": "F.Cu", "status": "routed"}],
+            "derived": {
+                "stackup": {"F.Cu": "Microstrip over GND"},
+                "impedances": ["90 ohm diff USB", "50 ohm SE"],
+                "items": {"c2": {"problems": [{"message": "Clearance violation near U3"}]}}
+            }
+        });
+        let d = data(&plan, &[], true);
+        assert_eq!((d["total"].as_u64(), d["done"].as_u64(), d["verified"].as_u64(), d["routed"].as_u64(), d["blocked"].as_u64()), (Some(3), Some(2), Some(1), Some(1), Some(1)));
+        assert_eq!(d["status"], "blocked");
+        assert_eq!(d["stackup_summary"], "F.Cu: Microstrip over GND");
+        assert_eq!(d["impedances"], json!(["90 ohm diff USB", "50 ohm SE"]));
+        let c1 = &d["layers"][0]["items"][0];
+        assert_eq!((c1["width"].as_f64(), c1["impedance"].as_str()), (Some(0.25), Some("90 ohm diff")));
+        assert_eq!(d["layers"][0]["items"][1]["problem_text"], "Clearance violation near U3");
+        assert!(crate::api::RpcHandler::methods(&crate::plan::Rpc).contains(&"plan.verify"));
+
+        let rejected_only = json!({"corridors": [{"id": "c1", "group": "usb", "layer": "F.Cu", "status": "rejected"}]});
+        assert_eq!(data(&rejected_only, &[], false)["status"], "rejected");
+        let failed_item = json!({"corridors": [{"id": "c1", "group": "usb", "layer": "F.Cu", "status": "failed"}]});
+        assert_eq!(data(&failed_item, &[], false)["status"], "blocked");
+        let partial_plan = json!({"corridors": [
+            {"id": "c1", "group": "usb", "layer": "F.Cu", "status": "routed"},
+            {"id": "c2", "group": "usb", "layer": "F.Cu", "status": "rejected"}
+        ]});
+        assert_eq!(data(&partial_plan, &[], false)["status"], "partial");
     }
 }

@@ -281,7 +281,7 @@ pub fn refused(err: &str) -> String {
 }
 pub struct Rpc;
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["plan.approve", "plan.stop", "plan.get", "plan.focus", "plan.enable"] }
+    fn methods(&self) -> &'static [&'static str] { &["plan.approve", "plan.stop", "plan.verify", "plan.get", "plan.focus", "plan.enable"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let path = if !sv(p, "pro").is_empty() { sv(p, "pro") } else { sv(p, "path") };
@@ -300,6 +300,7 @@ impl RpcHandler for Rpc {
                     "plan.approve" => approve(hub, &pcb, sv(p, "layer"), &ids, p["approve"] != false).await,
                     "plan.focus" => panel::focus(hub, if sv(p, "pro").is_empty() { sv(p, "path") } else { sv(p, "pro") }, sv(p, "id")).await,
                     "plan.stop" => { let r = call(hub, None, &pcb, "StopPlanRouting", json!({"board": spec(&pcb)})).await; events::settle(hub, &pcb).await; r }
+                    "plan.verify" => { let r = call(hub, None, &pcb, "VerifyPlan", json!({"board": spec(&pcb)})).await; events::settle(hub, &pcb).await; r }
                     _ => read_plan(hub, None, &pcb, true).await,
                 }
             }.await;

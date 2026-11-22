@@ -471,6 +471,31 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 4, "thread.review", json!({"thread":"t2"})).await; assert_eq!(r["result"]["review"], Value::Null, "no review: no bar: {r}");
     let r = ask(&mut ws, 5, "thread.review", json!({})).await; assert!(r["error"].is_string() || r["result"].is_null(), "a thread is needed: {r}");
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_exposes_plan_asks_and_plan_mode_state() {
+    let extra = "{\"$\":\"ModesSet\",\"id\":\"t1\",\"runtime\":\"full-access\",\"interaction\":\"plan\",\"model\":\"\",\"at\":1700000050}\n{\"$\":\"AskOpened\",\"id\":\"qp1\",\"thread\":\"t1\",\"kind\":\"plan\",\"tool\":\"ExitPlanMode\",\"detail\":\"# Plan\\n1. Route USB\",\"options\":\"\",\"at\":1700000051}\n";
+    let (hub, port) = up_with("planask", extra).await;
+    let _policies = crate::statehost::start_unshared(hub.hub.clone());
+    for _ in 0..200 {
+        let ready = crate::statehost::with_state_of(&hub.hub, |st| {
+            st.interaction.get("t1").map(String::as_str) == Some("plan")
+                && st.asks.get("qp1").is_some_and(|(th, open)| th == "t1" && *open)
+        }).unwrap_or(false);
+        if ready { break }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t1"})).await;
+    let plan_entry = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["id"] == "ask:qp1").unwrap();
+    assert_eq!(plan_entry["ask"]["kind"], "plan");
+    assert_eq!(plan_entry["ask"]["head"], "Proposed plan");
+    assert_eq!(plan_entry["ask"]["revise"], true);
+    assert_eq!(plan_entry["ask"]["options"], json!([{"id":"implement","label":"Implement"},{"id":"dismiss","label":"Dismiss"}]));
+    let r = ask(&mut ws, 2, "threads.list", json!({})).await;
+    let t1 = r["result"]["threads"].as_array().unwrap().iter().find(|t| t["id"] == "t1").unwrap();
+    assert_eq!(t1["planMode"]["interaction"], "plan");
+    assert_eq!(t1["planMode"]["phase"], "pending");
+    assert_eq!(t1["planMode"]["pending"], true);
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_hubs_note_to_the_agent_is_marked_agent_only_on_a_page_and_live() {
     let (hub, port) = up("agentonly").await;
     crate::settings::order::test_link("q_live", "http://127.0.0.1:3871/q/q_live?t=tok");
