@@ -1,6 +1,7 @@
 // data/1 JSON + binary CBOR WebSocket client for Backplane web UI.
 // Authenticates strictly via the HttpOnly __Host-bp_web cookie (never ?token=).
 import { RawInflater } from "./inflate";
+import type { NoProviderNotice } from "./provider-notice";
 
 export interface HomeMoving {
   to: string;
@@ -35,6 +36,7 @@ export interface HelloFrame {
   theme?: string;
   locale?: string;
   notice?: unknown;
+  noProvider?: NoProviderNotice | null;
 }
 
 export interface DataPush {

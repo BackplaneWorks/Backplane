@@ -3,9 +3,18 @@
 //! its project's thread and the viewer tab that draws it, never the system's app for a design file), anything else says so.
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Route { Web(String), Hub(String), File(String), /** a part, pin or net of the thread's design (screens/xprobe.rs) */ Design(String), Note(&'static str),
+pub enum Route { Web(String), Hub(String), File(String), Settings(String), /** a part, pin or net of the thread's design (screens/xprobe.rs) */ Design(String), Note(&'static str),
     /** an agent's plan review (`backplane://plan/<board from the project folder>`, the hub's plan/mod.rs `review_link`): that board with its Plan panel */ Plan(String),
     /** a file an agent shared (`/s/<token>/<name>`, the hub's files/share.rs `share_route`): it downloads from the hub */ Share(String) }
+
+/// Match `backplane://settings/<page>` (or app scheme alias) and return the normalized page name.
+pub fn settings_page(href: &str) -> Option<String> {
+    let h = href.trim();
+    let rest = ["backplane://settings/", "bpgpui://settings/", "backplane-gpui://settings/"]
+        .iter().find_map(|p| h.strip_prefix(p))?;
+    let page = rest.split(['#', '?']).next().unwrap_or("").trim_end_matches('/');
+    (!page.is_empty()).then(|| page.to_string())
+}
 
 /// `%XX` decoded (a link's path segments, as the hub's md/refs.rs `uri` writes them); a bad escape is kept as it is.
 fn unpct(s: &str) -> String {
@@ -18,6 +27,7 @@ fn unpct(s: &str) -> String {
 pub fn route(href: &str, file: bool) -> Route {
     let h = href.trim();
     if let Some(rel) = h.strip_prefix("backplane://plan/").map(|r| r.split(['#', '?']).next().unwrap_or("")).filter(|r| !r.is_empty()) { return Route::Plan(rel.split('/').map(unpct).collect::<Vec<_>>().join("/")) }
+    if let Some(page) = settings_page(h) { return Route::Settings(page) }
     if let Some(w) = h.strip_prefix(super::xprobe::HREF).filter(|w| !w.is_empty()) { return Route::Design(w.to_string()) }
     if h.starts_with("backplane://") || crate::pairing::is_open_link(h) { return Route::Hub(h.to_string()) }
     if h.starts_with("https://") || h.starts_with("http://") || h.starts_with("mailto:") { return Route::Web(h.to_string()) }
@@ -179,5 +189,11 @@ mod tests {
     }
     #[test] fn the_hover_target_drops_a_message_anchor_only_on_backplane_links() {
         assert_eq!(target("backplane://thread/t1#m3"), "backplane://thread/t1"); assert_eq!(target("https://a.io/#x"), "https://a.io/#x");
+    }
+    #[test] fn settings_links_route_to_settings_page() {
+        assert_eq!(route("backplane://settings/accounts", false), Route::Settings("accounts".into()));
+        assert_eq!(route("bpgpui://settings/accounts/", false), Route::Settings("accounts".into()));
+        assert_eq!(route("backplane://settings/agents?x=1", false), Route::Settings("agents".into()));
+        assert_eq!(settings_page("https://example.com/settings/accounts"), None);
     }
 }

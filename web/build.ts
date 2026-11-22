@@ -106,6 +106,11 @@ function collectI18nKeys(tsFiles: string[]): string[] {
     "gpui.mgmt.plan.st.partial",
     "gpui.mgmt.plan.st.rejected",
     "gpui.mgmt.plan.st.empty",
+    "provider.notice.head",
+    "provider.notice.text.none",
+    "provider.notice.text.signedout",
+    "provider.notice.button",
+    "provider.notice.senderr",
   ]);
   const re = /\bt\(\s*["']([a-zA-Z0-9_.-]+)["']/g;
   for (const f of tsFiles) {

@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -867,7 +867,7 @@ pub fn phone_info_frame(v: &Value) -> Option<Value> {
     let keep: serde_json::Map<String, Value> = v["info"].as_object()?.iter().filter(|(k, _)| phone_info(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
     (!keep.is_empty()).then(|| json!({"t":"info","info":keep}))
 }
-pub fn phone_info(key: &str) -> bool { key == "hub.offer" || key == "hub.back" || key.starts_with("mgmt.") || key.starts_with("kicad.checks.") || key.starts_with("review.") }
+pub fn phone_info(key: &str) -> bool { key == "hub.offer" || key == "hub.back" || key == crate::settings::provider_notice::INFO_KEY || key.starts_with("mgmt.") || key.starts_with("kicad.checks.") || key.starts_with("review.") }
 
 async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Value {
     handle_for(hub, c, subs, v, false).await
@@ -1009,7 +1009,8 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
             crate::import014::phone_state(&hub).await,
         )
     };
-    let mut hello = json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating}); if let Some(c) = z { hello["z"] = json!(c) }
+    let no_provider = crate::settings::provider_notice::for_hub(&hub).await.map_or(Value::Null, |n| n.json());
+    let mut hello = json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating,"noProvider":no_provider}); if let Some(c) = z { hello["z"] = json!(c) }
     // the home (feature "home", net/home.rs): where the uberbot lives, as this hub sees it; `k:"home"` pushes follow it on a lists subscription
     let mut home_sent = crate::net::home::now(&hub).await; hello["home"] = home_sent.clone();
     tx.send(pack(&hello, json_mode)).await?;

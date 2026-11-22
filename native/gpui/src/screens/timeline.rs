@@ -696,6 +696,10 @@ impl Backplane {
                 } }
             super::linkroute::Route::Share(u) => { self.note.clear(); let name = super::linkroute::share_name(&u).unwrap_or_default(); self.download(u, name, super::dlbar::From::Other, cx) }
             super::linkroute::Route::Web(u) => cx.open_url(&u),
+            super::linkroute::Route::Settings(page) => {
+                self.note.clear();
+                if page == "accounts" { self.open_accounts(cx); } else { self.go("link-open", format!("backplane://settings/{page}"), cx); }
+            }
             super::linkroute::Route::Hub(u) => { self.note.clear(); self.go("link-open", u, cx); }
             super::linkroute::Route::Note(n) => self.note = n.to_string(),
             super::linkroute::Route::Design(w) => super::xprobe::clicked(self, &w),

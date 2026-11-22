@@ -471,6 +471,8 @@ button.primary.stop {
   font-size: 12px;
 }
 .bp-review-bar { border-left: 2px solid var(--warn); }
+.bp-no-provider { border-left: 2px solid var(--warn); }
+.bp-no-provider-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .bp-unanswered { border-left: 2px solid var(--bad); }
 .bp-unanswered-body { display: flex; flex-direction: column; gap: 2px; }
 .bp-banner-actions { display: flex; gap: 6px; flex-shrink: 0; }
@@ -645,7 +647,39 @@ html.light .bp-code-block { background: var(--panel); }
 .bp-popup-row.active, .bp-popup-row:hover { background: var(--raise); }
 .bp-popup-name { font-family: var(--mono); color: var(--accent); font-weight: 600; flex-shrink: 0; }
 .bp-popup-desc { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.bp-composer-err { color: var(--bad); font-size: 12px; }
+.bp-composer-err {
+  color: var(--bad);
+  font-size: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.bp-composer-err-act {
+  font-size: 11px;
+  padding: 2px 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--accent);
+}
+.bp-composer-err-act:hover { background: var(--raise); }
+.bp-link-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  text-decoration: none;
+  background: var(--raise);
+  border: 1px solid var(--line);
+  color: var(--text);
+  cursor: pointer;
+}
+.bp-link-btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
 .bp-composer-input {
   width: 100%;
   min-height: 68px;

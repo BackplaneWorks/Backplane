@@ -263,6 +263,7 @@ pub async fn refresh(hub: &Arc<Hub>) -> bool {
     if !super::models::set_live(&info) { return false }
     let _ = std::fs::write(hub.cfg.home.join("models.cache.part"), cache_text(&info)).and_then(|_| std::fs::rename(hub.cfg.home.join("models.cache.part"), hub.cfg.home.join("models.cache")));
     hub.push_all(&json!({"t":"info","info":{"models":super::models::info(),"models.all":super::models::all()}}));
+    super::provider_notice::publish(hub).await;
     hub.bump_views();
     // a thread made before its agent was found (onboarding's first thread, on Claude, with only Codex installed) moves to one that is here
     if let Some(h) = hub.rpc_for("agents.fresh") { let _ = h.call(hub, &crate::api::Caller { gen: String::new(), client: 0 }, &json!(0), "agents.fresh", &json!({})).await; }
@@ -289,7 +290,12 @@ pub fn refresh_soon(hub: &Arc<Hub>) {
 
 /// At start: the list found last time at once, then a detection (after the window is up) and one every 15 minutes. A copy of a real log with no stand-ins probes nothing.
 pub fn start(hub: Arc<Hub>) {
-    if let Some(i) = std::fs::read_to_string(hub.cfg.home.join("models.cache")).ok().as_deref().and_then(cache_read) { super::models::set_live(&i); }
+    let cached = std::fs::read_to_string(hub.cfg.home.join("models.cache")).ok().as_deref().and_then(cache_read);
+    if let Some(i) = &cached {
+        super::models::set_live(i);
+        let h = hub.clone();
+        tokio::spawn(async move { super::provider_notice::publish(&h).await; });
+    }
     if crate::copy::on() && std::env::var("BACKPLANE_AGENTS").map_or(true, |d| d.is_empty()) { return }
     super::models::set_detects();
     tokio::spawn(async move {

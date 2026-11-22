@@ -661,3 +661,24 @@ struct DTelemetryNotice: Codable, Equatable {
     }
 }
 struct DTelemetryNoticeReply: Decodable { var notice: DTelemetryNotice? }
+
+/// Hub notice shown when zero AI providers / accounts are configured or signed in.
+struct DNoProvider: Equatable {
+    let reason: String, head: String, text: String, button: String, url: String
+    static func of(_ v: Any?) -> DNoProvider? {
+        var obj = v as? [String: Any]
+        if obj == nil, let s = v as? String, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let d = s.data(using: .utf8) {
+            obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
+        }
+        guard let o = obj, let head = (o["head"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !head.isEmpty else { return nil }
+        return DNoProvider(
+            reason: o["reason"] as? String ?? "",
+            head: head,
+            text: o["text"] as? String ?? "",
+            button: o["button"] as? String ?? "",
+            url: o["url"] as? String ?? "backplane://settings/accounts"
+        )
+    }
+    static func isSendError(_ msg: String) -> Bool { msg.contains("No AI provider connected") }
+}

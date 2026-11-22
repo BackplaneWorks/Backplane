@@ -31,7 +31,7 @@ impl super::Screen for Recent {
         // a revoked device gone); opening the page reads it too (the page in the session is still the one before the press)
         let devpage=super::settings::page(&params["session"])=="devices" || (text(params,"action")=="settings-page" && text(params,"value")=="devices");
         let acted; let params=if devpage && text(params,"action").starts_with("device-") { match super::settings::device_act(text(params,"action"),text(params,"value")) { Some(patch)=>{ let mut c=params.clone(); crate::session::patch::merge(&mut c["session"],&patch); c["action"]=json!(""); c["value"]=json!(""); acted=c; &acted } None=>params } } else { params };
-        let withinfo; let params=if super::settings::is_open(&params["session"]) || shows_thread(params) || shows_swarm_models(params) || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } c["hubInfo"]["shares"]=json!(crate::files::share::listed_now()); } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { params };
+        let withinfo; let params=if super::settings::is_open(&params["session"]) || shows_thread(params) || shows_swarm_models(params) || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } c["hubInfo"]["shares"]=json!(crate::files::share::listed_now()); } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { let mut c=params.clone(); c["hubInfo"]=json!({"models":crate::settings::models::info()}); withinfo=c; &withinfo };
         // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
         let withmig; let params=match crate::import014::last_published(&_hub.cfg.home) { Some(v) => { let mut c=params.clone(); c["importV014"]=v; withmig=c; &withmig } None => params };
         let m=_hub.mirrors();
@@ -938,6 +938,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,far,un,hub),"bots":bots(st,far,un,hub,opts.now),"theme":setting(st,"ui.theme"),"mouse":json!({"2d":setting(st,"mouse.2d"),"3d":setting(st,"mouse.3d"),"invert":setting(st,"mouse.invert")}),"browserStart":crate::settings::browser_start::url(setting(st,crate::settings::browser_start::KEY)),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":super::botforms::new_room(st,hub,&session).unwrap_or(Value::Null),"newBot":super::botforms::new_bot(&session).unwrap_or(Value::Null),"projectHome":null});
     let mut shown=shown;
+    let no_provider=crate::settings::provider_notice::from_screen(p.get("hubInfo").and_then(|h|h["models"].as_str()),setting(st,"accounts.inventory"));
+    if !no_provider.is_null() { shown["noProvider"]=no_provider; }
     if !far.is_empty() { shown["machines"]=machine_switch(far,un,&mpick); }
     // the sections (docs/ALWAYS-ON.md section 8): Bub, Needs you, Pinned, Active, groups, Quiet; the project page; Ctrl+K's list
     { let rows=merged_here(st,far,un); let open=super::sections::opened(&session);
@@ -1781,5 +1783,26 @@ mod selected_thread_tests {
         let chosen=projects.last().unwrap(); assert_eq!(chosen["threadsPage"]["selectedOutside"],true);
         assert_eq!(chosen["threads"].as_array().unwrap().last().unwrap()["id"],"h|t0-0");
         assert_eq!(out["shown"]["thread"]["id"],"h|t0-0");
+    }
+    #[test] fn zero_provider_notice_is_shown_only_when_probed_and_unusable() {
+        let mut st=State::new(); st.lean=true;
+        st.apply(&json!({"$":"ProjectCreated","id":"p1","title":"P","root":"/tmp/synthetic","at":1}));
+        st.apply(&json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"T","provider":"claude","model":"","at":2}));
+        let base=json!({"target":{"kind":"thread","id":"t1"},"nativeSidebar":1,"nativeKey":"00112233445566778899aabbccddeeff",
+            "hub":"h","generation":"g","epoch":"e","viewId":"v","revision":st.seq,"now":1000000,"session":{"drafts":{},"open":{}},
+            "window":{"remaining":0},"page":{"thread":"t1","rows":[]}});
+        assert!(recent(&st,&base).unwrap()["shown"].get("noProvider").is_none(), "unprobed builtin omits noProvider");
+        let mut none=base.clone();
+        none["hubInfo"]=json!({"models":json!({"probed":true,"about":{"claude":{"cli":""},"codex":{"cli":""}}}).to_string()});
+        let np=recent(&st,&none).unwrap()["shown"]["noProvider"].clone();
+        assert_eq!(np["reason"],"none_installed");
+        assert_eq!(np["url"],"backplane://settings/accounts");
+        let mut have=base.clone();
+        have["hubInfo"]=json!({"models":json!({"probed":true,"about":{"claude":{"cli":"/usr/bin/claude"},"codex":{"cli":""}}}).to_string()});
+        assert!(recent(&st,&have).unwrap()["shown"].get("noProvider").is_none());
+        st.apply(&json!({"$":"SettingSet","key":"accounts.inventory","value":json!({"defaultLogin":{"claude":{"state":"signed-out"}}}).to_string(),"at":3}));
+        have["revision"]=json!(st.seq);
+        let so=recent(&st,&have).unwrap()["shown"]["noProvider"].clone();
+        assert_eq!(so["reason"],"signed_out");
     }
 }

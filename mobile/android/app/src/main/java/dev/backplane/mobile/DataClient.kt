@@ -44,6 +44,10 @@ object DataClient {
     /** the strip's words (the hub's English) in place of its usual look, or null */
     val restartText: String? get() = RestartStrip.text(restarting, hubBack, conn == Conn.ONLINE, stripNow)
     var telemetryNotice by mutableStateOf<DTelemetryNotice?>(null); private set   // the one-time telemetry notice (feature "telemetryNotice"): shown while the hub says so
+    /** Hub notice when zero AI providers / accounts are configured or signed in (`hello.noProvider` / `info["provider.notice"]`) */
+    var noProvider by mutableStateOf<DNoProvider?>(null); private set
+    var openAccounts by mutableStateOf(false)
+    var openSettings by mutableStateOf(false)
     /** Alerts not allowed yet (Android 13+): AlertsBanner offers them, with the reason, instead of the system asking at start. Not now hides it until the next launch. */
     var alertsAsk by mutableStateOf(false)
     var migrating by mutableStateOf<DMigrateCard?>(null); private set   // a 0.14 home coming across: hello `migrating`, then each `migrating` frame (DataMigrate.kt)
@@ -168,9 +172,9 @@ object DataClient {
     private fun reset(clearDisk: Boolean = false) {
         saveJob?.cancel()
         shellHashes.clear(); threadHashes.clear(); threadIds.clear(); subEntriesById.clear(); subEntryIds = emptyList()
-        Swarms.reset(); restarting = null; hubBack = null; notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
+        Swarms.reset(); restarting = null; hubBack = null; notice = HubNotice(); star = null; telemetryNotice = null; noProvider = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
         home = null
-        Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
+        Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; noProvider = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
         if (clearDisk) link?.let { Pairing.key(it) }?.let { cacheFile(it).delete() }
     }
 
@@ -268,6 +272,7 @@ object DataClient {
                 scope.launch { synchronise(g) }
                 scope.launch { Clones.reconcile() }   // a clone followed across the reconnect: its pushes meanwhile were missed
                 heardOffer(o.optString("hubOffer"))
+                noProvider = DNoProvider.of(o.opt("noProvider"))
             }
             "reply" -> {
                 val d = calls.remove(o.optInt("id", -1)) ?: return
@@ -283,7 +288,7 @@ object DataClient {
             "hub.restarting" -> { o.optString("text").takeIf { it.isNotEmpty() }?.let { restarting = RestartNote(it, System.currentTimeMillis()); strip() } }
             "telemetry.notice" -> { telemetryNotice = DTelemetryNotice.of(o.optJSONObject("notice")) }
             "migrating" -> heardMigrating(o)
-            "info" -> o.optJSONObject("info")?.let { if (it.has("hub.offer")) heardOffer(it.optString("hub.offer")); if (it.has("hub.back")) heardBack(it.optString("hub.back")); heardMgmt(it) }
+            "info" -> o.optJSONObject("info")?.let { if (it.has("hub.offer")) heardOffer(it.optString("hub.offer")); if (it.has("hub.back")) heardBack(it.optString("hub.back")); if (it.has("provider.notice")) noProvider = DNoProvider.of(it.opt("provider.notice")); heardMgmt(it) }
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
         }
     }
@@ -1403,5 +1408,22 @@ data class DTelemetryNotice(val token: String, val text: String, val off: String
         }
         /** telemetry.notice.act's params: shown, close or off */
         fun act(token: String, action: String): JSONObject = JSONObject().put("token", token).put("action", action)
+    }
+}
+
+/** Hub notice shown when zero AI providers / accounts are configured or signed in. */
+data class DNoProvider(val reason: String, val head: String, val text: String, val button: String, val url: String) {
+    companion object {
+        fun of(v: Any?): DNoProvider? {
+            val o = when (v) {
+                is JSONObject -> v
+                is String -> v.trim().takeIf { it.isNotEmpty() }?.let { runCatching { JSONObject(it) }.getOrNull() }
+                else -> null
+            } ?: return null
+            val head = o.optString("head").trim()
+            if (head.isEmpty()) return null
+            return DNoProvider(o.optString("reason"), head, o.optString("text"), o.optString("button"), o.optString("url"))
+        }
+        fun isSendError(msg: String): Boolean = msg.contains("No AI provider connected")
     }
 }

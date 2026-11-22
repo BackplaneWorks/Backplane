@@ -5,17 +5,17 @@ import UIKit
 // (SwiftUI's openURL; a long press shows the system's Open / Copy / Share menu). A backplane:// link or a path is asked of the hub (link.resolve), which says
 // what it opens: a thread (also one on a linked machine), a project, a room, a file at a line, or a short note why not. The root screen follows `linkTarget`.
 struct DLinkTarget: Equatable {
-    enum Kind { case thread, project, room, file }
+    enum Kind { case thread, project, room, file, settings }
     var kind: Kind; var id: String; var path = ""; var line = 0
     var n = UUID()
 }
 
 struct DLinkReply: Decodable {
-    var kind: String; var thread: String; var project: String; var room: String; var path: String; var line: Int; var note: String
-    enum CodingKeys: String, CodingKey { case kind, thread, project, room, path, line, note }
+    var kind: String; var thread: String; var project: String; var room: String; var path: String; var line: Int; var note: String; var page: String
+    enum CodingKeys: String, CodingKey { case kind, thread, project, room, path, line, note, page }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        kind = c.str(.kind); thread = c.str(.thread); project = c.str(.project); room = c.str(.room); path = c.str(.path); line = c.int(.line); note = c.str(.note)
+        kind = c.str(.kind); thread = c.str(.thread); project = c.str(.project); room = c.str(.room); path = c.str(.path); line = c.int(.line); note = c.str(.note); page = c.str(.page)
     }
 }
 
@@ -47,6 +47,7 @@ extension DataClient {
             // a hub that does not know link.resolve: a thread link as before, the rest says so
             guard has("links") else {
                 if let u = URL(string: text), u.host == "thread", let id = u.pathComponents.dropFirst().first, !id.isEmpty { linkTarget = DLinkTarget(kind: .thread, id: id) }
+                else if let u = URL(string: text), u.host == "settings" { linkTarget = DLinkTarget(kind: .settings, id: u.pathComponents.dropFirst().first ?? "") }
                 else { say("Update the hub to open this link.") }
                 return
             }
@@ -57,6 +58,7 @@ extension DataClient {
                 case "project": linkTarget = DLinkTarget(kind: .project, id: r.project)
                 case "room": linkTarget = DLinkTarget(kind: .room, id: r.room)
                 case "file": linkTarget = DLinkTarget(kind: .file, id: r.thread, path: r.path, line: r.line)
+                case "settings": linkTarget = DLinkTarget(kind: .settings, id: r.page)
                 default:
                     // a file the reply lists that no viewer here opens is downloaded instead
                     if let p = dPathFrom(url), download(p, thread: thread, viewToo: true) { break }

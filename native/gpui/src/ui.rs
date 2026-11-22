@@ -1251,10 +1251,13 @@ impl Render for Backplane {
                     .when(has_home && !page_list, |d| d.child(div().id("home").track_scroll(&self.screens.home_scroll).overflow_y_scroll().flex_1().min_h_0().flex().flex_col().items_center().child(div().w_full().flex_none().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
                     .when(!has_home, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
-                    .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(crate::i18n::trs(&self.error))))
+                    .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().flex().flex_wrap().items_center().gap_2()
+                        .child(div().text_color(c("bad")).child(crate::i18n::trs(&self.error)))
+                        .children(crate::screens::provider_notice::error_action(cx, light, &self.error))))
                     .when(!self.note.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("dim")).child(crate::i18n::trs(&self.note))))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("rule")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
+                        .children(crate::screens::provider_notice::view(cx, light, &self.data["noProvider"], self.data["tour"].is_object() || (self.project_page.is_none() && thread["mark"].is_object())))
                         .children(crate::screens::review::view(cx, light, &thread["review"]))
                         .children(crate::screens::planmode::bar(cx, light, thread))
                         .children(crate::screens::order::view(cx, light, &thread["order"]))
@@ -1273,7 +1276,9 @@ impl Render for Backplane {
                         // another machine's thread: where an agent sent from here runs
                         .children(if self.project_page.is_some() { None } else { crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)) })
                         // a project's page: what the hub said when it would not do what the page asked (a New thread refused), one line by the box
-                        .children((self.project_page.is_some() && !self.screens.projects.refused.is_empty()).then(|| div().id("page-error").text_size(crate::scale::tpx(11.)).text_color(c("bad")).child(self.screens.projects.refused.clone())))
+                        .children((self.project_page.is_some() && !self.screens.projects.refused.is_empty()).then(|| div().id("page-error").flex().flex_wrap().items_center().gap_2()
+                            .child(div().text_size(crate::scale::tpx(11.)).text_color(c("bad")).child(crate::i18n::trs(&self.screens.projects.refused)))
+                            .children(crate::screens::provider_notice::error_action(cx, light, &self.screens.projects.refused))))
                         // text a page's Send could not deliver while the box held new text: offered back, never merged (Restore puts it in the box, what was there is kept to restore)
                         .children(self.screens.projects.restore.clone().map(|t| { let preview: String = t.chars().take(60).collect();
                             /* i18n-ok: a ctl id the drivers press */ with_rect(div().id("restore-unsent"), || "ui:restore unsent".to_string()).flex().items_center().gap(px(6.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))

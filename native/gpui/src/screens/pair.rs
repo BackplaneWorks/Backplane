@@ -27,8 +27,11 @@ pub fn start(unpaired: bool, link: Option<&str>, cx: &mut Context<Backplane>) ->
 }
 /// A link the system handed the running app.
 pub fn incoming(this: &mut Backplane, link: &str, cx: &mut Context<Backplane>) {
-    // a thread or project to open (one of another machine too): the hub says what it opens
-    if pairing::is_open_link(link) { let _ = this.tx.try_send(crate::hub::Command::Action("link-open".into(), link.to_string())); cx.notify(); return }
+    // a thread, project, or settings link to open: Settings → Accounts opens directly, the rest goes to the hub
+    if pairing::is_open_link(link) {
+        if crate::screens::linkroute::settings_page(link).as_deref() == Some("accounts") { this.open_accounts(cx); return }
+        let _ = this.tx.try_send(crate::hub::Command::Action("link-open".into(), link.to_string())); cx.notify(); return
+    }
     if this.pair.is_none() { this.pair = Some(Ui::new(false, cx)); }
     if let Some(ui) = &mut this.pair { asked(ui, link) }
     cx.notify();

@@ -4901,6 +4901,13 @@ mobile.plan.touchhint	Drag waypoints to steer · Tap + to add · Tap point to re
 mobile.plan.copied	Copied	コピーしました	Copiado
 mobile.plan.widthmm	{v} mm	{v} mm	{v} mm
 mobile.plan.coord	({x}, {y} mm)	({x}, {y} mm)	({x}, {y} mm)
+provider.notice.head	No AI provider connected	AI プロバイダーが接続されていません	No hay ningún proveedor de IA conectado
+provider.notice.text.none	Connect Claude, Codex, Antigravity, or another provider to start chatting.	チャットを始めるには、Claude、Codex、Antigravity などのプロバイダーを接続してください。	Conecta Claude, Codex, Antigravity u otro proveedor para empezar a chatear.
+provider.notice.text.signedout	Sign in to Claude, Codex, or another provider in Settings → Accounts to start chatting.	チャットを始めるには、設定 → アカウントで Claude、Codex などのプロバイダーにサインインしてください。	Inicia sesión en Claude, Codex u otro proveedor en Configuración → Cuentas para empezar a chatear.
+provider.notice.button	Open Settings → Accounts	設定 → アカウントを開く	Abrir Configuración → Cuentas
+provider.notice.senderr	No AI provider connected yet. Open Settings → Accounts to connect Claude, Codex, Antigravity, or another provider.	AI プロバイダーがまだ接続されていません。設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。	Aún no hay ningún proveedor de IA conectado. Abre Configuración → Cuentas para conectar Claude, Codex, Antigravity u otro proveedor.
+web.settings.providers	AI providers	AI プロバイダー	Proveedores de IA
+web.settings.providers.browser	Connect a provider in the Backplane desktop or mobile app under Settings → Accounts.	Backplane のデスクトップまたはモバイルアプリの設定 → アカウントからプロバイダーを接続してください。	Conecta un proveedor en la aplicación de escritorio o móvil de Backplane en Configuración → Cuentas.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

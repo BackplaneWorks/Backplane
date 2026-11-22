@@ -108,6 +108,8 @@ fun DataRoot() {
     var page by remember { mutableStateOf<Page>(DataClient.openFromIntent?.let { if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it) } ?: Page.Home) }
     // an expired sign-in's alert: that account, its sign-in started
     LaunchedEffect(DataClient.openAccount) { DataClient.openAccount?.let { page = Page.Account(it, true); DataClient.openAccount = null } }
+    LaunchedEffect(DataClient.openAccounts) { if (DataClient.openAccounts) { DataClient.openAccounts = false; page = Page.Accounts } }
+    LaunchedEffect(DataClient.openSettings) { if (DataClient.openSettings) { DataClient.openSettings = false; page = Page.Settings } }
     LaunchedEffect(DataClient.openFromIntent) { DataClient.openFromIntent?.let { page = if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it); DataClient.openFromIntent = null } }
     // a link the hub resolved (DataLinks.kt): its screen
     LaunchedEffect(DataClient.openAddProject) { if (DataClient.openAddProject) { DataClient.openAddProject = false; page = Page.Folders() } }
@@ -120,6 +122,7 @@ fun DataRoot() {
             LinkTarget.Kind.THREAD -> page = Page.Thread(t.id)
             LinkTarget.Kind.FILE -> page = Page.Viewer(t.id, t.path, t.line)
             LinkTarget.Kind.PROJECT -> { DataClient.focusProject = t.id; page = Page.Home }
+            LinkTarget.Kind.SETTINGS -> page = if (t.id == "accounts") Page.Accounts else Page.Settings
             LinkTarget.Kind.ROOM -> {
                 if (Swarms.on() && !Swarms.isSwarm(t.id)) Swarms.load()
                 if (Swarms.isSwarm(t.id)) { page = Page.Swarm(t.id); return@LaunchedEffect }   // a swarm's page is its room's
@@ -351,6 +354,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             IconButton(onClick = settings, modifier = Modifier.testTag("home.settings")) { Icon(Icons.Default.Settings, Msg.palette_settings, tint = dcs.onSurfaceVariant) }
         }
         ConnBanner(hub, settings)
+        NoProviderBanner { DataClient.openAccounts = true }
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (DataClient.has("search")) Box(Modifier.weight(1f)) { DField(q, { q = it }, Msg.android_search_hint, Modifier.testTag("home.searchfield")) } else Spacer(Modifier.weight(1f))
             IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, Msg.sidebar_add_project, tint = dcs.onSurfaceVariant) }
@@ -741,6 +745,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             if (thread?.state == "working") item("working") { WorkingRow() }
         }
         DLine()
+        if (!id.contains('~')) NoProviderBanner { DataClient.openAccounts = true }
         review?.let { r -> ReviewBar(r, !reviewing) { if (!reviewing) { reviewing = true; scope.launch { try { review = DataClient.reviewSet(id, r.value) } catch (e: Exception) { notice = e.message ?: "" } finally { reviewing = false } } } } }
         order?.let { OrderCard(it) }
         MentionPopup(draft) { put(it) }
@@ -752,7 +757,10 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             if (notice.isNotEmpty()) DMono(Tr.t(notice), dwarn, 12)
             existing?.let { dir -> DBtn(Msg.android_hub_cmd_project_existing, false, true, Modifier.testTag("thread.project.existing")) { scope.launch { try { DataClient.addProject(dir); existing = null; notice = ""; put("") } catch (e: Exception) { notice = e.message ?: Msg.android_failed_generic } } } }
             thread?.mark?.let { m -> DMono(Tr.t(m.runs) + if (m.away) " · " + Msg.android_away else "", dfaint, 11, Modifier.testTag("thread.runs")) }
-            DataClient.sendError[id]?.let { DMono(Tr.t(it), dcs.error, 12, Modifier.testTag("thread.refused")) }
+            DataClient.sendError[id]?.let {
+                DMono(Tr.t(it), dcs.error, 12, Modifier.testTag("thread.refused"))
+                if (DNoProvider.isSendError(it)) DBtn(Msg.provider_notice_button, false, true, Modifier.testTag("thread.refused.accounts")) { DataClient.openAccounts = true }
+            }
             if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) { Pic(b, 64) }; }
             }
@@ -1531,6 +1539,18 @@ internal fun ReviewBar(r: DReviewBar, enabled: Boolean, press: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         DMono(Tr.t(r.text), if (r.on) dcs.onSurface else dcs.onSurfaceVariant, 12, Modifier.weight(1f).testTag("thread.review.text"), lines = 3)
         DBtn(Tr.t(r.button), false, enabled, Modifier.testTag("thread.review.button")) { press() }
+    }
+}
+
+/** Proactive banner shown when the hub has zero AI providers configured or signed in. */
+@Composable
+internal fun NoProviderBanner(onOpenAccounts: () -> Unit) {
+    val n = DataClient.noProvider ?: return
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).border(BorderStroke(1.dp, dwarn)).background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 8.dp).testTag("provider.notice"),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        DMono(Tr.t(n.head), dcs.onSurface, 12, bold = true)
+        if (n.text.isNotEmpty()) DMono(Tr.t(n.text), dcs.onSurfaceVariant, 11, lines = 3)
+        DBtn(if (n.button.isNotEmpty()) Tr.t(n.button) else Msg.provider_notice_button, true, modifier = Modifier.testTag("provider.notice.button")) { onOpenAccounts() }
     }
 }
 

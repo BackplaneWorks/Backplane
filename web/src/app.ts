@@ -10,6 +10,7 @@ import { onLocaleChange, setLocale, t } from "./i18n";
 import { signOut } from "./logout";
 import { MgmtStrip } from "./mgmt";
 import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
+import { isNoProviderError, parseNoProvider, type NoProviderNotice } from "./provider-notice";
 import { RailView, type RailEntry } from "./rail";
 import { needAfter, needPress } from "./swarm-need";
 import { SettingsModal, type SettingsRow } from "./settings";
@@ -353,6 +354,7 @@ function mountApp(): void {
   const chat = new ChatView(centerEl, {
     onLoadOlder: () => { void loadOlderEntries(); },
     onGoToEntry: (id) => { void goToEntry(id); },
+    onOpenAccounts: () => { openAccounts(); },
     onAnswerAsk: (askId, answer) => {
       void hub.rpc("ask.answer", { ask: askId, answer }).catch((e) => {
         composer.showError(e instanceof Error ? e.message : "Could not send answer");
@@ -600,6 +602,7 @@ function mountApp(): void {
   });
 
   let homeInfo: HomeInfo | null = null;
+  let noProvider: NoProviderNotice | null = null;
   const settings = new SettingsModal(root, {
     onLoadDevices: async () => {
       const res = await hub.rpc<{ rows?: SettingsRow[] }>("devices.page", {});
@@ -612,11 +615,27 @@ function mountApp(): void {
     onMoveHomeHere: async () => {
       await hub.rpc("home.move", { to: "back" });
     },
+    onGetNoProvider: () => noProvider,
     onLogout: () => signOut(() => {
       hub.disconnect();
       window.location.replace("/");
     }),
   });
+  function applyNoProvider(next: NoProviderNotice | null): void {
+    noProvider = next;
+    chat.setNoProvider(next);
+    if (settings.isOpen()) void settings.refresh();
+  }
+  function openAccounts(): void {
+    void settings.openToAccounts();
+  }
+  function showSendError(err: unknown, fallback: string): void {
+    const msg = err instanceof Error ? err.message : fallback;
+    composer.showError(
+      msg,
+      isNoProviderError(msg) ? { label: t("provider.notice.button", "Open Settings → Accounts"), onClick: openAccounts } : undefined,
+    );
+  }
 
   pinBtn.addEventListener("click", () => {
     const th = threads.find((x) => x.id === selectedThreadId);
@@ -1327,7 +1346,7 @@ function mountApp(): void {
         composer.focus();
       }
     } catch (e) {
-      composer.showError(e instanceof Error ? e.message : "Could not create thread");
+      showSendError(e, "Could not create thread");
     }
   }
 
@@ -1385,7 +1404,7 @@ function mountApp(): void {
         chat.removeEntry(localId);
         composer.setDraft(text);
         if (reply && !replying) startReply(reply);
-        composer.showError(e instanceof Error ? e.message : "Failed to send message");
+        showSendError(e, "Failed to send message");
       }
     }
   }
@@ -1402,7 +1421,7 @@ function mountApp(): void {
       if (gen !== threadGen || selectedThreadId !== threadId) return;
       if (res.error) {
         composer.setDraft(text);
-        composer.showError(res.error);
+        showSendError(new Error(res.error), res.error);
       } else if (res.kind === "edit" && typeof res.text === "string") {
         composer.setDraft(res.text);
       } else if (res.kind === "project") {
@@ -1413,7 +1432,7 @@ function mountApp(): void {
     } catch (e) {
       if (gen === threadGen && selectedThreadId === threadId) {
         composer.setDraft(text);
-        composer.showError(e instanceof Error ? e.message : "Command refused");
+        showSendError(e, "Command refused");
       }
     }
   }
@@ -1479,6 +1498,7 @@ function mountApp(): void {
       if (hello.name) sidebar.setHostName(hello.name);
       homeInfo = hello.home ?? null;
       sidebar.setHome(homeInfo);
+      applyNoProvider(parseNoProvider(hello.noProvider));
       if (settings.isOpen()) void settings.refresh();
       renderConnStatus(state);
       // back after a crash (hello.hubBack): said once, for a few seconds
@@ -1506,7 +1526,11 @@ function mountApp(): void {
       return;
     }
     if (frame.t === "info" && frame.info && typeof frame.info === "object") {
-      mgmt.handleInfo(frame.info as Record<string, unknown>);
+      const info = frame.info as Record<string, unknown>;
+      if (Object.prototype.hasOwnProperty.call(info, "provider.notice")) {
+        applyNoProvider(parseNoProvider(info["provider.notice"]));
+      }
+      mgmt.handleInfo(info);
       return;
     }
     if (frame.t !== "d") return;

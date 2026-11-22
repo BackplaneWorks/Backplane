@@ -4,6 +4,7 @@
 // hidden routine git/system notes, load-on-scroll pagination, asks, #1309 review bar, #1311 unanswered notice.
 import { t, trs } from "./i18n";
 import { renderMarkdown } from "./md";
+import type { NoProviderNotice } from "./provider-notice";
 import type { ThreadItem } from "./sidebar";
 
 export interface EntryTool { name: string; summary?: string; state?: string; }
@@ -53,6 +54,7 @@ export interface ChatCallbacks {
   onToggleReview: (nextOn: boolean) => void;
   onUnansweredAction: (action: string, value: string) => void;
   onReplyEntry: (entry: EntryItem) => void;
+  onOpenAccounts?: () => void;
   /** a reply's quote: go to the message it answers, reading older pages until it is loaded */
   onGoToEntry?: (entryId: string) => void;
   onLoadImage: (entryId: string, path: string) => Promise<{ url?: string; mime?: string; data?: string } | null>;
@@ -124,6 +126,7 @@ export class ChatView {
   private loadingOlder = false;
   private review: ReviewBar | null = null;
   private unanswered: UnansweredNotice | null = null;
+  private noProvider: NoProviderNotice | null = null;
   private btwNote: { q: string; a: string } | null = null;
   private liveNodes = new Map<string, HTMLElement>();
   private imageCache = new Map<string, string>();
@@ -283,6 +286,11 @@ export class ChatView {
     this.renderBanners();
   }
 
+  public setNoProvider(noProvider: NoProviderNotice | null): void {
+    this.noProvider = noProvider;
+    this.renderBanners();
+  }
+
   public showBtw(q: string, a: string): void {
     this.btwNote = { q, a };
     this.renderBanners();
@@ -367,6 +375,33 @@ export class ChatView {
 
   private renderBanners(): void {
     const frag = document.createDocumentFragment();
+    if (this.noProvider && !(this.thread?.id.includes("~"))) {
+      const card = document.createElement("div");
+      card.className = "bp-banner bp-no-provider";
+      card.setAttribute("data-testid", "no-provider-banner");
+      const body = document.createElement("div");
+      body.className = "bp-no-provider-body";
+      const h = document.createElement("strong");
+      h.textContent = trs(this.noProvider.head);
+      body.appendChild(h);
+      if (this.noProvider.text) {
+        const p = document.createElement("span");
+        p.className = "bp-dim";
+        p.textContent = trs(this.noProvider.text);
+        body.appendChild(p);
+      }
+      const acts = document.createElement("div");
+      acts.className = "bp-banner-actions";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "primary";
+      btn.setAttribute("data-testid", "no-provider-accounts-btn");
+      btn.textContent = trs(this.noProvider.button);
+      btn.addEventListener("click", () => this.cb.onOpenAccounts?.());
+      acts.appendChild(btn);
+      card.append(body, acts);
+      frag.appendChild(card);
+    }
     if (this.review && (this.review.text || this.review.button)) {
       const bar = document.createElement("div");
       bar.className = "bp-banner bp-review-bar";
