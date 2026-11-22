@@ -12,8 +12,12 @@ pub const CLAUDE: &[&str] = &["fable", "opus", "sonnet", "haiku"];
 static LIVE: RwLock<Option<(String, String)>> = RwLock::new(None);
 /// Whether the hub detects its agents' models (the binary's start, models_probe::start): a test hub keeps the built-in value and asks no CLI.
 static DETECTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Whether this hub process has completed at least one live CLI probe (separate from `models.cache`'s persisted `"probed": true`).
+static PROBED_HERE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub fn live() -> bool { DETECTS.load(std::sync::atomic::Ordering::Relaxed) }
 pub fn set_detects() { DETECTS.store(true, std::sync::atomic::Ordering::Relaxed) }
+pub fn probed_here() -> bool { PROBED_HERE.load(std::sync::atomic::Ordering::Relaxed) }
+pub fn mark_probed() { PROBED_HERE.store(true, std::sync::atomic::Ordering::Relaxed) }
 /// The info in force becomes `info`; answers whether it changed.
 pub fn set_live(info: &str) -> bool {
     let mut g = LIVE.write().unwrap_or_else(|e| e.into_inner());

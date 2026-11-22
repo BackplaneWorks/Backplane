@@ -2719,3 +2719,35 @@ impl mailroom::Mailroom for ChatRoom {
     drop(drv);
     assert!(!prof_path.exists(), "profile config file removed when turn ends");
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn zero_provider_turn_start_refuses_cleanly_and_homemove_replay_bypasses_guard() {
+    let sd = dir("np-ag-bin");
+    perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("np-ag", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    let mut about = serde_json::Map::new();
+    for (agent, _) in crate::present::keys::AGENTS {
+        about.insert((*agent).to_string(), json!({"cli": ""}));
+    }
+    let _guard = crate::settings::provider_notice::override_for_test(&hub, true, json!({"probed": true, "about": about}));
+    let from = len(&hub).await;
+
+    let r = rpc(&hub, "turn.start", json!({"thread": T1, "text": "hello"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!(r["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(r["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+
+    let btw = rpc(&hub, "thread.btw", json!({"thread": T1, "q": "why?"})).await;
+    assert_eq!(btw["ok"], false, "{btw}");
+    assert_eq!(btw["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+
+    let ev = log_from(&hub, from).await;
+    assert!(ev.is_empty(), "refused turn.start and thread.btw must leave zero log events, got {ev:?}");
+
+    let h_turn = hub.rpc_for("turn.start").unwrap();
+    let replay_caller = Caller { gen: "home".into(), client: 1 };
+    let rr = h_turn.call(&hub, &replay_caller, &json!(8), "turn.start", &json!({"thread": T1, "text": "replayed prompt", "msg": "hm-replay"})).await;
+    assert_eq!(rr[0]["ok"], true, "home-move replay must not be blocked by send guard: {:?}", rr);
+    let posted = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["msg"] == "hm-replay")).await;
+    assert!(posted.iter().any(|e| is(e, "MessagePosted") && e["msg"] == "hm-replay"));
+    ag.shutdown();
+}

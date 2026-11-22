@@ -5046,5 +5046,6 @@ provider.notice.text.none = Connect Claude, Codex, Antigravity, or another provi
 provider.notice.text.signedout = Sign in to Claude, Codex, or another provider in Settings → Accounts to start chatting.
 provider.notice.button = Open Settings → Accounts
 provider.notice.senderr = No AI provider connected yet. Open Settings → Accounts to connect Claude, Codex, Antigravity, or another provider.
+provider.notice.senderr.remote = No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.
 web.settings.providers = AI providers
 web.settings.providers.browser = Connect a provider in the Backplane desktop or mobile app under Settings → Accounts.

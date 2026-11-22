@@ -1493,3 +1493,62 @@ async fn viewer_layout_over_a_socket_is_per_device_pushed_and_refuses_in_code_ke
     let r = ask(&mut ws, 1, "link.resolve", json!({"url":"backplane://settings/accounts","thread":""})).await;
     assert_eq!(r["result"], json!({"kind":"settings","page":"accounts"}));
 }
+
+fn probed_models(installed: &[&str]) -> Value {
+    let mut about = serde_json::Map::new();
+    for (agent, _) in crate::present::keys::AGENTS {
+        let cli = if installed.contains(agent) { format!("/usr/bin/{agent}") } else { String::new() };
+        about.insert((*agent).to_string(), json!({"cli": cli}));
+    }
+    json!({"probed": true, "about": about})
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_populates_no_provider_and_live_clears_over_socket() {
+    let (h, port) = up("np-hello").await;
+    let mut guard = crate::settings::provider_notice::override_for_test(&h.hub, false, probed_models(&[]));
+    crate::settings::provider_notice::publish(&h.hub).await;
+    let mut ws_cached = open(port, "&enc=json").await;
+    let hello_cached = next(&mut ws_cached).await;
+    assert!(hello_cached["noProvider"].is_null(), "cached negative probe must not populate hello.noProvider before live scan: {hello_cached}");
+    drop(ws_cached);
+
+    guard = crate::settings::provider_notice::override_for_test(&h.hub, true, probed_models(&[]));
+    crate::settings::provider_notice::publish(&h.hub).await;
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert_eq!(hello["noProvider"]["reason"], "none_installed", "{hello}");
+    assert_eq!(hello["noProvider"]["url"], "backplane://settings/accounts");
+
+    let _ok_guard = crate::settings::provider_notice::override_for_test(&h.hub, true, probed_models(&["claude"]));
+    drop(guard);
+    crate::settings::provider_notice::publish(&h.hub).await;
+    let clear = loop {
+        let v = next(&mut ws).await;
+        if v["t"] == "info" && v["info"].get(crate::settings::provider_notice::INFO_KEY).is_some() {
+            break v;
+        }
+    };
+    assert_eq!(clear["info"][crate::settings::provider_notice::INFO_KEY], "");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_composer_btw_and_thread_create_refuse_without_side_effects_when_no_provider() {
+    let (h, port) = up("np-guard").await;
+    let _guard = crate::settings::provider_notice::override_for_test(&h.hub, true, probed_models(&[]));
+    let mut ws = open(port, "&enc=json").await;
+    let _hello = next(&mut ws).await;
+    let n0 = h.hub.store.len();
+
+    let btw = ask(&mut ws, 1, "composer.run", json!({"thread":"t1","text":"/btw why"})).await;
+    assert_eq!(btw["ok"], false, "{btw}");
+    assert_eq!(btw["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(btw["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+
+    let create_with_text = ask(&mut ws, 2, "thread.create", json!({"project":"p1","text":"hello world"})).await;
+    assert_eq!(create_with_text["ok"], false, "{create_with_text}");
+    assert_eq!(create_with_text["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(create_with_text["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+    assert_eq!(h.hub.store.len(), n0, "refused thread.create with initial prompt must leave zero ThreadCreated events");
+
+    let empty_create = ask(&mut ws, 3, "thread.create", json!({"project":"p1"})).await;
+    assert_eq!(empty_create["ok"], true, "opening an empty thread remains allowed so user sees proactive banner: {empty_create}");
+}

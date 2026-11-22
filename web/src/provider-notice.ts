@@ -35,5 +35,11 @@ export function parseNoProvider(raw: unknown): NoProviderNotice | null {
 }
 
 export function isNoProviderError(msg: string): boolean {
-  return msg.includes("No AI provider connected");
+  return msg.startsWith("No AI provider connected yet.");
+}
+
+export function isLocalNoProviderError(msg: string, code?: string): boolean {
+  if (code === "no_provider") return true;
+  if (code) return false;
+  return isNoProviderError(msg);
 }

@@ -5046,5 +5046,6 @@ provider.notice.text.none = Conecta Claude, Codex, Antigravity u otro proveedor 
 provider.notice.text.signedout = Inicia sesión en Claude, Codex u otro proveedor en Configuración → Cuentas para empezar a chatear.
 provider.notice.button = Abrir Configuración → Cuentas
 provider.notice.senderr = Aún no hay ningún proveedor de IA conectado. Abre Configuración → Cuentas para conectar Claude, Codex, Antigravity u otro proveedor.
+provider.notice.senderr.remote = No hay ningún proveedor de IA conectado en {machine}. Abre Configuración → Cuentas en {machine} para conectar Claude, Codex, Antigravity u otro proveedor.
 web.settings.providers = Proveedores de IA
 web.settings.providers.browser = Conecta un proveedor en la aplicación de escritorio o móvil de Backplane en Configuración → Cuentas.

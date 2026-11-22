@@ -655,16 +655,35 @@ pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "v
 async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Value> {
     use crate::session::composer::{btw_answer, intent_edit, word_of, Word, BTW_EMPTY};
     let (th, text) = (s(p, "thread"), s(p, "text"));
-    if !known_thread(&*hub.model().await, th) { return Err(err("unknown thread")) }
+    if !known_any(hub, &*hub.model().await, th) { return Err(err("unknown thread")) }
     match word_of(text) {
         None => Err(err("not a command of the composer")),
         Some(Word::Btw(q)) if q.is_empty() => Err(err(BTW_EMPTY)),
         Some(Word::Btw(q)) => {
+            if machines::is_far(th) {
+                let r = rpc(hub, c, "thread.btw", json!({"thread": th, "q": q})).await?;
+                let a = btw_answer(r["result"]["btw"].as_str().unwrap_or(""));
+                let (h, client, thread, asked, ans) = (hub.clone(), c.client, th.to_string(), q.clone(), a.clone());
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    h.push(client, json!({"t":"d","k":"btw","thread":thread,"q":asked,"a":ans}));
+                });
+                return Ok(json!({"kind":"btw","q":q,"a":a}));
+            }
+            if let Some(why) = crate::settings::provider_notice::send_guard(hub).await {
+                return Err(super::no_provider_err(why));
+            }
             let (h, client, thread, asked) = (hub.clone(), c.client, th.to_string(), q.clone());
             tokio::spawn(async move { // the model may take a minute: this socket keeps answering meanwhile
-                let who = crate::api::Caller { gen: String::new(), client: 0 };
+                // Fresh non-attached client id so thread.btw keeps client > 0 checks without taking the attached desktop reply path.
+                let who = crate::api::Caller { gen: String::new(), client: h.fresh_client() };
                 let r = match h.rpc_for("thread.btw") { Some(x) => x.call(&h, &who, &json!(0), "thread.btw", &json!({"thread":thread,"q":asked})).await.into_iter().next().unwrap_or(Value::Null), None => Value::Null };
-                h.push(client, json!({"t":"d","k":"btw","thread":thread,"q":asked,"a":btw_answer(r["result"]["btw"].as_str().unwrap_or(""))}));
+                let a = if r["ok"] == true {
+                    btw_answer(r["result"]["btw"].as_str().unwrap_or(""))
+                } else {
+                    r["error"].as_str().filter(|e| !e.is_empty()).map(str::to_string).unwrap_or_else(|| btw_answer(""))
+                };
+                h.push(client, json!({"t":"d","k":"btw","thread":thread,"q":asked,"a":a}));
             });
             Ok(json!({"kind":"btw","q":q}))
         }
@@ -686,6 +705,7 @@ async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, 
             Ok(Some((path, first))) => {
                 let r = hub.request_here(c, &json!({"id":0,"m":"project.new","p":{"path":path,"empty":true,"text":first}})).await.into_iter().find(|v| v["t"] == "reply").unwrap_or(Value::Null);
                 if r["ok"] == true { return Ok(json!({"kind":"made","thread":r["thread"],"note":r["note"].as_str().unwrap_or("")})) }
+                if r.get("errorCode").is_some() { return Err(super::err_from_rpc(&r)) }
                 let why = r["error"].as_str().unwrap_or("The project could not be made.").to_string();
                 match r["result"]["exists"].as_str() { Some(d) if p["exists"] == true => Ok(json!({"kind":"exists","path":d,"error":why})), _ => Err(err(why)) }
             }

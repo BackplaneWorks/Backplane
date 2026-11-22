@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { isNoProviderError, parseNoProvider } from "../src/provider-notice";
+import { isLocalNoProviderError, isNoProviderError, parseNoProvider } from "../src/provider-notice";
 
 describe("provider-notice", () => {
   test("parses hello object and info JSON string payloads", () => {
@@ -22,8 +22,17 @@ describe("provider-notice", () => {
     expect(parseNoProvider({ head: "  " })).toBeNull();
   });
 
-  test("detects no-provider send guard errors", () => {
-    expect(isNoProviderError("No AI provider connected yet. Open Settings → Accounts to connect Claude, Codex, Antigravity, or another provider.")).toBe(true);
+  test("detects local vs remote no-provider send guard errors", () => {
+    const localMsg = "No AI provider connected yet. Open Settings → Accounts to connect Claude, Codex, Antigravity, or another provider.";
+    const remoteMsg = "No AI provider connected on boat-hub. Open Settings → Accounts on boat-hub to connect Claude, Codex, Antigravity, or another provider.";
+    expect(isNoProviderError(localMsg)).toBe(true);
+    expect(isNoProviderError(remoteMsg)).toBe(false);
     expect(isNoProviderError("Network timeout")).toBe(false);
+
+    expect(isLocalNoProviderError(localMsg, "no_provider")).toBe(true);
+    expect(isLocalNoProviderError(remoteMsg, "no_provider_remote")).toBe(false);
+    expect(isLocalNoProviderError(localMsg, "no_provider_remote")).toBe(false);
+    expect(isLocalNoProviderError(localMsg)).toBe(true);
+    expect(isLocalNoProviderError(remoteMsg)).toBe(false);
   });
 });

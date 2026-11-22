@@ -10,7 +10,7 @@ import { onLocaleChange, setLocale, t } from "./i18n";
 import { signOut } from "./logout";
 import { MgmtStrip } from "./mgmt";
 import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
-import { isNoProviderError, parseNoProvider, type NoProviderNotice } from "./provider-notice";
+import { isLocalNoProviderError, parseNoProvider, type NoProviderNotice } from "./provider-notice";
 import { RailView, type RailEntry } from "./rail";
 import { needAfter, needPress } from "./swarm-need";
 import { SettingsModal, type SettingsRow } from "./settings";
@@ -27,7 +27,7 @@ import {
   type ThreadItem,
 } from "./sidebar";
 import { VoiceController } from "./voice";
-import { HubClient, type DataPush, type HelloFrame, type HomeInfo } from "./ws";
+import { HubClient, HubRpcError, type DataPush, type HelloFrame, type HomeInfo } from "./ws";
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore resolved by web/build.ts to ./viewers/viewer-pane.ts when present
 import { mountViewerPane } from "virtual:viewer-pane";
@@ -630,10 +630,22 @@ function mountApp(): void {
     void settings.openToAccounts();
   }
   function showSendError(err: unknown, fallback: string): void {
-    const msg = err instanceof Error ? err.message : fallback;
+    const rawMsg = err instanceof Error ? err.message : fallback;
+    const rpcErr = err instanceof HubRpcError ? err : null;
+    const code = rpcErr?.code;
+    const machine = rpcErr?.machine;
+    const msg =
+      code === "no_provider_remote" && machine
+        ? t(
+            "provider.notice.senderr.remote",
+            "No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.",
+          ).replaceAll("{machine}", machine)
+        : rawMsg;
     composer.showError(
       msg,
-      isNoProviderError(msg) ? { label: t("provider.notice.button", "Open Settings → Accounts"), onClick: openAccounts } : undefined,
+      isLocalNoProviderError(rawMsg, code)
+        ? { label: t("provider.notice.button", "Open Settings → Accounts"), onClick: openAccounts }
+        : undefined,
     );
   }
 
@@ -1414,14 +1426,16 @@ function mountApp(): void {
     const gen = threadGen;
     const threadId = selectedThreadId;
     try {
-      const res = await hub.rpc<{ kind?: string; text?: string; repo?: string; error?: string }>("composer.run", {
+      const res = await hub.rpc<{ kind?: string; q?: string; a?: string; text?: string; repo?: string; error?: string; errorCode?: string; machine?: string }>("composer.run", {
         thread: threadId,
         text,
       });
       if (gen !== threadGen || selectedThreadId !== threadId) return;
       if (res.error) {
         composer.setDraft(text);
-        showSendError(new Error(res.error), res.error);
+        showSendError(new HubRpcError(res.error, { code: res.errorCode, machine: res.machine }), res.error);
+      } else if (res.kind === "btw" && typeof res.a === "string") {
+        chat.showBtw(res.q ?? "", res.a);
       } else if (res.kind === "edit" && typeof res.text === "string") {
         composer.setDraft(res.text);
       } else if (res.kind === "project") {

@@ -557,7 +557,7 @@ impl RpcHandler for Rpc {
                 if q.is_empty() { return vec![err(id, crate::session::composer::BTW_EMPTY)] }
                 if who.client > 0 {
                     if let Some(why) = crate::settings::provider_notice::send_guard(hub).await {
-                        return vec![err(id, why)];
+                        return vec![crate::settings::provider_notice::rpc_error_reply(id, why)];
                     }
                 }
                 let (ag, th, id2) = (self.0.clone(), th.to_string(), id.clone());
@@ -598,7 +598,13 @@ impl RpcHandler for Rpc {
                 "turn.start" => match crate::net::homemove::intercept(&self.0.hub, th, p).await { Some(r) => r, None => self.0.turn_start(who, th, p).await },
                 _ => { let r = self.0.interrupt(th).await; if let Some(m) = self.0.mailroom() { m.stopping(th).await } r }
             };
-            match r { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] }
+            match r {
+                Ok(()) => vec![ok(id)],
+                Err(e) if e == crate::settings::provider_notice::SEND_GUARD_ERROR => {
+                    vec![crate::settings::provider_notice::rpc_error_reply(id, &e)]
+                }
+                Err(e) => vec![err(id, &e)],
+            }
         })
     }
 }
@@ -617,7 +623,7 @@ impl Agents {
                     let attached: Vec<Value> = p.get("attachments").filter(|a| a.as_array().map_or(false, |x| !x.is_empty())).map(|a| vec![json!({"$":"MessageAttached","thread":th,"msg":msg,"attachments":a,"at":now_s()})]).unwrap_or_default();
                     // `/restore [turn]` from the person: the hub puts the project back to before that turn itself, no agent turn (snapguard.rs)
                     if who.client > 0 && !retry { if let Some(n) = snapguard::restore_command(text) { return self.restore_command(th, n).await } }
-                    if who.client > 0 && !retry && (!text.trim().is_empty() || !attached.is_empty()) {
+                    if who.client > 0 && who.gen != "home" && !retry && (!text.trim().is_empty() || !attached.is_empty()) {
                         if let Some(why) = crate::settings::provider_notice::send_guard(&self.hub).await {
                             return Err(why.to_string());
                         }

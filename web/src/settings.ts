@@ -35,6 +35,7 @@ export class SettingsModal {
   private bodyEl: HTMLElement;
   private cb: SettingsCallbacks;
   private openState = false;
+  private forceProviders = false;
   private providersEl: HTMLElement | null = null;
 
   constructor(root: HTMLElement, cb: SettingsCallbacks) {
@@ -81,12 +82,14 @@ export class SettingsModal {
   }
 
   public async openToAccounts(): Promise<void> {
+    this.forceProviders = true;
     await this.open();
     this.providersEl?.scrollIntoView({ block: "nearest" });
   }
 
   public close(): void {
     this.openState = false;
+    this.forceProviders = false;
     this.backdrop.classList.add("bp-hidden");
   }
 
@@ -101,7 +104,7 @@ export class SettingsModal {
     this.providersEl = null;
 
     const noProvider = this.cb.onGetNoProvider?.() ?? null;
-    if (noProvider) {
+    if (noProvider || this.forceProviders) {
       const provSec = document.createElement("section");
       provSec.className = "bp-set-section";
       provSec.setAttribute("data-testid", "settings-providers");
@@ -113,7 +116,7 @@ export class SettingsModal {
       const info = document.createElement("div");
       info.className = "bp-set-info";
       const title = document.createElement("div");
-      title.textContent = trs(noProvider.head);
+      title.textContent = noProvider ? trs(noProvider.head) : t("provider.notice.head", "No AI provider connected");
       const sub = document.createElement("div");
       sub.className = "bp-dim";
       sub.textContent = t(
@@ -125,9 +128,9 @@ export class SettingsModal {
       btns.className = "bp-set-btns";
       const link = document.createElement("a");
       link.className = "bp-link-btn primary";
-      link.href = noProvider.url || "backplane://settings/accounts";
+      link.href = noProvider?.url || "backplane://settings/accounts";
       link.setAttribute("data-testid", "settings-open-accounts");
-      link.textContent = trs(noProvider.button);
+      link.textContent = noProvider ? trs(noProvider.button) : t("provider.notice.button", "Open Settings → Accounts");
       btns.appendChild(link);
       provRow.append(info, btns);
       provSec.append(provHead, provRow);

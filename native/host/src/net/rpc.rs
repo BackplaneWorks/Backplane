@@ -137,7 +137,8 @@ impl Parts {
             } else if ok { watching.lock().unwrap().remove(&client); }
         }
         let frame = if code == 200 {
-            far::reply_on(serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"t":"reply","ok":false,"error":"invalid reply from that machine","id":0})), id, l)
+            let r = far::reply_on(serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"t":"reply","ok":false,"error":"invalid reply from that machine","id":0})), id, l);
+            crate::settings::provider_notice::rewrite_remote_reply(r, &machine_name(&sync, l))
         } else if code == 0 { err(id, "that machine is away").remove(0) } else { err(id, &format!("that machine did not take it: {}", text.chars().take(120).collect::<String>())).remove(0) };
         { let mut w = waiting.lock().unwrap(); if let Some(n) = w.get_mut(&client) { *n -= 1; if *n == 0 { w.remove(&client); } } }
         frame
@@ -226,6 +227,15 @@ async fn send_held(sync: Arc<FarSync>, hub: std::sync::Weak<Hub>, out: Arc<Outbo
             tokio::spawn(async move {
                 let body = item.body().to_string();
                 let (code, text) = post(&sync, &hub2, &item.link, &body).await;
+                let text = if code == 200 {
+                    serde_json::from_str::<Value>(&text)
+                        .ok()
+                        .filter(crate::settings::provider_notice::is_local_refusal_reply)
+                        .map(|v| crate::settings::provider_notice::rewrite_remote_reply(v, &machine_name(&sync, &item.link)).to_string())
+                        .unwrap_or(text)
+                } else {
+                    text
+                };
                 out2.answered(&item.msg, code, &text, farsend::now_ms());
                 busy2.lock().unwrap().retain(|m| *m != item.msg);
                 out2.kick.notify_one();
@@ -259,6 +269,15 @@ pub fn machines_of(sync: &FarSync) -> Vec<(String, String, String)> {
     let names: Vec<(String, String)> = rows.iter().map(|r| (r.0.clone(), r.1.clone())).collect();
     let uniq = crate::bots::mesh::unique_labels(&names, crate::bots::mesh::RESERVED);
     rows.into_iter().zip(uniq).map(|(r, (_, label))| (r.0, label, r.2)).collect()
+}
+
+fn machine_name(sync: &FarSync, link: &str) -> String {
+    machines_of(sync)
+        .into_iter()
+        .find(|(id, _, _)| id == link)
+        .map(|(_, name, _)| name)
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| link.to_string())
 }
 
 /// The bots lane's transport for `owner.mail` (a signed POST to a linked machine); only to one of the owner's own (the request carries mail text).

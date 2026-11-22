@@ -320,7 +320,7 @@ pub fn moved_thread(at: &str, thread: &str, project: Option<&str>, there: &dyn F
 /// The move in progress: where to, and the threads it carries (the person's messages to them are held until it is over).
 /// Kept in `<home>/home-held.json` from the move's start to the last held message's delivery (as net/farsend.rs keeps far-sends.json), so a hub that
 /// restarts mid-move loses none of them: `recover` delivers them on the next start, to the new home when the move finished, else here.
-#[derive(serde::Serialize, serde::Deserialize, Default)]
+#[derive(Clone, serde::Serialize, serde::Deserialize, Default)]
 struct Moving { link: String, threads: HashSet<String>, held: Vec<Value>, #[serde(skip)] path: Option<PathBuf> }
 static MOVING: Mutex<Option<Moving>> = Mutex::new(None);
 fn held_path(home: &Path) -> PathBuf { home.join("home-held.json") }
@@ -408,18 +408,75 @@ async fn has_msg(hub: &Arc<Hub>, thread: &str, msg: &str) -> bool {
     let m = hub.model().await; m.page(&hub.store, thread, 0, 64).map(|pg| pg.rows.iter().any(|r| r.id == msg)).unwrap_or(false)
 }
 async fn deliver_held(hub: &Arc<Hub>, mut m: Moving, moved: bool) {
+    let mut failed: Vec<Value> = vec![];
     while !m.held.is_empty() {
         let p = m.held[0].clone();
         let th = gs(&p, "thread").to_string();
         let to = crate::net::far::id(&m.link, &th);
-        if p["via"] == "deliver" {
-            if moved { if let Err(e) = deliver_there(&to, &m.link, &p) { eprintln!("backplane: home move: a held delivery to {th} was not sent: {e}") } }
-            else if !has_msg(hub, &th, gs(&p, "msg")).await { if let Some(h) = hub.rpc_for("thread.deliver") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 0 }, &json!(0), "thread.deliver", &p).await; } }
-        } else if moved { if let Err(e) = forward(&to, &m.link, &p) { eprintln!("backplane: home move: a held message to {th} was not sent: {e}") } }
-        else if !has_msg(hub, &th, gs(&p, "msg")).await { if let Some(h) = hub.rpc_for("turn.start") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 1 }, &json!(0), "turn.start", &p).await; } }
-        m.held.remove(0); m.save(); // (the far outbox keeps what goes there from here on)
+        let delivered = if p["via"] == "deliver" {
+            if moved {
+                match deliver_there(&to, &m.link, &p) {
+                    Ok(()) => true,
+                    Err(e) => {
+                        eprintln!("backplane: home move: a held delivery to {th} was not sent: {e}");
+                        false
+                    }
+                }
+            } else if has_msg(hub, &th, gs(&p, "msg")).await {
+                true
+            } else if let Some(h) = hub.rpc_for("thread.deliver") {
+                let r = h.call(hub, &Caller { gen: "home".into(), client: 0 }, &json!(0), "thread.deliver", &p).await;
+                if r.iter().any(|v| v["ok"] == true) {
+                    true
+                } else {
+                    eprintln!("backplane: home move: a held delivery to {th} failed locally: {:?}", r.first());
+                    false
+                }
+            } else {
+                eprintln!("backplane: home move: a held delivery to {th} has no thread.deliver handler");
+                false
+            }
+        } else if moved {
+            match forward(&to, &m.link, &p) {
+                Ok(()) => true,
+                Err(e) => {
+                    eprintln!("backplane: home move: a held message to {th} was not sent: {e}");
+                    false
+                }
+            }
+        } else if has_msg(hub, &th, gs(&p, "msg")).await {
+            true
+        } else if let Some(h) = hub.rpc_for("turn.start") {
+            let r = h.call(hub, &Caller { gen: "home".into(), client: 1 }, &json!(0), "turn.start", &p).await;
+            if r.iter().any(|v| v["ok"] == true) {
+                true
+            } else {
+                eprintln!("backplane: home move: a held message to {th} failed locally: {:?}", r.first());
+                false
+            }
+        } else {
+            eprintln!("backplane: home move: a held message to {th} has no turn.start handler");
+            false
+        };
+        let item = m.held.remove(0);
+        if !delivered {
+            failed.push(item);
+        }
+        if failed.is_empty() {
+            m.save();
+        } else {
+            let mut snap = m.clone();
+            snap.held = failed.iter().chain(m.held.iter()).cloned().collect();
+            snap.save();
+        }
     }
-    if let Some(p) = &m.path { let _ = std::fs::remove_file(p); }
+    if failed.is_empty() {
+        if let Some(p) = &m.path { let _ = std::fs::remove_file(p); }
+    } else {
+        m.held = failed;
+        m.save();
+        eprintln!("backplane: home move: {} held message(s) remain saved after delivery failure", m.held.len());
+    }
 }
 
 // ---- the readiness check (before a move; nothing here signs in, installs or costs a request to a provider) ----
@@ -1032,5 +1089,42 @@ mod tests {
         use base64::Engine as _; let b64 = |x: &[u8]| base64::engine::general_purpose::STANDARD.encode(x);
         for (off, part) in [(0u64, &b"abc"[..]), (3, b"def"), (3, b"def")] { let r = serve(&hub, "L", "home.file", &json!({"root":"home","rel":"mail/x.txt","off":off,"b64":b64(part)})).await; assert_eq!(r["ok"], true, "{r}") }
         assert_eq!(std::fs::read(home.join("mail/x.txt")).unwrap(), b"abcdef", "the chunk sent again is written once");
+    }
+
+    #[tokio::test(flavor = "multi_thread")] async fn deliver_held_keeps_failed_items_on_disk() {
+        use crate::api::{Caller, Fut, RpcHandler};
+        struct DummyTurn(bool);
+        impl RpcHandler for DummyTurn {
+            fn methods(&self) -> &'static [&'static str] { &["turn.start"] }
+            fn call<'a>(&'a self, _h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, _m: &'a str, _p: &'a Value) -> Fut<'a, Vec<Value>> {
+                let ok = self.0;
+                Box::pin(async move {
+                    vec![if ok { json!({"t":"reply","id":id,"ok":true}) } else { json!({"t":"reply","id":id,"ok":false,"error":"refused"}) }]
+                })
+            }
+        }
+        let home = crate::plat::tmp::dir("hm-keep");
+        let hub = Hub::start(crate::hub::Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        let path = held_path(&home);
+        let held_item = json!({"thread":"t1","msg":"m1","text":"keep me"});
+        let m = Moving { link: "L1".into(), threads: ["t1".to_string()].into_iter().collect(), held: vec![held_item.clone()], path: Some(path.clone()) };
+        m.save();
+        deliver_held(&hub, m.clone(), false).await;
+        let saved: Moving = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved.held.len(), 1, "missing handler must retain held item");
+
+        hub.register_rpc(Arc::new(DummyTurn(false)));
+        deliver_held(&hub, m.clone(), false).await;
+        let saved2: Moving = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(saved2.held.len(), 1, "failed turn.start must retain held item");
+
+        let home2 = crate::plat::tmp::dir("hm-drop");
+        let hub2 = Hub::start(crate::hub::Cfg { home: home2.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        hub2.register_rpc(Arc::new(DummyTurn(true)));
+        let path2 = held_path(&home2);
+        let m2 = Moving { link: "L1".into(), threads: ["t1".to_string()].into_iter().collect(), held: vec![held_item], path: Some(path2.clone()) };
+        m2.save();
+        deliver_held(&hub2, m2, false).await;
+        assert!(!path2.exists(), "successful delivery removes held file");
     }
 }

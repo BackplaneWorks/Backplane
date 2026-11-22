@@ -1907,3 +1907,20 @@ async fn three(tag: &str) -> Three {
     assert_eq!(member_in("cy@mid2", "L10", bot_id, lom).as_deref(), Some("cy@L12"));
     assert_eq!(member_in("dee@mid7", "L10", bot_id, lom), None, "a machine this one has no link to is dropped");
 }
+
+#[tokio::test] async fn bots_say_refuses_when_no_provider_without_waking_or_posting() {
+    let (hub, _b, rec) = start("np-say", "").await;
+    let b = bot(&hub, "ada").await;
+    let from = log(&hub).len();
+    let mut about = serde_json::Map::new();
+    for (agent, _) in crate::present::keys::AGENTS {
+        about.insert((*agent).to_string(), json!({"cli": ""}));
+    }
+    let _guard = crate::settings::provider_notice::override_for_test(&hub, true, json!({"probed": true, "about": about}));
+    let r = rpc(&hub, "bots.say", json!({"bot": b, "text": "hello"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!(r["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(r["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+    assert!(kinds(&hub, from).is_empty(), "refused bots.say must emit zero BotWoke/MessagePosted events");
+    assert!(rec.got.lock().unwrap().is_empty(), "refused bots.say must deliver nothing to Inbox");
+}
