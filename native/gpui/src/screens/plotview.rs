@@ -443,7 +443,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         .on_mouse_down(crate::mousecfg::BUTTONS[2], cx.listener(move |this, e: &MouseDownEvent, window, cx| { plot_down(this, slot, e, window, cx) }))
         .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
             let pv = this.screens.pv(slot);
-            if let (Some((x, y)), Some(v), Some(act), Some(b), true) = (pv.drag, pv.view, pv.drag_act, pv.bounds, e.dragging()) {
+            if let (Some((x, y)), Some(v), Some(act), Some(b), true) = (pv.drag, pv.view, pv.drag_act, pv.bounds, plot_drag_held(pv.drag_btn, e.pressed_button)) {
                 let (nx, ny) = (f32::from(e.position.x), f32::from(e.position.y));
                 let moved = match act {
                     Action::Pan => { pv.view = Some(v.pan(nx - x, ny - y)); true }
@@ -487,6 +487,11 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
 
 /// The person moved or zoomed the view: the one place every plot input ends, so a camera that follows something lets go here (follow pauses).
 fn person_moved(app: &mut Backplane, slot: usize) { app.screens.pv(slot).touched = true; super::follow::person_input(app, slot); }
+
+/// MouseMoveEvent::dragging only reports the left button.
+fn plot_drag_held(started: Option<MouseButton>, pressed: Option<MouseButton>) -> bool {
+    started.is_some() && started == pressed
+}
 
 /// A button went down on the plot: the table says whether it drags (and what the drag does) and whether a click of it selects.
 fn plot_down(this: &mut Backplane, slot: usize, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Backplane>) {
@@ -787,6 +792,17 @@ pub fn report_state(app: &mut Backplane) {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plot_drag_follows_the_button_that_started_it() {
+        use super::{plot_drag_held, MouseButton};
+        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+            assert!(plot_drag_held(Some(button), Some(button)));
+            assert!(!plot_drag_held(Some(button), None));
+        }
+        assert!(!plot_drag_held(Some(MouseButton::Right), Some(MouseButton::Left)));
+        assert!(!plot_drag_held(None, None));
+    }
+
     use super::*;
     use core::prelude::v1::test;
     #[test]
