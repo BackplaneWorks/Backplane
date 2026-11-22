@@ -948,6 +948,8 @@ mod imp {
         let Some(g) = conn() else { return false };
         focus_in(g.as_ref().unwrap(), container as u32)
     }
+    /// Strict live focus check for placement decisions (same as `has_focus` on X11).
+    pub fn has_live_focus(container: u64) -> bool { has_focus(container) }
 
     fn focus_in(c: &RustConnection, container: u32) -> bool {
         if container <= 1 { return false }
@@ -2318,6 +2320,15 @@ mod imp {
             false
         }
     }
+    /// Strict live foreground focus check for placement decisions: unlike `has_focus`, never returns
+    /// true on `CLICK_GRACE_UNTIL` when the foreground queue's focus is outside `container`, and does
+    /// not perform `has_focus`'s cold-construction reclaim side effect.
+    pub fn has_live_focus(container: u64) -> bool {
+        if FOCUS_ESCAPED.load(Ordering::SeqCst) { return false }
+        let c = hwnd(container);
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return false }
+        unsafe { in_child_focus(c) }
+    }
 
     /// Windows: the press handler reads the window under the pointer already (WindowFromPoint); never so here.
     pub fn pointer_on_other_window(_w: u64) -> bool { false }
@@ -2829,6 +2840,7 @@ mod imp {
     /// Unknown here: the window's own key-up decides.
     pub fn semicolon_held() -> Option<bool> { None }
     pub fn has_focus(_container: u64) -> bool { false }
+    pub fn has_live_focus(_container: u64) -> bool { false }
     pub fn focus_in_pid(_pid: u32) -> bool { false }
     pub fn pointer_on_other_window(_w: u64) -> bool { false }
     pub fn button_over(_w: u64) -> Option<bool> { None }

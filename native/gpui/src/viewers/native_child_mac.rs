@@ -314,6 +314,8 @@ static KICAD_PID: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::n
 fn app_active(pid: i64) -> bool { if pid <= 0 { return false } let a = running_app(pid); !a.is_null() && unsafe { send_bool(a, c"isActive") } }
 /// KiCad has the keyboard: its app is the active one.
 pub fn has_focus(_container: u64) -> bool { app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed)) }
+/// Strict live focus check for placement decisions (same as `has_focus` on macOS).
+pub fn has_live_focus(container: u64) -> bool { has_focus(container) }
 /// The app `pid` is the active one (an accessory app is active while it holds the keyboard, though it never owns the menu bar).
 pub fn focus_in_pid(pid: u32) -> bool { app_active(pid as i64) }
 pub fn button_over(_w: u64) -> Option<bool> { None }

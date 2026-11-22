@@ -680,8 +680,8 @@ pub struct KicadPane {
     busy_sent: Option<std::time::Instant>,
     container: Option<u64>, toplevel: u64, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
     marker: Arc<Mutex<Option<HitboxId>>>,
-    /// macOS: a hitbox drawn after all the pane's own content (its last child), and whether what was drawn after it covered all of
-    /// the pane in the last frame (`covers_pane`: Settings or another full-window screen over the page)
+    /// Last hitbox of the pane's own content (after any inline `say` controls), used to find overlays painted after the pane
+    /// (`holes`, capture-phase Backplane click detection, and macOS `covers_pane`).
     end_marker: Arc<Mutex<Option<HitboxId>>>, mac_covered: bool,
     /// macOS: when the last push of a burst is sent again (`mac_watch`): a show and the rect corrected a frame later reached KiCad as
     /// two pushes, and its frame kept the first one's rect (e2e-macos 44255662838: 24 pt too tall over the strip, 13.6 s and on)
@@ -697,6 +697,9 @@ pub struct KicadPane {
     /// (a tab switch, a frames change, the hub's echo of it), this is not. A re-place at this same rect needs no geometry (Linux:
     /// `nc::show_local` maps the frame and nothing else), and `kicad_place`'s `changed` / `frame_changed` compare with it.
     last_place: Option<(u64, nc::R, Option<u64>)>,
+    /// The KiCad frame window last actually placed on show (kept across `self.placed = None` resets such as `info["frames"]`
+    /// changing `1 -> 2` during schematic pre-warm), cleared on a new KiCad pid, `wait_close`, `detach`, or when `show` becomes `None`.
+    last_show: Option<u64>,
     /// the (top-level, container) last reported on screen to the Linux focus proxy (nc::note_pane_on_screen): taken off when either changes
     screen_key: Option<(u64, u64)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
@@ -799,13 +802,74 @@ fn editor_focus_target(in_page: bool, frame: Option<u64>) -> Option<u64> {
     frame.filter(|_| in_page)
 }
 
-/// Whether to hand in the keyboard and which frame to remember for the next placement.
-fn placement_hand_in(in_page: bool, has_rect: bool, keys: bool, want_keys: bool, show: Option<u64>, prev_show: Option<u64>, dialog_has_keys: bool) -> (bool, Option<u64>) {
-    let requested = hand_in_now(keys, want_keys, show, prev_show, dialog_has_keys);
+/// Result of a placement's keyboard hand-in decision: whether to hand focus to `show` now,
+/// which frame `self.placed` should record, and which frame `self.last_show` should keep
+/// across `placed = None` resets (#1362).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlacementDecision {
+    pub hand_in: bool,
+    pub placed_show: Option<u64>,
+    pub next_last_show: Option<u64>,
+}
+
+/// Whether this runtime needs the legacy macOS same-frame re-show repair (bp.13.2 and older,
+/// lacking `embed-key-on-activate`). On macOS with `embed-key-on-activate` (bp.13.3+), Linux,
+/// and Windows, Edit's initial hand-in works directly and a same-frame re-placement must never
+/// re-hand keyboard focus (#1362).
+pub fn needs_legacy_reshow(macos: bool, info: &Value) -> bool {
+    macos && !info["embed_caps"].as_array().is_some_and(|a| a.iter().any(|c| c == "embed-key-on-activate"))
+}
+
+/// Whether a mouse press in Backplane's own window is under way right now.
+fn press_in_backplane(top: u64, w: u64) -> bool {
+    #[cfg(target_os = "macos")]
+    { let _ = w; nc::mouse_down() && nc::window_at_pointer() == top }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = top; nc::button_over(w) == Some(false) }
+}
+
+/// Decide whether a placement hands the keyboard to `show` and which frame to remember
+/// in `placed` and across `placed = None` resets (`last_show`).
+///
+/// - Explicit user requests (`want_keys`: deliberate Edit, tab click, Ctrl+Tab, Full size/screen,
+///   rehome, popped window close) hand in even for the same frame already on show.
+/// - Without `want_keys`:
+///   - On legacy macOS runtimes without `embed-key-on-activate` (`legacy_reshow`), keep `main`'s
+///     `prev_show` reference so the frames-change re-show still repairs Edit focus, guarded by
+///     `kicad_active_now && !press_in_backplane` so a click into Backplane cannot be undone.
+///   - Otherwise (macOS `bp.13.3+` with `embed-key-on-activate`, Linux, Windows), re-placing the
+///     same frame (`show == last_show`, e.g. `frames` `1 -> 2` during schematic pre-warm) never
+///     hands in; switching to a different frame (`show != last_show`) hands in only if KiCad
+///     already held focus (`keys`), is actively focused right now (`kicad_active_now`), and no
+///     mouse press in Backplane is under way (`!press_in_backplane`).
+/// - An inactive macOS window can draw without a hitbox (`!has_rect`): keep a requested on-page
+///   hand-in pending by preserving `prev_show` and `last_show` until `has_rect`.
+pub fn decide_placement_focus(
+    in_page: bool,
+    has_rect: bool,
+    keys: bool,
+    want_keys: bool,
+    show: Option<u64>,
+    prev_show: Option<u64>,
+    last_show: Option<u64>,
+    dialog_has_keys: bool,
+    kicad_active_now: bool,
+    press_in_backplane: bool,
+    legacy_reshow: bool,
+) -> PlacementDecision {
+    let ref_show = if legacy_reshow { prev_show } else { last_show };
+    let requested = hand_in_now(
+        keys && kicad_active_now && !press_in_backplane,
+        want_keys,
+        show,
+        ref_show,
+        dialog_has_keys,
+    );
     let can_focus = editor_focus_target(in_page, show).is_some();
-    // An inactive macOS window can draw without a hitbox. Keep the frame switch pending until it has a rect.
-    let placed_show = if requested && can_focus && !has_rect { prev_show } else { show };
-    (requested && can_focus && has_rect, placed_show)
+    if requested && can_focus && !has_rect {
+        return PlacementDecision { hand_in: false, placed_show: prev_show, next_last_show: last_show };
+    }
+    PlacementDecision { hand_in: requested && can_focus && has_rect, placed_show: show, next_last_show: show }
 }
 
 /// Whether the frame should receive the keyboard on placement. An explicit request works on the current frame too,
@@ -834,6 +898,24 @@ pub enum TurnedTo { Click, Typing, Overlay }
 /// Whether a waiting hand-in is dropped: the person turned to Backplane before KiCad's frame came (an Edit pressed during a DRC, or under
 /// the lock question, gives KiCad the keys only if the person is still waiting for it). Nothing to drop once KiCad has the keys. Pure.
 pub fn hand_in_dropped(want_keys: bool, keys: bool, _how: TurnedTo) -> bool { want_keys && !keys }
+/// Clear KiCad keyboard ownership and drop any pending hand-in (`want_keys`, `await_close`) on a Backplane click.
+/// Returns `(had_keys, dropped_want_keys)`.
+fn cancel_hand_in_on_click<T>(keys: &mut bool, want_keys: &mut bool, await_close: &mut Option<T>) -> (bool, bool) {
+    *await_close = None;
+    let had_keys = std::mem::take(keys);
+    let dropped = hand_in_dropped(*want_keys, *keys, TurnedTo::Click);
+    if dropped { *want_keys = false; }
+    (had_keys, dropped)
+}
+/// Whether a GPUI mouse-down event landed on Backplane UI rather than on the bare KiCad pane
+/// (or the pane's own inline buttons such as "Open anyway").
+/// - `!pane_hovered`: click was outside the pane's bounds or blocked by an `.occlude()` overlay
+///   (`HitboxBehavior::BlockMouse`, e.g. menus, modals, Settings, palette, context menus).
+/// - `hit_overlay_after_pane`: click landed inside a non-occluding Backplane overlay painted
+///   after the pane (e.g. floating terminal or context dialog cut out via `holes`).
+pub fn click_is_in_backplane(pane_hovered: bool, hit_overlay_after_pane: bool) -> bool {
+    !pane_hovered || hit_overlay_after_pane
+}
 /// How long a key that pressed what asked for the keyboard (an Edit chosen with Enter, a shortcut) is still taken for its own repeats: the
 /// same keystroke again within this of its last sight. X11's repeat delay is ~660 ms on stock Xorg, and its repeats say no key is held
 /// (`is_held` false), so the key is remembered, not asked.
@@ -1014,7 +1096,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, closing_pid: None, page_thread: String::new(), leave: LeaveState::default(), mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None, screen_key: None,
+        KicadPane { born: std::time::Instant::now(), edit_key: asked_key(!deferred_open(), trigger_key()), handoff_placed: None, handoff_over: false, host_sent: None, mac_show_held: None, mac_full: false, in_page: true, closing_pid: None, page_thread: String::new(), leave: LeaveState::default(), mac_raise: RaiseState::default(), mac_buried: false, mac_watching: false, mac_hot: None, mac_seen: (false, None), mac_pressed: false, mac_press: None, mac_looked: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), end_marker: Arc::default(), mac_covered: false, mac_settle: None, host_sends: Default::default(), host_unsent: false, last_root: (i32::MIN, 0), placed: None, last_place: None, last_show: None, screen_key: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, remounts: None, unshown_since: None, unshown_asks: 0, reattached_for: None, adrift_held_at: None, override_kind: None, pending_show: None, chosen_at: 0, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, shown_once: false, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: opening_wants_keys(why), why, auto_taken_said: false, generation: None, mac_plan_said: String::new(), refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0, opening_timer: Arc::default() }
     }
     /// Edit pressed on this pane: KiCad ready but without a frame of the kind the pane wants: it is asked for one (a fresh frame).
@@ -1077,7 +1159,7 @@ impl KicadPane {
         // KiCad again (a fresh one) rather than standing on one closed under it
         if reopens(&self.info, &info, self.in_page) {
             eprintln!("GPUI_LOG {}", json!({"kicad_reopen": self.project, "pid": self.info["pid"]}));
-            self.info = info; self.placed = None; self.reattach(); cx.notify(); return
+            self.info = info; self.placed = None; self.last_show = None; self.reattach(); cx.notify(); return
         }
         if let Some(pid) = self.closing_pid {
             if still_closing(pid, &info) {
@@ -1087,7 +1169,7 @@ impl KicadPane {
             }
             self.closing_pid = None;
             eprintln!("GPUI_LOG {}", json!({"kicad_closing_over": pid, "state": info["state"], "pid": info["pid"], "project": self.project}));
-            self.info = info; self.placed = None;
+            self.info = info; self.placed = None; self.last_show = None;
             self.reattach(); cx.notify();
             return
         }
@@ -1106,7 +1188,7 @@ impl KicadPane {
         }
         if info["pid"] != self.info["pid"] {
             let had_pid = !self.info["pid"].is_null();
-            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.last_place = None; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.last_place = None; self.last_show = None; if had_pid || self.override_kind.as_deref() != Some(SIM) { self.override_kind = None; } cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             if had_pid { self.pending_show = None; }
             // another KiCad (a restart): its frames are new and are told their root position again (X may reuse a window id)
             #[cfg(target_os = "linux")]
@@ -1807,7 +1889,7 @@ impl KicadPane {
         eprintln!("GPUI_LOG {}", json!({"kicad_attach_closing": pid, "project": self.project}));
         self.closing_pid = Some(pid);
         self.info = json!({"state": "closing", "project": self.info["project"].as_str().unwrap_or(&self.project), "mode": self.info["mode"]});
-        self.pending_show = None; self.placed = None;
+        self.pending_show = None; self.placed = None; self.last_show = None;
         cx.notify();
     }
     /// Re-send `editor.kicad.attach` after a WebSocket reconnect so any info transition missed while disconnected is recovered.
@@ -1836,9 +1918,10 @@ impl KicadPane {
         let scale = window.scale_factor();
         let r = |b: &Bounds<Pixels>| nc::R { x: (f32::from(b.origin.x) * scale).round() as i32, y: (f32::from(b.origin.y) * scale).round() as i32, w: (f32::from(b.size.width) * scale).round() as i32, h: (f32::from(b.size.height) * scale).round() as i32 };
         let at = seen.as_ref().map(|(b, _)| r(b)).filter(|r| r.w > 0 && r.h > 0);
-        let mut over: Vec<nc::R> = seen.as_ref().map(|(_, o)| o.iter().filter(|b| f32::from(b.size.width) >= 12. && f32::from(b.size.height) >= 12.).map(|b| r(b)).collect()).unwrap_or_default();
+        let after = self.end_marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id));
+        let mut over: Vec<nc::R> = after.as_ref().map(|(_, o)| o.iter().filter(|b| f32::from(b.size.width) >= 12. && f32::from(b.size.height) >= 12.).map(|b| r(b)).collect()).unwrap_or_default();
         // Centered modals (keysheet, improvements) draw a full-window dim backdrop plus a smaller card: cut out the card so the uncovered pane stays visible.
-        if let Some(p) = at {
+        if let Some(p) = after.as_ref().map(|(b, _)| r(b)).or(at) {
             if over.iter().any(|o| *o != p) { over.retain(|o| *o != p); }
         }
         // the pane asks about another KiCad's lock: no editor over the question (KiCad's frame, mapped in its container, covered the
@@ -1848,7 +1931,7 @@ impl KicadPane {
         #[cfg(target_os = "macos")]
         {
             let px = |b: &Bounds<Pixels>| (f32::from(b.size.width), f32::from(b.size.height));
-            self.mac_covered = self.end_marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id)).is_some_and(|(e, o)| covers_pane(px(&e), &o.iter().map(px).collect::<Vec<_>>()));
+            self.mac_covered = after.as_ref().is_some_and(|(e, o)| covers_pane(px(e), &o.iter().map(px).collect::<Vec<_>>()));
             if self.mac_host(at, at.is_some(), show) { cx.notify(); }
         }
         // bp.9 local map: the frames shown once are the client's to map and unmap, the switch with no round trip (KiCad follows the map state)
@@ -1900,6 +1983,16 @@ impl KicadPane {
             return;
         }
         let prev = self.last_place.filter(|(lc, _, _)| *lc == c).map(|(_, r, s)| (Some(r), s));
+        let legacy = needs_legacy_reshow(cfg!(target_os = "macos"), &self.info);
+        let ref_show = if legacy { prev_show } else { self.last_show };
+        let check_live_switch = !self.want_keys && self.keys && show.is_some() && show != ref_show;
+        // Read live focus/button state before placement unmaps the previous frame on X11/Windows.
+        let kicad_active_now = if check_live_switch { nc::has_live_focus(c) } else { false };
+        let press = if check_live_switch {
+            show.is_some_and(|w| press_in_backplane(self.toplevel, w))
+        } else {
+            false
+        };
         // Linux, the client mapping KiCad's frames: a re-place at the rect last placed (a tab switch, the frames poll, the hub's echo of
         // the switch) only maps the frame on show (raised, the others unmapped), with no configure and no synthetic ConfigureNotify; a
         // move of the pane on screen is still told by sync_root (rail-round4: three same-rect placements per Board<->Schematic switch)
@@ -1924,10 +2017,24 @@ impl KicadPane {
             eprintln!("GPUI_LOG {}", json!({"kicad_switch_busy": {"frame": show, "jobs": self.jobs.iter().map(|j| j["title"].clone()).collect::<Vec<_>>(), "task_wait": self.info["task_wait"], "keys": self.keys, "want_keys": self.want_keys, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64}}));
         }
         // a pane off the page takes no input and no focus (#1470, the KiCad lead's rule): a hand-in waits for the page and the pane's rect
-        let (hand_in, placed_show) = placement_hand_in(self.in_page, at.is_some(), self.keys, self.want_keys, show, prev_show, kicad_dialog_has_keys);
+        let decision = decide_placement_focus(
+            self.in_page,
+            at.is_some(),
+            self.keys,
+            self.want_keys,
+            show,
+            prev_show,
+            self.last_show,
+            kicad_dialog_has_keys,
+            kicad_active_now,
+            press,
+            legacy,
+        );
         // a KiCad dialog has the keys: a waiting hand-in to the frame under it is over (not handed in late at the next placement change)
-        if self.want_keys && kicad_dialog_has_keys && show.is_some() && show == prev_show { self.want_keys = false; }
-        if hand_in && show != prev_show {
+        if self.want_keys && kicad_dialog_has_keys && show.is_some() && (show == prev_show || show == self.last_show) {
+            self.want_keys = false;
+        }
+        if decision.hand_in {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
                 #[cfg(not(target_os = "macos"))]
@@ -1940,22 +2047,11 @@ impl KicadPane {
                 if self.want_keys && !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
                 self.want_keys = false;
             }
-        } else if hand_in {
-            // already on show (Full size, the tab of the editor shown): the keyboard to it now
-            let w = show.unwrap();
-            if nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
-            #[cfg(not(target_os = "macos"))]
-            nc::focus(w);
-            #[cfg(target_os = "macos")]
-            { nc::yield_to(w); self.show_rpc(json!({"project": self.project, "frame": self.wanted_kind(), "focus": true})); }
-            if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); self.unexplained_reposted = false; cx.notify(); }
-            if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
-            if !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
-            self.want_keys = false;
         }
         match at { Some(p) if !over.is_empty() => nc::holes(c, Some(&nc::cut(p, &over))), _ => nc::holes(c, None) }
         if key.1.is_some() { self.shown_once = true; }
-        self.placed = Some((at, placed_show, over));
+        self.last_show = decision.next_last_show;
+        self.placed = Some((at, decision.placed_show, over));
     }
     /// macOS: KiCad's frame follows the pane by itself once it knows where the pane is on screen and whether our window can be seen
     /// (native_child_mac.rs); pushed when either changes. The order (KiCad's frame above our window) is `mac_order`'s.
@@ -2159,6 +2255,7 @@ impl KicadPane {
         // off screen for the Linux focus proxy, and the key forgotten: a pane taking this container over (take_kept) owns it from now, and
         // this pane's later tick or Drop must not take its entry away
         if let Some((t, k)) = self.screen_key.take() { nc::note_pane_on_screen(t, k, false); }
+        self.last_show = None;
         let Some(c) = self.container.take() else { return };
         let prev = self.last_place.filter(|(lc, _, _)| *lc == c).map(|(_, r, s)| (Some(r), s));
         nc::place(c, None, None, None, &mut self.last_root); self.log_place("leave", c, None, None, prev, false, false); self.last_place = None; nc::grab_escape(self.toplevel, false);
@@ -2176,6 +2273,27 @@ impl KicadPane {
             return;
         }
         self.rpc("editor.kicad.detach", json!({"project": self.project})); nc::destroy(c);
+    }
+    /// Handle a mouse click in Backplane UI (outside the pane or on an overlay drawn over it):
+    /// cancel any pending hand-in / yield fallback and reclaim focus when KiCad held the keys.
+    fn on_backplane_click(&mut self, cx: &mut Context<Self>) {
+        self.took = None;
+        let (had_keys, dropped) = cancel_hand_in_on_click(&mut self.keys, &mut self.want_keys, &mut self.await_close);
+        if dropped {
+            self.edit_key = None;
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                eprintln!("GPUI_LOG {}", json!({"kicad_hand_in_dropped": format!("{:?}", TurnedTo::Click)}));
+            }
+        }
+        // macOS: a press on our window brings it in front of KiCad's frame: ordered back at once and watched (mac_order)
+        #[cfg(target_os = "macos")]
+        { nc::cancel_yield(); self.mac_heat(); cx.notify(); }
+        if had_keys {
+            nc::focus(self.toplevel);
+            nc::grab_escape(self.toplevel, false);
+            if let Some(c) = self.container { self.grab_click(c, true); }
+            cx.notify();
+        }
     }
     /// The `{"kicad":{...}}` script step's answer: the container and every frame (geometry, mapped, painted), the hub's state, who has the keys.
     pub fn report(&self) -> Value {
@@ -2231,31 +2349,42 @@ impl Render for KicadPane {
         let buried = self.mac_buried && !self.mac_full && self.info["state"] == "ready";
         let say = if buried { Some(crate::i18n::t("gpui.c.kicad.mac.buried")) } else { say };
         let full = (self.mac_full || self.mac_buried) && self.info["state"] == "ready";
-        let marker = self.marker.clone(); let focus = self.focus.clone();
+        let marker = self.marker.clone(); let end_marker = self.end_marker.clone(); let focus = self.focus.clone();
+        let pane = cx.entity().downgrade();
         let keys = self.keys;
         // its rect as `kicad:pane` (an e2e judges KiCad's frame against the pane as it is drawn now: a panel, Full size, Full screen change it)
         crate::ui::with_rect(div().id("kicad-pane"), || "kicad:pane".to_string()).size_full().relative().when(!handoff, |d| d.bg(rgb(0x001023))).track_focus(&focus)
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
-                this.took = None;
-                // a press in Backplane's own area: a hand-in still waiting for KiCad's frame is dropped
-                this.turned_to_backplane(TurnedTo::Click);
-                // macOS: a press on our window brings it in front of KiCad's frame: ordered back at once and watched (mac_order)
-                #[cfg(target_os = "macos")]
-                { this.mac_heat(); cx.notify(); }
-                if this.keys {
-                    nc::focus(this.toplevel);
-                    this.keys = false;
-                    nc::grab_escape(this.toplevel, false);
-                    if let Some(c) = this.container { this.grab_click(c, true); }
-                    cx.notify();
-                }
-            }))
             // the keyboard's outline: always 2 px, coloured only while KiCad has the keyboard, so the editor's container keeps one size
             // (a border that came and went resized KiCad by 4 px at each hand-over: a relayout and repaint each time)
             // in a warm hand-over the outline is the pane's navy where it would be clear (the picture under it otherwise showed in those 2 px,
             // then turned navy at the hold's end: a change after KiCad had finished painting, GPU display bp.12.4)
             .border_2().border_color(if keys { c("accent") } else if handoff { Rgba::from(rgb(0x001023)) } else { Rgba { a: 0., ..c("accent") } })
-            .child(canvas(move |b, window, _| { *marker.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).size_full())
+            .child(canvas(
+                move |b, window, _| {
+                    let hb = window.insert_hitbox(b, HitboxBehavior::Normal);
+                    *marker.lock().unwrap() = Some(hb.id);
+                    hb
+                },
+                move |_, hb, window, _| {
+                    let pane = pane.clone();
+                    let end_marker = end_marker.clone();
+                    window.on_mouse_event(move |ev: &MouseDownEvent, phase, window, cx| {
+                        if phase != DispatchPhase::Capture { return }
+                        let pane_hovered = hb.is_hovered(window);
+                        let hit_after = if pane_hovered {
+                            let after_id = end_marker.lock().unwrap().unwrap_or(hb.id);
+                            window.hitbox_drawn_after(after_id).is_some_and(|(_, over)| {
+                                over.iter().any(|b| b.contains(&ev.position))
+                            })
+                        } else {
+                            false
+                        };
+                        if click_is_in_backplane(pane_hovered, hit_after) {
+                            let _ = pane.update(cx, |this, cx| this.on_backplane_click(cx));
+                        }
+                    });
+                },
+            ).size_full())
             .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().flex_col().gap_2().items_center().justify_center().text_color(c("faint")).child(s)
                 .when_some(notice, |d, n| d.child(crate::ui::with_rect(div().id("kicad-notice-start"), || "kicad:notice-start".to_string()).max_w(px(520.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n)))
                 .when(again, |d| d.child(crate::ui::with_rect(div().id("kicad-open-again"), || "kicad:open-again".to_string()).px_3().py_1().rounded_md().cursor_pointer()
@@ -2278,9 +2407,9 @@ impl Render for KicadPane {
                 .when(app, |d| d.child(crate::ui::with_rect(div().id("kicad-app"), || "kicad:app".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Open the KiCad app instead"))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(PaneKey("kicad-app".into()))))))))
-            // macOS: the last of the pane's own hitboxes; what is drawn after it over all of the pane is a screen over the page (covers_pane).
-            // Not on Linux and Windows: a hitbox the pane's size after the marker would be cut out of KiCad's frame there (holes)
-            .when(cfg!(target_os = "macos"), |d| { let end = self.end_marker.clone(); d.child(canvas(move |b, window, _| { *end.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).absolute().inset_0()) })
+            // Last of the pane's own hitboxes (after any inline `say` controls): everything drawn after it overlapping the pane
+            // is a Backplane overlay (holes on Linux/Windows, covers_pane on macOS, and non-occluding overlay click cancellation).
+            .child({ let end = self.end_marker.clone(); canvas(move |b, window, _| { *end.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).absolute().inset_0() })
     }
 }
 
@@ -2454,19 +2583,178 @@ mod tests {
         assert!(mark_auto("editor.kicad.host", json!({}), ShowBy::Automatic).get("auto").is_none());
     }
     #[test] fn placement_defers_focus_without_a_rect_and_retries_the_frame_switch() {
-        use super::{editor_focus_target, placement_hand_in};
+        use super::{decide_placement_focus, editor_focus_target, PlacementDecision};
         let before = Some(7000);
         let after = Some(7001);
         assert_eq!(editor_focus_target(false, after), None);
         assert_eq!(editor_focus_target(true, after), after);
-        assert_eq!(placement_hand_in(false, true, true, true, after, before, false), (false, after));
+        assert_eq!(
+            decide_placement_focus(false, true, true, true, after, before, before, false, true, false, false),
+            PlacementDecision { hand_in: false, placed_show: after, next_last_show: after }
+        );
         for (keys, want_keys) in [(true, false), (false, true)] {
-            let (focus, remembered) = placement_hand_in(true, false, keys, want_keys, after, before, false);
-            assert!(!focus);
-            assert_eq!(remembered, before);
-            assert_eq!(placement_hand_in(true, true, keys, want_keys, after, remembered, false), (true, after));
+            let d = decide_placement_focus(true, false, keys, want_keys, after, before, before, false, true, false, false);
+            assert!(!d.hand_in);
+            assert_eq!(d.placed_show, before);
+            assert_eq!(d.next_last_show, before);
+            assert_eq!(
+                decide_placement_focus(true, true, keys, want_keys, after, d.placed_show, d.next_last_show, false, true, false, false),
+                PlacementDecision { hand_in: true, placed_show: after, next_last_show: after }
+            );
         }
-        assert_eq!(placement_hand_in(true, true, true, true, after, before, true), (false, after));
+        assert_eq!(
+            decide_placement_focus(true, true, true, true, after, before, before, true, true, false, false),
+            PlacementDecision { hand_in: false, placed_show: after, next_last_show: after }
+        );
+    }
+    #[test] fn frames_change_reshow_never_steals_focus_while_preserving_initial_edit() {
+        use super::{decide_placement_focus, PlacementDecision};
+        let board = Some(7632);
+        let sym = Some(7633);
+        let new_board = Some(9001);
+        // 1. Deliberate Edit initial placement hands in focus.
+        let d = decide_placement_focus(true, true, false, true, board, None, None, false, false, false, false);
+        assert_eq!(d, PlacementDecision { hand_in: true, placed_show: board, next_last_show: board });
+        let last_show = d.next_last_show;
+
+        // 2. Schematic pre-warm changes frames (1 -> 2), resetting `placed` so `prev_show` is None while `last_show` keeps `board`.
+        // Neither while KiCad is still active nor when the user clicks into Backplane (`!kicad_active_now` or `press`) does it re-hand focus.
+        for (kicad_active_now, press) in [(true, false), (false, false), (true, true), (false, true)] {
+            let d = decide_placement_focus(true, true, true, false, board, None, last_show, false, kicad_active_now, press, false);
+            assert_eq!(
+                d,
+                PlacementDecision { hand_in: false, placed_show: board, next_last_show: board },
+                "same-frame re-show after frames change must not hand in (active={kicad_active_now}, press={press})"
+            );
+        }
+
+        // 3. Explicit user request on the same frame (`want_keys = true`, e.g. Edit again / Full size / tab click) still hands in.
+        assert_eq!(
+            decide_placement_focus(true, true, false, true, board, board, last_show, false, false, true, false),
+            PlacementDecision { hand_in: true, placed_show: board, next_last_show: board }
+        );
+
+        // 4. Switching to a different frame (`sym != board`) with `want_keys = false`:
+        // hands in only when KiCad held keys, is actively focused now, and no Backplane mouse press is under way.
+        assert_eq!(
+            decide_placement_focus(true, true, true, false, sym, board, last_show, false, true, false, false),
+            PlacementDecision { hand_in: true, placed_show: sym, next_last_show: sym }
+        );
+        for (kicad_active_now, press) in [(false, false), (true, true), (false, true)] {
+            assert_eq!(
+                decide_placement_focus(true, true, true, false, sym, board, last_show, false, kicad_active_now, press, false),
+                PlacementDecision { hand_in: false, placed_show: sym, next_last_show: sym },
+                "frame switch must not steal focus back when Backplane is active or clicked (active={kicad_active_now}, press={press})"
+            );
+        }
+
+        // 5. Automatic attach (`want_keys = false, keys = false`) never hands in on initial show, frames change, or frame switch.
+        for (show, prev, last) in [(board, None, None), (board, None, board), (sym, board, board)] {
+            assert_eq!(
+                decide_placement_focus(true, true, false, false, show, prev, last, false, true, false, false),
+                PlacementDecision { hand_in: false, placed_show: show, next_last_show: show }
+            );
+        }
+
+        // 6. New KiCad restart clears `last_show` to None: deliberate open hands in; active KiCad with `keys` also hands in.
+        assert_eq!(
+            decide_placement_focus(true, true, false, true, new_board, None, None, false, false, false, false),
+            PlacementDecision { hand_in: true, placed_show: new_board, next_last_show: new_board }
+        );
+        assert_eq!(
+            decide_placement_focus(true, true, true, false, new_board, None, None, false, true, false, false),
+            PlacementDecision { hand_in: true, placed_show: new_board, next_last_show: new_board }
+        );
+
+        // 7. Inactive window (`!has_rect`):
+        // - Implicit switch while active defers and keeps `next_last_show` as `board` until `has_rect` becomes true.
+        let deferred = decide_placement_focus(true, false, true, false, sym, board, last_show, false, true, false, false);
+        assert_eq!(deferred, PlacementDecision { hand_in: false, placed_show: board, next_last_show: board });
+        assert_eq!(
+            decide_placement_focus(true, true, true, false, sym, deferred.placed_show, deferred.next_last_show, false, true, false, false),
+            PlacementDecision { hand_in: true, placed_show: sym, next_last_show: sym }
+        );
+        // - Implicit switch while KiCad is inactive does not leave a pending focus steal when `has_rect` returns.
+        let inactive_switch = decide_placement_focus(true, false, true, false, sym, board, last_show, false, false, false, false);
+        assert_eq!(inactive_switch, PlacementDecision { hand_in: false, placed_show: sym, next_last_show: sym });
+        assert_eq!(
+            decide_placement_focus(true, true, true, false, sym, inactive_switch.placed_show, inactive_switch.next_last_show, false, true, false, false),
+            PlacementDecision { hand_in: false, placed_show: sym, next_last_show: sym }
+        );
+        // - Explicit request (`want_keys = true`) without a rect while KiCad is inactive defers and hands in once `has_rect` returns.
+        let explicit_deferred = decide_placement_focus(true, false, false, true, sym, board, last_show, false, false, false, false);
+        assert_eq!(explicit_deferred, PlacementDecision { hand_in: false, placed_show: board, next_last_show: board });
+        assert_eq!(
+            decide_placement_focus(true, true, false, true, sym, explicit_deferred.placed_show, explicit_deferred.next_last_show, false, false, false, false),
+            PlacementDecision { hand_in: true, placed_show: sym, next_last_show: sym }
+        );
+    }
+    #[test] fn legacy_reshow_applies_only_on_macos_without_embed_key_on_activate() {
+        use super::{decide_placement_focus, needs_legacy_reshow, PlacementDecision};
+        use serde_json::json;
+        let with_cap = json!({"embed_caps": ["embed-macos", "embed-key-on-activate"]});
+        let without_cap = json!({"embed_caps": ["embed-macos"]});
+        let empty_caps = json!({"embed_caps": []});
+        assert!(!needs_legacy_reshow(true, &with_cap), "bp.13.3+ macOS has embed-key-on-activate");
+        assert!(needs_legacy_reshow(true, &without_cap), "bp.13.2 macOS needs legacy re-show repair");
+        assert!(needs_legacy_reshow(true, &empty_caps));
+        assert!(needs_legacy_reshow(true, &serde_json::Value::Null));
+        assert!(!needs_legacy_reshow(false, &with_cap) && !needs_legacy_reshow(false, &without_cap) && !needs_legacy_reshow(false, &empty_caps), "Linux/Windows never need legacy macOS re-show");
+
+        let board = Some(7632);
+        // Legacy macOS runtime (bp.13.2): frames 1 -> 2 resets `prev_show` to None while `last_show` is `board`.
+        // Reproduces main's repair hand-in when `keys = true`, KiCad is active, and no Backplane press is under way.
+        assert_eq!(
+            decide_placement_focus(true, true, true, false, board, None, board, false, true, false, true),
+            PlacementDecision { hand_in: true, placed_show: board, next_last_show: board }
+        );
+        // Click interleaving in Backplane (`!kicad_active_now` or `press_in_backplane`) suppresses the legacy re-show too.
+        assert!(!decide_placement_focus(true, true, true, false, board, None, board, false, false, false, true).hand_in);
+        assert!(!decide_placement_focus(true, true, true, false, board, None, board, false, true, true, true).hand_in);
+        assert!(!decide_placement_focus(true, true, true, false, board, None, board, false, false, true, true).hand_in);
+        // Still respects `!in_page`, `!has_rect`, `dialog_has_keys`, and `keys = false`.
+        assert!(!decide_placement_focus(false, true, true, false, board, None, board, false, true, false, true).hand_in);
+        let deferred = decide_placement_focus(true, false, true, false, board, None, board, false, true, false, true);
+        assert_eq!(deferred, PlacementDecision { hand_in: false, placed_show: None, next_last_show: board });
+        assert!(!decide_placement_focus(true, true, true, false, board, None, board, true, true, false, true).hand_in);
+        assert!(!decide_placement_focus(true, true, false, false, board, None, board, false, true, false, true).hand_in);
+    }
+    #[test] fn backplane_click_drops_pending_hand_in_even_when_keys_and_await_close_are_set() {
+        use super::cancel_hand_in_on_click;
+        let (mut keys, mut want_keys, mut await_close) = (true, true, Some(42_u64));
+        assert_eq!(cancel_hand_in_on_click(&mut keys, &mut want_keys, &mut await_close), (true, true));
+        assert!(!keys && !want_keys && await_close.is_none());
+
+        let (mut keys, mut want_keys, mut await_close) = (false, true, Some(99_u64));
+        assert_eq!(cancel_hand_in_on_click(&mut keys, &mut want_keys, &mut await_close), (false, true));
+        assert!(!keys && !want_keys && await_close.is_none());
+
+        let (mut keys, mut want_keys, mut await_close) = (true, false, None::<u64>);
+        assert_eq!(cancel_hand_in_on_click(&mut keys, &mut want_keys, &mut await_close), (true, false));
+        assert!(!keys && !want_keys && await_close.is_none());
+    }
+    #[test] fn click_on_overlay_over_pane_cancels_pending_hand_in() {
+        use super::{cancel_hand_in_on_click, click_is_in_backplane, decide_placement_focus, PlacementDecision};
+        // Outside pane or blocked by an .occlude() overlay over the pane (menu, modal, Settings, palette):
+        assert!(click_is_in_backplane(false, false));
+        assert!(click_is_in_backplane(false, true));
+        // Non-occluding Backplane overlay painted after `end_marker` (even while inline `say` status UI is visible):
+        assert!(click_is_in_backplane(true, true));
+        // Bare pane or the pane's own inline buttons before `end_marker`:
+        assert!(!click_is_in_backplane(true, false));
+
+        // Both occluded and non-occluding overlay clicks drop pending `want_keys` and `await_close` before the next placement.
+        for (pane_hovered, hit_after) in [(false, false), (true, true)] {
+            assert!(click_is_in_backplane(pane_hovered, hit_after));
+            let (mut keys, mut want_keys, mut await_close) = (false, true, Some(77_u64));
+            assert_eq!(cancel_hand_in_on_click(&mut keys, &mut want_keys, &mut await_close), (false, true));
+            assert!(!keys && !want_keys && await_close.is_none());
+            let board = Some(100_u64);
+            assert_eq!(
+                decide_placement_focus(true, true, keys, want_keys, board, board, board, false, false, false, false),
+                PlacementDecision { hand_in: false, placed_show: board, next_last_show: board }
+            );
+        }
     }
 
     /// A quick away-and-back sends nothing. A settled leave is sent once and its back is sent immediately.
