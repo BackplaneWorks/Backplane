@@ -15,6 +15,53 @@ pub const NIGHTLY_SIGNED: [&str; 3] = ["nightly-manifest.json", "nightly-manifes
 pub const SIGNED: [&str; 3] = ["manifest.json", "manifest.json.sig", "manifest.json.keyid"];
 const SMALL: u64 = 1 << 20;
 
+fn is_loopback_http(u: &str) -> bool {
+    let Some(rest) = u.strip_prefix("http://") else { return false };
+    let auth = rest.split(['/', '?', '#']).next().unwrap_or("");
+    if auth.contains('@') { return false }
+    if let Some(tail) = auth.strip_prefix("[::1]") {
+        return tail.is_empty() || tail.strip_prefix(':').is_some_and(|p| !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit()));
+    }
+    let (host, port_ok) = match auth.split_once(':') {
+        Some((h, p)) => (h, !p.is_empty() && p.bytes().all(|c| c.is_ascii_digit())),
+        None => (auth, true),
+    };
+    port_ok && matches!(host, "localhost" | "127.0.0.1")
+}
+
+/// Validate a URL before passing it to curl. Production feeds allow only `https://`; a loopback test feed also allows
+/// plain `http://` targeting loopback. Rejects option-shaped URLs, empty/userinfo authorities, and whitespace/control characters.
+/// Answers `true` when HTTPS must be pinned.
+pub fn curl_url_ok(url: &str, feed_url: &str) -> Result<bool, String> {
+    if url.is_empty() || url.starts_with('-') || url.bytes().any(|b| b <= 0x20 || b == 0x7f) {
+        return Err("refusing unsafe release URL".into());
+    }
+    if let Some(rest) = url.strip_prefix("https://") {
+        let auth = rest.split(['/', '?', '#']).next().unwrap_or("");
+        if auth.is_empty() || auth.contains('@') || auth.contains('\\') {
+            return Err("refusing unsafe release URL".into());
+        }
+        return Ok(true);
+    }
+    if is_loopback_http(feed_url) && is_loopback_http(url) { return Ok(false); }
+    Err("refusing release URL outside allowed protocol".into())
+}
+
+/// Curl arguments matching `curl_url_ok`: `-q` first to ignore user config; production HTTPS stays HTTPS on redirects (`-fsSL --proto =https`),
+/// while loopback HTTP test feeds disallow redirects (`-fsS --max-redirs 0 --proto =http`) so HTTP never hops off loopback.
+pub fn curl_args(https: bool, max: u64, agent: &str) -> Vec<String> {
+    let mut v = vec!["-q".into(), if https { "-fsSL" } else { "-fsS" }.into()];
+    if !https { v.extend(["--max-redirs".into(), "0".into()]); }
+    v.extend([
+        "--max-time".into(), "1800".into(),
+        "--max-filesize".into(), max.to_string(),
+        "-A".into(), agent.into(),
+        "--proto".into(), if https { "=https" } else { "=http" }.into(),
+        "--proto-redir".into(), "=https".into(),
+    ]);
+    v
+}
+
 /// Fetch a URL into a file, refusing more than the given bytes.
 pub type Get<'a> = &'a dyn Fn(&str, &Path, u64) -> Result<(), String>;
 /// Unpack an archive into an empty folder.
@@ -99,23 +146,206 @@ fn check_tree(d: &Path, zip: bool) -> Result<(), String> {
     Ok(())
 }
 
+static BACKUP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+fn name_ok(s: &str) -> bool { !s.is_empty() && s.len() <= 64 && !s.starts_with('.') && s.chars().all(|c| c.is_ascii_alphanumeric() || "-._".contains(c)) }
+
+/// Strict single-line safe folder name allowed in pointer files (`CURRENT`, `next`): strips at most one trailing `\n` and `\r`.
+pub fn valid_current(raw: &str) -> Option<String> {
+    let s = raw.strip_suffix('\n').unwrap_or(raw);
+    let s = s.strip_suffix('\r').unwrap_or(s);
+    name_ok(s).then(|| s.to_string())
+}
+
+/// Strict tag-list parser (`good`): accepts empty file or lines separated by `\n`/`\r\n` with every line satisfying `name_ok` (no blank/malformed lines).
+pub fn valid_tag_list(raw: &str) -> Option<Vec<String>> {
+    if raw.is_empty() { return Some(Vec::new()); }
+    let body = raw.strip_suffix('\n').unwrap_or(raw);
+    let mut out = Vec::new();
+    for line in body.split('\n') {
+        let line = line.strip_suffix('\r').unwrap_or(line);
+        if !name_ok(line) { return None }
+        out.push(line.to_string());
+    }
+    Some(out)
+}
+
+/// Read a tag-list file fail-closed: `Ok(Vec::new())` only on `NotFound`, `Err(())` on other I/O errors or malformed entries.
+pub fn try_tag_list(p: &Path) -> Result<Vec<String>, ()> {
+    match fs::read_to_string(p) {
+        Ok(raw) => valid_tag_list(&raw).ok_or(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(_) => Err(()),
+    }
+}
+
+/// Strictly validate all 5 fields of `<builds>/app-update/trial`, returning `Some((tag, from))` only when complete and valid.
+pub fn valid_trial_tags(raw: &str) -> Option<(String, String)> {
+    let v: Value = serde_json::from_str(raw).ok()?;
+    let tag = v.get("tag").and_then(Value::as_str).filter(|s| name_ok(s))?.to_string();
+    let from = v.get("from").and_then(Value::as_str).filter(|s| name_ok(s))?.to_string();
+    let _at = v.get("at").and_then(Value::as_u64)?;
+    let _pid = v.get("pid").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).filter(|&n| n > 0 && n <= i32::MAX as u32)?;
+    let _nonce = v.get("nonce").and_then(Value::as_str).filter(|s| !s.is_empty())?;
+    Some((tag, from))
+}
+
+fn lock_state(builds: &Path) -> Result<fs::File, String> {
+    let au = builds.join("app-update");
+    fs::create_dir_all(&au).map_err(|_| "cannot lock app-update state".to_string())?;
+    fs::OpenOptions::new().create(true).truncate(false).write(true).open(au.join("state.lock"))
+        .and_then(|f| f.lock().map(|()| f))
+        .map_err(|_| "cannot lock app-update state".to_string())
+}
+
+fn is_protected_existing(builds: &Path, tag: &str) -> bool {
+    match fs::read_to_string(builds.join("CURRENT")) {
+        Ok(raw) => match valid_current(&raw) {
+            Some(cur) => if cur == tag { return true; },
+            None => return true,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return true,
+    }
+    match fs::read_dir(builds.join(".pins")) {
+        Ok(rd) => {
+            for e in rd {
+                let Ok(e) = e else { return true };
+                match fs::read_to_string(e.path()) {
+                    Ok(s) => if s.lines().any(|l| l.trim() == tag) { return true; },
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => return true,
+                }
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return true,
+    }
+    match fs::read_to_string(builds.join("app-update/next")) {
+        Ok(raw) => match valid_current(&raw) {
+            Some(n) => if n == tag { return true; },
+            None => return true,
+        },
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return true,
+    }
+    match try_tag_list(&builds.join("app-update/good")) {
+        Ok(entries) => if entries[entries.len().saturating_sub(3)..].iter().any(|g| g == tag) { return true; },
+        Err(()) => return true,
+    }
+    match fs::read_to_string(builds.join("app-update/trial")) {
+        Ok(s) => {
+            let Some((ttag, tfrom)) = valid_trial_tags(&s) else { return true };
+            if ttag == tag || tfrom == tag { return true; }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return true,
+    }
+    false
+}
+
+fn staged_ok(dest: &Path, f: &Found, zip: bool, extra: &dyn Fn(&Path) -> Result<(), String>) -> Result<(), String> {
+    let meta = fs::symlink_metadata(dest).map_err(|_| "staged build is missing".to_string())?;
+    if !meta.file_type().is_dir() { return Err("staged build is not a folder".into()); }
+    let raw = fs::read_to_string(dest.join("EXPECT")).map_err(|_| "staged build has no EXPECT".to_string())?;
+    let e: Value = serde_json::from_str(&raw).map_err(|_| "staged build has unreadable EXPECT".to_string())?;
+    let g = |k: &str| e[k].as_str().unwrap_or("");
+    if g("version") != f.version || g("commit") != f.commit || g("sha256") != f.asset.sha256 {
+        return Err("staged build does not match the signed manifest".into());
+    }
+    check_tree(dest, zip)?;
+    extra(dest)
+}
+
 /// Fetch, check and unpack, then one rename makes `builds/<tag>`. Scratch sits beside it, on the same disk, and is gone however this ends.
 pub fn stage(f: &Found, builds: &Path, get: Get, unpack: Unpack) -> Result<PathBuf, String> {
+    stage_with(f, builds, get, unpack, &|_| Ok(()))
+}
+
+/// Like `stage`, running an extra caller check (`extra`) in scratch before renaming into `builds/<tag>`, and verifying provenance via
+/// `EXPECT` + `check_tree` + `extra` if `builds/<tag>` already exists. An idle/legacy unverified directory is replaced atomically only after a
+/// freshly downloaded archive passes all checks; active/pinned or symlinked destinations are never deleted or overwritten.
+pub fn stage_with(f: &Found, builds: &Path, get: Get, unpack: Unpack, extra: &dyn Fn(&Path) -> Result<(), String>) -> Result<PathBuf, String> {
+    stage_with_commit(f, builds, get, unpack, extra, &|_| Ok(()))
+}
+
+/// Like `stage_with`, also invoking `commit(&dest)` under the same `app-update/state.lock` across destination reuse or atomic publish so no
+/// pruner or guard shutdown can slip between staging the build and publishing its pointer.
+pub fn stage_with_commit(
+    f: &Found,
+    builds: &Path,
+    get: Get,
+    unpack: Unpack,
+    extra: &dyn Fn(&Path) -> Result<(), String>,
+    commit: &dyn Fn(&Path) -> Result<(), String>,
+) -> Result<PathBuf, String> {
     let dest = builds.join("builds").join(&f.tag);
-    if dest.exists() { return Ok(dest) } // only ever made whole, by the rename below
+    let zip = f.asset.name.ends_with(".zip");
+    {
+        let _state_lock = lock_state(builds)?;
+        match fs::symlink_metadata(&dest) {
+            Ok(meta) => {
+                if staged_ok(&dest, f, zip, extra).is_ok() {
+                    commit(&dest)?;
+                    return Ok(dest);
+                }
+                if !meta.file_type().is_dir() || is_protected_existing(builds, &f.tag) {
+                    return Err("existing build cannot be replaced safely".into());
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e.to_string()),
+        }
+    }
     let work = builds.join("builds").join(format!(".stage-{}-{}", f.tag, std::process::id()));
     let _ = fs::remove_dir_all(&work); fs::create_dir_all(&work).map_err(|e| e.to_string())?;
     let r = (|| {
         // the unpacker tells the kinds apart by this name, which comes from the verified manifest (rel::archive_name)
-        let zip = f.asset.name.ends_with(".zip");
         let a = work.join(if zip { "archive.zip" } else { "archive.tar.gz" }); get(&f.url, &a, f.asset.size)?;
         if fs::metadata(&a).map_err(|e| e.to_string())?.len() != f.asset.size { return Err("the download is the wrong size".to_string()) }
         if sha256(&a)? != f.asset.sha256 { return Err("the download's checksum does not match".to_string()) }
         let x = work.join("build"); fs::create_dir(&x).map_err(|e| e.to_string())?;
-        unpack(&a, &x)?; check_tree(&x, zip)?;
-        // written after the tree check, by us, from the verified manifest: an archive cannot choose what its build is held to
-        fs::write(x.join("EXPECT"), json!({"version":f.version,"commit":f.commit}).to_string()).map_err(|e| e.to_string())?;
-        fs::rename(&x, &dest).map_err(|e| e.to_string())
+        unpack(&a, &x)?; check_tree(&x, zip)?; extra(&x)?;
+        // written after all checks, by us, from the verified manifest: an archive cannot choose what its build is held to
+        fs::write(x.join("EXPECT"), json!({"version":f.version,"commit":f.commit,"sha256":f.asset.sha256}).to_string()).map_err(|e| e.to_string())?;
+        let _state_lock = lock_state(builds)?;
+        match fs::symlink_metadata(&dest) {
+            Ok(meta) => {
+                if staged_ok(&dest, f, zip, extra).is_ok() {
+                    return commit(&dest);
+                }
+                if !meta.file_type().is_dir() || is_protected_existing(builds, &f.tag) {
+                    return Err("existing build cannot be replaced safely".into());
+                }
+                let backup = loop {
+                    let seq = BACKUP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    let cand = builds.join("builds").join(format!(".old-{}-{}-{seq}", f.tag, std::process::id()));
+                    match fs::symlink_metadata(&cand) {
+                        Ok(_) => continue,
+                        Err(e) if e.kind() == std::io::ErrorKind::NotFound => break cand,
+                        Err(e) => return Err(e.to_string()),
+                    }
+                };
+                fs::rename(&dest, &backup).map_err(|e| e.to_string())?;
+                if let Err(e) = fs::rename(&x, &dest) {
+                    return match fs::rename(&backup, &dest) {
+                        Ok(()) => Err(e.to_string()),
+                        Err(re) => Err(format!("replace failed ({e}); rollback failed ({re}); previous build preserved at {}", backup.display())),
+                    };
+                }
+                let _ = fs::remove_dir_all(&backup);
+                commit(&dest)
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => match fs::rename(&x, &dest) {
+                Ok(()) => commit(&dest),
+                Err(_) if fs::symlink_metadata(&dest).is_ok() => {
+                    staged_ok(&dest, f, zip, extra)?;
+                    commit(&dest)
+                }
+                Err(e) => Err(e.to_string()),
+            },
+            Err(e) => Err(e.to_string()),
+        }
     })();
     let _ = fs::remove_dir_all(&work);
     r.map(|_| dest)
@@ -339,5 +569,101 @@ mod tests {
 
         let got2 = find_nightly(&[hotfix, n1, n2], &bad).unwrap().unwrap();
         assert_eq!(got2.tag, "v0.16.5-nightly.20261121.1");
+    }
+    #[test] fn curl_url_ok_enforces_https_in_prod_and_rejects_option_urls() {
+        let prod = FEED;
+        assert_eq!(curl_url_ok("https://github.com/BackplaneWorks/Backplane/releases/download/v1/a.tar.gz", prod), Ok(true));
+        assert_eq!(curl_url_ok("https://github.com/org/repo/releases/download/v1/pkg@2.tar.gz", prod), Ok(true));
+        for bad in ["-K/etc/passwd", "file:///etc/passwd", "http://example.com/a.tar.gz", "http://127.0.0.1:8080/a.tar.gz", "https://example.com/a b", "https://user:pass@example.com/a.tar.gz", "https://example.com\\@evil.com/a", "https:///a.tar.gz", "https://", ""] {
+            assert!(curl_url_ok(bad, prod).is_err(), "{bad} must be rejected on production feed");
+        }
+        let local = "http://127.0.0.1:8080/releases.json";
+        assert_eq!(curl_url_ok("http://127.0.0.1:8080/v1/a.tar.gz", local), Ok(false));
+        assert_eq!(curl_url_ok("http://[::1]:8080/v1/a.tar.gz", local), Ok(false));
+        assert_eq!(curl_url_ok("http://localhost:8080/v1/a.tar.gz", local), Ok(false));
+        assert_eq!(curl_url_ok("https://github.com/v1/a.tar.gz", local), Ok(true));
+        for bad in ["http://example.com/a.tar.gz", "http://127.0.0.1:8080@evil.com/a", "http://127.0.0.1.evil.com/a", "https://user:pass@example.com/a.tar.gz", "file:///etc/passwd", "-o/tmp/x"] {
+            assert!(curl_url_ok(bad, local).is_err(), "{bad} must be rejected even on loopback feed");
+        }
+        let prod_args = curl_args(true, 1024, "backplane-hub");
+        assert_eq!(prod_args[0], "-q");
+        assert!(prod_args.contains(&"-fsSL".into()) && prod_args.windows(2).any(|w| w == ["--proto-redir", "=https"]));
+        let loop_args = curl_args(false, 1024, "backplane-guard");
+        assert_eq!(loop_args[0], "-q");
+        assert!(!loop_args.contains(&"-fsSL".into()) && loop_args.windows(2).any(|w| w == ["--max-redirs", "0"]));
+    }
+    #[test] fn stage_with_verifies_extra_in_scratch_and_preexisting_provenance() {
+        let r = Rig::new("prov"); let mut f = Feed::new(); let x = found(&mut f, &r, b"archive");
+        // Failing extra check leaves no destination directory behind
+        let err = stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Err("missing gpui".into())).unwrap_err();
+        assert!(err.contains("missing gpui")); assert!(left(&r).is_empty());
+
+        // Active (CURRENT) unverified directory is refused AND untouched
+        let pre = r.d.join("b/builds/v0.16.0"); fs::create_dir_all(&pre).unwrap(); fs::write(pre.join("keepme"), b"1").unwrap();
+        fs::write(r.d.join("b/CURRENT"), "v0.16.0\n").unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        assert!(pre.join("keepme").is_file(), "protected active directory must not be touched");
+        fs::remove_file(r.d.join("b/CURRENT")).unwrap();
+
+        // Malformed CURRENT (including trailing blank lines), next/good protection & malformation, and trial missing `from` all fail closed
+        fs::write(r.d.join("b/CURRENT"), "v0.15.0\nv0.16.0\n").unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        fs::write(r.d.join("b/CURRENT"), "v0.15.0\n\n").unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        fs::remove_file(r.d.join("b/CURRENT")).unwrap();
+        fs::create_dir_all(r.d.join("b/app-update")).unwrap();
+        fs::write(r.d.join("b/app-update/next"), "v0.16.0\n").unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        fs::write(r.d.join("b/app-update/next"), "v0.15.0\n\n").unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        fs::remove_file(r.d.join("b/app-update/next")).unwrap();
+        fs::write(r.d.join("b/app-update/good"), "v0.16.0\n").unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        fs::write(r.d.join("b/app-update/good"), "v0.15.0\r\r\n").unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        fs::write(r.d.join("b/app-update/good"), "../bad\n").unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        fs::remove_file(r.d.join("b/app-update/good")).unwrap();
+        fs::write(r.d.join("b/app-update/trial"), r#"{"tag":"v0.15.0"}"#).unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        fs::write(r.d.join("b/app-update/trial"), r#"{"tag":"v0.15.0","from":"v0.14.0"}"#).unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+        assert!(pre.join("keepme").is_file(), "protected/malformed pointer must fail closed and preserve dir");
+        fs::remove_file(r.d.join("b/app-update/trial")).unwrap();
+
+        // Symlink at builds/<tag> root is refused AND untouched
+        #[cfg(unix)] {
+            fs::remove_dir_all(&pre).unwrap();
+            let target_dir = r.d.join("outside-target"); fs::create_dir_all(&target_dir).unwrap();
+            crate::plat::fs::symlink(&target_dir, &pre).unwrap();
+            assert!(stage_with(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(())).is_err());
+            assert!(fs::symlink_metadata(&pre).unwrap().file_type().is_symlink());
+            fs::remove_file(&pre).unwrap();
+        }
+
+        // Legacy idle EXPECT (version + commit without sha256) recovers automatically without touching any pre-existing retained .old-* backup
+        let old0 = r.d.join(format!("b/builds/.old-v0.16.0-{}-0", std::process::id()));
+        fs::create_dir_all(&old0).unwrap(); fs::write(old0.join("retained"), b"keep").unwrap();
+        let _ = fs::remove_dir_all(&pre); fs::create_dir_all(&pre).unwrap();
+        fs::write(pre.join("EXPECT"), r#"{"version":"0.16.0","commit":"c"}"#).unwrap();
+        fs::write(pre.join("legacy"), b"old").unwrap();
+        let commits = std::cell::Cell::new(0usize);
+        let d = stage_with_commit(&x, &r.d.join("b"), &|u, o, m| f.get(u, o, m), &good_tree, &|_| Ok(()), &|_| { commits.set(commits.get() + 1); Ok(()) }).unwrap();
+        assert_eq!(commits.get(), 1);
+        assert!(old0.join("retained").is_file(), "prior retained backup must never be erased");
+        let _ = fs::remove_dir_all(&old0);
+        assert!(!d.join("legacy").exists(), "legacy tree replaced atomically with verified archive");
+        let e: Value = serde_json::from_str(&fs::read_to_string(d.join("EXPECT")).unwrap()).unwrap();
+        assert_eq!(e["sha256"].as_str(), Some(x.asset.sha256.as_str()));
+
+        // Verified tree is reused without fetching again AND still invokes commit under state.lock
+        f.asked.borrow_mut().clear();
+        let d2 = stage_with_commit(&x, &r.d.join("b"), &|_, _, _| panic!("should reuse verified tree"), &good_tree, &|_| Ok(()), &|_| { commits.set(commits.get() + 1); Ok(()) }).unwrap();
+        assert_eq!(d, d2);
+        assert_eq!(commits.get(), 2);
+        // If download fails while idle mismatched dir exists, existing dir is preserved untouched
+        fs::write(d.join("EXPECT"), r#"{"version":"0.16.0","commit":"c","sha256":"00"}"#).unwrap();
+        assert!(stage_with(&x, &r.d.join("b"), &|_, _, _| Err("offline".into()), &good_tree, &|_| Ok(())).is_err());
+        assert!(d.join("EXPECT").is_file(), "failed refresh must not delete existing dir");
     }
 }

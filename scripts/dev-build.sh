@@ -123,8 +123,8 @@ gok_put() { mkdir -p "$GOK/$1.d"; printf '%s\n%s\n%s\n' "$2" "$3" "$4" > "$GOK/$
 if [ "$GATE" = 1 ]; then
   git -C "$ROOT" rev-parse HEAD > /dev/null 2>&1 && ok=1 || ok=0
   if [ "$ok" = 1 ]; then
-    KEY[hub]=$(gkey hub . "${ex[@]}" ':(exclude)native/gpui' ':(exclude)native/voice'); KEY[window]=$(gkey window . "${ex[@]}" ':(exclude)native/host' ':(exclude)native/voice' ':(exclude)native/guard')
-    KEY[voice]=$(gkey voice native/voice); KEY[guard]=$(gkey guard native/guard)
+    KEY[hub]=$(gkey hub . "${ex[@]}" ':(exclude)native/gpui' ':(exclude)native/voice'); KEY[window]=$(gkey window . "${ex[@]}" ':(exclude)native/host' ':(exclude)native/voice')
+    KEY[voice]=$(gkey voice native/voice); KEY[guard]=$(gkey guard native/guard native/host/src/update native/host/src/scopeprobe.rs native/host/vendor/ed25519-compact)
   fi
   for k in hub window voice guard; do SKIP[$k]=0
     # a Boat box runs only what the caller has no pass for (GATE_SKIP_SUITES, set by boat_core): nothing is tested twice for one tree

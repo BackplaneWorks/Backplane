@@ -104,7 +104,7 @@ fn moved_to(me: &Path, prefix: &Path, current: &str, exists: impl Fn(&Path) -> b
     exists(&app).then_some(app)
 }
 
-fn detached(cmd: &mut std::process::Command) {
+pub(crate) fn detached(cmd: &mut std::process::Command) {
     #[cfg(unix)] { use std::os::unix::process::CommandExt; cmd.process_group(0); }
     // the guard and the hub start with every signal unblocked and SIGCHLD at its default: this runs on a background thread (GCD's on macOS,
     // which blocks SIGCHLD, SIGTERM, SIGHUP...), and std's posix_spawn passes that mask on, so the hub never saw a child end (#1456)

@@ -82,26 +82,25 @@ impl Dir {
 pub struct Builds(pub PathBuf);
 impl Builds {
     pub fn dir(&self, id: &str) -> PathBuf { self.0.join("builds").join(id) }
-    pub fn current(&self) -> String { fs::read_to_string(self.0.join("CURRENT")).unwrap_or_default().lines().next().unwrap_or("").trim().to_string() }
-    pub fn bad(&self) -> Vec<String> { fs::read_to_string(self.0.join("BAD")).unwrap_or_default().lines().filter_map(|l| l.split('\t').next()).filter(|l| !l.is_empty()).map(str::to_string).collect() }
-    /// One line more in BAD; `.fresh-bad` holds the newest alone, which is all an older watcher reads.
-    pub fn mark_bad(&self, id: &str, why: &str) {
-        if self.bad().iter().any(|b| b == id) { return }
-        let why: String = why.chars().filter(|c| !c.is_control()).take(200).collect();
-        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(self.0.join("BAD")) { let _ = writeln!(f, "{id}\t{why}"); }
-        let _ = fs::write(self.0.join(".fresh-bad"), format!("{id}\n"));
-    }
-    /// The one writer of CURRENT in a guarded install: a whole file, renamed over.
-    pub fn publish(&self, id: &str) { let t = self.0.join(format!(".CURRENT.{}", std::process::id())); if fs::write(&t, format!("{id}\n")).and_then(|_| fs::rename(&t, self.0.join("CURRENT"))).is_err() { let _ = fs::remove_file(&t); } }
+    pub fn current(&self) -> String { crate::appkeep::current(&self.0) }
+    pub fn bad(&self) -> Vec<String> { crate::appkeep::bad(&self.0) }
+    /// One line more in BAD; `.fresh-bad` holds the newest alone, which is all an older watcher reads. The desktop app's own updates write it the same way (appkeep.rs).
+    pub fn mark_bad(&self, id: &str, why: &str) { crate::appkeep::mark_bad(&self.0, id, why) }
+    /// The one writer of CURRENT in a guarded install: a whole file, renamed over. (Where no guard runs, the desktop app is: appkeep.rs.)
+    pub fn publish(&self, id: &str) { let _ = crate::appkeep::publish(&self.0, id); }
     /// Take the mark off: the person says this build is fine.
-    pub fn clear_bad(&self, id: &str) {
-        let kept: Vec<String> = fs::read_to_string(self.0.join("BAD")).unwrap_or_default().lines().filter(|l| l.split('\t').next() != Some(id)).map(str::to_string).collect();
-        let _ = fs::write(self.0.join("BAD"), if kept.is_empty() { String::new() } else { kept.join("\n") + "\n" });
-        if fs::read_to_string(self.0.join(".fresh-bad")).unwrap_or_default().trim() == id { let _ = fs::remove_file(self.0.join(".fresh-bad")); }
-    }
+    pub fn clear_bad(&self, id: &str) { crate::appkeep::clear_bad(&self.0, id); }
     /// Builds a running guard needs: dev-cut.sh prunes none of them, whatever the count.
-    pub fn pin(&self, port: u16, ids: &[String]) { let d = self.0.join(".pins"); let _ = fs::create_dir_all(&d); let _ = fs::write(d.join(port.to_string()), ids.join("\n") + "\n"); }
-    pub fn unpin(&self, port: u16) { let _ = fs::remove_file(self.0.join(".pins").join(port.to_string())); }
+    pub fn pin(&self, port: u16, ids: &[String]) {
+        let _ = crate::appkeep::try_with_state_lock(&self.0, || {
+            let _ = crate::appkeep::put(&self.0.join(".pins").join(port.to_string()), &(ids.join("\n") + "\n"));
+        });
+    }
+    pub fn unpin(&self, port: u16) {
+        let _ = crate::appkeep::try_with_state_lock(&self.0, || {
+            let _ = fs::remove_file(self.0.join(".pins").join(port.to_string()));
+        });
+    }
 }
 
 /// `~/.config/backplane/guard-home`: the home `backplane hub ...` means when none is named. Windows has USERPROFILE.
@@ -136,4 +135,13 @@ mod tests {
         d.incident("Disk nearly full", "6 GB", "free space", "b"); assert!(d.open_alert("Disk nearly full"), "full again");
     }
     #[test] fn incidents_read_back_newest_last() { let t = tmp("inc"); let d = Dir::of(&t); d.make(); d.incident("a", "w", "d", "b"); d.incident("c", "w", "d", "b"); assert_eq!(d.incidents(1)[0]["what"], "c"); assert_eq!(d.incidents(9).len(), 2); }
+    #[test] fn pin_writes_atomically_and_unpins_cleanly() {
+        let t = tmp("pin"); let b = Builds(t.to_path_buf());
+        b.pin(4321, &["v1".into(), "v2".into()]);
+        assert_eq!(fs::read_to_string(b.0.join(".pins/4321")).unwrap(), "v1\nv2\n");
+        let entries: Vec<String> = fs::read_dir(b.0.join(".pins")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(entries, vec!["4321"]);
+        b.unpin(4321);
+        assert!(!b.0.join(".pins/4321").exists());
+    }
 }

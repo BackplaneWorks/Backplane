@@ -39,7 +39,9 @@ jobs:
               - '.github/workflows/ci.yml'
             gpui:
               - 'native/gpui/**'
+              - 'native/guard/src/appkeep.rs'
               - 'assets/**'
+              - 'i18n/**'
               - '.github/workflows/ci.yml'
             browser:
               - 'native/gpui/**'
@@ -48,6 +50,8 @@ jobs:
               - '.github/workflows/ci.yml'
             guard:
               - 'native/guard/**'
+              - 'native/host/src/update/**'
+              - 'native/host/vendor/ed25519-compact/**'
               - '.github/workflows/ci.yml'
             android:
               - 'mobile/android/**'

@@ -1838,6 +1838,35 @@ settings.settle.personal.note	Read, completed personal conversations settle afte
 gpui.settings.more	… {n} more	…ほか{n}件	… {n} más
 gpui.settings.textpct	{pct}% of the standard size.	標準の{pct}%です。	{pct}% del tamaño estándar.
 gpui.settings.px	{px} px.	{px} pxです。	{px} px.
+gpui.appupdate.hub	Hub: Backplane {version}	ハブ: Backplane {version}	Hub: Backplane {version}
+gpui.appupdate.label	This computer's app: {tag}	このコンピューターのアプリ: {tag}	La app de este ordenador: {tag}
+gpui.appupdate.label.mac	This Mac's app: {tag}	このMacのアプリ: {tag}	La app de este Mac: {tag}
+gpui.appupdate.differs	Differs from the hub ({hub}).	ハブ ({hub}) とバージョンが異なります。	Difiere del hub ({hub}).
+gpui.appupdate.off	Updates are off on this computer.	このコンピューターでは更新がオフです。	Las actualizaciones están desactivadas en este ordenador.
+gpui.appupdate.guard	Updated by this computer's own hub.	このコンピューターのハブが更新します。	La actualiza el hub de este mismo ordenador.
+gpui.appupdate.checking	Checking for updates.	更新を確認しています。	Buscando actualizaciones.
+gpui.appupdate.downloading	Downloading {tag}.	{tag}をダウンロードしています。	Descargando {tag}.
+gpui.appupdate.ready	{tag} is ready: used the next time Backplane opens.	{tag}の準備ができました。次にBackplaneを開いたときに使われます。	{tag} está lista: se usará la próxima vez que se abra Backplane.
+gpui.appupdate.failed	The last check failed.	前回の確認に失敗しました。	La última comprobación falló.
+gpui.appupdate.err.network	Could not reach the release feed.	リリースフィードに接続できませんでした。	No se pudo conectar al feed de versiones.
+gpui.appupdate.err.platform	No build is available for this platform.	このプラットフォーム向けのビルドはありません。	No hay ninguna compilación disponible para esta plataforma.
+gpui.appupdate.err.verify	Update verification failed.	更新の検証に失敗しました。	Falló la verificación de la actualización.
+gpui.appupdate.err.package	The downloaded update package could not be installed.	ダウンロードした更新パッケージをインストールできませんでした。	No se pudo instalar el paquete de actualización descargado.
+gpui.appupdate.closeothers	Close other Backplane windows first to update.	更新するには、他のBackplaneウィンドウを先に閉じてください。	Cierra las demás ventanas de Backplane primero para actualizar.
+gpui.appupdate.idle	Up to date, checked {when}.	最新です。{when}に確認しました。	Al día, comprobado a las {when}.
+gpui.appupdate.never	Not checked yet.	まだ確認していません。	Aún no se ha comprobado.
+gpui.appupdate.updated	Updated to {tag}.	{tag}に更新しました。	Actualizada a {tag}.
+gpui.appupdate.updated.when	Updated to {tag}. Up to date, checked {when}.	{tag}に更新しました。最新です。{when}に確認しました。	Actualizada a {tag}. Al día, comprobado a las {when}.
+gpui.appupdate.stayed	{tag} did not start, so this build stayed.	{tag}が起動しなかったため、このビルドのままです。	{tag} no arrancó, así que se mantuvo esta versión.
+gpui.appupdate.stayed.when	{tag} did not start, so this build stayed. Checked {when}.	{tag}が起動しなかったため、このビルドのままです。{when}に確認しました。	{tag} no arrancó, así que se mantuvo esta versión. Comprobado a las {when}.
+gpui.appupdate.local	Updated with this computer's hub.	このコンピューターのハブと一緒に更新されます。	Se actualiza con el hub de este ordenador.
+gpui.appupdate.package	Updated by its package.	パッケージで更新されます。	Se actualiza con su paquete.
+gpui.appupdate.restart	Restart to update	再起動して更新	Reiniciar para actualizar
+gpui.appupdate.samehub	Same as the hub ({channel})	ハブと同じ ({channel})	Igual que el hub ({channel})
+gpui.appnotice.ready	Backplane {tag} is ready.	Backplane {tag}の準備ができました。	Backplane {tag} está lista.
+gpui.appnotice.appbehind	This app is {app}; the hub runs {hub}.	このアプリは{app}、ハブは{hub}です。	Esta app es la {app}; el hub ejecuta la {hub}.
+gpui.appnotice.hubbehind	The hub runs {hub}, older than this app ({app}).	ハブは{hub}で、このアプリ ({app}) より古いです。	El hub ejecuta la {hub}, más antigua que esta app ({app}).
+gpui.appnotice.checkhub	Check the hub	ハブを確認	Comprobar el hub
 gpui.keys.fixed	{key}. Fixed.	{key}。固定です。	{key}. Fijo.
 gpui.keys.now	Now {key}. Press to take the next key.	現在は{key}。押すと次のキーに変わります。	Ahora {key}. Pulsa para tomar la siguiente tecla.
 gpui.keys.notyet	Not yet: {why}.	未対応: {why}。	Aún no: {why}.
@@ -5680,6 +5709,51 @@ mobile.plan.coord	({x}, {y} mm)	({x}, {y} mm)	({x}, {y} mm)
 
     /// gpui.settings.px = {px} px.
     static func gpui_settings_px(px: String) -> String { f("gpui.settings.px", ["px": px]) }
+
+    /// gpui.appupdate.hub = Hub: Backplane {version}
+    static func gpui_appupdate_hub(version: String) -> String { f("gpui.appupdate.hub", ["version": version]) }
+
+    /// gpui.appupdate.label = This computer's app: {tag}
+    static func gpui_appupdate_label(tag: String) -> String { f("gpui.appupdate.label", ["tag": tag]) }
+
+    /// gpui.appupdate.label.mac = This Mac's app: {tag}
+    static func gpui_appupdate_label_mac(tag: String) -> String { f("gpui.appupdate.label.mac", ["tag": tag]) }
+
+    /// gpui.appupdate.differs = Differs from the hub ({hub}).
+    static func gpui_appupdate_differs(hub: String) -> String { f("gpui.appupdate.differs", ["hub": hub]) }
+
+    /// gpui.appupdate.downloading = Downloading {tag}.
+    static func gpui_appupdate_downloading(tag: String) -> String { f("gpui.appupdate.downloading", ["tag": tag]) }
+
+    /// gpui.appupdate.ready = {tag} is ready: used the next time Backplane opens.
+    static func gpui_appupdate_ready(tag: String) -> String { f("gpui.appupdate.ready", ["tag": tag]) }
+
+    /// gpui.appupdate.idle = Up to date, checked {when}.
+    static func gpui_appupdate_idle(when: String) -> String { f("gpui.appupdate.idle", ["when": when]) }
+
+    /// gpui.appupdate.updated = Updated to {tag}.
+    static func gpui_appupdate_updated(tag: String) -> String { f("gpui.appupdate.updated", ["tag": tag]) }
+
+    /// gpui.appupdate.updated.when = Updated to {tag}. Up to date, checked {when}.
+    static func gpui_appupdate_updated_when(tag: String, when: String) -> String { f("gpui.appupdate.updated.when", ["tag": tag, "when": when]) }
+
+    /// gpui.appupdate.stayed = {tag} did not start, so this build stayed.
+    static func gpui_appupdate_stayed(tag: String) -> String { f("gpui.appupdate.stayed", ["tag": tag]) }
+
+    /// gpui.appupdate.stayed.when = {tag} did not start, so this build stayed. Checked {when}.
+    static func gpui_appupdate_stayed_when(tag: String, when: String) -> String { f("gpui.appupdate.stayed.when", ["tag": tag, "when": when]) }
+
+    /// gpui.appupdate.samehub = Same as the hub ({channel})
+    static func gpui_appupdate_samehub(channel: String) -> String { f("gpui.appupdate.samehub", ["channel": channel]) }
+
+    /// gpui.appnotice.ready = Backplane {tag} is ready.
+    static func gpui_appnotice_ready(tag: String) -> String { f("gpui.appnotice.ready", ["tag": tag]) }
+
+    /// gpui.appnotice.appbehind = This app is {app}; the hub runs {hub}.
+    static func gpui_appnotice_appbehind(app: String, hub: String) -> String { f("gpui.appnotice.appbehind", ["app": app, "hub": hub]) }
+
+    /// gpui.appnotice.hubbehind = The hub runs {hub}, older than this app ({app}).
+    static func gpui_appnotice_hubbehind(hub: String, app: String) -> String { f("gpui.appnotice.hubbehind", ["hub": hub, "app": app]) }
 
     /// gpui.keys.fixed = {key}. Fixed.
     static func gpui_keys_fixed(key: String) -> String { f("gpui.keys.fixed", ["key": key]) }

@@ -46,6 +46,11 @@ mod vt;
 /// What `systemd-run --user --scope` takes here, shared by path with the hub (the hub's own scope, launch.rs).
 #[path = "../../host/src/scopeprobe.rs"]
 mod scopeprobe;
+// this device's app's own updates where no guard runs (a hub on another machine): the rules, shared with the guard's `backplane builds keep`
+#[path = "../../guard/src/appkeep.rs"]
+#[allow(dead_code)]
+mod appkeep;
+mod selfupdate;
 use gpui::{prelude::*, *, actions};
 use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
@@ -57,7 +62,7 @@ pub struct Backplane { pub pair:Option<screens::pair::Ui>, pub paired:bool, /** 
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
     drafts:HashMap<String,String>, started:Instant, usable:bool,
     /** a message sent and not yet answered by the hub: its thread and text (the box is emptied at the press; a refusal puts the text back) */ sent_wait:Option<(String,String)>,
-    first_frame:bool, script_done:bool, pub timeline:ListState, pub cats:art::Cats, pub links_sent:bool, pub links_last:String, pub sidebar_open:bool, pub models_pending:bool, pub local:local::Local, pub project_page:Option<String>, pub arm_new:Option<(Instant,std::collections::HashSet<String>)>, pub echo_seq:u64, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub probes_last:String, pub last_layout:String, /** a script step that needs the window: "model" opens the model menu, "escape" closes the top popup (script.rs frame_marks) */ pub win_op:Option<&'static str>, pub wake_at:Option<Instant>, pub reconnected:bool, pub had_hello:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>,  script_window:AnyWindowHandle, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize, screens:screens::Screens,
+    first_frame:bool, script_done:bool, pub timeline:ListState, pub cats:art::Cats, pub links_sent:bool, pub links_last:String, pub sidebar_open:bool, pub models_pending:bool, pub local:local::Local, pub project_page:Option<String>, pub arm_new:Option<(Instant,std::collections::HashSet<String>)>, pub echo_seq:u64, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub probes_last:String, pub last_layout:String, /** a script step that needs the window: "model" opens the model menu, "escape" closes the top popup (script.rs frame_marks) */ pub win_op:Option<&'static str>, pub wake_at:Option<Instant>, pub reconnected:bool, pub had_hello:bool, pub hub_update_timer:bool, pub app_update_timer:bool, pub hub_upd_ready:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>,  script_window:AnyWindowHandle, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize, screens:screens::Screens,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
     let mut row=div().flex().gap_2().px_3().py_1().text_size(crate::scale::tpx(11.));let mut any=false;
@@ -130,7 +135,7 @@ impl Backplane {
         // an installed release: the guard moves CURRENT once an update's hub has run cleanly for a while, after this window reconnected, so it is looked at every 20 s
         if std::env::current_exe().ok().and_then(|me|launch::guarded_install(&me)).is_some(){cx.spawn(async move|this,cx|loop{cx.background_executor().timer(Duration::from_secs(20)).await;if this.update(cx,|this,_|this.to_moved_build()).is_err(){break}}).detach();}
         {let weak=cx.entity().downgrade();window.on_window_should_close(cx,move|_,cx|{let _=weak.update(cx,|this,_|this.close_window());std::process::exit(0)});}
-        Self{pair,paired,hubs:hubs::load(),hub_menu:false,has_hub,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),sent_wait:None,started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),probes_last:String::new(),last_layout:String::new(),win_op:None,wake_at:None,reconnected:false,had_hello:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),script_window:window.window_handle(),steps,pending:None,seq:0,want_focus:false,script_total,screens:{let mut s=screens::Screens::new(cx,target,drafts_path,saved);s.elsewhere=elsewhere;s}}
+        Self{pair,paired,hubs:hubs::load(),hub_menu:false,has_hub,input,data:Value::Null,status:"Connecting…".into(),note:String::new(),error:art::assets_missing().unwrap_or_default(),tx,selected:String::new(),drafts:saved.clone(),sent_wait:None,started,usable:false,first_frame:false,script_done:false,timeline:ListState::new(0,ListAlignment::Bottom,px(screens::timeline::RUNWAY)),cats:art::Cats::new(),links_sent:false,links_last:String::new(),sidebar_open:local.sidebar_open,models_pending:false,local,project_page:None,arm_new:None,echo_seq:0,thread_cache:Vec::new(),thread_source:"hub",confirm:None,ack_pending:None,recording:None,ui_epoch:0,controls:Vec::new(),ctl_last:String::new(),probes_last:String::new(),last_layout:String::new(),win_op:None,wake_at:None,reconnected:false,had_hello:false,hub_update_timer:false,app_update_timer:false,hub_upd_ready:false,click_info:None,timing:None,applied_at:None,apply_ms:0.0,render_us:0,swatches,gallery,fonts,theme_override:theme.as_deref().map(|t|t=="light"),script_window:window.window_handle(),steps,pending:None,seq:0,want_focus:false,script_total,screens:{let mut s=screens::Screens::new(cx,target,drafts_path,saved);s.elsewhere=elsewhere;s}}
     }
     /// What the window's close keeps before the process exits: the drafts written (bounded, normally a few ms) and a screen recording ended.
     /// (KiCad's holders first: out of every container before the process ends, kicad_pane::release_all)
@@ -140,6 +145,7 @@ impl Backplane {
     /// The hub answered (at start, and after each restart): when an update moved the install to another build (launch::moved_build), this window is
     /// the old build's program, so it puts its drafts away and starts the new one with the same arguments, as closing and opening it would.
     fn to_moved_build(&mut self)->bool{
+        if selfupdate::on_trial(){return false} // a trial (selfupdate.rs) is not CURRENT until its window is up
         let Some(app)=std::env::current_exe().ok().and_then(|me|launch::moved_build(&me)) else {return false};
         /* i18n-ok: a log line */ eprintln!("GPUI_LOG {}",serde_json::json!({"moved_build":app.display().to_string()}));
         self.before_exit();
@@ -176,7 +182,7 @@ impl Backplane {
             Event::KicadProgress(text)=>{if let Some(p)=self.screens.kicad.clone(){let v:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();p.update(cx,|p,cx|p.set_progress(v,cx));}},
             Event::Mgmt(key,text)=>{{let viewer=&self.data["thread"]["viewer"];let open=if viewer["open"]=="review" {viewer["review"]["tabs"].as_array().is_some_and(|tabs|tabs.iter().any(|t|t["page"]=="checks" && t["on"]==true))}else{screens::mgmt::shows(viewer["open"].as_str().unwrap_or("")) && self.screens.mgmt.peek()["open"]=="checks"};if !key.starts_with("review.clicked.") || key.strip_prefix("review.clicked.")==Some(self.screens.mgmt.digest.as_str()){screens::mgmt_checks::seen(&self.screens.mgmt.checks,&key,&text,open);}}if self.screens.mgmt.info(&key,&text){self.ui_epoch+=1;cx.notify();}},
             Event::KicadReload(text)=>{if let Some(p)=self.screens.kicad.clone(){let v:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();p.update(cx,|p,cx|p.set_reload(v,cx));}},
-            Event::Using(home)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"hub":"using","text":home.clone().unwrap_or_default()}));self.screens.offers.on_home=home;cx.notify();},
+            Event::Using(home)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"hub":"using","text":home.clone().unwrap_or_default()}));self.hub_upd_ready=false;selfupdate::set_using(home.as_deref());self.screens.offers.on_home=home;cx.notify();},
             Event::Answer(id,reply) if screens::hubpick::answered(self,id,&reply,cx)=>{},
             Event::Answer(id,reply) if screens::mgmt::answered(self,id,&reply,cx)=>{},
             Event::Answer(id,reply) if screens::mgmt_checks::answered(self,id,&reply,cx)=>{},
@@ -201,6 +207,7 @@ impl Backplane {
             Event::Data(tag, v) if tag == "dock-probe" => screens::plotview::dock_probe_reply(self, &v),
             Event::Data(tag, v) if tag == "dock-watch" => self.dock_watch(&v, cx),
             Event::Data(tag,v) if tag==streamer::TAG => self.streamer_ids(&v,cx),
+            Event::Data(tag,v) if tag=="hubupd" => { if self.hub_upd_ready && selfupdate::hub_said(&v) { self.app_check(cx); } cx.notify(); }
             Event::Data(tag,v) if tag=="names" => { screens::xprobe::got_names(self,&v); cx.notify(); }
             Event::Data(tag,v) if tag=="xsel" => { screens::xprobe::got_select(self,&v); cx.notify(); }
             Event::Data(tag,v) if tag=="xsel-tap" => { eprintln!("GPUI_LOG {}",serde_json::json!({"event":"xprobe_tap","ok":v["ok"],"kicad":v["kicad"],"found":v["found"],"error":v["error"]})); }
@@ -212,11 +219,12 @@ impl Backplane {
             // the first message of a thread a page's Send made: refused, the text comes back (never merged) and the error shows; taken, it is done
             Event::Rpc("first-message",ok,why)=>{ let text=self.screens.projects.sending.take(); if !ok { self.screens.projects.refused=why; if let Some(t)=text { let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(t,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } } cx.notify(); },
             Event::Term(key,pid,b,reset,state)=>self.term_frame(&key,pid,&b,reset,state,cx),
-            Event::Hello=>{if self.to_moved_build(){return}self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);/* the viewer's state again on the new connection (whose page holds KiCad: Follow agent, kicad/follow.rs) */self.screens.last_state.clear();screens::plotview::report_state(self);}self.screens.unsent.live=true;self.send_unsent();},
+            Event::Hello=>{if self.to_moved_build(){return}self.hub_upd_ready=true;self.ask_hub_update(cx);self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);/* the viewer's state again on the new connection (whose page holds KiCad: Follow agent, kicad/follow.rs) */self.screens.last_state.clear();screens::plotview::report_state(self);}self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
             Event::TmNotice(v)=>self.tm_notice(&v,cx),
             Event::GpNotice(v)=>self.gp_notice(&v,cx),
             Event::Rpc("project-push",ok,why)=>{ if !ok { self.error=why; } let pid=self.screens.projects.home.pid.clone(); if !pid.is_empty() { screens::projects::ask_home(self,&pid); } cx.notify(); },
+            Event::Rpc("hubchk",_,_)=>{cx.spawn(async move|this,cx|{for secs in [3,17] {cx.background_executor().timer(Duration::from_secs(secs)).await;if this.update(cx,|this,cx|this.ask_hub_update(cx)).is_err(){break}}}).detach();},
             Event::Rpc("mgmt",ok,why)=>{self.screens.mgmt.error=if ok{String::new()}else{why};cx.notify();},
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag=="google"{screens::google::done(self,ok,&why)}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag=="fileopen" {if !ok {self.error=why;}} else if tag=="plan" {screens::mgmt_plan::answered(self,ok,&why,cx)} else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
@@ -253,12 +261,87 @@ impl Backplane {
     pub fn light(&self)->bool{self.theme_override.unwrap_or_else(||self.local.light(self.data["theme"]=="light"))}
     /// A press of a `local:<name>` button in the settings dialog: this device's own setting, applied here and kept in the local file; the hub hears nothing.
     pub fn local_press(&mut self,name:&str,value:&str,cx:&mut Context<Self>){
+        if name=="app-check"{self.app_check(cx);return;}
+        if name=="app-restart"{
+            if !selfupdate::can_restart_now() {
+                self.note=crate::i18n::trs("Close other Backplane windows first to update.");
+                cx.notify();
+                return;
+            }
+            self.before_exit();
+            match selfupdate::restart(){
+                Ok(())=>std::process::exit(0),
+                Err(e) if e.kind()==std::io::ErrorKind::WouldBlock=>{self.note=crate::i18n::trs("Close other Backplane windows first to update.");cx.notify();}
+                Err(e)=>{self.status=crate::i18n::tf("gpui.could.not.restart",&[("why",e.to_string().into())]);cx.notify();}
+            }
+            return;
+        }
+        if name=="hub-check"{let _=self.tx.try_send(hub::Command::Rpc("update.check".into(),screens::settings::Secret(serde_json::json!({})),"hubchk"));return;}
         if !self.local.set(name,value){return;}
+        if name=="app-channel"{self.local.save();self.app_check(cx);}
         if name=="sidebar-open"{self.sidebar_open=self.local.sidebar_open;}
         if name=="lang"{crate::i18n::set_choice(&self.local.lang);cx.defer(keys::install_menus);}
         if name.starts_with("streamer"){self.local.save();self.streamer_apply(cx);}
         if name.starts_with("shortcut"){let l=self.local.clone();cx.defer(move|cx|bind_all(cx,&l));}
         self.local.save();self.ui_epoch+=1;cx.notify();
+    }
+    /// Ensure remote-hub update checks and periodic timer are active once this app switches to or opens on a remote hub.
+    pub fn ensure_app_updates(&mut self,cx:&mut Context<Self>){
+        if !self.app_update_timer {
+            self.app_update_timer=true;
+            self.app_check(cx);
+            cx.spawn(async move|this,cx|{loop{cx.background_executor().timer(selfupdate::EVERY).await;if this.update(cx,|this,cx|this.app_check(cx)).is_err(){break}}}).detach();
+        } else {
+            self.app_check(cx);
+        }
+    }
+    /// First window frame opened after draw + present: promote any pending trial build to CURRENT and start periodic remote-app update checks.
+    pub fn app_opened(&mut self,cx:&mut Context<Self>){
+        if selfupdate::opened() {
+            self.ensure_app_updates(cx);
+        }
+    }
+    /// This device's app looks for a newer build now (selfupdate.rs: Check now in its row, or the hub's Check now beside it), serialized so a
+    /// channel update or click while one check runs queues a single follow-up pass and repaints only on state transitions.
+    pub fn app_check(&mut self,cx:&mut Context<Self>){
+        if !selfupdate::request_check(){return;}
+        let Some(mut child)=selfupdate::check() else {
+            selfupdate::mark_helper_failed();
+            let again=selfupdate::finish_check();
+            if again{cx.spawn(async move|this,cx|{let _=this.update(cx,|this,cx|this.app_check(cx));}).detach();}
+            cx.notify();
+            return;
+        };
+        let mut last_state=selfupdate::status_state();
+        cx.spawn(async move|this,cx|{
+            let mut exit_ok=true;
+            loop{
+                cx.background_executor().timer(Duration::from_millis(500)).await;
+                match child.try_wait(){
+                    Ok(Some(st))=>{exit_ok=st.success();break;}
+                    Ok(None)=>{}
+                    Err(_)=>{exit_ok=false;break;}
+                }
+                let state_now=selfupdate::status_state();
+                if state_now!=last_state{
+                    last_state=state_now;
+                    if this.update(cx,|_,cx|cx.notify()).is_err(){break;}
+                }
+            }
+            if !exit_ok{selfupdate::mark_helper_failed();}
+            let again=selfupdate::finish_check();
+            let _=this.update(cx,|this,cx|{cx.notify();if again{this.app_check(cx);}});
+        }).detach();
+        cx.notify();
+    }
+    /// The hub's `update.status` (its version and channel: selfupdate.rs follows its channel and compares its version), asked at each connection and
+    /// hourly while the window is open.
+    pub fn ask_hub_update(&mut self,cx:&mut Context<Self>){
+        let _=self.tx.try_send(hub::Command::Rpc("update.status".into(),screens::settings::Secret(serde_json::json!({})),"hubupd"));
+        if !self.hub_update_timer{
+            self.hub_update_timer=true;
+            cx.spawn(async move|this,cx|{loop{cx.background_executor().timer(Duration::from_secs(3600)).await;if this.update(cx,|this,_|{let _=this.tx.try_send(hub::Command::Rpc("update.status".into(),screens::settings::Secret(serde_json::json!({})),"hubupd"));}).is_err(){break}}}).detach();
+        }
     }
     /// The gear: this device's page opens at once (no round trip), and the hub is asked for its pages beside it.
     pub fn open_settings(&mut self,cx:&mut Context<Self>){
@@ -405,6 +488,16 @@ fn main()->anyhow::Result<()> {
     script::metric(started,"process_start",serde_json::json!({}));
     // Windows: an unpacked release asks to install itself where the guard can update it (install.rs); on Install the installed one runs
     #[cfg(windows)] if install::maybe_install(config.pending) { return Ok(()) }
+    // a hub on another machine: this app keeps its own build (selfupdate.rs); a staged build is tried here, before any window, and this process may become it
+    {
+        let saved=launch::load();
+        let hub_list=hubs::load();
+        let env_home=std::env::var_os("BACKPLANE_HOME").map_or(false,|h|!h.is_empty());
+        let special=config.swatches||config.gallery||config.fonts||config.solid_demo.is_some()||config.script.is_some();
+        let is_remote=selfupdate::remote(config.pending,config.paired,&config.hub,env_home,hubs::local_target(&hub_list).is_some(),&saved.url,special);
+        let hub_key=hub_list.first().map(|h|h.key.as_str()).filter(|s|!s.is_empty()).unwrap_or(saved.url.as_str());
+        selfupdate::at_launch(!env_home&&!special,is_remote,hub_key);
+    }
     let app=Application::new().with_assets(art::Assets);
     // macOS hands a backplane:// link to the app itself, at launch and while it runs
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});
