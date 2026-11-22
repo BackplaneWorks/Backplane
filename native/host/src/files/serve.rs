@@ -22,8 +22,16 @@ pub fn range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
     Ok(Some((start, end)))
 }
 
+/// Hardened security headers shared by `/img`, `/blob/<sha256>`, and sibling media routes (F-002 / F-011):
+/// blocks active script execution (e.g. `image/svg+xml`) and strips referrers.
+pub(crate) const MEDIA_SECURITY_HEADERS: &str = concat!(
+    "X-Content-Type-Options: nosniff\r\n",
+    "Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox\r\n",
+    "Referrer-Policy: no-referrer\r\n",
+);
+
 fn head(status: &'static str, ctype: &str, extra: String, body: Vec<u8>) -> HttpReply {
-    HttpReply { status, ctype: ctype.into(), extra: format!("Cache-Control: private, no-cache\r\nAccept-Ranges: bytes\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox\r\nReferrer-Policy: no-referrer\r\n{extra}"), body }
+    HttpReply { status, ctype: ctype.into(), extra: format!("Cache-Control: private, no-cache\r\nAccept-Ranges: bytes\r\n{MEDIA_SECURITY_HEADERS}{extra}"), body }
 }
 fn fail(status: &'static str, msg: &str, extra: &str) -> HttpReply { head(status, "text/plain; charset=utf-8", extra.into(), msg.as_bytes().to_vec()) }
 

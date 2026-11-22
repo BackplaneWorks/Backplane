@@ -192,7 +192,7 @@ flowchart TB
 3. **Content-addressed caching for viewers, images, and blobs:**
    - **2D Plots (Board / Schematic / Gerbers):** Hash each chunk by `blake3_64(chunk)` (or existing `sig` + `d` hash). Clients persist a bounded LRU of chunk hashes across `viewer.watch` switches and send a compact `keptChunks` list/bloom filter on `viewer.watch`. Re-opening an unchanged board sends **0 chunk bytes** (~200 B header instead of 18–528 KB!).
    - **3D Meshes & Parts:** Extend `kept` from a single `(key, mesh_id)` to a persistent client-side cache of `(part_hash)` IDs across watches, so common footprints (0402 resistors, QFN packages, connectors) are sent **once ever** across all boards.
-   - **Images & Attachments:** Replace base64-in-JSON `message.image` / `attachment.get` with content-addressed HTTP `GET /blob/<sha256>` with `Cache-Control: public, max-age=31536000, immutable` and `ETag` (and optional `?w=800&fmt=webp` thumbnailing for chat previews). Saves **33% base64 overhead** + **100% on repeat views**.
+   - **Images & Attachments:** Replace base64-in-JSON `message.image` / `attachment.get` with content-addressed HTTP `GET /blob/<sha256>` with `Cache-Control: private, max-age=31536000, immutable` and `ETag` (and optional `?w=800&fmt=webp` thumbnailing for chat previews). Saves **33% base64 overhead** + **100% on repeat views**.
 4. **Lazy loading & paging:**
    - History pages capped at **40 entries / 100 KB decoded**; older pages fetched on scroll-up via `historyCursor`.
    - Large tool outputs (>2 KB) and git diffs omitted from initial thread load and fetched on expand (`entry.body {entry}`).

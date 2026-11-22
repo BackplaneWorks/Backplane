@@ -13,17 +13,26 @@ const FAILED: Duration = Duration::from_secs(10 * 60);
 /// The most kept, oldest dropped first.
 const KEEP_BYTES: u64 = 256 << 20;
 
+fn err(status: &'static str, msg: &str) -> HttpReply {
+    HttpReply {
+        status,
+        ctype: "text/plain; charset=utf-8".into(),
+        extra: format!("Cache-Control: private, no-store\r\n{}", super::serve::MEDIA_SECURITY_HEADERS),
+        body: msg.as_bytes().to_vec(),
+    }
+}
+
 pub struct WebImg;
 impl HttpHandler for WebImg {
     fn routes(&self) -> &'static [&'static str] { &["/webimg"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a Req) -> Fut<'a, HttpReply> {
         Box::pin(async move {
             let url = super::fm::from_uri(&req.param("url"));
-            if !allowed(&url) { return HttpReply::text("400 Bad Request", "not a web picture") }
+            if !allowed(&url) { return err("400 Bad Request", "not a web picture") }
             let dir = hub.cfg.home.join("cache").join("webimg");
             match tokio::task::spawn_blocking(move || get(&dir, &url)).await {
-                Ok(Some((ct, body))) => HttpReply { status: "200 OK", ctype: ct.into(), extra: "X-Content-Type-Options: nosniff\r\nCache-Control: private, max-age=86400\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox\r\n".into(), body },
-                _ => HttpReply::text("404 Not Found", "the picture could not be fetched"),
+                Ok(Some((ct, body))) => HttpReply { status: "200 OK", ctype: ct.into(), extra: format!("Cache-Control: private, max-age=86400\r\n{}", super::serve::MEDIA_SECURITY_HEADERS), body },
+                _ => err("404 Not Found", "the picture could not be fetched"),
             }
         })
     }
@@ -122,5 +131,24 @@ mod tests {
         assert_eq!(get(&d, url).map(|x| x.0), Some("image/png"));
         let other = "https://example.invalid/b.png"; std::fs::write(d.join(format!("{}.failed", key(other))), b"").unwrap();
         assert_eq!(get(&d, other), None, "a recent failure is not fetched again");
+    }
+    #[tokio::test]
+    async fn webimg_serves_hardened_media_headers_on_cached_svg() {
+        let dir = crate::plat::tmp::dir("webimg-http");
+        let cache = dir.join("cache").join("webimg");
+        std::fs::create_dir_all(&cache).unwrap();
+        let url = "https://example.invalid/badge.svg";
+        let svg = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>";
+        std::fs::write(cache.join(key(url)), svg).unwrap();
+        let hub = Hub::start(
+            crate::hub::Cfg { home: dir.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() },
+            Arc::new(crate::presenter::Canned { reply: serde_json::json!({}) }),
+        ).await.unwrap();
+        let req = Req::new("GET", &format!("/webimg?url={url}"), vec![]);
+        let rep = WebImg.call(&hub, &req).await;
+        assert_eq!(rep.status, "200 OK");
+        assert_eq!(rep.ctype, "image/svg+xml");
+        assert!(rep.extra.contains("Cache-Control: private, max-age=86400\r\n"), "{}", rep.extra);
+        assert!(rep.extra.contains(crate::files::serve::MEDIA_SECURITY_HEADERS), "{}", rep.extra);
     }
 }

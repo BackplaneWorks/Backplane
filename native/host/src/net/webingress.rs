@@ -218,18 +218,62 @@ mod tests {
         // a share a native client may open, of a file the browser may not reach: the browser gets the intersection
         let far = crate::files::share::create(&hub, "t1", &serde_json::json!({"path": home.join("far-files/L/x.zip").to_string_lossy()})).await.unwrap();
         assert!(ask(far["link"].as_str().unwrap().to_string(), c.clone()).await.0.starts_with("HTTP/1.1 403"), "a share opens to a browser only within the browser's roots");
-        // /blob/<sha256>: unpaired -> 401; paired -> 200 with ETag + immutable private cache; If-None-Match -> 304
+        // /blob/<sha256>: unpaired -> 401; paired -> 200 with ETag + immutable private cache + hardened sandbox CSP; If-None-Match -> 304
         hub.register_http(std::sync::Arc::new(crate::files::blob::BlobHttp));
         let sha = crate::files::blob::register_bytes(&home, proj.join("mfg/bom.csv"), "text/csv", b"a,b\n");
         let blob_route = format!("/blob/{sha}");
-        assert!(ask(blob_route.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "unpaired /blob must be 401");
+        let (uh_blob, _) = ask(blob_route.clone(), String::new()).await;
+        assert!(uh_blob.starts_with("HTTP/1.1 401"), "unpaired /blob must be 401: {uh_blob}");
+        for need in ["sandbox", "Referrer-Policy: no-referrer", "X-Content-Type-Options: nosniff", "Cross-Origin-Resource-Policy: same-origin"] {
+            assert!(uh_blob.contains(need), "unpaired /blob missing {need}: {uh_blob}");
+        }
+        assert!(!uh_blob.contains("script-src 'self'"), "unpaired /blob must not carry app CSP: {uh_blob}");
         let (bh, bb) = ask(blob_route.clone(), c.clone()).await;
         assert!(bh.starts_with("HTTP/1.1 200") && bb == b"a,b\n", "paired /blob: {bh}");
         assert!(bh.contains("Cache-Control: private, max-age=31536000, immutable"), "immutable private cache: {bh}");
+        assert!(!bh.contains("Cache-Control: public"), "never public cache: {bh}");
+        assert!(bh.contains("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox"), "sandbox CSP: {bh}");
+        assert!(!bh.contains("script-src 'self'"), "blob must not carry app CSP: {bh}");
+        assert!(bh.contains("Referrer-Policy: no-referrer"), "referrer policy: {bh}");
+        assert!(bh.contains("X-Content-Type-Options: nosniff"), "nosniff: {bh}");
         assert!(bh.contains("Cross-Origin-Resource-Policy: same-origin"), "corp header: {bh}");
         let blob_etag = bh.lines().find_map(|l| l.strip_prefix("ETag: ").map(str::trim).map(str::to_string)).expect("ETag on /blob");
         let (bh304, bb304) = ask(blob_route.clone(), format!("{c}If-None-Match: {blob_etag}\r\n")).await;
         assert!(bh304.starts_with("HTTP/1.1 304") && bb304.is_empty(), "304 on /blob: {bh304}");
+        assert!(!bh304.to_ascii_lowercase().contains("content-length:"), "304 must omit Content-Length: {bh304}");
+        assert!(bh304.contains("Cache-Control: private, max-age=31536000, immutable"), "304 private immutable: {bh304}");
+        assert!(bh304.contains("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox"), "304 sandbox CSP: {bh304}");
+        assert!(bh304.contains("Referrer-Policy: no-referrer"), "304 referrer policy: {bh304}");
+        assert!(bh304.contains("X-Content-Type-Options: nosniff"), "304 nosniff: {bh304}");
+        let head_blob = head(blob_route.clone(), c.clone()).await;
+        for bad_hdr in [
+            ask("/blob/not-a-hash".into(), c.clone()).await.0,
+            head_blob.clone(),
+        ] {
+            assert!(bad_hdr.starts_with("HTTP/1.1 404"), "bad/HEAD /blob must be 404: {bad_hdr}");
+            assert!(bad_hdr.contains("sandbox") && bad_hdr.contains("Referrer-Policy: no-referrer") && bad_hdr.contains("X-Content-Type-Options: nosniff"), "{bad_hdr}");
+            assert!(!bad_hdr.contains("script-src 'self'"), "404 /blob must not carry app CSP: {bad_hdr}");
+        }
+        assert!(head_blob.ends_with("\r\n\r\n"), "HEAD /blob must be bodyless: {head_blob}");
+        let unauth_files_get = ask("/files/get?thread=project-home-p1&path=mfg%2Fbom.csv".into(), String::new()).await.0;
+        assert!(unauth_files_get.starts_with("HTTP/1.1 401"), "{unauth_files_get}");
+        for need in ["sandbox", "Referrer-Policy: no-referrer", "X-Content-Type-Options: nosniff", "Cross-Origin-Resource-Policy: same-origin"] {
+            assert!(unauth_files_get.contains(need), "unpaired /files/get missing {need}: {unauth_files_get}");
+        }
+        assert!(!unauth_files_get.contains("script-src 'self'"), "unpaired /files/get must not carry app CSP: {unauth_files_get}");
+
+        let svg_bytes = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>";
+        let svg_path = proj.join("mfg/evil.svg");
+        std::fs::write(&svg_path, svg_bytes).unwrap();
+        let svg_sha = crate::files::blob::register_bytes(&home, svg_path, "image/svg+xml", svg_bytes);
+        let (svg_h, svg_b) = ask(format!("/blob/{svg_sha}"), c.clone()).await;
+        assert!(svg_h.starts_with("HTTP/1.1 200") && svg_b == svg_bytes, "paired svg /blob: {svg_h}");
+        assert!(svg_h.contains("Cache-Control: private, max-age=31536000, immutable"), "{svg_h}");
+        assert!(svg_h.contains("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox"), "{svg_h}");
+        assert!(!svg_h.contains("script-src 'self'"), "{svg_h}");
+        assert!(svg_h.contains("Referrer-Policy: no-referrer"), "{svg_h}");
+        assert!(svg_h.contains("X-Content-Type-Options: nosniff"), "{svg_h}");
+        assert!(svg_h.contains("Content-Disposition: attachment"), "{svg_h}");
 
         let tag = ask(bom.clone(), c.clone()).await.0.lines().find_map(|l| l.strip_prefix("ETag: ").map(str::to_string)).unwrap();
         let device = reg.list()["devices"].as_array().unwrap().iter().find(|d| d["kind"] == "browser").unwrap()["id"].as_str().unwrap().to_string();
@@ -330,6 +374,26 @@ const SECURITY_HEADERS: &str = concat!(
 
 fn json_response(status: &str, body: serde_json::Value, extra: &str) -> Vec<u8> {
     crate::wire::response_for(status, "application/json", &format!("{SECURITY_HEADERS}{extra}"), body.to_string().as_bytes())
+}
+
+fn is_blob_path(route: &str) -> bool {
+    route == "/blob" || route.starts_with("/blob/")
+}
+
+fn is_media_route(route: &str) -> bool {
+    is_blob_path(route) || is_protected_asset(route)
+}
+
+fn asset_json_response(status: &str, body: serde_json::Value) -> Vec<u8> {
+    crate::wire::response_for(
+        status,
+        "application/json",
+        &format!(
+            "Cache-Control: private, no-store\r\n{}Cross-Origin-Resource-Policy: same-origin\r\n",
+            crate::files::serve::MEDIA_SECURITY_HEADERS
+        ),
+        body.to_string().as_bytes(),
+    )
 }
 
 fn cookie_header(name: &str, value: &str, seconds: u32) -> String {
@@ -453,8 +517,29 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     let login = single_header(&req, "tailscale-user-login").unwrap_or("").to_owned();
     let ingress = BrowserIngress { authority, verified_login: &login };
     let upgrade = req.route() == "/ws";
+    let media_route = is_media_route(req.route());
+    let is_head = req.method == "HEAD";
+    let route_json = |status: &str, body: serde_json::Value| {
+        if media_route {
+            if is_head {
+                crate::wire::response_for(
+                    status,
+                    "application/json",
+                    &format!(
+                        "Cache-Control: private, no-store\r\n{}Cross-Origin-Resource-Policy: same-origin\r\n",
+                        crate::files::serve::MEDIA_SECURITY_HEADERS
+                    ),
+                    &[],
+                )
+            } else {
+                asset_json_response(status, body)
+            }
+        } else {
+            json_response(status, body, "")
+        }
+    };
     let reply = if hub.setting("web.enabled").await.as_deref() != Some("1") {
-        json_response("404 Not Found", json!({}), "")
+        route_json("404 Not Found", json!({}))
     } else if req.route() == "/auth/web/setup" {
         #[cfg(target_os = "linux")]
         let ok = unix_proxy && req.method == "GET" && req.target == "/auth/web/setup"
@@ -466,12 +551,12 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
         let ok = false;
         crate::wire::response_for(if ok { "204 No Content" } else { "404 Not Found" }, "text/plain", SECURITY_HEADERS, &[])
     } else if (unix_proxy && !normalize_unix_authority(&mut req, authority)) || !ingress.accepts(&req, upgrade) || login == "tagged-devices" {
-        json_response("401 Unauthorized", json!({"state":"unauthorized"}), "")
+        route_json("401 Unauthorized", json!({"state":"unauthorized"}))
     } else if req.target.split_once('?').is_some_and(|(_, query)| query.split('&').any(|field| {
         let key = field.split('=').next().unwrap_or("");
         crate::files::fm::from_uri(key).eq_ignore_ascii_case("token")
     })) {
-        json_response("400 Bad Request", json!({"state":"invalid_request"}), "")
+        route_json("400 Bad Request", json!({"state":"invalid_request"}))
     } else if req.method == "GET" && req.target == "/auth/web/info" {
         json_response("200 OK", json!({"address":format!("https://{authority}")}), "")
     } else if upgrade && req.method == "GET" && is_browser_ws_target(&req.target) {
@@ -488,8 +573,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
         // nothing but pairing), streamed and ranged, never inline as anything that runs, never stored (files/share.rs `Who::Browser`)
         let device = crate::net::start::registry(&hub.cfg.home).and_then(|r| crate::auth::browser_device(&r, &req, &login));
         if device.is_none() {
-            // the file routes' own guards on top of the ingress's (a second CSP only narrows it)
-            json_response("401 Unauthorized", json!({"state":"unpaired"}), "Content-Security-Policy: default-src 'none'; sandbox\r\nCross-Origin-Resource-Policy: same-origin\r\n")
+            asset_json_response("401 Unauthorized", json!({"state":"unpaired"}))
         } else {
             use crate::files::share::{serve_file, serve_files_get, serve_share, Who};
             let r = match req.route() { "/file" => serve_file(&hub, &mut writer, Who::Browser, &req).await, "/files/get" => serve_files_get(&hub, &mut writer, Who::Browser, &req).await, _ => serve_share(&hub, &mut writer, Who::Browser, &format!("browser:{}", device.as_deref().unwrap_or("")), &req).await };
@@ -507,7 +591,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     } else if req.method == "GET" && is_protected_asset(req.route()) {
         let registry = crate::net::start::registry(&hub.cfg.home);
         if registry.and_then(|r| crate::auth::browser_device(&r, &req, &login)).is_none() {
-            json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
+            asset_json_response("401 Unauthorized", json!({"state":"unpaired"}))
         } else {
             let result = if req.route() == "/message-image" {
                 crate::files::imgroutes::snapshot_response(&hub, &req, None).await
@@ -518,24 +602,21 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             };
             // Only carry the content disposition (and ETag for immutable /blob/ assets) from the underlying resource.
             let is_blob = req.route().starts_with("/blob/");
-            let mut headers = if is_blob && matches!(result.status, "200 OK" | "304 Not Modified") {
-                SECURITY_HEADERS.replacen(
-                    "Cache-Control: private, no-store\r\n",
-                    "Cache-Control: private, max-age=31536000, immutable\r\n",
-                    1,
-                )
+            let cache = if is_blob && matches!(result.status, "200 OK" | "304 Not Modified") {
+                "Cache-Control: private, max-age=31536000, immutable\r\n"
             } else {
-                SECURITY_HEADERS.to_owned()
+                "Cache-Control: private, no-store\r\n"
             };
+            let mut headers = format!(
+                "{cache}{}Cross-Origin-Resource-Policy: same-origin\r\n",
+                crate::files::serve::MEDIA_SECURITY_HEADERS
+            );
             for line in result.extra.lines() {
                 let lower = line.to_ascii_lowercase();
                 if lower.starts_with("content-disposition:") || (is_blob && lower.starts_with("etag:")) {
                     headers.push_str(line.trim_end());
                     headers.push_str("\r\n");
                 }
-            }
-            if is_blob {
-                headers.push_str("Cross-Origin-Resource-Policy: same-origin\r\n");
             }
             if result.ctype.eq_ignore_ascii_case("image/svg+xml") {
                 headers.push_str("Content-Disposition: attachment\r\n");
@@ -584,7 +665,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             json_response("400 Bad Request", json!({"state":"invalid_request"}), "")
         }
     } else {
-        json_response("404 Not Found", json!({}), "")
+        route_json("404 Not Found", json!({}))
     };
     writer.write_all(&reply).await?;
     writer.shutdown().await?;
