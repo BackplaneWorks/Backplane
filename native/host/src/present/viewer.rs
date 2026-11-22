@@ -966,8 +966,7 @@ fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
 }
 /// File.json: an opened image, PDF or note: its name, its kind, where the hub serves it (`/img` takes an absolute path).
 fn file_page(kind: &str, abs: &str) -> Value {
-    // the file's own name, after either separator on Windows (a preview there is opened by C:\p\docs\readme.txt, and fm::last cuts at '/' only)
-    let name = abs.rsplit(crate::plat::fs::SEPS).next().unwrap_or(abs);
+    let name = crate::files::fm::last(abs);
     let mut v = json!({"name": name, "kind": kind, "url": format!("/img?path={}", pct(abs, true))});
     // a Markdown note is sent as a document's nodes (md/doc.rs: GitHub's Markdown, its pictures beside it), so the clients draw it rendered; plain text stays the client's to fetch
     let l = abs.to_ascii_lowercase();
@@ -3652,7 +3651,7 @@ mod tests {
         assert_eq!((b[0]["on"].as_bool(), b[1]["on"].as_bool(), b[1]["label"].as_str()), (Some(false), Some(true), Some("b/b")));
         assert!(board_action(&st, "h", &s1, "c/c.kicad_pcb").is_none(), "only a listed board");
         let o = board_action(&st, "h", &s1, "a/a.kicad_pcb").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
-        assert!(o.before[0]["text"].as_str().unwrap().contains(&format!("{root}/a/a.kicad_pcb")), "{:?}", o.before);
+        assert_eq!(sent(&o.before[0])["path"], json!(format!("{root}/a/a.kicad_pcb")), "{:?}", o.before);
         assert_eq!(viewer_json(&st, &template, &s1).unwrap()["boards"][0]["on"], true);
         let _ = std::fs::remove_dir_all(&d);
     }
@@ -3767,15 +3766,16 @@ mod tests {
         let o = run(&s1, "fm-up", "").unwrap(); crate::session::patch::merge(&mut s1, &o.patch); assert_eq!(s1["drafts"][format!("@files.dir:{th}")], "");
         assert!(run(&s1, "fm-cd", "..").is_none() && run(&s1, "fm-cd", "/etc").is_none() && run(&s1, "fm-open", "../x.png").is_none() && run(&s1, "fm-open", "nope.png").is_none());
         // a board opens in the Board viewer on its own file, and the hub is asked to watch that path
+        let join = |n: &str| std::path::Path::new(&root).join(n).to_string_lossy().into_owned();
         let o = run(&s1, "fm-open", "a.kicad_pcb").unwrap(); let mut s2 = s1.clone(); crate::session::patch::merge(&mut s2, &o.patch);
-        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"board\"") && w.contains(&format!("{root}/a.kicad_pcb")), "{w}");
-        let v = viewer_json(&st, &template, &s2).unwrap(); assert_eq!(v["open"], "board"); assert_eq!(v["key"], format!("0|{root}|{root}/a.kicad_pcb"));
+        let p = sent(&o.before[0]); assert_eq!((p["kind"].as_str(), p["path"].as_str()), (Some("board"), Some(join("a.kicad_pcb").as_str())), "{p}");
+        let v = viewer_json(&st, &template, &s2).unwrap(); assert_eq!(v["open"], "board"); assert_eq!(v["key"], format!("0|{root}|{}", join("a.kicad_pcb")));
         // an image, a PDF and a note open as a file page of the Files tab; the watch is stopped
         for (n, k) in [("pic.png", "image"), ("doc.pdf", "pdf"), ("notes.md", "text")] {
             let o = run(&s2, "fm-open", n).unwrap(); let mut s3 = s2.clone(); crate::session::patch::merge(&mut s3, &o.patch);
             assert!(o.before[0]["text"].as_str().unwrap().contains("\"kind\":\"\""), "{n}");
             let v = viewer_json(&st, &template, &s3).unwrap(); assert_eq!(v["open"], k); assert_eq!(v["file"]["name"], n); assert_eq!(v["file"]["kind"], k);
-            assert_eq!(v["file"]["url"], format!("/img?path={}", pct(&format!("{root}/{n}"), true)));
+            assert_eq!(v["file"]["url"], format!("/img?path={}", pct(&join(n), true)));
             assert_eq!(v["choices"].as_array().unwrap().iter().find(|c| c["on"] == true).unwrap()["value"], "files", "{n}: Files stays lit");
             // back to the folder (fm), and from there another tab
             let o = run(&s3, "fm", "").unwrap(); let mut s4 = s3.clone(); crate::session::patch::merge(&mut s4, &o.patch); assert_eq!(viewer_json(&st, &template, &s4).unwrap()["open"], "files");
@@ -3924,7 +3924,7 @@ mod tests {
         let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
         let o = view_action(&st, "h", &session, &format!("mech\t{root}/mech/b.step")).unwrap();
         assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "mech/b.step");
-        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"3d\"") && w.contains(&format!("{root}/mech/b.step")), "{w}");
+        let p = sent(&o.before[0]); assert_eq!((p["kind"].as_str(), p["path"].as_str()), (Some("3d"), Some(format!("{root}/mech/b.step").as_str())), "{p}");
         // another page, then Mech again from the rail (no part named): the part chosen last, not the first
         let session = json!({"sel": th, "rid": 2, "drafts": {format!("@view:{th}"): "mech", format!("@mech.part:{th}"): "mech/b.step"}, "open": {}, "adding": false, "panel": false, "info": {}});
         let o = view_action(&st, "h", &session, "3d").unwrap();
@@ -3932,7 +3932,7 @@ mod tests {
         let session = json!({"sel": th, "rid": 3, "drafts": {format!("@view:{th}"): "3d", format!("@mech.part:{th}"): "mech/b.step"}, "open": {}, "adding": false, "panel": false, "info": {}});
         let o = view_action(&st, "h", &session, "mech").unwrap();
         assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "mech/b.step");
-        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains(&format!("{root}/mech/b.step")), "{w}");
+        assert_eq!(sent(&o.before[0])["path"], json!(format!("{root}/mech/b.step")));
     }
 
     #[test]

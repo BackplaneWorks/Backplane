@@ -749,24 +749,30 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     use crate::plat::fs::PermissionsExt;
     let sd = dir("a-bin"); let argfile = sd.join("argv.json");
     // a stand-in that writes its own argv as JSON, then behaves as a Claude that answers once
-    std::fs::write(sd.join("claude"), format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > {a}.tmp\nmv {a}.tmp {a}\nread l\nsleep 600\n", a = crate::plat::fs::script_path(&argfile))).unwrap();
+    let a = crate::plat::fs::script_path(&argfile).replace('\'', "'\\''");
+    std::fs::write(sd.join("claude"), format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > '{a}.tmp'\nmv '{a}.tmp' '{a}'\nread l\nsleep 30\n")).unwrap();
     std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    let (hub, ag, home, work) = {
+    let (hub, ag, home, work, fc_fix) = {
         let home = dir("a-home"); let work = dir("a-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
         let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let host = host::HostInfo { home: home.to_path_buf(), fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve-current".into(), kicad: prompt::Kicad { status: "stock".into(), cli: "/home/h/.local/bin/kicad-cli".into(), version: "10.0.7".into(), ..Default::default() },
             models: json!({"claude":["fable","opus","sonnet","haiku"],"codex":["gpt-6.1-sol","gpt-6-astra","gpt-6.1-terra","gpt-6-sol","gpt-6-luna","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"]}), ..Default::default() };
-        let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); (hub, ag, home, work)
+        let fc_fix = host.fc.clone();
+        let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); (hub, ag, home, work, fc_fix)
     };
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
     for _ in 0..100 { if argfile.exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
-    let got: Vec<String> = { let raw = std::fs::read_to_string(&argfile).unwrap(); let mut v: Vec<String> = raw.split('\0').map(str::to_string).collect(); v.pop(); v };
+    let mut got: Vec<String> = { let raw = std::fs::read_to_string(&argfile).unwrap(); let mut v: Vec<String> = raw.split('\0').map(str::to_string).collect(); v.pop(); v };
+    if cfg!(windows) {
+        if let Some(i) = got.iter().position(|a| a == "--append-system-prompt-file") { got[i] = "--append-system-prompt".into(); if i + 1 < got.len() { got[i + 1] = std::fs::read_to_string(&got[i + 1]).unwrap() } }
+        if let Some(i) = got.iter().position(|a| a == "--settings") { if i + 1 < got.len() && !got[i + 1].trim_start().starts_with('{') { got[i + 1] = std::fs::read_to_string(&got[i + 1]).unwrap() } }
+    }
     let want: Vec<String> = serde_json::from_str(include_str!("../../../../test/agents/fixtures/argv-default.json")).unwrap();
     assert_eq!(got.len(), want.len());
     // the FreeCAD the hub tells about is the one it finds on this machine (PATH first): told as the fixture's, wherever it is installed here
-    let told = crate::files::kicad::stepglb::told_freecad(&home, "/home/h/.local/bin/freecadcmd");
-    let fc_dir = told.rsplit_once('/').map(|d| d.0.to_string()).unwrap_or_default();
-    let norm = |v: &[String]| v.iter().map(|x| { let x = if fc_dir.is_empty() || fc_dir == "/home/h/.local/bin" { x.clone() } else { x.replace(&format!("{fc_dir}/freecad"), "/home/h/.local/bin/freecad") };
+    let told = crate::files::kicad::stepglb::told_freecad(&home, &fc_fix);
+    let (fc_gui, fc_fix_gui) = (prompt::mech_gui(&told), prompt::mech_gui(&fc_fix));
+    let norm = |v: &[String]| v.iter().map(|x| { let x = x.replace(&told, "<freecadcmd>").replace(&fc_fix, "<freecadcmd>").replace(&fc_gui, "<freecad>").replace(&fc_fix_gui, "<freecad>");
         let x = x.replace(&home.join("attachments").to_string_lossy().to_string(), "<home>/attachments").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/home/attachments", "<home>/attachments");
         let x = x.replace(&work.to_string_lossy().to_string(), "<root>").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/fixroot", "<root>");
         if x.contains("/mcp/") { let (a, b) = x.split_once("/mcp/").unwrap(); let _ = a; format!("mcp:{}", b.split('?').next().unwrap().split('.').next().unwrap()) } else { x } }).collect::<Vec<_>>();
@@ -836,7 +842,7 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     for (k, v) in [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")] { std::env::set_var(k, v) } // hermetic: no host git identity, config or hooks
     let sd = dir("st-bin"); script(&sd, "claude", PLAYER);
     std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/agents/fixtures/replay-steps.ndjson")).unwrap();
-    let home = dir("st-home"); let work = dir("st-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
+    let home = dir("st-home"); let work = crate::plat::tmp::canonical("ag-st-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
     std::fs::write(work.join("b.kicad_pcb"), "(kicad_pcb (version 20240108))\n").unwrap();
     let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let host = host::HostInfo { home: home.to_path_buf(), ..Default::default() };
@@ -849,15 +855,29 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     let ev = until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() == 2 && ev.iter().filter(|e| e["tone"] == "step").count() == 2).await; tokio::time::sleep(Duration::from_millis(800)).await;
     let ev = { let e2 = log_from(&hub, from).await; if e2.len() > ev.len() { e2 } else { ev } };
     let js_root = "/home/h/Documents/i2cjak/bp-agents-scratch/modes/work-steps/fixroot"; let me = work.to_string_lossy().to_string();
-    // which git dir holds the steps is compared above; here the JS hub's (history.git, as it had no #1163) and ours are the same "<gitdir>"
-    let f = |v: &[Value], r: &str| core(v, T1).iter().map(|e| norm_digits(&norm_steps(&norm(e), &[r]).replace("<root>/.backplane/history.git", "<gitdir>").replace("<root>/.git", "<gitdir>"))).collect::<Vec<_>>();
+    let mut me_roots = crate::plat::fs::path_forms(&me);
+    if cfg!(windows) {
+        if let Some(n) = work.file_name().and_then(|s| s.to_str()) { me_roots.push(format!("/tmp/{n}")); }
+    }
     // the step Acts carry the commit, the previous commit, the git dir and top, and the files changed
     let steps: Vec<Value> = ev.iter().filter(|e| e["tone"] == "step").cloned().collect(); assert_eq!(steps.len(), 2, "{steps:?}");
     let rec = |i: usize| -> Value { let sm = steps[i]["summary"].as_str().unwrap_or(""); serde_json::from_str(sm).unwrap_or_else(|e| panic!("step {i}: the capture did not record a JSON step ({e}); its summary was: {sm:?}")) };
     assert_eq!(rec(0)["w"], "start"); assert_eq!(rec(0)["f"], json!(["A\tb.kicad_pcb"])); assert_eq!(rec(0)["p"], ""); assert_eq!(rec(1)["p"], rec(0)["c"]); assert_eq!(rec(1)["f"], json!(["M\tb.kicad_pcb"]));
     // the folder was in no repository: the turn made it one first (#1163, snapguard.rs), so the steps are its .git's, not .backplane/history.git
-    assert_eq!(rec(0)["g"], format!("{me}/.git")); assert_eq!(rec(0)["t"], me);
-    let (g, w) = (f(&ev, &me), f(&lines_of(include_str!("../../../../test/agents/fixtures/js-steps.jsonl")), js_root));
+    let (g0, t0) = (rec(0)["g"].as_str().unwrap_or("").to_string(), rec(0)["t"].as_str().unwrap_or("").to_string());
+    if cfg!(windows) {
+        assert!(me_roots.iter().any(|r| g0.eq_ignore_ascii_case(&format!("{r}/.git"))), "g={g0:?} roots={me_roots:?}");
+        assert!(me_roots.iter().any(|r| t0.eq_ignore_ascii_case(r)), "t={t0:?} roots={me_roots:?}");
+        if let Some(gr) = g0.strip_suffix("/.git") { if !me_roots.iter().any(|r| r == gr) { me_roots.push(gr.to_string()); } }
+        if !me_roots.iter().any(|r| r == &t0) { me_roots.push(t0.clone()); }
+    } else {
+        assert_eq!(g0, format!("{me}/.git")); assert_eq!(t0, me);
+    }
+    me_roots.sort_by(|a, b| b.len().cmp(&a.len()));
+    // which git dir holds the steps is compared above; here the JS hub's (history.git, as it had no #1163) and ours are the same "<gitdir>"
+    let f = |v: &[Value], roots: &[&str]| core(v, T1).iter().map(|e| norm_digits(&norm_steps(&norm(e), roots).replace("<root>/.backplane/history.git", "<gitdir>").replace("<root>/.git", "<gitdir>"))).collect::<Vec<_>>();
+    let me_refs: Vec<&str> = me_roots.iter().map(String::as_str).collect();
+    let (g, w) = (f(&ev, &me_refs), f(&lines_of(include_str!("../../../../test/agents/fixtures/js-steps.jsonl")), &[js_root]));
     // the Acts land when the background capture ends, so their place among the turn's events varies: compare the rest in order, and the Acts as a set
     let (gs, ws): (Vec<_>, Vec<_>) = (g.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>(), w.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>());
     assert_eq!(gs, ws); let (mut a, mut b): (Vec<_>, Vec<_>) = (g.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect(), w.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect()); a.sort(); b.sort(); assert_eq!(a, b);
@@ -2101,7 +2121,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
 }
 async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note() {
     let sd = dir("sk-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
-    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", crate::plat::fs::script_path(&rec), crate::plat::fs::script_path(&inner)));
+    script(&sd, "claude", &format!("#!/bin/sh\ntee -a '{}' | sh '{}'\n", crate::plat::fs::script_path(&rec).replace('\'', "'\\''"), crate::plat::fs::script_path(&inner).replace('\'', "'\\''")));
     let uh = dir("sk-userhome"); // a fake user: a Claude skill, a Codex-only skill
     for (rel, name) in [(".claude/skills/unslop-zq", "unslop-zq"), (".agents/skills/codexonly-zq", "codexonly-zq")] { std::fs::create_dir_all(uh.join(rel)).unwrap(); std::fs::write(uh.join(rel).join("SKILL.md"), format!("---\nname: {name}\ndescription: d\n---\nbody")).unwrap(); }
     let home = dir("sk-home"); let work = dir("sk-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
@@ -2112,7 +2132,8 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     let got = std::fs::read_to_string(&rec).unwrap(); let line = got.lines().find(|l| l.contains("zqskill")).expect("the user line"); let v: Value = serde_json::from_str(line).unwrap();
     let text = v["message"]["content"].as_str().map(str::to_string).or_else(|| v["message"]["content"][0]["text"].as_str().map(str::to_string)).expect("text");
     assert!(text.contains("zqskill run /unslop-zq and $codexonly-zq"), "{text}");
-    assert!(text.contains(&format!("read \"{}/.agents/skills/codexonly-zq/SKILL.md\"", uh.display())) && !text.contains("unslop-zq/SKILL.md"), "{text}");
+    let tsl = crate::plat::tmp::sl(&text);
+    assert!(tsl.contains(&format!("read \"{}/.agents/skills/codexonly-zq/SKILL.md\"", crate::plat::tmp::sl(uh.to_string_lossy()))) && !tsl.contains("unslop-zq/SKILL.md"), "{text}");
     ag.shutdown();
 }
 // one test, not two: two hubs of the host kind at once disturb the process-wide account grants other tests hold
@@ -2120,7 +2141,7 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note().await;
     // stand-ins that do what the real agents do with the note: open the SKILL.md named in it and answer with its secret word
     // (\\* and not \\?: macOS's sed has no \? in a basic expression, and the stand-in then never found the file)
-    let find = r#"p=$(printf '%s' "$X" | sed -n 's/.*read \\*"\([^"\\]*SKILL.md\)\\*".*/\1/p' | head -1); w=$(sed -n 's/^SECRET=//p' "$p" 2>/dev/null | head -1)"#;
+    let find = r#"p=$(printf '%s' "$X" | sed -n 's/.*read \\*"\(.*SKILL\.md\)\\*".*/\1/p' | head -1 | tr -s '\\' '/'); w=$(sed -n 's/^SECRET=//p' "$p" 2>/dev/null | head -1)"#;
     let uh = dir("sc-userhome"); // the skill sits where the other provider's agent does not load it itself, so the turn text must hand over the file
     for rel in [".agents/skills/zqwhale", ".claude/skills/zqwhale"] { let d = uh.join(rel); std::fs::create_dir_all(&d).unwrap(); std::fs::write(d.join("SKILL.md"), "---\nname: zqwhale\ndescription: d\nprovider: \"*\"\n---\nSECRET=PURPLE-OTTER-77\n").unwrap(); }
     std::fs::remove_dir_all(uh.join(".claude/skills/zqwhale")).unwrap(); // placeholder: each provider below gets only the foreign copy

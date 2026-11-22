@@ -206,7 +206,7 @@ async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_a
     let out = turn(T1).await; assert!(out.contains("\"completed\""), "{out}");
     let ran: Vec<Value> = std::fs::read_to_string(&log).unwrap().lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let d1 = ran[0]["dir"].as_str().unwrap();
-    assert!(d1.contains(&format!("providers/accounts-v1/{id}/")), "the bound thread runs in the profile's own config folder: {d1}");
+    assert!(crate::plat::tmp::sl(d1).contains(&format!("providers/accounts-v1/{id}/")), "the bound thread runs in the profile's own config folder: {d1}");
     let args: Vec<&str> = ran[0]["args"].as_array().unwrap().iter().filter_map(|a| a.as_str()).collect();
     assert!(args.windows(2).any(|w| w == ["--setting-sources", "user"]) && args.iter().any(|a| a.contains("forceLoginMethod")), "claude.ai login is forced for the profile: {args:?}");
     let out = turn(t2).await; assert!(out.contains("\"completed\""), "{out}");
