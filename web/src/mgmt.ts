@@ -101,6 +101,7 @@ export class MgmtStrip {
   private planHydratedDraw: { bands?: PlanBand[]; regions?: PlanRegion[] } | null = null;
   private planNoteOpen = false;
   private planCanvas: PlanFloorplannerCanvas | null = null;
+  private planCommitFields: ((id: string, fields: Record<string, unknown>) => void) | null = null;
 
   private fabStatus = "";
 
@@ -168,6 +169,7 @@ export class MgmtStrip {
     this.planNoteOpen = false;
     this.planCanvas?.destroy();
     this.planCanvas = null;
+    this.planCommitFields = null;
     this.fabStatus = "";
     this.render();
   }
@@ -1440,9 +1442,21 @@ export class MgmtStrip {
           this.planShownLayers = activeLayers.length >= 2 ? [activeLayers[0], fields.layer] : [...activeLayers, fields.layer];
         }
       }
+      const wireFields: Record<string, unknown> = { ...fields };
+      if (
+        Array.isArray(fields.outline) &&
+        Array.isArray((fields.outline as unknown[])[0]) &&
+        typeof ((fields.outline as unknown[])[0] as unknown[])[0] === "number"
+      ) {
+        const reg = mergedRegions.find((r) => r.id === id);
+        if (reg?.holes && reg.holes.length > 0) {
+          wireFields.outline = [fields.outline, ...reg.holes];
+        }
+      }
       this.render();
-      sendPlan("plan.update", { ops: [{ op: "set", id, fields }] });
+      sendPlan("plan.update", { ops: [{ op: "set", id, fields: wireFields }] });
     };
+    this.planCommitFields = commitItemFields;
 
     if (this.planSelectedId) {
       let selLayer = "";
@@ -1781,7 +1795,7 @@ export class MgmtStrip {
             this.planOptimistic.set(id, { ...prev, ...fields });
           },
           onCommitFields: (id, fields) => {
-            commitItemFields(id, fields);
+            (this.planCommitFields ?? commitItemFields)(id, fields);
           },
           onApproveLayer: (layer, approve) => {
             sendPlan("plan.approve", { layer, ids: [], approve });

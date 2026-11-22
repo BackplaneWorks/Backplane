@@ -392,6 +392,17 @@ pub fn apply_person_ops(plan: &mut Value, ops: &[Value]) -> Result<Vec<String>, 
                         for (k, v) in fields {
                             if matches!(k.as_str(), "op" | "id" | "fields") { continue }
                             if k == "layer" { if let Some(s) = v.as_str() { new_layer = s.to_string(); } }
+                            if k == "outline" {
+                                if let (Some(new_rings), Some(old_rings)) = (v.as_array(), obj.get("outline").and_then(Value::as_array)) {
+                                    if new_rings.len() == 1 && old_rings.len() > 1 {
+                                        let mut merged = Vec::with_capacity(old_rings.len());
+                                        merged.push(new_rings[0].clone());
+                                        merged.extend(old_rings[1..].iter().cloned());
+                                        obj.insert(k.clone(), Value::Array(merged));
+                                        continue;
+                                    }
+                                }
+                            }
                             obj.insert(k.clone(), v.clone());
                         }
                         obj.insert("edited".into(), json!(true));
@@ -496,12 +507,23 @@ pub fn apply_person_approve(plan: &mut Value, layer: &str, ids: &[String], yes: 
     changed
 }
 
+static PLAN_FILE_LOCK: Mutex<()> = Mutex::new(());
+static PLAN_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 fn write_plan_file(pcb: &str, plan: &Value) -> Result<(), String> {
     let f = Path::new(pcb).with_extension("kicad_plan");
-    let tmp = f.with_extension("kicad_plan.tmp");
+    let seq = PLAN_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let tmp = f.with_extension(format!("kicad_plan.{}.{seq}.tmp", std::process::id()));
     let txt = serde_json::to_string_pretty(plan).map_err(|e| e.to_string())?;
-    std::fs::write(&tmp, txt).map_err(|e| e.to_string())?;
-    crate::plat::fs::rename(&tmp, &f).map_err(|e| e.to_string())
+    if let Err(e) = std::fs::write(&tmp, txt) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    if let Err(e) = crate::plat::fs::rename(&tmp, &f) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e.to_string());
+    }
+    Ok(())
 }
 
 /// The person's steering edits (the Plan canvas/inspector): sends KiCad's `UpdatePlan` as the person when open,
@@ -530,6 +552,7 @@ pub async fn update(hub: &Arc<Hub>, pcb: &str, base: Option<u64>, ops: &[Value])
     let f = Path::new(pcb).with_extension("kicad_plan");
     let pcb_s = pcb.to_string();
     let res = tokio::task::spawn_blocking(move || -> Result<(Value, Vec<String>), String> {
+        let _guard = PLAN_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let raw = std::fs::read_to_string(&f).map_err(|_| "no saved routing plan for this board".to_string())?;
         let mut plan: Value = serde_json::from_str(&raw).map_err(|_| "saved routing plan is not valid JSON".to_string())?;
         let touched = apply_person_ops(&mut plan, &norm)?;
@@ -551,6 +574,7 @@ pub async fn approve(hub: &Arc<Hub>, pcb: &str, layer: &str, ids: &[String], yes
             if f.exists() {
                 let (pcb_s, layer_s, ids_v) = (pcb.to_string(), layer.to_string(), ids.to_vec());
                 let res = tokio::task::spawn_blocking(move || -> Result<Value, String> {
+                    let _guard = PLAN_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
                     let raw = std::fs::read_to_string(&f).map_err(|e| e.to_string())?;
                     let mut plan: Value = serde_json::from_str(&raw).map_err(|_| "saved routing plan is not valid JSON".to_string())?;
                     let changed = apply_person_approve(&mut plan, &layer_s, &ids_v, yes);
@@ -750,5 +774,31 @@ mod tests {
         assert!(normalize_person_ops(&[json!({"op": "set", "id": "c1", "width": 0.01})]).is_err());
         assert!(normalize_person_ops(&[json!({"op": "set", "id": "c1", "path": [[0.0, 0.0]]})]).is_err());
         assert!(crate::api::RpcHandler::methods(&Rpc).contains(&"plan.update"));
+    }
+
+    #[test] fn plane_outline_edit_preserves_existing_holes() {
+        let hole = json!([[4.0, 4.0], [6.0, 4.0], [6.0, 6.0], [4.0, 6.0]]);
+        let mut p = json!({
+            "revision": 1,
+            "layers": [{"layer": "In2.Cu", "role": "power", "status": "proposed"}],
+            "planes": [{"id": "p1", "net": "GND", "layer": "In2.Cu", "outline": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], hole], "status": "proposed"}]
+        });
+        let single_ops = normalize_person_ops(&[
+            json!({"op": "set", "id": "p1", "outline": [[0.0, 0.0], [12.0, 0.0], [12.0, 10.0], [0.0, 10.0]]})
+        ]).unwrap();
+        apply_person_ops(&mut p, &single_ops).unwrap();
+        let rings = p["planes"][0]["outline"].as_array().unwrap();
+        assert_eq!(rings.len(), 2);
+        assert_eq!(rings[0], json!([[0.0, 0.0], [12.0, 0.0], [12.0, 10.0], [0.0, 10.0]]));
+        assert_eq!(rings[1], hole);
+
+        let new_hole = json!([[3.0, 3.0], [5.0, 3.0], [5.0, 5.0]]);
+        let multi_ops = normalize_person_ops(&[
+            json!({"op": "set", "id": "p1", "outline": [[[0.0, 0.0], [14.0, 0.0], [14.0, 10.0]], new_hole]})
+        ]).unwrap();
+        apply_person_ops(&mut p, &multi_ops).unwrap();
+        let rings2 = p["planes"][0]["outline"].as_array().unwrap();
+        assert_eq!(rings2.len(), 2);
+        assert_eq!(rings2[1], new_hole);
     }
 }

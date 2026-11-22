@@ -743,7 +743,22 @@ pub fn apply_optimistic(app: &mut Backplane, id: &str, patch: Value) {
 
 pub fn commit_item_fields(app: &mut Backplane, id: &str, fields: Value, cx: &mut Context<Backplane>) {
     apply_optimistic(app, id, fields.clone());
-    mgmt_plan::send(app, "plan.update", json!({"ops": [{"op": "set", "id": id, "fields": fields}]}), cx);
+    let mut wire_fields = fields;
+    if let Some(outer) = wire_fields.get("outline").cloned() {
+        if outer.as_array().and_then(|a| a.first()).and_then(|p| p.as_array()).and_then(|p| p.first()).and_then(Value::as_f64).is_some() {
+            let d = app.screens.mgmt.data("plan");
+            let (_, draw) = resolved_board_and_draw(app, &d);
+            if let Some(holes) = draw["regions"].as_array().into_iter().flatten().find(|r| r["id"] == id).and_then(|r| r["holes"].as_array()).filter(|h| !h.is_empty()) {
+                let mut rings = Vec::with_capacity(1 + holes.len());
+                rings.push(outer);
+                rings.extend(holes.iter().cloned());
+                if let Some(obj) = wire_fields.as_object_mut() {
+                    obj.insert("outline".into(), Value::Array(rings));
+                }
+            }
+        }
+    }
+    mgmt_plan::send(app, "plan.update", json!({"ops": [{"op": "set", "id": id, "fields": wire_fields}]}), cx);
 }
 
 fn board_bbox_f32(board: &Value) -> [f32; 4] {
