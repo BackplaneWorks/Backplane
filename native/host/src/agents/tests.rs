@@ -1949,7 +1949,16 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let person = PathBuf::from(std::env::var("BP_SBS_PERSON").unwrap()); let live = PathBuf::from(std::env::var("BP_SBS_LIVE").unwrap());
     let rec = person.join("rec"); let _ = std::fs::create_dir_all(&rec);
     let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
-    let wrapped = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\nprintf '%s\\n' \"$@\" > {rec}/argv; env > {rec}/env; pwd > {rec}/cwd\n", rec = crate::plat::fs::script_path(&rec)), 1);
+    let rec_s = crate::plat::fs::script_path(&rec);
+    let rec_paths = if cfg!(windows) {
+        // Resolve MSYS-translated HOME and pwd back to native Windows paths inside the same MSYS runtime that produced them.
+        format!(
+            "env > \"{rec_s}/env\"; h=; cr=$(printf '\\r'); while IFS= read -r l || [ -n \"$l\" ]; do case \"$l\" in HOME=*) h=${{l#HOME=}}; h=${{h%\"$cr\"}}; break;; esac; done < \"{rec_s}/env\"; if [ -n \"$h\" ]; then cygpath -aw -- \"$h\" > \"{rec_s}/home\"; fi; cygpath -aw -- \"$(pwd)\" > \"{rec_s}/cwd\""
+        )
+    } else {
+        format!("env > \"{rec_s}/env\"; pwd > \"{rec_s}/cwd\"")
+    };
+    let wrapped = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=\"{rec_s}/starts\"\nprintf '%s\\n' \"$@\" > \"{rec_s}/argv\"; {rec_paths}\n"), 1);
     script(&bin, "claude", &wrapped);
     // the person's claude is this stand-in, whatever the machine has installed: the parent puts its folder first on the hub's PATH, which `person_dirs`
     // searches before the person's login shell's (a Boat box's has a real, logged-out /usr/local/bin/claude). Checked with the hub's own lookup before any turn, so a real CLI never runs
@@ -1985,8 +1994,17 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(!argv.iter().any(|a| a == "--resume"), "no copied session is resumed: {argv:?}");
     let pm = argv.iter().position(|a| a == "--permission-mode").map(|i| argv[i + 1].clone()).unwrap(); assert_eq!(pm, "default", "approval-required, whatever the copied thread said");
     assert!(argv.iter().any(|a| a == "--permission-prompt-tool"), "approvals reach the person: {argv:?}");
-    let env = read("env"); assert!(env.lines().any(|l| l == format!("HOME={}", person.display())), "the person's HOME"); assert!(!env.lines().any(|l| l.starts_with("BACKPLANE_")), "no BACKPLANE_* reaches the agent:\n{env}");
-    assert_eq!(crate::plat::fs::canonicalize(read("cwd").trim()).unwrap(), crate::plat::fs::canonicalize(&work).unwrap());
+    let env = read("env");
+    if cfg!(windows) {
+        assert!(env.lines().any(|l| l.starts_with("HOME=")), "the person's HOME in:\n{env}");
+        let home_raw = read("home");
+        assert_eq!(crate::plat::fs::canonicalize(home_raw.trim()).unwrap_or_else(|e| panic!("canonicalize HOME {home_raw:?} failed: {e}\nenv:\n{env}")), crate::plat::fs::canonicalize(&person).unwrap(), "the person's HOME");
+    } else {
+        assert!(env.lines().any(|l| l == format!("HOME={}", person.display())), "the person's HOME");
+    }
+    assert!(!env.lines().any(|l| l.starts_with("BACKPLANE_")), "no BACKPLANE_* reaches the agent:\n{env}");
+    let cwd_raw = read("cwd");
+    assert_eq!(crate::plat::fs::canonicalize(cwd_raw.trim()).unwrap_or_else(|e| panic!("canonicalize cwd {cwd_raw:?} failed: {e}")), crate::plat::fs::canonicalize(&work).unwrap());
     assert_eq!(std::fs::read_to_string(rec.join("starts")).unwrap().matches("START").count(), 1, "exactly the person's stand-in ran");
     // (4) the one-shot helpers keep Kind::Agent, refused on a copy (proc.rs tests)
     ag.shutdown();
