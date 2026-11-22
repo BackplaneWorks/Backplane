@@ -70,6 +70,7 @@ struct DataRoot: View {
         .onOpenURL { route($0) }
         // the telemetry notice's Settings link: Settings over what is open
         .onChange(of: client.openSettings) { _, v in if v { path.append(DPage(name: "settings")); client.openSettings = false } }
+        .onChange(of: client.openAccounts, initial: true) { _, v in if v { path.append(DPage(name: "settings")); path.append(DPage(name: "accounts")); client.openAccounts = false } }
         .onChange(of: client.pushThread, initial: true) { _, t in if !t.isEmpty { var p = NavigationPath(); p.append(t); path = p; client.pushThread = "" } }
         // an alert that a sign-in expired: Settings, Accounts, that account, its sign-in started
         .onChange(of: client.pushAccount, initial: true) { _, a in if !a.isEmpty { var p = NavigationPath(); p.append(DPage(name: "settings")); p.append(DPage(name: "accounts")); p.append(DAccountRoute(id: a, start: true)); path = p; client.pushAccount = "" } }
@@ -84,6 +85,9 @@ struct DataRoot: View {
         case .thread: path.append(t.id)
         case .file: path.append(DViewerRoute(id: t.id, file: t.path, line: t.line))
         case .project: path = NavigationPath(); client.focusProject = t.id
+        case .settings:
+            path.append(DPage(name: "settings"))
+            if t.id == "accounts" { path.append(DPage(name: "accounts")) }
         case .room:
             Task {
                 if !client.rooms.contains(where: { $0.id == t.id }) { await client.loadBots() }
@@ -99,7 +103,9 @@ struct DataRoot: View {
         // (a thread link from outside: the hub says which thread it is, so `desktop~t9` and a link id both open the one on that machine)
         if url.host == "thread" { client.openLink(url, thread: "") }
         else if url.host == "google" { return }   // the end of a Google sign-in (GoogleLoop): not a pairing link
-        else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } } else { client.opened(url) }
+        else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } }
+        else if url.host == "settings" { if url.pathComponents.dropFirst().first == "accounts" { client.openAccounts = true } else { client.openSettings = true } }
+        else { client.opened(url) }
     }
     // a picture from another app (Open in / Share, Files): a copy in the app's Inbox, or a file it may read for a moment
     private func take(_ url: URL) {
@@ -155,6 +161,7 @@ struct DataThreadsView: View {
             DataTelemetryBanner(client: client)
             DataStarBanner(client: client)
             DataAlertsBanner(client: client)
+            DataNoProviderBanner(client: client)
             if client.restartLine != .none { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
                 if client.has("search") {
@@ -873,6 +880,7 @@ struct DataThreadView: View {
                     findGo = nil
                 }
             }
+            if !id.contains("~") { DataNoProviderBanner(client: client) }
             if let review { DataReviewBar(bar: review, enabled: !reviewing) { press(review) } }
             if let order { DataOrderCard(order: order) }
             if let m = thread?.mark { Text(dAway(Tr.t(m.runs), m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.top, 4).accessibilityIdentifier("data.thread.runs") }
@@ -1311,7 +1319,14 @@ struct DataQueueStrip: View {
                     }
                 }.accessibilityElement(children: .contain).accessibilityIdentifier("queue.row")
             }
-            if let e = client.queueError[thread] { Text(Tr.t(e)).dmono(11).foregroundStyle(BackplaneDesign.bad).accessibilityIdentifier("queue.error") }
+            if let e = client.queueError[thread] {
+                HStack(spacing: 8) {
+                    Text(Tr.t(e)).dmono(11).foregroundStyle(BackplaneDesign.bad).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("queue.error")
+                    if DNoProvider.isSendError(e) {
+                        Button(Tr.t("Open Settings → Accounts")) { client.openAccounts = true }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("queue.error.accounts")
+                    }
+                }
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel)
         .overlay(alignment: .top) { DLine() }
@@ -1899,6 +1914,24 @@ struct DataReviewBar: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(bar.on ? BackplaneDesign.warn : BackplaneDesign.line, lineWidth: 1))
         .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("thread.review")
+    }
+}
+
+/// Proactive banner shown when the hub has zero AI providers configured or signed in.
+struct DataNoProviderBanner: View {
+    let client: DataClient
+    var body: some View {
+        if let n = client.noProvider {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(Tr.t(n.head)).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("provider.notice.head")
+                if !n.text.isEmpty { Text(Tr.t(n.text)).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("provider.notice.text") }
+                Button(n.button.isEmpty ? Tr.t("Open Settings → Accounts") : Tr.t(n.button)) { client.openAccounts = true }
+                    .buttonStyle(DButton(primary: true, compact: true)).accessibilityIdentifier("provider.notice.button")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10).padding(.vertical, 8).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.warn, lineWidth: 1))
+            .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("provider.notice")
+        }
     }
 }
 

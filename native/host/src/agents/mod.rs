@@ -555,6 +555,11 @@ impl RpcHandler for Rpc {
             if method == "thread.btw" {
                 let q = p.get("q").and_then(Value::as_str).unwrap_or("").trim().to_string();
                 if q.is_empty() { return vec![err(id, crate::session::composer::BTW_EMPTY)] }
+                if who.client > 0 {
+                    if let Some(why) = crate::settings::provider_notice::send_guard(hub).await {
+                        return vec![err(id, why)];
+                    }
+                }
                 let (ag, th, id2) = (self.0.clone(), th.to_string(), id.clone());
                 let answer = async move { let a = ag.side_answer(&th, &q).await; json!({"t":"reply","id":id2,"ok":true,"result":{"thread":th,"q":q,"btw":a}}) };
                 // nothing is logged and no turn sees it. The model may take a minute: a connection answers everything else meanwhile, and its reply comes when it comes. A caller with no socket of its own (a linked machine's) waits.
@@ -612,6 +617,11 @@ impl Agents {
                     let attached: Vec<Value> = p.get("attachments").filter(|a| a.as_array().map_or(false, |x| !x.is_empty())).map(|a| vec![json!({"$":"MessageAttached","thread":th,"msg":msg,"attachments":a,"at":now_s()})]).unwrap_or_default();
                     // `/restore [turn]` from the person: the hub puts the project back to before that turn itself, no agent turn (snapguard.rs)
                     if who.client > 0 && !retry { if let Some(n) = snapguard::restore_command(text) { return self.restore_command(th, n).await } }
+                    if who.client > 0 && !retry && (!text.trim().is_empty() || !attached.is_empty()) {
+                        if let Some(why) = crate::settings::provider_notice::send_guard(&self.hub).await {
+                            return Err(why.to_string());
+                        }
+                    }
                     if who.client > 0 && !retry && !text.trim().is_empty() {
                         // the star nudge counts this prompt in the same commit; the offer (the fifth) goes to this connection after it
                         let (mut extra, offer) = crate::statehost::policies().map(|p| p.star_prompt(&msg, now_s())).unwrap_or((vec![], None));

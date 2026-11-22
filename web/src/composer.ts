@@ -2,7 +2,7 @@
 // Tall bordered input box ("Ask anything: @bot, >thread, %project, #room, $skill, /btw"),
 // slash-command popup (hello.commands), mentions popup, and bottom toolbar row
 // with model chip on the left and accent-blue Send / red Stop on the right.
-import { t } from "./i18n";
+import { t, trs } from "./i18n";
 import type { PlanModeInfo } from "./sidebar";
 
 export interface SlashCommand {
@@ -508,13 +508,25 @@ export class ComposerView {
     this.textarea.focus();
   }
 
-  public showError(msg: string): void {
-    this.errorEl.textContent = msg;
+  public showError(msg: string, action?: { label: string; onClick: () => void }): void {
+    const txt = document.createElement("span");
+    txt.textContent = trs(msg);
+    if (action) {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "bp-composer-err-act";
+      btn.setAttribute("data-testid", "composer-err-accounts");
+      btn.textContent = action.label;
+      btn.addEventListener("click", action.onClick);
+      this.errorEl.replaceChildren(txt, btn);
+    } else {
+      this.errorEl.replaceChildren(txt);
+    }
     this.errorEl.classList.remove("bp-hidden");
   }
 
   public clearError(): void {
-    this.errorEl.textContent = "";
+    this.errorEl.replaceChildren();
     this.errorEl.classList.add("bp-hidden");
   }
 

@@ -58,6 +58,7 @@ pub(super) async fn resolve(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
                 if kind == "bot" { if let Some(b) = dir["bots"].as_array().and_then(|a| a.iter().find(|x| x["id"] == bid.as_str())) { return Ok(json!({"kind":"thread","thread":b["thread"]})) } return none("That conversation is not on this hub.") }
                 none("That conversation has no screen on the phone.")
             }
+            "settings" => Ok(json!({"kind":"settings","page":id})),
             _ => none("The phone has no screen for that link."),
         };
     }

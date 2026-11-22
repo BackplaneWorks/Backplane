@@ -109,7 +109,11 @@ impl Backplane {
         let(hub_at,token_file)=(screens::attach::Target::from(&config.hub,&config.token_file),config.token_file.clone());
         let elsewhere=hubs::elsewhere(&config.hub);let(tx,events)=hub::connect(config);
         // started with a thread's link (the system's handler for backplane://): the hub opens it once the window is up
-        if let Some(l)=open_link {let _=tx.try_send(Command::Action("link-open".into(),l));}
+        if let Some(l)=open_link {
+            if screens::linkroute::settings_page(&l).as_deref()==Some("accounts") {
+                cx.spawn(async move |weak,cx|{let _=weak.update(cx,|this,cx|this.open_accounts(cx));}).detach();
+            } else { let _=tx.try_send(Command::Action("link-open".into(),l)); }
+        }
         screens::place::watch(cx);screens::devbar::watch(cx);screens::hubbar::watch(cx,hub_at,&token_file);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
         // the keys held show their hints only in the window in use (keys::hint_mode): its focus coming or going draws them again
@@ -349,6 +353,16 @@ impl Backplane {
         let ui=&mut self.screens.settings_ui;
         if ui.open_local||hub_open{ui.open_local=false;ui.device=false;ui.accounts=false;} else {ui.open_local=true;ui.device=true;self.screens.focus_settings=true;}
         let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));cx.notify();
+    }
+    /// Open Settings directly on the client-rendered Accounts tab.
+    pub fn open_accounts(&mut self,cx:&mut Context<Self>){
+        self.want_focus=true;
+        if !screens::settings::is_open(self){self.open_settings(cx);}
+        self.screens.settings_ui.device=false;
+        self.screens.settings_ui.hubs=false;
+        self.screens.settings_ui.accounts=true;
+        screens::accounts::open_page(self,cx);
+        cx.notify();
     }
     /// Search threads (the top bar's button; Ctrl+Shift+F is Find across threads, palette.rs): the sidebar's box takes the keys; a sidebar folded to its strip, by hand or for want of room, unfolds first
     /// (the box is not drawn there: `sidebar_open` alone missed the fold for room, and the press did nothing)

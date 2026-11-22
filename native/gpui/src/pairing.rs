@@ -8,7 +8,7 @@ const SCHEMES: [&str; 3] = ["backplane://", "bpgpui://", "backplane-gpui://"];
 pub fn is_link(s: &str) -> bool { SCHEMES.iter().any(|p| s.starts_with(p)) }
 /// A link to something to open, not a pairing: `backplane://thread/<id>` (a thread of another machine `<machine>~<id>` too) or `backplane://project/<id>`.
 /// The hub decides what it opens (`link-open`); this only tells it from a pairing link.
-pub fn is_open_link(s: &str) -> bool { SCHEMES.iter().any(|p| s.strip_prefix(p).map_or(false, |r| r.starts_with("thread/") || r.starts_with("project/"))) }
+pub fn is_open_link(s: &str) -> bool { SCHEMES.iter().any(|p| s.strip_prefix(p).map_or(false, |r| r.starts_with("thread/") || r.starts_with("project/") || r.starts_with("settings/"))) }
 
 #[derive(Debug, PartialEq, Clone)]
 pub struct Invitation { pub origin: String, pub secret: String, /** every address to try, in order (the link's own first) */ pub routes: Vec<String>, /** a link, not an address typed by the person */ pub from_link: bool }
@@ -252,7 +252,7 @@ mod tests {
     fn inv(origin: &str, secret: &str) -> Option<Invitation> { Some(Invitation { origin: origin.into(), secret: secret.into(), routes: vec![origin.into()], from_link: true }) }
     fn code(origin: &str, secret: &str) -> Option<Invitation> { inv(origin, secret).map(|i| Invitation { from_link: false, ..i }) }
     #[test] fn a_thread_link_is_opened_not_paired() {
-        for l in ["backplane://thread/t1", "backplane://thread/lap~t9#m3", "backplane://project/p1", "bpgpui://thread/t1"] { assert!(is_open_link(l) && is_link(l), "{l}"); }
+        for l in ["backplane://thread/t1", "backplane://thread/lap~t9#m3", "backplane://project/p1", "backplane://settings/accounts", "bpgpui://thread/t1"] { assert!(is_open_link(l) && is_link(l), "{l}"); }
         for l in ["backplane://pair?url=x", "https://x/thread/t1", "backplane://person"] { assert!(!is_open_link(l), "{l}"); }
     }
     #[test] fn a_link_gives_its_hub_and_secret() {

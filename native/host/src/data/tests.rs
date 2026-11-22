@@ -65,10 +65,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -802,12 +802,13 @@ fn a_reply_reaches_a_phone_as_its_body_and_reply_to() {
 }
 #[test] fn phones_get_the_management_panels_and_checks_info() {
     use super::phone_info;
-    for k in ["hub.offer", "mgmt.state.abc", "mgmt.bom.abc", "mgmt.life.abc", "mgmt.fab.abc", "kicad.checks.abc"] { assert!(phone_info(k), "{k}") }
+    for k in ["hub.offer", "provider.notice", "mgmt.state.abc", "mgmt.bom.abc", "mgmt.life.abc", "mgmt.fab.abc", "kicad.checks.abc"] { assert!(phone_info(k), "{k}") }
     for k in ["editor.kicad.abc", "kicad.progress.abc", "browser.tabs.x", "terms"] { assert!(!phone_info(k), "{k}") }
     assert!(super::FEATURES.contains(&"mgmt"));
+    assert!(super::FEATURES.contains(&"noProvider"));
     // a set_info frame as the hub pushes it: the phone's keys kept, the rest left out
-    let f = super::phone_info_frame(&json!({"t":"info","info":{"mgmt.bom.d1":"{}","editor.kicad.d1":"x"}})).unwrap();
-    assert_eq!(f, json!({"t":"info","info":{"mgmt.bom.d1":"{}"}}));
+    let f = super::phone_info_frame(&json!({"t":"info","info":{"mgmt.bom.d1":"{}","provider.notice":"{\"head\":\"x\"}","editor.kicad.d1":"x"}})).unwrap();
+    assert_eq!(f, json!({"t":"info","info":{"mgmt.bom.d1":"{}","provider.notice":"{\"head\":\"x\"}"}}));
     assert!(super::phone_info_frame(&json!({"t":"info","info":{"terms":"[]"}})).is_none());
 }
 
@@ -1482,4 +1483,13 @@ async fn viewer_layout_over_a_socket_is_per_device_pushed_and_refuses_in_code_ke
     let got = loop { let v = next(&mut ws).await; if v["t"] == "d" && v["k"] == "home" { break v } };
     assert_eq!(got["sub"], sub);
     assert_eq!((got["home"]["kind"].as_str(), got["home"]["name"].as_str(), got["home"]["online"].as_bool(), got["home"]["canMoveHere"].as_bool()), (Some("peer"), Some("desktop"), Some(true), Some(true)), "{got}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn settings_accounts_link_resolves_for_phones_and_hello_carries_no_provider() {
+    let (_h, port) = up("link-settings").await;
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert!(hello.get("noProvider").is_some(), "hello carries noProvider field: {hello}");
+    let r = ask(&mut ws, 1, "link.resolve", json!({"url":"backplane://settings/accounts","thread":""})).await;
+    assert_eq!(r["result"], json!({"kind":"settings","page":"accounts"}));
 }

@@ -46,6 +46,7 @@ pub mod models;
 pub mod models_probe;
 pub mod agent_versions;
 pub mod privacy;
+pub mod provider_notice;
 pub mod provider_usage;
 pub mod proposal;
 pub mod secret;

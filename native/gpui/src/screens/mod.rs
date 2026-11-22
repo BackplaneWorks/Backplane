@@ -11,6 +11,7 @@ pub mod handoff;
 pub mod thought;
 pub mod halt;
 pub mod unanswered;
+pub mod provider_notice;
 pub mod google;
 pub mod migrate;
 pub mod voice;

@@ -146,6 +146,9 @@ final class DataClient {
     private(set) var telemetryNotice: DTelemetryNotice?
     /// the notice's Settings link: the root view opens Settings and sets it back
     var openSettings = false
+    /// Hub notice when zero AI providers / accounts are configured or signed in (`hello.noProvider` / `info["provider.notice"]`)
+    private(set) var noProvider: DNoProvider?
+    var openAccounts = false
     var canSendImages: Bool { features.contains("images") }
     // the composer's own commands (hello.commands): the hub's table; none of them is ever a message
     struct Word: Equatable { let word, label, desc: String }
@@ -321,7 +324,7 @@ final class DataClient {
         shellHashes = [:]; threadHashes = [:]; threadIds = [:]; subEntriesById = [:]; subEntryIds = []
         restarting = nil; hubBack = nil; restartStrip()
         home = nil
-        notice = HubNotice(); star = nil; telemetryNotice = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
+        notice = HubNotice(); star = nil; telemetryNotice = nil; noProvider = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
         mgmt = [:]; mgmtDigest = ""; mgmtProject = ""; mgmtAsked = ""; mgmtRev += 1
@@ -533,6 +536,7 @@ final class DataClient {
             if !onHome { downSince = nil }
             Task { await self.synchronise(g) }
             heardOffer(o["hubOffer"] as? String ?? "")
+            noProvider = DNoProvider.of(o["noProvider"])
         case "reply":
             guard let id = o["id"] as? Int ?? (o["id"] as? Double).map(Int.init), let k = calls.removeValue(forKey: id) else { return }
             if o["ok"] as? Bool == true {
@@ -552,6 +556,7 @@ final class DataClient {
         case "info":
             if let info = o["info"] as? [String: Any] {
                 if let v = info["hub.offer"] as? String { heardOffer(v) }
+                if info.keys.contains("provider.notice") { noProvider = DNoProvider.of(info["provider.notice"]) }
                 heardMgmt(info)
             }
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
