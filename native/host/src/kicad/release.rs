@@ -67,7 +67,7 @@ pub fn next(ts: &[&str]) -> String {
 pub fn dir(repo: &str, tag: &str) -> String { format!("{repo}/.backplane/releases/{tag}") }
 /// Release.stem: the file name without folder or extension
 pub fn stem(path: &str) -> String {
-    let base = path.rsplit('/').next().unwrap_or(""); let ps: Vec<&str> = base.split('.').collect();
+    let base = path.rsplit(crate::plat::fs::SEPS).next().unwrap_or(""); let ps: Vec<&str> = base.split('.').collect();
     if ps.len() >= 2 { ps[..ps.len() - 1].join(".") } else { ps[0].to_string() }
 }
 #[derive(Clone, Debug, PartialEq)]

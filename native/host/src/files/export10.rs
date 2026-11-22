@@ -20,18 +20,41 @@ fn result(home: &str, pro: &str, report: &J, state: &str, text: &str) -> J {
 async fn within(work: impl std::future::Future<Output = Ran>) -> Ran {
     tokio::time::timeout(DEADLINE, work).await.unwrap_or(Ran { code: 124, out: "KiCad export timed out after ten minutes. Its export folder stays locked until the command exits.".into() })
 }
+fn may_clear_base(home: &str, base: &str, marker: bool) -> bool { may_clear_base_on(cfg!(windows), home, base, marker) }
+fn may_clear_base_on(windows: bool, home: &str, base: &str, marker: bool) -> bool {
+    if !windows || (base.starts_with('/') && !base.starts_with("//")) { return kx::may_clear_in(home, base, marker) }
+    let posix = |s: &str| -> String {
+        let s = s.replace('\\', "/");
+        let b = s.as_bytes();
+        if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'/' { s[2..].to_string() }
+        else if let Some(rest) = s.strip_prefix("//").filter(|r| !r.starts_with('/') && !r.starts_with("?/") && r.contains('/')) { format!("/{rest}") }
+        else { s }
+    };
+    kx::within(home, base) && kx::may_clear_in(&posix(home), &posix(base), marker)
+}
+fn pro_outside_on(windows: bool, home: &str, pro: &str) -> bool {
+    if !windows { return !pro.starts_with(&format!("{home}/exports/")) }
+    let norm = |s: &str| -> String {
+        let s = s.replace('\\', "/").to_ascii_lowercase();
+        let b = s.as_bytes();
+        if b.len() >= 3 && b[0] == b'/' && b[1].is_ascii_alphabetic() && b[2] == b'/' {
+            format!("{}:{}", b[1] as char, &s[2..])
+        } else { s }
+    };
+    !norm(pro).starts_with(&format!("{}/exports/", norm(home).trim_end_matches('/')))
+}
 /// KExport.command: only a marked, managed folder is cleared
 async fn command(home: &str, pro: &str, cli: &str, mode: &str, flags: &[&str]) -> Ran {
     let base = kx::paths(home, pro).base;
     let marker = std::path::Path::new(&format!("{base}/.backplane-export")).is_file();
-    let mode = if mode == "export" && !kx::may_clear_in(home, &base, marker) { "refuse" } else { mode };
+    let mode = if mode == "export" && !may_clear_base(home, &base, marker) { "refuse" } else { mode };
     let mut a = vec!["-c", GUARD, "sh", home, &base, pro, mode, cli]; a.extend_from_slice(flags);
     within(super::git::proc_ro("sh", &a, "/", &[])).await
 }
 fn report_at(home: &str, pro: &str) -> Option<J> { std::fs::read(kx::paths(home, pro).report).ok().and_then(|b| bj::parse(&super::kicad::sexpr::decode(&b))) }
 /// KExport.project
 async fn project_export(home: &str, pro: &str, cli: &str, anyway: bool, expected: &str, agent: bool) -> J {
-    if !(crate::plat::fs::is_abs(pro) && pro.ends_with(".kicad_pro") && !pro.starts_with(&format!("{home}/exports/"))) { return result(home, pro, &J::Null, "error", "Export needs an absolute .kicad_pro path outside the managed export folder.") }
+    if !(crate::plat::fs::is_abs(pro) && pro.ends_with(".kicad_pro") && pro_outside_on(cfg!(windows), home, pro)) { return result(home, pro, &J::Null, "error", "Export needs an absolute .kicad_pro path outside the managed export folder.") }
     let r = command(home, pro, cli, "dry", &["--dry-run"]).await;
     let report = report_at(home, pro).unwrap_or(J::Null);
     if r.code != 0 { return result(home, pro, &report, "error", &r.out) }
@@ -58,7 +81,7 @@ fn put(o: J, key: &str, v: J) -> J {
 async fn open(o: J, pro: &str) -> J {
     if crate::copy::on() { return o }
     let path = o.get_str("path", "").to_string();
-    let file = pro.rsplit('/').next().unwrap_or("project.kicad_pro");
+    let file = pro.rsplit(crate::plat::fs::SEPS).next().unwrap_or("project.kicad_pro");
     let r = within(proc("sh", &["-c", OPEN, "sh", &path, &format!("{path}{file}")], "/", &[])).await;
     put(o, "openError", J::Str(if r.code == 0 { String::new() } else { bj::trim(&r.out).to_string() }))
 }
@@ -122,16 +145,54 @@ mod tests {
     #[tokio::test] async fn refusals_before_anything_runs() {
         let (home, bin) = (tmp("home3"), tmp("bin3")); let env = rt(&bin, LOSSY);
         for pro in ["relative.kicad_pro", "/a/b.txt", &format!("{home}/exports/x/y.kicad_pro")] { assert_eq!(export(&env, &home, pro, false, "", false).await.get_str("text", ""), "Export needs an absolute .kicad_pro path outside the managed export folder.") }
+        let missing = format!("{home}-missing/no/b.kicad_pro");
+        assert_eq!(export(&env, &home, &missing, false, "", false).await.get_str("export10", ""), "error");
         assert!(!std::path::Path::new(&format!("{home}/exports")).exists());
         let sick = ipc::Env { status: "broken".into(), ..Default::default() }; let u = export(&sick, &home, "/a/b.kicad_pro", false, "", false).await; assert_eq!((u.get_str("export10", ""), u.get_str("kicad", "")), ("unavailable", "broken"));
         let nocap = ipc::Env { status: "ok".into(), ..Default::default() }; assert_eq!(export(&nocap, &home, "/a/b.kicad_pro", false, "", false).await.get_str("export10", ""), "unavailable");
+    }
+    fn symlink_dir(target: &str, link: &str) {
+        match crate::plat::fs::symlink(target, link) {
+            Ok(()) => {}
+            #[cfg(windows)]
+            Err(e) if e.raw_os_error() == Some(1314) => {
+                // Without Developer Mode Windows requires symlink privilege; an NTFS junction still tests the guard's link refusal.
+                let (link_w, target_w) = (link.replace('/', "\\"), target.replace('/', "\\"));
+                let st = std::process::Command::new("cmd").args(["/C", "mklink", "/J", &link_w, &target_w]).status().unwrap();
+                assert!(st.success(), "mklink /J failed: {st}");
+            }
+            Err(e) => panic!("symlink({target}, {link}) failed: {e}"),
+        }
     }
     #[tokio::test] async fn an_unmarked_folder_is_never_adopted_and_a_link_never_followed() {
         let (home, bin, proj) = (tmp("home4"), tmp("bin4"), tmp("proj4")); let pro = format!("{proj}/b.kicad_pro"); std::fs::write(&pro, "{}").unwrap(); let env = rt(&bin, r#"{"entries":[]}"#);
         let base = kx::paths(&home, &pro).base; std::fs::create_dir_all(format!("{base}/kicad10")).unwrap(); std::fs::write(format!("{base}/kicad10/keep"), "x").unwrap();
         let r = export(&env, &home, &pro, false, "", false).await; assert_eq!(r.get_str("export10", ""), "error"); assert!(r.get_str("text", "").contains("Unmarked export folder refused"), "{r:?}"); assert!(std::path::Path::new(&format!("{base}/kicad10/keep")).exists());
-        let (h2, victim) = (tmp("home5"), tmp("victim")); crate::plat::fs::symlink(&victim, format!("{h2}/exports")).unwrap();
+        let (h2, victim) = (tmp("home5"), tmp("victim")); symlink_dir(&victim, &format!("{h2}/exports"));
         let r = export(&env, &h2, &pro, false, "", false).await; assert_eq!(r.get_str("export10", ""), "error"); assert!(r.get_str("text", "").contains("Symlinked exports folder refused"), "{r:?}"); assert!(std::fs::read_dir(&victim).unwrap().next().is_none());
+    }
+    #[test] fn windows_paths_are_checked_and_refused_safely() {
+        assert!(may_clear_base_on(true, r"C:\bp", r"C:\bp/exports/My-Board-1-2", true));
+        assert!(may_clear_base_on(true, "C:/bp", "C:/bp/exports/My-Board-1-2", true));
+        assert!(may_clear_base_on(true, r"\\server\share\bp", r"\\server\share\bp/exports/My-Board-1-2", true));
+        assert!(may_clear_base_on(true, "//server/share/bp", "//server/share/bp/exports/My-Board-1-2", true));
+        assert!(!may_clear_base_on(true, "//server", "//server/exports/x", true));
+        assert!(!may_clear_base_on(true, r"\\?\C:\bp", r"\\?\C:\bp/exports/x", true));
+        assert!(!may_clear_base_on(true, r"C:\bp", r"C:\bp/exports/My-Board-1-2", false));
+        assert!(!may_clear_base_on(true, r"C:\bp", r"D:\bp/exports/My-Board-1-2", true));
+        assert!(!may_clear_base_on(true, r"C:\a\..\b", r"C:\a\..\b/exports/x", true));
+        assert!(!may_clear_base_on(true, r"C:\bp\", r"C:\bp\/exports/x", true));
+        assert!(!may_clear_base_on(true, "bp", "bp/exports/x", true));
+        assert!(!may_clear_base_on(true, r"C:\bp", r"C:\bp/exports/x/y", true));
+        assert!(!pro_outside_on(true, r"C:\bp", r"C:\bp\exports\x\y.kicad_pro"));
+        assert!(!pro_outside_on(true, r"C:\bp", r"c:\bp\exports\x\y.kicad_pro"));
+        assert!(!pro_outside_on(true, r"C:\bp", "C:/bp/exports/x/y.kicad_pro"));
+        assert!(!pro_outside_on(true, r"C:\bp", "/c/bp/exports/x/y.kicad_pro"));
+        assert!(!pro_outside_on(true, "/c/bp", r"C:\bp\exports\x\y.kicad_pro"));
+        assert!(!pro_outside_on(true, r"\\server\share\bp", "//server/share/bp/exports/x/y.kicad_pro"));
+        assert!(pro_outside_on(true, r"C:\bp", r"C:\proj\b.kicad_pro"));
+        assert!(pro_outside_on(true, r"C:\bp", "/c/proj/b.kicad_pro"));
+        assert!(pro_outside_on(true, r"C:\bp", "/d/bp/exports/x/y.kicad_pro"));
     }
     #[test] fn put_replaces_at_the_front() { assert_eq!(put(J::obj(&[("a", J::str("1")), ("b", J::str("2"))]), "b", J::str("3")).show(), r#"{"b":"3","a":"1"}"#); assert_eq!(put(J::Null, "k", J::Null).show(), r#"{"k":null}"#) }
 }
