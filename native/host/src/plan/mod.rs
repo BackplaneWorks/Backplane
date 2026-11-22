@@ -274,33 +274,53 @@ fn norm_ring(v: &Value, min_len: usize) -> Result<Vec<Value>, String> {
     if arr.len() < min_len { return Err(format!("need at least {min_len} points")) }
     arr.iter().map(norm_pt).collect()
 }
-fn norm_outline(v: &Value) -> Result<Value, String> {
+fn is_flat_outline(v: &Value) -> bool {
+    v.as_array()
+        .filter(|a| !a.is_empty())
+        .and_then(|a| a[0].as_array())
+        .and_then(|p| p.first())
+        .and_then(Value::as_f64)
+        .is_some()
+}
+pub(super) fn norm_outline(v: &Value) -> Result<Value, String> {
     let arr = v.as_array().filter(|a| !a.is_empty()).ok_or_else(|| "outline must be a polygon".to_string())?;
-    let is_flat = arr[0].as_array().and_then(|p| p.first()).and_then(Value::as_f64).is_some();
-    if is_flat {
+    if is_flat_outline(v) {
         Ok(Value::Array(vec![Value::Array(norm_ring(v, 3)?)]))
     } else {
         let mut rings = Vec::with_capacity(arr.len());
-        for (i, ring) in arr.iter().enumerate() {
-            rings.push(Value::Array(norm_ring(ring, if i == 0 { 3 } else { 3 })?));
+        for ring in arr.iter() {
+            rings.push(Value::Array(norm_ring(ring, 3)?));
         }
         Ok(Value::Array(rings))
     }
 }
-/// Validate and normalize person steering ops into KiCad `UpdatePlan` JSON ops (`set` uses `"fields"`, `"note"` becomes `add` note).
-pub fn normalize_person_ops(ops: &[Value]) -> Result<Vec<Value>, String> {
+
+static PLAN_NOTE_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+#[derive(Clone)]
+struct NormOp {
+    wire: Value,
+    preserve_holes: bool,
+}
+
+fn next_note_id() -> String {
+    let seq = PLAN_NOTE_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("note-{}-{seq}", crate::hub::now_ms())
+}
+
+fn normalize_person_ops_checked(ops: &[Value]) -> Result<Vec<NormOp>, String> {
     if ops.is_empty() { return Err("ops cannot be empty".into()) }
     let mut out = Vec::with_capacity(ops.len());
-    for (idx, op) in ops.iter().enumerate() {
+    for op in ops.iter() {
         let kind = op["op"].as_str().unwrap_or("");
         match kind {
             "note" => {
                 let text = op["text"].as_str().unwrap_or("").trim();
                 if text.is_empty() { return Err("note text cannot be empty".into()) }
-                let id = op["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string).unwrap_or_else(|| format!("note-{}-{idx}", crate::hub::now_ms()));
+                let id = op["id"].as_str().filter(|s| !s.is_empty()).map(str::to_string).unwrap_or_else(next_note_id);
                 let mut item = json!({"id": id, "text": text, "author": "person"});
                 if let Some(t) = op.get("target").filter(|v| !v.is_null()) { item["target"] = t.clone(); }
-                out.push(json!({"op": "add", "kind": "note", "item": item}));
+                out.push(NormOp { wire: json!({"op": "add", "kind": "note", "item": item}), preserve_holes: false });
             }
             "add" => {
                 let k = op["kind"].as_str().unwrap_or("");
@@ -308,16 +328,17 @@ pub fn normalize_person_ops(ops: &[Value]) -> Result<Vec<Value>, String> {
                 let mut item = op["item"].clone();
                 if k == "note" {
                     if item["text"].as_str().unwrap_or("").trim().is_empty() { return Err("note text cannot be empty".into()) }
-                    if item["id"].as_str().unwrap_or("").is_empty() { item["id"] = json!(format!("note-{}-{idx}", crate::hub::now_ms())); }
+                    if item["id"].as_str().unwrap_or("").is_empty() { item["id"] = json!(next_note_id()); }
                     item["author"] = json!("person");
                 }
-                out.push(json!({"op": "add", "kind": k, "item": item}));
+                out.push(NormOp { wire: json!({"op": "add", "kind": k, "item": item}), preserve_holes: false });
             }
             "set" => {
                 let id = op["id"].as_str().unwrap_or("");
                 if id.is_empty() { return Err("set op needs id".into()) }
                 let src = op["fields"].as_object().or_else(|| op.as_object()).ok_or_else(|| "set op needs fields".to_string())?;
                 let mut fields = serde_json::Map::new();
+                let mut preserve_holes = false;
                 for k in ["path", "width", "outline", "layer", "locked", "vias", "reference", "status"] {
                     let Some(v) = src.get(k) else { continue };
                     let clean = match k {
@@ -327,7 +348,10 @@ pub fn normalize_person_ops(ops: &[Value]) -> Result<Vec<Value>, String> {
                             if !w.is_finite() || !(0.1..=50.0).contains(&w) { return Err("width must be between 0.1 and 50.0 mm".into()) }
                             json!(round3(w))
                         }
-                        "outline" => norm_outline(v)?,
+                        "outline" => {
+                            preserve_holes = is_flat_outline(v);
+                            norm_outline(v)?
+                        }
                         "layer" | "reference" | "status" => {
                             let s = v.as_str().map(str::trim).unwrap_or("");
                             if s.is_empty() && k == "layer" { return Err("layer cannot be empty".into()) }
@@ -340,17 +364,22 @@ pub fn normalize_person_ops(ops: &[Value]) -> Result<Vec<Value>, String> {
                     fields.insert(k.to_string(), clean);
                 }
                 if fields.is_empty() { return Err(format!("set op for {id} has no supported fields")) }
-                out.push(json!({"op": "set", "id": id, "fields": Value::Object(fields)}));
+                out.push(NormOp { wire: json!({"op": "set", "id": id, "fields": Value::Object(fields)}), preserve_holes });
             }
             "status" | "delete" => {
                 let id = op["id"].as_str().unwrap_or("");
                 if id.is_empty() { return Err(format!("{kind} op needs id")) }
-                out.push(op.clone());
+                out.push(NormOp { wire: op.clone(), preserve_holes: false });
             }
             other => return Err(format!("unsupported plan op '{other}'")),
         }
     }
     Ok(out)
+}
+
+/// Validate and normalize person steering ops into KiCad `UpdatePlan` JSON ops (`set` uses `"fields"`, `"note"` becomes `add` note).
+pub fn normalize_person_ops(ops: &[Value]) -> Result<Vec<Value>, String> {
+    Ok(normalize_person_ops_checked(ops)?.into_iter().map(|n| n.wire).collect())
 }
 
 fn ensure_layer_entry(plan: &mut Value, layer: &str, role: &str) {
@@ -368,9 +397,37 @@ fn ensure_layer_entry(plan: &mut Value, layer: &str, role: &str) {
 
 /// Apply normalized person ops directly to a saved `<board>.kicad_plan` JSON document.
 pub fn apply_person_ops(plan: &mut Value, ops: &[Value]) -> Result<Vec<String>, String> {
+    let wrapped: Vec<NormOp> = ops.iter().map(|op| {
+        let mut wire = op.clone();
+        let preserve_holes = if wire["op"] == "set" {
+            let raw_o = wire["fields"].get("outline").or_else(|| wire.get("outline")).cloned();
+            if let Some(ov) = raw_o {
+                let flat = is_flat_outline(&ov);
+                if flat {
+                    let norm = norm_outline(&ov)?;
+                    if let Some(flds) = wire.get_mut("fields").and_then(Value::as_object_mut) {
+                        flds.insert("outline".into(), norm);
+                    } else if let Some(obj) = wire.as_object_mut() {
+                        obj.insert("outline".into(), norm);
+                    }
+                }
+                flat
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+        Ok(NormOp { wire, preserve_holes })
+    }).collect::<Result<Vec<_>, String>>()?;
+    apply_norm_ops(plan, &wrapped)
+}
+
+fn apply_norm_ops(plan: &mut Value, ops: &[NormOp]) -> Result<Vec<String>, String> {
     if !plan.is_object() { return Err("invalid routing plan JSON".into()) }
     let mut touched = Vec::new();
-    for op in ops {
+    for nop in ops {
+        let op = &nop.wire;
         match op["op"].as_str().unwrap_or("") {
             "set" => {
                 let id = op["id"].as_str().unwrap_or("");
@@ -392,14 +449,18 @@ pub fn apply_person_ops(plan: &mut Value, ops: &[Value]) -> Result<Vec<String>, 
                         for (k, v) in fields {
                             if matches!(k.as_str(), "op" | "id" | "fields") { continue }
                             if k == "layer" { if let Some(s) = v.as_str() { new_layer = s.to_string(); } }
-                            if k == "outline" {
-                                if let (Some(new_rings), Some(old_rings)) = (v.as_array(), obj.get("outline").and_then(Value::as_array)) {
-                                    if new_rings.len() == 1 && old_rings.len() > 1 {
-                                        let mut merged = Vec::with_capacity(old_rings.len());
-                                        merged.push(new_rings[0].clone());
-                                        merged.extend(old_rings[1..].iter().cloned());
-                                        obj.insert(k.clone(), Value::Array(merged));
-                                        continue;
+                            if k == "outline" && nop.preserve_holes {
+                                if let (Some(new_rings), Some(old_raw)) = (v.as_array(), obj.get("outline")) {
+                                    if new_rings.len() == 1 {
+                                        if let Ok(Value::Array(old_rings)) = norm_outline(old_raw) {
+                                            if old_rings.len() > 1 {
+                                                let mut merged = Vec::with_capacity(old_rings.len());
+                                                merged.push(new_rings[0].clone());
+                                                merged.extend(old_rings[1..].iter().cloned());
+                                                obj.insert(k.clone(), Value::Array(merged));
+                                                continue;
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -512,6 +573,11 @@ static PLAN_TMP_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64
 
 fn write_plan_file(pcb: &str, plan: &Value) -> Result<(), String> {
     let f = Path::new(pcb).with_extension("kicad_plan");
+    if let Ok(md) = std::fs::symlink_metadata(&f) {
+        if md.file_type().is_symlink() {
+            return Err("refusing to write routing plan through a symlink".into());
+        }
+    }
     let seq = PLAN_TMP_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let tmp = f.with_extension(format!("kicad_plan.{}.{seq}.tmp", std::process::id()));
     let txt = serde_json::to_string_pretty(plan).map_err(|e| e.to_string())?;
@@ -526,17 +592,39 @@ fn write_plan_file(pcb: &str, plan: &Value) -> Result<(), String> {
     Ok(())
 }
 
+fn update_saved_plan_sync(pcb: &str, base: Option<u64>, ops: &[NormOp]) -> Result<(Value, Vec<String>), String> {
+    let f = Path::new(pcb).with_extension("kicad_plan");
+    let _guard = PLAN_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    if let Ok(md) = std::fs::symlink_metadata(&f) {
+        if md.file_type().is_symlink() {
+            return Err("refusing to access routing plan through a symlink".into());
+        }
+    }
+    let raw = std::fs::read_to_string(&f).map_err(|_| "no saved routing plan for this board".to_string())?;
+    let mut plan: Value = serde_json::from_str(&raw).map_err(|_| "saved routing plan is not valid JSON".to_string())?;
+    if let Some(want) = base {
+        let cur = plan["revision"].as_u64().unwrap_or(0);
+        if cur != want {
+            return Err(format!("routing plan changed (expected revision {want}, current is {cur}); refresh and try again"));
+        }
+    }
+    let touched = apply_norm_ops(&mut plan, ops)?;
+    write_plan_file(pcb, &plan)?;
+    Ok((plan["revision"].clone(), touched))
+}
+
 /// The person's steering edits (the Plan canvas/inspector): sends KiCad's `UpdatePlan` as the person when open,
 /// else updates `<board>.kicad_plan` atomically on disk and broadcasts the settled panel update.
 pub async fn update(hub: &Arc<Hub>, pcb: &str, base: Option<u64>, ops: &[Value]) -> Result<Value, String> {
-    let norm = normalize_person_ops(ops)?;
+    let norm_ops = normalize_person_ops_checked(ops)?;
+    let wire_ops: Vec<Value> = norm_ops.iter().map(|n| n.wire.clone()).collect();
     let pro = crate::files::kicad::project::read(&Path::new(pcb).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).pro;
     if let Some(r) = crate::files::kicad::embed::gui_route(&pro) {
         let rev = match base {
             Some(b) => b,
             None => read_plan(hub, None, pcb, false).await.ok().and_then(|p| p["revision"].as_u64()).unwrap_or(0),
         };
-        let msg = json!({"board": spec(pcb), "base": rev, "ops": Value::Array(norm).to_string()});
+        let msg = json!({"board": spec(pcb), "base": rev, "ops": Value::Array(wire_ops).to_string()});
         let o = crate::files::kicad::embed::gui_call_as(&r, &format!("{NS}UpdatePlan"), msg, &crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Person)).await;
         if o["ok"].as_bool() != Some(true) {
             return Err(refused(o["error"].as_str().unwrap_or("no answer")));
@@ -549,16 +637,8 @@ pub async fn update(hub: &Arc<Hub>, pcb: &str, base: Option<u64>, ops: &[Value])
         events::settle(hub, pcb).await;
         return Ok(m.clone());
     }
-    let f = Path::new(pcb).with_extension("kicad_plan");
     let pcb_s = pcb.to_string();
-    let res = tokio::task::spawn_blocking(move || -> Result<(Value, Vec<String>), String> {
-        let _guard = PLAN_FILE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let raw = std::fs::read_to_string(&f).map_err(|_| "no saved routing plan for this board".to_string())?;
-        let mut plan: Value = serde_json::from_str(&raw).map_err(|_| "saved routing plan is not valid JSON".to_string())?;
-        let touched = apply_person_ops(&mut plan, &norm)?;
-        write_plan_file(&pcb_s, &plan)?;
-        Ok((plan["revision"].clone(), touched))
-    }).await.map_err(|e| e.to_string())??;
+    let res = tokio::task::spawn_blocking(move || update_saved_plan_sync(&pcb_s, base, &norm_ops)).await.map_err(|e| e.to_string())??;
     events::settle(hub, pcb).await;
     Ok(json!({"revision": res.0, "applied": res.1, "saved": true}))
 }
@@ -783,22 +863,81 @@ mod tests {
             "layers": [{"layer": "In2.Cu", "role": "power", "status": "proposed"}],
             "planes": [{"id": "p1", "net": "GND", "layer": "In2.Cu", "outline": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 10.0]], hole], "status": "proposed"}]
         });
-        let single_ops = normalize_person_ops(&[
+        // Flat outline -> edits outer ring only, preserves existing holes
+        let flat_ops = normalize_person_ops_checked(&[
             json!({"op": "set", "id": "p1", "outline": [[0.0, 0.0], [12.0, 0.0], [12.0, 10.0], [0.0, 10.0]]})
         ]).unwrap();
-        apply_person_ops(&mut p, &single_ops).unwrap();
+        assert!(flat_ops[0].preserve_holes);
+        apply_norm_ops(&mut p, &flat_ops).unwrap();
         let rings = p["planes"][0]["outline"].as_array().unwrap();
         assert_eq!(rings.len(), 2);
         assert_eq!(rings[0], json!([[0.0, 0.0], [12.0, 0.0], [12.0, 10.0], [0.0, 10.0]]));
         assert_eq!(rings[1], hole);
 
+        // Explicit 1-ring array -> replaces all rings and clears existing holes
+        let clear_ops = normalize_person_ops_checked(&[
+            json!({"op": "set", "id": "p1", "outline": [[[0.0, 0.0], [13.0, 0.0], [13.0, 10.0]]]})
+        ]).unwrap();
+        assert!(!clear_ops[0].preserve_holes);
+        apply_norm_ops(&mut p, &clear_ops).unwrap();
+        assert_eq!(p["planes"][0]["outline"], json!([[[0.0, 0.0], [13.0, 0.0], [13.0, 10.0]]]));
+
+        // Flat stored outline must never treat vertices 1..N as holes when edited
+        let mut p_flat = json!({
+            "revision": 1,
+            "layers": [{"layer": "In2.Cu", "role": "power", "status": "proposed"}],
+            "planes": [{"id": "p1", "net": "GND", "layer": "In2.Cu", "outline": [[0.0, 0.0], [10.0, 0.0], [10.0, 10.0]], "status": "proposed"}]
+        });
+        let flat_ops2 = normalize_person_ops_checked(&[
+            json!({"op": "set", "id": "p1", "outline": [[0.0, 0.0], [15.0, 0.0], [15.0, 10.0]]})
+        ]).unwrap();
+        apply_norm_ops(&mut p_flat, &flat_ops2).unwrap();
+        assert_eq!(p_flat["planes"][0]["outline"], json!([[[0.0, 0.0], [15.0, 0.0], [15.0, 10.0]]]));
+
         let new_hole = json!([[3.0, 3.0], [5.0, 3.0], [5.0, 5.0]]);
-        let multi_ops = normalize_person_ops(&[
+        let multi_ops = normalize_person_ops_checked(&[
             json!({"op": "set", "id": "p1", "outline": [[[0.0, 0.0], [14.0, 0.0], [14.0, 10.0]], new_hole]})
         ]).unwrap();
-        apply_person_ops(&mut p, &multi_ops).unwrap();
+        apply_norm_ops(&mut p, &multi_ops).unwrap();
         let rings2 = p["planes"][0]["outline"].as_array().unwrap();
         assert_eq!(rings2.len(), 2);
         assert_eq!(rings2[1], new_hole);
+    }
+
+    #[test] fn saved_plan_update_checks_base_revision_and_unique_note_ids() {
+        let dir = std::env::temp_dir().join(format!("bp-plan-mod-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let pcb = dir.join("demo.kicad_pcb");
+        let plan_f = dir.join("demo.kicad_plan");
+        std::fs::write(&pcb, "").unwrap();
+        std::fs::write(&plan_f, serde_json::to_string_pretty(&json!({
+            "revision": 5,
+            "corridors": [{"id": "c1", "group": "g1", "layer": "In1.Cu", "path": [[0.0, 0.0], [10.0, 0.0]], "width": 1.0, "status": "proposed"}]
+        })).unwrap()).unwrap();
+
+        let nops = normalize_person_ops_checked(&[
+            json!({"op": "set", "id": "c1", "width": 2.0}),
+            json!({"op": "note", "target": "c1", "text": "Note A"}),
+            json!({"op": "note", "target": "c1", "text": "Note B"})
+        ]).unwrap();
+        assert_ne!(nops[1].wire["item"]["id"], nops[2].wire["item"]["id"]);
+        assert_eq!(nops[1].wire["item"]["target"], "c1");
+
+        let pcb_s = pcb.to_string_lossy().into_owned();
+        // Stale base=4 is rejected without overwriting disk
+        let err = update_saved_plan_sync(&pcb_s, Some(4), &nops).unwrap_err();
+        assert!(err.contains("expected revision 4, current is 5"), "{err}");
+        let disk_before: Value = serde_json::from_str(&std::fs::read_to_string(&plan_f).unwrap()).unwrap();
+        assert_eq!(disk_before["revision"], 5);
+
+        // Matching base=5 succeeds and increments revision
+        let (rev, _) = update_saved_plan_sync(&pcb_s, Some(5), &nops).unwrap();
+        assert_eq!(rev, 6);
+        let disk_after: Value = serde_json::from_str(&std::fs::read_to_string(&plan_f).unwrap()).unwrap();
+        assert_eq!(disk_after["revision"], 6);
+        assert_eq!(disk_after["notes"].as_array().unwrap().len(), 2);
+        assert_eq!(disk_after["notes"][0]["target"], "c1");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

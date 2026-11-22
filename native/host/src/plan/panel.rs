@@ -139,18 +139,30 @@ pub fn draw(plan: &Value, rows: &[(String, Value)]) -> Value {
     draw_enriched(plan, rows, &std::collections::HashMap::new())
 }
 
+fn take_pts(left: &mut usize, pts: &Value) -> Option<Value> {
+    let n = pts.as_array().map_or(0, Vec::len);
+    if n == 0 || n > *left { return None }
+    *left -= n;
+    Some(pts.clone())
+}
+
 fn draw_enriched(plan: &Value, rows: &[(String, Value)], guides: &std::collections::HashMap<String, Vec<[f64; 4]>>) -> Value {
     let row = |id: &str| rows.iter().find(|(_, v)| v["id"] == id).map(|(_, v)| v);
     let state = |id: &str| row(id).map(|v| v["state"].clone()).unwrap_or(json!("proposed"));
     let colour = |id: &str| row(id).map(|v| v["color"].clone()).unwrap_or(json!("#8a8a8a"));
     let nets = |id: &str| row(id).map(|v| v["nets"].clone()).unwrap_or(json!(0));
     let mut left = MAX_POINTS;
-    let mut take = |pts: &Value| -> Option<Value> { let n = pts.as_array().map_or(0, Vec::len); if n == 0 || n > left { return None } left -= n; Some(pts.clone()) };
     let bands: Vec<Value> = plan["corridors"].as_array().into_iter().flatten().filter_map(|c| {
         let id = st(c, "id");
         let r = row(id);
         let g = guides.get(id).cloned().unwrap_or_default();
-        Some(json!({"id": id, "layer": c["layer"], "width": c["width"].as_f64().unwrap_or(1.0), "path": take(&c["path"])?, "state": state(id), "color": colour(id), "nets": nets(id), "vias": c["vias"],
+        let path = take_pts(&mut left, &c["path"])?;
+        let vias = c["vias"].as_array().map(|a| {
+            let take_n = a.len().min(64).min(left);
+            left -= take_n;
+            Value::Array(a.iter().take(take_n).cloned().collect())
+        }).unwrap_or_else(|| c["vias"].clone());
+        Some(json!({"id": id, "layer": c["layer"], "width": c["width"].as_f64().unwrap_or(1.0), "path": path, "state": state(id), "color": colour(id), "nets": nets(id), "vias": vias,
             "name": r.map(|v| v["name"].clone()).unwrap_or(json!(id)), "group": c["group"], "locked": c["locked"] == true, "edited": c["edited"] == true, "order": c["order"],
             "from": c["from"], "to": c["to"], "impedance": r.map(|v| v["impedance"].clone()).unwrap_or(Value::Null), "guides": g,
             "problem_text": r.map(|v| v["problem_text"].clone()).unwrap_or(json!(""))}))
@@ -158,8 +170,20 @@ fn draw_enriched(plan: &Value, rows: &[(String, Value)], guides: &std::collectio
     let regions: Vec<Value> = plan["planes"].as_array().into_iter().flatten().filter_map(|p| {
         let id = st(p, "id");
         let r = row(id);
-        let holes = p["outline"].as_array().map(|a| a.iter().skip(1).cloned().collect::<Vec<_>>()).unwrap_or_default();
-        Some(json!({"id": id, "layer": p["layer"], "net": p["net"], "outline": take(&p["outline"][0])?, "holes": holes, "state": state(id), "color": colour(id),
+        let rings = match super::norm_outline(&p["outline"]) {
+            Ok(Value::Array(rs)) => rs,
+            _ => return None,
+        };
+        let outer = take_pts(&mut left, rings.first()?)?;
+        let mut holes = Vec::new();
+        for h in rings.iter().skip(1) {
+            if let Some(kept) = take_pts(&mut left, h) {
+                holes.push(kept);
+            } else {
+                break;
+            }
+        }
+        Some(json!({"id": id, "layer": p["layer"], "net": p["net"], "outline": outer, "holes": holes, "state": state(id), "color": colour(id),
             "locked": p["locked"] == true, "edited": p["edited"] == true, "reference": p["reference"], "priority": p["priority"],
             "problem_text": r.map(|v| v["problem_text"].clone()).unwrap_or(json!(""))}))
     }).collect();
@@ -170,33 +194,83 @@ fn draw_enriched(plan: &Value, rows: &[(String, Value)], guides: &std::collectio
 pub fn fit_info_budget(d: &mut Value) {
     const BUDGET: usize = 58 * 1024;
     if d.to_string().len() <= BUDGET { return }
-    let mut trimmed = false;
+    d["board_trimmed"] = json!(true);
+
     if let Some(bands) = d["draw"]["bands"].as_array_mut() {
         for b in bands.iter_mut() {
             if let Some(gs) = b["guides"].as_array_mut() {
-                if gs.len() > 6 { gs.truncate(6); trimmed = true; }
+                if gs.len() > 6 { gs.truncate(6); }
             }
         }
     }
-    if d.to_string().len() <= BUDGET { if trimmed { d["board_trimmed"] = json!(true); } return }
+    if d.to_string().len() <= BUDGET { return }
+
     if let Some(bands) = d["draw"]["bands"].as_array_mut() {
-        for b in bands.iter_mut() {
-            if b["guides"].as_array().is_some_and(|g| !g.is_empty()) {
-                b["guides"] = json!([]);
-                trimmed = true;
+        for b in bands.iter_mut() { b["guides"] = json!([]); }
+    }
+    if d.to_string().len() <= BUDGET { return }
+
+    for cap in [80usize, 40, 0] {
+        if let Some(parts) = d["board"]["parts"].as_array_mut() {
+            if parts.len() > cap { parts.truncate(cap); }
+        }
+        if d.to_string().len() <= BUDGET { return }
+    }
+
+    if let Some(regions) = d["draw"]["regions"].as_array_mut() {
+        for r in regions.iter_mut() { r["holes"] = json!([]); }
+    }
+    if let Some(bands) = d["draw"]["bands"].as_array_mut() {
+        for b in bands.iter_mut() { b["vias"] = json!([]); }
+    }
+    if let Some(board) = d.get_mut("board").and_then(Value::as_object_mut) {
+        board.insert("outline".into(), json!([]));
+    }
+    if d.to_string().len() <= BUDGET { return }
+
+    if let Some(draw) = d.get_mut("draw").and_then(Value::as_object_mut) {
+        draw.insert("bands".into(), json!([]));
+        draw.insert("regions".into(), json!([]));
+    }
+    if d.to_string().len() <= BUDGET { return }
+
+    if let Some(obj) = d.as_object_mut() {
+        obj.insert("notes".into(), json!([]));
+        obj.insert("constraints".into(), json!([]));
+        obj.insert("impedances".into(), json!([]));
+        obj.insert("stackup_summary".into(), json!(""));
+    }
+    if d.to_string().len() <= BUDGET { return }
+
+    if let Some(layers) = d["layers"].as_array_mut() {
+        for l in layers.iter_mut() {
+            if let Some(items) = l["items"].as_array_mut() {
+                for it in items.iter_mut() {
+                    if let Some(obj) = it.as_object_mut() {
+                        obj.insert("problem_text".into(), json!(""));
+                    }
+                }
             }
         }
     }
-    if d.to_string().len() <= BUDGET { if trimmed { d["board_trimmed"] = json!(true); } return }
-    if let Some(parts) = d["board"]["parts"].as_array_mut() {
-        if parts.len() > 80 { parts.truncate(80); trimmed = true; }
-    }
-    if d.to_string().len() > BUDGET {
-        if let Some(parts) = d["board"]["parts"].as_array_mut() {
-            if parts.len() > 40 { parts.truncate(40); trimmed = true; }
+    while d.to_string().len() > BUDGET {
+        let Some(layers) = d["layers"].as_array_mut() else { break };
+        let mut shrunk = false;
+        for l in layers.iter_mut().rev() {
+            if let Some(items) = l["items"].as_array_mut() {
+                if !items.is_empty() {
+                    let keep = items.len() / 2;
+                    items.truncate(keep);
+                    shrunk = true;
+                    break;
+                }
+            }
+        }
+        if !shrunk {
+            layers.clear();
+            break;
         }
     }
-    if trimmed { d["board_trimmed"] = json!(true); }
 }
 
 /// The board of a project's .kicad_pro.
@@ -379,5 +453,21 @@ mod tests {
         fit_info_budget(&mut big);
         assert!(big.to_string().len() <= 58 * 1024);
         assert_eq!(big["board_trimmed"], true);
+
+        // Verify holes count against MAX_POINTS and massive notes/holes/items are trimmed <= 58 KiB
+        let hole_pts: Vec<Value> = (0..(MAX_POINTS - 5)).map(|i| json!([i as f64, 1.0])).collect();
+        let mut huge_plan = json!({
+            "layers": [{"layer": "In1.Cu", "role": "power", "status": "proposed"}],
+            "planes": [{"id": "p1", "net": "GND", "layer": "In1.Cu", "outline": [[[0, 0], [10, 0], [10, 10], [0, 10]], hole_pts.clone(), hole_pts], "status": "proposed"}]
+        });
+        let dr_holes = data(&huge_plan, &[], false);
+        assert_eq!(dr_holes["draw"]["regions"][0]["holes"].as_array().unwrap().len(), 1, "second huge hole exceeds MAX_POINTS and is dropped");
+        huge_plan["notes"] = json!((0..400).map(|i| json!({"id": format!("n{i}"), "text": "a".repeat(250)})).collect::<Vec<_>>());
+        huge_plan["corridors"] = json!((0..250).map(|i| json!({"id": format!("c{i}"), "group": "g1", "layer": "F.Cu", "path": [[1, 1], [2, 2]], "status": "proposed"})).collect::<Vec<_>>());
+        let mut huge_d = data(&huge_plan, &[], false);
+        assert!(huge_d.to_string().len() > 58 * 1024);
+        fit_info_budget(&mut huge_d);
+        assert!(huge_d.to_string().len() <= 58 * 1024);
+        assert_eq!(huge_d["board_trimmed"], true);
     }
 }

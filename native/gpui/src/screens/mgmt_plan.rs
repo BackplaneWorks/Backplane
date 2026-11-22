@@ -303,13 +303,15 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
 
     let layers_merged = mgmt_plan_canvas::merge_optimistic_into_layers(&d["layers"], &app.screens.mgmt.plan_ui.optimistic);
     let all_layers_arr = layers_merged.as_array().cloned().unwrap_or_default();
-    let shown_names: Vec<String> = mgmt_plan_canvas::visible_layers(&app.screens.mgmt.plan_ui, &all_layers_arr)
+    let copper_arr = d["copper_layers"].as_array().map(Vec::as_slice).unwrap_or(&[]);
+    let canvas_layers = mgmt_plan_canvas::all_canvas_layers(&all_layers_arr, copper_arr);
+    let shown_names: Vec<String> = mgmt_plan_canvas::visible_layers(&app.screens.mgmt.plan_ui, &canvas_layers)
         .iter()
         .filter_map(|l| l["layer"].as_str().map(str::to_string))
         .collect();
-    let layer_bar = (view_mode != ViewMode::List && all_layers_arr.len() > 1).then(|| {
+    let layer_bar = (view_mode != ViewMode::List && canvas_layers.len() > 1).then(|| {
         let mut row = div().flex_shrink_0().flex().flex_wrap().items_center().gap(px(4.)).px_2().py(px(3.)).border_b_1().border_color(c("rule")).bg(c("bg")).text_size(crate::scale::tpx(10.));
-        for l in &all_layers_arr {
+        for l in &canvas_layers {
             let lname = s(l, "layer").to_string();
             let title = l["title"].as_str().filter(|x| !x.is_empty()).unwrap_or(&lname).to_string();
             let active = shown_names.contains(&lname);
@@ -451,7 +453,11 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                         let txt = e.read(cx).content.to_string().trim().to_string();
                         if !txt.is_empty() {
                             if let Some(target_id) = this.screens.mgmt.plan_sel.clone() {
-                                send(this, "plan.update", json!({"ops": [{"op": "note", "id": target_id, "text": txt}]}), cx);
+                                let mut payload = json!({"ops": [{"op": "note", "target": target_id, "text": txt}]});
+                                if let Some(b) = this.screens.mgmt.data("plan")["revision"].as_u64() {
+                                    payload["base"] = json!(b);
+                                }
+                                send(this, "plan.update", payload, cx);
                             }
                             e.update(cx, |comp, cx| comp.set(String::new(), cx));
                             this.screens.mgmt.plan_ui.note_open = false;
@@ -470,7 +476,11 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                             let txt = f_sub.read(cx).content.to_string().trim().to_string();
                             if !txt.is_empty() {
                                 if let Some(target_id) = this.screens.mgmt.plan_sel.clone() {
-                                    send(this, "plan.update", json!({"ops": [{"op": "note", "id": target_id, "text": txt}]}), cx);
+                                    let mut payload = json!({"ops": [{"op": "note", "target": target_id, "text": txt}]});
+                                    if let Some(b) = this.screens.mgmt.data("plan")["revision"].as_u64() {
+                                        payload["base"] = json!(b);
+                                    }
+                                    send(this, "plan.update", payload, cx);
                                 }
                                 f_sub.update(cx, |comp, cx| comp.set(String::new(), cx));
                                 this.screens.mgmt.plan_ui.note_open = false;
