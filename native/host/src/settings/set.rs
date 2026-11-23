@@ -24,8 +24,37 @@ impl RpcHandler for SettingSet {
             // a zone is only right once its rule is known: person.tz goes through zone.set (settings/zone.rs), which looks the rule up and refuses a name that is not a zone
             if key == "person.tz" { if let Some(z) = hub.rpc_for("zone.set") { return z.call(hub, _who, id, "zone.set", &json!({"zone": value})).await } }
             if telemetry::reserved(key) { return vec![telemetry::legacy(hub, id, key, value).await] }
+            let info = super::models::info_value();
+            if key == "agent.model" && !value.is_empty() {
+                let cur_prov = hub.setting("agent.provider").await.unwrap_or_default();
+                let eff_prov = if cur_prov.is_empty() { "claude" } else { cur_prov.as_str() };
+                if !super::models::model_compatible(eff_prov, value, Some(&info)) {
+                    return vec![json!({"t":"reply","id":id,"ok":false,"error":format!("model {value} is not compatible with provider {eff_prov}")})];
+                }
+            }
             let at = now_ms() / 1000;
             let mut batch = vec![json!({"$":"SettingSet","key":key,"value":value,"at":at})];
+            if key == "agent.provider" {
+                let prev_prov = hub.setting("agent.provider").await.unwrap_or_default();
+                let cur_model = hub.setting("agent.model").await.unwrap_or_default();
+                let prev_norm = if prev_prov.is_empty() { "claude" } else { prev_prov.as_str() };
+                let next_norm = if value.is_empty() { "claude" } else { value };
+                if !cur_model.is_empty() && (next_norm != prev_norm || !super::models::model_compatible(next_norm, &cur_model, Some(&info))) {
+                    batch.push(json!({"$":"SettingSet","key":"agent.model","value":"","at":at}));
+                }
+            } else if key == "text.provider" {
+                let prev_prov = hub.setting("text.provider").await.unwrap_or_default();
+                let cur_model = hub.setting("text.model").await.unwrap_or_default();
+                if !cur_model.is_empty() && (value != prev_prov || !super::models::model_compatible(value, &cur_model, Some(&info))) {
+                    batch.push(json!({"$":"SettingSet","key":"text.model","value":"","at":at}));
+                }
+            } else if key == "fallback.add.provider" {
+                let prev_prov = hub.setting("fallback.add.provider").await.unwrap_or_default();
+                let cur_model = hub.setting("fallback.add.model").await.unwrap_or_default();
+                if !cur_model.is_empty() && cur_model != "default" && (value != prev_prov || !super::models::model_compatible(value, &cur_model, Some(&info))) {
+                    batch.push(json!({"$":"SettingSet","key":"fallback.add.model","value":"default","at":at}));
+                }
+            }
             // a write to either fallback setting closes the open settings proposals in the same batch (Proposal.invalidate)
             if let Some(a) = &self.agents { let open: Vec<String> = a.world().await.asks.iter().filter(|(_, k)| k.tool == super::proposal::TOOL).map(|(i, _)| i.clone()).collect(); let extra = super::proposal::invalidate(&batch.clone(), &open, at); batch.extend(extra); batch = super::proposal::with_pending(a, batch, at).await; }
             match hub.commit_many(&batch).await {
@@ -102,5 +131,31 @@ mod tests {
         assert_eq!(call(&hub, "setting.set", json!({"key":"launch.input.t9","value":""})).await["ok"], true);
         assert!(std::fs::read_to_string(home.join("events.jsonl")).unwrap().contains("\"key\":\"launch.input.t9\",\"value\":\"\""), "an empty write is logged");
         let _ = rx.try_recv(); let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test(flavor = "multi_thread")] async fn provider_change_clears_stale_model_and_incompatible_agent_model_is_refused() {
+        let home = crate::plat::tmp::dir("set-prov-model");
+        let hub = start(&home).await;
+        assert_eq!(call(&hub, "setting.set", json!({"key":"agent.provider","value":"claude"})).await["ok"], true);
+        assert_eq!(call(&hub, "setting.set", json!({"key":"agent.model","value":"opus"})).await["ok"], true);
+        assert_eq!(hub.setting("agent.model").await.as_deref(), Some("opus"));
+
+        // Switching agent.provider to codex clears agent.model atomically
+        assert_eq!(call(&hub, "setting.set", json!({"key":"agent.provider","value":"codex"})).await["ok"], true);
+        assert_eq!(hub.setting("agent.provider").await.as_deref(), Some("codex"));
+        assert_eq!(hub.setting("agent.model").await, None);
+
+        // Trying to set a Claude model while agent.provider is codex is refused
+        let bad = call(&hub, "setting.set", json!({"key":"agent.model","value":"opus"})).await;
+        assert_eq!(bad["ok"], false, "{bad}");
+        assert!(bad["error"].as_str().unwrap_or("").contains("not compatible"), "{bad}");
+        assert_eq!(hub.setting("agent.model").await, None);
+
+        // Switching text.provider clears stale text.model
+        assert_eq!(call(&hub, "setting.set", json!({"key":"text.provider","value":"claude"})).await["ok"], true);
+        assert_eq!(call(&hub, "setting.set", json!({"key":"text.model","value":"haiku"})).await["ok"], true);
+        assert_eq!(call(&hub, "setting.set", json!({"key":"text.provider","value":"codex"})).await["ok"], true);
+        assert_eq!(hub.setting("text.model").await, None);
+        let _ = std::fs::remove_dir_all(&home);
     }
 }

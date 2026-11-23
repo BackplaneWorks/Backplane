@@ -215,7 +215,9 @@ fn agents(st: &State, info: &Value) -> Vec<Value> {
     let models: Value = info["models"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
     let prov = set(st, "agent.provider", "claude");
     let cli = models["about"][prov]["cli"].as_str().unwrap_or("");
-    let model = set(st, "agent.model", "");
+    let raw_model = set(st, "agent.model", "");
+    let model_clean = crate::settings::models::sanitize_model(prov, raw_model, models.is_object().then_some(&models));
+    let model = model_clean.as_str();
     let updates = agent_updates(&models, info);
     let mut ids: Vec<&str> = vec![""];
     ids.extend(models[prov].as_array().into_iter().flatten().filter_map(Value::as_str).take(12));
@@ -617,7 +619,9 @@ fn writing(st: &State, info: &Value) -> Vec<Value> {
     const TEXT: &[&str] = &["claude", "codex", "grok", "muse"];
     let models: Value = info["models"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
     let prov = { let p = set(st, "text.provider", "claude").trim(); if TEXT.contains(&p) { p } else { "claude" } };
-    let model = set(st, "text.model", "").trim();
+    let raw_model = set(st, "text.model", "").trim();
+    let model_clean = crate::settings::models::sanitize_model(prov, raw_model, models.is_object().then_some(&models));
+    let model = model_clean.as_str();
     let mut ids: Vec<&str> = vec![""];
     ids.extend(models[prov].as_array().into_iter().flatten().filter_map(Value::as_str).take(12));
     if !ids.contains(&model) { ids.push(model); }
@@ -1711,6 +1715,9 @@ mod tests {
         assert_eq!(r[3]["note"], "opus: Opus 5.5"); assert_eq!(r[2]["buttons"][0]["on"], true, "claude is the default provider");
         let r = page_rows(&st(&[("agent.provider", "codex")]), "agents", json!({}));
         assert_eq!(r[2]["note"], "codex is not installed");
+        let r = page_rows(&st(&[("agent.provider", "codex"), ("agent.model", "opus")]), "agents", json!({}));
+        assert!(r[3]["note"].as_str().unwrap().starts_with("default:"), "mismatched agent.model sanitized on display: {}", r[3]);
+        assert!(!r[3]["buttons"].as_array().unwrap().iter().any(|b| b["label"] == "opus"), "no bogus opus chip under codex");
     }
 
     #[test] fn the_boat_hub_rows_show_its_cost_and_warn_before_the_plan_runs_out() {

@@ -189,7 +189,8 @@ impl Agents {
         }).await.unwrap_or_default()
     }
     pub async fn prompt_for(&self, th: &str, cwd: &str) -> String {
-        let (provider, model) = self.world().await.threads.get(th).map(|t| (t.provider.clone(), t.model.clone())).unwrap_or_default();
+        let (provider, raw_model) = self.world().await.threads.get(th).map(|t| (t.provider.clone(), t.model.clone())).unwrap_or_default();
+        let model = crate::settings::models::sanitize_model_now(&provider, &raw_model);
         self.prompt_context(th, cwd, &provider, &model, false).await.text()
     }
     async fn prompt_base(&self, th: &str, cwd: &str) -> String {
@@ -521,7 +522,7 @@ impl RpcHandler for Rpc {
                 let (cwd, provider, model) = {
                     let world = self.0.world().await;
                     let t = &world.threads[th];
-                    (world.cwd(th), t.provider.clone(), t.model.clone())
+                    (world.cwd(th), t.provider.clone(), crate::settings::models::sanitize_model_now(&t.provider, &t.model))
                 };
                 let home = hub.cfg.home.clone();
                 let standalone = provider == "antigravity" && !providers::agy::pinned(&home.to_string_lossy());
@@ -878,7 +879,7 @@ impl Actor {
             self.commit(ev).await; self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
             if midturn { self.unanswered_arm(&msg, &text, now); let agent = unanswered::wrap(&text); return self.steer_as(text, agent).await }
             return self.steer(text).await }
-        self.codex = codex; self.prov = t.provider.clone(); self.model = t.model.clone();
+        self.codex = codex; self.prov = t.provider.clone(); self.model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
         let was_running = self.cx.running || t.turn == "running"; // Ride.post: a turn that starts on an idle thread takes the mail waiting for it
         self.cx = cx; self.last_user = msg.clone(); self.cwd = cwd.clone();
         let (now, th) = (now_s(), self.th.clone());
@@ -956,7 +957,7 @@ impl Actor {
         if self.cx.running || t.turn == "running" { return Err("the thread's turn is running".into()) }
         if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
         let (now, th) = (now_s(), self.th.clone());
-        self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone(); self.cx = cx; self.cwd = cwd.clone();
+        self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = crate::settings::models::sanitize_model_now(&t.provider, &t.model); self.cx = cx; self.cwd = cwd.clone();
         let mut ev = vec![]; if taken { ev.push(json!({"$":"QueueTaken","thread":th,"at":now})) } ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         self.limit_seen = None;
         let handed = if taken { String::new() } else { self.handed(&mut ev, now).await }; // what was queued is `text` when it is all taken; otherwise the hand-overs go with this turn and the rest stays
@@ -999,7 +1000,7 @@ impl Actor {
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("s", now, self.ag.seq()),"tone":"info","kind":"steer","summary":rules::steer_summary(&text),"at":now})];
         let run = if ride.is_empty() { agent.clone() } else { ev.extend(codex::ride_done(&th, &ride, "with the steer", now)); if text.trim().is_empty() { codex::ride_input(&ride) } else { format!("{}\n\n{}", codex::ride_input(&ride), agent) } };
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
-        self.live_close().await; self.commit(ev).await; self.cwd = cwd.clone(); self.cx.running = true; self.codex = true; self.prov = t.provider.clone(); self.model = t.model.clone();
+        self.live_close().await; self.commit(ev).await; self.cwd = cwd.clone(); self.cx.running = true; self.codex = true; self.prov = t.provider.clone(); self.model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
         self.steering = true; self.codex_run(&t, &cwd, &run).await; self.steering = false; Ok(())
     }
 
@@ -1036,8 +1037,10 @@ impl Actor {
                 }
             }
         }
+        let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
+        self.model = model.clone();
         let gen = format!("{now}-{}", self.ag.seq()); self.ag.set_gen(&th, &gen);
-        let prompt = self.ag.prompt_context(&th, cwd, &t.provider, &t.model, self.person || !acct_env.is_empty()).await.text();
+        let prompt = self.ag.prompt_context(&th, cwd, &t.provider, &model, self.person || !acct_env.is_empty()).await.text();
         let (effort, think, session) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.threads.get(&th).map(|x| x.session.clone()).unwrap_or_else(|| t.session.clone())) };
         let session = if self.person { String::new() } else { session_over.unwrap_or(session) }; // a copied session is never resumed in side-by-side mode; another login's is not either (`account_route`)
         // infinite context (agents/recall.rs): a new turn runs in a fresh session with the view ahead of its text; a steer keeps the running turn's session
@@ -1045,7 +1048,7 @@ impl Actor {
         let session = if fresh { String::new() } else { session };
         let text = if fresh { let v = self.ag.recall_view(&th).await; if v.is_empty() { text.to_string() } else { format!("{v}\n\n{text}") } } else { text.to_string() };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
-        let (host, cwd2, text2, prov2, model2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone(), t.model.clone());
+        let (host, cwd2, text2, prov2, model2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone(), model.clone());
         let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &skills::for_model(&ss, &prov2, &model2), &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
         if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return }
         let codex_home = if !cfg!(windows) { String::new() }
@@ -1053,11 +1056,11 @@ impl Actor {
             else if self.ag.cli.test_mode() { String::new() }
             else if self.person { self.person_child().map(|pc| pc.home.join(".codex").to_string_lossy().into_owned()).unwrap_or_default() }
             else { std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(|v| v.to_string_lossy().into_owned()).unwrap_or_else(|| std::path::Path::new(&self.ag.host.user_home).join(".codex").to_string_lossy().into_owned()) };
-        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url, cwd).await, speed: String::new(), speed_args: vec![], codex_home };
+        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url, cwd).await, speed: String::new(), speed_args: vec![], codex_home };
         let a = providers::TurnIn { pcbparts_url: if a.mcp.pcbparts { crate::mcpx::gen::PCBPARTS.into() } else { String::new() }, ..a };
         // the speed dial (agents/speed.rs): the mode the thread's model takes, passed the provider's way; recorded for the thread's usage (`turn.tier.<thread>`)
         let a = { let info = speed::info_now(); let want = self.ag.world().await.setting(&format!("speed.{th}")).to_string();
-            let mode = speed::effective(&info, &t.provider, &t.model, &want); let how = speed::how(&info, &t.provider, &t.model, mode);
+            let mode = speed::effective(&info, &t.provider, &model, &want); let how = speed::how(&info, &t.provider, &model, mode);
             providers::TurnIn { model: how.model.unwrap_or(a.model.clone()), speed: mode.to_string(), speed_args: how.args, ..a } };
         self.tier_set(&th, &a.speed, now).await;
         let mut driver = made.driver;
@@ -1111,7 +1114,7 @@ impl Actor {
         self.commit(vec![set(format!("ride.{th}"), v.clone(), now)]).await;
         if running || !start { return Ok(()) } // a "running" Claude turn with no live process (after a restart) keeps the ride for its next start; a note alone waits for the next turn
         // Ride.start: an idle thread starts a turn with the waiting rides
-        self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = t.model.clone();
+        self.cx = cx; self.cwd = cwd.clone(); self.codex = t.provider != "claude"; self.prov = t.provider.clone(); self.model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
         let mut ev = codex::ride_done(&th, &v, "with a new turn", now); ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         self.commit(ev).await; self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed); // #1163: the folder is a repository and snapshotted before the turn's own captures and before the agent gets anything (snapguard.rs)
         if let Err(why) = self.ag.turn_guard_start(&th, &cwd, None).await { self.fail(why, "git", &hub_id("git", now_s(), self.ag.seq())).await; return Ok(()) }
@@ -1189,8 +1192,9 @@ impl Actor {
         let th = self.th.clone(); let (cwd, msg, text, mut agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
         // the thread's MCP servers are part of the key: a list changed in Settings > MCP (or by an agent) starts Claude again at its next turn, on the same session
         // the speed dial too: a thread turned to Fast starts Claude again at its next turn with fast mode in its settings, on the same session
-        let want = self.ag.world().await.setting(&format!("speed.{th}")).to_string(); let tier = speed::effective(&speed::info_now(), "claude", &t.model, &want);
-        let key = format!("{}|speed:{tier}|mcp:{}{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude", &cwd).await, if self.ag.in_review(&th).await { "|review" } else { "" }); // a review runs with deny rules for design files (snapguard.rs): a change of mode starts Claude again
+        let model = crate::settings::models::sanitize_model_now("claude", &t.model);
+        let want = self.ag.world().await.setting(&format!("speed.{th}")).to_string(); let tier = speed::effective(&speed::info_now(), "claude", &model, &want);
+        let key = format!("{}|speed:{tier}|mcp:{}{}", rules::agent_key(&model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude", &cwd).await, if self.ag.in_review(&th).await { "|review" } else { "" }); // a review runs with deny rules for design files (snapguard.rs): a change of mode starts Claude again
         self.tier_set(&th, tier, now).await; self.cx.tier_want = tier.to_string(); self.cx.tier = tier.to_string();
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
         // infinite context (agents/recall.rs): a new turn (no command open: a message into a running turn goes on its input) starts a fresh session with the view
@@ -1213,7 +1217,6 @@ impl Actor {
         let steer = std::mem::take(&mut self.steer_now);
         let bound = { let raw = self.ag.hub.setting(&crate::settings::accounts::binding_key(&th, "claude")).await.unwrap_or_default(); !serde_json::from_str::<Value>(&raw).ok().map_or(String::new(), |b| b["id"].as_str().unwrap_or("").to_string()).is_empty() };
         let isolated = self.person || bound; // an account profile or the person mode runs Claude without the person's own skills and plugins
-        let model = t.model.clone();
         let line = { let (text2, cwd2, host, uuid2) = (agent_text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
             tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &skills::for_model(&ss, "claude", &model), "claude", isolated) } else { text2.clone() }; let imgs = inputs::read_images(&text2); inputs::claude_line_p(&body, &imgs, &uuid2, steer) }).await.unwrap_or_default() };
         let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
@@ -1376,17 +1379,18 @@ impl Actor {
         }
         if std::mem::take(&mut self.recall_fresh) { session = String::new(); self.handover = false; } // a new turn with infinite context: a fresh session, the view goes with its message
         let gen = format!("{now}-{}", self.ag.seq()); // Hub.gen: the process's generation, which its MCP URL names
-        let prompt = self.ag.prompt_context(&th, cwd, &t.provider, &t.model, self.person || !acct_env.is_empty()).await.text();
+        let model = crate::settings::models::sanitize_model_now("claude", &t.model);
+        let prompt = self.ag.prompt_context(&th, cwd, &t.provider, &model, self.person || !acct_env.is_empty()).await.text();
         if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return Err("agents shut down".into()) }
         let own: Vec<String> = self.ag.host.kistack.iter().chain(self.ag.host.bundled.iter()).map(|k| k.to_string_lossy().into_owned()).collect(); // KiStack's and Backplane's own skills
         let mut dirs = own.clone(); dirs.push(self.ag.host.home.join("attachments").to_string_lossy().into_owned());
         let plugins = own;
         let (effort, think, want) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.setting(&format!("speed.{th}")).to_string()) };
-        let speed = speed::effective(&speed::info_now(), "claude", &t.model, &want);
+        let speed = speed::effective(&speed::info_now(), "claude", &model, &want);
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let mcp = crate::mcpx::svc::launch(&th, "claude", &url, cwd).await;
         let mut disallowed = mcp.disallowed.clone(); if self.ag.in_review(&th).await { disallowed.extend(snapguard::CLAUDE_DENY.iter().map(|x| x.to_string())) } // a review's design files are read-only to Claude's own tools too
-        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &disallowed, speed });
+        let mut args = rules::claude_args(&rules::ArgsIn { model: &model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &disallowed, speed });
         let mut keep = vec![]; // the files Claude reads at its start, removed when it ends
         // the MCP config holds the thread's key: on every platform it goes in a private file, never on the command line (`/proc/<pid>/cmdline` is world-readable on Linux, F-009)
         { let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();

@@ -34,7 +34,8 @@ impl Agents {
         let asked = if s(a, "provider").is_empty() { if a.get("account").is_some() && !s(a, "account").eq_ignore_ascii_case("default") { String::new() } else { default_prov.clone() } } else { s(a, "provider").to_string() };
         let chosen = match self.account_arg(a, &asked).await { Ok(c) => c, Err(e) => return fail(&e) };
         let provider = chosen.as_ref().map(|c| c.provider.clone()).unwrap_or(if asked.is_empty() { default_prov.clone() } else { asked });
-        let model = if !s(a, "model").is_empty() { s(a, "model").to_string() } else if s(a, "provider").is_empty() && provider == default_prov { default_model } else { String::new() };
+        let raw_model = if !s(a, "model").is_empty() { s(a, "model").to_string() } else if s(a, "provider").is_empty() && provider == default_prov { default_model } else { String::new() };
+        let model = crate::settings::models::sanitize_model_now(&provider, &raw_model);
         if provider != "claude" && super::providers::driver(&provider).is_none() { return fail(&format!("{provider} threads are not run by the Rust hub yet")) }
         let (now, report) = (now_s(), a.get("report").and_then(Value::as_bool).unwrap_or(true));
         let seq = self.seq_n();

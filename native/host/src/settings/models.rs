@@ -3,13 +3,16 @@
 //! installed (a stand-in test hub, a fresh machine) they are empty. The hub's detection (models_probe.rs) replaces the built-in value
 //! with what the machine's CLIs report (`set_live`); `info` and `all` answer the value in force.
 use serde_json::{json, Value};
-use std::sync::RwLock;
+use std::sync::{Arc, OnceLock, RwLock};
+
+pub use super::model_compat::{model_compatible, sanitize_model};
 
 /// Claude Code's aliases, for a CLI that cannot say its own list.
 pub const CLAUDE: &[&str] = &["fable", "opus", "sonnet", "haiku"];
 
-/// The detected info and its `models.all`, once the hub has detected (or read its cache); None: the built-in value.
-static LIVE: RwLock<Option<(String, String)>> = RwLock::new(None);
+/// The detected info, its `models.all`, and parsed `Value`, once the hub has detected (or read its cache); None: the built-in value.
+static LIVE: RwLock<Option<(String, String, Arc<Value>)>> = RwLock::new(None);
+static BUILTIN_VAL: OnceLock<Arc<Value>> = OnceLock::new();
 /// Whether the hub detects its agents' models (the binary's start, models_probe::start): a test hub keeps the built-in value and asks no CLI.
 static DETECTS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Whether this hub process has completed at least one live CLI probe (separate from `models.cache`'s persisted `"probed": true`).
@@ -21,9 +24,10 @@ pub fn mark_probed() { PROBED_HERE.store(true, std::sync::atomic::Ordering::Rela
 /// The info in force becomes `info`; answers whether it changed.
 pub fn set_live(info: &str) -> bool {
     let mut g = LIVE.write().unwrap_or_else(|e| e.into_inner());
-    if g.as_ref().map_or(false, |(i, _)| i == info) { return false }
-    let all = all_of(&serde_json::from_str::<Value>(info).unwrap_or(Value::Null));
-    *g = Some((info.to_string(), all)); true
+    if g.as_ref().map_or(false, |(i, _, _)| i == info) { return false }
+    let parsed = serde_json::from_str::<Value>(info).unwrap_or(Value::Null);
+    let all = all_of(&parsed);
+    *g = Some((info.to_string(), all, Arc::new(parsed))); true
 }
 
 /// Agy.version: the pinned Antigravity agent.
@@ -43,7 +47,18 @@ pub fn about() -> Value {
 }
 
 /// The info value in force (a JSON text, as the JS hub sends it): what the hub detected, else the built-in one.
-pub fn info() -> String { LIVE.read().ok().and_then(|g| g.as_ref().map(|(i, _)| i.clone())).unwrap_or_else(builtin) }
+pub fn info() -> String { LIVE.read().ok().and_then(|g| g.as_ref().map(|(i, _, _)| i.clone())).unwrap_or_else(builtin) }
+/// Parsed `models` info value in force (cached).
+pub fn info_value() -> Arc<Value> {
+    if let Ok(g) = LIVE.read() {
+        if let Some((_, _, v)) = g.as_ref() { return v.clone() }
+    }
+    BUILTIN_VAL.get_or_init(|| Arc::new(serde_json::from_str::<Value>(&builtin()).unwrap_or(Value::Null))).clone()
+}
+/// Sanitize `model` against `provider` using the live (or built-in) models catalog.
+pub fn sanitize_model_now(provider: &str, model: &str) -> String {
+    sanitize_model(provider, model, Some(&info_value()))
+}
 /// The info for a machine whose CLIs have not been asked: Claude's aliases and nothing else.
 pub fn builtin() -> String {
     json!({"claude":["fable","opus","sonnet","haiku"],"codex":[],"grok":[],"muse":[],"antigravity":[],"opencode":[],"pi":[],"omp":[],
@@ -52,7 +67,7 @@ pub fn builtin() -> String {
 
 /// The `models.all` info (new, not in the JS hub): every provider's models as rows the `&` mention offers, `{provider: [{value, label, ok, why}]}`. `value` is the id the
 /// `model` actions use; `ok` is false, with `why`, when the agent cannot be used now (its CLI is not installed). Claude's list is built in and always usable.
-pub fn all() -> String { LIVE.read().ok().and_then(|g| g.as_ref().map(|(_, a)| a.clone())).unwrap_or_else(|| all_of(&serde_json::from_str::<Value>(&builtin()).unwrap_or(Value::Null))) }
+pub fn all() -> String { LIVE.read().ok().and_then(|g| g.as_ref().map(|(_, a, _)| a.clone())).unwrap_or_else(|| all_of(&serde_json::from_str::<Value>(&builtin()).unwrap_or(Value::Null))) }
 pub fn all_of(models: &Value) -> String {
     let mut out = serde_json::Map::new();
     let Some(o) = models.as_object() else { return "{}".into() };
@@ -94,7 +109,7 @@ pub fn default_agent(chosen: &str, models: &Value, connected: &[String]) -> Stri
 }
 /// default_agent for the models info in force.
 pub fn default_now(chosen: &str, inventory: &str) -> String {
-    default_agent(chosen, &serde_json::from_str::<Value>(&info()).unwrap_or(Value::Null), &connected(inventory))
+    default_agent(chosen, &info_value(), &connected(inventory))
 }
 
 #[cfg(test)]

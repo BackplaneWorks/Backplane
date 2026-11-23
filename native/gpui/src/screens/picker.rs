@@ -167,6 +167,14 @@ pub fn settle(c: &Cursor, rows: &[Section], own: &Cursor) -> Cursor {
     if let Some(m) = rows.iter().find(|s| s.action == "model").and_then(|s| s.choices.first()) { n.col = 1; n.set(1, &m.value, own); }
     n
 }
+/// The model a cursor applies: its own when the provider lists it (or lists none yet), else the provider's default ("").
+pub fn model_applied(c: &Cursor, rows: &[Section]) -> String {
+    if c.model.is_empty() { return String::new() }
+    match rows.iter().find(|s| s.action == "model") {
+        Some(s) if !s.choices.is_empty() && !s.choices.iter().any(|ch| ch.value == c.model) => String::new(),
+        _ => c.model.clone(),
+    }
+}
 /// The effort a cursor applies: the one lit (an effort the model does not take is the agent's default; none when it takes none).
 pub fn effort_applied(c: &Cursor, rows: &[Section]) -> String { lit(&steps(&levels(rows, &c.model)), &c.effort).unwrap_or_else(|| c.effort.clone()) }
 /// The requests that apply a cursor against the thread's own: another agent is one switch carrying the model and any new effort, the same agent asks for what changed, nothing changed asks for nothing.
@@ -252,8 +260,9 @@ pub fn shown(thread: &Value, pick: &Pick, favs: &[String]) -> Option<Shown> {
     let mine = parse(&thread["picker"]);
     if mine.is_empty() { return None }
     let own = Cursor::own(&mine); let id = string(thread, "id");
-    let cur = pick.cur.as_ref().filter(|(t, _)| *t == id).map_or_else(|| own.clone(), |(_, c)| c.clone());
+    let mut cur = pick.cur.as_ref().filter(|(t, _)| *t == id).map_or_else(|| own.clone(), |(_, c)| c.clone());
     let all = for_provider(&thread["picker"], &thread["pickerAgents"], &cur.provider);
+    cur.model = model_applied(&cur, &all);
     let (rows, hidden) = arrange(&all, &cur.provider, &pick.q, favs, &cur.model);
     Some(Shown { own, cur, all, rows, hidden })
 }
@@ -574,6 +583,7 @@ impl Backplane {
     /// Apply a cursor: an agent that cannot be used here is only shown (its column says why), never switched to.
     fn picker_apply(&self, mut c: Cursor, all: &[Section], own: &Cursor) {
         if !agent_ok(all, &c.provider) { return }
+        c.model = model_applied(&c, all);
         c.effort = effort_applied(&c, all);
         c.speed = speed_applied(&c, all);
         for cmd in plan(&c, own) { let _ = self.tx.try_send(cmd); }
@@ -759,5 +769,19 @@ mod tests {
         let far = Cursor { provider: "@codex".into(), model: "gpt".into(), ..c };
         assert_eq!(acts(plan(&far, &own)), [pair("provider", "codex\u{1f}gpt"), pair("speed", "fast")]);
         assert_eq!(cap(3, 3, 4), "←→"); assert_eq!(cap(0, 3, 4), "Tab"); assert_eq!(cap(3, 1, 3), "", "no keycap for a dial Tab cannot reach");
+    }
+    #[test] fn switching_provider_or_applying_cursor_never_sends_stale_model_across_providers() {
+        let (p, a) = fixture(); let s = parse(&p); let own = Cursor::own(&s);
+        let mut c = own.clone();
+        c.set(0, "@codex", &own);
+        assert_eq!(c.provider, "@codex");
+        assert_eq!(c.model, "", "switching provider clears previous provider's model");
+        assert_eq!(acts(plan(&c, &own)), [pair("provider", "codex\u{1f}")]);
+
+        let codex_rows = for_provider(&p, &a, "@codex");
+        let stale = Cursor { col: 0, provider: "@codex".into(), model: "opus".into(), effort: "high".into(), speed: String::new() };
+        assert_eq!(model_applied(&stale, &codex_rows), "", "stale claude model is cleared for codex");
+        let valid = Cursor { model: "gpt".into(), ..stale };
+        assert_eq!(model_applied(&valid, &codex_rows), "gpt");
     }
 }

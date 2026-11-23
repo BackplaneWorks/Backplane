@@ -472,8 +472,9 @@ impl Bots {
             let Some(project) = project else { return fail("name the swarm's project (project_list)") };
             let rid = self.id("r", now); let mut taken: Vec<String> = vec![]; let mut plan = vec![]; let mut evs = vec![];
             for (i, m) in ms.iter().enumerate() {
-                let (prov, model, role) = (gs(m, "provider"), gs(m, "model"), gs(m, "role"));
-                let nm = gate::short_name(role, prov, model, &taken); taken.push(nm.clone());
+                let (prov, raw_model, role) = (gs(m, "provider"), gs(m, "model"), gs(m, "role"));
+                let model = crate::settings::models::sanitize_model_now(prov, raw_model);
+                let nm = gate::short_name(role, prov, &model, &taken); taken.push(nm.clone());
                 let tid = self.id("t", now); let key = format!("{THREAD}{tid}");
                 evs.push(json!({"$":"SettingSet","key":format!("room.member.{rid}.{key}"),"value":json!({"name":nm,"color":gate::color(i),"role":role,"provider":prov,"model":model}).to_string(),"at":now}));
                 plan.push((tid, nm, m.clone()));
@@ -494,7 +495,8 @@ impl Bots {
         for (tid, nm, m) in &plan {
             let peers: Vec<String> = names.iter().filter(|x| *x != nm).cloned().collect();
             let mut prompt = brief(&topic, &rid, &goal, nm, gs(m, "role"), &peers, false); if !seed.is_empty() { prompt.push_str(&format!("\n\nTo start with:\n{seed}")) }
-            let mut args = json!({"project":project,"prompt":prompt,"provider":gs(m, "provider"),"model":gs(m, "model"),"title":format!("{topic} · {nm}"),"subthread":false,"report":false,"_id":tid});
+            let model = crate::settings::models::sanitize_model_now(gs(m, "provider"), gs(m, "model"));
+            let mut args = json!({"project":project,"prompt":prompt,"provider":gs(m, "provider"),"model":model,"title":format!("{topic} · {nm}"),"subthread":false,"report":false,"_id":tid});
             if !gs(m, "account").is_empty() { args["account"] = m["account"].clone() }
             match self.inbox.launch(by, args).await { Ok(t) if &t == tid => started.push(json!({"thread":t,"name":nm})), Ok(t) => failed.push(format!("{nm}: started as {t}, not the id the room lists")), Err(e) => failed.push(format!("{nm}: {e}")) }
         }
@@ -581,16 +583,17 @@ impl Bots {
                 (true, json!({"room":r.id,"removed":th})) }
             "add" => { if r.members.len() >= MAX_MEMBERS { return fail(&format!("a swarm has at most {MAX_MEMBERS} members")) }
                 let m = a.get("member").cloned().unwrap_or_else(|| json!({"provider":gs(a, "provider"),"model":gs(a, "model"),"role":gs(a, "role")}));
+                let (prov, model) = (gs(&m, "provider"), crate::settings::models::sanitize_model_now(gs(&m, "provider"), gs(&m, "model")));
                 let taken: Vec<String> = names(&w, &r).into_iter().map(|x| x.1).collect();
-                let nm = gate::short_name(gs(&m, "role"), gs(&m, "provider"), gs(&m, "model"), &taken);
+                let nm = gate::short_name(gs(&m, "role"), prov, &model, &taken);
                 let tid = self.id("t", now); let key = format!("{THREAD}{tid}");
                 let ann = self.guard_post(&r.id, &format!("{nm} joined the swarm (added by {who})."), &[], true, now); let ann_id = gs(&ann, "id").to_string();
                 let ev = vec![r.set_ev(now, |x| x.members.push(key.clone())),
-                    json!({"$":"SettingSet","key":format!("room.member.{}.{key}", r.id),"value":json!({"name":nm,"color":gate::color(r.members.len()),"role":gs(&m, "role"),"provider":gs(&m, "provider"),"model":gs(&m, "model")}).to_string(),"at":now}),
+                    json!({"$":"SettingSet","key":format!("room.member.{}.{key}", r.id),"value":json!({"name":nm,"color":gate::color(r.members.len()),"role":gs(&m, "role"),"provider":prov,"model":model}).to_string(),"at":now}),
                     json!({"$":"SettingSet","key":format!("room.joined.{}.{key}", r.id),"value":ann_id,"at":now}), ann];
                 if let Err(e) = self.hub.commit_many(&w.also(now, ev)).await { return fail(&format!("{e:#}")) }
                 let project = r.project.clone(); drop(w); { let _w = self.world().await; }
-                let mut args = json!({"project":project,"prompt":brief(&r.name, &r.id, &r.goal, &nm, gs(&m, "role"), &taken, true),"provider":gs(&m, "provider"),"model":gs(&m, "model"),"title":format!("{} · {nm}", r.name),"subthread":false,"report":false,"_id":tid});
+                let mut args = json!({"project":project,"prompt":brief(&r.name, &r.id, &r.goal, &nm, gs(&m, "role"), &taken, true),"provider":prov,"model":model,"title":format!("{} · {nm}", r.name),"subthread":false,"report":false,"_id":tid});
                 if !gs(&m, "account").is_empty() { args["account"] = m["account"].clone() }
                 match self.inbox.launch(&r.by, args).await { Ok(t) => (true, json!({"room":r.id,"thread":t,"name":nm})), Err(e) => {
                     let w = self.world().await; if let Some(r2) = w.room(&r.id).cloned() { let _ = self.hub.commit_many(&w.also(now_s(), vec![r2.set_ev(now_s(), |x| x.members.retain(|m| m != &key))])).await; }
