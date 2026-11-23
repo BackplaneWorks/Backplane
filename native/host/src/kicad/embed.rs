@@ -1835,7 +1835,7 @@ async fn send_gui_raw(route: &GuiRoute, ty: &str, msg: Value, client: &str, time
     match tokio::time::timeout_at(deadline + Duration::from_millis(1_000), r).await {
         Ok(Ok(v)) => v,
         Ok(Err(_)) => json!({"ok":false,"error":"no reply","why":"no reply","fallback":true}),
-        Err(_) => json!({"ok":false,"error":format!("KiCad did not answer in {} s", timeout_ms as f64 / 1000.0),"why":"timeout","fallback":true}),
+        Err(_) => json!({"ok":false,"error":format!("KiCad did not answer in {} s", timeout_ms as f64 / 1000.0),"why":"timeout"}),
     }
 }
 async fn gui_call_in(route: &GuiRoute, ty: &str, msg: Value, client: &str, patient: Option<Duration>) -> Value {
@@ -1857,6 +1857,33 @@ async fn gui_call_in(route: &GuiRoute, ty: &str, msg: Value, client: &str, patie
 /// Send one command directly with an explicit timeout in ms (e.g. a quick Ping probe after BeginCommit times out).
 pub async fn gui_call_timeout(route: &GuiRoute, ty: &str, msg: Value, client: &str, timeout_ms: u64) -> Value {
     send_gui_raw(route, ty, msg, client, timeout_ms).await
+}
+
+#[cfg(test)]
+pub(crate) fn mock_gui_route_for_test(
+    pro: &str,
+    handler: impl Fn(String, Value, oneshot::Sender<Value>) + Send + Sync + 'static,
+) -> GuiRoute {
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let handler = std::sync::Arc::new(handler);
+    tokio::spawn(async move {
+        while let Some(msg) = rx.recv().await {
+            if let Msg::Raw { ty, msg, reply, .. } = msg {
+                handler(ty, msg, reply);
+            }
+        }
+    });
+    GuiRoute {
+        pro: pro.into(),
+        mode: "fork".into(),
+        sock: "/mock/gui.sock".into(),
+        desc: String::new(),
+        cli: String::new(),
+        argv: String::new(),
+        version: "10.99.0-bp.13".into(),
+        caps: vec!["coedit".into()],
+        tx,
+    }
 }
 
 /// One commit of item updates in the open editor as `client` (`coedit::client_name`): BeginCommit, UpdateItems, EndCommit, every one
@@ -3204,7 +3231,7 @@ impl Actor {
                     Some(dl) => {
                         let rem = dl.saturating_duration_since(tokio::time::Instant::now()).as_millis() as u64;
                         if rem == 0 {
-                            let _ = reply.send(json!({"ok":false,"error":format!("KiCad did not answer in {} s", timeout as f64 / 1000.0),"why":"timeout","fallback":true}));
+                            let _ = reply.send(json!({"ok":false,"error":format!("KiCad did not answer in {} s", timeout as f64 / 1000.0),"why":"timeout"}));
                             return;
                         }
                         timeout.min(rem).max(1)

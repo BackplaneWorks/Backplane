@@ -131,6 +131,55 @@ struct Actor {
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 pub fn now_ms() -> u128 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0) }
 
+/// Socket directory for headless `kicad-cli api-server`: `ks::dir` when `<dir>/api.sock` fits macOS's 104-byte `SUN_LEN`,
+/// else a short per-UID temp folder so long macOS home paths never fail Unix socket bind/connect.
+pub(crate) fn sock_dir_for(rt: &str, home: &str, project: &str) -> String {
+    let d = ks::dir(rt, home, project);
+    #[cfg(unix)]
+    {
+        const MAX_DIR: usize = 94; // + "/api.sock" (9) = 103 < 104 (macOS SUN_LEN)
+        const MAX_FALLBACK_DIR: usize = 82; // + "/api-9999999.sock" (17) = 99 < 104
+        if d.len() > MAX_DIR {
+            let dig = ks::digest(project);
+            let ns = format!("bp-ks-{}", crate::plat::fs::uid());
+            let tmp = std::env::temp_dir().join(&ns).join(&dig).to_string_lossy().into_owned();
+            if tmp.len() <= MAX_FALLBACK_DIR { return tmp }
+            return format!("/tmp/{ns}/{dig}");
+        }
+    }
+    d
+}
+
+#[cfg(unix)]
+fn check_dir_owner_no_symlink(p: &Path, uid: u32) -> Result<(), String> {
+    use crate::plat::fs::{MetadataExt, PermissionsExt};
+    let meta = std::fs::symlink_metadata(p).map_err(|e| format!("could not inspect {}: {e}", p.display()))?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(format!("refusing unsafe KiCad socket folder (not a real directory): {}", p.display()));
+    }
+    if meta.uid() != uid {
+        return Err(format!("refusing KiCad socket folder owned by uid {} instead of {}: {}", meta.uid(), uid, p.display()));
+    }
+    if meta.permissions().mode() & 0o077 != 0 {
+        let _ = std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o700));
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn ensure_private_sock_dir(dir: &Path) -> Result<(), String> {
+    use crate::plat::fs::DirBuilderExt;
+    let uid = crate::plat::fs::uid();
+    if let Some(parent) = dir.parent().filter(|p| p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("bp-ks-"))) {
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(parent)
+            .map_err(|e| format!("could not create {}: {e}", parent.display()))?;
+        check_dir_owner_no_symlink(parent, uid)?;
+    }
+    std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)
+        .map_err(|e| format!("could not create {}: {e}", dir.display()))?;
+    check_dir_owner_no_symlink(dir, uid)
+}
+
 impl Actor {
     fn srv(&self, project: &str) -> Srv { self.srvs.iter().find(|s| s.project == project).cloned().unwrap_or_else(|| Srv::none(project)) } // KServe.get
     fn put(&mut self, s: Srv) { match self.srvs.iter_mut().find(|x| x.project == s.project) { Some(x) => *x = s, None => self.srvs.push(s) } } // KServe.put
@@ -140,13 +189,19 @@ impl Actor {
     fn bump_gen(&mut self, project: &str) -> u64 { let g = self.launch_gen(project) + 1; self.srv_gen.insert(project.to_string(), g); g }
     fn process_alive(&self, project: &str) -> Option<bool> { self.helper.as_ref().and_then(|h| h.link.process_alive(project)) }
     fn pid_of(&self, project: &str) -> u32 { self.helper.as_ref().map_or(0, |h| h.link.pid_of(project)) }
+    fn sock_dir(&self, project: &str) -> String { sock_dir_for(&self.rt, &self.home, project) }
 
     fn remove_stale_sock(&self, project: &str, sock: &str) {
         #[cfg(unix)]
         if !sock.is_empty() {
-            let expected_dir = ks::dir(&self.rt, &self.home, project);
-            if Path::new(sock).parent() == Some(Path::new(&expected_dir)) {
-                let _ = std::fs::remove_file(sock);
+            let p = Path::new(sock);
+            let parent = p.parent();
+            let expected_dir = self.sock_dir(project);
+            let kserve_dir = ks::dir(&self.rt, &self.home, project);
+            if let Some(dir) = parent.filter(|d| *d == Path::new(&expected_dir) || *d == Path::new(&kserve_dir)) {
+                if check_dir_owner_no_symlink(dir, crate::plat::fs::uid()).is_ok() {
+                    let _ = std::fs::remove_file(p);
+                }
             }
         }
         #[cfg(not(unix))]
@@ -253,8 +308,17 @@ impl Actor {
     fn launch(&mut self, project: &str) { // KServe.launch: helper present, then the server is started and gets 30 s to say it listens
         let now = now_s();
         let launch_gen = self.bump_gen(project);
-        let dir = ks::dir(&self.rt, &self.home, project);
-        { use crate::plat::fs::DirBuilderExt; let _ = std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&dir); }
+        let dir = self.sock_dir(project);
+        #[cfg(unix)]
+        if let Err(why) = ensure_private_sock_dir(Path::new(&dir)) {
+            let s = self.srv(project).set("stopped", "");
+            self.put(s);
+            self.fail_project(project, &why);
+            self.emit();
+            return;
+        }
+        #[cfg(not(unix))]
+        { let _ = std::fs::create_dir_all(&dir); }
         let argv = ks::argv(&self.env.cli, project, &dir, self.hub_pid, &self.env.caps);
         let envv: Map<String, Value> = ["BACKPLANE_KICAD_LIBRARY", "KICAD_CONFIG_HOME"].iter().map(|k| (k.to_string(), json!(std::env::var(k).unwrap_or_default()))).collect();
         self.sink(json!({"op":"spawn","key":project,"gen":launch_gen,"argv":argv,"memory":"1536M","env":envv}));
@@ -563,7 +627,7 @@ impl Actor {
             Msg::Retire { project, reply } => self.retire(project, reply),
             Msg::Retired { project, launch_gen, ok, why, reply } => self.retired(project, launch_gen, ok, why, reply),
             Msg::Info(r) => { self.reap_dead(); let _ = r.send(ks::lines(&self.srvs)); }
-            Msg::Argv { project, env, reply } => { let d = ks::dir(&self.rt, &self.home, &project); let _ = reply.send(ks::argv(&env.cli, &project, &d, self.hub_pid, &env.caps).join(" ")); }
+            Msg::Argv { project, env, reply } => { let d = self.sock_dir(&project); let _ = reply.send(ks::argv(&env.cli, &project, &d, self.hub_pid, &env.caps).join(" ")); }
             Msg::ReadySock { project, reply } => {
                 self.reap_dead();
                 let s = self.srv(&project);
@@ -1414,6 +1478,9 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         let ok = o["ok"].as_bool().unwrap_or(false);
         if !ok && short == "BeginCommit" { unpin() }
         if !ok && is_conn_error(&o) { super::embed::check_exited(&pro); }
+        if !status && !ok && short == "BeginCommit" && is_timeout_error(&o) {
+            return Err(explain_begin_commit_timeout_gui(&gui, &pro, &o).await);
+        }
         if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
         let live = super::embed::gui_route(&pro).is_some() && !is_conn_error(&o);
         let servers = format!("{pro}|{}|gui ({})", if live { "ready" } else { "stopped" }, gui.mode);
@@ -1422,9 +1489,6 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
             let st = super::embed::session_state(&pro);
             return Ok(json!({"server":format!("gui ({})", gui.mode),"servers":servers,"argv":gui.argv,"version":gui.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) },
                 "dialogs":st["dialogs"].clone(),"dialogs_reported":st["dialogs_reported"].clone(),"notices":st["notices"].clone()}))
-        }
-        if !ok && short == "BeginCommit" && is_timeout_error(&o) {
-            return Err(explain_begin_commit_timeout_gui(&gui, &pro, &o).await);
         }
         if !ok { return Err(if short == "SaveDocument" { super::savegate::explain_save_error(&err_of(&o), super::savegate::saves_design(&msg_doc, path)) } else { err_of(&o) }) }
         let wrote_nothing = short == "SaveDocument" && super::savegate::wrote_nothing(&o);
@@ -1458,14 +1522,14 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
     let ok = o["ok"].as_bool().unwrap_or(false);
     let short = ty.rsplit('.').next().unwrap_or(ty);
     if !ok && short == "BeginCommit" { unpin() }
+    if !status && !ok && short == "BeginCommit" && is_timeout_error(&o) {
+        return Err(explain_begin_commit_timeout_headless(i, &pro, &env, &o, &orig_sock, orig_gen).await);
+    }
     if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
     if status {
         let lines = info_on(i).await;
         let argv = argv_on(i, &pro, &env).await;
         return Ok(json!({"server":ks::note(&lines),"servers":lines,"argv":argv,"version":env.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }}));
-    }
-    if !ok && short == "BeginCommit" && is_timeout_error(&o) {
-        return Err(explain_begin_commit_timeout_headless(i, &pro, &env, &o, &orig_sock, orig_gen).await);
     }
     if !ok { return Err(err_of(&o)) }
     let mut o = o; let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].take()}); // (taken, not copied: a simulation's vectors)
@@ -2326,6 +2390,70 @@ mod tests {
         alive.lock().unwrap().insert(project.clone(), false);
         tx.send(Msg::Clear).unwrap();
         assert!(info_on(&ipc).await.contains("|stopped|"));
+    }
+
+    #[tokio::test]
+    async fn embed_begin_commit_timeout_reply_has_no_fallback_and_explains_gui_state() {
+        use std::sync::{atomic::{AtomicBool, Ordering}, Mutex};
+        let pro = "/p/mock-gui.kicad_pro";
+        let ping_ok = Arc::new(AtomicBool::new(true));
+        let held = Arc::new(Mutex::new(Vec::<oneshot::Sender<Value>>::new()));
+        let route = super::super::embed::mock_gui_route_for_test(pro, {
+            let ping_ok = ping_ok.clone();
+            let held = held.clone();
+            move |ty, _msg, reply| {
+                if ty == "kiapi.common.commands.BeginCommit" {
+                    held.lock().unwrap().push(reply);
+                } else if ty == "kiapi.common.commands.Ping" {
+                    if ping_ok.load(Ordering::SeqCst) {
+                        let _ = reply.send(json!({"ok": true, "type": "PingResponse", "message": {}}));
+                    } else {
+                        let _ = reply.send(json!({"ok": false, "error": "KiCad IPC connection dropped"}));
+                    }
+                }
+            }
+        });
+
+        let timed = super::super::embed::gui_call_timeout(&route, "kiapi.common.commands.BeginCommit", json!({}), "", 50).await;
+        assert!(is_timeout_error(&timed), "expected timeout error, got: {timed}");
+        assert_ne!(timed["fallback"], json!(true), "timeout must not set fallback:true: {timed}");
+
+        let msg_ok = explain_begin_commit_timeout_gui(&route, pro, &timed).await;
+        assert!(msg_ok.contains("still answers reads/Ping"), "unexpected msg_ok: {msg_ok}");
+
+        ping_ok.store(false, Ordering::SeqCst);
+        let msg_fail = explain_begin_commit_timeout_gui(&route, pro, &timed).await;
+        assert!(msg_fail.contains("follow-up Ping failed"), "unexpected msg_fail: {msg_fail}");
+    }
+
+    #[test]
+    fn sock_dir_for_respects_unix_sun_len_for_long_home() {
+        assert_eq!(
+            sock_dir_for("/run/user/1000", "/h", "/p/a.kicad_pro"),
+            ks::dir("/run/user/1000", "/h", "/p/a.kicad_pro")
+        );
+        #[cfg(unix)]
+        {
+            let long_home = "/Users/long-example-username-here/Library/Application Support/Backplane";
+            let kserve_a = ks::dir("", long_home, "/p/a.kicad_pro");
+            let d_a = sock_dir_for("", long_home, "/p/a.kicad_pro");
+            let d_b = sock_dir_for("", long_home, "/p/b.kicad_pro");
+            assert_ne!(d_a, kserve_a, "long macOS home must use fallback dir");
+            assert_eq!(d_a, sock_dir_for("", long_home, "/p/a.kicad_pro"), "fallback dir must be deterministic");
+            assert_ne!(d_a, d_b, "distinct projects must keep distinct fallback dirs");
+            assert!(d_a.contains(&format!("bp-ks-{}", crate::plat::fs::uid())), "expected per-UID fallback dir, got: {d_a}");
+            let sock = format!("{d_a}/api-9999999.sock");
+            assert!(sock.len() < 104, "headless socket path exceeds macOS SUN_LEN: {sock} ({})", sock.len());
+
+            // Symlinked socket directory must be rejected.
+            let tmp = crate::plat::tmp::dir("sock-sym");
+            let real = tmp.join("real");
+            let link = tmp.join("link");
+            std::fs::create_dir_all(&real).unwrap();
+            std::os::unix::fs::symlink(&real, &link).unwrap();
+            let err = ensure_private_sock_dir(&link).unwrap_err();
+            assert!(err.contains("not a real directory"), "unexpected symlink error: {err}");
+        }
     }
 
     fn ok_test_out(s: &str) -> ProbeOutcome {

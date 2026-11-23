@@ -392,7 +392,7 @@ pub async fn push_upstream(top: &str, branch: &str) -> String {
     let up = upstream(top, branch).await;
     if up.is_empty() { return up }
     let (remote, rb) = up.split_once('/').map(|(a, b)| (a.to_string(), b.to_string())).unwrap_or_default();
-    let p = crate::files::git::run(top, &["push", "-q", &remote, &format!("{branch}:{rb}")]).await;
+    let p = crate::files::git::push(top, &["push", "-q", &remote, &format!("{branch}:{rb}")]).await;
     if p.code == 0 { up } else { format!("not pushed: {}", p.out.trim().lines().last().unwrap_or("")) }
 }
 /// The main checkout of `root`: its top folder and branch, None when it is no git checkout on a branch (or a worktree).
