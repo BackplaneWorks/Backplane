@@ -30,7 +30,7 @@ const SAMPLE_ITEMS: SettingsSearchItem[] = [
   {
     pageId: "providers",
     pageTitle: "AI providers",
-    groupLabel: "AI & tools",
+    groupLabel: "Agents and tools",
     rowTitle: "Provider connections",
     rowDetail: "Connect Claude, Codex, Antigravity, or other AI providers.",
     keywords: ["accounts", "claude", "codex"],
@@ -64,7 +64,7 @@ const SAMPLE_ITEMS: SettingsSearchItem[] = [
 describe("Web Settings model", () => {
   test("defines clean grouped pages with valid group references", () => {
     const groupIds = new Set(SETTINGS_GROUPS.map((g) => g.id));
-    expect(SETTINGS_GROUPS.map((g) => g.label)).toEqual(["General", "AI & tools", "Connect"]);
+    expect(SETTINGS_GROUPS.map((g) => g.label)).toEqual(["General", "Agents and tools", "Connect"]);
     expect(SETTINGS_PAGES.map((p) => p.id)).toEqual(["appearance", "providers", "devices", "home"]);
     for (const p of SETTINGS_PAGES) {
       expect(groupIds.has(p.group)).toBe(true);

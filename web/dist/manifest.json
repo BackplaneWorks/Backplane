@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 218944,
+  "totalAssetGzipBytes": 218947,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -305,8 +305,8 @@
     "web/src/provider-notice.ts": "96efd0b9ce7981efadfdbba3e2eac7b7fa00cf18f3126f980b9d087022084e29",
     "web/src/qr.ts": "04b634557884b8f512a7b03ad9638c1c15a299ffaea0103d1bdeec6338d9b9d3",
     "web/src/rail.ts": "5fb391094992578cb6f54d35d53559951a584c43fcfc2ee6f4f2cc3897acfe46",
-    "web/src/settings-model.ts": "6ba2f990e30efcf5615b8c51b6846617e02f561005b5ee8b0c6cb16bc839158e",
-    "web/src/settings.ts": "88db5d4cd876f6cfbfb0f5f638d69e4e4a46884f8094b9f44833ad1f3b8b41ac",
+    "web/src/settings-model.ts": "19e99d594cf3eebb66b616f81dee5877abddb2d24c1d4e32fa0bc2b205cb268b",
+    "web/src/settings.ts": "da58e48f2c547e89c971ab598cb2b6a7be73a167fba27f6e50c3d23830610010",
     "web/src/shell.css": "32898b2fc072984fde99490f22143e9aa6e39c8a517be2a4fbd2d10b227a75f1",
     "web/src/sidebar.ts": "cc22668cddd8d039389fdd9637141c840d6ab8985de06a4268bb536d3a9588c1",
     "web/src/swarm-need.ts": "503bbf5ffe0389f068847571c792321b0ad5c8d26a18c73b8e41c0a8989e227f",
@@ -345,9 +345,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 386040,
-      "gzipBytes": 109237,
-      "sha256": "ab5b53462cb38d96c45e326f206b0557d0b1ab7b7d564036f8840f83eb35d20e"
+      "bytes": 386056,
+      "gzipBytes": 109240,
+      "sha256": "0c29817ad97b4c91ba2b4bbe2c28d76aeacc71ed1b79c3739179a61a571bd1aa"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,

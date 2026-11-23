@@ -1,5 +1,5 @@
 // Grouped, searchable Web Settings modal:
-// General (Appearance: Theme & Language), AI & tools (AI providers),
+// General (Appearance: Theme & Language), Agents and tools (AI providers),
 // Connect (Devices & browser, Home machine).
 import { t, trs } from "./i18n";
 import type { NoProviderNotice } from "./provider-notice";
@@ -355,7 +355,7 @@ export class SettingsModal {
       {
         pageId: "providers",
         pageTitle: "AI providers",
-        groupLabel: "AI & tools",
+        groupLabel: "Agents and tools",
         rowTitle: noProvider ? trs(noProvider.head) : "Provider connections",
         rowDetail: "Connect Claude, Codex, Antigravity, or other AI providers in Settings → Accounts.",
         keywords: ["accounts", "claude", "codex", "antigravity", "grok", "openai", "signin"],
@@ -431,7 +431,7 @@ export class SettingsModal {
         if (g) {
           const head = document.createElement("div");
           head.className = "bp-settings-group";
-          head.textContent = g.label;
+          head.textContent = trs(g.label);
           frag.appendChild(head);
         }
       }
