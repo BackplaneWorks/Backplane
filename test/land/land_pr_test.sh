@@ -183,5 +183,13 @@ nl p13 docs/p13.md; sed -i 's/^k5.a = A$/k5.a = MAIN/' "$T/l-p13/i18n/en.msg"; (
 (cd "$T/l-p13" && LAND_TEST=true sh scripts/land.sh) > /dev/null 2>&1; h12=$(git -C "$T/l-p12" rev-parse HEAD)
 LAND_TEST=true lland p12 > "$T/o38"; rc=$?
 [ $rc != 0 ] && grep -q "p12 conflicts with main" "$T/o38" && [ "$(git -C "$T/l-p12" rev-parse HEAD)" = "$h12" ] && [ -z "$(git -C "$T/l-p12" status --porcelain)" ]; ok $? "a conflict in a .msg itself: stopped as before, the branch as it was (rc $rc)"
+# 39. git push and fetch run with i2cjak's GH_TOKEN (the active gh account is another one); the gate (LAND_TEST) never sees it
+HK=$(git -C "$T/main" rev-parse --path-format=absolute --git-common-dir)/hooks; mkdir -p "$HK"
+printf '#!/bin/sh\necho "${GH_TOKEN:-none}" >> %s\n' "$T/pushtok" > "$HK/pre-push"; chmod +x "$HK/pre-push"; : > "$T/pushtok"; : > "$T/gatetok"
+nl p14 docs/p14.md
+LAND_TEST="echo \"\${GH_TOKEN:-none}\" >> $T/gatetok" lland p14 > "$T/o39"; rc=$?; rm -f "$HK/pre-push"
+[ $rc = 0 ] && [ -s "$T/pushtok" ] && [ "$(sort -u "$T/pushtok")" = fake-token ] && [ "$(cat "$T/gatetok")" = none ] && ! grep -q fake-token "$T/o39"; ok $? "git push gets i2cjak's GH_TOKEN, the gate gets none, it is never printed (rc $rc)"
+! grep -n -E '(^|[^a-z_])git (fetch|push)[^#]*origin' "$ROOT/scripts/land.sh" | grep -v -E '^[0-9]+:\s*#|gitr '; ok $? "every git fetch/push against origin goes through gitr (i2cjak's token)"
+grep -q 'not running git' "$ROOT/scripts/land.sh" && (export FAKE_NOLOGIN=1; gh_prog=$LAND_GH; eval "$(grep '^gitr()' "$ROOT/scripts/land.sh")"; ! gitr --version >/dev/null 2>&1); ok $? "gitr runs no git when i2cjak's token cannot be read"
 unset FAKE_LOCKFILE
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }

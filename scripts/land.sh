@@ -63,10 +63,13 @@ ghi() { GH_TOKEN=$("$gh_prog" auth token --user i2cjak 2>/dev/null) || GH_TOKEN=
     [ "$who" = i2cjak ] || die "refusing 'gh $1 $2': the token it would use is ${who:-unknown} on GitHub, not i2cjak (gh auth token --user i2cjak must be i2cjak's; never gh auth switch or login)";; esac
   "$gh_prog" "$@"; }
 "$gh_prog" auth token --user i2cjak >/dev/null 2>&1 || die "no gh login for i2cjak (gh auth login as i2cjak; the active account is not used)"
+# git against origin as i2cjak too (the credential helper is gh's, which would use the active account): the token is in the environment of that one
+# git process alone (a subshell; never printed, stored, or exported into the gate), and nothing switches the active gh account
+gitr() { ( GH_TOKEN=$("$gh_prog" auth token --user i2cjak 2>/dev/null) || GH_TOKEN=; [ -n "$GH_TOKEN" ] || { echo "land.sh: no gh token for i2cjak: not running git $1 as another account" >&2; exit 1; }; export GH_TOKEN; exec git "$@" ); }
 pr_number() { ghi pr list -R "$repo" --head "$br" --state open --json number -q '.[0].number' 2>/dev/null || true; }
 # A stale copy of this script (a worktree made before main's land.sh changed) must not run: an older land.sh pushed straight to main. Refused when
 # origin/main's scripts/land.sh differs from this one AND this one is a version main has had (a copy ahead of main, a change being landed, is fine).
-git fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
+gitr fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
 if mine=$(git hash-object "$LAND_COPY") && cur=$(git rev-parse -q --verify origin/main:scripts/land.sh) && [ "$mine" != "$cur" ]; then
   for c in $(git log --format=%H origin/main -- scripts/land.sh); do
     [ "$(git rev-parse -q --verify "$c:scripts/land.sh" 2>/dev/null)" = "$mine" ] && die "this scripts/land.sh is older than origin/main's: rebase on origin/main (git rebase origin/main), then run it again"
@@ -105,7 +108,7 @@ catalogs_only() { local top c f out made=
   [ ! -f "$top/scripts/i18n-gate.sh" ] || bash "$top/scripts/i18n-gate.sh" > /dev/null || { say "rebase ($1): the catalogs made again do not check (above)"; return 1; }
   say "rebase ($1): onto main $(git rev-parse --short origin/main), its catalog conflicts resolved by the generators"; }
 rebase_or_stop() { # rebase_or_stop WHEN: onto origin/main as it is now; a conflict stops the land (the lock, if held, goes with this process)
-  git fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
+  gitr fetch -q origin main || die "git fetch origin main failed (offline?); nothing pushed"
   pre=$(git rev-parse HEAD)
   if ! git rebase -q origin/main && ! catalogs_only "$1"; then
     if [ -d "$(git rev-parse --git-path rebase-merge)" ] || [ -d "$(git rev-parse --git-path rebase-apply)" ]; then
@@ -155,9 +158,9 @@ while :; do
     bash "$(git rev-parse --show-toplevel)/scripts/i18n-gate.sh" > /dev/null || die "after the rebase onto main in the land lock, $br's i18n catalogs are stale (above): run the generator it names, commit, and land again; nothing pushed"
   fi
   # the branch: forced with a lease (a rebase rewrote it; nothing else pushes to a lane's branch)
-  git fetch -q origin "$br" 2>/dev/null || true
+  gitr fetch -q origin "$br" 2>/dev/null || true
   [ "$br" != main ] && [ "$br" != master ] || die "refusing to push $br: land.sh never pushes to main, only a lane's branch (main takes the pull request's merge)"
-  git push -q --force-with-lease origin "HEAD:refs/heads/$br" || die "could not push $br to origin (see above); nothing landed"
+  gitr push -q --force-with-lease origin "HEAD:refs/heads/$br" || die "could not push $br to origin (see above); nothing landed"
   num=$(pr_number)
   if [ -z "$num" ]; then
     url=$(ghi pr create -R "$repo" --fill --base main --head "$br") || die "could not open the pull request for $br"
@@ -203,7 +206,7 @@ while :; do
 done
 say "the land lock was held $(( $(date +%s) - h0 ))s for the merge"
 # After the merge nothing may turn the result non-zero but a failed fast-forward of local main (and that says the merge is done).
-if ! git fetch -q origin main; then say "the merge of ${num:+PR #$num }is DONE, but git fetch origin main failed here; local main is not updated (run: git fetch origin main, then fast-forward main)"; exit 0; fi
+if ! gitr fetch -q origin main; then say "the merge of ${num:+PR #$num }is DONE, but git fetch origin main failed here; local main is not updated (run: git fetch origin main, then fast-forward main)"; exit 0; fi
 # local main follows what GitHub made of the commits (a rebase merge rewrites them: the branch's own shas are not main's): fast-forward it in the checkout that has it
 tip=$(git rev-parse origin/main)
 mainwt=$(git worktree list --porcelain | awk '/^worktree /{w=substr($0,10)} /^branch refs\/heads\/main$/{print w}')
