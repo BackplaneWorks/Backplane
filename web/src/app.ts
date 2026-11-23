@@ -322,7 +322,25 @@ function mountApp(): void {
     },
     onNewThread: (projectId) => { void createThread(projectId); },
     onSelectBot: (bot) => { void openThread(bot.thread); },
+    onQuickOpenViewer: (projectId, kind) => {
+      const existing = threads.find((th) => th.project === projectId && !th.archived && !th.swarm);
+      const go = async (): Promise<void> => {
+        if (existing) await openThread(existing.id);
+        else await createThread(projectId);
+        if (selectedThreadId) {
+          activeRailKind = kind;
+          rail.setActive(kind);
+          viewerController?.open(kind, selectedThreadId);
+        }
+      };
+      void go();
+    },
     onThreadAct: (id, action) => { void runThreadAct(id, action); },
+    onSnoozeRow: (value) => {
+      void hub.rpc("sidebar.act", { action: "row-snooze", value })
+        .then(() => refreshSections())
+        .catch(() => {});
+    },
     onToggleSection: (toggle) => {
       if (openSectionFolds.has(toggle)) openSectionFolds.delete(toggle);
       else openSectionFolds.add(toggle);

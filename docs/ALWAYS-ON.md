@@ -171,6 +171,18 @@ Setup's sub-step shows each row as Signed in / Sign in there / Not on that machi
      A setting, off by default (Settings, Appearance, "Group projects", `sidebar.groups`): off, the rest stays in Active, newest first, and
      only a group the person made (Move to group, New group…) is a section.
   6. **Quiet:** nothing for 2 weeks; auto-collapsed, never deleted, searchable.
+- **D12, revised Nov 23 (the crew band, the inbox, the bench):** with forty projects the bots and rooms were a screen below the list, and
+  "Active" held nearly every project. Now, top to bottom:
+  1. **The crew band**, above the list and never scrolled with it: Bub, the bots as one strip of cats (name and note under the pointer, a red
+     mark on one that waits), the rooms as `#name`, each with its `+`.
+  2. **Needs you**, then **Running** (every project's running threads in one list, not repeated under their projects), then **Snoozed**
+     (folded; `ThreadSnoozed`, the row's clock offers 1 hour, Tomorrow, 1 week; an open ask is never snoozed away). A row is two lines: its
+     title, then its status as a word (`label`, `tone`: Approve, Input, Sign in, Failed, Stopped, Working, Waiting, Done), its project and its
+     age. No status dots: a word reads at a glance. A stop settles in one press (`settle`).
+  3. **Pinned** projects, then **Recent**: the eight projects the person was in last (`sidebar.visit.<project id>`, written when a thread or the
+     project's page is opened, at most once in ten minutes; never visited: by last activity), so a board reopened daily stays at hand with no
+     agent activity and a merged software project sinks by itself. A hardware project (KiCad files) carries a board glyph (`hasBoard`).
+  4. **All projects** (the rest, by name, one folded line), then **Quiet**.
 - **A project's page:** running, then needs you, then recent, with done threads behind "Done (n)".
 - **Ctrl+K** jumps to any project or thread on any machine (registry-backed).
 - Same on GPUI, iOS and Android: the hub presents it (present/screen.rs sections), the clients draw sections generically.
