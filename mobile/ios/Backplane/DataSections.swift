@@ -90,7 +90,8 @@ struct DStatusPill: View {
     let pill: HomePill
     private var color: Color { switch pill.tone { case "bad": BackplaneDesign.bad; case "run": BackplaneDesign.accent; case "ok": BackplaneDesign.ok; default: BackplaneDesign.dim } }
     var body: some View {
-        let solid = pill.tone == "bad"
+        // solid when the person must act (approve, answer, sign in); a stop is red too, as a line: it waits for nobody
+        let solid = pill.tone == "bad" && pill.label != "Failed" && pill.label != "Stopped"
         HStack(spacing: 4) {
             Image(systemName: pill.symbol).font(.system(size: 10, weight: .bold))
             Text(Tr.t(pill.label)).dmono(11, bold: true).lineLimit(1)
