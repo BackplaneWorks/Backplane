@@ -11,7 +11,7 @@ impl ModelRef {
     /// The agent's `<references>` line.
     pub fn line(&self) -> String { format!("model {}/{}: {}", self.provider, self.model, match self.state { "ok" => "usable", "unavailable" => "listed but not usable now", _ => "not a model this hub lists" }) }
 }
-fn slug(c: char) -> bool { c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '+') }
+fn slug(c: char) -> bool { c.is_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':' | '+' | '[' | ']') }
 
 /// The `&word`s of a text, in order: a `&` that begins a word (start of text or after whitespace/an opening bracket or quote) then slug characters containing a `/`
 /// (a bare `&sonnet` has no provider: it is `unknown`, shown so, never guessed). Trailing `.`, `,`, `:`, `/` are punctuation, not the id.
@@ -21,7 +21,15 @@ pub fn words(text: &str) -> Vec<String> {
         let start = i == 0 || cs[i - 1].is_whitespace() || matches!(cs[i - 1], '(' | '[' | '{' | '"' | '\'' | '`' | ',');
         if cs[i] == '&' && start {
             let mut j = i + 1; while j < cs.len() && slug(cs[j]) { j += 1 }
-            while j > i + 1 && matches!(cs[j - 1], '.' | ',' | ':' | '/') { j -= 1 }
+            while j > i + 1 {
+                if matches!(cs[j - 1], '.' | ',' | ':' | '/') { j -= 1; continue }
+                if cs[j - 1] == ']' {
+                    let opens = cs[i + 1..j].iter().filter(|&&c| c == '[').count();
+                    let closes = cs[i + 1..j].iter().filter(|&&c| c == ']').count();
+                    if closes > opens { j -= 1; continue }
+                }
+                break;
+            }
             if j > i + 1 { let w: String = cs[i..j].iter().collect(); if !out.contains(&w) { out.push(w) } }
             i = j.max(i + 1);
         } else { i += 1 }
@@ -53,6 +61,7 @@ mod tests {
         assert_eq!(words("a&b rock&roll && &"), Vec::<String>::new(), "mid-word and bare ampersands are text");
         assert_eq!(words("&claude/opus &claude/opus"), ["&claude/opus"], "once each");
         assert_eq!(words("see &opencode/openai/gpt-5."), ["&opencode/openai/gpt-5"], "the first slash splits, the last dot is punctuation");
+        assert_eq!(words("try &claude/claude-fable-5-2[1m], [&claude/opus] and [&claude/claude-fable-5-2[1m]]."), ["&claude/claude-fable-5-2[1m]", "&claude/opus"]);
     }
     #[test] fn each_reference_is_ok_unknown_or_unavailable_and_none_changes_a_thread() {
         let r = resolve("use &claude/sonnet, &codex/gpt-6.1-sol, &claude/nope, &sonnet, &opencode/openai/gpt-5 and &zed/x", &all());

@@ -1,7 +1,7 @@
 //! The timeline's text: Markdown blocks drawn as styled, wrapped, selectable text (selection runs across blocks and
 //! messages), links, code blocks with Copy and light highlighting, tables, and images. What to draw comes from the hub's
 //! nodes (screens::md); this file only lays them out and answers the pointer. The pure rules are in md.rs and select.rs.
-use super::{images::Slot, md::{self, Align, Block, Dim, Img, Inline, Link, Span, Tok}, select::{self, Pos, Selection, Text}};
+use super::{images::Slot, md::{self, Align, Block, Dim, Img, Inline, Link, ModelChip, Span, Tok, UserSeg}, select::{self, Pos, Selection, Text}};
 use crate::{art, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
@@ -26,7 +26,7 @@ pub struct Registry {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
-pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: usize, pub links: Vec<(Range<usize>, Link)>, pub layout: Option<TextLayout> }
+pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: usize, pub links: Vec<(Range<usize>, Link)>, pub layout: Option<BlockLayout> }
 pub type Reg = Rc<RefCell<Registry>>;
 /// The viewer page's code blocks' Copy places are numbered from here (`copy:1000`...), the thread's rows' from 0: each part may draw without the other.
 pub const VIEWER_COPIES: usize = 1000;
@@ -302,7 +302,629 @@ impl Element for SelText {
                 if hot.iter().any(|(h, shown)| h.iter().any(|b| b.contains(&e.position)) != *shown) { window.refresh(); }
             });
         }
-        let mut r = self.reg.borrow_mut(); if let Some(o) = r.at(&self.id, self.idx) { r.blocks[o].layout = Some(layout); }
+        let mut r = self.reg.borrow_mut(); if let Some(o) = r.at(&self.id, self.idx) { r.blocks[o].layout = Some(BlockLayout::Text(layout)); }
+    }
+}
+
+/// Stored layout of one painted text block (plain `StyledText` or inline-chip `FlowText`).
+#[derive(Clone)]
+pub enum BlockLayout {
+    Text(TextLayout),
+    Flow(FlowLayout),
+}
+
+impl BlockLayout {
+    pub fn bounds(&self) -> Bounds<Pixels> {
+        match self { Self::Text(l) => l.bounds(), Self::Flow(l) => l.bounds }
+    }
+    pub fn line_height(&self) -> Pixels {
+        match self { Self::Text(l) => l.line_height(), Self::Flow(l) => l.line_height }
+    }
+    pub fn index_for_position(&self, p: Point<Pixels>) -> Result<usize, usize> {
+        match self { Self::Text(l) => l.index_for_position(p), Self::Flow(l) => l.index_for_position(p) }
+    }
+    pub fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        match self { Self::Text(l) => l.position_for_index(index), Self::Flow(l) => l.position_for_index(index) }
+    }
+}
+
+#[derive(Clone)]
+pub enum FlowItem {
+    Text { x: Pixels, text_y: Pixels, range: Range<usize>, shaped: ShapedLine },
+    Chip { rect: Bounds<Pixels>, range: Range<usize>, amp: ShapedLine, label: ShapedLine, kind: ShapedLine, amp_x: Pixels, label_x: Pixels, kind_x: Pixels },
+}
+
+#[derive(Clone)]
+pub struct FlowLine {
+    pub top: Pixels,
+    pub height: Pixels,
+    pub text_y: Pixels,
+    pub range: Range<usize>,
+    pub has_chip: bool,
+    pub items: Vec<FlowItem>,
+}
+
+#[derive(Clone)]
+pub struct FlowLayout {
+    pub bounds: Bounds<Pixels>,
+    pub line_height: Pixels,
+    pub text_len: usize,
+    pub lines: Vec<FlowLine>,
+}
+
+impl FlowLayout {
+    pub fn index_for_position(&self, p: Point<Pixels>) -> Result<usize, usize> {
+        if self.lines.is_empty() || p.y < self.bounds.top() { return Err(0) }
+        for vl in &self.lines {
+            if p.y <= vl.top + vl.height {
+                let Some(first) = vl.items.first() else { return Err(vl.range.start) };
+                let first_x = match first { FlowItem::Text { x, .. } => *x, FlowItem::Chip { rect, .. } => rect.left() };
+                if p.x < first_x { return Err(vl.range.start) }
+                for it in &vl.items {
+                    match it {
+                        FlowItem::Text { x, range, shaped, .. } => {
+                            if p.x <= *x + shaped.width {
+                                let off = shaped.closest_index_for_x((p.x - *x).max(px(0.)));
+                                return Ok((range.start + off).min(range.end));
+                            }
+                        }
+                        FlowItem::Chip { rect, range, .. } => {
+                            if p.x <= rect.right() {
+                                let mid = rect.left() + rect.size.width / 2.;
+                                return Ok(if p.x < mid { range.start } else { range.end });
+                            }
+                        }
+                    }
+                }
+                return Err(vl.range.end);
+            }
+        }
+        Err(self.text_len)
+    }
+
+    pub fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
+        if index > self.text_len { return None }
+        for vl in &self.lines {
+            if index < vl.range.start { return Some(point(self.bounds.left(), vl.top + vl.text_y)) }
+            if index <= vl.range.end {
+                for it in &vl.items {
+                    match it {
+                        FlowItem::Text { x, text_y, range, shaped } if index >= range.start && index <= range.end => {
+                            return Some(point(*x + shaped.x_for_index(index - range.start), vl.top + *text_y));
+                        }
+                        FlowItem::Chip { rect, range, .. } if index >= range.start && index <= range.end => {
+                            let x = if index == range.end { rect.right() } else { rect.left() };
+                            return Some(point(x, vl.top + vl.text_y));
+                        }
+                        _ => {}
+                    }
+                }
+                return Some(point(self.bounds.left(), vl.top + vl.text_y));
+            }
+        }
+        None
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct WrapAtom {
+    width: f32,
+    is_space: bool,
+    is_chip: bool,
+    glue_prev: bool,
+}
+
+/// Groups wrappable atoms into visual lines `(atom_range, has_chip)` under optional `wrap_w`, keeping
+/// non-space clusters (e.g. a chip and adjacent punctuation or brackets) on one line and leaving
+/// trailing spaces on the line before a soft wrap.
+fn wrap_flow_lines(atoms: &[WrapAtom], wrap_w: Option<f32>) -> Vec<(Range<usize>, bool)> {
+    if atoms.is_empty() { return vec![(0..0, false)] }
+    let Some(max_w) = wrap_w else {
+        return vec![(0..atoms.len(), atoms.iter().any(|a| a.is_chip))];
+    };
+    struct Cluster { range: Range<usize>, width: f32, is_space: bool, has_chip: bool }
+    let mut clusters: Vec<Cluster> = Vec::new();
+    for (i, a) in atoms.iter().enumerate() {
+        if a.glue_prev && clusters.last().is_some_and(|c| !c.is_space) && !a.is_space {
+            let c = clusters.last_mut().unwrap();
+            c.range.end = i + 1;
+            c.width += a.width;
+            c.has_chip |= a.is_chip;
+        } else {
+            clusters.push(Cluster { range: i..i + 1, width: a.width, is_space: a.is_space, has_chip: a.is_chip });
+        }
+    }
+    let mut out = Vec::new();
+    let (mut line_start, mut line_end, mut cur_w, mut has_chip) = (0usize, 0usize, 0.0f32, false);
+    for cl in clusters {
+        let empty = line_start == line_end;
+        if empty {
+            line_start = cl.range.start;
+            line_end = cl.range.end;
+            cur_w = cl.width;
+            has_chip = cl.has_chip;
+            continue;
+        }
+        if cl.is_space {
+            line_end = cl.range.end;
+            cur_w += cl.width;
+            continue;
+        }
+        if cur_w + cl.width > max_w + 0.01 {
+            out.push((line_start..line_end, has_chip));
+            line_start = cl.range.start;
+            line_end = cl.range.end;
+            cur_w = cl.width;
+            has_chip = cl.has_chip;
+        } else {
+            line_end = cl.range.end;
+            cur_w += cl.width;
+            has_chip |= cl.has_chip;
+        }
+    }
+    out.push((line_start..line_end, has_chip));
+    out
+}
+
+#[derive(Clone)]
+enum RawPiece {
+    Span { text: String, style: md::Style, range: Range<usize> },
+    Chip { label: String, range: Range<usize> },
+}
+
+#[derive(Clone)]
+struct HardLine {
+    range: Range<usize>,
+    pieces: Vec<RawPiece>,
+}
+
+#[derive(Clone)]
+enum AtomKind {
+    Text { text: String, style: md::Style, shaped: ShapedLine },
+    Chip { amp: ShapedLine, label: ShapedLine, kind: ShapedLine, width: Pixels, height: Pixels, pad_x: Pixels, gap: Pixels },
+}
+
+#[derive(Clone)]
+struct MeasuredAtom {
+    range: Range<usize>,
+    width: f32,
+    is_space: bool,
+    is_chip: bool,
+    glue_prev: bool,
+    kind: AtomKind,
+}
+
+#[derive(Clone)]
+enum BuiltItem {
+    Text { x: Pixels, range: Range<usize>, shaped: ShapedLine },
+    Chip { x: Pixels, w: Pixels, h: Pixels, pad_x: Pixels, gap: Pixels, range: Range<usize>, amp: ShapedLine, label: ShapedLine, kind: ShapedLine },
+}
+
+#[derive(Clone)]
+struct BuiltLine {
+    top: Pixels,
+    height: Pixels,
+    text_y: Pixels,
+    range: Range<usize>,
+    has_chip: bool,
+    items: Vec<BuiltItem>,
+}
+
+#[derive(Clone)]
+struct BuiltFlow {
+    wrap_w: Option<f32>,
+    size: Size<Pixels>,
+    lh: Pixels,
+    lines: Vec<BuiltLine>,
+}
+
+fn span_run(style: &md::Style, base_font: &Font, light: bool) -> TextRun {
+    let c = |n: &str| theme::color(light, n);
+    let mut font = base_font.clone();
+    if style.bold { font.weight = FontWeight::BOLD; }
+    if style.italic { font.style = FontStyle::Italic; }
+    if style.code { font = art::mono_font(); }
+    let button = style.link.as_ref().is_some_and(|l| l.href.starts_with("backplane://settings/") || l.href.starts_with("backplane://plan/"));
+    if button { font.weight = FontWeight::BOLD; }
+    let color = if style.link.is_some() { c("accent") } else if style.small { c("dim") } else { c("text") };
+    TextRun {
+        len: 0,
+        font,
+        color: color.into(),
+        background_color: None,
+        underline: (style.link.is_some() && !button).then(|| UnderlineStyle { color: Some(color.into()), thickness: px(1.), wavy: false }),
+        strikethrough: style.strike.then(|| StrikethroughStyle { color: Some(color.into()), thickness: px(1.) }),
+    }
+}
+
+fn shape_text_piece(text: &str, style: &md::Style, base_font: &Font, font_size: Pixels, light: bool, window: &Window) -> ShapedLine {
+    let mut run = span_run(style, base_font, light);
+    run.len = text.len();
+    window.text_system().shape_line(SharedString::from(text.to_string()), font_size, &[run], None)
+}
+
+fn shape_truncated_label(label: &str, max_w: Pixels, base_font: &Font, font_size: Pixels, color: Rgba, window: &Window) -> ShapedLine {
+    let make = |s: &str| {
+        let run = TextRun { len: s.len(), font: base_font.clone(), color: color.into(), background_color: None, underline: None, strikethrough: None };
+        window.text_system().shape_line(SharedString::from(s.to_string()), font_size, &[run], None)
+    };
+    let full = make(label);
+    if full.width <= max_w { return full; }
+    let chars: Vec<char> = label.chars().collect();
+    let mut lo = 1usize;
+    let mut hi = chars.len();
+    let mut best = make("…");
+    while lo <= hi {
+        let mid = (lo + hi) / 2;
+        let cand: String = chars[..mid].iter().collect::<String>() + "…";
+        let shaped = make(&cand);
+        if shaped.width <= max_w {
+            best = shaped;
+            lo = mid + 1;
+        } else {
+            if mid == 0 { break; }
+            hi = mid - 1;
+        }
+    }
+    best
+}
+
+fn split_hard_lines(segs: &[UserSeg]) -> Vec<HardLine> {
+    let mut out = Vec::new();
+    let mut cur = Vec::new();
+    let mut byte_at = 0usize;
+    let mut line_start = 0usize;
+    for seg in segs {
+        match seg {
+            UserSeg::Model(m) => {
+                let len = m.word.len();
+                cur.push(RawPiece::Chip { label: m.label.clone(), range: byte_at..byte_at + len });
+                byte_at += len;
+            }
+            UserSeg::Span(sp) => {
+                for (i, part) in sp.text.split('\n').enumerate() {
+                    if i > 0 {
+                        out.push(HardLine { range: line_start..byte_at, pieces: std::mem::take(&mut cur) });
+                        byte_at += 1;
+                        line_start = byte_at;
+                    }
+                    if !part.is_empty() {
+                        let len = part.len();
+                        cur.push(RawPiece::Span { text: part.to_string(), style: sp.style.clone(), range: byte_at..byte_at + len });
+                        byte_at += len;
+                    }
+                }
+            }
+        }
+    }
+    out.push(HardLine { range: line_start..byte_at, pieces: cur });
+    out
+}
+
+fn flow_range_rects(lines: &[FlowLine], r: &Range<usize>, lh: Pixels) -> Vec<Bounds<Pixels>> {
+    let mut out = Vec::new();
+    for vl in lines {
+        if r.end <= vl.range.start || r.start >= vl.range.end { continue }
+        for it in &vl.items {
+            match it {
+                FlowItem::Text { x, text_y, range, shaped } => {
+                    let a = r.start.max(range.start);
+                    let b = r.end.min(range.end);
+                    if a < b {
+                        let x0 = *x + shaped.x_for_index(a - range.start);
+                        let x1 = *x + shaped.x_for_index(b - range.start);
+                        out.push(Bounds::from_corners(point(x0, vl.top + *text_y), point(x1, vl.top + *text_y + lh)));
+                    }
+                }
+                FlowItem::Chip { rect, range, .. } => {
+                    if r.start < range.end && r.end > range.start {
+                        out.push(*rect);
+                    }
+                }
+            }
+        }
+    }
+    out
+}
+
+/// Selectable, wrapping paragraph element that renders resolved `&provider/model` references as
+/// inline bordered chips while keeping raw text selection/copy (`&provider/model`) and link hits intact.
+pub struct FlowText {
+    raw_text: String,
+    hard_lines: Vec<HardLine>,
+    light: bool,
+    reg: Reg,
+    id: String,
+    idx: usize,
+    shaded: Vec<Range<usize>>,
+    measured: Rc<RefCell<Option<BuiltFlow>>>,
+    layout: Option<FlowLayout>,
+}
+
+impl FlowText {
+    pub fn new(reg: &Reg, raw_text: &str, segs: Vec<UserSeg>, light: bool) -> Self {
+        let mut r = reg.borrow_mut();
+        let mut at = 0usize;
+        let mut links = Vec::new();
+        let mut shaded = Vec::new();
+        for seg in &segs {
+            match seg {
+                UserSeg::Span(sp) => {
+                    if let Some(l) = &sp.style.link { links.push((at..at + sp.text.len(), l.clone())); }
+                    let button = sp.style.link.as_ref().is_some_and(|l| l.href.starts_with("backplane://settings/") || l.href.starts_with("backplane://plan/"));
+                    if !sp.text.is_empty() && (sp.style.code || sp.style.kbd || button) { shaded.push(at..at + sp.text.len()); }
+                    at += sp.text.len();
+                }
+                UserSeg::Model(m) => { at += m.word.len(); }
+            }
+        }
+        let entry = r.entry;
+        let (id, idx) = (r.entry_id.clone(), r.next_idx());
+        r.blocks.push(Info { text: raw_text.to_string(), entry, id: id.clone(), idx, links, layout: None });
+        drop(r);
+        let hard_lines = split_hard_lines(&segs);
+        Self { raw_text: raw_text.to_string(), hard_lines, light, reg: reg.clone(), id, idx, shaded, measured: Rc::new(RefCell::new(None)), layout: None }
+    }
+
+    fn build(hard_lines: &[HardLine], light: bool, wrap_w: Option<f32>, style: &TextStyle, window: &Window) -> BuiltFlow {
+        let c = |n: &str| theme::color(light, n);
+        let sc = crate::scale::s();
+        let font_size = style.font_size.to_pixels(window.rem_size());
+        let lh = style.line_height.to_pixels(font_size.into(), window.rem_size());
+        let base_font = style.font();
+        let chip_fs = crate::scale::tpx(12.);
+        let kind_fs = crate::scale::tpx(10.);
+        let pad_x = px(6. * sc);
+        let gap = px(5. * sc);
+        let chip_h = lh.max(crate::scale::tpx(19.));
+        let chip_line_h = lh + px(4. * sc);
+        let max_label_w = wrap_w.map_or(px(220. * sc), |w| px((w - 72. * sc).max(40. * sc)).min(px(220. * sc)));
+        let kind_word = crate::i18n::trs("model");
+
+        let mut built_lines = Vec::new();
+        let mut y = px(0.);
+        let mut max_w = px(0.);
+
+        for hl in hard_lines {
+            if hl.pieces.is_empty() {
+                built_lines.push(BuiltLine { top: y, height: lh, text_y: px(0.), range: hl.range.clone(), has_chip: false, items: Vec::new() });
+                y += lh;
+                continue;
+            }
+            let mut atoms: Vec<MeasuredAtom> = Vec::new();
+            for p in &hl.pieces {
+                match p {
+                    RawPiece::Chip { label, range } => {
+                        let mut amp_font = base_font.clone();
+                        amp_font.weight = FontWeight::BOLD;
+                        let amp = window.text_system().shape_line("&".into(), chip_fs, &[TextRun { len: 1, font: amp_font, color: c("ok").into(), background_color: None, underline: None, strikethrough: None }], None);
+                        let lbl = shape_truncated_label(label, max_label_w, &base_font, chip_fs, c("text"), window);
+                        let kind = window.text_system().shape_line(SharedString::from(kind_word.clone()), kind_fs, &[TextRun { len: kind_word.len(), font: base_font.clone(), color: c("faint").into(), background_color: None, underline: None, strikethrough: None }], None);
+                        let w = pad_x * 2. + amp.width + gap + lbl.width + gap + kind.width;
+                        let glue_prev = atoms.last().is_some_and(|prev| !prev.is_space);
+                        atoms.push(MeasuredAtom {
+                            range: range.clone(),
+                            width: f32::from(w),
+                            is_space: false,
+                            is_chip: true,
+                            glue_prev,
+                            kind: AtomKind::Chip { amp, label: lbl, kind, width: w, height: chip_h, pad_x, gap },
+                        });
+                    }
+                    RawPiece::Span { text, style: sp_style, range } => {
+                        let mut pos = 0usize;
+                        while pos < text.len() {
+                            let ws = text[pos..].chars().next().unwrap().is_whitespace();
+                            let mut end = pos;
+                            for ch in text[pos..].chars() {
+                                if ch.is_whitespace() != ws { break }
+                                end += ch.len_utf8();
+                            }
+                            let mut sub_start = pos;
+                            let mut first_sub = true;
+                            while sub_start < end {
+                                let chunk = &text[sub_start..end];
+                                let shaped = shape_text_piece(chunk, sp_style, &base_font, font_size, light, window);
+                                let glue_prev = first_sub && !ws && atoms.last().is_some_and(|prev| !prev.is_space);
+                                if !ws && let Some(mw) = wrap_w && f32::from(shaped.width) > mw && chunk.chars().count() > 1 {
+                                    let mut cut = shaped.closest_index_for_x(px(mw));
+                                    if cut == 0 { cut = chunk.chars().next().map_or(chunk.len(), char::len_utf8); }
+                                    while !chunk.is_char_boundary(cut) { cut += 1; }
+                                    let part = &chunk[..cut];
+                                    let part_shaped = shape_text_piece(part, sp_style, &base_font, font_size, light, window);
+                                    let r = (range.start + sub_start)..(range.start + sub_start + cut);
+                                    atoms.push(MeasuredAtom {
+                                        range: r,
+                                        width: f32::from(part_shaped.width),
+                                        is_space: false,
+                                        is_chip: false,
+                                        glue_prev,
+                                        kind: AtomKind::Text { text: part.to_string(), style: sp_style.clone(), shaped: part_shaped },
+                                    });
+                                    sub_start += cut;
+                                    first_sub = false;
+                                } else {
+                                    let r = (range.start + sub_start)..(range.start + end);
+                                    atoms.push(MeasuredAtom {
+                                        range: r,
+                                        width: f32::from(shaped.width),
+                                        is_space: ws,
+                                        is_chip: false,
+                                        glue_prev,
+                                        kind: AtomKind::Text { text: chunk.to_string(), style: sp_style.clone(), shaped },
+                                    });
+                                    sub_start = end;
+                                }
+                            }
+                            pos = end;
+                        }
+                    }
+                }
+            }
+
+            let wrap_atoms: Vec<WrapAtom> = atoms.iter().map(|a| WrapAtom { width: a.width, is_space: a.is_space, is_chip: a.is_chip, glue_prev: a.glue_prev }).collect();
+            for (atom_range, has_chip) in wrap_flow_lines(&wrap_atoms, wrap_w) {
+                let line_h = if has_chip { chip_line_h } else { lh };
+                let text_y = (line_h - lh) / 2.;
+                let line_atoms = &atoms[atom_range];
+                let line_byte_range = line_atoms.first().map(|a| a.range.start).unwrap_or(hl.range.start)..line_atoms.last().map(|a| a.range.end).unwrap_or(hl.range.end);
+
+                // Merge adjacent text atoms with identical style so prose keeps natural kerning and single ShapedLine layout per span.
+                let mut merged: Vec<BuiltItem> = Vec::new();
+                let mut pending: Option<(String, md::Style, Range<usize>)> = None;
+                let mut x = px(0.);
+                let flush_pending = |pending: &mut Option<(String, md::Style, Range<usize>)>, x: &mut Pixels, merged: &mut Vec<BuiltItem>| {
+                    if let Some((txt, st, rng)) = pending.take() {
+                        let shaped = shape_text_piece(&txt, &st, &base_font, font_size, light, window);
+                        let w = shaped.width;
+                        merged.push(BuiltItem::Text { x: *x, range: rng, shaped });
+                        *x += w;
+                    }
+                };
+                for a in line_atoms {
+                    match &a.kind {
+                        AtomKind::Text { text, style: st, .. } => {
+                            if let Some((ptxt, pst, prng)) = pending.as_mut() && *pst == *st && prng.end == a.range.start {
+                                ptxt.push_str(text);
+                                prng.end = a.range.end;
+                            } else {
+                                flush_pending(&mut pending, &mut x, &mut merged);
+                                pending = Some((text.clone(), st.clone(), a.range.clone()));
+                            }
+                        }
+                        AtomKind::Chip { amp, label, kind, width, height, pad_x, gap } => {
+                            flush_pending(&mut pending, &mut x, &mut merged);
+                            merged.push(BuiltItem::Chip { x, w: *width, h: *height, pad_x: *pad_x, gap: *gap, range: a.range.clone(), amp: amp.clone(), label: label.clone(), kind: kind.clone() });
+                            x += *width;
+                        }
+                    }
+                }
+                flush_pending(&mut pending, &mut x, &mut merged);
+                max_w = max_w.max(x.ceil());
+                built_lines.push(BuiltLine { top: y, height: line_h, text_y, range: line_byte_range, has_chip, items: merged });
+                y += line_h;
+            }
+        }
+
+        let out_w = wrap_w.map_or(max_w, |mw| max_w.min(px(mw)));
+        BuiltFlow { wrap_w, size: size(out_w, y.max(lh)), lh, lines: built_lines }
+    }
+}
+
+impl IntoElement for FlowText { type Element = Self; fn into_element(self) -> Self { self } }
+
+fn flow_needs_rebuild(cached_wrap_w: Option<f32>, cached_w: f32, cached_lines: usize, bounds_w: f32) -> bool {
+    cached_w > bounds_w + 0.5 || cached_wrap_w.is_some_and(|w| bounds_w > w + 0.5 && cached_lines > 1)
+}
+
+impl Element for FlowText {
+    type RequestLayoutState = ();
+    type PrepaintState = Vec<(Hitbox, CursorStyle)>;
+    fn id(&self) -> Option<ElementId> { None }
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> { None }
+
+    fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, window: &mut Window, _: &mut App) -> (LayoutId, ()) {
+        let style = window.text_style();
+        let hard_lines = self.hard_lines.clone();
+        let light = self.light;
+        let cache = self.measured.clone();
+        let layout_id = window.request_measured_layout(Default::default(), move |known, avail, window, _| {
+            let wrap_w = known.width.or(match avail.width { AvailableSpace::Definite(x) => Some(x), _ => None }).map(f32::from);
+            let mut g = cache.borrow_mut();
+            if g.as_ref().is_none_or(|b| b.wrap_w != wrap_w) {
+                *g = Some(FlowText::build(&hard_lines, light, wrap_w, &style, window));
+            }
+            g.as_ref().unwrap().size
+        });
+        (layout_id, ())
+    }
+
+    fn prepaint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), window: &mut Window, _: &mut App) -> Vec<(Hitbox, CursorStyle)> {
+        let style = window.text_style();
+        let bounds_w = f32::from(bounds.size.width);
+        let built = {
+            let mut g = self.measured.borrow_mut();
+            let need_rebuild = g.as_ref().is_none_or(|b| flow_needs_rebuild(b.wrap_w, f32::from(b.size.width), b.lines.len(), bounds_w));
+            if need_rebuild {
+                *g = Some(FlowText::build(&self.hard_lines, self.light, Some(bounds_w), &style, window));
+            }
+            g.as_ref().unwrap().clone()
+        };
+        let lines = built.lines.into_iter().map(|vl| {
+            let top = bounds.top() + vl.top;
+            let items = vl.items.into_iter().map(|it| match it {
+                BuiltItem::Text { x, range, shaped } => FlowItem::Text { x: bounds.left() + x, text_y: vl.text_y, range, shaped },
+                BuiltItem::Chip { x, w, h, pad_x, gap, range, amp, label, kind } => {
+                    let chip_y = top + (vl.height - h) / 2.;
+                    let rect = Bounds::new(point(bounds.left() + x, chip_y), size(w, h));
+                    let amp_x = rect.left() + pad_x;
+                    let label_x = amp_x + amp.width + gap;
+                    let kind_x = label_x + label.width + gap;
+                    FlowItem::Chip { rect, range, amp, label, kind, amp_x, label_x, kind_x }
+                }
+            }).collect();
+            FlowLine { top, height: vl.height, text_y: vl.text_y, range: vl.range, has_chip: vl.has_chip, items }
+        }).collect();
+        let layout = FlowLayout { bounds, line_height: built.lh, text_len: self.raw_text.len(), lines };
+
+        let mut out = vec![(window.insert_hitbox(bounds, HitboxBehavior::Normal), CursorStyle::IBeam)];
+        let links: Vec<(Range<usize>, String)> = {
+            let r = self.reg.borrow();
+            r.at(&self.id, self.idx).map(|o| r.blocks[o].links.iter().map(|(r, l)| (r.clone(), l.href.clone())).collect()).unwrap_or_default()
+        };
+        for (r, href) in links {
+            let rects = flow_range_rects(&layout.lines, &r, layout.line_height);
+            if let Some(first) = rects.first() {
+                /* i18n-ok: an e2e rect name */ crate::art::report(&format!("link:{}", href.replace(['"', '\\'], "")), *first, window.scale_factor());
+            }
+            for rect in rects {
+                out.push((window.insert_hitbox(rect, HitboxBehavior::Normal), CursorStyle::PointingHand));
+            }
+        }
+        self.layout = Some(layout);
+        out
+    }
+
+    fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&InspectorElementId>, _: Bounds<Pixels>, _: &mut (), pre: &mut Vec<(Hitbox, CursorStyle)>, window: &mut Window, cx: &mut App) {
+        let Some(layout) = self.layout.clone() else { return };
+        let c = |n: &str| theme::color(self.light, n);
+        let shade = c("raise");
+        for r in &self.shaded {
+            for q in flow_range_rects(&layout.lines, r, layout.line_height) { window.paint_quad(fill(q, shade)); }
+        }
+        let panel = c("panel");
+        let line_c = c("line");
+        for vl in &layout.lines {
+            for it in &vl.items {
+                if let FlowItem::Chip { rect, .. } = it {
+                    window.paint_quad(gpui::quad(*rect, Corners::default(), panel, Edges::all(px(1.)), line_c, BorderStyle::Solid));
+                }
+            }
+        }
+        let sel_range = { let r = self.reg.borrow(); r.at(&self.id, self.idx).and_then(|o| r.sel.within(o, r.blocks[o].text.len())) };
+        if let Some(range) = sel_range {
+            let tint = select::highlight(self.light);
+            for q in flow_range_rects(&layout.lines, &range, layout.line_height) { window.paint_quad(fill(q, tint)); }
+        }
+        for vl in &layout.lines {
+            for it in &vl.items {
+                match it {
+                    FlowItem::Text { x, text_y, shaped, .. } => {
+                        let _ = shaped.paint(point(*x, vl.top + *text_y), layout.line_height, window, cx);
+                    }
+                    FlowItem::Chip { rect, amp, label, kind, amp_x, label_x, kind_x, .. } => {
+                        let h = rect.size.height;
+                        let y = rect.top();
+                        let _ = amp.paint(point(*amp_x, y), h, window, cx);
+                        let _ = label.paint(point(*label_x, y), h, window, cx);
+                        let _ = kind.paint(point(*kind_x, y), h, window, cx);
+                    }
+                }
+            }
+        }
+        for (h, style) in pre.iter() { window.set_cursor_style(*style, h); }
+        let mut r = self.reg.borrow_mut();
+        if let Some(o) = r.at(&self.id, self.idx) { r.blocks[o].layout = Some(BlockLayout::Flow(layout)); }
     }
 }
 
@@ -314,10 +936,31 @@ fn plain_spans(s: &str) -> Vec<Span> { vec![Span { text: s.to_string(), style: D
 /// A message of short lines never wraps and keeps its snug bubble.
 /// A message with pictures is laid out in blocks too: in the snug flex bubble the pictures' wrapping row was measured on one line and painted on
 /// two, so the second picture spilled out of the bubble over the rows below and the composer.
-pub fn bubble_full_width(text: &str, attachments: &Value) -> bool { text.lines().any(|l| l.chars().count() > 60) || !split_attachments(attachments).0.is_empty() }
+pub fn bubble_full_width(text: &str, attachments: &Value) -> bool {
+    text.lines().any(|l| l.chars().count() > 60) || !split_attachments(attachments).0.is_empty()
+}
+
+/// [`bubble_full_width`] with a lower threshold when inline model chips add extra width beyond their raw `@`/`&` slug length.
+pub fn bubble_full_width_with_chips(text: &str, attachments: &Value, has_model_chips: bool) -> bool {
+    bubble_full_width(text, attachments) || (has_model_chips && text.lines().any(|l| l.chars().count() > 40))
+}
 
 /// A user's message text.
 pub fn user_text(reg: &Reg, light: bool, s: &str, refs: &[String]) -> AnyElement { text(reg, light, md::chips(md::linkify(s), refs), Kind::Body) }
+
+/// A user's message text with resolved `&provider/model` references embedded inline as chips, plus the set of model ref words embedded inline.
+pub fn user_text_with_models(reg: &Reg, light: bool, s: &str, other_refs: &[String], models: &[ModelChip]) -> (AnyElement, std::collections::HashSet<String>) {
+    if models.is_empty() { return (user_text(reg, light, s, other_refs), Default::default()) }
+    let segs = md::user_segments(s, other_refs, models);
+    let inline_words: std::collections::HashSet<String> = segs.iter().filter_map(|seg| match seg {
+        UserSeg::Model(m) => Some(m.word.clone()),
+        _ => None,
+    }).collect();
+    if inline_words.is_empty() {
+        return (user_text(reg, light, s, other_refs), inline_words);
+    }
+    (FlowText::new(reg, s, segs, light).into_any_element(), inline_words)
+}
 
 /// An invisible overlay that records where its parent was painted, for the check harness's control rectangles.
 fn copy_probe(reg: &Reg, ix: usize) -> impl IntoElement {
@@ -889,5 +1532,25 @@ mod tests {
         let a = c.get("e1", "hi", &n); let b = c.get("e1", "hi", &n);
         assert!(Rc::ptr_eq(&a, &b), "unchanged text is not parsed again");
         let d = c.get("e1", "hi there", &n); assert!(!Rc::ptr_eq(&a, &d));
+    }
+
+    #[test] fn wrap_flow_lines_keeps_chips_with_adjacent_punctuation_and_wraps_cleanly() {
+        let a = |w: f32, space: bool, chip: bool, glue: bool| WrapAtom { width: w, is_space: space, is_chip: chip, glue_prev: glue };
+        // "use " (28 + 4), chip (120), "," (4, glued), " ok" (4 + 20) at max_w = 154: chip+comma = 124, 32 + 124 = 156 > 154 -> wraps before chip!
+        let atoms = vec![a(28., false, false, false), a(4., true, false, false), a(120., false, true, false), a(4., false, false, true), a(4., true, false, false), a(20., false, false, false)];
+        assert_eq!(wrap_flow_lines(&atoms, Some(154.)), vec![(0..2, false), (2..6, true)]);
+        // Empty line still produces one line without a chip.
+        assert_eq!(wrap_flow_lines(&[], Some(200.)), vec![(0..0, false)]);
+        // "(" + chip + ")" stays together as one indivisible cluster.
+        let paren = vec![a(50., false, false, false), a(4., true, false, false), a(6., false, false, false), a(100., false, true, true), a(6., false, false, true)];
+        assert_eq!(wrap_flow_lines(&paren, Some(150.)), vec![(0..2, false), (2..5, true)]);
+    }
+
+    #[test] fn flow_needs_rebuild_reuses_snug_single_line_and_rebuilds_on_shrink_or_rewrap() {
+        assert!(!flow_needs_rebuild(None, 180., 1, 180.), "snug single-line chip keeps its layout width");
+        assert!(!flow_needs_rebuild(Some(614.), 180., 1, 614.), "exact cached width never rebuilds");
+        assert!(!flow_needs_rebuild(Some(300.), 180., 1, 500.), "single unwrapped line stays valid when wider");
+        assert!(flow_needs_rebuild(Some(614.), 250., 1, 200.), "narrower bounds trigger wrap rebuild");
+        assert!(flow_needs_rebuild(Some(300.), 290., 2, 420.), "wider bounds trigger unwrap rebuild for multi-line flow");
     }
 }

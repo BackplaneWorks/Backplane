@@ -4,6 +4,8 @@
 // with model chip on the left and accent-blue Send / red Stop on the right.
 import { t, trs } from "./i18n";
 import type { PlanModeInfo } from "./sidebar";
+// @ts-ignore virtual module injected by web/build.ts
+import { PROVIDER_MARKS } from "virtual:provider-marks";
 
 export interface SlashCommand {
   word: string;
@@ -71,13 +73,32 @@ function makePlanPlayIcon(): SVGSVGElement {
   return makeComposerIcon(["M6 4l14 8-14 8z"]);
 }
 
-function providerBadge(provider?: string): { glyph: string; color: string; title: string } {
+function providerBadge(provider?: string): { mark?: string; glyph: string; color: string; title: string } {
   const p = (provider || "").toLowerCase();
-  if (p.includes("claude") || p.includes("anthropic")) return { glyph: "A", color: "#d97706", title: "Claude" };
-  if (p.includes("codex") || p.includes("openai")) return { glyph: "O", color: "#10b981", title: "Codex" };
-  if (p.includes("gemini") || p.includes("antigravity")) return { glyph: "G", color: "#3b82f6", title: "Gemini" };
-  if (p.includes("grok")) return { glyph: "X", color: "#94a3b8", title: "Grok" };
+  if (p.includes("claude") || p.includes("anthropic")) return { mark: "claude", glyph: "A", color: "#d97757", title: "Claude" };
+  if (p.includes("codex") || p.includes("openai")) return { mark: "codex", glyph: "O", color: "#10a37f", title: "Codex" };
+  if (p.includes("gemini") || p.includes("antigravity") || p === "agy") return { mark: "antigravity", glyph: "G", color: "#4285f4", title: "Antigravity" };
+  if (p.includes("grok")) return { mark: "grok", glyph: "X", color: "#6b7280", title: "Grok" };
+  if (p.includes("muse")) return { mark: "muse", glyph: "M", color: "#8b5cf6", title: "Muse" };
+  if (p.includes("opencode")) return { mark: "opencode", glyph: "C", color: "#2563eb", title: "OpenCode" };
+  if (p.includes("omp") || p.includes("oh-my-pi")) return { mark: "omp", glyph: "Ω", color: "#c026d3", title: "Oh My Pi" };
+  if (p === "pi" || p.startsWith("pi/") || p.startsWith("@pi")) return { mark: "pi", glyph: "π", color: "#db2777", title: "Pi" };
   return { glyph: "●", color: "var(--accent)", title: provider || "Model" };
+}
+
+function makeProviderMarkSvg(mark: string): SVGSVGElement | null {
+  const info = PROVIDER_MARKS[mark];
+  if (!info || !info.d) return null;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", info.viewBox || "0 0 24 24");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("fill", "currentColor");
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", info.d);
+  svg.appendChild(path);
+  return svg;
 }
 
 export class ComposerView {
@@ -316,7 +337,9 @@ export class ComposerView {
 
   public setModelChip(chip: string, provider?: string, ctxPct?: number): void {
     const badge = providerBadge(provider);
-    this.providerMarkEl.textContent = badge.glyph;
+    const svg = badge.mark ? makeProviderMarkSvg(badge.mark) : null;
+    if (svg) this.providerMarkEl.replaceChildren(svg);
+    else this.providerMarkEl.textContent = badge.glyph;
     this.providerMarkEl.style.color = badge.color;
     this.providerMarkEl.title = badge.title;
     this.modelTextEl.textContent = chip || "default";
