@@ -3,6 +3,15 @@
 // slash-command popup (hello.commands), mentions popup, and bottom toolbar row
 // with model chip on the left and accent-blue Send / red Stop on the right.
 import { t, trs } from "./i18n";
+import {
+  applyFavoriteKeysToSnapshot,
+  buildPickerViewModel,
+  normalizeFavKey,
+  normalizeFavKeys,
+  parsePickerResponse,
+  toggleFavoriteKey,
+  type PickerSnapshot,
+} from "./model-picker-model";
 import type { PlanModeInfo } from "./sidebar";
 // @ts-ignore virtual module injected by web/build.ts
 import { PROVIDER_MARKS } from "virtual:provider-marks";
@@ -36,6 +45,11 @@ export interface ComposerCallbacks {
   onToggleVoice?: () => void;
   onCyclePlanMode?: () => void;
   onSetPlanMode?: (mode: "once" | "always" | "off") => void;
+  onLoadModelPicker?: () => Promise<unknown>;
+  onSelectModel?: (provider: string, model: string) => Promise<void> | void;
+  onSelectEffort?: (effort: string) => Promise<void> | void;
+  onToggleFavorite?: (provider: string, model: string, on: boolean) => Promise<string[] | null | void> | void;
+  getFavoriteModels?: () => string[];
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -71,6 +85,22 @@ function makePlanDocIcon(): SVGSVGElement {
 
 function makePlanPlayIcon(): SVGSVGElement {
   return makeComposerIcon(["M6 4l14 8-14 8z"]);
+}
+
+function makeStarIcon(filled: boolean): SVGSVGElement {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("width", "13");
+  svg.setAttribute("height", "13");
+  svg.setAttribute("fill", filled ? "currentColor" : "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.8");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const p = document.createElementNS(SVG_NS, "path");
+  p.setAttribute("d", "M12 2.5l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.4l-5.9 3.1 1.2-6.5-4.8-4.6 6.6-.9z");
+  svg.appendChild(p);
+  return svg;
 }
 
 function providerBadge(provider?: string): { mark?: string; glyph: string; color: string; title: string } {
@@ -110,9 +140,20 @@ export class ComposerView {
   private memoryEl: HTMLElement;
   private memoryFill: HTMLElement;
   private memoryText: HTMLElement;
+  private modelBtn: HTMLButtonElement;
   private providerMarkEl: HTMLElement;
   private modelTextEl: HTMLElement;
   private ctxEl: HTMLElement;
+  private modelPickerEl: HTMLElement;
+  private modelSearchInput: HTMLInputElement;
+  private modelPickerBodyEl: HTMLElement;
+  private modelPickerEffortsEl: HTMLElement;
+  private modelPickerOpen = false;
+  private modelPickerLoading = false;
+  private modelPickerSnap: PickerSnapshot | null = null;
+  private modelPickerQuery = "";
+  private modelPickerFocusIdx = -1;
+  private onDocMouseDown: (e: MouseEvent) => void;
   private planChipBtn: HTMLButtonElement;
   private planChipIconHost: HTMLElement;
   private planChipLbl: HTMLElement;
@@ -184,8 +225,14 @@ export class ComposerView {
     const bar = document.createElement("div");
     bar.className = "bp-composer-bar";
 
-    const modelWrap = document.createElement("div");
+    const modelWrap = document.createElement("button");
+    modelWrap.type = "button";
     modelWrap.className = "bp-composer-model";
+    modelWrap.setAttribute("data-testid", "composer-model-chip");
+    modelWrap.setAttribute("aria-haspopup", "dialog");
+    modelWrap.setAttribute("aria-expanded", "false");
+    modelWrap.title = t("composer.model.tip", "Choose the model and effort");
+    this.modelBtn = modelWrap;
     this.providerMarkEl = document.createElement("span");
     this.providerMarkEl.className = "bp-provider-mark";
     this.providerMarkEl.textContent = "●";
@@ -195,7 +242,66 @@ export class ComposerView {
     this.ctxEl = document.createElement("span");
     this.ctxEl.className = "bp-ctx-pct bp-hidden";
     this.ctxEl.setAttribute("data-testid", "composer-ctx");
-    modelWrap.append(this.providerMarkEl, this.modelTextEl, this.ctxEl);
+    const modelChevron = document.createElement("span");
+    modelChevron.className = "bp-model-caret";
+    modelChevron.textContent = "▾";
+    modelWrap.append(this.providerMarkEl, this.modelTextEl, this.ctxEl, modelChevron);
+    modelWrap.addEventListener("click", () => { void this.toggleModelPicker(); });
+
+    this.modelPickerEl = document.createElement("div");
+    this.modelPickerEl.className = "bp-model-picker bp-hidden";
+    this.modelPickerEl.setAttribute("data-testid", "model-picker");
+    this.modelPickerEl.setAttribute("role", "dialog");
+    const mpHead = document.createElement("div");
+    mpHead.className = "bp-mp-search-wrap";
+    this.modelSearchInput = document.createElement("input");
+    this.modelSearchInput.type = "search";
+    this.modelSearchInput.className = "bp-mp-search";
+    this.modelSearchInput.placeholder = t("gpui.search.models", "Search models");
+    this.modelSearchInput.setAttribute("data-testid", "model-picker-search");
+    this.modelSearchInput.addEventListener("input", () => {
+      this.modelPickerQuery = this.modelSearchInput.value;
+      this.modelPickerFocusIdx = -1;
+      this.renderModelPicker();
+    });
+    this.modelSearchInput.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        this.closeModelPicker();
+        this.textarea.focus();
+        return;
+      }
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        const items = this.modelPickerFocusableButtons();
+        if (items.length === 0) return;
+        e.preventDefault();
+        const delta = e.key === "ArrowDown" ? 1 : -1;
+        this.modelPickerFocusIdx =
+          this.modelPickerFocusIdx < 0
+            ? (delta > 0 ? 0 : items.length - 1)
+            : (this.modelPickerFocusIdx + delta + items.length) % items.length;
+        this.updateModelPickerKbdFocus(items);
+        return;
+      }
+      if (e.key === "Enter") {
+        const items = this.modelPickerFocusableButtons();
+        const target =
+          this.modelPickerFocusIdx >= 0 && this.modelPickerFocusIdx < items.length
+            ? items[this.modelPickerFocusIdx]
+            : (this.modelPickerQuery.trim() ? items[0] : undefined);
+        if (target) {
+          e.preventDefault();
+          target.click();
+        }
+      }
+    });
+    mpHead.appendChild(this.modelSearchInput);
+    this.modelPickerBodyEl = document.createElement("div");
+    this.modelPickerBodyEl.className = "bp-mp-body";
+    this.modelPickerEffortsEl = document.createElement("div");
+    this.modelPickerEffortsEl.className = "bp-mp-efforts bp-hidden";
+    this.modelPickerEl.append(mpHead, this.modelPickerBodyEl, this.modelPickerEffortsEl);
 
     this.planChipBtn = document.createElement("button");
     this.planChipBtn.type = "button";
@@ -266,9 +372,21 @@ export class ComposerView {
 
     btns.append(this.attachBtn, this.voiceBtn, this.stopBtn, this.sendBtn);
     bar.append(modelWrap, this.planChipBtn, this.memoryEl, btns);
-    inner.append(this.popupEl, this.errorEl, this.replyEl, this.attachStripEl, this.planBarEl, this.fileInput, this.textarea, bar);
+    inner.append(this.modelPickerEl, this.popupEl, this.errorEl, this.replyEl, this.attachStripEl, this.planBarEl, this.fileInput, this.textarea, bar);
     wrap.appendChild(inner);
     container.appendChild(wrap);
+
+    this.onDocMouseDown = (e: MouseEvent) => {
+      if (!this.modelPickerEl.isConnected) {
+        document.removeEventListener("mousedown", this.onDocMouseDown);
+        return;
+      }
+      if (!this.modelPickerOpen) return;
+      const target = e.target as Node | null;
+      if (target && (this.modelPickerEl.contains(target) || this.modelBtn.contains(target))) return;
+      this.closeModelPicker();
+    };
+    document.addEventListener("mousedown", this.onDocMouseDown);
 
     this.textarea.addEventListener("paste", (e) => {
       const items = e.clipboardData?.items;
@@ -484,9 +602,311 @@ export class ComposerView {
     this.sendBtn.disabled = !enabled;
     this.attachBtn.disabled = !enabled;
     this.voiceBtn.disabled = !enabled;
+    this.modelBtn.disabled = !enabled;
+    if (!enabled) this.closeModelPicker();
     this.planChipBtn.disabled = !enabled;
     this.planBarEl.querySelectorAll<HTMLButtonElement>(".bp-plan-scope-btn").forEach((b) => { b.disabled = !enabled; });
     this.stopBtn.classList.toggle("bp-hidden", !running);
+  }
+
+  public destroy(): void {
+    document.removeEventListener("mousedown", this.onDocMouseDown);
+  }
+
+  public isModelPickerOpen(): boolean {
+    return this.modelPickerOpen;
+  }
+
+  public closeModelPicker(): void {
+    if (!this.modelPickerOpen) return;
+    this.modelPickerOpen = false;
+    this.modelPickerFocusIdx = -1;
+    this.modelPickerEl.classList.add("bp-hidden");
+    this.modelBtn.classList.remove("is-open");
+    this.modelBtn.setAttribute("aria-expanded", "false");
+  }
+
+  private modelPickerFocusableButtons(): HTMLButtonElement[] {
+    return Array.from(this.modelPickerBodyEl.querySelectorAll<HTMLButtonElement>(".bp-mp-row-main:not(:disabled)"));
+  }
+
+  private updateModelPickerKbdFocus(items: HTMLButtonElement[]): void {
+    items.forEach((btn, idx) => {
+      const active = idx === this.modelPickerFocusIdx;
+      btn.classList.toggle("is-kbd", active);
+      if (active) btn.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  public updateFavoriteModels(keys: string[]): void {
+    if (!this.modelPickerSnap) return;
+    this.modelPickerSnap = applyFavoriteKeysToSnapshot(this.modelPickerSnap, keys);
+    if (this.modelPickerOpen) this.renderModelPicker();
+  }
+
+  private async toggleModelPicker(): Promise<void> {
+    if (!this.enabled) return;
+    if (this.modelPickerOpen) {
+      this.closeModelPicker();
+      return;
+    }
+    this.closePopup();
+    this.modelPickerOpen = true;
+    this.modelPickerQuery = "";
+    this.modelPickerFocusIdx = -1;
+    this.modelSearchInput.value = "";
+    this.modelPickerEl.classList.remove("bp-hidden");
+    this.modelBtn.classList.add("is-open");
+    this.modelBtn.setAttribute("aria-expanded", "true");
+    this.modelPickerLoading = true;
+    this.renderModelPicker();
+    this.modelSearchInput.focus();
+    await this.reloadModelPicker();
+  }
+
+  private async reloadModelPicker(): Promise<void> {
+    if (!this.cb.onLoadModelPicker) {
+      this.modelPickerLoading = false;
+      this.renderModelPicker();
+      return;
+    }
+    try {
+      const raw = await this.cb.onLoadModelPicker();
+      if (!this.modelPickerOpen) return;
+      this.modelPickerSnap = parsePickerResponse(raw, this.cb.getFavoriteModels?.() ?? []);
+    } catch {
+      // keep prior snapshot if reload failed
+    } finally {
+      this.modelPickerLoading = false;
+      if (this.modelPickerOpen) this.renderModelPicker();
+    }
+  }
+
+  private async toggleFavoriteInPicker(provider: string, model: string): Promise<void> {
+    if (!this.modelPickerSnap) return;
+    const prev = this.modelPickerSnap;
+    const nk = normalizeFavKey(provider, model);
+    if (!nk) return;
+    const wasStarred = prev.favoriteKeys.includes(nk);
+    const toggled = toggleFavoriteKey(prev.favoriteKeys, provider, model);
+    if (toggled.keys.length === prev.favoriteKeys.length && toggled.starred === wasStarred) {
+      return;
+    }
+    this.modelPickerSnap = applyFavoriteKeysToSnapshot(prev, toggled.keys);
+    this.renderModelPicker();
+    if (!this.cb.onToggleFavorite) return;
+    try {
+      const next = await this.cb.onToggleFavorite(provider, model, toggled.starred);
+      if (Array.isArray(next) && this.modelPickerSnap) {
+        this.modelPickerSnap = applyFavoriteKeysToSnapshot(this.modelPickerSnap, normalizeFavKeys(next));
+        if (this.modelPickerOpen) this.renderModelPicker();
+      }
+    } catch (err) {
+      if (this.modelPickerSnap) {
+        const auth = this.cb.getFavoriteModels?.();
+        const reverted = Array.isArray(auth)
+          ? normalizeFavKeys(auth)
+          : toggleFavoriteKey(this.modelPickerSnap.favoriteKeys, provider, model, !toggled.starred).keys;
+        this.modelPickerSnap = applyFavoriteKeysToSnapshot(this.modelPickerSnap, reverted);
+        if (this.modelPickerOpen) this.renderModelPicker();
+      }
+      this.showError(err instanceof Error && err.message ? err.message : "Could not update favorite model");
+    }
+  }
+
+  private renderProviderGlyph(provider: string): HTMLElement {
+    const badge = providerBadge(provider);
+    const wrap = document.createElement("span");
+    wrap.className = "bp-mp-mark";
+    wrap.style.color = badge.color;
+    wrap.title = badge.title;
+    const svg = badge.mark ? makeProviderMarkSvg(badge.mark) : null;
+    if (svg) wrap.appendChild(svg);
+    else wrap.textContent = badge.glyph;
+    return wrap;
+  }
+
+  private makeStarButton(
+    provider: string,
+    model: string,
+    starred: boolean,
+    testIdPrefix = "model-star",
+  ): HTMLButtonElement {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "bp-mp-star" + (starred ? " is-starred" : "");
+    const label = starred
+      ? t("gpui.picker.favorite.remove", "Remove from favorites")
+      : t("gpui.picker.favorite.add", "Add to favorites");
+    btn.title = label;
+    btn.setAttribute("aria-label", label);
+    btn.setAttribute("aria-pressed", starred ? "true" : "false");
+    btn.setAttribute("data-testid", `${testIdPrefix}-${provider}-${model}`);
+    btn.appendChild(makeStarIcon(starred));
+    btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      void this.toggleFavoriteInPicker(provider, model);
+    });
+    return btn;
+  }
+
+  private renderModelPicker(): void {
+    if (!this.modelPickerOpen) return;
+    this.modelPickerFocusIdx = -1;
+    if (!this.modelPickerSnap) {
+      const empty = document.createElement("div");
+      empty.className = "bp-mp-empty";
+      empty.textContent = this.modelPickerLoading ? "…" : t("gpui.no.models", "No models");
+      this.modelPickerBodyEl.replaceChildren(empty);
+      this.modelPickerEffortsEl.classList.add("bp-hidden");
+      this.modelPickerEffortsEl.replaceChildren();
+      return;
+    }
+
+    const vm = buildPickerViewModel(this.modelPickerSnap, this.modelPickerQuery);
+    const frag = document.createDocumentFragment();
+
+    if (vm.favorites.length > 0) {
+      const favSec = document.createElement("div");
+      favSec.className = "bp-mp-section bp-mp-favorites";
+      favSec.setAttribute("data-testid", "model-picker-favorites");
+
+      const head = document.createElement("div");
+      head.className = "bp-mp-head";
+      const starIc = document.createElement("span");
+      starIc.className = "bp-mp-head-star";
+      starIc.appendChild(makeStarIcon(true));
+      const title = document.createElement("span");
+      title.textContent = t("gpui.picker.favorites", "Favorites");
+      head.append(starIc, title);
+      favSec.appendChild(head);
+
+      for (const fav of vm.favorites) {
+        const row = document.createElement("div");
+        row.className = "bp-mp-row" + (fav.on ? " is-active" : "") + (!fav.ok ? " is-disabled" : "");
+        row.setAttribute("data-testid", `model-fav-row-${fav.provider}-${fav.model}`);
+
+        const main = document.createElement("button");
+        main.type = "button";
+        main.className = "bp-mp-row-main";
+        main.disabled = !fav.ok;
+        if (!fav.ok && fav.why) main.title = fav.why;
+        const chk = document.createElement("span");
+        chk.className = "bp-mp-check";
+        chk.textContent = fav.on ? "✓" : "";
+        const name = document.createElement("span");
+        name.className = "bp-mp-name";
+        name.textContent = fav.label;
+        const note = document.createElement("span");
+        note.className = "bp-mp-note";
+        note.textContent = !fav.ok && fav.why ? trs(fav.why) : (fav.note && fav.note !== fav.label ? trs(fav.note) : fav.provider);
+        main.append(chk, this.renderProviderGlyph(fav.provider), name, note);
+        main.addEventListener("click", () => {
+          if (!fav.ok) return;
+          this.closeModelPicker();
+          this.textarea.focus();
+          void this.cb.onSelectModel?.(fav.provider, fav.model);
+        });
+
+        row.append(main, this.makeStarButton(fav.provider, fav.model, true, "model-fav-star"));
+        favSec.appendChild(row);
+      }
+      frag.appendChild(favSec);
+    }
+
+    const groupsWrap = document.createElement("div");
+    groupsWrap.className = "bp-mp-groups";
+    groupsWrap.setAttribute("data-testid", "model-picker-groups");
+
+    if (vm.groups.length === 0) {
+      const empty = document.createElement("div");
+      empty.className = "bp-mp-empty";
+      empty.textContent = this.modelPickerQuery.trim()
+        ? t("gpui.nothing.matches", "Nothing matches")
+        : t("gpui.no.models", "No models");
+      groupsWrap.appendChild(empty);
+    } else {
+      for (const grp of vm.groups) {
+        const gEl = document.createElement("div");
+        gEl.className = "bp-mp-group";
+        const gHead = document.createElement("div");
+        gHead.className = "bp-mp-group-head";
+        const gLbl = document.createElement("span");
+        gLbl.className = "bp-mp-group-title";
+        gLbl.textContent = grp.label;
+        gHead.append(this.renderProviderGlyph(grp.provider), gLbl);
+        if (!grp.ok && grp.why) {
+          const gWhy = document.createElement("span");
+          gWhy.className = "bp-mp-group-why";
+          gWhy.textContent = trs(grp.why);
+          gHead.appendChild(gWhy);
+        }
+        gEl.appendChild(gHead);
+
+        for (const m of grp.models) {
+          const row = document.createElement("div");
+          row.className = "bp-mp-row" + (m.on ? " is-active" : "") + (!m.ok ? " is-disabled" : "");
+          row.setAttribute("data-testid", `model-row-${grp.provider}-${m.value || "default"}`);
+
+          const main = document.createElement("button");
+          main.type = "button";
+          main.className = "bp-mp-row-main";
+          main.disabled = !m.ok;
+          if (!m.ok && m.why) main.title = m.why;
+          const chk = document.createElement("span");
+          chk.className = "bp-mp-check";
+          chk.textContent = m.on ? "✓" : "";
+          const name = document.createElement("span");
+          name.className = "bp-mp-name";
+          name.textContent = m.label;
+          const note = document.createElement("span");
+          note.className = "bp-mp-note";
+          note.textContent = m.note && m.note !== m.label ? trs(m.note) : "";
+          main.append(chk, name, note);
+          main.addEventListener("click", () => {
+            if (!m.ok) return;
+            this.closeModelPicker();
+            this.textarea.focus();
+            void this.cb.onSelectModel?.(grp.provider, m.value);
+          });
+
+          row.appendChild(main);
+          if (m.starrable) {
+            row.appendChild(this.makeStarButton(grp.provider, m.value, m.starred));
+          }
+          gEl.appendChild(row);
+        }
+        groupsWrap.appendChild(gEl);
+      }
+    }
+    frag.appendChild(groupsWrap);
+    this.modelPickerBodyEl.replaceChildren(frag);
+
+    if (vm.efforts.length > 0) {
+      const effFrag = document.createDocumentFragment();
+      const lbl = document.createElement("span");
+      lbl.className = "bp-mp-efforts-lbl";
+      lbl.textContent = t("model.col.effort", "Effort");
+      effFrag.appendChild(lbl);
+      for (const ef of vm.efforts) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "bp-mp-effort" + (ef.on ? " active" : "");
+        b.textContent = ef.label;
+        b.addEventListener("click", () => {
+          void Promise.resolve(this.cb.onSelectEffort?.(ef.value)).then(() => {
+            if (this.modelPickerOpen) void this.reloadModelPicker();
+          });
+        });
+        effFrag.appendChild(b);
+      }
+      this.modelPickerEffortsEl.replaceChildren(effFrag);
+      this.modelPickerEffortsEl.classList.remove("bp-hidden");
+    } else {
+      this.modelPickerEffortsEl.classList.add("bp-hidden");
+      this.modelPickerEffortsEl.replaceChildren();
+    }
   }
 
   public setDraft(text: string): void {
@@ -563,9 +983,12 @@ export class ComposerView {
     this.attachBtn.setAttribute("aria-label", t("web.composer.attach", "Attach image"));
     this.voiceBtn.title = t("web.composer.voice", "Voice dictation");
     this.voiceBtn.setAttribute("aria-label", t("web.composer.voice", "Voice dictation"));
+    this.modelBtn.title = t("composer.model.tip", "Choose the model and effort");
+    this.modelSearchInput.placeholder = t("gpui.search.models", "Search models");
     this.sendBtn.textContent = t("composer.send", "Send");
     this.stopBtn.textContent = t("composer.stop", "Stop");
     this.setPlanMode(this.planMode);
+    if (this.modelPickerOpen) this.renderModelPicker();
   }
 
   private autoGrow(): void {

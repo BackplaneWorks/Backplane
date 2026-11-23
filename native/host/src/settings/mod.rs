@@ -44,6 +44,7 @@ pub mod onboard;
 pub mod tools_install;
 pub mod models;
 pub mod model_compat;
+pub mod favorites;
 pub mod models_probe;
 pub mod agent_versions;
 pub mod privacy;
@@ -100,6 +101,7 @@ mod read_tests {
 /// Registers the handlers (after `open`).
 pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(set::SettingSet { agents: agents.clone() }));
+    hub.register_rpc(Arc::new(set::ModelsFavoriteRpc));
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
     hub.register_rpc(Arc::new(autopush::AutoPushRpc));
     hub.register_rpc(Arc::new(browser_start::BrowserPage));

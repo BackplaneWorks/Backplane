@@ -68,6 +68,10 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let model = crate::settings::models::sanitize_model(&provider, &raw_model, info.is_object().then_some(&info));
     let models: Value = serde_json::from_str(&crate::settings::models::all_of(&info)).unwrap_or(Value::Null);
     let mut out = picker_sections_of(&info, &models, &provider, &model, &pick("effort", String::new()), &pick("speed", String::new()), &pick("runtime", "approval-required".into()));
+    let raw_favs = hub.setting(crate::settings::models::FAVORITES_KEY).await.unwrap_or_default();
+    out["favorites"] = json!(crate::settings::models::favorite_rows(&info, &raw_favs, &provider, &model));
+    out["favoriteKeys"] = json!(crate::settings::models::parse_favorite_keys(&raw_favs));
+    out["agents"] = crate::present::keys::picker_agents(info.is_object().then_some(&info));
     // a thread's: its account and what that has left, the one chip's words as the desktop draws it (a new thread has no account yet)
     if !th.is_empty() && p.get("provider").is_none() {
         let (extra, combo) = crate::statehost::policies().and_then(|x| x.with_state(|st| { let n = crate::hub::now_ms() / 1000; (crate::present::keys::account_sections(st, th, n), crate::present::keys::combo_of(st, th, n)) })).unwrap_or_default();
@@ -239,6 +243,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "thread.picker" => picker(hub, p).await,
+        "models.favorite" => rpc(hub, c, "models.favorite", p.clone()).await.map(result),
         "thread.planonce" => {
             let th = s(p, "thread"); if !known_any(hub, &*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
             match rpc(hub, c, "thread.planonce", json!({"thread":th,"on":p["on"] == true})).await {

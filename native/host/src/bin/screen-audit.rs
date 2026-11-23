@@ -23,10 +23,15 @@ mod session { pub use crate::{composer, patch, select, pages}; }
 #[path="../present/tokstats.rs"] mod tokstats;
 #[path="../present/tz.rs"] mod tz;
 #[path="../present/keys.rs"] mod keys;
+#[path="../settings/favorites.rs"] #[allow(dead_code)] mod favorites;
 #[path="../settings/order_view.rs"] mod order_view;
 #[path="../settings/model_compat.rs"] mod model_compat;
 // the speed dial's table (agents/speed.rs) asks for the detected models; the audit counts screens and detects none
-mod settings { pub mod order { pub use crate::order_view::*; } pub mod models { pub fn info() -> String { String::new() } pub use crate::model_compat::{model_compatible, sanitize_model}; } }
+mod settings { pub mod order { pub use crate::order_view::*; } pub mod models {
+    pub use crate::favorites::{FAVORITES_KEY, parse_favorite_keys};
+    pub fn info() -> String { String::new() }
+    pub use crate::model_compat::{model_compatible, sanitize_model};
+} }
 #[path="../present/thread.rs"] mod thread;
 #[path="../present/window.rs"] mod window;
 #[path="../present/audit_files.rs"] mod files;

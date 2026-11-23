@@ -35,6 +35,7 @@ export interface HelloFrame {
   commands?: Array<{ word: string; label: string; desc: string }>;
   theme?: string;
   locale?: string;
+  favoriteModels?: string[];
   notice?: unknown;
   noProvider?: NoProviderNotice | null;
 }

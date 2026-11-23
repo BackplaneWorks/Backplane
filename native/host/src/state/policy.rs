@@ -38,7 +38,7 @@ pub fn lean_keeps(k: &str) -> bool {
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key; a provider's day (`.dv.`, Settings › Accounts)
     if ["tok.epoch", "tok.recount"].contains(&k) || ["turn.last.", "turn.speed.", "turn.models.", "turn.live.", "turn.tier."].iter().any(|p| k.starts_with(p)) || (k.starts_with("tok.") && [".t.", ".td.", ".tr.", ".bl.", ".dv."].iter().any(|p| k.starts_with(&format!("tok{p}")) || k.contains(p))) { return true }
     // the Settings pages' values (present/settings.rs): short strings, one per control
-    if ["web.enabled", "settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "thread.env", "agent.provider", "agent.model", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "telemetry.notice", "onboard.usage", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "viewer.board3d", "plan.routing", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model", "recall.bots", "browser.start"].contains(&k) || ["push.webhook.", "notify.", "tz.rule."].iter().any(|p| k.starts_with(p)) { return true }
+    if ["web.enabled", "settle.idle.minutes", "settle.personal.minutes", "settle.done", "restart.continue", "thread.env", "agent.provider", "agent.model", "models.favorites", "telemetry.share", "telemetry.usage.asked", "telemetry.asked", "telemetry.usage.generation", "telemetry.choice.revision", "telemetry.reset", "telemetry.notice", "onboard.usage", "update.channel", "text.provider", "text.model", "kicad.path", "freecad.path", "kicad.ipc", "viewer.board3d", "plan.routing", "fallback.chain", "fallback.on", "fallback.add.provider", "fallback.add.model", "recall.bots", "browser.start"].contains(&k) || ["push.webhook.", "notify.", "tz.rule."].iter().any(|p| k.starts_with(p)) { return true }
     // Settings, Voice (voice/page.rs, drawn by present/settings.rs from this copy): the engine, the model and the microphone, and the dictionary's
     // entries and learned fixes (a short line each, a removed one is gone, `blank_gone`). Without them every choice there looked unchosen (matrix S09).
     if k.starts_with("mouse.") { return true }
@@ -269,6 +269,7 @@ mod tests {
         for k in ["allowance.claude", "allowance.codex", "accounts.inventory"] { assert!(lean_keeps(k), "{k}: the composer's limits chip reads it"); }
         for k in ["rule.r1", "board.b1"] { assert!(lean_keeps(k), "{k}: Settings, Rules and task board lists it"); }
         for k in ["room.need.r1", "room.member.r1.thread:t1"] { assert!(lean_keeps(k), "{k}: a swarm's Needs you row says why from it (present/swarm_need.rs)"); }
+        assert!(lean_keeps("models.favorites"), "the thread view and data/1 picker read favorite models from it");
         assert!(lean_keeps("plan.routing"), "Settings › CAD draws the Plan before routing switch from it");
         assert!(lean_keeps("halt.t1.oom5-1"), "the thread view draws a halt card from it");
         assert!(lean_keeps("review.ro.t1"), "the thread view draws the review bar from it (#1305)");

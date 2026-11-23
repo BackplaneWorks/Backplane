@@ -2626,6 +2626,9 @@ gpui.c.kicad.exit.full.screen	Exit full screen	全画面を終了	Salir de panta
 gpui.c.kicad.the.editor.takes.the.whole	The editor takes the whole window; only this row stays	エディタがウィンドウ全体を使います。この行だけが残ります	El editor ocupa toda la ventana; solo queda esta fila
 gpui.c.kicad.closing	KiCad is closing. The editor opens again once it has closed.	KiCad を閉じています。閉じ終わるとエディタがもう一度開きます。	KiCad se está cerrando. El editor vuelve a abrirse cuando termine de cerrarse.
 gpui.c.kicad.closing.ask	KiCad is waiting for an answer before it closes: "{title}". Its window may be behind another one.	KiCad は閉じる前に応答を待っています:「{title}」。そのウィンドウが別のウィンドウの後ろにあるかもしれません。	KiCad espera una respuesta antes de cerrarse: «{title}». Su ventana puede estar detrás de otra.
+gpui.c.solid.load.big	Load it anyway	それでも読み込む	Cargarlo de todos modos
+gpui.c.solid.loading.big	Loading it anyway…	それでも読み込み中…	Cargándolo de todos modos…
+gpui.c.solid.big.next	Loading it may take a while and a lot of memory.	読み込みには時間と多くのメモリがかかることがあります。	Cargarlo puede tardar y usar mucha memoria.
 gpui.assets.missing	Assets missing in {dir}: {files}	{dir} にアセットがありません: {files}	Faltan recursos en {dir}: {files}
 gpui.connecting	Connecting…	接続中…	Conectando…
 gpui.connected	Connected	接続済み	Conectado
@@ -2760,6 +2763,9 @@ gpui.no.models	No models	モデルがありません	Sin modelos
 gpui.picker.more	{n} more: search to find them	ほか{n}件: 検索して探してください	{n} más: busca para encontrarlos
 gpui.picker.speed	Speed	速度	Velocidad
 gpui.picker.speed.normal.only	{model} runs at Normal speed only	{model}は標準の速度でのみ動きます	{model} solo funciona a velocidad Normal
+gpui.picker.favorites	Favorites	お気に入り	Favoritos
+gpui.picker.favorite.add	Add to favorites	お気に入りに追加	Añadir a favoritos
+gpui.picker.favorite.remove	Remove from favorites	お気に入りから外す	Quitar de favoritos
 gpui.speed.normal	Normal	標準	Normal
 gpui.speed.fast	Fast	高速	Rápido
 gpui.speed.ultrafast	UltraFast	超高速	Ultrarrápido
