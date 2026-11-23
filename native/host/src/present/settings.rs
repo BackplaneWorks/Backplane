@@ -881,8 +881,9 @@ fn devices_and_web(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     if web.get(1).map_or(false, |w| w["buttons"].as_array().map_or(true, Vec::is_empty)) { web[1]["buttons"] = r[at]["buttons"].clone(); }
     let rest = r.split_off(at + 1 + waiting); let asks = r.split_off(at + 1); r.truncate(at);
     r.extend(web); r.extend(asks);
-    if !rest.is_empty() { r.push(head("Paired devices")); }
-    for x in rest { if x["label"].as_str().map_or(false, |l| l.starts_with("Shared file · ")) && !r.iter().any(|h| h["label"] == "Shared files" && h["note"] == "") { r.push(head("Shared files")); } r.push(x); }
+    let shared = |x: &Value| x["label"].as_str().map_or(false, |l| l.starts_with("Shared file · ") || l == "Shared files");
+    if rest.iter().any(|x| !shared(x)) { r.push(head("Paired devices")); }
+    for x in rest { if shared(&x) && !r.iter().any(|h| h["label"] == "Shared files" && h["note"] == "") { r.push(head("Shared files")); } r.push(x); }
     r
 }
 
@@ -899,7 +900,9 @@ fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
 fn page_words(id: &str) -> (&'static str, &'static str) {
     static W: OnceLock<Vec<(&'static str, String, String)>> = OnceLock::new();
     let all = W.get_or_init(|| { let (st, none) = (State::default(), json!({}));
-        PAGES.iter().map(|(id, _)| { let rows = if *id == "setup" { vec![head("Setup"), head("Import from 0.14")] } else { rows_of(&st, &none, &none, id) };
+        PAGES.iter().map(|(id, _)| { let mut rows = if *id == "setup" { vec![head("Setup"), head("Import from 0.14")] } else { rows_of(&st, &none, &none, id) };
+            // what Devices shows only once browser access is on, or something is paired or shared: found by name all the same
+            if *id == "devices" { rows.extend(["Set up private HTTPS forwarding", "Web address", "Paired devices", "Shared files"].map(head)); }
             let found: Vec<(&str, String)> = rows.iter().filter_map(|r| Some((r["label"].as_str().filter(|l| !l.is_empty())?, r["note"].as_str().unwrap_or("").replace('\n', " ")))).collect();
             (*id, found.iter().map(|(l, _)| *l).collect::<Vec<_>>().join("\n"), found.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join("\n")) }).collect() });
     all.iter().find(|(p, _, _)| *p == id).map_or(("", ""), |(_, w, n)| (w.as_str(), n.as_str()))
@@ -1186,6 +1189,10 @@ mod tests {
         let l: Vec<String> = pg_rows("devices", &[("web.enabled", "1")], json!({}), info).iter().map(|r| r["label"].as_str().unwrap().to_string()).collect();
         assert_eq!(l, ["Devices", "Add a device", "Web UI", "Browser access", "Set up private HTTPS forwarding", "Firefox", "Paired devices", "Phone", "Shared files", "Shared file · a.pdf"]);
         assert_eq!(l.iter().filter(|x| *x == "Browser access").count(), 1, "one switch, not one on each of two pages");
+        let only_shared: Vec<String> = pg_rows("devices", &[], json!({}), json!({"shares": [{"id": "s1", "name": "a.pdf", "path": "/home/user/a.pdf", "expires": 1}]})).iter().map(|r| r["label"].as_str().unwrap().to_string()).collect();
+        assert_eq!(only_shared, ["Devices", "Add a device", "Web UI", "Browser access", "Shared files", "Shared file · a.pdf"], "no empty Paired devices heading");
+        let menu = view(&st(&[]), &json!({}), &json!({})); let words = menu["rows"].as_array().unwrap().iter().find(|r| r["buttons"][0]["value"] == "devices").unwrap()["words"].as_str().unwrap().to_string();
+        for w in ["Set up private HTTPS forwarding", "Web address"] { assert!(words.lines().any(|l| l == w), "the search finds {w} before browser access is on"); }
     }
     #[test] fn projects_and_git_offers_auto_push_off_by_default() {
         let lit = |s: &State| { let v = view(s, &json!({"open": {"settings": true}, "drafts": {"@settings.page": "git"}}), &json!({})); v["rows"].as_array().unwrap().iter().flat_map(|r| r["buttons"].as_array().cloned().unwrap_or_default()).filter(|b| b["on"] == true).map(|b| b["value"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
