@@ -422,7 +422,8 @@ pub fn bindings_for(mac: bool) -> Vec<KeyBinding> {
     /* i18n-ok: key contexts */ for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
     let c = Some(ctx);
     v.extend([
-        KeyBinding::new("backspace", Backspace, c), KeyBinding::new("delete", Delete, c),
+        KeyBinding::new("backspace", Backspace, c), KeyBinding::new("shift-backspace", Backspace, c),
+        KeyBinding::new("delete", Delete, c), KeyBinding::new("shift-delete", Delete, c),
         KeyBinding::new("left", Left, c), KeyBinding::new("right", Right, c),
         KeyBinding::new("shift-left", SelLeft, c), KeyBinding::new("shift-right", SelRight, c),
         KeyBinding::new("tab", Tab, c), KeyBinding::new("up", Up, c), KeyBinding::new("down", Down, c), KeyBinding::new("shift-up", SelUp, c), KeyBinding::new("shift-down", SelDown, c),
@@ -501,6 +502,28 @@ mod tests {
             map.bindings_for_input(&[gpui::Keystroke::parse(key).unwrap()], &[gpui::KeyContext::parse("TextInput").unwrap()]).0.first().map(|b| b.action().name().to_string()).unwrap_or_default() };
         for (key, a) in [("cmd-left", "Home"), ("cmd-right", "End"), ("cmd-v", "Paste"), ("cmd-c", "Copy"), ("cmd-x", "Cut"), ("cmd-a", "SelectAll"), ("ctrl-v", "Paste")] { assert_eq!(k(true, key), format!("text_input::{a}"), "{key}"); }
         assert_eq!(k(false, "cmd-left"), ""); assert_eq!(k(false, "ctrl-v"), "text_input::Paste");
+    }
+    #[test] fn shift_backspace_and_shift_delete_delete_characters() {
+        for mac in [false, true] {
+            for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
+                assert_eq!(edit_key(mac, "shift-backspace", ctx), "composer::Backspace", "{ctx} mac={mac}");
+                assert_eq!(edit_key(mac, "shift-delete", ctx), "composer::Delete", "{ctx} mac={mac}");
+            }
+            let map = gpui::Keymap::new(crate::input::bindings_for(mac));
+            let ti = [gpui::KeyContext::parse("TextInput").unwrap()];
+            let resolve = |key: &str| map.bindings_for_input(&[gpui::Keystroke::parse(key).unwrap()], &ti).0.first().map(|b| b.action().name().to_string()).unwrap_or_default();
+            assert_eq!(resolve("shift-backspace"), "text_input::Backspace", "TextInput mac={mac}");
+            assert_eq!(resolve("shift-delete"), "text_input::Delete", "TextInput mac={mac}");
+        }
+        let mut ed = Editor::default();
+        ed.insert("abc");
+        assert_eq!(edit_key(false, "shift-backspace", "Composer"), "composer::Backspace");
+        ed.backspace(false);
+        assert_eq!(ed.text(), "ab");
+        ed.place(0, false);
+        assert_eq!(edit_key(false, "shift-delete", "Composer"), "composer::Delete");
+        ed.delete(false);
+        assert_eq!(ed.text(), "b");
     }
     #[test] fn the_mask_keeps_every_byte_offset_and_newline() {
         let s = "key-é日\nline2";

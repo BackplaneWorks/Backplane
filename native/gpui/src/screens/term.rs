@@ -599,7 +599,7 @@ mod tests {
         assert_eq!(b(&typed("a", "a")), b"a"); assert_eq!(b(&typed("shift-a", "A")), b"A"); assert_eq!(b(&typed("`", "`")), b"`", "a backtick is the shell's");
         assert_eq!(b(&typed("space", " ")), b" "); assert_eq!(b(&ks("ctrl-space")), [0]);
         assert_eq!(b(&ks("ctrl-c")), [3]); assert_eq!(b(&ks("ctrl-d")), [4]); assert_eq!(b(&ks("ctrl-k")), [11]); assert_eq!(b(&ks("ctrl-l")), [12]);
-        assert_eq!(b(&ks("enter")), [13]); assert_eq!(b(&ks("backspace")), [127]); assert_eq!(b(&ks("tab")), [9]); assert_eq!(b(&ks("shift-tab")), b"\x1b[Z");
+        assert_eq!(b(&ks("enter")), [13]); assert_eq!(b(&ks("backspace")), [127]); assert_eq!(b(&ks("shift-backspace")), [127]); assert_eq!(b(&ks("tab")), [9]); assert_eq!(b(&ks("shift-tab")), b"\x1b[Z");
         assert_eq!(b(&ks("escape")), [27]); assert_eq!(b(&ks("up")), b"\x1b[A"); assert_eq!(b(&ks("left")), b"\x1b[D"); assert_eq!(b(&ks("ctrl-right")), b"\x1b[1;5C");
         assert_eq!(b(&ks("home")), b"\x1b[H"); assert_eq!(b(&ks("delete")), b"\x1b[3~"); assert_eq!(b(&ks("pageup")), b"\x1b[5~"); assert_eq!(b(&ks("f1")), b"\x1bOP"); assert_eq!(b(&ks("f5")), b"\x1b[15~");
         assert_eq!(b(&typed("é", "é")), "é".as_bytes());

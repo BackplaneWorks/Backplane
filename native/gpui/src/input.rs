@@ -657,7 +657,9 @@ pub fn bindings() -> Vec<KeyBinding> { bindings_for(crate::keys::mac()) }
 pub fn bindings_for(mac: bool) -> Vec<KeyBinding> {
     let mut v = vec![
         KeyBinding::new("backspace", Backspace, Some("TextInput")),
+        KeyBinding::new("shift-backspace", Backspace, Some("TextInput")),
         KeyBinding::new("delete", Delete, Some("TextInput")),
+        KeyBinding::new("shift-delete", Delete, Some("TextInput")),
         KeyBinding::new("left", Left, Some("TextInput")),
         KeyBinding::new("right", Right, Some("TextInput")),
         KeyBinding::new("shift-left", SelectLeft, Some("TextInput")),

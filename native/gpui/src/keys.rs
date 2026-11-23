@@ -608,9 +608,11 @@ mod tests {
         assert_eq!(d("shift-enter", &["Composer"]), "composer::Newline");
         assert_eq!(d("/", &["Composer"]), "", "a slash is typed"); assert_eq!(d("b", &["Composer"]), "");
         // no shortcut shadows an editing key of the composer
-        for k in ["ctrl-a", "ctrl-c", "ctrl-x", "ctrl-v", "ctrl-z", "ctrl-y", "ctrl-shift-z", "ctrl-left", "ctrl-right", "ctrl-backspace", "ctrl-home", "ctrl-end", "home", "end", "tab", "backspace", "delete"] {
+        for k in ["ctrl-a", "ctrl-c", "ctrl-x", "ctrl-v", "ctrl-z", "ctrl-y", "ctrl-shift-z", "ctrl-left", "ctrl-right", "ctrl-backspace", "ctrl-home", "ctrl-end", "home", "end", "tab", "backspace", "shift-backspace", "delete", "shift-delete"] {
             let a = d(k, &["Composer"]); assert!(a.starts_with("composer::"), "{k} must stay the composer's, got {a}");
         }
+        assert_eq!(d("shift-backspace", &["Composer"]), "composer::Backspace");
+        assert_eq!(d("shift-delete", &["Composer"]), "composer::Delete");
         assert_eq!(d("shift-tab", &["Composer"]), "keys::TogglePlanMode");
         assert_eq!(d("shift-tab", &["Picker", "Composer"]), "keys::PickBackTab");
         assert_eq!(d("alt-shift-p", &[]), "keys::MgmtPlan");
@@ -637,7 +639,8 @@ mod tests {
         assert_eq!(d("ctrl-z", &["DrawPad"]), "pad::Undo"); assert_eq!(d("delete", &["DrawPad"]), "pad::Delete"); assert_eq!(d("backspace", &["DrawPad"]), "pad::Delete");
         assert_eq!(d("ctrl-z", &["Composer"]), "composer::Undo", "the message box keeps its own undo");
         assert_eq!(d("ctrl-z", &["DrawPad", "PadLength"]), "composer::Undo", "in the length box it undoes the typing");
-        assert_eq!(d("delete", &["DrawPad", "PadLength"]), "composer::Delete"); assert_eq!(d("enter", &["DrawPad", "PadLength"]), "composer::Go");
+        assert_eq!(d("delete", &["DrawPad", "PadLength"]), "composer::Delete"); assert_eq!(d("shift-delete", &["DrawPad", "PadLength"]), "composer::Delete");
+        assert_eq!(d("shift-backspace", &["DrawPad", "PadLength"]), "composer::Backspace"); assert_eq!(d("enter", &["DrawPad", "PadLength"]), "composer::Go");
         assert_eq!(d("escape", &["DrawPad"]), "backplane::ClosePopup"); assert_eq!(d("escape", &["DrawPad", "PadLength"]), "backplane::ClosePopup");
     }
     #[test] fn nothing_behind_the_pad_moves_while_it_is_open() {
@@ -680,7 +683,7 @@ mod tests {
         if mac() { assert_eq!(d("cmd-c", &["Terminal"]), "term::Copy"); assert_eq!(d("cmd-v", &["Terminal"]), "term::Paste"); }
     }
     #[test] fn every_other_shortcut_is_the_shells_inside_the_terminal() {
-        for k in ["ctrl-c", "ctrl-k", "ctrl-n", "ctrl-b", "ctrl-d", "ctrl-p", "ctrl-.", "ctrl-m", "ctrl-h", "ctrl-shift-p", "ctrl-shift-f", "ctrl-shift-s", "ctrl-shift-u", "ctrl-shift-[", "alt-1", "ctrl-1", "ctrl-z", "ctrl-a", "enter", "tab", "backspace", "delete", "/", "b", "s", "3", "w", "`"] {
+        for k in ["ctrl-c", "ctrl-k", "ctrl-n", "ctrl-b", "ctrl-d", "ctrl-p", "ctrl-.", "ctrl-m", "ctrl-h", "ctrl-shift-p", "ctrl-shift-f", "ctrl-shift-s", "ctrl-shift-u", "ctrl-shift-[", "alt-1", "ctrl-1", "ctrl-z", "ctrl-a", "enter", "tab", "backspace", "shift-backspace", "delete", "shift-delete", "/", "b", "s", "3", "w", "`"] {
             if mac() && k == "ctrl-c" { continue } // Cmd+C copies in the terminal on a Mac (the secondary chord is its own)
             assert_eq!(d(k, &["Terminal"]), "", "{k} must reach the shell");
         }
