@@ -21,6 +21,10 @@ fn home_log() -> String {
             line(json!({"$":"MessagePosted","thread":th,"msg":format!("m{t}-{i}a"),"role":"assistant","text":format!("Step {i}: the 3V3 rail is routed, DRC reports no errors, and the decoupling capacitors sit next to their pins."),"at":at})); at += 1;
         }
     }
+    // the person was in t000's and t001's projects just now (present/sections.rs `bench_rank`): opening their threads here is no new visit, so going
+    // between them changes nothing of the sidebar (a first visit moves a project onto the bench, once)
+    { let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+      for p in ["p0", "p1"] { line(json!({"$":"SettingSet","key":format!("sidebar.visit.{p}"),"value":now.to_string(),"at":at})); at += 1; } }
     line(json!({"$":"AskOpened","id":"q81","thread":"t002","kind":"approval","tool":"Bash","detail":"make flash","options":"","at":at})); at += 1;
     line(json!({"$":"AskOpened","id":"q82","thread":"t003","kind":"approval","tool":"Bash","detail":"make flash","options":"","at":at}));
     l

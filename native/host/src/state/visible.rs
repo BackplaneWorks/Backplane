@@ -128,6 +128,15 @@ pub fn look(st: &State, id: &str, now: u64) -> Vec<Value> {
     if !abnormal(status(st, id)) || !own(st, id) || num(st, &format!("sidebar.looked.{id}")) >= t.activity.max(1) { return vec![] }
     vec![json!({"$":"SettingSet","key":format!("sidebar.looked.{id}"),"value":now.max(t.activity).to_string(),"at":now})]
 }
+/// A visit is written at most once in ten minutes for a project (`sidebar.visit.<project id>`): the bench orders by it, and a log line for
+/// every thread opened would be noise.
+pub fn visit_due(st: &State, project: &str, now: u64) -> bool { !project.is_empty() && num(st, &format!("sidebar.visit.{project}")) + 600 <= now }
+/// Events a viewer's view.open of a thread adds for the bench (state/policy.rs `read`): the person was in its project now.
+pub fn visit(st: &State, id: &str, now: u64) -> Vec<Value> {
+    let Some(t) = st.threads.get(id) else { return vec![] };
+    if !visit_due(st, &t.project, now) { return vec![] }
+    vec![json!({"$":"SettingSet","key":format!("sidebar.visit.{}", t.project),"value":now.to_string(),"at":now})]
+}
 /// What a committed change leaves for the sidebar (state/policy.rs `derive`): a turn that starts ends a restart's cut mark.
 pub fn meta(st: &State, e: &Value) -> Vec<Value> {
     if e["$"] != "TurnChanged" || e["state"] != "running" { return vec![] }

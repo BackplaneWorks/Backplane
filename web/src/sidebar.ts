@@ -1,7 +1,11 @@
-// Left sidebar matching GPUI native-chat.png:
-// "This computer" header, "Search projects" input, ACTIVE section with folder icons
-// and indented thread rows with status dots + relative age, BOTS & ROOMS sections,
-// and bottom-left Connected status footer.
+// Left sidebar: Crew / Inbox / Bench layout matching GPUI:
+// - Top header ("This computer" + search + quick add)
+// - Sticky Crew band (never scrolls): Uberbot (Bub), compact bot avatar strip, wrapping room chips
+// - Scrollable Inbox (Needs you + Running + foldable Snoozed) with unmistakable icon+word status pills,
+//   project context, and hover 1-click Snooze (1h / Tomorrow / 1w) & Settle
+// - Scrollable Bench (Pinned + Recent MRU projects with hw/sw icons, live badges, hover quick-open)
+// - Foldable All projects (alphabetical, optional All/Boards/Code filter) & Quiet
+// - Bottom Connected status footer
 import { t } from "./i18n";
 import { needPress, parseNeed, type NeedAction } from "./swarm-need";
 import type { HomeInfo } from "./ws";
@@ -54,11 +58,19 @@ export interface BotItem {
   thread: string;
   color?: string;
   uber?: boolean;
+  mood?: string;
+  note?: string;
 }
 
 export interface RoomItem {
   id: string;
   name: string;
+  members?: number;
+}
+
+export interface SnoozeOption {
+  label: string;
+  value: string;
 }
 
 export interface SectionThreadRow {
@@ -67,6 +79,10 @@ export interface SectionThreadRow {
   word?: string;
   say?: string;
   want?: string;
+  /** Explicit status pill word from hub (Approve, Input, Sign in, Failed, Stopped, Working, Waiting, Done). */
+  label?: string;
+  /** Explicit status pill tone from hub (bad | run | wait | ok | ""). */
+  tone?: string;
   status?: string;
   state?: string;
   ago?: string;
@@ -77,6 +93,12 @@ export interface SectionThreadRow {
   off?: boolean;
   nav?: string;
   kind?: string;
+  /** Thread id for 1-click settle when eligible (hub `settle` field). */
+  settle?: string;
+  /** Snooze duration choices when eligible (hub `snooze` field; send `row-snooze` with `value`). */
+  snooze?: SnoozeOption[];
+  /** Wake value for a snoozed row (`<qid>|off`, send `row-snooze`). */
+  wake?: string;
   /** a swarm row's need (swarm-need.ts): null when nothing waits on the person */
   need?: unknown;
 }
@@ -89,6 +111,8 @@ export interface SectionProjectRow {
   css?: string;
   color?: string;
   pinned?: boolean;
+  hasBoard?: boolean;
+  hasSchematic?: boolean;
   threads?: SectionThreadRow[];
   swarms?: SectionThreadRow[];
   more?: number;
@@ -116,7 +140,13 @@ export interface SidebarCallbacks {
   onSelectThread: (threadId: string) => void;
   onNewThread: (projectId: string) => void;
   onSelectBot: (bot: BotItem) => void;
+  onSelectRoom?: (room: RoomItem) => void;
+  onNewBot?: () => void;
+  onNewRoom?: () => void;
+  onQuickOpenViewer?: (projectId: string, kind: "board" | "schematic") => void;
   onThreadAct: (threadId: string, action: string) => void;
+  /** Snooze or wake a thread row (`row-snooze` action with hub-provided value). */
+  onSnoozeRow?: (value: string) => void;
   onToggleSection?: (toggle: string) => void;
   onToggleProjectFold?: (projectKey: string) => void;
   onCollapseSidebar?: () => void;
@@ -128,34 +158,129 @@ export interface SidebarCallbacks {
   onAddProject?: () => void;
 }
 
+export interface StatusPill {
+  icon: string;
+  label: string;
+  tone: "bad" | "bad-out" | "run" | "wait" | "ok" | "dim";
+}
+
+/** Resolve an explicit, scannable icon+word status pill from hub `label`/`tone` or `word`/`want`. */
+export function statusPillOf(row: Pick<SectionThreadRow, "label" | "tone" | "word" | "want" | "status" | "state" | "wake">): StatusPill | null {
+  if (row.wake) return { icon: "◷", label: "Snoozed", tone: "dim" };
+
+  const rawLabel = (row.label ?? "").trim();
+  const rawTone = (row.tone ?? "").trim();
+  if (rawLabel) {
+    const low = rawLabel.toLowerCase();
+    const icon =
+      low === "approve" || low === "sign in" ? "!" :
+      low === "input" ? "?" :
+      low === "failed" || low === "stopped" ? "×" :
+      low === "working" || low === "running" ? "▸" :
+      low === "waiting" ? "◌" :
+      low === "done" ? "✓" : "•";
+    const tone: StatusPill["tone"] =
+      rawTone === "bad" ? (low === "failed" || low === "stopped" ? "bad-out" : "bad") :
+      rawTone === "run" ? "run" :
+      rawTone === "wait" ? "wait" :
+      rawTone === "ok" ? "ok" : "dim";
+    return { icon, label: rawLabel, tone };
+  }
+
+  const w = row.word || "";
+  if (w === "needs") {
+    if (row.want === "approval") return { icon: "!", label: "Approve", tone: "bad" };
+    if (row.want === "sign-in") return { icon: "!", label: "Sign in", tone: "bad" };
+    return { icon: "?", label: "Input", tone: "bad" };
+  }
+  if (w === "failed" || row.status === "failed" || row.state === "fail") return { icon: "×", label: "Failed", tone: "bad-out" };
+  if (w === "cut" || w === "interrupted") return { icon: "×", label: "Stopped", tone: "bad-out" };
+  if (w === "running" || row.status === "active" || row.status === "working" || row.state === "run") return { icon: "▸", label: "Working", tone: "run" };
+  if (w === "monitoring" || w === "limit" || row.status === "waiting") return { icon: "◌", label: "Waiting", tone: "wait" };
+  if (w === "done" || row.status === "finished") return { icon: "✓", label: "Done", tone: "ok" };
+  return null;
+}
+
 const SVG_NS = "http://www.w3.org/2000/svg";
 
-function makeFolderIcon(): SVGSVGElement {
+function makeSvgIcon(paths: string[], size = 14, className = ""): SVGSVGElement {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("width", "14");
-  svg.setAttribute("height", "14");
+  svg.setAttribute("width", String(size));
+  svg.setAttribute("height", String(size));
   svg.setAttribute("fill", "none");
   svg.setAttribute("stroke", "currentColor");
   svg.setAttribute("stroke-width", "1.75");
+  svg.setAttribute("stroke-linecap", "square");
+  svg.setAttribute("stroke-linejoin", "miter");
   svg.setAttribute("aria-hidden", "true");
-  svg.classList.add("bp-folder-icon");
-  const p = document.createElementNS(SVG_NS, "path");
-  p.setAttribute("d", "M3 6h6l2 2h10v11H3z");
-  svg.appendChild(p);
+  if (className) svg.classList.add(...className.split(" "));
+  for (const d of paths) {
+    const p = document.createElementNS(SVG_NS, "path");
+    p.setAttribute("d", d);
+    svg.appendChild(p);
+  }
   return svg;
 }
 
-function statusClassFromWords(status?: string, word?: string, state?: string, waiting?: number): string {
-  const s = status || word || state || "";
-  if (s === "active" || s === "working" || s === "running" || s === "run") return "bp-dot-work";
-  if (s === "finished" || s === "done") return "bp-dot-done";
-  if (s === "waiting" || s === "asking" || s === "blocked" || s === "needs" || s === "failed" || s === "fail" || s === "cut" || s === "interrupted" || s === "limit" || s === "monitoring" || (waiting ?? 0) > 0) return "bp-dot-need";
-  return "bp-dot-idle";
+function makeFolderIcon(): SVGSVGElement {
+  return makeSvgIcon(["M3 6h6l2 2h10v11H3z"], 14, "bp-folder-icon");
 }
 
-function statusClass(th: ThreadItem): string {
-  return statusClassFromWords(th.status, undefined, th.state, th.waiting);
+function makeBoardIcon(size = 14, className = "bp-folder-icon bp-hw-icon"): SVGSVGElement {
+  return makeSvgIcon(
+    [
+      "M3 3h18v18H3z",
+      "M9 3v6h6",
+      "M9 21v-6",
+      "M15 9a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+      "M9 15a2 2 0 1 0 0-4 2 2 0 0 0 0 4z",
+    ],
+    size,
+    className,
+  );
+}
+
+function makeSchematicIcon(size = 13): SVGSVGElement {
+  return makeSvgIcon(
+    [
+      "M6 6h12v12H6z",
+      "M9 2v4",
+      "M15 2v4",
+      "M9 18v4",
+      "M15 18v4",
+      "M2 9h4",
+      "M2 15h4",
+      "M18 9h4",
+      "M18 15h4",
+    ],
+    size,
+  );
+}
+
+function makeCatGlyph(size = 15): SVGSVGElement {
+  return makeSvgIcon(
+    [
+      "M4 10V4l4 3h8l4-3v6l-2 9H6z",
+      "M9 13h1",
+      "M14 13h1",
+      "M11 16h2",
+    ],
+    size,
+    "bp-cat-glyph",
+  );
+}
+
+function makeCheckIcon(size = 11): SVGSVGElement {
+  return makeSvgIcon(["M4 12l5 5 11-11"], size);
+}
+
+function makeClockIcon(size = 11): SVGSVGElement {
+  return makeSvgIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 6v6l4 2"], size);
+}
+
+function makePinIcon(size = 11): SVGSVGElement {
+  return makeSvgIcon(["M12 17v5", "M8 4h8l-1 5 3 3v2H6v-2l3-3z"], size, "bp-pin-icon");
 }
 
 function formatAge(ts: number): string {
@@ -168,15 +293,36 @@ function formatAge(ts: number): string {
   return `${Math.floor(diffSec / 86400)}d`;
 }
 
+function botInitials(name: string): string {
+  const clean = name.replace(/^@/, "").trim();
+  if (!clean) return "?";
+  const parts = clean.split(/[\s_-]+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  return clean.slice(0, 2).toUpperCase();
+}
+
+function moodClass(mood?: string): string {
+  if (mood === "wait" || mood === "error") return "bp-mood-wait";
+  if (mood === "work" || mood === "talk") return "bp-mood-work";
+  return "bp-mood-idle";
+}
+
+function rawThreadId(qid: string): string {
+  const idx = qid.lastIndexOf("|");
+  return idx >= 0 ? qid.slice(idx + 1) : qid;
+}
+
 export class SidebarView {
   private el: HTMLElement;
   private hostLabel: HTMLElement;
   private homeBanner: HTMLElement;
+  private crewEl: HTMLElement;
   private filterInput: HTMLInputElement;
   private listEl: HTMLElement;
   private connEl: HTMLElement;
   private filterText = "";
-  private showSettled = new Set<string>();
+  private allFilter: "all" | "hw" | "sw" = "all";
+  private snoozeMenuRowId = "";
   private collapsedProjects = new Set<string>();
   private addShown = false;
 
@@ -223,7 +369,7 @@ export class SidebarView {
     this.filterInput = document.createElement("input");
     this.filterInput.type = "search";
     this.filterInput.className = "bp-input bp-side-search";
-    const ph = t("sidebar.search.projects", "Search projects");
+    const ph = t("sidebar.search.projects", "Search projects, threads…");
     this.filterInput.placeholder = ph;
     this.filterInput.setAttribute("aria-label", ph);
     this.filterInput.setAttribute("data-testid", "sidebar-filter");
@@ -253,6 +399,11 @@ export class SidebarView {
     this.homeBanner.style.fontSize = "11px";
     this.homeBanner.style.borderBottom = "1px solid var(--line, #2a2a2a)";
 
+    // Sticky Crew band: Bub + Bots strip + Rooms strip (never scrolls away)
+    this.crewEl = document.createElement("div");
+    this.crewEl.className = "bp-crew-band bp-hidden";
+    this.crewEl.setAttribute("data-testid", "sidebar-crew");
+
     this.listEl = document.createElement("div");
     this.listEl.className = "bp-side-list";
     this.listEl.setAttribute("data-testid", "sidebar-list");
@@ -265,7 +416,7 @@ export class SidebarView {
     this.connEl.setAttribute("data-testid", "conn-status");
     footer.appendChild(this.connEl);
 
-    this.el.append(hostRow, head, this.homeBanner, this.listEl, footer);
+    this.el.append(hostRow, head, this.homeBanner, this.crewEl, this.listEl, footer);
   }
 
   public setHome(home: HomeInfo | null): void {
@@ -361,10 +512,152 @@ export class SidebarView {
   }
 
   public refreshLocale(): void {
-    const ph = t("sidebar.search.projects", "Search projects");
+    const ph = t("sidebar.search.projects", "Search projects, threads…");
     this.filterInput.placeholder = ph;
     this.filterInput.setAttribute("aria-label", ph);
     this.render();
+  }
+
+  private renderCrewBand(q: string): void {
+    const uber = this.bots.find((b) => b.uber);
+    const otherBots = this.bots.filter((b) => !b.uber && (!q || b.name.toLowerCase().includes(q)));
+    const rooms = this.rooms.filter((r) => !q || r.name.toLowerCase().includes(q));
+    const showUber = Boolean(uber && (!q || uber.name.toLowerCase().includes(q)));
+    const hasBotsRow = otherBots.length > 0 || (Boolean(this.cb.onNewBot) && !q);
+    const hasRoomsRow = rooms.length > 0 || (Boolean(this.cb.onNewRoom) && !q);
+
+    if (!showUber && !hasBotsRow && !hasRoomsRow) {
+      this.crewEl.classList.add("bp-hidden");
+      this.crewEl.replaceChildren();
+      return;
+    }
+
+    const frag = document.createDocumentFragment();
+
+    if (showUber && uber) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "bp-crew-uber" + (uber.thread === this.selectedThreadId ? " active" : "");
+      row.setAttribute("data-testid", `crew-uber-${uber.id}`);
+      const avatar = document.createElement("span");
+      avatar.className = `bp-crew-uber-avatar ${moodClass(uber.mood)}`;
+      if (uber.color) avatar.style.color = uber.color;
+      avatar.appendChild(makeCatGlyph(14));
+
+      const meta = document.createElement("span");
+      meta.className = "bp-crew-uber-meta";
+      const name = document.createElement("span");
+      name.className = "bp-crew-uber-name";
+      name.textContent = uber.name;
+      meta.appendChild(name);
+      if (uber.note) {
+        const note = document.createElement("span");
+        note.className = `bp-crew-uber-note ${moodClass(uber.mood)}`;
+        note.textContent = uber.note;
+        meta.appendChild(note);
+      }
+
+      row.append(avatar, meta);
+      if (uber.mood === "wait" || uber.mood === "error") {
+        const badge = document.createElement("span");
+        badge.className = "bp-status-pill bp-pill-bad";
+        badge.textContent = "? Input";
+        row.appendChild(badge);
+      }
+      row.addEventListener("click", () => this.cb.onSelectBot(uber));
+      frag.appendChild(row);
+    }
+
+    if (hasBotsRow) {
+      const strip = document.createElement("div");
+      strip.className = "bp-crew-bots";
+      strip.setAttribute("data-testid", "crew-bots");
+
+      const lbl = document.createElement("span");
+      lbl.className = "bp-crew-lbl";
+      lbl.textContent = t("tour.title.bots", "Bots").toUpperCase();
+      strip.appendChild(lbl);
+
+      const tiles = document.createElement("div");
+      tiles.className = "bp-crew-bot-tiles";
+      for (const bot of otherBots) {
+        const tile = document.createElement("button");
+        tile.type = "button";
+        tile.className = `bp-crew-bot-tile ${moodClass(bot.mood)}` + (bot.thread === this.selectedThreadId ? " active" : "");
+        tile.title = bot.note ? `@${bot.name} — ${bot.note}` : `@${bot.name}`;
+        tile.setAttribute("aria-label", `@${bot.name}`);
+        tile.setAttribute("data-testid", `crew-bot-${bot.id}`);
+        if (bot.color) tile.style.setProperty("--bot-c", bot.color);
+
+        const init = document.createElement("span");
+        init.className = "bp-crew-bot-init";
+        init.textContent = botInitials(bot.name);
+        tile.appendChild(init);
+
+        if (bot.mood === "wait" || bot.mood === "error") {
+          const waitDot = document.createElement("span");
+          waitDot.className = "bp-crew-bot-wait";
+          tile.appendChild(waitDot);
+        }
+        tile.addEventListener("click", () => this.cb.onSelectBot(bot));
+        tiles.appendChild(tile);
+      }
+      if (this.cb.onNewBot && !q) {
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "bp-crew-bot-tile bp-crew-add";
+        add.textContent = "+";
+        add.title = t("bots.new", "New bot");
+        add.setAttribute("aria-label", t("bots.new", "New bot"));
+        add.setAttribute("data-testid", "crew-new-bot");
+        add.addEventListener("click", () => this.cb.onNewBot?.());
+        tiles.appendChild(add);
+      }
+      strip.appendChild(tiles);
+      frag.appendChild(strip);
+    }
+
+    if (hasRoomsRow) {
+      const strip = document.createElement("div");
+      strip.className = "bp-crew-rooms";
+      strip.setAttribute("data-testid", "crew-rooms");
+      for (const room of rooms) {
+        const chip = document.createElement("button");
+        chip.type = "button";
+        chip.className = "bp-crew-room-chip";
+        chip.setAttribute("data-testid", `crew-room-${room.id}`);
+        const hash = document.createElement("span");
+        hash.className = "bp-dim";
+        hash.textContent = "#";
+        const name = document.createElement("span");
+        name.textContent = room.name;
+        chip.append(hash, name);
+        if (room.members !== undefined && room.members > 0) {
+          const cnt = document.createElement("span");
+          cnt.className = "bp-crew-room-cnt";
+          cnt.textContent = String(room.members);
+          chip.appendChild(cnt);
+        }
+        chip.title = room.members ? `#${room.name} (${room.members})` : `#${room.name}`;
+        chip.addEventListener("click", () => this.cb.onSelectRoom?.(room));
+        strip.appendChild(chip);
+      }
+      if (this.cb.onNewRoom && !q) {
+        const add = document.createElement("button");
+        add.type = "button";
+        add.className = "bp-crew-room-chip bp-crew-add";
+        add.textContent = "+";
+        add.title = t("rooms.new", "New room");
+        add.setAttribute("aria-label", t("rooms.new", "New room"));
+        add.setAttribute("data-testid", "crew-new-room");
+        add.addEventListener("click", () => this.cb.onNewRoom?.());
+        strip.appendChild(add);
+      }
+      frag.appendChild(strip);
+    }
+
+    this.crewEl.classList.remove("bp-hidden");
+    this.crewEl.replaceChildren(frag);
   }
 
   /** A projects heading with Add project's + at its right (the first projects heading only). */
@@ -395,89 +688,220 @@ export class SidebarView {
     return head;
   }
 
-  private renderSectionThreadRow(row: SectionThreadRow, showTreeBranch: boolean): HTMLElement {
+  private renderStatusPill(pill: StatusPill, say?: string): HTMLElement {
+    const el = document.createElement("span");
+    el.className = `bp-status-pill bp-pill-${pill.tone}`;
+    el.textContent = `${pill.icon} ${pill.label}`;
+    if (say) el.title = say;
+    return el;
+  }
+
+  private renderRowActions(row: SectionThreadRow): HTMLElement | null {
+    if (row.off) return null;
+    const hasSnooze = Array.isArray(row.snooze) && row.snooze.length > 0 && Boolean(this.cb.onSnoozeRow);
+    const hasWake = Boolean(row.wake) && Boolean(this.cb.onSnoozeRow);
+    const hasSettle = Boolean(row.settle);
+    if (!hasSnooze && !hasWake && !hasSettle) return null;
+
+    const acts = document.createElement("span");
+    acts.className = "bp-row-acts";
+
+    if (hasWake && row.wake) {
+      const wakeBtn = document.createElement("button");
+      wakeBtn.type = "button";
+      wakeBtn.className = "bp-row-act-btn bp-wake-btn";
+      wakeBtn.textContent = t("menu.wake", "Wake");
+      wakeBtn.title = t("menu.wake", "Wake snoozed thread");
+      wakeBtn.setAttribute("data-testid", `wake-row-${row.id}`);
+      wakeBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.cb.onSnoozeRow?.(row.wake!);
+      });
+      acts.appendChild(wakeBtn);
+    }
+
+    if (hasSnooze && row.snooze) {
+      const snBtn = document.createElement("button");
+      snBtn.type = "button";
+      snBtn.className = "bp-row-act-btn bp-snooze-btn";
+      snBtn.title = t("menu.snooze", "Snooze thread");
+      snBtn.setAttribute("aria-label", t("menu.snooze", "Snooze thread"));
+      snBtn.setAttribute("data-testid", `snooze-row-${row.id}`);
+      snBtn.appendChild(makeClockIcon(11));
+      snBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.snoozeMenuRowId = this.snoozeMenuRowId === row.id ? "" : row.id;
+        this.render();
+      });
+      acts.appendChild(snBtn);
+    }
+
+    if (hasSettle && row.settle) {
+      const settleBtn = document.createElement("button");
+      settleBtn.type = "button";
+      settleBtn.className = "bp-row-act-btn bp-settle-btn";
+      settleBtn.title = t("menu.settle", "Settle");
+      settleBtn.setAttribute("aria-label", t("menu.settle", "Settle"));
+      settleBtn.setAttribute("data-testid", `settle-row-${row.id}`);
+      settleBtn.appendChild(makeCheckIcon(11));
+      settleBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.cb.onThreadAct(rawThreadId(row.settle!), "settle");
+      });
+      acts.appendChild(settleBtn);
+    }
+
+    return acts;
+  }
+
+  private renderSectionThreadRow(row: SectionThreadRow, showTreeBranch: boolean, isInbox = false): HTMLElement {
     const el = document.createElement("div");
     el.className = "bp-thread-row" +
-      (row.id === this.selectedThreadId ? " active" : "") +
+      (isInbox ? " bp-inbox-row" : "") +
+      (row.id === this.selectedThreadId || rawThreadId(row.id) === this.selectedThreadId ? " active" : "") +
       (row.off ? " bp-dim" : "");
     el.setAttribute("data-thread-id", row.id);
     el.setAttribute("data-testid", `thread-row-${row.id}`);
 
-    if (showTreeBranch) {
-      const branch = document.createElement("span");
-      branch.className = "bp-tree-branch";
-      branch.setAttribute("aria-hidden", "true");
-      el.appendChild(branch);
-    }
+    const pill = statusPillOf(row);
+    const acts = this.renderRowActions(row);
 
-    const dot = document.createElement("span");
-    dot.className = `bp-dot ${statusClassFromWords(row.status, row.word, row.state)}`;
+    if (isInbox) {
+      // 2-line Inbox row:
+      // Line 1: Full-width Title + hover Snooze/Wake/Settle actions
+      // Line 2: Explicit [Status Pill] + Project name + right-aligned age
+      const main = document.createElement("div");
+      main.className = "bp-inbox-main";
 
-    const title = document.createElement("div");
-    title.className = "bp-thread-title";
-    title.textContent = row.title || "Untitled thread";
+      const line1 = document.createElement("div");
+      line1.className = "bp-inbox-top";
+      const title = document.createElement("div");
+      title.className = "bp-thread-title";
+      title.textContent = row.title || "Untitled thread";
+      line1.appendChild(title);
+      if (acts) line1.appendChild(acts);
 
-    el.append(dot, title);
+      const line2 = document.createElement("div");
+      line2.className = "bp-inbox-meta";
+      if (pill) line2.appendChild(this.renderStatusPill(pill, row.say));
+      if (row.project) {
+        const proj = document.createElement("span");
+        proj.className = "bp-inbox-proj";
+        proj.textContent = row.project;
+        line2.appendChild(proj);
+      }
+      if (row.ago) {
+        const age = document.createElement("span");
+        age.className = "bp-thread-age";
+        age.textContent = row.ago;
+        if (row.pinned) age.title = t("tools.pinned", "Pinned");
+        line2.appendChild(age);
+      }
 
-    if (row.word === "needs") {
-      const badge = document.createElement("span");
-      badge.className = "bp-badge-need";
-      badge.textContent = row.want === "approval" ? "!" : "•";
-      if (row.say) badge.title = row.say;
-      el.appendChild(badge);
-    } else if (row.ago) {
-      const age = document.createElement("span");
-      age.className = "bp-thread-age";
-      age.textContent = row.ago;
-      if (row.pinned) age.title = t("tools.pinned", "Pinned");
-      el.appendChild(age);
+      main.append(line1, line2);
+      el.appendChild(main);
+    } else {
+      // Nested Bench project row: optional tree branch + explicit compact status pill + title + hover actions + age
+      if (showTreeBranch) {
+        const branch = document.createElement("span");
+        branch.className = "bp-tree-branch";
+        branch.setAttribute("aria-hidden", "true");
+        el.appendChild(branch);
+      }
+      if (pill) el.appendChild(this.renderStatusPill(pill, row.say));
+
+      const title = document.createElement("div");
+      title.className = "bp-thread-title";
+      title.textContent = row.title || "Untitled thread";
+      el.appendChild(title);
+
+      if (acts) el.appendChild(acts);
+
+      if (row.ago) {
+        const age = document.createElement("span");
+        age.className = "bp-thread-age";
+        age.textContent = row.ago;
+        if (row.pinned) age.title = t("tools.pinned", "Pinned");
+        el.appendChild(age);
+      }
     }
 
     const target = row.nav || row.id;
     if (!row.off && target && !target.startsWith("@room:")) {
-      el.addEventListener("click", () => this.cb.onSelectThread(target));
+      el.addEventListener("click", () => this.cb.onSelectThread(rawThreadId(target)));
     }
+
+    const showSnoozeBar = this.snoozeMenuRowId === row.id && Array.isArray(row.snooze) && row.snooze.length > 0;
     const need = row.kind === "swarm" ? parseNeed(row.need) : null;
-    if (!need) return el;
-    // a swarm's need: its line under the row and a button per action
+    if (!need && !showSnoozeBar) return el;
+
     const wrap = document.createElement("div");
     wrap.className = "bp-need-wrap";
-    const line = document.createElement("div");
-    line.className = "bp-need" + (showTreeBranch ? " nested" : "") + (row.off ? " bp-dim" : "");
-    line.setAttribute("data-testid", `need-${row.id}`);
-    const text = document.createElement("span");
-    text.className = "bp-need-line";
-    text.textContent = need.line;
-    text.title = need.line;
-    line.appendChild(text);
-    for (const a of need.actions) {
-      if (!needPress(a, Boolean(this.cb.hasRoomView))) continue;
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "bp-need-btn";
-      b.textContent = a.label;
-      b.setAttribute("data-testid", `need-${a.act}-${row.id}`);
-      b.disabled = Boolean(row.off) || this.needBusy.has(row.id) || !this.cb.onNeedAct;
-      b.addEventListener("click", (e) => {
-        e.stopPropagation();
-        const act = this.cb.onNeedAct;
-        if (!act) return;
-        this.needErr.delete(row.id);
-        this.needBusy.add(row.id);
-        this.render();
-        act(a)
-          .catch((err: unknown) => { this.needErr.set(row.id, err instanceof Error ? err.message : String(err)); })
-          .finally(() => { this.needBusy.delete(row.id); this.render(); });
-      });
-      line.appendChild(b);
+    wrap.appendChild(el);
+
+    // Inline Snooze duration picker (1 hour · Tomorrow · 1 week)
+    if (showSnoozeBar && row.snooze) {
+      const bar = document.createElement("div");
+      bar.className = "bp-snooze-bar" + (showTreeBranch ? " nested" : "");
+      bar.setAttribute("data-testid", `snooze-bar-${row.id}`);
+      const lbl = document.createElement("span");
+      lbl.className = "bp-dim";
+      lbl.textContent = "Snooze:";
+      bar.appendChild(lbl);
+      for (const opt of row.snooze) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "bp-snooze-opt";
+        b.textContent = opt.label;
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.snoozeMenuRowId = "";
+          this.cb.onSnoozeRow?.(opt.value);
+          this.render();
+        });
+        bar.appendChild(b);
+      }
+      wrap.appendChild(bar);
     }
-    wrap.append(el, line);
-    const err = this.needErr.get(row.id);
-    if (err) {
-      const e = document.createElement("div");
-      e.className = "bp-need-err" + (showTreeBranch ? " nested" : "");
-      e.textContent = err;
-      wrap.appendChild(e);
+
+    if (need) {
+      const line = document.createElement("div");
+      line.className = "bp-need" + (showTreeBranch ? " nested" : "") + (row.off ? " bp-dim" : "");
+      line.setAttribute("data-testid", `need-${row.id}`);
+      const text = document.createElement("span");
+      text.className = "bp-need-line";
+      text.textContent = need.line;
+      text.title = need.line;
+      line.appendChild(text);
+      for (const a of need.actions) {
+        if (!needPress(a, Boolean(this.cb.hasRoomView))) continue;
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "bp-need-btn";
+        b.textContent = a.label;
+        b.setAttribute("data-testid", `need-${a.act}-${row.id}`);
+        b.disabled = Boolean(row.off) || this.needBusy.has(row.id) || !this.cb.onNeedAct;
+        b.addEventListener("click", (e) => {
+          e.stopPropagation();
+          const act = this.cb.onNeedAct;
+          if (!act) return;
+          this.needErr.delete(row.id);
+          this.needBusy.add(row.id);
+          this.render();
+          act(a)
+            .catch((err: unknown) => { this.needErr.set(row.id, err instanceof Error ? err.message : String(err)); })
+            .finally(() => { this.needBusy.delete(row.id); this.render(); });
+        });
+        line.appendChild(b);
+      }
+      wrap.appendChild(line);
+      const err = this.needErr.get(row.id);
+      if (err) {
+        const e = document.createElement("div");
+        e.className = "bp-need-err" + (showTreeBranch ? " nested" : "");
+        e.textContent = err;
+        wrap.appendChild(e);
+      }
     }
     return wrap;
   }
@@ -487,10 +911,16 @@ export class SidebarView {
     const listedThreadIds = new Set<string>();
     for (const sec of sections) {
       if (sec.kind === "threads") {
-        for (const r of sec.rows as SectionThreadRow[]) listedThreadIds.add(r.id);
+        for (const r of sec.rows as SectionThreadRow[]) {
+          listedThreadIds.add(r.id);
+          listedThreadIds.add(rawThreadId(r.id));
+        }
       } else if (sec.kind === "projects") {
         for (const p of sec.rows as SectionProjectRow[]) {
-          for (const th of p.threads ?? []) listedThreadIds.add(th.id);
+          for (const th of p.threads ?? []) {
+            listedThreadIds.add(th.id);
+            listedThreadIds.add(rawThreadId(th.id));
+          }
         }
       }
     }
@@ -500,37 +930,59 @@ export class SidebarView {
 
     let anyProjectRows = false;
     for (const sec of sections) {
-      if (sec.kind === "projects" && sec.rows.length > 0) anyProjectRows = true;
+      if (sec.kind === "projects" && (sec.rows.length > 0 || (sec.count ?? 0) > 0)) anyProjectRows = true;
     }
 
     for (const sec of sections) {
       if (sec.kind === "bub") continue;
 
       if (sec.kind === "threads") {
+        const isFoldable = Boolean(sec.fold && sec.toggle);
         const rows = (sec.rows as SectionThreadRow[]).filter((r) => {
           if (!q) return true;
           return `${r.title} ${r.project ?? ""}`.toLowerCase().includes(q);
         });
-        if (rows.length === 0) continue;
+        if (!isFoldable && rows.length === 0) continue;
+        if (isFoldable && q && rows.length === 0) continue;
+        if (isFoldable && !q && (sec.count ?? rows.length) === 0) continue;
 
         const secWrap = document.createElement("section");
-        secWrap.className = "bp-side-section";
+        secWrap.className = `bp-side-section bp-side-inbox bp-sec-${sec.id}`;
         secWrap.setAttribute("data-section-id", sec.id);
 
-        const head = document.createElement("div");
-        head.className = "bp-side-section-head";
-        head.textContent = sec.title.toUpperCase();
-        secWrap.appendChild(head);
+        if (isFoldable) {
+          const headBtn = document.createElement("button");
+          headBtn.type = "button";
+          headBtn.className = "bp-side-section-head bp-side-section-toggle";
+          const count = q ? rows.length : (sec.count ?? rows.length);
+          const arrow = sec.open || Boolean(q) ? "▾" : "▸";
+          headBtn.textContent = `${arrow} ${sec.title.toUpperCase()} (${count})`;
+          if (sec.hint) headBtn.title = sec.hint;
+          headBtn.setAttribute("data-testid", `section-toggle-${sec.id}`);
+          headBtn.addEventListener("click", () => {
+            if (sec.toggle) this.cb.onToggleSection?.(sec.toggle);
+          });
+          secWrap.appendChild(headBtn);
+        } else {
+          const head = document.createElement("div");
+          head.className = "bp-side-section-head" +
+            (sec.id === "needs" ? " bp-head-needs" : sec.id === "running" ? " bp-head-running" : "");
+          head.textContent = `${sec.title.toUpperCase()} ${rows.length}`;
+          secWrap.appendChild(head);
+        }
 
-        for (const r of rows) {
-          secWrap.appendChild(this.renderSectionThreadRow(r, false));
+        if (!isFoldable || Boolean(sec.open) || Boolean(q)) {
+          for (const r of rows) {
+            secWrap.appendChild(this.renderSectionThreadRow(r, false, true));
+          }
         }
         frag.appendChild(secWrap);
         continue;
       }
 
       if (sec.kind === "projects") {
-        const projRows = (sec.rows as SectionProjectRow[]).filter((p) => {
+        const rawRows = sec.rows as SectionProjectRow[];
+        let projRows = rawRows.filter((p) => {
           if (!q) return true;
           if ((p.title || p.id).toLowerCase().includes(q)) return true;
           if ((p.threads ?? []).some((th) => th.title.toLowerCase().includes(q))) return true;
@@ -543,17 +995,18 @@ export class SidebarView {
         if (!isFoldable && sec.id !== "active" && projRows.length === 0) continue;
 
         const secWrap = document.createElement("section");
-        secWrap.className = "bp-side-section";
+        secWrap.className = `bp-side-section bp-sec-${sec.id}`;
         secWrap.setAttribute("data-section-id", sec.id);
 
         if (isFoldable) {
           const headBtn = document.createElement("button");
           headBtn.type = "button";
           headBtn.className = "bp-side-section-head bp-side-section-toggle";
-          const count = sec.count ?? projRows.length;
-          const arrow = sec.open ? "▾" : "▸";
-          headBtn.textContent = `${sec.title.toUpperCase()} (${count}) ${arrow}`;
+          const count = q ? projRows.length : (sec.count ?? projRows.length);
+          const arrow = sec.open || Boolean(q) ? "▾" : "▸";
+          headBtn.textContent = `${arrow} ${sec.title.toUpperCase()} (${count})`;
           if (sec.hint) headBtn.title = sec.hint;
+          headBtn.setAttribute("data-testid", `section-toggle-${sec.id}`);
           headBtn.addEventListener("click", () => {
             if (sec.toggle) this.cb.onToggleSection?.(sec.toggle);
           });
@@ -562,7 +1015,37 @@ export class SidebarView {
           secWrap.appendChild(this.projectsHead(sec.title.toUpperCase()));
         }
 
-        if (!isFoldable || sec.open || Boolean(q)) {
+        const isOpen = !isFoldable || Boolean(sec.open) || Boolean(q);
+        if (isOpen) {
+          if (sec.id === "all" && !q) {
+            const hasHw = rawRows.some((p) => p.hasBoard || p.hasSchematic);
+            const hasSw = rawRows.some((p) => !p.hasBoard && !p.hasSchematic);
+            if (hasHw && hasSw) {
+              const bar = document.createElement("div");
+              bar.className = "bp-proj-filter";
+              bar.setAttribute("data-testid", "all-projects-filter");
+              const opts: Array<{ id: "all" | "hw" | "sw"; label: string }> = [
+                { id: "all", label: "All" },
+                { id: "hw", label: "Boards" },
+                { id: "sw", label: "Code" },
+              ];
+              for (const opt of opts) {
+                const btn = document.createElement("button");
+                btn.type = "button";
+                btn.className = "bp-proj-filter-btn" + (this.allFilter === opt.id ? " active" : "");
+                btn.textContent = opt.label;
+                btn.addEventListener("click", () => {
+                  this.allFilter = opt.id;
+                  this.render();
+                });
+                bar.appendChild(btn);
+              }
+              secWrap.appendChild(bar);
+              if (this.allFilter === "hw") projRows = projRows.filter((p) => p.hasBoard || p.hasSchematic);
+              else if (this.allFilter === "sw") projRows = projRows.filter((p) => !p.hasBoard && !p.hasSchematic);
+            }
+          }
+
           if (sec.id === "active" && !anyProjectRows && !q) {
             const empty = document.createElement("div");
             empty.className = "bp-side-empty";
@@ -572,7 +1055,7 @@ export class SidebarView {
 
           for (const proj of projRows) {
             const group = document.createElement("div");
-            group.className = "bp-proj-group" + (proj.off ? " bp-dim" : "");
+            group.className = "bp-proj-group" + (proj.off || sec.id === "quiet" ? " bp-dim" : "");
             group.setAttribute("data-project-id", proj.id);
             if (proj.nav || proj.key) group.setAttribute("data-project-key", proj.nav || proj.key || "");
 
@@ -582,14 +1065,68 @@ export class SidebarView {
             const toggle = document.createElement("button");
             toggle.type = "button";
             toggle.className = "bp-proj-toggle";
-            const folder = makeFolderIcon();
-            if (proj.css) folder.style.color = proj.css;
+            const isHw = Boolean(proj.hasBoard || proj.hasSchematic);
+            const icon = isHw ? makeBoardIcon(14) : makeFolderIcon();
+            if (proj.css) icon.style.color = proj.css;
             const nameSpan = document.createElement("span");
             nameSpan.className = "bp-proj-name";
             nameSpan.textContent = proj.title || proj.id;
-            toggle.append(folder, nameSpan);
+            toggle.append(icon, nameSpan);
             if (proj.fold === "project-fold" && proj.nav) {
               toggle.addEventListener("click", () => this.cb.onToggleProjectFold?.(proj.nav!));
+            }
+
+            const meta = document.createElement("div");
+            meta.className = "bp-proj-meta";
+            if ((proj.needsCount ?? 0) > 0) {
+              const nb = document.createElement("span");
+              nb.className = "bp-proj-badge-need";
+              nb.textContent = String(proj.needsCount);
+              nb.title = `${proj.needsCount} needing you`;
+              meta.appendChild(nb);
+            }
+            if ((proj.running ?? 0) > 0) {
+              const rb = document.createElement("span");
+              rb.className = "bp-proj-badge-run";
+              rb.textContent = String(proj.running);
+              rb.title = `${proj.running} running`;
+              meta.appendChild(rb);
+            }
+            if (proj.pinned && sec.id !== "pinned") {
+              meta.appendChild(makePinIcon(11));
+            }
+
+            const acts = document.createElement("div");
+            acts.className = "bp-proj-acts";
+            if (!proj.off && this.cb.onQuickOpenViewer) {
+              if (proj.hasBoard) {
+                const bBtn = document.createElement("button");
+                bBtn.type = "button";
+                bBtn.className = "bp-proj-quick";
+                bBtn.title = t("viewer.board", "Open Board");
+                bBtn.setAttribute("aria-label", `Open Board (${proj.title})`);
+                bBtn.setAttribute("data-testid", `quick-board-${proj.id}`);
+                bBtn.appendChild(makeBoardIcon(13, ""));
+                bBtn.addEventListener("click", (e) => {
+                  e.stopPropagation();
+                  this.cb.onQuickOpenViewer?.(rawThreadId(proj.id), "board");
+                });
+                acts.appendChild(bBtn);
+              }
+              if (proj.hasSchematic) {
+                const sBtn = document.createElement("button");
+                sBtn.type = "button";
+                sBtn.className = "bp-proj-quick";
+                sBtn.title = t("viewer.schematic", "Open Schematic");
+                sBtn.setAttribute("aria-label", `Open Schematic (${proj.title})`);
+                sBtn.setAttribute("data-testid", `quick-sch-${proj.id}`);
+                sBtn.appendChild(makeSchematicIcon(13));
+                sBtn.addEventListener("click", (e) => {
+                  e.stopPropagation();
+                  this.cb.onQuickOpenViewer?.(rawThreadId(proj.id), "schematic");
+                });
+                acts.appendChild(sBtn);
+              }
             }
 
             const addBtn = document.createElement("button");
@@ -601,10 +1138,11 @@ export class SidebarView {
             if (proj.off) addBtn.disabled = true;
             addBtn.addEventListener("click", (e) => {
               e.stopPropagation();
-              this.cb.onNewThread(proj.id);
+              this.cb.onNewThread(rawThreadId(proj.id));
             });
+            acts.appendChild(addBtn);
 
-            header.append(toggle, addBtn);
+            header.append(toggle, meta, acts);
             group.appendChild(header);
 
             if (!proj.folded || Boolean(q)) {
@@ -617,12 +1155,9 @@ export class SidebarView {
                 if (q && !projNameMatches && !th.title.toLowerCase().includes(q)) continue;
                 group.appendChild(this.renderSectionThreadRow(th, true));
               }
-              // Mirror GPUI's `on_show` rule (`sections.rs:340-341`): since `data/1` `sidebar.sections`
-              // passes `selected: ""`, keep the currently selected thread visible under its project
-              // without altering the order of hub-returned rows.
               if (
                 selectedMeta &&
-                selectedMeta.project === proj.id &&
+                selectedMeta.project === rawThreadId(proj.id) &&
                 !listedThreadIds.has(selectedMeta.id) &&
                 (!q || projNameMatches || selectedMeta.title.toLowerCase().includes(q))
               ) {
@@ -649,8 +1184,11 @@ export class SidebarView {
 
   public render(): void {
     this.addShown = false;
-    const frag = document.createDocumentFragment();
     const q = this.filterText;
+
+    this.renderCrewBand(q);
+
+    const frag = document.createDocumentFragment();
 
     if (this.sections !== null) {
       this.renderHubSections(frag, q);
@@ -667,7 +1205,7 @@ export class SidebarView {
         byProject.set(th.project, list);
       }
 
-      frag.appendChild(this.projectsHead("ACTIVE"));
+      frag.appendChild(this.projectsHead("RECENT"));
 
       if (this.projects.length === 0 && this.threads.length === 0) {
         const empty = document.createElement("div");
@@ -733,58 +1271,6 @@ export class SidebarView {
 
         frag.appendChild(sec);
       }
-    }
-
-    if (!q) {
-      const botSec = document.createElement("section");
-      botSec.className = "bp-proj-group bp-bots-group";
-      const botHead = document.createElement("div");
-      botHead.className = "bp-side-section-head bp-side-section-row";
-      const botLbl = document.createElement("span");
-      botLbl.textContent = t("tour.title.bots", "Bots").toUpperCase();
-      const botAdd = document.createElement("span");
-      botAdd.className = "bp-side-sec-plus";
-      botAdd.textContent = "+";
-      botAdd.setAttribute("aria-hidden", "true");
-      botHead.append(botLbl, botAdd);
-      botSec.appendChild(botHead);
-      for (const bot of this.bots) {
-        const row = document.createElement("div");
-        row.className = "bp-thread-row" + (bot.thread === this.selectedThreadId ? " active" : "");
-        const dot = document.createElement("span");
-        dot.className = "bp-dot bp-dot-idle";
-        if (bot.color) dot.style.backgroundColor = bot.color;
-        const name = document.createElement("div");
-        name.className = "bp-thread-title";
-        name.textContent = `@${bot.name}`;
-        row.append(dot, name);
-        row.addEventListener("click", () => this.cb.onSelectBot(bot));
-        botSec.appendChild(row);
-      }
-      frag.appendChild(botSec);
-
-      const roomSec = document.createElement("section");
-      roomSec.className = "bp-proj-group";
-      const roomHead = document.createElement("div");
-      roomHead.className = "bp-side-section-head bp-side-section-row";
-      const roomLbl = document.createElement("span");
-      roomLbl.textContent = t("bots.rooms", "Rooms").toUpperCase();
-      const roomAdd = document.createElement("span");
-      roomAdd.className = "bp-side-sec-plus";
-      roomAdd.textContent = "+";
-      roomAdd.setAttribute("aria-hidden", "true");
-      roomHead.append(roomLbl, roomAdd);
-      roomSec.appendChild(roomHead);
-      for (const room of this.rooms) {
-        const row = document.createElement("div");
-        row.className = "bp-thread-row";
-        const name = document.createElement("div");
-        name.className = "bp-thread-title";
-        name.textContent = `#${room.name}`;
-        row.appendChild(name);
-        roomSec.appendChild(row);
-      }
-      frag.appendChild(roomSec);
     }
 
     this.listEl.replaceChildren(frag);

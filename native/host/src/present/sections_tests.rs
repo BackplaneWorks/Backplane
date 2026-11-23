@@ -102,21 +102,24 @@ fn one(evs: &[Value]) -> State { let mut v = vec![pc("p1", "Proj", "/nowhere/pro
     let under = |s: &State| { let rows = merged_projects(s, &[], &|_| false, &|_| String::new(), "desk", &[]); let v = build(s, &rows, &Value::Null, &ctx(&HashSet::new())); sec(&v, "active")["rows"][0]["threads"].clone() };
     let names = |u: &Value| u.as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     let u = under(&one(&evs));
-    assert_eq!(names(&u), ["T t3", "T t1", "T t2"], "the pins first, as pinned; the running one (newest) after them");
+    assert_eq!(names(&u), ["T t3", "T t1"], "the pins first, as pinned; the running one is a row of Running");
+    let running = { let s = one(&evs); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); sec(&build(&s, &rows, &Value::Null, &ctx(&HashSet::new())), "running")["rows"].clone() };
+    assert_eq!(names(&running), ["T t2"]); assert_eq!(running[0]["project"], "Proj"); assert_eq!(running[0]["settle"], "", "a thread that runs is not settled from under its turn");
+    assert_eq!(u[0]["settle"], "h|t3", "a finished one settles in one press");
     let menu = |r: &Value| r["menu"].as_array().unwrap().iter().map(|m| (m["id"].as_str().unwrap().to_string(), m["action"].as_str().unwrap().to_string(), m["value"].as_str().unwrap().to_string())).collect::<Vec<_>>();
     assert_eq!(menu(&u[0]), [("unpin".into(), "row-unpin".into(), "h|t3".into()), ("settle".into(), "row-settle".into(), "h|t3".into())], "no Archive: it is Settle");
-    assert_eq!(menu(&u[2])[0].0, "pin"); assert_eq!(u[0]["menu"][0]["label"], "Unpin"); assert_eq!(u[2]["menu"][0]["label"], "Pin");
+    assert_eq!(menu(&running[0])[0].0, "pin"); assert_eq!(u[0]["menu"][0]["label"], "Unpin"); assert_eq!(running[0]["menu"][0]["label"], "Pin");
     // no fold: a project's rows are few and fixed (two pins, one other), so no chevron; an old fold setting changes nothing
     { let s = one(&evs); let key = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[])[0].key.clone();
       let mut f = evs.clone(); f.push(json!({"$":"SettingSet","key":format!("sidebar.fold.{key}"),"value":"1","at":NOW-1}));
       let s = one(&f); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
-      let p = &sec(&v, "active")["rows"][0]; assert_eq!((p["fold"].as_str(), p["folded"].as_bool(), p["under"].as_u64()), (Some(""), Some(false), Some(0))); assert_eq!(names(&p["threads"]), ["T t3", "T t1", "T t2"]); }
-    // ten more running threads, all newer: still the two pins and one running thread, the newest
+      let p = &sec(&v, "active")["rows"][0]; assert_eq!((p["fold"].as_str(), p["folded"].as_bool(), p["under"].as_u64()), (Some(""), Some(false), Some(0))); assert_eq!(names(&p["threads"]), ["T t3", "T t1"]); }
+    // ten more running threads, all newer: still the two pins alone (what runs is in Running)
     for i in 0..10 { let id = format!("r{i}"); evs.push(tc(&id, "p1", NOW - 9)); evs.push(turn(&id, "running", NOW - 5)); }
-    let u = under(&one(&evs)); assert_eq!(u.as_array().unwrap().len(), 3); assert_eq!(names(&u)[..2], ["T t3", "T t1"]);
+    let u = under(&one(&evs)); assert_eq!(names(&u), ["T t3", "T t1"]);
     // settled by hand, a thread gives up its pin (the state's law) and leaves; unpinned and done, the other leaves too. The page's Done row offers Pin and Unsettle
     evs.truncate(7); evs.push(json!({"$":"ThreadSettled","id":"t3","manual":true,"at":NOW-20})); evs.push(pin("t1", false, NOW - 20));
-    let s = one(&evs); assert_eq!(names(&under(&s)), ["T t2"]);
+    let s = one(&evs); assert!(names(&under(&s)).is_empty());
     let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let open = HashSet::new();
     let pg = page(&s, &rows, &rows[0].key, &ctx(&open), true); let done = pg["sections"].as_array().unwrap().iter().find(|x| x["id"] == "done").unwrap();
     let t3 = done["rows"].as_array().unwrap().iter().find(|r| r["title"] == "T t3").unwrap(); assert_eq!((t3["menu"][0]["id"].as_str(), t3["menu"][1]["id"].as_str()), (Some("pin"), Some("unsettle")));
@@ -148,7 +151,7 @@ fn world() -> State {
     assert!(!groups_on(&s) && groups_on(&world()));
     let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
     assert_eq!(ids(&v), ["needs", "active", "quiet"], "no group section");
-    assert_eq!(titles(sec(&v, "active")), ["Alive", "Recent", "Grouped", "Failing"], "the grouped one is in the list, by its last activity like the rest");
+    assert_eq!(titles(sec(&v, "active")), ["Alive", "Failing", "Grouped", "Recent"], "the grouped one is in the list, by name like the rest");
     assert!(groups_due(&s, &rows).is_empty(), "nothing asks Haiku for a name");
     let g = sec(&v, "active")["rows"].as_array().unwrap().iter().find(|r| r["title"] == "Grouped").unwrap().clone(); assert_eq!(g["group"], "");
     let sub = |r: &Value| r["menu"].as_array().unwrap().iter().find(|i| i["id"] == "move").unwrap()["sub"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect::<Vec<_>>();
@@ -171,8 +174,8 @@ fn world() -> State {
     // Needs you: the approval, then the failure (twenty days old, never looked at)
     assert_eq!(titles(sec(&v, "needs")), ["T ta", "T tf"]);
     assert_eq!(sec(&v, "needs")["rows"][0]["want"], "approval"); assert_eq!(sec(&v, "needs")["rows"][1]["want"], "failed");
-    // Active: a project with a visible thread (Alive runs, Failing's failure shows) or activity within three days, newest first
-    assert_eq!(titles(sec(&v, "active")), ["Alive", "Recent", "Failing"], "{v}");
+    // Recent: a project with a visible thread (Alive runs, Failing's failure shows) or activity within three days; on the bench by name
+    assert_eq!(titles(sec(&v, "active")), ["Alive", "Failing", "Recent"], "{v}");
     let alive = &sec(&v, "active")["rows"][0]; assert_eq!(alive["running"], 1); assert_eq!(alive["needsCount"], 1);
     assert!(alive["threads"].as_array().unwrap().is_empty(), "its thread is in Needs you, not repeated under it");
     // a group folds by default with its count, and Quiet too
@@ -213,7 +216,7 @@ fn world() -> State {
     let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
     let alive = &sec(&v, "active")["rows"][0];
     assert_eq!((alive["fold"].as_str(), alive["folded"].as_bool(), alive["under"].as_u64(), alive["rest"].as_u64()), (Some(""), Some(false), Some(0), Some(0)), "{alive}");
-    assert_eq!(titles_of(&alive["threads"]), ["T tc"], "one other thread: the newest running one");
+    assert!(titles_of(&alive["threads"]).is_empty(), "what runs is in Running"); assert_eq!(titles(sec(&v, "running")), ["T tc", "T tb"], "the newest first");
     assert_eq!((alive["running"].as_u64(), alive["needsCount"].as_u64()), (Some(3), Some(1)), "its counts stay on the row");
     assert_eq!(titles(sec(&v, "needs"))[0], "T ta", "a thread of it that asks the person is in Needs you");
     // a search still lists every hit under it
@@ -458,7 +461,8 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let rows2 = merged_projects(&s2, &[], &|_| false, &|_| String::new(), "desk", &[]);
     let v2 = build(&s2, &rows2, &Value::Null, &ctx(&HashSet::new()));
     assert!(sec(&v2, "needs").is_null());
-    let p2 = &sec(&v2, "active")["rows"][0]; assert_eq!(p2["swarms"][0]["nav"], "@room:r1"); assert_eq!(p2["swarms"][0]["members"], 2); assert!(p2["running"].as_u64().unwrap() >= 1);
+    let p2 = &sec(&v2, "active")["rows"][0]; assert!(p2["swarms"].as_array().unwrap().is_empty(), "not repeated under its project"); assert!(p2["running"].as_u64().unwrap() >= 1);
+    let r2 = &sec(&v2, "running")["rows"][0]; assert_eq!(r2["nav"], "@room:r1"); assert_eq!(r2["members"], 2);
     // a guard's pause asks the person; a member's ask does too
     for evs in [vec![room("r1", "paused", "circular")], vec![room("r1", "", ""), ask("q", "a", "question")]] {
         let mut e = vec![pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3)]; e.extend(evs);
@@ -475,14 +479,15 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
 }
 
 // ---- finished threads: counted on the project's row, and the one on show listed under it -----------------------------------
-#[test] fn the_one_row_besides_the_pins_is_the_running_thread_else_the_open_one() {
+#[test] fn the_one_row_besides_the_pins_is_the_open_thread_and_what_runs_is_in_running() {
     let s = one(&[tc("t2", "p1", NOW - 80), tc("t3", "p1", NOW - 70), turn("t1", "completed", NOW - 50), turn("t2", "completed", NOW - 40),
         json!({"$":"ThreadSettled","id":"t2","manual":true,"at":NOW-30}), turn("t3", "running", NOW - 20)]);
     let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let open = HashSet::new();
     let row = |s: &State, sel: &'static str| { let rows = merged_projects(s, &[], &|_| false, &|_| String::new(), "desk", &[]); let c = Ctx { selected: sel, ..ctx(&open) }; sec(&build(s, &rows, &Value::Null, &c), "active")["rows"][0].clone() };
     let _ = rows;
-    let r = row(&s, ""); assert_eq!((titles_of(&r["threads"]), r["rest"].as_u64()), (vec!["T t3".to_string()], Some(0)), "the running one; no count of the rest");
-    assert_eq!(titles_of(&row(&s, "t2")["threads"]), ["T t3"], "the running one wins over the one on show");
+    let r = row(&s, ""); assert_eq!((titles_of(&r["threads"]), r["rest"].as_u64(), r["running"].as_u64()), (vec![], Some(0), Some(1)), "the running one is in Running, counted here; no count of the rest");
+    assert_eq!(titles_of(&row(&s, "t2")["threads"]), ["T t2"], "the one on show has the row");
+    assert_eq!(titles_of(&row(&s, "t3")["threads"]), ["T t3"], "the running one too, while it is the one on show");
     // nothing runs: the thread on show has the row, and leaves when another is opened
     let s = one(&[tc("t2", "p1", NOW - 80), turn("t1", "completed", NOW - 50), turn("t2", "completed", NOW - 40), json!({"$":"ThreadSettled","id":"t2","manual":true,"at":NOW-30})]);
     assert_eq!(titles_of(&row(&s, "t2")["threads"]), ["T t2"]);
@@ -504,7 +509,7 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let s = one(&evs);
     assert!(attention_only(&s), "on unless the person turns it off");
     let v = view(&s, ""); let p = &sec(&v, "active")["rows"][0];
-    assert_eq!(titles_of(&p["threads"]), ["T t8", "T t3"], "the pin and the running one");
+    assert_eq!(titles_of(&p["threads"]), ["T t8"], "the pin"); assert_eq!(titles_of(&sec(&v, "running")["rows"]), ["T t3"], "what runs is in Running");
     assert_eq!(titles_of(&sec(&v, "needs")["rows"]), ["T t7"]);
     assert_eq!(p["fold"], "", "no chevron");
     let mut off = evs.clone(); off.push(set(ATTENTION, "off", NOW - 1));
@@ -633,4 +638,57 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let jmp_str = jmp.to_string();
     assert!(!jmp_str.contains("Bub: Launch:") && !jmp_str.contains("mailcoord-"), "no mailroom runs in Ctrl+K: {jmp_str}");
     assert!(jmp_str.contains("User thread") && jmp_str.contains("Test runner"));
+}
+
+// ---- the bench: Recent holds the projects the person was in last, the rest fold into All projects ----------------------------------
+#[test] fn recent_holds_the_last_visited_projects_and_the_rest_fold_into_all_projects() {
+    // twelve projects, each with one finished thread, the higher the number the newer its activity
+    let mut evs = vec![]; for i in 0..12u64 { let (p, t) = (format!("q{i:02}"), format!("u{i:02}")); evs.push(pc(&p, &format!("N{i:02}"), &format!("/n/q{i:02}"), NOW - 5 * DAY)); evs.push(tc(&t, &p, NOW - 4 * DAY + i)); evs.push(turn(&t, "completed", NOW - 4 * DAY + i)); }
+    let s = st(&evs); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    assert_eq!(ids(&v), ["active", "all"]); assert_eq!(sec(&v, "active")["title"], "Recent");
+    assert_eq!(titles(sec(&v, "active")), ["N04", "N05", "N06", "N07", "N08", "N09", "N10", "N11"], "never visited: the BENCH newest by activity; on the bench by name, so no row moves as the person goes between them");
+    assert_eq!((sec(&v, "all")["count"].as_u64(), sec(&v, "all")["open"].as_bool(), sec(&v, "all")["rows"].as_array().unwrap().len()), (Some(4), Some(false), 0), "the rest: one folded line");
+    // opened: by name
+    let open: HashSet<String> = ["sec:all".to_string()].into();
+    assert_eq!(titles(sec(&build(&s, &rows, &Value::Null, &ctx(&open)), "all")), ["N00", "N01", "N02", "N03"]);
+    assert_eq!(act(&s, &rows, "side-section", "sec:all", &json!({}), NOW).unwrap().open_toggle.as_deref(), Some("sec:all"));
+    // a visit (its page opened, or a thread of it) brings an old one to the top, whatever the agents did since
+    let key = rows.iter().find(|p| p.name == "N01").unwrap().key.clone();
+    let a = act(&s, &rows, "project-page", &key, &json!({}), NOW).unwrap(); assert_eq!(a.sets, vec![("sidebar.visit.q01".to_string(), NOW.to_string())]);
+    let mut s2 = st(&evs); s2.apply(&set("sidebar.visit.q01", &NOW.to_string(), NOW));
+    let rows2 = merged_projects(&s2, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    assert_eq!(titles(sec(&build(&s2, &rows2, &Value::Null, &ctx(&HashSet::new())), "active")), ["N01", "N05", "N06", "N07", "N08", "N09", "N10", "N11"], "it took the oldest one's place");
+    assert!(act(&s2, &rows2, "project-page", &key, &json!({}), NOW + 60).unwrap().sets.is_empty(), "at most one visit line in ten minutes");
+    assert_eq!(crate::state::visible::visit(&s2, "u02", NOW)[0]["key"], "sidebar.visit.q02"); assert!(crate::state::visible::visit(&s2, "u01", NOW + 60).is_empty());
+    // the open thread's project is on the bench, wherever it was
+    let none = HashSet::new(); let c = Ctx { selected: "u00", ..ctx(&none) };
+    assert_eq!(titles(sec(&build(&s, &rows, &Value::Null, &c), "active")), ["N00", "N05", "N06", "N07", "N08", "N09", "N10", "N11"]);
+    // a search lists every hit: All projects opens by itself
+    let c = Ctx { query: "N02", ..ctx(&none) }; let v = build(&s, &rows, &Value::Null, &c);
+    assert_eq!(titles(sec(&v, "active")), ["N02"]);
+}
+
+// ---- status labels and snoozing (the person, 2026-11-23) ----------------------------------------------------------------------------------
+#[test] fn a_row_says_its_status_in_a_word_and_a_snoozed_thread_waits_in_its_own_fold() {
+    assert_eq!([badge("needs", "approval"), badge("needs", "question"), badge("needs", "sign-in"), badge("failed", "failed"), badge("cut", "stopped"), badge("running", ""), badge("monitoring", ""), badge("done", ""), badge("idle", "")],
+        [("Approve", "bad"), ("Input", "bad"), ("Sign in", "bad"), ("Failed", "bad"), ("Stopped", "bad"), ("Working", "run"), ("Waiting", "wait"), ("Done", "ok"), ("", "")]);
+    let snz = |id: &str, until: u64| json!({"$":"ThreadSnoozed","id":id,"until":until,"at":NOW-5});
+    let evs = vec![tc("t2", "p1", NOW - 80), tc("t3", "p1", NOW - 70), turn("t1", "failed", NOW - 60), turn("t2", "running", NOW - 50), ask("q3", "t3", "question")];
+    let view = |s: &State, open: &HashSet<String>| { let rows = merged_projects(s, &[], &|_| false, &|_| String::new(), "desk", &[]); build(s, &rows, &Value::Null, &ctx(open)) };
+    let none = HashSet::new(); let v = view(&one(&evs), &none);
+    assert_eq!(ids(&v), ["needs", "running", "active"]);
+    let n = &sec(&v, "needs")["rows"]; assert_eq!((n[0]["label"].as_str(), n[0]["tone"].as_str()), (Some("Input"), Some("bad"))); assert_eq!((n[1]["label"].as_str(), n[1]["settle"].as_str()), (Some("Failed"), Some("h|t1")));
+    assert_eq!(n[0]["snooze"], json!([]), "an open ask is answered, not snoozed"); assert_eq!(n[1]["snooze"][0], json!({"label":"1 hour","value":"h|t1|1h"}));
+    let r = &sec(&v, "running")["rows"][0]; assert_eq!((r["label"].as_str(), r["tone"].as_str(), r["snooze"].as_array().map(Vec::len)), (Some("Working"), Some("run"), Some(3)));
+    // snoozed: the stop and the running one leave their lists for one folded line; the ask stays whatever its snooze
+    let mut e2 = evs.clone(); e2.extend([snz("t1", NOW + 3600), snz("t2", NOW + 7200), snz("t3", NOW + 3600)]);
+    let s2 = one(&e2); let v = view(&s2, &none);
+    assert_eq!(ids(&v), ["needs", "snoozed", "active"]); assert_eq!(titles(sec(&v, "needs")), ["T t3"]);
+    let z = sec(&v, "snoozed"); assert_eq!((z["count"].as_u64(), z["fold"].as_bool(), z["open"].as_bool(), z["rows"].as_array().map(Vec::len)), (Some(2), Some(true), Some(false), Some(0)));
+    let p = &sec(&v, "active")["rows"][0]; assert_eq!((p["running"].as_u64(), p["needsCount"].as_u64()), (Some(0), Some(1)), "a snoozed thread is not counted on its project");
+    let open: HashSet<String> = ["sec:snoozed".to_string()].into(); let v = view(&s2, &open); let z = sec(&v, "snoozed");
+    assert_eq!(titles(z), ["T t1", "T t2"], "soonest to wake first"); assert_eq!((z["rows"][0]["wake"].as_str(), z["rows"][0]["ago"].as_str()), (Some("h|t1|off"), Some("1h")));
+    // its time passed: back where it was
+    let mut e3 = evs.clone(); e3.push(snz("t1", NOW - 1)); assert_eq!(ids(&view(&one(&e3), &none)), ["needs", "running", "active"]);
 }

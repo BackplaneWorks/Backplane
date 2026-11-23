@@ -1,4 +1,5 @@
 //! The window: layout and colours follow the web client (src/web/style.css tokens).
+use crate::screens::siderow::PillEl;
 use crate::script::{Ctl, CtlEntry};
 use crate::{art, hub::Command, string, theme, Backplane, Send};
 use crate::i18n::{tf, trs};
@@ -373,8 +374,17 @@ impl Backplane {
                 /* i18n-ok: a ctl label */ if kids > 0 && tree { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
                 let pin_group = SharedString::from(format!("row-{id}"));
                 let pin = crate::screens::siderow::pin_button(cx, light, t, pin_group.clone());
+                // the hub's status label (`label`, `tone`): drawn as a word where the dot was. A row of the lists across projects (Needs you, Running,
+                // Snoozed: `sub`) has two lines: its title, then its label, its project and its age
+                let pill = crate::screens::siderow::pill(light, t);
+                let labelled = t["label"].is_string();
+                let inbox = labelled && !sub.is_empty();
+                let gutter = if inbox { 10. } else { gutter };
+                { let (snz, wake) = (&t["snooze"], string(t, "wake"));
+                  if !wake.is_empty() { ctl.push(CtlEntry { id: format!("wake:{raw}"), label: "Wake".into() /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-snooze".into(), wake) }); }
+                  for o in snz.as_array().into_iter().flatten() { ctl.push(CtlEntry { id: format!("snooze:{raw}:{}", string(o, "label")), label: format!("Snooze {}", string(o, "label")) /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-snooze".into(), string(o, "value")) }); } }
                 { let (action, value) = crate::screens::siderow::pin_press(t); ctl.push(CtlEntry { id: format!("pin:{raw}"), label: action.into(), ctl: Ctl::Node(action.into(), value) }); }
-                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).group(pin_group).flex().items_center().gap_2().pr_3().h(crate::scale::tpx(32.)).when(faded || t["off"] == true, |d| d.opacity(0.55))
+                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).group(pin_group).relative().flex().items_center().gap_2().pr_3().h(crate::scale::tpx(if inbox { 42. } else { 32. })).when(faded || t["off"] == true, |d| d.opacity(0.55))
                     // a row under its project: no bar and no block when open (the person, 2026-11-15); its L says where it is
                     .border_l_2().border_color(if selected && !under { c("accent") } else { transparent_black().into() })
                     .bg(if selected && !under { c("raise") } else { transparent_black().into() }).hover(|s| s.bg(c("raise"))).cursor_pointer()
@@ -387,14 +397,29 @@ impl Backplane {
                     // as the project's own; the open one's L a shade brighter
                     .child(toggle.map_or_else(|| div().w(px(gutter)).h_full().flex_shrink_0().relative().when(under, |d| { let l = c(if selected { "dim" } else { "line" });
                         d.child(div().absolute().left(px(36.)).top_0().w(px(1.)).h(relative(0.5)).bg(l))
-                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).child(crate::screens::siderow::dot(light, t)).child(if crate::screens::siderow::renaming(&self.data, &id, "thread") { crate::screens::siderow::field(light, &self.screens.fields, &id) } else { div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().relative().child(div().min_w_0().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(sub.to_string())))
+                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).children((!labelled).then(|| crate::screens::siderow::dot(light, t))).child(if crate::screens::siderow::renaming(&self.data, &id, "thread") { crate::screens::siderow::field(light, &self.screens.fields, &id) } else if inbox {
+                        let (proj, ago) = (sub.trim().to_string(), trs(&string(t, "ago")));
+                        div().flex_1().min_w_0().flex().flex_col().justify_center().gap(px(1.)).relative()
+                            .child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().line_height(crate::scale::tpx(18.)).child(string(t, "title")))
+                            .child(div().flex().items_center().gap(px(6.)).min_w_0().overflow_hidden().whitespace_nowrap().text_size(crate::scale::tpx(11.)).line_height(crate::scale::tpx(16.)).text_color(c("faint"))
+                                .children(pill.clone_el())
+                                .children((!proj.is_empty()).then(|| div().min_w_0().overflow_hidden().text_ellipsis().text_color(c("dim")).child(proj)))
+                                .child(div().flex_shrink_0().child(ago)))
+                            .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element()
+                    } else { div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().relative().child(div().min_w_0().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(sub.to_string())))
                         // held Ctrl: this row's Ctrl+digit; held Alt, in the Active view: its project's Alt+digit; over the title's end, so nothing moves (screens/hints.rs)
                         .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).or_else(|| (!sub.is_empty()).then(|| crate::screens::hints::digit_of(&self.screens.hold_projects, pid)).flatten()).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element() })
-                    .child(pin) // the pin: always on a pinned row, on hover on the others
+                    .children(crate::screens::siderow::settle_button(cx, light, t, SharedString::from(format!("row-{id}")))) // Settle in one press, under the pointer (the hub's `settle`: a stop that asks nothing)
+                    // under the pointer: Snooze (a span from its menu; Wake on a snoozed row), Settle in one press (the hub's `settle`: a stop that asks
+                    // nothing), the pin (always on a pinned row). On a two-line row they lie over the title's end, so they take no width from it
+                    .child({ let g = SharedString::from(format!("row-{id}"));
+                        let acts = div().flex().items_center().gap_1().children(crate::screens::siderow::snooze_button(cx, light, t, g.clone())).children(crate::screens::siderow::settle_button(cx, light, t, g.clone())).child(pin);
+                        if inbox { let raise = c("raise"); acts.absolute().right(px(8.)).top(px(4.)).px(px(2.)).group_hover(g, move |s| s.bg(raise)) } else { acts.flex_shrink_0() } })
                     .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id)) // (another machine's thread: its name, dim; none for this machine's)
-                    .child({ let want = string(t, "want"); // a red row says what it wants where its age goes (0.14 Side.want, r01)
+                    .children((labelled && !inbox).then(|| pill.clone_el()).flatten()) // under its project: the label before its age
+                    .children((!inbox).then(|| { let want = if labelled { String::new() } else { string(t, "want") }; // a red row says what it wants where its age goes (0.14 Side.want, r01); the label says it now
                         if want.is_empty() { div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if kids > 0 && !under && string(t, "agents").is_empty() { format!("{kids}") } else { trs(&string(t, "ago")) }) }
-                        else { div().text_size(crate::scale::tpx(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want)) } }).into_any_element()
+                        else { div().text_size(crate::scale::tpx(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want)) } })).into_any_element()
     }
 }
 
@@ -581,15 +606,59 @@ impl Backplane {
         // always on: listening is shown at the top of the sidebar whenever it is on
         if let Some(r) = crate::screens::voice::always_row(cx, light, &self.screens.voice, self.screens.voice.always_wanted) { rows.push(r); }
         let mut ctl: Vec<CtlEntry> = Vec::new();
+        // the crew band (Bub, the bots in one strip, the rooms as chips): above the list and never scrolled with it, so forty projects cannot bury it
+        let mut crew: Vec<AnyElement> = Vec::new();
         for ((bname, mood, note, _, bid, bsel), rig) in uber_data.iter().zip(uber_rigs.iter()) {
             let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
             ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
             let bid2 = bid.clone();
-            rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_3().px_3().py(px(10.)).border_b_1().border_color(c("line")).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+            crew.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_2().px_3().h(px(44.)).border_l_2().border_color(if *bsel { c("accent") } else { transparent_black().into() }).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
                 .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
-                .child(art::cat(rig.clone(), mood, 56., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
-                .child(div().flex().flex_col().min_w_0().line_height(crate::scale::tpx(22.)).child(div().text_size(crate::scale::tpx(16.)).overflow_hidden().whitespace_nowrap().child(bname.clone()))
-                    .child(div().flex().gap_2().items_center().child(div().text_size(crate::scale::tpx(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
+                .child(art::cat(rig.clone(), mood, 36., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
+                .child(div().flex_shrink_0().text_size(crate::scale::tpx(14.)).whitespace_nowrap().child(bname.clone()))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(note_color).child(trs(note)))
+                .children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))).into_any_element());
+        }
+        {
+            // the bots: one strip of cats (a bot's name and what it does under the pointer; a red mark on one that waits or failed), then +
+            let mut strip: Vec<AnyElement> = Vec::new();
+            for ((bname, mood, note, _, bid, bsel), rig) in bot_data.iter().zip(bot_rigs.iter()) {
+                ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
+                let bid2 = bid.clone();
+                let wants = matches!(mood.as_str(), "wait" | "error"); let busy = matches!(mood.as_str(), "work" | "talk");
+                /* i18n-ok: a name and a note already translated */ let tip = if note.is_empty() { bname.clone() } else { format!("{bname} · {}", trs(note)) };
+                strip.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).relative().flex_shrink_0().size(px(32.)).flex().items_center().justify_center().cursor_pointer()
+                    .border_b_2().border_color(if *bsel { c("accent") } else if wants { c("bad") } else if busy { c("accent") } else { transparent_black().into() })
+                    .when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                    .tooltip(crate::keys::tip_raw(&tip, "", light))
+                    .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
+                    .when_some(row_menus.get(bid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
+                    .child(art::cat(rig.clone(), mood, 26., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
+                    .children(wants.then(|| div().absolute().top(px(2.)).right(px(2.)).size(px(6.)).bg(c("bad"))))
+                    .children(marks.get(bid).map(|_| div().absolute().bottom(px(3.)).right(px(2.)).size(px(5.)).rounded_full().bg(c("dim")))).into_any_element());
+            }
+            /* i18n-ok: ui: ids the drivers press */ ctl.push(CtlEntry { id: "ui:New bot".into(), label: "New bot".into(), ctl: Ctl::Node("bot-new".into(), String::new()) });
+            /* i18n-ok: a ui: id the drivers press */ strip.push(with_rect(div().id("ui:New bot"), || "ui:New bot".to_string()).flex_shrink_0().size(px(32.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("New bot", "", light))
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot-new".into(), String::new())); cx.notify(); })).child(ic(light, "plus", 14., "dim")).into_any_element());
+            crew.push(div().id("crew-bots").flex().flex_wrap().items_center().px(px(6.)).children(strip).into_any_element());
+            // the rooms: chips (#name and its members), wrapping, three lines at most (the rest scroll within the band), then +
+            let mut chips: Vec<AnyElement> = Vec::new();
+            for r in self.data["rooms"].as_array().into_iter().flatten() {
+                let (rid, rname, sel) = (string(r, "id"), string(r, "name"), r["sel"].as_bool().unwrap_or(false));
+                ctl.push(CtlEntry { id: format!("room:{rname}"), label: rname.clone(), ctl: Ctl::Node("room".into(), rid.clone()) });
+                let rid2 = rid.clone();
+                chips.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex_shrink_0().max_w(px(150.)).h(px(22.)).px(px(5.)).flex().items_center().cursor_pointer().text_size(crate::scale::tpx(12.))
+                    .border_b_1().border_color(if sel { c("accent") } else { transparent_black().into() }).when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                    /* i18n-ok: a room name and a count */ .tooltip(crate::keys::tip_raw(&format!("#{rname} · {}", r["members"]), "", light))
+                    .on_click(cx.listener(move |this, _, _, cx| this.go("room", rid2.clone(), cx)))
+                    .when_some(row_menus.get(&rid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
+                    .child(div().text_color(c("faint")).child("#")).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(if sel { c("text") } else { c("dim") }).child(rname.clone()))
+                    .children(crate::screens::badge::machine_mark(light, &r["mark"], false, &rid)).into_any_element());
+            }
+            /* i18n-ok: ui: ids the drivers press */ ctl.push(CtlEntry { id: "ui:New room".into(), label: "New room".into(), ctl: Ctl::Node("room-new".into(), String::new()) });
+            /* i18n-ok: a ui: id the drivers press */ chips.push(with_rect(div().id("ui:New room"), || "ui:New room".to_string()).flex_shrink_0().h(px(22.)).px(px(4.)).flex().items_center().gap_1().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("faint")).hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("New room", "", light))
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("room-new".into(), String::new())); cx.notify(); })).child(ic(light, "plus", 14., "dim")).into_any_element());
+            crew.push(div().id("crew-rooms").flex().flex_wrap().items_center().px(px(7.)).pb(px(6.)).max_h(px(3. * 22. + 6.)).overflow_y_scroll().children(chips).into_any_element());
         }
         if let Some((line, bad)) = home_away_line(&self.data["home"]) {
             rows.push(div().id("home-away-row").px_3().py_1().border_b_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(11.)).text_color(if bad { c("bad") } else { c("dim") }).child(line).into_any_element());
@@ -697,39 +766,10 @@ impl Backplane {
                 .child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(tf(if open { "gpui.b.older.open" } else { "gpui.b.older" }, &[("n", n.into())]))
                 .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("side-older".into(), String::new())); cx.notify(); })).into_any_element());
         }
-        /* i18n-ok: compared below; drawn through trs */ for name in ["BOTS", "ROOMS"] {
-            /* i18n-ok: ui: ids */ let (plus_id, plus_action) = if name == "BOTS" { ("ui:New bot", "bot-new") } else { ("ui:New room", "room-new") };
-            ctl.push(CtlEntry { id: plus_id.into(), label: plus_id.trim_start_matches("ui:").into(), ctl: Ctl::Node(plus_action.into(), String::new()) });
-            rows.push(div().flex().justify_between().px_3().pt_4().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(name))
-                .child(with_rect(div().id(plus_id), || plus_id.to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(plus_action.into(), String::new())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
-            if name == "BOTS" {
-                for ((bname, mood, note, _, bid, bsel), rig) in bot_data.iter().zip(bot_rigs.iter()) {
-                    let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
-                    ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
-                    let bid2 = bid.clone();
-                    rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_2().px_3().py(px(3.)).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-                        .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
-                        .when_some(row_menus.get(bid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
-                        .child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
-                        .child(div().flex().flex_col().min_w_0().line_height(crate::scale::tpx(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
-                            .child(div().flex().gap_2().items_center().child(div().text_size(crate::scale::tpx(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
-                }
-            } else {
-                for r in self.data["rooms"].as_array().into_iter().flatten() {
-                    let (rid, rname, sel) = (string(r, "id"), string(r, "name"), r["sel"].as_bool().unwrap_or(false));
-                    ctl.push(CtlEntry { id: format!("room:{rname}"), label: rname.clone(), ctl: Ctl::Node("room".into(), rid.clone()) });
-                    let rid2 = rid.clone();
-                    rows.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex().items_center().gap_2().px_3().py_1().cursor_pointer().when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-                        .on_click(cx.listener(move |this, _, _, cx| this.go("room", rid2.clone(), cx)))
-                        .when_some(row_menus.get(&rid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
-                        .child(div().text_color(c("faint")).child("#")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(rname.clone()))
-                        .children(crate::screens::badge::machine_mark(light, &r["mark"], false, &rid))
-                        .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("{}", r["members"]))).into_any_element());
-                }
-            }
-        }
         self.screens.parts.side_ctl = ctl;
-        /* i18n-ok: a key context */ div().id("sidebar").size_full().overflow_y_scroll().track_focus(&self.screens.side_focus).key_context("Sidebar").children(rows).into_any_element()
+        /* i18n-ok: a key context */ div().id("sidebar").size_full().flex().flex_col().track_focus(&self.screens.side_focus).key_context("Sidebar")
+            .child(div().id("crew").flex_none().flex().flex_col().border_b_1().border_color(c("line")).children(crew))
+            .child(div().id("sidebar-list").flex_1().min_h_0().overflow_y_scroll().pb_3().children(rows)).into_any_element()
     }
     /// The viewer's page, a part of the window (part.rs): a board or schematic is drawn again only when the page itself changed, not for
     /// a hover in the sidebar or the caret's blink.

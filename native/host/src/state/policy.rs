@@ -17,7 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
     "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant.",
-    "order.enabled", "order.estimates", "account.thread.", "allowance.", "sidebar.pin.", "sidebar.fold.", "sidebar.keys.moved.", "sidebar.archived.", "sidebar.group.", "sidebar.hide.", "sidebar.looked.", "sidebar.cut.", "auth.wait.", "carry.wait.", "room.need.", "room.member.", "accounts.inventory", "fork.", "usage.", "effort.", "speed.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
+    "order.enabled", "order.estimates", "account.thread.", "allowance.", "sidebar.pin.", "sidebar.visit.", "sidebar.fold.", "sidebar.keys.moved.", "sidebar.archived.", "sidebar.group.", "sidebar.hide.", "sidebar.looked.", "sidebar.cut.", "auth.wait.", "carry.wait.", "room.need.", "room.member.", "accounts.inventory", "fork.", "usage.", "effort.", "speed.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
 // A thread screen must see its refusal gate's configuration even in the lean copy. Exact global keys keep their values;
 // per-thread keys keep only presence, never the possibly large body. stopped./failed. remain outside this allowlist.
 const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "agent.thinking", "permissions.default"];
@@ -249,7 +249,7 @@ impl Policy {
     }
     pub fn read(&self, thread: &str, now_s: u64) -> Vec<Value> {
         let g = self.lock();
-        if g.booting.is_some() { vec![] } else { let mut v = autosettle::read(&g.core.st, thread, now_s); v.extend(crate::state::visible::look(&g.core.st, thread, now_s)); v }
+        if g.booting.is_some() { vec![] } else { let mut v = autosettle::read(&g.core.st, thread, now_s); v.extend(crate::state::visible::look(&g.core.st, thread, now_s)); v.extend(crate::state::visible::visit(&g.core.st, thread, now_s)); v }
     }
 }
 

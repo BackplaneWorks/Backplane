@@ -5,7 +5,10 @@
 //! a sign-in), or stopped abnormally (failed, interrupted, cut by a restart or held by a usage limit) until the person looks at it or settles it.
 //! A pinned thread always shows. Everything else is reachable from the project page and Ctrl+K (`jump`), never from the sidebar.
 //!
-//! D12, the order: Bub; Needs you (every machine, gone when empty); Pinned projects; Active (a visible thread or activity in the last
+//! D12 as revised 2026-11-23 (docs/ALWAYS-ON.md): Bub; Needs you; Running (every project's, one list); Snoozed (folded); Pinned projects; Recent (id
+//! `active`: the BENCH projects the person was in last, `sidebar.visit.<project id>`); the person's groups; All projects (the rest, folded); Quiet.
+//! Every thread row says its status as a word (`label`, `tone`), can be snoozed (`snooze`) and, stopped, settled in one press (`settle`).
+//! Before that: Bub; Needs you (every machine, gone when empty); Pinned projects; Active (a visible thread or activity in the last
 //! ACTIVE days, newest first); Groups (the rest, by git owner then folder, named by Haiku or the person, folded by default); Quiet (nothing for
 //! QUIET, folded, never deleted, searchable); Archived (the projects the person put away, folded, last). The automatic groups are a setting, off by default (`sidebar.groups`, `groups_on`): without them
 //! the rest stays in Active, and only a group the person made is a section.
@@ -28,6 +31,8 @@ const UNDER: usize = 8;
 /// rows of the project page's Recent and Done lists, and of the Ctrl+K list
 const PAGE: usize = 60;
 const JUMP: usize = 600;
+/// projects in Recent (the bench): the ones the person was in last. The rest are one fold below, All projects.
+pub const BENCH: usize = 8;
 
 // the status vocabulary and D11's rule are the state's own (state/visible.rs: the digest and probe binaries fold the look and cut marks too)
 pub use crate::state::visible::*;
@@ -110,7 +115,36 @@ fn thread_row(hub: &str, now: u64, p: &MergedProject, f: &Th) -> Value {
         "project":p.name,"projectKey":p.key,"off":off,"nav":if off { String::new() } else { qid(hub,&t.id) },
         // another machine's thread can be hidden here (its menu's first item on the desktop, a long press on the phones)
         "hide":hide_of(hub,t),"lead":if hide_of(hub,t).is_empty() { json!([]) } else { json!([{"label":"Hide","action":"thread-hide","value":hide_of(hub,t),"tone":"settle","options":[]}]) },
-        "menu":thread_menu(hub,f)})
+        "label":badge(f.word,want(t,f.word)).0,"tone":badge(f.word,want(t,f.word)).1,"snooze":snooze_of(hub,f),
+        "settle":settle_of(hub,f),"menu":thread_menu(hub,f)})
+}
+/// A row's status as a word and its tone (`bad`, `run`, `wait`, `ok`): every client draws it as a label beside the title, where a coloured dot
+/// alone said almost nothing at a glance (the person, 2026-11-23). ("", "") for a thread with nothing to say (idle).
+pub fn badge(word: &str, want: &str) -> (&'static str, &'static str) {
+    match (word, want) {
+        ("needs", "approval") => ("Approve", "bad"), ("needs", "sign-in") => ("Sign in", "bad"), ("needs", _) => ("Input", "bad"),
+        ("failed", _) => ("Failed", "bad"), ("cut" | "interrupted", _) => ("Stopped", "bad"),
+        ("running", _) => ("Working", "run"), ("monitoring" | "limit", _) => ("Waiting", "wait"), ("done", _) => ("Done", "ok"),
+        _ => ("", ""),
+    }
+}
+/// Whether a thread is snoozed now (`ThreadSnoozed`, state `snooze_until`): a thread of this machine, until its time. An open ask is never
+/// snoozed away (it is answered); a new turn or ask wakes the thread (commands/plan.rs).
+fn snoozed(f: &Th, now: u64) -> bool { f.word != "needs" && f.t.machine.is_empty() && snooze_end(f) > now }
+fn snooze_end(f: &Th) -> u64 { f.t.src.and_then(|s| s.snooze_until.get(&f.t.id).copied()).unwrap_or(0) }
+/// The spans a row can be snoozed for (action `row-snooze`, each option's value): a thread of this machine with no open ask. Empty for any other.
+fn snooze_of(hub: &str, f: &Th) -> Value {
+    let t = f.t;
+    if !t.machine.is_empty() || t.src.is_none() || t.archived || f.word == "needs" { return json!([]) }
+    let q = qid(hub, &t.id);
+    json!([{"label":"1 hour","value":format!("{q}|1h")},{"label":"Tomorrow","value":format!("{q}|tomorrow")},{"label":"1 week","value":format!("{q}|1w")}])
+}
+/// The thread a row settles in one press (its id; "" for none): a thread of this machine that stopped and asks nothing. One that runs is not settled
+/// from under its turn, and an open ask is answered, not put away.
+fn settle_of(hub: &str, f: &Th) -> String {
+    let t = f.t;
+    if !t.machine.is_empty() || t.src.is_none() || t.archived || f.settled || live(f.word) || f.word == "needs" { return String::new() }
+    qid(hub, &t.id)
 }
 /// A thread row's menu (right click on the desktop, long press on the phones), for a thread of this machine: Pin or Unpin (a pinned thread is a
 /// fixed row under its project, and the clock never settles it), Settle or Unsettle (Archive was folded into Settle). `id` is the `thread.act` action a phone sends;
@@ -334,8 +368,8 @@ fn put_away(f: &Th) -> bool { f.t.archived || f.t.src.and_then(|s| s.threads.get
 fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, groups: &Groups) -> Value {
     let mut r = super::merged::row_json(p);
     // what runs: a turn running (one that also asks the person counts here and in Needs you), work it owns, a turn held for a reset
-    let running = ths.iter().filter(|f| matches!(f.word, "running" | "monitoring" | "limit") || (f.word == "needs" && f.t.src.map_or(false, |s| s.threads.get(&f.t.id).map_or(false, |x| x.turn == Turn::Running)))).count();
-    let needs = ths.iter().filter(|f| f.needs).count();
+    let running = ths.iter().filter(|f| !snoozed(f, c.now)).filter(|f| matches!(f.word, "running" | "monitoring" | "limit") || (f.word == "needs" && f.t.src.map_or(false, |s| s.threads.get(&f.t.id).map_or(false, |x| x.turn == Turn::Running)))).count();
+    let needs = ths.iter().filter(|f| f.needs && !snoozed(f, c.now)).count();
     let q = c.query;
     let every = !attention_only(st);
     let on_show = |f: &Th| !c.selected.is_empty() && f.t.id == c.selected;
@@ -343,15 +377,16 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     // Settings' "Only threads that need attention" off: every thread of it the person has not put away, its asks too (they are also in
     // Needs you), as in 0.15; a delegated child or a swarm's member still hangs under its parent or its swarm
     let mut shown: Vec<&Th> = if every && q.is_empty() { ths.iter().filter(|f| (!f.kid && !put_away(f)) || on_show(f)).collect() }
-        else { ths.iter().filter(|f| if q.is_empty() { !f.needs && ((f.show && !f.kid) || on_show(f)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect() };
+        else { ths.iter().filter(|f| if q.is_empty() { (!f.needs || snoozed(f, c.now)) && ((f.show && !f.kid && !snoozed(f, c.now)) || on_show(f)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect() };
     // a pinned thread is a fixed row of its project: first, where it was pinned, whatever runs or stops below it (and never cut by UNDER)
     if q.is_empty() { shown.sort_by_key(|f| pin_rank(f)); }
-    // At most its two pins and one other: the thread that runs (the newest live one), else the one on show, else the newest stop that
-    // still wants a look. Nothing folds: the rows under a project are few and fixed, so there is no chevron (the person, 2026-11-15: "the
+    // At most its two pins and one other: the one on show, else the newest stop that still wants a look. Nothing folds: the rows under a project are few and fixed, so there is no chevron (the person, 2026-11-15: "the
     // max number of threads viewable under a project are 2 pinned plus one active ... it should not be collapsible anyway")
     if q.is_empty() && !every {
         let mut other: Vec<&Th> = shown.iter().filter(|f| !f.t.pinned).copied().collect();
-        other.sort_by_key(|f| (!crate::state::visible::live(f.word), f.t.id != c.selected, std::cmp::Reverse(f.t.activity)));
+        // what runs is a row of Running (`build`), not repeated here: under a project, its pins, the thread on show, else its newest stop
+        other.retain(|f| !live(f.word) || on_show(f));
+        other.sort_by_key(|f| (f.t.id != c.selected, std::cmp::Reverse(f.t.activity)));
         let pins: Vec<&Th> = shown.iter().filter(|f| f.t.pinned).take(crate::commands::plan::PINS).copied().collect();
         shown = pins.into_iter().chain(other.into_iter().take(1)).collect();
     }
@@ -370,7 +405,10 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let sw = swarms_of(p, c);
     r["running"] = json!(running + sw.iter().filter(|x| x.1 == "running").count());
     r["needsCount"] = json!(needs + sw.iter().filter(|x| x.1 != "running").count());
-    let live: Vec<Value> = sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect();
+    // a running swarm is a row of Running while only what needs attention is listed; with every thread listed it stays under its project
+    let live: Vec<Value> = if every { sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect() } else { vec![] };
+    r["hasBoard"] = json!(p.here.is_some() && hardware(&p.folder)); r["hasSchematic"] = r["hasBoard"].clone();
+
     // no fold while only what needs attention is listed (an older client draws a chevron only for a `fold` action with rows to hide: none);
     // with every thread listed, a chevron folds them away (its counts stay, and its asks are in Needs you)
     if every && q.is_empty() && under > 0 { r["fold"] = json!("project-fold"); r["folded"] = json!(folded); r["under"] = json!(under); }
@@ -386,6 +424,18 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     r["dots"] = json!(p.machines.iter().map(|m| json!({"name":m["name"],"short":m["short"],"here":m["here"],"dim":m["dim"],"note":m["note"]})).collect::<Vec<_>>());
     r
 }
+/// When the person was last in a project (opened its page or a thread of it: `sidebar.visit.<project id>`, state/visible.rs `visit`), s; 0 for never.
+fn visited_at(st: &State, p: &MergedProject) -> u64 { p.here.as_ref().map_or(0, |id| num(st, &format!("sidebar.visit.{id}"))) }
+/// The bench's order: by the person's last visit; a project never visited (every one, at the upgrade) by its last activity.
+fn bench_rank(st: &State, p: &MergedProject) -> u64 { match visited_at(st, p) { 0 => p.last_activity, v => v } }
+/// `kicad::canonical::hardware` of a project's folder, remembered for five minutes: the sidebar asks for every project at every picture.
+fn hardware(folder: &str) -> bool {
+    static HW: std::sync::OnceLock<std::sync::Mutex<HashMap<String, (std::time::Instant, bool)>>> = std::sync::OnceLock::new();
+    if folder.is_empty() { return false }
+    let m = HW.get_or_init(Default::default);
+    if let Some((at, v)) = m.lock().unwrap().get(folder) { if at.elapsed() < std::time::Duration::from_secs(300) { return *v } }
+    let v = crate::files::kicad::canonical::hardware(folder); m.lock().unwrap().insert(folder.to_string(), (std::time::Instant::now(), v)); v
+}
 fn fold_section(id: &str, title: &str, rows: Vec<Value>, c: &Ctx, extra: Value) -> Value {
     let open = c.open.contains(&format!("sec:{id}")) || !c.query.is_empty() || rows.iter().any(|r| r["threads"].as_array().map_or(false, |t| t.iter().any(|x| x["id"] == json!(qid(c.hub, c.selected)))));
     let mut s = json!({"id":id,"kind":"projects","title":title,"count":rows.len(),"fold":true,"open":open,"toggle":format!("sec:{id}"),"rows":if open { rows } else { vec![] }});
@@ -400,7 +450,7 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
     if bub.is_object() { out.push(json!({"id":"bub","kind":"bub","title":"","rows":[bub]})); }
     // Needs you: every machine's, approvals first, then questions, then stops, newest first within each
     let mut needs: Vec<(u8, u64, Value)> = vec![];
-    for (p, ths) in rows.iter().zip(&facts_of) { for f in ths.iter().filter(|f| f.needs) {
+    for (p, ths) in rows.iter().zip(&facts_of) { for f in ths.iter().filter(|f| f.needs && !snoozed(f, c.now)) {
         if !c.query.is_empty() && !hit(&f.t.title, c.query) && !hit(&p.name, c.query) { continue }
         let r = thread_row(c.hub, c.now, p, f);
         let rank = match r["want"].as_str().unwrap_or("") { "approval" => 0, "question" | "sign-in" => 1, "failed" => 2, _ => 3 };
@@ -427,8 +477,36 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
       } } }
     needs.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
     if !needs.is_empty() { out.push(json!({"id":"needs","kind":"threads","title":"Needs you","count":needs.len(),"rows":needs.into_iter().map(|x| x.2).collect::<Vec<_>>()})); }
-    // the projects: pinned, active, by group, quiet
+    // Running: what works now, every project's in one list (the newest first), each row naming its project. With every thread listed
+    // (`sidebar.attention` off) they stay under their projects, as before
+    if attention_only(st) {
+        let mut running: Vec<(u64, Value)> = vec![];
+        for (p, ths) in rows.iter().zip(&facts_of) {
+            for f in ths.iter().filter(|f| !f.needs && f.show && !f.kid && live(f.word) && !snoozed(f, c.now)) {
+                if !c.query.is_empty() && !hit(&f.t.title, c.query) && !hit(&p.name, c.query) { continue }
+                running.push((f.t.activity, thread_row(c.hub, c.now, p, f)));
+            }
+            for (r, w) in swarms_of(p, c) { if w != "running" { continue }
+                if !c.query.is_empty() && !hit(text_of(&r, "title"), c.query) && !hit(&p.name, c.query) { continue }
+                running.push((r["activity"].as_u64().unwrap_or(0), r)); }
+        }
+        running.sort_by(|a, b| b.0.cmp(&a.0));
+        if !running.is_empty() { out.push(json!({"id":"running","kind":"threads","title":"Running","count":running.len(),"rows":running.into_iter().map(|x| x.1).collect::<Vec<_>>()})); }
+    }
+    // Snoozed: what the person put off (a stop, or work they do not want to watch), soonest to wake first; folded, and gone when empty
+    { let mut snz: Vec<(u64, Value)> = vec![];
+      for (p, ths) in rows.iter().zip(&facts_of) { for f in ths.iter().filter(|f| snoozed(f, c.now) && !f.kid && (f.show || f.needs)) {
+          if !c.query.is_empty() && !hit(&f.t.title, c.query) && !hit(&p.name, c.query) { continue }
+          let mut r = thread_row(c.hub, c.now, p, f); let until = snooze_end(f);
+          r["wake"] = json!(format!("{}|off", qid(c.hub, &f.t.id))); r["until"] = json!(until); r["ago"] = json!(crate::sidebar::ago(until, c.now)); r["snooze"] = json!([]); r["settle"] = json!("");
+          snz.push((until, r)); } }
+      snz.sort_by(|a, b| a.0.cmp(&b.0));
+      if !snz.is_empty() {
+          let open = c.open.contains("sec:snoozed") || !c.query.is_empty();
+          out.push(json!({"id":"snoozed","kind":"threads","title":"Snoozed","count":snz.len(),"fold":true,"open":open,"toggle":"sec:snoozed","rows":if open { snz.into_iter().map(|x| x.1).collect::<Vec<_>>() } else { vec![] }})); } }
+    // the projects: pinned, the bench (Recent), by group, all the rest, quiet
     let (mut pinned, mut active, mut quiet): (Vec<(u64, Value)>, Vec<(u64, Value)>, Vec<Value>) = (vec![], vec![], vec![]);
+    let mut rest: Vec<(String, Value)> = vec![];
     let mut groups: Vec<(String, String, Vec<Value>)> = vec![];
     let all = Groups::of(st, rows);
     let held = rows.iter().zip(&facts_of).find(|(_, ths)| ths.iter().any(|f| f.t.id == c.selected)).map(|(p, _)| p.key.clone()).unwrap_or_default();
@@ -437,23 +515,32 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
         let gid = all.of_project(st, p);
         let row = project_row(st, c, p, ths, &gid, &all);
         let pin = pinned_at(st, &p.key);
-        let shows = ths.iter().any(|f| f.show && !f.kid) || row["swarms"].as_array().map_or(false, |a| !a.is_empty()) || row["needsCount"].as_u64().unwrap_or(0) > 0;
+        let shows = ths.iter().any(|f| f.show && !f.kid && !snoozed(f, c.now)) || row["swarms"].as_array().map_or(false, |a| !a.is_empty()) || row["needsCount"].as_u64().unwrap_or(0) > 0;
         if pin > 0 { pinned.push((pin, row)); continue }
         // made quiet: in Quiet at once, until something new happens in it (its asks are in Needs you all the same; the section opens by
         // itself while the open thread is listed under it, `fold_section`)
         if made_quiet(st, p) { quiet.push(row); continue }
-        if shows || p.last_activity + ACTIVE > c.now || p.key == held { active.push((p.last_activity, row)); continue }
-        if p.last_activity + QUIET <= c.now { quiet.push(row); continue }
-        // in no group (groups are off, the default): it stays in the one list, below what is newer
-        if gid.is_empty() { active.push((p.last_activity, row)); continue }
+        // the project of the open thread is always on the bench (the person is in it now)
+        if p.key == held { active.push((u64::MAX, row)); continue }
+        if !shows && bench_rank(st, p) + QUIET <= c.now && p.last_activity + QUIET <= c.now { quiet.push(row); continue }
+        // a project of a group the person made (or of the automatic groups, when on) is in its group
+        // (one with something to show, or one the person was in within ACTIVE, is on the bench all the same)
+        if gid.is_empty() || shows || bench_rank(st, p) + ACTIVE > c.now { active.push((bench_rank(st, p), row)); continue }
         match groups.iter_mut().find(|g| g.0 == gid) { Some(g) => g.2.push(row), None => groups.push((gid.clone(), all.name(st, &gid), vec![row])) }
     }
     pinned.sort_by(|a, b| a.0.cmp(&b.0));
     active.sort_by(|a, b| b.0.cmp(&a.0));
     if !pinned.is_empty() { out.push(json!({"id":"pinned","kind":"projects","title":"Pinned","count":pinned.len(),"rows":pinned.into_iter().map(|x| x.1).collect::<Vec<_>>()})); }
-    out.push(json!({"id":"active","kind":"projects","title":"Active","count":active.len(),"rows":active.into_iter().map(|x| x.1).collect::<Vec<_>>()}));
+    // the bench holds BENCH: the rest fold into All projects, by name (a search lists every hit where it is)
+    for (_, row) in active.split_off(active.len().min(BENCH)) { rest.push((text_of(&row, "title").to_lowercase(), row)); }
+    rest.sort_by(|a, b| a.0.cmp(&b.0));
+    // which projects are on the bench follows the person's visits; where each stands on it does not: by name, so opening a thread of another
+    // project moves no row under the pointer and a project is found where it was
+    active.sort_by(|a, b| text_of(&a.1, "title").to_lowercase().cmp(&text_of(&b.1, "title").to_lowercase()));
+    out.push(json!({"id":"active","kind":"projects","title":"Recent","count":active.len(),"rows":active.into_iter().map(|x| x.1).collect::<Vec<_>>()}));
     groups.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
     for (gid, name, rs) in groups { out.push(fold_section(&format!("group:{gid}"), &name, rs, c, json!({"group":gid,"rename":true}))); }
+    if !rest.is_empty() { out.push(fold_section("all", "All projects", rest.into_iter().map(|x| x.1).collect(), c, json!({}))); }
     if !quiet.is_empty() { out.push(fold_section("quiet", "Quiet", quiet, c, json!({"hint":"Nothing for two weeks, or made quiet"}))); }
     json!(out)
 }
@@ -524,8 +611,11 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
     let known = |key: &str| rows.iter().any(|p| p.key == key);
     match action {
         // a section's fold (Groups, Quiet, Archived), the project page's Done (n) and its Older (m)
-        "side-section" => { if !(value.starts_with("sec:group:") || value == "sec:quiet" || value == "sec:archived" || value == "page-done" || value == "page-older") { return None } Some(Act { open_toggle: Some(value.into()), ..none() }) }
-        "project-page" => { if !value.is_empty() && !known(value) { return None } Some(Act { page: Some(value.into()), ..none() }) }
+        "side-section" => { if !(value.starts_with("sec:group:") || value == "sec:quiet" || value == "sec:all" || value == "sec:snoozed" || value == "sec:archived" || value == "page-done" || value == "page-older") { return None } Some(Act { open_toggle: Some(value.into()), ..none() }) }
+        "project-page" => { if !value.is_empty() && !known(value) { return None }
+            // opening a project's page is a visit: it comes to the top of the bench (`bench_rank`)
+            let sets = rows.iter().find(|p| p.key == value).and_then(|p| p.here.as_ref()).filter(|id| crate::state::visible::visit_due(st, id, now)).map(|id| vec![(format!("sidebar.visit.{id}"), now.to_string())]).unwrap_or_default();
+            Some(Act { page: Some(value.into()), sets, ..none() }) }
         // another machine's thread, hidden here until something new happens there (`hidden_at`); a local thread has Settle and Archive
         "thread-hide" => {
             let id = value.rsplit_once('|').map_or(value, |(_, r)| r);
