@@ -14,6 +14,13 @@ import { isLocalNoProviderError, parseNoProvider, type NoProviderNotice } from "
 import { RailView, type RailEntry } from "./rail";
 import { needAfter, needPress } from "./swarm-need";
 import { SettingsModal, type SettingsRow } from "./settings";
+import {
+  parseLocalePref,
+  parseThemePref,
+  resolveTheme,
+  type WebLocalePref,
+  type WebThemePref,
+} from "./settings-model";
 import { ThreadContextDialog } from "./thread-context";
 import {
   SidebarView,
@@ -90,11 +97,35 @@ function hasForKind(has: RailHas | undefined, kind: string): boolean {
   return true;
 }
 
+let hubTheme: "dark" | "light" = "dark";
+let themePref: WebThemePref = (() => {
+  try { return parseThemePref(localStorage.getItem("bp.theme.pref")); } catch { return "auto"; }
+})();
+let hubLocale: string | null = null;
+let localePref: WebLocalePref = (() => {
+  try { return parseLocalePref(localStorage.getItem("bp.locale")); } catch { return "auto"; }
+})();
+
+function applyEffectiveTheme(): void {
+  const resolved = resolveTheme(themePref, hubTheme);
+  document.documentElement.classList.toggle("light", resolved === "light");
+  try { localStorage.setItem("bp.theme", resolved); } catch { /* ignore */ }
+}
+
 function applyHubTheme(theme: string | undefined): void {
   if (!theme) return;
-  const light = theme === "light";
-  document.documentElement.classList.toggle("light", light);
-  try { localStorage.setItem("bp.theme", light ? "light" : "dark"); } catch { /* ignore */ }
+  hubTheme = theme === "light" ? "light" : "dark";
+  applyEffectiveTheme();
+}
+
+function applyEffectiveLocale(): void {
+  if (localePref !== "auto") {
+    setLocale(localePref);
+  } else if (hubLocale) {
+    setLocale(hubLocale);
+  } else if (typeof navigator !== "undefined" && navigator.language) {
+    if (!setLocale(navigator.language)) setLocale("en");
+  }
 }
 
 function makeClientId(): string {
@@ -106,7 +137,9 @@ function mountApp(): void {
   if (!root) return;
 
   try {
-    if (localStorage.getItem("bp.theme") === "light") document.documentElement.classList.add("light");
+    if (localStorage.getItem("bp.theme") === "light") hubTheme = "light";
+    if (resolveTheme(themePref, hubTheme) === "light") document.documentElement.classList.add("light");
+    if (localePref !== "auto") setLocale(localePref);
   } catch { /* ignore */ }
 
   // Unified GPUI-style top bar
@@ -634,6 +667,25 @@ function mountApp(): void {
       await hub.rpc("home.move", { to: "back" });
     },
     onGetNoProvider: () => noProvider,
+    onGetThemePref: () => themePref,
+    onSetThemePref: (next) => {
+      themePref = next;
+      try {
+        if (next === "auto") localStorage.removeItem("bp.theme.pref");
+        else localStorage.setItem("bp.theme.pref", next);
+      } catch { /* ignore */ }
+      applyEffectiveTheme();
+    },
+    onGetHubTheme: () => hubTheme,
+    onGetLocalePref: () => localePref,
+    onSetLocalePref: (next) => {
+      localePref = next;
+      try {
+        if (next === "auto") localStorage.removeItem("bp.locale");
+        else localStorage.setItem("bp.locale", next);
+      } catch { /* ignore */ }
+      applyEffectiveLocale();
+    },
     onLogout: () => signOut(() => {
       hub.disconnect();
       window.location.replace("/");
@@ -1525,7 +1577,10 @@ function mountApp(): void {
 
   hub.onState((state, hello: HelloFrame | null) => {
     if (state === "connected" && hello) {
-      if (hello.locale) setLocale(hello.locale);
+      if (hello.locale) {
+        hubLocale = hello.locale;
+        applyEffectiveLocale();
+      }
       if (hello.theme) applyHubTheme(hello.theme);
       if (hello.name) sidebar.setHostName(hello.name);
       homeInfo = hello.home ?? null;
@@ -1662,7 +1717,7 @@ function mountApp(): void {
     } else if (e.key === "Escape") {
       if (palette.isOpen()) palette.close();
       else if (addProject.isOpen()) addProject.escape();
-      else if (settings.isOpen()) settings.close();
+      else if (settings.isOpen()) settings.handleEscape();
       else if (chat.closePlanRevise()) { /* handled by plan revise drawer */ }
       else if (mgmt.isOpen()) mgmt.closePanel();
     }
