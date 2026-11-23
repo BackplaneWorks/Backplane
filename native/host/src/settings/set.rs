@@ -45,7 +45,9 @@ impl RpcHandler for SettingSet {
             } else if key == "text.provider" {
                 let prev_prov = hub.setting("text.provider").await.unwrap_or_default();
                 let cur_model = hub.setting("text.model").await.unwrap_or_default();
-                if !cur_model.is_empty() && (value != prev_prov || !super::models::model_compatible(value, &cur_model, Some(&info))) {
+                let prev_norm = if prev_prov.is_empty() { "claude" } else { prev_prov.as_str() };
+                let next_norm = if value.is_empty() { "claude" } else { value };
+                if !cur_model.is_empty() && (next_norm != prev_norm || !super::models::model_compatible(next_norm, &cur_model, Some(&info))) {
                     batch.push(json!({"$":"SettingSet","key":"text.model","value":"","at":at}));
                 }
             } else if key == "fallback.add.provider" {

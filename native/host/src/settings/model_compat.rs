@@ -17,7 +17,16 @@ pub const PROVIDERS: &[&str] = &[
     "omp",
 ];
 
-const CLAUDE_ALIASES: &[&str] = &["opus", "sonnet", "haiku", "fable", "mythos"];
+const CLAUDE_ALIASES: &[&str] = &["opus", "sonnet", "haiku", "fable", "mythos", "opusplan"];
+
+const AGY_VARIANTS: &[&str] = &["minimal", "low", "medium", "high", "xhigh", "max", "thinking"];
+
+fn strip_agy_variant(low: &str) -> &str {
+    match low.rsplit_once('-') {
+        Some((base, suf)) if !base.is_empty() && AGY_VARIANTS.contains(&suf) => base,
+        _ => low,
+    }
+}
 
 fn is_o_series(low: &str) -> bool {
     low.starts_with('o')
@@ -36,6 +45,9 @@ fn model_prefix_owner(low: &str) -> Option<&'static str> {
             .any(|a| base == *a || base.starts_with(&format!("{a}-")))
     {
         return Some("claude");
+    }
+    if base.starts_with("gpt-oss-") {
+        return Some("antigravity");
     }
     if base.starts_with("gpt-")
         || base.starts_with("codex-")
@@ -77,8 +89,9 @@ fn catalog_other_has(info: &Value, provider: &str, model: &str) -> bool {
 ///
 /// Order of checks:
 /// 1. Empty / `"default"` is always compatible.
-/// 2. Target provider's own catalog allow-list (allows Antigravity-hosted `claude-opus-5-5` / `gpt-oss-120b`).
-/// 3. Prefix/syntax ownership (`provider/model` for opencode/pi/omp; `claude-*`/aliases, `gpt-*`/`codex-*`/`o3`, `gemini-*`, `grok-*`, `muse-*`).
+/// 2. Target provider's own catalog allow-list (including Antigravity variant-stripped base IDs).
+/// 3. Prefix/syntax ownership (`provider/model` for opencode/pi/omp; Antigravity-hosted `gemini-*`/`claude-*`/`gpt-oss-*`
+///    even when the catalog is cold; `claude-*`/aliases, `gpt-*`/`codex-*`/`o3`, `gemini-*`, `grok-*`, `muse-*`).
 ///    Checked before other-provider catalog exclusion so `("claude", "claude-opus-5-5")` stays valid even when Antigravity also lists it.
 /// 4. Foreign catalog exclusion (rejects models listed under another provider's catalog when not listed here).
 /// 5. Otherwise compatible (preserves uncached new models and generic test placeholders).
@@ -93,14 +106,24 @@ pub fn model_compatible(provider: &str, model: &str, models: Option<&Value>) -> 
     } else {
         p_low.as_str()
     };
+    let low = m.to_ascii_lowercase();
 
-    if models.is_some_and(|info| catalog_contains(info, p, m)) {
+    if models.is_some_and(|info| {
+        catalog_contains(info, p, m)
+            || (p == "antigravity" && catalog_contains(info, "antigravity", strip_agy_variant(&low)))
+    }) {
         return true;
     }
 
-    let low = m.to_ascii_lowercase();
     if low.contains('/') {
         return matches!(p, "opencode" | "pi" | "omp");
+    }
+    if p == "antigravity"
+        && (low.starts_with("gemini-")
+            || low.starts_with("claude-")
+            || low.starts_with("gpt-oss-"))
+    {
+        return true;
     }
     if let Some(owner) = model_prefix_owner(&low) {
         return owner == p;
@@ -150,6 +173,7 @@ mod tests {
             "haiku",
             "fable",
             "mythos",
+            "opusplan",
             "opus[1m]",
             "claude-opus-5-5",
             "claude-fable-5-2[1m]",
@@ -199,13 +223,22 @@ mod tests {
     }
 
     #[test]
-    fn antigravity_cross_family_and_claude_full_id_both_work() {
+    fn antigravity_cross_family_variants_cold_catalog_and_claude_full_id_work() {
         let cat = catalog();
         assert!(model_compatible("antigravity", "claude-opus-5-5", Some(&cat)));
+        assert!(model_compatible("antigravity", "claude-opus-5-5-high", Some(&cat)));
+        assert!(model_compatible("antigravity", "claude-opus-5-5-high", None));
+        assert!(model_compatible("antigravity", "claude-opus-5-5", None));
         assert!(model_compatible("antigravity", "gpt-oss-120b", Some(&cat)));
+        assert!(model_compatible("antigravity", "gpt-oss-120b", None));
+        assert!(model_compatible("antigravity", "gpt-oss-120b-medium", Some(&cat)));
         assert!(model_compatible("claude", "claude-opus-5-5", Some(&cat)));
+        assert!(model_compatible("claude", "opusplan", Some(&cat)));
+        assert!(!model_compatible("codex", "opusplan", Some(&cat)));
         assert!(!model_compatible("antigravity", "opus", Some(&cat)));
-        assert!(!model_compatible("antigravity", "claude-opus-5-5", None));
+        assert!(!model_compatible("antigravity", "opus", None));
+        assert!(!model_compatible("antigravity", "gpt-6.2-sol", Some(&cat)));
+        assert!(!model_compatible("codex", "gpt-oss-120b", Some(&cat)));
         assert!(!model_compatible("codex", "claude-opus-5-5", Some(&cat)));
     }
 

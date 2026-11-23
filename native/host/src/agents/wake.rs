@@ -248,7 +248,10 @@ pub async fn plan_once_end(ag: &Arc<super::Agents>, th: &str) {
     let (Some(next), Some(t)) = (next, t) else { return };
     let now = now_s();
     let mut ev = vec![json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":next,"at":now})];
-    if next.is_empty() && t.interaction == "plan" { ev.push(json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() },"interaction":"default","model":t.model,"at":now})) }
+    if next.is_empty() && t.interaction == "plan" {
+        let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
+        ev.push(json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() },"interaction":"default","model":model,"at":now}))
+    }
     ag.commit_events(ev).await;
 }
 #[cfg(test)]
