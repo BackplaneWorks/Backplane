@@ -1679,8 +1679,11 @@ impl Window {
     ///
     /// If called from within a view, it will notify that view on the next frame. Otherwise, it will refresh the entire window.
     pub fn request_animation_frame(&self) {
-        let entity = self.current_view();
-        self.on_next_frame(move |_, cx| cx.notify(entity));
+        if let Some(entity) = self.try_current_view() {
+            self.on_next_frame(move |_, cx| cx.notify(entity));
+        } else {
+            self.on_next_frame(|window, _| window.refresh());
+        }
     }
 
     /// Spawn the future returned by the given closure on the application thread pool.
@@ -2546,14 +2549,18 @@ impl Window {
         let (task, is_first) = cx.fetch_asset::<A>(source);
         task.clone().now_or_never().or_else(|| {
             if is_first {
-                let entity_id = self.current_view();
+                let entity_id = self.try_current_view();
                 self.spawn(cx, {
                     let task = task.clone();
                     async move |cx| {
                         task.await;
 
-                        cx.on_next_frame(move |_, cx| {
-                            cx.notify(entity_id);
+                        cx.on_next_frame(move |window, cx| {
+                            if let Some(entity_id) = entity_id {
+                                cx.notify(entity_id);
+                            } else {
+                                window.refresh();
+                            }
                         });
                     }
                 })
@@ -3421,6 +3428,11 @@ impl Window {
     pub fn set_view_id(&mut self, view_id: EntityId) {
         self.invalidator.debug_assert_prepaint();
         self.next_frame.dispatch_tree.set_view_id(view_id);
+    }
+
+    /// Get the entity ID for the currently rendering view, if inside a view's draw pass.
+    pub fn try_current_view(&self) -> Option<EntityId> {
+        self.rendered_entity_stack.last().copied()
     }
 
     /// Get the entity ID for the currently rendering view

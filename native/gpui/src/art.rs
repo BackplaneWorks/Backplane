@@ -335,13 +335,16 @@ impl Cats {
 pub const CAT_STEP: std::time::Duration = std::time::Duration::from_millis(33);
 /// Ask the view a moving cat is drawn in to draw again in CAT_STEP; one wait per view, however many cats it has.
 fn cat_tick(window: &mut Window, cx: &mut App) {
-    thread_local! { static WAITING: std::cell::RefCell<std::collections::HashSet<EntityId>> = Default::default(); }
-    let view = window.current_view();
+    thread_local! { static WAITING: std::cell::RefCell<std::collections::HashSet<Option<EntityId>>> = Default::default(); }
+    let view = window.try_current_view();
     if !WAITING.with(|w| w.borrow_mut().insert(view)) { return }
     window.spawn(cx, async move |cx| {
         cx.background_executor().timer(CAT_STEP).await;
         WAITING.with(|w| w.borrow_mut().remove(&view));
-        let _ = cx.update(|_, cx| cx.notify(view));
+        let _ = cx.update(|window, cx| match view {
+            Some(v) => cx.notify(v),
+            None => window.refresh(),
+        });
     }).detach();
 }
 /// A cat, `size` px square. Only a moving mood asks for another frame (at CAT_STEP), so an idle window never repaints.
