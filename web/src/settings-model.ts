@@ -36,7 +36,7 @@ export interface SettingsNavMatch {
 
 export const SETTINGS_GROUPS: readonly SettingsGroupMeta[] = [
   { id: "general", label: "General" },
-  { id: "ai", label: "AI & tools" },
+  { id: "ai", label: "Agents and tools" },
   { id: "connect", label: "Connect" },
 ];
 
