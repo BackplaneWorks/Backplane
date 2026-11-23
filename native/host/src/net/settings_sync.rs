@@ -124,15 +124,15 @@ pub fn merge(
     let (eff_prov_raw, eff_prov_at) = effective("agent.provider");
     let eff_prov = if eff_prov_raw.is_empty() { "claude" } else { eff_prov_raw.as_str() };
     let (eff_model, eff_model_at) = effective("agent.model");
+    let info = crate::settings::models::info_value();
     if !eff_model.is_empty()
-        && !crate::settings::models::model_compatible(
-            eff_prov,
-            &eff_model,
-            Some(&crate::settings::models::info_value()),
-        )
+        && !crate::settings::models::model_compatible(eff_prov, &eff_model, Some(&info))
     {
         out.retain(|e| e["key"].as_str() != Some("agent.model"));
-        if local.get("agent.model").is_some_and(|e| !e.value.is_empty()) {
+        if local.get("agent.model").is_some_and(|e| {
+            !e.value.is_empty()
+                && !crate::settings::models::model_compatible(eff_prov, &e.value, Some(&info))
+        }) {
             out.push(json!({
                 "$": "SettingSet",
                 "key": "agent.model",
@@ -403,6 +403,15 @@ mod tests {
         local2.insert("agent.provider".into(), Entry { value: "codex".into(), at: 200 });
         let evs2 = merge(&local2, &remote);
         assert!(!evs2.iter().any(|e| e["key"] == "agent.model" && e["value"] == "opus"), "{evs2:?}");
+
+        // Remote incompatible model must NOT wipe a compatible local model
+        let mut local3 = BTreeMap::new();
+        local3.insert("agent.provider".into(), Entry { value: "codex".into(), at: 200 });
+        local3.insert("agent.model".into(), Entry { value: "gpt-6.1-sol".into(), at: 210 });
+        let mut remote3 = BTreeMap::new();
+        remote3.insert("agent.model".into(), Entry { value: "opus".into(), at: 250 });
+        let evs3 = merge(&local3, &remote3);
+        assert!(!evs3.iter().any(|e| e["key"] == "agent.model"), "compatible local model must be preserved: {evs3:?}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

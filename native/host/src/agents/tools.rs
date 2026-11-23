@@ -236,14 +236,16 @@ impl Agents {
         if implement {
             if let Some(t) = t {
                 let rt = if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() };
-                ev.push(json!({"$":"ModesSet","id":th,"runtime":rt,"interaction":"default","model":t.model,"at":now}));
+                let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
+                ev.push(json!({"$":"ModesSet","id":th,"runtime":rt,"interaction":"default","model":model,"at":now}));
             }
             if had_once { ev.push(json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":"","at":now})) }
             if !th.is_empty() { ev.push(json!({"$":"SettingSet","key":format!("plan.executing.{th}"),"value":"1","at":now})) }
         } else if let Some(ref fb) = revise {
             if let Some(t) = t {
                 let rt = if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() };
-                ev.push(json!({"$":"ModesSet","id":th,"runtime":rt,"interaction":"plan","model":t.model,"at":now}));
+                let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
+                ev.push(json!({"$":"ModesSet","id":th,"runtime":rt,"interaction":"plan","model":model,"at":now}));
                 if (had_ask_once || had_once) && !th.is_empty() {
                     let flag = if t.turn == "running" { "2" } else { "1" };
                     ev.push(json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":flag,"at":now}));
