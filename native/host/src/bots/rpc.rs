@@ -220,7 +220,10 @@ impl Bots {
         if !name_ok(&name) { return vec![err(id, "a bot's name is 1 to 24 letters, digits, - or _")] }
         let w = self.world().await;
         if w.named(&name).is_some() { return vec![err(id, &format!("a bot named {name} already exists"))] }
-        let (provider, model) = (gsd(p, "provider", &crate::settings::models::default_now(&w.setting("agent.provider", "claude"), "")).to_string(), gsd(p, "model", &w.setting("agent.model", "")).to_string());
+        let default_prov = crate::settings::models::default_now(&w.setting("agent.provider", "claude"), "");
+        let provider = gsd(p, "provider", &default_prov).to_string();
+        let default_model = if gs(p, "provider").is_empty() || provider == default_prov { w.setting("agent.model", "") } else { String::new() };
+        let model = crate::settings::models::sanitize_model_now(&provider, gsd(p, "model", &default_model));
         let (bot, th) = (self.id("b", now), self.id("t", now));
         // the cat: a look given is the person's pick (kept whatever the name), else the name's; `color` the fur's ("#rrggbb", "" the coat's own)
         let (look, auto) = match gnat(p, "look") { Some(l) => (l % super::cat::LOOKS, false), None => (super::cat::look_of(&name), true) };

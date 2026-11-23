@@ -210,12 +210,14 @@ pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, speed:
 /// The combined chip of a thread (`combo`), from the state.
 pub fn combo_of(st: &State, id: &str, now_s: u64) -> Value {
     let Some(t) = st.threads.get(id) else { return Value::Null };
+    let info = crate::agents::speed::info_now();
+    let model = crate::settings::models::sanitize_model(&t.provider, &t.model, info.is_object().then_some(&info));
     let snap = allowance_of(st, id, &t.provider);
     let acct = account_of(st, id, &t.provider, &snap);
     let effort = st.settings.get(&format!("effort.{id}")).map(String::as_str).unwrap_or("");
     let want = st.settings.get(&format!("speed.{id}")).map(String::as_str).unwrap_or("");
-    let speed = if want.is_empty() { "" } else { crate::agents::speed::effective(&crate::agents::speed::info_now(), &t.provider, &t.model, want) };
-    combo(&snap, &t.provider, &t.model, effort, speed, (&acct.0, &acct.1, acct.2), &super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc), now_s)
+    let speed = if want.is_empty() { "" } else { crate::agents::speed::effective(&info, &t.provider, &model, want) };
+    combo(&snap, &t.provider, &model, effort, speed, (&acct.0, &acct.1, acct.2), &super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc), now_s)
 }
 /// The phones' picker for a thread on an account provider: an Account section (the CLI's own login, then each saved account of the provider, with what it has
 /// left; a press is `thread.pick {action: account, value: "<profile>\u{1f}<epoch>"}`, "" the CLI's own) and a Usage section (the thread's account's windows with
@@ -317,6 +319,8 @@ pub fn chip(provider: &str, model: &str, effort: &str, efforts: bool) -> String 
 /// Mob.picker.ctx.loc: the model chip and its label, the model menu (the thread's provider's models, each with what its CLI calls it), the efforts its model
 /// takes and the agents (with what each is and whether it can be used). Without the hub's models info: the provider's default only.
 pub fn picker_with(provider: &str, model: &str, effort: &str, reading: &str, models: Option<&Value>) -> Value {
+    let model = crate::settings::models::sanitize_model(provider, model, models);
+    let model = model.as_str();
     let label = format!("{} · {}{}{}", provider, if model.is_empty() { "default" } else { model }, if effort.is_empty() { String::new() } else { format!(" · {}", effort_label(effort)) }, usage_tail(provider, reading));
     let choice = |l: String, v: &str, on: bool| json!({"label": l, "value": v, "on": on});
     let es = model_efforts(models, provider, model);
@@ -472,13 +476,14 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
     let (models, agents) = picker_agents_of(models_text);
     let mine = models.as_deref().map(|i| info_for_thread(st, id, i));
-    m.insert("picker".into(), with_speed(picker_with(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()), mine.as_ref(), &t.provider, &t.model, get(format!("speed.{id}"))));
+    let model = crate::settings::models::sanitize_model(&t.provider, &t.model, mine.as_ref());
+    m.insert("picker".into(), with_speed(picker_with(&t.provider, &model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()), mine.as_ref(), &t.provider, &model, get(format!("speed.{id}"))));
     m.insert("pickerAgents".into(), agents);
     m.insert("claude".into(), json!(t.provider == "claude"));
     // "Plan first, this turn only" set (commands/plan.rs thread.planonce): the picker's toggle is on until the turn it was set for ends
     m.insert("planOnce".into(), json!(!get(format!("plan.once.{id}")).is_empty()));
     m.insert("planMode".into(), plan_mode(st, id));
-    m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
+    m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &model, now_s)));
     m.insert("combo".into(), combo_of(st, id, now_s));
     Some(m)
 }

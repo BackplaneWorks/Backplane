@@ -109,6 +109,38 @@ pub fn merge(
             }));
         }
     }
+    let effective = |k: &str| -> (String, u64) {
+        if let Some(ev) = out.iter().find(|e| e["key"].as_str() == Some(k)) {
+            return (
+                ev["value"].as_str().unwrap_or("").to_string(),
+                ev["at"].as_u64().unwrap_or(0),
+            );
+        }
+        local
+            .get(k)
+            .map(|e| (e.value.clone(), e.at))
+            .unwrap_or_default()
+    };
+    let (eff_prov_raw, eff_prov_at) = effective("agent.provider");
+    let eff_prov = if eff_prov_raw.is_empty() { "claude" } else { eff_prov_raw.as_str() };
+    let (eff_model, eff_model_at) = effective("agent.model");
+    if !eff_model.is_empty()
+        && !crate::settings::models::model_compatible(
+            eff_prov,
+            &eff_model,
+            Some(&crate::settings::models::info_value()),
+        )
+    {
+        out.retain(|e| e["key"].as_str() != Some("agent.model"));
+        if local.get("agent.model").is_some_and(|e| !e.value.is_empty()) {
+            out.push(json!({
+                "$": "SettingSet",
+                "key": "agent.model",
+                "value": "",
+                "at": eff_prov_at.max(eff_model_at),
+            }));
+        }
+    }
     out
 }
 
@@ -355,6 +387,22 @@ mod tests {
         assert!(evs.iter().any(|e| e["key"] == "ui.theme" && e["value"] == "light" && e["at"] == 150));
         assert!(evs.iter().any(|e| e["key"] == "sidebar.pin.org/repo" && e["value"] == "" && e["at"] == 120));
         assert!(evs.iter().any(|e| e["key"] == "agent.model" && e["value"] == "opus" && e["at"] == 50));
+    }
+
+    #[test]
+    fn merge_drops_or_clears_incompatible_agent_model_when_provider_is_codex() {
+        let mut local = BTreeMap::new();
+        local.insert("agent.provider".into(), Entry { value: "codex".into(), at: 200 });
+        local.insert("agent.model".into(), Entry { value: "opus".into(), at: 100 });
+        let mut remote = BTreeMap::new();
+        remote.insert("agent.model".into(), Entry { value: "opus".into(), at: 150 });
+        let evs = merge(&local, &remote);
+        assert!(evs.iter().any(|e| e["key"] == "agent.model" && e["value"] == ""), "{evs:?}");
+
+        let mut local2 = BTreeMap::new();
+        local2.insert("agent.provider".into(), Entry { value: "codex".into(), at: 200 });
+        let evs2 = merge(&local2, &remote);
+        assert!(!evs2.iter().any(|e| e["key"] == "agent.model" && e["value"] == "opus"), "{evs2:?}");
     }
 
     #[tokio::test(flavor = "multi_thread")]

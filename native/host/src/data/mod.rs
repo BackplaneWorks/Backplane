@@ -159,7 +159,8 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     );
     let (model, effort, runtime, plan_mode, combo, status, pin_order, swarm) = crate::statehost::with_state_of(hub, read_st)
         .or_else(|| crate::statehost::policies().and_then(|p| p.with_state(read_st))).unwrap_or_default();
-    let model = if model.is_empty() { t.model.clone() } else { model };
+    let raw_model = if model.is_empty() { t.model.clone() } else { model };
+    let model = crate::settings::models::sanitize_model_now(&t.provider, &raw_model);
     // the composer's one chip: the model and what the account has left (present/keys.rs `combo`, its short form: a phone's row has room for about 20 characters;
     // the picker's title says it all)
     let chip = combo["short"].as_str().filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, &effort));

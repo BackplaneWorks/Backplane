@@ -126,7 +126,8 @@ impl Agents {
         let (from, was_model, running) = { let w = self.world().await; match w.threads.get(target) { Some(t) => (t.provider.clone(), t.model.clone(), w.running(target)), None => return fail("No such thread.") } };
         let to = { let p = sv(a, "provider").trim().to_lowercase(); if p.is_empty() { from.clone() } else { p } };
         if to != "claude" && super::providers::driver(&to).is_none() { return fail(&format!("{to} is not a provider this hub runs (orchestrator_capabilities lists them)")) }
-        let model = match a.get("model") { Some(Value::String(m)) => m.trim().to_string(), Some(Value::Null) | None => if to == from { was_model.clone() } else { String::new() }, Some(_) => return fail("model is a string (empty for the provider's default)") };
+        let raw_model = match a.get("model") { Some(Value::String(m)) => m.trim().to_string(), Some(Value::Null) | None => if to == from { was_model.clone() } else { String::new() }, Some(_) => return fail("model is a string (empty for the provider's default)") };
+        let model = crate::settings::models::sanitize_model_now(&to, &raw_model);
         if running { return fail(if target == thread { "a thread's provider and model change between turns, and this is its turn: ask from another thread, or the person, once it ends" } else { "a provider changes between turns: that thread is running; thread_interrupt it first, or wait for its turn to end" }) }
         if to != from || model != was_model {
             let Some(h) = self.hub.rpc_for("thread.provider") else { return fail("switching providers is not available") };
