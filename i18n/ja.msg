@@ -4465,6 +4465,19 @@ ios.clone.signin.starting = サインインを開始中…
 ios.clone.signin.done = GitHub にサインインしました。
 ios.clone.signin.open = ページを開く
 ios.clone.loading = リポジトリを読み込み中…
+mobile.tab.inbox = 受信トレイ
+mobile.tab.crew = クルー
+mobile.tab.bench = ベンチ
+mobile.inbox.clear = 対応待ちなし
+mobile.inbox.clear.note = 対応待ちも実行中のものもありません。
+mobile.inbox.talk.bub = Bubと話す
+mobile.inbox.jump.in = 最近開いたプロジェクト
+mobile.inbox.open.bench = ベンチを開く
+mobile.badge.pcb = PCB
+mobile.pill.waiting = 待機中
+mobile.snooze.wakes = {time}後に再開
+mobile.bench.all = すべてのプロジェクト
+mobile.snooze.for = スヌーズする期間
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = 対応が必要

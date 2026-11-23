@@ -613,9 +613,19 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
         }
         // a sidebar section's press: pin a project (`project-pin` <key>), fold or unfold its threads (`project-fold` <key>), archive it (`project-archive` <key>, again to unarchive), hide another machine's thread here (`thread-hide` <id>), name a group (`group-rename` "<gid>\u{1f}<name>"), move a project (`group-move` "<key>\u{1f}<gid>")
         "sidebar.act" => {
-            let Some(pol) = crate::statehost::policies() else { return Err(err("state is starting")) };
             let (a, v) = (s(p, "action"), s(p, "value"));
-            if !matches!(a, "project-pin" | "project-fold" | "thread-hide" | "group-rename" | "group-move" | "project-archive") { return Err(err("no such action")) }
+            // a thread row's snooze or wake, by the row's own value (sections.rs `snooze` and `wake`: "<thread>|1h", "|tomorrow", "|1w", "|off"; the window's
+            // carries its hub first, "<hub>|<thread>|<span>"): the thread's snooze, as the desktop's `row-snooze` sends it
+            if a == "row-snooze" {
+                let mut parts = v.rsplit('|'); let (span, th) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+                if th.is_empty() || !matches!(span, "1h" | "tomorrow" | "1w" | "off") { return Err(err("value: <thread>|1h, tomorrow, 1w or off")) }
+                if !hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
+                rpc(hub, c, "thread.snooze", json!({"thread":th,"for":span})).await?;
+                return Ok(json!({}))
+            }
+            // `project-page` <key>: the person opened a project's page on this client, a visit (the bench orders by it; at most one write in ten minutes)
+            if !matches!(a, "project-pin" | "project-fold" | "thread-hide" | "group-rename" | "group-move" | "project-archive" | "project-page") { return Err(err("no such action")) }
+            let Some(pol) = crate::statehost::policies() else { return Err(err("state is starting")) };
             let now = crate::hub::now_ms() / 1000;
             let sets = pol.with_state(|st| crate::present::merged::merged_of(st, hub.mirrors(), |rows| crate::present::sections::act(st, &rows, a, v, &json!({}), now).map(|x| x.sets))).flatten().ok_or_else(|| err("unknown project or group"))?;
             for (k, val) in sets { rpc(hub, c, "setting.set", json!({"key":k,"value":val})).await?; }
