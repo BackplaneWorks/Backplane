@@ -9,6 +9,7 @@ import {
   filterSearchItems,
   filterSettingsNav,
   resolveTheme,
+  type SettingsGroupId,
   type SettingsPageId,
   type SettingsPageMeta,
   type SettingsSearchItem,
@@ -106,6 +107,30 @@ function makeSearchIcon(): SVGSVGElement {
   p.setAttribute("d", "m20 20-3.5-3.5");
   svg.append(c, p);
   return svg;
+}
+
+function groupLabel(id: SettingsGroupId, fallback: string): string {
+  switch (id) {
+    case "general":
+      return t("gpui.settings.group.general", fallback);
+    case "ai":
+      return t("gpui.settings.group.agents", fallback);
+    case "connect":
+      return t("native.pair.connect", fallback);
+  }
+}
+
+function pageTitle(id: SettingsPageId, fallback: string): string {
+  switch (id) {
+    case "appearance":
+      return t("settings.appearance", fallback);
+    case "providers":
+      return t("web.settings.providers", fallback);
+    case "devices":
+      return fallback;
+    case "home":
+      return t("home.machine", fallback);
+  }
 }
 
 export class SettingsModal {
@@ -335,52 +360,59 @@ export class SettingsModal {
   private buildSearchItems(): SettingsSearchItem[] {
     const home = this.cb.onGetHome?.() ?? null;
     const noProvider = this.cb.onGetNoProvider?.() ?? null;
+    const generalLbl = groupLabel("general", "General");
+    const aiLbl = groupLabel("ai", "Agents and tools");
+    const connectLbl = groupLabel("connect", "Connect");
+    const appearanceTitle = pageTitle("appearance", "Appearance");
+    const providersTitle = pageTitle("providers", "AI providers");
+    const devicesTitle = pageTitle("devices", "Devices & browser");
+    const homeTitle = pageTitle("home", "Home machine");
     const items: SettingsSearchItem[] = [
       {
         pageId: "appearance",
-        pageTitle: "Appearance",
-        groupLabel: "General",
-        rowTitle: "Theme",
+        pageTitle: appearanceTitle,
+        groupLabel: generalLbl,
+        rowTitle: t("settings.theme", "Theme"),
         rowDetail: "Auto (follow hub), Dark, or Light in this browser.",
-        keywords: ["dark", "light", "auto", "appearance", "colors"],
+        keywords: ["theme", "dark", "light", "auto", "appearance", "colors"],
       },
       {
         pageId: "appearance",
-        pageTitle: "Appearance",
-        groupLabel: "General",
+        pageTitle: appearanceTitle,
+        groupLabel: generalLbl,
         rowTitle: t("settings.lang", "Language"),
         rowDetail: "Interface language for this browser.",
         keywords: ["locale", "english", "espanol", "japanese", "language"],
       },
       {
         pageId: "providers",
-        pageTitle: "AI providers",
-        groupLabel: "Agents and tools",
+        pageTitle: providersTitle,
+        groupLabel: aiLbl,
         rowTitle: noProvider ? trs(noProvider.head) : "Provider connections",
         rowDetail: "Connect Claude, Codex, Antigravity, or other AI providers in Settings → Accounts.",
         keywords: ["accounts", "claude", "codex", "antigravity", "grok", "openai", "signin"],
       },
       {
         pageId: "devices",
-        pageTitle: "Devices & browser",
-        groupLabel: "Connect",
+        pageTitle: devicesTitle,
+        groupLabel: connectLbl,
         rowTitle: "This browser",
         rowDetail: "Sign out and revoke this browser's session cookie.",
         keywords: ["logout", "sign out", "session", "cookie"],
       },
       {
         pageId: "devices",
-        pageTitle: "Devices & browser",
-        groupLabel: "Connect",
+        pageTitle: devicesTitle,
+        groupLabel: connectLbl,
         rowTitle: "Paired devices",
         rowDetail: this.devicesRows.map((r) => `${r.title || r.head || ""} ${r.detail || r.text || ""}`).join(" ") || "Paired phones and browsers on this hub.",
         keywords: ["phone", "pair", "revoke", "browser"],
       },
       {
         pageId: "home",
-        pageTitle: "Home machine",
-        groupLabel: "Connect",
-        rowTitle: home?.name ? `${home.name}` : t("home.machine", "Home machine"),
+        pageTitle: homeTitle,
+        groupLabel: connectLbl,
+        rowTitle: home?.name ? `${home.name}` : homeTitle,
         rowDetail: "Which machine hosts your always-on hub and bots.",
         keywords: ["boat", "move", "online", "away", "queued", "machine"],
       },
@@ -390,8 +422,8 @@ export class SettingsModal {
       if (title) {
         items.push({
           pageId: "devices",
-          pageTitle: "Devices & browser",
-          groupLabel: "Connect",
+          pageTitle: devicesTitle,
+          groupLabel: connectLbl,
           rowTitle: title,
           rowDetail: r.detail || r.text || "",
           keywords: ["paired", "device"],
@@ -431,7 +463,7 @@ export class SettingsModal {
         if (g) {
           const head = document.createElement("div");
           head.className = "bp-settings-group";
-          head.textContent = trs(g.label);
+          head.textContent = groupLabel(g.id, g.label);
           frag.appendChild(head);
         }
       }
@@ -451,7 +483,7 @@ export class SettingsModal {
 
       const label = document.createElement("span");
       label.className = "bp-settings-nav-label";
-      label.textContent = trs(p.title);
+      label.textContent = pageTitle(p.id, p.title);
 
       rowTop.append(iconWrap, label);
 
@@ -502,7 +534,7 @@ export class SettingsModal {
     const header = document.createElement("div");
     header.className = "bp-settings-pane-head";
     const h3 = document.createElement("h3");
-    h3.textContent = trs(meta.title);
+    h3.textContent = pageTitle(meta.id, meta.title);
     const sub = document.createElement("div");
     sub.className = "bp-settings-pane-sub";
     sub.textContent = meta.subtitle;
@@ -557,7 +589,7 @@ export class SettingsModal {
       secBar.className = "bp-settings-search-sec";
       const secHead = document.createElement("div");
       secHead.className = "bp-settings-subhead";
-      secHead.textContent = meta.title;
+      secHead.textContent = pageTitle(meta.id, meta.title);
       const openPageBtn = document.createElement("button");
       openPageBtn.type = "button";
       openPageBtn.className = "bp-settings-search-open";
@@ -588,20 +620,23 @@ export class SettingsModal {
     const hubTheme = this.cb.onGetHubTheme?.() ?? "dark";
     const resolvedTheme = resolveTheme(themePref, hubTheme);
     const localePref = this.cb.onGetLocalePref?.() ?? "auto";
+    const themeTitle = t("settings.theme", "Theme");
     const langTitle = t("settings.lang", "Language");
 
-    if (!onlyRows || onlyRows.has("Theme")) {
+    if (!onlyRows || onlyRows.has(themeTitle)) {
+      const darkLabel = t("settings.theme.dark", "Dark");
+      const lightLabel = t("settings.theme.light", "Light");
       const themeDesc = themePref === "auto"
-        ? `Following hub theme (${hubTheme === "light" ? "Light" : "Dark"}). Stored in this browser only.`
-        : `Using ${resolvedTheme === "light" ? "Light" : "Dark"} in this browser. Select Auto to follow the hub.`;
+        ? `Following hub theme (${hubTheme === "light" ? lightLabel : darkLabel}). Stored in this browser only.`
+        : `Using ${resolvedTheme === "light" ? lightLabel : darkLabel} in this browser. Select Auto to follow the hub.`;
 
       frag.appendChild(this.makeSegmentedRow(
-        "Theme",
+        themeTitle,
         themeDesc,
         [
           { value: "auto", label: "Auto" },
-          { value: "dark", label: "Dark" },
-          { value: "light", label: "Light" },
+          { value: "dark", label: darkLabel },
+          { value: "light", label: lightLabel },
         ],
         themePref,
         "settings-theme",
