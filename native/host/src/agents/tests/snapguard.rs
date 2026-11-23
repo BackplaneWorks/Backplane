@@ -412,3 +412,70 @@ done
     assert!(!after.wrote && after.review);
     ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn design_record_note_bounds_stalled_repo_lock_so_save_never_hangs() {
+    let bin = dir("sg-des-bin"); script(&bin, "claude", DOER);
+    let (hub, ag, _home, work) = start("sg-des-tmo", |w| {
+        std::fs::write(w.join("board.kicad_pcb"), board(4)).unwrap();
+        std::fs::write(w.join("board.kicad_pro"), "{}").unwrap();
+        git_out(w, &["init", "-q", "-b", "main"]);
+        git_out(w, &["config", "user.name", "t"]);
+        git_out(w, &["config", "user.email", "t@t"]);
+        git_out(w, &["add", "."]);
+        git_out(w, &["commit", "-qm", "init"]);
+        base_log(w, 1, "")
+    }, |_| Cli::standin(&bin)).await;
+
+    std::fs::write(work.join("board.kicad_pcb"), board(6)).unwrap();
+    let top = sn::top_of(&work.to_string_lossy()).await.unwrap();
+    let lock = sn::repo_lock(&top).await;
+    let from = len(&hub).await;
+    let t0 = Instant::now();
+    ag.design_record_note_within(T1, "save", "", Duration::from_millis(200)).await;
+    assert!(t0.elapsed() < Duration::from_secs(3), "design_record_note_within must bound stalled repo_lock, took {:?}", t0.elapsed());
+
+    let ev = log_from(&hub, from).await;
+    assert!(
+        ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.contains("did not finish within"))),
+        "expected timeout ActivityLogged warning, got: {ev:?}"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), sn::repo_lock(&top)).await.is_err(),
+        "repo_lock must still be held"
+    );
+
+    drop(lock);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let ev2 = log_from(&hub, from).await;
+            let committed_ev = ev2.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.contains("Committed 1 design file to main")));
+            if committed_ev && git_out(&work, &["log", "-1", "--format=%s"]).contains("design:") { break }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("detached design commit must finish and report completion once lock is released");
+    tokio::time::timeout(Duration::from_secs(2), sn::repo_lock(&top))
+        .await
+        .expect("repo_lock must become available once detached commit finishes");
+    ag.shutdown();
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")] async fn repo_lock_canonicalizes_symlink_and_real_path() {
+    let d = crate::plat::tmp::short_dir("sg-canon-lock");
+    let real = d.path().join("real");
+    let link = d.path().join("link");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let link_s = link.to_string_lossy().into_owned();
+    let real_s = real.to_string_lossy().into_owned();
+    let g = sn::repo_lock(&link_s).await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), sn::repo_lock(&real_s)).await.is_err(),
+        "symlink and canonical path must contend on the same repo_lock mutex"
+    );
+    drop(g);
+    tokio::time::timeout(Duration::from_secs(2), sn::repo_lock(&real_s))
+        .await
+        .expect("canonical path must acquire repo_lock once symlink holder drops");
+}

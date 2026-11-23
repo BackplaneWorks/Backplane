@@ -207,6 +207,7 @@ impl Agents {
         if design && self.in_review(th).await { return Err(sn::review_refusal(path.rsplit('/').next().unwrap_or(path))) }
         let g = self.turn_guard(th);
         if g.as_ref().is_some_and(|g| g.wrote) { return Ok(()) }
+        let prev_person = g.as_ref().is_some_and(|g| g.person);
         let timed_out = || {
             let secs = limit.as_secs_f64();
             let secs_str = if secs >= 1.0 && secs.fract() == 0.0 { format!("{} s", secs as u64) } else { format!("{secs:.2} s") };
@@ -243,6 +244,7 @@ impl Agents {
                     match Self::await_detached(limit, async move { me.compute_guard(&th_s, &cwd, None, false).await }).await {
                         Ok(mut computed) => {
                             computed.wrote = true;
+                            computed.person |= prev_person;
                             self.turn_guards.lock().unwrap().insert(th.to_string(), computed);
                             return Ok(());
                         }

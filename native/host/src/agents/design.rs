@@ -9,6 +9,9 @@ use crate::files::kicad::canonical as kc;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+/// Bound on synchronous post-save / turn-end `commit_design` so a stalled `repo_lock` or git command never hangs `SaveDocument` / `kicad_edit` for 300 s or delays releasing document locks.
+pub const DESIGN_COMMIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 /// (agents/world.rs `cwd` reads the same key by its text: a fold input reaches nothing outside its inputs)
 pub fn main_key(th: &str) -> String { format!("kicad.main.{th}") }
@@ -297,27 +300,8 @@ impl Agents {
         let abs = if p.starts_with('/') { p } else { format!("{r}/{p}") };
         kc::is_document(&abs).then_some(abs)
     }
-    /// Commit the design files changed in the thread's main checkout straight to main (and push
-    /// when it has an upstream and `git.auto_push` is on: settings/autopush.rs), leaving any document another thread holds for that thread.
-    /// `why`: "turn" (a turn's end) or "save" (a SaveDocument). Each commit is a line in the thread.
-    pub async fn design_record(self: &Arc<Self>, th: &str, why: &str) { self.design_record_note(th, why, "").await }
-    /// The same, `note` a line of the commit's body (a save that also upgraded the file's format says so: savegate.rs).
-    pub async fn design_record_note(self: &Arc<Self>, th: &str, why: &str, note: &str) {
-        if crate::copy::on() { return }
-        let root = self.main_root(th).await; if root.is_empty() || !kc::hardware(&root) { return }
-        let (title, mine, push, off) = { let w = self.world().await; (w.threads.get(th).map(|t| t.title.clone()).unwrap_or_default(), w.setting(&main_key(th)) == "on", crate::settings::autopush::on(w.setting(crate::settings::autopush::KEY)), crate::settings::offbranch::on(w.setting(crate::settings::offbranch::KEY))) };
-        if !mine && why == "turn" { return } // a thread still in an older worktree edits its own copies (bring_back moves them)
-        let mut held: Vec<String> = vec![];
-        for n in self.lock_names().await.into_iter().filter(|n| kc::is_doc_lock(n)) {
-            let l = self.lock_get(&n).await;
-            if let Some(h) = &l.holder { if h.thread != th { held.push(n) } }
-        }
-        // the documents of the project whose lock another thread holds
-        let f = kc::for_cwd(&root);
-        let skip: Vec<String> = [f.pcb, f.sch].into_iter().filter(|d| !d.is_empty() && held.contains(&kc::doc_lock(d))).collect();
-        // #1188: the subject says what changed (kc::describe); the thread it came from is the body, never the subject
-        let body = design_body(th, &title, why, note);
-        match kc::commit_design(&root, &body, &skip, push, off).await {
+    async fn finish_design_record(&self, th: &str, root: &str, skip: &[String], rec: Result<kc::Recorded, String>) {
+        match rec {
             Ok(r) if r.commit.is_empty() => {}
             Ok(r) => {
                 crate::settings::telemetry_usage::bump(crate::settings::telemetry_usage::BOARDS_CREATED, r.new_boards);
@@ -333,6 +317,50 @@ impl Agents {
                 self.say(th, "info", "git", line).await
             }
             Err(e) => self.say(th, "warn", "git", format!("Design files not committed to main: {e}")).await,
+        }
+    }
+    /// Commit the design files changed in the thread's main checkout straight to main (and push
+    /// when it has an upstream and `git.auto_push` is on: settings/autopush.rs), leaving any document another thread holds for that thread.
+    /// `why`: "turn" (a turn's end) or "save" (a SaveDocument). Each commit is a line in the thread.
+    pub async fn design_record(self: &Arc<Self>, th: &str, why: &str) { self.design_record_note(th, why, "").await }
+    /// The same, `note` a line of the commit's body (a save that also upgraded the file's format says so: savegate.rs).
+    pub async fn design_record_note(self: &Arc<Self>, th: &str, why: &str, note: &str) {
+        self.design_record_note_within(th, why, note, DESIGN_COMMIT_TIMEOUT).await
+    }
+    pub(crate) async fn design_record_note_within(self: &Arc<Self>, th: &str, why: &str, note: &str, limit: std::time::Duration) {
+        if crate::copy::on() { return }
+        let root = self.main_root(th).await; if root.is_empty() || !kc::hardware(&root) { return }
+        let (title, mine, push, off) = { let w = self.world().await; (w.threads.get(th).map(|t| t.title.clone()).unwrap_or_default(), w.setting(&main_key(th)) == "on", crate::settings::autopush::on(w.setting(crate::settings::autopush::KEY)), crate::settings::offbranch::on(w.setting(crate::settings::offbranch::KEY))) };
+        if !mine && why == "turn" { return } // a thread still in an older worktree edits its own copies (bring_back moves them)
+        let mut held: Vec<String> = vec![];
+        for n in self.lock_names().await.into_iter().filter(|n| kc::is_doc_lock(n)) {
+            let l = self.lock_get(&n).await;
+            if let Some(h) = &l.holder { if h.thread != th { held.push(n) } }
+        }
+        // the documents of the project whose lock another thread holds
+        let f = kc::for_cwd(&root);
+        let skip: Vec<String> = [f.pcb, f.sch].into_iter().filter(|d| !d.is_empty() && held.contains(&kc::doc_lock(d))).collect();
+        // #1188: the subject says what changed (kc::describe); the thread it came from is the body, never the subject
+        let body = design_body(th, &title, why, note);
+        let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+        let me = self.clone();
+        let th_s = th.to_string();
+        tokio::spawn(async move {
+            let rec = kc::commit_design(&root, &body, &skip, push, off).await;
+            me.finish_design_record(&th_s, &root, &skip, rec).await;
+            let _ = done_tx.send(());
+        });
+        match tokio::time::timeout(limit, done_rx).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => {
+                self.say(th, "warn", "git", "Design files not committed to main: commit task stopped unexpectedly.".into()).await;
+            }
+            Err(_) => {
+                let secs = limit.as_secs_f64();
+                let secs_str = if secs >= 1.0 && secs.fract() == 0.0 { format!("{} s", secs as u64) } else { format!("{secs:.2} s") };
+                let prefix = if why == "save" { "Design files were saved, but committing to main" } else { "Committing design files to main" };
+                self.say(th, "warn", "git", format!("{prefix} did not finish within {secs_str} (git or the repository lock is still busy); it will finish in the background.")).await;
+            }
         }
     }
     /// The documents' locks a thread holds go when its turn ends (a waiter is granted at once).
