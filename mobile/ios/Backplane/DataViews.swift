@@ -144,6 +144,15 @@ struct DataThreadsView: View {
     @State private var flash = ""   // the project a link just opened
 
     @State private var newSwarm: String?        // a project id: the New swarm sheet
+    // the home's tabs (HomeModel.swift), over a hub with sections: Inbox first, every time the app opens
+    @State private var tab: HomeTab = .inbox
+    @State private var searching = false
+    @FocusState private var searchFocus: Bool
+    private var sectioned: Bool { client.has("sections") && !client.sections.isEmpty }
+    private var bub: DBot? { client.bots.first { $0.uber && !$0.thread.isEmpty } }
+    private var inboxSections: [DSection] { client.sections.filter { Home.tab(section: $0.id, kind: $0.kind) == .inbox } }
+    private var benchSections: [DSection] { client.sections.filter { Home.tab(section: $0.id, kind: $0.kind) == .bench && !($0.id == "active" && $0.rows.isEmpty) } }
+    private var needsCount: Int { client.sections.first { $0.id == "needs" }?.count ?? 0 }
     /// the threads a project's list leaves out: bots' and, on a hub with swarms, the swarms' members (the swarm's row stands for them)
     private var botThreads: Set<String> {
         let b = Set(client.bots.map(\.thread))
@@ -163,20 +172,28 @@ struct DataThreadsView: View {
             DataAlertsBanner(client: client)
             DataNoProviderBanner(client: client)
             if client.restartLine != .none { DataConnectionBanner(client: client) }
-            HStack(spacing: 8) {
-                if client.has("search") {
-                    TextField(Tr.t("Search projects and threads"), text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .padding(.horizontal, 10).frame(height: 36).dbox().accessibilityIdentifier("data.search")
-                } else { Spacer() }
-                Button { addingProject = true } label: { Image(systemName: "plus").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }
-                    .accessibilityLabel(Tr.t("Add project")).accessibilityIdentifier("data.project.add")
-            }.padding(.horizontal, 10).padding(.vertical, 8)
+            // the tabs keep the list's whole height: Search is a button of the bar, its field here only while it is used; Add project is on the Bench
+            if !sectioned || searching {
+                HStack(spacing: 8) {
+                    if client.has("search") {
+                        TextField(Tr.t("Search projects and threads"), text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .focused($searchFocus).padding(.horizontal, 10).frame(height: 40).dbox().accessibilityIdentifier("data.search")
+                    } else { Spacer() }
+                    if sectioned {
+                        Button { query = ""; searching = false; searchFocus = false } label: { Image(systemName: "xmark").frame(width: 44, height: 40).foregroundStyle(BackplaneDesign.dim) }
+                            .accessibilityLabel(Tr.t("Cancel")).accessibilityIdentifier("data.search.cancel")
+                    } else {
+                        Button { addingProject = true } label: { Image(systemName: "plus").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }
+                            .accessibilityLabel(Tr.t("Add project")).accessibilityIdentifier("data.project.add")
+                    }
+                }.padding(.horizontal, 10).padding(.vertical, 8)
+            }
             DataMachineChips(client: client)
             DLine()
-            if !client.locks.isEmpty && !(client.has("sections") && !client.sections.isEmpty) { DataLocksStrip(client: client, path: $path) } // (the sections leave the hub's locks out: backend work)
+            if !client.locks.isEmpty && !sectioned { DataLocksStrip(client: client, path: $path) } // (the sections leave the hub's locks out: backend work)
             if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 DataSearchResults(client: client, query: query, open: { path.append($0) }, openAt: { path.append($0) })
-            } else { list }
+            } else if sectioned { tabs } else { list }
         }
         .background(BackplaneDesign.panel)
         .navigationBarTitleDisplayMode(.inline)
@@ -194,10 +211,20 @@ struct DataThreadsView: View {
                         BrandMark(size: 20, conn: client.conn == .online)
                         Text(client.hubName.isEmpty ? "Backplane" : client.hubName).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1).truncationMode(.middle)
                         Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(BackplaneDesign.dim)
-                    }.frame(maxWidth: 230, alignment: .leading) // a long hub name is cut, never pushing the Settings gear into the bar's More menu (iOS 26 folds both there)
+                    }.frame(maxWidth: sectioned ? 150 : 230, alignment: .leading) // a long hub name is cut, never pushing the bar's buttons into its More menu (iOS 26 folds them there)
                 }.accessibilityIdentifier("data.hub")
             }.dflat()
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                // Bub is one press from every tab: its cat in the bar
+                if sectioned, let b = bub {
+                    Button { path.append(b.thread) } label: {
+                        if client.has("cats") { DBotCat(client: client, look: b.look, color: b.color, size: 28) } else { Text(verbatim: "@").dmono(16, bold: true).foregroundStyle(BackplaneDesign.accent) }
+                    }.accessibilityLabel(b.name).accessibilityIdentifier("data.home.bub")
+                }
+                if sectioned && client.has("search") {
+                    Button { searching = true; searchFocus = true } label: { Image(systemName: "magnifyingglass").foregroundStyle(BackplaneDesign.dim) }
+                        .accessibilityLabel(Tr.t("Search")).accessibilityIdentifier("data.home.search")
+                }
                 Button { path.append(DPage(name: "settings")) } label: { Image(systemName: "gearshape").foregroundStyle(BackplaneDesign.dim) }
                     .accessibilityLabel(Tr.t("Settings")).accessibilityIdentifier("data.settings")
             }.dflat()
@@ -266,21 +293,10 @@ struct DataThreadsView: View {
     }
     private var listBody: some View {
         List {
-            if client.projects.isEmpty && client.listsLoaded {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(Tr.t("No projects yet")).dmono(14, bold: true)
-                    Text(Tr.t("A project is a folder on your hub's computer. Add one to start a thread.")).dmono(12).foregroundStyle(BackplaneDesign.dim)
-                    Button(Tr.t("Add a project")) { addingProject = true }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.project.add.empty")
-                }.padding(14).dataRow()
-            }
-            ForEach(client.bots.filter { $0.uber && !$0.thread.isEmpty }) { b in botRow(b) }
-            if let away = client.home?.awayLine() {
-                Text(away.text).dmono(11).foregroundStyle(away.isError ? BackplaneDesign.bad : BackplaneDesign.dim)
-                    .padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
-                    .background(BackplaneDesign.panel).dataRow().accessibilityIdentifier("data.home.away")
-            }
-            // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
-            if client.has("sections") && !client.sections.isEmpty { sectionRows } else {
+            noProjects
+            bubRows
+            awayRow
+            // an older hub, with no sections: every project with its threads
             ForEach(client.projects) { p in
                 projectHeader(p)
                 if !shut.contains(p.id) {
@@ -305,67 +321,164 @@ struct DataThreadsView: View {
                     }
                 }
             }
-            } // (no sections)
-            // Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
-            if client.history.count > 0 {
-                let open = client.historyOpen
-                Button { client.setHistory(open: !open) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
-                        Text(Tr.t(ThreadGroups.historyTitle(client.history.count)).uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(minLength: 0)
-                    }.padding(.leading, 10).frame(height: 40).contentShape(Rectangle())
-                }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history")
-                ForEach(ThreadGroups.history(live: client.history.live, rows: client.history.threads, open: open)) { threadRow($0) }
-                if open && client.history.next != nil {
-                    Button { Task { await client.loadHistory(more: true) } } label: { Text(Tr.t("More")).dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
-                        .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history.more")
-                }
-            }
-            let bots = client.bots.filter { !$0.uber && !$0.thread.isEmpty }
-            if !bots.isEmpty { DHeading(text: Tr.t("Bots")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow(); ForEach(bots) { botRow($0) } }
-            if !client.rooms.isEmpty {
-                DHeading(text: Tr.t("Rooms")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow()
-                ForEach(client.rooms) { r in
-                    Button { path.append(r) } label: { sideRow("#", r.name, "room", r.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.room." + r.id)
-                        // Delete room (a long press on a room the hub offers it for): asked first, then `room.delete`
-                        .contextMenu { if r.delete { Button(Tr.t("Delete room"), systemImage: "trash", role: .destructive) { roomDelete = r } } }
-                }
-            }
+            historyRows
+            crewRows
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .refreshable { await client.refresh() }
     }
 
-    /// The hub's sections, in its order: a section's head, then its threads (Needs you) or its projects, each with its visible threads under it.
-    @ViewBuilder private var sectionRows: some View {
-        ForEach(client.sections.filter { $0.kind != "bub" && !($0.id == "active" && $0.rows.isEmpty) }) { s in
-            DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
-                .contextMenu { if s.rename { Button(Tr.t("Rename group"), systemImage: "pencil") { groupTitle = s.title; renamingGroup = s.group } } }
-            if s.kind == "threads" {
-                // Needs you: the title has the row (no project name), and a stop says so by its dot; an ask keeps its red word
+    // MARK: the home's tabs (a hub with sections): Inbox, Crew, Bench
+
+    /// The three tabs, the system's own bar under them. Inbox carries how many wait on the person.
+    private var tabs: some View {
+        TabView(selection: $tab) {
+            inboxList.tabItem { Label(Tr.t("Inbox"), systemImage: "tray") }.tag(HomeTab.inbox).badge(needsCount)
+            crewList.tabItem { Label(Tr.t("Crew"), systemImage: "person.2") }.tag(HomeTab.crew)
+            benchList.tabItem { Label(Tr.t("Bench"), systemImage: "square.grid.2x2") }.tag(HomeTab.bench)
+        }
+        .toolbarBackground(BackplaneDesign.panel, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
+        // a project link: the Bench, and its page
+        .onChange(of: client.focusProject, initial: true) { _, id in
+            guard !id.isEmpty else { return }
+            client.focusProject = ""; tab = .bench
+            if let r = client.sections.flatMap(\.rows).first(where: { $0.isProject && $0.id == id }) { path.append(DProjectRoute(key: r.key, title: r.title)) }
+        }
+    }
+    /// Inbox: Needs you, Running and Snoozed as the hub lists them. A row swipes left to snooze and right to settle. With nothing to need the
+    /// person and nothing running it says so, and offers Bub and the projects the person was in last.
+    private var inboxList: some View {
+        List {
+            awayRow
+            if !inboxSections.contains(where: { $0.id != "snoozed" }) { allClear }
+            ForEach(inboxSections) { s in
+                DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
+                ForEach(s.rows) { r in inboxRow(r) }
+            }
+        }
+        .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+        .refreshable { await client.refresh() }.accessibilityIdentifier("data.home.inbox")
+    }
+    @ViewBuilder private func inboxRow(_ r: DSecRow) -> some View {
+        // a swarm that waits on the person opens the swarm's page
+        if let room = r.swarmRoom, let n = r.need { DataSwarmNeedRow(client: client, r: r, need: n, room: room, openRoom: { path.append(DSwarmRoute(id: room, name: r.title)) }, openThread: { path.append($0) }).dataRow() }
+        else if let room = r.swarmRoom { DataSectionThread(r: r, showProject: true) { _ in path.append(DSwarmRoute(id: room, name: r.title)) }.dataRow() }
+        else { DataSectionThread(r: r, showProject: true) { path.append($0) }.farHide(r, client).rowSwipes(r, client).dataRow() }
+    }
+    @ViewBuilder private var allClear: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(BackplaneDesign.ok)
+                Text(Tr.t("All clear")).dmono(16, bold: true).foregroundStyle(BackplaneDesign.text)
+            }
+            Text(Tr.t("Nothing needs you and nothing is running.")).dmono(12).foregroundStyle(BackplaneDesign.dim)
+            HStack(spacing: 8) {
+                if let b = bub { Button(Tr.t("Talk to Bub")) { path.append(b.thread) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.inbox.bub") }
+                Button(Tr.t("Open Bench")) { tab = .bench }.buttonStyle(DButton()).accessibilityIdentifier("data.inbox.bench")
+            }.padding(.top, 4)
+        }.padding(.horizontal, 14).padding(.vertical, 18).frame(maxWidth: .infinity, alignment: .leading).dataRow().accessibilityIdentifier("data.inbox.clear")
+        // the projects the person was in last (the hub's Pinned, then Recent): three, a thumb away
+        let jump = Array(benchSections.filter { $0.id == "pinned" || $0.id == "active" }.flatMap(\.rows).prefix(3))
+        if !jump.isEmpty {
+            DHeading(text: Tr.t("Jump back in")).padding(.leading, 14).padding(.top, 10).padding(.bottom, 4).dataRow()
+            ForEach(jump) { r in projectRow(r, tall: true) }
+        }
+    }
+    /// Crew: Bub, the bots and the rooms, then the old chats with no project.
+    private var crewList: some View {
+        List {
+            bubRows
+            awayRow
+            crewRows
+            historyRows
+        }
+        .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+        .refreshable { await client.refresh() }.accessibilityIdentifier("data.home.crew")
+    }
+    /// Bench: the projects as the hub sections them. Pinned and Recent (the ones the person was in last) are tall rows on top; the groups, All
+    /// projects and Quiet are folds under them, so no one scrolls through every project to reach a board.
+    private var benchList: some View {
+        List {
+            noProjects
+            Button { addingProject = true } label: {
+                HStack(spacing: 8) { Image(systemName: "plus").font(.system(size: 13)).frame(width: 20); Text(Tr.t("Add project")).dmono(13); Spacer(minLength: 0) }
+                    .foregroundStyle(BackplaneDesign.accent).padding(.leading, 14).padding(.trailing, 12).frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.project.add")
+            ForEach(benchSections) { s in
+                DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
+                    .contextMenu { if s.rename { Button(Tr.t("Rename group"), systemImage: "pencil") { groupTitle = s.title; renamingGroup = s.group } } }
                 ForEach(s.rows) { r in
-                    // a swarm that waits on the person opens the swarm's page
-                    if let room = r.swarmRoom, let n = r.need { DataSwarmNeedRow(client: client, r: r, need: n, room: room, openRoom: { path.append(DSwarmRoute(id: room, name: r.title)) }, openThread: { path.append($0) }).dataRow() }
-                    else if let room = r.swarmRoom { DataSectionThread(r: r) { _ in path.append(DSwarmRoute(id: room, name: r.title)) }.dataRow() }
-                    else { DataSectionThread(r: r, quiet: r.want == "failed" || r.want == "stopped") { path.append($0) }.farHide(r, client).dataRow() }
-                }
-            } else {
-                ForEach(s.rows) { r in
-                    Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet" || s.id == "archived") { Task { await client.sidebarAct(r.fold, r.key) } } }
-                        .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
-                        .contextMenu { if !r.menu.isEmpty { sectionMenu(r) } else {
-                            Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
-                            if let p = client.projects.first(where: { $0.id == r.id }) { Button(Tr.t("Badge"), systemImage: "paintpalette") { badgeProject = p } }
-                            if client.has("swarm") { Button(Tr.ios_swarm_new_in(project: r.title), systemImage: "circle.hexagongrid") { newSwarm = r.id } }
-                            ForEach(client.groupsTo, id: \.value) { g in Button(Tr.gpui_sections_move_to(group: g.label)) { Task { await client.sidebarAct("group-move", r.key + "\u{1f}" + g.value) } } }
-                        } }
+                    projectRow(r, faded: s.id == "quiet" || s.id == "archived", tall: s.id == "pinned" || s.id == "active")
                     // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
                     if client.has("swarm") && !r.folded { ForEach(Swarm.listed(client.swarms, project: r.id).filter { x in !(client.sections.first { $0.id == "needs" }?.rows.contains { $0.swarmRoom == x.id } ?? false) }) { x in DataSwarmRow(row: x) { path.append(DSwarmRoute(id: x.id, name: x.name)) }.dataRow() } }
-                    ForEach(r.threads) { t in DataSectionThread(r: t, indent: 34) { path.append($0) }.farHide(t, client).dataRow() }
+                    ForEach(r.threads) { t in DataSectionThread(r: t, indent: 36) { path.append($0) }.farHide(t, client).rowSwipes(t, client).dataRow() }
                 }
             }
         }
+        .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+        .refreshable { await client.refresh() }.accessibilityIdentifier("data.home.bench")
     }
+    /// A project row of the Bench (and of the Inbox's Jump back in): a press opens its page, a long press its menu.
+    private func projectRow(_ r: DSecRow, faded: Bool = false, tall: Bool = false) -> some View {
+        Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: faded, tall: tall) { Task { await client.sidebarAct(r.fold, r.key) } } }
+            .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
+            .contextMenu { if !r.menu.isEmpty { sectionMenu(r) } else {
+                Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
+                if let p = client.projects.first(where: { $0.id == r.id }) { Button(Tr.t("Badge"), systemImage: "paintpalette") { badgeProject = p } }
+                if client.has("swarm") { Button(Tr.ios_swarm_new_in(project: r.title), systemImage: "circle.hexagongrid") { newSwarm = r.id } }
+                ForEach(client.groupsTo, id: \.value) { g in Button(Tr.gpui_sections_move_to(group: g.label)) { Task { await client.sidebarAct("group-move", r.key + "\u{1f}" + g.value) } } }
+            } }
+    }
+
+    // MARK: rows both the tabs and an older hub's one list draw
+
+    @ViewBuilder private var noProjects: some View {
+        if client.projects.isEmpty && client.listsLoaded {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(Tr.t("No projects yet")).dmono(14, bold: true)
+                Text(Tr.t("A project is a folder on your hub's computer. Add one to start a thread.")).dmono(12).foregroundStyle(BackplaneDesign.dim)
+                Button(Tr.t("Add a project")) { addingProject = true }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.project.add.empty")
+            }.padding(14).dataRow()
+        }
+    }
+    @ViewBuilder private var bubRows: some View { ForEach(client.bots.filter { $0.uber && !$0.thread.isEmpty }) { b in botRow(b) } }
+    @ViewBuilder private var awayRow: some View {
+        if let away = client.home?.awayLine() {
+            Text(away.text).dmono(11).foregroundStyle(away.isError ? BackplaneDesign.bad : BackplaneDesign.dim)
+                .padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
+                .background(BackplaneDesign.panel).dataRow().accessibilityIdentifier("data.home.away")
+        }
+    }
+    /// Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
+    @ViewBuilder private var historyRows: some View {
+        if client.history.count > 0 {
+            let open = client.historyOpen
+            Button { client.setHistory(open: !open) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
+                    Text(Tr.t(ThreadGroups.historyTitle(client.history.count)).uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(minLength: 0)
+                }.padding(.leading, 10).frame(height: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history")
+            ForEach(ThreadGroups.history(live: client.history.live, rows: client.history.threads, open: open)) { threadRow($0) }
+            if open && client.history.next != nil {
+                Button { Task { await client.loadHistory(more: true) } } label: { Text(Tr.t("More")).dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
+                    .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history.more")
+            }
+        }
+    }
+    @ViewBuilder private var crewRows: some View {
+        let bots = client.bots.filter { !$0.uber && !$0.thread.isEmpty }
+        if !bots.isEmpty { DHeading(text: Tr.t("Bots")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow(); ForEach(bots) { botRow($0) } }
+        if !client.rooms.isEmpty {
+            DHeading(text: Tr.t("Rooms")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow()
+            ForEach(client.rooms) { r in
+                Button { path.append(r) } label: { sideRow("#", r.name, "room", r.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.room." + r.id)
+                    // Delete room (a long press on a room the hub offers it for): asked first, then `room.delete`
+                    .contextMenu { if r.delete { Button(Tr.t("Delete room"), systemImage: "trash", role: .destructive) { roomDelete = r } } }
+            }
+        }
+    }
+
     /// A project row's long press: the hub's menu (SectionMenu.swift), Move to group a submenu of the other groups and New group…; Remove asks
     /// first (the project leaves Backplane's list, its folder and files stay).
     @ViewBuilder private func sectionMenu(_ r: DSecRow) -> some View {
@@ -396,7 +509,7 @@ struct DataThreadsView: View {
             Text(b.name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer()
             if let m = b.mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
             Text(Tr.t(!b.note.isEmpty ? b.note : b.uber ? "uberbot" : "bot")).dmono(11).foregroundStyle(BackplaneDesign.faint)
-        }.padding(.horizontal, 12).padding(.vertical, b.uber ? 4 : 2).frame(minHeight: 40).contentShape(Rectangle())
+        }.padding(.horizontal, 12).padding(.vertical, b.uber ? 4 : 2).frame(minHeight: 48).contentShape(Rectangle())
     }
     private func sideRow(_ sigil: String, _ name: String, _ detail: String, _ mark: DMark? = nil) -> some View {
         HStack(spacing: 8) {
@@ -404,7 +517,7 @@ struct DataThreadsView: View {
             Text(name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer()
             if let m = mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
             Text(Tr.t(detail)).dmono(11).foregroundStyle(BackplaneDesign.faint)
-        }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle())
+        }.padding(.horizontal, 12).frame(minHeight: 48).contentShape(Rectangle())
     }
     private func botRow(_ b: DBot) -> some View {
         Button { path.append(b.thread) } label: {

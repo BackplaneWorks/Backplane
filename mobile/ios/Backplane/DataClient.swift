@@ -660,6 +660,11 @@ final class DataClient {
         UserDefaults.standard.set(Array(sectionsOpen), forKey: "data.sections.open"); Task { await loadSections() }
     }
     func sidebarAct(_ action: String, _ value: String) async { _ = try? await call("sidebar.act", ["action": action, "value": value]) as DEmpty; await loadSections() }
+    /// A section row's snooze or wake by the hub's own value (the row's `snooze` option or `wake`: "<thread>|1h", "|tomorrow", "|1w", "|off").
+    func snoozeRow(_ value: String) async { await sidebarAct("row-snooze", value) }
+    /// A project's page opened here: a visit, so the bench (Recent) follows this phone too. The hub writes it at most once in ten minutes; an
+    /// older hub refuses the action, which changes nothing.
+    func visitProject(_ key: String) async { guard has("sections"), !key.isEmpty else { return }; _ = try? await call("sidebar.act", ["action": "project-page", "value": key]) as DEmpty }
     /// A section row's menu item for a thread of this hub (the hub's `menu`: pin, unpin, settle, unsettle, archive): `thread.act`, then the sections as the hub has them now.
     func sectionThreadAct(_ id: String, _ action: String) async { await threadAct(id, action); await loadSections() }
     func projectPage(_ key: String, done: Bool, older: Bool = false) async -> DProjectPage? {
