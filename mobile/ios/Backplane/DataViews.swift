@@ -338,6 +338,10 @@ struct DataThreadsView: View {
             benchList.tabItem { Label(Tr.t("Bench"), systemImage: "square.grid.2x2") }.tag(HomeTab.bench)
         }
         .toolbarBackground(BackplaneDesign.panel, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
+        #if DEBUG
+        // a check without hands: BACKPLANE_TAB opens on a tab (inbox, crew, bench)
+        .task { if let t = ProcessInfo.processInfo.environment["BACKPLANE_TAB"], let h = HomeTab(rawValue: t) { tab = h } }
+        #endif
         // a project link: the Bench, and its page
         .onChange(of: client.focusProject, initial: true) { _, id in
             guard !id.isEmpty else { return }
@@ -357,7 +361,7 @@ struct DataThreadsView: View {
             }
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
-        .refreshable { await client.refresh() }.accessibilityIdentifier("data.home.inbox")
+        .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.inbox")
     }
     @ViewBuilder private func inboxRow(_ r: DSecRow) -> some View {
         // a swarm that waits on the person opens the swarm's page
@@ -393,7 +397,7 @@ struct DataThreadsView: View {
             historyRows
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
-        .refreshable { await client.refresh() }.accessibilityIdentifier("data.home.crew")
+        .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.crew")
     }
     /// Bench: the projects as the hub sections them. Pinned and Recent (the ones the person was in last) are tall rows on top; the groups, All
     /// projects and Quiet are folds under them, so no one scrolls through every project to reach a board.
@@ -416,7 +420,7 @@ struct DataThreadsView: View {
             }
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
-        .refreshable { await client.refresh() }.accessibilityIdentifier("data.home.bench")
+        .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.bench")
     }
     /// A project row of the Bench (and of the Inbox's Jump back in): a press opens its page, a long press its menu.
     private func projectRow(_ r: DSecRow, faded: Bool = false, tall: Bool = false) -> some View {
