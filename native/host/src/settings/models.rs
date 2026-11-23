@@ -112,6 +112,41 @@ pub fn default_now(chosen: &str, inventory: &str) -> String {
     default_agent(chosen, &info_value(), &connected(inventory))
 }
 
+pub use super::favorites::*;
+
+/// Enrich persisted favorite `(provider, model)` entries against `info` for `thread.picker`.
+pub fn favorite_rows(info: &Value, raw_favs: &str, cur_provider: &str, cur_model: &str) -> Vec<Value> {
+    let cp = cur_provider.trim().trim_start_matches('@').to_ascii_lowercase();
+    let cm = cur_model.trim();
+    let info_opt = info.is_object().then_some(info);
+    parse_favorites(raw_favs)
+        .into_iter()
+        .map(|(p, m)| {
+            let note = info["about"][&p]["labels"][&m].as_str().unwrap_or("");
+            let (mut ok, mut why) = crate::present::keys::agent_ok(info_opt, &p);
+            if ok {
+                if let Some(arr) = info.get(&p).and_then(Value::as_array) {
+                    let has_catalog = arr.iter().filter_map(Value::as_str).any(|s| !s.is_empty());
+                    if has_catalog && !arr.iter().filter_map(Value::as_str).any(|s| s == m) {
+                        ok = false;
+                        why = "not available on this machine".to_string();
+                    }
+                }
+            }
+            json!({
+                "key": format!("{p}/{m}"),
+                "provider": p,
+                "model": m,
+                "label": m,
+                "note": note,
+                "on": p == cp && m == cm,
+                "ok": ok,
+                "why": why,
+            })
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     /// The JS hub's `models` info with no agent CLI installed (build/gpui/results/parity-current/recA/session-mobile.json).
@@ -133,6 +168,73 @@ mod tests {
         assert_eq!(serde_json::from_str::<serde_json::Value>(&super::all_of(&m)).unwrap()["codex"][0], serde_json::json!({"value":"gpt-6","label":"gpt-6","ok":false,"why":"its CLI is not installed on this machine"}));
         let m = serde_json::json!({"codex":["gpt-6"],"about":{"codex":{"cli":"/bin/codex","labels":{"gpt-6":"GPT 6"}}}});
         assert_eq!(serde_json::from_str::<serde_json::Value>(&super::all_of(&m)).unwrap()["codex"][0]["ok"], true);
+    }
+    #[test] fn favorites_normalize_dedup_toggle_validate_and_enrich() {
+        assert_eq!(super::norm_fav_pair(" @Claude ", " opus "), Some(("claude".into(), "opus".into())));
+        assert_eq!(super::norm_fav_pair("", "opus"), None);
+        assert_eq!(super::norm_fav_pair("claude", ""), None);
+        assert_eq!(super::norm_fav_pair("claude/sub", "opus"), None);
+        assert_eq!(super::norm_fav_pair("cl aude", "opus"), None);
+        assert_eq!(super::norm_fav_pair("claude", "opus\n"), None);
+        assert_eq!(super::fav_key("@Codex", "gpt-6"), Some("codex/gpt-6".into()));
+
+        let parsed = super::parse_favorites(r#"["@Claude/opus","codex/gpt-6","claude/opus",{"provider":"@Grok","model":"grok-4"},"bad"]"#);
+        assert_eq!(parsed, vec![("claude".into(), "opus".into()), ("codex".into(), "gpt-6".into()), ("grok".into(), "grok-4".into())]);
+        assert_eq!(super::parse_favorites("not-json"), vec![]);
+        assert_eq!(super::format_favorites(&[]), "");
+
+        let (v1, starred1, k1) = super::toggle_favorite("", "@Claude", "opus", None).unwrap();
+        assert!(starred1);
+        assert_eq!(k1, vec!["claude/opus"]);
+        assert_eq!(v1, r#"["claude/opus"]"#);
+
+        let (v2, starred2, k2) = super::toggle_favorite(&v1, "codex", "gpt-6", Some(true)).unwrap();
+        assert!(starred2);
+        assert_eq!(k2, vec!["claude/opus", "codex/gpt-6"]);
+        // idempotent re-star preserves order
+        let (v2_again, s_again, k_again) = super::toggle_favorite(&v2, "claude", "opus", Some(true)).unwrap();
+        assert!(s_again);
+        assert_eq!(k_again, vec!["claude/opus", "codex/gpt-6"]);
+        assert_eq!(v2_again, v2);
+
+        let (v3, starred3, k3) = super::toggle_favorite(&v2, "claude", "opus", None).unwrap();
+        assert!(!starred3);
+        assert_eq!(k3, vec!["codex/gpt-6"]);
+        let (v4, starred4, k4) = super::toggle_favorite(&v3, "codex", "gpt-6", Some(false)).unwrap();
+        assert!(!starred4);
+        assert!(k4.is_empty());
+        assert_eq!(v4, "");
+
+        // At the 64-favorite cap, adding a 65th returns an error instead of evicting
+        let sixty_four: Vec<String> = (0..super::MAX_FAVORITES).map(|i| format!("claude/m{i}")).collect();
+        let raw_64 = serde_json::to_string(&sixty_four).unwrap();
+        assert!(super::favorites_value_ok(&raw_64));
+        assert!(super::toggle_favorite(&raw_64, "codex", "gpt-6", Some(true)).is_err());
+        assert_eq!(super::parse_favorite_keys(&raw_64).len(), super::MAX_FAVORITES);
+
+        // Exceeding 4096 bytes returns an error and format_favorites respects the byte cap
+        let long_model = "m".repeat(180);
+        let long_pairs: Vec<(String, String)> = (0..22).map(|i| ("claude".into(), format!("{i:02}-{long_model}"))).collect();
+        let bounded = super::format_favorites(&long_pairs);
+        assert!(super::favorites_value_ok(&bounded) && bounded.len() <= super::MAX_FAVORITES_BYTES);
+        assert!(super::toggle_favorite(&bounded, "claude", &format!("99-{long_model}"), Some(true)).is_err());
+
+        assert!(super::favorites_value_ok(""));
+        assert!(super::favorites_value_ok(r#"["claude/opus","codex/gpt-6"]"#));
+        assert!(!super::favorites_value_ok("not-json"));
+        assert!(!super::favorites_value_ok(r#"["claude/"]"#));
+        assert!(!super::favorites_value_ok(r#"["/opus"]"#));
+        assert!(!super::favorites_value_ok(r#"[123]"#));
+
+        let info = serde_json::json!({"probed":true,"claude":["opus","sonnet"],"about":{"claude":{"cli":"/bin/claude","labels":{"opus":"Opus 5.5"}},"grok":{"cli":"","labels":{}}}});
+        let rows = super::favorite_rows(&info, r#"["claude/opus","claude/retired","grok/grok-4"]"#, "claude", "opus");
+        assert_eq!(rows.len(), 3);
+        assert_eq!(rows[0], serde_json::json!({"key":"claude/opus","provider":"claude","model":"opus","label":"opus","note":"Opus 5.5","on":true,"ok":true,"why":""}));
+        assert_eq!(rows[1]["ok"], false);
+        assert_eq!(rows[1]["why"], "not available on this machine");
+        assert_eq!(rows[2]["ok"], false);
+        assert_eq!(rows[2]["on"], false);
+        assert_eq!(rows[2]["why"], "not installed on this machine");
     }
 }
 

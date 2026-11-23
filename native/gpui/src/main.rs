@@ -166,7 +166,7 @@ impl Backplane {
             Event::Picture(r,timing)=>{
                 let t_apply=Instant::now();self.ui_epoch+=1;
                 if let Some(w)=self.wake_at.take(){self.reconnected=true;self.m("net",serde_json::json!({"event":"reconnected","ms":(w.elapsed().as_secs_f64()*1e6).round()/1e3}));}
-                let mut r=r;let prev=self.data["thread"].take();self.data=r["shown"].take();mousecfg::apply(&self.data["mouse"]);crate::viewers::kicad_pane::test_hold_key(&mut self.data);self.picture_applied(cx);self.kicad_warm();screens::histbar::picture(self);
+                let mut r=r;let prev=self.data["thread"].take();self.data=r["shown"].take();mousecfg::apply(&self.data["mouse"]);crate::viewers::kicad_pane::test_hold_key(&mut self.data);screens::picker::reconcile_fav_pending(&self.data["thread"],&mut self.screens.pick.fav_pending);self.picker_migrate_local_favs();self.picture_applied(cx);self.kicad_warm();screens::histbar::picture(self);
                 self.timeline_picture(prev,&r["window"]);
                 if self.data["deleting"].is_object(){eprintln!("GPUI_LOG {{\"deleting\":{}}}",self.data["deleting"]["id"]);}let selected=string(&self.data["thread"],"id");
                 screens::accounts::thread_changed(self,&selected);if !selected.is_empty() {let selected=screens::attach::raw_id(&selected).to_string();self.picture_arrived(&selected,cx);self.selected=selected;}
@@ -230,6 +230,8 @@ impl Backplane {
             Event::Rpc("project-push",ok,why)=>{ if !ok { self.error=why; } let pid=self.screens.projects.home.pid.clone(); if !pid.is_empty() { screens::projects::ask_home(self,&pid); } cx.notify(); },
             Event::Rpc("hubchk",_,_)=>{cx.spawn(async move|this,cx|{for secs in [3,17] {cx.background_executor().timer(Duration::from_secs(secs)).await;if this.update(cx,|this,cx|this.ask_hub_update(cx)).is_err(){break}}}).detach();},
             Event::Rpc("mgmt",ok,why)=>{self.screens.mgmt.error=if ok{String::new()}else{why};cx.notify();},
+            Event::Rpc("models-fav",ok,why)=>self.picker_fav_replied(ok,&why,cx),
+            Event::Rpc("models-fav-migrate",ok,why)=>self.picker_fav_migrate_replied(ok,&why,cx),
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag=="google"{screens::google::done(self,ok,&why)}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag=="fileopen" {if !ok {self.error=why;}} else if tag=="plan" {screens::mgmt_plan::answered(self,ok,&why,cx)} else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Refs(r)=>{ if r.get("resolved").is_some() { screens::histbar::resolved(self,&r,cx); } else { self.screens.plots[0].hist.refs=screens::plot::refs_of(&r); } cx.notify(); }

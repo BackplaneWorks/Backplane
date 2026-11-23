@@ -4,7 +4,7 @@
 //! - theme (`ui.theme`, `theme`)
 //! - language (`ui.lang`, `lang`)
 //! - quiet hours & notifications (`notify.quiet`, `notify.quiet.urgent`, `notify.<kind>`)
-//! - default models (`agent.provider`, `agent.model`, `agent.thinking`)
+//! - default and favorite models (`agent.provider`, `agent.model`, `agent.thinking`, `models.favorites`)
 //! - project pins, icons, colors, and groups (`sidebar.view`, `sidebar.groups`, `sidebar.attention`,
 //!   `sidebar.pin.*`, `sidebar.group.of.*`, `sidebar.group.name.*`, `sidebar.group.pick.*`,
 //!   `sidebar.archived.*`, `sidebar.fold.*`, `project.icon.*`, `project.color.*`, `project.pick.*`)
@@ -44,6 +44,7 @@ pub fn is_shared(key: &str) -> bool {
             | "agent.provider"
             | "agent.model"
             | "agent.thinking"
+            | "models.favorites"
             | "sidebar.view"
             | "sidebar.groups"
             | "sidebar.attention"
@@ -79,6 +80,9 @@ pub fn value_ok(key: &str, value: &str) -> bool {
     }
     if key == crate::push::QUIET_URGENT {
         return matches!(value, "" | "on" | "off");
+    }
+    if key == crate::settings::models::FAVORITES_KEY {
+        return crate::settings::models::favorites_value_ok(value);
     }
     true
 }
@@ -323,6 +327,7 @@ mod tests {
             "agent.provider",
             "agent.model",
             "agent.thinking",
+            "models.favorites",
             "sidebar.view",
             "sidebar.groups",
             "sidebar.attention",
@@ -379,14 +384,18 @@ mod tests {
         remote.insert("ui.lang".into(), Entry { value: "ja".into(), at: 150 }); // older ignored
         remote.insert("sidebar.pin.org/repo".into(), Entry { value: "".into(), at: 120 }); // clear wins
         remote.insert("agent.model".into(), Entry { value: "opus".into(), at: 50 }); // missing locally -> taken
+        remote.insert("models.favorites".into(), Entry { value: r#"["claude/opus"]"#.into(), at: 60 }); // valid -> taken
         remote.insert("machine.id".into(), Entry { value: "evil".into(), at: 999 }); // not allowlisted -> ignored
         remote.insert("notify.quiet".into(), Entry { value: "not-a-window".into(), at: 999 }); // invalid -> ignored
 
         let evs = merge(&local, &remote);
-        assert_eq!(evs.len(), 3, "{evs:?}");
+        assert_eq!(evs.len(), 4, "{evs:?}");
         assert!(evs.iter().any(|e| e["key"] == "ui.theme" && e["value"] == "light" && e["at"] == 150));
         assert!(evs.iter().any(|e| e["key"] == "sidebar.pin.org/repo" && e["value"] == "" && e["at"] == 120));
         assert!(evs.iter().any(|e| e["key"] == "agent.model" && e["value"] == "opus" && e["at"] == 50));
+        assert!(evs.iter().any(|e| e["key"] == "models.favorites" && e["value"] == r#"["claude/opus"]"# && e["at"] == 60));
+        assert!(!value_ok("models.favorites", "not-json"));
+        assert!(value_ok("models.favorites", ""));
     }
 
     #[test]
@@ -422,6 +431,7 @@ mod tests {
         a.commit_many(&[
             json!({"$":"SettingSet","key":"ui.theme","value":"light","at":10}),
             json!({"$":"SettingSet","key":"notify.quiet","value":"22:00-07:00","at":10}),
+            json!({"$":"SettingSet","key":"models.favorites","value":r#"["claude/opus","codex/gpt-6"]"#,"at":10}),
             json!({"$":"SettingSet","key":"machine.id","value":"m-a","at":10}),
         ])
         .await
@@ -446,13 +456,15 @@ mod tests {
         assert_eq!(a.setting("ui.lang").await.as_deref(), Some("ja"));
         assert_eq!(b.setting("ui.lang").await.as_deref(), Some("ja"));
         assert_eq!(b.setting("notify.quiet").await.as_deref(), Some("22:00-07:00"));
+        assert_eq!(b.setting("models.favorites").await.as_deref(), Some(r#"["claude/opus","codex/gpt-6"]"#));
         assert_eq!(a.setting("machine.id").await.as_deref(), Some("m-a"));
         assert_eq!(b.setting("machine.id").await.as_deref(), Some("m-b"));
 
-        // Offline edit on B (clearing notify.quiet + changing theme at newer timestamp) catches up on next round
+        // Offline edit on B (clearing notify.quiet + changing theme + clearing favorites at newer timestamp) catches up on next round
         b.commit_many(&[
             json!({"$":"SettingSet","key":"notify.quiet","value":"","at":30}),
             json!({"$":"SettingSet","key":"ui.theme","value":"dark","at":30}),
+            json!({"$":"SettingSet","key":"models.favorites","value":"","at":30}),
         ])
         .await
         .unwrap();
@@ -460,5 +472,6 @@ mod tests {
         apply_remote(&a, &parse_entries(&reply2["result"]["entries"])).await.unwrap();
         assert_eq!(a.setting("notify.quiet").await, None);
         assert_eq!(a.setting("ui.theme").await.as_deref(), Some("dark"));
+        assert_eq!(a.setting("models.favorites").await, None);
     }
 }

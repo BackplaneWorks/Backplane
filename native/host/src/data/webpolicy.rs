@@ -28,6 +28,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "message.send"
         | "mgmt.bom.edit"
         | "mgmt.panel"
+        | "models.favorite"
         | "project.act"
         | "project.add"
         | "queue.act"
@@ -219,6 +220,7 @@ mod tests {
         assert!(allowed("thread.act", &json!({"action":"rename"})));
         assert!(allowed("thread.pick", &json!({"action":"model"})));
         assert!(!allowed("thread.pick", &json!({"action":"account"})));
+        assert_eq!(policy("models.favorite", &json!({"provider":"claude","model":"opus"})), Policy::Activity);
         assert!(!allowed("composer.run", &json!({"text":"/secret example"})));
         assert!(allowed("composer.run", &json!({"text":"/settle"})));
         assert_eq!(policy("devices.page", &Value::Null), Policy::Devices);

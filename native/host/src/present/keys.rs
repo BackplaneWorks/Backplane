@@ -342,6 +342,11 @@ pub fn with_speed(mut p: Value, models: Option<&Value>, provider: &str, model: &
         for k in ["chip", "label"] { let x = format!("{}{}{l}", p[k].as_str().unwrap_or(""), if k == "chip" { " / " } else { " \u{b7} " }); p[k] = json!(x) } }
     p["speeds"] = json!(d); p
 }
+/// Attach persisted favorite model keys (`["provider/model", ...]`) onto the desktop picker payload.
+pub fn with_favorites(mut p: Value, raw: &str) -> Value {
+    p["favorites"] = json!(crate::settings::models::parse_favorite_keys(raw));
+    p
+}
 
 /// The model menu once the hub's `models` info is known (Models.menu): the provider's default first, its models (each with its CLI's label as `note`, and the efforts it
 /// takes when they differ from the default's), and the thread's own when the list lacks it.
@@ -477,7 +482,8 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     let (models, agents) = picker_agents_of(models_text);
     let mine = models.as_deref().map(|i| info_for_thread(st, id, i));
     let model = crate::settings::models::sanitize_model(&t.provider, &t.model, mine.as_ref());
-    m.insert("picker".into(), with_speed(picker_with(&t.provider, &model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()), mine.as_ref(), &t.provider, &model, get(format!("speed.{id}"))));
+    let p = with_speed(picker_with(&t.provider, &model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()), mine.as_ref(), &t.provider, &model, get(format!("speed.{id}")));
+    m.insert("picker".into(), with_favorites(p, get(crate::settings::models::FAVORITES_KEY.into())));
     m.insert("pickerAgents".into(), agents);
     m.insert("claude".into(), json!(t.provider == "claude"));
     // "Plan first, this turn only" set (commands/plan.rs thread.planonce): the picker's toggle is on until the turn it was set for ends
@@ -734,5 +740,16 @@ mod tests {
         st.apply_line(r#"{"$":"TurnChanged","thread":"t1","state":"idle","at":7}"#);
         assert_eq!(plan_mode(&st, "t1")["phase"], "off");
         assert!(!st.settings.contains_key("plan.executing.t1"));
+    }
+    #[test] fn keys_includes_normalized_picker_favorites_and_as_helper_strips_them() {
+        let mut st = State::new();
+        for l in [
+            r#"{"$":"ProjectCreated","id":"p1","title":"P","folder":"/p","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t1","project":"p1","title":"T","provider":"claude","model":"opus","at":1}"#,
+            r#"{"$":"SettingSet","key":"models.favorites","value":"[\"@Claude/opus\",\"codex/gpt-6\"]","at":2}"#,
+        ] { st.apply_line(l); }
+        let k = keys(&st, "t1", 10, "", None).unwrap();
+        assert_eq!(k["picker"]["favorites"], json!(["claude/opus", "codex/gpt-6"]));
+        assert!(as_helper(&k["picker"]).get("favorites").is_none());
     }
 }

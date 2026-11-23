@@ -49,6 +49,7 @@ async fn up_with(name: &str, more: &str) -> (crate::hub::TestHub, u16) {
     let cfg = Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
     let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     hub.register_rpc(Arc::new(Fake(hub.clone())));
+    hub.register_rpc(Arc::new(crate::settings::set::ModelsFavoriteRpc));
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
     { let hub = hub.clone(); tokio::spawn(async move { loop { let (st, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = wire::serve_with(h, st, false).await; }); } }); }
     (crate::hub::TestHub { hub, _tmp: dir }, port)
@@ -1575,4 +1576,47 @@ fn probed_models(installed: &[&str]) -> Value {
     let mut none = json!({"id":"m2","kind":"user","text":"try &provider/model only","at":2});
     with_refs_with(&mut none, Some(models_json));
     assert!(none.get("refs").is_none(), "unresolved model ref must not attach refs: {none}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_models_favorite_toggles_pushes_deltas_and_enriches_picker() {
+    let (_hub, port) = up("favorites").await;
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert_eq!(hello["favoriteModels"], json!([]));
+
+    let sub = ask(&mut ws, 1, "subscribe", json!({"topic":"lists"})).await;
+    assert_eq!(sub["ok"], true);
+
+    let r1 = ask(&mut ws, 2, "models.favorite", json!({"provider":"claude","model":"opus"})).await;
+    assert_eq!(r1["ok"], true, "{r1}");
+    assert_eq!(r1["result"], json!({"starred":true,"favorites":["claude/opus"]}));
+
+    let push1 = loop {
+        let v = next(&mut ws).await;
+        if v["t"] == "d" && v["k"] == "favorites" { break v; }
+    };
+    assert_eq!(push1["favorites"], json!(["claude/opus"]));
+
+    let pk = ask(&mut ws, 3, "thread.picker", json!({"thread":"t1"})).await;
+    assert_eq!(pk["ok"], true, "{pk}");
+    let picker = &pk["result"]["picker"];
+    assert_eq!(picker["favoriteKeys"], json!(["claude/opus"]));
+    assert_eq!(picker["favorites"][0]["key"], "claude/opus");
+    assert_eq!(picker["favorites"][0]["provider"], "claude");
+    assert_eq!(picker["favorites"][0]["model"], "opus");
+    assert!(picker["agents"]["claude"]["models"].is_array());
+
+    // A fresh connection sees persisted favoriteModels in hello
+    let mut ws2 = open(port, "&enc=json").await;
+    let hello2 = next(&mut ws2).await;
+    assert_eq!(hello2["favoriteModels"], json!(["claude/opus"]));
+
+    // Unstarring clears and pushes empty favorites
+    let r2 = ask(&mut ws, 4, "models.favorite", json!({"provider":"claude","model":"opus","on":false})).await;
+    assert_eq!(r2["result"], json!({"starred":false,"favorites":[]}));
+    let push2 = loop {
+        let v = next(&mut ws).await;
+        if v["t"] == "d" && v["k"] == "favorites" { break v; }
+    };
+    assert_eq!(push2["favorites"], json!([]));
 }

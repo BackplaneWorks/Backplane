@@ -801,6 +801,10 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 let t = s(&e, "key").rsplit_once('.').map(|x| x.1).unwrap_or("");
                 if !t.is_empty() && !upsert.contains(&t.to_string()) { upsert.push(t.to_string()) }
             }
+            "SettingSet" if s(&e, "key") == crate::settings::models::FAVORITES_KEY => {
+                let favs = crate::settings::models::parse_favorite_keys(s(&e, "value"));
+                for sub in subs.lists() { out.push(d(sub, "favorites", json!({"favorites": favs}))); }
+            }
             "ProjectCreated" | "ProjectRenamed" => projects.push((s(&e, "id").to_string(), true)),
             "ProjectRemoved" => projects.push((s(&e, "id").to_string(), false)),
             "MessagePosted" => {
@@ -1110,7 +1114,8 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
     };
     let no_provider = crate::settings::provider_notice::for_hub(&hub).await.map_or(Value::Null, |n| n.json());
     let mut no_provider_sent = no_provider.clone();
-    let mut hello = json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating,"noProvider":no_provider}); if let Some(c) = z { hello["z"] = json!(c) }
+    let favorite_models = crate::settings::models::parse_favorite_keys(&hub.setting(crate::settings::models::FAVORITES_KEY).await.unwrap_or_default());
+    let mut hello = json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"theme":theme,"locale":locale,"favoriteModels":favorite_models,"hubOffer":hub_offer,"hubBack":hub.info_now()["hub.back"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":notice,"migrating":migrating,"noProvider":no_provider}); if let Some(c) = z { hello["z"] = json!(c) }
     // the home (feature "home", net/home.rs): where the uberbot lives, as this hub sees it; `k:"home"` pushes follow it on a lists subscription
     let mut home_sent = crate::net::home::now(&hub).await; hello["home"] = home_sent.clone();
     tx.send(pack(&hello, json_mode)).await?;

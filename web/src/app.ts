@@ -304,6 +304,7 @@ function mountApp(): void {
   let threads: ThreadItem[] = [];
   let bots: BotItem[] = [];
   let rooms: RoomItem[] = [];
+  let favoriteModels: string[] = [];
   let railItems: RailEntry[] = [];
   let helloCommands: SlashCommand[] = [];
   let selectedThreadId = "";
@@ -516,6 +517,62 @@ function mountApp(): void {
       } else {
         applyPlanModeRpc("thread.pick", { thread: selectedThreadId, action: "interaction", value: "default" });
       }
+    },
+    getFavoriteModels: () => favoriteModels,
+    onLoadModelPicker: async () => {
+      if (!selectedThreadId) return null;
+      return hub.rpc("thread.picker", { thread: selectedThreadId });
+    },
+    onSelectModel: async (provider, model) => {
+      if (!selectedThreadId) return;
+      const gen = threadGen;
+      const tid = selectedThreadId;
+      try {
+        const res = await hub.rpc<{ thread?: ThreadItem }>("thread.model", { thread: tid, provider, model });
+        if (gen !== threadGen || selectedThreadId !== tid) return;
+        if (res.thread) {
+          const idx = threads.findIndex((x) => x.id === res.thread!.id);
+          if (idx >= 0) threads[idx] = res.thread;
+          else threads.unshift(res.thread);
+          sidebar.setData(projects, threads, bots, rooms);
+          chat.updateThreadMeta(res.thread);
+          updateHeader();
+          composer.setState(true, res.thread.state === "working");
+        }
+      } catch (e) {
+        if (gen === threadGen && selectedThreadId === tid) {
+          composer.showError(e instanceof Error ? e.message : "Could not switch model");
+        }
+      }
+    },
+    onSelectEffort: async (effort) => {
+      if (!selectedThreadId) return;
+      const gen = threadGen;
+      const tid = selectedThreadId;
+      try {
+        const res = await hub.rpc<{ thread?: ThreadItem }>("thread.pick", { thread: tid, action: "effort", value: effort });
+        if (gen !== threadGen || selectedThreadId !== tid) return;
+        if (res.thread) {
+          const idx = threads.findIndex((x) => x.id === res.thread!.id);
+          if (idx >= 0) threads[idx] = res.thread;
+          else threads.unshift(res.thread);
+          sidebar.setData(projects, threads, bots, rooms);
+          chat.updateThreadMeta(res.thread);
+          updateHeader();
+        }
+      } catch (e) {
+        if (gen === threadGen && selectedThreadId === tid) {
+          composer.showError(e instanceof Error ? e.message : "Could not set effort");
+        }
+      }
+    },
+    onToggleFavorite: async (provider, model, on) => {
+      const res = await hub.rpc<{ favorites?: string[] }>("models.favorite", { provider, model, on });
+      if (Array.isArray(res.favorites)) {
+        favoriteModels = res.favorites;
+        return favoriteModels;
+      }
+      return null;
     },
   });
 
@@ -1188,6 +1245,7 @@ function mountApp(): void {
     }
 
     selectedThreadId = threadId;
+    composer.closeModelPicker();
     const cached = threadCache.get(threadId);
     olderCursor = cached?.olderCursor ?? null;
     try { localStorage.setItem("bp.lastThread", threadId); } catch { /* ignore */ }
@@ -1583,6 +1641,10 @@ function mountApp(): void {
       }
       if (hello.theme) applyHubTheme(hello.theme);
       if (hello.name) sidebar.setHostName(hello.name);
+      if (Array.isArray(hello.favoriteModels)) {
+        favoriteModels = hello.favoriteModels;
+        composer.updateFavoriteModels(favoriteModels);
+      }
       homeInfo = hello.home ?? null;
       sidebar.setHome(homeInfo);
       applyNoProvider(parseNoProvider(hello.noProvider));
@@ -1703,6 +1765,13 @@ function mountApp(): void {
         if (settings.isOpen()) void settings.refresh();
         break;
       }
+      case "favorites": {
+        if (Array.isArray(p.favorites)) {
+          favoriteModels = p.favorites.filter((x): x is string => typeof x === "string");
+          composer.updateFavoriteModels(favoriteModels);
+        }
+        break;
+      }
       default:
         break;
     }
@@ -1716,6 +1785,7 @@ function mountApp(): void {
       else palette.open();
     } else if (e.key === "Escape") {
       if (palette.isOpen()) palette.close();
+      else if (composer.isModelPickerOpen()) composer.closeModelPicker();
       else if (addProject.isOpen()) addProject.escape();
       else if (settings.isOpen()) settings.handleEscape();
       else if (chat.closePlanRevise()) { /* handled by plan revise drawer */ }
