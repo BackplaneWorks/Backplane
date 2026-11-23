@@ -259,6 +259,7 @@ pub async fn detect(home: &Path) -> Found {
 
 /// One detection: a list that differs from the one in force is cached, pushed to every client and every view is drawn again. Answers whether it changed.
 pub async fn refresh(hub: &Arc<Hub>) -> bool {
+    super::tools_install::repair_codex_soon(hub);
     let info = info_of(&detect(&hub.cfg.home).await);
     let first_scan = !super::models::probed_here();
     let changed = super::models::set_live(&info);
