@@ -617,7 +617,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
                 for (k, h) in hits.iter().take(HITS_SHOWN).enumerate() {
                     let to = id.clone();
                     nav = nav.child(div().id(SharedString::from(format!("set-hit-{n}-{k}"))).pl(px(43.)).pr_3().py(px(2.)).cursor_pointer().text_size(crate::scale::tpx(11.)).text_color(c("dim")).hover(|s| s.text_color(c("text")))
-                        .child(nav_title(h)).on_click(cx.listener(move |this, _, _, cx| open_nav(this, &to, cx))));
+                        .child(trs(h)).on_click(cx.listener(move |this, _, _, cx| open_nav(this, &to, cx))));
                 }
                 if hits.len() > HITS_SHOWN { nav = nav.child(div().pl(px(43.)).pr_3().pb(px(2.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(tf("gpui.settings.more", &[("n", (hits.len() - HITS_SHOWN).into())]))); }
             }
