@@ -76,7 +76,7 @@ pub fn stage_text(kind: u32, file: &str, native: bool, cached: bool, tools: &[st
 pub fn is_retryable_err(why: &str) -> bool {
     if why.is_empty() || why.starts_with("@bp.file-missing:") { return false }
     let low = why.to_ascii_lowercase();
-    !["too large", "not found", "no such file", "does not exist", "unsupported", "permission denied"].iter().any(|p| low.contains(p))
+    !["too large", "too big", "not found", "no such file", "does not exist", "unsupported", "permission denied"].iter().any(|p| low.contains(p))
 }
 pub fn key(kind: u32, root: &str, path: &str) -> String { format!("{kind}|{root}|{path}") }
 /// An Altium board file (.PcbDoc, any case): read by altium/pcb.rs
@@ -88,7 +88,8 @@ pub fn fnv(s: &str) -> u32 { s.chars().fold(2166136261u32, |h, c| (h ^ c as u32)
 #[derive(Default)]
 /// `parts`: a board model's part frames so far (the one that starts them first), `stop` its stream's (set when another replaces it)
 /// `focus`: a STEP the person zoomed in on, refined around this box (kicad.refine): read at that detail from then on
-struct Src { kind: u32, root: String, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool, parts: Vec<Arc<Vec<u8>>>, stop: Option<Arc<std::sync::atomic::AtomicBool>>, focus: Option<[f64; 6]> }
+/// `asked`: the person asked for this model past the size limit (kicad.big, "Load it anyway"): read up to `solid::MOST_ASKED` from then on
+struct Src { kind: u32, root: String, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool, parts: Vec<Arc<Vec<u8>>>, stop: Option<Arc<std::sync::atomic::AtomicBool>>, focus: Option<[f64; 6]>, asked: bool }
 /// `kept`: the id (`plot::mesh_id`) of the model the client already holds from an earlier visit; that model is not sent again
 /// `parts_at`: how many of its source's part frames this watcher has been sent
 struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, kept_chunks: std::collections::HashSet<u64>, with_chunk_hashes: bool, parts_at: usize }
@@ -467,6 +468,18 @@ impl Plots {
         self.read(hub, ky);
         Ok(true)
     }
+    /// kicad.big: a client asked for a 3D model it watches that was refused for its size ("Load it anyway"). The source is read again up to
+    /// `solid::MOST_ASKED`, and stays so while it is watched. Ok(false): it was asked for already. Err: not a 3D model this client watches.
+    pub fn ask_big(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, ky: &str) -> Result<bool, &'static str> {
+        { let mut st = self.st.lock().unwrap();
+          if !st.subs.get(&client).map_or(false, |v| v.iter().any(|s| s.key == ky)) { return Err("that model is not on show here") }
+          let Some(s) = st.srcs.get_mut(ky) else { return Err("that model is not on show here") };
+          if !solid_kind(s.kind) { return Err("only a 3D model is loaded past its size") }
+          if s.asked { return Ok(false) }
+          s.asked = true; }
+        self.read(hub, ky);
+        Ok(true)
+    }
     /// A board model's parts, streamed: the plan's frames go onto the source as they are made and out to its watchers. A newer model's
     /// stream stops this one (its flag), and so does the source leaving.
     fn start_parts(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str, file: &str, rev: String, made: Arc<(pcb3d::stream::Plan, u64)>) {
@@ -590,7 +603,7 @@ impl Plots {
     }
 
     fn read(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str) {
-        let (kind, root, file) = { let mut st = self.st.lock().unwrap(); let Some(s) = st.srcs.get_mut(ky) else { return }; if s.busy { s.again = true; return } s.busy = true; (s.kind, s.root.clone(), s.file.clone()) };
+        let (kind, root, file, asked) = { let mut st = self.st.lock().unwrap(); let Some(s) = st.srcs.get_mut(ky) else { return }; if s.busy { s.again = true; return } s.busy = true; (s.kind, s.root.clone(), s.file.clone(), s.asked) };
         let (me, hub, ky) = (self.clone(), hub.clone(), ky.to_string());
         tokio::spawn(async move {
             let t0 = std::time::Instant::now();
@@ -603,7 +616,8 @@ impl Plots {
             // always made here (altium/board3d.rs reads the .PcbDoc itself: no KiCad, no kicad-cli)
             let native3d = solid3 && !file.starts_with("diff\n") && (is_altium_board(&file) || (file.ends_with(".kicad_pcb") && Self::board3d_native(&hub).await));
             let known = if solid3 && !native3d { solidread::known(kind, &file) } else { 0 };
-            let _one = if solid3 && !native3d && solid::fits_for(known, solidread::is_step(&file)) {
+            let fits = solid::fits_asked(known, solidread::is_step(&file), asked);
+            let _one = if solid3 && !native3d && fits {
                 let g = match me.solid.try_lock() { Ok(g) => g, Err(_) => { say("Waiting for another 3D model to finish…"); me.solid.lock().await } };
                 Some(g)
             } else { None };
@@ -612,7 +626,7 @@ impl Plots {
             let before = if is_version(&file) { Stamp::default() } else { stamp_in(&file, rt) };
             let mut parts = None;
             let out = if native3d { me.run_board3d(&hub, kind, &file, &ky).await.map(|r| match r { Ok((p, plan)) => { parts = plan; (0, String::new(), Some(p)) } Err(e) => (3, e, None) }) }
-                else if !solid::fits_for(known, solidread::is_step(&file)) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &root, &file, &ky).await } else { me.run_child(kind, &root, &file, &ky).await.map(|(c, t)| (c, t, None)) };
+                else if !fits { Some((3, solid::big_for(known, solidread::is_step(&file), asked), None)) } else if native() { me.run_native(&hub, kind, &root, &file, &ky, asked).await } else { me.run_child(kind, &root, &file, &ky, asked).await.map(|(c, t)| (c, t, None)) };
             let after = if is_version(&file) { Stamp::default() } else { stamp_in(&file, rt) };
             let (code, text, made) = match out { Some((c, t, m)) => if before != after { (2, String::new(), None) } else { (c, t, m) }, None => (1, "cannot run the plot reader".into(), None) };
             let mut again = false;
@@ -635,8 +649,11 @@ impl Plots {
                 (None, _) => { // Pv.fail: every watcher told why, and holding nothing
                     let why: String = text.trim().chars().take(200).collect();
                     let retryable = is_retryable_err(&why);
+                    // a model refused for its size, not asked for yet: `big`, the page offers "Load it anyway" (kicad.big)
+                    let mut frame = json!({"t":"plot","key":ky,"none":why,"retryable":retryable});
+                    if solid3 && !asked && solid::is_big(&why) { frame["big"] = json!(true) }
                     let mut st = me.st.lock().unwrap(); let mut gone = vec![];
-                    for (c, subs) in st.subs.iter_mut() { for s in subs.iter_mut().filter(|s| s.key == ky) { s.held.clear(); if !hub.push(*c, json!({"t":"plot","key":ky,"none":why,"retryable":retryable})) { gone.push(*c) } } }
+                    for (c, subs) in st.subs.iter_mut() { for s in subs.iter_mut().filter(|s| s.key == ky) { s.held.clear(); if !hub.push(*c, frame.clone()) { gone.push(*c) } } }
                     drop(st); for c in gone { me.stop(c) } }
             }
             if matches!(code, 0 | 2) && (ky.starts_with("2|") || ky.starts_with("3|")) { me.note(&hub, &ky, None) } // Pv.handle PGot
@@ -646,7 +663,7 @@ impl Plots {
     }
     /// `Pv.child` in this process (kicad/plotread.rs, kicad/solidread.rs): the plot, its info file written, and the child's exit code and
     /// message. A panic in a reader is an unread file, never the hub's end; a big file's memory goes back when it is done.
-    async fn run_native(self: &Arc<Self>, hub: &Arc<Hub>, kind: u32, root: &str, file: &str, ky: &str) -> Option<(i32, String, Option<Plot>)> {
+    async fn run_native(self: &Arc<Self>, hub: &Arc<Hub>, kind: u32, root: &str, file: &str, ky: &str, asked: bool) -> Option<(i32, String, Option<Plot>)> {
         let (f, infos) = (file.to_string(), self.infos(ky));
         if solid_kind(kind) {
             let (cli, home) = (super::ipc::runtime(hub).await.cli, self.home.clone());
@@ -671,9 +688,9 @@ impl Plots {
                                 emit(plot::part_frame_faces(&ky, &format!("step{n}"), count, &mesh, &[IDENTITY], &[], done, &faces))
                             }
                         };
-                        solidread::read_streaming(kind, &f, &cli, &tools, &i, None, Some(&mut on))
+                        solidread::read_streaming(kind, &f, &cli, &tools, &i, None, asked, Some(&mut on))
                     }
-                    None => solidread::read_streaming(kind, &f, &cli, &tools, &i, focus, None),
+                    None => solidread::read_streaming(kind, &f, &cli, &tools, &i, focus, asked, None),
                 }));
                 let o = match r { Ok(g) => (g.code, g.text, g.plot), Err(_) => (3, plotgen::UNREAD.to_string(), None) };
                 #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); }
@@ -693,9 +710,10 @@ impl Plots {
             o
         }).await.ok()
     }
-    async fn run_child(&self, kind: u32, root: &str, file: &str, ky: &str) -> Option<(i32, String)> {
+    async fn run_child(&self, kind: u32, root: &str, file: &str, ky: &str, asked: bool) -> Option<(i32, String)> {
         let mut c = if solid_kind(kind) { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, "nice"); c.args(["-n", "10"]).arg(&self.bin); c } else { crate::proc::tokio_cmd(crate::proc::Kind::Local, &self.bin) };
         if !root.is_empty() { c.env("BACKPLANE_PLOT_ROOT", root); }
+        if asked { c.env("BACKPLANE_PLOT_ASKED", "1"); }
         c.arg("--plot").arg(kind.to_string()).arg(file).arg(self.infos(ky)).stdin(std::process::Stdio::null()).kill_on_drop(false);
         let o = c.output().await.ok()?;
         let code = o.status.code().unwrap_or(1);
@@ -858,7 +876,7 @@ pub fn viewer_snapshot(thread: &str) -> (u64, u64, Value) { vs().lock().unwrap()
 
 pub struct KicadRpc(pub Arc<Plots>);
 impl RpcHandler for KicadRpc {
-    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.watch.set", "kicad.refine", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "kicad.install", "viewer.state", "history.steps"] }
+    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.watch.set", "kicad.refine", "kicad.big", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "kicad.install", "viewer.state", "history.steps"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -928,6 +946,11 @@ impl RpcHandler for KicadRpc {
                         Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
                     }
                 }
+                // "Load it anyway": a 3D model refused for its size, read past the limit (Plots::ask_big)
+                "kicad.big" => match self.0.ask_big(hub, who.client, &s("key")) {
+                    Ok(started) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"started":started}})],
+                    Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
+                },
                 "kicad.warm" => { // the saved versions before and after a step, plotted ahead
                     let (kind, root) = (s("kind"), s("root"));
                     for path in [s("before"), s("after")] {
@@ -1331,7 +1354,7 @@ mod tests {
         let plots = Plots::new(&home); let ky = "2|/p/mech/lid.step|".to_string();
         let mut out = hub.attach(7);
         { let mut st = plots.st.lock().unwrap();
-          st.srcs.insert(ky.clone(), Src { kind: 2, root: "/p".into(), file: "/p/mech/lid.step".into(), stamp: None, busy: true, plot: None, again: false, parts: vec![], stop: None, focus: None });
+          st.srcs.insert(ky.clone(), Src { kind: 2, root: "/p".into(), file: "/p/mech/lid.step".into(), stamp: None, busy: true, plot: None, again: false, parts: vec![], stop: None, focus: None, asked: false });
           st.subs.insert(7, vec![Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, kept_chunks: Default::default(), with_chunk_hashes: false, parts_at: 0 }]); }
         let raw = |out: &mut crate::hub::Outbox| { let mut v = vec![]; while let Ok(o) = out.try_recv() { if let Out::Raw(b) = o { v.push(String::from_utf8_lossy(&b).into_owned()) } } v };
         let old = plots.step_stream(&ky);

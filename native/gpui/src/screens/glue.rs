@@ -343,6 +343,8 @@ impl Backplane {
                 }
             }
             // zoomed in on a STEP: its solids there meshed finer by the hub, the model replaced when they are
+            // "Load it anyway": a model the hub refused for its size, read past the limit
+            crate::viewers::solid::SolidEvent::LoadBig(key) => { let _ = this.tx.try_send(Command::Rpc("kicad.big".into(), super::settings::Secret(serde_json::json!({"key": key})), "big")); }
             crate::viewers::solid::SolidEvent::Refine(key, at, r) => { let _ = this.tx.try_send(Command::Rpc("kicad.refine".into(), super::settings::Secret(serde_json::json!({"key": key, "at": at, "r": r})), "refine")); }
             // a part clicked on the board's model: the board's probe, lit on the schematic and the board as a tap there is
             crate::viewers::solid::SolidEvent::Pick(r) => super::plotview::probe_part(this, r),

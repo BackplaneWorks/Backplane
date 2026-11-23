@@ -2239,6 +2239,9 @@ gpui.c.kicad.exit.full.screen = Salir de pantalla completa
 gpui.c.kicad.the.editor.takes.the.whole = El editor ocupa toda la ventana; solo queda esta fila
 gpui.c.kicad.closing = KiCad se está cerrando. El editor vuelve a abrirse cuando termine de cerrarse.
 gpui.c.kicad.closing.ask = KiCad espera una respuesta antes de cerrarse: «{title}». Su ventana puede estar detrás de otra.
+gpui.c.solid.load.big = Cargarlo de todos modos
+gpui.c.solid.loading.big = Cargándolo de todos modos…
+gpui.c.solid.big.next = Cargarlo puede tardar y usar mucha memoria.
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Faltan recursos en {dir}: {files}
