@@ -35,11 +35,14 @@ class MobileSectionsTest {
         assertTrue(proj.hasSchematic)
         assertTrue(proj.pinned)
 
-        val snz = row("""{"id":"t2","title":"Old build","word":"done","label":"Done","tone":"ok","wake":"t2|off","ago":"3h"}""")
+        val snz = row("""{"id":"t2","title":"Old build","word":"failed","label":"Failed","tone":"bad","wake":"t2|off","ago":"3h"}""")
         assertEquals("t2|off", snz.wake)
         val pill = statusPillOf(snz)!!
-        assertEquals(PillKind.SNOOZED, pill.kind)
-        assertEquals(PillTone.DIM, pill.tone)
+        assertEquals(PillKind.FAILED, pill.kind)
+        assertEquals(PillTone.BAD_OUTLINE, pill.tone)
+
+        val idleSnz = row("""{"id":"t3","title":"Idle snooze","word":"idle","wake":"t3|off","ago":"1h"}""")
+        assertEquals(StatusPillModel(PillKind.SNOOZED, "Snoozed", PillTone.DIM), statusPillOf(idleSnz))
     }
 
     @Test fun resolvesHubLabelAndTonePills() {

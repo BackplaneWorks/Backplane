@@ -100,9 +100,9 @@ enum class PillKind { APPROVE, INPUT, SIGN_IN, FAILED, STOPPED, WORKING, WAITING
 enum class PillTone { BAD, BAD_OUTLINE, RUN, WAIT, OK, DIM }
 data class StatusPillModel(val kind: PillKind, val label: String, val tone: PillTone)
 
-/** Resolve the status pill for a thread/swarm row; returns null when idle with nothing to say. */
+/** Resolve the status pill for a thread/swarm row; returns null when idle with nothing to say.
+ *  Snoozed rows keep their real status (Failed/Working/Done…) since the section header already says Snoozed and line 2 shows "Wakes in …". */
 fun statusPillOf(r: DSecRow): StatusPillModel? {
-    if (r.wake.isNotEmpty()) return StatusPillModel(PillKind.SNOOZED, "Snoozed", PillTone.DIM)
     val rawLabel = r.label.trim()
     val rawTone = r.tone.trim()
     if (rawLabel.isNotEmpty()) {
@@ -133,7 +133,7 @@ fun statusPillOf(r: DSecRow): StatusPillModel? {
         }
         return StatusPillModel(kind, rawLabel, tone)
     }
-    return when (r.word) {
+    val derived = when (r.word) {
         "needs" -> when (r.want) {
             "approval" -> StatusPillModel(PillKind.APPROVE, "Approve", PillTone.BAD)
             "sign-in" -> StatusPillModel(PillKind.SIGN_IN, "Sign in", PillTone.BAD)
@@ -146,6 +146,7 @@ fun statusPillOf(r: DSecRow): StatusPillModel? {
         "done" -> StatusPillModel(PillKind.DONE, "Done", PillTone.OK)
         else -> null
     }
+    return derived ?: if (r.wake.isNotEmpty()) StatusPillModel(PillKind.SNOOZED, "Snoozed", PillTone.DIM) else null
 }
 
 /** Partition the hub's sections into the mobile-native Inbox and Bench tabs. Pure, unit-tested. */
