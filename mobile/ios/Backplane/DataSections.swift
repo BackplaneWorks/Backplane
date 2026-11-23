@@ -67,6 +67,25 @@ struct DProjectPage: Decodable, Equatable { var key: String; var sections: [DSec
 struct DSections: Decodable { var sections: [DSection]; var groupsTo: [DGroupTo]; var page: DProjectPage?
     enum CodingKeys: String, CodingKey { case sections, groupsTo, page }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); sections = (try? c.decode([DSection].self, forKey: .sections)) ?? []; groupsTo = (try? c.decode([DGroupTo].self, forKey: .groupsTo)) ?? []; page = try? c.decode(DProjectPage.self, forKey: .page) } }
+// (here, beside DSections: DataModels.swift is compiled without this file by the wire test, scripts/mobile/ios-unit-tests.sh)
+struct DShellSyncReply: Decodable {
+    let sub: Int
+    let projects: [DProject]?
+    let threads: [DThread]?
+    let removed: [String]?
+    let sections: DSections?
+    let h: [String: String]?
+    enum CodingKeys: String, CodingKey { case sub, projects, threads, removed, sections, h }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
+        projects = try? c.decode([DProject].self, forKey: .projects)
+        threads = try? c.decode([DThread].self, forKey: .threads)
+        removed = try? c.decode([String].self, forKey: .removed)
+        sections = try? c.decode(DSections.self, forKey: .sections)
+        h = try? c.decode([String: String].self, forKey: .h)
+    }
+}
 /// A project's page on the navigation stack: its key and name.
 struct DProjectRoute: Hashable { var key: String; var title: String }
 

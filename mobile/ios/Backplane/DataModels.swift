@@ -568,24 +568,6 @@ struct DHome: Decodable, Equatable {
         }
     }
 }
-struct DShellSyncReply: Decodable {
-    let sub: Int
-    let projects: [DProject]?
-    let threads: [DThread]?
-    let removed: [String]?
-    let sections: DSections?
-    let h: [String: String]?
-    enum CodingKeys: String, CodingKey { case sub, projects, threads, removed, sections, h }
-    init(from d: Decoder) throws {
-        let c = try d.container(keyedBy: CodingKeys.self)
-        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
-        projects = try? c.decode([DProject].self, forKey: .projects)
-        threads = try? c.decode([DThread].self, forKey: .threads)
-        removed = try? c.decode([String].self, forKey: .removed)
-        sections = try? c.decode(DSections.self, forKey: .sections)
-        h = try? c.decode([String: String].self, forKey: .h)
-    }
-}
 struct DThreadOpenReply: Decodable {
     let sub: Int
     let thread: DThread?
