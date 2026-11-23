@@ -450,6 +450,10 @@ object DataClient {
     }
     fun toggleSection(t: String) { sectionsOpen = if (t in sectionsOpen) sectionsOpen - t else sectionsOpen + t; prefs().edit().putStringSet("sections.open", sectionsOpen).apply(); scope.launch { loadSections() } }
     fun sidebarAct(action: String, value: String) { scope.launch { runCatching { call("sidebar.act", JSONObject().put("action", action).put("value", value)) }; loadSections() } }
+    /** Snooze or wake a thread row using the hub's own `snooze[].value` (`<id>|1h|tomorrow|1w`) or `wake` (`<id>|off`). */
+    fun snoozeRow(value: String) { if (value.isNotEmpty()) sidebarAct("row-snooze", value) }
+    /** Record a project visit on the hub so the Recent bench order follows this phone too. */
+    fun visitProject(key: String) { if (key.isNotEmpty()) sidebarAct("project-page", key) }
     /** A section row's menu item for a thread of this hub (the hub's `menu`: pin, unpin, settle, unsettle, archive): `thread.act`, then the sections as the hub has them now. */
     fun sectionThreadAct(tid: String, action: String) { scope.launch { runCatching { call("thread.act", JSONObject().put("thread", tid).put("action", action)).optJSONObject("thread")?.let { upsert(parseThread(it)) } }; loadSections() } }
     suspend fun projectPage(key: String, done: Boolean, older: Boolean = false): List<DSection>? {
