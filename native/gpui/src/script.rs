@@ -466,7 +466,7 @@ impl Backplane {
                 window.on_next_frame(move |_, cx| {
                     let _ = app_this.update(cx, |v, cx| v.app_opened(cx));
                 });
-                window.request_animation_frame();
+                window.refresh();
             });
             match window.gpu_specs() {
                 Some(g) => metric(started, "gpu", json!({"device": g.device_name, "driver": g.driver_name, "driver_info": g.driver_info, "software": g.is_software_emulated})),
@@ -1504,5 +1504,119 @@ mod tests {
         assert_eq!(rail_row_state(&v, "schematic"), None);
         assert_eq!(rail_row_state(&v, "gerbers"), Some("hidden"));
         assert_eq!(rail_row_state(&json!({}), "board"), None);
+    }
+    fn strip_rust_comments(src: &str, keep_strings: bool) -> String {
+        let mut out = String::with_capacity(src.len());
+        let bytes = src.as_bytes();
+        let mut i = 0;
+        while i < bytes.len() {
+            if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'/') {
+                while i < bytes.len() && bytes[i] != b'\n' { i += 1; }
+                continue;
+            }
+            if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                let mut depth = 1usize;
+                i += 2;
+                while i < bytes.len() && depth > 0 {
+                    if bytes[i] == b'/' && bytes.get(i + 1) == Some(&b'*') {
+                        depth += 1; i += 2;
+                    } else if bytes[i] == b'*' && bytes.get(i + 1) == Some(&b'/') {
+                        depth -= 1; i += 2;
+                    } else {
+                        if bytes[i] == b'\n' { out.push('\n'); }
+                        i += 1;
+                    }
+                }
+                out.push(' ');
+                continue;
+            }
+            if bytes[i] == b'\'' {
+                if bytes.get(i + 1) == Some(&b'\\') && bytes.get(i + 3) == Some(&b'\'') {
+                    if keep_strings { out.push_str(&src[i..i + 4]); }
+                    i += 4;
+                    continue;
+                }
+                if let Some(ch) = src[i + 1..].chars().next()
+                    && ch != '\\' && ch != '\n' && ch != '\r'
+                    && bytes.get(i + 1 + ch.len_utf8()) == Some(&b'\'')
+                {
+                    let end = i + 1 + ch.len_utf8() + 1;
+                    if keep_strings { out.push_str(&src[i..end]); }
+                    i = end;
+                    continue;
+                }
+            }
+            if bytes[i] == b'r' {
+                let raw_prefix = i == 0
+                    || !(bytes[i - 1].is_ascii_alphanumeric() || bytes[i - 1] == b'_')
+                    || ((bytes[i - 1] == b'b' || bytes[i - 1] == b'c')
+                        && (i == 1 || !(bytes[i - 2].is_ascii_alphanumeric() || bytes[i - 2] == b'_')));
+                if raw_prefix {
+                    let mut hashes = 0usize;
+                    while bytes.get(i + 1 + hashes) == Some(&b'#') { hashes += 1; }
+                    if bytes.get(i + 1 + hashes) == Some(&b'"') {
+                        let start = i;
+                        i += 1 + hashes + 1;
+                        while i < bytes.len() {
+                            if bytes[i] == b'"' && (0..hashes).all(|k| bytes.get(i + 1 + k) == Some(&b'#')) {
+                                i += 1 + hashes;
+                                break;
+                            }
+                            i += 1;
+                        }
+                        if keep_strings { out.push_str(&src[start..i]); } else { out.push_str("\"\""); }
+                        continue;
+                    }
+                }
+            }
+            if bytes[i] == b'"' {
+                let start = i;
+                i += 1;
+                let mut escape = false;
+                while i < bytes.len() {
+                    if escape { escape = false; i += 1; }
+                    else if bytes[i] == b'\\' { escape = true; i += 1; }
+                    else if bytes[i] == b'"' { i += 1; break; }
+                    else { i += 1; }
+                }
+                if keep_strings { out.push_str(&src[start..i]); } else { out.push_str("\"\""); }
+                continue;
+            }
+            let ch = src[i..].chars().next().unwrap();
+            out.push(ch);
+            i += ch.len_utf8();
+        }
+        out
+    }
+    #[test] fn no_unwrapped_current_view_calls_in_client_src() {
+        assert!(!strip_rust_comments(r##"let a = '"'; let b = '\"'; let c = r#"// ok"#; // x.current_view()"##, false).contains("current_view"));
+        assert!(strip_rust_comments("let a = '\"'; x.current_view();", false).contains("current_view"));
+        let needle = concat!(".current_", "view(");
+        let mut todo = vec![std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src")];
+        let mut hits = Vec::new();
+        while let Some(d) = todo.pop() {
+            for e in std::fs::read_dir(&d).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() { todo.push(p); continue; }
+                if p.extension().is_none_or(|x| x != "rs") { continue; }
+                let text = std::fs::read_to_string(&p).unwrap();
+                let code = text.split("\n#[cfg(test)]\nmod ").next().unwrap_or(&text);
+                let stripped = strip_rust_comments(code, false);
+                if stripped.contains(needle) {
+                    hits.push(p.display().to_string());
+                }
+            }
+        }
+        assert!(hits.is_empty(), "client code must use try_current_view() instead of panicking current_view(): {hits:?}");
+    }
+    #[test] fn first_frame_callback_does_not_call_request_animation_frame() {
+        let text = include_str!("script.rs");
+        let code = text.split("\n#[cfg(test)]\nmod ").next().unwrap();
+        let stripped = strip_rust_comments(code, true);
+        let start = stripped.find("metric(started, \"first_frame\"").expect("first_frame metric");
+        let end = stripped[start..].find("match window.gpu_specs()").expect("gpu_specs after first_frame") + start;
+        let block = &stripped[start..end];
+        assert!(!block.contains("request_animation_frame"), "first_frame on_next_frame callback must not call request_animation_frame():\n{block}");
+        assert!(block.contains("window.refresh()"), "first_frame on_next_frame callback should call window.refresh():\n{block}");
     }
 }
