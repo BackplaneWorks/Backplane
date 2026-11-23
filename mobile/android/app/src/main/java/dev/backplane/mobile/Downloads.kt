@@ -115,7 +115,11 @@ object Downloads {
         File(c.cacheDir, "downloads").listFiles()?.forEach { d -> if (d !in live && d.lastModified() < day) d.deleteRecursively() }
     }
 
-    private fun mime(name: String) = MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+    private fun mime(name: String): String {
+        val ext = name.substringAfterLast('.', "").lowercase()
+        if (ext == "pdf") return "application/pdf"
+        return MimeTypeMap.getSingleton().getMimeTypeFromExtension(ext) ?: "application/octet-stream"
+    }
 
     /** A copy in the phone's Downloads: MediaStore from Android 10, the app's own Downloads folder before it. */
     private fun saveToDownloads(c: Context, f: File) {
@@ -136,13 +140,21 @@ object Downloads {
     private fun uri(c: Context, f: File): Uri = androidx.core.content.FileProvider.getUriForFile(c, c.packageName + ".files", f)
     fun open(c: Context, r: DownloadRow) {
         val f = r.file ?: return
-        val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri(c, f), mime(f.name)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        runCatching { c.startActivity(Intent.createChooser(i, f.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }.onFailure { DataClient.say(Msg.android_download_noapp) }
+        val u = uri(c, f)
+        val i = Intent(Intent.ACTION_VIEW).setDataAndType(u, mime(f.name))
+            .apply { clipData = android.content.ClipData.newRawUri(f.name, u) }
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val chooser = Intent.createChooser(i, f.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        runCatching { c.startActivity(chooser) }.onFailure { DataClient.say(Msg.android_download_noapp) }
     }
     fun send(c: Context, r: DownloadRow) {
         val f = r.file ?: return
-        val i = Intent(Intent.ACTION_SEND).setType(mime(f.name)).putExtra(Intent.EXTRA_STREAM, uri(c, f)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        runCatching { c.startActivity(Intent.createChooser(i, f.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+        val u = uri(c, f)
+        val i = Intent(Intent.ACTION_SEND).setType(mime(f.name)).putExtra(Intent.EXTRA_STREAM, u)
+            .apply { clipData = android.content.ClipData.newRawUri(f.name, u) }
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        val chooser = Intent.createChooser(i, f.name).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        runCatching { c.startActivity(chooser) }
     }
 }
 

@@ -177,3 +177,106 @@ fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
     std::fs::remove_file(d.join("shares-v1.json")).unwrap();
     assert!(mutate(&d, |v| v.len()).is_ok(), "no store yet is an empty list");
 }
+
+#[test] fn file_urls_and_markdown_links_extract_decode_and_check_safely() {
+    let t = concat!(
+        "See [Parts_List.pdf](file:///home/user/proj/docs/Parts_List.pdf) and ",
+        "[My Doc](file:///home/user/proj/docs/My%20Doc%20(Final).pdf) and ",
+        "[Ref](file://localhost/home/user/proj/docs/Spec%20Sheet.pdf#page=2) and ",
+        "file:///home/user/proj/src/main.rs#L10-L20 and /home/user/proj/src/lib.rs:12:3"
+    );
+    assert_eq!(
+        candidates(t),
+        vec![
+            "/home/user/proj/docs/Parts_List.pdf",
+            "/home/user/proj/docs/My Doc (Final).pdf",
+            "/home/user/proj/docs/Spec Sheet.pdf",
+            "/home/user/proj/src/main.rs",
+            "/home/user/proj/src/lib.rs",
+        ]
+    );
+
+    let d = tmp("fileurl");
+    let (proj, home, out) = (d.join("proj"), d.join("home"), d.join("out"));
+    std::fs::create_dir_all(proj.join("docs")).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let pdf = proj.join("docs/My Doc (Final).pdf");
+    std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
+    std::fs::write(proj.join(".env"), b"SECRET=1").unwrap();
+    std::fs::write(out.join("outside.pdf"), b"%PDF-1.4\n").unwrap();
+    let roots = vec![proj.clone()];
+
+    let encoded_url = format!("file://{}/docs/My%20Doc%20(Final).pdf#page=2", s(&proj));
+    let localhost_url = format!("file://localhost{}/docs/My%20Doc%20(Final).pdf", s(&proj));
+    assert_eq!(local_path(&encoded_url), Some(pdf.clone()));
+    assert_eq!(local_path(&localhost_url), Some(pdf.clone()));
+    assert!(check(&roots, &home, &encoded_url).is_ok());
+    assert!(check(&roots, &home, &localhost_url).is_ok());
+
+    // Security refusals: traversal, NUL, secret, outside project
+    assert!(local_path(&format!("file://{}/docs/%2e%2e/.env", s(&proj))).is_none());
+    assert!(local_path(&format!("file://{}/docs/a%00b.pdf", s(&proj))).is_none());
+    assert_eq!(check(&roots, &home, &format!("file://{}/.env", s(&proj))).unwrap_err(), "that file is not shared");
+    assert_eq!(check(&roots, &home, &format!("file://{}/outside.pdf", s(&out))).unwrap_err(), "that file is not in a project");
+
+    // linkable_with picks up markdown file:// PDF as view and drops .env / outside files
+    let msg = format!(
+        "[My Doc]({}) and [env](file://{}/.env) and [out](file://{}/outside.pdf)",
+        encoded_url, s(&proj), s(&out)
+    );
+    let links = linkable_with(&roots, &home, &msg);
+    assert_eq!(links, vec![json!({
+        "path": s(&pdf),
+        "name": "My Doc (Final).pdf",
+        "size": 9,
+        "open": "view"
+    })]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn serve_file_serves_project_pdf_by_path_and_file_url() {
+    let d = tmp("serve-file");
+    let (proj, home, out) = (d.join("proj"), d.join("home"), d.join("out"));
+    std::fs::create_dir_all(proj.join("docs")).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let pdf = proj.join("docs/Parts List.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4\nhello").unwrap();
+    std::fs::write(proj.join(".env"), b"SECRET=1").unwrap();
+    std::fs::write(out.join("out.pdf"), b"%PDF-1.4\n").unwrap();
+
+    std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"proj\",\"root\":{},\"at\":1700000000}}\n", serde_json::Value::from(s(&proj)))).unwrap();
+    let cfg = crate::hub::Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+    let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+    refresh(&hub).await;
+
+    let split = |v: &[u8]| {
+        let i = v.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        (String::from_utf8_lossy(&v[..i]).into_owned(), v[i + 4..].to_vec())
+    };
+    let fetch = |target: String| {
+        let hub = hub.clone();
+        async move {
+            let mut out_buf = Vec::new();
+            let req = Req::new("GET", &target, Default::default());
+            serve_file(&hub, &mut out_buf, Who::Native, &req).await.unwrap();
+            out_buf
+        }
+    };
+
+    let enc = |v: &str| crate::md::refs::pct(v).replace("%2F", "/");
+    let (h1, b1) = split(&fetch(format!("/file?path={}", enc(&s(&pdf)))).await);
+    assert!(h1.starts_with("HTTP/1.1 200 OK") && h1.contains("Content-Type: application/pdf"), "{h1}");
+    assert_eq!(b1, b"%PDF-1.4\nhello");
+
+    let file_url = format!("file://{}", enc(&s(&pdf)));
+    let (h2, b2) = split(&fetch(format!("/file?path={}", crate::md::refs::pct(&file_url))).await);
+    assert!(h2.starts_with("HTTP/1.1 200 OK") && h2.contains("Content-Type: application/pdf"), "{h2}");
+    assert_eq!(b2, b"%PDF-1.4\nhello");
+
+    let (h3, _) = split(&fetch(format!("/file?path={}", crate::md::refs::pct(&s(&proj.join(".env"))))).await);
+    assert!(h3.starts_with("HTTP/1.1 403"), "{h3}");
+
+    let (h4, _) = split(&fetch(format!("/file?path={}", crate::md::refs::pct(&s(&out.join("out.pdf"))))).await);
+    assert!(h4.starts_with("HTTP/1.1 403"), "{h4}");
+}

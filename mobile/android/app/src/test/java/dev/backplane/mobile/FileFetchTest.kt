@@ -11,7 +11,7 @@ import org.junit.Test
 // Files of the hub's machine (docs/file-links.md): which link is a file to download, its address, and how a stopped download goes on
 class FileFetchTest {
     private val tok = "0123456789abcdef0123456789abcdef0123456789abcdef"
-    private val files = listOf(DFileLink("/home/user/p/mfg/gerbers.zip", "gerbers.zip", 123, "download"), DFileLink("~/p/board.kicad_pcb", "board.kicad_pcb", 9, "view"))
+    private val files = listOf(DFileLink("/home/user/p/mfg/gerbers.zip", "gerbers.zip", 123, "download"), DFileLink("~/p/board.kicad_pcb", "board.kicad_pcb", 9, "view"), DFileLink("/home/user/p/docs/My Doc.pdf", "My Doc.pdf", 456, "view"))
 
     @Test fun sharesAreLinks() {
         assertEquals("/s/$tok/gerbers.zip", FileFetch.shareRoute("/s/$tok/gerbers.zip"))
@@ -32,6 +32,9 @@ class FileFetchTest {
 
     @Test fun aTappedPathFindsItsFile() {
         assertEquals("gerbers.zip", FileFetch.find("/home/user/p/mfg/gerbers.zip", files)?.name)
+        assertEquals("gerbers.zip", FileFetch.find("file:///home/user/p/mfg/gerbers.zip", files)?.name)
+        assertEquals("My Doc.pdf", FileFetch.find("file:///home/user/p/docs/My%20Doc.pdf", files)?.name)
+        assertEquals("My Doc.pdf", FileFetch.find("file://localhost/home/user/p/docs/My%20Doc.pdf#page=2", files)?.name)
         // a link carries the line it points at; the file is the same
         assertEquals("board.kicad_pcb", FileFetch.find("~/p/board.kicad_pcb:12", files)?.name)
         assertEquals("board.kicad_pcb", FileFetch.find("~/p/board.kicad_pcb:3:4", files)?.name)

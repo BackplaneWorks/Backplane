@@ -72,6 +72,7 @@ fun DataClient.openLink(url: String, thread: String) {
                 "project" -> LinkTarget(LinkTarget.Kind.PROJECT, r.optString("project"))
                 "room" -> LinkTarget(LinkTarget.Kind.ROOM, r.optString("room"))
                 "file" -> LinkTarget(LinkTarget.Kind.FILE, r.optString("thread"), r.optString("path"), r.optInt("line"))
+                "download" -> { MdLinks.ctx?.let { c -> Downloads.file(c, DFileLink(r.optString("path"), r.optString("name"), r.optLong("size", -1L), "download"), thread) }; null }
                 "settings" -> LinkTarget(LinkTarget.Kind.SETTINGS, r.optString("page"))
                 else -> {
                     // a file the reply lists that no viewer here opens is downloaded instead

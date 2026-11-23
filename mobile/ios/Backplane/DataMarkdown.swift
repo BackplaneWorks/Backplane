@@ -143,7 +143,9 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
             let tick = [Character](repeating: "`", count: n)
             if let e = find(s, tick, from: i + n) {
                 flush(); var inner = String(s[(i + n)..<e]); if inner.hasPrefix(" "), inner.hasSuffix(" "), !inner.trimmed.isEmpty { inner = inner.trimmed }
-                var g = f; if dIsPathText(inner), let u = dPathURL(inner) { g.link = u }
+                var g = f
+                if let p = dFileURLPath(inner), let u = dPathURL(p) { g.link = u }
+                else if dIsPathText(inner), let u = dPathURL(inner) { g.link = u }
                 put(inner, g, code: true); i = e + n; continue
             }
             plain += String(tick); i += n; continue
@@ -156,12 +158,10 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
                 var pd = 0, k = close + 1, end = -1
                 while k < s.count { if s[k] == "(" { pd += 1 } else if s[k] == ")" { pd -= 1; if pd == 0 { end = k; break } }; k += 1 }
                 if end > 0 {
-                    var url = String(s[(close + 2)..<end]).trimmed
-                    if let sp = url.firstIndex(of: " ") { url = String(url[..<sp]) }
-                    url = url.trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
+                    let rawDest = String(s[(close + 2)..<end])
                     let label = Array(s[(st + 1)..<close])
-                    flush(); var g = f; g.link = dIsPathText(url) ? dPathURL(url) : (URL(string: url) ?? URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""))
-                    if c == "!" { put(label.isEmpty ? url : String(label), g) } else { inl(label, g, size, &out, depth + 1) }
+                    flush(); var g = f; g.link = dLinkURL(rawDest)
+                    if c == "!" { let u = rawDest.trimmed; put(label.isEmpty ? u : String(label), g) } else { inl(label, g, size, &out, depth + 1) }
                     i = end + 1; continue
                 }
             }
@@ -283,9 +283,9 @@ func dMdLayout(_ text: String, images: [String]) -> ReplyImages.Layout {
     #if DEBUG
     DataClient.shared.lastLink = url.absoluteString
     #endif
-    switch url.scheme {
+    switch url.scheme?.lowercased() {
     case "http", "https", "mailto", "tel": return .systemAction
-    case "backplane", AppIdentity.scheme, dPathScheme: DataClient.shared.openLink(url, thread: thread); return .handled
+    case "backplane", AppIdentity.scheme.lowercased(), dPathScheme, "file": DataClient.shared.openLink(url, thread: thread); return .handled
     default: return .discarded
     }
 }

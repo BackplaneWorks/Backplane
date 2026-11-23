@@ -63,29 +63,78 @@ pub(super) async fn resolve(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
         };
     }
     if url.starts_with("backplane://") { return none("That link is not one this hub knows.") }
-    // a path in a project: against the thread's folder; a file of another project (an absolute path, a file:// address) opens in that
-    // project's thread (present/filelink.rs: the one given when it is that project's, else its newest), its tab chosen by the app from its name
-    let url = url.strip_prefix("file://").map(crate::present::filelink::url_path).unwrap_or_else(|| url.to_string());
-    let (path, line) = split_line(&url);
-    let other = { let g = hub.model().await; use crate::present::filelink as fl;
-        let base = g.threads.get(th).and_then(|t| if !t.worktree.is_empty() { Some(crate::files::kicad::canonical::design_root(&t.worktree)) } else { g.projects.get(&t.project).map(|p| p.root.clone()) }).unwrap_or_default();
-        fl::absolute(path, &base, &crate::plat::dirs::home_or_empty()).and_then(|a| {
-            let under = |r: &str| fl::under(&a, r);
-            let (pid, p) = g.projects.iter().filter(|(id, p)| !p.removed && !id.contains('~') && under(&p.root)).max_by_key(|(_, p)| p.root.trim_end_matches('/').len())?;
-            let t = if g.threads.get(th).map_or(false, |t| &t.project == pid && !t.deleted) { th.to_string() }
-                else { g.threads.iter().filter(|(_, t)| &t.project == pid && !t.archived && !t.deleted).max_by_key(|(i, t)| (t.activity, i.to_string())).map(|(i, _)| i.clone())? };
-            Some((t, p.root.clone())) }) };
-    let (th, root) = { let g = hub.model().await;
-        match other { Some(x) => x, None => {
-            if th.is_empty() { return none("There is no project to look for that file in.") }
-            let root = g.threads.get(th).filter(|t| !t.deleted).and_then(|t| g.projects.get(&t.project)).map(|p| p.root.clone());
-            let Some(root) = root else { return none("That file is on another machine.") };
-            (th.to_string(), root) } } };
-    let th = th.as_str();
-    let r2 = root.clone(); let pp = path.to_string();
-    match tokio::task::spawn_blocking(move || inside(&r2, &pp)).await.ok().flatten() {
-        Some(rel) => Ok(json!({"kind":"file","thread":th,"path":rel,"line":line})),
-        None => none("That file is not in this project."),
+    // a path in a project: against the thread's folder, or any registered project / share root allowed by files::share::check
+    // (a file:// address or absolute path in another project, e.g. from a bot conversation, opens in that project's thread or downloads via /file)
+    let normalized = if let Some(rest) = url.get(..7).filter(|s| s.eq_ignore_ascii_case("file://")).map(|_| &url[7..]) {
+        let (before_frag, frag) = match rest.split_once('#') {
+            Some((a, f)) if f.starts_with('L') && f[1..].chars().next().is_some_and(|c| c.is_ascii_digit()) => (a, Some(f)),
+            Some((a, _)) => (a, None),
+            None => (rest, None),
+        };
+        let decoded = crate::present::filelink::url_path(before_frag);
+        match frag { Some(f) => format!("{decoded}#{f}"), None => decoded }
+    } else { url.to_string() };
+    let (path, line) = split_line(&normalized);
+    let extra = hub.setting("files.share.roots").await.unwrap_or_default();
+    let home = hub.cfg.home.clone();
+    let home_dir = crate::plat::dirs::home_or_empty();
+    let (roots, abs_path, cands) = {
+        let g = hub.model().await;
+        use crate::present::filelink as fl;
+        let roots = crate::files::share::roots_of(&g, &home, &extra);
+        let th_root = crate::files::threadpath::resolve(
+            th,
+            |i| g.threads.get(i).map(|t| crate::files::threadpath::T { project: &t.project, worktree: &t.worktree, deleted: t.deleted }),
+            |i| g.projects.get(i).map(|p| crate::files::threadpath::P { root: &p.root, removed: p.removed }),
+        ).unwrap_or_default();
+        let th_proj_root = g.threads.get(th).filter(|t| !t.deleted).and_then(|t| g.projects.get(&t.project)).filter(|p| !p.removed).map(|p| p.root.clone()).unwrap_or_default();
+        let base = if !th_root.is_empty() { th_root.clone() } else { th_proj_root };
+        let is_rel = !crate::plat::fs::is_abs(path) && !path.starts_with("~/");
+        if is_rel && base.is_empty() { return none("There is no project to look for that file in.") }
+        if is_rel && path.split(['/', '\\']).any(|x| x == "..") { return none("That file is not in this project.") }
+        let Some(abs_path) = fl::absolute(path, &base, &home_dir) else { return none("That file is not in this project.") };
+        let mut cands: Vec<(String, String)> = vec![];
+        if !th.is_empty() && !th_root.is_empty() && g.threads.get(th).is_some_and(|t| !t.deleted) {
+            cands.push((th.to_string(), th_root));
+        }
+        let mut projs: Vec<(&String, &crate::model::ProjectMeta)> = g.projects.iter().filter(|(id, p)| !p.removed && !id.contains('~') && !p.root.is_empty()).collect();
+        projs.sort_by(|a, b| b.1.root.trim_end_matches('/').len().cmp(&a.1.root.trim_end_matches('/').len()));
+        for (pid, p) in projs {
+            let mut ts: Vec<(&String, &crate::model::ThreadMeta)> = g.threads.iter().filter(|(_, t)| !t.deleted && !t.archived && &t.project == pid).collect();
+            ts.sort_by(|a, b| {
+                let ra = if !a.1.worktree.is_empty() { &a.1.worktree } else { &p.root };
+                let rb = if !b.1.worktree.is_empty() { &b.1.worktree } else { &p.root };
+                std::path::Path::new(rb).components().count().cmp(&std::path::Path::new(ra).components().count())
+                    .then_with(|| b.1.activity.cmp(&a.1.activity))
+                    .then_with(|| b.0.cmp(a.0))
+            });
+            for (tid, t) in ts {
+                if cands.iter().any(|(x, _)| x == tid) { continue }
+                let root = if !t.worktree.is_empty() { t.worktree.clone() } else { p.root.clone() };
+                cands.push((tid.clone(), root));
+            }
+        }
+        (roots, abs_path, cands)
+    };
+    let res = tokio::task::spawn_blocking(move || -> Result<Value, &'static str> {
+        let (real, md) = crate::files::share::check(&roots, &home, &abs_path).map_err(|e| match e {
+            "that file is not shared" => "That file is not shared.",
+            "that file is not in a project" => "That file is not in a project.",
+            _ => "That file is not in this project.",
+        })?;
+        let real_str = real.to_string_lossy().into_owned();
+        for (cand_th, cand_root) in &cands {
+            if let Some(rel) = inside(cand_root, &real_str) {
+                return Ok(json!({"kind": "file", "thread": cand_th, "path": rel, "line": line}));
+            }
+        }
+        let name = real.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
+        Ok(json!({"kind": "download", "path": real_str, "name": name, "size": md.len()}))
+    }).await;
+    match res {
+        Ok(Ok(v)) => Ok(v),
+        Ok(Err(note)) => none(note),
+        Err(_) => none("That file is not in this project."),
     }
 }
 

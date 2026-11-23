@@ -45,6 +45,7 @@ run reply-images ReplyImagesTests.swift "" ReplyImages.swift
 run reply-draft ReplyDraftTests.swift "" ReplyDraft.swift
 run viewer-rail ViewerRailTests.swift "" ViewerRail.swift
 run hub-restart HubRestartTests.swift "" HubRestart.swift
+run link-grammar LinkGrammarTests.swift "" DataLinkGrammar.swift
 run file-fetch FileFetchTests.swift "" FileFetch.swift DataLinkGrammar.swift
 run plan-floorplanner PlanFloorplannerTests.swift "" PlanFloorplannerModel.swift
 sh "$ROOT/scripts/mobile/ios-outbox-test.sh" && echo "ok outbox"

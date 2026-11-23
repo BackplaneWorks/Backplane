@@ -1620,3 +1620,66 @@ fn probed_models(installed: &[&str]) -> Value {
     };
     assert_eq!(push2["favorites"], json!([]));
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_link_resolve_handles_bot_thread_file_urls_and_download_fallback() {
+    let base = crate::plat::tmp::canonical("link-bot-file");
+    let proj_with_thread = base.join("proj-a");
+    let proj_no_thread = base.join("proj-b");
+    let proj_wt_only = base.join("proj-c");
+    let wt_dir = proj_wt_only.join(".backplane/worktrees/w1");
+    let outside = base.join("outside");
+    for d in [proj_with_thread.join("docs"), proj_no_thread.join("docs"), wt_dir.clone(), outside.clone()] {
+        std::fs::create_dir_all(&d).unwrap();
+    }
+    let pdf_a = proj_with_thread.join("docs/Parts List.pdf");
+    let pdf_b = proj_no_thread.join("docs/No Thread.pdf");
+    let pdf_c = proj_wt_only.join("docs/Main Only.pdf");
+    std::fs::create_dir_all(proj_wt_only.join("docs")).unwrap();
+    std::fs::write(&pdf_a, b"%PDF-1.4\na").unwrap();
+    std::fs::write(&pdf_b, b"%PDF-1.4\nb").unwrap();
+    std::fs::write(&pdf_c, b"%PDF-1.4\nc").unwrap();
+    std::fs::write(proj_with_thread.join(".env"), b"SECRET=1").unwrap();
+    std::fs::write(outside.join("secret.pdf"), b"%PDF-1.4\nout").unwrap();
+
+    let more = format!(
+        "{{\"$\":\"ProjectCreated\",\"id\":\"pa\",\"title\":\"A\",\"root\":{},\"at\":1700000100}}\n\
+         {{\"$\":\"ProjectCreated\",\"id\":\"pb\",\"title\":\"B\",\"root\":{},\"at\":1700000101}}\n\
+         {{\"$\":\"ProjectCreated\",\"id\":\"pc\",\"title\":\"C\",\"root\":{},\"at\":1700000102}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"ta\",\"project\":\"pa\",\"title\":\"A1\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000110}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"tc_wt\",\"project\":\"pc\",\"title\":\"Cwt\",\"env\":\"worktree\",\"branch\":\"b\",\"worktree\":{},\"provider\":\"claude\",\"model\":\"\",\"at\":1700000111}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"bot_th\",\"project\":\"\",\"title\":\"Bot\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000112}}\n",
+        json!(proj_with_thread.to_string_lossy()),
+        json!(proj_no_thread.to_string_lossy()),
+        json!(proj_wt_only.to_string_lossy()),
+        json!(wt_dir.to_string_lossy()),
+    );
+    let (_h, port) = up_with("bot-file", &more).await;
+    let mut ws = open(port, "&enc=json").await;
+    next(&mut ws).await;
+
+    let pct_path = |p: &std::path::Path| format!("file://{}", p.to_string_lossy().replace(' ', "%20"));
+
+    // Bot thread linking to a file in a registered project with an active non-worktree thread -> kind: "file"
+    let r1 = ask(&mut ws, 1, "link.resolve", json!({"url": pct_path(&pdf_a), "thread": "bot_th"})).await;
+    assert_eq!(r1["result"]["kind"], "file", "{r1}");
+    assert_eq!(r1["result"]["thread"], "ta", "{r1}");
+    assert_eq!(r1["result"]["path"], "docs/Parts List.pdf", "{r1}");
+
+    // Bot thread linking to a file in a registered project with NO threads -> kind: "download"
+    let r2 = ask(&mut ws, 2, "link.resolve", json!({"url": pct_path(&pdf_b), "thread": "bot_th"})).await;
+    assert_eq!(r2["result"]["kind"], "download", "{r2}");
+    assert_eq!(r2["result"]["path"], pdf_b.to_string_lossy().as_ref(), "{r2}");
+    assert_eq!(r2["result"]["name"], "No Thread.pdf", "{r2}");
+    assert_eq!(r2["result"]["size"], 10, "{r2}");
+
+    // Project whose only thread is a worktree that doesn't contain the file -> kind: "download" (not a 404 viewer thread)
+    let r3 = ask(&mut ws, 3, "link.resolve", json!({"url": pct_path(&pdf_c), "thread": "bot_th"})).await;
+    assert_eq!(r3["result"]["kind"], "download", "{r3}");
+    assert_eq!(r3["result"]["path"], pdf_c.to_string_lossy().as_ref(), "{r3}");
+
+    // Security refusals: .env inside project and file outside all projects -> kind: "none"
+    let r4 = ask(&mut ws, 4, "link.resolve", json!({"url": format!("file://{}/.env", proj_with_thread.to_string_lossy()), "thread": "bot_th"})).await;
+    assert_eq!(r4["result"]["kind"], "none", "{r4}");
+    let r5 = ask(&mut ws, 5, "link.resolve", json!({"url": format!("file://{}/secret.pdf", outside.to_string_lossy()), "thread": "bot_th"})).await;
+    assert_eq!(r5["result"]["kind"], "none", "{r5}");
+}

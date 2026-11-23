@@ -21,11 +21,17 @@ object FileFetch {
     /** A name safe to be a file's: no folder in it, never `.` or `..`. */
     fun safeName(n: String): String { val t = n.replace('/', '_').replace('\\', '_').trim(); return if (t.isEmpty() || t == "." || t == "..") "download" else t }
 
-    /** A path as a link carries it, without the line it points at (`a.rs:12`, `a.rs:3:4`, `a.rs#L4-L9`). */
-    fun bare(p: String): String = lineTail.replace(p, "")
+    /** A path as a link carries it, without `file://`, fragment, query, or the line it points at (`a.rs:12`, `a.rs:3:4`, `a.rs#L4-L9`). */
+    fun bare(p: String): String {
+        val s = fileUrlPath(p)?.substringBefore('#') ?: p.trim()
+        return lineTail.replace(s, "")
+    }
 
     /** The file of [files] a tapped path names, in the message's spelling. */
-    fun find(p: String, files: List<DFileLink>): DFileLink? { val b = bare(p); return files.firstOrNull { it.path == p || it.path == b } }
+    fun find(p: String, files: List<DFileLink>): DFileLink? {
+        val b = bare(p)
+        return files.firstOrNull { it.path == p || it.path == b || bare(it.path) == b }
+    }
 
     /** A thread of another machine (`<link>~<id>`) is named on the request; this hub's own thread is not. */
     fun far(thread: String) = thread.contains('~')

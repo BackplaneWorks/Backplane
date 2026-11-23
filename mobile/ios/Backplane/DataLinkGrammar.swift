@@ -7,7 +7,49 @@ import Foundation
 /// A path written in text, as a URL the text can carry: bppath:<percent-encoded path[:line]>
 let dPathScheme = "bppath"
 func dPathURL(_ p: String) -> URL? { URL(string: dPathScheme + ":" + (p.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: ":"))) ?? p)) }
-func dPathFrom(_ u: URL) -> String? { u.scheme == dPathScheme ? String(u.absoluteString.dropFirst(dPathScheme.count + 1)).removingPercentEncoding : nil }
+func dPathFrom(_ u: URL) -> String? {
+    if u.scheme == dPathScheme { return String(u.absoluteString.dropFirst(dPathScheme.count + 1)).removingPercentEncoding }
+    if u.scheme?.lowercased() == "file" { return dFileURLPath(u.absoluteString) }
+    return nil
+}
+
+/// Decodes a `file://` URL into a hub filesystem path (preserving `#L<line>` anchors, stripping other fragments/queries and `localhost`).
+func dFileURLPath(_ s: String) -> String? {
+    let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard t.count >= 7, t.prefix(7).lowercased() == "file://" else { return nil }
+    var rest = String(t.dropFirst(7))
+    if rest.hasPrefix("localhost/") { rest = String(rest.dropFirst("localhost".count)) }
+    var anchor = ""
+    if let hash = rest.firstIndex(of: "#") {
+        let frag = String(rest[rest.index(after: hash)...])
+        rest = String(rest[..<hash])
+        if let r = frag.range(of: "^L\\d{1,6}(?:-L?\\d{1,6})?$", options: .regularExpression) {
+            anchor = "#" + String(frag[r])
+        }
+    }
+    if let q = rest.firstIndex(of: "?") { rest = String(rest[..<q]) }
+    var decoded = rest.removingPercentEncoding ?? rest
+    if decoded.range(of: "^/[A-Za-z]:/", options: .regularExpression) != nil { decoded = String(decoded.dropFirst()) }
+    let isWinAbs = decoded.range(of: "^[A-Za-z]:/", options: .regularExpression) != nil
+    guard !decoded.isEmpty, decoded.hasPrefix("/") || decoded.hasPrefix("~/") || isWinAbs else { return nil }
+    return decoded + anchor
+}
+
+/// Converts a markdown link destination into a URL (`bppath:` for `file://` and hub paths, otherwise a web/app URL).
+func dLinkURL(_ raw: String) -> URL? {
+    let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+    var url: String
+    if trimmed.hasPrefix("<"), let gt = trimmed.dropFirst().firstIndex(of: ">") {
+        url = String(trimmed[trimmed.index(after: trimmed.startIndex)..<gt])
+    } else {
+        url = trimmed
+        if let sp = url.firstIndex(of: " ") { url = String(url[..<sp]) }
+        url = url.trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
+    }
+    if let p = dFileURLPath(url) { return dPathURL(p) }
+    if dIsPathText(url) { return dPathURL(url) }
+    return URL(string: url) ?? URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
+}
 
 private func rx(_ p: String) -> NSRegularExpression { try! NSRegularExpression(pattern: p) }
 private let reEmail = rx("^[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}$")
@@ -70,17 +112,24 @@ func dLinkRuns(_ text: String) -> [(text: String, url: URL?)] {
     flush(); return out
 }
 
-/// An http(s):// or backplane:// address that starts at s[i], to the end of its characters (trailing marks and an unmatched ) stay out).
+/// An http(s)://, backplane:// or file:// address that starts at s[i], to the end of its characters (trailing marks and an unmatched ) stay out).
 func dWebLink(_ s: [Character], _ i: Int) -> (end: Int, url: URL)? {
     if i > 0, s[i - 1].isLetter || s[i - 1].isNumber { return nil }
-    var hit = false
-    for p in ["http://", "https://", "backplane://"] where i + p.count <= s.count && String(s[i..<i + p.count]) == p { hit = true }
-    guard hit else { return nil }
+    let prefix = i + 8 <= s.count ? String(s[i..<i + 8]).lowercased() : String(s[i...]).lowercased()
+    let isFile = prefix.hasPrefix("file://")
+    let isWeb = prefix.hasPrefix("http://") || prefix.hasPrefix("https://")
+    let isBp = i + 12 <= s.count && String(s[i..<i + 12]) == "backplane://"
+    guard isFile || isWeb || isBp else { return nil }
     var e = i; while e < s.count, !s[e].isWhitespace, !"<>\"'".contains(s[e]) { e += 1 }
     while e > i, ".,;:!?)]}*_".contains(s[e - 1]) {
         if s[e - 1] == ")" { let seg = s[i..<e]; if seg.filter({ $0 == "(" }).count >= seg.filter({ $0 == ")" }).count { break } }
         e -= 1
     }
-    guard let u = URL(string: String(s[i..<e])) else { return nil }
+    let raw = String(s[i..<e])
+    if isFile {
+        guard let p = dFileURLPath(raw), let u = dPathURL(p) else { return nil }
+        return (e, u)
+    }
+    guard let u = URL(string: raw) else { return nil }
     return (e, u)
 }

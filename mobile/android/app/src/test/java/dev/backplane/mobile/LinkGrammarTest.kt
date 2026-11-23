@@ -29,4 +29,16 @@ class LinkGrammarTest {
         assertEquals(listOf("backplane://thread/lab~t9|backplane://thread/lab~t9"), kinds("(backplane://thread/lab~t9)"))
         assertEquals(listOf("backplane://conv/room%3Aabc|backplane://conv/room%3Aabc"), kinds("backplane://conv/room%3Aabc"))
     }
+    @Test fun file_urls() {
+        assertEquals("/home/user/proj/docs/Parts List.pdf", fileUrlPath("file:///home/user/proj/docs/Parts%20List.pdf"))
+        assertEquals("/home/user/proj/docs/Spec Sheet.pdf", fileUrlPath("file://localhost/home/user/proj/docs/Spec%20Sheet.pdf#page=2"))
+        assertEquals("/home/user/proj/src/main.rs#L40-L50", fileUrlPath("file:///home/user/proj/src/main.rs#L40-L50"))
+        assertEquals("/home/user/proj/docs/Parts List.pdf", pathOf("file:///home/user/proj/docs/Parts%20List.pdf"))
+        assertEquals("bppath:/home/user/proj/docs/My Doc (Final).pdf", linkTargetUrl("file:///home/user/proj/docs/My%20Doc%20(Final).pdf"))
+        assertEquals("bppath:/home/user/proj/docs/Parts List.pdf", linkTargetUrl("<file:///home/user/proj/docs/Parts List.pdf>"))
+        assertEquals(
+            listOf("bppath:/home/user/proj/docs/Parts List.pdf|file:///home/user/proj/docs/Parts%20List.pdf"),
+            kinds("see file:///home/user/proj/docs/Parts%20List.pdf now"),
+        )
+    }
 }

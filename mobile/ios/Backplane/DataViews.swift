@@ -236,6 +236,7 @@ struct DataThreadsView: View {
         .navigationDestination(for: DSwarmRoute.self) { DataSwarmView(client: client, route: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
+            else if !r.file.isEmpty { DataViewerView(client: client, thread: DThread.stub(id: r.id, title: (r.file as NSString).lastPathComponent), openFile: r.file, line: r.line) }
             else { DLoading(text: Tr.t(client.conn == .online ? "Loading the thread…" : "Connecting to the hub…")) } // never a blank page while the thread list comes
         }
         .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if let sub = DSettingsPage(rawValue: p.name) { DataSettingsPageView(client: client, page: sub) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else if p.name == "mcp" { DataMcpView(client: client) } else { DataImprovementsView(client: client) } }

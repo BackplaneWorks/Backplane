@@ -143,9 +143,9 @@ object MdLinks {
     var thread: String = ""
     fun open(url: String) {
         val c = ctx
-        val scheme = url.substringBefore(':', "")
+        val scheme = url.substringBefore(':', "").lowercase()
         when {
-            url.startsWith(PATH_SCHEME) || scheme == "backplane" || scheme == BuildConfig.URL_SCHEME -> DataClient.openLink(url, thread)
+            url.startsWith(PATH_SCHEME) || scheme == "backplane" || scheme == BuildConfig.URL_SCHEME.lowercase() || scheme == "file" -> DataClient.openLink(url, thread)
             scheme == "http" || scheme == "https" || scheme == "mailto" -> c?.let { runCatching { it.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
             scheme == "tel" -> c?.let { runCatching { it.startActivity(android.content.Intent(android.content.Intent.ACTION_DIAL, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
         }
@@ -203,7 +203,8 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int, cx:
             if (e > 0) {
                 val inner = s.substring(i + n, e).trim('`').let { if (it.startsWith(" ") && it.endsWith(" ") && it.isNotBlank()) it.trim() else it }
                 val code: AnnotatedString.Builder.() -> Unit = { withStyle(SpanStyle(fontFamily = BpMono, color = p.code, background = p.codeBg, fontSize = 12.5.sp)) { append(inner) } }
-                if (isPathText(inner)) link(pathLink(inner), p) { code() } else code()
+                val codeTarget = fileUrlPath(inner)?.let { pathLink(it) } ?: if (isPathText(inner)) pathLink(inner) else null
+                if (codeTarget != null) link(codeTarget, p) { code() } else code()
                 cx?.look?.inline(inner)?.let { piece -> appendInlineContent("cp${cx.pieces.size}", " "); cx.pieces.add(piece) }
                 i = e + n; continue
             }
@@ -217,7 +218,7 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int, cx:
                 var pd = 0; var k = close + 1; var end = -1
                 while (k < s.length) { if (s[k] == '(') pd++ else if (s[k] == ')') { pd--; if (pd == 0) { end = k; break } }; k++ }
                 if (end > 0) {
-                    val url = s.substring(close + 2, end).trim().removePrefix("<").substringBefore(' ').removeSuffix(">").let { if (isPathText(it)) pathLink(it) else it }
+                    val url = linkTargetUrl(s.substring(close + 2, end))
                     val label = s.substring(st + 1, close)
                     link(url, p) { if (c == '!') append(label.ifEmpty { url }) else inl(label, p, depth + 1, cx) }
                     i = end + 1; continue

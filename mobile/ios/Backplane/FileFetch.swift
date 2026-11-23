@@ -36,10 +36,24 @@ enum FileFetch {
         if isShare(route) { guard shareRoute(route) != nil else { return nil }; c.percentEncodedPath = route } else { c.path = route }
         return c.url
     }
-    /// A path as a link carries it, without the line it points at (`a.rs:12`, `a.rs:3:4`, `a.rs#L4-L9`).
-    static func bare(_ p: String) -> String { lineTail.stringByReplacingMatches(in: p, range: whole(p), withTemplate: "") }
+    /// A path as a link carries it, without `file://`, fragment, query, or the line it points at (`a.rs:12`, `a.rs:3:4`, `a.rs#L4-L9`).
+    static func bare(_ p: String) -> String {
+        var s = p.trimmingCharacters(in: .whitespaces)
+        if s.count >= 7, s.prefix(7).lowercased() == "file://" {
+            var rest = String(s.dropFirst(7))
+            if rest.hasPrefix("localhost/") { rest = String(rest.dropFirst("localhost".count)) }
+            if let hash = rest.firstIndex(of: "#") { rest = String(rest[..<hash]) }
+            if let q = rest.firstIndex(of: "?") { rest = String(rest[..<q]) }
+            s = rest.removingPercentEncoding ?? rest
+            if s.range(of: "^/[A-Za-z]:/", options: .regularExpression) != nil { s = String(s.dropFirst()) }
+        }
+        return lineTail.stringByReplacingMatches(in: s, range: whole(s), withTemplate: "")
+    }
     /// The file of `files` a tapped path names, in the message's spelling.
-    static func find(_ p: String, in files: [DFileLink]) -> DFileLink? { let b = bare(p); return files.first { $0.path == p || $0.path == b } }
+    static func find(_ p: String, in files: [DFileLink]) -> DFileLink? {
+        let b = bare(p)
+        return files.first { $0.path == p || $0.path == b || bare($0.path) == b }
+    }
     /// A thread of another machine (`<link>~<id>`) is named on the request; this hub's own thread is not.
     static func far(_ thread: String) -> Bool { thread.contains("~") }
     /// `/file`'s query.
