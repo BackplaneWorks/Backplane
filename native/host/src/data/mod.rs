@@ -281,7 +281,8 @@ fn far_entries(f: &Arc<dyn crate::api::FarView>, th: &str, p: &Value, bot: bool)
     rows.sort_by_key(|r| r.ord);
     let backend = if bot { let o = oldest_ord(&page.rows); backend_of(&page.rows, if o > 1 { f.page(th, o, 32).map(|p| p.rows).unwrap_or_default() } else { vec![] }) } else { HashSet::new() };
     let mut noise = crate::present::thread::Noise::default();
-    let out: Vec<Value> = rows.iter().filter(|r| noise.shown(r.kind == "msg", &r.role, &r.akind, &r.text)).filter_map(|r| row_entry_hid(r, bot, &backend)).collect();
+    let models_cat = std::cell::OnceCell::new();
+    let out: Vec<Value> = rows.iter().filter(|r| noise.shown(r.kind == "msg", &r.role, &r.akind, &r.text)).filter_map(|r| row_entry_hid_with(r, bot, &backend, &models_cat)).collect();
     let more = page.below > 0 || page.rows.iter().map(|r| r.ord).collect::<HashSet<_>>().len() > ids.len();
     let next = if more { rows.first().map(|r| json!(r.ord.to_string())).unwrap_or(Value::Null) } else { Value::Null };
     let title = rows.iter().find(|r| r.kind == "msg" && r.role == "user").map(|r| clip(&shown_text(&r.text), 60)).unwrap_or_default();
@@ -308,6 +309,10 @@ pub(crate) fn far_bot(hub: &Hub, th: &str) -> bool { hub.mirrors().shown(|far| m
 fn row_entry(r: &crate::model::Row, bot: bool) -> Option<Value> { row_entry_hid(r, bot, &HashSet::new()) }
 /// `backend`: the replies of turns that were not the person's (`present::thread::backend_replies`), agentOnly in a bot's conversation too
 fn row_entry_hid(r: &crate::model::Row, bot: bool, backend: &HashSet<String>) -> Option<Value> {
+    row_entry_hid_with(r, bot, backend, &std::cell::OnceCell::new())
+}
+/// `backend`: the replies of turns that were not the person's (`present::thread::backend_replies`), agentOnly in a bot's conversation too
+fn row_entry_hid_with(r: &crate::model::Row, bot: bool, backend: &HashSet<String>, catalog: &std::cell::OnceCell<Value>) -> Option<Value> {
     let at = ms(r.at);
     if r.kind == "msg" {
         let kind = match r.role.as_str() { "user" => "user", "assistant" => "assistant", _ => "note" };
@@ -315,8 +320,12 @@ fn row_entry_hid(r: &crate::model::Row, bot: bool, backend: &HashSet<String>) ->
         let mut en = json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { crate::settings::order::pay_shown(&r.text) },"at":at});
         // a reply (`<in_reply_to>` block, bots/reply.rs): its body as the text and the message it answers, as the desktop draws it (present/thread.rs)
         if let Some(v) = r.akind.strip_prefix("voice").and_then(|j| serde_json::from_str::<Value>(j).ok()) { en["voice"] = v }
-        if kind == "user" { if let Some((to, quote, body)) = crate::bots::reply::of(&r.text) {
-            en["text"] = json!(shown_text(&body)); en["replyTo"] = json!({"id": to, "quote": quote.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); } }
+        if kind == "user" {
+            if let Some((to, quote, body)) = crate::bots::reply::of(&r.text) {
+                en["text"] = json!(shown_text(&body)); en["replyTo"] = json!({"id": to, "quote": quote.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")});
+            }
+            with_refs_catalog(&mut en, catalog);
+        }
         if crate::present::thread::hidden(bot, &r.id, &r.role, &r.text) || (bot && backend.contains(&r.id)) { en["agentOnly"] = json!(true) }
         if kind == "assistant" { with_images(&mut en, &r.text); with_files(&mut en, &r.text); with_copy(&mut en) }
         return Some(en);
@@ -346,6 +355,27 @@ fn act_entry(thread: &str, id: &str, role: &str, akind: &str, text: &str, at: u6
             if a["folds"] == true { n["folds"] = json!(true) } n }
     })
 }
+/// Resolved `&provider/model` references in a user entry's shown text (same shape as `present::thread`: `{word, kind, id, label}`).
+fn with_refs_with(en: &mut Value, models_json: Option<&str>) {
+    let text = en["text"].as_str().unwrap_or("");
+    if !text.contains('&') { return }
+    let refs = match models_json {
+        Some(raw) => crate::session::composer::mention::model_refs_in_with(text, raw),
+        None => crate::session::composer::mention::model_refs_in(text),
+    };
+    if !refs.is_empty() { en["refs"] = Value::Array(refs); }
+}
+
+fn with_refs_catalog(en: &mut Value, catalog: &std::cell::OnceCell<Value>) {
+    let text = en["text"].as_str().unwrap_or("");
+    if !text.contains('&') { return }
+    let all = catalog.get_or_init(crate::session::composer::mention::models_catalog);
+    let refs = crate::session::composer::mention::model_refs_in_catalog(text, all);
+    if !refs.is_empty() { en["refs"] = Value::Array(refs); }
+}
+
+fn with_refs(en: &mut Value) { with_refs_with(en, None); }
+
 /// What of a message there is to copy (feature `copy`, md/copy.rs `spans`): `copy: [{text, cmd}]`, each fenced block and each inline code span with a
 /// kind, in order; left out when there is none. A phone that draws the Markdown itself gives a span a copy button when its text is listed.
 pub(crate) fn with_copy(en: &mut Value) {
@@ -379,7 +409,8 @@ async fn entries(hub: &Hub, p: &Value) -> Result<Value, Value> {
     let mut noise = crate::present::thread::Noise::default();
     let quiet: HashSet<&str> = all.iter().filter(|r| !noise.shown(r.kind == "msg", &r.role, &r.akind, &r.text)).map(|r| r.id.as_str()).collect();
     let points = crate::present::thread::restore_points(all.iter().map(|r| (r.id.as_str(), r.kind == "msg", r.role.as_str(), r.akind.as_str(), r.text.as_str())));
-    let mut out: Vec<Value> = rows.iter().filter(|r| !quiet.contains(r.id.as_str())).filter_map(|r| { let mut e = row_entry_hid(r, bot, &backend)?;
+    let models_cat = std::cell::OnceCell::new();
+    let mut out: Vec<Value> = rows.iter().filter(|r| !quiet.contains(r.id.as_str())).filter_map(|r| { let mut e = row_entry_hid_with(r, bot, &backend, &models_cat)?;
         // a user message's images are on its log line
         if r.kind == "msg" && r.role == "user" { if let Some(a) = attachments_of(hub, r.seq as usize - 1, &r.id) { e["attachments"] = a } if let Some(p) = points.get(&r.id) { e["restore"] = p.clone() } }
         Some(e) }).collect();
@@ -503,6 +534,7 @@ async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, cl
     if voice.is_object() { p["voice"] = voice.clone() } // dictated (voice/mark.rs): the agent is told
     rpc(hub, c, "turn.start", p).await?;
     let mut e = json!({"id":msg,"kind":"user","text":body,"at":now_ms()});
+    with_refs(&mut e);
     if let Some((_, r)) = &rto { e["replyTo"] = r.clone() }
     if voice.is_object() { e["voice"] = voice.clone() }
     if !meta.is_empty() { e["attachments"] = json!(meta) }
@@ -775,12 +807,12 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 if crate::present::thread::hidden(bot, id, role, s(&e, "text")) || backend { en["agentOnly"] = json!(true) }
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
                 if kind == "assistant" { with_images(&mut en, s(&e, "text")); with_files(&mut en, s(&e, "text")); with_copy(&mut en) }
-                if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
+                if kind == "user" { with_refs(&mut en); if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }
                 let replaced = if kind == "assistant" { subs.live.get_mut(&th).and_then(|l| l.finished()) } else { None };
                 if let Some(n) = replaced { en["replaces"] = json!(Streams::id(&th, n)) }
                 if replaced.is_some() || kind != "assistant" || !s(&e, "text").trim().is_empty() { entry = Some(en) }
             }
-            "MessageAttached" => { let id = s(&e, "msg"); let mut en = json!({"id":id,"kind":"user","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"attachments":e["attachments"]}); if let Some(x) = recalled(id) { en["text"] = x["text"].clone(); if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } entry = Some(en) }
+            "MessageAttached" => { let id = s(&e, "msg"); let mut en = json!({"id":id,"kind":"user","text":"","at":ms(e["at"].as_u64().unwrap_or(0)),"attachments":e["attachments"]}); if let Some(x) = recalled(id) { en["text"] = x["text"].clone(); if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } with_refs(&mut en); entry = Some(en) }
             "ActivityLogged" => entry = {
                 let (tone, kind, sum) = (s(&e, "tone"), s(&e, "kind"), s(&e, "summary"));
                 if crate::present::thread::snap_line(sum).is_some() { restore_push(hub, &th, s(&e, "act")).await } // the turn's snapshot: no row; its message gains Restore to before this

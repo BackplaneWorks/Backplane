@@ -9,8 +9,23 @@ const ROOT = resolve(WEB_DIR, "..");
 const SRC_DIR = join(WEB_DIR, "src");
 const DIST_DIR = join(WEB_DIR, "dist");
 const STYLE_SRC = join(ROOT, "assets/web/style.css");
+const PROVIDERS_DIR = join(ROOT, "assets/providers");
 const I18N_DIR = join(ROOT, "i18n");
 const CHECK_ONLY = process.argv.includes("--check");
+const PROVIDER_MARK_NAMES = ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"];
+
+function buildProviderMarksBundle(): string {
+  const marks: Record<string, { viewBox: string; d: string }> = {};
+  for (const name of PROVIDER_MARK_NAMES) {
+    const p = join(PROVIDERS_DIR, `${name}.svg`);
+    if (!existsSync(p)) continue;
+    const svg = readFileSync(p, "utf8");
+    const vb = /\bviewBox="([^"]+)"/.exec(svg)?.[1] ?? "0 0 24 24";
+    const d = /<path\b[^>]*\bd="([^"]+)"/.exec(svg)?.[1] ?? "";
+    if (d) marks[name] = { viewBox: vb, d };
+  }
+  return `export const PROVIDER_MARKS: Record<string, { viewBox: string; d: string }> = ${JSON.stringify(marks)};\n`;
+}
 
 function walkFiles(dir: string): string[] {
   if (!existsSync(dir)) return [];
@@ -176,6 +191,21 @@ async function buildInto(outDir: string): Promise<void> {
     },
   };
 
+  const providerMarksSource = buildProviderMarksBundle();
+  const providerMarksPlugin: Bun.BunPlugin = {
+    name: "backplane-provider-marks",
+    setup(build) {
+      build.onResolve({ filter: /^virtual:provider-marks$/ }, () => ({
+        path: "virtual:provider-marks",
+        namespace: "bp-provider-marks",
+      }));
+      build.onLoad({ filter: /.*/, namespace: "bp-provider-marks" }, () => ({
+        contents: providerMarksSource,
+        loader: "ts",
+      }));
+    },
+  };
+
   const viewerPanePath = join(SRC_DIR, "viewers/viewer-pane.ts");
   const viewerPlugin: Bun.BunPlugin = {
     name: "backplane-viewer-pane",
@@ -241,7 +271,7 @@ async function buildInto(outDir: string): Promise<void> {
     sourcemap: "none",
     splitting: false,
     naming: "[name].[ext]",
-    plugins: [i18nPlugin, viewerPlugin, xtermCspPlugin],
+    plugins: [i18nPlugin, providerMarksPlugin, viewerPlugin, xtermCspPlugin],
   });
   if (!res.success) {
     for (const log of res.logs) console.error(log);
@@ -265,6 +295,7 @@ async function buildInto(outDir: string): Promise<void> {
     ...walkFiles(SRC_DIR),
     ...walkFiles(join(WEB_DIR, "vendor")),
     join(WEB_DIR, "build.ts"),
+    ...PROVIDER_MARK_NAMES.map((n) => join(PROVIDERS_DIR, `${n}.svg`)),
     join(ROOT, "assets/web/favicon.svg"),
     join(ROOT, "assets/web/favicon-light.svg"),
   ]) {

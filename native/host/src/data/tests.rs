@@ -1552,3 +1552,17 @@ fn probed_models(installed: &[&str]) -> Value {
     let empty_create = ask(&mut ws, 3, "thread.create", json!({"project":"p1"})).await;
     assert_eq!(empty_create["ok"], true, "opening an empty thread remains allowed so user sees proactive banner: {empty_create}");
 }
+
+#[test] fn data_user_message_carries_resolved_model_refs_only() {
+    let models_json = r#"{"claude":[{"value":"opus","label":"Opus 5.5","ok":true,"why":""},{"value":"claude-fable-5-2[1m]","label":"Fable 5.2","ok":true,"why":""}],"antigravity":[{"value":"gemini-4-neon","label":"Gemini 4 Neon","ok":true,"why":""}]}"#;
+    let mut en = json!({"id":"m1","kind":"user","text":"try &antigravity/gemini-4-neon, &claude/claude-fable-5-2[1m] and &provider/model","at":1});
+    with_refs_with(&mut en, Some(models_json));
+    assert_eq!(en["refs"], json!([
+        {"word":"&antigravity/gemini-4-neon","kind":"model","id":"","label":"Gemini 4 Neon"},
+        {"word":"&claude/claude-fable-5-2[1m]","kind":"model","id":"","label":"Fable 5.2"}
+    ]));
+
+    let mut none = json!({"id":"m2","kind":"user","text":"try &provider/model only","at":2});
+    with_refs_with(&mut none, Some(models_json));
+    assert!(none.get("refs").is_none(), "unresolved model ref must not attach refs: {none}");
+}

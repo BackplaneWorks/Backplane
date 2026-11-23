@@ -46,23 +46,39 @@ pub(crate) fn parse_d(d: &str) -> Vec<Seg> {
     out
 }
 
-/// A provider's mark as path segments in its 24x24 viewBox (assets/providers/<provider>.svg, sources in its NOTICE.md), None for a provider without one.
-pub fn mark_path(provider: &str) -> Option<&'static [Seg]> {
+/// A provider's vector mark: its path segments and SVG `viewBox` (`[min_x, min_y, width, height]`).
+pub struct Mark { pub segs: Vec<Seg>, pub vb: [f32; 4] }
+
+fn view_box(svg: &str) -> [f32; 4] {
+    let Some(v) = attr(svg, "<svg", "viewBox") else { return [0.0, 0.0, 24.0, 24.0] };
+    let ns: Vec<f32> = v.split(|c: char| c.is_whitespace() || c == ',').filter(|t| !t.is_empty()).filter_map(|t| t.parse().ok()).collect();
+    if ns.len() == 4 && ns[2] > 0.0 && ns[3] > 0.0 { [ns[0], ns[1], ns[2], ns[3]] } else { [0.0, 0.0, 24.0, 24.0] }
+}
+
+/// A provider's mark (segments + `viewBox`, from `assets/providers/<provider>.svg`, sources in its NOTICE.md), None for a provider without one.
+pub fn mark_info(provider: &str) -> Option<&'static Mark> {
     macro_rules! marks { ($($name:literal),*) => {{
-        static CELLS: [std::sync::OnceLock<Vec<Seg>>; marks!(@n $($name),*)] = [const { std::sync::OnceLock::new() }; marks!(@n $($name),*)];
+        static CELLS: [std::sync::OnceLock<Mark>; marks!(@n $($name),*)] = [const { std::sync::OnceLock::new() }; marks!(@n $($name),*)];
         let svgs = [$(include_str!(concat!("../../../assets/providers/", $name, ".svg"))),*];
         let names = [$($name),*];
         let i = names.iter().position(|n| *n == provider)?;
-        Some(CELLS[i].get_or_init(|| parse_d(attr(svgs[i], "<path", "d").unwrap_or(""))).as_slice())
+        Some(CELLS[i].get_or_init(|| Mark { segs: parse_d(attr(svgs[i], "<path", "d").unwrap_or("")), vb: view_box(svgs[i]) }))
     }}; (@n $($name:literal),*) => { [$($name),*].len() } }
     marks!("claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp")
 }
+
+/// A provider's mark as path segments (`mark_info`), None for a provider without one.
+pub fn mark_path(provider: &str) -> Option<&'static [Seg]> { mark_info(provider).map(|m| m.segs.as_slice()) }
+
 /// The mark drawn plain in `color` in a `size` px box (one paint, no repaint loop).
-pub fn mark(segs: &'static [Seg], size: f32, color: u32) -> impl IntoElement {
+pub fn mark(m: &'static Mark, size: f32, color: u32) -> impl IntoElement {
     canvas(|_, _, _| (), move |b: Bounds<Pixels>, _, window: &mut Window, _| {
-        let (o, s) = (b.origin, size / 24.0);
-        let mut pb = PathBuilder::fill();
-        trace(&mut pb, segs, 1.0, |x, y| point(o.x + px(x * s), o.y + px(y * s)));
+        let [vx, vy, vw, vh] = m.vb;
+        let s = size / vw.max(vh).max(1.0);
+        let (ox, oy) = ((size - vw * s) * 0.5 - vx * s, (size - vh * s) * 0.5 - vy * s);
+        let o = b.origin;
+        let mut pb = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::default().with_tolerance(0.02)));
+        trace(&mut pb, &m.segs, s, |x, y| point(o.x + px(ox + x * s), o.y + px(oy + y * s)));
         if let Ok(path) = pb.build() { window.paint_path(path, rgb(color)); }
     }).size(px(size)).flex_shrink_0()
 }
@@ -476,5 +492,26 @@ mod cjk_font_tests {
         }
         assert!(std::fs::read_to_string(dir.join("OFL.txt")).unwrap().contains("SIL OPEN FONT LICENSE"), "OFL.txt holds the licence");
         #[cfg(target_os = "linux")] assert_eq!(super::CJK_FACES.len(), 2, "the Linux client compiles both faces in");
+    }
+}
+
+#[cfg(test)]
+mod provider_mark_tests {
+    use super::*;
+    use core::prelude::v1::test;
+    #[test] fn codex_uses_openai_viewbox_and_all_provider_marks_build_paths() {
+        let codex = mark_info("codex").expect("codex mark");
+        assert_eq!(codex.vb, [0.0, 0.0, 256.0, 260.0]);
+        assert!(codex.segs.iter().any(|s| matches!(s, Seg::A(..))), "codex mark includes arc segments");
+        for p in ["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"] {
+            let m = mark_info(p).unwrap_or_else(|| panic!("missing mark {p}"));
+            assert!(!m.segs.is_empty(), "{p} has segments");
+            let [vx, vy, vw, vh] = m.vb;
+            let s = 16.0 / vw.max(vh).max(1.0);
+            let (ox, oy) = ((16.0 - vw * s) * 0.5 - vx * s, (16.0 - vh * s) * 0.5 - vy * s);
+            let mut pb = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::default().with_tolerance(0.02)));
+            trace(&mut pb, &m.segs, s, |x, y| point(px(ox + x * s), px(oy + y * s)));
+            assert!(pb.build().is_ok(), "{p} tessellates cleanly");
+        }
     }
 }

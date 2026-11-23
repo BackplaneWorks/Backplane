@@ -279,9 +279,17 @@ fn chip(light: bool, label: String) -> Div {
     div().px_3().py_1().flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).whitespace_nowrap().child(label)
 }
 
-/// A message's references as little cards under it: a bot, thread, project or room goes there on a click; a model is only named.
-fn ref_cards(cx: &mut Context<Backplane>, light: bool, mid: &str, refs: &Value) -> Option<Div> {
-    let list = refs.as_array().filter(|r| !r.is_empty())?;
+/// References kept as cards under a message (`bot`, `thread`, `project`, `room`, `skill`, `machine`, plus any model ref that was not rendered inline).
+fn card_refs<'a>(refs: &'a Value, inline_models: &std::collections::HashSet<String>) -> Vec<&'a Value> {
+    refs.as_array().into_iter().flatten().filter(|r| {
+        !(r["kind"].as_str() == Some("model") && r["word"].as_str().is_some_and(|w| inline_models.contains(w)))
+    }).collect()
+}
+
+/// A message's references as little cards under it: a bot, thread, project or room goes there on a click; any non-inline model ref is named too.
+fn ref_cards(cx: &mut Context<Backplane>, light: bool, mid: &str, refs: &Value, inline_models: &std::collections::HashSet<String>) -> Option<Div> {
+    let list = card_refs(refs, inline_models);
+    if list.is_empty() { return None }
     let c = |n: &str| theme::color(light, n);
     let mut row = div().flex().flex_wrap().gap_2();
     for (i, r) in list.iter().enumerate() {
@@ -458,12 +466,23 @@ impl Backplane {
         let was_streamed = kind == "assistant" && !id.starts_with('@') && !self.screens.streamed.is_empty() && { let a: String = self.screens.streamed.trim().chars().take(60).collect(); text.trim_start().starts_with(&a) };
         let row: AnyElement = match kind {
             "user" => {
-                let wide = crate::screens::timeline::bubble_full_width(&text, &e["attachments"]);
-                let ref_words: Vec<String> = e["refs"].as_array().into_iter().flatten().map(|r| string(r, "word")).collect();
-                let body = crate::screens::timeline::user_text(&reg, light, &text, &ref_words);
+                let mut model_chips = Vec::new();
+                let mut other_ref_words = Vec::new();
+                for r in e["refs"].as_array().into_iter().flatten() {
+                    let word = string(r, "word");
+                    if word.is_empty() { continue }
+                    if r["kind"].as_str() == Some("model") {
+                        let label = string(r, "label");
+                        if !label.is_empty() { model_chips.push(crate::screens::md::ModelChip { word, label }); }
+                    } else {
+                        other_ref_words.push(word);
+                    }
+                }
+                let (body, inline_models) = crate::screens::timeline::user_text_with_models(&reg, light, &text, &other_ref_words, &model_chips);
+                let wide = crate::screens::timeline::bubble_full_width_with_chips(&text, &e["attachments"], !inline_models.is_empty());
                 let atts = crate::screens::timeline::attachments(cx, light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
                 let tools = msg_tools(cx, light, &id, &text);
-                let cards = ref_cards(cx, light, &id, &e["refs"]);
+                let cards = ref_cards(cx, light, &id, &e["refs"], &inline_models);
                 // r05: a follow-up the agent has not read yet: its text a step dimmer, its time ("not read yet · 06:13") in the queued colour
                 let unread = e["unread"] == true;
                 let spoken = crate::screens::voice::bubble_mark(cx, light, &self.screens.voice, &id, &e["voice"]);
@@ -1708,5 +1727,22 @@ mod home_tests {
         /* i18n-ok: test */ assert_eq!(mv, Some(("Moving home to laptop: copying".into(), false)));
         let fail = home_away_line(&json!({"kind":"peer","name":"desktop","online":true,"moving":{"to":"laptop","state":"failed","note":"disk full"}}));
         /* i18n-ok: test */ assert_eq!(fail, Some(("Home move failed: disk full".into(), true)));
+    }
+
+    #[test]
+    fn card_refs_excludes_inline_model_cards_and_keeps_others() {
+        let refs = json!([
+            {"word": "&antigravity/gemini-4-neon", "kind": "model", "id": "", "label": "Gemini 4 Neon"},
+            {"word": "&claude/unmatched", "kind": "model", "id": "", "label": "Unmatched"},
+            {"word": "@designer", "kind": "bot", "id": "h|b1", "label": "Designer"},
+            {"word": ">fix-bug", "kind": "thread", "id": "h|t1", "label": "Fix bug"}
+        ]);
+        let inline: std::collections::HashSet<String> = ["&antigravity/gemini-4-neon".to_string()].into_iter().collect();
+        let kept = super::card_refs(&refs, &inline);
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0]["word"], "&claude/unmatched");
+        assert_eq!(kept[1]["kind"], "bot");
+        assert_eq!(kept[2]["kind"], "thread");
+        assert!(super::card_refs(&json!([{"word":"&claude/opus","kind":"model","id":"","label":"Opus"}]), &["&claude/opus".to_string()].into_iter().collect()).is_empty());
     }
 }

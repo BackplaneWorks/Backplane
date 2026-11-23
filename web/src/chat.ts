@@ -6,6 +6,7 @@ import { t, trs } from "./i18n";
 import { renderMarkdown } from "./md";
 import type { NoProviderNotice } from "./provider-notice";
 import type { ThreadItem } from "./sidebar";
+import { splitUserModelRefs, type MessageRef } from "./user-refs";
 
 export interface EntryTool { name: string; summary?: string; state?: string; }
 export interface EntryAsk {
@@ -37,6 +38,7 @@ export interface EntryItem {
   tool?: EntryTool;
   ask?: EntryAsk;
   replyTo?: { id: string; quote: string };
+  refs?: MessageRef[];
   images?: string[];
   attachments?: EntryAttachment[];
 }
@@ -96,6 +98,72 @@ function formatDuration(deltaMs: number): string {
   const m = Math.floor(secs / 60);
   const s = secs % 60;
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
+}
+
+function renderUserBody(text: string, refs?: MessageRef[]): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  const segs = splitUserModelRefs(text, refs);
+  const modelLbl = t("native.thread.model", "Model").toLowerCase();
+  for (const seg of segs) {
+    if (seg.kind === "text") {
+      frag.appendChild(document.createTextNode(seg.text));
+      continue;
+    }
+    const chip = document.createElement("span");
+    chip.className = "bp-ref-chip bp-ref-model";
+    chip.title = seg.word;
+    chip.setAttribute("data-ref-word", seg.word);
+
+    const sigil = document.createElement("span");
+    sigil.className = "bp-ref-sigil";
+    sigil.textContent = "&";
+
+    const label = document.createElement("span");
+    label.className = "bp-ref-label";
+    label.textContent = seg.label;
+
+    const kind = document.createElement("span");
+    kind.className = "bp-ref-kind";
+    kind.textContent = modelLbl;
+
+    chip.append(sigil, label, kind);
+    frag.appendChild(chip);
+  }
+  return frag;
+}
+
+function attachTimelineCopyHandler(scrollEl: HTMLElement): void {
+  scrollEl.addEventListener("copy", (e) => {
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    if (!scrollEl.contains(range.commonAncestorContainer)) return;
+    const ancestor = range.commonAncestorContainer;
+    const el = ancestor.nodeType === Node.ELEMENT_NODE ? (ancestor as Element) : ancestor.parentElement;
+    const singleChip = el?.closest(".bp-ref-chip[data-ref-word]");
+    const singleWord = singleChip?.getAttribute("data-ref-word");
+    let textOut: string;
+    if (singleWord) {
+      textOut = singleWord;
+    } else {
+      const frag = range.cloneContents();
+      const chips = frag.querySelectorAll(".bp-ref-chip[data-ref-word]");
+      if (chips.length === 0) return;
+      for (const chip of chips) {
+        const raw = chip.getAttribute("data-ref-word") || chip.textContent || "";
+        chip.replaceWith(document.createTextNode(raw));
+      }
+      const entries = frag.querySelectorAll(".bp-entry");
+      for (let i = 1; i < entries.length; i++) {
+        entries[i].before(document.createTextNode("\n"));
+      }
+      textOut = frag.textContent ?? "";
+    }
+    if (e.clipboardData) {
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", textOut);
+    }
+  });
 }
 
 function isHiddenSystemNote(e: EntryItem): boolean {
@@ -183,6 +251,7 @@ export class ChatView {
     this.listEl = document.createElement("div");
     this.listEl.className = "bp-timeline-list";
 
+    attachTimelineCopyHandler(this.scrollEl);
     this.scrollEl.append(this.olderBtn, this.listEl);
     container.append(this.bannerEl, this.scrollEl);
   }
@@ -681,8 +750,11 @@ export class ChatView {
       if (hasBody || entry.live) {
         const body = document.createElement("div");
         body.className = "bp-entry-body";
-        if (entry.kind === "user") body.textContent = entry.text;
-        else body.appendChild(renderMarkdown(entry.text || ""));
+        if (entry.kind === "user") {
+          body.appendChild(renderUserBody(entry.text || "", entry.refs));
+        } else {
+          body.appendChild(renderMarkdown(entry.text || ""));
+        }
         if (entry.live) this.liveNodes.set(entry.id, body);
         row.appendChild(body);
       }

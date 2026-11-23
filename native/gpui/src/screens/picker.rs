@@ -266,7 +266,7 @@ pub fn mark(provider: &str) -> (u32, &'static str) {
 pub fn logo(provider: &str) -> AnyElement {
     let provider = match bare(provider) { "agy" => "antigravity", p => p };
     let (rgb_, letter) = mark(provider);
-    if let Some(segs) = crate::art::mark_path(provider) { return crate::art::mark(segs, 16., rgb_).into_any_element(); }
+    if let Some(m) = crate::art::mark_info(provider) { return crate::art::mark(m, 16., rgb_).into_any_element(); }
     div().w(px(16.)).h(px(16.)).flex_shrink_0().flex().items_center().justify_center().bg(rgb(rgb_)).text_color(rgb(0xffffff)).text_size(crate::scale::tpx(10.)).font_weight(FontWeight::BOLD).child(letter).into_any_element()
 }
 
