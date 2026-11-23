@@ -35,8 +35,13 @@ From a Linux checkout, with the Mac `hs-mac-mini` reachable through
   `-DDATA_APP`; `ADHOC=1` ad-hoc signs the Debug build so the keychain, which
   holds the pairing, works; `release` is an optimised build with
   `BP_MEASURE`).
-- `scripts/ios-archive.sh check|upload`: a no-signing Release device build to
-  see that it compiles, or an archive uploaded to TestFlight.
+- `scripts/ios-archive.sh version|check|upload`: print the resolved version synced
+  from the hub (`native/host/Cargo.toml` / release git tags; `MARKETING_VERSION`
+  or `BACKPLANE_VERSION` overrides), run a no-signing Release device build to
+  see that it compiles, or archive and upload to TestFlight. `mobile/ios/build.sh`
+  likewise syncs `MARKETING_VERSION` / `CFBundleShortVersionString` from the hub
+  version when run in a repo checkout (falling back to `project.pbxproj` when
+  run standalone without env overrides).
 
 Other `scripts/ios-*.sh` helpers (run, pair, shots, measure) exist; none is
 described here.
