@@ -356,7 +356,7 @@
    "name": "settings-import",
    "steps": [
     {
-     "click": "set-nav:import"
+     "click": "set-nav:setup"
     },
     {
      "wait": 900

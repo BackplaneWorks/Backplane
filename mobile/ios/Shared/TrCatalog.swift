@@ -2026,6 +2026,11 @@ home.move.failed	Home move failed	ホームの移動に失敗しました	No se 
 home.move.failed.note	Home move failed: {note}	ホームの移動に失敗しました: {note}	No se pudo mover el inicio: {note}
 home.machine	Home machine	ホームマシン	Máquina de inicio
 home.move.here	Make this machine the home	このマシンをホームにする	Hacer de esta máquina el inicio
+gpui.settings.group.general	General	一般	General
+gpui.settings.group.agents	Agents and tools	エージェントとツール	Agentes y herramientas
+gpui.settings.group.workspace	Workspace	ワークスペース	Espacio de trabajo
+gpui.settings.web.ui	Web UI	Web UI	Interfaz web
+gpui.settings.shared.files	Shared files	共有ファイル	Archivos compartidos
 gpui.imp.could.not.keep.this.draft	Could not keep this draft on this device. Retry.	この下書きをこの端末に保存できませんでした。再試行してください。	No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change	Describe the change…	変更内容を書いてください…	Describe el cambio…
 gpui.imp.describe.the.behavior.in.detail	Describe the behavior in detail: what you did and what you saw.	操作した内容と、そのとき見えたことを詳しく書いてください。	Describe el comportamiento en detalle: qué hiciste y qué viste.

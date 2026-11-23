@@ -63,7 +63,7 @@ What is in a 0.14 home:
 ## How it is started
 
 - **Setup:** the step "Bring your 0.14 projects across?" after "Where your data is kept". It appears only on a desktop that has 0.14 data. Count reads the old log, then Import, or Import with keys.
-- **Settings, Import from 0.14:** the same rows, at any time.
+- **Settings, Setup, Import from 0.14:** the same rows, at any time.
 - **RPC:** `import.v014` with `{op: "scan" | "run", secrets: bool}`. It answers at once, and progress and the result go to the hub info key `import.v014`, as JSON text. The last result is also the setting `import.v014.done`.
 - **HTTP**, with the home's token: `GET /import/0.14` returns what would come (or the last result), and `GET /import/0.14/run[?secrets=1]` imports and answers the result.
 - **Where it looks:** `BACKPLANE_IMPORT_FROM`, else each place in the table above that holds a 0.14 home, the one whose log was written last. A home under the temp folder (tests) looks only at the variable. A copy of a real log (`BACKPLANE_COPY=1`) imports nothing.

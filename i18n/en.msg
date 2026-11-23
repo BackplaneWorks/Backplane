@@ -1632,6 +1632,11 @@ home.move.failed = Home move failed
 home.move.failed.note = Home move failed: {note}
 home.machine = Home machine
 home.move.here = Make this machine the home
+gpui.settings.group.general = General
+gpui.settings.group.agents = Agents and tools
+gpui.settings.group.workspace = Workspace
+gpui.settings.web.ui = Web UI
+gpui.settings.shared.files = Shared files
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = Could not keep this draft on this device. Retry.

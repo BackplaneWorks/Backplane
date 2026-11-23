@@ -1655,6 +1655,11 @@ home.move.failed = ホームの移動に失敗しました
 home.move.failed.note = ホームの移動に失敗しました: {note}
 home.machine = ホームマシン
 home.move.here = このマシンをホームにする
+gpui.settings.group.general = 一般
+gpui.settings.group.agents = エージェントとツール
+gpui.settings.group.workspace = ワークスペース
+gpui.settings.web.ui = Web UI
+gpui.settings.shared.files = 共有ファイル
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = この下書きをこの端末に保存できませんでした。再試行してください。
