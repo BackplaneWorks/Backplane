@@ -2,9 +2,19 @@
 use sha2::{Digest, Sha256};
 use std::{io::{Read, Write}, net::{TcpListener, TcpStream, ToSocketAddrs}, sync::{atomic::{AtomicBool, Ordering::SeqCst}, Arc}, time::Duration};
 
+fn connect_any(addrs: &[std::net::SocketAddr], timeout: Duration) -> Option<TcpStream> {
+    let deadline = std::time::Instant::now() + timeout;
+    for a in addrs {
+        let left = deadline.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() { return None }
+        if let Ok(s) = TcpStream::connect_timeout(a, left) { return Some(s) }
+    }
+    None
+}
+
 pub fn call(addr: &str, method: &str, path: &str, token: &str, body: &str, timeout: Duration) -> Option<(u16, String)> {
-    let a = addr.to_socket_addrs().ok()?.next()?;
-    let mut s = TcpStream::connect_timeout(&a, timeout).ok()?;
+    let addrs: Vec<_> = addr.to_socket_addrs().ok()?.collect();
+    let mut s = connect_any(&addrs, timeout)?;
     s.set_read_timeout(Some(timeout)).ok()?; s.set_write_timeout(Some(timeout)).ok()?;
     let auth = if token.is_empty() { String::new() } else { format!("Authorization: Bearer {token}\r\n") };
     s.write_all(format!("{method} {path} HTTP/1.1\r\nHost: {addr}\r\n{auth}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).as_bytes()).ok()?;
@@ -111,4 +121,11 @@ mod tests {
         loop { match TcpListener::bind(&a) { Ok(_) => break, Err(e) => { assert!(std::time::Instant::now() < end, "the port is free for the hub again: {e}"); std::thread::sleep(Duration::from_millis(50)) } } }
     }
     #[test] fn nothing_listening_is_none_not_a_hang() { assert!(call("127.0.0.1:1", "GET", "/", "", "", Duration::from_millis(200)).is_none()); }
+    #[test] fn connect_any_falls_through_to_live_address() {
+        let dead = { let l = TcpListener::bind("127.0.0.1:0").unwrap(); l.local_addr().unwrap() };
+        let (a, _s) = start_on_a_free_port();
+        let live: std::net::SocketAddr = a.parse().unwrap();
+        assert!(connect_any(&[dead, live], Duration::from_secs(5)).is_some());
+        assert!(connect_any(&[dead], Duration::from_millis(200)).is_none());
+    }
 }

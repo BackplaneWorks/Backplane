@@ -178,6 +178,22 @@ impl SleepClock {
     pub fn waking(&self, awake_s: u64) -> bool { self.woke.map_or(false, |w| awake_s.saturating_sub(w) < WAKE_GRACE_S) }
 }
 
+/// Tracks whether the guard is currently in rescue mode so automatic retry loops alert once on entry,
+/// never re-alert on each retry (even though `one_run` transitions `state` through `"starting"`), and
+/// reset only on hub recovery or an explicit control request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RescueState { pub active: bool }
+impl RescueState {
+    /// Enter or stay in rescue. Returns `true` only on the first entry (when an alert should fire).
+    pub fn enter(&mut self) -> bool {
+        if self.active { return false }
+        self.active = true;
+        true
+    }
+    /// Leave rescue (hub came up healthy, or a control request reset the plan). Returns `true` if previously in rescue.
+    pub fn leave(&mut self) -> bool { std::mem::replace(&mut self.active, false) }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,5 +368,17 @@ mod tests {
         assert!(!proven(true, &json!({"status": "ok", "folding": 0}), false, 59, 60));
         assert!(proven(true, &json!({"status": "ok", "folding": 0}), false, 60, 60));
         assert!(!proven(true, &json!({"status": "ok", "folding": 0}), true, 120, 60));
+    }
+
+    #[test]
+    fn rescue_alerts_once_across_retries_until_recovery_or_reset() {
+        let mut r = RescueState::default();
+        assert!(!r.leave(), "not in rescue yet");
+        assert!(r.enter(), "first entry into rescue fires an alert");
+        assert!(!r.enter(), "subsequent automatic retries stay silent");
+        assert!(!r.enter(), "even across multiple retries");
+        assert!(r.leave(), "hub recovered or control request cleared rescue");
+        assert!(!r.leave(), "already left");
+        assert!(r.enter(), "a later rescue episode alerts again");
     }
 }

@@ -178,8 +178,9 @@ pub fn last_why(home: &Path) -> String {
     format!("{}: {}", last["what"].as_str().unwrap_or(""), last["did"].as_str().unwrap_or(""))
 }
 /// The newest incident still open: a record that `clears` an alert (the guard's "Disk has room again") closes it, and is no news itself.
-fn open_incident(s: &Value) -> Value {
-    let mut cleared: Vec<&str> = vec![];
+fn open_incident(s: &Value) -> Value { open_incident_for(s, &[]) }
+fn open_incident_for(s: &Value, skip: &[&str]) -> Value {
+    let mut cleared: Vec<&str> = skip.to_vec();
     for i in s["incidents"].as_array().map(|a| a.as_slice()).unwrap_or(&[]).iter().rev() {
         if let Some(c) = i["clears"].as_str() { cleared.push(c); continue }
         if cleared.contains(&i["what"].as_str().unwrap_or("")) { continue }
@@ -190,7 +191,7 @@ fn open_incident(s: &Value) -> Value {
 /// What a client shows about the hub, and when: `text` empty means all is well.
 pub fn notice(s: &Value) -> Value {
     let safe = s["hub"]["safe"] == true; let degraded = s["hub"]["degraded"].as_array().map_or(0, Vec::len) > 0;
-    let last = open_incident(s);
+    let last = open_incident_for(s, &["Hub is down"]);
     let fresh = last["at"].as_u64().map_or(false, |at| now_s().saturating_sub(at) < 3600);
     let text = if safe { format!("Safe mode: agents, routines and bots are paused. {}", last["why"].as_str().unwrap_or("")) }
         else if degraded { format!("Hub is running without {}.", s["hub"]["degraded"].as_array().map_or(String::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))) }
@@ -364,5 +365,13 @@ mod tests {
         let crash = json!({"at": now_s() - 30, "what": "Hub crashed", "why": "x", "did": "restarted"});
         assert!(with(vec![crash.clone(), full.clone(), room.clone()]).starts_with("Hub crashed"), "an earlier incident it did not clear still shows");
         assert!(with(vec![full.clone(), room, full]).starts_with("Disk nearly full"), "full again: told again");
+    }
+    #[test] fn a_running_hub_never_shows_a_stale_hub_is_down_notice() {
+        let down = json!({"at": now_s() - 30, "what": "Hub is down", "why": "port held", "did": "answering on its port for a restart, and trying again by itself"});
+        let full = json!({"at": now_s() - 60, "what": "Disk nearly full", "why": "7.1 GB free", "did": "free space on this disk"});
+        let calm = json!({"hub": {"safe": false, "degraded": []}, "guard": {}});
+        let with = |i: Vec<Value>| { let mut c = calm.clone(); c["incidents"] = json!(i); notice(&c)["text"].as_str().unwrap().to_string() };
+        assert_eq!(with(vec![down.clone()]), "", "an uncleared Hub is down incident is suppressed while the hub is running");
+        assert!(with(vec![full, down]).starts_with("Disk nearly full"), "an earlier open incident underneath still shows");
     }
 }
