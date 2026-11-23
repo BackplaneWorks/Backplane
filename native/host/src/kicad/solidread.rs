@@ -130,7 +130,8 @@ pub fn plot_of(bytes: &[u8], step: bool) -> Result<Plot, glb::TooBig> {
     if step { solid::metres(&mut ts); solid::upright(&mut ts) } // a part from STEP stands Z up, in metres
     // a STEP is sent as meshed while it fits (the grid of `thin` made small holes in big assemblies jagged), with its B-rep faces when
     // its mesher said them and nothing was thinned; a board as always
-    let ts = if step { solid::fit(ts, solid::STEP_TRIS) } else { solid::thin(ts) };
+    // (a board's thinned model within STEP_TRIS too: one read past its size limit on the person's word goes out in one frame)
+    let ts = if step { solid::fit(ts, solid::STEP_TRIS) } else { solid::fit(solid::thin(ts), solid::STEP_TRIS) };
     let runs = if step { solid::face_runs(&faces, ts.len()) } else { vec![] };
     let mut so = solid::of(&ts); if let Some(s) = so.as_mut() { s.faces = runs }
     Ok(solid::plot(so))
@@ -144,10 +145,11 @@ pub fn warm(path: &str, tools: &[Mesher]) -> bool {
     export(true, false, false, path, &out, "", tools, stepglb::NORMAL, None).code == 0
 }
 /// Pv.child.solid: what `--plot KIND FILE INFOS` does for a 3D model. The note (parts without a model) goes to `infos`, as the child left it.
-pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> Got { read_streaming(kind, path, cli, tools, infos, None, None) }
+pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> Got { read_streaming(kind, path, cli, tools, infos, None, false, None) }
 /// `read`, a STEP not meshed yet streaming its parts to `on` while it is (a cached one, a board or a GLB says nothing there). `fine`: a
-/// STEP refined around that box (its solids there meshed finer: `stepglb::Detail::refined`), kept as a mesh of its own.
-pub fn read_streaming(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str, fine: Option<[f64; 6]>, on: Option<&mut dyn FnMut(Streamed)>) -> Got {
+/// STEP refined around that box (its solids there meshed finer: `stepglb::Detail::refined`), kept as a mesh of its own. `asked`: the
+/// person asked for this model past the size limit (`solid::fits_asked`).
+pub fn read_streaming(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str, fine: Option<[f64; 6]>, asked: bool, on: Option<&mut dyn FnMut(Streamed)>) -> Got {
     let (isglb, step) = (path.ends_with(".glb"), is_step(path));
     let out = glb_at(kind, path, fine);
     let detail = fine.map_or(stepglb::NORMAL, stepglb::Detail::refined);
@@ -155,8 +157,8 @@ pub fn read_streaming(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos:
     if r.code != 0 { return fail(format!("3D export failed: {}", r.out.trim().chars().take(600).collect::<String>())) }
     plotgen::write_infos(infos, &missing_note(&r.out));
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
-    if !solid::fits_for(size, step) { return fail(solid::big(size)) }
-    match plot_of(&std::fs::read(&out).unwrap_or_default(), step) { Ok(p) => Got { code: 0, text: String::new(), plot: Some(p) }, Err(_) => fail(solid::big(size)) }
+    if !solid::fits_asked(size, step, asked) { return fail(solid::big_for(size, step, asked)) }
+    match plot_of(&std::fs::read(&out).unwrap_or_default(), step) { Ok(p) => Got { code: 0, text: String::new(), plot: Some(p) }, Err(_) => fail(solid::big_for(size, step, asked)) }
 }
 
 #[cfg(test)]
@@ -226,7 +228,7 @@ mod tests {
         std::env::set_var("XDG_CACHE_HOME", d.join("cache")); // its own models cache: nothing made before is read
         let tools = [Mesher::Step2glb(tool)]; let infos = d.join("i").to_string_lossy().into_owned();
         let rim = |fine: Option<[f64; 6]>| -> usize {
-            let g = read_streaming(2, &src.to_string_lossy(), "", &tools, &infos, fine, None);
+            let g = read_streaming(2, &src.to_string_lossy(), "", &tools, &infos, fine, false, None);
             assert_eq!(g.code, 0, "{}", g.text);
             let ts = glb::tris(&std::fs::read(glb_at(2, &src.to_string_lossy(), fine)).unwrap()).unwrap();
             let mut pts: Vec<(i64, i64)> = ts.iter().flat_map(|t| [t.a, t.b, t.c]).filter(|p| (p[2] - 10.0).abs() < 1e-4 && ((p[0] * p[0] + p[1] * p[1]).sqrt() - 3.0).abs() < 1e-3)
@@ -251,6 +253,7 @@ mod tests {
         let big = vec![0u8; solid::MOST as usize + 1]; std::fs::write(&f, &big).unwrap();
         let p = f.to_string_lossy();
         let g = read(2, &p, "", &[], &infos); assert_eq!((g.code, g.text.as_str()), (3, "This 3D model is too big to show here (13 MB; the hub reads models up to 12 MB)"));
+        let g = read_streaming(2, &p, "", &[], &infos, None, true, None); assert_eq!(g.code, 0, "asked for: read past the limit ({})", g.text);
         std::fs::write(&f, b"not a model").unwrap();
         let g = read(2, &p, "", &[], &infos); assert_eq!(g.code, 0); let pl = g.plot.unwrap(); assert_eq!((pl.solid, pl.thick), (None, 0));
     }

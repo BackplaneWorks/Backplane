@@ -64,7 +64,9 @@ fn main() {
     }
     let kind: u32 = k.parse().unwrap_or(0);
     if kind >= 2 {
-        let g = solidread::read(kind, file, &std::env::var("BACKPLANE_KICAD_CLI").unwrap_or_default(), &tools(), a.get(2).map_or("", String::as_str));
+        // BACKPLANE_PLOT_ASKED: the person asked for this model past the size limit (the hub's kicad.big)
+        let asked = std::env::var("BACKPLANE_PLOT_ASKED").map_or(false, |v| v == "1");
+        let g = solidread::read_streaming(kind, file, &std::env::var("BACKPLANE_KICAD_CLI").unwrap_or_default(), &tools(), a.get(2).map_or("", String::as_str), None, asked, None);
         let Some(p) = g.plot else { eprintln!("{}", g.text); std::process::exit(g.code) };
         std::io::stdout().write_all(&plotgen::lines(&p)).unwrap();
         println!();

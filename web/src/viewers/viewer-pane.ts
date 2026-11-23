@@ -40,7 +40,7 @@ interface LayersReply {
 
 type PendingFrame =
   | { kind: "bin"; buf: ArrayBuffer }
-  | { kind: "none"; key: string; none: string; retryable: boolean };
+  | { kind: "none"; key: string; none: string; retryable: boolean; big: boolean };
 
 const MAX_PENDING_FRAMES = 64;
 const MAX_PENDING_BYTES = 16 << 20;
@@ -330,7 +330,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       clearPending();
       for (const item of queued) {
         if (item.kind === "bin") handleBinary(item.buf);
-        else handlePlotNone(item.key, item.none, item.retryable);
+        else handlePlotNone(item.key, item.none, item.retryable, item.big);
       }
       setBanner(
         history.highlightEdits
@@ -539,7 +539,8 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   });
   themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
 
-  function setOverlay(mode: "none" | "loading" | "empty" | "error", text = "", retryable = false): void {
+  // bigKey: a 3D model the hub refused for its size; the card offers "Load it anyway" (kicad.big reads it past the limit)
+  function setOverlay(mode: "none" | "loading" | "empty" | "error", text = "", retryable = false, bigKey = ""): void {
     if (mode === "none") {
       overlayEl.hidden = true;
       overlayEl.replaceChildren();
@@ -560,6 +561,20 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       retryBtn.textContent = t("tools.retry", "Retry");
       retryBtn.addEventListener("click", () => void startWatch(true));
       card.append(retryBtn);
+    }
+    if (bigKey) {
+      const next = document.createElement("div");
+      next.className = "bp-v-state-msg";
+      next.textContent = t("gpui.c.solid.big.next", "Loading it may take a while and a lot of memory.");
+      const bigBtn = document.createElement("button");
+      bigBtn.type = "button";
+      bigBtn.className = "bp-v-btn is-primary";
+      bigBtn.textContent = t("gpui.c.solid.load.big", "Load it anyway");
+      bigBtn.addEventListener("click", () => {
+        setOverlay("loading", t("gpui.c.solid.loading.big", "Loading it anyway…"));
+        void api.hub.rpc("kicad.big", { key: bigKey }).catch(() => setOverlay("error", text, false, bigKey));
+      });
+      card.append(next, bigBtn);
     }
     overlayEl.replaceChildren(card);
   }
@@ -1043,7 +1058,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       clearPending();
       for (const item of queued) {
         if (item.kind === "bin") handleBinary(item.buf);
-        else handlePlotNone(item.key, item.none, item.retryable);
+        else handlePlotNone(item.key, item.none, item.retryable, item.big);
       }
     } catch (err) {
       if (gen !== watchGen) return;
@@ -1056,10 +1071,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     }
   }
 
-  function handlePlotNone(key: string, none: string, retryable: boolean): void {
+  function handlePlotNone(key: string, none: string, retryable: boolean, big = false): void {
     if (watchPending) {
       if (pendingQueue.length < MAX_PENDING_FRAMES) {
-        pendingQueue.push({ kind: "none", key, none, retryable });
+        pendingQueue.push({ kind: "none", key, none, retryable, big });
       }
       return;
     }
@@ -1073,6 +1088,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         return;
       }
     }
+    if (big) { setOverlay("error", none, false, key); return; }
     setOverlay(retryable ? "error" : "empty", none || "Nothing to display", retryable);
   }
 
@@ -1105,7 +1121,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     }
 
     if (typeof map.none === "string") {
-      handlePlotNone(key, map.none, map.retryable === 1 || (map.retryable as unknown) === true);
+      handlePlotNone(key, map.none, map.retryable === 1 || (map.retryable as unknown) === true, (map.big as unknown) === true);
       return;
     }
 
