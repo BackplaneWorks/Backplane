@@ -4,7 +4,7 @@ import Foundation
 var failed = 0
 func check(_ ok: Bool, _ what: String) { if !ok { failed += 1; print("FAIL", what) } }
 let tok = "0123456789abcdef0123456789abcdef0123456789abcdef"
-let files = [DFileLink(path: "/home/user/p/mfg/gerbers.zip", name: "gerbers.zip", size: 123, open: "download"), DFileLink(path: "~/p/board.kicad_pcb", name: "board.kicad_pcb", size: 9, open: "view")]
+let files = [DFileLink(path: "/home/user/p/mfg/gerbers.zip", name: "gerbers.zip", size: 123, open: "download"), DFileLink(path: "~/p/board.kicad_pcb", name: "board.kicad_pcb", size: 9, open: "view"), DFileLink(path: "/home/user/p/docs/My Doc.pdf", name: "My Doc.pdf", size: 456, open: "view")]
 func kinds(_ t: String) -> [String] { dLinkRuns(t).compactMap { run in run.url.map { u in (dPathFrom(u).map { "path:" + $0 } ?? u.absoluteString) + "|" + run.text } } }
 
 // shares
@@ -25,6 +25,9 @@ check(FileFetch.safeName("a/b") == "a_b" && FileFetch.safeName("..") == "downloa
 
 // a tapped path finds its file
 check(FileFetch.find("/home/user/p/mfg/gerbers.zip", in: files)?.name == "gerbers.zip", "find")
+check(FileFetch.find("file:///home/user/p/mfg/gerbers.zip", in: files)?.name == "gerbers.zip", "find file://")
+check(FileFetch.find("file:///home/user/p/docs/My%20Doc.pdf", in: files)?.name == "My Doc.pdf", "find file:// encoded")
+check(FileFetch.find("file://localhost/home/user/p/docs/My%20Doc.pdf#page=2", in: files)?.name == "My Doc.pdf", "find file:// localhost fragment")
 check(FileFetch.find("~/p/board.kicad_pcb:12", in: files)?.name == "board.kicad_pcb", "find with line")
 check(FileFetch.find("~/p/board.kicad_pcb:3:4", in: files)?.name == "board.kicad_pcb", "find with line and column")
 check(FileFetch.find("/home/user/p/mfg/gerbers.zip#L4-L9", in: files)?.name == "gerbers.zip", "find with anchor")

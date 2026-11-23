@@ -272,6 +272,14 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var memory: DMemory? // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); nil for a thread without it
     var planMode: DPlanMode? = nil
     enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory, planMode }
+    init(id: String, project: String = "", title: String = "", state: String = "idle", updatedAt: Int = 0, pinned: Bool = false, pinOrder: Int = 0, settled: Bool = false, settledAt: Int = 0, archived: Bool = false, provider: String = "", model: String = "", effort: String = "", runtime: String = "", chip: String = "", preview: String = "", waiting: Int = 0, parent: String = "", history: Bool = false, status: String = "", mark: DMark? = nil, swarm: String = "", memory: DMemory? = nil, planMode: DPlanMode? = nil) {
+        self.id = id; self.project = project; self.title = title; self.state = state; self.updatedAt = updatedAt
+        self.pinned = pinned; self.pinOrder = pinOrder; self.settled = settled; self.settledAt = settledAt; self.archived = archived
+        self.provider = provider; self.model = model; self.effort = effort; self.runtime = runtime; self.chip = chip
+        self.preview = preview; self.waiting = waiting; self.parent = parent; self.history = history; self.status = status
+        self.mark = mark; self.swarm = swarm; self.memory = memory; self.planMode = planMode
+    }
+    static func stub(id: String, title: String) -> DThread { DThread(id: id, title: title) }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)

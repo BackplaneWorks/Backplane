@@ -74,9 +74,19 @@ fn closed_dir(n: &str) -> bool {
     (l.starts_with('.') && l != ".backplane" && l != ".github") || l == "secrets" || l == "vault" || l.starts_with(".backplane-") || l == "node_modules"
 }
 
-/// The request's path made into a path on this machine: `file://` dropped, `~/` expanded; None for anything relative, climbing or with a NUL.
+fn strip_file_scheme(s: &str) -> Option<&str> {
+    s.get(..7).filter(|p| p.eq_ignore_ascii_case("file://")).map(|_| &s[7..])
+}
+
+/// The request's path made into a path on this machine: `file://` (with `#fragment` stripped and `%XX` decoded) dropped, `~/` expanded; None for anything relative, climbing or with a NUL.
 pub fn local_path(p: &str) -> Option<PathBuf> {
-    let p = p.trim(); let p = p.strip_prefix("file://").unwrap_or(p);
+    let p = p.trim();
+    let decoded;
+    let p = if let Some(rest) = strip_file_scheme(p) {
+        let rest = rest.split('#').next().unwrap_or(rest);
+        decoded = crate::present::filelink::url_path(rest);
+        decoded.as_str()
+    } else { p };
     if p.contains('\0') || !crate::files::mimg::no_climb(p) { return None }
     let full = match p.strip_prefix("~/") { Some(r) => PathBuf::from(crate::plat::dirs::home_or_empty()).join(r), None => PathBuf::from(p) };
     if full.is_absolute() { Some(full) } else { None }
@@ -145,13 +155,12 @@ pub fn linkable(text: &str) -> Vec<Value> {
     g.insert(key, (Instant::now(), v.clone()));
     v
 }
-fn linkable_now(text: &str) -> Vec<Value> {
-    let roots = roots(); if roots.is_empty() { return vec![] }
-    let home = HOME.read().unwrap().clone();
+pub fn linkable_with(roots: &[PathBuf], home: &Path, text: &str) -> Vec<Value> {
+    if roots.is_empty() { return vec![] }
     let mut out = vec![];
     for p in candidates(text) {
         if out.len() >= 32 { break }
-        if let Ok((_, md)) = check(&roots, &home, &p) {
+        if let Ok((_, md)) = check(roots, home, &p) {
             let name = p.rsplit(['/', '\\']).next().unwrap_or(&p).to_string();
             let open = if crate::files::fm::preview(&name).is_empty() { "download" } else { "view" };
             out.push(json!({"path": p, "name": name, "size": md.len(), "open": open}));
@@ -159,22 +168,80 @@ fn linkable_now(text: &str) -> Vec<Value> {
     }
     out
 }
+fn linkable_now(text: &str) -> Vec<Value> {
+    let roots = roots();
+    let home = HOME.read().unwrap().clone();
+    linkable_with(&roots, &home, text)
+}
 static HOME: LazyLock<RwLock<PathBuf>> = LazyLock::new(Default::default);
 
-/// Every absolute or `~/` path in a text (code spans and blocks included: an agent writes paths in backticks), each once, at most 1024 chars, with
-/// what a sentence puts after it (`.`, `:`, `,`, `)`) dropped.
+fn push_candidate(raw: &str, out: &mut Vec<String>) {
+    if out.len() >= 64 { return }
+    let w = raw.trim();
+    let decoded;
+    let w = if let Some(rest) = strip_file_scheme(w) {
+        let rest = rest.split('#').next().unwrap_or(rest);
+        decoded = crate::present::filelink::url_path(rest);
+        decoded.as_str()
+    } else { w };
+    let w = w.trim_end_matches(['.', ':', '!', '?']);
+    let w = w.split_once(":L").map_or(w, |(a, b)| if b.chars().next().map_or(false, |c| c.is_ascii_digit()) { a } else { w });
+    let (w, _) = crate::data::link::split_line(w);
+    if w.len() < 2 || w.len() > 1024 || !(crate::plat::fs::is_abs(w) || w.starts_with("~/")) || w.ends_with('/') { return }
+    if !out.iter().any(|x| x == w) { out.push(w.to_string()) }
+}
+
+/// Every absolute or `~/` path in a text (markdown links, code spans and blocks included: an agent writes paths in backticks), each once, at most
+/// 1024 chars, with what a sentence puts after it (`.`, `:`, `,`, `)`) dropped.
 pub fn candidates(text: &str) -> Vec<String> {
-    let sep = |c: char| c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '`' | '"' | '\'' | ',' | ';' | '|' | '*');
     let mut out: Vec<String> = vec![];
-    for w in text.split(sep) {
-        let w = w.strip_prefix("file://").unwrap_or(w);
-        let w = w.trim_end_matches(['.', ':', '!', '?']);
-        let w = w.split_once(":L").map_or(w, |(a, b)| if b.chars().next().map_or(false, |c| c.is_ascii_digit()) { a } else { w });
-        // a `path:line` reference
-        let w = match w.rsplit_once(':') { Some((a, b)) if !b.is_empty() && b.bytes().all(|c| c.is_ascii_digit()) => a, _ => w };
-        if w.len() < 2 || w.len() > 1024 || !(crate::plat::fs::is_abs(w) || w.starts_with("~/")) || w.ends_with('/') { continue }
-        if !out.iter().any(|x| x == w) { out.push(w.to_string()) }
-        if out.len() >= 64 { break }
+    let mut skip: Vec<(usize, usize)> = vec![];
+    // Pass 1: standard markdown links `[label](dest)` (including balanced `()` and `<...>` inside dest, e.g. `%20` or `(Final)`).
+    let b = text.as_bytes();
+    let mut i = 0;
+    while i < b.len() && out.len() < 64 {
+        if b[i] == b'\\' { i = (i + 2).min(b.len()); continue }
+        if b[i] == b'[' {
+            let mut d = 0usize; let mut j = i; let mut close = None;
+            while j < b.len() {
+                if b[j] == b'\\' { j = (j + 2).min(b.len()); continue }
+                if b[j] == b'[' { d += 1 }
+                else if b[j] == b']' { d -= 1; if d == 0 { close = Some(j); break } }
+                j += 1;
+            }
+            if let Some(c) = close.filter(|&c| c + 1 < b.len() && b[c + 1] == b'(') {
+                let mut pd = 0usize; let mut k = c + 1; let mut end = None;
+                while k < b.len() {
+                    if b[k] == b'\\' { k = (k + 2).min(b.len()); continue }
+                    if b[k] == b'(' { pd += 1 }
+                    else if b[k] == b')' { pd -= 1; if pd == 0 { end = Some(k); break } }
+                    k += 1;
+                }
+                if let Some(e) = end {
+                    let inner = text[c + 2..e].trim();
+                    let dest = if let Some(after) = inner.strip_prefix('<') {
+                        after.split_once('>').map(|(u, _)| u).unwrap_or(after)
+                    } else {
+                        inner.split_whitespace().next().unwrap_or("")
+                    };
+                    push_candidate(dest, &mut out);
+                    skip.push((c + 1, e + 1));
+                    i = e + 1;
+                    continue;
+                }
+            }
+        }
+        i += 1;
+    }
+    // Pass 2: bare, backticked, and parenthesized paths in running text outside matched markdown `(dest)` spans.
+    let sep = |c: char| c.is_whitespace() || matches!(c, '(' | ')' | '[' | ']' | '{' | '}' | '<' | '>' | '`' | '"' | '\'' | ',' | ';' | '|' | '*');
+    let mut pos = 0;
+    for (s, e) in skip.into_iter().chain(std::iter::once((text.len(), text.len()))) {
+        for w in text[pos..s].split(sep) {
+            if out.len() >= 64 { break }
+            push_candidate(w, &mut out);
+        }
+        pos = e;
     }
     out
 }

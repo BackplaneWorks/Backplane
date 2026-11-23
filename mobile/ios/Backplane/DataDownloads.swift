@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import QuickLook
 
 // Downloads of files on the hub's machine (docs/file-links.md): a file a reply names (`/file?path=`), a share (`/s/<token>/<name>`) or a Files row
 // (`/files/get`), over HTTP on the hub the app is connected to, with the device's token. Streamed into `<name>.part` in the app's caches, never held in
@@ -44,7 +45,7 @@ final class DDownloads {
             }
             guard let self, !Task.isCancelled else { return }
             self.tasks[key] = nil; self.put(out)
-            if out.state == .done, let f = out.file { DDownloads.present(f) }
+            if out.state == .done, let f = out.file { DDownloads.open(f) }
         }
     }
     @ObservationIgnored private var stopping: [String: Task<Void, Never>] = [:]
@@ -93,18 +94,39 @@ final class DDownloads {
         }
     }
 
+    private static var ql: DQuickLook?
+    private static func topVC() -> UIViewController? {
+        let top = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }.first
+        var at = top; while let p = at?.presentedViewController { at = p }
+        return at
+    }
+    /// Preview a finished download in QuickLook (PDFs, images, text, office files), falling back to the share sheet.
+    static func open(_ f: URL) {
+        guard QLPreviewController.canPreview(f as NSURL), let at = topVC() else { present(f); return }
+        let hold = DQuickLook(f); ql = hold
+        let vc = QLPreviewController(); vc.dataSource = hold; vc.delegate = hold
+        at.present(vc, animated: true)
+    }
+
     /// The system's share sheet for a finished file: Save to Files, AirDrop, Open in another app.
     static func present(_ f: URL) {
         let vc = UIActivityViewController(activityItems: [f], applicationActivities: nil)
-        let top = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }.first
-        var at = top; while let p = at?.presentedViewController { at = p }
+        let at = topVC()
         vc.popoverPresentationController?.sourceView = at?.view
         if let v = at?.view { vc.popoverPresentationController?.sourceRect = CGRect(x: v.bounds.midX, y: v.bounds.maxY - 80, width: 1, height: 1) }
         at?.present(vc, animated: true)
     }
+
+    private final class DQuickLook: NSObject, QLPreviewControllerDataSource, QLPreviewControllerDelegate {
+        let url: URL
+        init(_ url: URL) { self.url = url }
+        nonisolated func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
+        nonisolated func previewController(_ controller: QLPreviewController, previewItemAt index: Int) -> QLPreviewItem { url as NSURL }
+        nonisolated func previewControllerDidDismiss(_ controller: QLPreviewController) { Task { @MainActor in DDownloads.ql = nil } }
+    }
 }
 
-/// The downloads under way and just done, over the screen's foot: each with its progress, then Share, or the hub's words and Retry.
+/// The downloads under way and just done, over the screen's foot: each with its progress, then Open & Share, or the hub's words and Retry.
 struct DDownloadStrip: View {
     var d = DDownloads.shared
     private func mb(_ n: Int64) -> String { n < 0 ? "?" : n < 1024 ? "\(n) B" : n < 1 << 20 ? "\(n / 1024) KB" : String(format: "%.1f MB", Double(n) / 1048576) }
@@ -120,7 +142,8 @@ struct DDownloadStrip: View {
                                 Text(r.total > 0 ? Tr.android_download_of(have: mb(r.have), total: mb(r.total)) : mb(r.have)).dmono(11).foregroundStyle(BackplaneDesign.dim)
                                 Button(Tr.t("Cancel")) { d.cancel(r.id) }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("download.cancel")
                             case .done:
-                                Button(Tr.t("Share")) { if let f = r.file { DDownloads.present(f) } }.buttonStyle(DButton(primary: true, compact: true)).accessibilityIdentifier("download.share")
+                                Button(Tr.t("Open")) { if let f = r.file { DDownloads.open(f) } }.buttonStyle(DButton(primary: true, compact: true)).accessibilityIdentifier("download.open")
+                                Button(Tr.t("Share")) { if let f = r.file { DDownloads.present(f) } }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("download.share")
                                 Button { d.dismiss(r.id) } label: { Image(systemName: "xmark") }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("download.close")
                             case .fail:
                                 Button(Tr.t("Retry")) { d.retry(r.id) }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("download.retry")
