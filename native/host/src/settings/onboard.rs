@@ -170,6 +170,7 @@ impl OnboardRpc {
         // a path typed here goes where FreeCAD is looked for, then Settings, CAD reads the same machine
         if checks["freecad"]["runs"] == true && !g("freecad").is_empty() { let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), g("freecad")); }
         crate::files::kicad::ipc::publish_cad(hub).await;
+        super::tools_install::repair_codex_soon(hub);
         super::models_probe::refresh_soon(hub); // setup's check and the picker's agents are found the same way, at the same moment
         Self::auto_kicad(hub).await;
         // a setting, not info: its log line redraws every client, and the answer outlives a restart. Only a change is logged.
