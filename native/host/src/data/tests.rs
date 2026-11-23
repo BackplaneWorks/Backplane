@@ -8,7 +8,7 @@ use tokio_tungstenite::connect_async;
 
 struct Fake(Arc<Hub>);
 impl RpcHandler for Fake {
-    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set", "thread.review"] }
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set", "thread.review", "thread.snooze"] }
     fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = &self.0; let at = now_ms() / 1000;
@@ -19,6 +19,9 @@ impl RpcHandler for Fake {
                 // /project's request: a folder named "full" holds something, any other is made with its first thread
                 "project.new" => if s(p, "path") == "full" { vec![json!({"t":"reply","id":id,"ok":false,"error":"/h/full is there and is not empty.","result":{"error":"/h/full is there and is not empty.","exists":"/h/full"}})] }
                     else { assert_eq!(p["empty"], true); vec![json!({"t":"reply","id":id,"ok":true,"thread":format!("made-{}", s(p, "text").len())})] },
+                // (the commands lane's: `for` 1h, tomorrow, 1w or off)
+                "thread.snooze" => { assert!(matches!(s(p, "for"), "1h" | "tomorrow" | "1w" | "off"), "the span as the row gave it: {p}");
+                    h.commit(&json!({"$":"ThreadSnoozed","id":s(p,"thread"),"until":if s(p, "for") == "off" { 0 } else { at + 3600 },"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.review" => { h.commit(&json!({"$":"SettingSet","key":format!("review.ro.{}", s(p, "thread")),"value":if p["on"] == true { "1" } else { "0" },"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.modes" | "thread.effort" | "thread.provider" | "turn.interrupt" | "thread.pin" | "thread.rename" | "thread.detach" | "setting.set" => vec![json!({"t":"reply","id":id,"ok":true})],
@@ -336,6 +339,13 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 8, "thread.act", json!({"thread":"t1","action":"pin"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["thread"]["id"], "t1");
     let r = ask(&mut ws, 9, "thread.act", json!({"thread":"t1","action":"explode"})).await; assert_eq!(r["ok"], false);
     let r = ask(&mut ws, 10, "thread.act", json!({"thread":"nope","action":"pin"})).await; assert_eq!(r["ok"], false);
+    // a section row's snooze and wake by the row's own value (sections.rs `snooze`, `wake`), and a project page's visit: the phones' and the web's `sidebar.act`
+    let r = ask(&mut ws, 101, "sidebar.act", json!({"action":"row-snooze","value":"t1|1h"})).await; assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(ask(&mut ws, 102, "sidebar.act", json!({"action":"row-snooze","value":"hub|t1|off"})).await["ok"], true, "the window's value carries its hub first");
+    assert_eq!(ask(&mut ws, 103, "sidebar.act", json!({"action":"row-snooze","value":"t1|forever"})).await["ok"], false, "a span the hub does not know");
+    assert_eq!(ask(&mut ws, 104, "sidebar.act", json!({"action":"row-snooze","value":"nope|1h"})).await["ok"], false, "an unknown thread");
+    assert_eq!(ask(&mut ws, 105, "sidebar.act", json!({"action":"row-snooze","value":"t1"})).await["ok"], false, "no span");
+    assert_eq!(ask(&mut ws, 107, "sidebar.act", json!({"action":"explode","value":"t1"})).await["error"], "no such action");
     let r = ask(&mut ws, 11, "thread.act", json!({"thread":"t1","action":"rename","title":"  "})).await; assert_eq!(r["ok"], false, "a blank title is refused before any request");
     // the badge and Move to top level
     let r = ask(&mut ws, 12, "badge.list", json!({})).await; assert_eq!((r["result"]["colors"][0]["name"].as_str(), r["result"]["icons"][0].as_str()), (Some("blue"), Some("folder")));

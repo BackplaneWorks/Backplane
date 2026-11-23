@@ -4444,6 +4444,19 @@ ios.clone.signin.starting = Iniciando la sesión…
 ios.clone.signin.done = Sesión iniciada en GitHub.
 ios.clone.signin.open = Abrir la página
 ios.clone.loading = Leyendo tus repositorios…
+mobile.tab.inbox = Bandeja
+mobile.tab.crew = Equipo
+mobile.tab.bench = Banco
+mobile.inbox.clear = Todo en orden
+mobile.inbox.clear.note = Nada te necesita y nada está en marcha.
+mobile.inbox.talk.bub = Hablar con Bub
+mobile.inbox.jump.in = Volver a entrar
+mobile.inbox.open.bench = Abrir el banco
+mobile.badge.pcb = PCB
+mobile.pill.waiting = En espera
+mobile.snooze.wakes = Vuelve en {time}
+mobile.bench.all = Todos los proyectos
+mobile.snooze.for = Posponer
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Te necesita

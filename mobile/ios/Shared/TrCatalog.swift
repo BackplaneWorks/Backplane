@@ -486,6 +486,19 @@ ios.clone.signin.starting	Starting the sign-in…	サインインを開始中…
 ios.clone.signin.done	Signed in to GitHub.	GitHub にサインインしました。	Sesión iniciada en GitHub.
 ios.clone.signin.open	Open the page	ページを開く	Abrir la página
 ios.clone.loading	Reading your repositories…	リポジトリを読み込み中…	Leyendo tus repositorios…
+mobile.tab.inbox	Inbox	受信トレイ	Bandeja
+mobile.tab.crew	Crew	クルー	Equipo
+mobile.tab.bench	Bench	ベンチ	Banco
+mobile.inbox.clear	All clear	対応待ちなし	Todo en orden
+mobile.inbox.clear.note	Nothing needs you and nothing is running.	対応待ちも実行中のものもありません。	Nada te necesita y nada está en marcha.
+mobile.inbox.talk.bub	Talk to Bub	Bubと話す	Hablar con Bub
+mobile.inbox.jump.in	Jump back in	最近開いたプロジェクト	Volver a entrar
+mobile.inbox.open.bench	Open Bench	ベンチを開く	Abrir el banco
+mobile.badge.pcb	PCB	PCB	PCB
+mobile.pill.waiting	Waiting	待機中	En espera
+mobile.snooze.wakes	Wakes in {time}	{time}後に再開	Vuelve en {time}
+mobile.bench.all	All projects	すべてのプロジェクト	Todos los proyectos
+mobile.snooze.for	Snooze for	スヌーズする期間	Posponer
 common.cancel	Cancel	キャンセル	Cancelar
 common.delete	Delete	削除	Eliminar
 common.save	Save	保存	Guardar
@@ -7682,6 +7695,9 @@ web.settings.providers.browser	Connect a provider in the Backplane desktop or mo
 
     /// ios.clone.code = Enter this code at {url}
     static func ios_clone_code(url: String) -> String { f("ios.clone.code", ["url": url]) }
+
+    /// mobile.snooze.wakes = Wakes in {time}
+    static func mobile_snooze_wakes(time: String) -> String { f("mobile.snooze.wakes", ["time": time]) }
 
     /// gpui.sections.move.to = Move to {group}
     static func gpui_sections_move_to(group: String) -> String { f("gpui.sections.move.to", ["group": group]) }
