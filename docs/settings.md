@@ -1,14 +1,22 @@
 # Settings
 
-The web and desktop Settings menu groups the thirteen pages under
-Your workspace, Agents, Hardware, and Machine & data. Each category has a
-fixed icon slot, its existing localized title, a short description, and a
-chevron. The menu uses two columns on wider screens and one on small screens.
-Category buttons have explicit accessible names and descriptions. English
-and Japanese menus retain the same page IDs, settings controls and actions.
-Search still filters the existing title/keyword/row index; Enter opens its
-first result. Subpages show their category icon and description above the
-existing controls. This change does not alter settings values or defaults.
+The hub decides Settings' pages, their order and their groups (`native/host/src/present/settings.rs`: `PAGES`, `GROUPS`); the
+desktop draws what the menu rows say and sorts nothing.
+
+| Group | Pages |
+| --- | --- |
+| General | Appearance, Threads, Notifications, Time zone |
+| Agents and tools | Agents, Writing, API keys, MCP servers, Voice (with Ring), Rules and task board, Usage |
+| Workspace | Projects and git, CAD, Browser, Mouse and trackpad, Ordering |
+| Connect | Devices (with Web UI: browser access, forwarding setup, the web address), Machines, Network and updates |
+| System | Setup (with Import from 0.14), Privacy, About, Developer |
+
+Each menu row carries `group`, `words` (its rows' labels, one a line) and `notes` (each label's note on the same line). The desktop's
+search matches titles, labels and notes (this device's own page too), names the first settings found under each page, and Enter opens
+the first page found. Three pages were folded into their neighbours: the ids `web`, `ring` and `import` still open Devices, Voice and
+Setup (`canon`: a `settings-page` press, a saved session, a `backplane://settings/<id>` link). The desktop adds three pages of its own:
+This device and Hubs (kept on this computer) and Accounts (leading Agents and tools). The phones keep their own pages
+(`devices.page`, `ring.page`, ...), and the web client its own dialog (`web/src/settings.ts`).
 
 The occasional second click had a reproducible transport cause: a background
 `view.update` or `view.changed` could issue a newer presentation revision while

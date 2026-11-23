@@ -29,7 +29,7 @@ impl super::Screen for Recent {
         let setup=text(params,"action").starts_with("ob-") || policies.with_state(|st|super::onboard::due(st,&params["session"])).unwrap_or(false);
         // Settings → Devices: a press acts on the registry before the page reads it, so the list it draws is the one after the press (a new link listed,
         // a revoked device gone); opening the page reads it too (the page in the session is still the one before the press)
-        let devpage=super::settings::page(&params["session"])=="devices" || (text(params,"action")=="settings-page" && text(params,"value")=="devices");
+        let devpage=super::settings::page(&params["session"])=="devices" || (text(params,"action")=="settings-page" && super::settings::canon(text(params,"value"))=="devices");
         let acted; let params=if devpage && text(params,"action").starts_with("device-") { match super::settings::device_act(text(params,"action"),text(params,"value")) { Some(patch)=>{ let mut c=params.clone(); crate::session::patch::merge(&mut c["session"],&patch); c["action"]=json!(""); c["value"]=json!(""); acted=c; &acted } None=>params } } else { params };
         let withinfo; let params=if super::settings::is_open(&params["session"]) || shows_thread(params) || shows_swarm_models(params) || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); c["hubInfo"]["modelsProbedHere"]=json!(crate::settings::models::probed_here()); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } c["hubInfo"]["shares"]=json!(crate::files::share::listed_now()); } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { let mut c=params.clone(); c["hubInfo"]=json!({"models":crate::settings::models::info(),"modelsProbedHere":crate::settings::models::probed_here()}); withinfo=c; &withinfo };
         // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
@@ -359,6 +359,7 @@ fn link_file(st: &State,far: &[(String,&State)],un: &Unified,p: &Value,href: &st
 /// The Settings page a `backplane://settings/<page>` link names, when it is one of Settings' pages.
 pub fn settings_link(href: &str) -> Option<&'static str> {
     let page=href.trim().strip_prefix("backplane://settings/")?.split(['#','?']).next()?.trim_end_matches('/');
+    let page=super::settings::canon(page); // a page folded into another (web, ring, import) opens the one that holds it
     super::settings::PAGES.iter().map(|(id,_)|*id).find(|id|*id==page)
 }
 /// A swarm row's button (`swarm-need`): the request to present instead (its page, the member's thread, Settings › Agents, or nothing new) and the `swarm.act`

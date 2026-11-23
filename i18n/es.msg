@@ -1634,6 +1634,11 @@ home.move.failed = No se pudo mover el inicio
 home.move.failed.note = No se pudo mover el inicio: {note}
 home.machine = Máquina de inicio
 home.move.here = Hacer de esta máquina el inicio
+gpui.settings.group.general = General
+gpui.settings.group.agents = Agentes y herramientas
+gpui.settings.group.workspace = Espacio de trabajo
+gpui.settings.web.ui = Interfaz web
+gpui.settings.shared.files = Archivos compartidos
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change = Describe el cambio…
