@@ -1,12 +1,14 @@
 exec 2>/dev/null
+bp_pwd() { pwd -W || pwd; }
 cd "$1" || exit 0
 name=$2
 if top=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
   # git names the top by its real path (macOS: /private/var/... for /var/...); the History compares it with the path the person
   # opened, so keep the folder's path as we were given it: the same folder, reached the way "$1" reached it (not on Windows' C:/...)
   case $top in /*) lt=$(cd "./$(git rev-parse --show-cdup)" && pwd) && [ "$lt" != "$top" ] && [ "$(cd "$lt" && pwd -P)" = "$(cd "$top" && pwd -P)" ] && top=$lt ;; esac
-  gd=$(cd "$(git rev-parse --git-common-dir)" && pwd) || exit 0
+  gd=$(cd "$(git rev-parse --git-common-dir)" && bp_pwd) || exit 0
   printf '%s\n%s\n' "$gd" "$top"
+  [ "${3:-}" = --dirs ] && exit 0
   h=$(git rev-parse -q --verify HEAD) && printf 'head\tHEAD\t%s\n' "$h"
   for b in origin/HEAD origin/main origin/master main master; do
     m=$(git merge-base HEAD "$b" 2>/dev/null) || continue
@@ -19,6 +21,6 @@ if top=$(git rev-parse --show-toplevel 2>/dev/null) && [ -n "$top" ]; then
   git for-each-ref --sort=-committerdate --format='turn%09%(refname)%09%(objectname)' "refs/backplane/checkpoints/$name/turn/"
   git for-each-ref --sort=-committerdate --count=40 --format='snap%09%(refname)%09%(objectname)' "refs/backplane/snapshots/$name/" | awk -F'\t' '$2 ~ /\/[0-9]+$/'
 else
-  top=$(pwd)
+  top=$(bp_pwd)
   printf '%s\n%s\n' "$top/.backplane/history.git" "$top"
 fi

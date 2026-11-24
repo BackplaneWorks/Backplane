@@ -210,6 +210,10 @@ pub async fn step_capture(cwd: &str, thread: &str, reg: &str) -> String {
 /// caller's timeout (history.steps, #1110) leaves no git running.
 pub async fn refs(cwd: &str, thread: &str) -> String {
     if !super::threadpath::absolute(cwd) { return String::new() } let r = sh_read(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
+/// Just the git dir and top lines of `refs.sh` (`history.steps` needs only those, not branches/tags/log).
+pub async fn repo_dirs(cwd: &str) -> String {
+    if !super::threadpath::absolute(cwd) { return String::new() } let r = sh_read(REFS, &[cwd, "", "--dirs"], "/", &[]).await; if r.code == 0 { r.out } else { String::new() }
+}
 /// Git.show: a file as a commit has it (`git --git-dir G show OBJ`), None when it is not there.
 pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
     let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, "sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).kill_on_drop(true).output().await.ok()?; // a pure read: killed with its future
@@ -417,6 +421,9 @@ mod tests {
         std::fs::write(format!("{d}/b.kicad_pcb"), "(kicad_pcb 2)").unwrap();
         let s2 = step_capture(&d, "th", &reg).await; assert_eq!(s2.split('\n').nth(1).unwrap(), l[0]);
         let r = refs(&d, "th").await; assert!(r.lines().nth(0).unwrap().ends_with(".git") && r.contains("\n") );
+        let dirs = repo_dirs(&d).await; let dl: Vec<&str> = dirs.lines().collect();
+        assert_eq!(dl.len(), 2, "{dirs:?}");
+        assert_eq!(dl[0], r.lines().nth(0).unwrap()); assert_eq!(dl[1], r.lines().nth(1).unwrap());
         let gd = l[2]; assert_eq!(show(gd, &format!("{}:b.kicad_pcb", l[0])).await.unwrap(), b"(kicad_pcb)"); assert!(show(gd, "nope:x").await.is_none());
         // a folder outside git keeps its steps in .backplane/history.git
         let f = tmp("shadow"); std::fs::write(format!("{f}/s.kicad_sch"), "(kicad_sch)").unwrap();

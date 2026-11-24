@@ -1,4 +1,5 @@
 exec 2>/dev/null
+bp_pwd() { pwd -W || pwd; }
 bp_safe() { n=${GIT_CONFIG_COUNT:-0}; ks=$(git config --show-scope --name-only --get-regexp '^filter[.].*[.](clean|smudge|process)$' 2>/dev/null | awk -F '	' '$1 == "local" || $1 == "worktree" { print $2 }'); o=$IFS; IFS='
 '; for k in $ks; do export "GIT_CONFIG_KEY_$n=$k" "GIT_CONFIG_VALUE_$n="; n=$((n+1)); done; IFS=$o; export GIT_CONFIG_COUNT=$n; }; 
 cd "$1" || exit 0
@@ -8,16 +9,16 @@ if top=$(git rev-parse --show-toplevel) && [ -n "$top" ]; then
   # git names the top by its real path (macOS: /private/var/... for /var/...); the History compares it with the path the person
   # opened, so keep the folder's path as we were given it: the same folder, reached the way "$1" reached it (not on Windows' C:/...)
   case $top in /*) lt=$(cd "./$(git rev-parse --show-cdup)" && pwd) && [ "$lt" != "$top" ] && [ "$(cd "$lt" && pwd -P)" = "$(cd "$top" && pwd -P)" ] && top=$lt ;; esac
-  gd=$(cd "$(git rev-parse --git-common-dir)" && pwd) || exit 0
+  gd=$(cd "$(git rev-parse --git-common-dir)" && bp_pwd) || exit 0
   pd=$(git rev-parse --absolute-git-dir) || exit 0
   shadow=
 else
-  top=$(pwd); gd=$top/.backplane/history.git; pd=$gd; shadow=1
-  [ "$top" = / ] || [ "$top" = "$HOME" ] && exit 0
+  top=$(bp_pwd); ltop=$(pwd); gd=$top/.backplane/history.git; lgd=$ltop/.backplane/history.git; pd=$gd; shadow=1
+  [ "$top" = / ] || [ "$ltop" = / ] || [ "$top" = "$HOME" ] || [ "$ltop" = "$HOME" ] && exit 0
   [ -d "$gd" ] || [ -L "$gd" ] || [ -n "$(find . -maxdepth 4 \( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.kicad_pro' -o -iname '*.pcbdoc' -o -iname '*.schdoc' -o -iname '*.prjpcb' \) -print | head -n 1)" ] || exit 0
   if [ -e "$gd" ] || [ -L "$gd" ]; then
     # trusted: the registry names this folder with its inode (the device number before the colon is not compared: it changes when the disk is mounted again)
-    if ! { [ -n "$reg" ] && [ ! -L "$gd" ] && [ -d "$gd" ] && i=$(ino "$gd") && awk -v i="${i#*:}" -v g="$gd" '{ k = $1; sub(/^[^:]*:/, "", k) } k == i && substr($0, length($1) + 2) == g { f = 1 } END { exit !f }' "$reg"; }; then
+    if ! { [ -n "$reg" ] && [ ! -L "$gd" ] && [ -d "$gd" ] && i=$(ino "$gd") && awk -v i="${i#*:}" -v g="$gd" -v g2="$lgd" '{ k = $1; sub(/^[^:]*:/, "", k); p = substr($0, length($1) + 2) } k == i && (p == g || p == g2) { f = 1 } END { exit !f }' "$reg"; }; then
       mv "$gd" "$gd.untrusted-$(date +%s)" || exit 0
     fi
   fi

@@ -17,7 +17,69 @@ pub struct Src { pub id: String, pub msg: bool, pub role: String, pub kind: Stri
 #[derive(Clone, Debug, PartialEq)]
 pub struct Step { pub id: String, pub entry: String, pub c: String, pub p: String, pub g: String, pub top: String, pub files: Vec<(String, String)>, pub at: u64, pub base: bool, /** the step before is in `g` */ pub po: bool }
 
-fn step_of(e: &Src) -> Option<Step> {
+/// Normalize an MSYS/Git Bash drive path (`/c/foo` or `/c`) to Windows `C:/foo` when `windows` is true.
+pub fn msys_to_win(p: &str) -> String { msys_to_win_on(cfg!(windows), p) }
+pub fn msys_to_win_on(windows: bool, p: &str) -> String {
+    if !windows { return p.to_string() }
+    let b = p.as_bytes();
+    if b.len() >= 2 && b[0] == b'/' && b[1].is_ascii_alphabetic() && (b.len() == 2 || b[2] == b'/') {
+        let drive = (b[1] as char).to_ascii_uppercase();
+        let rest = if b.len() == 2 { "/" } else { &p[2..] };
+        format!("{drive}:{rest}")
+    } else {
+        p.to_string()
+    }
+}
+
+fn norm_win_sep(windows: bool, p: &str) -> String {
+    let s = msys_to_win_on(windows, p);
+    if !windows { return s }
+    let s = s.replace('\\', "/");
+    let (prefix, rest) = if let Some(r) = s.strip_prefix("//") { ("//", r) } else { ("", s.as_str()) };
+    let mut out = String::with_capacity(s.len());
+    out.push_str(prefix);
+    let mut prev_slash = !prefix.is_empty();
+    for ch in rest.chars() {
+        if ch == '/' {
+            if !prev_slash { out.push('/'); }
+            prev_slash = true;
+        } else {
+            prev_slash = false;
+            out.push(ch);
+        }
+    }
+    out
+}
+
+fn join_top(top: &str, rel: &str) -> String { format!("{}/{rel}", top.trim_end_matches(['/', '\\'])) }
+
+fn strip_prefix_ci<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
+    let mut si = s.char_indices();
+    for pc in prefix.chars() {
+        let (_, sc) = si.next()?;
+        if !sc.to_lowercase().eq(pc.to_lowercase()) { return None }
+    }
+    Some(match si.next() { Some((idx, _)) => &s[idx..], None => "" })
+}
+
+/// Compare two file paths, normalizing separators and case on Windows.
+pub fn paths_match(a: &str, b: &str) -> bool { paths_match_on(cfg!(windows), a, b) }
+pub fn paths_match_on(windows: bool, a: &str, b: &str) -> bool {
+    if !windows { return a == b }
+    let (na, nb) = (norm_win_sep(true, a), norm_win_sep(true, b));
+    let mut ai = na.chars();
+    let mut bi = nb.chars();
+    loop {
+        match (ai.next(), bi.next()) {
+            (None, None) => return true,
+            (Some(x), Some(y)) if x.to_lowercase().eq(y.to_lowercase()) => continue,
+            _ => return false,
+        }
+    }
+}
+
+fn step_of(e: &Src) -> Option<Step> { step_of_on(cfg!(windows), e) }
+fn step_of_on(windows: bool, e: &Src) -> Option<Step> {
     if e.msg || e.role != "step" { return None }
     let v: Value = serde_json::from_str(&e.text).ok()?;
     let g = |k: &str| v[k].as_str().unwrap_or("").to_string();
@@ -26,22 +88,34 @@ fn step_of(e: &Src) -> Option<Step> {
     // Step.base: a thread's first step taken at a turn's start (or an old record that says only that it is first) is the design as it was before, no change
     let base = p.is_empty() && (v["w"] == "start" || v.get("w").is_none());
     if g("c").is_empty() { return None }
-    Some(Step { id: e.id.clone(), entry: g("e"), c: g("c"), po: !p.is_empty(), p, g: g("g"), top: g("t"), files, at: e.at, base })
+    Some(Step { id: e.id.clone(), entry: g("e"), c: g("c"), po: !p.is_empty(), p, g: norm_win_sep(windows, &g("g")), top: norm_win_sep(windows, &g("t")), files, at: e.at, base })
+}
+
+fn ends_with_ascii_ci(s: &str, suffix: &[u8]) -> bool {
+    let b = s.as_bytes();
+    b.len() >= suffix.len() && b[b.len() - suffix.len()..].eq_ignore_ascii_case(suffix)
 }
 
 /// Hist.ext: 0 a board, 1 a schematic, 2 neither.
-fn ext(path: &str) -> u8 { if path.ends_with(".kicad_pcb") { 0 } else if path.ends_with(".kicad_sch") { 1 } else { 2 } }
+fn ext(path: &str) -> u8 { if ends_with_ascii_ci(path, b".kicad_pcb") { 0 } else if ends_with_ascii_ci(path, b".kicad_sch") { 1 } else { 2 } }
 fn kind_no(kind: &str) -> u8 { if kind == "schematic" { 1 } else { 0 } }
 
 /// Hist.track.file: the steps that changed the file `want` (its live path), or with no file known every step that changed a file of the kind
 /// (a deletion shows nothing).
-pub fn track<'a>(steps: &'a [Step], kind: u8, want: &str) -> Vec<&'a Step> {
-    steps.iter().filter(|s| s.files.iter().any(|(st, rel)| st != "D" && ext(rel) == kind && (want.is_empty() || format!("{}/{}", s.top, rel) == want))).collect()
+pub fn track<'a>(steps: &'a [Step], kind: u8, want: &str) -> Vec<&'a Step> { track_on(cfg!(windows), steps, kind, want) }
+pub fn track_on<'a>(windows: bool, steps: &'a [Step], kind: u8, want: &str) -> Vec<&'a Step> {
+    steps.iter().filter(|s| s.files.iter().any(|(st, rel)| st != "D" && ext(rel) == kind && (want.is_empty() || paths_match_on(windows, &join_top(&s.top, rel), want)))).collect()
 }
 
 /// core/hist's version path of `file` (a live path under `top`) in `commit`: "git\t<gitdir>\t<commit>\t<len top>\t<top>/<rel>" ("" when there is none).
-pub fn version(git: &str, top: &str, commit: &str, file: &str) -> String {
-    match file.strip_prefix(&format!("{top}/")) { Some(rel) if !commit.is_empty() && !git.is_empty() && !rel.is_empty() => format!("git\t{git}\t{commit}\t{}\t{top}/{rel}", top.chars().count()), _ => String::new() }
+pub fn version(git: &str, top: &str, commit: &str, file: &str) -> String { version_on(cfg!(windows), git, top, commit, file) }
+pub fn version_on(windows: bool, git: &str, top: &str, commit: &str, file: &str) -> String {
+    if commit.is_empty() || git.is_empty() { return String::new() }
+    let (git, top_norm, file_norm) = (norm_win_sep(windows, git), norm_win_sep(windows, top), norm_win_sep(windows, file));
+    let top = top_norm.trim_end_matches('/');
+    let prefix = format!("{top}/");
+    let rel = if windows { strip_prefix_ci(&file_norm, &prefix) } else { file_norm.strip_prefix(&prefix) };
+    match rel { Some(rel) if !rel.is_empty() => format!("git\t{git}\t{commit}\t{}\t{top}/{rel}", top.chars().count()), _ => String::new() }
 }
 
 /// Hist.line: a text's first line, trimmed and kept short.
@@ -90,27 +164,36 @@ pub fn live_tip(n: usize, c: usize, total: usize) -> String {
     if before == 0 { format!("{snaps}: {changes}") } else { format!("{snaps}: {changes}, and the design as it was before {before} {}", if before == 1 { "turn" } else { "turns" }) }
 }
 /// The bar for `file` (kind 0 a board, 1 a schematic) from the thread's entries, oldest first. `when` names a time as the person reads it.
-pub fn bar(es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Value { bar_of(es.iter().filter_map(step_of).collect(), es, kind, file, when) }
+pub fn bar(es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Value { bar_on(cfg!(windows), es, kind, file, when) }
+pub fn bar_on(windows: bool, es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Value {
+    bar_of_on(windows, es.iter().filter_map(|e| step_of_on(windows, e)).collect(), es, kind, file, when)
+}
 /// The same from steps already read (and placed: `locate`).
-pub fn bar_of(all: Vec<Step>, es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Value {
+pub fn bar_of(all: Vec<Step>, es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Value { bar_of_on(cfg!(windows), all, es, kind, file, when) }
+pub fn bar_of_on(windows: bool, all: Vec<Step>, es: &[Src], kind: u8, file: &str, when: &dyn Fn(u64) -> String) -> Value {
     let by: HashMap<&str, &Src> = es.iter().map(|e| (e.id.as_str(), e)).collect();
     // the thread's row a step points at: a message is its own row; a tool call or a step sits in a run the thread folds, "fold:<its first>"
     let mut fold: HashMap<&str, String> = HashMap::new(); let mut first: Option<&str> = None;
     for e in es {
-        let base = step_of(e).is_some_and(|s| s.base);
+        let base = step_of_on(windows, e).is_some_and(|s| s.base);
         if !e.msg && (e.role == "tool" || e.role == "step") && !base { let f = *first.get_or_insert(e.id.as_str()); fold.insert(e.id.as_str(), format!("fold:{f}")); }
         else if !base { first = None }
     }
     let row = |s: &Step| -> String { match by.get(s.entry.as_str()) { Some(e) if e.msg => e.id.clone(), _ => fold.get(s.entry.as_str()).or_else(|| fold.get(s.id.as_str())).cloned().unwrap_or_default() } };
-    let tr = track(&all, kind, file);
+    let tr = track_on(windows, &all, kind, file);
     let n = tr.len();
     let rows: Vec<Value> = tr.iter().enumerate().map(|(i, s)| {
-        // the file as this step left it: the one on show when the step changed it, else the first of the kind it changed (Step.file)
-        let f = if !file.is_empty() { file.to_string() } else { s.files.iter().find(|(st, rel)| st != "D" && ext(rel) == kind).map(|(_, rel)| format!("{}/{rel}", s.top)).unwrap_or_default() };
+        // the file as this step left it: the one on show when the step changed it (preserving Git tree casing), else the first of the kind it changed (Step.file)
+        let f = if !file.is_empty() {
+            s.files.iter().find(|(st, rel)| st != "D" && ext(rel) == kind && paths_match_on(windows, &join_top(&s.top, rel), file))
+                .map(|(_, rel)| join_top(&s.top, rel)).unwrap_or_else(|| file.to_string())
+        } else {
+            s.files.iter().find(|(st, rel)| st != "D" && ext(rel) == kind).map(|(_, rel)| join_top(&s.top, rel)).unwrap_or_default()
+        };
         let at = if s.at == 0 { "Time unavailable".to_string() } else { when(s.at) };
         let title = if s.p.is_empty() { format!("Step {} of {n} · before the agent's edits", i + 1) } else { format!("Step {} of {n}", i + 1) };
         json!({"c": s.c, "p": s.p, "t": s.at, "id": s.id, "entry": s.entry, "base": s.base,
-            "old": if s.po { version(&s.g, &s.top, &s.p, &f) } else { String::new() }, "new": version(&s.g, &s.top, &s.c, &f),
+            "old": if s.po { version_on(windows, &s.g, &s.top, &s.p, &f) } else { String::new() }, "new": version_on(windows, &s.g, &s.top, &s.c, &f),
             "label": format!("Step {}", i + 1), "tip": format!("Step {} · {at}", i + 1), "title": title,
             "detail": format!("Saved {at} · {}", source(&by, &s.entry)), "files": names(&s.files), "row": row(s)})
     }).collect();
@@ -146,7 +229,7 @@ fn moved_aside(g: &str) -> Vec<String> {
     let p = std::path::Path::new(g); let (Some(dir), Some(name)) = (p.parent(), p.file_name().and_then(|n| n.to_str())) else { return vec![] };
     let pre = format!("{name}.untrusted-");
     let mut v: Vec<String> = std::fs::read_dir(dir).into_iter().flatten().flatten().filter_map(|e| { let n = e.file_name().to_string_lossy().into_owned();
-        (n.strip_prefix(&pre).is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())) && e.path().is_dir()).then(|| e.path().to_string_lossy().into_owned()) }).collect();
+        (n.strip_prefix(&pre).is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())) && e.path().is_dir()).then(|| norm_win_sep(cfg!(windows), &e.path().to_string_lossy())) }).collect();
     v.sort(); v.reverse(); v
 }
 /// One git read of a history (#1110): past this it is killed and its folder counts as having none of the commits.
@@ -158,7 +241,8 @@ const STEPS_LIMIT: Duration = Duration::from_secs(30);
 async fn have(g: &str, commits: &[String], until: Instant) -> Option<std::collections::HashSet<String>> {
     let left = until.saturating_duration_since(Instant::now()).min(GIT_LIMIT);
     if left.is_zero() { return None }
-    let mut args: Vec<&str> = vec!["--git-dir", g, "rev-list", "--no-walk", "--ignore-missing"]; args.extend(commits.iter().map(String::as_str));
+    let g = norm_win_sep(cfg!(windows), g);
+    let mut args: Vec<&str> = vec!["--git-dir", &g, "rev-list", "--no-walk", "--ignore-missing"]; args.extend(commits.iter().map(String::as_str));
     let r = fgit::read_within(left, "git", &args, "/", &[]).await;
     if r.code == 124 { return None }
     if r.code != 0 { return Some(Default::default()) }
@@ -214,8 +298,8 @@ pub async fn steps(hub: &Arc<Hub>, thread: &str, kind: &str, file: &str) -> Valu
 async fn steps_now(hub: &Arc<Hub>, thread: &str, kind: &str, file: &str, until: Instant) -> Value {
     let Some(cwd) = crate::files::root_of(hub, thread).await else { return json!({"thread": thread, "steps": [], "live": "Live", "note": ""}) };
     let cwd = cwd.to_string_lossy().into_owned();
-    let out = tokio::time::timeout(GIT_LIMIT, fgit::refs(&cwd, thread)).await.unwrap_or_default(); let mut ls = out.split('\n');
-    let (gd, top) = (ls.next().unwrap_or("").to_string(), ls.next().unwrap_or("").to_string());
+    let out = tokio::time::timeout(GIT_LIMIT, fgit::repo_dirs(&cwd)).await.unwrap_or_default(); let mut ls = out.split('\n');
+    let (gd, top) = (norm_win_sep(cfg!(windows), ls.next().unwrap_or("").trim()), norm_win_sep(cfg!(windows), ls.next().unwrap_or("").trim()));
     let f = super::project::read(&cwd);
     let k = kind_no(kind);
     let file = if !file.is_empty() && !file.contains('\t') && !file.contains('\n') { file.to_string() } else if k == 1 { f.sch.clone() } else { f.pcb.clone() };
@@ -260,11 +344,11 @@ mod tests {
         assert_eq!(past_cd("cd /w/lamp&&ls"), "ls"); assert_eq!(past_cd("cd /w/lamp\nkicad-cli pcb drc b.kicad_pcb"), "kicad-cli pcb drc b.kicad_pcb");
         for kept in ["cd /w/lamp", "cd /w/lamp &&", "cd /w/lamp;", "cd /w/lamp ls", "cd /w/lamp & ls", "cdparanoia -B", "ls && cd /w", "cd 'unclosed && ls", ""] { assert_eq!(past_cd(kept), kept, "{kept:?} stays as it is") }
         let mut l = log(); l[2] = act("tu1", "tool", "Bash", "cd /p && python3 widen.py\nsecond line", 110);
-        let v = bar(&l, 0, "/p/b.kicad_pcb", &|t| format!("T{t}"));
+        let v = bar_on(false, &l, 0, "/p/b.kicad_pcb", &|t| format!("T{t}"));
         assert_eq!(v["steps"][1]["detail"], "Saved T111 · After Bash · python3 widen.py");
     }
     #[test] fn the_bar_names_each_step_of_the_file_by_what_it_followed() {
-        let v = bar(&log(), 0, "/p/b.kicad_pcb", &|t| format!("T{t}"));
+        let v = bar_on(false, &log(), 0, "/p/b.kicad_pcb", &|t| format!("T{t}"));
         let s = v["steps"].as_array().unwrap();
         assert_eq!(s.iter().map(|x| x["c"].as_str().unwrap()).collect::<Vec<_>>(), ["c0", "c1", "c3"], "only the board's steps");
         assert_eq!(s[0]["title"], "Step 1 of 3 · before the agent's edits"); assert_eq!(s[1]["title"], "Step 2 of 3"); assert_eq!(s[1]["label"], "Step 2"); assert_eq!(s[1]["tip"], "Step 2 · T111");
@@ -278,11 +362,11 @@ mod tests {
         assert_eq!(v["live"], "Live · 2 of 3 changes", "the design as it was before is no change; the schematic's change counts for the thread");
         assert_eq!(v["liveTip"], "3 snapshots of this file: 2 of the thread's 3 design changes, and the design as it was before 1 turn");
         assert_eq!(live_tip(26, 21, 27), "26 snapshots of this file: 21 of the thread's 27 design changes, and the design as it was before 5 turns"); assert_eq!(live_tip(2, 2, 2), "2 snapshots of this file: 2 design changes"); assert_eq!(live_tip(0, 0, 4), "");
-        let sch = bar(&log(), 1, "", &|t| format!("T{t}"));
+        let sch = bar_on(false, &log(), 1, "", &|t| format!("T{t}"));
         let s = sch["steps"].as_array().unwrap();
         assert_eq!(s.len(), 2); assert_eq!(s[1]["detail"], "Saved T121 · After kicad_sch_edit", "a tool call whose summary is its name says only the name");
         assert_eq!(s[1]["new"], "git\t/p/.git\tc2\t2\t/p/s.kicad_sch", "with no file known, the file of the kind the step changed");
-        let none = bar(&log(), 0, "/p/elsewhere.kicad_pcb", &|t| format!("{t}"));
+        let none = bar_on(false, &log(), 0, "/p/elsewhere.kicad_pcb", &|t| format!("{t}"));
         assert!(none["steps"].as_array().unwrap().is_empty()); assert_eq!(none["live"], "Live"); assert_eq!(none["note"], "The live file. Compare it with any commit, branch or tag.");
     }
     #[test] fn a_step_is_shown_from_where_its_commit_is_now() {
@@ -294,7 +378,7 @@ mod tests {
         assert_eq!(out.iter().map(|s| (s.c.as_str(), s.g.rsplit('/').next().unwrap(), s.po)).collect::<Vec<_>>(),
             [("a1", "history.git.untrusted-9", false), ("a2", "history.git.untrusted-9", true), ("b1", "history.git.untrusted-9", false), ("b2", "history.git", false)],
             "a moved-aside history still shows; a step whose step before was moved away shows without marks; a commit found nowhere is no step");
-        let v = bar_of(out, &[], 0, "/p/b.kicad_pcb", &|t| format!("T{t}"));
+        let v = bar_of_on(false, out, &[], 0, "/p/b.kicad_pcb", &|t| format!("T{t}"));
         assert_eq!(v["steps"][1]["old"], "git\t/p/.backplane/history.git.untrusted-9\ta1\t2\t/p/b.kicad_pcb"); assert_eq!(v["steps"][3]["old"], ""); assert_eq!(v["steps"][3]["title"], "Step 4 of 4");
     }
     #[test] fn an_after_reply_step_and_an_unknown_source_say_so() {
@@ -324,5 +408,76 @@ mod tests {
         let t0 = Instant::now();
         assert_eq!(have("/nonexistent/history.git", &["abc1234".into()], Instant::now()).await, None);
         assert!(t0.elapsed() < Duration::from_secs(1));
+    }
+    #[test] fn msys_git_dir_and_top_paths_normalize_on_windows_only() {
+        assert_eq!(msys_to_win_on(true, "/c/EDA/Demo/.git"), "C:/EDA/Demo/.git");
+        assert_eq!(msys_to_win_on(true, "/C/EDA/Demo/.backplane/history.git"), "C:/EDA/Demo/.backplane/history.git");
+        assert_eq!(msys_to_win_on(true, "/d"), "D:/");
+        assert_eq!(msys_to_win_on(true, "/d/"), "D:/");
+        assert_eq!(msys_to_win_on(true, "C:/EDA/Demo/.git"), "C:/EDA/Demo/.git");
+        assert_eq!(msys_to_win_on(true, "/tmp/repo/.git"), "/tmp/repo/.git");
+        assert_eq!(msys_to_win_on(true, "//server/share/.git"), "//server/share/.git");
+        assert_eq!(msys_to_win_on(true, ""), "");
+        assert_eq!(msys_to_win_on(false, "/c/EDA/Demo/.git"), "/c/EDA/Demo/.git");
+        assert_eq!(msys_to_win_on(false, "/p/.git"), "/p/.git");
+
+        let e = act("step:c1", "step", "kicad", &json!({"e": "m1", "c": "c1", "p": "c0", "g": "/c/EDA/Demo/.git", "t": "/c/EDA/Demo", "f": ["M\tdemo.kicad_pcb"], "w": ""}).to_string(), 100);
+        let s = step_of_on(true, &e).unwrap();
+        assert_eq!(s.g, "C:/EDA/Demo/.git");
+        assert_eq!(s.top, "C:/EDA/Demo");
+        let kept = place(vec![s], &mut |d, want| { assert_eq!(d, "C:/EDA/Demo/.git"); want.iter().cloned().collect() }, &|_| vec![]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].g, "C:/EDA/Demo/.git");
+    }
+    #[test] fn windows_mixed_slash_and_case_insensitive_paths_match_and_build_versions() {
+        let win_step = |c: &str, p: &str, e: &str, w: &str, g: &str, t: &str, files: &[&str], at: u64| {
+            act(&format!("step:{c}"), "step", "kicad", &json!({"e": e, "c": c, "p": p, "g": g, "t": t, "f": files, "w": w}).to_string(), at)
+        };
+        let es = vec![
+            msg("m1", "user", "widen trace", 100),
+            win_step("c0", "", "m1", "start", "/c/EDA/Demo/.git", "C:/EDA/Demo", &["A\tdemo.kicad_pcb", "A\tSub/Sheet.kicad_sch"], 101),
+            act("tu1", "tool", "kicad_edit", "widen +5V", 110),
+            win_step("c1", "c0", "tu1", "", "/c/EDA/Demo/.git", "C:/EDA/Demo", &["M\tdemo.kicad_pcb"], 111),
+            act("tu2", "tool", "kicad_sch_edit", "add R1", 120),
+            win_step("c2", "c1", "tu2", "", "/c/EDA/Demo/.git", "C:/EDA/Demo", &["M\tSub/Sheet.kicad_sch"], 121),
+        ];
+
+        for query in [r"C:\EDA\Demo\demo.kicad_pcb", "c:/EDA/demo/demo.kicad_pcb"] {
+            let v = bar_on(true, &es, 0, query, &|t| format!("T{t}"));
+            let steps = v["steps"].as_array().unwrap();
+            assert_eq!(steps.len(), 2, "query {query}");
+            assert_eq!(steps[0]["c"], "c0");
+            assert_eq!(steps[1]["c"], "c1");
+            assert_eq!(steps[1]["old"], "git\tC:/EDA/Demo/.git\tc0\t11\tC:/EDA/Demo/demo.kicad_pcb");
+            assert_eq!(steps[1]["new"], "git\tC:/EDA/Demo/.git\tc1\t11\tC:/EDA/Demo/demo.kicad_pcb");
+            assert_eq!(v["live"], "Live · 1 of 2 changes");
+            assert_eq!(v["note"], "The live file. Each tick is a saved snapshot; pick one or play the history.");
+        }
+
+        let sch = bar_on(true, &es, 1, r"c:\eda\demo\sub\sheet.kicad_sch", &|t| format!("T{t}"));
+        let s = sch["steps"].as_array().unwrap();
+        assert_eq!(s.len(), 2);
+        assert_eq!(s[1]["old"], "git\tC:/EDA/Demo/.git\tc1\t11\tC:/EDA/Demo/Sub/Sheet.kicad_sch", "preserves Git tree casing");
+        assert_eq!(s[1]["new"], "git\tC:/EDA/Demo/.git\tc2\t11\tC:/EDA/Demo/Sub/Sheet.kicad_sch");
+
+        // Non-git shadow repo step with MSYS top
+        let shadow = vec![
+            win_step("s0", "", "m1", "start", "/c/EDA/Demo/.backplane/history.git", "/c/EDA/Demo", &["A\tboards/demo.kicad_pcb"], 200),
+            win_step("s1", "s0", "tu1", "", "/c/EDA/Demo/.backplane/history.git", "/c/EDA/Demo", &["M\tboards/demo.kicad_pcb"], 201),
+        ];
+        let sv = bar_on(true, &shadow, 0, r"C:\EDA\Demo\boards\demo.kicad_pcb", &|t| format!("T{t}"));
+        assert_eq!(sv["steps"].as_array().unwrap().len(), 2);
+        assert_eq!(sv["steps"][1]["new"], "git\tC:/EDA/Demo/.backplane/history.git\ts1\t11\tC:/EDA/Demo/boards/demo.kicad_pcb");
+
+        // Non-matching paths return empty steps
+        for miss in [r"C:\EDA\Demo\other.kicad_pcb", r"C:\EDA\Demo2\demo.kicad_pcb"] {
+            let mv = bar_on(true, &es, 0, miss, &|t| format!("T{t}"));
+            assert!(mv["steps"].as_array().unwrap().is_empty(), "should not match {miss}");
+        }
+
+        assert_eq!(version_on(true, "/c/EDA/Demo/.git", r"C:\EDA\Demo\", "abc1234", r"c:\eda\demo\Sub\Sheet.kicad_sch"),
+            "git\tC:/EDA/Demo/.git\tabc1234\t11\tC:/EDA/Demo/Sub/Sheet.kicad_sch");
+        assert_eq!(version_on(false, "/p/.git", "/p", "abc1234", r"/p\b.kicad_pcb"), "");
+        assert_eq!(version_on(false, "/p/.git", "/P", "abc1234", "/p/b.kicad_pcb"), "");
     }
 }
