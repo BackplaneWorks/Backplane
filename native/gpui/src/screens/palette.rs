@@ -110,6 +110,8 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     v.push(Item { label: trs("Fold or unfold the sidebar"), place: String::new(), kind: "action", what: Do::Sidebar, row: Value::Null });
     // always here, whatever the hub sends or fails to send: these do not go through it (hubbar.rs)
     for a in ["restart", "safe", "rollback"] { v.push(Item { label: trs(super::hubbar::label_of(a)), place: String::new(), kind: "action", what: Do::Hub(a.into()), row: Value::Null }); }
+    // a chat in no project: always offered, whatever is open (the hub makes its folder)
+    v.push(Item { label: trs("New chat (no project)"), place: String::new(), kind: "action", what: Do::Action("new-thread".into(), crate::keys::CHATS.into()), row: Value::Null });
     for p in data["projects"].as_array().into_iter().flatten() {
         let (pid, ptitle) = (string(p, "id"), string(p, "title"));
         let raw = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
@@ -419,6 +421,7 @@ mod tests {
         assert!(!all.iter().any(|i| i.what == Do::Action("delete".into(), String::new())), "Delete asks first and is not a palette action");
         let r = found(all.clone(), "pow", 10); assert_eq!(r[0].label, "Power budget");
         assert!(found(all.clone(), "zzzz", 10).is_empty());
+        let r = found(all.clone(), "new chat", 10); assert_eq!(r[0].what, Do::Action("new-thread".into(), "chats".into()), "a chat in no project, from anywhere");
         let r = found(all, "new thr", 10); assert_eq!(r[0].what, Do::Action("new-thread".into(), "p1".into()), "the project's raw id");
     }
     #[test] fn opened_empty_the_threads_waiting_on_the_person_come_first() {

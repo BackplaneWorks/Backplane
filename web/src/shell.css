@@ -3068,3 +3068,11 @@ button.bp-home-row:focus-visible { outline: 1px solid var(--accent); outline-off
   .bp-home-thread .bp-home-row-faint { display: inline; }
   .bp-ring-search { flex-wrap: wrap; }
 }
+
+/* Quick chats: New chat beside the search, and Move to project's list */
+.bp-side-new-chat { display: inline-flex; align-items: center; padding: 4px 6px; }
+.bp-move-note { color: var(--dim); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-move-row { text-align: left; padding: 7px 9px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
+.bp-move-row:hover { border-color: var(--faint); }
+.bp-move-err { color: var(--bad); font-size: 12px; }
+.bp-modal-body:has(.bp-move-row) { gap: 6px; }

@@ -10,6 +10,17 @@ import { t } from "./i18n";
 import { needPress, parseNeed, type NeedAction } from "./swarm-need";
 import type { HomeInfo } from "./ws";
 
+/** The place of the chats that belong to no project (the hub's `sidebar::CHATS`): `thread.create {project: CHATS}` starts one. */
+export const CHATS = "chats";
+
+/** The projects a chat may move to: this hub's own, by name (a linked machine's copy, `<link>~<id>`, is not offered). */
+export function moveTargets(projects: ProjectItem[]): ProjectItem[] {
+  return projects
+    .filter((p) => p.id && p.id !== CHATS && p.id !== "scratch" && !p.id.includes("~"))
+    .slice()
+    .sort((a, b) => (a.title || a.id).toLowerCase().localeCompare((b.title || b.id).toLowerCase()));
+}
+
 export interface ProjectItem {
   id: string;
   title: string;
@@ -93,6 +104,8 @@ export interface SectionThreadRow {
   off?: boolean;
   nav?: string;
   kind?: string;
+  /** A chat that belongs to no project (hub `chat` field): it can move to a project. */
+  chat?: boolean;
   /** Thread id for 1-click settle when eligible (hub `settle` field). */
   settle?: string;
   /** Snooze duration choices when eligible (hub `snooze` field; send `row-snooze` with `value`). */
@@ -166,6 +179,10 @@ export interface SidebarCallbacks {
   onAddProject?: () => void;
   /** Settle/dismiss a swarm row (`sidebar.act` `swarm-settle`). */
   onSettleSwarm?: (roomId: string) => void;
+  /** New chat: a thread in no project, started at once. */
+  onNewChat?: () => void;
+  /** A chat row's Move to project…: the app asks which project. */
+  onMoveToProject?: (threadId: string) => void;
 }
 
 /** Whether a swarm row under a project should be shown in the sidebar. */
@@ -296,6 +313,22 @@ function makeCheckIcon(size = 11): SVGSVGElement {
   return makeSvgIcon(["M4 12l5 5 11-11"], size);
 }
 
+/** Lucide square-pen: the New chat glyph (as GPUI's). */
+function makeChatIcon(size = 13): SVGSVGElement {
+  return makeSvgIcon(["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4z"], size);
+}
+
+/** Lucide folder-input: Move to project. */
+function makeMoveIcon(size = 11): SVGSVGElement {
+  return makeSvgIcon(["M2 9V5a2 2 0 0 1 2-2h4l2 3h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H2", "M2 13h10", "M9 16l3-3-3-3"], size);
+}
+
+/** New chat's key as the person reads it. A browser keeps Ctrl+Shift+N for itself, so the web's is Alt+Shift+N. */
+export function newChatKeyHint(): string {
+  const mac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || "");
+  return mac ? "⌥⇧N" : "Alt+Shift+N";
+}
+
 function makeClockIcon(size = 11): SVGSVGElement {
   return makeSvgIcon(["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20z", "M12 6v6l4 2"], size);
 }
@@ -412,7 +445,18 @@ export class SidebarView {
       if (firstProj) this.cb.onNewThread(firstProj);
     });
 
-    head.append(this.filterInput, quickAdd);
+    // New chat: a thread in no project, in one press
+    const newChat = document.createElement("button");
+    newChat.type = "button";
+    newChat.className = "icon bp-side-add bp-side-new-chat";
+    newChat.appendChild(makeChatIcon(13));
+    const chatTip = `${t("chats.new.noproject", "New chat (no project)")} (${newChatKeyHint()})`;
+    newChat.title = chatTip;
+    newChat.setAttribute("aria-label", t("chats.new.noproject", "New chat (no project)"));
+    newChat.setAttribute("data-testid", "sidebar-new-chat");
+    newChat.addEventListener("click", () => this.cb.onNewChat?.());
+
+    head.append(this.filterInput, newChat, quickAdd);
 
     this.homeBanner = document.createElement("div");
     this.homeBanner.className = "bp-side-home bp-hidden";
@@ -745,7 +789,8 @@ export class SidebarView {
     const hasWake = Boolean(row.wake) && Boolean(this.cb.onSnoozeRow);
     const isSwarm = row.kind === "swarm";
     const hasSettle = Boolean(row.settle) && (!isSwarm || Boolean(this.cb.onSettleSwarm));
-    if (!hasSnooze && !hasWake && !hasSettle) return null;
+    const hasMove = Boolean(row.chat) && Boolean(this.cb.onMoveToProject);
+    if (!hasSnooze && !hasWake && !hasSettle && !hasMove) return null;
 
     const acts = document.createElement("span");
     acts.className = "bp-row-acts";
@@ -778,6 +823,21 @@ export class SidebarView {
         this.render();
       });
       acts.appendChild(snBtn);
+    }
+
+    if (hasMove) {
+      const moveBtn = document.createElement("button");
+      moveBtn.type = "button";
+      moveBtn.className = "bp-row-act-btn bp-move-btn";
+      moveBtn.title = t("chats.move", "Move to project…");
+      moveBtn.setAttribute("aria-label", t("chats.move", "Move to project…"));
+      moveBtn.setAttribute("data-testid", `move-row-${row.id}`);
+      moveBtn.appendChild(makeMoveIcon(11));
+      moveBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.cb.onMoveToProject?.(rawThreadId(row.id));
+      });
+      acts.appendChild(moveBtn);
     }
 
     if (hasSettle && row.settle) {
@@ -829,7 +889,7 @@ export class SidebarView {
       const line2 = document.createElement("div");
       line2.className = "bp-inbox-meta";
       if (pill) line2.appendChild(this.renderStatusPill(pill, row.say));
-      if (row.project) {
+      if (row.project && !row.chat) {
         const proj = document.createElement("span");
         proj.className = "bp-inbox-proj";
         proj.textContent = row.project;
@@ -1012,7 +1072,23 @@ export class SidebarView {
           const head = document.createElement("div");
           head.className = "bp-side-section-head" +
             (sec.id === "needs" ? " bp-head-needs" : sec.id === "running" ? " bp-head-running" : "");
-          head.textContent = `${sec.title.toUpperCase()} ${rows.length}`;
+          if (sec.id === CHATS && this.cb.onNewChat) {
+            // Chats (the threads in no project): its + starts one
+            head.classList.add("bp-side-section-row");
+            const lbl = document.createElement("span");
+            lbl.textContent = `${t("chats.title", sec.title).toUpperCase()} ${rows.length}`;
+            const add = document.createElement("button");
+            add.type = "button";
+            add.className = "bp-side-sec-plus bp-side-sec-btn";
+            add.textContent = "+";
+            add.title = t("chats.new.noproject", "New chat (no project)");
+            add.setAttribute("aria-label", add.title);
+            add.setAttribute("data-testid", "section-new-chat");
+            add.addEventListener("click", (e) => { e.stopPropagation(); this.cb.onNewChat?.(); });
+            head.append(lbl, add);
+          } else {
+            head.textContent = `${sec.title.toUpperCase()} ${rows.length}`;
+          }
           secWrap.appendChild(head);
         }
 

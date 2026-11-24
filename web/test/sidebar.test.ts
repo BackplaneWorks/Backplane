@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 mock.module("virtual:i18n", () => ({ CATALOGS: {} }));
-const { statusPillOf, isSwarmVisibleUnderProject } = await import("../src/sidebar");
+const { statusPillOf, isSwarmVisibleUnderProject, moveTargets, CHATS } = await import("../src/sidebar");
 
 const root = join(import.meta.dir, "..");
 const sidebarSrc = readFileSync(join(root, "src/sidebar.ts"), "utf8");
@@ -23,6 +23,17 @@ describe("SidebarView Crew / Inbox / Bench + Status Pills + Snooze", () => {
     expect(statusPillOf({ word: "running" })).toEqual({ icon: "▸", label: "Working", tone: "run" });
     expect(statusPillOf({ word: "done" })).toEqual({ icon: "✓", label: "Done", tone: "ok" });
     expect(statusPillOf({ word: "idle" })).toBeNull();
+  });
+
+  test("Quick chats: New chat in the header and the Chats head, Move to project on a chat row, own projects only", () => {
+    expect(CHATS).toBe("chats");
+    expect(sidebarSrc).toContain('"sidebar-new-chat"');
+    expect(sidebarSrc).toContain('"section-new-chat"');
+    expect(sidebarSrc).toContain("`move-row-${row.id}`");
+    const got = moveTargets([
+      { id: "p2", title: "psu" }, { id: "chats", title: "Chats" }, { id: "scratch", title: "Scratch" }, { id: "L~p9", title: "far" }, { id: "p1", title: "Amp" },
+    ]);
+    expect(got.map((p) => p.id)).toEqual(["p1", "p2"]);
   });
 
   test("Crew band is mounted outside scrollable list and never appended after projects", () => {

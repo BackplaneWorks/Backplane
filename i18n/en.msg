@@ -2449,6 +2449,14 @@ gpui.star.why = Stars help other hardware designers find Backplane, and tell us 
 gpui.projects.unpushed = {n, plural, one {# commit not pushed to {upstream}} other {# commits not pushed to {upstream}}}
 gpui.projects.push = Push
 
+# quick chats: threads in no project (sidebar New chat, the Chats section, Move to project)
+chats.new = New chat
+chats.new.noproject = New chat (no project)
+chats.title = Chats
+chats.move = Move to project…
+chats.move.none = No project to move it to. Add a project first.
+chats.old.tip = Older chats that belong to no project, kept as they are. New chat starts a new one.
+
 # ---- gpui-e: hub settings and panels ----
 gpui.e.files.max.mb = Largest attachment (MB)
 gpui.e.files.max.note = A file sent with a message, or shown from this hub, may be up to {mb} MB. Files stream from disk, so a large one costs disk space, not memory.

@@ -13,6 +13,8 @@ export type PaletteAction =
   | { type: "next-thread" }
   | { type: "command"; word: string; runDirectly: boolean }
   | { type: "new-thread"; projectId: string }
+  | { type: "new-chat" }
+  | { type: "move-project" }
   | { type: "improvements" }
   | { type: "settings" }
   | { type: "sidebar" };
@@ -163,6 +165,15 @@ export function buildPaletteItems(state: PaletteState, labels: PaletteLabels = D
       kind: "action",
       action: { type: "thread-act", action: cur.archived ? "unarchive" : "archive" },
     });
+    // a chat that belongs to no project: it can go to one, with all it says
+    if (cur.project === "chats") {
+      out.push({
+        label: t("chats.move", "Move to project…"),
+        place: "",
+        kind: "action",
+        action: { type: "move-project" },
+      });
+    }
     out.push({
       label: t("sheet.rename", "Rename thread"),
       place: "",
@@ -217,6 +228,14 @@ export function buildPaletteItems(state: PaletteState, labels: PaletteLabels = D
     action: { type: "sidebar" },
   });
 
+  // a chat in no project: always offered, whatever is open
+  out.push({
+    label: t("chats.new.noproject", "New chat (no project)"),
+    place: "",
+    kind: "action",
+    action: { type: "new-chat" },
+  });
+
   // 5. New thread in each project
   for (const p of state.projects) {
     out.push({
@@ -232,7 +251,7 @@ export function buildPaletteItems(state: PaletteState, labels: PaletteLabels = D
     const { urgency, want } = urgencyOf(th);
     out.push({
       label: th.title || "Untitled thread",
-      place: th.project ? (projById.get(th.project) ?? "") : "",
+      place: th.project === "chats" ? t("chats.title", "Chats") : th.project ? (projById.get(th.project) ?? "") : "",
       kind: "thread",
       urgency,
       want,

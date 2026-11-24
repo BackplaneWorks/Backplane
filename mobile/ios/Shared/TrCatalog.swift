@@ -2834,6 +2834,12 @@ gpui.star.dont.ask	Don't ask again	今後表示しない	No preguntar de nuevo
 gpui.star.why	Stars help other hardware designers find Backplane, and tell us what to keep building.	スターは、ほかのハードウェア設計者がBackplaneを見つける助けになり、私たちが何を作り続けるべきかを知る手がかりにもなります。	Las estrellas ayudan a otros diseñadores de hardware a encontrar Backplane y nos indican qué seguir construyendo.
 gpui.projects.unpushed	{n, plural, one {# commit not pushed to {upstream}} other {# commits not pushed to {upstream}}}	{upstream} にプッシュしていないコミット: {n} 件	{n, plural, one {# commit sin enviar a {upstream}} other {# commits sin enviar a {upstream}}}
 gpui.projects.push	Push	プッシュ	Enviar
+chats.new	New chat	新しいチャット	Chat nuevo
+chats.new.noproject	New chat (no project)	新しいチャット（プロジェクトなし）	Chat nuevo (sin proyecto)
+chats.title	Chats	チャット	Chats
+chats.move	Move to project…	プロジェクトに移動…	Mover a un proyecto…
+chats.move.none	No project to move it to. Add a project first.	移動先のプロジェクトがありません。先にプロジェクトを追加してください。	No hay ningún proyecto al que moverlo. Añade uno primero.
+chats.old.tip	Older chats that belong to no project, kept as they are. New chat starts a new one.	プロジェクトに属さない以前のチャットです。そのまま残っています。新しいチャットから新しく始められます。	Chats antiguos sin proyecto, tal como estaban. Chat nuevo empieza uno.
 gpui.e.files.max.mb	Largest attachment (MB)	添付の上限（MB）	Adjunto más grande (MB)
 gpui.e.files.max.note	A file sent with a message, or shown from this hub, may be up to {mb} MB. Files stream from disk, so a large one costs disk space, not memory.	メッセージで送るファイルやこのハブから表示するファイルは{mb} MBまでです。ファイルはディスクから順に読むので、大きなファイルはメモリではなくディスク容量を使います。	Un archivo enviado con un mensaje, o mostrado desde este hub, puede pesar hasta {mb} MB. Los archivos se transmiten desde disco, así que uno grande consume espacio en disco, no memoria.
 gpui.e.dev.replay	Replay first run	初回起動をやり直す	Repetir primer inicio

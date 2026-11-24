@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 235837,
+  "totalAssetGzipBytes": 237355,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -12,6 +12,10 @@
     "bots.new",
     "bots.rooms",
     "bots.tab.browser",
+    "chats.move",
+    "chats.move.none",
+    "chats.new.noproject",
+    "chats.title",
     "common.cancel",
     "common.close",
     "common.copy",
@@ -340,10 +344,10 @@
     "web.settings.providers",
     "web.settings.providers.browser"
   ],
-  "i18nSubsetSha256": "6e36764b44f9e02d79f1962767de5a6ee5d04d2e6f01d8bbf6454d049483e23d",
+  "i18nSubsetSha256": "ad3083cc73511c7876092934bbfa1a26823b509f16985a9cf924cf2136eff864",
   "inputs": {
     "web/src/addproject.ts": "06a7ff3e13cd78d993ebca7f638d5d623da06c0099186ad534bae8f184dbe44f",
-    "web/src/app.ts": "8dd026527a0661b6034c6776a4d4dcf18a468d2a913e07cbc93a282c6ca858b7",
+    "web/src/app.ts": "266280ec582ff9db7a0800134c813cf5a62f7f6962a0d4083b1e636a639d4cad",
     "web/src/chat.ts": "639e3af0791aedcde788c1a76aee6ea07cf96f5749d6a3564898c2beb8bd7337",
     "web/src/clone-model.ts": "d265df49436e14f415bbeb2a271ffa3552f9163be62bdc0158cecc10c3cdae45",
     "web/src/composer.ts": "63a5e9d7acfd321007c0a18880ee0ba055506335fcf4808154febc2b380f91a8",
@@ -358,7 +362,7 @@
     "web/src/model-picker-model.ts": "8bebc12191d731c58f6805c5d273b8c018aa0dd64f36d4fc72adc8b39d58ec73",
     "web/src/pair.html": "cf7b94703316f910718356e9ff8e99e088b68211db39b5200213b623c9275f6e",
     "web/src/pair.ts": "af07d19224043f8176f8cd2298d00b6806248eee453fd2f287c183e71a08179b",
-    "web/src/palette-model.ts": "ae359cc71e98e84774428355a5048fd9ba0e1da2d45fa18290b4313c50c50ee4",
+    "web/src/palette-model.ts": "4854dad6a1e7044685689f146438c53670b99c50741cfb5af62355198dbf827c",
     "web/src/palette.ts": "bcd5c4585f57cc80a9cf29bf1b9da6ebbd33a3ab68f8f2a918c37c58060c8e48",
     "web/src/plan-canvas.ts": "49a0af6ef960301d4ea75f2fcd48628e01d983431d96329f37e6a3704bafd498",
     "web/src/project-home-model.ts": "866d403419cf28df64a914cf20aaceb177203666114d591e14feaa522494f048",
@@ -369,8 +373,8 @@
     "web/src/ring-model.ts": "66368ffe8996138d4e73f041e50ac4fa573cf20ee59571af5fd1f320e29a895d",
     "web/src/settings-model.ts": "2f8f64cc93ee54c1bf45d918d8568eec2457970db7b3c43e926b2b4c45dcd5f6",
     "web/src/settings.ts": "8d4c24f554ba9c7ba4c4a96098fe25eea68b91f41489aee4d2b01b616f41f507",
-    "web/src/shell.css": "8859e0833ec034ca137745c6863305a9e897c5f72a9c1b2dbec4434dffe11bce",
-    "web/src/sidebar.ts": "121045bb07d60d7b06393b4c67862d0088991b0737ff52b94add9dd5510ad2b1",
+    "web/src/shell.css": "0fc26ae8ba27a25dff78a10523e89880db122cd9b1ccbcd972b6457df1eafcd8",
+    "web/src/sidebar.ts": "ee2e10c0fdde6e1f2807e72199bce3a85379244fc550acedd4f35b76c1369fc4",
     "web/src/swarm-need.ts": "503bbf5ffe0389f068847571c792321b0ad5c8d26a18c73b8e41c0a8989e227f",
     "web/src/thread-context.ts": "b9fbd5b3ef0b1357b5a4444a1e9a0ac0606afe1c8a5377c4777752e918af0ac2",
     "web/src/user-refs.ts": "56bcf0dc116d5f14260606f07cf9af9becbbd7cbb102dc9e0687a4ea5f894011",
@@ -407,9 +411,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 434864,
-      "gzipBytes": 122455,
-      "sha256": "7650fc2de412daac4bc5d60cb382555c4d8f8470df5841f437915e7da1ec2621"
+      "bytes": 439731,
+      "gzipBytes": 123684,
+      "sha256": "7d68d5f26a82d1143218aa7c226e3ab5db7ba0221a0a134af296ee467509d547"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -427,14 +431,14 @@
       "sha256": "123b6a27f255d339b505c8fd83609674f0bddf9b46c0e907fce23befa96b1eec"
     },
     "assets/pair.js": {
-      "bytes": 62486,
-      "gzipBytes": 18662,
-      "sha256": "2aca9be2863742059403024eca7b5cc265665b2cc99e54ce95cd6c3d6e681c21"
+      "bytes": 63122,
+      "gzipBytes": 18825,
+      "sha256": "1667d584f1306cc34069c62ca91e4aa78a1286d0875d1f12657817aa1a70a475"
     },
     "assets/style.css": {
-      "bytes": 99938,
-      "gzipBytes": 16421,
-      "sha256": "65dfec07c0af6a83cf5da4c3c511cd08d842b07eec2dc677af2f26e21eb3ef8a"
+      "bytes": 100512,
+      "gzipBytes": 16547,
+      "sha256": "7d61c5023e532d5b8ac18015e107b26b6d2bcaa455a8e5f669c0c7fede529b80"
     },
     "assets/terminal.js": {
       "bytes": 296616,

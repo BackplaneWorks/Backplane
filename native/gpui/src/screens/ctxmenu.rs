@@ -64,6 +64,12 @@ pub fn image_items(path: &str) -> Vec<Item> {
     v
 }
 
+/// A chat's Move to project…: the hub's `menu` item `move`, whose `sub` lists the projects (each sends `row-move-project`); none when the hub sent
+/// none (a thread of a project, an older hub, no project to move to).
+pub fn move_item(menu: &Value) -> Option<Item> {
+    let m = menu.as_array()?.iter().find(|x| x["id"] == "move" && x["sub"].as_array().map_or(false, |a| !a.is_empty()))?;
+    section_items(&Value::Array(vec![m.clone()])).into_iter().next()
+}
 /// The items for a thread row of the sidebar (`t` is its row, `project` the raw id of the project it is in).
 pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     let qid = s(t, "id");
@@ -73,7 +79,10 @@ pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     // a row of the sections (the hub's `menu`): Settle or Unsettle, by hand (the clock never settles a pinned thread)
     else if let Some(m) = t["menu"].as_array().and_then(|m| m.iter().find(|x| matches!(x["id"].as_str(), Some("settle" | "unsettle")))) { v.push(item(&s(m, "label"), &s(m, "action"), &s(m, "value"), false)); }
     /* i18n-ok: menu labels, tested; drawn through trs in render */ for o in t["trail"].as_array().into_iter().flatten().flat_map(|x| x["options"].as_array().into_iter().flatten()) { v.push(item(&format!("Snooze {}", s(o, "label").to_lowercase()), "row-snooze", &s(o, "value"), false)); }
-    /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["canChild"].as_bool().unwrap_or(true) { v.push(item("New subthread", "thread-child", &format!("{}|{}", raw(&qid), project), false)); }
+    // a chat in no project (the hub's `chat`): Move to project… (the hub's `menu` item, a second menu of the projects), and no subthread: it has no project to be under
+    let chat = t["chat"] == true;
+    v.extend(move_item(&t["menu"]));
+    /* i18n-ok: menu labels, tested; drawn through trs in render */ if !chat && t["canChild"].as_bool().unwrap_or(true) { v.push(item("New subthread", "thread-child", &format!("{}|{}", raw(&qid), project), false)); }
     /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["depth"].as_u64().unwrap_or(0) > 0 { v.push(item("Move to top level", "row-detach", raw(&qid), false)); }
     /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["depth"].is_u64() && !project.is_empty() { v.push(item("Move under\u{2026}", LOCAL_MOVE, &format!("{}|{}", raw(&qid), project), false)); }
     /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(item("Rename", "row-rename", raw(&qid), false));
@@ -116,9 +125,15 @@ pub fn title_items(data: &Value) -> Vec<Item> {
     /* i18n-ok: menu labels, drawn through trs in render */ let mut v = vec![item("Find in thread", LOCAL_SEARCH, &rid, false), item("Rename", "row-rename", &rid, false), item("Regenerate title", "row-retitle", &rid, false)];
     /* i18n-ok: menu labels, drawn through trs in render */ if !project.is_empty() && row.map_or(false, |r| r["canChild"].as_bool().unwrap_or(true)) { v.push(item("New subthread", "thread-child", &format!("{rid}|{project}"), false)); }
     /* i18n-ok: menu labels, drawn through trs in render */ if row.map_or(false, |r| r["depth"].as_u64().unwrap_or(0) > 0) { v.push(item("Move to top level", "row-detach", &rid, false)); }
+    // a chat in no project: Move to project… here too (the hub's `thread.menu` or its row's)
+    v.extend(move_item(&thread["menu"]).or_else(|| chat_row(data, &rid).and_then(|r| move_item(&r["menu"]))));
     /* i18n-ok: menu label translated in render */ v.push(item("Context & Prompt", "local:thread-context", &rid, false));
     v.extend(super::tools::context_items(thread));
     v
+}
+/// The row of a chat in no project in the sections (`id` "chats"), by its raw id.
+pub fn chat_row<'a>(data: &'a Value, rid: &str) -> Option<&'a Value> {
+    data["sections"].as_array()?.iter().filter(|s| s["id"] == crate::keys::CHATS).flat_map(|s| s["rows"].as_array().into_iter().flatten()).find(|t| raw(t["id"].as_str().unwrap_or("")) == rid)
 }
 /// The items for a project's header.
 /// A project that is also on linked machines (the hub's `newOn`): one New thread per machine, this one first, each naming its machine.
@@ -316,6 +331,23 @@ mod tests {
     use super::*; use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
     /// The composer's machine picker opens at its line: under it when there is room, over it near the window's bottom edge (never clipped).
+    #[test] fn a_chat_in_no_project_moves_to_a_project_from_its_menu_and_has_no_subthread() {
+        let sep = '\u{1f}';
+        let t = serde_json::json!({"id": "h|c1", "title": "quick question", "chat": true, "depth": 0, "menu": [
+            {"id": "pin", "label": "Pin", "action": "row-pin", "value": "h|c1"}, {"id": "settle", "label": "Settle", "action": "row-settle", "value": "h|c1"},
+            {"id": "move", "label": "Move to project\u{2026}", "sub": [{"label": "amp", "action": "row-move-project", "value": format!("h|c1{sep}p1")}, {"label": "psu", "action": "row-move-project", "value": format!("h|c1{sep}p2")}]}]});
+        let it = thread_items(&t, "");
+        assert!(!it.iter().any(|i| i.action == "thread-child" || i.action == LOCAL_MOVE), "no project to be under");
+        let mv = it.iter().find(|i| i.label == "Move to project\u{2026}").expect("the hub's Move item"); assert_eq!(mv.action, LOCAL_SUB);
+        let sub = sub_items(&mv.value);
+        assert_eq!(sub.iter().map(|i| (i.label.as_str(), i.action.as_str(), i.value.as_str())).collect::<Vec<_>>(), [("amp", "row-move-project", "h|c1\u{1f}p1"), ("psu", "row-move-project", "h|c1\u{1f}p2")]);
+        // the open chat's ▾ menu has it too, from its row in the Chats section
+        let d = serde_json::json!({"thread": {"id": "h|c1"}, "sections": [{"id": "chats", "kind": "threads", "rows": [t.clone()]}]});
+        assert!(title_items(&d).iter().any(|i| i.action == LOCAL_SUB && i.label == "Move to project\u{2026}"));
+        // a thread of a project, or a chat with no project to go to: nothing
+        assert!(move_item(&serde_json::json!([{"id": "pin", "label": "Pin", "action": "row-pin", "value": "h|t1"}])).is_none());
+        assert!(move_item(&serde_json::json!([{"id": "move", "label": "Move to project\u{2026}", "sub": []}])).is_none());
+    }
     #[test] fn a_menu_from_a_control_opens_at_it_and_above_it_near_the_bottom() {
         let b = |x: f32, y: f32| Bounds { origin: point(px(x), px(y)), size: size(px(120.), px(16.)) };
         assert_eq!(anchored(b(500., 300.), px(1000.), 3), point(px(500.), px(320.)), "under it");
