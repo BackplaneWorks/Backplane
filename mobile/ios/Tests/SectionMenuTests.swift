@@ -21,5 +21,15 @@ check(sub.map(\.label) == ["Nordic", "New group…"], "Move to group: the other 
 check(sub.first?.value == "k1\u{1f}folder:/w/n", "a group's value is the project key and the group", sub.first?.value ?? "")
 check(((try? JSONDecoder().decode([DMenuItem].self, from: Data("[{\"id\":\"pin\"}]".utf8))) ?? []).first?.label == "", "missing fields are empty")
 
+// a chat in no project: its row's menu has Move to project…, a second list of the hub's projects (each a `row-move-project`)
+let chatJson = """
+[{"id":"pin","label":"Pin","action":"row-pin","value":"c1"},{"id":"settle","label":"Settle","action":"row-settle","value":"c1"},
+ {"id":"move","label":"Move to project…","action":"","value":"","sub":[{"id":"project","label":"amp","action":"row-move-project","value":"c1\\u001fp1"}]}]
+"""
+let chatMenu = DMenuItem.thread(try! JSONDecoder().decode([DMenuItem].self, from: Data(chatJson.utf8)))
+check(chatMenu.map(\.id) == ["pin", "settle", "move"], "a chat's menu: pin, settle, move", chatMenu.map(\.id))
+check(chatMenu[2].isMove && !chatMenu[0].isMove && chatMenu[2].sub[0].action == DMenuItem.moveProject && chatMenu[2].sub[0].value == "c1\u{1f}p1", "Move to project lists the projects", chatMenu[2].sub)
+check(DMenuItem.thread([DMenuItem(id: "move", label: "Move to project…")]).isEmpty, "no project to move to: no item")
+
 print("section-menu: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

@@ -16,6 +16,11 @@ struct DMenuItem: Decodable, Equatable, Identifiable {
         id = s(.id); label = s(.label); action = s(.action); value = s(.value)
         confirm = (try? c.decode(Bool.self, forKey: .confirm)) ?? false; sub = (try? c.decode([DMenuItem].self, forKey: .sub)) ?? []
     }
+    /// A chat's Move to project… (`id` "move"): its `sub` is the projects, each sent as `sidebar.act` `row-move-project`.
+    static let moveProject = "row-move-project"
+    var isMove: Bool { id == "move" && !sub.isEmpty }
+    /// A thread row's menu: the hub's items that have words; Move to project… only while there is a project to move to.
+    static func thread(_ menu: [DMenuItem]) -> [DMenuItem] { menu.filter { !$0.label.isEmpty && ($0.id != "move" || !$0.sub.isEmpty) } }
     /// What a phone's long press lists: the hub's menu without Open folder (the folder is on the hub's machine) and New swarm when swarms are off.
     static func phone(_ menu: [DMenuItem], swarms: Bool) -> [DMenuItem] { menu.filter { $0.id != "open" && (swarms || $0.id != "swarm") && !$0.label.isEmpty } }
 }

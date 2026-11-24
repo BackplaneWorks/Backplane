@@ -11,6 +11,9 @@ for id in ["pinned", "active", "group:owner:github.com/acme", "all", "quiet"] { 
 check(Home.tab(section: "bub", kind: "bub") == .crew, "Bub's row is the Crew's")
 check(Home.tab(section: "later", kind: "threads") == .inbox, "a list of threads a newer hub adds is in the Inbox, never lost")
 check(Home.tab(section: "x", kind: "chart") == nil, "an unknown kind is not drawn")
+// Chats (the threads in no project) are a list of threads: the Inbox, and they do not end All clear
+check(Home.tab(section: "chats", kind: "threads") == .inbox && Home.chats == "chats", "Chats are in the Inbox")
+check(Home.allClear([]) && Home.allClear(["chats", "snoozed"]) && !Home.allClear(["needs", "chats"]) && !Home.allClear(["running"]), "All clear with only chats and snoozed rows")
 
 // the status pill: the hub's label and tone as they come
 check(Home.pill(label: "Approve", tone: "bad", word: "needs", want: "approval") == HomePill(label: "Approve", tone: "bad", symbol: "exclamationmark"), "the hub's label and tone")

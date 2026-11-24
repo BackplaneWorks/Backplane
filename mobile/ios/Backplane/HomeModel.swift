@@ -24,7 +24,11 @@ struct HomePill: Equatable { var label: String; var tone: String; var symbol: St
 
 enum Home {
     /// The sections of the Inbox tab, in the hub's order.
-    static let inbox: Set<String> = ["needs", "running", "snoozed"]
+    static let inbox: Set<String> = ["needs", "running", "chats", "snoozed"]
+    /// The place of the chats that belong to no project (the hub's `sidebar::CHATS`): `thread.create` with it starts one, in a folder of its own.
+    static let chats = "chats"
+    /// Whether the Inbox says All clear: nothing waits and nothing runs. The chats and the snoozed rows stay listed under it.
+    static func allClear(_ sections: [String]) -> Bool { !sections.contains { $0 != "snoozed" && $0 != chats } }
     static func tab(section id: String, kind: String) -> HomeTab? {
         if kind == "bub" { return .crew }
         if inbox.contains(id) { return .inbox }

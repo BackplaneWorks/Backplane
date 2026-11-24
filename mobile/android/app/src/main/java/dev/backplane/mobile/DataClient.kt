@@ -883,6 +883,8 @@ object DataClient {
         projects = (projects.filter { it.id != p.id } + p).sortedByDescending { it.updatedAt }
         return p
     }
+    /** The place of the chats that belong to no project (the hub's `sidebar::CHATS`): `thread.create` with it starts one, in a folder of its own. */
+    const val CHATS = "chats"
     suspend fun createThread(project: String, text: String, choice: DNewThreadChoice = DNewThreadChoice()): DThread {
         val p = choice.into(JSONObject().put("project", project).put("clientId", UUID.randomUUID().toString()).put("permission", "ask"), skipEmpty = true)
         if (text.isNotBlank()) p.put("text", text.trim())

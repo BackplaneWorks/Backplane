@@ -378,6 +378,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                     Icon(if (searchOpen) Icons.Default.Close else Icons.Default.Search, if (searchOpen) Msg.common_close else Msg.common_search, tint = if (searchOpen) dcs.primary else dcs.onSurfaceVariant)
                 }
             }
+            // New chat: a thread in no project, from every tab (the hub keeps it under Chats until it is settled or moved to a project)
+            IconButton(onClick = { newThread(DataClient.CHATS) }, modifier = Modifier.testTag("home.chat.new")) { Icon(Icons.Default.Edit, Msg.chats_new, tint = dcs.onSurfaceVariant) }
             IconButton(onClick = settings, modifier = Modifier.testTag("home.settings")) { Icon(Icons.Default.Settings, Msg.palette_settings, tint = dcs.onSurfaceVariant) }
         }
         ConnBanner(hub, settings)
@@ -412,7 +414,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                         )
                                     }
                                     // keep Snoozed reachable underneath All clear when items are snoozed
-                                    inboxItems(partition.inbox.filter { it.id == "snoozed" }, open, openSwarm)
+                                    inboxItems(quietInbox(partition.inbox), open, openSwarm)
                                 } else {
                                     inboxItems(partition.inbox, open, openSwarm)
                                 }
@@ -1679,7 +1681,7 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
     LaunchedEffect(choice) { if (DataClient.has("picker")) runCatching { DataClient.picker(null, choice) }.onSuccess { chip = it.chip } }
     if (picking) PickerSheet(null, choice, { choice = it }) { picking = false }
     Column(Modifier.fillMaxSize()) {
-        DBar(Msg.android_thread_new_title(title), back)
+        DBar(if (project == DataClient.CHATS) Msg.chats_new else Msg.android_thread_new_title(title), back)
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (where.isNotEmpty()) DMono(Tr.t(where) + if ((owner?.newOn?.size ?: 0) > 1) " ▾" else "", dfaint, 11, Modifier.testTag("new.where").clickable(enabled = (owner?.newOn?.size ?: 0) > 1) { pickRun = true })
             DField(text, { text = it }, Msg.android_thread_new_hint, Modifier.heightIn(min = 120.dp).focusRequester(focus).testTag("new.text"), 8, dcs.primary)
