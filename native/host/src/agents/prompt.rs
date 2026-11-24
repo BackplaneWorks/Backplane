@@ -50,7 +50,7 @@ pub fn why(text: &str) -> String { text.lines().next().unwrap_or("").trim().char
 
 pub fn kicad(k: &Kicad, ipc: bool) -> String {
     let status = match (k.status.as_str(), ipc) {
-        ("ok", true) => format!("Backplane KiCad {}. Start with `kicad_edit`. If it lacks an operation, read the bundled `kicad-ipc` skill and use `kicad_ipc_status` for live commands.", k.version),
+        ("ok", true) => format!("Backplane KiCad {}. Load and follow the matching KiStack skill (`kistack:<name>` or its SKILL.md in `<kistack_skills>`) before creating or editing any schematic, symbol, footprint, or board, then start edits with `kicad_edit`. If `kicad_edit` lacks an operation, read the bundled `kicad-ipc` skill and use `kicad_ipc_status` for live commands.", k.version),
         ("ok", false) => "KiCad IPC is turned off. Enable it in Settings for document work.".into(),
         ("stock", _) => "Install Backplane KiCad from Settings to use editing IPC.".into(),
         ("old", _) => format!("Update Backplane KiCad from Settings for editing IPC (minimum {}).", min_version()),
@@ -124,7 +124,7 @@ pub fn kistack_skills(c: &crate::agents::kistack::Copy) -> String {
     let l = T::PROMPT_SKILL_LINE;
     let which = if c.pinned { format!("pinned with this Backplane (KiStack commit {})", &c.rev[..12.min(c.rev.len())]) } else { format!("from BACKPLANE_KISTACK (KiStack {})", if c.rev.is_empty() { "of no recorded commit" } else { &c.rev }) };
     let list = c.skills.iter().map(|(n, d, p)| format!("{}{n}{}{d}{}{p}{}", l[0], l[1], l[2], l[3])).collect::<Vec<_>>().join("\n");
-    format!("<kistack_skills>Use KiStack as the default skill set for KiCad work and apply its CAD design rules in Altium. Read the relevant SKILL.md before design work. This copy is {which} at `{}`.\n{list}</kistack_skills>", c.dir)
+    format!("<kistack_skills>MANDATORY: Use KiStack as the default skill set for KiCad work and apply its CAD design rules in Altium. Before creating or editing any KiCad schematic, symbol, footprint, or PCB layout (including in a new project with no KiCad files yet), load and follow the matching KiStack skill — in Claude via the Skill loader (`kistack:<name>`, e.g. `kistack:kicad-schematic`, `kistack:kicad-symbol`, `kistack:kicad-footprint`, `kistack:kicad-layout`, `kistack:kicad-pcb`, `kistack:kicad-bom`, `kistack:kicad-export`), or by reading its pinned SKILL.md below. Do not bypass KiStack skills with ad-hoc scripts or wall-of-labels bulk pin dumps, and use this pinned copy rather than any older personal copy (such as under `~/.agents/skills`). This copy is {which} at `{}`.\n{list}</kistack_skills>", c.dir)
 }
 /// Where a hardware thread's work goes. `code`: its code worktree and branch when it works in the
 /// main checkout ("" for a thread still in an older worktree); `locks`: (document, its lock).
@@ -259,7 +259,9 @@ pub(crate) mod tests {
     }
     #[test] fn kicad_words_follow_the_status() {
         let k = |s: &str| Kicad { status: s.into(), cli: "/k".into(), version: "1".into(), commit: "abc".into(), why: "no\nmore".into() };
-        assert!(kicad(&k("ok"), true).contains("`kicad_ipc_status`")); assert!(kicad(&k("ok"), false).contains("turned off")); assert!(kicad(&k("broken"), true).contains("doesn't run (no)"));
+        assert!(kicad(&k("ok"), true).contains("`kicad_ipc_status`"));
+        assert!(kicad(&k("ok"), true).contains("Load and follow the matching KiStack skill") && kicad(&k("ok"), true).contains("then start edits with `kicad_edit`"));
+        assert!(kicad(&k("ok"), false).contains("turned off")); assert!(kicad(&k("broken"), true).contains("doesn't run (no)"));
         { let mut e = PromptEnv { pcb: "/p/b.kicad_pcb".into(), ..Default::default() }; e.kicad.status = "ok".into(); e.kicad.version = "10.99.0-bp.11".into(); assert!(build(&e).contains("<backplane_routing_plan>"));
             assert!(build(&e).contains("Plan before routing is off") && !build(&e).contains("plan_approve"), "off unless the person turns it on: route as asked");
             e.routing_plan = true; assert!(build(&e).contains("plan_approve") && !build(&e).contains("is off")); e.routing_plan = false; e.kicad.version = "10.99.0-bp.10".into(); assert!(!build(&e).contains("<backplane_routing_plan>"), "the plan API came with bp.11"); e.kicad.status = "stock".into(); assert!(!build(&e).contains("<backplane_routing_plan>"), "stock KiCad has no plan API"); }
@@ -284,12 +286,14 @@ pub(crate) mod tests {
     }
     #[test] fn kistack_is_named_with_its_files_only_when_the_agent_has_it() {
         let e = gold_env(); let s = build(&e);
-        assert!(!s.contains("<kistack_skills>"));
+        assert!(!s.contains("</kistack_skills>"));
         let mut e = e;
         e.kistack = Some(crate::agents::kistack::Copy { dir: "/skills/kistack".into(), rev: crate::agents::kistack::REV.into(), pinned: true,
             skills: vec![("kicad-schematic".into(), "Draw schematics.".into(), "/skills/kistack/schematic/SKILL.md".into())] });
         let s = build(&e);
-        assert!(s.contains("Use KiStack as the default skill set") && s.contains("/skills/kistack/schematic/SKILL.md"));
+        assert!(s.contains("MANDATORY: Use KiStack as the default skill set") && s.contains("kistack:kicad-schematic") && s.contains("/skills/kistack/schematic/SKILL.md"));
+        assert!(s.contains("including in a new project with no KiCad files yet"), "{s}");
+        assert!(s.contains("load and follow the matching KiStack skill"), "PROMPT_BOARD should mandate KiStack before kicad_edit");
     }
     #[test] fn buy_workflow_is_loaded_on_demand() {
         let mut e = gold_env();

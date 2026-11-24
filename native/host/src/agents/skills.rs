@@ -95,7 +95,7 @@ mod parsing_tests {
 pub enum Kind { ClaudeUser, ClaudeProject, ClaudePlugin, Codex, Agents, Gemini, Cursor, Universal, Pi, Omp, Grok, Hub, HubLocal }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Found { pub name: String, pub bare: String, pub description: String, pub path: String, pub group: String, pub kind: Kind, pub provider: String, pub model_pattern: String, pub model: bool, pub user: bool, pub scope: &'static str }
+pub struct Found { pub name: String, pub bare: String, pub description: String, pub path: String, pub group: String, pub kind: Kind, pub provider: String, pub model_pattern: String, pub model: bool, pub user: bool, pub scope: &'static str, pub kistack: bool }
 
 /// Where to look: the person's home, the hub's home, KiStack, and Codex's own home when set.
 #[derive(Clone, Debug, Default)]
@@ -119,18 +119,22 @@ pub fn directories(cwd: &Path) -> Vec<PathBuf> {
     dirs
 }
 
-struct Root { dir: PathBuf, kind: Kind, group: String, plugin: String, scope: &'static str }
+struct Root { dir: PathBuf, kind: Kind, group: String, plugin: String, scope: &'static str, kistack: bool }
 
 fn read_json(p: &Path) -> Value { std::fs::read_to_string(p).ok().and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null) }
 
 /// Every folder skills may sit in, for a thread working in `cwd`.
 fn roots(env: &Env, cwd: &str) -> Vec<Root> {
     let home = PathBuf::from(&env.home); let mut v: Vec<Root> = vec![];
-    let mut add = |dir: PathBuf, kind: Kind, group: &str, plugin: &str, scope| if !v.iter().any(|r| r.dir == dir) { v.push(Root { dir, kind, group: group.into(), plugin: plugin.into(), scope }) };
+    let mut add = |dir: PathBuf, kind: Kind, group: &str, plugin: &str, scope, kistack| if !v.iter().any(|r| r.dir == dir) { v.push(Root { dir, kind, group: group.into(), plugin: plugin.into(), scope, kistack }) };
     for dir in directories(Path::new(cwd)).into_iter().rev().filter(|d| *d != home) {
-        for (rel, kind, group) in locations(true) { add(dir.join(rel), kind, group, "", "Project"); }
+        for (rel, kind, group) in locations(true) { add(dir.join(rel), kind, group, "", "Project", false); }
     }
-    for (rel, kind, group) in locations(false) { add(home.join(rel), kind, group, "", "User"); }
+    // Backplane's pinned KiStack copy takes precedence over user-level copies (such as stale ~/.agents/skills/kicad-*),
+    // while project-local overrides above still win.
+    if let Some(k) = &env.kistack { add(k.join("skills"), Kind::Hub, "Backplane", "", "Bundled", true); }
+    add(env.hub_home.join("kistack/skills"), Kind::Hub, "Backplane", "", "Bundled", true);
+    for (rel, kind, group) in locations(false) { add(home.join(rel), kind, group, "", "User", false); }
     let enabled = read_json(&home.join(".claude/settings.json"));
     let installed = read_json(&home.join(".claude/plugins/installed_plugins.json"));
     for (key, list) in installed["plugins"].as_object().into_iter().flatten() {
@@ -140,17 +144,15 @@ fn roots(env: &Env, cwd: &str) -> Vec<Root> {
         let mut any = false;
         for i in list.as_array().into_iter().flatten() {
             let p = PathBuf::from(i["installPath"].as_str().unwrap_or("")); if !p.is_dir() { continue }
-            any = true; add(p.join("skills"), Kind::ClaudePlugin, &group, plugin, "User");
+            any = true; add(p.join("skills"), Kind::ClaudePlugin, &group, plugin, "User", false);
         }
         if !any { // the install is gone: a directory marketplace is read where it is
-            if let Some(m) = enabled["extraKnownMarketplaces"][market]["source"]["path"].as_str() { add(PathBuf::from(m).join("skills"), Kind::ClaudePlugin, &group, plugin, "User"); add(PathBuf::from(m), Kind::ClaudePlugin, &group, plugin, "User"); }
+            if let Some(m) = enabled["extraKnownMarketplaces"][market]["source"]["path"].as_str() { add(PathBuf::from(m).join("skills"), Kind::ClaudePlugin, &group, plugin, "User", false); add(PathBuf::from(m), Kind::ClaudePlugin, &group, plugin, "User", false); }
         }
     }
     let codex = env.codex_home.as_ref().map(PathBuf::from).unwrap_or_else(|| home.join(".codex"));
-    add(codex.join("skills"), Kind::Codex, "Codex · yours", "", "User");
-    if let Some(k) = &env.kistack { add(k.join("skills"), Kind::Hub, "Backplane", "", "Bundled"); }
-    add(env.hub_home.join("kistack/skills"), Kind::Hub, "Backplane", "", "Bundled");
-    add(env.hub_home.join("skills"), Kind::HubLocal, "Backplane", "", "Bundled"); add(env.hub_home.join("bundled/skills"), Kind::Hub, "Backplane", "", "Bundled"); // bundled.rs dir()
+    add(codex.join("skills"), Kind::Codex, "Codex · yours", "", "User", false);
+    add(env.hub_home.join("skills"), Kind::HubLocal, "Backplane", "", "Bundled", false); add(env.hub_home.join("bundled/skills"), Kind::Hub, "Backplane", "", "Bundled", false); // bundled.rs dir()
     v
 }
 
@@ -214,9 +216,13 @@ fn applicable(f: &Found, provider: &str, model: &str) -> bool {
 
 pub fn for_model(ss: &[Found], provider: &str, model: &str) -> Vec<Found> {
     let mut candidates: Vec<_> = ss.iter().filter(|f| applicable(f, provider, model)).collect();
-    // Stable sort keeps the closest directory ahead of its ancestors within the same scope.
-    candidates.sort_by_key(|f| (match f.scope { "Project" => 0, "User" => 1, _ => 2 },
-        f.provider.is_empty() && matches!(f.kind, Kind::Universal | Kind::Agents | Kind::Hub | Kind::HubLocal), f.model_pattern.is_empty()));
+    // Stable sort keeps the closest directory ahead of its ancestors within the same scope;
+    // Project > pinned KiStack > User > other Bundled so stale user copies never shadow KiStack.
+    candidates.sort_by_key(|f| (
+        if f.scope == "Project" { 0 } else if f.kistack { 1 } else if f.scope == "User" { 2 } else { 3 },
+        f.provider.is_empty() && matches!(f.kind, Kind::Universal | Kind::Agents | Kind::Hub | Kind::HubLocal),
+        f.model_pattern.is_empty(),
+    ));
     let mut seen = std::collections::HashSet::new();
     candidates.into_iter().filter(|f| seen.insert(&f.name)).cloned().collect()
 }
@@ -245,7 +251,7 @@ pub fn scan_all(env: &Env, cwd: &str) -> Vec<Found> {
             let s = parse_skill(&t, d.strip_suffix(".md").unwrap_or(&d), &p.to_string_lossy());
             let name = if r.plugin.is_empty() { s.name.clone() } else { format!("{}:{}", r.plugin, s.name) };
             if out.iter().any(|f| f.path == s.path) { continue }
-            out.push(Found { name, bare: s.name, description: s.description, path: s.path, group: r.group.clone(), kind: r.kind, provider: s.provider, model_pattern: s.model_pattern, model: s.model, user: s.user, scope: r.scope });
+            out.push(Found { name, bare: s.name, description: s.description, path: s.path, group: r.group.clone(), kind: r.kind, provider: s.provider, model_pattern: s.model_pattern, model: s.model, user: s.user, scope: r.scope, kistack: r.kistack });
         }
     }
     out
@@ -285,13 +291,15 @@ pub fn native(f: &Found, provider: &str, isolated: bool) -> bool {
         ("antigravity", Kind::Gemini) => f.scope == "User",
         ("pi", Kind::Pi) | ("omp", Kind::Omp | Kind::ClaudeUser | Kind::ClaudeProject | Kind::ClaudePlugin | Kind::Codex) |
         ("grok", Kind::Grok) | ("opencode", Kind::ClaudeUser | Kind::ClaudeProject) => true,
-        ("pi", Kind::Hub) => f.path.replace('\\', "/").contains("/kistack/skills/"),
+        ("pi", Kind::Hub) => f.kistack || f.path.replace('\\', "/").contains("/kistack/skills/"),
         _ => false,
     }
 }
-/// A skill word (`$name`, or the bare name of a plugin's skill when only one has it) to its skill.
+/// A skill word (`$name`, `kistack:<bare>`, or the bare name of a plugin's skill when only one has it) to its skill.
 pub fn lookup<'a>(ss: &'a [Found], name: &str) -> Option<&'a Found> {
-    ss.iter().find(|f| f.name == name).or_else(|| { let m: Vec<&Found> = ss.iter().filter(|f| f.bare == name).collect(); if m.len() == 1 { Some(m[0]) } else { None } })
+    ss.iter().find(|f| f.name == name)
+        .or_else(|| name.strip_prefix("kistack:").and_then(|bare| ss.iter().find(|f| f.kistack && f.bare == bare)))
+        .or_else(|| { let m: Vec<&Found> = ss.iter().filter(|f| f.bare == name).collect(); if m.len() == 1 { Some(m[0]) } else { None } })
 }
 fn as_u(f: &Found) -> USkill { USkill { name: f.name.clone(), description: f.description.clone(), path: f.path.clone(), model: f.model, user: f.user, ..Default::default() } }
 fn canon(text: &str, ss: &[Found]) -> String { // a bare plugin skill word becomes its full name
@@ -427,7 +435,7 @@ mod tests {
         put(&home, ".claude/skills/new/SKILL.md", &sk("new", "changed text")); assert_eq!(index(&env, "")[0].description, "changed text");
         std::fs::remove_dir_all(&t).ok();
     }
-    fn f(n: &str, kind: Kind, group: &str) -> Found { Found { name: n.into(), bare: n.rsplit(':').next().unwrap().into(), description: format!("{n} does things"), path: format!("/s/{n}/SKILL.md"), group: group.into(), kind, provider: String::new(), model_pattern: String::new(), model: true, user: true, scope: "User" } }
+    fn f(n: &str, kind: Kind, group: &str) -> Found { Found { name: n.into(), bare: n.rsplit(':').next().unwrap().into(), description: format!("{n} does things"), path: format!("/s/{n}/SKILL.md"), group: group.into(), kind, provider: String::new(), model_pattern: String::new(), model: true, user: true, scope: "User", kistack: false } }
     #[test] fn claude_gets_slash_for_what_it_loads_and_a_file_note_for_the_rest() {
         let ss = vec![f("unslop", Kind::ClaudeUser, "Claude · yours"), f("cdx", Kind::Codex, "Codex · yours"), f("pk:review", Kind::ClaudePlugin, "p")];
         let o = prepare("run $unslop and $cdx then $review and $nope", &ss, "claude", false);
