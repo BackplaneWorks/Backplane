@@ -2450,6 +2450,14 @@ gpui.star.why = Las estrellas ayudan a otros diseñadores de hardware a encontra
 gpui.projects.unpushed = {n, plural, one {# commit sin enviar a {upstream}} other {# commits sin enviar a {upstream}}}
 gpui.projects.push = Enviar
 
+# quick chats: threads in no project (sidebar New chat, the Chats section, Move to project)
+chats.new = Chat nuevo
+chats.new.noproject = Chat nuevo (sin proyecto)
+chats.title = Chats
+chats.move = Mover a un proyecto…
+chats.move.none = No hay ningún proyecto al que moverlo. Añade uno primero.
+chats.old.tip = Chats antiguos sin proyecto, tal como estaban. Chat nuevo empieza uno.
+
 # ---- gpui-e: hub settings and panels ----
 gpui.e.files.max.mb = Adjunto más grande (MB)
 gpui.e.files.max.note = Un archivo enviado con un mensaje, o mostrado desde este hub, puede pesar hasta {mb} MB. Los archivos se transmiten desde disco, así que uno grande consume espacio en disco, no memoria.

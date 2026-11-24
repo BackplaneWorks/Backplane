@@ -65,6 +65,9 @@ describe("Command Palette pure logic", () => {
     // data/1 does not expose `thread.fork`; palette must not offer a misleading Fork action
     expect(items.some((i) => i.label.toLowerCase().includes("fork"))).toBe(false);
     expect(items.some((i) => i.action.type === "new-thread" && i.label === "New thread in Demo Board")).toBe(true);
+    // a chat in no project is always offered; Move to project… only for a chat
+    expect(items.some((i) => i.action.type === "new-chat" && i.label === "New chat (no project)")).toBe(true);
+    expect(items.some((i) => i.action.type === "move-project")).toBe(false);
   });
 
   test("empty query surfaces waiting threads first", () => {

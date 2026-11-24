@@ -6,7 +6,7 @@ use crate::i18n::{tr, trs};
 use gpui::{actions, prelude::*, *};
 use serde_json::Value;
 
-actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, AlwaysOn, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
+actions!(keys, [NewThread, NewChat, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, AlwaysOn, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
     AccountMenu, Account1, Account2, Account3, Account4, Account5, Account6, Account7, Account8, Account9,
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
@@ -76,6 +76,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("uber", "Uberbot chat", "Sidebar", "secondary-shift-u", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("always", "Always-on dictation: listen or mute", "Window", "secondary-shift-m", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("new", "New thread", "Timeline", "secondary-n", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("new-chat", "New chat (no project)", "Sidebar", "secondary-shift-n", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("settle", "Settle or unsettle the thread", "Timeline", "secondary-shift-s", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("stop", "Stop the running turn", "Timeline", "ctrl-.", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("diff", "Diff", "Viewer", "secondary-d", Rebind),
@@ -147,10 +148,16 @@ pub fn show(key: &str, mac: bool) -> String {
 pub fn mac() -> bool { cfg!(target_os = "macos") }
 /// The key of a shortcut for the person to read, "" when it has none.
 pub fn hint(l: &Local, id: &str) -> String { match find(id) { Some(x) if x.kind == Fixed => show(x.key, mac()), Some(_) => show(&l.key(id), mac()), None => String::new() } }
+/// The place of the chats that belong to no project (the hub's `sidebar::CHATS`): `new-thread` with it starts one, in a folder of its own.
+pub const CHATS: &str = "chats";
+impl Backplane {
+    /// New chat: a thread in no project, opened as soon as the hub has made it. No picker, nothing to choose.
+    pub(crate) fn new_chat(&mut self, cx: &mut Context<Self>) { self.arm_new(); let _ = self.tx.try_send(Command::Action("new-thread".into(), CHATS.into())); cx.notify(); }
+}
 /// The shortcut a palette item or tool does, by the hub's action and value (`current`: the open thread's project, for New thread).
 pub fn id_for(action: &str, value: &str, current: &str) -> &'static str {
     match (action, value) {
-        ("new-thread", v) if !v.is_empty() && v == current => "new", ("diff", _) => "diff", ("interrupt", _) => "stop", ("settle" | "unsettle", _) => "settle",
+        ("new-thread", CHATS) => "new-chat", ("new-thread", v) if !v.is_empty() && v == current => "new", ("diff", _) => "diff", ("interrupt", _) => "stop", ("settle" | "unsettle", _) => "settle",
         ("view-kind", "files") => "files", _ => "",
     }
 }
@@ -168,7 +175,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("close"), crate::ClosePopup, None), KeyBinding::new("secondary-c", crate::CopySelection, Some(NOT_MAC_COMPOSER)),
         KeyBinding::new(&k("sidebar"), crate::ToggleSidebarKey, None), KeyBinding::new(&k("search"), crate::FocusSearchKey, None),
         KeyBinding::new(&k("palette"), crate::OpenPaletteKey, None), KeyBinding::new("secondary-shift-p", crate::OpenPaletteKey, None),
-        KeyBinding::new(&k("new"), NewThread, None), KeyBinding::new(&k("diff"), OpenDiff, None), KeyBinding::new(&k("files"), OpenFiles, None),
+        KeyBinding::new(&k("new"), NewThread, None), KeyBinding::new(&k("new-chat"), NewChat, None), KeyBinding::new(&k("diff"), OpenDiff, None), KeyBinding::new(&k("files"), OpenFiles, None),
         KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None), KeyBinding::new(&k("account"), AccountMenu, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("always"), AlwaysOn, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
@@ -472,6 +479,7 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
         let pid = new_target(&this.data, &this.selected, this.project_page.as_deref());
         if !pid.is_empty() { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid)); cx.notify(); }
     });
+    let el = on!(el, NewChat, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.new_chat(cx));
     let el = on!(el, OpenDiff, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail("diff", "", cx));
     let el = on!(el, OpenFiles, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail("view-kind", "files", cx));
     let el = on!(el, StopTurn, |this: &mut Backplane, _, cx: &mut Context<Backplane>| if has_tool(&this.data, "interrupt") { let _ = this.tx.try_send(Command::Action("interrupt".into(), String::new())); cx.notify(); });
@@ -882,7 +890,7 @@ mod tests {
         crate::screens::viewer::forget_press();
     }
     #[test] fn hints_follow_the_hubs_actions() {
-        assert_eq!(id_for("diff", "", ""), "diff"); assert_eq!(id_for("interrupt", "", ""), "stop"); assert_eq!(id_for("new-thread", "p1", "p1"), "new"); assert_eq!(id_for("new-thread", "p2", "p1"), "");
+        assert_eq!(id_for("diff", "", ""), "diff"); assert_eq!(id_for("interrupt", "", ""), "stop"); assert_eq!(id_for("new-thread", "p1", "p1"), "new"); assert_eq!(id_for("new-thread", "p2", "p1"), ""); assert_eq!(id_for("new-thread", CHATS, "p1"), "new-chat", "New chat says its key in the palette");
         assert_eq!(hint(&Local::default(), "stop"), show("ctrl-.", mac())); assert_eq!(rail_letter("3d"), "3");
     }
 }

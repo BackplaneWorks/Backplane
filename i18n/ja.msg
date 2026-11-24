@@ -2472,6 +2472,14 @@ gpui.star.why = スターは、ほかのハードウェア設計者がBackplane�
 gpui.projects.unpushed = {upstream} にプッシュしていないコミット: {n} 件
 gpui.projects.push = プッシュ
 
+# quick chats: threads in no project (sidebar New chat, the Chats section, Move to project)
+chats.new = 新しいチャット
+chats.new.noproject = 新しいチャット（プロジェクトなし）
+chats.title = チャット
+chats.move = プロジェクトに移動…
+chats.move.none = 移動先のプロジェクトがありません。先にプロジェクトを追加してください。
+chats.old.tip = プロジェクトに属さない以前のチャットです。そのまま残っています。新しいチャットから新しく始められます。
+
 # ---- gpui-e: hub settings and panels ----
 gpui.e.files.max.mb = 添付の上限（MB）
 gpui.e.files.max.note = メッセージで送るファイルやこのハブから表示するファイルは{mb} MBまでです。ファイルはディスクから順に読むので、大きなファイルはメモリではなくディスク容量を使います。

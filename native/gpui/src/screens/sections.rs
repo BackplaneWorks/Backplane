@@ -1,6 +1,7 @@
 //! The sidebar's sections (docs/ALWAYS-ON.md section 8), as the hub presents them (`sections`: present/sections.rs): Needs you, Pinned,
 //! Active, the groups and Quiet. Drawn generically: a section is a head (its title, a count, a chevron when it folds) and its rows, a thread
 //! row (`kind` "threads") or a project row with its visible threads under it ("projects"). Bub is drawn above by the window as before.
+//! The Chats section (`id` "chats": the threads in no project) is a "threads" section whose head has a + (New chat).
 //! The hub decides everything shown; this only draws and sends `side-section`, `project-page`, `project-pin`, `project-fold`, `group-rename-start`, `group-move`.
 //! A project row's chevron (and Left/Right while the sidebar has the keyboard) folds its threads away; the hub keeps the fold per project.
 use crate::i18n::{tf, trs};
@@ -23,7 +24,7 @@ pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
 }
 
 /// The head of a section: its title, its count when it folds or lists threads, a chevron when it folds.
-fn head(cx: &mut Context<Backplane>, light: bool, s: &Value, ctl: &mut Vec<CtlEntry>) -> AnyElement {
+fn head(this: &Backplane, cx: &mut Context<Backplane>, light: bool, s: &Value, ctl: &mut Vec<CtlEntry>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let (id, title, fold, open) = (string(s, "id"), string(s, "title"), s["fold"] == true, s["open"] == true);
     let n = s["count"].as_u64().unwrap_or(0);
@@ -38,6 +39,12 @@ fn head(cx: &mut Context<Backplane>, light: bool, s: &Value, ctl: &mut Vec<CtlEn
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child(label));
     if fold {
         d = d.cursor_pointer().hover(|s| s.text_color(c("text"))).on_click(cx.listener(move |this, _, _, cx| { this.go("side-section", toggle.clone(), cx); }));
+    }
+    // Chats (the threads in no project): its + starts one, as the sidebar's New chat does
+    if id == crate::keys::CHATS {
+        /* i18n-ok: a ctl label and a ui: id the drivers press */ ctl.push(CtlEntry { id: "section-new-chat".into(), label: "New chat".into(), ctl: Ctl::Node("new-thread".into(), crate::keys::CHATS.into()) });
+        /* i18n-ok: a ui: id the drivers press; the tip is drawn through tr */ d = d.child(crate::ui::with_rect(div().id("sec-new-chat"), || "ui:New chat in Chats".to_string()).cursor_pointer().tooltip(crate::keys::tip("New chat (no project)", &crate::keys::hint(&this.local, "new-chat"), light))
+            .on_click(cx.listener(|this, _, _, cx| { cx.stop_propagation(); this.new_chat(cx); })).child(crate::ui::ic(light, "plus", 16., "dim")));
     }
     if s["rename"] == true && !gid.is_empty() {
         /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("group-rename:{gid}"), label: "Rename group".into(), ctl: Ctl::Node("group-rename-start".into(), gid.clone()) });
@@ -140,7 +147,7 @@ impl Backplane {
             match s["kind"].as_str().unwrap_or("") {
                 "bub" => continue,
                 "threads" => {
-                    rows.push(head(cx, light, s, ctl));
+                    rows.push(head(self, cx, light, s, ctl));
                     for t in s["rows"].as_array().into_iter().flatten() {
                         // a swarm that waits on the person: its own row (screens/swarm.rs), which opens the swarm's page
                         if t["kind"] == "swarm" { rows.extend(crate::screens::swarm::side_rows(cx, light, &serde_json::json!({"swarms": [t]}), &open_room, ctl)); continue }
@@ -149,7 +156,8 @@ impl Backplane {
                         // a stop says so by its dot alone (the right column is the title's); an ask keeps its red word (approval, question)
                         let mut t = t.clone(); if matches!(t["want"].as_str(), Some("failed" | "stopped")) { t["want"] = serde_json::json!(""); }
                         // Running lists every project's work in one place, so each row names its project (faint, after the title)
-                        let sub = string(&t, "project");
+                        // (a chat's section already says what it is: no "Chats" after every title)
+                        let sub = if t["chat"] == true { String::new() } else { string(&t, "project") };
                         if t["settle"].as_str().map_or(false, |v| !v.is_empty()) { let v = string(&t, "settle"); ctl.push(CtlEntry { id: format!("settle:{}", v.rsplit('|').next().unwrap_or("")), label: "Settle".into() /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-settle".into(), v) }); }
                         rows.push(self.side_thread(cx, light, &t, "", if sub.is_empty() { " " } else { &sub }, t["off"] == true, ctl));
                     }
@@ -157,7 +165,7 @@ impl Backplane {
                 _ => {
                     let empty = s["rows"].as_array().map_or(true, |r| r.is_empty());
                     if s["id"] == "active" && empty && s["fold"] != true { continue }
-                    rows.push(head(cx, light, s, ctl));
+                    rows.push(head(self, cx, light, s, ctl));
                     let faded = s["id"] == "quiet";
                     for p in s["rows"].as_array().into_iter().flatten() {
                         rows.push(project(self, cx, light, p, faded, ctl));

@@ -26,7 +26,9 @@ import {
 } from "./settings-model";
 import { ThreadContextDialog } from "./thread-context";
 import {
+  CHATS,
   SidebarView,
+  moveTargets,
   type BotItem,
   type PlanModeInfo,
   type ProjectItem,
@@ -496,6 +498,8 @@ function mountApp(): void {
         .then(() => refreshSections())
         .catch(() => {});
     },
+    onNewChat: () => { void createThread(CHATS); },
+    onMoveToProject: (id) => openMoveToProject(id),
   });
 
   const chat = new ChatView(centerEl, {
@@ -728,6 +732,12 @@ function mountApp(): void {
         break;
       case "new-thread":
         void createThread(act.projectId);
+        break;
+      case "new-chat":
+        void createThread(CHATS);
+        break;
+      case "move-project":
+        if (selectedThreadId) openMoveToProject(selectedThreadId);
         break;
       case "rename": {
         const th = threads.find((x) => x.id === selectedThreadId);
@@ -983,6 +993,65 @@ function mountApp(): void {
     }
   }
 
+  /** Move to project…: a chat that belongs to no project goes to the project picked, with all it says (`thread.move_project`). */
+  function openMoveToProject(threadId: string): void {
+    const th = threads.find((x) => x.id === threadId);
+    const backdrop = document.createElement("div");
+    backdrop.className = "bp-modal-backdrop";
+    backdrop.setAttribute("data-testid", "move-project-modal");
+    const modal = document.createElement("div");
+    modal.className = "bp-modal";
+    const head = document.createElement("div");
+    head.className = "bp-modal-head";
+    const h2 = document.createElement("h2");
+    h2.textContent = t("chats.move", "Move to project…");
+    const closeBtn = document.createElement("button");
+    closeBtn.type = "button";
+    closeBtn.className = "icon";
+    closeBtn.textContent = "×";
+    closeBtn.addEventListener("click", () => backdrop.remove());
+    head.append(h2, closeBtn);
+    const bodyEl = document.createElement("div");
+    bodyEl.className = "bp-modal-body";
+    const note = document.createElement("div");
+    note.className = "bp-move-note";
+    note.textContent = th?.title || "";
+    const err = document.createElement("div");
+    err.className = "bp-move-err";
+    bodyEl.append(note);
+    const list = moveTargets(projects);
+    if (list.length === 0) {
+      const none = document.createElement("div");
+      none.textContent = t("chats.move.none", "No project to move it to. Add a project first.");
+      bodyEl.appendChild(none);
+    }
+    for (const p of list) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = "bp-move-row";
+      row.textContent = p.title || p.id;
+      row.setAttribute("data-testid", `move-project-${p.id}`);
+      row.addEventListener("click", () => {
+        void hub.rpc<{ thread?: ThreadItem }>("thread.move_project", { thread: threadId, project: p.id })
+          .then((res) => {
+            if (res.thread) threads = threads.map((x) => (x.id === res.thread!.id ? res.thread! : x));
+            else threads = threads.map((x) => (x.id === threadId ? { ...x, project: p.id } : x));
+            sidebar.setData(projects, threads, bots, rooms);
+            updateHeader();
+            void refreshSections();
+            backdrop.remove();
+          })
+          .catch((e) => { err.textContent = e instanceof Error ? e.message : "Could not move the chat"; });
+      });
+      bodyEl.appendChild(row);
+    }
+    bodyEl.appendChild(err);
+    modal.append(head, bodyEl);
+    backdrop.appendChild(modal);
+    backdrop.addEventListener("click", (e) => { if (e.target === backdrop) backdrop.remove(); });
+    root.appendChild(backdrop);
+  }
+
   impBtn.addEventListener("click", () => { void openImprovementsModal(); });
   cmdBox.addEventListener("click", () => palette.open());
   searchBtn.addEventListener("click", () => palette.open());
@@ -999,8 +1068,10 @@ function mountApp(): void {
       ? projectOf(homeProjectId) ?? { id: homeProjectId, title: homeProjectId }
       : th ? projectOf(th.project) : undefined;
     if (homeProjectId && proj) projectHome.setTitle(proj.title);
-    projCrumb.textContent = proj?.title ?? "";
-    sep1.classList.toggle("bp-hidden", !proj);
+    // a chat that belongs to no project says so where a project's name would be
+    const chat = !homeProjectId && th?.project === CHATS;
+    projCrumb.textContent = chat ? t("chats.title", "Chats") : (proj?.title ?? "");
+    sep1.classList.toggle("bp-hidden", !proj && !chat);
     sep2.classList.toggle("bp-hidden", !th);
     threadCrumb.textContent = th ? (th.title || "Untitled thread") : "";
 
@@ -1892,7 +1963,13 @@ function mountApp(): void {
       e.preventDefault();
       if (palette.isOpen()) palette.close();
       else palette.open();
+    } else if (e.shiftKey && e.code === "KeyN" && (e.altKey || e.ctrlKey || e.metaKey)) {
+      // New chat. A browser keeps Ctrl/Cmd+Shift+N for itself (it never arrives here); Alt+Shift+N always does
+      e.preventDefault();
+      void createThread(CHATS);
     } else if (e.key === "Escape") {
+      const moving = document.querySelector('[data-testid="move-project-modal"]');
+      if (moving) { moving.remove(); return; }
       if (palette.isOpen()) palette.close();
       else if (composer.isModelPickerOpen()) composer.closeModelPicker();
       else if (addProject.isOpen()) addProject.escape();
