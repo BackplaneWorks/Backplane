@@ -103,12 +103,12 @@ def _apply(o, s):
         det = s.get("customer_details") or {}
         ship = (s.get("collected_information") or {}).get("shipping_details") or s.get("shipping_details") or {}
         addr = ship.get("address") or {}
-        store.set_order(o["id"], status="paid", amount=s.get("amount_total") or o["amount"],
+        store.change_order(o["id"], "stripe", status="paid", amount=s.get("amount_total") or o["amount"],
                         email=det.get("email") or "", shipping={"name": ship.get("name"), "address": ship.get("address"),
                                                                "phone": det.get("phone"),
                                                                **shipped_state(store.quote(o["quote_id"]), addr)})
     elif s.get("status") == "expired" and o["status"] == "checkout":
-        store.set_order(o["id"], status="cancelled")
+        store.change_order(o["id"], "stripe", status="cancelled")
 
 
 def confirm(o):

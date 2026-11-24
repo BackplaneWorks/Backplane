@@ -491,3 +491,67 @@ def test_paying_needs_the_order_terms_ticked(monkeypatch):
     assert sent["consent_collection[terms_of_service]"] == "required"
     assert f"({config.PUBLIC_URL}/terms)" in sent["custom_text[terms_of_service_acceptance][message]"]
     assert len(sent["custom_text[terms_of_service_acceptance][message]"]) <= 1200
+
+
+def test_the_order_list_filters_keeps_history_and_undoes():
+    from fabsrv import config, pages, store
+    c = client()
+    c.cookies.set("fab_admin", config.ADMIN_TOKEN)
+
+    def order(title, status, email="", name="", city=""):
+        qid, _ = store.create_quote("filters-install-0123456789", "127.0.0.1", "US", {"title": title})
+        store.set_quote(qid, status="ready", result={"title": title, "parts": [], "lines": []})
+        oid = store.create_order(qid, "cs_test_" + title.replace(" ", ""), 12345)
+        store.set_order(oid, status=status, email=email,
+                        shipping={"name": name, "address": {"city": city, "country": "US"}} if name else {})
+        return oid
+
+    paid = order("Amp board", "paid", "amp@example.com", "Ada Lovelace", "Monroe")
+    placed = order("Pedal board", "placed", "pedal@example.com", "Bob Moog", "Asheville")
+    expired = order("Lamp board", "cancelled")
+    opened = order("Logger board", "checkout")
+
+    def page(**params):
+        r = c.get("/admin", params=params)
+        assert r.status_code == 200, r.text
+        return r.text
+
+    todo = page()  # the default view: paid, placed and shipped orders only
+    assert "Amp board" in todo and "Pedal board" in todo and "Lamp board" not in todo and "Logger board" not in todo
+    assert "Lamp board" in page(view="expired") and "Amp board" not in page(view="expired")
+    assert "Logger board" in page(view="open") and "Lamp board" not in page(view="open")
+    assert all(t in page(view="all") for t in ("Amp board", "Pedal board", "Lamp board", "Logger board"))
+    found = page(view="all", find="moog asheville")  # every word, any field, any case
+    assert "Pedal board" in found and "Amp board" not in found
+    assert "No orders here match that search." in page(find="nobody-like-this")
+    assert "Paid: to place <span class=muted>1</span>" in page(), "the tabs count what they hold"
+    assert "Stripe sets this one" in page(view="expired") and f"/admin/order/{expired}'" not in page(view="expired")
+
+    # a checkout nobody paid is never changed here (that is how one became "paid" by mistake)
+    for oid in (expired, opened):
+        r = c.post(f"/admin/order/{oid}", data={"status": "paid"}, follow_redirects=False)
+        assert r.status_code == 400 and store.order(oid)["status"] in ("cancelled", "checkout")
+
+    # a change is kept, shown, and undone; Save goes back to the view it came from, and only to one
+    r = c.post(f"/admin/order/{paid}", data={"status": "placed", "tracking": "", "note": "fab W1", "back": "/admin?view=paid"},
+               follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/admin?view=paid"
+    assert store.order(paid)["status"] == "placed" and len(store.order_log(paid)) == 1
+    assert "Undo: back to paid" in page(view="placed") and "you: paid → placed" in page(view="placed")
+    r = c.post(f"/admin/order/{paid}", data={"status": "placed", "note": "fab W1", "back": "https://evil.example/admin?view=x"},
+               follow_redirects=False)
+    assert r.headers["location"] == "/admin" and len(store.order_log(paid)) == 1, "an unchanged Save writes nothing"
+    r = c.post(f"/admin/order/{paid}/undo", data={"back": "/admin?view=all&find=amp"}, follow_redirects=False)
+    assert r.status_code == 303 and r.headers["location"] == "/admin?view=all&find=amp"
+    o = store.order(paid)
+    assert (o["status"], o["note"]) == ("paid", "") and store.order_log(paid) == []
+    assert c.post(f"/admin/order/{paid}/undo", follow_redirects=False).status_code == 400, "nothing left to undo"
+
+    # Stripe's changes are kept too, but never undone from the list
+    store.change_order(opened, "stripe", status="cancelled")
+    assert store.order_log(opened)[0]["by"] == "stripe" and not store.undo(opened)
+    assert pages.kind(store.order(opened)) == "expired"
+
+    # without the admin cookie, nothing
+    anon = client()
+    assert anon.get("/admin").status_code == 404 and anon.post(f"/admin/order/{paid}/undo").status_code == 404
