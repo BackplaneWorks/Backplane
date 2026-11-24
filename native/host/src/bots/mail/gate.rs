@@ -1,7 +1,7 @@
 //! The tell gate (Nov 20, the person: "I'm getting 30 billion KiCad messages, please fix that"; pref.fewer-progress-notes). Busy lead threads end a turn every few
 //! minutes, and each end reached the person as a tell_person saying "nothing landed, nothing to try, still waiting on …". The person hears only what is material:
-//! a landing on main or a release they can try (`landed`, `release`), or a decision, approval or blocker that needs them (`needs_you`). This is decided here, by
-//! the hub, not only by the lanes' briefs:
+//! a landing on main or a release they can try (`landed`, `release`), a finished non-PR deliverable or user-requested thread with no PR/commit/release ref (`completed`),
+//! or a decision, approval or blocker that needs them (`needs_you`). This is decided here, by the hub, not only by the lanes' briefs:
 //! - `refusal`: a tell whose words amount to no change ("nothing landed", "nothing to try", "still testing", "queued", "rebased", …), or whose words do not
 //!   back its kind, is refused; the lane is told why and nothing is posted.
 //! - `quiet_report`: a launched thread's turn-end report that opens with no-change words never becomes a done lane at all.
@@ -49,26 +49,35 @@ pub const RECENT: u64 = 2 * 86400;
 fn norm(t: &str) -> String { t.to_lowercase().replace(['\u{2019}', '\u{2018}'], "'") }
 fn has(t: &str, ws: &[&str]) -> Option<String> { ws.iter().find(|w| t.contains(**w)).map(|w| w.trim().to_string()) }
 
-/// Gate.kind: what a tell is: a landing on main, a release to try, or something that needs the person now
+/// Gate.kind: what a tell is: a landing on main, a release to try, a finished non-PR deliverable, or something that needs the person now
 #[derive(Clone, Copy, PartialEq, Debug)]
-pub enum Kind { Landed, Release, NeedsYou }
+pub enum Kind { Landed, Release, Completed, NeedsYou }
 impl Kind {
-    pub fn parse(s: &str) -> Option<Kind> { match s.trim() { "landed" => Some(Kind::Landed), "release" => Some(Kind::Release), "needs_you" => Some(Kind::NeedsYou), _ => None } }
+    pub fn parse(s: &str) -> Option<Kind> { match s.trim() { "landed" => Some(Kind::Landed), "release" => Some(Kind::Release), "completed" => Some(Kind::Completed), "needs_you" => Some(Kind::NeedsYou), _ => None } }
     pub fn urgent(self) -> bool { self == Kind::NeedsYou }
 }
 
 /// Gate.ref: the one thing a tell is about, which the hub checks before anything is told: a pull request merged to its repository's default branch, a commit
-/// on it, a published release, or an ask open in the hub. A tell without one is not told.
+/// on it, a published release, a completed thread (local `<id>` or mirrored `<link>~<id>`), or an ask open in the hub. A tell without one is not told.
 #[derive(Clone, PartialEq, Debug)]
-pub enum Ref { Pr { repo: String, n: u64 }, Commit { repo: String, sha: String }, Release { repo: String, tag: String }, Ask { id: String } }
+pub enum Ref { Pr { repo: String, n: u64 }, Commit { repo: String, sha: String }, Release { repo: String, tag: String }, Thread { id: String }, Ask { id: String } }
 fn repo_ok(r: &str) -> bool { let mut p = r.split('/'); matches!((p.next(), p.next(), p.next()), (Some(o), Some(n), None) if !o.is_empty() && !n.is_empty() && r.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c))) }
 fn tag_ok(t: &str) -> bool { !t.is_empty() && t.len() <= 120 && t.chars().all(|c| c.is_ascii_alphanumeric() || "-_.+".contains(c)) }
+fn thread_id_ok(id: &str) -> bool {
+    !id.is_empty() && id.len() <= 120
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || "-_.~".contains(c))
+        && match id.split_once('~') { Some((l, r)) => !l.is_empty() && !r.is_empty() && !r.contains('~'), None => true }
+}
 impl Ref {
-    /// `owner/repo#N` or a pull URL; `commit:owner/repo@sha`; `release:owner/repo@tag` or a release-tag URL; `ask:<id>`
+    /// `owner/repo#N` or a pull URL; `commit:owner/repo@sha`; `release:owner/repo@tag` or a release-tag URL; `thread:<id>` or `backplane://thread/<id>`; `ask:<id>`
     pub fn parse(s: &str) -> Result<Ref, String> {
-        let s = s.trim(); let bad = || Err(format!("ref must be owner/repo#N (a merged pull request), commit:owner/repo@sha (a commit on main), release:owner/repo@tag (a published release) or ask:<id> (an open ask), not \"{}\"", take(s, 80)));
+        let s = s.trim(); let bad = || Err(format!("ref must be owner/repo#N (a merged pull request), commit:owner/repo@sha (a commit on main), release:owner/repo@tag (a published release), thread:<id> (a completed thread) or ask:<id> (an open ask), not \"{}\"", take(s, 80)));
         let s2 = s.strip_prefix("https://github.com/").or_else(|| s.strip_prefix("pr:")).unwrap_or(s);
         if let Some(id) = s.strip_prefix("ask:") { let id = id.trim(); return if !id.is_empty() && id.len() <= 120 && id.chars().all(|c| c.is_ascii_alphanumeric() || "-_.:".contains(c)) { Ok(Ref::Ask { id: id.into() }) } else { bad() } }
+        if let Some(id) = s.strip_prefix("thread:").or_else(|| s.strip_prefix("backplane://thread/")) {
+            let id = id.trim().trim_end_matches('/');
+            return if thread_id_ok(id) { Ok(Ref::Thread { id: id.into() }) } else { bad() };
+        }
         if let Some(r) = s.strip_prefix("commit:") { let Some((repo, sha)) = r.split_once('@') else { return bad() }; let sha = sha.to_lowercase();
             return if repo_ok(repo) && (7..=40).contains(&sha.len()) && sha.chars().all(|c| c.is_ascii_hexdigit()) { Ok(Ref::Commit { repo: repo.into(), sha }) } else { bad() } }
         if let Some(r) = s.strip_prefix("release:") { let Some((repo, tag)) = r.split_once('@') else { return bad() };
@@ -77,14 +86,15 @@ impl Ref {
         let (repo, n) = if let Some((r, n)) = s2.split_once("/pull/") { (r, n) } else if let Some((r, n)) = s2.split_once('#') { (r, n) } else { return bad() };
         match n.trim_end_matches('/').parse::<u64>() { Ok(n) if n > 0 && repo_ok(repo) => Ok(Ref::Pr { repo: repo.into(), n }), _ => bad() }
     }
-    /// the told key: one tell per landed PR, commit, release or ask, whatever key the lane gives
-    pub fn key(&self) -> String { match self { Ref::Pr { repo, n } => format!("pr:{repo}#{n}"), Ref::Commit { repo, sha } => format!("commit:{repo}@{}", take(sha, 10)), Ref::Release { repo, tag } => format!("release:{repo}@{tag}"), Ref::Ask { id } => format!("ask:{id}") } }
-    fn fits(&self, k: Kind) -> bool { matches!((self, k), (Ref::Pr { .. } | Ref::Commit { .. }, Kind::Landed) | (Ref::Release { .. }, Kind::Release) | (Ref::Ask { .. }, Kind::NeedsYou)) }
-    /// the text names what it is about: the PR's number, the commit's short sha, the release's tag (an ask is linked by the hub, so no words are asked of it)
+    /// the told key: one tell per landed PR, commit, release, completed thread or ask, whatever key the lane gives.
+    /// For `Ref::Thread`, this intentionally deduplicates to one `completed` tell per thread id as a hard backstop against recurring leads spamming turns.
+    pub fn key(&self) -> String { match self { Ref::Pr { repo, n } => format!("pr:{repo}#{n}"), Ref::Commit { repo, sha } => format!("commit:{repo}@{}", take(sha, 10)), Ref::Release { repo, tag } => format!("release:{repo}@{tag}"), Ref::Thread { id } => format!("thread:{id}"), Ref::Ask { id } => format!("ask:{id}") } }
+    fn fits(&self, k: Kind) -> bool { matches!((self, k), (Ref::Pr { .. } | Ref::Commit { .. }, Kind::Landed) | (Ref::Release { .. }, Kind::Release) | (Ref::Thread { .. }, Kind::Completed) | (Ref::Ask { .. }, Kind::NeedsYou)) }
+    /// the text names what it is about: the PR's number, the commit's short sha, the release's tag (an ask or thread is linked by the hub, so no words are asked of it)
     fn named(&self, t: &str) -> bool {
         match self {
             Ref::Pr { n, .. } => { let n = n.to_string(); [format!("#{n}"), format!("/pull/{n}")].iter().any(|w| t.match_indices(w.as_str()).any(|(i, _)| !t[i + w.len()..].starts_with(|c: char| c.is_ascii_digit()))) }
-            Ref::Commit { sha, .. } => t.contains(&sha[..7]), Ref::Release { tag, .. } => t.contains(&tag.to_lowercase()), Ref::Ask { .. } => true,
+            Ref::Commit { sha, .. } => t.contains(&sha[..7]), Ref::Release { tag, .. } => t.contains(&tag.to_lowercase()), Ref::Thread { .. } | Ref::Ask { .. } => true,
         }
     }
 }
@@ -93,15 +103,15 @@ fn take(s: &str, n: usize) -> String { s.chars().take(n).collect() }
 /// Gate.proof: what the hub found about a tell's ref before the gate ran (`verify`): None, no ref given; Some(Err), the check refused it
 pub type Proof = Option<(Ref, Result<(), String>)>;
 
-/// Gate.refusal: why a tell is not material (None: it may go out). Default deny: a kind, a ref the hub verified (merged, on main, published or open), and words
+/// Gate.refusal: why a tell is not material (None: it may go out). Default deny: a kind, a ref the hub verified (merged, on main, published, completed or open), and words
 /// that name it and say no no-change status.
 pub fn refusal(kind: &str, text: &str, proof: &Proof) -> Option<String> {
-    let Some(k) = Kind::parse(kind) else { return Some("kind must be landed (merged to main), release (a build or release the person can try now) or needs_you (a decision, approval or blocker only the person can resolve). Anything else is not told.".into()) };
+    let Some(k) = Kind::parse(kind) else { return Some("kind must be landed (merged to main), release (a build or release the person can try now), completed (a finished non-PR deliverable or user-requested thread with no PR/commit/release ref) or needs_you (a decision, approval or blocker only the person can resolve). Anything else is not told.".into()) };
     let t = norm(text);
-    if let Some(w) = has(&t, NO_CHANGE) { return Some(format!("refused: \"{w}\" is a no-change status. The person hears only landings, releases they can try, and what needs them; progress, waiting, review, queues, corrections and rebases stay private. Drop the status words and tell only the material item, or end silently.")) }
-    let Some((r, checked)) = proof else { return Some("refused: a tell must give ref: the merged pull request (owner/repo#N), the commit on main (commit:owner/repo@sha), the published release (release:owner/repo@tag) or the open ask (ask:<id>) it is about. Without one nothing is told; end silently.".into()) };
-    if !r.fits(k) { return Some(format!("refused: a {kind} tell needs a {} ref, not {}.", match k { Kind::Landed => "merged pull request or commit", Kind::Release => "release", Kind::NeedsYou => "open ask" }, r.key())) }
-    if let Err(why) = checked { return Some(format!("refused: {} is not verified: {why}. Only what is merged, published or open is told.", r.key())) }
+    if let Some(w) = has(&t, NO_CHANGE) { return Some(format!("refused: \"{w}\" is a no-change status. The person hears only landings, releases they can try, finished deliverables, and what needs them; progress, waiting, review, queues, corrections and rebases stay private. Drop the status words and tell only the material item, or end silently.")) }
+    let Some((r, checked)) = proof else { return Some("refused: a tell must give ref: the merged pull request (owner/repo#N), the commit on main (commit:owner/repo@sha), the published release (release:owner/repo@tag), the completed thread (thread:<id>) or the open ask (ask:<id>) it is about. Without one nothing is told; end silently.".into()) };
+    if !r.fits(k) { return Some(format!("refused: a {kind} tell needs a {} ref, not {}.", match k { Kind::Landed => "merged pull request or commit", Kind::Release => "release", Kind::Completed => "completed thread", Kind::NeedsYou => "open ask" }, r.key())) }
+    if let Err(why) = checked { return Some(format!("refused: {} is not verified: {why}. Only what is merged, published, completed or open is told.", r.key())) }
     if !r.named(&t) { return Some(format!("refused: the text must name {} (its number, short sha or tag).", r.key())) }
     match k {
         Kind::Landed | Kind::Release if has(&t, LANDED).is_none() => Some("refused: a landed or release tell must say what landed on main or what was released for the person to try.".into()),
@@ -185,15 +195,16 @@ impl<'a> Ctx<'a> {
 
 /// Tests stand in for GitHub: the ref keys that count as merged or published
 #[cfg(test)] pub fn test_verified() -> &'static std::sync::Mutex<std::collections::HashSet<String>> { static V: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new(); V.get_or_init(Default::default) }
-/// Gate.verify: the hub's own check of a tell's ref, before the gate: GitHub for a pull request, commit or release (bounded, a read), the hub's asks for an ask.
-/// Anything that cannot be checked is refused.
+/// Gate.verify: the hub's own check of a tell's ref, before the gate: GitHub for a pull request, commit or release (bounded, a read), the hub's asks for an ask,
+/// and the hub's local/mirrored thread state for a completed thread. Anything that cannot be checked is refused.
 pub async fn verify(hub: &crate::hub::Hub, r: &Ref, now: u64) -> Result<(), String> {
     use crate::files::git::read_within;
     let gh = |args: Vec<String>| async move { let a: Vec<&str> = args.iter().map(String::as_str).collect(); read_within(std::time::Duration::from_secs(20), "gh", &a, "/", &[]).await };
     let said = |r: crate::files::git::Ran| if r.code == 0 { Ok(r.out.trim().to_string()) } else { Err(format!("GitHub could not be asked (gh exit {})", r.code)) };
-    #[cfg(test)] if !matches!(r, Ref::Ask { .. }) { let _ = (&gh, &said, now); return if test_verified().lock().unwrap().contains(&r.key()) { Ok(()) } else { Err("not merged or published (test)".into()) } }
+    #[cfg(test)] if !matches!(r, Ref::Ask { .. } | Ref::Thread { .. }) { let _ = (&gh, &said, now); return if test_verified().lock().unwrap().contains(&r.key()) { Ok(()) } else { Err("not merged or published (test)".into()) } }
     match r {
         Ref::Ask { id } => crate::data::ask_thread(hub, id).map(|_| ()).ok_or_else(|| "no such open ask in the hub".to_string()),
+        Ref::Thread { id } => verify_thread(hub, id).await,
         Ref::Pr { repo, n } => pr_landed(&said(gh(vec!["api".into(), format!("repos/{repo}/pulls/{n}"), "--jq".into(),
             "[(.merged_at // \"\" | if . == \"\" then 0 else fromdateiso8601 end), .base.ref, .base.repo.default_branch] | map(tostring) | join(\" \")".into()]).await)?, now),
         Ref::Commit { repo, sha } => {
@@ -203,6 +214,73 @@ pub async fn verify(hub: &crate::hub::Hub, r: &Ref, now: u64) -> Result<(), Stri
         Ref::Release { repo, tag } => release_out(&said(gh(vec!["api".into(), format!("repos/{repo}/releases/tags/{tag}"), "--jq".into(),
             "[.draft, (.published_at // \"\" | if . == \"\" then 0 else fromdateiso8601 end)] | map(tostring) | join(\" \")".into()]).await).unwrap_or_default(), now),
     }
+}
+
+fn state_thread_completed(st: &crate::state::State, id: &str) -> Result<(), String> {
+    if st.run_hidden(id) { return Err("it is an internal mailroom or coordination thread".into()) }
+    if st.threads.get(id).map_or(true, |t| t.deleted) { return Err("no such thread in the hub".into()) }
+    match crate::state::visible::status(st, id) {
+        "done" => Ok(()),
+        "monitoring" => Err("thread is still monitoring background work".into()),
+        "needs" => Err("thread is waiting for an answer".into()),
+        "limit" => Err("thread is held on a provider limit".into()),
+        other => Err(format!("thread is {other}, not completed")),
+    }
+}
+
+async fn verify_thread(hub: &crate::hub::Hub, id: &str) -> Result<(), String> {
+    if crate::state::is_mail_run_id(id) { return Err("it is an internal mailroom or coordination thread".into()) }
+    if crate::net::far::is(id) {
+        return hub.mirrors().with_thread(id, |st| state_thread_completed(st, id))
+            .unwrap_or_else(|| Err("no such thread in the hub".into()));
+    }
+    if let Some(res) = crate::statehost::with_state_of(hub, |st| state_thread_completed(st, id)) {
+        return res;
+    }
+    let n = hub.store.len();
+    if n <= 4096 {
+        if let Ok(lines) = hub.store.range(0, n) {
+            let mut st = crate::state::State::new();
+            st.lean = true;
+            for l in lines { st.apply_line(&l); }
+            return state_thread_completed(&st, id);
+        }
+    }
+    if hub.setting(&format!("mail.private.owner.{id}")).await.is_some_and(|v| !v.is_empty()) {
+        return Err("it is an internal mailroom or coordination thread".into());
+    }
+    let (t, secret_seqs) = {
+        let m = hub.model().await;
+        let t = m.threads.get(id).filter(|t| !t.deleted).cloned();
+        let seqs: Vec<u32> = m.settings_with_prefix("secret.ask.").map(|(_, s)| s).collect();
+        (t, seqs)
+    };
+    let Some(t) = t else {
+        return Err("no such thread in the hub".into());
+    };
+    if t.turn != "completed" {
+        return Err(format!("thread is {}, not completed", if t.turn.is_empty() { "idle" } else { t.turn.as_str() }));
+    }
+    let secret_asked = secret_seqs.into_iter().any(|seq| {
+        hub.store.get(seq as usize - 1).ok()
+            .and_then(|l| serde_json::from_str::<Value>(&l).ok())
+            .and_then(|e| serde_json::from_str::<Value>(e["value"].as_str().unwrap_or("")).ok())
+            .is_some_and(|j| j["thread"].as_str() == Some(id))
+    });
+    if t.pending > 0 || secret_asked || crate::data::thread_has_open_ask(hub, id) || hub.setting(&format!("auth.wait.{id}")).await.is_some_and(|v| !v.is_empty()) {
+        return Err("thread is waiting for an answer".into());
+    }
+    if hub.setting(&format!("provider.resume.{id}")).await.is_some_and(|v| !v.is_empty()) {
+        return Err("thread is held on a provider limit".into());
+    }
+    let bg_active = |v: Option<String>| v.map_or(false, |s| crate::agents::bg::lines(&s).iter().any(|l| !crate::agents::bg::ended(l)));
+    if bg_active(hub.setting(&format!("bg.{id}")).await)
+        || bg_active(hub.setting(&format!("watch.{id}")).await)
+        || hub.setting(&format!("order.wait.{id}")).await.is_some_and(|v| !v.is_empty())
+    {
+        return Err("thread is still monitoring background work".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -260,9 +338,35 @@ mod laws {
         assert_eq!(Ref::parse("commit:BackplaneWorks/Backplane@09D43D3BD1"), Ok(Ref::Commit { repo: BP.into(), sha: "09d43d3bd1".into() }));
         assert_eq!(Ref::parse("https://github.com/BackplaneWorks/Backplane_KiCad/releases/tag/backplane-kicad-v10.99.0-bp.13.3"), Ok(Ref::Release { repo: "BackplaneWorks/Backplane_KiCad".into(), tag: "backplane-kicad-v10.99.0-bp.13.3".into() }));
         assert_eq!(Ref::parse("ask:q1795-3"), Ok(Ref::Ask { id: "q1795-3".into() }));
-        for b in ["", "#1437", "1437", "pr:1437", "commit:abc", "commit:BackplaneWorks/Backplane@xyz1234", "release:x@", "ask:", "https://github.com/BackplaneWorks/Backplane/issues/1403", "a/b/c#1", "done:done1795"] {
+        let th = Ref::Thread { id: "t1794400000-1".into() };
+        assert_eq!(Ref::parse("thread:t1794400000-1"), Ok(th.clone()));
+        assert_eq!(Ref::parse("backplane://thread/t1794400000-1"), Ok(th.clone()));
+        assert_eq!(Ref::parse("thread:desk~t1794400000-1"), Ok(Ref::Thread { id: "desk~t1794400000-1".into() }));
+        assert_eq!(th.key(), "thread:t1794400000-1");
+        assert_eq!(Ref::parse(&th.key()), Ok(th));
+        for b in ["", "#1437", "1437", "pr:1437", "commit:abc", "commit:BackplaneWorks/Backplane@xyz1234", "release:x@", "ask:", "thread:", "thread:~t1", "thread:l1~", "thread:a~b~c", "thread:a/b", "thread:a b", "https://github.com/BackplaneWorks/Backplane/issues/1403", "a/b/c#1", "done:done1795"] {
             assert!(Ref::parse(b).is_err(), "{b}") }
         assert_eq!(pr(1437).key(), "pr:BackplaneWorks/Backplane#1437"); assert_eq!(Ref::parse(&pr(1437).key()), Ok(pr(1437)), "a told key reads back");
+    }
+    #[test] fn completed_deliverables_require_verified_thread_and_reject_progress_chatter() {
+        let tr = Ref::Thread { id: "t1794400000-9".into() };
+        assert!(!Kind::Completed.urgent());
+        let ok_msg = "CH32X035 firmware built cleanly (build/firmware.elf, 18.4 KB flash) and flashed to the target board.";
+        assert_eq!(refusal("completed", ok_msg, &ok(tr.clone())), None);
+        assert!(refusal("completed", ok_msg, &None).unwrap().contains("must give ref"));
+        assert!(refusal("completed", ok_msg, &Some((tr.clone(), Err("thread is running, not completed".into())))).unwrap().contains("not verified"));
+        assert!(refusal("completed", ok_msg, &ok(pr(1))).unwrap().contains("needs a completed thread ref"));
+        assert!(refusal("completed", ok_msg, &ok(Ref::Ask { id: "q1".into() })).unwrap().contains("needs a completed thread ref"));
+        for chatter in [
+            "Still waiting on the hardware test bench.",
+            "Nothing landed yet; firmware compile finished locally.",
+            "In review with the coordinator before flashing.",
+            "Queued for testing after the board power cycle.",
+            "Rebased onto main, no new results yet.",
+            "Nothing to try yet: still testing the render.",
+        ] {
+            assert!(refusal("completed", chatter, &ok(tr.clone())).is_some(), "chatter must be refused: {chatter}");
+        }
     }
     #[test] fn githubs_answers_are_read_strictly() {
         let now = 1_795_170_000;

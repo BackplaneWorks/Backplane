@@ -630,3 +630,150 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     let tc = l.iter().find(|e| e["$"] == "ThreadCreated" && e["id"] == run_id.as_str()).expect("ThreadCreated for run");
     assert_eq!(tc["project"], "", "new mailroom run must not be assigned to a user project");
 }
+
+#[tokio::test] async fn completed_non_pr_deliverable_verifies_thread_state_and_delivers_once() {
+    let (hub, bots, rec, bub, chat) = uber("completed-deliverable").await;
+    hub.commit(&json!({"$":"MemorySaved","bot":bub,"key":"pref.fewer-progress-notes","kind":"pref","text":"Speak only when something lands, finishes, or needs them.","tags":"","at":1})).await.unwrap();
+    // Create local threads in various states and a launched finished report so we get a live done lane.
+    hub.commit_many(&[
+        json!({"$":"ProjectCreated","id":"p-fw","title":"Sensor","root":"/tmp/fw","at":1}),
+        json!({"$":"ThreadCreated","id":"t-fw-1","project":"p-fw","title":"Build CH32X035 firmware","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}),
+        json!({"$":"TurnChanged","thread":"t-fw-1","state":"running","at":3}),
+        json!({"$":"TurnChanged","thread":"t-fw-1","state":"completed","at":4}),
+        json!({"$":"ThreadCreated","id":"t-idle","project":"p-fw","title":"Idle","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":5}),
+        json!({"$":"ThreadCreated","id":"t-run","project":"p-fw","title":"Running","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":6}),
+        json!({"$":"TurnChanged","thread":"t-run","state":"running","at":7}),
+        json!({"$":"ThreadCreated","id":"t-fail","project":"p-fw","title":"Failed","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":8}),
+        json!({"$":"TurnChanged","thread":"t-fail","state":"failed","at":9}),
+        json!({"$":"ThreadCreated","id":"t-int","project":"p-fw","title":"Interrupted","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":9}),
+        json!({"$":"TurnChanged","thread":"t-int","state":"interrupted","at":9}),
+        json!({"$":"ThreadCreated","id":"t-ask","project":"p-fw","title":"Asking","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":10}),
+        json!({"$":"TurnChanged","thread":"t-ask","state":"completed","at":11}),
+        json!({"$":"AskOpened","id":"q-fw","thread":"t-ask","kind":"question","tool":"AskUserQuestion","detail":"Voltage?","options":"","at":12}),
+        json!({"$":"ThreadCreated","id":"t-sec","project":"p-fw","title":"Secret ask","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":12}),
+        json!({"$":"TurnChanged","thread":"t-sec","state":"completed","at":12}),
+        json!({"$":"SettingSet","key":"secret.ask.k1","value":"{\"thread\":\"t-sec\",\"purpose\":\"key\"}","at":12}),
+        json!({"$":"ThreadCreated","id":"t-auth","project":"p-fw","title":"Auth wait","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":12}),
+        json!({"$":"TurnChanged","thread":"t-auth","state":"completed","at":12}),
+        json!({"$":"SettingSet","key":"auth.wait.t-auth","value":"1","at":12}),
+        json!({"$":"ThreadCreated","id":"t-lim","project":"p-fw","title":"Provider limit","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":12}),
+        json!({"$":"TurnChanged","thread":"t-lim","state":"completed","at":12}),
+        json!({"$":"SettingSet","key":"provider.resume.t-lim","value":"123","at":12}),
+        json!({"$":"ThreadCreated","id":"t-held","project":"p-fw","title":"Fallback held","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":12}),
+        json!({"$":"TurnChanged","thread":"t-held","state":"completed","at":12}),
+        json!({"$":"TurnQueued","thread":"t-held","msg":"fallback:held:1","text":"retry","at":12}),
+        json!({"$":"ThreadCreated","id":"t-mon","project":"p-fw","title":"Monitoring","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":13}),
+        json!({"$":"TurnChanged","thread":"t-mon","state":"completed","at":14}),
+        json!({"$":"WorkSet","thread":"t-mon","kind":"bg","rows":"b1\trunning\tc1\tWatch build\tshell","at":15}),
+        json!({"$":"ThreadCreated","id":"t-watch","project":"p-fw","title":"Watching","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":15}),
+        json!({"$":"TurnChanged","thread":"t-watch","state":"completed","at":15}),
+        json!({"$":"WorkSet","thread":"t-watch","kind":"watch","rows":"w1\trunning\tc1\tWatch job\tshell","at":15}),
+        json!({"$":"ThreadCreated","id":"t-ord","project":"p-fw","title":"Order wait","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":15}),
+        json!({"$":"TurnChanged","thread":"t-ord","state":"completed","at":15}),
+        json!({"$":"SettingSet","key":"order.wait.t-ord","value":"ord-1","at":15}),
+        json!({"$":"ThreadCreated","id":"t-task","project":"p-fw","title":"Delegated task","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":15}),
+        json!({"$":"TurnChanged","thread":"t-task","state":"completed","at":15}),
+        json!({"$":"TaskDelegated","task":"tk-1","parent":"t-task","child":"t-child","depth":1,"at":15}),
+        json!({"$":"ThreadCreated","id":"t-del","project":"p-fw","title":"Deleted","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":16}),
+        json!({"$":"TurnChanged","thread":"t-del","state":"completed","at":17}),
+        json!({"$":"ThreadDeleted","id":"t-del","at":18}),
+    ]).await.unwrap();
+    // Mirror a far machine `L` with a completed CAD thread and running/monitoring/asking/internal threads.
+    hub.mirrors().fold("L", &[
+        json!({"$":"ProjectCreated","id":"L~p1","title":"Enclosure","root":"/tmp/cad","at":1}),
+        json!({"$":"ThreadCreated","id":"L~t-cad-1","project":"L~p1","title":"Render STEP PDF","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}),
+        json!({"$":"TurnChanged","thread":"L~t-cad-1","state":"completed","at":3}),
+        json!({"$":"ThreadCreated","id":"L~t-run","project":"L~p1","title":"Far running","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":4}),
+        json!({"$":"TurnChanged","thread":"L~t-run","state":"running","at":5}),
+        json!({"$":"ThreadCreated","id":"L~t-mon","project":"L~p1","title":"Far monitoring","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":6}),
+        json!({"$":"TurnChanged","thread":"L~t-mon","state":"completed","at":7}),
+        json!({"$":"SettingSet","key":"bg.L~t-mon","value":"b1\trunning\tc1\tWatch\tshell","at":8}),
+        json!({"$":"ThreadCreated","id":"L~t-ask","project":"L~p1","title":"Far asking","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":9}),
+        json!({"$":"TurnChanged","thread":"L~t-ask","state":"completed","at":10}),
+        json!({"$":"AskOpened","id":"L~q1","thread":"L~t-ask","kind":"approval","tool":"Bash","detail":"x","options":"","at":11}),
+        json!({"$":"ThreadCreated","id":"L~run123-1","project":"","title":"Internal","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":12}),
+        json!({"$":"TurnChanged","thread":"L~run123-1","state":"completed","at":13}),
+    ]);
+
+    let text = crate::agents::launch::note("t-fw-1", "Build CH32X035 firmware", "completed", "Built firmware.elf (18.4 KB) and verified flash.");
+    report(&bots, &chat, "t-fw-1", "launch", &text).await; settle(&bots).await;
+    due_now(&hub, &bots, &bub).await;
+    let lane = lanes(&hub, &bub)[0].clone();
+    let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == lane).cloned().unwrap();
+    assert!(ride.2.contains("completed") && ride.2.contains("thread:<id>"), "done brief teaches completed: {}", ride.2);
+    let key = lane_tell_key(&rec, &lane);
+    running(&hub, &lane).await; settle(&bots).await;
+
+    // Non-completed, missing, waiting, limit-held, monitoring, and internal threads must all be refused.
+    for (i, bad_ref) in [
+        "thread:t-missing", "thread:t-del", "thread:t-idle", "thread:t-run", "thread:t-fail", "thread:t-int",
+        "thread:t-ask", "thread:t-sec", "thread:t-auth", "thread:t-lim", "thread:t-held",
+        "thread:t-mon", "thread:t-watch", "thread:t-ord", "thread:t-task",
+        &format!("thread:{lane}"), &format!("thread:{chat}"),
+        "thread:L~t-run", "thread:L~t-mon", "thread:L~t-ask", "thread:L~run123-1",
+    ].iter().enumerate() {
+        let r = bots.mail_tool(&lane, "tell_person", &json!({
+            "text": "Deliverable finished: firmware build ready.",
+            "key": format!("{key}-bad-{i}"),
+            "kind": "completed",
+            "ref": bad_ref
+        })).await;
+        assert!(!r.0, "{bad_ref} must be refused: {}", r.1);
+    }
+
+    // Progress-chatter wording is still refused even on a genuinely completed thread, and quotes owner rules.
+    for (i, chatter) in ["Still waiting on flashing.", "Nothing landed yet for the board.", "In review with the hardware lead."].iter().enumerate() {
+        let r = bots.mail_tool(&lane, "tell_person", &json!({
+            "text": chatter,
+            "key": format!("{key}-chat-{i}"),
+            "kind": "completed",
+            "ref": "thread:t-fw-1"
+        })).await;
+        assert!(!r.0, "chatter refused: {chatter}");
+        assert!(r.1["error"].as_str().unwrap().contains("pref.fewer-progress-notes"), "{}", r.1);
+    }
+
+    // Ending bg/watch/task work allows verification to pass.
+    hub.commit_many(&[
+        json!({"$":"WorkSet","thread":"t-mon","kind":"bg","rows":"b1\t\u{1}ended:done\tc1\tWatch build\tshell","at":19}),
+        json!({"$":"WorkSet","thread":"t-watch","kind":"watch","rows":"","at":19}),
+        json!({"$":"TaskStateSet","task":"tk-1","state":"done","summary":"ok","at":19}),
+    ]).await.unwrap();
+    let mon_ok = bots.mail_tool(&lane, "tell_person", &json!({
+        "text": "Watch build finished cleanly.",
+        "key": format!("{key}-mon"),
+        "kind": "completed",
+        "ref": "thread:t-mon"
+    })).await;
+    assert!(mon_ok.0 && mon_ok.1["told"] == "batched", "{}", mon_ok.1);
+    let task_ok = bots.mail_tool(&lane, "tell_person", &json!({
+        "text": "Delegated BOM task finished cleanly.",
+        "key": format!("{key}-task"),
+        "kind": "completed",
+        "ref": "backplane://thread/t-task"
+    })).await;
+    assert!(task_ok.0 && task_ok.1["told"] == "batched", "backplane://thread/<id> accepted: {}", task_ok.1);
+
+    // Local completed deliverable succeeds, batches, and deduplicates across keys.
+    let fw_msg = "CH32X035 firmware built (firmware.elf, 18.4 KB) and verified on hardware.";
+    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":fw_msg,"key":key,"kind":"completed","ref":"thread:t-fw-1"})).await;
+    assert!(r.0 && r.1["told"] == "batched", "{}", r.1);
+    let dup = bots.mail_tool(&lane, "tell_person", &json!({"text":fw_msg,"key":format!("{key}-dup"),"kind":"completed","ref":"thread:t-fw-1"})).await;
+    assert!(dup.0 && dup.1["told"] == "already", "same thread ref deduplicated: {}", dup.1);
+
+    // Mirrored completed deliverable also succeeds and joins the batch.
+    let cad_msg = "Enclosure STEP PDF render completed on L (output/enclosure.pdf).";
+    let r_far = bots.mail_tool(&lane, "tell_person", &json!({"text":cad_msg,"key":format!("{key}-far"),"kind":"completed","ref":"thread:L~t-cad-1"})).await;
+    assert!(r_far.0 && r_far.1["told"] == "batched", "{}", r_far.1);
+
+    // A needs_you tell flushes the batched completed deliverables immediately together, urgent first.
+    hub.commit(&json!({"$":"AskOpened","id":"q-flush","thread":"t-fw-1","kind":"question","tool":"AskUserQuestion","detail":"Flash?","options":"","at":20})).await.unwrap();
+    let ask_msg = "Flash the new firmware to the target board now? Your call.";
+    let r_ask = bots.mail_tool(&lane, "tell_person", &json!({"text":ask_msg,"key":format!("{key}-ask"),"kind":"needs_you","ref":"ask:q-flush"})).await;
+    assert!(r_ask.0 && r_ask.1["told"] == "now", "needs_you flushes batched completed tells: {}", r_ask.1);
+
+    end(&hub, &lane, "completed").await; settle(&bots).await;
+    let shown = shown_lines(&hub, &chat);
+    assert_eq!(shown.len(), 1, "flushed into one message: {shown:?}");
+    assert!(shown[0].starts_with(&format!("- {ask_msg}")) && shown[0].contains(fw_msg) && shown[0].contains(cad_msg), "{}", shown[0]);
+}

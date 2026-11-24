@@ -35,6 +35,11 @@ impl Mirrors {
     pub fn has_bot(&self, link: &str, bot: &str) -> bool { self.st.read().unwrap().get(link).map_or(false, |s| s.bots_nav.contains_key(&format!("{link}~{bot}")) || s.bots_nav.contains_key(bot)) }
     /// Whether a mirror holds this thread (`<link>~<id>`), live.
     pub fn has_thread(&self, id: &str) -> bool { self.st.read().unwrap().values().any(|s| s.threads.get(id).map_or(false, |t| !t.deleted)) }
+    /// Run `f` on the mirrored state holding live thread `id` (`<link>~<id>`), if any.
+    pub fn with_thread<R>(&self, id: &str, f: impl FnOnce(&State) -> R) -> Option<R> {
+        let g = self.st.read().unwrap();
+        g.values().find(|s| s.threads.get(id).map_or(false, |t| !t.deleted)).map(f)
+    }
     /// A link's history was replaced.
     pub fn forget(&self, link: &str) { self.st.write().unwrap().remove(link); }
     /// Every mirror is given again after a rebuild.
