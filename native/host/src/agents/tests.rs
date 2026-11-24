@@ -2751,3 +2751,33 @@ impl mailroom::Mailroom for ChatRoom {
     assert!(posted.iter().any(|e| is(e, "MessagePosted") && e["msg"] == "hm-replay"));
     ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn prompt_for_includes_kistack_and_claude_plugin_exposes_all_pinned_skills() {
+    let home = dir("kistack-prompt-home");
+    let work = dir("kistack-prompt-work");
+    std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let kistack_dir = kistack::install(&home).expect("install pinned kistack");
+    let host = host::HostInfo { home: home.to_path_buf(), kistack: Some(kistack_dir.clone()), ..Default::default() };
+    let ag = Agents::start_host(hub.clone(), Cli::standin(&dir("kistack-prompt-bin")), host).await.unwrap();
+
+    // Even in an empty brand-new project with no .kicad_* files yet, prompt_for includes <kistack_skills>.
+    let prompt = ag.prompt_for(T1, &work.to_string_lossy()).await;
+    assert!(prompt.contains("<kistack_skills>") && prompt.contains("MANDATORY: Use KiStack as the default skill set"), "{prompt}");
+    for expected in ["kicad-schematic", "kicad-layout", "kicad-symbol", "kicad-footprint", "kicad-bom", "kicad-pcb", "kicad-export"] {
+        assert!(prompt.contains(expected), "prompt missing KiStack skill {expected}");
+    }
+
+    // Claude plugin manifest and --plugin-dir wiring expose the pinned KiStack directory cleanly.
+    let plugin_json: Value = serde_json::from_str(&std::fs::read_to_string(kistack_dir.join(".claude-plugin/plugin.json")).unwrap()).unwrap();
+    assert_eq!(plugin_json["name"], "kistack");
+    let desc = kistack::describe(&kistack_dir);
+    for expected in ["kicad-schematic", "kicad-layout", "kicad-symbol", "kicad-footprint", "kicad-bom", "kicad-pcb", "kicad-export"] {
+        assert!(desc.skills.iter().any(|s| s.0 == expected), "kistack::describe missing {expected}");
+    }
+    let plugins = vec![kistack_dir.to_string_lossy().into_owned()];
+    let args = rules::claude_args(&rules::ArgsIn { model: "", session: "", runtime: "full-access", interaction: "default", prompt: &prompt, dirs: &[], effort: "", think: false, plugins: &plugins, mcp_url: "http://127.0.0.1:9/mcp/t1", mcp_json: "", disallowed: &[], speed: "" });
+    let i = args.iter().position(|a| a == "--plugin-dir").expect("--plugin-dir flag");
+    assert_eq!(args[i + 1], kistack_dir.to_string_lossy());
+    ag.shutdown();
+}

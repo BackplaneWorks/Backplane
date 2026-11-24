@@ -103,9 +103,24 @@ mod tests {
         std::fs::write(&stale, "---\nname: kicad-schematic\ndescription: an older copy\n---\nold\n").unwrap();
         let ss = crate::agents::skills::scan_all(&env, &home.to_string_lossy());
         let f = crate::agents::skills::lookup(&ss, "kicad-schematic").expect("listed");
-        assert_eq!((f.group.as_str(), f.kind), ("Agents · yours", crate::agents::skills::Kind::Agents), "the user copy wins the name");
+        assert_eq!((f.group.as_str(), f.kind, f.kistack), ("Backplane", crate::agents::skills::Kind::Hub, true), "pinned KiStack beats user copy");
+        let fk = crate::agents::skills::lookup(&ss, "kistack:kicad-schematic").expect("plugin name lookup");
+        assert_eq!(fk.path, f.path);
         assert_eq!(ss.iter().filter(|f| f.name == "kicad-schematic" && f.kind == crate::agents::skills::Kind::Hub).count(), 1, "one entry, not one per root");
-        assert!(crate::agents::skills::prepare("$kicad-schematic draw it", &ss, "codex", false).replace('\\', "/").contains(".agents/skills/schematic/SKILL.md"), "Codex is told the user file");
+        for (prov, model) in [("claude", "fable"), ("codex", "gpt-6")] {
+            let active = crate::agents::skills::for_model(&ss, prov, model);
+            let picked = active.iter().find(|s| s.name == "kicad-schematic").expect("kicad-schematic in for_model");
+            assert!(picked.kistack && picked.path.replace('\\', "/").contains("hub/kistack/skills/schematic/SKILL.md"), "{prov} picked {}", picked.path);
+        }
+        assert!(crate::agents::skills::prepare("$kicad-schematic draw it", &ss, "codex", false).replace('\\', "/").contains("hub/kistack/skills/schematic/SKILL.md"), "Codex is told the pinned KiStack file");
+        // a project-scoped override still wins over pinned KiStack when cwd is inside that project
+        let proj = h.join("proj"); let ovr = proj.join(".backplane/skills/schematic/SKILL.md");
+        std::fs::create_dir_all(ovr.parent().unwrap()).unwrap();
+        std::fs::write(&ovr, "---\nname: kicad-schematic\ndescription: project override\n---\nproj\n").unwrap();
+        let pss = crate::agents::skills::scan_all(&env, &proj.to_string_lossy());
+        let pf = crate::agents::skills::lookup(&pss, "kicad-schematic").expect("project override");
+        assert_eq!(pf.scope, "Project");
+        assert!(pf.path.replace('\\', "/").contains(".backplane/skills/schematic/SKILL.md"));
         let _ = std::fs::remove_dir_all(&h);
     }
 }

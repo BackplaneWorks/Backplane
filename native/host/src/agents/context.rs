@@ -251,7 +251,12 @@ impl Prompt {
         let (instructions, project) = instructions_for(cwd, provider, claude);
         let discovered = skills::index(env, cwd);
         let active = skills::for_model(&discovered, provider, model);
-        let index = skills::prompt_index(&active, provider, isolated);
+        let index = if base.contains("</kistack_skills>") {
+            let filtered: Vec<_> = active.iter().filter(|f| !f.kistack).cloned().collect();
+            skills::prompt_index(&filtered, provider, isolated)
+        } else {
+            skills::prompt_index(&active, provider, isolated)
+        };
         let skills = discovered.iter().map(|s| {
             let status = if !active.contains(s) { "Skipped" }
                 else if skills::native(s, provider, isolated) { "Native" }
@@ -304,6 +309,14 @@ mod launch_tests {
         let claude = prompt("claude", "sonnet");
         assert!(claude.skills.iter().any(|row| row["name"] == "deploy" && row["status"] == "Native"));
         assert!(!claude.index.contains("command marker"));
+
+        // Pinned KiStack skills are omitted from <available_skills> when <kistack_skills> is already in base, while remaining active in skills.
+        let ks_dir = dir.join("kistack_pin");
+        put(&ks_dir, "skills/schematic/SKILL.md", "---\nname: kicad-schematic\ndescription: Draw schematics.\n---\nBODY");
+        let env_ks = crate::agents::skills::env_from(home.to_str().unwrap(), &bundle, Some(&ks_dir));
+        let codex_with_ks = Prompt::build("<kistack_skills>MANDATORY: ...</kistack_skills>".into(), &env_ks, cwd.to_str().unwrap(), "codex", "gpt-6", false, ClaudeFiles::default());
+        assert!(!codex_with_ks.index.contains("kicad-schematic"), "no duplicate KiStack entry in <available_skills>");
+        assert!(codex_with_ks.skills.iter().any(|row| row["name"] == "kicad-schematic" && row["status"] == "Cross-provider"));
     }
 
     #[test]

@@ -90,6 +90,121 @@ pub fn file_prop(texts: &[String], reference: &str, name: &str, value: &str) -> 
         false })
 }
 
+/// Summary counts of drawn schematic elements across saved `.kicad_sch` texts, used for deterministic quality linting.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct SchQualityStats {
+    pub components: usize,
+    pub power_symbols: usize,
+    pub labels: usize,
+    pub connecting_wires: usize,
+    pub stub_wires: usize,
+    pub boxes: usize,
+}
+
+fn sx_prop<'a>(x: &'a super::sexpr::Sx<'a>, name: &str) -> &'a str {
+    x.all("property").find(|p| p.arg(0) == name).map(|p| p.arg(1)).unwrap_or("")
+}
+
+fn sx_xy(x: &super::sexpr::Sx<'_>) -> (f64, f64) {
+    (x.f(0) as f64, x.f(1) as f64)
+}
+
+fn close_pt(a: (f64, f64), b: (f64, f64), tol: f64) -> bool {
+    (a.0 - b.0).hypot(a.1 - b.1) <= tol
+}
+
+/// Counts components, labels, stub vs. connecting wires, and subcircuit boxes from saved `.kicad_sch` sheet texts.
+pub fn sch_quality_from_texts(texts: &[String]) -> SchQualityStats {
+    use super::sexpr::{forms, parse};
+    let mut stats = SchQualityStats::default();
+    for t in texts {
+        let Some(top_forms) = forms(t.as_bytes()) else { continue };
+        let mut stub_anchors: Vec<(f64, f64)> = vec![];
+        let mut sheet_wires: Vec<((f64, f64), (f64, f64))> = vec![];
+        for raw in top_forms {
+            let x = parse(raw);
+            match x.name() {
+                "symbol" => {
+                    let rf = sx_prop(&x, "Reference");
+                    if rf.starts_with('#') {
+                        stats.power_symbols += 1;
+                        stub_anchors.push(sx_xy(x.get("at")));
+                    } else if !rf.is_empty() {
+                        stats.components += 1;
+                    }
+                }
+                "label" | "global_label" | "hierarchical_label" => {
+                    stats.labels += 1;
+                    stub_anchors.push(sx_xy(x.get("at")));
+                }
+                "rectangle" | "sheet" => stats.boxes += 1,
+                "polyline" => {
+                    let pts: Vec<(f64, f64)> = x.get("pts").all("xy").map(|p| sx_xy(p)).collect();
+                    if pts.len() >= 5 || (pts.len() >= 4 && close_pt(pts[0], pts[pts.len() - 1], 0.05)) {
+                        stats.boxes += 1;
+                    }
+                }
+                "wire" => {
+                    let pts: Vec<(f64, f64)> = x.get("pts").all("xy").map(|p| sx_xy(p)).collect();
+                    for seg in pts.windows(2) {
+                        sheet_wires.push((seg[0], seg[1]));
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (a, b) in sheet_wires {
+            let len = (b.0 - a.0).hypot(b.1 - a.1);
+            let near_stub = stub_anchors.iter().any(|s| close_pt(a, *s, 0.05) || close_pt(b, *s, 0.05));
+            if len <= 3.0 && near_stub {
+                stats.stub_wires += 1;
+            } else {
+                stats.connecting_wires += 1;
+            }
+        }
+    }
+    stats
+}
+
+/// Emits actionable warnings when a schematic edit looks like a wall-of-labels dump or lacks subcircuit boxes.
+pub fn sch_quality_lint(stats: &SchQualityStats, symbols_added: usize, bulk_pin_stubs: usize, explicit_wires_added: usize) -> Option<Value> {
+    let mut warnings = vec![];
+    if stats.components >= 3
+        && stats.labels >= 6
+        && (stats.connecting_wires == 0
+            || (stats.connecting_wires < stats.components && stats.labels > stats.connecting_wires * 2))
+    {
+        warnings.push(format!(
+            "Wall-of-labels schematic detected: {} components and {} net labels, but only {} connecting wire(s) ({} short label/power stub wire(s)). Follow KiStack's kicad-schematic skill: wire passives directly to IC pins with `wire`, group decoupling capacitors onto shared rails, and use net labels only for inter-block buses or distant signals.",
+            stats.components, stats.labels, stats.connecting_wires, stats.stub_wires
+        ));
+    } else if stats.components == 0 && symbols_added >= 3 && bulk_pin_stubs >= 6 && explicit_wires_added == 0 {
+        warnings.push(format!(
+            "Bulk pin-label dump detected: added {symbols_added} symbols with {bulk_pin_stubs} pin stubs via `pins: {{...}}` and 0 explicit `wire` entries. Follow KiStack's kicad-schematic skill: wire passives directly to IC pins with `wire`, group decoupling capacitors, and reserve `pins` / labels for power rails or inter-block connections."
+        ));
+    }
+    if stats.components >= 4 && stats.boxes == 0 {
+        warnings.push(format!(
+            "No subcircuit boxes detected across {} components. Follow KiStack's kicad-schematic skill: group each subcircuit inside a colored KiCad rectangle with a brief, bold title.",
+            stats.components
+        ));
+    }
+    if warnings.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "warnings": warnings,
+        "stats": {
+            "components": stats.components,
+            "connecting_wires": stats.connecting_wires,
+            "stub_wires": stats.stub_wires,
+            "labels": stats.labels,
+            "boxes": stats.boxes,
+        },
+        "next": "Follow KiStack's kicad-schematic skill before moving on: wire passives directly to IC pins, group decoupling caps, box and label subcircuits, color related nets, run ERC, and visually inspect rendered PNGs (viewer_show / kicad-cli sch export svg -> PNG)."
+    }))
+}
+
 /// A check report's findings as one line each: DRC violations, unconnected items and parity, or ERC violations of every sheet.
 pub fn findings(report: &Value) -> Vec<String> {
     let line = |kind: &str, v: &Value| { let items: Vec<String> = v["items"].as_array().into_iter().flatten().map(|i| i["description"].as_str().unwrap_or("").chars().take(70).collect()).collect();
@@ -508,7 +623,9 @@ struct Run<'a> { c: &'a dyn Call, doc: Value, board: bool, commit: Option<Value>
     /// What the saved sheet files must show (reference, property, text), and how many updates KiCad deferred (the person is editing those items).
     expect: Vec<(String, String, String)>, deferred: usize,
     /// Copper moved or was added (a route, a placement, a track): every zone is refilled before the save, so no pour is left over the new copper.
-    refill_all: bool }
+    refill_all: bool,
+    /// Schematic `add` quality tracking for wall-of-labels lint.
+    sch_added: bool, symbols_added: usize, pin_stubs_added: usize, explicit_wires_added: usize }
 /// Rows a change answers with: what the items are now, so nothing is read again to check it.
 /// What `from_library` does next after KiCad answered "not found": wait for the library, ask once more at once, or give up (its words, or
 /// empty for KiCad's own "not found").
@@ -890,6 +1007,10 @@ impl Run<'_> {
             "add" => {
                 let mut list = match &op["add"] { Value::Array(a) => a.clone(), o => vec![o.clone()] }; let mut note = Map::new();
                 if !self.board {
+                    self.sch_added = true;
+                    self.explicit_wires_added += list.iter().filter(|it| it["wire"].is_array()).count();
+                    self.symbols_added += list.iter().filter(|it| it["symbol"].is_object() && !it["symbol"]["ref"].as_str().unwrap_or("").starts_with('#')).count();
+                    self.pin_stubs_added += list.iter().filter_map(|it| it["symbol"]["pins"].as_object()).map(|m| m.len()).sum::<usize>();
                     // a symbol is placed by KiCad first and a pin is read from the document: both need the changes so far to have landed
                     if list.iter().any(|it| it["symbol"].is_object() || it.to_string().contains('.')) { self.settle(i).await? }
                     let (asked, pwr0) = (list.clone(), self.pwr); list = self.expand(op, asked.clone()).await?;
@@ -1133,7 +1254,7 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     if let Some((i, _)) = ops.iter().enumerate().find(|(_, o)| verb(o).is_empty()) { return Err(format!("op {}: an op is one of find, move, set, add, delete, route, place, netclass, rule, refill, ipc", i + 1)) }
     let patient = Patient { c, step: BUSY_STEP, wait: BUSY_WAIT }; let c: &dyn Call = &patient;
     let doc = Run::open(c, path).await?;
-    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, planned: Default::default(), added: vec![], lib_kicked: false, pwr: None, touched: vec![], touch_all: false, vacated: vec![], field_fixes: c.caps().iter().any(|x| x == FIELD_FIXES), only: vec![], lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
+    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, sch_added: false, symbols_added: 0, pin_stubs_added: 0, explicit_wires_added: 0, planned: Default::default(), added: vec![], lib_kicked: false, pwr: None, touched: vec![], touch_all: false, vacated: vec![], field_fixes: c.caps().iter().any(|x| x == FIELD_FIXES), only: vec![], lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
         message: a["message"].as_str().unwrap_or("kicad_edit").to_string(), split: 0, templates: Default::default() };
     // KiCad's own check before the edit, so the answer can say what the edit added to it (check: false leaves it out)
     let checking = writes(&a["ops"]) && a["save"].as_bool().unwrap_or(true) && a["check"].as_bool().unwrap_or(true);
@@ -1183,6 +1304,13 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
         // the parts this call added, with the net each pin is now on (the saved schematic's own netlist)
         if out["saved"].is_string() && !r.board && !r.added.is_empty() { if let Ok(all) = r.c.nets().await { let m: Map<String, Value> = r.added.iter().filter(|a| all[a.as_str()].is_object()).map(|a| (a.clone(), all[a.as_str()].clone())).collect(); if !m.is_empty() { out["nets"] = Value::Object(m) } } }
         if out["saved"].is_string() && !before.is_null() { if let Ok(now) = r.c.check().await { if !now.is_null() { out["check"] = check_delta(&before, &now, if r.touch_all || !r.board { &[] } else { &r.touched }) } } }
+    }
+    if r.wrote && !r.board && r.sch_added {
+        let texts = if out["saved"].is_string() { r.c.sheet_texts() } else { None };
+        let stats = texts.as_deref().map(sch_quality_from_texts).unwrap_or_default();
+        if let Some(lint) = sch_quality_lint(&stats, r.symbols_added, r.pin_stubs_added, r.explicit_wires_added) {
+            out["schematic_lint"] = lint;
+        }
     }
     Ok(out)
 }
@@ -1655,5 +1783,76 @@ mod tests {
         assert_eq!(out, json!({"results": [{}, {"created_items": ["new-0"]}]}));
         assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "GetNets", "BeginCommit", "CreateItems", "EndCommit"]);
         assert_eq!(sent(&f, "GetNets")["board"]["board_filename"], "b.kicad_pcb");
+    }
+
+    #[test] fn schematic_quality_lint_flags_wall_of_labels_and_stays_quiet_when_wired_and_boxed() {
+        // Wall-of-labels sheet: 4 components, 8 labels, only 2.54 mm stub wires ending at labels/power symbols, 0 connecting wires, 0 boxes.
+        let wall_sheet = r##"(kicad_sch
+            (symbol (lib_id "MCU:U") (at 50 50 0) (property "Reference" "U1"))
+            (symbol (lib_id "Device:R") (at 80 50 0) (property "Reference" "R1"))
+            (symbol (lib_id "Device:C") (at 90 50 0) (property "Reference" "C1"))
+            (symbol (lib_id "Device:C") (at 100 50 0) (property "Reference" "C2"))
+            (symbol (lib_id "power:GND") (at 90 56 0) (property "Reference" "#PWR001"))
+            (wire (pts (xy 80 48) (xy 80 45.46)))
+            (label "SDA" (at 80 45.46 0))
+            (wire (pts (xy 80 52) (xy 80 54.54)))
+            (label "SCL" (at 80 54.54 0))
+            (wire (pts (xy 90 48) (xy 90 45.46)))
+            (label "+3V3" (at 90 45.46 0))
+            (wire (pts (xy 90 53.46) (xy 90 56)))
+            (label "CS" (at 50 40 0))
+            (label "SCK" (at 50 42 0))
+            (label "MOSI" (at 50 44 0))
+            (label "MISO" (at 50 46 0))
+        )"##.to_string();
+        let f = Fake { texts: Some(vec![wall_sheet]), ..fake(None) };
+        let out = go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:R", "ref": "R2", "at": [110, 50]}}]}]})).unwrap();
+        let lint = out.get("schematic_lint").expect("wall-of-labels should emit schematic_lint");
+        let warnings: Vec<&str> = lint["warnings"].as_array().unwrap().iter().filter_map(Value::as_str).collect();
+        assert!(warnings.iter().any(|w| w.contains("Wall-of-labels schematic detected")), "{warnings:?}");
+        assert!(warnings.iter().any(|w| w.contains("No subcircuit boxes detected")), "{warnings:?}");
+        assert_eq!(lint["stats"]["components"], 4);
+        assert_eq!(lint["stats"]["connecting_wires"], 0);
+        assert_eq!(lint["stats"]["stub_wires"], 4);
+        assert_eq!(lint["stats"]["labels"], 7);
+        assert_eq!(lint["stats"]["boxes"], 0);
+        assert!(lint["next"].as_str().unwrap().contains("kicad-schematic"));
+
+        // Properly wired and boxed schematic: real connecting wires between pins + KiCad rectangle subcircuit box.
+        let good_sheet = r##"(kicad_sch
+            (rectangle (start 40 35) (end 115 70))
+            (symbol (lib_id "MCU:U") (at 50 50 0) (property "Reference" "U1"))
+            (symbol (lib_id "Device:R") (at 70 50 0) (property "Reference" "R1"))
+            (symbol (lib_id "Device:C") (at 85 50 0) (property "Reference" "C1"))
+            (symbol (lib_id "Device:C") (at 95 50 0) (property "Reference" "C2"))
+            (symbol (lib_id "power:GND") (at 85 60 0) (property "Reference" "#PWR001"))
+            (wire (pts (xy 55 50) (xy 70 50)))
+            (wire (pts (xy 55 52.54) (xy 85 52.54) (xy 85 50)))
+            (wire (pts (xy 85 55) (xy 95 55)))
+            (wire (pts (xy 85 55) (xy 85 60)))
+            (wire (pts (xy 55 47.46) (xy 70 47.46)))
+            (label "SPI_MOSI" (at 110 47.46 0))
+        )"##.to_string();
+        let f_good = Fake { texts: Some(vec![good_sheet]), ..fake(None) };
+        let out_good = go_on(&f_good, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:R", "ref": "R2", "at": [110, 50]}}]}]})).unwrap();
+        assert!(out_good.get("schematic_lint").is_none(), "properly wired & boxed schematic must not warn: {out_good}");
+
+        // Fallback when sheet_texts() is unavailable (including save: false): bulk pins:{...} dump (>= 3 symbols, >= 6 pin stubs, 0 explicit wires) warns, while 1 IC with 6 pins stays quiet.
+        let stats_none = SchQualityStats::default();
+        let fallback = sch_quality_lint(&stats_none, 3, 6, 0).expect("bulk pin stub fallback should warn");
+        assert!(fallback["warnings"][0].as_str().unwrap().contains("Bulk pin-label dump detected"), "{fallback}");
+        assert!(sch_quality_lint(&stats_none, 1, 6, 0).is_none(), "single IC with 6 pins should not warn");
+        assert!(sch_quality_lint(&stats_none, 3, 6, 1).is_none(), "explicit wire suppresses fallback bulk-stub warning");
+
+        let f_unsaved = fake(None);
+        let out_unsaved = go_on(&f_unsaved, "/p/b.kicad_sch", json!({
+            "save": false,
+            "ops": [{"add": [
+                {"symbol": {"lib": "Device:R", "ref": "R1", "at": [10, 20], "pins": {"1": "A", "2": "B"}}},
+                {"symbol": {"lib": "Device:R", "ref": "R2", "at": [20, 20], "pins": {"1": "C", "2": "D"}}},
+                {"symbol": {"lib": "Device:R", "ref": "R3", "at": [30, 20], "pins": {"1": "E", "2": "F"}}}
+            ]}]
+        })).unwrap();
+        assert!(out_unsaved["schematic_lint"]["warnings"][0].as_str().unwrap().contains("Bulk pin-label dump detected"), "{out_unsaved}");
     }
 }
