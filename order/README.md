@@ -21,8 +21,10 @@ A small Python service behind nginx on a Debian host.
   Checkout (an open one is reused) that collects card, email, phone and the shipping address in the
   quote's country, and shows the price-may-change terms beside Pay. There is no quote page: the quote is
   only shown in Backplane. Stripe comes back to `/q/{id}/done` or `/q/{id}/cancelled`, one line each.
-- `/admin`: paid orders, to place by hand. Takes `?k=$FAB_ADMIN_TOKEN` once, which then
-  becomes a cookie.
+- `/admin`: paid orders, to place by hand. nginx asks for a password first (user `admin`, a bcrypt
+  line in `/etc/nginx/fab-admin.htpasswd`, made with `mkpasswd -m bcrypt`) and then hands the app its
+  token from `/etc/fab/nginx-admin.conf`; without that file the page takes `?k=$FAB_ADMIN_TOKEN` once,
+  which then becomes a cookie.
 
 The person sees three lines and a total, four for the US:
 - manufacturing;
