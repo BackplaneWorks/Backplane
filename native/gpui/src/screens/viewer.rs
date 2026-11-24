@@ -1050,7 +1050,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         let body = if popped {
             // the editor is in its own window: the pane says so and offers it back
             div().flex_1().min_h_0().flex().flex_col().items_center().justify_center().gap_2().text_color(theme::color(light, "faint")).child(trs("KiCad is open in its own window."))
-                .child(div().id("kicad-popin").px_3().py_1().border_1().border_color(theme::color(light, "line")).bg(theme::color(light, "raise")).cursor_pointer().child(trs("Pop back in"))
+                .child(div().id("kicad-popin").px_3().py_1().border_1().border_color(theme::color(light, "line")).bg(theme::color(light, "raise")).text_color(theme::color(light, "text")).cursor_pointer().hover(|s| s.bg(theme::color(light, "panel"))).child(trs("Pop back in"))
                     .on_click(cx.listener(|this, _, _, cx| { let h = this.screens.kicad_window; this.kicad_popin(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } })))
                 .into_any_element()
         } else if e.read(cx).handoff() && matches!(open, "board" | "schematic") {

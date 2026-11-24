@@ -924,6 +924,7 @@ impl Render for Backplane {
         // whether the page holds the embedded editor this frame (popped out: its own window does), from this frame's state: macOS hides
         // KiCad's frame by it when the pane is not drawn (#1199: the viewer closed, the PCB Editor stayed on screen)
         if let Some(p) = self.screens.kicad.clone() {
+            if p.read(cx).light != light { p.update(cx, |p, cx| p.set_light(light, cx)); }
             let mine = self.kicad_for(thread, cx).is_some();
             let in_page = self.screens.kicad_window.is_some() || (!docked && mine && crate::screens::viewer::holds_editor(thread));
             // #1345: off screen because the person moved away (another thread or design, or the viewer closed or on another page): the hub
