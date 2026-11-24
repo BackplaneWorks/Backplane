@@ -315,7 +315,7 @@ review.comments.open = Comentarios · {count} abiertos
 review.tag = Etiqueta {tag}
 review.reading = Leyendo el diseño…
 review.comments.none = Sin comentarios aún. Haz clic derecho en un lugar de la placa o esquemático (mantén pulsado en un teléfono) para comentar ahí.
-review.release.note = Etiqueta este diseño y genera sus salidas de fabricación: Gerbers, taladros, CPL, BOM, PDFs y STEP, en .backplane/releases.
+review.release.note = Etiqueta este diseño y genera sus salidas de fabricación: Gerbers, taladros, CPL, BOM, PDFs, STEP y los planos de fabricación, taladrado y montaje, en .backplane/releases.
 review.empty = Nada aún.
 
 # antigravity and google sign-in

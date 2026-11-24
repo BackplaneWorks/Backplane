@@ -315,7 +315,7 @@ review.comments.open = Comments · {count} open
 review.tag = Tag {tag}
 review.reading = Reading the design…
 review.comments.none = No comments yet. Right-click a place on the board or schematic (long-press on a phone) to comment there.
-review.release.note = Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.
+review.release.note = Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs, STEP and the fabrication, drill and assembly drawings, in .backplane/releases.
 review.empty = Nothing yet.
 
 # antigravity and google sign-in

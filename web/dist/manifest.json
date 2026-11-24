@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 225845,
+  "totalAssetGzipBytes": 226499,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -335,7 +335,7 @@
     "web/src/viewers/browser.ts": "44ba909e0e7d4c2d31672c97d41ad7e8039a8654e9929c2ba2650c7581f398ba",
     "web/src/viewers/cbor.ts": "0d2778a46998ab0c22c607dbca757494ad2ff6640b43a833356d227c09b80483",
     "web/src/viewers/mesh-worker.ts": "b7a5094d136cdcba42132ab54615a1518b7e6a13eb232e055065d9d00ba1f4ab",
-    "web/src/viewers/panes.ts": "a1b1e4a5f1135ed442f761a7a189053583da653172fc8c6d2a2df17391d16dff",
+    "web/src/viewers/panes.ts": "2e8674827cb5eb16c1189967e7d1fa145e8b832d6d63e8918c65f6ff87fe567b",
     "web/src/viewers/plot2d.ts": "d60c911ecb3632ab17005740a865b3420ba0b65964a087784bf478e8144d336b",
     "web/src/viewers/responsive.css": "cad654abbf106a0a67fb36f2a5e33ac6596923c9eee771248cf0ed974f6531bc",
     "web/src/viewers/solid3d.ts": "9e82abfe611d41917e70d315cc86047f5a9f99e6cb4df051cdec117078026e21",
@@ -364,9 +364,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 407131,
-      "gzipBytes": 114874,
-      "sha256": "b229e7984a1ff6e23fa10a781bf06549a9c34f48be17c4842d674da8380ddc83"
+      "bytes": 409177,
+      "gzipBytes": 115528,
+      "sha256": "a729db89b1c16801fbd3170bd3524e861672da5d22c825ce59c7b0a67245599a"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,

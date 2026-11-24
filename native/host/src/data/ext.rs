@@ -11,7 +11,7 @@
 //! `viewer.probe {key,name,value}` → `{matches}`, `viewer.info {key,at,idx}` → `{info}` · `files.entries {thread, path?}` → `{dir, entries:[{dir,size,name}]}` ·
 //! `mech.list {thread}` → the hub's listing · bytes of a file: GET /files/get?thread=&path=&token= · `browser {thread, op, ...}` → `{}` (bots.browser for the thread's page: takeover, handback, click {x,y 0..1000},
 //! type, press, scroll, navigate, toolbar) · the page's newest frame: GET /bots/<thread>/screen.jpg, a new one announced by `{"t":"shot","bot":<thread>,"n":N}` (JSON, to every client that connected for viewers).
-//! Diff and Review (features "diff", "review"): `viewer.diff {thread, from?, to?}` → `{diff, nogit?}` (the hub's git.diff: unified text) · `review.page {thread, page: bom|checks, a?, b?, commit?}` → `{report:{md, err, gate, line, tasks:[…]}}`
+//! Diff and Review (features "diff", "review"): `viewer.diff {thread, from?, to?}` → `{diff, nogit?}` (the hub's git.diff: unified text) · `review.page {thread, page: bom|checks|release, a?, b?, commit?}` → `{report:{md, err, gate, line, tasks:[…]}}`
 //! (review.bom / review.checks: Markdown the hub writes) · `review.tick {thread, index}` → `{ticked:{tasks}}` · `review.comment {thread, op: add|edit|resolve|reopen|drop, text?, id?, parent?, file?, layer?, x?, y?, item?}` → `{}` ·
 //! `review.list {thread}` → `{comments:[{id, text, by, at, parent, resolved, file, layer, x, y, item}]}` (the thread's review acts folded, oldest first).
 //! Picker (feature "picker"): `thread.picker {thread?, provider?, model?, effort?, runtime?}` → `{picker:{chip, sections:[{title, action, choices:[{label, value, on, ok, why}]}]}}` (a thread's own, or a new thread's from what is given) ·
@@ -743,6 +743,8 @@ async fn review(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Resu
                 match page {
                     "bom" => { for k in ["a", "b"] { if !s(p, k).is_empty() { q[k] = p[k].clone() } } rpc(hub, c, "review.bom", q).await.map(result) }
                     "checks" => { if !s(p, "commit").is_empty() { q["commit"] = p["commit"].clone() } q["trigger"] = json!("manual"); rpc(hub, c, "review.checks", q).await.map(result) }
+                    // the newest release already made: its drawing package and files (a read; nothing is released from here)
+                    "release" => rpc(hub, c, "review.released", q).await.map(result),
                     _ => Err(err("page: bom or checks")),
                 }
             }

@@ -221,7 +221,7 @@ mod boundary_tests {
         (crate::hub::TestHub { hub, _tmp: home }, proj)
     }
     const ROUTES: &[&str] = &["files.dir", "files.op", "files.read", "files.list", "git.status", "git.diff", "git.act", "git.revert", "history.refs", "history.resolve", "kicad.components", "boards.list", "mech.list", "mech.render",
-        "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "kicad.export10", "pdf.page", "file.open"];
+        "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "review.released", "kicad.export10", "pdf.page", "file.open"];
     #[tokio::test] async fn every_folder_route_refuses_what_does_not_resolve() {
         let (hub, _proj) = world().await;
         let who = Caller { gen: "g".into(), client: 1 };

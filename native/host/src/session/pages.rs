@@ -209,6 +209,8 @@ fn ask_page_ab(b: &mut B, sel: &str, page: &str, ab: &str) {
     let p = if page == "bom" { json!({"thread": sel, "a": va, "b": vb}) } else { json!({"thread": sel, "commit": "", "trigger": if release { "release" } else { "manual" }}) };
     let id = b.rpc(m, p);
     b.patch_d.insert(format!("@rp.req:{id}"), json!(format!("{sel}:{page}")));
+    // the Release page also shows the newest release already made (its drawing package and files), read back from .backplane/releases
+    if release { let id = b.rpc("review.released", json!({"thread": sel})); b.patch_d.insert(format!("@rp.req:{id}"), json!(format!("{sel}:release"))); }
 }
 /// Rp.open: the Review tab on a page, and the page asked for
 pub fn open_review(session: &Value, hub: &str, sel: &str, page: &str, managed: bool) -> (Value, Vec<Value>) { open_review_ab(session, hub, sel, page, "", managed) }
@@ -345,7 +347,7 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
                 }
                 p = json!({"info": i, "drafts": d});
             }
-            "review.bom" | "review.checks" | "review.release" if res.get("report").is_some() => {
+            "review.bom" | "review.checks" | "review.release" | "review.released" if res.get("report").is_some() => {
                 let rep = &res["report"]; let k = format!("{}:{}", s(rep, "thread"), s(rep, "page"));
                 let mut i = Map::new();
                 i.insert(format!("rp.md:{k}"), json!(s(rep, "md"))); i.insert(format!("rp.err:{k}"), json!(s(rep, "err")));
@@ -353,13 +355,16 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
                 i.insert(format!("rp.checklistGate:{k}"), json!(if rep["checklistGate"] == true { "1" } else { "" }));
                 i.insert(format!("rp.otherGates:{k}"), json!(s(rep, "otherGates")));
                 i.insert(format!("rp.tasks:{k}"), json!(rep.get("tasks").filter(|t| t.is_array()).map_or("[]".to_string(), |t| t.to_string())));
-                p = json!({"info": i, "drafts": {format!("@rp.busy:{}", s(rep, "thread")): "", format!("@rp.req:{id}"): ""}});
+                p = json!({"info": i, "drafts": {format!("@rp.req:{id}"): ""}});
+                // the release read back is beside the page's checks: it does not end their reading
+                if method != "review.released" { p["drafts"][format!("@rp.busy:{}", s(rep, "thread"))] = json!(""); }
             }
             "review.tick" if res.get("ticked").is_some() => {
                 let t = &res["ticked"];
                 p = json!({"info": {format!("rp.tasks:{}:checks", s(t, "thread")): t.get("tasks").filter(|x| x.is_array()).map_or("[]".to_string(), |x| x.to_string())}, "drafts": {format!("@rp.req:{id}"): ""}});
             }
             // a review request that failed: its page stops reading and says why
+            "review.released" if !ok => { p = json!({"drafts": {format!("@rp.req:{id}"): ""}}); }
             "review.bom" | "review.checks" | "review.tick" | "review.release" if !ok => {
                 let key = draft(session, &format!("@rp.req:{id}")).to_string();
                 if !key.is_empty() {
@@ -431,7 +436,7 @@ pub fn tile_review(session: &Value, sel: &str, page: &str) -> Value {
     let title = match page { "comments" => "Comments · 0 open".to_string(), "release" => "Release".to_string(), _ => info(session, &key("rp.title")).to_string() };
     let note = if busy { "Reading the design…".to_string() } else if !err.is_empty() { err.to_string() } else if !md_text.is_empty() { String::new() } else { match page {
         "comments" => "No comments yet. Right-click a place on the board or schematic (long-press on a phone) to comment there.".into(),
-        "release" => "Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.".into(),
+        "release" => "Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs, STEP and the fabrication, drill and assembly drawings, in .backplane/releases.".into(),
         _ => "Nothing yet.".into() } };
     let blocks = if md_text.is_empty() { vec![] } else { md::nodes_json(&md::render(md_text)) };
     let checks = if report_page == "checks" {
@@ -448,7 +453,7 @@ pub fn tile_review(session: &Value, sel: &str, page: &str) -> Value {
         json!({"gate": gate, "line": info(session, &key("rp.line")), "tasks": rows})
     } else { Value::Null };
     let tabs: Vec<Value> = ["bom", "checks", "comments", "release"].iter().map(|p| tab(p, page)).collect();
-    let mut picture = json!({"tabs": tabs, "title": title, "busy": busy, "note": note, "blocks": blocks, "checks": checks, "release": if page == "release" { json!({"note":"Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs and STEP, in .backplane/releases.", "blocks": md::nodes_json(&md::render(info(session, &format!("rp.md:{sel}:release"))))}) } else { Value::Null }});
+    let mut picture = json!({"tabs": tabs, "title": title, "busy": busy, "note": note, "blocks": blocks, "checks": checks, "release": if page == "release" { json!({"note":"Tag this design and make its fabrication outputs: Gerbers, drill, CPL, BOM, PDFs, STEP and the fabrication, drill and assembly drawings, in .backplane/releases.", "blocks": md::nodes_json(&md::render(info(session, &format!("rp.md:{sel}:release"))))}) } else { Value::Null }});
     if !err.is_empty() {
         picture["error"] = json!(err);
     }
@@ -548,7 +553,13 @@ mod tests {
         let open = act_for("h", &session, T, "rv-page", "release", || true).unwrap();
         let cmd: Value = serde_json::from_str(open.cmds[0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(cmd["p"]["trigger"], "release");
+        // and the newest release already made is read back, beside the checks
+        let back: Value = serde_json::from_str(open.cmds[1]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((back["m"].as_str(), back["p"]["thread"].as_str()), (Some("review.released"), Some(T)));
         patch::merge(&mut session, &open.session_patch);
+        apply_reads(&M, "h", &mut session, &[json!({"method":"review.released","ok":true,"id":back["id"],"result":{"report":{"page":"release","thread":T,"md":"# v1\n\n**Drawings**\n\n- Drill drawing: `/p/.backplane/releases/v1/drawings/b-drill.pdf`","err":""}}})]);
+        assert!(review_json(&session, T)["busy"] == true, "the checks are still being read");
+        assert!(review_json(&session, T)["release"]["blocks"].to_string().contains("Drill drawing"), "{}", review_json(&session, T)["release"]);
         apply_reads(&M, "h", &mut session, &[json!({"method":"review.checks","ok":true,"id":5,"result":{"report":{
             "page":"checks","thread":T,"checklistGate":true,"gate":"Checklist: 1 unticked","tasks":[{"text":"ERC clean","done":false}],"md":"Project check output"
         }}})]);
