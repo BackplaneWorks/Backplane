@@ -297,9 +297,14 @@ private fun MemberPickRow(n: Int, pick: DSwarmPick, models: List<Pair<String, Li
         }
         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             Box(Modifier.weight(1f)) {
-                ModelChip(pick.provider.ifEmpty { Msg.android_swarm_provider }, "swarm.new.provider.$n", Modifier.fillMaxWidth()) { prov = true }
+                ModelChip(pick.provider.ifEmpty { Msg.android_swarm_provider }, "swarm.new.provider.$n", Modifier.fillMaxWidth(), provider = pick.provider) { prov = true }
                 DropdownMenu(prov, { prov = false }) {
-                    models.forEach { (p, l) -> DropdownMenuItem({ Text(p, fontFamily = BpMono, color = if (l.isEmpty() || l.any { it.ok }) dcs.onSurface else dfaint) }, { prov = false; change(pick.copy(provider = p, model = "")) }, Modifier.testTag("swarm.pick.provider.$p")) }
+                    models.forEach { (p, l) -> DropdownMenuItem({
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            ProviderMark(p, 14.dp)
+                            Text(p, fontFamily = BpMono, color = if (l.isEmpty() || l.any { it.ok }) dcs.onSurface else dfaint)
+                        }
+                    }, { prov = false; change(pick.copy(provider = p, model = "")) }, Modifier.testTag("swarm.pick.provider.$p")) }
                 }
             }
             Box(Modifier.weight(1f)) {

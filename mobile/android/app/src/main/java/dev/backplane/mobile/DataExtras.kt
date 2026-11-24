@@ -203,6 +203,9 @@ fun PickerSheet(thread: String?, choice: DNewThreadChoice, choose: (DNewThreadCh
       // one height from the first frame: a sheet that opens empty and grows when the list arrives stays where it opened; short of the whole screen, it clears the status bar
       Column(Modifier.fillMaxWidth().fillMaxHeight(.85f)) {
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+            val activePv = picker?.sections?.firstOrNull { it.action == "provider" }?.choices?.firstOrNull { it.on }?.value
+                ?: ProviderMarks.providerOfChip(picker?.chip ?: "")
+            if (activePv.isNotEmpty()) { ProviderMark(activePv, 14.dp); Spacer(Modifier.width(6.dp)) }
             DMono(picker?.chip?.let(Tr::t) ?: " ", dcs.onSurface, 12, Modifier.weight(1f).testTag("picker.chip"))
             DMono(Msg.android_done, dcs.primary, 13, Modifier.clickable(onClick = close).padding(8.dp).testTag("picker.done"), bold = true)
         }
@@ -221,6 +224,7 @@ fun PickerSheet(thread: String?, choice: DNewThreadChoice, choose: (DNewThreadCh
                 s.choices.forEach { c ->
                     Row(Modifier.fillMaxWidth().background(if (c.on) dcs.surfaceContainerHigh else Color.Transparent).clickable(enabled = c.ok) { press(s, c) }.heightIn(min = 44.dp).padding(horizontal = 14.dp, vertical = 6.dp).testTag("pick.${s.action}.${c.value}"), verticalAlignment = Alignment.CenterVertically) {
                         DMono(if (c.on) "✓" else "", dcs.primary, 13, Modifier.width(24.dp))
+                        if (s.action == "provider") { ProviderMark(c.value, 16.dp); Spacer(Modifier.width(8.dp)) }
                         Column {
                             Text(Tr.t(c.label), color = if (c.ok) dcs.onSurface else dfaint, fontFamily = BpMono, fontSize = 13.sp)
                             if (!c.ok && c.why.isNotEmpty()) DMono(Tr.t(c.why), dfaint, 11)

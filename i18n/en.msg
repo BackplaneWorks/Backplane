@@ -5073,3 +5073,5 @@ provider.notice.senderr = No AI provider connected yet. Open Settings → Accoun
 provider.notice.senderr.remote = No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.
 web.settings.providers = AI providers
 web.settings.providers.browser = Connect a provider in the Backplane desktop or mobile app under Settings → Accounts.
+order.lead.days = {days, plural, one {Est. lead time: 1 day} other {Est. lead time: {days} days}}
+order.estimate.warnings = Warning: {warnings}

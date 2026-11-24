@@ -12,7 +12,7 @@ The server in this tree is ahead of the 0.14 tags: `1f85acb19a` (US sales tax, t
 |---|---|---|
 | `GET /v1/health` `{ok, version, pricing}` | `fab.rs` `look_in`: only for a card with a KiCad board and no fab file | **Fixed**: `pricing: false` was read as healthy; the card now says "pricing is not available right now" (`health_got`) |
 | `GET /v1/catalog` `{kinds, fee, fee_cnc, min_assembled}` | never called; agents get a hand-written list (`ORDER_PROMPT_FAB`) | **Fixed by a test**: the list had drifted (sheet metal `countersinks`, HDI thicknesses 1.4 and 1.8). Prompt corrected, and `fab.rs` test `the_agents_fab_json_contract_names_everything_the_order_servers_catalog_has` fails on any kind, option, choice or feature the catalog has and the prompt lacks, and on the order minimums (5 boards, assembly from 2) |
-| `POST /v1/estimate` `{currency, from, parts[{name,kind,qty,from,lead_days,warnings}], label, note}` | `fab.rs` sends `{parts:[{name,kind,qty,options,features}]}`, reads `label`, per-part `from`/`problems`/`name`/`kind` | `lead_days` and `warnings` were dropped. **Fixed**: `fab.look` carries `lead_days` and `estimate_warnings`. Not drawn by any client yet (open) |
+| `POST /v1/estimate` `{currency, from, parts[{name,kind,qty,from,lead_days,warnings}], label, note}` | `fab.rs` sends `{parts:[{name,kind,qty,options,features}]}`, reads `label`, per-part `from`/`problems`/`name`/`kind` | `lead_days` and `warnings` were dropped. **Fixed**: `fab.look` carries `lead_days` and `estimate_warnings`, and GPUI, iOS, and Android render them on Order cards and project fab cards |
 | `POST /v1/quotes` (multipart `manifest` + `file`; 202 `{id,token,status,poll_after}`; 400, 413, 429 with `{error}`) | `order.rs` `upload`: `X-Backplane-Install`, manifest and files by relative path, 300 s; error text shown to the agent | matches. The hub ignores `poll_after` (polls at 3 s, then 30 s; the server's read budget is 1200 an hour per address and per install, so one quote is far inside it) |
 | `GET /v1/quotes/{id}` `{id,status,expires,country,pilot,quote,pay_path,order,error}` | `order.rs` `get`, `order_view.rs` `state`/`payable`/`pending`/`sum` | see the two bugs below; `pilot`, `shipping.ddp`, `pay_label`, `markdown`, `problems`, `warnings`, `order.{status,tracking}` all read as the server writes them |
 | `/q/{id}?t=` Buy now (redirect to Stripe; paused page when `FAB_PAUSED`) | `order.rs` `pay_of`, `pay_link` | matches. The hub cannot know the server is paused before the person opens the page (open, needs a server field) |
@@ -41,7 +41,7 @@ The server in this tree is ahead of the 0.14 tags: `1f85acb19a` (US sales tax, t
 
 ## Open, and why
 
-- **No client draws `lead_days` or `estimate_warnings`.** Adding a line to the Buy it tooltip or the card is a UI decision on three clients (GPUI, iOS, Android); left for the person to choose.
+- **`lead_days` and `estimate_warnings` are rendered on GPUI, iOS, and Android** (on Order cards and project fab cards).
 - **The hub cannot see a paused server** until Buy now is opened. A `paused` flag on `GET /v1/quotes/{id}` (and `/v1/health`) would let the quote and the card say it. That is a server change (`order/fabsrv/app.py`), not a client one; not made here because it changes the deployed contract.
 - **`poll_after` is not honoured.** Harmless today; if the server ever slows it, the hub should follow it.
 - **No live run of the phones** for the changed paths (the changes are in the hub's data, which all clients draw unchanged).

@@ -218,7 +218,7 @@ private struct DataSwarmMemberRow: View {
             HStack(spacing: 6) {
                 Menu {
                     ForEach(Swarm.providers(models), id: \.self) { p in Button(p) { member.provider = p; member.model = "" } }
-                } label: { pick(member.provider.isEmpty ? Tr.t("Provider") : member.provider) }.accessibilityIdentifier("data.swarm.member.provider.\(index)")
+                } label: { pick(member.provider.isEmpty ? Tr.t("Provider") : member.provider, provider: member.provider) }.accessibilityIdentifier("data.swarm.member.provider.\(index)")
                 Menu {
                     Button(Tr.t("default")) { member.model = "" }
                     ForEach(models[member.provider] ?? [], id: \.value) { m in Button(m.label) { member.model = m.value }.disabled(!m.ok) }
@@ -232,8 +232,11 @@ private struct DataSwarmMemberRow: View {
                 .accessibilityIdentifier("data.swarm.member.role.\(index)")
         }
     }
-    private func pick(_ s: String) -> some View {
-        HStack(spacing: 4) { Text(s).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer(minLength: 0); Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(BackplaneDesign.dim) }
+    private func pick(_ s: String, provider: String = "") -> some View {
+        HStack(spacing: 4) {
+            if !provider.isEmpty { ProviderMark(provider: provider, size: 13) }
+            Text(s).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer(minLength: 0); Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(BackplaneDesign.dim)
+        }
             .padding(.horizontal, 8).frame(maxWidth: .infinity, minHeight: 36).dbox(fill: BackplaneDesign.panel)
     }
 }

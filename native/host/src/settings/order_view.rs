@@ -104,10 +104,18 @@ pub fn total_of(label: &str, raw: &Value) -> String {
     if let Some(t) = label.strip_prefix("Buy now · ") { return t.to_string() }
     match raw { Value::Null => String::new(), Value::String(s) if s.is_empty() => String::new(), Value::String(s) => format!("${s}"), v => format!("${v}") }
 }
+fn warnings_text(v: &Value) -> String {
+    let mut out: Vec<String> = vec![];
+    for w in v.as_array().into_iter().flatten().filter_map(Value::as_str).map(str::trim).filter(|w| !w.is_empty()) {
+        if !out.iter().any(|x| x == w) { out.push(w.to_string()) }
+    }
+    out.join("; ")
+}
 /// Order.sum: what the hub keeps of a quote for the card (the setting `order.quote.<thread>`), without its link: `pay_link` finds that by the id.
 pub fn sum(q: &Value) -> String {
     let label = sv(&q["quote"], "pay_label");
-    json!({"id":sv(q, "id"),"state":state(q),"total":total_of(label, &q["quote"]["total"]),"ddp":ddp(q),"payable":payable(q),"unavailable":unavailable(q),"label":if label.is_empty() { "Buy now" } else { label },"tracking":sv(&q["order"], "tracking")}).to_string()
+    json!({"id":sv(q, "id"),"state":state(q),"total":total_of(label, &q["quote"]["total"]),"ddp":ddp(q),"payable":payable(q),"unavailable":unavailable(q),"label":if label.is_empty() { "Buy now" } else { label },"tracking":sv(&q["order"], "tracking"),
+        "lead_days":q["quote"]["lead_days"].as_u64().unwrap_or(0),"estimate_warnings":warnings_text(&q["quote"]["warnings"])}).to_string()
 }
 /// Order.sum.keeps: a newer quote always takes the card; a quote's own progress only while it is the card's.
 pub fn sum_keeps(fresh: bool, cur: &str, id: &str) -> bool { fresh || cur.is_empty() || serde_json::from_str::<Value>(cur).map_or(false, |v| sv(&v, "id") == id) }
@@ -133,9 +141,13 @@ pub fn card(name: &str, asked: bool, files: bool, waiting: bool, running: bool, 
     let line = if asked { "Backplane needs your answer below.".to_string() } else { match i {
         0 => if running { "Getting the order ready…".into() } else { "Reply below to go on.".into() }, 1 => "Check the files below and send them for a quote.".into(), 2 => "Getting your quote… usually 1-2 min".into(), _ => card_said(st, pay, tracking, q["unavailable"].as_bool().unwrap_or(false)) } };
     let buys = i == 3 && pay && matches!(st, "ready" | "quoted"); let (shown, total) = (i >= 3, sv(&q, "total"));
+    let lead_days = q["lead_days"].as_u64().unwrap_or(0);
+    let warns = { let w = sv(&q, "estimate_warnings"); if w.is_empty() { warnings_text(&q["warnings"]) } else { w.to_string() } };
     let mut o = json!({"name":name,"steps":STEPS.iter().enumerate().map(|(k, l)| json!({"label":l,"mark":if k < i { "done" } else if k == i { "on" } else { "" }})).collect::<Vec<_>>(),
         "line":line,"waiting":i == 2,"total":if shown { total } else { "" },"customs":if shown && !total.is_empty() { customs(q["ddp"].as_bool().unwrap_or(false)) } else { "" },
         "pay":if buys { pay_link(sv(&q, "id")).unwrap_or_default() } else { String::new() },"label":if buys { let l = sv(&q, "label"); if l.is_empty() { "Buy now" } else { l } } else { "" }});
+    if shown && lead_days > 0 { o["lead_days"] = json!(lead_days); }
+    if shown && !warns.is_empty() { o["estimate_warnings"] = json!(warns); }
     if i == 3 && q["unavailable"].as_bool().unwrap_or(false) && matches!(st, "ready" | "quoted") { o["requote"] = json!(true) }
     o
 }

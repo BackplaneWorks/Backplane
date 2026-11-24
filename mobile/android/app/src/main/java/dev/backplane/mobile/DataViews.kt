@@ -308,9 +308,13 @@ internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modi
 
 /** The composer's model chip: the hub's "claude / opus / high" in a line box; a tap opens the picker. */
 @Composable
-internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier, onClick: () -> Unit) {
+internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier, provider: String = "", onClick: () -> Unit) {
+    val pv = remember(provider, text) { provider.ifEmpty { ProviderMarks.providerOfChip(text) } }
     Box(modifier.height(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable(onClick = onClick).padding(horizontal = 10.dp).testTag(tag), contentAlignment = Alignment.CenterStart) {
-        DMono(Tr.t(text), dcs.onSurface, 12)
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (pv.isNotEmpty()) ProviderMark(pv, 14.dp)
+            DMono(Tr.t(text), dcs.onSurface, 12)
+        }
     }
 }
 
@@ -746,6 +750,7 @@ private fun ThreadRow(t: DThread, onClick: () -> Unit, depth: Int = 0, kids: Int
         Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (t.pinned) { Icon(Icons.Default.PushPin, Msg.tools_pinned, tint = dcs.primary, modifier = Modifier.size(11.dp)); Spacer(Modifier.width(5.dp)) }
+                if (t.provider.isNotEmpty()) { ProviderMark(t.provider, 12.dp); Spacer(Modifier.width(6.dp)) }
                 Text(t.title.ifEmpty { Msg.thread_new }, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
             if (t.preview.isNotEmpty()) Text(t.preview.replace("**", "").replace("`", ""), color = dfaint, fontSize = 11.sp, fontFamily = BpMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1034,7 +1039,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.focusRequester(replyBox).testTag("thread.composer"), 6, if (planActive) planTint else dcs.primary)
             thread?.memory?.let { MemoryBar(it) }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { Msg.common_default }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
+                if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { Msg.common_default }}" }, "thread.model", Modifier.weight(1f), provider = thread.provider) { models = true } else Spacer(Modifier.weight(1f))
                 if (DataClient.has("plan") && planMode != null) {
                     val pcol = if (planActive) planTint else dcs.onSurfaceVariant
                     Box(
@@ -1680,7 +1685,7 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
             DField(text, { text = it }, Msg.android_thread_new_hint, Modifier.heightIn(min = 120.dp).focusRequester(focus).testTag("new.text"), 8, dcs.primary)
             if (err.isNotEmpty()) Text(Tr.t(err), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (DataClient.has("picker")) ModelChip(chip.ifEmpty { " " }, "new.model", Modifier.weight(1f)) { picking = true } else Spacer(Modifier.weight(1f))
+                if (DataClient.has("picker")) ModelChip(chip.ifEmpty { " " }, "new.model", Modifier.weight(1f), provider = choice.provider ?: "") { picking = true } else Spacer(Modifier.weight(1f))
                 DBtn(if (busy) Msg.state_starting else Msg.android_start, true, !busy, Modifier.testTag("new.start")) {
                     busy = true; scope.launch { try { created(DataClient.createThread(target, text, choice).id) } catch (e: Exception) { err = e.message ?: ""; busy = false } }
                 }
@@ -1796,6 +1801,8 @@ private fun OrderCard(o: DataClient.Order) {
         DMono(Tr.t(o.line), if (o.waiting) dcs.onSurfaceVariant else dcs.onSurface, 12, lines = 4) // the card's words wrap, as on iOS and in the window
         if (o.total.isNotEmpty()) DMono(o.total, dcs.onSurface, 14, bold = true)
         if (o.customs.isNotEmpty()) DMono(Tr.t(o.customs), dcs.onSurfaceVariant, 11, Modifier.testTag("thread.order.customs"), lines = 4)
+        if (o.leadDays > 0) DMono(Msg.order_lead_days(o.leadDays), dcs.onSurfaceVariant, 11, Modifier.testTag("thread.order.lead"))
+        if (o.estimateWarnings.isNotEmpty()) DMono(Msg.order_estimate_warnings(o.estimateWarnings), dwarn, 11, Modifier.testTag("thread.order.warnings"), lines = 4)
         if (o.pay.startsWith("https://") || o.pay.startsWith("http://")) DBtn(Tr.t(o.label.ifEmpty { "Buy now" }), true, modifier = Modifier.testTag("thread.order.pay")) {
             runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(o.pay))) }
         }

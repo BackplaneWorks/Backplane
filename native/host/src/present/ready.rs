@@ -39,11 +39,14 @@ pub fn keep(res: &Value) -> Option<Value> {
     let th = s(res, "thread"); if th.is_empty() || res.get("goal").is_none() { return None }
     let shown = !s(res, "intent").trim().is_empty() || res["parts"].as_array().map_or(0, Vec::len) + res["boards"].as_u64().unwrap_or(0) as usize > 0;
     let goal = s(res, "goal");
+    let lead = res["lead_days"].as_u64().unwrap_or(0);
     Some(json!({"info": {
         format!("fab.line:{th}"): if goal.is_empty() { "No goal yet. Edit to say what this project is for." } else { goal },
         format!("fab.intent:{th}"): s(res, "intent"), format!("fab.buy:{th}"): buy_label(res), format!("fab.shown:{th}"): if shown { "1" } else { "" },
         format!("fab.boards:{th}"): boards_text(&res["board_files"]), format!("fab.board:{th}"): s(res, "board_default"),
-        format!("fab.ready:{th}"): ready_line(res), format!("fab.again:{th}"): if ordered(s(res, "order")) { "1" } else { "" }}}))
+        format!("fab.ready:{th}"): ready_line(res), format!("fab.again:{th}"): if ordered(s(res, "order")) { "1" } else { "" },
+        format!("fab.lead:{th}"): if lead > 0 { lead.to_string() } else { String::new() },
+        format!("fab.warn:{th}"): s(res, "estimate_warnings")}}))
 }
 
 /// Buy it in the thread's header (Fab.mini.tools): what the card can buy, with Ordering on, outside a buy thread. There is no bar above the composer: the person asked for it gone
@@ -55,7 +58,15 @@ pub fn header(st: &State, thread: &str, session: &Value) -> Option<Value> {
     let (buy, line) = (info("fab.buy"), info("fab.ready"));
     if buy.is_empty() || st.settings.get(&format!("buy.{thread}")).map_or(false, |v| !v.is_empty()) { return None }
     let label = if info("fab.again") == "1" { "Buy again".to_string() } else { buy };
-    Some(json!({"icon": "shopping-cart", "label": label, "tip": if line.is_empty() { "Ready to order".to_string() } else { line }, "action": "fab-buy", "value": "", "on": false, "danger": false}))
+    let lead = info("fab.lead").parse::<u64>().unwrap_or(0);
+    let warn = info("fab.warn");
+    let mut tip = if line.is_empty() { "Ready to order".to_string() } else { line };
+    if lead > 0 { tip.push_str(&format!(" · Est. {} {}", lead, if lead == 1 { "day" } else { "days" })); }
+    if !warn.is_empty() { tip.push_str(&format!("\nWarning: {warn}")); }
+    let mut b = json!({"icon": "shopping-cart", "label": label, "tip": tip, "action": "fab-buy", "value": "", "on": false, "danger": false});
+    if lead > 0 { b["lead_days"] = json!(lead); }
+    if !warn.is_empty() { b["estimate_warnings"] = json!(warn); }
+    Some(b)
 }
 
 /// The thread a project's page buys from: the project's latest thread that is not a buy thread (an archived one only when there is no other).
@@ -114,5 +125,17 @@ mod tests {
         let mut st = State::default(); project(&mut st); let mut sess = json!({"info": {}});
         let mut c = card(&["A"], "from $5", ""); c["order"] = json!("shipped"); crate::session::patch::merge(&mut sess, &keep(&c).unwrap());
         let b = header(&st, "t1", &sess).unwrap(); assert_eq!((b["label"].as_str(), b["tip"].as_str()), (Some("Buy again"), Some("Ordered · shipped")));
+    }
+    #[test] fn header_and_page_button_forward_lead_days_and_warnings() {
+        let mut st = State::default(); project(&mut st); let mut sess = json!({"info": {}});
+        let mut c = card(&["A"], "from $5", ""); c["lead_days"] = json!(7); c["estimate_warnings"] = json!("thin board");
+        crate::session::patch::merge(&mut sess, &keep(&c).unwrap());
+        let b = header(&st, "t1", &sess).unwrap();
+        assert_eq!(b["lead_days"], 7);
+        assert_eq!(b["estimate_warnings"], "thin board");
+        assert_eq!(b["tip"], "Ready to order · A · Est. 7 days\nWarning: thin board");
+        let pb = page_button(&st, "t1", &c).unwrap();
+        assert_eq!(pb["lead_days"], 7);
+        assert_eq!(pb["estimate_warnings"], "thin board");
     }
 }

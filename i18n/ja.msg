@@ -5096,3 +5096,5 @@ provider.notice.senderr = AI プロバイダーがまだ接続されていませ
 provider.notice.senderr.remote = {machine} に AI プロバイダーが接続されていません。{machine} で設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。
 web.settings.providers = AI プロバイダー
 web.settings.providers.browser = Backplane のデスクトップまたはモバイルアプリの設定 → アカウントからプロバイダーを接続してください。
+order.lead.days = {days, plural, one {目安納期: 1日} other {目安納期: {days}日}}
+order.estimate.warnings = 警告: {warnings}

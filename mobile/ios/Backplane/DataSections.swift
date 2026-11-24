@@ -25,7 +25,9 @@ struct DSecRow: Decodable, Identifiable, Equatable {
     var snooze: [DSnoozeOpt]; var settle: String; var wake: String
     /// a project with a board in its folder
     var hasBoard: Bool
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under, need, label, tone, snooze, settle, wake, hasBoard }
+    /// thread provider id (e.g. claude, codex, antigravity)
+    var provider: String
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under, need, label, tone, snooze, settle, wake, hasBoard, provider }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
@@ -36,7 +38,7 @@ struct DSecRow: Decodable, Identifiable, Equatable {
         fold = c.str(.fold); folded = c.bool(.folded); under = c.int(.under)
         need = kind == "swarm" ? DSwarmNeed.of(c, .need) : nil
         label = c.str(.label); badgeTone = c.str(.tone); snooze = (try? c.decode([DSnoozeOpt].self, forKey: .snooze)) ?? []; settle = c.str(.settle); wake = c.str(.wake)
-        hasBoard = c.bool(.hasBoard)
+        hasBoard = c.bool(.hasBoard); provider = c.str(.provider)
     }
     var isProject: Bool { !key.isEmpty }
     /// a chevron on the row: something is under it, or it is folded (an older hub sends no fold)
@@ -149,6 +151,7 @@ struct DataSectionThread: View {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
+                        if !r.provider.isEmpty { ProviderMark(provider: r.provider, size: 12) }
                         Text(r.title).dmono(14).foregroundStyle(BackplaneDesign.text).lineLimit(1)
                         if r.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.pinned." + r.id) }
                     }
@@ -278,11 +281,13 @@ struct DataProjectPageView: View {
     @State private var whole = false
     var body: some View {
         List {
-            if let c = card, !c.goal.isEmpty || !c.boards.isEmpty {
+            if let c = card, !c.goal.isEmpty || !c.boards.isEmpty || c.leadDays > 0 || !c.estimateWarnings.isEmpty {
                 Button { whole.toggle() } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         if !c.goal.isEmpty { Text(c.goal).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(whole ? 20 : 2).multilineTextAlignment(.leading) }
                         if !c.boards.isEmpty { Text(Tr.t("Boards").uppercased() + "  " + c.boards.joined(separator: " · ")).dmono(10).foregroundStyle(BackplaneDesign.dim).lineLimit(2) }
+                        if c.leadDays > 0 { Text(Tr.order_lead_days(days: c.leadDays)).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("data.project.page.lead") }
+                        if !c.estimateWarnings.isEmpty { Text(Tr.order_estimate_warnings(warnings: c.estimateWarnings)).dmono(11).foregroundStyle(BackplaneDesign.warn).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("data.project.page.warnings") }
                     }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).contentShape(Rectangle())
                 }.buttonStyle(.plain).background(BackplaneDesign.panel).accessibilityIdentifier("data.project.page.card").dataRow()
             }

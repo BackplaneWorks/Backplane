@@ -4933,6 +4933,8 @@ provider.notice.senderr	No AI provider connected yet. Open Settings → Accounts
 provider.notice.senderr.remote	No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.	{machine} に AI プロバイダーが接続されていません。{machine} で設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。	No hay ningún proveedor de IA conectado en {machine}. Abre Configuración → Cuentas en {machine} para conectar Claude, Codex, Antigravity u otro proveedor.
 web.settings.providers	AI providers	AI プロバイダー	Proveedores de IA
 web.settings.providers.browser	Connect a provider in the Backplane desktop or mobile app under Settings → Accounts.	Backplane のデスクトップまたはモバイルアプリの設定 → アカウントからプロバイダーを接続してください。	Conecta un proveedor en la aplicación de escritorio o móvil de Backplane en Configuración → Cuentas.
+order.lead.days	{days, plural, one {Est. lead time: 1 day} other {Est. lead time: {days} days}}	{days, plural, one {目安納期: 1日} other {目安納期: {days}日}}	{days, plural, one {Plazo estimado: 1 día} other {Plazo estimado: {days} días}}
+order.estimate.warnings	Warning: {warnings}	警告: {warnings}	Aviso: {warnings}
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7916,4 +7918,10 @@ web.settings.providers.browser	Connect a provider in the Backplane desktop or mo
 
     /// provider.notice.senderr.remote = No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.
     static func provider_notice_senderr_remote(machine: String) -> String { f("provider.notice.senderr.remote", ["machine": machine]) }
+
+    /// order.lead.days = {days, plural, one {Est. lead time: 1 day} other {Est. lead time: {days} days}}
+    static func order_lead_days(days: Int) -> String { f("order.lead.days", ["days": String(days)]) }
+
+    /// order.estimate.warnings = Warning: {warnings}
+    static func order_estimate_warnings(warnings: String) -> String { f("order.estimate.warnings", ["warnings": warnings]) }
 }

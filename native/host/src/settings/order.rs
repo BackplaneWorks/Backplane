@@ -548,8 +548,14 @@ mod tests {
         let c = card("L", false, false, true, false, ""); assert_eq!(c["line"], "Getting your quote… usually 1-2 min"); assert_eq!(c["waiting"], true);
         let r = Rec { id: "q_card".into(), token: "tok".into(), thread: "t".into(), server: "http://s".into(), boards: false }; PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token));
         let mut q = ready(false); q["id"] = json!("q_card"); let s = sum(&q); assert!(!s.contains("tok"), "the setting holds no token");
+        let sv: Value = serde_json::from_str(&s).unwrap(); assert_eq!((sv["lead_days"].clone(), sv["estimate_warnings"].clone()), (json!(9), json!("w")));
         let c = card("L", false, false, false, false, &s); assert_eq!(marks(&c), "done,done,done,on,,"); assert_eq!((c["total"].as_str(), c["pay"].as_str(), c["label"].as_str()), (Some("$112.40"), Some("http://s/q/q_card?t=tok"), Some("Buy now · $112.40")));
+        assert_eq!((c["lead_days"].clone(), c["estimate_warnings"].clone()), (json!(9), json!("w")));
         assert_eq!(c["customs"], "Includes import VAT and duties: nothing to pay on delivery.");
+        let mut plain_q = ready(false); plain_q["id"] = json!("q_card"); plain_q["quote"]["lead_days"] = json!(0); plain_q["quote"]["warnings"] = json!([]);
+        let cp = card("L", false, false, false, false, &sum(&plain_q));
+        assert!(cp.get("lead_days").is_none() && cp.get("estimate_warnings").is_none());
+        assert!(card("L", false, false, false, false, "").get("lead_days").is_none());
         let mut bad = ready(false); bad["id"] = json!("q_card"); bad["quote"]["problems"] = json!(["No price for Mars"]);
         assert_eq!(card("L", false, false, false, false, &sum(&bad))["line"], "The quote has something to fix first: see it above.", "the posted quote is above the card, on every client");
         q["order"] = json!({"status":"placed"}); let c = card("L", false, false, false, false, &sum(&q)); assert_eq!(marks(&c), "done,done,done,done,on,"); assert_eq!(c["pay"], "", "paid: no Buy now"); assert_eq!(c["line"], "Ordered: your order is in production.");

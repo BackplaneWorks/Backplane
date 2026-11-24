@@ -7,6 +7,16 @@ import org.json.JSONObject
  *  webhook's URL and header to copy or share into the Pebble app on this phone, when the test event came, and the recordings with Play. A press the
  *  phone does itself (copy, share-text, open-url) never leaves it; What happened (link-open) opens the thread here; the rest goes to ring.page.act
  *  {action, value, fields}, whose answer is the page again. */
+object RingLogic {
+    fun clearedField(action: String, value: String): String? =
+        if (action == "ring-search" && value == "clear") "ringq" else null
+
+    fun hasPendingWork(rows: List<JSONObject>): Boolean = rows.any { r ->
+        val note = r.optString("note")
+        note.contains("being heard now") || note.contains("waiting to be heard") || note.contains("waiting to go to Pebble")
+    }
+}
+
 object DataRing {
     var rows by mutableStateOf<List<JSONObject>>(emptyList()); private set
     var error by mutableStateOf(""); private set
@@ -26,5 +36,15 @@ object DataRing {
 @Composable
 internal fun RingSettings() {
     LaunchedEffect(DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) DataRing.load() }
-    PageRows(Msg.android_ring_head, "ring", DataRing.rows, DataRing.error) { action, value, sent -> DataRing.act(action, value, sent); null }
+    LaunchedEffect(DataClient.conn, DataRing.rows) {
+        if (DataClient.conn == DataClient.Conn.ONLINE && RingLogic.hasPendingWork(DataRing.rows)) {
+            kotlinx.coroutines.delay(2000)
+            DataRing.load()
+        }
+    }
+    PageRows(Msg.android_ring_head, "ring", DataRing.rows, DataRing.error) { action, value, sent ->
+        val clear = RingLogic.clearedField(action, value)
+        DataRing.act(action, value, sent)
+        clear
+    }
 }

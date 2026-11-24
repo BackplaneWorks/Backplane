@@ -62,5 +62,15 @@ check(DPlanMode.effective(for: thOmitted)?.phase == "off", "Claude thread with o
 let askPlan = try! JSONDecoder().decode(DAsk.self, from: Data(#"{"id":"a1","state":"open","kind":"plan","head":"Proposed plan","question":"Do step 1","options":[],"revise":true}"#.utf8))
 check(askPlan.head == "Proposed plan" && askPlan.revise && askPlan.kind == "plan", "DAsk decodes head & revise", "")
 
+// Commerce lead_days + estimate_warnings across DOrder, DBuy, DProjectCard
+let ord = try! JSONDecoder().decode(DOrder.self, from: Data(#"{"name":"Main","steps":[],"line":"Quoted","waiting":false,"total":"$27.20","customs":"","pay":"","label":"Buy now","lead_days":9,"estimate_warnings":"thin board"}"#.utf8))
+check(ord.leadDays == 9 && ord.estimateWarnings == "thin board", "DOrder decodes lead_days & estimate_warnings", ord)
+let ordPlain = try! JSONDecoder().decode(DOrder.self, from: Data(#"{"name":"Main","steps":[],"line":"Reply","waiting":false,"lead_days":-2}"#.utf8))
+check(ordPlain.leadDays == 0 && ordPlain.estimateWarnings == "", "DOrder clamps negative/omitted fields", ordPlain)
+let buy = try! JSONDecoder().decode(DBuy.self, from: Data(#"{"label":"Buy it","tip":"t","thread":"t1","lead_days":5,"estimate_warnings":"fragile"}"#.utf8))
+check(buy.leadDays == 5 && buy.estimateWarnings == "fragile", "DBuy decodes lead_days & estimate_warnings", buy)
+let pcard = try! JSONDecoder().decode(DProjectCard.self, from: Data(#"{"goal":"Desk lamp","boards":["main"],"lead_days":7,"estimate_warnings":"warn1"}"#.utf8))
+check(pcard.leadDays == 7 && pcard.estimateWarnings == "warn1", "DProjectCard decodes lead_days & estimate_warnings", pcard)
+
 print("wire-json: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

@@ -70,7 +70,10 @@ struct DataAccountsView: View {
                         DLine()
                     }
                     ForEach(p.providers) { pv in
-                        DHeading(text: pv.title)
+                        HStack(spacing: 6) {
+                            if ProviderMarks.spec(pv.provider) != nil { ProviderMark(provider: pv.provider, size: 13) }
+                            DHeading(text: pv.title)
+                        }
                         if pv.accounts.isEmpty { Text(Tr.t("No accounts")).dmono(12).foregroundStyle(BackplaneDesign.faint) }
                         ForEach(pv.accounts) { a in
                             if a.open == false { row(a, chevron: false).accessibilityIdentifier("accounts.row." + a.id) }
@@ -131,6 +134,7 @@ struct DataAccountsView: View {
         let what = [Tr.t(l.title), l.plan, l.kind == "cli" ? Tr.t("CLI login") : "", l.label.caseInsensitiveCompare(e.title) == .orderedSame ? "" : l.label].filter { !$0.isEmpty }.joined(separator: " · ")
         return VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
+                if ProviderMarks.spec(l.provider) != nil { ProviderMark(provider: l.provider, size: 13) }
                 Text(what).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                 if l.default { Text(Tr.t("Used for new threads")).dmono(10).foregroundStyle(BackplaneDesign.dim).lineLimit(1).fixedSize().padding(.horizontal, 5).padding(.vertical, 1).background(BackplaneDesign.raised) }
                 Spacer(minLength: 4)

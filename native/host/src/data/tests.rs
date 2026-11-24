@@ -684,6 +684,7 @@ impl RpcHandler for FakeStar {
     let r = ask(&mut ws, 9, "project.card", json!({"project":"p1"})).await; assert_eq!((r["ok"].as_bool(), &r["result"]["boards"]), (Some(true), &json!([])), "{r}");
     let r = ask(&mut ws, 10, "project.card", json!({})).await; assert_eq!(r["ok"], false, "{r}");
     assert_eq!(super::ext::project_card(&json!({"goal":"A gimbal node","board_files":["Nodes/A/A.kicad_pcb","B.kicad_pcb"]})), json!({"goal":"A gimbal node","boards":["A","B"]}));
+    assert_eq!(super::ext::project_card(&json!({"goal":"A gimbal node","board_files":["B.kicad_pcb"],"lead_days":9,"estimate_warnings":"thin board"})), json!({"goal":"A gimbal node","boards":["B"],"lead_days":9,"estimate_warnings":"thin board"}));
     let r = ask(&mut ws, 7, "threads.list", json!({"project":"p1"})).await;
     assert!(r["result"]["threads"].as_array().unwrap().iter().all(|t| t["status"].is_string()), "every thread says its dot's word: {r}");
 }

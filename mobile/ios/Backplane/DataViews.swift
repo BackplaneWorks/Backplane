@@ -88,6 +88,7 @@ struct DataRoot: View {
         case .settings:
             path.append(DPage(name: "settings"))
             if t.id == "accounts" { path.append(DPage(name: "accounts")) }
+            else if t.id == "ring" { path.append(DPage(name: DSettingsPage.ring.rawValue)) }
         case .room:
             Task {
                 if !client.rooms.contains(where: { $0.id == t.id }) { await client.loadBots() }
@@ -104,7 +105,12 @@ struct DataRoot: View {
         if url.host == "thread" { client.openLink(url, thread: "") }
         else if url.host == "google" { return }   // the end of a Google sign-in (GoogleLoop): not a pairing link
         else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } }
-        else if url.host == "settings" { if url.pathComponents.dropFirst().first == "accounts" { client.openAccounts = true } else { client.openSettings = true } }
+        else if url.host == "settings" {
+            let sub = url.pathComponents.dropFirst().first
+            if sub == "accounts" { client.openAccounts = true }
+            else if sub == "ring" { client.linkTarget = DLinkTarget(kind: .settings, id: "ring") }
+            else { client.openSettings = true }
+        }
         else { client.opened(url) }
     }
     // a picture from another app (Open in / Share, Files): a copy in the app's Inbox, or a file it may read for a moment
@@ -667,6 +673,7 @@ struct DataThreadRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     if thread.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.accent) }
+                    if !thread.provider.isEmpty { ProviderMark(provider: thread.provider, size: 12) }
                     Text(thread.title.isEmpty ? Tr.t("New thread") : thread.title).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
                 }
                 if !thread.preview.isEmpty { Text(thread.preview.replacingOccurrences(of: "**", with: "").replacingOccurrences(of: "`", with: "")).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1) }
@@ -795,7 +802,14 @@ struct DataNewThreadSheet: View {
             if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad) }
             HStack(spacing: 6) {
                 if client.has("picker") {
-                    Button { picking = true } label: { Text(chip.isEmpty ? " " : chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
+                    let pv = choice.provider.flatMap { $0.isEmpty ? nil : $0 } ?? ProviderMarks.providerOfChip(chip)
+                    Button { picking = true } label: {
+                        HStack(spacing: 6) {
+                            if !pv.isEmpty { ProviderMark(provider: pv, size: 14) }
+                            Text(chip.isEmpty ? " " : chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                        }
+                        .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel)
+                    }
                         .buttonStyle(.plain).accessibilityLabel(Tr.ios_model_label(model: chip)).accessibilityIdentifier("data.thread.new.model")
                 } else { Spacer() }
                 Button(Tr.t(busy ? "Starting…" : "Start")) { Task { await start() } }.buttonStyle(DButton(primary: true)).disabled(busy).accessibilityIdentifier("data.thread.new.start")
@@ -1257,7 +1271,14 @@ struct DataThreadView: View {
                 if let m = thread?.memory { MemoryBar(m: m) }
                 HStack(spacing: 6) {
                     if client.has("picker") || thread?.chip.isEmpty == false {
-                        Button { modelSheet = true } label: { Text(chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
+                        let pv = (thread?.provider).flatMap { $0.isEmpty ? nil : $0 } ?? ProviderMarks.providerOfChip(chip)
+                        Button { modelSheet = true } label: {
+                            HStack(spacing: 6) {
+                                if !pv.isEmpty { ProviderMark(provider: pv, size: 14) }
+                                Text(chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                            }
+                            .padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel)
+                        }
                             .buttonStyle(.plain).accessibilityLabel(Tr.ios_model_label(model: chip)).accessibilityIdentifier("data.thread.model")
                     } else { Spacer(minLength: 0) }
                     if client.has("plan"), let pm {
@@ -2075,6 +2096,8 @@ struct DataOrderCard: View {
             Text(Tr.t(order.line)).dmono(12).foregroundStyle(order.waiting ? BackplaneDesign.dim : BackplaneDesign.text)
             if !order.total.isEmpty { Text(Tr.t(order.total)).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text) }
             if !order.customs.isEmpty { Text(Tr.t(order.customs)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
+            if order.leadDays > 0 { Text(Tr.order_lead_days(days: order.leadDays)).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("thread.order.lead") }
+            if !order.estimateWarnings.isEmpty { Text(Tr.order_estimate_warnings(warnings: order.estimateWarnings)).dmono(11).foregroundStyle(BackplaneDesign.warn).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("thread.order.warnings") }
             if let u = order.payURL { Button(Tr.t(order.label.isEmpty ? "Buy now" : order.label)) { openURL(u) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("thread.order.pay") }
         }
         .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))

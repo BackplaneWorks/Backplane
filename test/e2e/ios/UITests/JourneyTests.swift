@@ -553,7 +553,8 @@ final class Journeys: XCTestCase {
     func test_ring() {
         d = Driver("ring"); defer { d.finish() }
         d.launch()
-        guard d.step("Settings", act: { d.tap(d.el("data.settings")) }, expect: { d.el("data.settings").exists == false || d.label("Ring").exists }) else { return }
+        guard d.step("Settings", act: { d.tap(d.el("data.settings")) }, expect: { d.el("settings.ring").exists }) else { return }
+        guard d.step("Ring settings", act: { d.tap(d.el("settings.ring")) }, expect: { d.label("Ring").exists }) else { return }
         func on(_ e: XCUIElement) { var n = 0; while n < 16 && !(e.exists && e.isHittable) { d.app.swipeUp(velocity: .slow); n += 1 } }
         func btn(_ action: String, _ label: String) -> XCUIElement { d.app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "ring.page." + action, label)).firstMatch }
         let setUp = btn("ring-op", "Set up")
