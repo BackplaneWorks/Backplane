@@ -741,7 +741,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
         // the same answer every client gets (its `result`, not the reply around it); the phones draw it
         "update.status" | "update.check" | "app.update" | "update.now" => Ok(rpc(hub, c, m, json!({})).await?["result"].clone()),
-        "hub.offer.take" | "hub.offer.done" => Ok(rpc(hub, c, m, p.clone()).await?["result"].clone()),
+        "hub.offer.take" | "hub.offer.done" | "home.move.dismiss" => Ok(rpc(hub, c, m, p.clone()).await?["result"].clone()),
         "update.channel" => { let ch = s(p, "channel"); if !["stable", "beta", "nightly"].contains(&ch) { return Err(err("no such channel")) } rpc(hub, c, "setting.set", json!({"key":"update.channel","value":ch})).await?; Ok(rpc(hub, c, "update.status", json!({})).await?["result"].clone()) }
         // Improvements: the projects of every machine a request may go to (searched on the hub) and the last one chosen, as the desktop gets them
         "improvements.projects" | "improvements.project" => Ok(rpc(hub, c, m, p.clone()).await?["result"].clone()),
@@ -1196,9 +1196,20 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                     let lines = hub.store.range(seen, len.min(seen + 2000)).unwrap_or_default();
                     seen += lines.len();
                     let inv_changed = lines.iter().any(|l| l.contains("\"accounts.inventory\""));
+                    let home_changed = lines.iter().any(|l| l.contains("\"home.moving\"") || l.contains("\"home.at\""));
                     for f in deltas(&hub, &lines, &mut subs).await {
                         if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&f, json_mode)).await? { return Ok(()) }
                         sent = true;
+                    }
+                    if home_changed && !subs.lists().is_empty() {
+                        let h = crate::net::home::now(&hub).await;
+                        if h != home_sent {
+                            home_sent = h.clone();
+                            for sub in subs.lists() {
+                                if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&d(sub, "home", json!({"home": h})), json_mode)).await? { return Ok(()) }
+                            }
+                            sent = true;
+                        }
                     }
                     if inv_changed {
                         let cur = crate::settings::provider_notice::for_hub(&hub).await.map_or(Value::Null, |n| n.json());
@@ -1239,11 +1250,22 @@ async fn socket_with_reg<S: AsyncRead + AsyncWrite + Unpin + Send>(
                         if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&f, json_mode)).await? { return Ok(()) }
                     },
                     // hub info (set_info): what a phone draws of it (phone_info), as `{"t":"info","info":{...}}`
-                    Out::Value(v) if v["t"] == "info" => if let Some(f) = phone_info_frame(&v) {
-                        if let Some(raw) = f["info"].get(crate::settings::provider_notice::INFO_KEY) {
-                            no_provider_sent = raw.as_str().and_then(|s| if s.is_empty() { None } else { serde_json::from_str(s).ok() }).unwrap_or(Value::Null);
+                    Out::Value(v) if v["t"] == "info" => {
+                        if v["info"].get("home.move").is_some() && !subs.lists().is_empty() {
+                            let h = crate::net::home::now(&hub).await;
+                            if h != home_sent {
+                                home_sent = h.clone();
+                                for sub in subs.lists() {
+                                    if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&d(sub, "home", json!({"home": h})), json_mode)).await? { return Ok(()) }
+                                }
+                            }
                         }
-                        if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&f, json_mode)).await? { return Ok(()) }
+                        if let Some(f) = phone_info_frame(&v) {
+                            if let Some(raw) = f["info"].get(crate::settings::provider_notice::INFO_KEY) {
+                                no_provider_sent = raw.as_str().and_then(|s| if s.is_empty() { None } else { serde_json::from_str(s).ok() }).unwrap_or(Value::Null);
+                            }
+                            if !send_frame(&mut tx, &hub, browser.as_ref(), conn.client, pack(&f, json_mode)).await? { return Ok(()) }
+                        }
                     },
                     Out::Value(v) => if ext::wants_value(&v) {
                         // a plot's "none" is binary like the plots (one decoder in the app); a browser frame's announcement is JSON

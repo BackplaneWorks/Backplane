@@ -3,10 +3,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 mock.module("virtual:i18n", () => ({ CATALOGS: {} }));
-const { statusPillOf, isSwarmVisibleUnderProject, moveTargets, CHATS } = await import("../src/sidebar");
+const { statusPillOf, isSwarmVisibleUnderProject, moveTargets, homeBannerState, CHATS } = await import("../src/sidebar");
 
 const root = join(import.meta.dir, "..");
 const sidebarSrc = readFileSync(join(root, "src/sidebar.ts"), "utf8");
+const appSrc = readFileSync(join(root, "src/app.ts"), "utf8");
 const shellCss = readFileSync(join(root, "src/shell.css"), "utf8");
 
 describe("SidebarView Crew / Inbox / Bench + Status Pills + Snooze", () => {
@@ -70,5 +71,28 @@ describe("SidebarView Crew / Inbox / Bench + Status Pills + Snooze", () => {
     expect(shellCss).toContain("button.bp-proj-quick {\n  display: none;");
     expect(shellCss).toContain(".bp-proj-head:hover button.bp-proj-quick");
     expect(sidebarSrc).not.toContain('className = "icon bp-proj-quick"');
+  });
+
+  test("homeBannerState marks only failed home moves as dismissible and wires dismiss RPC", () => {
+    expect(homeBannerState(null)).toBeNull();
+    expect(homeBannerState({ kind: "local", id: "m1", name: "desk", online: true, queuedCount: 0, canMoveHere: false })).toBeNull();
+    expect(homeBannerState({
+      kind: "peer", id: "m2", name: "boat", online: true, queuedCount: 0, canMoveHere: false,
+      moving: { to: "boat", state: "moving", step: "copying" },
+    })).toEqual({ text: "Moving home to boat: copying", isError: false, dismissible: false });
+    expect(homeBannerState({
+      kind: "peer", id: "m2", name: "boat", online: true, queuedCount: 0, canMoveHere: true,
+      moving: { to: "boat", state: "failed", note: "that machine is away" },
+    })).toEqual({ text: "Home move failed: that machine is away", isError: true, dismissible: true });
+    expect(homeBannerState({
+      kind: "peer", id: "m2", name: "boat", online: true, queuedCount: 0, canMoveHere: true,
+      moving: { to: "boat", state: "failed" },
+    })).toEqual({ text: "Home move failed", isError: true, dismissible: true });
+    expect(homeBannerState({
+      kind: "peer", id: "m2", name: "boat", online: false, queuedCount: 2, canMoveHere: false,
+    })).toEqual({ text: "Home (boat) is away · 2 queued", isError: false, dismissible: false });
+    expect(sidebarSrc).toContain('"home-move-dismiss"');
+    expect(sidebarSrc).toContain("this.cb.onDismissHomeMove?.()");
+    expect(appSrc).toContain('"home.move.dismiss"');
   });
 });

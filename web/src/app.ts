@@ -500,6 +500,17 @@ function mountApp(): void {
     },
     onNewChat: () => { void createThread(CHATS); },
     onMoveToProject: (id) => openMoveToProject(id),
+    onDismissHomeMove: () => {
+      void hub.rpc<{ home?: HomeInfo }>("home.move.dismiss", {})
+        .then((res) => {
+          if (res?.home !== undefined) {
+            homeInfo = res.home ?? null;
+            sidebar.setHome(homeInfo);
+            if (settings.isOpen()) void settings.refresh();
+          }
+        })
+        .catch(() => {});
+    },
   });
 
   const chat = new ChatView(centerEl, {

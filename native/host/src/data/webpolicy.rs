@@ -72,7 +72,8 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "clone.start"
         | "clone.cancel"
         | "clone.retry"
-        | "clone.signin" => Activity,
+        | "clone.signin"
+        | "home.move.dismiss" => Activity,
         "attachment.get"
         | "badge.list"
         | "bot.cat"
@@ -232,6 +233,7 @@ mod tests {
         assert_eq!(policy("ring.hear", &json!({"note":"n1","engine":"local"})), Policy::Activity);
         for m in ["ring.page", "ring.page.act", "ring.setup", "ring.send", "ring.get", "ring.search"] { assert_eq!(policy(m, &Value::Null), Policy::Denied, "{m}"); }
         assert_eq!(policy("project.home", &json!({"project":"p1"})), Policy::Passive);
+        assert_eq!(policy("home.move.dismiss", &Value::Null), Policy::Activity);
         assert_eq!(policy("devices.page", &Value::Null), Policy::Devices);
         assert_eq!(policy("devices.page.act", &Value::Null), Policy::Denied);
     }

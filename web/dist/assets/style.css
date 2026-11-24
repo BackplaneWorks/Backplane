@@ -329,6 +329,27 @@ button.primary.stop {
   padding: 8px 10px;
   border-bottom: 1px solid var(--line);
 }
+.bp-side-home {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+.bp-side-home.bp-bad { color: var(--bad); }
+.bp-side-home.bp-dim { color: var(--dim); }
+.bp-side-home-text { flex: 1; min-width: 0; }
+.bp-side-home-dismiss {
+  flex-shrink: 0;
+  padding: 0 4px;
+  line-height: 1.2;
+  color: var(--dim);
+  cursor: pointer;
+}
+.bp-side-home-dismiss:hover { color: var(--text); background: var(--raise); }
 .bp-side-search { flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px; background: var(--panel); }
 .bp-side-add { font-size: 15px; line-height: 1; padding: 3px 7px; color: var(--dim); border: 1px solid var(--line); background: var(--panel); }
 .bp-side-add:hover { color: var(--text); border-color: var(--faint); }

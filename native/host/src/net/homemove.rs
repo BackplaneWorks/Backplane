@@ -4,7 +4,7 @@
 //! receiver holds it all, and a move whose check fails is undone at once.
 //!
 //! Requests (this hub's clients): `home.move {to}` (a linked machine's link id or name; "back" asks the machine that holds the home now to move
-//! it here), `home.status`, `hub.offer.take {id}`, `hub.offer.done {id, ok}`. Far requests (an owner's machine, signed): `home.state`,
+//! it here), `home.move.dismiss`, `home.status`, `hub.offer.take {id}`, `hub.offer.done {id, ok}`. Far requests (an owner's machine, signed): `home.state`,
 //! `home.adopt`, `home.secret`, `home.file`, `home.import`, `home.finish`, `home.retire`, `home.mint`, `home.pull`.
 //! Settings: `home.at` (JSON `{link, name, url, at}`: the machine that holds the home now; "" when this one does), `home.here` (on the holder:
 //! `{from, at}`). Info: `home.move` (the job's state), `hub.offer` (docs/PHONE-DATA.md: a client adds the holder to its hubs by itself).
@@ -308,7 +308,7 @@ pub fn moving_note(v: &str, now: u64) -> Option<(&'static str, String)> {
         _ => None,
     }
 }
-const FAILED_SHOWN_S: u64 = 3600;
+pub(crate) const FAILED_SHOWN_S: u64 = 600;
 /// The thread a client asked for, when the home moved away and took it: `<link>~<id>` on the new home (the same id there), drawn in its place.
 /// `at` the setting `home.at`; `project` the local thread's project (a project's thread never moves); `there` whether the mirror has an id.
 pub fn moved_thread(at: &str, thread: &str, project: Option<&str>, there: &dyn Fn(&str) -> bool) -> Option<String> {
@@ -580,8 +580,47 @@ pub async fn check(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
 // ---- the sending side ----
 
 static STATE: Mutex<Option<Value>> = Mutex::new(None);
+/// Returns `v` when it represents a live move or a non-expired failed move at unix seconds `now`.
+pub(crate) fn active_move(v: &Value, now: u64) -> Option<Value> {
+    match gs(v, "state") {
+        "moving" => Some(v.clone()),
+        "failed" => {
+            let at = v["at"].as_u64().unwrap_or(0);
+            if now > 0 && now > at.saturating_add(FAILED_SHOWN_S) { None } else { Some(v.clone()) }
+        }
+        _ => None,
+    }
+}
+/// The sending side's move job at unix seconds `now` while it runs or before a failed state expires, else null.
+pub fn job_at(now: u64) -> Value {
+    STATE.lock().unwrap().as_ref().and_then(|v| active_move(v, now)).unwrap_or(Value::Null)
+}
 /// The sending side's move job while it runs or after it failed (`{state, step, note}`), else null: the home object's `moving` (net/home.rs).
-pub fn job() -> Value { STATE.lock().unwrap().clone().filter(|v| v["state"] == "moving" || v["state"] == "failed").unwrap_or(Value::Null) }
+pub fn job() -> Value { job_at(now_s()) }
+/// Dismiss a failed home move banner/state on this hub. Leaves an active `"moving"` job untouched.
+pub async fn dismiss(hub: &Arc<Hub>) -> Value {
+    let cleared_state = {
+        let mut g = STATE.lock().unwrap();
+        if g.as_ref().is_some_and(|v| v["state"] != "moving") {
+            *g = None;
+            WARN.lock().unwrap().clear();
+            true
+        } else {
+            false
+        }
+    };
+    if cleared_state {
+        hub.set_info("home.move", "").await;
+    }
+    let moving_setting = hub.setting("home.moving").await.unwrap_or_default();
+    if !moving_setting.is_empty() {
+        let parsed: Value = serde_json::from_str(&moving_setting).unwrap_or(Value::Null);
+        if parsed["state"] != "moving" {
+            set_moving(hub, Value::Null).await;
+        }
+    }
+    json!({"home": crate::net::home::now(hub).await})
+}
 /// The check's warnings for the move running now (or the last one), shown with its state: what the bots there wait for (`warnings`).
 static WARN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 async fn tell(hub: &Arc<Hub>, state: &str, step: &str, note: &str) {
@@ -897,7 +936,7 @@ pub fn rows(uber: bool, at: &str, mv: &str, linked: &Value) -> Vec<Value> {
 }
 pub struct HomeRpc;
 impl RpcHandler for HomeRpc {
-    fn methods(&self) -> &'static [&'static str] { &["home.move", "home.check", "home.status", "hub.offer.take", "hub.offer.done", "ring.front.use"] }
+    fn methods(&self) -> &'static [&'static str] { &["home.move", "home.move.dismiss", "home.check", "home.status", "hub.offer.take", "hub.offer.done", "ring.front.use"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let reply = |v: Value| vec![json!({"t":"reply","id":id,"ok":true,"result":v})];
@@ -905,6 +944,7 @@ impl RpcHandler for HomeRpc {
             match m {
                 "home.status" => reply(STATE.lock().unwrap().clone().unwrap_or(json!({"state":"idle"}))),
                 "home.move" => match start(hub, gs(p, "to")).await { Ok(v) => reply(v), Err(e) => fail(&e) },
+                "home.move.dismiss" => reply(dismiss(hub).await),
                 // the dry check alone (Settings, Machines and scripts/home-move-check.sh): what a move there would find, nothing moved
                 "home.check" => { let to = gs(p, "to"); match hub.far_machines().into_iter().find(|(lid, n, _)| lid == to || n.eq_ignore_ascii_case(to)).map(|(lid, _, _)| lid) { Some(l) => match check(hub, &l).await { Ok(v) => reply(v), Err(e) => fail(&e) }, None => fail("no machine of yours by that name is linked") } }
                 "hub.offer.take" => {
@@ -1126,5 +1166,54 @@ mod tests {
         m2.save();
         deliver_held(&hub2, m2, false).await;
         assert!(!path2.exists(), "successful delivery removes held file");
+    }
+
+    #[test]
+    fn active_move_expires_failed_and_keeps_running() {
+        let moving = json!({"state":"moving","step":"copying","at":100});
+        assert_eq!(active_move(&moving, 100 + FAILED_SHOWN_S + 10_000), Some(moving));
+        let failed = json!({"state":"failed","note":"that machine is away","at":100});
+        assert_eq!(active_move(&failed, 110), Some(failed.clone()));
+        assert_eq!(active_move(&failed, 100 + FAILED_SHOWN_S), Some(failed.clone()));
+        assert_eq!(active_move(&failed, 100 + FAILED_SHOWN_S + 1), None);
+        assert_eq!(active_move(&json!({"state":"failed","note":"no ts"}), FAILED_SHOWN_S + 1), None);
+        assert_eq!(active_move(&json!({"state":"done","at":100}), 110), None);
+        assert_eq!(active_move(&json!({"state":"idle"}), 110), None);
+        assert_eq!(active_move(&Value::Null, 110), None);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn failed_move_expires_and_dismiss_clears_state_and_setting() {
+        let home = crate::plat::tmp::dir("hm-dismiss");
+        let hub = Hub::start(
+            crate::hub::Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() },
+            Arc::new(crate::presenter::Canned { reply: json!({}) }),
+        ).await.unwrap();
+
+        let ts = now_s();
+        tell(&hub, "failed", "checking", "that machine is away").await;
+        set_moving(&hub, json!({"to":"boat","state":"failed","why":"that machine is away","at":ts})).await;
+
+        assert_eq!(job()["state"], "failed");
+        assert_eq!(crate::net::home::now(&hub).await["moving"]["state"], "failed");
+        assert_eq!(job_at(ts + FAILED_SHOWN_S + 1), Value::Null);
+
+        let reply = HomeRpc.call(&hub, &Caller { gen: "test".into(), client: 1 }, &json!(7), "home.move.dismiss", &json!({})).await;
+        assert_eq!(reply.len(), 1);
+        assert_eq!(reply[0]["ok"], true);
+        assert!(reply[0]["result"]["home"].is_object());
+        assert!(reply[0]["result"]["home"].get("moving").is_none());
+        assert_eq!(job(), Value::Null);
+        assert!(hub.setting("home.moving").await.unwrap_or_default().is_empty());
+        assert!(hub.info_now().get("home.move").is_none());
+        assert!(crate::net::home::now(&hub).await.get("moving").is_none());
+
+        // Dismiss must not clobber an active in-flight move.
+        tell(&hub, "moving", "copying", "boat").await;
+        let active_reply = HomeRpc.call(&hub, &Caller { gen: "test".into(), client: 1 }, &json!(8), "home.move.dismiss", &json!({})).await;
+        assert_eq!(active_reply[0]["result"]["home"]["moving"]["state"], "moving");
+
+        *STATE.lock().unwrap() = None;
+        WARN.lock().unwrap().clear();
     }
 }
