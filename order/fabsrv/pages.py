@@ -5,6 +5,7 @@ goes straight to Stripe. Everything shown is escaped; no scripts.
 import datetime
 import html
 import json
+import urllib.parse
 
 from . import config, duties
 
@@ -139,20 +140,73 @@ def tax_flag(q, ship):
             f"ships to {e(state)} ({rate:g}%): {e(what)}.</p>")
 
 
-def admin(rows):
-    """The paid orders, each with what to order where: its parts, options and costs, the
-    customer's address, and the files to download."""
-    out = ["<style>main{max-width:1100px}</style><h1>Orders</h1><p class=sub>Paid orders, newest first. "
-           "Place each with the fab using its files and options, then set its status: the customer's buy thread follows it.</p>"]
-    if not rows:
-        out.append("<div class=card>No paid orders yet.</div>")
+# The order list's views: (key, tab label, the kinds of order shown). An order's kind is its status,
+# except a checkout nobody paid: "open" while Stripe can still take it, "expired" once it cannot.
+VIEWS = (("todo", "To do", ("paid", "placed", "shipped")), ("paid", "Paid: to place", ("paid",)),
+         ("placed", "Placed", ("placed",)), ("shipped", "Shipped", ("shipped",)), ("delivered", "Delivered", ("delivered",)),
+         ("refunded", "Refunded", ("refunded",)), ("cancelled", "Cancelled after paying", ("cancelled",)),
+         ("open", "Open checkouts", ("open",)), ("expired", "Expired checkouts", ("expired",)), ("all", "All", None))
+STATUSES = ("paid", "placed", "shipped", "delivered", "refunded", "cancelled")
+
+
+def kind(o):
+    if o["status"] == "checkout":
+        return "open"
+    return "expired" if o["status"] == "cancelled" and not o["email"] else o["status"]
+
+
+def _utc(t, fmt="%-d %b %Y %H:%M UTC"):
+    return datetime.datetime.fromtimestamp(t, datetime.timezone.utc).strftime(fmt)
+
+
+def _haystack(o, q, ship):
+    addr = ship.get("address") or {}
+    return " ".join(str(x or "") for x in (q.get("title"), o["id"], o["quote_id"], o["email"], o["tracking"], o["note"],
+                                            ship.get("name"), ship.get("phone"), o["country"], *addr.values())).lower()
+
+
+def _view_url(view, find):
+    return "/admin?" + urllib.parse.urlencode({"view": view, **({"find": find} if find else {})})
+
+
+def admin(rows, view="todo", find="", logs=None):
+    """The orders in one view (VIEWS) matching `find`, each with what to order where: its parts,
+    options and costs, the customer's address, the files to download, and its history with Undo."""
+    logs = logs or {}
+    view = view if any(v[0] == view for v in VIEWS) else "todo"
+    words = find.lower().split()
+    parsed = []
     for o in rows:
         q = json.loads(o["result"] or "{}")
-        man = json.loads(o["manifest"] or "{}") if "manifest" in o.keys() else {}
         ship = json.loads(o["shipping"] or "{}")
+        if all(w in _haystack(o, q, ship) for w in words):
+            parsed.append((o, q, ship, kind(o)))
+    count = {k: sum(1 for p in parsed if ks is None or p[3] in ks) for k, _, ks in VIEWS}
+    kinds = {k: ks for k, _, ks in VIEWS}[view]
+    back = _view_url(view, find)
+    tabs = "".join(f"<a class='{'on' if k == view else ''}' href='{e(_view_url(k, find))}'>{e(label)} <span class=muted>{count[k]}</span></a>"
+                   for k, label, _ in VIEWS)
+    out = ["<style>main{max-width:1100px}.tabs{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}"
+           ".tabs a{border:1px solid var(--line);border-radius:999px;padding:4px 12px;text-decoration:none;color:var(--text);font-size:13px}"
+           ".tabs a.on{background:var(--accent);border-color:var(--accent);color:#fff}.tabs a.on .muted{color:#fff}"
+           ".find{display:flex;gap:8px;margin:0 0 8px}.find input{flex:1;padding:6px 10px;font:inherit}"
+           ".badge{border:1px solid var(--line);border-radius:6px;padding:1px 6px;font-size:12px}"
+           ".b-paid{color:var(--warn);border-color:var(--warn)}.b-expired,.b-open{color:var(--muted)}"
+           "details{margin-top:8px}summary{cursor:pointer;color:var(--muted);font-size:13px}</style>"
+           "<h1>Orders</h1><p class=sub>Place each paid order with the fab using its files and options, then set its status: "
+           "the customer's buy thread follows it. Every change is kept under History, with Undo.</p>",
+           f"<form class=find method=get action='/admin'><input type=hidden name=view value='{e(view)}'>"
+           f"<input name=find value='{e(find)}' placeholder='Find: name, email, project, order or quote id, tracking, note, country, city'>"
+           "<button style='width:auto;padding:6px 16px'>Find</button>"
+           + (f"<a href='{e(_view_url(view, ''))}' style='align-self:center'>Clear</a>" if find else "") + "</form>",
+           f"<nav class=tabs>{tabs}</nav>"]
+    shown = [p for p in parsed if kinds is None or p[3] in kinds]
+    if not shown:
+        out.append("<div class=card>No orders here" + (" match that search." if find else ".") + "</div>")
+    for o, q, ship, k in shown:
+        man = json.loads(o["manifest"] or "{}") if "manifest" in o.keys() else {}
         addr = ship.get("address") or {}
-        a = ", ".join(str(addr.get(k)) for k in ("line1", "line2", "city", "state", "postal_code", "country") if addr.get(k))
-        when = datetime.datetime.fromtimestamp(o["created"], datetime.timezone.utc).strftime("%-d %b %Y %H:%M UTC")
+        a = ", ".join(str(addr.get(x)) for x in ("line1", "line2", "city", "state", "postal_code", "country") if addr.get(x))
         parts = {p["name"]: p for p in man.get("parts", [])}
         rows_html = []
         for p in q.get("parts", []):
@@ -161,17 +215,33 @@ def admin(rows):
                              + f"<br><span class='muted small'>{e(p.get('summary'))}<br>{e(_opts(mp))}</span></td></tr>")
         costs = "".join(f"<tr><td class=small>{e(ln['label'])}</td><td class='n small'>{money(ln['amount'])}</td></tr>" for ln in q.get("part_lines", []))
         costs += "".join(f"<tr><td class=small>{e(ln['label'])}</td><td class='n small'>{money(ln['amount'])}</td></tr>" for ln in q.get("lines", [])[1:])
-        tax = tax_flag(q, ship)
-        opts = "".join(f"<option{' selected' if s == o['status'] else ''}>{s}</option>"
-                       for s in ("paid", "placed", "shipped", "delivered", "refunded", "cancelled"))
+        unpaid = k in ("open", "expired")
+        label = {"open": "open checkout, not paid", "expired": "checkout expired, never paid"}.get(k, o["status"])
         out.append(
-            f"<div class=card><table><tr><td><b>{e(q.get('title') or o['quote_id'])}</b> · {money(o['amount'] / 100)} paid · {e(when)}"
-            f"<br><span class='muted small'>{e(o['id'])} · {e(o['quote_id'])}</span></td>"
+            f"<div class=card><table><tr><td><b>{e(q.get('title') or o['quote_id'])}</b> · {money(o['amount'] / 100)} {'not paid' if unpaid else 'paid'}"
+            f" · {e(_utc(o['created']))} <span class='badge b-{e(k)}'>{e(label)}</span>"
+            f"<br><span class='muted small'>{e(o['id'])} · {e(o['quote_id'])} · updated {e(_utc(o['updated']))}</span></td>"
             f"<td class=n><a href='/admin/files/{e(o['quote_id'])}'>Files (.zip)</a></td></tr></table>"
             f"<table style='margin-top:10px'><tr><td style='width:55%'><table>{''.join(rows_html)}</table></td>"
             f"<td><table>{costs}</table><p class=small><b>Ship to</b> {e(ship.get('name'))}, {e(a)}<br>{e(o['email'])} · {e(ship.get('phone'))}"
-            f"<br>{e((q.get('shipping') or {}).get('method'))}</p>{tax}</td></tr></table>"
-            f"<form method=post action='/admin/order/{e(o['id'])}' style='display:flex;gap:8px;margin-top:8px'>"
-            f"<select name=status>{opts}</select><input name=tracking placeholder='tracking number' value='{e(o['tracking'])}'>"
-            f"<input name=note placeholder=note value='{e(o['note'])}' style='flex:1'><button style='width:auto;padding:6px 16px'>Save</button></form></div>")
+            f"<br>{e((q.get('shipping') or {}).get('method'))}</p>{tax_flag(q, ship)}</td></tr></table>")
+        if unpaid:  # Stripe alone moves a checkout nobody paid
+            out.append("<p class='muted small'>Stripe sets this one's status: it changes here only if the customer pays.</p>")
+        else:
+            opts = "".join(f"<option{' selected' if s == o['status'] else ''}>{s}</option>" for s in STATUSES)
+            out.append(f"<form method=post action='/admin/order/{e(o['id'])}' style='display:flex;gap:8px;margin-top:8px'>"
+                       f"<input type=hidden name=back value='{e(back)}'>"
+                       f"<select name=status>{opts}</select><input name=tracking placeholder='tracking number' value='{e(o['tracking'])}'>"
+                       f"<input name=note placeholder=note value='{e(o['note'])}' style='flex:1'><button style='width:auto;padding:6px 16px'>Save</button></form>")
+        hist = logs.get(o["id"], [])
+        if hist:
+            items = "".join(f"<li>{e(_utc(h['at']))} · {e('you' if h['by'] == 'admin' else h['by'])}: {e(h['status'])} → {e(h['new_status'])}"
+                            + (f" <span class=muted>(tracking was “{e(h['tracking'])}”)</span>" if h["tracking"] else "")
+                            + (f" <span class=muted>(note was “{e(h['note'])}”)</span>" if h["note"] else "") + "</li>" for h in hist)
+            mine = hist[0]["by"] == "admin"
+            undo = (f"<form method=post action='/admin/order/{e(o['id'])}/undo' style='margin:4px 0'>"
+                    f"<input type=hidden name=back value='{e(back)}'><button style='width:auto;padding:4px 12px;font-size:13px'>"
+                    f"Undo: back to {e(hist[0]['status'])}</button></form>") if mine else ""
+            out.append(f"<details{' open' if mine else ''}><summary>History ({len(hist)})</summary>{undo}<ul class=small>{items}</ul></details>")
+        out.append("</div>")
     return page("Orders", "".join(out))

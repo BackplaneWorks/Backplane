@@ -3,6 +3,7 @@
 A quote's read token is shown once, in the reply that creates it; only its
 SHA-256 is kept, so a copy of the database cannot read anyone's quote.
 """
+import contextlib
 import hashlib
 import hmac
 import json
@@ -46,6 +47,16 @@ create table if not exists orders (
   updated real not null
 );
 create index if not exists orders_quote on orders(quote_id);
+create table if not exists order_log (
+  order_id text not null references orders(id),
+  at real not null,
+  by text not null default '',        -- admin | stripe
+  status text not null default '',    -- the order as it was before the change
+  tracking text not null default '',
+  note text not null default '',
+  new_status text not null default ''
+);
+create index if not exists order_log_order on order_log(order_id, at);
 """
 
 
@@ -128,9 +139,79 @@ def set_order(oid, **kv):
     q(f"update orders set {cols} where id = ?", *kv.values(), oid)
 
 
-def orders(limit=200):
+@contextlib.contextmanager
+def _tx():
+    """One transaction under the lock (the connection otherwise commits each statement)."""
+    with _lock:
+        c = db()
+        c.execute("begin immediate")
+        try:
+            yield c
+        except BaseException:
+            c.execute("rollback")
+            raise
+        c.execute("commit")
+
+
+def order(oid):
+    return one("select * from orders where id = ?", oid)
+
+
+def never_paid(o):
+    """A checkout nobody paid (still open, or expired and cancelled): Stripe alone moves it."""
+    return o["status"] in ("checkout", "cancelled") and not o["email"]
+
+
+def change_order(oid, by, **kv):
+    """Set an order's status, tracking or note, keeping what they were in order_log (for the
+    order list's history and Undo). Nothing is written when nothing changes."""
+    with _tx() as c:
+        o = c.execute("select * from orders where id = ?", (oid,)).fetchone()
+        if o is None:
+            return False
+        moved = any(str(o[k]) != str(v) for k, v in kv.items() if k in ("status", "tracking", "note"))
+        if not moved and set(kv) <= {"status", "tracking", "note"}:
+            return False
+        now = time.time()
+        if moved:
+            c.execute("insert into order_log (order_id, at, by, status, tracking, note, new_status) values (?,?,?,?,?,?,?)",
+                      (oid, now, by, o["status"], o["tracking"], o["note"], kv.get("status", o["status"])))
+        kv["updated"] = now
+        if "shipping" in kv and not isinstance(kv["shipping"], str):
+            kv["shipping"] = json.dumps(kv["shipping"])
+        c.execute(f"update orders set {', '.join(f'{k} = ?' for k in kv)} where id = ?", (*kv.values(), oid))
+        return True
+
+
+def order_log(oid):
+    return q("select rowid, * from order_log where order_id = ? order by at desc, rowid desc", oid)
+
+
+def logs():
+    """Every order's changes, newest first, by order id."""
+    out = {}
+    for r in q("select rowid, * from order_log order by at desc, rowid desc"):
+        out.setdefault(r["order_id"], []).append(r)
+    return out
+
+
+def undo(oid):
+    """Put back what the newest change from the order list replaced, and forget that change.
+    False when the newest change was not the order list's (Stripe's are never undone)."""
+    with _tx() as c:
+        r = c.execute("select rowid, * from order_log where order_id = ? order by at desc, rowid desc limit 1", (oid,)).fetchone()
+        if r is None or r["by"] != "admin":
+            return False
+        c.execute("update orders set status = ?, tracking = ?, note = ?, updated = ? where id = ?",
+                  (r["status"], r["tracking"], r["note"], time.time(), oid))
+        c.execute("delete from order_log where rowid = ?", (r["rowid"],))
+        return True
+
+
+def orders(limit=1000):
+    """Every order, open checkouts too, newest first, with its quote."""
     return q("select o.*, q.country, q.result, q.manifest from orders o join quotes q on q.id = o.quote_id "
-             "where o.status != 'checkout' order by o.created desc limit ?", limit)
+             "order by o.created desc limit ?", limit)
 
 
 def open_checkouts():

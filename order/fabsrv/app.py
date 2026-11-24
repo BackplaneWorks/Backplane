@@ -8,9 +8,10 @@
     GET  /q/{id}?t=token                Backplane's Buy now: straight to Stripe Checkout (no quote page)
     GET  /q/{id}/done?s=session         back from Stripe: payment confirmed with Stripe itself
     GET  /q/{id}/cancelled              back from Stripe without paying
-    GET  /admin                         paid orders (FAB_ADMIN_TOKEN as a cookie or ?k=)
+    GET  /admin                         orders by status (?view=), searched (?find=) (FAB_ADMIN_TOKEN as a cookie or ?k=)
     GET  /admin/files/{id}              a paid quote's files as one zip
-    POST /admin/order/{id}              an order's status, tracking and note
+    POST /admin/order/{id}              an order's status, tracking and note (kept in its history)
+    POST /admin/order/{id}/undo         the order list's newest change to it, undone
 
 Every client sends X-Backplane-Install, a random id made once per install;
 limits apply to it and to the address (limits.py).
@@ -42,6 +43,7 @@ async def lifespan(_app):
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 INSTALL = re.compile(r"^[A-Za-z0-9_-]{16,64}$")
 QID = re.compile(r"^q_[A-Za-z0-9_-]{20,24}$")
+ADMIN_BACK = re.compile(r"^/admin\?view=[a-z]{1,20}(&find=[A-Za-z0-9%+._~-]{0,600})?$")
 
 
 @app.middleware("http")
@@ -256,11 +258,11 @@ def admin_ok(request: Request, k=""):
 
 
 @app.get("/admin", response_class=HTMLResponse)
-async def admin(request: Request, k: str = ""):
+async def admin(request: Request, k: str = "", view: str = "todo", find: str = ""):
     limited("pay", request)
     if not admin_ok(request, k):
         raise HTTPException(404, "not found")
-    resp = HTMLResponse(pages.admin(store.orders()))
+    resp = HTMLResponse(pages.admin(store.orders(), view=view[:20], find=find[:200], logs=store.logs()))
     if k:
         resp.set_cookie("fab_admin", k, httponly=True, secure=config.PUBLIC_URL.startswith("https"), samesite="strict",
                         max_age=7 * 86400)
@@ -287,6 +289,12 @@ async def admin_files(qid: str, request: Request):
                     headers={"Content-Disposition": f"attachment; filename={qid}.zip"})
 
 
+def back_to(form):
+    """Where a Save or Undo returns: the order list's view it came from (never another site)."""
+    b = str(form.get("back") or "")
+    return b if ADMIN_BACK.match(b) else "/admin"
+
+
 @app.post("/admin/order/{oid}")
 async def admin_order(oid: str, request: Request):
     limited("pay", request)
@@ -294,11 +302,28 @@ async def admin_order(oid: str, request: Request):
         raise HTTPException(404, "not found")
     form = await request.form(max_files=0, max_fields=4, max_part_size=4096)
     status = str(form.get("status") or "")
-    if status not in ("paid", "placed", "shipped", "delivered", "refunded", "cancelled"):
+    if status not in pages.STATUSES:
         raise HTTPException(400, "bad status")
-    store.set_order(oid, status=status, tracking=str(form.get("tracking") or "")[:200],
-                    note=str(form.get("note") or "")[:2000])
-    return RedirectResponse("/admin", status_code=303)
+    o = store.order(oid)
+    if o is None:
+        raise HTTPException(404, "not found")
+    if store.never_paid(o):
+        raise HTTPException(400, "nobody paid this checkout: only Stripe changes its status")
+    store.change_order(oid, "admin", status=status, tracking=str(form.get("tracking") or "")[:200],
+                       note=str(form.get("note") or "")[:2000])
+    return RedirectResponse(back_to(form), status_code=303)
+
+
+@app.post("/admin/order/{oid}/undo")
+async def admin_undo(oid: str, request: Request):
+    """Put back what the order list's newest change to the order replaced."""
+    limited("pay", request)
+    if not admin_ok(request):
+        raise HTTPException(404, "not found")
+    form = await request.form(max_files=0, max_fields=2, max_part_size=4096)
+    if not store.undo(oid):
+        raise HTTPException(400, "nothing to undo: the newest change was not made here")
+    return RedirectResponse(back_to(form), status_code=303)
 
 
 async def housekeeping():
