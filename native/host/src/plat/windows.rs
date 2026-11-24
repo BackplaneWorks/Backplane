@@ -491,20 +491,47 @@ pub mod net {
     }
 }
 
-/// Windows IPv4 loopback peer authentication via GetExtendedTcpTable.
+/// Windows IPv4 loopback peer authentication via GetExtendedTcpTable and SCM/process identity checks.
 pub mod browser_peer {
+    use super::wide;
     use std::net::Ipv4Addr;
     use windows_sys::Win32::{
-        Foundation::{CloseHandle, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, HANDLE, INVALID_HANDLE_VALUE},
+        Foundation::{CloseHandle, ERROR_INSUFFICIENT_BUFFER, HANDLE, INVALID_HANDLE_VALUE},
         NetworkManagement::IpHelper::{
             GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
             MIB_TCP_STATE_ESTAB, TCP_TABLE_OWNER_PID_CONNECTIONS,
         },
         Networking::WinSock::AF_INET,
         Security::{CreateWellKnownSid, EqualSid, GetTokenInformation, TokenUser, WinLocalSystemSid, PSID, TOKEN_QUERY, TOKEN_USER},
-        System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS},
         System::Threading::{OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
     };
+
+    #[repr(C)]
+    struct ServiceStatusProcess {
+        dw_service_type: u32,
+        dw_current_state: u32,
+        dw_controls_accepted: u32,
+        dw_win32_exit_code: u32,
+        dw_service_specific_exit_code: u32,
+        dw_check_point: u32,
+        dw_wait_hint: u32,
+        dw_process_id: u32,
+        dw_service_flags: u32,
+    }
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        fn OpenSCManagerW(machine_name: *const u16, database_name: *const u16, desired_access: u32) -> HANDLE;
+        fn OpenServiceW(sc_manager: HANDLE, service_name: *const u16, desired_access: u32) -> HANDLE;
+        fn QueryServiceStatusEx(
+            service: HANDLE,
+            info_level: i32,
+            buffer: *mut u8,
+            buf_size: u32,
+            bytes_needed: *mut u32,
+        ) -> i32;
+        fn CloseServiceHandle(sc_object: HANDLE) -> i32;
+    }
 
     struct OwnedHandle(HANDLE);
     impl Drop for OwnedHandle {
@@ -513,6 +540,49 @@ pub mod browser_peer {
                 unsafe { CloseHandle(self.0); }
             }
         }
+    }
+
+    struct OwnedScHandle(HANDLE);
+    impl Drop for OwnedScHandle {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe { CloseServiceHandle(self.0); }
+            }
+        }
+    }
+
+    fn tailscale_service_pid() -> Option<u32> {
+        const SC_MANAGER_CONNECT: u32 = 0x0001;
+        const SERVICE_QUERY_STATUS: u32 = 0x0004;
+        const SC_STATUS_PROCESS_INFO: i32 = 0;
+        const SERVICE_RUNNING: u32 = 4;
+
+        let scm = unsafe { OpenSCManagerW(std::ptr::null(), std::ptr::null(), SC_MANAGER_CONNECT) };
+        if scm.is_null() {
+            return None;
+        }
+        let _scm_guard = OwnedScHandle(scm);
+        let name = wide("Tailscale");
+        let svc = unsafe { OpenServiceW(scm, name.as_ptr(), SERVICE_QUERY_STATUS) };
+        if svc.is_null() {
+            return None;
+        }
+        let _svc_guard = OwnedScHandle(svc);
+        let mut status: ServiceStatusProcess = unsafe { std::mem::zeroed() };
+        let mut needed = 0u32;
+        let ok = unsafe {
+            QueryServiceStatusEx(
+                svc,
+                SC_STATUS_PROCESS_INFO,
+                (&mut status as *mut ServiceStatusProcess).cast(),
+                std::mem::size_of::<ServiceStatusProcess>() as u32,
+                &mut needed,
+            )
+        };
+        if ok == 0 || status.dw_current_state != SERVICE_RUNNING || status.dw_process_id == 0 {
+            return None;
+        }
+        Some(status.dw_process_id)
     }
 
     fn owning_pid(local_port: u16, remote_port: u16) -> Option<u32> {
@@ -594,29 +664,6 @@ pub mod browser_peer {
         Some(String::from_utf16_lossy(&buf[..len as usize]))
     }
 
-    fn snapshot_exe_name(pid: u32) -> Option<String> {
-        let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
-        if snap == INVALID_HANDLE_VALUE || snap.is_null() {
-            return None;
-        }
-        let _snap_guard = OwnedHandle(snap);
-        let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
-        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
-        if unsafe { Process32FirstW(snap, &mut entry) } == 0 {
-            return None;
-        }
-        loop {
-            if entry.th32ProcessID == pid {
-                let end = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
-                return Some(String::from_utf16_lossy(&entry.szExeFile[..end]));
-            }
-            if unsafe { Process32NextW(snap, &mut entry) } == 0 {
-                break;
-            }
-        }
-        None
-    }
-
     pub fn accepts(stream: &tokio::net::TcpStream) -> bool {
         let (Ok(local), Ok(remote)) = (stream.local_addr(), stream.peer_addr()) else {
             return false;
@@ -630,25 +677,29 @@ pub mod browser_peer {
         if pid == 0 || pid == std::process::id() {
             return false;
         }
-        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        if !handle.is_null() {
-            let _guard = OwnedHandle(handle);
-            let Some(path) = process_image_path(handle) else {
-                return false;
-            };
-            if !crate::plat::is_tailscale_windows_exe_name(&path) {
-                return false;
+        let verified = if tailscale_service_pid() == Some(pid) {
+            true
+        } else {
+            let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+            if handle.is_null() {
+                false
+            } else {
+                let _guard = OwnedHandle(handle);
+                let Some(path) = process_image_path(handle) else {
+                    return false;
+                };
+                if !crate::plat::is_tailscale_windows_exe_name(&path) {
+                    return false;
+                }
+                let pf = std::env::var("ProgramFiles").ok();
+                let pf86 = std::env::var("ProgramFiles(x86)").ok();
+                // A Tailscale binary running under LocalSystem (custom install dir) or inside Program Files is trusted.
+                crate::plat::is_trusted_tailscale_windows_path(&path, pf.as_deref(), pf86.as_deref())
+                    || is_local_system_token(handle)
             }
-            let pf = std::env::var("ProgramFiles").ok();
-            let pf86 = std::env::var("ProgramFiles(x86)").ok();
-            return crate::plat::is_trusted_tailscale_windows_path(&path, pf.as_deref(), pf86.as_deref())
-                || is_local_system_token(handle);
-        }
-        if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
-            return snapshot_exe_name(pid)
-                .is_some_and(|name| name.eq_ignore_ascii_case("tailscaled.exe"));
-        }
-        false
+        };
+        // Re-check the established tuple after verification to guard against PID reuse.
+        verified && owning_pid(local.port(), remote.port()) == Some(pid)
     }
 }
 

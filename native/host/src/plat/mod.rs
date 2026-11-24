@@ -45,8 +45,154 @@ pub(crate) fn is_trusted_tailscale_windows_path(
     })
 }
 
-/// Verify that an accepted loopback TCP connection belongs to the Tailscale daemon on Windows,
-/// or is at least a genuine IPv4 loopback peer on platforms that use loopback fallback.
+pub(crate) fn is_trusted_tailscale_macos_path(path: &str, home_dir: Option<&str>) -> bool {
+    let trimmed = path.trim();
+    if trimmed.is_empty() || !trimmed.starts_with('/') {
+        return false;
+    }
+    if std::path::Path::new(trimmed)
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return false;
+    }
+    if trimmed.starts_with("/Applications/Tailscale.app/") {
+        return true;
+    }
+    if let Some(home) = home_dir.map(str::trim).filter(|h| h.starts_with('/')) {
+        let home = home.trim_end_matches('/');
+        if trimmed.starts_with(&format!("{home}/Applications/Tailscale.app/")) {
+            return true;
+        }
+    }
+    if trimmed.starts_with("/Library/SystemExtensions/")
+        && trimmed
+            .split('/')
+            .any(|seg| seg.starts_with("io.tailscale.ipn.macsys"))
+    {
+        return true;
+    }
+    if matches!(
+        trimmed,
+        "/opt/homebrew/bin/tailscaled" | "/usr/local/bin/tailscaled"
+    ) {
+        return true;
+    }
+    for prefix in ["/opt/homebrew/Cellar/tailscale/", "/usr/local/Cellar/tailscale/"] {
+        if let Some(rest) = trimmed.strip_prefix(prefix) {
+            if let Some((_, tail)) = rest.split_once('/') {
+                if tail == "bin/tailscaled" {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+pub(crate) fn parse_macos_netstat_pid(
+    output: &str,
+    local_port: u16,
+    remote_port: u16,
+) -> Option<u32> {
+    let want_local = format!("127.0.0.1.{remote_port}");
+    let want_foreign = format!("127.0.0.1.{local_port}");
+    let mut pid_col: usize = 8;
+    for line in output.lines() {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if let Some(state_idx) = cols.iter().position(|c| *c == "(state)") {
+            if let Some(pid_idx) = cols.iter().position(|c| *c == "pid") {
+                if pid_idx > state_idx {
+                    pid_col = 5 + (pid_idx - state_idx);
+                }
+            }
+            continue;
+        }
+        if cols.first().copied() == Some("tcp4")
+            && cols.get(3).copied() == Some(want_local.as_str())
+            && cols.get(4).copied() == Some(want_foreign.as_str())
+            && cols.get(5).copied() == Some("ESTABLISHED")
+        {
+            if let Some(pid) = cols.get(pid_col).and_then(|s| s.parse::<u32>().ok()) {
+                if pid != 0 {
+                    return Some(pid);
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(target_os = "macos")]
+mod macos_browser_peer {
+    use super::{effective_uid, is_trusted_tailscale_macos_path, parse_macos_netstat_pid};
+    use std::net::Ipv4Addr;
+
+    pub fn accepts(stream: &tokio::net::TcpStream) -> bool {
+        let (Ok(local), Ok(remote)) = (stream.local_addr(), stream.peer_addr()) else {
+            return false;
+        };
+        if local.ip() != Ipv4Addr::LOCALHOST || remote.ip() != Ipv4Addr::LOCALHOST {
+            return false;
+        }
+        let Ok(out) = crate::proc::std_cmd(crate::proc::Kind::Local, "/usr/sbin/netstat")
+            .args(["-anv", "-p", "tcp"])
+            .stdin(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .output()
+        else {
+            return false;
+        };
+        if !out.status.success() {
+            return false;
+        }
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let Some(pid) = parse_macos_netstat_pid(&stdout, local.port(), remote.port()) else {
+            return false;
+        };
+        if pid == 0 || pid == std::process::id() {
+            return false;
+        }
+        let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
+        let rc = unsafe {
+            libc::proc_pidinfo(
+                pid as libc::c_int,
+                libc::PROC_PIDT_SHORTBSDINFO,
+                0,
+                (&mut info as *mut libc::proc_bsdshortinfo).cast(),
+                std::mem::size_of::<libc::proc_bsdshortinfo>() as libc::c_int,
+            )
+        };
+        if rc != std::mem::size_of::<libc::proc_bsdshortinfo>() as libc::c_int {
+            return false;
+        }
+        let uid = effective_uid();
+        if info.pbsi_uid != 0 && info.pbsi_uid != uid {
+            return false;
+        }
+        let mut path_buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let plen = unsafe {
+            libc::proc_pidpath(
+                pid as libc::c_int,
+                path_buf.as_mut_ptr().cast(),
+                path_buf.len() as u32,
+            )
+        };
+        if plen <= 0 || (plen as usize) >= path_buf.len() {
+            return false;
+        }
+        let Ok(path) = std::str::from_utf8(&path_buf[..plen as usize]) else {
+            return false;
+        };
+        let home = std::env::var("HOME").ok();
+        if !is_trusted_tailscale_macos_path(path, home.as_deref()) {
+            return false;
+        }
+        stream.peer_addr().is_ok()
+    }
+}
+
+/// Verify that an accepted loopback TCP connection belongs to the Tailscale daemon.
 pub fn browser_loopback_peer_ok(stream: &tokio::net::TcpStream) -> bool {
     let (Ok(local), Ok(remote)) = (stream.local_addr(), stream.peer_addr()) else {
         return false;
@@ -62,9 +208,17 @@ pub fn browser_loopback_peer_ok(stream: &tokio::net::TcpStream) -> bool {
     {
         return browser_peer::accepts(stream);
     }
-    #[cfg(not(windows))]
+    #[cfg(target_os = "linux")]
     {
-        true
+        return browser_peer::accepts(stream);
+    }
+    #[cfg(target_os = "macos")]
+    {
+        return macos_browser_peer::accepts(stream);
+    }
+    #[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
+    {
+        false
     }
 }
 pub mod dirs;

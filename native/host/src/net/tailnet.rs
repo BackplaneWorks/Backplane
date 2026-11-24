@@ -185,7 +185,11 @@ pub fn resolve_tailscale_in(
                 candidates.push(join_windows_path(pf86, r"Tailscale\tailscale.exe"));
             }
             if let Some(path) = path_env {
-                for dir in path.split(';').filter(|d| !d.is_empty()) {
+                for dir in path
+                    .split(';')
+                    .map(|d| d.trim().trim_matches('"'))
+                    .filter(|d| !d.is_empty())
+                {
                     candidates.push(join_windows_path(dir, "tailscale.exe"));
                 }
             }
@@ -201,10 +205,10 @@ pub fn resolve_tailscale_in(
     candidates.into_iter().find(|p| is_executable(p))
 }
 
-/// Locate the system curl executable for HTTPS probe verification.
+/// Locate the system curl executable for HTTPS probe verification using fixed OS locations only.
 pub fn resolve_curl_in(
     os: &str,
-    path_env: Option<&str>,
+    _path_env: Option<&str>,
     system_root: Option<&str>,
     is_executable: impl Fn(&std::path::Path) -> bool,
 ) -> Option<std::path::PathBuf> {
@@ -213,39 +217,18 @@ pub fn resolve_curl_in(
         "linux" => {
             candidates.push("/usr/bin/curl".into());
             candidates.push("/bin/curl".into());
-            if let Some(path) = path_env {
-                for dir in path.split(':').filter(|d| !d.is_empty()) {
-                    candidates.push(std::path::Path::new(dir).join("curl"));
-                }
-            }
         }
         "macos" => {
             candidates.push("/usr/bin/curl".into());
-            if let Some(path) = path_env {
-                for dir in path.split(':').filter(|d| !d.is_empty()) {
-                    candidates.push(std::path::Path::new(dir).join("curl"));
-                }
-            }
         }
         "windows" => {
             let root = system_root
-                .map(str::trim)
+                .map(|s| s.trim().trim_matches('"'))
                 .filter(|s| !s.is_empty())
                 .unwrap_or(r"C:\Windows");
             candidates.push(join_windows_path(root, r"System32\curl.exe"));
-            if let Some(path) = path_env {
-                for dir in path.split(';').filter(|d| !d.is_empty()) {
-                    candidates.push(join_windows_path(dir, "curl.exe"));
-                }
-            }
         }
-        _ => {
-            if let Some(path) = path_env {
-                for dir in std::env::split_paths(path) {
-                    candidates.push(dir.join("curl"));
-                }
-            }
-        }
+        _ => {}
     }
     candidates.into_iter().find(|p| is_executable(p))
 }
@@ -462,7 +445,7 @@ mod tests {
             Some(Path::new(r"C:\Program Files\Tailscale\tailscale.exe").to_path_buf())
         );
         assert_eq!(
-            resolve_tailscale_in("windows", Some(r"C:\Tools"), None, None, None, false, has(&[r"C:\Tools\tailscale.exe"])),
+            resolve_tailscale_in("windows", Some(r#""C:\Tools";D:\Bin"#), None, None, None, false, has(&[r"C:\Tools\tailscale.exe"])),
             Some(Path::new(r"C:\Tools\tailscale.exe").to_path_buf())
         );
 
@@ -480,7 +463,8 @@ mod tests {
         );
         assert_eq!(
             resolve_curl_in("windows", Some(r"C:\Tools"), Some(r"C:\Windows"), has(&[r"C:\Tools\curl.exe"])),
-            Some(Path::new(r"C:\Tools\curl.exe").to_path_buf())
+            None,
+            "verification must only trust system curl locations, not user PATH"
         );
     }
 }
