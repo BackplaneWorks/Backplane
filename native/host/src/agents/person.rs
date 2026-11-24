@@ -26,9 +26,10 @@ pub fn check_folder(cwd: &str, roots: &[String], copy_home: &Path, live_home: Op
     if let Some(l) = live_home { let l = canon(l); if under(&real, &l) { return Err(format!("{cwd} is inside the live Backplane's home ({})", l.display())) } }
     let ch = canon(copy_home);
     let scratch = ch.join("scratch");
+    let chats = ch.join("chats");
     let in_root = roots.iter().filter(|r| !r.is_empty()).any(|r| under(&real, &canon(Path::new(r))));
-    if real == ch || (under(&real, &ch) && !under(&real, &scratch)) { return Err(format!("{cwd} is the copy's own home or one of its control folders")) }
-    if !(in_root || under(&real, &scratch)) { return Err(format!("{cwd} is not under a project folder of this copy")) }
+    if real == ch || (under(&real, &ch) && !under(&real, &scratch) && !under(&real, &chats)) { return Err(format!("{cwd} is the copy's own home or one of its control folders")) }
+    if !(in_root || under(&real, &scratch) || under(&real, &chats)) { return Err(format!("{cwd} is not under a project folder of this copy")) }
     Ok(real)
 }
 
@@ -41,11 +42,12 @@ impl LiveFold {
         let mut f = LiveFold::default(); for (t, folder, running) in base { if !folder.is_empty() { f.folder.insert(t.clone(), folder.clone()); } if *running { f.running.insert(t.clone()); } }
         for l in lines {
             let Some(ty) = crate::session::event_type(l) else { continue };
-            if !["ProjectCreated", "ThreadCreated", "WorktreeSet", "TurnChanged"].contains(&ty) { continue }
+            if !["ProjectCreated", "ThreadCreated", "ThreadProjectSet", "WorktreeSet", "TurnChanged"].contains(&ty) { continue }
             let Ok(v) = serde_json::from_str::<Value>(l) else { continue }; let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
             match ty {
                 "ProjectCreated" => { f.roots.insert(g("id"), g("root")); }
                 "ThreadCreated" => { f.project.insert(g("id"), g("project")); let wt = g("worktree"); let folder = if !wt.is_empty() { wt } else { f.roots.get(&g("project")).cloned().unwrap_or_default() }; if !folder.is_empty() { f.folder.insert(g("id"), folder); } }
+                "ThreadProjectSet" => { let (id, proj) = (g("id"), g("project")); f.project.insert(id.clone(), proj.clone()); if let Some(r) = f.roots.get(&proj).cloned().filter(|r| !r.is_empty()) { f.folder.insert(id, r); } else { f.folder.remove(&id); } }
                 "WorktreeSet" => { f.folder.insert(g("id"), g("worktree")); }
                 "TurnChanged" => { if g("state") == "running" { f.running.insert(g("thread")); } else { f.running.remove(&g("thread")); } }
                 _ => {}
@@ -105,10 +107,12 @@ mod tests {
     fn dir(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::canonical(&format!("person-{n}")) }
     #[test] fn the_folder_must_be_a_project_folder_of_the_copy_and_nothing_of_the_live_home_or_root() {
         let (proj, home, live, other) = (dir("proj"), dir("home"), dir("live"), dir("other")); std::fs::create_dir_all(proj.join("sub")).unwrap(); std::fs::create_dir_all(home.join("scratch/t1")).unwrap(); std::fs::create_dir_all(live.join("scratch/t9")).unwrap();
+        std::fs::create_dir_all(home.join("chats/c1")).unwrap(); std::fs::create_dir_all(live.join("chats/c9")).unwrap();
         let roots = vec![proj.to_string_lossy().into_owned()];
         assert!(check_folder(proj.to_str().unwrap(), &roots, &home, Some(&live)).is_ok()); assert!(check_folder(proj.join("sub").to_str().unwrap(), &roots, &home, Some(&live)).is_ok());
         assert!(check_folder(home.join("scratch/t1").to_str().unwrap(), &roots, &home, Some(&live)).is_ok(), "the copy's own scratch");
-        for (bad, why) in [("/", "root"), (live.join("scratch/t9").to_str().unwrap(), "under the live home"), (other.to_str().unwrap(), "not a project folder"), (home.to_str().unwrap(), "the copy's home"), (home.join("attachments").to_str().unwrap(), "control folder"), ("/no/such/folder", "missing"), ("", "empty")] {
+        assert!(check_folder(home.join("chats/c1").to_str().unwrap(), &roots, &home, Some(&live)).is_ok(), "the copy's own chats");
+        for (bad, why) in [("/", "root"), (live.join("scratch/t9").to_str().unwrap(), "under the live home"), (live.join("chats/c9").to_str().unwrap(), "chats under live home"), (other.to_str().unwrap(), "not a project folder"), (home.to_str().unwrap(), "the copy's home"), (home.join("attachments").to_str().unwrap(), "control folder"), ("/no/such/folder", "missing"), ("", "empty")] {
             assert!(check_folder(bad, &roots, &home, Some(&live)).is_err(), "{why}: {bad}");
         }
         std::fs::create_dir_all(home.join("attachments")).unwrap(); assert!(check_folder(home.join("attachments").to_str().unwrap(), &roots, &home, Some(&live)).is_err());

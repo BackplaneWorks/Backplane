@@ -510,6 +510,36 @@ fn fold_section(id: &str, title: &str, rows: Vec<Value>, c: &Ctx, extra: Value) 
     s
 }
 
+fn chat_row(st: &State, c: &Ctx, id: &str, t: &crate::state::Thread) -> Value {
+    let w = status(st, id);
+    let mt = MergedThread { machine: String::new(), id: id.to_string(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(st), status: String::new() };
+    let wn = want(&mt, w);
+    let q = qid(c.hub, id);
+    let se = settled(st, id);
+    let (lbl, tone) = badge(w, wn);
+    let mut menu = vec![
+        if t.pinned { json!({"id":"unpin","label":"Unpin","action":"row-unpin","value":q}) } else { json!({"id":"pin","label":"Pin","action":"row-pin","value":q}) },
+        if se { json!({"id":"unsettle","label":"Unsettle","action":"row-unsettle","value":q}) } else { json!({"id":"settle","label":"Settle","action":"row-settle","value":q}) },
+    ];
+    let targets = super::keys::move_project_targets(st, &q);
+    if !targets.is_empty() {
+        menu.push(json!({"id":"move","label":"Move to project\u{2026}","action":"","value":"","sub":targets}));
+    }
+    let snooze = if t.archived || w == "needs" { json!([]) } else {
+        json!([{"label":"1 hour","value":format!("{q}|1h")},{"label":"Tomorrow","value":format!("{q}|tomorrow")},{"label":"1 week","value":format!("{q}|1w")}])
+    };
+    let settle = if t.archived || se || live(w) || w == "needs" { String::new() } else { q.clone() };
+    json!({
+        "id": q, "title": if t.title.is_empty() { "New chat" } else { t.title.as_str() }, "provider": t.provider,
+        "word": w, "say": say(w), "want": wn, "status": dot_word(w), "state": turn_word(w),
+        "depth": 0, "children": 0, "expanded": false, "agents": "",
+        "ago": crate::sidebar::ago(c.now, t.activity), "activity": t.activity, "pinned": t.pinned,
+        "machine": "", "mark": Value::Null, "project": crate::sidebar::CHATS_TITLE, "projectKey": "",
+        "chat": true, "canChild": false, "off": false, "nav": q, "hide": "", "lead": [],
+        "label": lbl, "tone": tone, "snooze": snooze, "settle": settle, "menu": menu,
+    })
+}
+
 /// The sections, top to bottom. `bub` is the uberbot's sidebar row (screen.rs `bots`), or null.
 pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value {
     let facts_of: Vec<Vec<Th>> = rows.iter().map(|p| p.threads.iter().map(|t| facts(st, p, t, c.now)).filter(listed).collect()).collect();
@@ -534,13 +564,15 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
       for p in rows { for t in &p.threads { if let Some(s) = t.src { if !t.machine.is_empty() && !states.iter().any(|(x, _)| std::ptr::eq(*x, s)) { states.push((s, t.machine.clone())); } } } }
       for (s, machine) in states { // (another machine's ask is believed for ACTIVE, as `far_word` has it)
       for (id, t) in s.threads.iter().filter(|(id, t)| !t.deleted && !s.run_hidden(id) && !listed.contains(id.as_str()) && !crate::state::visible::swarm_member(s, id) && wants_person(s, id) && (machine.is_empty() || (far_word("needs", false, c.now.saturating_sub(t.activity)) == "needs" && hidden_at(st, id) < t.activity.max(1)))) {
-          let place = s.bots_nav.values().find(|b| &b.thread == id).map(|b| b.name.clone()).unwrap_or_else(|| crate::sidebar::NO_PROJECT.into());
+          let is_chat = t.project == crate::sidebar::CHATS;
+          let place = if is_chat { crate::sidebar::CHATS_TITLE.to_string() } else { s.bots_nav.values().find(|b| &b.thread == id).map(|b| b.name.clone()).unwrap_or_else(|| crate::sidebar::NO_PROJECT.into()) };
           if !c.query.is_empty() && !hit(&t.title, c.query) && !hit(&place, c.query) { continue }
+          if is_chat && machine.is_empty() { needs.push((if want(&MergedThread { machine: String::new(), id: id.clone(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(s), status: String::new() }, "needs") == "approval" { 0 } else { 1 }, t.activity, chat_row(s, c, id, t))); continue }
           let mt = MergedThread { machine: machine.clone(), id: id.clone(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(s), status: String::new() };
           let w = want(&mt, "needs");
           let mark = if machine.is_empty() { Value::Null } else { crate::mirror::mark_of(&machine, false) };
           needs.push((if w == "approval" { 0 } else { 1 }, t.activity, json!({"id":qid(c.hub,id),"title":t.title,"provider":t.provider,"word":"needs","say":say("needs"),"want":w,"status":"blocked","state":"idle","depth":0,"children":0,"expanded":false,"agents":"",
-              "ago":crate::sidebar::ago(c.now,t.activity),"activity":t.activity,"pinned":t.pinned,"machine":machine,"mark":mark,"project":place,"projectKey":"","off":false,"nav":qid(c.hub,id)})));
+              "ago":crate::sidebar::ago(c.now,t.activity),"activity":t.activity,"pinned":t.pinned,"machine":machine,"mark":mark,"project":place,"projectKey":"","chat":is_chat,"off":false,"nav":qid(c.hub,id)})));
       } } }
     needs.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
     if !needs.is_empty() { out.push(json!({"id":"needs","kind":"threads","title":"Needs you","count":needs.len(),"rows":needs.into_iter().map(|x| x.2).collect::<Vec<_>>()})); }
@@ -557,6 +589,13 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
                 if !c.query.is_empty() && !hit(text_of(&x.row, "title"), c.query) && !hit(&p.name, c.query) { continue }
                 running.push((x.activity, x.row)); }
         }
+        for (id, t) in st.threads.iter().filter(|(id, t)| t.project == crate::sidebar::CHATS && !t.deleted && !t.archived && !st.run_hidden(id) && !crate::state::visible::swarm_member(st, id)) {
+            let w = status(st, id);
+            let until = st.snooze_until.get(id).copied().unwrap_or(0);
+            if w == "needs" || !live(w) || until > c.now { continue }
+            if !c.query.is_empty() && !hit(&t.title, c.query) && !hit(crate::sidebar::CHATS_TITLE, c.query) { continue }
+            running.push((t.activity, chat_row(st, c, id, t)));
+        }
         running.sort_by(|a, b| b.0.cmp(&a.0));
         if !running.is_empty() { out.push(json!({"id":"running","kind":"threads","title":"Running","count":running.len(),"rows":running.into_iter().map(|x| x.1).collect::<Vec<_>>()})); }
     }
@@ -567,10 +606,44 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
           let mut r = thread_row(c.hub, c.now, p, f); let until = snooze_end(f);
           r["wake"] = json!(format!("{}|off", qid(c.hub, &f.t.id))); r["until"] = json!(until); r["ago"] = json!(crate::sidebar::ago(until, c.now)); r["snooze"] = json!([]); r["settle"] = json!("");
           snz.push((until, r)); } }
+      for (id, t) in st.threads.iter().filter(|(id, t)| t.project == crate::sidebar::CHATS && !t.deleted && !t.archived && !st.run_hidden(id) && !crate::state::visible::swarm_member(st, id)) {
+          let until = st.snooze_until.get(id).copied().unwrap_or(0);
+          if until <= c.now || status(st, id) == "needs" { continue }
+          if !c.query.is_empty() && !hit(&t.title, c.query) && !hit(crate::sidebar::CHATS_TITLE, c.query) { continue }
+          let mut r = chat_row(st, c, id, t);
+          r["wake"] = json!(format!("{}|off", qid(c.hub, id))); r["until"] = json!(until); r["ago"] = json!(crate::sidebar::ago(until, c.now)); r["snooze"] = json!([]); r["settle"] = json!("");
+          snz.push((until, r));
+      }
       snz.sort_by(|a, b| a.0.cmp(&b.0));
       if !snz.is_empty() {
           let open = c.open.contains("sec:snoozed") || !c.query.is_empty();
           out.push(json!({"id":"snoozed","kind":"threads","title":"Snoozed","count":snz.len(),"fold":true,"open":open,"toggle":"sec:snoozed","rows":if open { snz.into_iter().map(|x| x.1).collect::<Vec<_>>() } else { vec![] }})); } }
+    // Quick Chats (project-free threads): active unsettled chats (plus pinned or currently open), newest first; search includes settled chats too; omitted when empty
+    {
+        let mut chats: Vec<(&str, &crate::state::Thread)> = st.threads.iter()
+            .filter(|(id, t)| t.project == crate::sidebar::CHATS && !t.deleted && !t.archived && !st.run_hidden(id) && !crate::state::visible::swarm_member(st, id))
+            .filter(|(id, t)| {
+                if !c.query.is_empty() {
+                    crate::sidebar::word_hit(&t.title, c.query) || crate::sidebar::word_hit("New chat", c.query) && t.title.is_empty()
+                } else {
+                    let until = st.snooze_until.get(id.as_str()).copied().unwrap_or(0);
+                    let is_snoozed = until > c.now && status(st, id) != "needs";
+                    !is_snoozed && (!settled(st, id) || t.pinned || id.as_str() == c.selected)
+                }
+            })
+            .map(|(id, t)| (id.as_str(), t))
+            .collect();
+        chats.sort_by(|(ia, a), (ib, b)| {
+            b.pinned.cmp(&a.pinned)
+                .then_with(|| if a.pinned && b.pinned { a.pinned_at.cmp(&b.pinned_at) } else { std::cmp::Ordering::Equal })
+                .then_with(|| b.activity.max(b.created).cmp(&a.activity.max(a.created)))
+                .then_with(|| ia.cmp(ib))
+        });
+        if !chats.is_empty() {
+            let rows: Vec<Value> = chats.into_iter().map(|(id, t)| chat_row(st, c, id, t)).collect();
+            out.push(json!({"id":"chats","kind":"threads","title":crate::sidebar::CHATS_TITLE,"count":rows.len(),"rows":rows}));
+        }
+    }
     // the projects: pinned, the bench (Recent), by group, all the rest, quiet
     let (mut pinned, mut active, mut quiet): (Vec<(u64, Value)>, Vec<(u64, Value)>, Vec<Value>) = (vec![], vec![], vec![]);
     let mut rest: Vec<(String, Value)> = vec![];
@@ -655,10 +728,22 @@ pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: b
 }
 
 // ---- Ctrl+K ---------------------------------------------------------------------------------------------------------------
-/// Every project and thread on every machine (the registry's too), for the palette: projects open their page, threads open (one whose machine
+/// Every project, Quick Chat, and thread on every machine (the registry's too), for the palette: projects open their page, threads open (one whose machine
 /// is off says so and opens nothing). What needs the person first, then the newest. Bounded.
-pub fn jump(rows: &[MergedProject], c: &Ctx) -> Value {
+pub fn jump(st: &State, rows: &[MergedProject], c: &Ctx) -> Value {
     let mut v: Vec<(u8, u64, Value)> = vec![];
+    for (id, t) in st.threads.iter().filter(|(id, t)| t.project == crate::sidebar::CHATS && !t.deleted && !t.archived && !st.run_hidden(id) && !crate::state::visible::swarm_member(st, id)) {
+        let w = status(st, id);
+        let se = settled(st, id);
+        let mt = MergedThread { machine: String::new(), id: id.clone(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(st), status: String::new() };
+        let wn = want(&mt, w);
+        let rank = if w == "needs" { 0 } else if !se || visible(st, id) { 1 } else { 3 };
+        v.push((rank, t.activity.max(t.created), json!({
+            "kind":"thread","label":if t.title.is_empty() { "New chat" } else { t.title.as_str() },
+            "place":crate::sidebar::CHATS_TITLE,"chat":true,"word":w,"status":dot_word(w),"state":turn_word(w),"want":wn,
+            "action":"select","value":qid(c.hub, id),"off":false
+        })));
+    }
     for p in rows {
         let machines: Vec<String> = p.machines.iter().filter_map(|m| m["short"].as_str().map(String::from)).collect();
         v.push((2, p.last_activity, json!({"kind":"project","label":p.name,"place":machines.join(" · "),"action":"project-page","value":p.key,"pid":pid_of(p)})));

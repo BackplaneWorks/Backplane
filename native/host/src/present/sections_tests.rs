@@ -352,7 +352,7 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
 }
 #[test] fn ctrl_k_lists_every_project_and_thread_waiting_ones_first() {
     let s = world(); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
-    let open = HashSet::new(); let j = jump(&rows, &ctx(&open)); let a = j.as_array().unwrap();
+    let open = HashSet::new(); let j = jump(&s, &rows, &ctx(&open)); let a = j.as_array().unwrap();
     assert_eq!(a.iter().filter(|x| x["kind"] == "project").count(), 5); assert_eq!(a.iter().filter(|x| x["kind"] == "thread").count(), 5, "the hidden threads too");
     assert_eq!(a[0]["label"], "T ta"); assert_eq!(a[0]["action"], "select"); assert_eq!(a[0]["value"], "h|ta");
     let p = a.iter().find(|x| x["kind"] == "project").unwrap(); assert_eq!(p["action"], "project-page");
@@ -474,7 +474,7 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let s4 = st(&[pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3), room("r1", "done", "")]);
     let rows4 = merged_projects(&s4, &[], &|_| false, &|_| String::new(), "desk", &[]);
     assert!(sec(&build(&s4, &rows4, &Value::Null, &ctx(&HashSet::new())), "needs").is_null());
-    let j = jump(&rows2, &ctx(&HashSet::new())); assert!(j.as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["action"] == "room" && x["value"] == "h|r1"));
+    let j = jump(&s2, &rows2, &ctx(&HashSet::new())); assert!(j.as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["action"] == "room" && x["value"] == "h|r1"));
     let pg = page(&s2, &rows2, &rows2[0].key, &ctx(&HashSet::new()), false); assert_eq!(pg["sections"][0]["rows"][0]["kind"], "swarm");
 }
 
@@ -634,7 +634,7 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     assert!(pg_str.contains("User thread") && pg_str.contains("Test runner"));
 
     // Ctrl+K command palette
-    let jmp = jump(&rows, &ctx(&HashSet::new()));
+    let jmp = jump(&s, &rows, &ctx(&HashSet::new()));
     let jmp_str = jmp.to_string();
     assert!(!jmp_str.contains("Bub: Launch:") && !jmp_str.contains("mailcoord-"), "no mailroom runs in Ctrl+K: {jmp_str}");
     assert!(jmp_str.contains("User thread") && jmp_str.contains("Test runner"));
@@ -748,7 +748,7 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     assert!(sec(&v_stale, "running").is_null() && sec(&v_stale, "needs").is_null());
     let pg_stale = page(&s_stale, &rows_stale, &rows_stale[0].key, &ctx(&HashSet::new()), true);
     assert!(titles(&pg_stale["sections"][2]).contains(&"Swarm r_old".to_string()), "stale live swarm remains on Project Page Recent: {:?}", pg_stale["sections"][2]);
-    assert!(jump(&rows_stale, &ctx(&HashSet::new())).as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_old"));
+    assert!(jump(&s_stale, &rows_stale, &ctx(&HashSet::new())).as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_old"));
 
     // 5. swarm-settle action dismisses paused/idle swarm to Project Page Done and keeps it in Ctrl+K; newer post resurfaces it
     let mut paused_evs = vec![
@@ -769,7 +769,7 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     assert!(sec(&v_settled, "active")["rows"][0]["swarms"].as_array().unwrap().is_empty());
     let pg_settled = page(&s_settled, &rows_settled, &rows_settled[0].key, &ctx(&HashSet::new()), true);
     assert_eq!(titles(&pg_settled["sections"][3]), ["Swarm r_pause"], "settled swarm moves to Project Page Done");
-    assert!(jump(&rows_settled, &ctx(&HashSet::new())).as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_pause"));
+    assert!(jump(&s_settled, &rows_settled, &ctx(&HashSet::new())).as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_pause"));
     // Newer post after settle brings it back
     paused_evs.push(json!({"$":"RoomPosted","id":"p2","room":"r_pause","from":"opus","text":"new","hop":1,"at":NOW + 10}));
     let s_resurf = st(&paused_evs);
@@ -791,7 +791,56 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let pg_done = page(&s_done, &rows_done, &rows_done[0].key, &ctx(&HashSet::new()), true);
     let done_titles = titles(&pg_done["sections"][3]);
     assert!(done_titles.contains(&"Swarm r_done".to_string()) && done_titles.contains(&"Swarm r_stop".to_string()), "{done_titles:?}");
-    let jmp = jump(&rows_done, &ctx(&HashSet::new()));
+    let jmp = jump(&s_done, &rows_done, &ctx(&HashSet::new()));
     assert!(jmp.as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_done"));
     assert!(jmp.as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_stop"));
+}
+
+#[test] fn quick_chats_appear_in_chats_section_and_jump_and_offer_move_to_project() {
+    let base = vec![
+        pc("p1", "Beta", "/nowhere/beta", NOW - 200),
+        pc("p2", "Alpha", "/nowhere/alpha", NOW - 190),
+    ];
+    let p2_key = merged_projects(&st(&base), &[], &|_| false, &|_| String::new(), "desk", &[])
+        .into_iter().find(|r| r.name == "Alpha").unwrap().key;
+    let mut evs = base;
+    evs.extend([
+        set(&format!("sidebar.pin.{p2_key}"), &NOW.to_string(), NOW - 185),
+        tc("t1", "p1", NOW - 180),
+        turn("t1", "failed", NOW - 160), json!({"$":"ThreadSnoozed","id":"t1","until":NOW + 3600,"at":NOW - 150}),
+        tc("c1", "chats", NOW - 100),
+        tc("c2", "chats", NOW - 90),
+        tc("c3", "chats", NOW - 80), json!({"$":"ThreadSettled","id":"c3","manual":true,"at":NOW - 70}),
+    ]);
+    let s = st(&evs);
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let none = HashSet::new();
+    let v = build(&s, &rows, &Value::Null, &ctx(&none));
+    // chats appears after snoozed and before pinned (and active)
+    assert_eq!(ids(&v), ["snoozed", "chats", "pinned", "active"]);
+    let cs = sec(&v, "chats");
+    assert_eq!((cs["kind"].as_str(), cs["title"].as_str(), cs["count"].as_u64()), (Some("threads"), Some("Chats"), Some(2)));
+    assert_eq!(titles(cs), ["T c2", "T c1"]);
+    let r = &cs["rows"][1];
+    assert_eq!((r["project"].as_str(), r["projectKey"].as_str(), r["chat"].as_bool(), r["canChild"].as_bool()),
+        (Some("Chats"), Some(""), Some(true), Some(false)));
+    let mv = r["menu"].as_array().unwrap().iter().find(|m| m["id"] == "move").expect("move menu item");
+    assert_eq!(mv["label"], "Move to project\u{2026}");
+    assert_eq!(mv["sub"][0]["label"], "Alpha");
+    assert_eq!(mv["sub"][0]["action"], "row-move-project");
+    assert_eq!(mv["sub"][0]["value"], "h|c1\u{1f}p2");
+    assert_eq!(mv["sub"][1]["label"], "Beta");
+    // selected settled chat shows up; query filters chats by title
+    let v_sel = build(&s, &rows, &Value::Null, &Ctx { selected: "c3", ..ctx(&none) });
+    assert_eq!(titles(sec(&v_sel, "chats")), ["T c3", "T c2", "T c1"]);
+    let v_q = build(&s, &rows, &Value::Null, &Ctx { query: "c1", ..ctx(&none) });
+    assert_eq!(titles(sec(&v_q, "chats")), ["T c1"]);
+    // jump includes settled quick chats too with place "Chats"
+    let jmp = jump(&s, &rows, &ctx(&none));
+    let j_c3 = jmp.as_array().unwrap().iter().find(|x| x["value"] == "h|c3").expect("settled chat in jump");
+    assert_eq!((j_c3["place"].as_str(), j_c3["chat"].as_bool()), (Some("Chats"), Some(true)));
+    // when no unsettled/selected chat remains, section is omitted
+    let s_settled = st(&[pc("p1", "Beta", "/nowhere/beta", NOW - 200), tc("c3", "chats", NOW - 80), json!({"$":"ThreadSettled","id":"c3","manual":true,"at":NOW - 70})]);
+    let rows_settled = merged_projects(&s_settled, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    assert!(sec(&build(&s_settled, &rows_settled, &Value::Null, &ctx(&none)), "chats").is_null());
 }

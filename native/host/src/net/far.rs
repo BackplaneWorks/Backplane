@@ -92,7 +92,7 @@ pub fn reply_on(mut r: Value, id: &Value, l: &str) -> Value {
     }
     r
 }
-pub const VARIANTS: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadRenamed", "ThreadSettled", "ThreadUnsettled", "ThreadWoke", "ThreadArchived", "ThreadPinned",
+pub const VARIANTS: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadRenamed", "ThreadProjectSet", "ThreadSettled", "ThreadUnsettled", "ThreadWoke", "ThreadArchived", "ThreadPinned",
     "ThreadDeleted", "ModesSet", "ProviderSet", "AskClosed", "BotDeleted", "RoutineDeleted", "RoutineFired", "RoutinePlan", "RoutineSlot", "RoutineDone", "ThreadCreated",
     "MessagePosted", "MessageFrom", "TurnChanged", "PendingChanged", "TurnQueued", "QueueTaken", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "TodosChanged",
     "TodosSet", "WorkSet", "ActivityLogged", "ThreadForked", "TaskDelegated", "TaskStateSet", "TaskDelivered", "AskOpened", "BotSet", "RoutineSet", "Reminded", "MemorySaved",
@@ -103,7 +103,7 @@ fn table(variant: &str) -> Option<&'static [(&'static str, K)]> {
     Some(match variant {
         "ProjectCreated" | "ProjectRemoved" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadArchived" | "ThreadPinned"
         | "ThreadDeleted" | "ModesSet" | "ProviderSet" | "AskClosed" | "BotDeleted" | "RoutineDeleted" | "RoutineFired" | "RoutinePlan" | "RoutineSlot" | "RoutineDone" => &[("id", Id)],
-        "ThreadCreated" => &[("id", Id), ("project", Opt)],
+        "ThreadCreated" | "ThreadProjectSet" => &[("id", Id), ("project", Opt)],
         "MessagePosted" => &[("thread", Id), ("msg", Sent), ("text", Text)],
         "MessageFrom" => &[("thread", Id), ("msg", Sent), ("from", Addr)],
         "TurnChanged" | "PendingChanged" | "TurnQueued" | "QueueTaken" | "QueueEdited" | "QueueRemoved" | "QueueMoved" | "QueueTakenOne"
@@ -162,7 +162,7 @@ pub fn shared(o: &dyn Owned, c: &Value) -> bool {
     let ts = |k: &str| thread_shared(o, f(k));
     match c["$"].as_str().unwrap_or("") {
         "ProjectCreated" | "ProjectRemoved" => !is(f("id")),
-        "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadArchived" | "ThreadPinned" | "ThreadForked"
+        "ThreadCreated" | "ThreadRenamed" | "ThreadProjectSet" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadArchived" | "ThreadPinned" | "ThreadForked"
         | "ThreadDeleted" | "ModesSet" | "ProviderSet" | "ThreadParentSet" | "ThreadLaunched" => ts("id"),
         "MessagePosted" | "MessageFrom" | "TurnChanged" | "PendingChanged" | "ActivityLogged" | "TurnQueued" | "QueueTaken" | "QueueEdited" | "QueueRemoved"
         | "QueueMoved" | "QueueTakenOne" | "TodosChanged" | "TodosSet" | "WorkSet" | "AskOpened" => ts("thread"),

@@ -38,7 +38,7 @@ pub fn status(st: &State, id: &str) -> &'static str {
 pub fn rows_of(st: &State, machine: &str, now: u64, origin: &dyn Fn(&str) -> String, rel: &dyn Fn(&str) -> String) -> Value {
     let mut projects = vec![]; let mut keys: HashMap<&str, String> = HashMap::new();
     let all = crate::present::merged::local_keys(st, machine, origin, rel);
-    let mut ps: Vec<_> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH).collect();
+    let mut ps: Vec<_> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH && !crate::sidebar::is_chats(id)).collect();
     ps.sort_by(|a, b| a.0.cmp(b.0));
     for (id, p) in ps {
         let o = origin(&p.root);

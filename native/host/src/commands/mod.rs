@@ -95,7 +95,7 @@ impl Commands {
 
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["bots.give", "thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
-        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.planonce", "thread.effort", "thread.speed", "thread.provider", "accounts.select", "accounts.move_all", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
+        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.move_project", "thread.modes", "thread.planonce", "thread.effort", "thread.speed", "thread.provider", "accounts.select", "accounts.move_all", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
         "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "order.buy", "fs.list", "fs.mkdir", "fs.find", "agents.fresh"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
@@ -164,6 +164,7 @@ impl RpcHandler for Commands {
             } }
             if let Err(e) = f.sync(&hub.store) { return vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})] }
             f.default_agent = crate::settings::models::live().then(|| crate::settings::models::default_now(f.setting("agent.provider"), f.setting("accounts.inventory")));
+            f.chats_root = hub.cfg.home.join("chats").to_string_lossy().into_owned();
             f.alloc = Some(hub.alloc_n(4) as usize); // p<at>-<n>, t<at>-<n+1>, g<at>-<n+3>: a number no other request shares
             if let Some(root) = create_in {
                 let pl = plan::project_create(&f, now_s(), id, p, &root);
@@ -213,6 +214,8 @@ impl RpcHandler for Commands {
             if method == "thread.delete" { if let Some(h) = hub.rpc_for("browser.close") { let (hub, th) = (hub.clone(), p["thread"].as_str().unwrap_or("").to_string()); tokio::spawn(async move { let _ = h.call(&hub, &Caller { gen: String::new(), client: 0 }, &json!(0), "browser.close", &json!({"thread": th})).await; }); } }
             // BotFx scratch (an out, so after the changes): the folder exists before the reply, and before anything runs in it
             if let Some(th) = pl.scratch.clone() { scratch_folder(hub, &th); }
+            // Quick Chats: `<home>/chats/<thread>` exists synchronously before the reply (no git init)
+            if let Some(th) = pl.chat.clone() { chat_folder(hub, &th); }
             if let Some((th, root, mode, src, pv, bd, op)) = wtc { worktree::spawn(hub.clone(), self.fold.clone(), th, root, mode, src, pv, bd, op) }
             // Home.start: the first message is a turn.start of the new thread (the agents module posts it, queued while the worktree is made); its failure is the reply's
             if let Some(("post", th, text)) = pl.act.clone() {
@@ -288,6 +291,13 @@ fn scratch_folder(hub: &Arc<Hub>, th: &str) {
         let _ = crate::files::git::proc_ro("git", &["init", "-q"], &path, &[]).await; // inside <home>/scratch: a home write
         let _ = hub.commit(&json!({"$":"WorktreeSet","id":th,"branch":"","worktree":path,"at":now_s()})).await;
     });
+}
+
+/// Quick Chats: `<home>/chats/<thread>` made synchronously before the reply (no git init).
+fn chat_folder(hub: &Arc<Hub>, th: &str) {
+    let plain = !th.is_empty() && !th.starts_with('.') && th.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
+    if !plain { return }
+    let _ = std::fs::create_dir_all(hub.cfg.home.join("chats").join(th));
 }
 
 /// The provider and account binding a worktree job starts with (Hub.job.ready compares them when it reports): the thread's, as this step's events set them.

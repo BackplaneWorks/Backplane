@@ -26,7 +26,10 @@ pub struct Fold {
     #[serde(skip)] pub alloc: Option<usize>, /// the agent a new thread gets when its request names none (settings/models.rs `default_agent`, set by the handler from
     /// what is installed here); None: the `agent.provider` setting as it is
     #[serde(skip)] pub default_agent: Option<String>, /// the first messages of home threads ("home-<msg>"), so a retry knows whether the message arrived
+    /// the first messages of home threads ("home-<msg>"), so a retry knows whether the message arrived
     pub home_msgs: std::collections::HashSet<String>,
+    /// `<home>/chats` directory resolved by the command handler for Quick Chats.
+    #[serde(skip)] pub chats_root: String,
 }
 
 const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "carry.wait.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "plan.once.", "seen.", "tz.machine", "account.thread.", "account.default.", "accounts.inventory", "account.session.", "account.seen.", "account.chosen.", "account.limit.", "fallback.intent."];
@@ -64,7 +67,7 @@ impl Fold {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "ThreadArchived", "ThreadDeleted", "ThreadForked", "ThreadSnoozed", "ThreadOrdered", "ProjectOrdered",
+        const READ: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadCreated", "ThreadRenamed", "ThreadProjectSet", "ThreadArchived", "ThreadDeleted", "ThreadForked", "ThreadSnoozed", "ThreadOrdered", "ProjectOrdered",
             "TurnQueued", "QueueTaken", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "AskOpened", "AskClosed", "SettingSet", "ProviderSet", "TurnChanged", "WorktreeSet", "ModesSet", "WorkSet", "WorktreeSkipped", "ThreadParentSet", "ThreadPinned", "ThreadSettled", "ThreadUnsettled", "ThreadMerged", "WorktreeRemoved", "SessionSet", "MessagePosted", "ActivityLogged", "Reminded"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
@@ -76,6 +79,7 @@ impl Fold {
             "ThreadCreated" => { self.threads.insert(g("id"), T { project: g("project"), title: g("title"), env: g("env"), branch: g("branch"), worktree: g("worktree"), provider: g("provider"), model: g("model"),
                 turn: "idle".into(), runtime: "full-access".into(), interaction: "default".into(), ..Default::default() }); }
             "ThreadRenamed" => if let Some(x) = self.threads.get_mut(&g("id")) { x.title = g("title") },
+            "ThreadProjectSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.project = g("project"); x.env = "local".into(); x.branch.clear(); x.worktree.clear(); },
             // an archive is read as a manual settle (state/mod.rs says why)
             "ThreadArchived" => if let Some(x) = self.threads.get_mut(&g("id")) { if v.get("archived").and_then(Value::as_bool).unwrap_or(false) { x.forced = 1; x.settled_at = x.settled_at.max(at); x.pinned = false } },
             "ThreadDeleted" => if let Some(x) = self.threads.get_mut(&g("id")) { x.deleted = true },

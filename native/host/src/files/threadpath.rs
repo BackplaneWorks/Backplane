@@ -27,7 +27,7 @@ pub fn resolve<'a>(id: &str, thread: impl Fn(&str) -> Option<T<'a>>, project: im
     if id.is_empty() { return None }
     let t = thread(id)?;
     if t.deleted { return None }
-    if t.project.is_empty() { return folder(t.worktree) }
+    if t.project.is_empty() || t.project == crate::sidebar::CHATS { return folder(t.worktree) }
     let root = proj(t.project)?;
     if t.worktree.is_empty() { Some(root) } else { folder(t.worktree) }
 }
@@ -53,7 +53,7 @@ mod tests {
     }
     fn world() -> World { World {
         threads: vec![("t1", "p1", "", false), ("wt", "p1", "/p/.backplane/worktrees/w", false), ("gone", "p1", "", true), ("rm", "p2", "", false), ("badwt", "p1", "relative/wt", false),
-            ("priv", "", "/priv", false), ("privrel", "", "rel", false), ("privempty", "", "", false), ("badroot", "p3", "", false), ("nul", "p4", "", false)],
+            ("priv", "", "/priv", false), ("chat1", crate::sidebar::CHATS, "/home/u/chats/chat1", false), ("privrel", "", "rel", false), ("privempty", "", "", false), ("badroot", "p3", "", false), ("nul", "p4", "", false)],
         projects: vec![("p1", "/p", false), ("p2", "/q", true), ("p3", "", false), ("p4", "/a\0b", false), ("p5", "/five", false)] } }
     // law thread_folder_refuses_job: when the folder does not resolve, no job is scheduled whatever the job, thread or arguments
     #[test] fn thread_folder_refuses_job() {
@@ -70,7 +70,7 @@ mod tests {
             }
         }
         // what does resolve: a thread of a live project, its worktree, an archived thread (not a deleted one), a private thread's own folder, a project home
-        for (id, root) in [("t1", "/p"), ("wt", "/p/.backplane/worktrees/w"), ("priv", "/priv"), ("project-home-p1", "/p"), ("project-home-p5", "/five")] { assert_eq!(at(&w, id).as_deref(), Some(root), "{id}") }
+        for (id, root) in [("t1", "/p"), ("wt", "/p/.backplane/worktrees/w"), ("priv", "/priv"), ("chat1", "/home/u/chats/chat1"), ("project-home-p1", "/p"), ("project-home-p5", "/five")] { assert_eq!(at(&w, id).as_deref(), Some(root), "{id}") }
         let ran = Cell::new(false); assert_eq!(job(at(&w, "t1"), &json!(1), |r| { ran.set(true); r }).unwrap(), "/p"); assert!(ran.get());
     }
     #[test] fn absolute_folders_only() {

@@ -448,6 +448,15 @@ pub fn task_tree(st: &State, id: &str) -> Vec<String> {
     out
 }
 
+/// Live local projects a Quick Chat can be promoted into, sorted by title then id.
+pub fn move_project_targets(st: &State, qid: &str) -> Vec<Value> {
+    let mut ps: Vec<(&str, &str)> = st.projects.iter()
+        .filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH && !crate::sidebar::is_chats(id) && !p.root.is_empty())
+        .map(|(id, p)| (id.as_str(), p.title.as_str())).collect();
+    ps.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()).then(a.0.cmp(b.0)));
+    ps.into_iter().map(|(pid, title)| json!({"id":"project","label":title,"action":"row-move-project","value":format!("{qid}\u{1f}{pid}")})).collect()
+}
+
 /// `state`, `tools`, `menu`, `working`, `phase` for a thread at clock `now_s`, or None for a case not computed here.
 pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&str>) -> Option<Map<String, Value>> {
     let t = st.threads.get(id)?;
@@ -471,9 +480,19 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     m.insert("state".into(), json!(state_word(t.turn)));
     // a bot's chat (its page): Stop and Retry only, and no Snooze or Delete in its menu; Pin, Settle, Archive, Fork are a project thread's
     let bot = st.bot_threads_has(id);
+    let is_chat = t.project == crate::sidebar::CHATS;
     let mut tl = tools(t.turn, t.pinned, settled(st, id), t.archived, forked);
     let mut mn = menu(id, now_s < until);
     if bot { tl.retain(|x| matches!(x["action"].as_str(), Some("interrupt" | "retry"))); mn.retain(|x| !matches!(x["action"].as_str(), Some("snooze" | "row-delete"))); }
+    if is_chat {
+        mn.retain(|x| x["action"].as_str() != Some("diff"));
+        let targets = move_project_targets(st, id);
+        if !targets.is_empty() {
+            let mv = json!({"id":"move","icon":"folder","label":"Move to project\u{2026}","action":"","value":"","on":false,"danger":false,"options":[],"sub":targets});
+            let pos = mn.iter().position(|x| x["action"].as_str() == Some("row-delete")).unwrap_or(mn.len());
+            mn.insert(pos, mv);
+        }
+    }
     m.insert("tools".into(), Value::Array(tl));
     m.insert("menu".into(), Value::Array(mn));
     m.insert("working".into(), json!(working)); m.insert("phase".into(), json!(phase));
@@ -751,5 +770,21 @@ mod tests {
         let k = keys(&st, "t1", 10, "", None).unwrap();
         assert_eq!(k["picker"]["favorites"], json!(["claude/opus", "codex/gpt-6"]));
         assert!(as_helper(&k["picker"]).get("favorites").is_none());
+    }
+    #[test] fn chat_keys_menu_drops_diff_and_inserts_move_before_delete() {
+        let mut st = State::new();
+        for l in [
+            r#"{"$":"ProjectCreated","id":"p1","title":"Alpha","root":"/a","at":1}"#,
+            r#"{"$":"ProjectCreated","id":"p2","title":"Beta","root":"/b","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"c1","project":"chats","title":"Chat","env":"local","worktree":"/chats/c1","provider":"claude","model":"","at":1}"#,
+        ] { st.apply_line(l); }
+        let k = keys(&st, "c1", 10, "", None).unwrap();
+        let mn = k["menu"].as_array().unwrap();
+        assert!(!mn.iter().any(|x| x["action"] == "diff"), "chat menu drops Diff");
+        let mv_pos = mn.iter().position(|x| x["id"] == "move").expect("Move to project item");
+        let del_pos = mn.iter().position(|x| x["action"] == "row-delete").expect("Delete item");
+        assert_eq!(mv_pos + 1, del_pos, "Move to project inserted before Delete");
+        assert_eq!(mn[mv_pos]["sub"][0]["value"], "c1\u{1f}p1");
+        assert_eq!(mn[mv_pos]["sub"][1]["value"], "c1\u{1f}p2");
     }
 }

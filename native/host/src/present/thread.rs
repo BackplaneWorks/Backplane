@@ -689,14 +689,19 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("diff".into(), crate::session::pages::diff_json(&params["session"], thread));
     o.insert("id".into(), json!(format!("{hub}|{thread}")));
     o.insert("title".into(), json!(t.title));
+    let is_chat = t.project == crate::sidebar::CHATS;
     // the header's crumb names the project (and opens its page): its raw id and title
-    o.insert("project".into(), json!({"id": t.project, "title": st.projects.get(&t.project).map(|p| p.title.as_str()).unwrap_or("")}));
-    o.insert("branch".into(), json!(t.branch));
+    o.insert("project".into(), json!({"id": t.project, "title": if is_chat { crate::sidebar::CHATS_TITLE } else { st.projects.get(&t.project).map(|p| p.title.as_str()).unwrap_or("") }}));
+    o.insert("branch".into(), json!(if is_chat { "" } else { t.branch.as_str() }));
+    if is_chat {
+        o.insert("chat".into(), json!(true));
+        o.insert("canChild".into(), json!(false));
+    }
     o.insert("readingSeen".into(), json!(newest_id.as_deref().unwrap_or("-")));
     // a sent message's references (@bot >thread %project #room &model) as cards the client draws under it
     let mut entries = entries;
     // `#123` and `OWNER/REPO#123` in the messages' text link to GitHub's issues, in the project's repository on GitHub, or the default one for a project with none and a bot's conversation (md/issues.rs)
-    let repo = if st.bot_threads_has(thread) { String::new() } else { st.projects.get(&t.project).and_then(|p| md::issues::repo_of(&crate::mirror::origin_of_root(&p.root))).unwrap_or_default() };
+    let repo = if st.bot_threads_has(thread) || is_chat { String::new() } else { st.projects.get(&t.project).and_then(|p| md::issues::repo_of(&crate::mirror::origin_of_root(&p.root))).unwrap_or_default() };
     { for e in entries.iter_mut() { if let Some(Value::Array(b)) = e.get_mut("blocks") { md::issues::link_nodes(b, &repo) } } }
     // halt cards (agents/halt.rs): a turn ended out of memory or out of context, its row drawn as a card with its actions
     for e in entries.iter_mut() { if e["kind"] == "act" { let id = e["id"].as_str().unwrap_or("").to_string();
@@ -749,7 +754,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     if let Some(q) = queue.as_array_mut() { for (i, r) in crate::session::composer::unsent_rows(thread).into_iter().enumerate() { q.insert(i, r) } }
     o.insert("queue".into(), queue); o.insert("queued".into(), queued);
     // Buy it heads the thread's tools: in the window's header, and the first of the phones' overflow menu, which lists them
-    if let Some(b) = super::ready::header(st, thread, &params["session"]) { if let Some(t) = o.get_mut("tools").and_then(Value::as_array_mut) { t.insert(0, b) } }
+    if !is_chat { if let Some(b) = super::ready::header(st, thread, &params["session"]) { if let Some(t) = o.get_mut("tools").and_then(Value::as_array_mut) { t.insert(0, b) } } }
     for k in ["draft", "skills", "send", "sendAct"] { o.insert(k.into(), c[k].clone()); }
     Ok(Value::Object(o))
 }
@@ -1089,5 +1094,20 @@ mod tests {
         let rows = entries(&es, false, &|_| false, 5000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
         assert!(rows.iter().all(|r| !r["text"].as_str().unwrap_or("").starts_with("Snapshot")), "{rows:?}");
         assert_eq!(rows.iter().find(|r| r["id"] == "u1").unwrap()["restore"]["commit"], "0bac077");
+    }
+    #[test] fn shown_thread_for_quick_chat_sets_chat_fields_and_move_menu() {
+        let mut st = State::new();
+        for l in [
+            r#"{"$":"ProjectCreated","id":"p1","title":"Alpha","root":"/tmp/alpha","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"c1","project":"chats","title":"Quick Q","env":"local","branch":"","worktree":"/tmp/chats/c1","provider":"claude","model":"","at":2}"#,
+        ] { st.apply_line(l); }
+        let got = thread_object(&st, "h", "c1", &json!({"session":{"sel":"c1"}, "page":{"thread":"c1","rows":[]}, "now": 5000}), "").unwrap();
+        assert_eq!(got["chat"], true);
+        assert_eq!(got["project"], json!({"id":"chats","title":"Chats"}));
+        assert_eq!(got["branch"], "");
+        assert_eq!(got["canChild"], false);
+        let mn = got["menu"].as_array().unwrap();
+        assert!(!mn.iter().any(|x| x["action"] == "diff"));
+        assert!(mn.iter().any(|x| x["id"] == "move" && x["sub"][0]["value"] == "c1\u{1f}p1"), "{got}");
     }
 }

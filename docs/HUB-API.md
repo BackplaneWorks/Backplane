@@ -39,6 +39,10 @@ One place to start modules, after `Hub::start`: `agents::Agents::start(hub.clone
 ## Rules process
 Not wired yet. Planned call: one persistent native process, a JSON line in, one out: `{"v":1,"fn":"Fm.safe","args":{...}}` -> `{"ok":..}`; 6.7 us round trip measured (docs/HUB-M1.md). Until then implement the rule in Rust with a corpus test and keep name in the test.
 
+## Quick chats (`project == "chats"`)
+- `thread.create {project: "chats", ...}` creates a project-free quick chat in `<home>/chats/<id>` with no git repo and default title `"New chat"`.
+- `thread.move_project {thread, project}` emits append-only `ThreadProjectSet {id, project, at}` to move an idle quick chat (`thread.project == "chats"`) into a live local project, clearing `worktree`, `branch`, and `session`, keeping conversation history, and stopping any idle agent process.
+
 ## Agent providers (agents lane, commit 51b4ac53d)
 
 Contract: `native/host/src/agents/providers/mod.rs` (read its docs); reference driver: `providers/codex.rs`.

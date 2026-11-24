@@ -39,7 +39,7 @@ impl Index {
         let th = |t: &str| self.threads.get(t).cloned().unwrap_or_default();
         match s(e, "$") {
             "ProjectCreated" | "ProjectRemoved" => s(e, "id").to_string(),
-            "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ThreadDeleted"
+            "ThreadCreated" | "ThreadRenamed" | "ThreadProjectSet" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ThreadDeleted"
             | "ModesSet" | "ProviderSet" | "ThreadParentSet" | "ThreadLaunched" => th(s(e, "id")),
             "MessagePosted" | "MessageFrom" | "TurnChanged" | "PendingChanged" | "ActivityLogged" | "TurnQueued" | "QueueTaken" | "QueueEdited" | "QueueRemoved"
             | "QueueMoved" | "QueueTakenOne" | "TodosChanged" | "TodosSet" | "WorkSet" | "AskOpened" => th(s(e, "thread")),
@@ -53,7 +53,7 @@ impl Index {
     pub fn fold(&mut self, seq: u32, e: &Value) {
         match s(e, "$") {
             "ProjectCreated" => { self.projects.insert(s(e, "id").into(), (s(e, "title").into(), e["at"].as_u64().unwrap_or(0))); }
-            "ThreadCreated" => { self.threads.insert(s(e, "id").into(), s(e, "project").into()); }
+            "ThreadCreated" | "ThreadProjectSet" => { self.threads.insert(s(e, "id").into(), s(e, "project").into()); }
             "AskOpened" => { self.asks.insert(s(e, "id").into(), s(e, "thread").into()); }
             "TaskDelegated" => { self.tasks.insert(s(e, "task").into(), s(e, "parent").into()); }
             _ => {}

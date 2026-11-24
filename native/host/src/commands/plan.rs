@@ -5,7 +5,8 @@ use serde_json::{json, Value};
 pub struct Plan { pub events: Vec<Value>, pub reply: Value, /// a running turn to stop before the events (Retire.archive)
     pub stop: Option<String>, /// a worktree to make after the events are durable: (thread, project folder, mode, fork source)
     pub wt: Option<(String, String, String, String, super::worktree::Opts)>, /// a scratch thread's own folder to make: (thread)
-    pub scratch: Option<String>, /// what the agents module does after the events: ("steer" | "resume", thread, text)
+    pub scratch: Option<String>, /// a project-free Quick Chat's own folder to make: (thread)
+    pub chat: Option<String>, /// what the agents module does after the events: ("steer" | "resume", thread, text)
     pub act: Option<(&'static str, String, String)> }
 
 /// One entry of a thread as the handoff text reads it: a message or an activity row.
@@ -19,7 +20,7 @@ pub struct Ctx { pub entries: Vec<Line>, pub buy: Buy }
 pub struct Buy { pub on: bool, pub buying: bool, pub last: String }
 
 /// The requests that read the thread's whole conversation.
-pub fn needs_entries(m: &str) -> bool { matches!(m, "thread.fork" | "thread.back" | "thread.provider" | "accounts.select" | "accounts.choose" | "fallback.switch") }
+pub fn needs_entries(m: &str) -> bool { matches!(m, "thread.fork" | "thread.back" | "thread.provider" | "thread.move_project" | "accounts.select" | "accounts.choose" | "fallback.switch") }
 
 fn ok(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":true}) }
 fn made(id: &Value, th: &str) -> Value { json!({"t":"reply","id":id,"ok":true,"thread":th}) }
@@ -29,7 +30,7 @@ fn s(p: &Value, k: &str, d: &str) -> String { p.get(k).and_then(Value::as_str).u
 fn nat(p: &Value, k: &str) -> u64 { match p.get(k) { Some(Value::Number(n)) => n.as_u64().unwrap_or(0), Some(Value::String(t)) => t.parse().unwrap_or(0), _ => 0 } }
 /// pinned threads a project keeps (`thread.pin`)
 pub const PINS: usize = 2;
-fn done(events: Vec<Value>, id: &Value) -> Option<Plan> { Some(Plan { events, reply: ok(id), stop: None, wt: None, scratch: None, act: None }) }
+fn done(events: Vec<Value>, id: &Value) -> Option<Plan> { Some(Plan { events, reply: ok(id), stop: None, wt: None, scratch: None, chat: None, act: None }) }
 /// Merge.found: the events that settle a thread whose branch is merged, once (none when it is not due).
 pub fn merged(f: &Fold, th: &str, url: &str, at: u64) -> Vec<Value> {
     let t = f.threads.get(th).cloned().unwrap_or_default();
@@ -123,7 +124,7 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         "thread.settle" | "thread.archive" => {
             let mut ev = vec![json!({"$":"ThreadSettled","id":th,"manual":true,"at":at})];
             if !f.setting(&format!("bg.{th}")).is_empty() { ev.push(json!({"$":"WorkSet","thread":th,"kind":"bg","rows":"","at":at})) }
-            Some(Plan { events: ev, reply: ok(id), stop: Some(th.clone()), wt: None, scratch: None, act: None })
+            Some(Plan { events: ev, reply: ok(id), stop: Some(th.clone()), wt: None, scratch: None, chat: None, act: None })
         }
         "thread.unsettle" => done(vec![json!({"$":"ThreadUnsettled","id":th,"at":at})], id),
         // a new pin goes to the bottom of the Pinned shelf: a place a drag gave it on an earlier pin is dropped
@@ -143,20 +144,20 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         "thread.rename" => { let t = s(p, "title", ""); let t = t.trim(); done(if t.is_empty() || th.is_empty() { vec![] } else { vec![json!({"$":"ThreadRenamed","id":th,"title":t,"at":at}), json!({"$":"SettingSet","key":format!("title.person.{th}"),"value":"1","at":at})] }, id) } // the person's own title: no titler replaces it
         "thread.delete" => {
             let stop = Some(th.clone()); // Retire: AgentStop every time, a running turn is interrupted first (see mod.rs)
-            Some(Plan { events: retire(f, &th, at, json!({"$":"ThreadDeleted","id":th,"at":at}), false), reply: ok(id), stop, wt: None, scratch: None, act: None })
+            Some(Plan { events: retire(f, &th, at, json!({"$":"ThreadDeleted","id":th,"at":at}), false), reply: ok(id), stop, wt: None, scratch: None, chat: None, act: None })
         }
         "thread.snooze" => {
             // "tomorrow" is a server job (the machine's zone): a copy of a log tells the client no (Copy.git.reads), anywhere else it answers {thread}
             let tomorrow_job = s(p, "for", "") == "tomorrow";
-            if tomorrow_job && crate::copy::on() { return Some(Plan { events: vec![], reply: err(id, crate::copy::GIT_TOLD), stop: None, wt: None, scratch: None, act: None }) }
+            if tomorrow_job && crate::copy::on() { return Some(Plan { events: vec![], reply: err(id, crate::copy::GIT_TOLD), stop: None, wt: None, scratch: None, chat: None, act: None }) }
             let until = match s(p, "for", "").as_str() { "1h" => at + 3600, "1w" => at + 604800, "off" => 0, "tomorrow" => tomorrow(at), _ => nat(p, "until") };
             let reply = if tomorrow_job { json!({"t":"reply","id":id,"ok":true,"result":{"thread":th}}) } else { ok(id) };
-            Some(Plan { events: vec![json!({"$":"ThreadSnoozed","id":th,"until":until,"at":at})], reply, stop: None, wt: None, scratch: None, act: None })
+            Some(Plan { events: vec![json!({"$":"ThreadSnoozed","id":th,"until":until,"at":at})], reply, stop: None, wt: None, scratch: None, chat: None, act: None })
         }
         // a shelf's new order after a drag: {section: "pinned" | "active", thread: the one moved, ids: the shelf's threads in their new order}
         "thread.reorder" => {
             let section = s(p, "section", "");
-            if section != "pinned" && section != "active" { return Some(Plan { events: vec![], reply: err(id, "only pinned and active threads reorder"), stop: None, wt: None, scratch: None, act: None }) }
+            if section != "pinned" && section != "active" { return Some(Plan { events: vec![], reply: err(id, "only pinned and active threads reorder"), stop: None, wt: None, scratch: None, chat: None, act: None }) }
             let xs: Vec<(String, String)> = p.get("ids").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str)
                 .map(|i| { let n = f.nav(i); (i.to_string(), if section == "pinned" { n.pinned } else { n.active }) }).collect();
             done(key::plan(&xs, &th).into_iter().map(|(i, k)| json!({"$":"ThreadOrdered","id":i,"section":section,"key":k,"at":at})).collect(), id)
@@ -176,9 +177,9 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         // Roots.move: a project pointed at its folder's new place; its worktrees under the old root move with it
         "project.move" => {
             let pid = s(p, "project", ""); let raw = s(p, "path", ""); let t = raw.trim(); let path = if t.ends_with('/') && t.len() > 1 { &t[..t.len() - 1] } else { t };
-            if !crate::plat::fs::is_abs(path) { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, act: None }) }
-            if pid.contains('~') || pid == "scratch" { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, act: None }) }
-            let Some(pr) = f.projects.get(&pid).filter(|x| !x.removed) else { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, act: None }) };
+            if !crate::plat::fs::is_abs(path) { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, chat: None, act: None }) }
+            if pid.contains('~') || pid == "scratch" { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, chat: None, act: None }) }
+            let Some(pr) = f.projects.get(&pid).filter(|x| !x.removed) else { return Some(Plan { events: vec![], reply: err(id, "Type the folder's full path, starting with /"), stop: None, wt: None, scratch: None, chat: None, act: None }) };
             let mut ev = vec![json!({"$":"ProjectCreated","id":pid,"title":pr.title,"root":path,"at":at})];
             for (tid, t) in &f.threads { if t.project == pid && t.worktree.starts_with(&format!("{}/", pr.root)) {
                 ev.push(json!({"$":"WorktreeSet","id":tid,"branch":t.branch,"worktree":format!("{path}{}", &t.worktree[pr.root.len()..]),"at":at})) } }
@@ -189,15 +190,15 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         // Hub.thread_parent: empty parent detaches; the whole new ancestry is checked first
         "thread.detach" | "thread.reparent" => {
             let parent = if method == "thread.detach" { String::new() } else { s(p, "parent", "") };
-            if !parent_valid(f, &th, &parent) { return Some(Plan { events: vec![], reply: err(id, "Parent must be a live conversation in the same project without a cycle (maximum depth 64)."), stop: None, wt: None, scratch: None, act: None }) }
+            if !parent_valid(f, &th, &parent) { return Some(Plan { events: vec![], reply: err(id, "Parent must be a live conversation in the same project without a cycle (maximum depth 64)."), stop: None, wt: None, scratch: None, chat: None, act: None }) }
             let mut ev = vec![json!({"$":"ThreadParentSet","id":th,"parent":parent,"at":at})];
             if !parent.is_empty() { ev.push(json!({"$":"SettingSet","key":format!("thread.tree.{parent}"),"value":"1","at":at})) }
             done(ev, id)
         }
         // Todos.edit.rpc: the person's add, delete, move, set on the agent's list; the fold applies it (state/todo.rs `edit`). A new item has no id yet: it gets one the agent will not make.
         "todos.edit" => {
-            if th.is_empty() || !f.threads.contains_key(&th) { return Some(Plan { events: vec![], reply: err(id, "No such thread."), stop: None, wt: None, scratch: None, act: None }) }
-            let op = s(p, "op", ""); if !["add", "delete", "move", "set"].contains(&op.as_str()) { return Some(Plan { events: vec![], reply: err(id, "Unknown to-do edit."), stop: None, wt: None, scratch: None, act: None }) }
+            if th.is_empty() || !f.threads.contains_key(&th) { return Some(Plan { events: vec![], reply: err(id, "No such thread."), stop: None, wt: None, scratch: None, chat: None, act: None }) }
+            let op = s(p, "op", ""); if !["add", "delete", "move", "set"].contains(&op.as_str()) { return Some(Plan { events: vec![], reply: err(id, "Unknown to-do edit."), stop: None, wt: None, scratch: None, chat: None, act: None }) }
             let tid = if op == "add" && s(p, "id", "").is_empty() { format!("u{at}-{}", f.threads.len()) } else { s(p, "id", "") };
             let data = json!({"op": op, "id": tid, "text": s(p, "text", ""), "status": s(p, "status", ""), "to": nat(p, "to")}).to_string();
             done(vec![json!({"$":"TodosChanged","thread":th,"who":"person","data":data,"at":at})], id)
@@ -206,6 +207,7 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         "queue.remove" => done(vec![json!({"$":"QueueRemoved","thread":th,"msg":s(p, "msg", ""),"at":at})], id),
         "queue.move" => done(vec![json!({"$":"QueueMoved","thread":th,"msg":s(p, "msg", ""),"to":nat(p, "to"),"at":at})], id),
         "thread.create" => create(f, at, id, p, None, None),
+        "thread.move_project" => move_project(f, at, id, p, cx),
         "thread.titled" => {
             // Title.changes: the writer's title replaces the placeholder only while the thread still has it, and only when there is an answer
             let (cur, ph) = (f.threads.get(&th).map(|t| t.title.clone()).unwrap_or_default(), s(p, "placeholder", ""));
@@ -223,15 +225,15 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
         // Queue.steer: a queued message sent now (into the running turn, or as a turn of its own); the agents module runs it
         "queue.steer" => {
             let m = s(p, "msg", "");
-            let Some((_, text)) = f.queue(&th).iter().find(|(i, _)| *i == m).cloned() else { return Some(Plan { events: vec![], reply: err(id, "no such queued message"), stop: None, wt: None, scratch: None, act: None }) };
-            Some(Plan { events: vec![json!({"$":"QueueTakenOne","thread":th,"msg":m,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, act: Some((if running(f, &th) { "steer" } else { "start_one" }, th.clone(), text)) })
+            let Some((_, text)) = f.queue(&th).iter().find(|(i, _)| *i == m).cloned() else { return Some(Plan { events: vec![], reply: err(id, "no such queued message"), stop: None, wt: None, scratch: None, chat: None, act: None }) };
+            Some(Plan { events: vec![json!({"$":"QueueTakenOne","thread":th,"msg":m,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, chat: None, act: Some((if running(f, &th) { "steer" } else { "start_one" }, th.clone(), text)) })
         }
         // Hub.resume: the held queue of an idle thread (kept across a restart, or after a stop) starts now
         "queue.resume" => {
             let ev: Vec<Value> = if f.setting(&format!("thread.config.hold.{th}")) == "on" { vec![json!({"$":"SettingSet","key":format!("thread.config.hold.{th}"),"value":"","at":at})] } else { vec![] };
             let go = !running(f, &th) && f.queue(&th).iter().any(|(m, _)| !m.starts_with("handoff:"));
             let text = f.queue_text(&th); // Queue.texts
-            Some(Plan { events: ev, reply: ok(id), stop: None, wt: None, scratch: None, act: go.then(|| ("resume", th.clone(), text)) })
+            Some(Plan { events: ev, reply: ok(id), stop: None, wt: None, scratch: None, chat: None, act: go.then(|| ("resume", th.clone(), text)) })
         }
         "thread.modes" => modes(f, at, id, p),
         // the picker's "Plan first, this turn only" (Claude's plan mode for one turn): plan mode now, and `plan.once.<thread>` so the turn's end puts the
@@ -267,19 +269,20 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
 /// Hub.thread_create: a thread of a project, as the person asked; a retry with the same creationKey is the same thread.
 fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usize)>, forced_id: Option<&str>) -> Option<Plan> {
     let project = s(p, "project", ""); let parent = s(p, "parent", ""); let key = s(p, "creationKey", "");
-    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
+    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, chat: None, act: None });
     let root = new_root.map(|r| r.0.to_string()).unwrap_or_else(|| f.projects.get(&project).map(|x| x.root.clone()).unwrap_or_default());
     let scratch = project == "scratch";
+    let chat = project == crate::sidebar::CHATS;
     let n = new_root.map_or(f.n(), |r| r.1);
     let mut th = forced_id.map(str::to_string).unwrap_or_else(|| hub_id("t", at, n));
     if !key.is_empty() {
         let hex = key.len() == 32 && key.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c));
-        let live = f.projects.get(&project).map_or(false, |x| !x.removed && !x.root.is_empty()) && !scratch;
+        let live = f.projects.get(&project).map_or(false, |x| !x.removed && !x.root.is_empty()) && !scratch && !chat;
         if !(hex && parent.is_empty() && live) { return refuse("Choose an existing project and retry this request.") }
         th = format!("improvement-{key}");
         if f.threads.contains_key(&th) {
-            return Some(if alive(f, &th) && tree_project(f, &th) == project { Plan { events: vec![], reply: made(id, &th), stop: None, wt: None, scratch: None, act: None } }
-                else { Plan { events: vec![], reply: err(id, "This request belongs to a different or removed conversation. Open that conversation before retrying."), stop: None, wt: None, scratch: None, act: None } });
+            return Some(if alive(f, &th) && tree_project(f, &th) == project { Plan { events: vec![], reply: made(id, &th), stop: None, wt: None, scratch: None, chat: None, act: None } }
+                else { Plan { events: vec![], reply: err(id, "This request belongs to a different or removed conversation. Open that conversation before retrying."), stop: None, wt: None, scratch: None, chat: None, act: None } });
         }
     } else if !parent.is_empty()
         && !(alive(f, &parent) && tree_project(f, &parent) == project && chain(f, 63, tree_raw(f, &parent), &parent)) {
@@ -288,15 +291,21 @@ fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usiz
     // J.Json.get_str: the default when the field is missing or not a string; M.Setting.get keeps a stored ""
     let gs = |k: &str, d: &str| p.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
     let env = gs("env", f.get("thread.env", "auto"));
-    let title = gs("title", "New thread");
+    let title = if chat {
+        p.get("title").and_then(Value::as_str).map(str::trim).filter(|x| !x.is_empty()).unwrap_or("New chat").to_string()
+    } else {
+        gs("title", "New thread")
+    };
     let default_prov = f.default_agent.as_deref().unwrap_or(f.get("agent.provider", "claude"));
     let explicit_prov = p.get("provider").and_then(Value::as_str);
     let provider = explicit_prov.unwrap_or(default_prov).to_string();
     let default_model = if explicit_prov.is_some_and(|x| x != default_prov) { "" } else { f.get("agent.model", "") };
     let raw_model = p.get("model").and_then(Value::as_str).unwrap_or(default_model);
     let model = crate::settings::models::sanitize_model_now(&provider, raw_model);
-    let mode = if scratch || env == "local" { "local" } else { "worktree" };
-    let wt = if scratch { format!("{root}/{th}") } else { String::new() };
+    let mode = if scratch || chat || env == "local" { "local" } else { "worktree" };
+    let wt = if scratch { format!("{root}/{th}") }
+        else if chat { if f.chats_root.is_empty() { format!("chats/{th}") } else { format!("{}/{th}", f.chats_root) } }
+        else { String::new() };
     let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":project,"title":title,"env":mode,"branch":"","worktree":wt,"provider":provider,"model":model,"at":at})];
     ev.extend(account_created(f, &th, &provider, at)); // Accounts.created: the binding follows the thread
     if !key.is_empty() || parent.is_empty() {} else {
@@ -307,8 +316,32 @@ fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usiz
     // an Improvements send names its base (a local branch that exists: the handler checked) and its branch; only with a creation key
     let prefer = { let own = f.get(&format!("worktree.base.{project}"), ""); if own.is_empty() { f.get("worktree.base", "") } else { own } }.to_string(); // the project's default base (a local branch), when no base is asked for
     let opts = if !key.is_empty() { super::worktree::Opts { base: s(p, "base", ""), branch: super::worktree::sanitize(&s(p, "branch", "")), prefer: if s(p, "base", "").is_empty() { prefer.clone() } else { String::new() } } } else { super::worktree::Opts { prefer, ..Default::default() } };
-    let wt = (mode == "worktree" && !scratch).then(|| (th.clone(), root.clone(), env.clone(), String::new(), opts));
-    Some(Plan { events: ev, reply: made(id, &th), stop: None, wt, scratch: scratch.then(|| th.clone()), act: None })
+    let wt = (mode == "worktree" && !scratch && !chat).then(|| (th.clone(), root.clone(), env.clone(), String::new(), opts));
+    Some(Plan { events: ev, reply: made(id, &th), stop: None, wt, scratch: scratch.then(|| th.clone()), chat: chat.then(|| th.clone()), act: None })
+}
+
+/// Promote a project-free Quick Chat (`project == "chats"`) into an existing project, preserving history and clearing its old chat folder/session.
+fn move_project(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx) -> Option<Plan> {
+    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, chat: None, act: None });
+    let (th, project) = (s(p, "thread", ""), s(p, "project", ""));
+    let Some(t) = f.threads.get(&th).filter(|t| !t.deleted).cloned() else { return refuse("No such thread.") };
+    if t.project != crate::sidebar::CHATS { return refuse("Only project-free chats can be moved to a project.") }
+    if running(f, &th) { return refuse("Finish or stop the current turn before moving this chat to a project.") }
+    if project == crate::sidebar::SCRATCH || project == crate::sidebar::CHATS { return refuse("Choose an existing project.") }
+    let Some(pr) = f.projects.get(&project).filter(|x| !x.removed && !x.root.is_empty()).cloned() else { return refuse("Choose an existing project.") };
+    let n = f.n();
+    let mut ev = vec![json!({"$":"ThreadProjectSet","id":th,"project":project,"at":at})];
+    if !t.session.is_empty() { ev.push(json!({"$":"SessionSet","id":th,"session":"","at":at})); }
+    for (m, _) in f.queue(&th) {
+        if m.starts_with("handoff:move:") { ev.push(json!({"$":"QueueRemoved","thread":th,"msg":m,"at":at})); }
+    }
+    if !cx.entries.is_empty() {
+        let why = format!("This chat was moved into the project \"{}\" ({}). Continue here in the project folder; the conversation so far, oldest first:", pr.title, pr.root);
+        ev.push(json!({"$":"TurnQueued","thread":th,"msg":format!("handoff:move:{n}"),"text":hand_text(&why, &cx.entries, &th),"at":at}));
+    }
+    ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("p", at, n),"tone":"info","kind":"project","summary":format!("Moved to {}", pr.title),"at":at}));
+    let reply = json!({"t":"reply","id":id,"ok":true,"thread":th,"project":project});
+    Some(Plan { events: ev, reply, stop: Some(th), wt: None, scratch: None, chat: None, act: None })
 }
 
 
@@ -378,8 +411,8 @@ fn buy_title(f: &Fold, project: &str) -> String {
 fn buy_recent(th: &str, now: u64) -> bool { th.strip_prefix('t').and_then(|r| r.split('-').next()).and_then(|a| a.parse::<u64>().ok()).map_or(false, |made| now >= made && now - made <= 2) }
 /// Buy.start: a thread of its own in the source's folder, marked buy.<thread>, started by the person's "Buy it"; the client that asked goes to it.
 fn buy(f: &Fold, at: u64, id: &Value, src: &str, b: &Buy) -> Option<Plan> {
-    let no = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
-    let there = |th: &str| Some(Plan { events: vec![], reply: made(id, th), stop: None, wt: None, scratch: None, act: None });
+    let no = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, chat: None, act: None });
+    let there = |th: &str| Some(Plan { events: vec![], reply: made(id, th), stop: None, wt: None, scratch: None, chat: None, act: None });
     let Some(t) = f.threads.get(src).filter(|t| !t.deleted) else { return no("no such thread") };
     if !b.on { return no("Ordering is off: turn it on in Settings to buy") }
     if b.buying { return there(src) } // a queued click after the client went to its buy thread: it has no Buy of its own
@@ -392,18 +425,21 @@ fn buy(f: &Fold, at: u64, id: &Value, src: &str, b: &Buy) -> Option<Plan> {
     ev.extend(account_created(f, &th, &t.provider, at)); ev.extend(account_forked(f, &th, src, at));
     ev.extend([json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access" } else { &t.runtime },"interaction":if t.interaction.is_empty() { "default" } else { &t.interaction },"model":model,"at":at}),
         json!({"$":"SettingSet","key":format!("buy.{th}"),"value":src,"at":at}), json!({"$":"SettingSet","key":format!("buy.last.{src}"),"value":th,"at":at})]);
-    Some(Plan { events: ev, reply: made(id, &th), stop: None, wt: None, scratch: None, act: Some(("post", th, "Buy it".to_string())) })
+    Some(Plan { events: ev, reply: made(id, &th), stop: None, wt: None, scratch: None, chat: None, act: Some(("post", th, "Buy it".to_string())) })
 }
 
 fn fork(f: &Fold, at: u64, id: &Value, src: &str, cx: &Ctx) -> Option<Plan> {
-    let Some(t) = f.threads.get(src) else { return Some(Plan { events: vec![], reply: err(id, "no such thread"), stop: None, wt: None, scratch: None, act: None }) };
+    let Some(t) = f.threads.get(src) else { return Some(Plan { events: vec![], reply: err(id, "no such thread"), stop: None, wt: None, scratch: None, chat: None, act: None }) };
     let n = f.n(); let th = hub_id("t", at, n);
-    let scratch = t.project == "scratch"; let root = f.projects.get(&t.project).map(|x| x.root.clone()).unwrap_or_default();
-    let env = if scratch || t.worktree.is_empty() { "local" } else { "worktree" };
+    let scratch = t.project == "scratch"; let chat = t.project == crate::sidebar::CHATS; let root = f.projects.get(&t.project).map(|x| x.root.clone()).unwrap_or_default();
+    let env = if scratch || chat || t.worktree.is_empty() { "local" } else { "worktree" };
     let why = format!("This thread is a fork of \"{}\" ({src}). You continue its work from where it stands; its conversation so far, oldest first:", t.title);
     let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
+    let wt_dir = if scratch { format!("{root}/{th}") }
+        else if chat { if f.chats_root.is_empty() { format!("chats/{th}") } else { format!("{}/{th}", f.chats_root) } }
+        else { String::new() };
     let mut ev = vec![
-        json!({"$":"ThreadCreated","id":th,"project":t.project,"title":format!("Fork: {}", t.title),"env":env,"branch":"","worktree":if scratch { format!("{root}/{th}") } else { String::new() },"provider":t.provider,"model":model,"at":at})];
+        json!({"$":"ThreadCreated","id":th,"project":t.project,"title":format!("Fork: {}", t.title),"env":env,"branch":"","worktree":wt_dir,"provider":t.provider,"model":model,"at":at})];
     ev.extend(account_created(f, &th, &t.provider, at));
     ev.extend([
         json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access" } else { &t.runtime },"interaction":if t.interaction.is_empty() { "default" } else { &t.interaction },"model":model,"at":at}),
@@ -413,16 +449,16 @@ fn fork(f: &Fold, at: u64, id: &Value, src: &str, cx: &Ctx) -> Option<Plan> {
         json!({"$":"TurnQueued","thread":th,"msg":format!("handoff:{src}"),"text":hand_text(&why, &cx.entries, src),"at":at}),
         json!({"$":"ActivityLogged","thread":src,"act":hub_id("k", at, n),"tone":"info","kind":"fork","summary":format!("Forked into \"Fork: {}\"", t.title),"at":at})]);
     // a fork with no worktree of its own shares the source's folder: it says so
-    if !scratch && t.worktree.is_empty() {
+    if !scratch && !chat && t.worktree.is_empty() {
         ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("g", at, n),"tone":"info","kind":"git","summary":format!("working in the project folder with \"{}\" (no worktree of its own): its edits change the same files", t.title),"at":at}));
     }
-    let wt = (!scratch && !t.worktree.is_empty()).then(|| (th.clone(), root, "fork".to_string(), src.to_string(), Default::default()));
-    Some(Plan { events: ev, reply: made(id, &th), stop: None, wt, scratch: scratch.then(|| th.clone()), act: None })
+    let wt = (!scratch && !chat && !t.worktree.is_empty()).then(|| (th.clone(), root, "fork".to_string(), src.to_string(), Default::default()));
+    Some(Plan { events: ev, reply: made(id, &th), stop: None, wt, scratch: scratch.then(|| th.clone()), chat: chat.then(|| th.clone()), act: None })
 }
 
 fn back(f: &Fold, at: u64, id: &Value, fork: &str, cx: &Ctx) -> Option<Plan> {
     let src = f.forks.get(fork).cloned().unwrap_or_default();
-    if src.is_empty() { return Some(Plan { events: vec![], reply: err(id, "this thread is not a fork"), stop: None, wt: None, scratch: None, act: None }) }
+    if src.is_empty() { return Some(Plan { events: vec![], reply: err(id, "this thread is not a fork"), stop: None, wt: None, scratch: None, chat: None, act: None }) }
     let n = f.n(); let title = |x: &str| f.threads.get(x).map(|t| t.title.clone()).unwrap_or_default();
     let why = format!("Work done in a fork of this thread, \"{}\" ({fork}), brought back here. Its files stay on its own branch; what was said and done there, oldest first:", title(fork));
     done(vec![
@@ -439,7 +475,7 @@ fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, auto: bool) -> Opt
     // back to the provider the failover order moved it off, with no model named (Nov 11, Bub): the very model the thread asked for there, never the provider's default
     if model.is_empty() && from != to { let asked = crate::settings::fallback::Target::parse(f.setting(&format!("fallback.intent.{th}"))); if asked.provider == to { model = asked.model } }
     model = crate::settings::models::sanitize_model_now(&to, &model);
-    if running(f, &th) { return Some(Plan { events: vec![], reply: err(id, "a provider changes between turns: stop this one first"), stop: None, wt: None, scratch: None, act: None }) }
+    if running(f, &th) { return Some(Plan { events: vec![], reply: err(id, "a provider changes between turns: stop this one first"), stop: None, wt: None, scratch: None, chat: None, act: None }) }
     // the same agent: the model and effort it names, if any (a picker that pressed an agent and then a model before it heard the first back asks this way)
     if from == to {
         let mut ev = vec![];
@@ -467,7 +503,7 @@ fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, auto: bool) -> Opt
     if !auto { ev.extend(hold(f, &th, at)) }
     if auto { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("p", at, n),"tone":"info","kind":"fallback","summary":s(p, "say", ""),"at":at})) }
     else if count > 0 { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("p", at, n),"tone":"info","kind":"provider","summary":format!("Now on {to}{}", if missed == 0 { "" } else { "; it gets what it missed with the next message" }),"at":at})) }
-    Some(Plan { events: ev, reply: ok(id), stop: if waiting { None } else { Some(th.clone()) }, wt: None, scratch: None, act: None })
+    Some(Plan { events: ev, reply: ok(id), stop: if waiting { None } else { Some(th.clone()) }, wt: None, scratch: None, chat: None, act: None })
 }
 
 /// Hub.accounts.select: the thread goes on under another account of its provider from its next message, between turns. The old account's native session and how much
@@ -477,7 +513,7 @@ fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, auto: bool) -> Opt
 /// asked, which the tool checks and says with `asked`), "failover" (the driver, past a pin: the pin is where the thread returns) and "return" (the driver, back to where it came from).
 fn account_select(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, by: &str) -> Option<Plan> {
     use crate::settings::accounts as ac;
-    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
+    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, chat: None, act: None });
     let th = s(p, "thread", ""); let th = th.rsplit('|').next().unwrap_or("").to_string(); let profile = s(p, "profile", ""); let epoch = p.get("epoch").and_then(Value::as_u64).unwrap_or(0);
     let Some(t) = f.threads.get(&th).filter(|t| !t.deleted).cloned() else { return refuse("The thread or account selection changed. Reopen the account menu and try again.") };
     if running(f, &th) { return refuse("Finish or stop the current turn before selecting another account.") }
@@ -523,7 +559,7 @@ fn account_select(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, by: &str) 
     let summary = match by { "person" => format!("Selected {name}; conversation context is handed to this account with the next message."), "agent" | "bot" => format!("{} selected {name}; conversation context is handed to this account with the next message.", s(p, "who", "An agent")), _ => said.clone() };
     if !summary.is_empty() { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("account", at, n + 1),"tone":"info","kind":"account","summary":summary,"at":at})) }
     ev.extend(after);
-    Some(Plan { events: ev, reply: ok(id), stop: Some(th), wt: None, scratch: None, act: None })
+    Some(Plan { events: ev, reply: ok(id), stop: Some(th), wt: None, scratch: None, chat: None, act: None })
 }
 
 const NO_ACCOUNT: &str = "{\"id\":\"\",\"epoch\":0}";
@@ -549,7 +585,7 @@ pub fn norm_root(r: &str) -> String {
 /// Hub.project_add (`project.create`): a folder becomes a project once (the same root twice is refused; a removed project's folder brings that
 /// project back with its threads); a project made afresh starts with a thread, made as thread.create makes one.
 pub fn project_create(f: &Fold, at: u64, id: &Value, p: &Value, root: &str) -> Plan {
-    let refuse = |m: String| Plan { events: vec![], reply: err(id, &m), stop: None, wt: None, scratch: None, act: None };
+    let refuse = |m: String| Plan { events: vec![], reply: err(id, &m), stop: None, wt: None, scratch: None, chat: None, act: None };
     if root.trim().is_empty() { return refuse("no folder given".into()) }
     let root_n = norm_root(root);
     if f.projects.values().any(|x| !x.removed && norm_root(&x.root) == root_n) { return refuse(format!("already a project: {root}")) }
@@ -560,12 +596,12 @@ pub fn project_create(f: &Fold, at: u64, id: &Value, p: &Value, root: &str) -> P
         // the removed project comes back as it was: its own name (a rename before it went is kept), unless a title is given now
         Some(pid) => {
             let title = if p.get("title").and_then(Value::as_str).is_some() { title } else { f.projects[&pid].title.clone() };
-            Plan { events: vec![json!({"$":"ProjectCreated","id":pid,"title":title,"root":root_n,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, act: None }
+            Plan { events: vec![json!({"$":"ProjectCreated","id":pid,"title":title,"root":root_n,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, chat: None, act: None }
         }
         // `starter: false` (a phone, data/1): the project alone; the phone's own New thread screen makes its first thread, so none is left empty
         None if p.get("starter").and_then(Value::as_bool) == Some(false) => {
             let pid = hub_id("p", at, n);
-            Plan { events: vec![json!({"$":"ProjectCreated","id":pid,"title":title,"root":root_n,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, act: None }
+            Plan { events: vec![json!({"$":"ProjectCreated","id":pid,"title":title,"root":root_n,"at":at})], reply: ok(id), stop: None, wt: None, scratch: None, chat: None, act: None }
         }
         None => {
             let pid = hub_id("p", at, n);
@@ -592,7 +628,7 @@ pub fn title_clean(answer: &str) -> String {
 /// Home.start: one real conversation and its first message, made atomically; the retained message id resolves to the same thread on every retry.
 fn start(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
     let (project, msg, text) = (s(p, "project", ""), s(p, "msg", ""), s(p, "text", ""));
-    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, act: None });
+    let refuse = |m: &str| Some(Plan { events: vec![], reply: err(id, m), stop: None, wt: None, scratch: None, chat: None, act: None });
     let live_root = f.projects.get(&project).filter(|x| !x.removed).map_or(false, |x| !x.root.is_empty());
     let token = !msg.is_empty() && msg.chars().count() <= 160 && msg.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_');
     if !(live_root && token && !text.trim().is_empty()) { return refuse("Choose a project and enter a message before starting a thread.") }
@@ -601,7 +637,7 @@ fn start(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
         let ok = f.threads.get(&th).map_or(false, |t| !t.deleted && t.project == project);
         // a retry finds the thread made: the message goes in if it never arrived (the hub died, or turn.start failed, between the two)
         let posted = f.home_msgs.contains(&format!("{th}\u{1}{msg}"));
-        return if ok { Some(Plan { events: vec![], reply: made(id, &th), stop: None, wt: None, scratch: None, act: (!posted).then(|| ("post", th.clone(), text.clone())) }) } else { refuse("This request belongs to a different or removed conversation. Open that conversation before retrying.") };
+        return if ok { Some(Plan { events: vec![], reply: made(id, &th), stop: None, wt: None, scratch: None, chat: None, act: (!posted).then(|| ("post", th.clone(), text.clone())) }) } else { refuse("This request belongs to a different or removed conversation. Open that conversation before retrying.") };
     }
     let title: String = text.chars().take(80).collect();
     let mut pl = create(f, at, id, &json!({"project": project, "title": title}), None, Some(&th))?;

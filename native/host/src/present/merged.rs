@@ -112,7 +112,7 @@ pub fn keys_of(ps: &[(String, u64, String, String, String)], machine: &str, here
 /// This machine's keys (`keys_of` over its projects, `origin` and `rel` read from each folder): what the sidebar, the registry rows and
 /// machine_list all say, so every machine computes the same key for a copy.
 pub fn local_keys(st: &State, here: &str, origin: &dyn Fn(&str) -> String, rel: &dyn Fn(&str) -> String) -> HashMap<String, String> {
-    let ps: Vec<(String, u64, String, String, String)> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH)
+    let ps: Vec<(String, u64, String, String, String)> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH && !crate::sidebar::is_chats(id))
         .map(|(id, p)| (id.clone(), p.created, origin(&p.root), rel(&p.root), st.settings.get(&format!("project.link.{id}")).cloned().unwrap_or_default())).collect();
     keys_of(&ps, "", here)
 }
@@ -155,7 +155,7 @@ pub fn merged_projects_in<'a>(st: &'a State, far: &[(String, &'a State)], away: 
     let live_act = |s: &State, id: &str, created: u64| s.threads.iter().filter(|(tid, t)| t.project == id && !t.deleted && !s.run_hidden(tid)).map(|(_, t)| t.activity.max(t.created)).max().unwrap_or(created);
     let set = |s: &'a State, k: String| s.settings.get(&k).map(String::as_str).unwrap_or("");
     // this machine's, oldest first (so of two local projects of one repository the older names the row)
-    let mut lp: Vec<_> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH).collect();
+    let mut lp: Vec<_> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH && !crate::sidebar::is_chats(id)).collect();
     lp.sort_by(|a, b| a.1.created.cmp(&b.1.created).then(a.0.cmp(b.0)));
     let keys = local_keys(st, here, local_origin, local_rel);
     for (id, p) in lp {
@@ -165,7 +165,7 @@ pub fn merged_projects_in<'a>(st: &'a State, far: &[(String, &'a State)], away: 
     }
     let live_names: Vec<&str> = far.iter().map(|(n, _)| n.as_str()).collect();
     for (m, f) in far {
-        let mut fp: Vec<_> = f.projects.iter().filter(|(id, p)| !p.removed && !id.ends_with(&format!("~{}", crate::sidebar::SCRATCH)) && id.as_str() != crate::sidebar::SCRATCH).collect();
+        let mut fp: Vec<_> = f.projects.iter().filter(|(id, p)| !p.removed && !id.ends_with(&format!("~{}", crate::sidebar::SCRATCH)) && id.as_str() != crate::sidebar::SCRATCH && !crate::sidebar::is_chats(id)).collect();
         fp.sort_by(|a, b| a.1.created.cmp(&b.1.created).then(a.0.cmp(b.0)));
         // (one machine's copies never merge with each other: `keys_of`'s rule, applied to the keys as this hub learns them)
         let mut taken = std::collections::HashSet::new();

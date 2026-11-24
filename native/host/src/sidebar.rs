@@ -21,6 +21,11 @@ pub fn fuzzy_hit(title: &str, q: &str) -> bool {
 pub fn word_hit(text: &str, q: &str) -> bool { let t = text.to_lowercase(); q.to_lowercase().split_whitespace().all(|w| t.contains(w)) }
 /// The Scratch project's id: conversations that belong to no project. Nothing starts there any more; its chats stay (`NO_PROJECT`).
 pub const SCRATCH: &str = "scratch";
+/// Project-free Quick Chats sentinel (`thread.project == CHATS`), with no `ProjectCreated` record.
+pub const CHATS: &str = "chats";
+pub const CHATS_TITLE: &str = "Chats";
+/// Whether a project id (local or `<link>~chats`) is the Quick Chats sentinel.
+pub fn is_chats(project: &str) -> bool { project == CHATS || project.split_once('~').is_some_and(|(_, l)| l == CHATS) }
 /// What every client calls the Scratch chats and says as their place: they are chats that belong to no project (the old name, "Conversation
 /// history", said nothing of what they are or why they are apart from the projects).
 pub const NO_PROJECT: &str = "Chats with no project";
@@ -351,8 +356,8 @@ pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
     let open_project = st.threads.get(o.selected).map(|t| t.project.as_str()).unwrap_or("");
     for (id, p) in &st.projects {
         if p.removed && id != open_project { continue }
-        // Side.projs.keep: the Scratch project (conversations that belong to no project) is not listed among projects
-        if id.rsplit('~').next() == Some("scratch") && !id.contains('~') || id.split_once('~').map_or(false, |(_, l)| l == "scratch") { continue }
+        // Side.projs.keep: the Scratch project and Quick Chats sentinel are not listed among projects
+        if (id.rsplit('~').next() == Some("scratch") && !id.contains('~')) || id.split_once('~').map_or(false, |(_, l)| l == "scratch") || is_chats(id) { continue }
         let mine: &[&str] = listed.get(id.as_str()).map_or(&[], Vec::as_slice);
         let raw = shelves_from(st, mine, o.now);
         // Side.latest: a thread's last move for its project's place; settling by hand counts
