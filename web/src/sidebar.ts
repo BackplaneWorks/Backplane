@@ -143,6 +143,10 @@ export interface SidebarSection {
 export interface SidebarCallbacks {
   onSelectThread: (threadId: string) => void;
   onNewThread: (projectId: string) => void;
+  /** A project's name: its home. False (or no handler): this hub has none, and the name folds the project as before. */
+  onOpenProject?: (projectId: string) => boolean;
+  /** Whether a project's name opens a home at all (the name's tooltip says so only then). */
+  canOpenProject?: () => boolean;
   onSelectBot: (bot: BotItem) => void;
   onSelectRoom?: (room: RoomItem) => void;
   onNewBot?: () => void;
@@ -345,6 +349,7 @@ export class SidebarView {
 
   private sections: SidebarSection[] | null = null;
   private projects: ProjectItem[] = [];
+  private selectedProjectId = "";
   private threads: ThreadItem[] = [];
   private bots: BotItem[] = [];
   private rooms: RoomItem[] = [];
@@ -510,6 +515,27 @@ export class SidebarView {
   public setSelected(threadId: string): void {
     this.selectedThreadId = threadId;
     this.render();
+  }
+
+  /** The project whose home is on show ("" for none): its head is marked, and no thread row is. */
+  public setSelectedProject(projectId: string): void {
+    if (this.selectedProjectId === projectId) return;
+    this.selectedProjectId = projectId;
+    this.render();
+  }
+
+  /** The chevron beside a project's name: it folds and unfolds the project's threads. */
+  private makeFoldChevron(folded: boolean, projectId: string): HTMLButtonElement {
+    const chev = document.createElement("button");
+    chev.type = "button";
+    chev.className = "bp-proj-chev" + (folded ? " folded" : "");
+    chev.textContent = folded ? "▸" : "▾";
+    const label = folded ? t("web.home.unfold", "Show threads") : t("web.home.fold", "Hide threads");
+    chev.title = label;
+    chev.setAttribute("aria-label", label);
+    chev.setAttribute("aria-expanded", folded ? "false" : "true");
+    chev.setAttribute("data-testid", `project-fold-${projectId}`);
+    return chev;
   }
 
   public focusFilter(): void {
@@ -777,7 +803,7 @@ export class SidebarView {
     const el = document.createElement("div");
     el.className = "bp-thread-row" +
       (isInbox ? " bp-inbox-row" : "") +
-      (row.id === this.selectedThreadId || rawThreadId(row.id) === this.selectedThreadId ? " active" : "") +
+      (!this.selectedProjectId && (row.id === this.selectedThreadId || rawThreadId(row.id) === this.selectedThreadId) ? " active" : "") +
       (row.off ? " bp-dim" : "");
     el.setAttribute("data-thread-id", row.id);
     el.setAttribute("data-testid", `thread-row-${row.id}`);
@@ -1091,9 +1117,19 @@ export class SidebarView {
             nameSpan.className = "bp-proj-name";
             nameSpan.textContent = proj.title || proj.id;
             toggle.append(icon, nameSpan);
-            if (proj.fold === "project-fold" && proj.nav) {
-              toggle.addEventListener("click", () => this.cb.onToggleProjectFold?.(proj.nav!));
-            }
+            const canFold = proj.fold === "project-fold" && Boolean(proj.nav);
+            const fold = (): void => { if (canFold) this.cb.onToggleProjectFold?.(proj.nav!); };
+            // the name opens the project's home; the chevron beside it folds its threads (an older hub has no home: the name folds)
+            if (!proj.off && this.cb.canOpenProject?.()) toggle.title = t("web.home.open", "Open project home");
+            toggle.setAttribute("data-testid", `project-open-${proj.id}`);
+            if (this.selectedProjectId && rawThreadId(proj.id) === this.selectedProjectId) header.classList.add("active");
+            toggle.addEventListener("click", () => {
+              if (proj.off || !this.cb.onOpenProject?.(proj.id)) fold();
+            });
+            const chev = this.makeFoldChevron(Boolean(proj.folded), proj.id);
+            if (canFold) chev.addEventListener("click", (e) => { e.stopPropagation(); fold(); });
+            else chev.disabled = true;
+            header.appendChild(chev);
 
             const meta = document.createElement("div");
             meta.className = "bp-proj-meta";
@@ -1256,11 +1292,20 @@ export class SidebarView {
         nameSpan.className = "bp-proj-name";
         nameSpan.textContent = proj.title || proj.id;
         toggle.append(folder, nameSpan);
-        toggle.addEventListener("click", () => {
+        const fold = (): void => {
           if (this.collapsedProjects.has(proj.id)) this.collapsedProjects.delete(proj.id);
           else this.collapsedProjects.add(proj.id);
           this.render();
+        };
+        if (this.cb.canOpenProject?.()) toggle.title = t("web.home.open", "Open project home");
+        toggle.setAttribute("data-testid", `project-open-${proj.id}`);
+        if (this.selectedProjectId && proj.id === this.selectedProjectId) header.classList.add("active");
+        toggle.addEventListener("click", () => {
+          if (!this.cb.onOpenProject?.(proj.id)) fold();
         });
+        const chev = this.makeFoldChevron(collapsed, proj.id);
+        chev.addEventListener("click", (e) => { e.stopPropagation(); fold(); });
+        header.appendChild(chev);
 
         const addBtn = document.createElement("button");
         addBtn.type = "button";

@@ -1,7 +1,7 @@
 // Grouped, searchable Web Settings modal:
 // General (Appearance: Theme & Language), Agents and tools (AI providers),
 // Connect (Devices & browser, Home machine).
-import { t, trs } from "./i18n";
+import { getLocale, t, trs } from "./i18n";
 import type { NoProviderNotice } from "./provider-notice";
 import {
   SETTINGS_GROUPS,
@@ -16,6 +16,15 @@ import {
   type WebLocalePref,
   type WebThemePref,
 } from "./settings-model";
+import {
+  ringAudioPath,
+  ringCountText,
+  ringHeardText,
+  ringStateText,
+  type RingList,
+  type RingNote,
+  type RingText,
+} from "./ring-model";
 import type { HomeInfo } from "./ws";
 
 export interface SettingsRowButton {
@@ -46,6 +55,19 @@ export interface SettingsCallbacks {
   onGetHubTheme?: () => "dark" | "light";
   onGetLocalePref?: () => WebLocalePref;
   onSetLocalePref?: (pref: WebLocalePref) => void;
+  /** Settings › Ring: whether this hub lets a browser read the ring's recordings (feature `ringnotes`). */
+  hasRing?: () => boolean;
+  /** The recordings, newest first; `q` narrows them to what was said. */
+  onRingList?: (q: string) => Promise<RingList>;
+  /** Hear a recording again with the local engine or OpenAI. */
+  onRingHear?: (note: string, engine: "local" | "openai") => Promise<void>;
+  /** Where a note went: its thread. */
+  onOpenThread?: (threadId: string) => void;
+}
+
+/** A model text in the page's language. */
+function ringT(x: RingText): string {
+  return x.key ? t(x.key, x.fallback, x.vars) : x.fallback;
 }
 
 function makeNavIcon(kind: SettingsPageMeta["icon"]): SVGSVGElement {
@@ -80,6 +102,10 @@ function makeNavIcon(kind: SettingsPageMeta["icon"]): SVGSVGElement {
     case "link":
       add("path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" });
       add("path", { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" });
+      break;
+    case "mic":
+      add("rect", { x: "9", y: "2", width: "6", height: "12" });
+      add("path", { d: "M5 11a7 7 0 0 0 14 0M12 18v4M8 22h8" });
       break;
     case "globe":
       add("circle", { cx: "12", cy: "12", r: "10" });
@@ -126,6 +152,8 @@ function pageTitle(id: SettingsPageId, fallback: string): string {
       return t("settings.appearance", fallback);
     case "providers":
       return t("web.settings.providers", fallback);
+    case "ring":
+      return t("ring.ring", fallback);
     case "devices":
       return fallback;
     case "home":
@@ -155,6 +183,25 @@ export class SettingsModal {
   private devicesRows: SettingsRow[] = [];
   private devicesError = "";
   private loadGen = 0;
+
+  private ringLoaded = false;
+  private ringLoading = false;
+  private ringList: RingList = { total: 0, notes: [], busy: "" };
+  /** The page's own parts while it is on show, so a new answer changes their words in place (a recording that plays keeps playing). */
+  private ringCountEl: HTMLElement | null = null;
+  private ringErrorEl: HTMLElement | null = null;
+  private ringRows = new Map<string, { state: HTMLElement; words: HTMLElement; meta: HTMLElement; hear: HTMLButtonElement[] }>();
+  /** The search the rows on show were drawn for. */
+  private ringShownQuery = "";
+  private ringError = "";
+  /** The search as it was last sent, and as it is being typed. */
+  private ringQuery = "";
+  private ringDraft = "";
+  private ringGen = 0;
+  /** Notes this page asked to be heard again, until the hub says it is hearing one (or has had the time to). */
+  private ringBusy = new Set<string>();
+  private ringPolls = 0;
+  private ringTimers: number[] = [];
 
   constructor(root: HTMLElement, cb: SettingsCallbacks) {
     this.cb = cb;
@@ -285,6 +332,7 @@ export class SettingsModal {
     this.backdrop.classList.remove("bp-hidden");
     this.render();
     void this.loadDevices();
+    if (this.activePage === "ring") void this.loadRing();
     window.setTimeout(() => {
       if (this.openState) this.searchInput.focus();
     }, 0);
@@ -307,6 +355,12 @@ export class SettingsModal {
     this.searchBrowseAll = false;
     this.syncSearchClear();
     this.backdrop.classList.add("bp-hidden");
+    for (const id of this.ringTimers) window.clearTimeout(id);
+    this.ringTimers = [];
+    this.ringBusy.clear();
+    this.ringPolls = 0;
+    // a recording stops with the page that plays it
+    if (this.activePage === "ring") this.paneEl.replaceChildren();
   }
 
   public refreshLocale(): void {
@@ -357,6 +411,109 @@ export class SettingsModal {
     }
   }
 
+  /** Settings › Ring: the recordings as the hub lists them now (the search as last sent). */
+  private async loadRing(): Promise<void> {
+    if (!this.cb.onRingList || !(this.cb.hasRing?.() ?? false)) return;
+    const gen = ++this.ringGen;
+    this.ringLoading = !this.ringLoaded;
+    if (this.ringLoading) this.showRing();
+    try {
+      const list = await this.cb.onRingList(this.ringQuery);
+      if (gen !== this.ringGen) return;
+      this.ringList = list;
+      this.ringError = "";
+      // a note this page sent to be heard stays busy while the hub hears one; once it hears none, it is done (or was refused)
+      if (!list.busy) this.ringBusy.clear();
+      // the hub is hearing: read again until it is not (a bounded number of times)
+      if (list.busy && this.openState && this.ringPolls < 40) {
+        this.ringPolls++;
+        this.ringLater(3000);
+      } else if (!list.busy) {
+        this.ringPolls = 0;
+      }
+    } catch (e) {
+      if (gen !== this.ringGen) return;
+      this.ringError = e instanceof Error && e.message ? e.message : t("web.ring.error", "Could not load recordings.");
+    } finally {
+      if (gen === this.ringGen) {
+        this.ringLoaded = true;
+        this.ringLoading = false;
+        this.showRing();
+      }
+    }
+  }
+
+  /** The list is read again in `ms` (while Settings is open). */
+  private ringLater(ms: number): void {
+    const id = window.setTimeout(() => {
+      this.ringTimers = this.ringTimers.filter((x) => x !== id);
+      if (this.openState) void this.loadRing();
+    }, ms);
+    this.ringTimers.push(id);
+  }
+
+  private ringIsBusy(id: string): boolean {
+    return this.ringBusy.has(id) || this.ringList.busy === id;
+  }
+
+  /**
+   * The Ring page as it is now. The same notes as are on show: their words change in place, so a recording that plays keeps
+   * playing and the search field keeps its caret. Other notes (a search, a new recording): the page is drawn again.
+   */
+  private showRing(): void {
+    if (!this.openState || this.activePage !== "ring" || (this.query.trim() && this.searchBrowseAll)) return;
+    const ids = this.ringList.notes.map((n) => n.id);
+    const shown = Array.from(this.ringRows.keys());
+    const same = this.ringCountEl?.isConnected === true && this.ringShownQuery === this.ringQuery
+      && ids.length === shown.length && ids.every((id, i) => id === shown[i]);
+    if (!same) {
+      this.renderPane();
+      return;
+    }
+    if (this.ringCountEl) this.ringCountEl.textContent = this.ringCountLine();
+    if (this.ringErrorEl) {
+      this.ringErrorEl.textContent = this.ringError;
+      this.ringErrorEl.classList.toggle("bp-hidden", !this.ringError);
+    }
+    for (const n of this.ringList.notes) this.fillRingNote(n);
+  }
+
+  private ringCountLine(): string {
+    return this.ringLoading
+      ? t("web.ring.loading", "Loading recordings…")
+      : ringT(ringCountText(this.ringList.total, this.ringList.notes.length, this.ringQuery));
+  }
+
+  /** A note's words, who heard them and where it is, into its row. */
+  private fillRingNote(n: RingNote): void {
+    const r = this.ringRows.get(n.id);
+    if (!r) return;
+    const busy = this.ringIsBusy(n.id);
+    r.state.className = "bp-status-pill " + (busy ? "accent" : n.state === "sent" ? "ok" : n.state === "failed" ? "bad" : "warn");
+    r.state.textContent = ringT(ringStateText(n.state, busy));
+    r.words.className = "bp-ring-words" + (n.words ? "" : " bp-dim");
+    r.words.textContent = n.words || t("web.ring.no.words", "(no words)");
+    r.meta.textContent = [ringT(ringHeardText(n)), n.unsure, n.error].filter(Boolean).join(" · ");
+    for (const b of r.hear) b.disabled = busy;
+  }
+
+  private async hearRing(note: string, engine: "local" | "openai"): Promise<void> {
+    if (!this.cb.onRingHear || this.ringIsBusy(note)) return;
+    this.ringBusy.add(note);
+    this.ringError = "";
+    this.showRing();
+    try {
+      await this.cb.onRingHear(note, engine);
+      // the hub hears it in its own time: the list is read again shortly (and on, while the hub says it is hearing)
+      this.ringPolls = 0;
+      this.ringLater(1500);
+    } catch (e) {
+      this.ringBusy.delete(note);
+      this.ringError = e instanceof Error && e.message ? e.message : t("web.ring.error", "Could not load recordings.");
+      this.showRing();
+    }
+  }
+
   private buildSearchItems(): SettingsSearchItem[] {
     const home = this.cb.onGetHome?.() ?? null;
     const noProvider = this.cb.onGetNoProvider?.() ?? null;
@@ -391,6 +548,14 @@ export class SettingsModal {
         rowTitle: noProvider ? trs(noProvider.head) : "Provider connections",
         rowDetail: "Connect Claude, Codex, Antigravity, or other AI providers in Settings → Accounts.",
         keywords: ["accounts", "claude", "codex", "antigravity", "grok", "openai", "signin"],
+      },
+      {
+        pageId: "ring",
+        pageTitle: pageTitle("ring", "Ring"),
+        groupLabel: aiLbl,
+        rowTitle: t("ring.recordings", "Recordings"),
+        rowDetail: "Read, search, play and hear again the voice notes from your Pebble ring.",
+        keywords: ["pebble", "voice", "note", "recording", "play", "hear", "transcribe"],
       },
       {
         pageId: "devices",
@@ -513,6 +678,7 @@ export class SettingsModal {
         this.activePage = p.id;
         this.searchBrowseAll = false;
         this.render();
+        if (p.id === "ring") void this.loadRing();
       });
       frag.appendChild(btn);
     }
@@ -547,6 +713,9 @@ export class SettingsModal {
         break;
       case "providers":
         this.renderProvidersPage(frag);
+        break;
+      case "ring":
+        this.renderRingPage(frag);
         break;
       case "devices":
         this.renderDevicesPage(frag);
@@ -598,6 +767,7 @@ export class SettingsModal {
         this.activePage = pageId;
         this.searchBrowseAll = false;
         this.render();
+        if (pageId === "ring") void this.loadRing();
       });
       secBar.append(secHead, openPageBtn);
       frag.appendChild(secBar);
@@ -607,6 +777,11 @@ export class SettingsModal {
         this.renderAppearancePage(frag, matchedTitles);
       } else if (pageId === "providers") {
         this.renderProvidersPage(frag);
+      } else if (pageId === "ring") {
+        const note = document.createElement("div");
+        note.className = "bp-settings-empty";
+        note.textContent = "Read, search, play and hear again the voice notes from your Pebble ring.";
+        frag.appendChild(note);
       } else if (pageId === "devices") {
         this.renderDevicesPage(frag, matchedTitles);
       } else if (pageId === "home") {
@@ -905,6 +1080,137 @@ export class SettingsModal {
       note.textContent = "Pair new browsers or phones, configure Tailscale HTTPS forwarding, or revoke access in desktop or mobile Settings → Devices.";
       frag.appendChild(note);
     }
+  }
+
+  private renderRingPage(frag: DocumentFragment): void {
+    const sec = document.createElement("section");
+    sec.className = "bp-settings-section";
+    sec.setAttribute("data-testid", "settings-ring");
+
+    if (!this.cb.onRingList || !(this.cb.hasRing?.() ?? false)) {
+      const empty = document.createElement("div");
+      empty.className = "bp-settings-empty";
+      empty.textContent = t("web.ring.unavailable", "This hub does not show ring notes to a browser yet. Update it, or open Settings › Ring in the desktop app.");
+      sec.appendChild(empty);
+      frag.appendChild(sec);
+      return;
+    }
+
+    // the search: what was said, sent on Enter or Search
+    const bar = document.createElement("form");
+    bar.className = "bp-ring-search";
+    const input = document.createElement("input");
+    input.type = "search";
+    input.className = "bp-ring-search-input";
+    input.placeholder = t("ring.search.what.you.said", "Search what you said");
+    input.setAttribute("aria-label", t("ring.search.what.you.said", "Search what you said"));
+    input.setAttribute("data-testid", "ring-search");
+    input.value = this.ringDraft;
+    input.addEventListener("input", () => { this.ringDraft = input.value; });
+    const go = document.createElement("button");
+    go.type = "submit";
+    go.className = "primary";
+    go.textContent = t("common.search", "Search");
+    bar.append(input, go);
+    if (this.ringQuery) {
+      const all = document.createElement("button");
+      all.type = "button";
+      all.className = "bp-btn-ghost";
+      all.textContent = t("ring.show.all", "Show all");
+      all.addEventListener("click", () => {
+        this.ringDraft = "";
+        this.ringQuery = "";
+        void this.loadRing();
+      });
+      bar.appendChild(all);
+    }
+    bar.addEventListener("submit", (e) => {
+      e.preventDefault();
+      this.ringQuery = this.ringDraft.trim();
+      void this.loadRing();
+    });
+    sec.appendChild(bar);
+
+    const err = document.createElement("div");
+    err.className = "bp-settings-notice bad" + (this.ringError ? "" : " bp-hidden");
+    err.setAttribute("data-testid", "ring-error");
+    err.textContent = this.ringError;
+    sec.appendChild(err);
+    this.ringErrorEl = err;
+
+    const count = document.createElement("div");
+    count.className = "bp-ring-count";
+    count.setAttribute("data-testid", "ring-count");
+    count.textContent = this.ringCountLine();
+    sec.appendChild(count);
+    this.ringCountEl = count;
+
+    this.ringRows.clear();
+    this.ringShownQuery = this.ringQuery;
+    for (const n of this.ringList.notes) sec.appendChild(this.renderRingNote(n));
+    frag.appendChild(sec);
+  }
+
+  private renderRingNote(n: RingNote): HTMLElement {
+    const row = document.createElement("div");
+    row.className = "bp-ring-note" + (n.state === "failed" ? " bad" : "");
+    row.setAttribute("data-testid", `ring-note-${n.id}`);
+
+    const head = document.createElement("div");
+    head.className = "bp-ring-note-head";
+    const when = document.createElement("span");
+    when.className = "bp-settings-row-title";
+    const said = n.said > 0 ? new Date(n.said * 1000).toLocaleString(getLocale(), { dateStyle: "medium", timeStyle: "short" }) : "";
+    when.textContent = [said, n.gesture].filter(Boolean).join(" · ");
+    const state = document.createElement("span");
+    head.append(when, state);
+    const words = document.createElement("div");
+    const meta = document.createElement("div");
+    meta.className = "bp-settings-row-detail";
+    const hear: HTMLButtonElement[] = [];
+
+    const acts = document.createElement("div");
+    acts.className = "bp-ring-acts";
+    const src = ringAudioPath(n.play);
+    if (src) {
+      const audio = document.createElement("audio");
+      audio.className = "bp-ring-audio";
+      audio.controls = true;
+      audio.preload = "none";
+      audio.src = src;
+      audio.setAttribute("data-testid", `ring-audio-${n.id}`);
+      acts.appendChild(audio);
+      for (const [engine, label] of [
+        ["local", t("ring.hear.again.local", "Hear again (local)")],
+        ["openai", t("ring.hear.again.openai", "Hear again (OpenAI)")],
+      ] as const) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "bp-btn-ghost";
+        b.textContent = label;
+        b.setAttribute("data-testid", `ring-hear-${engine}-${n.id}`);
+        hear.push(b);
+        b.addEventListener("click", () => { void this.hearRing(n.id, engine); });
+        acts.appendChild(b);
+      }
+    }
+    if (n.thread && this.cb.onOpenThread) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "bp-btn-ghost";
+      b.textContent = t("ring.what.happened", "What happened");
+      b.addEventListener("click", () => {
+        this.close();
+        this.cb.onOpenThread?.(n.thread);
+      });
+      acts.appendChild(b);
+    }
+
+    row.append(head, words, meta);
+    if (acts.childElementCount > 0) row.appendChild(acts);
+    this.ringRows.set(n.id, { state, words, meta, hear });
+    this.fillRingNote(n);
+    return row;
   }
 
   private renderHomePage(frag: DocumentFragment): void {

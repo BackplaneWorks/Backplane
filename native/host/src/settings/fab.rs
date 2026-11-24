@@ -264,6 +264,9 @@ pub async fn look_project(hub: &Arc<Hub>, project: &str) -> Value {
     let src = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::ready::page_source(st, project))).flatten();
     if let Some(th) = src {
         let tc = look(hub, &th).await;
+        // what the last estimate said beyond a price (the thread's card asked for it; this one never asks the order server)
+        if tc["lead_days"].as_u64().unwrap_or(0) > 0 { c["lead_days"] = tc["lead_days"].clone(); }
+        if !tc["estimate_warnings"].as_str().unwrap_or("").is_empty() { c["estimate_warnings"] = tc["estimate_warnings"].clone(); }
         if let Some(b) = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::ready::page_button(st, &th, &tc))).flatten() { c["buy"] = b; }
     }
     c

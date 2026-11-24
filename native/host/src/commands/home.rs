@@ -226,6 +226,11 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
     (snapshot, git, real)
 }
 
+/// The snapshot alone, read off the folder: no git rows (recent changes, pull requests), so no `git` or `gh` is run for it.
+pub async fn read_plain(root: &str, req: &Value) -> Value {
+    let (r, rq) = (root.to_string(), req.clone());
+    tokio::task::spawn_blocking(move || read_files(&r, &rq).0).await.unwrap_or_else(|_| json!({"error": "the project home could not be read"}))
+}
 /// The request's answer: the snapshot (with the git rows: recent changes, open pull requests), or the document window.
 pub async fn read(root: &str, req: &Value) -> Value {
     let (r, rq) = (root.to_string(), req.clone());

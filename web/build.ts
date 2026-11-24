@@ -127,6 +127,20 @@ function collectI18nKeys(tsFiles: string[]): string[] {
     "provider.notice.button",
     "provider.notice.senderr",
     "provider.notice.senderr.remote",
+    // Settings › Ring: texts the pure model names by key (ring-model.ts)
+    "ring.no.recordings.yet",
+    "web.ring.count",
+    "web.ring.count.one",
+    "web.ring.found",
+    "web.ring.not.heard",
+    "web.ring.app.words",
+    "web.ring.heard.by",
+    "web.ring.heard.by.sure",
+    "web.ring.state.sent",
+    "web.ring.state.new",
+    "web.ring.state.heard",
+    "web.ring.state.failed",
+    "web.ring.state.busy",
   ]);
   const re = /\bt\(\s*["']([a-zA-Z0-9_.-]+)["']/g;
   for (const f of tsFiles) {

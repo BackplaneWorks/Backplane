@@ -308,6 +308,18 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
         "project.card" => { let pr = s(p, "project"); if pr.is_empty() { return Some(Err(err("project"))) }
             let card = rpc(hub, c, "fab.look", json!({"project":pr})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
             Ok(project_card(&card)) }
+        // feature "projecthome": a project's home page for the browser, as the desktop's opens (`project.home` and `fab.look {project}` there): `project.home {project}` →
+        // `{project, root, intent, parts, boards, mech, leadDays, warnings}` (`project_home` below); nothing is priced or bought from it
+        "project.home" => { let pr = s(p, "project"); if pr.is_empty() { return Some(Err(err("project"))) }
+            // a linked machine's project is read there; this hub's own from its folder, as the desktop's request reads it (commands/mod.rs)
+            let snap = if pr.contains('~') { match rpc(hub, c, "project.home", json!({"project":pr})).await { Ok(r) => r["result"].clone(), Err(e) => return Some(Err(e)) } } else {
+                let root = { let m = hub.model().await; m.projects.get(pr).filter(|x| !x.removed).map(|x| x.root.clone()).unwrap_or_default() };
+                if root.is_empty() { return Some(Err(err("Choose an existing project."))) }
+                // the files only: the page draws no git rows, so no `git log` or `gh pr list` runs for it
+                // (a folder that cannot be read answers an empty page, as the desktop's does: the error is inside the snapshot)
+                crate::commands::home::read_plain(&root, &json!({"project":pr})).await };
+            let card = rpc(hub, c, "fab.look", json!({"project":pr})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
+            Ok(project_home(pr, &snap, &card)) }
         "thread.buy" if s(p, "thread").is_empty() && !s(p, "project").is_empty() => {
             let card = rpc(hub, c, "fab.look", json!({"project":s(p, "project")})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
             let b = &card["buy"];
@@ -523,6 +535,27 @@ pub fn project_card(card: &Value) -> Value {
     if lead > 0 { out["lead_days"] = json!(lead); }
     if let Some(w) = card["estimate_warnings"].as_str().filter(|w| !w.is_empty()) { out["estimate_warnings"] = json!(w); }
     out
+}
+/// The project's home page (feature "projecthome"), from the hub's own snapshot (`commands/home.rs`) and project card (`settings/fab.rs` `look_project`):
+/// the goal and notes as written, the parts to order (name, kind, fab file), the boards (the snapshot's, then the card's board files, paths from the
+/// project's root, 12 at most), the mechanical models (biggest first: the assembly), and what the last estimate said beyond a price: `leadDays`
+/// (0: none) and `warnings`, each once.
+pub fn project_home(project: &str, snap: &Value, card: &Value) -> Value {
+    let root = snap["root"].as_str().unwrap_or("");
+    let rel = |p: &str| p.strip_prefix(root).filter(|_| !root.is_empty()).map(|r| r.trim_start_matches('/').to_string()).unwrap_or_else(|| p.to_string());
+    let arts = |kind: &'static str| snap["artifacts"].as_array().into_iter().flatten().filter(move |a| a["kind"] == kind);
+    let ci = card["intent"].as_str().unwrap_or("");
+    let intent = if ci.trim().is_empty() && arts("intent").next().is_some() { snap["intent"].as_str().unwrap_or("") } else { ci };
+    let mut boards: Vec<String> = arts("board").map(|a| rel(a["path"].as_str().unwrap_or(""))).filter(|p| !p.is_empty()).collect();
+    for b in card["board_files"].as_array().into_iter().flatten().filter_map(Value::as_str) { if !boards.iter().any(|o| o == b) { boards.push(b.to_string()); } }
+    boards.truncate(12);
+    let mut mech: Vec<(String, String, u64)> = arts("mech").map(|a| { let p = rel(a["path"].as_str().unwrap_or("")); let n = p.rsplit('/').next().unwrap_or("").to_string(); (p, n, a["size"].as_u64().unwrap_or(0)) }).collect();
+    mech.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.cmp(&b.1)));
+    let parts: Vec<Value> = card["parts"].as_array().into_iter().flatten().map(|x| json!({"name": x["name"].as_str().unwrap_or(""), "kind": x["kind"].as_str().unwrap_or(""), "path": x["path"].as_str().unwrap_or("")})).collect();
+    let warnings: Vec<&str> = card["estimate_warnings"].as_str().unwrap_or("").split("; ").map(str::trim).filter(|w| !w.is_empty()).collect();
+    json!({"project": project, "root": root, "intent": intent, "parts": parts, "boards": boards,
+        "mech": mech.iter().map(|(p, n, z)| json!({"path": p, "name": n, "size": z})).collect::<Vec<_>>(),
+        "leadDays": card["lead_days"].as_u64().unwrap_or(0), "warnings": warnings})
 }
 // ---- viewers, files, browser (each the hub's own request, for the folder of the thread) ----
 pub(super) async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {
