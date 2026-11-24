@@ -213,7 +213,11 @@ extension View {
     func farHide(_ r: DSecRow, _ client: DataClient, after: @escaping () async -> Void = {}) -> some View {
         contextMenu {
             if !r.hide.isEmpty { Button(Tr.t("Hide"), systemImage: "eye.slash") { Task { await client.sidebarAct("thread-hide", r.hide) } } }
-            if !r.isProject && r.swarmRoom == nil { ForEach(r.menu) { m in Button(Tr.t(m.label)) { Task { await client.sectionThreadAct(r.id, m.id); await after() } }.accessibilityIdentifier("data.section." + m.id + "." + r.id) } }
+            if !r.isProject && r.swarmRoom == nil { ForEach(DMenuItem.thread(r.menu)) { m in
+                // a chat in no project: Move to project… lists the hub's projects (`sub`, each a `row-move-project`); every other item is a thread.act
+                if m.isMove { Menu { ForEach(m.sub.indices, id: \.self) { i in Button(m.sub[i].label) { Task { await client.sidebarAct(m.sub[i].action.isEmpty ? DMenuItem.moveProject : m.sub[i].action, m.sub[i].value); await after() } }.accessibilityIdentifier("data.section.move." + r.id + ".\(i)") } } label: { Label(Tr.t(m.label), systemImage: "folder") }.accessibilityIdentifier("data.section.move." + r.id) }
+                else { Button(Tr.t(m.label)) { Task { await client.sectionThreadAct(r.id, m.id); await after() } }.accessibilityIdentifier("data.section." + m.id + "." + r.id) }
+            } }
             // what a swipe does, for a finger that would rather press: the spans it can be snoozed for, or Wake
             if !r.snooze.isEmpty { Menu { ForEach(r.snooze) { o in Button(Tr.t(o.label)) { Task { await client.snoozeRow(o.value); await after() } } } } label: { Label(Tr.t("Snooze"), systemImage: "clock") } }
             if !r.wake.isEmpty { Button(Tr.t("Wake"), systemImage: "bell") { Task { await client.snoozeRow(r.wake); await after() } } }

@@ -177,7 +177,10 @@ data class MobilePartition(
     }
 }
 
-private val INBOX_IDS = setOf("needs", "running", "snoozed")
+/** The Inbox tab's sections, in the hub's order. Chats (the threads in no project) is listed here too: it is a list of threads, and the Bench is projects. */
+private val INBOX_IDS = setOf("needs", "running", "chats", "snoozed")
+/** What stays under the Inbox's All clear card: nothing waits or runs, but the chats and the snoozed rows are still reachable. */
+fun quietInbox(inbox: List<DSection>): List<DSection> = inbox.filter { it.id == "chats" || it.id == "snoozed" }
 
 fun partitionSections(sections: List<DSection>): MobilePartition {
     val inbox = sections.filter { it.id in INBOX_IDS }
@@ -222,6 +225,11 @@ data class DMenuItem(val id: String, val label: String, val action: String, val 
     companion object {
         fun list(a: JSONArray?): List<DMenuItem> = (0 until (a?.length() ?: 0)).map { i -> a!!.getJSONObject(i).let { o ->
             DMenuItem(o.optString("id"), o.optString("label"), o.optString("action"), o.optString("value"), o.optBoolean("confirm"), list(o.optJSONArray("sub"))) } }
+        /** A chat's Move to project… (`id` "move"): its `sub` is the projects, each sent as `sidebar.act` `row-move-project`. */
+        const val MOVE_PROJECT = "row-move-project"
+        fun isMove(m: DMenuItem) = m.id == "move" && m.sub.isNotEmpty()
+        /** A thread row's menu: the hub's items that have words; Move to project… only while there is a project to move to. */
+        fun thread(menu: List<DMenuItem>): List<DMenuItem> = menu.filter { it.label.isNotEmpty() && (it.id != "move" || it.sub.isNotEmpty()) }
         /** What a phone's long press lists: the hub's menu without Open folder (the folder is on the hub's machine) and New swarm when swarms are off. */
         fun phone(menu: List<DMenuItem>, swarms: Boolean): List<DMenuItem> = menu.filter { it.id != "open" && (swarms || it.id != "swarm") && it.label.isNotEmpty() }
     }
@@ -313,7 +321,8 @@ fun SectionHead(s: DSection, onLong: (() -> Unit)?) {
 fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, openThread: (String) -> Unit = {}, open: (String) -> Unit) {
     var menu by remember { mutableStateOf(false) }
     var snoozeSheet by remember { mutableStateOf(false) }
-    val acts = if (r.key.isEmpty() && r.swarmRoom == null) r.menu.filter { it.label.isNotEmpty() } else emptyList()
+    var moveSheet by remember { mutableStateOf<DMenuItem?>(null) }
+    val acts = if (r.key.isEmpty() && r.swarmRoom == null) DMenuItem.thread(r.menu) else emptyList()
     val need = r.need?.takeIf { r.kind == "swarm" }
     val pill = remember(r.label, r.tone, r.word, r.want, r.wake) { statusPillOf(r) }
     val canSwipeStart = r.wake.isNotEmpty() || r.settle.isNotEmpty()
@@ -378,7 +387,8 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
                         DropdownMenuItem(text = { Text(Msg.tools_snooze, fontFamily = BpMono) }, onClick = { menu = false; snoozeSheet = true }, modifier = Modifier.testTag("home.section.snooze.${r.id}"))
                     }
                     if (r.hide.isNotEmpty()) DropdownMenuItem(text = { Text(Msg.common_hide, fontFamily = BpMono) }, onClick = { menu = false; DataClient.sidebarAct("thread-hide", r.hide) }, modifier = Modifier.testTag("home.section.hide.${r.id}"))
-                    acts.forEach { m -> DropdownMenuItem(text = { Text(Tr.t(m.label), fontFamily = BpMono) }, onClick = { menu = false; DataClient.sectionThreadAct(r.id, m.id) }, modifier = Modifier.testTag("home.section.${m.id}.${r.id}")) }
+                    // a chat in no project: Move to project… opens the hub's list of projects (`sub`); every other item is a thread.act
+                    acts.forEach { m -> DropdownMenuItem(text = { Text(Tr.t(m.label), fontFamily = BpMono) }, onClick = { menu = false; if (DMenuItem.isMove(m)) moveSheet = m else DataClient.sectionThreadAct(r.id, m.id) }, modifier = Modifier.testTag("home.section.${m.id}.${r.id}")) }
                 }
             }
             if (need != null) SwarmNeedLine(r, need, indent, { open(r.nav) }, openThread)
@@ -444,6 +454,10 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
         )
     } else {
         rowContent()
+    }
+
+    moveSheet?.let { m ->
+        ActionSheet(Tr.t(m.label), m.sub.map { g -> g.label to { moveSheet = null; DataClient.sidebarAct(g.action.ifEmpty { DMenuItem.MOVE_PROJECT }, g.value) } }) { moveSheet = null }
     }
 
     if (snoozeSheet && r.snooze.isNotEmpty()) {

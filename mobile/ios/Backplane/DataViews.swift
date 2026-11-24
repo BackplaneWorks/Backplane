@@ -231,6 +231,9 @@ struct DataThreadsView: View {
                     Button { searching = true; searchFocus = true } label: { Image(systemName: "magnifyingglass").foregroundStyle(BackplaneDesign.dim) }
                         .accessibilityLabel(Tr.t("Search")).accessibilityIdentifier("data.home.search")
                 }
+                // New chat: a thread in no project, from every tab (the hub keeps it under Chats until it is settled or moved to a project)
+                Button { newThread = Home.chats } label: { Image(systemName: "square.and.pencil").foregroundStyle(BackplaneDesign.dim) }
+                    .accessibilityLabel(Tr.t("New chat")).accessibilityIdentifier("data.home.chat.new")
                 Button { path.append(DPage(name: "settings")) } label: { Image(systemName: "gearshape").foregroundStyle(BackplaneDesign.dim) }
                     .accessibilityLabel(Tr.t("Settings")).accessibilityIdentifier("data.settings")
             }.dflat()
@@ -361,7 +364,7 @@ struct DataThreadsView: View {
     private var inboxList: some View {
         List {
             awayRow
-            if !inboxSections.contains(where: { $0.id != "snoozed" }) { allClear }
+            if Home.allClear(inboxSections.map(\.id)) { allClear }
             ForEach(inboxSections) { s in
                 DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
                 ForEach(s.rows) { r in inboxRow(r) }
@@ -787,7 +790,7 @@ struct DataNewThreadSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Text(owner?.title ?? Tr.t("New thread")).dmono(14, bold: true).lineLimit(1); Spacer()
+                Text(project == Home.chats ? Tr.t("New chat") : owner?.title ?? Tr.t("New thread")).dmono(14, bold: true).lineLimit(1); Spacer()
                 Button(Tr.t("Cancel")) { dismiss() }.dmono(13).foregroundStyle(BackplaneDesign.dim)
             }
             if !whereLine.isEmpty {

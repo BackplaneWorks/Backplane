@@ -68,6 +68,29 @@ class MobileSectionsTest {
         assertNull(statusPillOf(row("""{"id":"9","word":"idle"}""")))
     }
 
+    @Test fun chatsWithNoProjectAreInTheInboxAndMoveToAProject() {
+        val sections = DSection.list(JSONArray(
+            """[
+                {"id":"chats","kind":"threads","title":"Chats","count":1,"rows":[{"id":"c1","title":"quick question","chat":true,"project":"Chats","projectKey":"",
+                    "menu":[{"id":"pin","label":"Pin","action":"row-pin","value":"c1"},
+                            {"id":"move","label":"Move to project…","action":"","value":"","sub":[{"id":"project","label":"amp","action":"row-move-project","value":"c1\u001fp1"}]}]}]},
+                {"id":"snoozed","kind":"threads","title":"Snoozed","count":1,"fold":true,"open":false,"toggle":"sec:snoozed","rows":[]},
+                {"id":"active","kind":"projects","title":"Recent","count":0,"rows":[]}
+            ]"""
+        ))
+        val p = partitionSections(sections)
+        assertEquals(listOf("chats", "snoozed"), p.inbox.map { it.id })
+        assertTrue("chats alone do not end All clear", p.inboxEmpty)
+        assertEquals(listOf("chats", "snoozed"), quietInbox(p.inbox).map { it.id })
+        val menu = DMenuItem.thread(p.inbox[0].rows[0].menu)
+        assertEquals(listOf("pin", "move"), menu.map { it.id })
+        val move = menu[1]
+        assertTrue(DMenuItem.isMove(move)); assertFalse(DMenuItem.isMove(menu[0]))
+        assertEquals("row-move-project", move.sub[0].action); assertEquals("c1\u001fp1", move.sub[0].value)
+        // no project to move to: the item is left out
+        assertTrue(DMenuItem.thread(DMenuItem.list(JSONArray("""[{"id":"move","label":"Move to project…","sub":[]}]"""))).isEmpty())
+    }
+
     @Test fun partitionsInboxAndBenchAndComputesQuickJump() {
         val raw = JSONArray(
             """[
