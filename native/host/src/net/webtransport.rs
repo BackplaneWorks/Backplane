@@ -102,16 +102,16 @@ impl BrowserListener {
 
 /// Loopback TCP backend used when the OS Tailscale daemon serves via loopback
 /// (Windows, and macOS sandboxed App Store Tailscale without a root Unix socket).
-/// Retains and returns the bound `TcpListener` on stop so the port cannot be
-/// claimed by another local process before Serve teardown completes.
+/// Borrows an `Arc<TcpListener>` so the provisioning monitor keeps the socket
+/// bound even if the accept task exits, aborts, or times out.
 pub(crate) struct LoopbackBrowserListener {
-    listener: tokio::net::TcpListener,
+    listener: Arc<tokio::net::TcpListener>,
     authority: String,
     backend_port: u16,
 }
 
 impl LoopbackBrowserListener {
-    pub fn from_listener(listener: tokio::net::TcpListener, authority: String) -> io::Result<Self> {
+    pub fn from_listener(listener: Arc<tokio::net::TcpListener>, authority: String) -> io::Result<Self> {
         validate_authority(&authority)?;
         let addr = listener.local_addr()?;
         if addr.ip() != Ipv4Addr::LOCALHOST || addr.port() == 0 {
@@ -126,7 +126,9 @@ impl LoopbackBrowserListener {
 
     pub async fn bind(authority: String, port: u16) -> io::Result<Self> {
         validate_authority(&authority)?;
-        let listener = tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?;
+        let listener = Arc::new(
+            tokio::net::TcpListener::bind(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).await?,
+        );
         Self::from_listener(listener, authority)
     }
 
@@ -134,11 +136,16 @@ impl LoopbackBrowserListener {
         self.backend_port
     }
 
+    #[cfg(test)]
+    pub fn listener(&self) -> Arc<tokio::net::TcpListener> {
+        Arc::clone(&self.listener)
+    }
+
     pub async fn run(
         self,
         hub: Arc<crate::hub::Hub>,
         stop: tokio::sync::oneshot::Receiver<()>,
-    ) -> io::Result<tokio::net::TcpListener> {
+    ) -> io::Result<()> {
         self.run_with(hub, stop, crate::plat::browser_loopback_peer_ok).await
     }
 
@@ -147,13 +154,14 @@ impl LoopbackBrowserListener {
         hub: Arc<crate::hub::Hub>,
         mut stop: tokio::sync::oneshot::Receiver<()>,
         verify: F,
-    ) -> io::Result<tokio::net::TcpListener>
+    ) -> io::Result<()>
     where
         F: Fn(&tokio::net::TcpStream) -> bool + Clone + Send + Sync + 'static,
     {
+        let verify_gate = Arc::new(tokio::sync::Semaphore::new(8));
         loop {
             let stream = tokio::select! {
-                _ = &mut stop => return Ok(self.listener),
+                _ = &mut stop => return Ok(()),
                 accepted = self.listener.accept() => match accepted {
                     Ok((stream, _)) => stream,
                     Err(e) if matches!(e.kind(), io::ErrorKind::ConnectionAborted | io::ErrorKind::Interrupted) => continue,
@@ -164,8 +172,14 @@ impl LoopbackBrowserListener {
                     Err(e) => return Err(e),
                 }
             };
+            let Ok(permit) = verify_gate.clone().try_acquire_owned() else {
+                continue;
+            };
             let verify = verify.clone();
-            let lookup = tokio::task::spawn_blocking(move || verify(&stream).then_some(stream));
+            let lookup = tokio::task::spawn_blocking(move || {
+                let _permit = permit;
+                verify(&stream).then_some(stream)
+            });
             if let Ok(Ok(Some(stream))) = tokio::time::timeout(Duration::from_millis(300), lookup).await {
                 let authority = self.authority.clone();
                 let hub = hub.clone();
@@ -251,6 +265,28 @@ mod tests {
         assert!(!trusted(r"C:\Program Files\Tailscale\other.exe", None, None));
     }
 
+    #[test]
+    fn macos_trusted_tailscale_path_and_netstat_parser() {
+        use crate::plat::{is_trusted_tailscale_macos_path as trusted, parse_macos_netstat_pid as parse_pid};
+        assert!(trusted("/Applications/Tailscale.app/Contents/PlugIns/IPNExtension.appex/Contents/MacOS/IPNExtension", None));
+        assert!(trusted("/Users/alex/Applications/Tailscale.app/Contents/MacOS/Tailscale", Some("/Users/alex")));
+        assert!(trusted("/Library/SystemExtensions/1234/io.tailscale.ipn.macsys.network-extension.systemextension/Contents/MacOS/io.tailscale.ipn.macsys.network-extension", None));
+        assert!(trusted("/opt/homebrew/bin/tailscaled", None));
+        assert!(trusted("/opt/homebrew/Cellar/tailscale/1.80.0/bin/tailscaled", None));
+        assert!(!trusted("/Applications/Tailscale.app/../Evil.app/MacOS/Evil", None));
+        assert!(!trusted("/Users/bob/Downloads/tailscaled", Some("/Users/alex")));
+
+        let sample = "\
+Active Internet connections (including servers)
+Proto Recv-Q Send-Q  Local Address          Foreign Address        (state)        rhiwat shiwat    pid   epid  state    options
+tcp4       0      0  127.0.0.1.54321        127.0.0.1.49231        ESTABLISHED    131072 131072   4242      0 0x0102 0x00000000
+tcp4       0      0  127.0.0.1.49231        *.*                    LISTEN         131072 131072    999      0 0x0100 0x00000000
+";
+        assert_eq!(parse_pid(sample, 49231, 54321), Some(4242));
+        assert_eq!(parse_pid(sample, 49231, 55555), None);
+        assert_eq!(parse_pid(sample, 54321, 49231), None);
+    }
+
     #[tokio::test]
     async fn loopback_listener_enforces_peer_check_and_retains_port_on_stop() {
         use serde_json::json;
@@ -279,6 +315,7 @@ mod tests {
         // Reject when peer verifier returns false
         let listener = LoopbackBrowserListener::bind(authority.into(), 0).await.unwrap();
         let port = listener.port();
+        let kept = listener.listener();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(listener.run_with(hub.clone(), stop_rx, |_| false));
         let mut client = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
@@ -297,11 +334,11 @@ mod tests {
         let _ = client.read_to_end(&mut buf).await;
         assert!(buf.is_empty(), "rejected peer must receive no HTTP response");
         let _ = stop_tx.send(());
-        let kept = task.await.unwrap().unwrap();
+        task.await.unwrap().unwrap();
         assert_eq!(kept.local_addr().unwrap().port(), port);
 
-        // Admit when peer verifier returns true, using retained listener
-        let listener = LoopbackBrowserListener::from_listener(kept, authority.into()).unwrap();
+        // Admit when peer verifier returns true, using retained Arc<TcpListener>
+        let listener = LoopbackBrowserListener::from_listener(Arc::clone(&kept), authority.into()).unwrap();
         let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(listener.run_with(hub.clone(), stop_rx, |_| true));
         let mut client = tokio::net::TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await.unwrap();
@@ -321,7 +358,8 @@ mod tests {
         let text = String::from_utf8_lossy(&buf);
         assert!(text.starts_with("HTTP/1.1 200 OK"), "{text}");
         let _ = stop_tx.send(());
-        let _kept = task.await.unwrap().unwrap();
+        task.await.unwrap().unwrap();
+        assert_eq!(kept.local_addr().unwrap().port(), port);
     }
 }
 

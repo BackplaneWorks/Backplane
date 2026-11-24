@@ -9,7 +9,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-static PENDING: Mutex<Weak<Probe>> = Mutex::new(Weak::new());
+static PENDING: Mutex<Vec<Weak<Probe>>> = Mutex::new(Vec::new());
 pub struct Probe {
     home: PathBuf,
     authority: String,
@@ -26,7 +26,12 @@ impl Probe {
             expires: Instant::now() + Duration::from_secs(30),
             consumed: AtomicBool::new(false),
         });
-        *PENDING.lock().unwrap() = Arc::downgrade(&probe);
+        let mut pending = PENDING.lock().unwrap();
+        pending.retain(|w| {
+            w.upgrade()
+                .is_some_and(|p| !(p.home == home && p.authority == authority))
+        });
+        pending.push(Arc::downgrade(&probe));
         probe
     }
     pub fn header(&self) -> String {
@@ -44,11 +49,19 @@ impl Probe {
     }
 }
 pub fn consume(home: &Path, authority: &str, nonce: &str) -> bool {
-    PENDING
-        .lock()
-        .unwrap()
-        .upgrade()
-        .is_some_and(|p| p.take(home, authority, nonce, Instant::now()))
+    let mut pending = PENDING.lock().unwrap();
+    let mut matched = false;
+    pending.retain(|w| {
+        let Some(p) = w.upgrade() else {
+            return false;
+        };
+        if p.take(home, authority, nonce, Instant::now()) {
+            matched = true;
+            return false;
+        }
+        true
+    });
+    matched
 }
 #[cfg(test)]
 mod tests {

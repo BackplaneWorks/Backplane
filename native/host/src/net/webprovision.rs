@@ -97,6 +97,8 @@ pub fn protected_directory(path: &std::path::Path) -> std::io::Result<()> {
     Ok(())
 }
 
+/// On Windows, directory permissions are governed by NTFS user profile ACLs;
+/// verify that the runtime directory is an absolute, non-symlink/non-junction directory.
 #[cfg(windows)]
 pub fn protected_directory(path: &std::path::Path) -> std::io::Result<()> {
     use std::io;
@@ -204,19 +206,24 @@ pub async fn https_address_answers(home: &std::path::Path, authority: &str) -> b
     };
     let url = format!("https://{authority}/auth/web/setup");
     let probe = super::webprobe::Probe::start(home, authority);
-    let Ok(mut child) = crate::proc::tokio_cmd(crate::proc::Kind::Net, &curl)
+    let mut cmd = crate::proc::tokio_cmd(crate::proc::Kind::Net, &curl);
+    cmd.args([
+        "-q",
+        "--silent",
+        "--fail",
+        "--proto",
+        "=https",
+        "--noproxy",
+        "*",
+        "--max-time",
+        "5",
+        "--max-filesize",
+        "1024",
+    ]);
+    #[cfg(windows)]
+    cmd.arg("--ssl-revoke-best-effort");
+    let Ok(mut child) = cmd
         .args([
-            "-q",
-            "--silent",
-            "--fail",
-            "--proto",
-            "=https",
-            "--noproxy",
-            "*",
-            "--max-time",
-            "5",
-            "--max-filesize",
-            "1024",
             "--header",
             "@-",
             "--write-out",
@@ -690,7 +697,7 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
     let mut previous = Value::Null;
     let mut last_action = std::time::Instant::now();
     let mut verification_failed = false;
-    let mut reserved_listener: Option<tokio::net::TcpListener> = None;
+    let mut reserved_listener: Option<std::sync::Arc<tokio::net::TcpListener>> = None;
     loop {
         let enabled = hub.setting("web.enabled").await.as_deref() == Some("1");
         let mut status_row = serde_json::json!({"canEnable":true});
@@ -728,6 +735,7 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                             #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                             let use_unix = false;
                             let target = if use_unix {
+                                reserved_listener = None;
                                 if protected_directory(&canon_dir).is_err() {
                                     status_row["reason"] = Value::from("Web UI runtime directory permissions are too permissive.");
                                     None
@@ -735,11 +743,14 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                                     Some(BackendTarget::Unix(canon_dir.join("browser.sock")))
                                 }
                             } else {
+                                // Loopback Serve mappings persist across hub restarts so users do not need
+                                // to re-approve forwarding each time; while running, `reserved_listener`
+                                // keeps the port reserved until `Mapping::Absent` is confirmed on disable.
                                 let port = if let Some(ref listener) = reserved_listener {
                                     listener.local_addr().ok().map(|a| a.port())
                                 } else if let Some(saved) = read_saved_port(&canon_dir) {
                                     if let Ok(tcp) = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, saved)).await {
-                                        reserved_listener = Some(tcp);
+                                        reserved_listener = Some(std::sync::Arc::new(tcp));
                                         Some(saved)
                                     } else if configured_authority_for(&config, &service, node, &BackendTarget::Loopback(saved)).is_some() {
                                         Some(saved)
@@ -754,7 +765,7 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                                 } else if let Ok(tcp) = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, 0)).await {
                                     let new_port = tcp.local_addr().ok().map(|a| a.port()).unwrap_or(0);
                                     if new_port != 0 && write_saved_port(&canon_dir, new_port).is_ok() {
-                                        reserved_listener = Some(tcp);
+                                        reserved_listener = Some(std::sync::Arc::new(tcp));
                                         Some(BackendTarget::Loopback(new_port))
                                     } else {
                                         None
@@ -835,56 +846,44 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                                         #[cfg(not(unix))]
                                         BackendTarget::Unix(_) => {}
                                         BackendTarget::Loopback(port) => {
-                                            let tcp = match reserved_listener.take() {
-                                                Some(l) if l.local_addr().is_ok_and(|a| a.port() == port) => Ok(l),
-                                                other => {
-                                                    drop(other);
-                                                    tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port)).await
-                                                }
-                                            };
-                                            match tcp {
-                                                Ok(tcp) => {
-                                                    if let Ok(listener) = super::webtransport::LoopbackBrowserListener::from_listener(tcp, authority.clone()) {
-                                                        let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
-                                                        let mut task = tokio::spawn(listener.run(hub.clone(), stop_rx));
-                                                        let verified = https_address_answers(&hub.cfg.home, &authority).await;
-                                                        if verified {
-                                                            let active = serde_json::json!({"available":true, "address":format!("https://{authority}")});
-                                                            publish_status(&hub, &mut previous, active).await;
-                                                            tokio::select! {
-                                                                res = &mut task => {
-                                                                    if let Ok(Ok(kept)) = res {
-                                                                        reserved_listener = Some(kept);
-                                                                    }
-                                                                }
-                                                                _ = enabled_changed(&hub, &mut changes, true) => {
-                                                                    let _ = stop_tx.send(());
-                                                                    if let Ok(Ok(Ok(kept))) = tokio::time::timeout(std::time::Duration::from_secs(2), &mut task).await {
-                                                                        reserved_listener = Some(kept);
-                                                                    } else {
-                                                                        task.abort();
-                                                                    }
+                                            if !reserved_listener.as_ref().is_some_and(|l| l.local_addr().is_ok_and(|a| a.port() == port)) {
+                                                reserved_listener = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, port))
+                                                    .await
+                                                    .ok()
+                                                    .map(std::sync::Arc::new);
+                                            }
+                                            if let Some(ref tcp) = reserved_listener {
+                                                if let Ok(listener) = super::webtransport::LoopbackBrowserListener::from_listener(std::sync::Arc::clone(tcp), authority.clone()) {
+                                                    let (stop_tx, stop_rx) = tokio::sync::oneshot::channel();
+                                                    let mut task = tokio::spawn(listener.run(hub.clone(), stop_rx));
+                                                    let verified = https_address_answers(&hub.cfg.home, &authority).await;
+                                                    if verified {
+                                                        let active = serde_json::json!({"available":true, "address":format!("https://{authority}")});
+                                                        publish_status(&hub, &mut previous, active).await;
+                                                        tokio::select! {
+                                                            _ = &mut task => (),
+                                                            _ = enabled_changed(&hub, &mut changes, true) => {
+                                                                let _ = stop_tx.send(());
+                                                                if tokio::time::timeout(std::time::Duration::from_secs(2), &mut task).await.is_err() {
+                                                                    task.abort();
                                                                 }
                                                             }
-                                                            requested = None;
-                                                            verification_failed = false;
-                                                            last_action = std::time::Instant::now();
-                                                            continue;
                                                         }
-                                                        verification_failed = true;
-                                                        status_row["reason"] = Value::from("Private HTTPS forwarding could not be verified. Backplane will retry.");
-                                                        let _ = stop_tx.send(());
-                                                        if let Ok(Ok(Ok(kept))) = tokio::time::timeout(std::time::Duration::from_secs(2), &mut task).await {
-                                                            reserved_listener = Some(kept);
-                                                        } else {
-                                                            task.abort();
-                                                        }
+                                                        requested = None;
+                                                        verification_failed = false;
+                                                        last_action = std::time::Instant::now();
+                                                        continue;
+                                                    }
+                                                    verification_failed = true;
+                                                    status_row["reason"] = Value::from("Private HTTPS forwarding could not be verified. Backplane will retry.");
+                                                    let _ = stop_tx.send(());
+                                                    if tokio::time::timeout(std::time::Duration::from_secs(2), &mut task).await.is_err() {
+                                                        task.abort();
                                                     }
                                                 }
-                                                Err(_) => {
-                                                    verification_failed = true;
-                                                    status_row["reason"] = Value::from("Local Web UI port is in use by another process. Turn Browser access off and back on to reset forwarding.");
-                                                }
+                                            } else {
+                                                verification_failed = true;
+                                                status_row["reason"] = Value::from("Local Web UI port is in use by another process. Turn Browser access off and back on to reset forwarding.");
                                             }
                                         }
                                     }
