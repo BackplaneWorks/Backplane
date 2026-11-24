@@ -110,6 +110,8 @@ fn open_ask_index(hub: &Hub) -> Vec<(String, String, usize)> {
 }
 /// The thread of an ask still open.
 pub fn ask_thread(hub: &Hub, ask: &str) -> Option<String> { open_ask_index(hub).into_iter().find(|(a, ..)| a == ask).map(|(_, t, _)| t) }
+/// Whether `thread` currently has any open ask in the tail.
+pub fn thread_has_open_ask(hub: &Hub, thread: &str) -> bool { open_ask_index(hub).into_iter().any(|(_, t, _)| t == thread) }
 fn open_ask_counts(hub: &Hub) -> HashMap<String, u64> {
     let mut m = HashMap::new();
     for (_, th, _) in open_ask_index(hub) { *m.entry(th).or_insert(0) += 1 }
