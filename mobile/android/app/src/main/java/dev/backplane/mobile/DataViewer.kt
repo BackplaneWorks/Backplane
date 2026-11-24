@@ -856,16 +856,16 @@ private fun DiffTab(thread: DThread) {
     }
 }
 
-// ---- Review: the BOM, the design checks (with the checklist's boxes) and the thread's comments
+// ---- Review: the BOM, the design checks (with the checklist's boxes), the thread's comments and the newest release made (its drawings and files)
 @Composable
 private fun ReviewTab(thread: DThread) {
     var page by remember { mutableStateOf("Checks") }
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 8.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("Checks" to Msg.review_checks, "BOM" to Msg.review_bom, "Comments" to Msg.review_comments).forEach { (p, l) -> DBtn(l, page == p, modifier = Modifier.testTag("review.page.$p")) { page = p } }
+            listOf("Checks" to Msg.review_checks, "BOM" to Msg.review_bom, "Comments" to Msg.review_comments, "Release" to Msg.review_release).forEach { (p, l) -> DBtn(l, page == p, modifier = Modifier.testTag("review.page.$p")) { page = p } }
         }
         DLine()
-        when (page) { "BOM" -> ReportPage(thread, "bom", false); "Comments" -> CommentsPage(thread); else -> ReportPage(thread, "checks", true) }
+        when (page) { "BOM" -> ReportPage(thread, "bom", false); "Comments" -> CommentsPage(thread); "Release" -> ReportPage(thread, "release", false); else -> ReportPage(thread, "checks", true) }
     }
 }
 @Composable

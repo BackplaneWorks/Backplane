@@ -328,7 +328,7 @@ review.comments.open = コメント · 未解決{count}件
 review.tag = タグ{tag}
 review.reading = 設計を読み込み中…
 review.comments.none = コメントはまだありません。基板や回路図の場所を右クリック（スマートフォンでは長押し）すると、そこにコメントできます。
-review.release.note = この設計にタグを付け、製造データ（ガーバー、ドリル、CPL、BOM、PDF、STEP）を.backplane/releasesに作成します。
+review.release.note = この設計にタグを付け、製造データ（ガーバー、ドリル、CPL、BOM、PDF、STEP、製造図・ドリル図・実装図）を.backplane/releasesに作成します。
 review.empty = まだ何もありません。
 
 # antigravity and google sign-in

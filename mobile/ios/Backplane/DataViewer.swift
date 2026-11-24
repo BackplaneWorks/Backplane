@@ -978,13 +978,14 @@ struct DataReviewTab: View {
     @State private var page = "Checks"
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 8) { ForEach(["Checks", "BOM", "Comments"], id: \.self) { p in
+            HStack(spacing: 8) { ForEach(["Checks", "BOM", "Comments", "Release"], id: \.self) { p in
                 Button(Tr.t(p)) { page = p }.buttonStyle(.bordered).tint(p == page ? BackplaneDesign.accent : .secondary).accessibilityIdentifier("data.review.page." + p) } ; Spacer() }
                 .padding(8).background(BackplaneDesign.panel)
             Divider()
             switch page {
             case "BOM": DataReportPage(client: client, thread: thread, kind: "bom", ticks: false)
             case "Comments": DataCommentsPage(client: client, thread: thread)
+            case "Release": DataReportPage(client: client, thread: thread, kind: "release", ticks: false)
             default: DataReportPage(client: client, thread: thread, kind: "checks", ticks: true)
             }
         }

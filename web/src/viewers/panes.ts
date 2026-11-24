@@ -401,12 +401,45 @@ interface ReviewTask {
   index?: number;
 }
 
+type ReviewTab = "checks" | "bom" | "comments" | "release";
+
+/** A release already made, as `review.page {page: "release"}` gives it: its folder from the thread's, and its manifest. */
+export interface ReleaseMade {
+  tag?: string;
+  rel?: string;
+  manifest?: {
+    commit?: string;
+    date?: string;
+    files?: string[];
+    drawings?: { kind?: string; title?: string; file?: string }[];
+    openFabNotes?: string[];
+  } | null;
+}
+
+export interface ReleaseRow { title: string; file: string; url: string; drawing: boolean }
+
+/** The rows of a release's page: the drawing package first (in the manifest's order), then every other output; each with where the hub serves it. */
+export function releaseRows(threadId: string, made: ReleaseMade): ReleaseRow[] {
+  const rel = made.rel || "";
+  const m = made.manifest || {};
+  const url = (file: string) => `/files/get?thread=${encodeURIComponent(threadId)}&path=${encodeURIComponent(`${rel}/${file}`)}`;
+  const ok = (file: unknown): file is string => typeof file === "string" && file !== "" && !file.startsWith("/") && !file.split(/[\\/]/).includes("..");
+  const drawings = (Array.isArray(m.drawings) ? m.drawings : []).filter((d) => ok(d?.file));
+  const drawn = new Set(drawings.map((d) => d.file));
+  const rows: ReleaseRow[] = drawings.map((d) => ({ title: d.title || d.kind || (d.file as string), file: d.file as string, url: url(d.file as string), drawing: true }));
+  for (const f of Array.isArray(m.files) ? m.files : []) {
+    if (ok(f) && !drawn.has(f)) rows.push({ title: f, file: f, url: url(f), drawing: false });
+  }
+  return rows;
+}
+
 interface ReviewReport {
   md?: string;
   err?: string;
   gate?: string;
   line?: string;
   tasks?: ReviewTask[];
+  release?: ReleaseMade;
 }
 
 interface ReviewComment {
@@ -426,7 +459,7 @@ export function mountReviewPane(
   threadId: string
 ): PaneHandle {
   let alive = true;
-  let tab: "checks" | "bom" | "comments" = "checks";
+  let tab: ReviewTab = "checks";
 
   const root = el("div", "bp-pane bp-review-pane");
   root.setAttribute("data-testid", "pane-review");
@@ -436,8 +469,10 @@ export function mountReviewPane(
   const checksBtn = el("button", "bp-v-btn is-on", "Checks");
   const bomBtn = el("button", "bp-v-btn", "BOM");
   const commentsBtn = el("button", "bp-v-btn", "Comments");
-  checksBtn.type = bomBtn.type = commentsBtn.type = "button";
-  tabsEl.append(checksBtn, bomBtn, commentsBtn);
+  const releaseBtn = el("button", "bp-v-btn", "Release");
+  releaseBtn.setAttribute("data-testid", "review-tab-release");
+  checksBtn.type = bomBtn.type = commentsBtn.type = releaseBtn.type = "button";
+  tabsEl.append(checksBtn, bomBtn, commentsBtn, releaseBtn);
 
   const refreshBtn = el("button", "bp-v-btn", "Refresh");
   refreshBtn.type = "button";
@@ -449,16 +484,58 @@ export function mountReviewPane(
   root.append(bar, body);
   stage.replaceChildren(root);
 
-  function setTab(next: "checks" | "bom" | "comments"): void {
+  function setTab(next: ReviewTab): void {
     tab = next;
     checksBtn.classList.toggle("is-on", tab === "checks");
     bomBtn.classList.toggle("is-on", tab === "bom");
     commentsBtn.classList.toggle("is-on", tab === "comments");
+    releaseBtn.classList.toggle("is-on", tab === "release");
     void load();
   }
   checksBtn.addEventListener("click", () => setTab("checks"));
   bomBtn.addEventListener("click", () => setTab("bom"));
   commentsBtn.addEventListener("click", () => setTab("comments"));
+  releaseBtn.addEventListener("click", () => setTab("release"));
+
+  // A release already made: its drawings to open in a tab or download, the notes the board leaves open, then the other outputs.
+  function renderRelease(made: ReleaseMade): HTMLElement {
+    const wrap = el("div", "bp-review-md bp-review-release");
+    wrap.setAttribute("data-testid", "review-release");
+    const m = made.manifest || {};
+    wrap.append(el("h2", "bp-review-h", made.tag || "Release"));
+    wrap.append(el("p", "bp-review-p", [m.commit ? `Commit ${m.commit.slice(0, 12)}` : "", m.date || ""].filter(Boolean).join(" · ")));
+    const rows = releaseRows(threadId, made);
+    const section = (title: string, part: ReleaseRow[]): void => {
+      if (part.length === 0) return;
+      wrap.append(el("h3", "bp-review-h", title));
+      const table = el("table", "bp-review-table");
+      for (const r of part) {
+        const tr = document.createElement("tr");
+        const name = el("td", undefined, r.title);
+        name.title = r.file;
+        const acts = document.createElement("td");
+        const dl = el("a", "bp-v-btn", "Download");
+        dl.href = r.url;
+        dl.download = r.file.split("/").pop() || r.file;
+        acts.append(dl);
+        tr.append(name, acts);
+        table.append(tr);
+      }
+      wrap.append(table);
+    };
+    section("Drawings", rows.filter((r) => r.drawing));
+    const open = Array.isArray(m.openFabNotes) ? m.openFabNotes : [];
+    if (open.length > 0) {
+      wrap.append(el("div", "bp-review-gate", `Open fabrication notes, not in the board (agree them with the fabricator): ${open.join(", ")}.`));
+    }
+    section("Files", rows.filter((r) => !r.drawing));
+    if (made.rel) {
+      const all = el("a", "bp-v-btn", "Download all (.zip)");
+      all.href = `/files/zip?thread=${encodeURIComponent(threadId)}&path=${encodeURIComponent(made.rel)}`;
+      wrap.append(all);
+    }
+    return wrap;
+  }
 
   function renderMarkdownSafe(md: string): HTMLElement {
     const wrap = el("div", "bp-review-md");
@@ -575,10 +652,14 @@ export function mountReviewPane(
         });
         body.append(list);
       }
-      if (rep.md && rep.md.trim()) {
+      if (tab === "release" && rep.release && rep.release.manifest) {
+        body.append(renderRelease(rep.release));
+      } else if (rep.md && rep.md.trim()) {
         body.append(renderMarkdownSafe(rep.md));
       } else if (!rep.err && (!rep.tasks || rep.tasks.length === 0)) {
-        body.append(el("div", "bp-pane-empty", `No ${tab === "bom" ? "BOM" : "design checks"} report available.`));
+        body.append(el("div", "bp-pane-empty", tab === "release"
+          ? "No release yet. A release tags this design and makes its fabrication outputs and drawings in .backplane/releases."
+          : `No ${tab === "bom" ? "BOM" : "design checks"} report available.`));
       }
     } catch (err) {
       if (!alive) return;

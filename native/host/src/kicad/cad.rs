@@ -9,13 +9,18 @@ pub const CHECKS: [Chk; 2] = [
     Chk { id: "erc", label: "ERC", argv: &["{cli}", "sch", "erc", "--format", "json", "--severity-all", "--units", "mm", "-o", "{out}/erc.json", "{sch}"], report: "erc.json" },
     Chk { id: "drc", label: "DRC", argv: &["{cli}", "pcb", "drc", "--format", "json", "--severity-all", "--units", "mm", "--schematic-parity", "-o", "{out}/drc.json", "{pcb}"], report: "drc.json" },
 ];
-pub const OUTS: [Out; 9] = [
+pub const OUTS: [Out; 11] = [
     Out { id: "gerbers", label: "Gerbers", argv: &["{cli}", "pcb", "export", "gerbers", "-o", "{out}/gerbers/", "{pcb}"], on: true },
     Out { id: "drill", label: "Drill files", argv: &["{cli}", "pcb", "export", "drill", "--format", "excellon", "--excellon-separate-th", "-o", "{out}/gerbers/", "{pcb}"], on: true },
     Out { id: "cpl", label: "Placement (CPL)", argv: &["{cli}", "pcb", "export", "pos", "--format", "csv", "--units", "mm", "--side", "both", "--exclude-dnp", "-o", "{out}/{name}-cpl.csv", "{pcb}"], on: true },
     Out { id: "bom", label: "BOM", argv: &["{cli}", "sch", "export", "bom", "--fields", "Reference,Value,Footprint,${QUANTITY},MPN,Manufacturer,${DNP}", "--labels", "Refs,Value,Footprint,Qty,MPN,Manufacturer,DNP", "--group-by", "Value,Footprint,MPN,Manufacturer", "--exclude-dnp", "-o", "{out}/{name}-bom.csv", "{sch}"], on: true },
     Out { id: "sch-pdf", label: "Schematic PDF", argv: &["{cli}", "sch", "export", "pdf", "-o", "{out}/{name}-schematic.pdf", "{sch}"], on: true },
     Out { id: "pcb-pdf", label: "Board PDF", argv: &["{cli}", "pcb", "export", "pdf", "--mode-multipage", "-l", "F.Cu,B.Cu,F.Silkscreen,B.Silkscreen,F.Mask,B.Mask,Edge.Cuts", "--cl", "Edge.Cuts", "-o", "{out}/{name}-board.pdf", "{pcb}"], on: true },
+    // the assembly drawings: each side's fabrication and courtyard layers over the outline, references and values kept, pads sketched, fitted to the page, a part
+    // that is not placed crossed out; the bottom is mirrored, so it reads as the board turned over. The fabrication and drill drawings are
+    // made in the hub (drawings.rs), into the same folder.
+    Out { id: "asm-top", label: "Assembly drawing, top", argv: &["{cli}", "pcb", "export", "pdf", "--mode-single", "-l", "F.Fab,F.Courtyard,Edge.Cuts", "--black-and-white", "--sketch-pads-on-fab-layers", "--crossout-DNP-footprints-on-fab-layers", "--drill-shape-opt", "0", "--scale", "0", "-o", "{out}/drawings/{name}-assembly-top.pdf", "{pcb}"], on: true },
+    Out { id: "asm-bottom", label: "Assembly drawing, bottom", argv: &["{cli}", "pcb", "export", "pdf", "--mode-single", "-l", "B.Fab,B.Courtyard,Edge.Cuts", "--mirror", "--black-and-white", "--sketch-pads-on-fab-layers", "--crossout-DNP-footprints-on-fab-layers", "--drill-shape-opt", "0", "--scale", "0", "-o", "{out}/drawings/{name}-assembly-bottom.pdf", "{pcb}"], on: true },
     Out { id: "step", label: "STEP model", argv: &["{cli}", "pcb", "export", "step", "--subst-models", "-f", "-o", "{out}/{name}.step", "{pcb}"], on: true },
     Out { id: "ipc2581", label: "IPC-2581", argv: &["{cli}", "pcb", "export", "ipc2581", "-o", "{out}/{name}-ipc2581.xml", "{pcb}"], on: false },
     Out { id: "odb", label: "ODB++", argv: &["{cli}", "pcb", "export", "odb", "-o", "{out}/{name}-odb.zip", "{pcb}"], on: false },

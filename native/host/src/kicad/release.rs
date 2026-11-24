@@ -81,9 +81,45 @@ pub fn plan_at(ids: &[&str], out: &str, cli: &str, pcb: &str, sch: &str) -> Vec<
     cad::OUTS.iter().filter(|o| ids.contains(&o.id) && !(pcb.is_empty() && o.argv.contains(&"{pcb}")) && !(sch.is_empty() && o.argv.contains(&"{sch}")))
         .map(|o| Step { id: o.id.into(), label: o.label.into(), argv: cad::fill(o.argv, &vars) }).collect()
 }
-/// Release.manifest
-pub fn manifest(tag: &str, commit: &str, date: &str, files: &[String]) -> String {
-    J::obj(&[("tag", J::str(tag)), ("commit", J::str(commit)), ("date", J::str(date)), ("files", J::Arr(files.iter().map(|f| J::str(f)).collect()))]).show()
+/// A drawing of the release's manufacturing drawing package
+#[derive(Clone, Debug, PartialEq)]
+pub struct Drawing { pub kind: &'static str, pub title: &'static str, pub file: String }
+/// Release.drawing_kinds: the package in the order a fabricator reads it: (kind, title, the end of its file's name)
+pub const DRAWINGS: [(&str, &str, &str); 4] = [
+    ("fabrication", "Fabrication drawing", "-fabrication.pdf"), ("drill", "Drill drawing", "-drill.pdf"),
+    ("assembly-top", "Assembly drawing, top", "-assembly-top.pdf"), ("assembly-bottom", "Assembly drawing, bottom", "-assembly-bottom.pdf"),
+];
+/// Release.drawing_path: where a drawing of the board `name` goes in the release's folder
+pub fn drawing_path(name: &str, kind: &str) -> String { DRAWINGS.iter().find(|d| d.0 == kind).map(|d| format!("drawings/{name}{}", d.2)).unwrap_or_default() }
+/// Release.drawings: the drawings among a release's files (those in drawings/), in the package's order
+pub fn drawings(files: &[String]) -> Vec<Drawing> {
+    DRAWINGS.iter().flat_map(|(kind, title, end)| files.iter().filter(move |f| f.strip_prefix("drawings/").map_or(false, |n| !n.contains('/') && n.len() > end.len() && n.ends_with(end))).map(move |f| Drawing { kind, title, file: f.clone() })).collect()
+}
+/// Release.manifest: `files` is every output; `drawings` names the drawing package among them; `openFabNotes` are the fabrication notes the
+/// board does not answer (printed OPEN on the fabrication drawing, never defaulted)
+pub fn manifest(tag: &str, commit: &str, date: &str, files: &[String], open: &[String]) -> String {
+    let ds = drawings(files).iter().map(|d| J::obj(&[("kind", J::str(d.kind)), ("title", J::str(d.title)), ("file", J::str(&d.file))])).collect();
+    J::obj(&[("tag", J::str(tag)), ("commit", J::str(commit)), ("date", J::str(date)), ("files", J::Arr(files.iter().map(|f| J::str(f)).collect())),
+        ("drawings", J::Arr(ds)), ("openFabNotes", J::Arr(open.iter().map(|f| J::str(f)).collect()))]).show()
+}
+/// Release.package_md: the drawing package as the Release page shows it: each drawing by its full path (a path opens it), then what is open
+pub fn package_md(dir: &str, files: &[String], open: &[String]) -> String {
+    let ds = drawings(files);
+    if ds.is_empty() { return String::new() }
+    let rows: Vec<String> = ds.iter().map(|d| format!("- {}: `{dir}/{}`", d.title, d.file)).collect();
+    let open = if open.is_empty() { String::new() } else { format!("\n\nOpen fabrication notes, not in the board (agree them with the fabricator): {}.", open.join(", ")) };
+    format!("**Drawings**\n\n{}{open}\n\n", rows.join("\n"))
+}
+/// Release.released_md: a release already made, from its folder and its manifest's text: the tag, the drawing package, the files. None when
+/// the manifest does not read as one.
+pub fn released_md(dir: &str, manifest: &str) -> Option<String> {
+    let m = bj::parse(manifest)?;
+    let (tag, commit) = (m.get_str("tag", ""), m.get_str("commit", ""));
+    if tag.is_empty() { return None }
+    let list = |k: &str| -> Vec<String> { m.get_obj(k).elems().iter().filter_map(|x| if let J::Str(s) = x { Some(s.clone()) } else { None }).collect() };
+    let files = list("files");
+    let rows: Vec<String> = files.iter().map(|f| format!("- `{f}`")).collect();
+    Some(format!("# {tag}\n\nCommit `{commit}`, made {}.\n\n{}**Files** in `{dir}`\n\n{}", m.get_str("date", ""), package_md(dir, &files, &list("openFabNotes")), rows.join("\n")))
 }
 fn sec(title: &str, body: &str) -> String { let b = bj::trim(body); if b.is_empty() { String::new() } else { format!("\n## {title}\n\n{b}\n") } }
 /// Release.notes: the tag, the commit, what it is since the previous tag, the checks' summary and the BOM changes
@@ -126,7 +162,7 @@ mod tests {
         assert_eq!(nocommit("/p/uno"), "No release: a release tags a commit, and /p/uno has none (it is not a git repository yet, or nothing is committed). Make one first: cd /p/uno && git init && git add -A && git commit -m start");
     }
     #[test] fn plans_as_release_test_says() {
-        assert_eq!(defaults(), ["gerbers", "drill", "cpl", "bom", "sch-pdf", "pcb-pdf", "step"]);
+        assert_eq!(defaults(), ["gerbers", "drill", "cpl", "bom", "sch-pdf", "pcb-pdf", "asm-top", "asm-bottom", "step"]);
         let show = |ss: Vec<Step>| ss.iter().map(|s| format!("{}:{}", s.id, s.argv.join("|"))).collect::<Vec<_>>();
         let out = "/r/.backplane/releases/v1";
         let p = show(plan_at(&["gerbers", "bom", "cpl"], out, "kicad-cli", "/r/a.kicad_pcb", "/r/a.kicad_sch"));
@@ -135,8 +171,30 @@ mod tests {
         assert_eq!(show(plan_at(&["cpl", "sch-pdf"], out, "kicad-cli", "", "/r/x.kicad_sch")), ["sch-pdf:kicad-cli|sch|export|pdf|-o|/r/.backplane/releases/v1/x-schematic.pdf|/r/x.kicad_sch"]);
         assert!(plan_at(&[], out, "kicad-cli", "/r/a.kicad_pcb", "").is_empty());
     }
+    #[test] fn release_drawings_are_the_package_in_reading_order() {
+        let files = ["a-board.pdf", "drawings/a-assembly-bottom.pdf", "drawings/a-assembly-top.pdf", "drawings/a-drill.pdf", "drawings/a-fabrication.pdf", "drawings/notes.txt", "drawings/x/a-drill.pdf", "drawings/-drill.pdf", "gerbers/a-drill.pdf"].map(String::from);
+        assert_eq!(drawings(&files).iter().map(|d| (d.kind, d.file.as_str())).collect::<Vec<_>>(), [("fabrication", "drawings/a-fabrication.pdf"), ("drill", "drawings/a-drill.pdf"), ("assembly-top", "drawings/a-assembly-top.pdf"), ("assembly-bottom", "drawings/a-assembly-bottom.pdf")]);
+        // the plan writes the assembly views where the manifest looks for them
+        let p = plan_at(&["asm-top", "asm-bottom"], "/o", "kicad-cli", "/r/a.kicad_pcb", "");
+        for (s, kind) in p.iter().zip(["assembly-top", "assembly-bottom"]) { assert!(s.argv.contains(&format!("/o/{}", drawing_path("a", kind))), "{:?}", s.argv) }
+        assert!(p[1].argv.contains(&"--mirror".to_string()) && !p[0].argv.contains(&"--mirror".to_string()));
+        assert_eq!((drawing_path("a", "drill"), drawing_path("a", "nope")), ("drawings/a-drill.pdf".to_string(), String::new()));
+        assert_eq!(package_md("/r/.backplane/releases/v1", &files[..1], &[]), "");
+        assert_eq!(package_md("/d", &files[3..5], &["Surface finish".to_string(), "Silkscreen".to_string()]), "**Drawings**\n\n- Fabrication drawing: `/d/drawings/a-fabrication.pdf`\n- Drill drawing: `/d/drawings/a-drill.pdf`\n\nOpen fabrication notes, not in the board (agree them with the fabricator): Surface finish, Silkscreen.\n\n");
+    }
+    #[test] fn release_made_reads_back_from_its_manifest() {
+        let files = ["a-bom.csv", "drawings/a-drill.pdf"].map(String::from);
+        let md = released_md("/r/.backplane/releases/v1", &manifest("v1", "abc123", "2026-10-12T00:00:00Z", &files, &["Silkscreen".to_string()])).unwrap();
+        assert_eq!(md, "# v1\n\nCommit `abc123`, made 2026-10-12T00:00:00Z.\n\n**Drawings**\n\n- Drill drawing: `/r/.backplane/releases/v1/drawings/a-drill.pdf`\n\nOpen fabrication notes, not in the board (agree them with the fabricator): Silkscreen.\n\n**Files** in `/r/.backplane/releases/v1`\n\n- `a-bom.csv`\n- `drawings/a-drill.pdf`");
+        // a manifest written before the drawing package has files only
+        assert_eq!(released_md("/d", "{\"tag\":\"v0\",\"commit\":\"c\",\"date\":\"d\",\"files\":[\"x.step\"]}").unwrap(), "# v0\n\nCommit `c`, made d.\n\n**Files** in `/d`\n\n- `x.step`");
+        assert_eq!((released_md("/d", "{}"), released_md("/d", "not json {")), (None, None));
+    }
     #[test] fn texts_as_release_test_says() {
-        assert_eq!(manifest("v1", "abc123", "2026-10-12T00:00:00Z", &["gerbers/a.gbr".to_string(), "a-bom.csv".to_string()]), "{\"tag\":\"v1\",\"commit\":\"abc123\",\"date\":\"2026-10-12T00:00:00Z\",\"files\":[\"gerbers/a.gbr\",\"a-bom.csv\"]}");
+        let files = ["gerbers/a.gbr", "a-bom.csv", "drawings/a-assembly-top.pdf", "drawings/a-drill.pdf", "drawings/a-fabrication.pdf"].map(String::from);
+        assert_eq!(manifest("v1", "abc123", "2026-10-12T00:00:00Z", &files[..2], &[]), "{\"tag\":\"v1\",\"commit\":\"abc123\",\"date\":\"2026-10-12T00:00:00Z\",\"files\":[\"gerbers/a.gbr\",\"a-bom.csv\"],\"drawings\":[],\"openFabNotes\":[]}");
+        let m = manifest("v1", "abc123", "d", &files, &["Surface finish".to_string()]);
+        assert!(m.ends_with("\"drawings\":[{\"kind\":\"fabrication\",\"title\":\"Fabrication drawing\",\"file\":\"drawings/a-fabrication.pdf\"},{\"kind\":\"drill\",\"title\":\"Drill drawing\",\"file\":\"drawings/a-drill.pdf\"},{\"kind\":\"assembly-top\",\"title\":\"Assembly drawing, top\",\"file\":\"drawings/a-assembly-top.pdf\"}],\"openFabNotes\":[\"Surface finish\"]}"), "{m}");
         assert_eq!(notes("v1.3", "v1.2", "abc123", "| Ref | Change |\n|---|---|\n| R1 | 10k -> 22k |", "ERC 0; DRC 0"), "# v1.3\n\nCommit `abc123`. Changes since v1.2.\n\n## Checks\n\nERC 0; DRC 0\n\n## BOM changes\n\n| Ref | Change |\n|---|---|\n| R1 | 10k -> 22k |\n");
         assert_eq!(notes("v1", "", "abc123", "", "  "), "# v1\n\nCommit `abc123`. First release.\n");
         assert_eq!(command_error("x", 0, "out"), ""); assert_eq!(command_error("x", 2, "  "), "x failed (exit 2)"); assert_eq!(command_error("x", 2, " why \n"), "x failed (exit 2): why");

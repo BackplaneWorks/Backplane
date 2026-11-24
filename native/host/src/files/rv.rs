@@ -10,7 +10,7 @@
 //!   * Not ported: the bundled library overlay (effects/kicad_library.js), which only a build with a baked library payload has.
 use super::git::{self, proc, proc_ro, Ran};
 use super::kicad::bj::{self, J};
-use super::kicad::{bom, cad, checks, ipc, plotread, project, release, review};
+use super::kicad::{bom, cad, checks, drawings, ipc, plotread, project, release, review};
 use super::{fm, threadpath};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
@@ -292,8 +292,23 @@ async fn export_step(argv: &[String], label: &str) -> String {
     if after.code != 0 { return release::command_error(&format!("{label} output inspection"), after.code, &after.out) }
     if bj::trim(&after.out).is_empty() || before.out == after.out { format!("{label} produced no new nonempty output") } else { String::new() }
 }
+/// Rvr.drawings: the fabrication and drill drawings, made here from the snapshot's board (the assembly views are KiCad's plots, among the
+/// export steps) into the staging folder's drawings/. The notes the board leaves open, or why a drawing could not be written.
+async fn drawing_step(stage: &str, pcb: &str, tag: &str, commit: &str) -> Result<Vec<String>, String> {
+    if pcb.is_empty() { return Ok(vec![]) }
+    let (stage, pcb, tag, commit) = (stage.to_string(), pcb.to_string(), tag.to_string(), commit.to_string());
+    tokio::task::spawn_blocking(move || {
+        let board = std::fs::read(&pcb).map_err(|e| format!("drawings: the board could not be read: {e}"))?;
+        let (f, name) = (drawings::facts(&board), release::stem(&pcb));
+        let m = drawings::Meta { name: &name, tag: &tag, commit: &commit };
+        for (kind, bytes) in [("fabrication", drawings::fabrication(&f, &m)), ("drill", drawings::drill(&f, &m))] {
+            std::fs::write(format!("{stage}/{}", release::drawing_path(&name, kind)), bytes).map_err(|e| format!("{kind} drawing could not be written: {e}"))?;
+        }
+        Ok(drawings::open(&f).into_iter().map(str::to_string).collect())
+    }).await.unwrap_or_else(|e| Err(format!("drawings failed: {e}")))
+}
 /// Rvr.outputs.done: the BOM change, the notes, the file list, the metadata, and the staged folder renamed into place
-async fn publish_stage(ls: &[String], tag: &str, sch: &str) -> J {
+async fn publish_stage(ls: &[String], tag: &str, sch: &str, open: &[String]) -> J {
     let (t, src, gd, top, c, prev, pc, fin, stage, object) = (at(ls, 0), at(ls, 1), at(ls, 2), at(ls, 3), at(ls, 4), at(ls, 5), at(ls, 6), at(ls, 7), at(ls, 8), at(ls, 10));
     let rel = bj::drop(sch, 1 + bj::len(src));
     let prefix = bj::drop(src, 5 + bj::len(t));
@@ -305,11 +320,12 @@ async fn publish_stage(ls: &[String], tag: &str, sch: &str) -> J {
     if lst.code != 0 { return err(release::command_error("list release outputs", lst.code, &lst.out)) }
     let files: Vec<String> = bj::trim(&lst.out).split('\n').filter(|x| !bj::trim(x).is_empty()).map(str::to_string).collect();
     let when = iso_utc(now_s());
-    let written = std::fs::write(format!("{stage}/notes.md"), &notes).is_ok() & std::fs::write(format!("{stage}/manifest.json"), release::manifest(tag, c, &when, &files)).is_ok();
+    let written = std::fs::write(format!("{stage}/notes.md"), &notes).is_ok() & std::fs::write(format!("{stage}/manifest.json"), release::manifest(tag, c, &when, &files, open)).is_ok();
     if !written { return err("release metadata could not be written; no outputs published, retry the same tag") }
     let done = sh(REL_COMMIT, &[stage, fin, gd, tag, c], "/").await;
     if done.code != 0 { return err(release::command_error("publish output directory", done.code, &done.out)) }
-    J::obj(&[("dir", J::str(fin)), ("files", J::Arr(files.into_iter().map(J::Str).collect())), ("notes", J::Str(notes)), ("prev", J::str(prev)), ("commit", J::str(c)), ("tagObject", J::str(object))])
+    J::obj(&[("dir", J::str(fin)), ("files", J::Arr(files.into_iter().map(J::Str).collect())), ("notes", J::Str(notes)), ("prev", J::str(prev)), ("commit", J::str(c)), ("tagObject", J::str(object)),
+        ("open", J::Arr(open.iter().map(|x| J::str(x)).collect()))])
 }
 /// Rvr.in: the outputs built from the snapshot into a private staging folder; both it and the snapshot go, and the lock with them
 async fn release_in(ls: &[String], tag: &str, cli: &str) -> J {
@@ -323,14 +339,17 @@ async fn release_in(ls: &[String], tag: &str, cli: &str) -> J {
     let f = project::read(at(ls, 1));
     let steps = release::plan_at(&release::defaults(), stage, cli, &f.pcb, &f.sch);
     let why = bound(&format!("{t}/src"), &f).await;
-    let made = std::fs::create_dir_all(format!("{stage}/gerbers"));
+    let made = std::fs::create_dir_all(format!("{stage}/gerbers")).and_then(|_| std::fs::create_dir_all(format!("{stage}/drawings")));
     let o = if !why.is_empty() { err(why) }
         else if let Err(e) = made { err(format!("create export directory failed: {e}")) }
         else if steps.is_empty() { err("no supported design files or export steps; no outputs published") }
         else {
             let mut e = String::new();
             for s in &steps { e = export_step(&s.argv, &format!("{} ({})", s.label, s.id)).await; if !e.is_empty() { break } }
-            if e.is_empty() { publish_stage(ls, tag, &f.sch).await } else { err(format!("{e}; no outputs published, retry the same tag")) }
+            let open = if e.is_empty() { match drawing_step(stage, &f.pcb, tag, at(ls, 4)).await { Ok(open) => open, Err(why) => { e = why; vec![] } } } else { vec![] };
+            // a schematic-only project has no drawings: its empty drawings/ is not an output
+            if f.pcb.is_empty() { let _ = std::fs::remove_dir(format!("{stage}/drawings")); }
+            if e.is_empty() { publish_stage(ls, tag, &f.sch, &open).await } else { err(format!("{e}; no outputs published, retry the same tag")) }
         };
     if !t.is_empty() { let _ = std::fs::remove_dir_all(t); }
     if !stage.is_empty() { let _ = std::fs::remove_dir_all(stage); }
@@ -371,8 +390,10 @@ fn output_error(o: &J) -> String {
 }
 /// Rvr.done.md
 fn done_md(o: &J, published: &str) -> String {
-    let files: Vec<String> = o.get_obj("files").elems().iter().map(|x| format!("- `{}`", if let J::Str(s) = x { s.as_str() } else { "" })).collect();
-    format!("{}\n\n**Files** in `{}`\n\n{}{}", o.get_str("notes", ""), o.get_str("dir", ""), files.join("\n"), if published.is_empty() { String::new() } else { format!("\n\n{published}") })
+    let list = |k: &str| -> Vec<String> { o.get_obj(k).elems().iter().map(|x| if let J::Str(s) = x { s.clone() } else { String::new() }).collect() };
+    let (dir, names) = (o.get_str("dir", ""), list("files"));
+    let files: Vec<String> = names.iter().map(|f| format!("- `{f}`")).collect();
+    format!("{}\n\n{}**Files** in `{dir}`\n\n{}{}", o.get_str("notes", ""), release::package_md(dir, &names, &list("open")), files.join("\n"), if published.is_empty() { String::new() } else { format!("\n\n{published}") })
 }
 /// RvJob.release: a release of the thread's folder at a resolved immutable commit
 async fn release_job(cli: &str, thread: &str, cwd: &str, tag: &str, publish_it: bool, force: bool, home: &str) -> Value {
@@ -396,6 +417,31 @@ async fn release_job(cli: &str, thread: &str, cwd: &str, tag: &str, publish_it: 
     let said = if publish_it { publish(cwd, tag, &out).await } else { String::new() };
     rel_report(thread, &done_md(&out, &said), if said.starts_with("Not published") || said.starts_with("Publication no longer") { &said } else { "" })
 }
+/// RvJob.released: the newest release already made in the thread's folder (by its manifest's date), read back from .backplane/releases: the
+/// tag, its drawing package and files, as the page's Markdown and as data (`rel`: the release's folder from the thread's, for a client that
+/// fetches the files; `manifest`: the manifest as written). A read: nothing is run or written. None when there is none.
+fn released(cwd: &str) -> Option<(String, Value)> {
+    let root = format!("{cwd}/.backplane/releases");
+    let mut best: Option<(String, String, String, String)> = None;
+    for e in std::fs::read_dir(&root).into_iter().flatten().flatten() {
+        let Ok(tag) = e.file_name().into_string() else { continue };
+        if !e.file_type().map(|t| t.is_dir()).unwrap_or(false) { continue }
+        let dir = format!("{root}/{tag}");
+        let text = text_of(&format!("{dir}/manifest.json"));
+        // a release is the folder named by its own tag: a staging folder (`<tag>.pending.*`, left by a release cut short) is not one
+        let Some(m) = bj::parse(&text) else { continue };
+        if m.get_str("tag", "") != tag { continue }
+        let date = m.get_str("date", "").to_string();
+        if best.as_ref().map_or(true, |b| (date.as_str(), tag.as_str()) > (b.0.as_str(), b.1.as_str())) { if let Some(md) = release::released_md(&dir, &text) { best = Some((date, tag, md, text)) } }
+    }
+    let (_, tag, md, text) = best?;
+    Some((md, json!({"tag": tag, "rel": format!(".backplane/releases/{tag}"), "manifest": serde_json::from_str::<Value>(&text).unwrap_or(Value::Null)})))
+}
+fn released_report(thread: &str, cwd: &str) -> Value {
+    let mut r = rel_report(thread, "", "");
+    if let Some((md, data)) = released(cwd) { r["report"]["md"] = json!(md); r["report"]["release"] = data; }
+    r
+}
 
 /// RvJob.pr: after Backplane opens a pull request, its BOM change (where the branch left main to what it pushed) goes on it as a comment; what to tell the thread ("" nothing)
 pub async fn pr_note(cwd: &str, url: &str) -> String {
@@ -414,7 +460,7 @@ pub async fn pr_note(cwd: &str, url: &str) -> String {
 
 pub struct Rv;
 impl RpcHandler for Rv {
-    fn methods(&self) -> &'static [&'static str] { &["review.bom", "review.checks", "review.tick", "review.comment", "review.release"] }
+    fn methods(&self) -> &'static [&'static str] { &["review.bom", "review.checks", "review.tick", "review.comment", "review.release", "review.released"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let j = J::of(p);
@@ -453,6 +499,7 @@ impl RpcHandler for Rv {
                         None => reply(false, json!({"error":"the checklist could not be written"})),
                     }
                 }
+                "review.released" => { let c = cwd.clone(); let th = thread.to_string(); reply(true, tokio::task::spawn_blocking(move || released_report(&th, &c)).await.unwrap_or_else(|_| rel_report(thread, "", ""))) }
                 _ => { // review.release
                     let cli = ipc::runtime(hub).await.cli;
                     reply(true, release_job(&cli, thread, &cwd, j.get_str("tag", ""), j.get_bool("publish", false), j.get_bool("force", false), &home).await)
@@ -558,8 +605,18 @@ mod tests {
         let r = release_job(&cli, "t", &d, "v1", false, false, &home).await; assert!(r["report"]["err"].as_str().unwrap().contains("commit or stash working changes"), "{r}"); std::fs::remove_file(format!("{d}/dirty.txt")).unwrap();
         let r = release_job(&cli, "t", &d, "v1", false, false, &home).await; assert_eq!(r["report"]["err"], "", "{r}");
         let md = r["report"]["md"].as_str().unwrap(); assert!(md.starts_with("# v1\n\nCommit `") && md.contains("First release.") && md.contains("- `b-bom.csv`") && md.contains("- `gerbers/gerbers.gbr`"), "{md}");
-        let fin = format!("{d}/.backplane/releases/v1"); assert!(std::path::Path::new(&format!("{fin}/notes.md")).exists());
+        // the drawing package: the hub's fabrication and drill drawings and KiCad's two assembly views, on the page by their paths and in the manifest
+        let fin = format!("{d}/.backplane/releases/v1");
+        assert!(md.contains(&format!("**Drawings**\n\n- Fabrication drawing: `{fin}/drawings/b-fabrication.pdf`\n- Drill drawing: `{fin}/drawings/b-drill.pdf`\n- Assembly drawing, top: `{fin}/drawings/b-assembly-top.pdf`\n- Assembly drawing, bottom: `{fin}/drawings/b-assembly-bottom.pdf`\n\nOpen fabrication notes, not in the board")), "{md}");
+        for k in ["fabrication", "drill"] { let b = std::fs::read(format!("{fin}/drawings/b-{k}.pdf")).unwrap(); assert!(b.starts_with(b"%PDF-1.4") && b.ends_with(b"%%EOF\n"), "{k}") }
+        assert!(std::path::Path::new(&format!("{fin}/notes.md")).exists());
         let m: Value = serde_json::from_str(&std::fs::read_to_string(format!("{fin}/manifest.json")).unwrap()).unwrap(); assert_eq!(m["tag"], "v1"); assert_eq!(m["commit"], g(&["rev-parse", "HEAD"]).as_str());
+        assert_eq!(m["drawings"].as_array().unwrap().iter().map(|x| format!("{}={}", x["kind"].as_str().unwrap(), x["file"].as_str().unwrap())).collect::<Vec<_>>(), ["fabrication=drawings/b-fabrication.pdf", "drill=drawings/b-drill.pdf", "assembly-top=drawings/b-assembly-top.pdf", "assembly-bottom=drawings/b-assembly-bottom.pdf"]);
+        for f in m["drawings"].as_array().unwrap() { assert!(m["files"].as_array().unwrap().contains(&f["file"]), "a drawing is one of the release's files: {f}") }
+        assert_eq!(m["openFabNotes"].as_array().unwrap().len(), 8, "the stand-in board says nothing: every note is open, none defaulted");
+        // the page reads the release back: the same package, with nothing run
+        let (back, data) = released(&d).unwrap(); assert_eq!((data["tag"].as_str(), data["rel"].as_str(), &data["manifest"]), (Some("v1"), Some(".backplane/releases/v1"), &m));
+        assert!(back.starts_with("# v1\n\nCommit `") && back.contains(&format!("- Drill drawing: `{fin}/drawings/b-drill.pdf`")) && back.contains("- `gerbers/gerbers.gbr`"), "{back}");
         assert_eq!(g(&["ls-remote", "--tags", "origin"]), ""); // nothing leaves the machine unasked
         let r = release_job(&cli, "t", &d, "v1", false, false, &home).await; assert!(r["report"]["err"].as_str().unwrap().contains("already exist"), "{r}");
         // the second release: notes carry the BOM change, the tag goes out by its object, gh is the stand-in
@@ -591,6 +648,29 @@ mod tests {
         assert_eq!(proc("git", &["tag"], &d, &[]).await.out, "");
         let r = release_job("/nonexistent/kicad-cli", "t", &d, "v1", false, true, &home).await; assert!(r["report"]["err"].as_str().unwrap().starts_with("No release: checks could not complete: erc: check command failed"), "{r}");
         let r = release_job(&cli, "t", &d, "v1", false, true, &home).await; assert_eq!(r["report"]["err"], "", "{r}");
+    }
+    #[test] fn the_newest_release_made_is_the_one_read_back() {
+        let d = tmp("released"); assert_eq!(released(&d), None); assert_eq!(released_report("t", &d), json!({"report":{"thread":"t","page":"release","md":"","err":""}}));
+        for (tag, date) in [("v9", "2026-01-01T00:00:00Z"), ("v10", "2026-03-01T00:00:00Z"), ("v2", "2026-02-01T00:00:00Z")] {
+            std::fs::create_dir_all(format!("{d}/.backplane/releases/{tag}")).unwrap();
+            std::fs::write(format!("{d}/.backplane/releases/{tag}/manifest.json"), release::manifest(tag, "c", date, &[format!("drawings/b-fabrication.pdf")], &[])).unwrap();
+        }
+        // a folder with no manifest (a release cut short) and a stray file are not releases
+        std::fs::create_dir_all(format!("{d}/.backplane/releases/v11.pending.ab12cd")).unwrap();
+        std::fs::write(format!("{d}/.backplane/releases/v11.pending.ab12cd/manifest.json"), release::manifest("v11", "c", "2026-09-01T00:00:00Z", &[], &[])).unwrap();
+        std::fs::create_dir_all(format!("{d}/.backplane/releases/zz")).unwrap(); std::fs::write(format!("{d}/.backplane/releases/note.txt"), "x").unwrap();
+        let r = released_report("t", &d); let md = r["report"]["md"].as_str().unwrap();
+        assert_eq!((r["report"]["release"]["rel"].as_str(), r["report"]["release"]["manifest"]["drawings"][0]["kind"].as_str()), (Some(".backplane/releases/v10"), Some("fabrication")));
+        assert!(md.starts_with("# v10\n") && md.contains(&format!("- Fabrication drawing: `{d}/.backplane/releases/v10/drawings/b-fabrication.pdf`")), "{md}");
+    }
+    #[tokio::test] async fn a_board_that_cannot_be_read_makes_no_drawings_and_says_so() {
+        let d = tmp("draw"); std::fs::create_dir_all(format!("{d}/drawings")).unwrap();
+        assert_eq!(drawing_step(&d, "", "v1", "c").await, Ok(vec![]));
+        assert!(drawing_step(&d, &format!("{d}/none.kicad_pcb"), "v1", "c").await.unwrap_err().starts_with("drawings: the board could not be read"));
+        std::fs::write(format!("{d}/a.kicad_pcb"), "(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 20 10) (layer \"Edge.Cuts\")))").unwrap();
+        let open = drawing_step(&d, &format!("{d}/a.kicad_pcb"), "v1", "c").await.unwrap();
+        assert!(!open.contains(&"Board size".to_string()) && !open.contains(&"Finished thickness".to_string()) && open.contains(&"Surface finish".to_string()), "{open:?}");
+        assert!(std::path::Path::new(&format!("{d}/drawings/a-fabrication.pdf")).exists() && std::path::Path::new(&format!("{d}/drawings/a-drill.pdf")).exists());
     }
     #[test] fn iso_utc_formats_rfc3339() {
         assert_eq!(iso_utc(0), "1970-01-01T00:00:00Z");
