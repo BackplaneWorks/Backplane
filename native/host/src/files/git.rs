@@ -32,7 +32,8 @@ async fn spawn(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)], kill: 
     c.args(args).current_dir(cwd).stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).envs(env.iter().copied()).kill_on_drop(kill);
     // a listed read on a copy must not refresh the real repository's index or take its lock while a live agent works there (git status would)
     if crate::copy::on() { c.env("GIT_OPTIONAL_LOCKS", "0"); }
-    match c.output().await {
+    // the exit through proc::output (proc::wait): tokio's own output() waits for SIGCHLD once the pipes close, and a macOS hub that misses it waits for ever (#1108, #1110)
+    match crate::proc::output(&mut c).await {
         Ok(o) => { let mut out = String::from_utf8_lossy(&o.stdout).into_owned(); out.push_str(&String::from_utf8_lossy(&o.stderr)); Ran { code: o.status.code().unwrap_or(1), out } }
         Err(e) => Ran { code: 127, out: e.to_string() },
     }

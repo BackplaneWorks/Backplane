@@ -344,7 +344,7 @@ impl Rpc {
         self.stdin.write_all(b"{\"method\":\"initialized\",\"params\":{}}\n").await.map_err(|_| ())
     }
     /// Killed, and its exit waited for a moment only: a missed exit (#1108) must not hold the op that closes it.
-    async fn close(mut self) { let _ = self.child.start_kill(); let _ = tokio::time::timeout(Duration::from_secs(3), self.child.wait()).await; }
+    async fn close(self) { crate::proc::kill_wait(self.child, Duration::from_secs(3)).await }
 }
 /// The variables that point a CLI at one profile's store (`environment` sets them). The default login never inherits them: a hub started from a shell that
 /// ran under a profile (an agent's own Bash, after failover moved it) would otherwise run every default-login thread, and read its usage, under that profile.
@@ -511,9 +511,9 @@ impl Accounts {
         let ran = tokio::time::timeout(limit, async {
             let mut chunk = [0u8; 8192];
             loop { let n = out.read(&mut chunk).await.map_err(|_| ())?; if n == 0 { break } buf.extend_from_slice(&chunk[..n]); if buf.len() > 131072 { return Err(()) } }
-            Ok::<i32, ()>(child.wait().await.map_err(|_| ())?.code().unwrap_or(-1))
+            Ok::<i32, ()>(crate::proc::wait(&mut child).await.map_err(|_| ())?.code().unwrap_or(-1))
         }).await;
-        let code = match ran { Ok(Ok(code)) => code, _ => { let _ = child.start_kill(); let _ = tokio::time::timeout(Duration::from_secs(2), child.wait()).await; return Err(()) } };
+        let code = match ran { Ok(Ok(code)) => code, _ => { crate::proc::kill_wait(child, Duration::from_secs(2)).await; return Err(()) } };
         let data = if args.get(1) == Some(&"logout") { json!({}) } else { serde_json::from_slice(&buf).map_err(|_| ())? };
         Ok((code, data))
     }
@@ -550,8 +550,7 @@ impl Accounts {
                 Err("The Claude CLI closed before reporting usage.".to_string())
             }).await.unwrap_or_else(|_| Err("The Claude CLI did not answer within 30 seconds.".to_string()))
         }.await;
-        let _ = child.start_kill();
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(2), child.wait()).await;
+        crate::proc::kill_wait(child, Duration::from_secs(2)).await; // reaped, not dropped: one zombie per usage read on a hub that missed SIGCHLD
         r
     }
     /// A test's usage request and CLI store (the real hub's are set in `open`).
@@ -1071,8 +1070,8 @@ impl Accounts {
                         Some(b) => { output.push_str(&String::from_utf8_lossy(&b)); if output.len() > 131072 { break Err("failed") } if let Some(u) = scan(&output, &mut reason) { if self.current(&aid).is_some() { self.set_waiting(&aid, u, String::new()); } } }
                         None => open = false,
                     },
-                    cmd = cmds.recv() => match cmd { Some(Cmd::Respond(code)) => { let _ = stdin.write_all(format!("{code}\n").as_bytes()).await; } Some(Cmd::Cancel) | None => { let _ = child.start_kill(); let _ = child.wait().await; return } },
-                    st = child.wait() => {
+                    cmd = cmds.recv() => match cmd { Some(Cmd::Respond(code)) => { let _ = stdin.write_all(format!("{code}\n").as_bytes()).await; } Some(Cmd::Cancel) | None => { let _ = child.start_kill(); let _ = crate::proc::wait(&mut child).await; return } },
+                    st = crate::proc::wait(&mut child) => {
                         // whatever it printed last still counts (why a code was refused)
                         while let Ok(Some(b)) = tokio::time::timeout(Duration::from_millis(200), orx.recv()).await { output.push_str(&String::from_utf8_lossy(&b)); let _ = scan(&output, &mut reason); }
                         break Ok(st.map(|s| s.success()).unwrap_or(false))
@@ -1080,7 +1079,7 @@ impl Accounts {
                     _ = tokio::time::sleep_until(deadline) => break Err("expired"),
                 }
             };
-            let _ = child.start_kill(); let _ = child.wait().await;
+            let _ = child.start_kill(); let _ = crate::proc::wait(&mut child).await;
             match outcome { Ok(ok) => self.finish(&aid, &cand, ok, &reason).await, Err("expired") => self.cancel(&aid, "expired", ""), Err(_) => self.cancel(&aid, "failed", "") }
         }
     }
