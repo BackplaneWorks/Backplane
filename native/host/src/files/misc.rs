@@ -8,7 +8,9 @@ use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
+#[cfg(not(windows))]
 const FILE_OPEN: &str = include_str!("scripts/file_open.sh");
+#[cfg(not(windows))]
 const FILE_REVEAL: &str = include_str!("scripts/file_reveal.sh");
 const PDF: &str = include_str!("scripts/pdf.sh");
 const MECH_LIST: &str = include_str!("scripts/mech_list.sh");
@@ -44,9 +46,19 @@ fn pdf_why(out: &str) -> String { if out.contains("nopoppler") { "PDFs show here
 /// A path as a message link gives it, as the opener wants it: from the thread's folder when relative, without a `:line[:col]` tail when the file
 /// is not named that way. `~/` and absolute paths stay as they are.
 pub fn link_path(path: &str, root: &str) -> String {
-    let abs = |p: &str| if p.starts_with("~/") || p.starts_with('/') { p.to_string() } else { format!("{}/{}", root.trim_end_matches('/'), p.trim_start_matches("./")) };
+    let is_abs_or_home = |p: &str| p == "~" || p.starts_with("~/") || p.starts_with("~\\") || p.starts_with('/') || crate::plat::dirs::win_abs(p);
+    let abs = |p: &str| if is_abs_or_home(p) { p.to_string() } else { format!("{}/{}", root.trim_end_matches(['/', '\\']), p.trim_start_matches("./").trim_start_matches(".\\")) };
     let full = abs(path);
-    let exists = |p: &str| { let q = match p.strip_prefix("~/") { Some(r) => crate::plat::dirs::home().map(|h| format!("{h}/{r}")).unwrap_or_default(), None => p.to_string() }; std::fs::symlink_metadata(q).is_ok() };
+    let exists = |p: &str| {
+        let q = if p == "~" {
+            crate::plat::dirs::home().unwrap_or_default()
+        } else if let Some(r) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
+            crate::plat::dirs::home().map(|h| format!("{}/{r}", h.trim_end_matches(['/', '\\']))).unwrap_or_default()
+        } else {
+            p.to_string()
+        };
+        !q.is_empty() && std::fs::symlink_metadata(q).is_ok()
+    };
     let mut cut = full.as_str();
     while !exists(cut) {
         let Some((head, tail)) = cut.rsplit_once(':') else { return full };
@@ -54,6 +66,194 @@ pub fn link_path(path: &str, root: &str) -> String {
         cut = head;
     }
     cut.to_string()
+}
+
+/// Normalize a Windows folder or file path for `explorer.exe`: expands `~`, converts `/` to `\`,
+/// strips `\\?\` / `\\?\UNC\` verbatim prefixes, collapses duplicate separators (preserving leading `\\`),
+/// and trims trailing backslashes except on a drive root like `C:\`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn normalize_win_path(path: &str, home: Option<&str>) -> String {
+    let expanded = if let Some(h) = home.filter(|h| !h.is_empty()) {
+        let base = h.trim_end_matches(['/', '\\']);
+        if path == "~" {
+            if base.len() == 2 && base.as_bytes()[1] == b':' { format!("{base}\\") } else { base.to_string() }
+        } else if let Some(rest) = path.strip_prefix("~/").or_else(|| path.strip_prefix("~\\")) {
+            format!("{base}\\{rest}")
+        } else {
+            path.to_string()
+        }
+    } else {
+        path.to_string()
+    };
+    let slashed = expanded.replace('/', "\\");
+    let stripped = if let Some(rest) = slashed.strip_prefix(r"\\?\") {
+        if rest.get(..4).is_some_and(|u| u.eq_ignore_ascii_case(r"UNC\")) {
+            format!(r"\\{}", &rest[4..])
+        } else if rest.as_bytes().get(1) == Some(&b':') && rest.as_bytes()[0].is_ascii_alphabetic() {
+            rest.to_string()
+        } else {
+            slashed
+        }
+    } else {
+        slashed
+    };
+    let mut collapsed = String::with_capacity(stripped.len());
+    let mut rest = stripped.as_str();
+    if rest.starts_with(r"\\") {
+        collapsed.push_str(r"\\");
+        rest = rest.trim_start_matches('\\');
+    }
+    let mut prev_sep = false;
+    for ch in rest.chars() {
+        if ch == '\\' {
+            if !prev_sep { collapsed.push('\\'); }
+            prev_sep = true;
+        } else {
+            prev_sep = false;
+            collapsed.push(ch);
+        }
+    }
+    if collapsed == r"\\" { return r"\\".to_string() }
+    if collapsed == r"\" { return r"\".to_string() }
+    let trimmed = collapsed.trim_end_matches('\\');
+    let tb = trimmed.as_bytes();
+    if tb.len() == 2 && tb[0].is_ascii_alphabetic() && tb[1] == b':' && collapsed.as_bytes().get(2) == Some(&b'\\') {
+        format!("{trimmed}\\")
+    } else {
+        trimmed.to_string()
+    }
+}
+
+/// Resolve the full path to `explorer.exe` from `SystemRoot`/`WINDIR`, falling back to `"explorer.exe"`.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn win_explorer_exe(system_root: Option<&str>) -> String {
+    match system_root.map(str::trim).filter(|r| !r.is_empty()) {
+        Some(r) => {
+            let norm = r.replace('/', "\\");
+            let base = norm.trim_end_matches('\\');
+            if base.is_empty() { "explorer.exe".to_string() } else { format!("{base}\\explorer.exe") }
+        }
+        None => "explorer.exe".to_string(),
+    }
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_win_drive_root(s: &str) -> bool {
+    let b = s.as_bytes();
+    b.len() == 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\'
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn quote_win_arg(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 2);
+    out.push('"');
+    let mut bs = 0usize;
+    for ch in s.chars() {
+        if ch == '\\' {
+            bs += 1;
+        } else if ch == '"' {
+            for _ in 0..(bs * 2 + 1) { out.push('\\'); }
+            bs = 0;
+            out.push('"');
+        } else {
+            for _ in 0..bs { out.push('\\'); }
+            bs = 0;
+            out.push(ch);
+        }
+    }
+    for _ in 0..(bs * 2) { out.push('\\'); }
+    out.push('"');
+    out
+}
+
+/// Format the raw command-line argument passed to `explorer.exe` for opening or revealing `path`.
+/// Uses `/select,"<path>"` (or unquoted `<drive>:\`) so Explorer handles spaces and commas without
+/// Rust's `Command::arg` wrapping `/select,` inside the quotes.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn win_explorer_raw_arg(path: &str, home: Option<&str>, reveal: bool) -> String {
+    let norm = normalize_win_path(path, home);
+    if is_win_drive_root(&norm) {
+        if reveal { format!("/select,{norm}") } else { norm }
+    } else {
+        let q = quote_win_arg(&norm);
+        if reveal { format!("/select,{q}") } else { q }
+    }
+}
+
+#[cfg_attr(not(windows), allow(dead_code))]
+fn is_win_executable(path: &str) -> bool {
+    let base = path.rsplit(['\\', '/']).next().unwrap_or(path).trim_end_matches([' ', '.']);
+    let Some((_, ext)) = base.rsplit_once('.') else { return false };
+    const EXTS: &[&str] = &[
+        "exe", "bat", "cmd", "com", "msi", "msp", "msu", "ps1", "psm1", "psd1",
+        "vbs", "vbe", "js", "jse", "wsf", "wsh", "scr", "pif", "hta", "lnk",
+        "url", "reg", "msc", "cpl", "inf", "jar",
+    ];
+    EXTS.iter().any(|e| ext.eq_ignore_ascii_case(e))
+}
+
+/// Validate and format the `explorer.exe` raw argument for opening or revealing `path`.
+/// Non-directory files with executable/script/shortcut extensions are forced to `/select,"..."`
+/// so `how == "open"` on a message link never executes an arbitrary file.
+#[cfg_attr(not(windows), allow(dead_code))]
+pub fn win_explorer_open_arg(path: &str, home: Option<&str>, reveal: bool, is_dir: bool) -> Result<String, String> {
+    let norm = normalize_win_path(path, home);
+    if norm.is_empty() {
+        return Err("No such file: ".into());
+    }
+    if norm.contains('\0') || norm.contains('"') {
+        return Err(format!("bad path: {norm}"));
+    }
+    let effective_reveal = reveal || (!is_dir && is_win_executable(&norm));
+    Ok(win_explorer_raw_arg(&norm, None, effective_reveal))
+}
+
+#[cfg(windows)]
+fn open_on_windows(path: &str, reveal: bool) -> Result<(), String> {
+    let norm = normalize_win_path(path, crate::plat::dirs::home().as_deref());
+    if norm.is_empty() {
+        return Err("No such file: ".into());
+    }
+    if norm.contains('\0') || norm.contains('"') {
+        return Err(format!("bad path: {norm}"));
+    }
+    let meta = std::fs::metadata(&norm)
+        .or_else(|_| std::fs::symlink_metadata(&norm))
+        .map_err(|_| format!("No such file: {norm}"))?;
+    let is_dir = meta.is_dir();
+    if let Ok(custom) = std::env::var("BACKPLANE_OPEN") {
+        if !custom.is_empty() {
+            // Mirror file_reveal.sh's fallback when revealing a file by passing its parent directory.
+            let target = if reveal && !is_dir {
+                std::path::Path::new(&norm)
+                    .parent()
+                    .filter(|p| !p.as_os_str().is_empty())
+                    .map(|p| p.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| norm.clone())
+            } else {
+                norm.clone()
+            };
+            let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &custom);
+            c.arg(&target)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            return c.spawn().map(|_| ()).map_err(|e| format!("could not open {norm}: {e}"));
+        }
+    }
+    let sys_root = std::env::var("SystemRoot").ok().or_else(|| std::env::var("WINDIR").ok());
+    let candidate = win_explorer_exe(sys_root.as_deref());
+    let exe = if std::path::Path::new(&candidate).is_file() { candidate } else { "explorer.exe".to_string() };
+    let raw = win_explorer_open_arg(&norm, None, reveal, is_dir)?;
+    let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &exe);
+    use std::os::windows::process::CommandExt;
+    // explorer.exe is a GUI process; clear std_cmd's default CREATE_NO_WINDOW so its window opens normally.
+    c.creation_flags(0);
+    c.raw_arg(&raw);
+    c.stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    c.spawn().map(|_| ()).map_err(|e| format!("could not open {norm}: {e}"))
 }
 
 pub struct Misc;
@@ -71,9 +271,22 @@ impl RpcHandler for Misc {
                     // a link in a message names a path from the thread's folder, maybe with a `:line` after it
                     let thread = s("thread");
                     if !thread.is_empty() { if let Some(root) = super::root_of(hub, &thread).await { path = link_path(&path, &root.to_string_lossy()) } }
-                    let script = if s("how") == "reveal" { FILE_REVEAL } else { FILE_OPEN };
-                    let r = proc("sh", &["-c", script, "sh", &path], "/", &[]).await;
-                    if r.code == 0 { reply(true, json!({"text":""})) } else { reply(false, json!({"text":r.out.trim()})) }
+                    let reveal = s("how") == "reveal";
+                    #[cfg(windows)]
+                    {
+                        let res = tokio::task::spawn_blocking(move || open_on_windows(&path, reveal)).await
+                            .unwrap_or_else(|e| Err(format!("could not open folder: {e}")));
+                        match res {
+                            Ok(()) => reply(true, json!({"text":""})),
+                            Err(e) => reply(false, json!({"text":e})),
+                        }
+                    }
+                    #[cfg(not(windows))]
+                    {
+                        let script = if reveal { FILE_REVEAL } else { FILE_OPEN };
+                        let r = proc("sh", &["-c", script, "sh", &path], "/", &[]).await;
+                        if r.code == 0 { reply(true, json!({"text":""})) } else { reply(false, json!({"text":r.out.trim()})) }
+                    }
                 }
                 "pdf.page" => {
                     let path = s("path"); let page = match p.get("page") { Some(Value::Number(n)) => n.to_string(), Some(Value::String(x)) => x.clone(), _ => "1".into() };
@@ -205,8 +418,81 @@ mod tests {
         assert_eq!(link_path("/abs/none.rs:5", &root), "/abs/none.rs:5"); assert_eq!(link_path("~/x", &root), "~/x");
     }
     #[tokio::test] async fn file_open_refuses_a_missing_file_and_the_pdf_script_a_missing_pdf() {
-        let r = proc("sh", &["-c", FILE_OPEN, "sh", "/nonexistent/file"], "/", &[]).await; assert_eq!(r.code, 1); assert!(r.out.contains("No such file"));
+        #[cfg(windows)]
+        {
+            let err = open_on_windows(r"C:\nonexistent\backplane_missing_file", false).unwrap_err();
+            assert!(err.contains("No such file"), "{err}");
+        }
+        #[cfg(not(windows))]
+        {
+            let r = proc("sh", &["-c", FILE_OPEN, "sh", "/nonexistent/file"], "/", &[]).await; assert_eq!(r.code, 1); assert!(r.out.contains("No such file"));
+        }
         let d = crate::plat::tmp::dir("pdf");
         let r = proc("sh", &["-c", PDF, "sh", "/nonexistent.pdf", "1", &d.to_string_lossy()], "/", &[]).await; assert_ne!(r.code, 0);
+    }
+    #[test] fn link_path_preserves_windows_absolute_paths_and_joins_relative_paths() {
+        for p in [
+            r"C:\Users\person\My Project",
+            "C:/Users/person/proj",
+            r"\\server\share\proj",
+            r"\\?\C:\Users\person\proj",
+            r"~\proj",
+        ] {
+            assert_eq!(link_path(p, r"C:\other\root"), p, "absolute/home path preserved: {p}");
+        }
+        assert_eq!(link_path("sub/file.txt", r"C:\other\root\"), "C:\\other\\root/sub/file.txt");
+        assert_eq!(link_path(r".\sub\file.txt", r"C:\other\root\"), "C:\\other\\root/sub\\file.txt");
+        assert_eq!(link_path(r"C:\x:5", r"C:\other\root"), r"C:\x:5");
+        assert_eq!(link_path(r"C:\Users\person\a.rs:12:3", r"C:\other\root"), r"C:\Users\person\a.rs:12:3");
+    }
+    #[test] fn win_explorer_open_arg_guards_executables_and_bad_paths() {
+        assert!(win_explorer_open_arg("", None, false, true).unwrap_err().contains("No such file"));
+        assert!(win_explorer_open_arg(r#"C:\Users\person\bad"dir"#, None, false, true).unwrap_err().contains("bad path"));
+        assert!(win_explorer_open_arg("C:\\Users\\person\\bad\0dir", None, false, true).unwrap_err().contains("bad path"));
+        for p in [r"C:\proj\mfg\x.bat", r"C:\a\run.EXE", r"C:\a\script.ps1", r"C:\a\shortcut.lnk"] {
+            let expected = format!(r#"/select,"{p}""#);
+            assert_eq!(win_explorer_open_arg(p, None, false, false).unwrap(), expected, "{p}");
+        }
+        assert_eq!(win_explorer_open_arg(r"C:\a\dir.exe", None, false, true).unwrap(), r#""C:\a\dir.exe""#);
+        assert_eq!(win_explorer_open_arg(r"C:\a\board.pdf", None, false, false).unwrap(), r#""C:\a\board.pdf""#);
+        assert_eq!(win_explorer_open_arg(r"C:\a\img.png", None, false, false).unwrap(), r#""C:\a\img.png""#);
+        assert_eq!(win_explorer_open_arg(r"C:\a\img.png", None, true, false).unwrap(), r#"/select,"C:\a\img.png""#);
+    }
+    #[test] fn normalize_win_path_handles_slashes_verbatim_prefixes_and_home() {
+        let home = Some(r"C:\Users\person\");
+        assert_eq!(normalize_win_path(r"C:\Users\person\My Project\", None), r"C:\Users\person\My Project");
+        assert_eq!(normalize_win_path("C:/Users/person/proj/", None), r"C:\Users\person\proj");
+        assert_eq!(normalize_win_path("C:/Users\\person//My Project\\", None), r"C:\Users\person\My Project");
+        assert_eq!(normalize_win_path(r"C:\", None), r"C:\");
+        assert_eq!(normalize_win_path("C:/", None), r"C:\");
+        assert_eq!(normalize_win_path(r"\\?\C:\", None), r"C:\");
+        assert_eq!(normalize_win_path(r"\\?\C:\Users\person\My Project\", None), r"C:\Users\person\My Project");
+        assert_eq!(normalize_win_path(r"\\?\UNC\server\share\My Project\", None), r"\\server\share\My Project");
+        assert_eq!(normalize_win_path(r"\\?\unc\server\share\My Project\", None), r"\\server\share\My Project");
+        assert_eq!(normalize_win_path("//server/share/dir/", None), r"\\server\share\dir");
+        assert_eq!(normalize_win_path(r"\\server\\share\\\dir\", None), r"\\server\share\dir");
+        assert_eq!(normalize_win_path("~/My Project", home), r"C:\Users\person\My Project");
+        assert_eq!(normalize_win_path(r"~\My Project\", home), r"C:\Users\person\My Project");
+        assert_eq!(normalize_win_path("~", home), r"C:\Users\person");
+    }
+    #[test] fn win_explorer_raw_arg_formats_open_and_reveal_for_all_path_shapes() {
+        assert_eq!(win_explorer_raw_arg(r"C:\Users\person\proj", None, false), r#""C:\Users\person\proj""#);
+        assert_eq!(win_explorer_raw_arg(r"C:\Users\person\proj", None, true), r#"/select,"C:\Users\person\proj""#);
+        assert_eq!(win_explorer_raw_arg(r"C:\Users\person\My Project", None, false), r#""C:\Users\person\My Project""#);
+        assert_eq!(win_explorer_raw_arg(r"C:\Users\person\My Project", None, true), r#"/select,"C:\Users\person\My Project""#);
+        assert_eq!(win_explorer_raw_arg(r"C:\Users\Doe, Jane\proj", None, false), r#""C:\Users\Doe, Jane\proj""#);
+        assert_eq!(win_explorer_raw_arg(r"C:\Users\Doe, Jane\proj", None, true), r#"/select,"C:\Users\Doe, Jane\proj""#);
+        assert_eq!(win_explorer_raw_arg("C:/Users/person/My Project/", None, false), r#""C:\Users\person\My Project""#);
+        assert_eq!(win_explorer_raw_arg(r"\\?\C:\Users\person\proj", None, true), r#"/select,"C:\Users\person\proj""#);
+        assert_eq!(win_explorer_raw_arg(r"\\?\UNC\server\share\My Project", None, false), r#""\\server\share\My Project""#);
+        assert_eq!(win_explorer_raw_arg(r"\\server\share\dir", None, true), r#"/select,"\\server\share\dir""#);
+        assert_eq!(win_explorer_raw_arg(r"C:\", None, false), r"C:\");
+        assert_eq!(win_explorer_raw_arg("C:/", None, true), r"/select,C:\");
+    }
+    #[test] fn win_explorer_exe_resolves_system_root() {
+        assert_eq!(win_explorer_exe(Some(r"C:\Windows")), r"C:\Windows\explorer.exe");
+        assert_eq!(win_explorer_exe(Some("C:/Windows/")), r"C:\Windows\explorer.exe");
+        assert_eq!(win_explorer_exe(None), "explorer.exe");
+        assert_eq!(win_explorer_exe(Some("")), "explorer.exe");
     }
 }
