@@ -491,6 +491,167 @@ pub mod net {
     }
 }
 
+/// Windows IPv4 loopback peer authentication via GetExtendedTcpTable.
+pub mod browser_peer {
+    use std::net::Ipv4Addr;
+    use windows_sys::Win32::{
+        Foundation::{CloseHandle, ERROR_ACCESS_DENIED, ERROR_INSUFFICIENT_BUFFER, HANDLE, INVALID_HANDLE_VALUE},
+        NetworkManagement::IpHelper::{
+            GetExtendedTcpTable, MIB_TCPROW_OWNER_PID, MIB_TCPTABLE_OWNER_PID,
+            MIB_TCP_STATE_ESTAB, TCP_TABLE_OWNER_PID_CONNECTIONS,
+        },
+        Networking::WinSock::AF_INET,
+        Security::{CreateWellKnownSid, EqualSid, GetTokenInformation, TokenUser, WinLocalSystemSid, PSID, TOKEN_QUERY, TOKEN_USER},
+        System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS},
+        System::Threading::{OpenProcess, OpenProcessToken, QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION},
+    };
+
+    struct OwnedHandle(HANDLE);
+    impl Drop for OwnedHandle {
+        fn drop(&mut self) {
+            if !self.0.is_null() && self.0 != INVALID_HANDLE_VALUE {
+                unsafe { CloseHandle(self.0); }
+            }
+        }
+    }
+
+    fn owning_pid(local_port: u16, remote_port: u16) -> Option<u32> {
+        let lo = u32::from_ne_bytes(Ipv4Addr::LOCALHOST.octets());
+        let mut size = 16u32 * 1024;
+        for _ in 0..4 {
+            let mut buf = vec![0u64; (size as usize).div_ceil(8)];
+            let rc = unsafe {
+                GetExtendedTcpTable(
+                    buf.as_mut_ptr().cast(),
+                    &mut size,
+                    0,
+                    AF_INET as u32,
+                    TCP_TABLE_OWNER_PID_CONNECTIONS,
+                    0,
+                )
+            };
+            if rc == ERROR_INSUFFICIENT_BUFFER {
+                continue;
+            }
+            if rc != 0 {
+                return None;
+            }
+            if (size as usize) < std::mem::size_of::<u32>() {
+                return None;
+            }
+            let table = unsafe { &*(buf.as_ptr().cast::<MIB_TCPTABLE_OWNER_PID>()) };
+            let count = table.dwNumEntries as usize;
+            let needed = std::mem::size_of::<u32>() + count.saturating_mul(std::mem::size_of::<MIB_TCPROW_OWNER_PID>());
+            if needed > buf.len() * 8 {
+                return None;
+            }
+            let rows = unsafe { std::slice::from_raw_parts(table.table.as_ptr(), count) };
+            for row in rows {
+                if row.dwState == MIB_TCP_STATE_ESTAB as u32
+                    && row.dwLocalAddr == lo
+                    && row.dwRemoteAddr == lo
+                    && u16::from_be(row.dwLocalPort as u16) == remote_port
+                    && u16::from_be(row.dwRemotePort as u16) == local_port
+                {
+                    return Some(row.dwOwningPid);
+                }
+            }
+            return None;
+        }
+        None
+    }
+
+    fn is_local_system_token(process: HANDLE) -> bool {
+        let mut token: HANDLE = std::ptr::null_mut();
+        if unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) } == 0 || token.is_null() {
+            return false;
+        }
+        let _token_guard = OwnedHandle(token);
+        let mut len = 0u32;
+        unsafe { GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut len); }
+        if len == 0 || len > 4096 {
+            return false;
+        }
+        let mut buf = vec![0u8; len as usize];
+        if unsafe { GetTokenInformation(token, TokenUser, buf.as_mut_ptr().cast(), len, &mut len) } == 0 {
+            return false;
+        }
+        let user = unsafe { &*(buf.as_ptr().cast::<TOKEN_USER>()) };
+        let mut sys_sid = [0u8; 68];
+        let mut sid_len = sys_sid.len() as u32;
+        if unsafe { CreateWellKnownSid(WinLocalSystemSid, std::ptr::null_mut(), sys_sid.as_mut_ptr() as PSID, &mut sid_len) } == 0 {
+            return false;
+        }
+        unsafe { EqualSid(user.User.Sid, sys_sid.as_ptr() as PSID) != 0 }
+    }
+
+    fn process_image_path(process: HANDLE) -> Option<String> {
+        let mut buf = vec![0u16; 1024];
+        let mut len = buf.len() as u32;
+        if unsafe { QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len) } == 0 || len == 0 {
+            return None;
+        }
+        Some(String::from_utf16_lossy(&buf[..len as usize]))
+    }
+
+    fn snapshot_exe_name(pid: u32) -> Option<String> {
+        let snap = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+        if snap == INVALID_HANDLE_VALUE || snap.is_null() {
+            return None;
+        }
+        let _snap_guard = OwnedHandle(snap);
+        let mut entry: PROCESSENTRY32W = unsafe { std::mem::zeroed() };
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        if unsafe { Process32FirstW(snap, &mut entry) } == 0 {
+            return None;
+        }
+        loop {
+            if entry.th32ProcessID == pid {
+                let end = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(entry.szExeFile.len());
+                return Some(String::from_utf16_lossy(&entry.szExeFile[..end]));
+            }
+            if unsafe { Process32NextW(snap, &mut entry) } == 0 {
+                break;
+            }
+        }
+        None
+    }
+
+    pub fn accepts(stream: &tokio::net::TcpStream) -> bool {
+        let (Ok(local), Ok(remote)) = (stream.local_addr(), stream.peer_addr()) else {
+            return false;
+        };
+        if local.ip() != Ipv4Addr::LOCALHOST || remote.ip() != Ipv4Addr::LOCALHOST {
+            return false;
+        }
+        let Some(pid) = owning_pid(local.port(), remote.port()) else {
+            return false;
+        };
+        if pid == 0 || pid == std::process::id() {
+            return false;
+        }
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if !handle.is_null() {
+            let _guard = OwnedHandle(handle);
+            let Some(path) = process_image_path(handle) else {
+                return false;
+            };
+            if !crate::plat::is_tailscale_windows_exe_name(&path) {
+                return false;
+            }
+            let pf = std::env::var("ProgramFiles").ok();
+            let pf86 = std::env::var("ProgramFiles(x86)").ok();
+            return crate::plat::is_trusted_tailscale_windows_path(&path, pf.as_deref(), pf86.as_deref())
+                || is_local_system_token(handle);
+        }
+        if std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ACCESS_DENIED as i32) {
+            return snapshot_exe_name(pid)
+                .is_some_and(|name| name.eq_ignore_ascii_case("tailscaled.exe"));
+        }
+        false
+    }
+}
+
 /// The local socket KiCad's API listens on (nng `ipc://<path>`): nng on Windows makes it the named pipe `\\.\pipe\<path>`.
 pub mod ipc {
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer, ServerOptions};

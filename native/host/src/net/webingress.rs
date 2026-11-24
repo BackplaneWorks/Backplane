@@ -368,6 +368,154 @@ mod tests {
             assert!(!ingress.accepts(&request, upgrade));
         }
     }
+
+    #[test]
+    fn loopback_proxy_normalizes_authority_and_rejects_mismatch() {
+        let authority = "bp.example.ts.net:8443";
+        for host in ["127.0.0.1:49231", "localhost:49231", authority] {
+            let mut req = Req::new(
+                "GET",
+                "/",
+                vec![
+                    ("Host".into(), host.into()),
+                    ("X-Forwarded-Host".into(), authority.into()),
+                    ("X-Forwarded-Proto".into(), "https".into()),
+                ],
+            );
+            assert!(normalize_proxy_authority(&mut req, authority, ProxyMode::Loopback(49231)), "{host}");
+            assert_eq!(single_header(&req, "host"), Some(authority));
+        }
+        for bad_host in ["127.0.0.1:9999", "evil.example.com", "localhost"] {
+            let mut req = Req::new(
+                "GET",
+                "/",
+                vec![
+                    ("Host".into(), bad_host.into()),
+                    ("X-Forwarded-Host".into(), authority.into()),
+                    ("X-Forwarded-Proto".into(), "https".into()),
+                ],
+            );
+            assert!(!normalize_proxy_authority(&mut req, authority, ProxyMode::Loopback(49231)), "{bad_host}");
+        }
+    }
+
+    #[tokio::test]
+    async fn loopback_proxy_verifies_setup_probe_and_enforces_pairing_and_funnel_rejection() {
+        use serde_json::json;
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = crate::plat::tmp::dir("webingress-loopback");
+        std::fs::write(dir.join("token"), "tok").unwrap();
+        std::fs::write(
+            dir.join("events.jsonl"),
+            "{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1700000040}\n",
+        )
+        .unwrap();
+        let cfg = crate::hub::Cfg {
+            home: dir.to_path_buf(),
+            version: "0.16.4".into(),
+            commit: "test".into(),
+            listen: "127.0.0.1:0".into(),
+            os: "windows".into(),
+            arch: "x64".into(),
+        };
+        let hub = crate::hub::Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) }))
+            .await
+            .unwrap();
+        let (reg, _routes) = crate::net::start::open(&hub.cfg.home, "127.0.0.1", 0).unwrap();
+        let authority = "bp.example.ts.net:8443";
+        let backend_port = 49231u16;
+
+        let send_loopback = |raw_req: String| {
+            let hub = hub.clone();
+            async move {
+                let (mut client, server) = tokio::io::duplex(16 * 1024);
+                let srv = tokio::spawn(async move { serve_loopback(hub, server, authority, backend_port).await });
+                client.write_all(raw_req.as_bytes()).await.unwrap();
+                let mut resp = Vec::new();
+                client.read_to_end(&mut resp).await.unwrap();
+                let _ = srv.await;
+                String::from_utf8_lossy(&resp).into_owned()
+            }
+        };
+
+        // Direct mode must not answer setup probe
+        let probe = super::super::webprobe::Probe::start(&hub.cfg.home, authority);
+        let nonce = probe.header().trim_start_matches("X-Backplane-Setup: ").trim().to_owned();
+        let (mut client, server) = tokio::io::duplex(8 * 1024);
+        let h2 = hub.clone();
+        let srv = tokio::spawn(async move { serve(h2, server, authority).await });
+        client
+            .write_all(
+                format!(
+                    "GET /auth/web/setup HTTP/1.1\r\nHost: {authority}\r\nX-Backplane-Setup: {nonce}\r\n\r\n"
+                )
+                .as_bytes(),
+            )
+            .await
+            .unwrap();
+        let mut direct_resp = Vec::new();
+        client.read_to_end(&mut direct_resp).await.unwrap();
+        let _ = srv.await;
+        assert!(String::from_utf8_lossy(&direct_resp).starts_with("HTTP/1.1 404 "));
+        assert!(!probe.consumed());
+
+        // Funnel header on setup probe must be rejected and must not consume nonce
+        let funnel_resp = send_loopback(format!(
+            "GET /auth/web/setup HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             Tailscale-Funnel-Request: true\r\nX-Backplane-Setup: {nonce}\r\n\r\n"
+        ))
+        .await;
+        assert!(funnel_resp.starts_with("HTTP/1.1 404 "), "{funnel_resp}");
+        assert!(!probe.consumed());
+
+        // Valid loopback setup probe passes once, then fails on replay
+        let ok_resp = send_loopback(format!(
+            "GET /auth/web/setup HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             X-Backplane-Setup: {nonce}\r\n\r\n"
+        ))
+        .await;
+        assert!(ok_resp.starts_with("HTTP/1.1 204 "), "{ok_resp}");
+        assert!(probe.consumed());
+        let replay_resp = send_loopback(format!(
+            "GET /auth/web/setup HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             X-Backplane-Setup: {nonce}\r\n\r\n"
+        ))
+        .await;
+        assert!(replay_resp.starts_with("HTTP/1.1 404 "), "{replay_resp}");
+
+        // Funnel header on regular route is rejected with 401
+        let regular_funnel = send_loopback(format!(
+            "GET /auth/web/info HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             Tailscale-User-Login: person@example.com\r\nTailscale-Funnel-Request: 1\r\n\r\n"
+        ))
+        .await;
+        assert!(regular_funnel.starts_with("HTTP/1.1 401 "), "{regular_funnel}");
+
+        // Unpaired /assets/app.js is 401; paired succeeds
+        let unpaired = send_loopback(format!(
+            "GET /assets/app.js HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             Tailscale-User-Login: person@example.com\r\n\r\n"
+        ))
+        .await;
+        assert!(unpaired.starts_with("HTTP/1.1 401 "), "{unpaired}");
+
+        let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Win Browser").unwrap();
+        assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
+        let session_cookie = reg.browser_wait("person@example.com", &poll_cookie).await.unwrap().unwrap();
+        let paired = send_loopback(format!(
+            "GET /assets/app.js HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             Tailscale-User-Login: person@example.com\r\nCookie: __Host-bp_web={session_cookie}\r\n\r\n"
+        ))
+        .await;
+        assert!(paired.starts_with("HTTP/1.1 200 "), "{paired}");
+    }
 }
 
 const SECURITY_HEADERS: &str = concat!(
@@ -474,19 +622,50 @@ async fn pair_response(hub: &crate::hub::Hub, req: &Req, login: &str) -> Vec<u8>
 pub(crate) async fn serve<S>(hub: std::sync::Arc<crate::hub::Hub>, stream: S, authority: &str)
     -> anyhow::Result<()>
 where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
-    serve_request(hub, stream, authority, false).await
+    serve_request(hub, stream, authority, ProxyMode::Direct).await
 }
 
 /// Called only after the transport authenticates the Unix peer.
 #[cfg(unix)]
 pub(crate) async fn serve_unix(hub: std::sync::Arc<crate::hub::Hub>, stream: tokio::net::UnixStream, authority: &str) -> anyhow::Result<()> {
-    serve_request(hub, stream, authority, true).await
+    serve_request(hub, stream, authority, ProxyMode::Unix).await
 }
 
-fn normalize_unix_authority(req: &mut Req, authority: &str) -> bool {
-    if single_header(req, "host") != Some("localhost")
+/// Called only after the transport verifies the loopback proxy peer.
+pub(crate) async fn serve_loopback<S>(
+    hub: std::sync::Arc<crate::hub::Hub>,
+    stream: S,
+    authority: &str,
+    backend_port: u16,
+) -> anyhow::Result<()>
+where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
+    serve_request(hub, stream, authority, ProxyMode::Loopback(backend_port)).await
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ProxyMode {
+    Direct,
+    Unix,
+    Loopback(u16),
+}
+
+fn normalize_proxy_authority(req: &mut Req, authority: &str, mode: ProxyMode) -> bool {
+    let host_ok = match mode {
+        ProxyMode::Direct => return true,
+        ProxyMode::Unix => single_header(req, "host") == Some("localhost"),
+        ProxyMode::Loopback(port) => {
+            let ip_host = format!("127.0.0.1:{port}");
+            let local_host = format!("localhost:{port}");
+            matches!(
+                single_header(req, "host"),
+                Some(h) if h == authority || h == ip_host || h == local_host
+            )
+        }
+    };
+    if !host_ok
         || single_header(req, "x-forwarded-host") != Some(authority)
-        || single_header(req, "x-forwarded-proto") != Some("https") {
+        || single_header(req, "x-forwarded-proto") != Some("https")
+    {
         return false;
     }
     for (name, value) in &mut req.headers {
@@ -495,7 +674,12 @@ fn normalize_unix_authority(req: &mut Req, authority: &str) -> bool {
     true
 }
 
-async fn serve_request<S>(hub: std::sync::Arc<crate::hub::Hub>, stream: S, authority: &str, unix_proxy: bool)
+#[cfg(test)]
+fn normalize_unix_authority(req: &mut Req, authority: &str) -> bool {
+    normalize_proxy_authority(req, authority, ProxyMode::Unix)
+}
+
+async fn serve_request<S>(hub: std::sync::Arc<crate::hub::Hub>, stream: S, authority: &str, mode: ProxyMode)
     -> anyhow::Result<()>
 where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -547,16 +731,18 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     let reply = if hub.setting("web.enabled").await.as_deref() != Some("1") {
         route_json("404 Not Found", json!({}))
     } else if req.route() == "/auth/web/setup" {
-        #[cfg(target_os = "linux")]
-        let ok = unix_proxy && req.method == "GET" && req.target == "/auth/web/setup"
-            && normalize_unix_authority(&mut req, authority)
+        let ok = mode != ProxyMode::Direct
+            && req.method == "GET"
+            && req.target == "/auth/web/setup"
+            && normalize_proxy_authority(&mut req, authority, mode)
             && !req.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("tailscale-funnel-request"))
             && single_header(&req, "x-backplane-setup").is_some_and(|n|
                 super::webprobe::consume(&hub.cfg.home, authority, n));
-        #[cfg(not(target_os = "linux"))]
-        let ok = false;
         crate::wire::response_for(if ok { "204 No Content" } else { "404 Not Found" }, "text/plain", SECURITY_HEADERS, &[])
-    } else if (unix_proxy && !normalize_unix_authority(&mut req, authority)) || !ingress.accepts(&req, upgrade) || login == "tagged-devices" {
+    } else if req.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("tailscale-funnel-request"))
+        || !normalize_proxy_authority(&mut req, authority, mode)
+        || !ingress.accepts(&req, upgrade)
+        || login == "tagged-devices" {
         route_json("401 Unauthorized", json!({"state":"unauthorized"}))
     } else if req.target.split_once('?').is_some_and(|(_, query)| query.split('&').any(|field| {
         let key = field.split('=').next().unwrap_or("");

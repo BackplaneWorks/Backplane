@@ -9,6 +9,64 @@
 pub mod browser_peer;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn effective_uid() -> u32 { unsafe { libc::geteuid() } }
+
+pub(crate) fn is_tailscale_windows_exe_name(name: &str) -> bool {
+    let base = name.rsplit(['\\', '/']).next().unwrap_or(name);
+    base.eq_ignore_ascii_case("tailscaled.exe")
+        || base.eq_ignore_ascii_case("tailscale-ipn.exe")
+        || base.eq_ignore_ascii_case("tailscale.exe")
+}
+
+pub(crate) fn is_trusted_tailscale_windows_path(
+    path: &str,
+    program_files: Option<&str>,
+    program_files_x86: Option<&str>,
+) -> bool {
+    if !is_tailscale_windows_exe_name(path) {
+        return false;
+    }
+    let norm = |s: &str| {
+        s.trim()
+            .trim_end_matches(['\\', '/'])
+            .replace('/', "\\")
+            .to_ascii_lowercase()
+    };
+    let p = norm(path);
+    let mut prefixes = vec![r"c:\program files\tailscale".to_string()];
+    if let Some(pf) = program_files.filter(|s| !s.trim().is_empty()) {
+        prefixes.push(format!(r"{}\tailscale", norm(pf)));
+    }
+    if let Some(pf86) = program_files_x86.filter(|s| !s.trim().is_empty()) {
+        prefixes.push(format!(r"{}\tailscale", norm(pf86)));
+    }
+    prefixes.into_iter().any(|dir| {
+        p.strip_prefix(&format!(r"{dir}\"))
+            .is_some_and(|rest| !rest.is_empty() && !rest.contains('\\'))
+    })
+}
+
+/// Verify that an accepted loopback TCP connection belongs to the Tailscale daemon on Windows,
+/// or is at least a genuine IPv4 loopback peer on platforms that use loopback fallback.
+pub fn browser_loopback_peer_ok(stream: &tokio::net::TcpStream) -> bool {
+    let (Ok(local), Ok(remote)) = (stream.local_addr(), stream.peer_addr()) else {
+        return false;
+    };
+    if !local.ip().is_loopback()
+        || !remote.ip().is_loopback()
+        || local.ip() != std::net::Ipv4Addr::LOCALHOST
+        || remote.ip() != std::net::Ipv4Addr::LOCALHOST
+    {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        return browser_peer::accepts(stream);
+    }
+    #[cfg(not(windows))]
+    {
+        true
+    }
+}
 pub mod dirs;
 #[cfg(test)] pub mod tmp;
 

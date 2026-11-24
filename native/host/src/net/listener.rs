@@ -38,12 +38,12 @@ pub trait Tailscale: Send + Sync {
 pub struct Cli;
 async fn run(args: Vec<String>) -> String {
     if crate::copy::on() { return String::new() }
-    match tokio::time::timeout(Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(&args).stderr(std::process::Stdio::null()).kill_on_drop(true).output()).await {
+    match tokio::time::timeout(Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, tailnet::tailscale_program()).args(&args).stderr(std::process::Stdio::null()).kill_on_drop(true).output()).await {
         Ok(Ok(o)) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(), _ => String::new() }
 }
 async fn run_ok(args: Vec<String>) -> bool {
     if crate::copy::on() { return false }
-    matches!(tokio::time::timeout(Duration::from_secs(15), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(&args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true).status()).await, Ok(Ok(s)) if s.success())
+    matches!(tokio::time::timeout(Duration::from_secs(15), crate::proc::tokio_cmd(crate::proc::Kind::Net, tailnet::tailscale_program()).args(&args).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).kill_on_drop(true).status()).await, Ok(Ok(s)) if s.success())
 }
 impl Tailscale for Cli {
     fn serve(&self, port: u16, https: u16) -> Fut<bool> { Box::pin(async move { run_ok(vec!["serve".into(), "--bg".into(), format!("--https={https}"), format!("http://127.0.0.1:{port}")]).await }) }
@@ -334,13 +334,9 @@ mod tests {
     }
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 #[path = "webtransport.rs"]
 pub(crate) mod webtransport;
-#[cfg(target_os = "linux")]
 #[path = "webprovision.rs"]
 pub(crate) mod webprovision;
-
-#[cfg(target_os = "linux")]
 #[path = "webprobe.rs"]
 pub(crate) mod webprobe;

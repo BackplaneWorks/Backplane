@@ -562,7 +562,7 @@ mod tests {
 
     #[test] fn a_test_never_runs_the_real_tailscale() {
         let tmp = std::path::Path::new(if cfg!(windows) { "C:\\Users\\x\\AppData\\Local\\Temp" } else { "/tmp" });
-        for p in ["tailscale", "tailscale.exe", "TailScale.EXE", "/usr/bin/tailscale", "C:\\Program Files\\Tailscale\\tailscale.exe", "C:/Program Files/Tailscale/tailscale.exe", "/tmp-evil/tailscale"] {
+        for p in ["tailscale", "tailscale.exe", "TailScale.EXE", "/usr/bin/tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale", "C:\\Program Files\\Tailscale\\tailscale.exe", "C:/Program Files/Tailscale/tailscale.exe", "/tmp-evil/tailscale"] {
             assert!(test_refusal(p, tmp).is_some(), "{p} would run the machine's tailscale");
         }
         let standin = tmp.join("bp-ts-standin").join("tailscale"); let standin = standin.to_str().unwrap();
