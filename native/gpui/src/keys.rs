@@ -321,6 +321,7 @@ fn has_tool(data: &Value, action: &str) -> bool { data["thread"]["tools"].as_arr
 /// in the system's proportional one, unlike everything around it. The window says its font at each draw (`set_tip_font`).
 static TIP_FONT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 pub fn set_tip_font(font: &str) { let mut f = TIP_FONT.lock().unwrap(); if *f != font { *f = font.to_string() } }
+pub fn tip_font() -> String { TIP_FONT.lock().unwrap().clone() }
 struct Tip(SharedString, bool);
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {

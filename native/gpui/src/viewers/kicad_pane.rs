@@ -3427,6 +3427,31 @@ mod tests {
         assert_eq!(hub_open_step("schematic", &mut last, "3d", None), Some("3d"));
         assert_eq!(last, "3d");
     }
+    #[test] fn detached_window_and_popin_button_have_contrasting_text_colors() {
+        fn luminance(c: gpui::Rgba) -> f32 {
+            let lin = |u: f32| if u <= 0.03928 { u / 12.92 } else { ((u + 0.055) / 1.055).powf(2.4) };
+            0.2126 * lin(c.r) + 0.7152 * lin(c.g) + 0.0722 * lin(c.b)
+        }
+        fn contrast(a: gpui::Rgba, b: gpui::Rgba) -> f32 {
+            let (la, lb) = (luminance(a), luminance(b));
+            let (hi, lo) = if la > lb { (la, lb) } else { (lb, la) };
+            (hi + 0.05) / (lo + 0.05)
+        }
+        for light in [false, true] {
+            let (win_bg, win_fg) = super::kicad_window_colors(light);
+            assert_eq!(win_bg, crate::theme::color(light, "bg"));
+            assert_eq!(win_fg, crate::theme::color(light, "text"));
+            assert!(contrast(win_fg, win_bg) >= 4.5, "light={light} window contrast too low");
+
+            let (btn_bg, btn_fg) = super::strip_button_colors(light);
+            assert_eq!(btn_bg, crate::theme::color(light, "raise"));
+            assert_eq!(btn_fg, crate::theme::color(light, "text"));
+            assert!(contrast(btn_fg, btn_bg) >= 4.5, "light={light} strip button contrast too low");
+            if !light {
+                assert_ne!(btn_fg, gpui::rgb(0x000000).into(), "dark theme button text must not default to black");
+            }
+        }
+    }
 }
 
 /// Whether this window can hold the thread's KiCad: the hub is on this machine (the editor runs beside it) and the thread is not another machine's.
@@ -3837,7 +3862,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     // a narrow pane (under 520 px: the narrowest is 380) packs the tabs and the buttons tighter, so all of them fit beside each other: at 380 px
     // Pop out was cut at the pane's edge
     let narrow = pane.read(cx).at_px.is_some_and(|b| f32::from(b.size.width) < 520.);
-    let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(crate::scale::tpx(30.)).flex_shrink_0().bg(c("panel")).border_b_1().border_color(c("rule"));
+    let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(crate::scale::tpx(30.)).flex_shrink_0().bg(c("panel")).text_color(c("text")).border_b_1().border_color(c("rule"));
     let shown = strip_tabs(&at, &have);
     // a library editor KiCad is opening (Ctrl+E, its libraries loading): after a short dwell, its tab is a placeholder that is never
     // selected, and the text beside the tabs says what KiCad is doing
@@ -3962,9 +3987,10 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     row = row.child(mid);
     let mk = |id: &'static str, label: String, tip: String, a: &'static str, cx: &mut Context<V>| {
         let act = act.clone();
+        let (btn_bg, btn_fg) = strip_button_colors(light);
         // its rect under `kicad:<action>` (kicad:full, kicad:screen, kicad:popout, kicad:popin): a driver clicks the button itself, never a place
         // measured once (real_use's fixed offset for Full size landed on Full screen once it was added beside it)
-        crate::ui::with_rect(div().id(id), move || format!("kicad:{a}")).when(narrow, |d| d.px_1()).when(!narrow, |d| d.px_2()).py(px(3.)).text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
+        crate::ui::with_rect(div().id(id), move || format!("kicad:{a}")).when(narrow, |d| d.px_1()).when(!narrow, |d| d.px_2()).py(px(3.)).text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(btn_bg).text_color(btn_fg).cursor_pointer().hover(|s| s.bg(c("panel")))
             .tooltip(crate::keys::tip(&tip, "", light)).child(label)
             .on_click(cx.listener(move |this, _, window, cx| act(this, a, window, cx)))
     };
@@ -3973,6 +3999,15 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     if !popped { row = row.child(mk("kicad-screen", crate::i18n::trs(if screen { "Exit full screen" } else { "Full screen" }), crate::i18n::trs("The editor takes the whole window; only this row stays"), "screen", cx)); }
     if !screen { row = row.child(mk("kicad-pop", crate::i18n::trs(if popped { "Pop back in" } else { "Pop out" }), crate::i18n::trs(if popped { "Back into Backplane's pane, as it is" } else { "The editor in a window of its own, as it is" }), if popped { "popin" } else { "popout" }, cx)); }
     row.into_any_element()
+}
+
+/// Detached KiCad window root (background, text) colours for the active theme.
+fn kicad_window_colors(light: bool) -> (Rgba, Rgba) {
+    (crate::theme::color(light, "bg"), crate::theme::color(light, "text"))
+}
+/// Strip action button (background, text) colours (Full size, Full screen, Pop out, Pop back in).
+fn strip_button_colors(light: bool) -> (Rgba, Rgba) {
+    (crate::theme::color(light, "raise"), crate::theme::color(light, "text"))
 }
 
 /// The editor in a window of its own (Pop out): the strip and the same pane (the same KiCad, nothing restarted). Closing it pops it back in.
@@ -3985,7 +4020,9 @@ impl Render for KicadWindow {
         let strip = strip(cx, light, &self.pane, &self.checks, true, false, false, |this: &mut KicadWindow, a, window, cx| {
             if a == "popin" { if let Some(app) = this.app.upgrade() { app.update(cx, |app, cx| app.kicad_popin(cx)); } window.remove_window(); }
         });
-        div().size_full().flex().flex_col().bg(crate::theme::color(light, "bg")).child(strip).child(div().flex_1().min_h_0().child(self.pane.clone()))
+        let (win_bg, win_fg) = kicad_window_colors(light);
+        let font = crate::keys::tip_font();
+        div().size_full().flex().flex_col().bg(win_bg).text_color(win_fg).text_size(crate::scale::tpx(13.)).line_height(crate::scale::tpx(20.)).when(!font.is_empty(), |d| d.font_family(font)).child(strip).child(div().flex_1().min_h_0().child(self.pane.clone()))
     }
 }
 
@@ -4002,7 +4039,7 @@ impl crate::Backplane {
         match cx.open_window(opts, move |window, cx| {
             let app2 = app.clone();
             window.on_window_should_close(cx, move |window, cx| { let popped = top_of(window).unwrap_or(0); if let Some(a) = app2.upgrade() { a.update(cx, |a, cx| a.kicad_popin_closing(popped, cx)); } true });
-            cx.new(|_| KicadWindow { pane, app, light, checks })
+            cx.new(|cx| { cx.observe(&pane, |_, _, cx| cx.notify()).detach(); KicadWindow { pane, app, light, checks } })
         }) {
             // the popped-out window is the person's now: the editor in it gets the keys as on Edit (the window itself is shown
             // active by open_window)
