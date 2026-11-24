@@ -162,7 +162,7 @@ impl Backplane {
                     for p in s["rows"].as_array().into_iter().flatten() {
                         rows.push(project(self, cx, light, p, faded, ctl));
                         // its live swarms, above its threads (their members have no rows: the swarm stands for them)
-                        rows.extend(crate::screens::swarm::side_rows(cx, light, p, &open_room, ctl));
+                        rows.extend(crate::screens::swarm::project_side_rows(cx, light, p, &open_room, ctl));
                         let qid = string(p, "id"); let pid = qid.rsplit_once('|').map_or(qid.as_str(), |(_, r)| r).to_string();
                         for t in p["threads"].as_array().into_iter().flatten() { let mut t = t.clone(); t["under"] = serde_json::json!(true); rows.push(self.side_thread(cx, light, &t, &pid, "", faded, ctl)); }
                     }

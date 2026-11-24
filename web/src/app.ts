@@ -401,6 +401,11 @@ function mountApp(): void {
     },
     hasRoomView: false,
     onAddProject: () => addProject.open({ mode: "folder" }),
+    onSettleSwarm: (roomId) => {
+      void hub.rpc("sidebar.act", { action: "swarm-settle", value: roomId })
+        .then(() => refreshSections())
+        .catch(() => {});
+    },
   });
 
   const chat = new ChatView(centerEl, {

@@ -267,3 +267,27 @@ fn line(b: &Value) -> String { b["room"]["need"]["line"].as_str().unwrap_or("").
     assert_eq!(peers.launched.lock().unwrap().last().unwrap()["provider"], "claude");
     { let w = bots.world().await; assert!(!w.room(&room).unwrap().threads().contains(&a)); }
 }
+
+#[tokio::test] async fn a_swarm_with_failed_or_missing_members_still_pauses_and_auto_ends_after_24h_idle() {
+    let (hub, bots, peers) = hub_of("stale-end").await;
+    let (ok, r) = bots.tool_call("t-boss", "swarm_create", &json!({"topic":"stale","members":[{"provider":"claude"},{"provider":"codex"}]})).await; assert!(ok, "{r}");
+    let room = r["room"].as_str().unwrap().to_string();
+    let (a, b) = { let l = peers.launched.lock().unwrap(); (l[0]["_id"].as_str().unwrap().to_string(), l[1]["_id"].as_str().unwrap().to_string()) };
+    // a failed member + a claim held: still pauses on idle after LIMITS.idle
+    peers.turn.lock().unwrap().insert(a.clone(), "failed".into());
+    peers.why.lock().unwrap().insert(a.clone(), "tool error".into());
+    post(&bots, &b, json!({"room":room,"text":"claiming file","tags":["claim"],"files":["src/a.rs"]})).await;
+    let t_pause = now_s() + crate::bots::gate::LIMITS.idle + 10;
+    bots.swarm_tick(t_pause).await;
+    { let w = bots.world().await; let rm = w.room(&room).unwrap(); assert_eq!((rm.state.as_str(), rm.reason.as_str()), ("paused", "idle")); }
+    assert!(!peers.locks.lock().unwrap().is_empty(), "claim still held while paused");
+    // 24h idle while paused: auto-ends as stopped/idle, releases claims, and does not wake starter again
+    let got_before = peers.got.lock().unwrap().len();
+    bots.swarm_tick(t_pause + crate::sidebar::SWARM_STALE + 1).await;
+    for _ in 0..100 { if peers.locks.lock().unwrap().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+    { let w = bots.world().await; let rm = w.room(&room).unwrap(); assert_eq!((rm.state.as_str(), rm.reason.as_str()), ("stopped", "idle")); }
+    assert!(peers.locks.lock().unwrap().is_empty(), "claims released on auto-end");
+    assert_eq!(peers.got.lock().unwrap().len(), got_before, "starter not woken on auto-end");
+    let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
+    assert!(g["room"]["need"].is_null());
+}

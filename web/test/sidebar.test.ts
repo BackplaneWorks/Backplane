@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 mock.module("virtual:i18n", () => ({ CATALOGS: {} }));
-const { statusPillOf } = await import("../src/sidebar");
+const { statusPillOf, isSwarmVisibleUnderProject } = await import("../src/sidebar");
 
 const root = join(import.meta.dir, "..");
 const sidebarSrc = readFileSync(join(root, "src/sidebar.ts"), "utf8");
@@ -36,9 +36,23 @@ describe("SidebarView Crew / Inbox / Bench + Status Pills + Snooze", () => {
     expect(sidebarSrc).toContain("row.snooze");
     expect(sidebarSrc).toContain("row.wake");
     expect(sidebarSrc).toContain("this.cb.onSnoozeRow?.(opt.value)");
-    expect(sidebarSrc).toContain("const hasSettle = Boolean(row.settle);");
+    expect(sidebarSrc).toContain("const hasSettle = Boolean(row.settle) && (!isSwarm || Boolean(this.cb.onSettleSwarm));");
+    expect(sidebarSrc).toContain("isSwarmVisibleUnderProject");
     expect(sidebarSrc).toContain("proj.hasBoard || proj.hasSchematic");
     expect(sidebarSrc).toContain('data-testid", "all-projects-filter"');
+  });
+
+  test("isSwarmVisibleUnderProject hides idle/settled/finished swarms under collapsed projects", () => {
+    expect(isSwarmVisibleUnderProject({ id: "r1", title: "Web UI", state: "active", working: 0 }, true)).toBe(false);
+    expect(isSwarmVisibleUnderProject({ id: "r1", title: "Web UI", state: "active", working: 0 }, false)).toBe(true);
+    expect(isSwarmVisibleUnderProject({ id: "r2", title: "Active", state: "active", working: 2 }, true)).toBe(true);
+    expect(isSwarmVisibleUnderProject({ id: "r3", title: "Mon", state: "active", working: 0, monitoring: true }, true)).toBe(true);
+    expect(isSwarmVisibleUnderProject({ id: "r4", title: "Paused", state: "paused", working: 1 }, true)).toBe(false);
+    expect(isSwarmVisibleUnderProject({ id: "r5", title: "Needs", state: "paused", working: 0, need: { line: "Paused" } }, true)).toBe(true);
+    expect(isSwarmVisibleUnderProject({ id: "r6", title: "WordNeeds", state: "active", word: "needs", working: 0 }, true)).toBe(true);
+    expect(isSwarmVisibleUnderProject({ id: "r7", title: "Settled", state: "active", working: 0, settled: true }, false)).toBe(false);
+    expect(isSwarmVisibleUnderProject({ id: "r8", title: "Done", state: "done", working: 0 }, false)).toBe(false);
+    expect(isSwarmVisibleUnderProject({ id: "r9", title: "Stopped", state: "stopped", working: 0 }, false)).toBe(false);
   });
 
   test("Quick-open hardware buttons stay hidden at rest and reveal on hover", () => {

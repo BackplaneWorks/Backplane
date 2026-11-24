@@ -202,8 +202,12 @@ pub fn read(st: &State, w: &World, rooms: &[RoomNews], now: u64, idle: bool) -> 
     hidden.extend(st.swarm_of.keys().map(String::as_str).filter(|t| crate::state::visible::swarm_member(st, t)));
     let mut all: Vec<Row> = vec![];
     for s in crate::sidebar::live_swarms(st) {
-        let (state, sub) = match &s.need { Some(n) => ("swarm".to_string(), format!("{} · {}", n.line, n.acts.iter().map(|a| a.label.as_str()).collect::<Vec<_>>().join(" / "))),
-            None => (if st.rooms_nav.get(&s.id).map_or(false, |r| r.state == "paused") { "idle" } else { "working" }.to_string(), st.rooms_nav.get(&s.id).map_or(String::new(), |r| if r.state == "paused" { format!("paused ({})", r.reason) } else { "running".into() })) };
+        if s.settled { continue }
+        let (state, sub) = match &s.need {
+            Some(n) => ("swarm".to_string(), format!("{} · {}", n.line, n.acts.iter().map(|a| a.label.as_str()).collect::<Vec<_>>().join(" / "))),
+            None if s.word == "running" => ("working".to_string(), format!("running ({} working)", s.working)),
+            None => ("idle".to_string(), st.rooms_nav.get(&s.id).map_or(String::new(), |r| if r.state == "paused" { format!("paused ({})", r.reason) } else { "idle (0 working)".into() })),
+        };
         all.push(Row { kind: "swarm", id: s.id.clone(), title: s.title.clone(), sub, state, at: s.activity });
     }
     let mut projects: Vec<(&String, &Project)> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != "scratch").collect(); projects.sort_by(|a, b| b.1.created.cmp(&a.1.created).then(a.0.cmp(b.0)));

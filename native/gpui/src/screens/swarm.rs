@@ -46,10 +46,51 @@ pub fn add_value(add: &Value, role: &str) -> String { format!("add|{}|{}|{}", st
 
 // ---- the sidebar ----
 
+/// Whether a swarm row should show under a project row in the sidebar:
+/// settled or finished swarms never show; under a collapsed project (`folded`),
+/// only actively working/monitoring (unpaused) or attention-needing swarms show.
+pub fn visible_under_project(r: &Value, folded: bool) -> bool {
+    if r["settled"] == true { return false }
+    let state = string(r, "state");
+    if matches!(state.as_str(), "done" | "stopped") { return false }
+    if !folded { return true }
+    let working = r["working"].as_u64().unwrap_or(0);
+    let monitoring = r["monitoring"] == true;
+    let needs = r["need"].is_object() || matches!(r["word"].as_str(), Some("needs"));
+    ((working > 0 || monitoring) && state != "paused") || needs
+}
+
+/// Context-menu items for a swarm row (hub-provided `menu` when present, else Pause/Resume + Stop swarm).
+pub fn menu_items(r: &Value) -> Vec<crate::screens::ctxmenu::Item> {
+    let from_hub = crate::screens::ctxmenu::section_items(&r["menu"]);
+    if !from_hub.is_empty() { return from_hub }
+    let room = nav_action(&string(r, "nav")).map(|(_, id)| id).unwrap_or_default();
+    let state = string(r, "state");
+    if room.is_empty() || matches!(state.as_str(), "done" | "stopped") { return vec![] }
+    let item = |label: &str, action: &str, value: String, confirm: bool| crate::screens::ctxmenu::Item {
+        label: label.into(), action: action.into(), value, confirm, note: String::new(),
+    };
+    let mut out = vec![];
+    if state == "paused" { out.push(item("Resume", "swarm-need", format!("{room}\u{1f}resume\u{1f}"), false)); } // i18n-ok: menu label, drawn through trs in render
+    else if state == "active" { out.push(item("Pause", "swarm-need", format!("{room}\u{1f}pause\u{1f}"), false)); } // i18n-ok: menu label, drawn through trs in render
+    out.push(item("Stop swarm", "swarm-need", format!("{room}\u{1f}stop\u{1f}"), true)); // i18n-ok: menu label, drawn through trs in render
+    out
+}
+
 /// A project's swarm rows, above its threads: the name, the state's dot, "N members · M working" and the ago; a click opens its page.
 pub fn side_rows(cx: &mut Context<Backplane>, light: bool, project: &Value, open_room: &str, ctl: &mut Vec<CtlEntry>) -> Vec<AnyElement> {
+    render_side_rows(cx, light, arr(project, "swarms"), open_room, ctl)
+}
+
+/// A project's swarm rows under its sidebar entry, applying collapsed-project visibility rules.
+pub fn project_side_rows(cx: &mut Context<Backplane>, light: bool, project: &Value, open_room: &str, ctl: &mut Vec<CtlEntry>) -> Vec<AnyElement> {
+    let folded = project["folded"] == true;
+    render_side_rows(cx, light, arr(project, "swarms").filter(|r| visible_under_project(r, folded)), open_room, ctl)
+}
+
+fn render_side_rows<'a>(cx: &mut Context<Backplane>, light: bool, rows: impl Iterator<Item = &'a Value>, open_room: &str, ctl: &mut Vec<CtlEntry>) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
-    arr(project, "swarms").filter_map(|r| {
+    rows.filter_map(|r| {
         let (action, room) = nav_action(&string(r, "nav"))?;
         let name = { let n = string(r, "name"); if n.is_empty() { string(r, "title") } else { n } };
         ctl.push(CtlEntry { id: format!("swarm:{name}"), label: name.clone(), ctl: Ctl::Node(action.clone(), room.clone()) });
@@ -62,15 +103,35 @@ pub fn side_rows(cx: &mut Context<Backplane>, light: bool, project: &Value, open
             ctl.push(CtlEntry { id: format!("swarm-need:{name}:{i}"), label: label.clone(), ctl: Ctl::Node("swarm-need".into(), v.clone()) });
             need_button(cx, light, format!("swarm-need-{rid}-{i}"), trs(&label), i == 0, v) }).collect();
         let has = !btns.is_empty();
+        let settle_val = string(r, "settle");
+        let items = menu_items(r);
+        let group = SharedString::from(format!("swarm-row-{rid}"));
+        let settle_btn = (!has && !settle_val.is_empty()).then(|| {
+            let raw = settle_val.rsplit('|').next().unwrap_or("").to_string();
+            /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("swarm-settle:{raw}"), label: "Settle".into(), ctl: Ctl::Node("swarm-settle".into(), settle_val.clone()) });
+            let sv = settle_val.clone();
+            crate::ui::with_rect(div().id(SharedString::from(format!("swarm-settle-{rid}"))), move || format!("swarm-settle:{raw}"))
+                .flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
+                .invisible().group_hover(group.clone(), |s| s.visible()).hover(|s| s.bg(c("line")))
+                .tooltip(crate::keys::tip(&trs("Settle"), "", light))
+                .child(crate::art::icon("check", 12., c("dim")))
+                .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.go("swarm-settle", sv.clone(), cx); }))
+                .into_any_element()
+        });
         let el = crate::ui::with_rect(div().id(SharedString::from(format!("swarm-{rid}"))), { let n = name.clone(); move || format!("swarm:{n}") })
-            .flex().items_center().gap_2().pl(px(30.)).pr_3().when(!has, |d| d.h(crate::scale::tpx(38.))).when(has, |d| d.py_1()).border_l_2().border_color(if sel { c("accent") } else { c("panel") })
+            .group(group).flex().items_center().gap_2().pl(px(30.)).pr_3().when(!has, |d| d.h(crate::scale::tpx(38.))).when(has, |d| d.py_1()).border_l_2().border_color(if sel { c("accent") } else { c("panel") })
             .bg(if sel { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| this.go(&action, room.clone(), cx)))
+            .when(!items.is_empty(), |d| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+                cx.stop_propagation();
+                this.ctx_open(e.position, items.clone(), cx);
+            })))
             .child(dot(light, &string(r, "state")))
             .child(div().flex_1().min_w_0().flex().flex_col().line_height(crate::scale::tpx(16.))
                 .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name))
                 .child(div().text_size(crate::scale::tpx(11.)).text_color(if has { c("warn") } else { c("faint") }).overflow_hidden().whitespace_nowrap().text_ellipsis().child(line))
                 .when(has, |d| d.child(div().pt_1().flex().gap_1().children(btns))))
+            .children(settle_btn)
             .when(!has, |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(string(r, "ago"))));
         Some(el.into_any_element())
     }).collect()
@@ -340,5 +401,27 @@ mod tests {
         assert!(!ids.contains(&"swarm-member-1"), "a bot member has no thread to open");
         assert!(c.iter().any(|x| x.0 == "swarm-rm-0" && matches!(&x.2, Ctl::Bot(k, v) if k == "act" && v == "swarm-act\u{1f}remove|t1")));
         assert!(c.iter().any(|x| x.0 == "srow-0-p0" && matches!(&x.2, Ctl::Bot(_, v) if v == "swarm-row-provider\u{1f}0\u{1f}codex")));
+    }
+    #[test] fn collapsed_project_hides_idle_swarms_and_keeps_active_or_needing_ones() {
+        let idle = json!({"nav": "@room:r1", "state": "active", "working": 0, "monitoring": false});
+        let working = json!({"nav": "@room:r2", "state": "active", "working": 2});
+        let monitoring = json!({"nav": "@room:r3", "state": "active", "working": 0, "monitoring": true});
+        let paused_working = json!({"nav": "@room:r4", "state": "paused", "working": 1});
+        let needs = json!({"nav": "@room:r5", "state": "paused", "working": 0, "need": {"line": "Paused"}});
+        let settled = json!({"nav": "@room:r6", "state": "active", "working": 0, "settled": true});
+        let done = json!({"nav": "@room:r7", "state": "done", "working": 0});
+        let stopped = json!({"nav": "@room:r8", "state": "stopped", "working": 0});
+        assert!(!visible_under_project(&idle, true), "collapsed project hides 0-working idle swarm");
+        assert!(visible_under_project(&idle, false), "expanded project shows live 0-working swarm");
+        assert!(visible_under_project(&working, true), "collapsed project keeps working > 0 swarm");
+        assert!(visible_under_project(&monitoring, true), "collapsed project keeps monitoring swarm");
+        assert!(!visible_under_project(&paused_working, true), "paused swarm without need is hidden when collapsed");
+        assert!(visible_under_project(&needs, true), "collapsed project keeps swarm needing user");
+        assert!(!visible_under_project(&settled, false) && !visible_under_project(&settled, true));
+        assert!(!visible_under_project(&done, false) && !visible_under_project(&stopped, false));
+        let hub_menu = json!({"nav": "@room:r1", "state": "active", "menu": [{"id": "settle", "label": "Settle", "action": "swarm-settle", "value": "r1"}]});
+        assert_eq!(menu_items(&hub_menu).len(), 1);
+        assert_eq!(menu_items(&idle).iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Pause", "Stop swarm"]);
+        assert_eq!(menu_items(&done).len(), 0);
     }
 }

@@ -101,6 +101,10 @@ export interface SectionThreadRow {
   wake?: string;
   /** a swarm row's need (swarm-need.ts): null when nothing waits on the person */
   need?: unknown;
+  working?: number;
+  members?: number;
+  monitoring?: boolean;
+  settled?: boolean;
 }
 
 export interface SectionProjectRow {
@@ -156,6 +160,19 @@ export interface SidebarCallbacks {
   hasRoomView?: boolean;
   /** The + beside the projects' heading: Add project. */
   onAddProject?: () => void;
+  /** Settle/dismiss a swarm row (`sidebar.act` `swarm-settle`). */
+  onSettleSwarm?: (roomId: string) => void;
+}
+
+/** Whether a swarm row under a project should be shown in the sidebar. */
+export function isSwarmVisibleUnderProject(sw: SectionThreadRow, folded: boolean): boolean {
+  if (sw.settled) return false;
+  if (sw.state === "done" || sw.state === "stopped") return false;
+  if (!folded) return true;
+  const working = sw.working ?? 0;
+  const monitoring = Boolean(sw.monitoring);
+  const needs = Boolean(parseNeed(sw.need)) || sw.word === "needs";
+  return ((working > 0 || monitoring) && sw.state !== "paused") || needs;
 }
 
 export interface StatusPill {
@@ -700,7 +717,8 @@ export class SidebarView {
     if (row.off) return null;
     const hasSnooze = Array.isArray(row.snooze) && row.snooze.length > 0 && Boolean(this.cb.onSnoozeRow);
     const hasWake = Boolean(row.wake) && Boolean(this.cb.onSnoozeRow);
-    const hasSettle = Boolean(row.settle);
+    const isSwarm = row.kind === "swarm";
+    const hasSettle = Boolean(row.settle) && (!isSwarm || Boolean(this.cb.onSettleSwarm));
     if (!hasSnooze && !hasWake && !hasSettle) return null;
 
     const acts = document.createElement("span");
@@ -746,7 +764,8 @@ export class SidebarView {
       settleBtn.appendChild(makeCheckIcon(11));
       settleBtn.addEventListener("click", (e) => {
         e.stopPropagation();
-        this.cb.onThreadAct(rawThreadId(row.settle!), "settle");
+        if (isSwarm) this.cb.onSettleSwarm?.(rawThreadId(row.settle!));
+        else this.cb.onThreadAct(rawThreadId(row.settle!), "settle");
       });
       acts.appendChild(settleBtn);
     }
@@ -1145,12 +1164,14 @@ export class SidebarView {
             header.append(toggle, meta, acts);
             group.appendChild(header);
 
-            if (!proj.folded || Boolean(q)) {
-              const projNameMatches = Boolean(q) && (proj.title || proj.id).toLowerCase().includes(q);
-              for (const sw of proj.swarms ?? []) {
-                if (q && !projNameMatches && !sw.title.toLowerCase().includes(q)) continue;
-                group.appendChild(this.renderSectionThreadRow(sw, true));
-              }
+            const projNameMatches = Boolean(q) && (proj.title || proj.id).toLowerCase().includes(q);
+            const isProjFolded = Boolean(proj.folded && !q);
+            for (const sw of proj.swarms ?? []) {
+              if (!isSwarmVisibleUnderProject(sw, isProjFolded)) continue;
+              if (q && !projNameMatches && !sw.title.toLowerCase().includes(q)) continue;
+              group.appendChild(this.renderSectionThreadRow(sw, true));
+            }
+            if (!isProjFolded) {
               for (const th of proj.threads ?? []) {
                 if (q && !projNameMatches && !th.title.toLowerCase().includes(q)) continue;
                 group.appendChild(this.renderSectionThreadRow(th, true));
