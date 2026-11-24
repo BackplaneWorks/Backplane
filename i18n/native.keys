@@ -373,3 +373,4 @@ reply.action
 reply.cancel
 reply.replying
 reply.to
+thread.context.size

@@ -5,17 +5,18 @@ import UIKit
 // (SwiftUI's openURL; a long press shows the system's Open / Copy / Share menu). A backplane:// link or a path is asked of the hub (link.resolve), which says
 // what it opens: a thread (also one on a linked machine), a project, a room, a file at a line, or a short note why not. The root screen follows `linkTarget`.
 struct DLinkTarget: Equatable {
-    enum Kind { case thread, project, room, file }
+    enum Kind { case thread, project, room, file, settings }
     var kind: Kind; var id: String; var path = ""; var line = 0
     var n = UUID()
 }
 
 struct DLinkReply: Decodable {
-    var kind: String; var thread: String; var project: String; var room: String; var path: String; var line: Int; var note: String
-    enum CodingKeys: String, CodingKey { case kind, thread, project, room, path, line, note }
+    var kind: String; var thread: String; var project: String; var room: String; var path: String; var line: Int; var note: String; var page: String; var name: String; var size: Int64
+    enum CodingKeys: String, CodingKey { case kind, thread, project, room, path, line, note, page, name, size }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        kind = c.str(.kind); thread = c.str(.thread); project = c.str(.project); room = c.str(.room); path = c.str(.path); line = c.int(.line); note = c.str(.note)
+        kind = c.str(.kind); thread = c.str(.thread); project = c.str(.project); room = c.str(.room); path = c.str(.path); line = c.int(.line); note = c.str(.note); page = c.str(.page); name = c.str(.name)
+        size = (try? c.decode(Int64.self, forKey: .size)) ?? Int64(c.int(.size))
     }
 }
 
@@ -29,8 +30,17 @@ extension DataClient {
         return nil
     }
 
+    /// A file of the hub's machine a tapped path names, when this phone downloads it rather than asking link.resolve: a share (`/s/<token>/<name>`),
+    /// or a file a reply of `thread` lists (feature fileLinks) that Backplane's viewers do not draw (`view` ones open in them, as before).
+    func download(_ path: String, thread: String, viewToo: Bool = false) -> Bool {
+        if let s = FileFetch.shareRoute(path) { DDownloads.shared.share(s); return true }
+        guard has("fileLinks"), let f = FileFetch.find(path, in: (entries[thread] ?? []).flatMap(\.files)), viewToo || f.open != "view" else { return false }
+        DDownloads.shared.file(f, thread: thread); return true
+    }
+
     func openLink(_ url: URL, thread: String) {
         guard let text = linkText(url) else { return }
+        if let p = dPathFrom(url), download(p, thread: thread) { return }
         Task {
             // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
             var waited = 0
@@ -38,6 +48,7 @@ extension DataClient {
             // a hub that does not know link.resolve: a thread link as before, the rest says so
             guard has("links") else {
                 if let u = URL(string: text), u.host == "thread", let id = u.pathComponents.dropFirst().first, !id.isEmpty { linkTarget = DLinkTarget(kind: .thread, id: id) }
+                else if let u = URL(string: text), u.host == "settings" { linkTarget = DLinkTarget(kind: .settings, id: u.pathComponents.dropFirst().first ?? "") }
                 else { say("Update the hub to open this link.") }
                 return
             }
@@ -48,7 +59,12 @@ extension DataClient {
                 case "project": linkTarget = DLinkTarget(kind: .project, id: r.project)
                 case "room": linkTarget = DLinkTarget(kind: .room, id: r.room)
                 case "file": linkTarget = DLinkTarget(kind: .file, id: r.thread, path: r.path, line: r.line)
-                default: say(r.note.isEmpty ? "That link does not open here." : r.note)
+                case "download": DDownloads.shared.file(DFileLink(path: r.path, name: r.name, size: r.size, open: "download"), thread: thread)
+                case "settings": linkTarget = DLinkTarget(kind: .settings, id: r.page)
+                default:
+                    // a file the reply lists that no viewer here opens is downloaded instead
+                    if let p = dPathFrom(url), download(p, thread: thread, viewToo: true) { break }
+                    say(r.note.isEmpty ? "That link does not open here." : r.note)
                 }
             } catch { say(conn == .online ? error.localizedDescription : "Not connected to the hub.") }
         }

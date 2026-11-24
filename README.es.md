@@ -30,7 +30,7 @@ backplane
 
 Linux (x64, arm64): el mismo comando de una línea, o `backplane-v<version>-linux-<arch>-native.tar.gz` desde la [última versión](https://github.com/BackplaneWorks/Backplane/releases/latest), descomprimido tal cual (el cliente encuentra los archivos del navegador embebido junto a él).
 
-**macOS (solo Apple silicon: M1 o posterior, macOS 13 o posterior; Backplane KiCad necesita macOS 15 o posterior).** Los Mac con Intel no son compatibles. Usa el mismo comando de una línea, o descarga `backplane-v<version>-darwin-arm64.tar.gz`. El instalador pone **Backplane.app en `~/Applications`**: ábrela desde ahí, Launchpad o Spotlight. La primera vez que abre Documentos, Escritorio o Descargas, macOS pregunta si Backplane puede hacerlo; si dijiste que no, Backplane te indica dónde permitirlo (Configuración del Sistema → Privacidad y seguridad → Archivos y carpetas). Las compilaciones **aún no están notarizadas** (firmadas ad hoc): la descarga del comando de una línea se abre tal cual; para un archivo que descargaste con un navegador y descomprimiste a mano, si macOS rechaza abrirlo, haz clic derecho (o Control + clic) → Abrir → Abrir, o en macOS 15+ ve a Configuración del Sistema → Privacidad y seguridad → «Abrir de todos modos». Consulta [docs/install.md](docs/install.md#macos-apple-silicon).
+**macOS (solo Apple silicon: M1 o posterior, macOS 13 o posterior; Backplane KiCad necesita macOS 15 o posterior).** Los Mac con Intel no son compatibles. Usa el mismo comando de una línea, o descarga `backplane-v<version>-darwin-arm64.tar.gz`. El instalador pone **Backplane.app en `~/Applications`**: ábrela desde ahí, Launchpad o Spotlight. La primera vez que abre Documentos, Escritorio o Descargas, macOS pregunta si Backplane puede hacerlo; si dijiste que no, Backplane te indica dónde permitirlo (Configuración del Sistema → Privacidad y seguridad → Archivos y carpetas). Las compilaciones **aún no están notarizadas** (firmadas ad hoc): la descarga del comando de una línea se abre tal cual; para un archivo que descargaste con un navegador y descomprimiste a mano, si macOS rechaza abrirlo, haz clic derecho (o Control + clic) → Abrir → Abrir, o en macOS 15+ ve a Configuración del Sistema → Privacidad y seguridad → «Abrir de todos modos». Consulta [docs/install.es.md](docs/install.es.md#macos-apple-silicon).
 
 **Windows (x64, experimental).** Descarga `backplane-v<version>-windows-x64.zip`, extrae todo el archivo en una carpeta con permisos de escritura y ejecuta `Backplane.exe`.
 
@@ -38,7 +38,7 @@ Linux (x64, arm64): el mismo comando de una línea, o `backplane-v<version>-linu
 
 La primera ejecución pregunta en una ventana emergente por los conteos de uso anónimos; vienen activados por defecto y se desactivan desde Ajustes.
 
-Consulta [instalación](docs/install.md) para más detalles, configuración en Windows, vinculación de teléfonos y desinstalación. Necesitas una CLI de agente, KiCad para trabajar con placas y esquemáticos, y FreeCAD para diseño mecánico. Antigravity se puede instalar desde Ajustes.
+Consulta [instalación](docs/install.es.md) para más detalles, configuración en Windows, vinculación de teléfonos y desinstalación. Necesitas una CLI de agente, KiCad para trabajar con placas y esquemáticos, y FreeCAD para diseño mecánico. Antigravity se puede instalar desde Ajustes.
 
 ## Inicio rápido
 
@@ -56,7 +56,7 @@ Consulta [instalación](docs/install.md) para más detalles, configuración en W
 Los visores muestran el diseño a medida que el agente trabaja.
 
 - **Board, Schematic, 3D.** Esquemáticos jerárquicos, controles de capas con el orden y nombres de KiCad, y *cross-probing* entre vistas.
-- **Mech.** Visualiza modelos STEP o GLB. Los agentes modelan piezas con scripts de FreeCAD, exportan a STEP y muestran el resultado aquí. Las carpetas solo mecánicas no necesitan un proyecto de KiCad; consulta la [guía rápida de diseño mecánico](docs/mechanical.md).
+- **Mech.** Visualiza modelos STEP o GLB. Los agentes modelan piezas con scripts de FreeCAD, exportan a STEP y muestran el resultado aquí. Las carpetas solo mecánicas no necesitan un proyecto de KiCad; consulta la [guía rápida de diseño mecánico](docs/mechanical.es.md).
 - **Historial y revisión.** Compara versiones, inspecciona cambios por hoja y capa, fija comentarios en una placa o esquemático y ejecuta comprobaciones de BOM, ERC y DRC desde la pestaña Review.
 - **Skills.** Las skills de KiCad de [KiStack](https://github.com/BackplaneWorks/kistack) vienen incluidas con la aplicación: esquemático, layout, huellas (*footprints*), BOM y exportaciones de fabricación.
 - **Pedidos.** Cuando un diseño tiene un archivo fab, *Buy it* abre un hilo que revisa el diseño y obtiene una cotización. Consulta [pedidos](docs/order.md).
@@ -140,7 +140,7 @@ Un hub por máquina gestiona el registro de eventos, los procesos de agentes, gi
 
 ## Documentación
 
-- [Instalación](docs/install.md), [ajustes](docs/settings.md), [secretos](docs/secrets.md)
+- [Instalación](docs/install.es.md), [ajustes](docs/settings.md), [secretos](docs/secrets.md)
 - [KiCad IPC](docs/kicad-ipc.md), [revisión de diseño](docs/design-review.md), [git](docs/git.md)
 - [Bots, salas y rutinas](docs/bots.md), [el uberbot](docs/uber.md), [terminales](docs/terminal.md)
 - [Pedidos](docs/order.md), [voz](docs/voice.md), [telemetría](docs/telemetry.md)

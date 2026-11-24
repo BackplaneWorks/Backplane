@@ -58,5 +58,38 @@ let p = Swarm.createParams(project: "p", topic: " debounce ", goal: "", seed: "I
 check(p["project"] as? String == "p" && p["topic"] as? String == "debounce" && p["goal"] == nil && p["seed"] as? String == "It bounces.", "create params", p)
 check((p["members"] as? [[String: String]]) == [["provider": "claude", "model": "opus", "role": "critic"], ["provider": "antigravity"]], "members: empty model and role left out", p["members"] ?? "")
 
+// a sidebar swarm row's `need` (native/host/src/present/swarm_need.rs `Need::json`), decoded forgivingly
+struct NeedRow: Decodable { var need: DSwarmNeed?
+    enum CodingKeys: String, CodingKey { case need }
+    init(from d: Decoder) throws { need = DSwarmNeed.of(try d.container(keyedBy: CodingKeys.self), .need) } }
+func needOf(_ j: String) -> DSwarmNeed? { (try? JSONDecoder().decode(NeedRow.self, from: Data(j.utf8)))?.need }
+let budget = needOf(#"{"need":{"line":"Paused: budget used (tokens)","why":"budget","actions":[{"label":"Raise budget","act":"raise","room":"hub|r1","thread":""},{"label":"Resume","act":"resume","room":"hub|r1","thread":""}]}}"#)
+check(budget == DSwarmNeed(line: "Paused: budget used (tokens)", why: "budget", actions: [DSwarmNeedAct(label: "Raise budget", act: "raise", room: "hub|r1"), DSwarmNeedAct(label: "Resume", act: "resume", room: "hub|r1")]), "need: budget", String(describing: budget))
+check(needOf(#"{"need":null}"#) == nil && needOf("{}") == nil && needOf(#"{"need":"x"}"#) == nil && needOf(#"{"need":{"why":"idle"}}"#) == nil, "need: null, absent, not an object, no line")
+let odd = needOf(#"{"need":{"line":"opus asks you something","actions":[{"label":"Answer","act":"open","thread":"t1"},42,{"label":7}],"extra":1}}"#)
+check(odd?.why == "" && odd?.actions.map(\.act) == ["open", ""] && odd?.actions[0].room == "", "need: a bad action drops itself, missing fields empty", String(describing: odd))
+
+// a press: board and open stay in the app; the others are swarm.act {room, action, thread (left out when empty)}
+check(Swarm.press(DSwarmNeedAct(label: "Read board", act: "board", room: "hub|r1"), rowRoom: "hub|r1") == .board(room: "hub|r1"), "press: board")
+check(Swarm.press(DSwarmNeedAct(label: "Answer", act: "open", thread: "hub|t1"), rowRoom: "r1") == .thread("hub|t1"), "press: open the member's thread")
+check(Swarm.press(DSwarmNeedAct(label: "Answer", act: "open"), rowRoom: "r1") == nil, "press: open with no thread is none")
+check(Swarm.press(DSwarmNeedAct(label: "Resume", act: "resume", room: "hub|r1"), rowRoom: "r9") == .request(["room": "hub|r1", "action": "resume"]), "press: resume, no thread")
+check(Swarm.press(DSwarmNeedAct(label: "Resume", act: "resume"), rowRoom: "r9") == .request(["room": "r9", "action": "resume"]), "press: no room falls back to the row's")
+for a in ["raise", "retry", "move", "signin"] {
+    check(Swarm.press(DSwarmNeedAct(label: a, act: a, room: "r1", thread: "t2"), rowRoom: "") == .request(["room": "r1", "action": a, "thread": "t2"]), "press: \(a) with its member")
+}
+check(Swarm.press(DSwarmNeedAct(label: "Fly", act: "fly", room: "r1"), rowRoom: "r1") == nil, "press: an unknown act is none")
+let mixed = DSwarmNeed(line: "x", why: "failed", actions: [DSwarmNeedAct(label: "Retry", act: "retry", room: "r1", thread: "t1"), DSwarmNeedAct(label: "Fly", act: "fly"), DSwarmNeedAct(label: "", act: "board")])
+check(Swarm.buttons(mixed, rowRoom: "r1").map(\.act) == ["retry"], "buttons: only known acts with a label", Swarm.buttons(mixed, rowRoom: "r1").map(\.act))
+
+// the reply's open: an account's sign-in, or a thread with the room's hub prefix back
+check(Swarm.opened("account:acc-1", room: "hub|r1") == .account("acc-1"), "opened: account")
+check(Swarm.opened("thread:t5", room: "hub|r1") == .thread("hub|t5") && Swarm.opened("thread:t5", room: "r1") == .thread("t5"), "opened: thread, prefixed as the room")
+check(Swarm.opened("thread:h2|t5", room: "hub|r1") == .thread("h2|t5"), "opened: an already prefixed thread kept")
+check(Swarm.opened("", room: "r1") == nil && Swarm.opened("account:", room: "r1") == nil && Swarm.opened("web:x", room: "r1") == nil, "opened: nothing")
+let reply = try! JSONDecoder().decode(DSwarmActReply.self, from: Data(#"{"room":"r1","thread":"t2","open":"account:a9"}"#.utf8))
+let bare = try! JSONDecoder().decode(DSwarmActReply.self, from: Data(#"{"room":"r1","state":"active","budget":{"posts":4}}"#.utf8))
+check(reply.open == "account:a9" && bare.open == "", "reply: open, or none")
+
 print("swarm-model: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

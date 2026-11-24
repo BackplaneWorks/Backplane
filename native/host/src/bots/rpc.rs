@@ -55,7 +55,10 @@ impl Inbox for Arc<Agents> {
     fn info<'a>(&'a self, thread: &'a str) -> Fut<'a, Option<super::swarm::ThreadInfo>> { Box::pin(async move {
         let w = self.world().await; let t = w.threads.get(thread)?;
         let asks = w.asks.values().any(|a| a.thread == thread);
-        Some(super::swarm::ThreadInfo { provider: t.provider.clone(), model: t.model.clone(), title: t.title.clone(), turn: t.turn.clone(), asking: asks, gone: t.archived || t.deleted, project: t.project.clone(), root: w.roots.get(&t.project).cloned().unwrap_or_default() })
+        // what it still owns between turns: background work, watched work (work_run), and the wakes it set (wake_on, the state lane's index)
+        let wakes = crate::statehost::with_state_of(&self.hub, |st| st.settings.get(&format!("wakes.by.{thread}")).map_or(0, |v| v.split('\n').filter(|l| !l.is_empty()).count())).unwrap_or(0);
+        let busy = (w.work(thread).0 + wakes) as u64;
+        Some(super::swarm::ThreadInfo { busy, provider: t.provider.clone(), model: t.model.clone(), title: t.title.clone(), turn: t.turn.clone(), asking: asks, gone: t.archived || t.deleted, project: t.project.clone(), root: w.roots.get(&t.project).cloned().unwrap_or_default(), why: t.why.clone() })
     }) }
     fn launch<'a>(&'a self, by: &'a str, args: Value) -> Fut<'a, Result<String, String>> { Box::pin(async move {
         let (ok, r) = self.tool_launch(by, &args).await;
@@ -127,7 +130,8 @@ pub fn safe_id(id: &str) -> bool { !id.is_empty() && id.len() <= 80 && id.chars(
 impl Bots {
     /// Folds the log once, off the runtime's workers, then registers the `bots.*` requests.
     pub async fn start(hub: Arc<Hub>, agents: Arc<Agents>) -> Arc<Bots> {
-        let b = Bots::start_with(hub, Arc::new(agents.clone())).await; b.start_ticker();
+        let b = Bots::start_with(hub.clone(), Arc::new(agents.clone())).await; b.start_ticker();
+        super::ubsync::start(&hub);
         agents.add_tools(Arc::new(super::tools::BotToolSet(b.clone()))); // the bots' own MCP tools join Backplane's in a bot's thread
         agents.add_tools(Arc::new(super::mail::tools::MailTools(b.clone()))); // the mailroom's, listed by what the thread is
         agents.set_mailroom(Arc::new(super::mail::funnel::Room(Arc::downgrade(&b))));
@@ -216,7 +220,10 @@ impl Bots {
         if !name_ok(&name) { return vec![err(id, "a bot's name is 1 to 24 letters, digits, - or _")] }
         let w = self.world().await;
         if w.named(&name).is_some() { return vec![err(id, &format!("a bot named {name} already exists"))] }
-        let (provider, model) = (gsd(p, "provider", &crate::settings::models::default_now(&w.setting("agent.provider", "claude"), "")).to_string(), gsd(p, "model", &w.setting("agent.model", "")).to_string());
+        let default_prov = crate::settings::models::default_now(&w.setting("agent.provider", "claude"), "");
+        let provider = gsd(p, "provider", &default_prov).to_string();
+        let default_model = if gs(p, "provider").is_empty() || provider == default_prov { w.setting("agent.model", "") } else { String::new() };
+        let model = crate::settings::models::sanitize_model_now(&provider, gsd(p, "model", &default_model));
         let (bot, th) = (self.id("b", now), self.id("t", now));
         // the cat: a look given is the person's pick (kept whatever the name), else the name's; `color` the fur's ("#rrggbb", "" the coat's own)
         let (look, auto) = match gnat(p, "look") { Some(l) => (l % super::cat::LOOKS, false), None => (super::cat::look_of(&name), true) };
@@ -335,6 +342,15 @@ impl Bots {
         if !w.live(bot) { return vec![err(id, "no such bot")] }
         let th = w.bot(bot).map(|b| b.thread.clone()).unwrap_or_default();
         if !msg.is_empty() && (w.has_msg(&th, msg) || w.inflight.contains(&(th.clone(), msg.to_string()))) { return vec![ok(id)] }
+        if star.is_some() && !text.trim().is_empty() {
+            drop(w);
+            if let Some(why) = crate::settings::provider_notice::send_guard(&self.hub).await {
+                return vec![crate::settings::provider_notice::rpc_error_reply(id, why)];
+            }
+            w = self.world().await;
+            if !w.live(bot) { return vec![err(id, "no such bot")] }
+            if !msg.is_empty() && (w.has_msg(&th, msg) || w.inflight.contains(&(th.clone(), msg.to_string()))) { return vec![ok(id)] }
+        }
         let q = if to.is_empty() { None } else { self.quoted(&w, &th, to) };
         let text = reply::resolve(to, q.as_deref(), text);
         let now = now_s(); let mid = if msg.is_empty() { self.id("m", now) } else { msg.to_string() };
@@ -385,7 +401,8 @@ impl Bots {
         let tags: Vec<String> = p.get("tags").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
         let tags = super::gate::tags_of(&tags); if !tags.is_empty() { heard.fields.insert("tags".into(), json!(tags)); }
         let ms = super::gate::mentions(text, &super::swarm::names(&w, &room)); if !ms.is_empty() { heard.fields.insert("mentions".into(), json!(ms)); }
-        if room.paused() && !room.ended() { extra.insert(0, room.set_ev(now, |x| { x.state = String::new(); x.reason = String::new() })) }
+        if room.paused() && !room.ended() { extra.insert(0, room.set_ev(now, |x| { x.state = String::new(); x.reason = String::new() }));
+            extra.extend(self.resume_facts(&w, &room, true, now)) } // a swarm: what Resume does too (held posts released, the pause's facts gone)
         let pending = self.post_decide(&w, now, "", "you", "", &rr, text, 0, &mid, extra, heard).await?;
         if let Some((c, f)) = offer { self.hub.push(c, f); }
         let syn = room.swarm() && !room.ended() && tags.iter().any(|t| t == "synthesis");

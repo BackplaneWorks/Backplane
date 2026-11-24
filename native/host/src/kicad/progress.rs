@@ -42,6 +42,10 @@ pub fn on_event(pro: &str, ev: &Value) -> bool {
 }
 /// The jobs running now in every open KiCad, by title (the checks wait for them: kicad/checkrun.rs).
 pub fn running() -> Vec<String> { state().lock().unwrap().values().flat_map(|j| j.values().map(|x| x.title.clone())).collect() }
+/// Whether `pro`'s KiCad has a job running now (its idle close waits: embed.rs `note_use`).
+pub fn has_jobs(pro: &str) -> bool { state().lock().unwrap().get(pro).is_some_and(|j| !j.is_empty()) }
+/// The first job running in `pro`'s KiCad (its title), if any (the exit bound waits for it: embed.rs `bound_check`).
+pub fn running_for(pro: &str) -> Option<String> { state().lock().unwrap().get(pro).and_then(|j| j.values().next().map(|x| if x.title.is_empty() { "a job".to_string() } else { x.title.clone() })) }
 /// KiCad went away or was restarted: nothing of its runs any more.
 pub fn clear(pro: &str) { state().lock().unwrap().remove(pro); }
 

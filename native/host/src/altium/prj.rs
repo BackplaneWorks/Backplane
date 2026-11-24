@@ -34,14 +34,49 @@ pub fn parameters(text: &str) -> Vec<(String, String)> {
     if let Some((n, v)) = cur { if !n.is_empty() { out.push((n, v)) } }
     out
 }
-/// The project file (.PrjPcb) in a sheet's folder that lists that sheet, if any.
+/// How many folders above a sheet's own `find_for` looks in for its project (Altium projects keep sheets in `Sch/`, `Schematics/`...).
+const UP: usize = 4;
+/// The project file (.PrjPcb) that lists a sheet, if any: in the sheet's folder or one of the `UP` above it, nearest first.
+/// A project in a folder above must list this very file (its `DocumentPath` joined to the project's folder is the sheet's path,
+/// any case); in the sheet's own folder a project listing a sheet of that name still counts, as it always did. The walk stops after
+/// a repository's or a Backplane project's root (a folder with `.git` or `.backplane.json`) and goes no higher than the folder
+/// below the home folder (as its path is spelled) or Unix's `/` (a Windows drive or share root, a usual place for a project, is
+/// looked in); the sheet's own folder is always looked in. An unrelated project higher up is never taken.
 pub fn find_for(sheet: &str) -> Option<String> {
-    let p = std::path::Path::new(sheet);
-    let (dir, name) = (p.parent()?, p.file_name()?.to_string_lossy().to_lowercase());
-    let mut ps: Vec<_> = std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path()).filter(|q| q.extension().map_or(false, |x| x.eq_ignore_ascii_case("prjpcb"))).collect();
-    ps.sort();
-    ps.into_iter().find(|q| std::fs::read(q).map(|b| of_kind(&String::from_utf8_lossy(&b), super::Kind::Schematic).iter().any(|d| d.rsplit('/').next().unwrap_or(d).to_lowercase() == name)).unwrap_or(false))
-        .map(|q| q.to_string_lossy().into_owned())
+    use std::path::{Component, Path, PathBuf};
+    let p = Path::new(sheet);
+    let name = p.file_name()?.to_string_lossy().to_lowercase();
+    // the lexical form (`..` and `.` folded; no file system access), and lower-cased for comparing a project's entry with the sheet
+    let lex = |q: &Path| -> PathBuf {
+        let mut out = PathBuf::new();
+        for c in q.components() { match c { Component::CurDir => {}, Component::ParentDir => { out.pop(); }, c => out.push(c) } }
+        out
+    };
+    let norm = |q: &Path| -> String { lex(q).to_string_lossy().to_lowercase() };
+    let want = norm(p);
+    let home = crate::plat::dirs::home().map(|h| norm(Path::new(&h)));
+    let projects = |dir: &Path| -> Vec<(PathBuf, Vec<String>)> {
+        let Ok(rd) = std::fs::read_dir(dir) else { return vec![] };
+        let mut ps: Vec<_> = rd.flatten().map(|e| e.path()).filter(|q| q.extension().map_or(false, |x| x.eq_ignore_ascii_case("prjpcb"))).collect();
+        ps.sort();
+        ps.into_iter().filter_map(|q| std::fs::read(&q).ok().map(|b| { let d = of_kind(&String::from_utf8_lossy(&b), super::Kind::Schematic); (q, d) })).collect()
+    };
+    // walked up from the folder's lexical form, so `a/b/../c/` goes up through `a`, not `a/b`
+    let own = lex(p.parent()?);
+    if own.as_os_str().is_empty() { return None }
+    let mut fallback = None;
+    let mut cur = Some(own.as_path());
+    for level in 0..=UP {
+        let Some(dir) = cur.filter(|d| !d.as_os_str().is_empty()) else { break };
+        if level > 0 && (Some(norm(dir)) == home || cfg!(unix) && dir.parent().is_none()) { break }
+        for (q, docs) in projects(dir) {
+            if docs.iter().any(|d| norm(&dir.join(d)) == want) { return Some(q.to_string_lossy().into_owned()) }
+            if dir == own && fallback.is_none() && docs.iter().any(|d| d.rsplit('/').next().unwrap_or(d).to_lowercase() == name) { fallback = Some(q) }
+        }
+        if dir.join(".git").exists() || dir.join(".backplane.json").exists() { break }
+        cur = dir.parent();
+    }
+    fallback.map(|q| q.to_string_lossy().into_owned())
 }
 static ROOTS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, (std::time::Instant, Vec<String>)>>> = std::sync::OnceLock::new();
 /// The project's sheets no other sheet of it places (its top-level sheets: the top of a hierarchy, and every sheet of a flat design), in
@@ -91,5 +126,49 @@ mod tests {
     #[test] fn project_parameters() {
         let t = "[Design]\r\nVersion=1.0\r\n[Parameter1]\r\nName=CompanyName\r\nValue=Example Ltd\r\n\r\n[Parameter2]\r\nName=Rev\r\nValue=\r\n[ParameterSettings]\r\nName=x\r\n[Parameter3]\r\nValue=A=B\r\nName=Note\r\n";
         assert_eq!(parameters(t), [("CompanyName".to_string(), "Example Ltd".to_string()), ("Rev".to_string(), String::new()), ("Note".to_string(), "A=B".to_string())]);
+    }
+    #[test] fn find_for_in_parent_folder() {
+        // a sheet in Sch/ under the project's folder (issue #1381); an unrelated project two folders up that lists a sheet of the same
+        // name elsewhere is not taken, and nothing is found above a repository's root
+        let t = crate::plat::tmp::dir("alt-find");
+        let d: &std::path::Path = &t;
+        let top = d.join("ws");
+        let prj = top.join("Board");
+        std::fs::create_dir_all(prj.join("Sch")).unwrap();
+        std::fs::write(prj.join("Sch").join("Power.SchDoc"), b"").unwrap();
+        std::fs::write(prj.join("Board.PrjPcb"), "[Document1]\r\nDocumentPath=Sch\\power.SchDoc\r\n[Document2]\r\nDocumentPath=Board.PcbDoc\r\n").unwrap();
+        std::fs::write(top.join("Other.PrjPcb"), "[Document1]\r\nDocumentPath=Elsewhere\\Power.SchDoc\r\n").unwrap();
+        let sheet = prj.join("Sch").join("Power.SchDoc").to_string_lossy().into_owned();
+        assert_eq!(find_for(&sheet).as_deref(), Some(prj.join("Board.PrjPcb").to_string_lossy().as_ref()));
+        // the project lists it by name only, from another folder: not this sheet's project
+        std::fs::write(prj.join("Board.PrjPcb"), "[Document1]\r\nDocumentPath=Old\\Power.SchDoc\r\n").unwrap();
+        assert_eq!(find_for(&sheet), None);
+        // a project above a repository's root is never reached
+        std::fs::write(top.join("Other.PrjPcb"), "[Document1]\r\nDocumentPath=Board\\Sch\\Power.SchDoc\r\n").unwrap();
+        assert_eq!(find_for(&sheet).as_deref(), Some(top.join("Other.PrjPcb").to_string_lossy().as_ref()));
+        std::fs::create_dir_all(prj.join(".git")).unwrap();
+        assert_eq!(find_for(&sheet), None);
+        // in the sheet's own folder, a project naming the sheet from another folder still counts (as before)
+        std::fs::write(prj.join("Sch").join("Local.PrjPcb"), "[Document1]\r\nDocumentPath=..\\Old\\Power.SchDoc\r\n").unwrap();
+        assert_eq!(find_for(&sheet).as_deref(), Some(prj.join("Sch").join("Local.PrjPcb").to_string_lossy().as_ref()));
+    }
+    #[test] fn find_for_stops_where_it_should() {
+        let t = crate::plat::tmp::dir("alt-find-up");
+        let d: &std::path::Path = &t;
+        // a sheet five folders below a project that lists it: four folders up are looked in, not five
+        let deep = d.join("p").join("a").join("b").join("c").join("e").join("f");
+        std::fs::create_dir_all(&deep).unwrap();
+        let sheet = deep.join("S.SchDoc").to_string_lossy().into_owned();
+        std::fs::write(d.join("p").join("Far.PrjPcb"), "[Document1]\r\nDocumentPath=a\\b\\c\\e\\f\\S.SchDoc\r\n").unwrap();
+        assert_eq!(find_for(&sheet), None);
+        std::fs::write(d.join("p").join("a").join("Near.PrjPcb"), "[Document1]\r\nDocumentPath=b\\c\\e\\f\\S.SchDoc\r\n").unwrap();
+        assert_eq!(find_for(&sheet).as_deref(), Some(d.join("p").join("a").join("Near.PrjPcb").to_string_lossy().as_ref()));
+        // a Backplane project's root stops the walk too, after its own folder is looked in
+        std::fs::write(d.join("p").join("a").join("b").join(".backplane.json"), "{}").unwrap();
+        assert_eq!(find_for(&sheet), None);
+        // a project listing the sheet through `..`, and a sheet path with `..` in it, walked from its real folder
+        std::fs::write(d.join("p").join("a").join("b").join("c").join("Up.PrjPcb"), "[Document1]\r\nDocumentPath=..\\c\\e\\f\\S.SchDoc\r\n").unwrap();
+        let odd = d.join("p").join("a").join("b").join("c").join("x").join("..").join("e").join("f").join("S.SchDoc").to_string_lossy().into_owned();
+        assert_eq!(find_for(&odd).as_deref(), Some(d.join("p").join("a").join("b").join("c").join("Up.PrjPcb").to_string_lossy().as_ref()));
     }
 }

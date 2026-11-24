@@ -46,7 +46,9 @@ class DataActivity : ComponentActivity() {
         if (BuildConfig.DEBUG && u.host == "unpair") { DataClient.unpair(); return }
         // (a thread of another machine, `desktop~t9` or a link id: the hub says which thread it is; this machine's own opens as it did)
         if (u.host == "thread") u.pathSegments.firstOrNull()?.let { if (it.contains('~')) DataClient.openLink(u.toString(), "") else DataClient.openFromIntent = it }
-        else if (u.host == "account") u.pathSegments.firstOrNull()?.let { DataClient.openAccount = it } else DataClient.askLink = u.toString()
+        else if (u.host == "account") u.pathSegments.firstOrNull()?.let { DataClient.openAccount = it }
+        else if (u.host == "settings") { if (u.pathSegments.firstOrNull() == "accounts") DataClient.openAccounts = true else DataClient.openSettings = true }
+        else DataClient.askLink = u.toString()
     }
     override fun onResume() { super.onResume(); DataClient.foreground = true; DataClient.foreground(); DataVoice.background(false) }
     override fun onPause() { super.onPause(); DataClient.foreground = false; DataVoice.background(true) }

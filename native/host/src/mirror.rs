@@ -13,6 +13,8 @@ pub type Names = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>,
     /// a mirrored project's folder inside its repository (`repo_rel_of_root` on its machine, read from the key it sends), by `<link>~<id>`
     rels: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>>, here: RwLock<String>,
+    /// when each away link stopped answering (unix ms), for the home's `awaySince` (docs/PHONE-DATA.md, The home)
+    away_at: RwLock<HashMap<String, u64>>,
     /// the links that said their projects' origins (an origin of one of theirs is known, "" when it has none); `asked` wakes the watch for a new one
     known: RwLock<std::collections::HashSet<String>>, asked: tokio::sync::Notify,
     /// moves when what the merged rows are made of moves (an origin learned, a machine away or back): `publish` redraws the clients then
@@ -167,7 +169,10 @@ impl Mirrors {
     /// A mirrored project's folder inside its repository ("" at its top, or not said: a machine of 0.16.0 or older).
     pub fn rel(&self, far_id: &str) -> String { self.rels.read().unwrap().get(far_id).cloned().unwrap_or_default() }
     /// Whether a linked machine answered when last asked (the origin watch asks each one every minute).
-    pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); let was = g.contains(link); if away { g.insert(link.to_string()); } else { g.remove(link); } if was != away { eprintln!("machines: {link} {}", if away { "is away" } else { "answers" }); drop(g); self.bump() } }
+    pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); let was = g.contains(link); if away { g.insert(link.to_string()); } else { g.remove(link); }
+        { let mut at = self.away_at.write().unwrap(); if !away { at.remove(link); } else if !was { at.insert(link.to_string(), crate::hub::now_ms()); } } if was != away { eprintln!("machines: {link} {}", if away { "is away" } else { "answers" }); drop(g); self.bump() } }
+    /// Since when `link` has not answered (unix ms), None while it answers.
+    pub fn away_since(&self, link: &str) -> Option<u64> { if !self.away.read().unwrap().contains(link) { return None } Some(self.away_at.read().unwrap().get(link).copied().unwrap_or(0)) }
     pub fn bump(&self) { self.gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
     /// The merged rows changed with no log line of this hub saying so (an origin learned, a machine away or back): every client draws again
     /// (`mirrors.gen` info; the phones' lists are pushed by data/1 `far_pushes`).
@@ -216,6 +221,7 @@ pub fn thread_ref(id: &str, here: &str, local: &dyn Fn(&str) -> bool, far: &[(St
 
 /// Ask one linked machine for its projects' origins (machine_list), bounded. Away only when it does not answer at all (no reply on the link): a
 /// machine that answers and refuses (an older build, not shared) is up, and its origins come from the rows it sends (net/registry.rs).
+/// The signed RPC transport treats upstream gateway errors as an unavailable hub.
 pub async fn ask_origins(hub: &crate::hub::Hub, link: &str) {
     let t0 = std::time::Instant::now();
     let r = match tokio::time::timeout(std::time::Duration::from_secs(15), hub.far_call(link, "machine_list", "machine_list", &serde_json::json!({}))).await { Ok(r) => r, Err(_) => Err("that machine is away".to_string()) };

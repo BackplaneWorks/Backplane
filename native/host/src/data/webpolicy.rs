@@ -10,7 +10,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
     Some(match method {
         "devices.page" => Devices,
         "thread.pick" => match params["action"].as_str() {
-            Some("provider" | "model" | "effort" | "speed" | "runtime") => Activity,
+            Some("provider" | "model" | "effort" | "speed" | "runtime" | "interaction") => Activity,
             _ => Denied,
         },
         "composer.run" => {
@@ -28,6 +28,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "message.send"
         | "mgmt.bom.edit"
         | "mgmt.panel"
+        | "models.favorite"
         | "project.act"
         | "project.add"
         | "queue.act"
@@ -46,18 +47,31 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "term.write"
         | "thread.act"
         | "thread.again"
+        | "thread.context.mcp"
         | "thread.create"
         | "thread.model"
+        | "thread.planonce"
         | "thread.review"
+        | "plan.approve"
+        | "plan.enable"
+        | "plan.focus"
+        | "plan.stop"
+        | "plan.update"
+        | "plan.verify"
         | "turn.interrupt"
         | "viewer.compare"
         | "viewer.follow"
+        | "viewer.layout.act"
         | "viewer.watch"
         | "voice.act"
         | "POST /voice/in"
         | "voice.start"
         | "voice.stop"
-        | "work.act" => Activity,
+        | "work.act"
+        | "clone.start"
+        | "clone.cancel"
+        | "clone.retry"
+        | "clone.signin" => Activity,
         "attachment.get"
         | "badge.list"
         | "bot.cat"
@@ -65,6 +79,9 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "bots.list"
         | "cat.rig"
         | "dirs.list"
+        | "clone.status"
+        | "clone.repos"
+        | "clone.dest"
         | "fab.profile"
         | "files.entries"
         | "history.list"
@@ -82,15 +99,14 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "mgmt.life.part"
         | "mgmt.watch"
         | "models.list"
-        | "plan.approve"
-        | "plan.focus"
-        | "plan.stop"
+        | "plan.get"
         | "project.card"
         | "projects.list"
         | "review.list"
         | "review.page"
         | "room.delete"
         | "room.posts"
+        | "shell.sync"
         | "sidebar.sections"
         | "subscribe"
         | "swarm.get"
@@ -100,6 +116,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "term.unwatch"
         | "term.watch"
         | "thread.entries"
+        | "thread.open"
         | "thread.order"
         | "thread.picker"
         | "thread.queue"
@@ -107,10 +124,12 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "thread.work"
         | "threads.list"
         | "unsubscribe"
+        | "thread.context"
         | "viewer.diff"
         | "viewer.files"
         | "viewer.info"
         | "viewer.layers"
+        | "viewer.layout"
         | "viewer.probe"
         | "viewer.rail"
         | "viewer.refs"
@@ -197,9 +216,11 @@ mod tests {
     #[test]
     fn browser_can_manage_threads_without_changing_provider_credentials() {
         use serde_json::json;
+        assert_eq!(policy("thread.act", &json!({"action":"fork"})), Policy::Activity);
         assert!(allowed("thread.act", &json!({"action":"rename"})));
         assert!(allowed("thread.pick", &json!({"action":"model"})));
         assert!(!allowed("thread.pick", &json!({"action":"account"})));
+        assert_eq!(policy("models.favorite", &json!({"provider":"claude","model":"opus"})), Policy::Activity);
         assert!(!allowed("composer.run", &json!({"text":"/secret example"})));
         assert!(allowed("composer.run", &json!({"text":"/settle"})));
         assert_eq!(policy("devices.page", &Value::Null), Policy::Devices);
@@ -218,6 +239,16 @@ mod tests {
         for op in ["attach", "detach", "unknown", "toolbar", ""] {
             assert_eq!(policy("browser", &json!({"op":op})), Policy::Denied);
         }
+    }
+
+    #[test]
+    fn browser_may_read_and_change_its_own_layout_and_nothing_else_of_it() {
+        use serde_json::json;
+        assert_eq!(policy("viewer.layout", &json!({"thread":"t","bounds":[800,600]})), Policy::Passive);
+        assert_eq!(policy("viewer.layout.act", &json!({"thread":"t","op":"add"})), Policy::Activity);
+        // a method that merely starts like it is not covered by it
+        assert_eq!(policy("viewer.layout.reset", &Value::Null), Policy::Denied);
+        assert_eq!(policy("viewer.layouts", &Value::Null), Policy::Denied);
     }
 
     #[test]

@@ -29,9 +29,9 @@ impl super::Screen for Recent {
         let setup=text(params,"action").starts_with("ob-") || policies.with_state(|st|super::onboard::due(st,&params["session"])).unwrap_or(false);
         // Settings → Devices: a press acts on the registry before the page reads it, so the list it draws is the one after the press (a new link listed,
         // a revoked device gone); opening the page reads it too (the page in the session is still the one before the press)
-        let devpage=super::settings::page(&params["session"])=="devices" || (text(params,"action")=="settings-page" && text(params,"value")=="devices");
+        let devpage=super::settings::page(&params["session"])=="devices" || (text(params,"action")=="settings-page" && super::settings::canon(text(params,"value"))=="devices");
         let acted; let params=if devpage && text(params,"action").starts_with("device-") { match super::settings::device_act(text(params,"action"),text(params,"value")) { Some(patch)=>{ let mut c=params.clone(); crate::session::patch::merge(&mut c["session"],&patch); c["action"]=json!(""); c["value"]=json!(""); acted=c; &acted } None=>params } } else { params };
-        let withinfo; let params=if super::settings::is_open(&params["session"]) || shows_thread(params) || shows_swarm_models(params) || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { params };
+        let withinfo; let params=if super::settings::is_open(&params["session"]) || shows_thread(params) || shows_swarm_models(params) || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); c["hubInfo"]["modelsProbedHere"]=json!(crate::settings::models::probed_here()); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } c["hubInfo"]["shares"]=json!(crate::files::share::listed_now()); } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { let mut c=params.clone(); c["hubInfo"]=json!({"models":crate::settings::models::info(),"modelsProbedHere":crate::settings::models::probed_here()}); withinfo=c; &withinfo };
         // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
         let withmig; let params=match crate::import014::last_published(&_hub.cfg.home) { Some(v) => { let mut c=params.clone(); c["importV014"]=v; withmig=c; &withmig } None => params };
         let m=_hub.mirrors();
@@ -359,7 +359,30 @@ fn link_file(st: &State,far: &[(String,&State)],un: &Unified,p: &Value,href: &st
 /// The Settings page a `backplane://settings/<page>` link names, when it is one of Settings' pages.
 pub fn settings_link(href: &str) -> Option<&'static str> {
     let page=href.trim().strip_prefix("backplane://settings/")?.split(['#','?']).next()?.trim_end_matches('/');
+    let page=super::settings::canon(page); // a page folded into another (web, ring, import) opens the one that holds it
     super::settings::PAGES.iter().map(|(id,_)|*id).find(|id|*id==page)
+}
+/// A swarm row's button (`swarm-need`): the request to present instead (its page, the member's thread, Settings › Agents, or nothing new) and the `swarm.act`
+/// parameters to send with it. None: not a live swarm of this hub, or not one of its members.
+pub fn swarm_need_act(st: &State,p: &Value) -> Option<(Value,Option<Value>)> {
+    let hub=text(p,"hub"); let bare=|v: &str| v.strip_prefix(&format!("{hub}|")).unwrap_or(v).to_string();
+    let mut it=text(p,"value").split('\u{1f}'); let (room,act,thread)=(bare(it.next()?),it.next()?.to_string(),bare(it.next().unwrap_or("")));
+    let r=st.rooms_nav.get(&room).filter(|r| r.swarm_live())?;
+    if !thread.is_empty() && !r.threads.contains(&thread) { return None }
+    let mut c=p.clone();
+    let go=|c: &mut Value,a: &str,v: String| { c["action"]=json!(a); c["value"]=json!(v); };
+    let q=|a: &str| { let mut q=json!({"room":room,"action":a}); if !thread.is_empty() { q["thread"]=json!(thread) } Some(q) };
+    match act.as_str() {
+        "board" => { go(&mut c,"room",room.clone()); Some((c,None)) }
+        "open" if !thread.is_empty() => { go(&mut c,"select",format!("{hub}|{thread}")); Some((c,None)) }
+        "signin" if !thread.is_empty() => {
+            let prov=st.threads.get(&thread).map(|t| t.provider.as_str()).unwrap_or("");
+            if matches!(prov,"claude"|"codex") { go(&mut c,"settings-page","agents".into()) } else { go(&mut c,"select",format!("{hub}|{thread}")) }
+            Some((c,q("signin"))) }
+        "resume"|"raise" => { go(&mut c,"open-thread",String::new()); Some((c,q(&act))) }
+        "retry"|"move" if !thread.is_empty() => { go(&mut c,"open-thread",String::new()); Some((c,q(&act))) }
+        _ => None,
+    }
 }
 /// What `view` and `view-show` do with a page change the viewer made: the session's patch, its commands after the request's reads, the fab's look
 /// (`fab_tail`) and, when the viewer opened on a drawing from anything else, the project's boards asked for.
@@ -384,6 +407,14 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         let Some(path)=super::filelink::file_ref(st,&r.rest) else { let mut c=p.clone(); c["action"]=json!("link-note"); c["value"]=json!("That file is not on this hub."); return recent_unified(st,far,un,&c) };
         return link_file(st,far,un,p,&path) } }
     // `backplane://settings/<page>` (an agent's "Open Settings, CAD" when KiCad or FreeCAD is missing): Settings on that page, as its own button
+    // a swarm's Needs you row's buttons (present/swarm_need.rs): "<room>\u{1f}<act>\u{1f}<thread>". Read board opens its page and Answer the member's thread;
+    // the rest is the hub's `swarm.act` (resume, raise, retry, move, signin), and a sign-in also opens where it happens: a Claude or Codex account's sign-in
+    // (Settings › Agents), another agent's terminal on the member's thread
+    if text(p,"action")=="swarm-need" { if let Some(c)=swarm_need_act(st,p) { let mut cmd=c.1; let mut out=recent_unified(st,far,un,&c.0)?;
+        if let Some(q)=cmd.take() { let rid=out["session"]["rid"].as_u64().unwrap_or(0); let hub=text(p,"hub").to_string();
+            let send=json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"swarm.act","p":q}).to_string()});
+            if let Some(a)=out["cmds"].as_array_mut() { a.insert(0,send) } else { out["cmds"]=json!([send]) } out["session"]["rid"]=json!(rid+1); }
+        return Some(out) } else { return refused("action.swarm-need") } }
     if text(p,"action")=="link-open" { if let Some(page)=settings_link(text(p,"value")) { let mut c=p.clone(); c["action"]=json!("settings-page"); c["value"]=json!(page); return recent_unified(st,far,un,&c) } }
     // a link clicked in a message: what it opens is decided here (present/linkopen.rs); a thread on a linked machine moves the target itself
     if text(p,"action")=="link-open" {
@@ -735,7 +766,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         },
         // docking/tiling layout actions (present/viewer.rs `layout_action`)
         "layout-add" | "layout-close" | "layout-focus" | "layout-resize" | "layout-swap"
-        | "layout-move" | "layout-overlay" | "layout-unsplit" | "layout-maximize" | "layout-restore" | "layout-restore-saved" | "layout-forget" => {
+        | "layout-move" | "layout-overlay" | "layout-unsplit" | "layout-maximize" | "layout-restore" | "layout-restore-saved" | "layout-forget" | "layout-version" => {
             let locale=p["locale"].as_str().filter(|s|!s.is_empty()).unwrap_or_else(||st.settings.get("ui.lang").map_or("",String::as_str));
             match super::viewer::layout_action(sel_st, hub, &session, p["designDesktop"].as_u64(), locale, action, value) {
                 Some(super::viewer::LayoutOut::Ok(o)) => {
@@ -743,7 +774,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
                     cmds = [read_cmds.clone(), o.before].concat();
                 }
                 Some(super::viewer::LayoutOut::Refused { code, key, text }) => {
-                    cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text}));
+                    let payload = serde_json::from_str::<Value>(value).unwrap_or_default();
+                    let tile = ["tile", "target", "base", "a"].iter().find_map(|k| payload[*k].as_str());
+                    cmds.push(json!({"type":"say","tone":"note","code":code,"key":key,"text":text,
+                        "thread":session["sel"], "tile":tile}));
                 }
                 None => return refused("action.layout-unported"),
             }
@@ -905,6 +939,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,far,un,hub),"bots":bots(st,far,un,hub,opts.now),"theme":setting(st,"ui.theme"),"mouse":json!({"2d":setting(st,"mouse.2d"),"3d":setting(st,"mouse.3d"),"invert":setting(st,"mouse.invert")}),"browserStart":crate::settings::browser_start::url(setting(st,crate::settings::browser_start::KEY)),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":super::botforms::new_room(st,hub,&session).unwrap_or(Value::Null),"newBot":super::botforms::new_bot(&session).unwrap_or(Value::Null),"projectHome":null});
     let mut shown=shown;
+    let no_provider=crate::settings::provider_notice::from_screen(p.get("hubInfo").and_then(|h|h["models"].as_str()), p.get("hubInfo").and_then(|h|h["modelsProbedHere"].as_bool()), setting(st,"accounts.inventory"));
+    if !no_provider.is_null() { shown["noProvider"]=no_provider; }
     if !far.is_empty() { shown["machines"]=machine_switch(far,un,&mpick); }
     // the sections (docs/ALWAYS-ON.md section 8): Bub, Needs you, Pinned, Active, groups, Quiet; the project page; Ctrl+K's list
     { let rows=merged_here(st,far,un); let open=super::sections::opened(&session);
@@ -1651,6 +1687,37 @@ mod thread_binding_tests {
         // a thread with no stored layout sends none
         assert_eq!(sets(&req(json!({"rid":1,"open":{},"drafts":{},"panel":false,"info":{}}))),0);
     }
+    /// `layout-version` reaches the viewer through the dispatcher (the boundary a client talks to): the tile shows the version and its identity names it; a version
+    /// the hub cannot resolve is refused with a localized reason in the answer's commands.
+    #[test] fn layout_version_is_an_action_a_client_can_send_and_it_answers_with_the_picture_or_a_localized_refusal() {
+        use crate::present::layout;
+        let (mut st,p0,_)=fixture(true);
+        let tid=p0["target"]["id"].as_str().unwrap().to_string();
+        let pid=st.threads[&tid].project.clone();
+        let d=crate::plat::tmp::dir("screen-version"); let root=d.to_string_lossy().into_owned();
+        for f in ["unit.kicad_pcb","unit.kicad_sch"] { std::fs::write(d.join(f),"(x)").unwrap(); }
+        let git=|args: &[&str]| { let o=std::process::Command::new("git").args(["-c","user.name=t","-c","user.email=t@example.com"]).args(args).current_dir(&d).output().unwrap(); assert!(o.status.success(),"git {args:?}"); String::from_utf8_lossy(&o.stdout).trim().to_string() };
+        git(&["init","-q"]); git(&["add","."]); git(&["commit","-q","-m","one"]); let c1=git(&["rev-parse","HEAD"]);
+        assert!(st.apply(&json!({"$":"ProjectCreated","id":pid,"title":"X","root":root,"at":99})));
+        assert_eq!(st.projects[&pid].root,root,"the fixture's project is on the temp folder now");
+        let tile=|id: &str,kind,src: &str| layout::Tile { id: id.into(), kind, source: src.into(), explicit: true, version: None, unresolved_version: false, overlay: None };
+        let l=layout::add(&layout::Layout::single(tile("t1",layout::PageKind::Board,"unit.kicad_pcb")).unwrap(),Some("t1"),layout::Side::Right,tile("t2",layout::PageKind::Schematic,"unit.kicad_sch"),false,None).unwrap();
+        let mut drafts=json!({}); drafts[format!("@view:{tid}")]=json!("board"); drafts[format!("@view.layout:{tid}")]=json!(serde_json::to_string(&l).unwrap());
+        let sid=layout::opaque_source_id(&format!("{root}/.git"),&root);
+        let run=|value: Value,locale: &str| { let mut q=p0.clone(); q["session"]=json!({"rid":1,"open":{},"drafts":drafts,"panel":false,"info":{}}); q["action"]=json!("layout-version"); q["value"]=json!(value.to_string()); q["locale"]=json!(locale); recent(&st,&q).unwrap_or_else(|| panic!("layout-version is not an action of the dispatcher")) };
+        let ver=|source_id: &str| json!({"tile":"t1","version":{"source_id":source_id,"id":c1,"label":"1 commit ago"}});
+        let out=run(ver(&sid),"en");
+        let stored: layout::Layout=serde_json::from_str(out["session"]["drafts"][format!("@view.layout:{tid}")].as_str().expect("the layout is stored")).unwrap();
+        assert_eq!(stored.tile("t1").unwrap().version.as_ref().map(|v| v.label.as_str()),Some("1 commit ago"));
+        let viewer=&out["shown"]["thread"]["viewer"];
+        assert_eq!(viewer["tiled"],true,"{}",out["shown"]["thread"].as_object().map(|o| o.keys().cloned().collect::<Vec<_>>().join(",")).unwrap_or_default());
+        assert_eq!(viewer["tiles"]["t1"]["identity"]["scope"],"1 commit ago","the picture names the version");
+        // a version the hub cannot resolve: refused, localized, nothing stored
+        let bad=run(ver("vsrc-unknown00000000"),"ja");
+        let say=bad["cmds"].as_array().into_iter().flatten().find(|c| c["type"]=="say").expect("a refusal is said");
+        assert_eq!((say["code"].as_str(),say["text"].as_str()),(Some("unresolvedVersion"),Some("このバージョンはこのプロジェクトの履歴にありません")));
+        assert_eq!(serde_json::from_str::<layout::Layout>(bad["session"]["drafts"][format!("@view.layout:{tid}")].as_str().unwrap()).unwrap().tile("t1").unwrap().version,None,"a refused request changes nothing");
+    }
     /// A remembered layout returns by itself only to a client that says it can draw tiles, onto a session with nothing open, once.
     #[test] fn a_remembered_layout_returns_only_to_a_client_that_draws_tiles_with_nothing_open() {
         use crate::present::layout;
@@ -1680,7 +1747,7 @@ mod thread_binding_tests {
             let (st,p,expected)=fixture(lean);
             let out=recent(&st,&p).expect("plain thread root is supported");
             // the Allowance chip's text (keys.rs `allowance`), the picker's other agents (`pickerAgents`) and the masked box and the composer's commands (`secretBox`, `commands`; `btw` is the helper's own key) are Backplane's own: the recorded helper reply has no such keys
-            let bare=|mut t:Value|{ t["viewer"].as_object_mut().unwrap().remove("runtime"); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("mode").unwrap()["want"], "viewer"); assert!(t["viewer"].as_object_mut().unwrap().remove("rail").unwrap().is_array()); assert!(t["viewer"].as_object_mut().unwrap().remove("has").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("layout").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("tiles").unwrap().is_object()); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("showToken").unwrap(), true); for k in ["allowance","combo","pickerAgents","secretBox","commands","project","subView","planOnce","review","unanswered"] { t.as_object_mut().unwrap().remove(k); } t["picker"]=crate::present::keys::as_helper(&t["picker"]); t };
+            let bare=|mut t:Value|{ assert!(t["viewer"].get("tiled").is_none()); t["viewer"].as_object_mut().unwrap().remove("runtime"); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("mode").unwrap()["want"], "viewer"); assert!(t["viewer"].as_object_mut().unwrap().remove("rail").unwrap().is_array()); assert!(t["viewer"].as_object_mut().unwrap().remove("has").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("layout").unwrap().is_object()); assert!(t["viewer"].as_object_mut().unwrap().remove("tiles").unwrap().is_object()); assert_eq!(t["viewer"].as_object_mut().unwrap().remove("showToken").unwrap(), true); for k in ["allowance","combo","pickerAgents","secretBox","commands","project","subView","planOnce","planMode","review","unanswered"] { t.as_object_mut().unwrap().remove(k); } t["picker"]=crate::present::keys::as_helper(&t["picker"]); t };
             assert_eq!(bare(out["shown"]["thread"].clone()),expected); assert_eq!(bare(out["overlay"]["j"]["thread"].clone()),expected);
             assert_eq!(out["session"]["sel"],p["target"]["id"]); assert_eq!(out["window"],p["window"]);
             assert_eq!(out["shown"]["nativeSidebar"],1);
@@ -1717,5 +1784,29 @@ mod selected_thread_tests {
         let chosen=projects.last().unwrap(); assert_eq!(chosen["threadsPage"]["selectedOutside"],true);
         assert_eq!(chosen["threads"].as_array().unwrap().last().unwrap()["id"],"h|t0-0");
         assert_eq!(out["shown"]["thread"]["id"],"h|t0-0");
+    }
+    #[test] fn zero_provider_notice_is_shown_only_when_probed_and_unusable() {
+        let mut st=State::new(); st.lean=true;
+        st.apply(&json!({"$":"ProjectCreated","id":"p1","title":"P","root":"/tmp/synthetic","at":1}));
+        st.apply(&json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"T","provider":"claude","model":"","at":2}));
+        let base=json!({"target":{"kind":"thread","id":"t1"},"nativeSidebar":1,"nativeKey":"00112233445566778899aabbccddeeff",
+            "hub":"h","generation":"g","epoch":"e","viewId":"v","revision":st.seq,"now":1000000,"session":{"drafts":{},"open":{}},
+            "window":{"remaining":0},"page":{"thread":"t1","rows":[]}});
+        assert!(recent(&st,&base).unwrap()["shown"].get("noProvider").is_none(), "unprobed builtin omits noProvider");
+        let mut cached_only=base.clone();
+        cached_only["hubInfo"]=json!({"models":json!({"probed":true,"about":{"claude":{"cli":""},"codex":{"cli":""}}}).to_string(),"modelsProbedHere":false});
+        assert!(recent(&st,&cached_only).unwrap()["shown"].get("noProvider").is_none(), "cached negative probe omits noProvider until current process scans");
+        let mut none=base.clone();
+        none["hubInfo"]=json!({"models":json!({"probed":true,"about":{"claude":{"cli":""},"codex":{"cli":""}}}).to_string(),"modelsProbedHere":true});
+        let np=recent(&st,&none).unwrap()["shown"]["noProvider"].clone();
+        assert_eq!(np["reason"],"none_installed");
+        assert_eq!(np["url"],"backplane://settings/accounts");
+        let mut have=base.clone();
+        have["hubInfo"]=json!({"models":json!({"probed":true,"about":{"claude":{"cli":"/usr/bin/claude"},"codex":{"cli":""}}}).to_string()});
+        assert!(recent(&st,&have).unwrap()["shown"].get("noProvider").is_none());
+        st.apply(&json!({"$":"SettingSet","key":"accounts.inventory","value":json!({"defaultLogin":{"claude":{"state":"signed-out"}}}).to_string(),"at":3}));
+        have["revision"]=json!(st.seq);
+        let so=recent(&st,&have).unwrap()["shown"]["noProvider"].clone();
+        assert_eq!(so["reason"],"signed_out");
     }
 }

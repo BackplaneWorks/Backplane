@@ -10,7 +10,49 @@ private fun <T> JSONArray?.list(f: (JSONObject) -> T): List<T> = if (this == nul
 
 data class DOption(val id: String, val label: String)
 data class DTool(val name: String, val summary: String, val state: String, val sub: String = "", val result: String = "") // sub: an Agent call's subagent (feature subview); result: a subagent's tool result
-data class DAsk(val id: String, val state: String, val question: String, val options: List<DOption>, val answered: String?) { val open get() = state == "open" }
+data class DAsk(val id: String, val state: String, val question: String, val options: List<DOption>, val answered: String?, val kind: String = "", val revise: Boolean = false, val head: String = "") { val open get() = state == "open" }
+data class DPlanMode(
+    val phase: String = "off",
+    val interaction: String = "default",
+    val once: Boolean = false,
+    val scope: String = "off",
+    val label: String = "",
+    val pending: Boolean = false,
+    val executing: Boolean = false,
+) {
+    val isActive: Boolean get() = phase.isNotEmpty() && phase != "off"
+}
+enum class PlanModeTarget { OFF, ONCE, ALWAYS }
+fun parsePlanMode(o: JSONObject?): DPlanMode? = o?.let {
+    DPlanMode(
+        phase = it.optString("phase", "off").ifEmpty { "off" },
+        interaction = it.optString("interaction", "default").ifEmpty { "default" },
+        once = it.optBoolean("once", false),
+        scope = it.optString("scope", "off").ifEmpty { "off" },
+        label = it.optString("label", ""),
+        pending = it.optBoolean("pending", false),
+        executing = it.optBoolean("executing", false),
+    )
+}
+fun planModeJson(m: DPlanMode?): Any = if (m == null) JSONObject.NULL else JSONObject()
+    .put("phase", m.phase)
+    .put("interaction", m.interaction)
+    .put("once", m.once)
+    .put("scope", m.scope)
+    .put("label", m.label)
+    .put("pending", m.pending)
+    .put("executing", m.executing)
+fun effectivePlanMode(t: DThread?): DPlanMode? = when {
+    t == null -> null
+    t.planMode != null -> t.planMode
+    t.provider == "claude" -> DPlanMode()
+    else -> null
+}
+fun nextPlanModeCycle(m: DPlanMode): PlanModeTarget = when (m.phase) {
+    "off", "" -> PlanModeTarget.ONCE
+    "armed", "planning" -> if (m.scope == "once") PlanModeTarget.ALWAYS else PlanModeTarget.OFF
+    else -> PlanModeTarget.OFF
+}
 data class DAttachment(val id: String, val name: String, val mime: String, val bytes: Long)
 data class DEntry(
     val id: String, val kind: String, val text: String, val at: Long, val clientId: String? = null, val replaces: String? = null,
@@ -20,12 +62,18 @@ data class DEntry(
     val label: String = "", // a design step: what changed; a note: its name
     val agentOnly: Boolean = false, // a message only the agent reads (data/1 `agentOnly`): never shown
     val tone: String = "",  // a note: error, info…
+    val folds: Boolean = false, // a note that is a thought (data/1 `folds`): drawn folded to its first line, a tap opens the whole of it
     val term: DTermRef? = null, // a chat terminal (feature `terms`, kind "term"): its card
     val handoff: DHandoff? = null, // a `/give` received (kind "handoff"): its card
     val replyTo: DReplyTo? = null, // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
     val voice: DVoiceMark? = null, // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
     val copy: List<CopyPiece>? = null, // what of a reply or a notice is to copy (feature `copy`, data/1 `copy`); null: the hub said nothing
     val restore: DRestore? = null, // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
+    val h: String = "", // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
+    val queued: Boolean = false, // queued for an away home machine (docs/PHONE-DATA.md, The home)
+    val files: List<DFileLink> = emptyList(), // the files a reply names that the hub serves (feature `fileLinks`): a tap on one downloads it (FileFetch.kt)
+    val images: List<String> = emptyList(), // the images a reply names (feature `replyImages`): drawn inline, fetched via `message.image`
+    val replyParam: Map<String, String>? = null, // phone-only: the `replyTo {id, text}` a message this phone is sending carries (feature `reply`), for Retry
 )
 /** Restore to before this (data/1 `restore`): the turn (0: a snapshot from before it was named), its short commit, the short info its confirm shows. */
 data class DRestore(val turn: Long, val commit: String, val info: String)
@@ -63,6 +111,7 @@ data class DThread(
     val status: String = "", // the sidebar dot's word (feature status): active, waiting, blocked, failed, stalled, finished (the desktop's green dot: done, not yet settled), settled, inactive; "" from an older hub
     val swarm: String = "", // the swarm room this thread is a member of (feature swarm), "" for none: left out of its project's list, which shows the swarm once
     val memory: DMemory? = null, // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); null for a thread without it
+    val planMode: DPlanMode? = null,
 )
 /** A thread's memory progress, every word the hub's: the bar is [done] of [total], [state] caught | behind | held. */
 data class DMemory(val done: Long, val total: Long, val state: String, val line: String, val status: String, val lines: String, val viewLine: String) {
@@ -87,26 +136,31 @@ object DialGeometry {
 }
 
 fun parseOption(o: JSONObject) = DOption(o.str("id"), o.str("label").ifEmpty { o.str("id") })
-fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"), o.optJSONArray("options").list(::parseOption), if (o.has("answered") && !o.isNull("answered")) o.str("answered") else null)
+fun parseAsk(o: JSONObject) = DAsk(o.str("id"), o.str("state"), o.str("question"), o.optJSONArray("options").list(::parseOption), if (o.has("answered") && !o.isNull("answered")) o.str("answered") else null, o.str("kind"), o.optBoolean("revise", false), o.str("head"))
 fun parseEntry(o: JSONObject) = DEntry(
     o.str("id"), o.str("kind"), o.str("text"), o.lng("at"), o.optString("clientId", "").ifEmpty { null }, o.optString("replaces", "").ifEmpty { null },
     o.optBoolean("live", false),
     o.optJSONObject("tool")?.let { DTool(it.str("name"), it.str("summary"), it.str("state"), it.str("sub"), it.str("result")) },
     o.optJSONObject("ask")?.let(::parseAsk),
     o.optJSONArray("attachments").list { DAttachment(it.str("id"), it.str("name"), it.str("mime"), it.lng("bytes")) },
-    label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
+    label = o.str("label"), tone = o.str("tone"), folds = o.optBoolean("folds", false), agentOnly = o.optBoolean("agentOnly", false),
     term = o.optJSONObject("term")?.let { DTermRef(it.str("key"), it.str("id"), it.str("title"), it.optInt("cols", 80), it.optInt("rows", 24), it.str("cmd")) },
     handoff = o.optJSONObject("handoff")?.let(::parseHandoff),
     replyTo = o.optJSONObject("replyTo")?.takeIf { it.str("id").isNotEmpty() }?.let { DReplyTo(it.str("id"), it.str("quote")) },
     voice = o.optJSONObject("voice")?.let(::parseVoiceMark),
     copy = parseCopy(o.optJSONArray("copy")),
     restore = o.optJSONObject("restore")?.let { DRestore(it.lng("turn"), it.str("commit"), it.str("info")) },
+    h = o.str("h"),
+    queued = o.optBoolean("queued", false),
+    files = parseFileLinks(o.optJSONArray("files")),
+    images = o.optJSONArray("images")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotEmpty) } } ?: emptyList(),
 )
+fun parseFileLinks(a: JSONArray?) = a.list { DFileLink(it.str("path"), it.str("name"), it.lng("size"), it.str("open").ifEmpty { "download" }) }.filter { it.path.isNotEmpty() }
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"), parseMemory(o.optJSONObject("memory")),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"), parseMemory(o.optJSONObject("memory")), parsePlanMode(o.optJSONObject("planMode")),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)
@@ -141,3 +195,53 @@ data class DHistory(val count: Int = 0, val live: List<DThread> = emptyList(), v
 /** A row of the queue strip over the composer (`thread.queue`, docs/PHONE-DATA.md), the hub's or this phone's own outbox's. */
 data class QButton(val label: String, val action: String, val value: String)
 data class QRow(val msg: String, val tag: String, val text: String, val buttons: List<QButton>)
+
+/** The designated home machine for Bub and shared state (docs/PHONE-DATA.md, The home). */
+data class DHomeMoving(val to: String, val state: String, val step: String = "", val note: String = "")
+data class DHome(
+    val kind: String,
+    val id: String,
+    val name: String,
+    val online: Boolean,
+    val awaySince: Long? = null,
+    val queuedCount: Int = 0,
+    val canMoveHere: Boolean = false,
+    val moving: DHomeMoving? = null,
+) {
+    fun awayLine(): Pair<String, Boolean>? {
+        val mv = moving
+        if (mv != null) {
+            if (mv.state == "moving") {
+                return (if (mv.step.isNotEmpty()) Msg.home_moving_step(mv.to, mv.step) else Msg.home_moving(mv.to)) to false
+            }
+            if (mv.state == "failed") {
+                return (if (mv.note.isNotEmpty()) Msg.home_move_failed_note(mv.note) else Msg.home_move_failed) to true
+            }
+        }
+        if (online) return null
+        val n = name.ifEmpty { "home" }
+        val time = if (awaySince != null && awaySince > 0L) {
+            java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date(awaySince))
+        } else null
+        val text = when {
+            time != null && queuedCount > 0 -> Msg.home_away_since_queued(n, time, queuedCount)
+            time != null -> Msg.home_away_since(n, time)
+            queuedCount > 0 -> Msg.home_away_queued(n, queuedCount)
+            else -> Msg.home_away(n)
+        }
+        return text to false
+    }
+}
+fun parseHome(o: JSONObject?): DHome? = o?.takeIf { it.optString("kind").isNotEmpty() }?.let {
+    val mv = it.optJSONObject("moving")?.let { m -> DHomeMoving(m.str("to"), m.str("state"), m.str("step"), m.str("note")) }
+    DHome(
+        kind = it.str("kind"),
+        id = it.str("id"),
+        name = it.str("name"),
+        online = it.optBoolean("online", true),
+        awaySince = if (it.has("awaySince") && !it.isNull("awaySince")) it.lng("awaySince") else null,
+        queuedCount = it.optInt("queuedCount", 0),
+        canMoveHere = it.optBoolean("canMoveHere", false),
+        moving = mv,
+    )
+}

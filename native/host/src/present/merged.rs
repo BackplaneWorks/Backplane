@@ -152,7 +152,7 @@ pub fn merged_projects_in<'a>(st: &'a State, far: &[(String, &'a State)], away: 
     let mut by: Vec<(String, Vec<Copy<'a>>)> = vec![];
     let mut slot: HashMap<String, usize> = HashMap::new();
     let mut put = |key: String, c: Copy<'a>| { let i = *slot.entry(key.clone()).or_insert_with(|| { by.push((key, vec![])); by.len() - 1 }); by[i].1.push(c) };
-    let live_act = |s: &State, id: &str, created: u64| s.threads.values().filter(|t| t.project == id && !t.deleted).map(|t| t.activity.max(t.created)).max().unwrap_or(created);
+    let live_act = |s: &State, id: &str, created: u64| s.threads.iter().filter(|(tid, t)| t.project == id && !t.deleted && !s.run_hidden(tid)).map(|(_, t)| t.activity.max(t.created)).max().unwrap_or(created);
     let set = |s: &'a State, k: String| s.settings.get(&k).map(String::as_str).unwrap_or("");
     // this machine's, oldest first (so of two local projects of one repository the older names the row)
     let mut lp: Vec<_> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != crate::sidebar::SCRATCH).collect();
@@ -196,9 +196,9 @@ pub fn merged_projects_in<'a>(st: &'a State, far: &[(String, &'a State)], away: 
     for r in reg {
         for c in &r.machines {
             if c.machine == here || live_names.contains(&c.machine.as_str()) { continue }
-            let act = r.threads.iter().filter(|t| t.machine == c.machine).map(|t| t.activity).max().unwrap_or(c.seen);
+            let act = r.threads.iter().filter(|t| t.machine == c.machine && !crate::state::is_mail_run_id(&t.id)).map(|t| t.activity).max().unwrap_or(c.seen);
             put(r.key.clone(), Copy { machine: c.machine.clone(), id: c.id.clone(), st: None, name: r.name.clone(), folder: c.folder.clone(), origin: r.origin.clone(), activity: act, was: if r.origin.is_empty() { r.key.clone() } else { r.origin.clone() } });
-            reg_threads.entry(r.key.clone()).or_default().extend(r.threads.iter().filter(|t| t.machine == c.machine));
+            reg_threads.entry(r.key.clone()).or_default().extend(r.threads.iter().filter(|t| t.machine == c.machine && !crate::state::is_mail_run_id(&t.id)));
         }
     }
     let mut out: Vec<MergedProject<'a>> = by.into_iter().map(|(key, mut cs)| {
@@ -221,7 +221,7 @@ pub fn merged_projects_in<'a>(st: &'a State, far: &[(String, &'a State)], away: 
                 let state = if c.machine.is_empty() { "here" } else if c.st.is_none() { "off" } else if away(&c.machine) { "away" } else { "on" };
                 machines.push(chip(&c.machine, here, state));
             }
-            if let Some(s) = c.st { for (tid, t) in s.threads.iter().filter(|(_, t)| t.project == c.id && !t.deleted) {
+            if let Some(s) = c.st { for (tid, t) in s.threads.iter().filter(|(tid, t)| t.project == c.id && !t.deleted && !s.run_hidden(tid)) {
                 threads.push(MergedThread { machine: c.machine.clone(), id: tid.clone(), title: t.title.clone(), activity: t.activity.max(t.created), pinned: t.pinned, archived: t.archived, src: Some(s), status: String::new() });
             } }
         }

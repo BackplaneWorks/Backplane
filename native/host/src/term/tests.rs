@@ -57,7 +57,9 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
 }
 #[tokio::test] async fn an_unknown_command_is_enoent() { let e = pty::Pty::spawn("/no/such/prog", &[], "", 80, 24).err().unwrap(); assert_eq!(e.kind(), std::io::ErrorKind::NotFound) }
 #[tokio::test] async fn cat_echoes_and_a_resize_reaches_the_program() {
-    let sp = pty::Pty::spawn("/bin/sh", &["-c".into(), "read x; echo got:$x; stty size".into()], "", 80, 24).unwrap();
+    // the size is read until the resize has reached the program (at most 5 s): on Windows the pseudo console hands a resize on a moment later
+    // (Git's sh on bp-win printed "24 80", the size it started with); that it arrives is what is checked, not how fast
+    let sp = pty::Pty::spawn("/bin/sh", &["-c".into(), "read x; echo got:$x; i=0; while [ \"$(stty size)\" != '10 50' ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done; stty size".into()], "", 80, 24).unwrap();
     let (mut out, exit, p) = (sp.output, sp.exit, sp.pty); p.resize(50, 10); p.write(b"hello\n".to_vec()); let mut all = vec![];
     while let Some(c) = out.recv().await { all.extend(c) }
     let s = String::from_utf8_lossy(&all).into_owned(); assert!(s.contains("got:hello"), "{s}"); assert!(s.contains("10 50"), "{s}"); exit.await.unwrap();
@@ -228,7 +230,9 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
     let reader = Tap::new(&hub, 1);
     let mut stalled = hub.attach(2); // never read until we say so
     assert_eq!(rpc(&hub, "term.open", json!({"thread":"t1","cols":80,"rows":24})).await["ok"], true);
-    rpc(&hub, "term.input", json!({"thread":"t1","b":"yes flood | head -c 20000000; echo FLOODDONE\n".bytes().collect::<Vec<u8>>()})).await;
+    // Long lines keep ConPTY's screen-buffer scroll count bounded while still overflowing the 128 KB half-outbox cap;
+    // split FLOODDONE so the echoed command line never matches before the flood completes.
+    rpc(&hub, "term.input", json!({"thread":"t1","b":"yes floodfloodfloodfloodfloodfloodfloodfloodfloodflood | head -c 4000000; printf 'FLOOD''DONE\\n'\n".bytes().collect::<Vec<u8>>()})).await;
     let t = get(&hub).unwrap();
     assert!(wait(90, || { reader.take(); t.inner.try_lock().map_or(false, |g| g.screens.get("t1").map_or(false, |sc| emb::text(&sc.vt).contains("FLOODDONE"))) }).await, "the flood ran to its end");
     assert!(hub.is_attached(2), "a skipped client is not dropped");

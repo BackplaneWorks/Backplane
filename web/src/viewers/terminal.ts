@@ -1,0 +1,364 @@
+// Real browser Terminal pane backed by vendored @xterm/xterm@5.5.0 + @xterm/addon-fit@0.10.0.
+// Built as a standalone lazy chunk (/assets/terminal.js) loaded only when Terminal opens,
+// keeping the P1 first-load bundle untouched.
+
+import { Terminal } from "../../vendor/xterm/xterm.js";
+import { FitAddon } from "../../vendor/xterm/addon-fit.js";
+import { TerminalSwitchState } from "./terminal-state";
+import type { ViewerHostApi } from "../app";
+
+export interface TerminalPaneHandle {
+  setTheme(light: boolean): void;
+  destroy(): void;
+}
+
+function decodeBase64Bytes(b64: string): Uint8Array {
+  try {
+    const bin = atob(b64);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  } catch {
+    return new Uint8Array(0);
+  }
+}
+
+function encodeBase64Utf8(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let bin = "";
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin);
+}
+
+function xtermTheme(light: boolean) {
+  if (light) {
+    return {
+      background: "#f5f4ef",
+      foreground: "#1b1d21",
+      cursor: "#1f6fd1",
+      selectionBackground: "rgba(31,111,209,0.22)",
+      black: "#1b1d21",
+      red: "#c93434",
+      green: "#1c8550",
+      yellow: "#9a6700",
+      blue: "#1f6fd1",
+      magenta: "#a3399a",
+      cyan: "#127c84",
+      white: "#d3d1ca",
+      brightBlack: "#5b6068",
+      brightRed: "#e05252",
+      brightGreen: "#2ea065",
+      brightYellow: "#b87d00",
+      brightBlue: "#3b82f6",
+      brightMagenta: "#b44bb0",
+      brightCyan: "#18949e",
+      brightWhite: "#fafaf8",
+    };
+  }
+  return {
+    background: "#08090b",
+    foreground: "#d9dde4",
+    cursor: "#5fb3ff",
+    selectionBackground: "rgba(95,179,255,0.25)",
+    black: "#13161b",
+    red: "#f06a6a",
+    green: "#58c28a",
+    yellow: "#e3b341",
+    blue: "#5fb3ff",
+    magenta: "#e07bd0",
+    cyan: "#4fc1c9",
+    white: "#d9dde4",
+    brightBlack: "#5c6473",
+    brightRed: "#ff8080",
+    brightGreen: "#6ed99e",
+    brightYellow: "#f0c85a",
+    brightBlue: "#7ec4ff",
+    brightMagenta: "#ea94dc",
+    brightCyan: "#6fd4dc",
+    brightWhite: "#ffffff",
+  };
+}
+
+function ensureXtermCss(): void {
+  if (document.getElementById("bp-xterm-css")) return;
+  const link = document.createElement("link");
+  link.id = "bp-xterm-css";
+  link.rel = "stylesheet";
+  link.href = "/assets/xterm.css";
+  document.head.appendChild(link);
+}
+
+export function mountTerminalPane(
+  stage: HTMLElement,
+  api: ViewerHostApi,
+  threadId: string,
+  initialLight: boolean
+): TerminalPaneHandle {
+  ensureXtermCss();
+
+  let alive = true;
+  const sw = new TerminalSwitchState();
+  let lastCols = 0;
+  let lastRows = 0;
+  let fitRaf = 0;
+
+  const root = document.createElement("div");
+  root.className = "bp-pane bp-term-pane";
+  root.setAttribute("data-testid", "pane-terminal");
+
+  const bar = document.createElement("div");
+  bar.className = "bp-pane-bar";
+
+  const left = document.createElement("div");
+  left.className = "bp-term-tabs";
+  const selectEl = document.createElement("select");
+  selectEl.className = "bp-v-select";
+  selectEl.setAttribute("aria-label", "Terminal session");
+  selectEl.setAttribute("data-testid", "terminal-select");
+  selectEl.hidden = true;
+  const statusEl = document.createElement("span");
+  statusEl.className = "bp-term-status";
+  statusEl.setAttribute("data-testid", "terminal-status");
+  statusEl.textContent = "Connecting…";
+  left.append(selectEl, statusEl);
+
+  const acts = document.createElement("div");
+  acts.className = "bp-vh-actions";
+  const newBtn = document.createElement("button");
+  newBtn.type = "button";
+  newBtn.className = "bp-v-btn";
+  newBtn.textContent = "+ New";
+  newBtn.setAttribute("data-testid", "terminal-new-btn");
+  const stopBtn = document.createElement("button");
+  stopBtn.type = "button";
+  stopBtn.className = "bp-v-btn";
+  stopBtn.textContent = "Stop";
+  stopBtn.setAttribute("data-testid", "terminal-stop-btn");
+  acts.append(newBtn, stopBtn);
+
+  bar.append(left, acts);
+
+  const host = document.createElement("div");
+  host.className = "bp-term-host";
+  host.setAttribute("data-testid", "terminal-host");
+
+  root.append(bar, host);
+  stage.replaceChildren(root);
+
+  const term = new Terminal({
+    cursorBlink: true,
+    scrollback: 5000,
+    fontSize: 12,
+    fontFamily: '"Noto Sans Mono CJK JP", "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace',
+    theme: xtermTheme(initialLight),
+    convertEol: false,
+  });
+  const fitAddon = new FitAddon();
+  term.loadAddon(fitAddon);
+  term.open(host);
+
+  function syncSessionSelect(): void {
+    selectEl.hidden = sw.knownKeys.length <= 1;
+    selectEl.replaceChildren();
+    sw.knownKeys.forEach((k, idx) => {
+      const opt = document.createElement("option");
+      opt.value = k;
+      opt.textContent = k === threadId ? "Primary" : `Shell ${idx + 1}`;
+      opt.selected = k === sw.activeKey;
+      selectEl.append(opt);
+    });
+  }
+
+  function sendResize(): void {
+    if (!alive) return;
+    try {
+      fitAddon.fit();
+    } catch {
+      return;
+    }
+    const cols = Math.max(20, term.cols || 80);
+    const rows = Math.max(5, term.rows || 24);
+    if (cols === lastCols && rows === lastRows) return;
+    lastCols = cols;
+    lastRows = rows;
+    if (sw.canSendInput()) {
+      void api.hub.rpc("term.resize", { key: sw.activeKey, cols, rows }).catch(() => {});
+    }
+  }
+
+  function scheduleFit(): void {
+    if (fitRaf) return;
+    fitRaf = requestAnimationFrame(() => {
+      fitRaf = 0;
+      sendResize();
+    });
+  }
+
+  const resizeObs = new ResizeObserver(() => scheduleFit());
+  resizeObs.observe(host);
+
+  // Key-by-key input + paste directly to hub `term.write` as base64 bytes.
+  // Gated on `sw.canSendInput()` so switching shells never routes typing/paste before the
+  // selected shell's snapshot has replaced the screen.
+  const dataDisp = term.onData((data) => {
+    if (!alive || !sw.canSendInput() || !data) return;
+    void api.hub.rpc("term.write", { key: sw.activeKey, b: encodeBase64Utf8(data) }).catch(() => {});
+  });
+
+  async function watchKey(key: string, existingGen?: number, priorKeyOverride?: string): Promise<void> {
+    const prevKey = priorKeyOverride !== undefined ? priorKeyOverride : sw.activeKey;
+    const gen = existingGen !== undefined ? existingGen : sw.beginSelect(key);
+    if (existingGen !== undefined) {
+      sw.inputReady = false;
+      sw.activeKey = key;
+      sw.rememberKey(key);
+    }
+    term.reset();
+    if (prevKey && prevKey !== key) {
+      void api.hub.rpc("term.unwatch", { key: prevKey }).catch(() => {});
+    }
+    syncSessionSelect();
+    statusEl.textContent = `${key} · connecting…`;
+
+    try {
+      const snap = await api.hub.rpc<{ b?: string; reset?: unknown; state?: string }>("term.watch", { key });
+      if (!alive || !sw.resolveWatch(gen, key)) {
+        if (key !== sw.activeKey) {
+          void api.hub.rpc("term.unwatch", { key }).catch(() => {});
+        }
+        return;
+      }
+      term.reset();
+      if (typeof snap?.b === "string" && snap.b.length > 0) {
+        term.write(decodeBase64Bytes(snap.b));
+      }
+      statusEl.textContent = snap?.state ? `${key} · ${snap.state}` : key;
+      lastCols = 0;
+      lastRows = 0;
+      scheduleFit();
+      term.focus();
+    } catch (err) {
+      if (!alive || !sw.isCurrent(gen)) return;
+      sw.inputReady = false;
+      statusEl.textContent = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async function openPrimary(): Promise<void> {
+    const gen = sw.beginSelect();
+    try {
+      fitAddon.fit();
+    } catch {}
+    const cols = Math.max(20, term.cols || 80);
+    const rows = Math.max(5, term.rows || 24);
+    statusEl.textContent = "Starting shell…";
+    try {
+      // Use term.new({ chat: threadId }) so closing & reopening reattaches the exact same primary shell.
+      const res = await api.hub.rpc<{ key?: string }>("term.new", {
+        chat: threadId,
+        cols,
+        rows,
+      });
+      if (!alive) return;
+      const key = typeof res?.key === "string" && res.key ? res.key : threadId;
+      const { applied, prevKey } = sw.resolveNew(gen, key);
+      if (!applied) {
+        syncSessionSelect();
+        return;
+      }
+      await watchKey(key, gen, prevKey);
+    } catch (err) {
+      if (!alive || !sw.isCurrent(gen)) return;
+      statusEl.textContent = err instanceof Error ? err.message : String(err);
+    }
+  }
+
+  async function createExtraShell(): Promise<void> {
+    const priorKey = sw.activeKey;
+    const gen = sw.beginSelect();
+    term.reset();
+    try {
+      fitAddon.fit();
+    } catch {}
+    const cols = Math.max(20, term.cols || 80);
+    const rows = Math.max(5, term.rows || 24);
+    statusEl.textContent = "Starting new shell…";
+    try {
+      const res = await api.hub.rpc<{ key?: string }>("term.new", {
+        thread: threadId,
+        cols,
+        rows,
+      });
+      if (!alive) return;
+      if (typeof res?.key === "string" && res.key) {
+        const { applied, prevKey } = sw.resolveNew(gen, res.key);
+        if (!applied) {
+          syncSessionSelect();
+          return;
+        }
+        await watchKey(res.key, gen, prevKey);
+      } else if (sw.isCurrent(gen) && priorKey) {
+        await watchKey(priorKey, gen, "");
+      }
+    } catch (err) {
+      if (!alive || !sw.isCurrent(gen)) return;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (priorKey) {
+        await watchKey(priorKey, gen, "");
+        if (alive && sw.isCurrent(gen)) {
+          statusEl.textContent = `${priorKey} · new shell failed: ${msg}`;
+        }
+      } else {
+        statusEl.textContent = msg;
+      }
+    }
+  }
+
+  selectEl.addEventListener("change", () => {
+    if (selectEl.value && (selectEl.value !== sw.activeKey || !sw.inputReady)) {
+      void watchKey(selectEl.value);
+    }
+  });
+  newBtn.addEventListener("click", () => void createExtraShell());
+  stopBtn.addEventListener("click", () => {
+    if (!sw.activeKey) return;
+    const k = sw.activeKey;
+    void api.hub.rpc("term.stop", { key: k }).then(
+      () => {
+        if (alive && sw.activeKey === k) statusEl.textContent = `${k} · stopped`;
+      },
+      () => {}
+    );
+  });
+
+  const unsub = api.hub.onFrame((f) => {
+    if (!alive || !sw.inputReady || f.t !== "d" || f.k !== "term") return;
+    if (f.key !== sw.activeKey) return;
+    if (f.reset) term.reset();
+    if (typeof f.b === "string" && f.b.length > 0) {
+      term.write(decodeBase64Bytes(f.b));
+    }
+    if (typeof f.state === "string" && f.state) {
+      statusEl.textContent = `${sw.activeKey} · ${f.state}`;
+    }
+  });
+
+  void openPrimary();
+
+  return {
+    setTheme(light: boolean) {
+      term.options.theme = xtermTheme(light);
+    },
+    destroy() {
+      alive = false;
+      if (fitRaf) cancelAnimationFrame(fitRaf);
+      resizeObs.disconnect();
+      dataDisp.dispose();
+      unsub();
+      term.dispose();
+      if (sw.activeKey) {
+        void api.hub.rpc("term.unwatch", { key: sw.activeKey }).catch(() => {});
+      }
+    },
+  };
+}

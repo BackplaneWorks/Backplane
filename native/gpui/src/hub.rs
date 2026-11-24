@@ -2,15 +2,15 @@ use crate::{delta,wire};
 use anyhow::{ensure, Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use serde_json::{json, Value};
-use std::{collections::HashMap, path::PathBuf, time::{Duration, SystemTime, UNIX_EPOCH}};
+use std::{collections::{HashMap, VecDeque}, path::PathBuf, time::{Duration, SystemTime, UNIX_EPOCH}};
 use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
-#[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64), /** read this history page of the thread, then stand on the newest again */ History(String), /** open this subagent's own view over the thread (its call's id; "" goes back to the thread) */ Sub(String) }
-#[derive(Debug)] pub enum Event { /** the hub put this text in a thread's composer */ Compose(String,String), /** a line that is no error (Intent saved) */ Note(String), /** the hub refused this device's credential: it was revoked */ Unpaired, /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>,Option<String>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), /** the hub's `hub.offer` (info, a JSON string; "" for none) */ HubOffer(String), /** an embedded KiCad's state (info `editor.kicad.<digest>`, JSON text; "" when gone) */ KicadEditor(String,String), /** files KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`, JSON text) */ KicadReload(String), /** a comment sent from KiCad to Backplane (info `kicad.comment.<digest>`, JSON text) */ KicadComment(String), /** KiCad's long jobs (info `kicad.progress.<digest>`, JSON text) */ KicadProgress(String), /** the Backplane KiCad update: info `kicad.update` or `kicad.install` (key, JSON text) */ KicadUpdate(String,String), /** a management panel's info (`mgmt.*`): key, JSON text ("" when gone) */ Mgmt(String,String), /** an `editor.kicad.*` RPC's answer: method and full reply */ KicadReply(String,Value), /** the connection failed over to the home hub (its key), or came back (None) */ Using(Option<String>), /** a person's download in the Browser tab: owner, id, name, error */ BrowserDownload(String,String,String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line, and each sheet file's references (`file<TAB>ref<TAB>ref...` per line) */ Sheets(String,String), /** an agent's viewer_show: thread, kind, path, and the KiCad frame its embedded pane is to show ("" none) */ ViewShow(String,String,String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), /** the star suggestion the hub shows now (null: none) */ Star(Value), /** the one-time telemetry notice the hub offers now (null: none) */ TmNotice(Value), /** the one-time notice that the hub no longer pushes on its own (#1171; null: none) */ GpNotice(Value), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
+#[derive(Debug)] pub enum Command { DockProbe { method: &'static str, params: Value, target: Value }, Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64), /** read this history page of the thread, then stand on the newest again */ History(String), /** open this subagent's own view over the thread (its call's id; "" goes back to the thread) */ Sub(String), /** switch to another hub in-process without relaunching the app: (ws_url, token_file, paired) */ SwitchHub(String,PathBuf,bool) }
+#[derive(Debug)] pub enum Event { /** the hub said it is restarting: its words (`hub.restarting`) */ Restarting(String), /** the hub put this text in a thread's composer */ Compose(String,String), /** a line that is no error (Intent saved) */ Note(String), /** the hub refused this device's credential: it was revoked */ Unpaired, /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>,Option<String>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), /** the hub's `hub.offer` (info, a JSON string; "" for none) */ HubOffer(String), /** an embedded KiCad's state (info `editor.kicad.<digest>`, JSON text; "" when gone) */ KicadEditor(String,String), /** files KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`, JSON text) */ KicadReload(String), /** a comment sent from KiCad to Backplane (info `kicad.comment.<digest>`, JSON text) */ KicadComment(String), /** KiCad's long jobs (info `kicad.progress.<digest>`, JSON text) */ KicadProgress(String), /** the Backplane KiCad update: info `kicad.update` or `kicad.install` (key, JSON text) */ KicadUpdate(String,String), /** a management panel's info (`mgmt.*`): key, JSON text ("" when gone) */ Mgmt(String,String), /** an `editor.kicad.*` RPC's answer: method and full reply */ KicadReply(String,Value), /** the connection failed over to the home hub (its key), or came back (None) */ Using(Option<String>), /** a person's download in the Browser tab: owner, id, name, error */ BrowserDownload(String,String,String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line, and each sheet file's references (`file<TAB>ref<TAB>ref...` per line) */ Sheets(String,String), /** an agent's viewer_show: thread, kind, path, and the KiCad frame its embedded pane is to show ("" none) */ ViewShow(String,String,String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), /** the star suggestion the hub shows now (null: none) */ Star(Value), /** the one-time telemetry notice the hub offers now (null: none) */ TmNotice(Value), /** the one-time notice that the hub no longer pushes on its own (#1171; null: none) */ GpNotice(Value), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
 impl Event {
     /// What the performance overlay calls it.
-    /* i18n-ok: event names for the perf overlay */ pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::Star(_)=>"star",Event::TmNotice(_)=>"telemetry notice",Event::GpNotice(_)=>"git push notice",Event::BrowserTabs(..)=>"browser tabs",Event::HubOffer(_)=>"hub offer",Event::KicadEditor(..)=>"kicad editor",Event::KicadReload(_)=>"kicad reload",Event::KicadComment(_)=>"kicad comment",Event::KicadProgress(_)=>"kicad progress",Event::KicadUpdate(..)=>"kicad update",Event::Mgmt(..)=>"mgmt",Event::KicadReply(..)=>"kicad reply",Event::Using(_)=>"using",Event::BrowserDownload(..)=>"browser download",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(..)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired",Event::Compose(..)=>"compose",Event::Note(_)=>"note"}}
+    /* i18n-ok: event names for the perf overlay */ pub fn name(&self)->&'static str {match self {Event::Restarting(_)=>"restarting",Event::Term(..)=>"term",Event::Hello=>"hello",Event::Star(_)=>"star",Event::TmNotice(_)=>"telemetry notice",Event::GpNotice(_)=>"git push notice",Event::BrowserTabs(..)=>"browser tabs",Event::HubOffer(_)=>"hub offer",Event::KicadEditor(..)=>"kicad editor",Event::KicadReload(_)=>"kicad reload",Event::KicadComment(_)=>"kicad comment",Event::KicadProgress(_)=>"kicad progress",Event::KicadUpdate(..)=>"kicad update",Event::Mgmt(..)=>"mgmt",Event::KicadReply(..)=>"kicad reply",Event::Using(_)=>"using",Event::BrowserDownload(..)=>"browser download",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(..)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired",Event::Compose(..)=>"compose",Event::Note(_)=>"note"}}
 }
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 /// The disconnect banner (the reconnect loop's Event::Error), as the person reads it.
@@ -83,6 +83,34 @@ fn unnamed(named:bool,keyed:bool,saved:Option<String>,token_here:bool)->Start {
         /* i18n-ok: test */ assert!(refused(true,&e(401)));assert!(!refused(false,&e(401)),"a hub token that fails is a wrong file, not a revoked device");
         /* i18n-ok: test */ assert!(!refused(true,&e(500)));assert!(!refused(true,&anyhow::anyhow!("connection refused")));
     }
+    #[test] fn commands_sent_during_backoff_are_queued_and_switch_hub_interrupts_immediately() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let (tx, mut rx) = mpsc::channel(512);
+            let mut queued = VecDeque::new();
+            tx.send(Command::Send("hello".into())).await.unwrap();
+            tx.send(Command::Select("t42".into())).await.unwrap();
+            assert!(backoff_wait(Duration::from_millis(30), &mut rx, &mut queued).await.is_none());
+            /* i18n-ok: test */ assert_eq!(queued.len(), 2, "Send and Select queued during backoff are preserved");
+            assert!(matches!(queued.pop_front(), Some(Command::Send(s)) if s == "hello"));
+            assert!(matches!(queued.pop_front(), Some(Command::Select(s)) if s == "t42"));
+            // 300 Drafts around a Send: consecutive Drafts coalesce and Send survives
+            tx.send(Command::Send("must-survive".into())).await.unwrap();
+            for i in 0..300 { /* i18n-ok: test */ tx.send(Command::Draft(format!("typing {i}"))).await.unwrap(); }
+            assert!(backoff_wait(Duration::from_millis(40), &mut rx, &mut queued).await.is_none());
+            assert_eq!(queued.len(), 2);
+            assert!(matches!(queued.pop_front(), Some(Command::Send(s)) if s == "must-survive"));
+            /* i18n-ok: test */ assert!(matches!(queued.pop_front(), Some(Command::Draft(s)) if s == "typing 299"));
+            // SwitchHub interrupts a long backoff immediately and clears queued old-hub commands
+            queued.push_back(Command::Send("old-hub".into()));
+            tx.send(Command::SwitchHub("ws://b:3799".into(), PathBuf::from("/tmp/b.token"), true)).await.unwrap();
+            let t0 = std::time::Instant::now();
+            let end = backoff_wait(Duration::from_secs(10), &mut rx, &mut queued).await;
+            /* i18n-ok: test */ assert!(t0.elapsed() < Duration::from_secs(1), "SwitchHub wakes backoff immediately");
+            assert!(matches!(end, Some(SessionEnd::Switch(ws, _, true)) if ws == "ws://b:3799"));
+            /* i18n-ok: test */ assert!(queued.is_empty(), "old-hub queued commands are cleared on SwitchHub");
+        });
+    }
 }
 /// The hub said no to this device's credential at the door, as it does once it is revoked (a restart or a lost route is only a reconnect).
 fn refused(paired:bool,e:&anyhow::Error)->bool {
@@ -126,6 +154,7 @@ impl View {
         // Opt in to the bounded native sidebar (at most 48 rows a page, paged by controls).
         if ["view.open","view.page","view.update","view.action"].contains(&method) {
             p["nativeSidebar"]=json!(1);
+            p["tiles"]=json!(true);
             p["accountProfiles"]=json!(1); // the account page: the hub offers its `accounts` grant only to a view that declares this version
             p["client"]=json!({"kind":"desktop","os":match std::env::consts::OS{"macos"=>"darwin",o=>o},"launcher":self.launcher,"browser":if cfg!(feature="cef"){"cef"}else{"frames"}});
             if let Some(d)=licenses_dir(){p["client"]["licenses"]=json!(d.to_string_lossy());} // Settings > About: where this install's notices are // browser: what Settings > About says this window's Browser tab is // setup's words for keys, and whether another home can be chosen
@@ -160,21 +189,85 @@ pub fn licenses_dir()->Option<PathBuf> {
     /* i18n-ok: a file name */ DIR.get_or_init(||{let me=std::env::current_exe().ok()?;let me=std::fs::canonicalize(&me).unwrap_or(me);let d=me.parent()?.join("licenses");d.join("README.md").is_file().then_some(d)}).clone()
 }
 fn rpc_id()->u64 {static RPC:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<30);RPC.fetch_add(1,std::sync::atomic::Ordering::Relaxed)}
-pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) {
+enum SessionEnd { Quit, Switch(String,PathBuf,bool) }
+/// Wait out a reconnect backoff while listening for commands: `SwitchHub` interrupts the wait
+/// immediately (discarding queued commands from the old hub), while all other commands are held
+/// in `queued` so they execute once the next session connects.
+async fn backoff_wait(
+    delay: Duration,
+    commands: &mut mpsc::Receiver<Command>,
+    queued: &mut VecDeque<Command>,
+) -> Option<SessionEnd> {
+    let sleep = tokio::time::sleep(delay);
+    tokio::pin!(sleep);
+    loop {
+        tokio::select! {
+            _ = &mut sleep => return None,
+            cmd = commands.recv() => match cmd {
+                Some(Command::SwitchHub(ws, token_file, paired)) => {
+                    queued.clear();
+                    return Some(SessionEnd::Switch(ws, token_file, paired));
+                }
+                Some(Command::Draft(text)) => {
+                    if matches!(queued.back(), Some(Command::Draft(_))) {
+                        *queued.back_mut().unwrap() = Command::Draft(text);
+                    } else {
+                        if queued.len() >= 256 {
+                            if let Some(i) = queued.iter().position(|c| matches!(c, Command::Draft(_))) { queued.remove(i); } else { queued.pop_front(); }
+                        }
+                        queued.push_back(Command::Draft(text));
+                    }
+                }
+                Some(other) => {
+                    if queued.len() >= 256 {
+                        if let Some(i) = queued.iter().position(|c| matches!(c, Command::Draft(_))) { queued.remove(i); } else { queued.pop_front(); }
+                    }
+                    queued.push_back(other);
+                }
+                None => return Some(SessionEnd::Quit),
+            }
+        }
+    }
+}
+pub fn connect(mut config:Config)->(Sender<Command>,async_channel::Receiver<Event>) {
     crate::screens::place::open(&config);
     let (tx,mut commands)=mpsc::channel(256);let (events,rx)=async_channel::bounded(64);
     std::thread::Builder::new().name("hub".into()).spawn(move || {
         let runtime=tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         runtime.block_on(async move {
-            if config.unpaired {while commands.recv().await.is_some() {} return;} // nothing to connect to: pairing starts this client again
+            let mut saved_targets:HashMap<String,Value>=HashMap::new();
+            let mut queued:VecDeque<Command>=VecDeque::new();
+            if config.unpaired {
+                loop {
+                    match commands.recv().await {
+                        Some(Command::SwitchHub(ws,token_file,paired))=>{
+                            config.hub=ws;config.token_file=token_file;config.paired=paired;config.unpaired=false;config.pending=false;break;
+                        }
+                        Some(_)=>{}
+                        None=>return,
+                    }
+                }
+            }
             let mut view=View::new(&config);let mut delay=1;
             // the home failover (docs/pairing.md, Home hub): `cfg` is the hub connected to, `on_home` the home's key while it is not the one chosen
             let mut cfg=config.clone();let mut on_home:Option<String>=None;let mut down:Option<tokio::time::Instant>=None;
+            let apply_switch=|config:&mut Config,cfg:&mut Config,view:&mut View,on_home:&mut Option<String>,down:&mut Option<tokio::time::Instant>,delay:&mut u64,saved_targets:&mut HashMap<String,Value>,queued:&mut VecDeque<Command>,ws:String,token_file:PathBuf,paired:bool|{
+                if !config.hub.is_empty() { saved_targets.insert(config.hub.clone(), view.target.clone()); }
+                queued.clear();
+                config.hub=ws;config.token_file=token_file;config.paired=paired;config.unpaired=false;config.pending=false;
+                *cfg=config.clone();*on_home=None;*down=None;*delay=1;
+                *view=View::fresh(cfg);
+                if let Some(t)=saved_targets.get(&config.hub) {
+                    view.target=t.clone();
+                    if let Some(id)=t["id"].as_str() { view.session["sel"]=json!(id); }
+                    view.restored=Restore::First;
+                }
+            };
             loop {
                 /* i18n-ok: connection status, compared with Connected; drawn through trs */ let _=events.send(Event::Status("Connecting…".into())).await;
                 let began=tokio::time::Instant::now();
                 let back=on_home.as_ref().map(|_|crate::pairing::http_of(&config.hub));
-                let r=session(&cfg,&mut commands,&events,&mut view,back).await;
+                let r=session(&cfg,&mut commands,&mut queued,&events,&mut view,back).await;
                 // a session that stood a while was up: the hub is down from now; quick failures keep the first time it went
                 if r.is_err() && (down.is_none()||began.elapsed()>Duration::from_secs(5)) {down=Some(tokio::time::Instant::now());}
                 if let Err(error)=&r { if let Some(next)=failover(&config,&cfg,on_home.as_deref(),down.map_or(Duration::ZERO,|d|d.elapsed()),format!("{error:#}")=="home:back"||(on_home.is_some()&&refused(true,error))).await {
@@ -182,7 +275,11 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
                     view=View::new(&cfg);delay=1;down=None;let _=events.send(Event::Using(on_home.clone())).await;continue;
                 }}
                 match r {
-                    Ok(())=>break,
+                    Ok(SessionEnd::Quit)=>break,
+                    Ok(SessionEnd::Switch(ws,token_file,paired))=>{
+                        apply_switch(&mut config,&mut cfg,&mut view,&mut on_home,&mut down,&mut delay,&mut saved_targets,&mut queued,ws,token_file,paired);
+                        let _=events.send(Event::Using(None)).await;continue;
+                    }
                     Err(error) if refused(cfg.paired,&error)=>{let _=events.send(Event::Unpaired).await;break;}
                     Err(error)=>{ // Never log the handshake URL or its credential.
                         if let Some(secs)=format!("{error:#}").strip_prefix("net_sleep:").and_then(|s|s.parse::<f64>().ok()) {
@@ -194,7 +291,14 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
                         let token=std::fs::read_to_string(&cfg.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error(disconnected_text())).await;
                         view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;view.older_on=false;view.older_reqs.clear();
-                        tokio::time::sleep(Duration::from_secs(delay)).await;delay=(delay*2).min(10);
+                        match backoff_wait(Duration::from_secs(delay), &mut commands, &mut queued).await {
+                            Some(SessionEnd::Quit) => return,
+                            Some(SessionEnd::Switch(ws, token_file, paired)) => {
+                                apply_switch(&mut config,&mut cfg,&mut view,&mut on_home,&mut down,&mut delay,&mut saved_targets,&mut queued,ws,token_file,paired);
+                                let _=events.send(Event::Using(None)).await;
+                            }
+                            None => { delay=(delay*2).min(10); }
+                        }
                     }
                 }
             }
@@ -215,20 +319,55 @@ async fn failover(config:&Config,cfg:&Config,on_home:Option<&str>,down:Duration,
     let o=crate::pairing::http_of(&ws);let up=tokio::task::spawn_blocking(move||crate::pairing::answers(&o)).await.unwrap_or(false);
     crate::hubs::on_home(&main,&key,false,down,up,false).then(||Some((key,ws,cred)))
 }
-async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&async_channel::Sender<Event>,v:&mut View,back:Option<String>)->Result<()> {
+/// A watch set can stream its initial frames before its RPC reply. Announce the
+/// requested source keys after the picture and replace them with the hub's table
+/// on acknowledgment. Only the latest watch on this connection owns that reply.
+fn dock_watch_request(request: &Value, thread: &Value) -> Value {
+    let params = &request["p"];
+    let root = params["root"].as_str().unwrap_or("");
+    let mut tiles = serde_json::Map::new();
+    for source in params["sources"].as_array().into_iter().flatten() {
+        let (Some(tile), Some(path)) = (source["tile"].as_str(), source["path"].as_str()) else { continue };
+        let kind = match source["kind"].as_str() {
+            Some("board") => 0, Some("schematic") => 1, Some("3d") => 2, _ => continue,
+        };
+        let keys = tiles.entry(tile).or_insert_with(|| json!([])).as_array_mut().unwrap();
+        let key = json!(format!("{kind}|{root}|{path}"));
+        if !keys.contains(&key) { keys.push(key); }
+    }
+    json!({"thread":thread["id"], "picture":thread["viewer"]["tiles"], "tiles":tiles, "pending":true})
+}
+async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mut VecDeque<Command>,events:&async_channel::Sender<Event>,v:&mut View,back:Option<String>)->Result<SessionEnd> {
     let token=std::fs::read_to_string(&config.token_file)?;
     /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
-    let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
+    let url=format!("{}/ws?view=1&mobile=1&z=deflate&token={}",config.hub.trim_end_matches('/'),token.trim());
     let limits=WebSocketConfig::default().max_message_size(Some(64<<20)).max_frame_size(Some(64<<20));
     let (socket,_)=tokio::time::timeout(Duration::from_secs(5),tokio_tungstenite::connect_async_with_config(url,Some(limits),true)).await??;
-    let (mut sink,mut source)=socket.split();let mut last=tokio::time::Instant::now();
+    let (mut sink,mut source)=socket.split();let mut last=tokio::time::Instant::now();let mut inflater:Option<wire::Inflater>=None;
     let mut heartbeat=tokio::time::interval(Duration::from_secs(10));
-    loop {tokio::select! {
-        command=commands.recv(), if !v.greeting.is_null()=>{
-            let Some(command)=command else{return Ok(())};
+    let mut dock_watch: Option<(u64, Value)> = None;
+    let mut announce = false;
+    let mut dock_probes = std::collections::BTreeMap::new();
+    loop {
+        if announce {
+            if let Some((_, watch)) = &dock_watch {
+                let _ = events.send(Event::Data("dock-watch", watch.clone())).await;
+            }
+            announce = false;
+        }
+        tokio::select! {
+        command=async { if let Some(c)=queued.pop_front() { Some(c) } else { commands.recv().await } }, if !v.greeting.is_null()=>{
+            let Some(command)=command else{return Ok(SessionEnd::Quit)};
             if let Command::Sleep(s)=&command {anyhow::bail!("net_sleep:{s}");}
+            if let Command::SwitchHub(ws,token_file,paired)=command {return Ok(SessionEnd::Switch(ws,token_file,paired));}
             let request=match command {
-                Command::Sleep(_)=>unreachable!(),
+                Command::Sleep(_)|Command::SwitchHub(..)=>unreachable!(),
+                Command::DockProbe { method, params, target } => {
+                    let id = rpc_id();
+                    if dock_probes.len() >= 256 { dock_probes.pop_first(); }
+                    dock_probes.insert(id, target);
+                    json!({"id": id, "m": method, "p": params})
+                }
                 Command::Rpc(m,p,tag)=>{let id=rpc_id();v.rpcs.insert(id,tag);if v.rpcs.len()>64 {v.rpcs.clear();}if tag=="kicad"{if v.rpc_names.len()>64{v.rpc_names.clear();}v.rpc_names.insert(id,m.clone());eprintln!("GPUI_LOG {}",json!({"kicad_rpc_sent":m,"id":id,"at_ms":crate::screens::kcomment::epoch_ms() as u64,"project":p.0["project"],"frame":p.0["frame"],"container":p.0["container"],"wait":p.0["wait"]}));}json!({"id":id,"m":m,"p":p.0})},
                 Command::Ask(m,p,tag)=>{static ASK:std::sync::atomic::AtomicU64=std::sync::atomic::AtomicU64::new(1<<31);let id=ASK.fetch_add(1,std::sync::atomic::Ordering::Relaxed);v.asks.insert(id,tag);if v.asks.len()>64 {v.asks.clear();}json!({"id":id,"m":m,"p":p})},
                 Command::Sub(key)=>{v.session["sub"]=json!(key);if v.view_id.is_empty(){continue;}v.request("view.update",json!({}))},
@@ -243,13 +382,28 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             sink.send(Message::Binary(wire::encode(&request).into())).await?;
         },
         frame=source.next()=>{
-            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();crate::perf::wire(frame.len());if let Message::Binary(b)=&frame {if crate::screens::plot::is_plot(b) {if b.len()<=(32<<20) {let _=events.send(Event::Plot(b.to_vec())).await;}else{let _=events.send(Event::PlotTooBig(b.len())).await;}continue;}}let recv=std::time::Instant::now();let mut size=0usize;
-            let mut x=match frame {Message::Binary(bytes)=>{size=bytes.len();wire::decode(&bytes)?},Message::Text(text)=>serde_json::from_str(&text)?,Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},Message::Close(_)=>anyhow::bail!("closed"),_=>continue};
+            let frame=frame.context("hub closed")??;last=tokio::time::Instant::now();crate::perf::wire(frame.len());
+            let recv=std::time::Instant::now();let mut size=0usize;
+            let mut x=match frame {
+                Message::Binary(bytes)=>{
+                    size=bytes.len();
+                    let raw=if let Some(inf)=inflater.as_mut() { std::borrow::Cow::Owned(inf.feed(&bytes)?) } else { std::borrow::Cow::Borrowed(&bytes[..]) };
+                    if crate::screens::plot::is_plot(&raw) {
+                        if raw.len()<=(32<<20) {let _=events.send(Event::Plot(raw.into_owned())).await;}else{let _=events.send(Event::PlotTooBig(raw.len())).await;}
+                        continue;
+                    }
+                    wire::decode(&raw)?
+                },
+                Message::Text(text)=>serde_json::from_str(&text)?,
+                Message::Ping(bytes)=>{sink.send(Message::Pong(bytes)).await?;continue},
+                Message::Close(_)=>anyhow::bail!("closed"),
+                _=>continue
+            };
             let decoded=std::time::Instant::now();
             match x["t"].as_str().unwrap_or("") {
                 "voice"=>{let _=events.send(Event::Voice(x)).await;continue;}
                 "google"=>{let _=events.send(Event::Data("google-changed",Value::Null)).await;continue;}
-                /* i18n-ok: connection errors, logged */ "view"=>{if x.get("version").is_none()&&x["thread"].is_string()&&x["kind"].is_string() {let g=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::ViewShow(g("thread"),g("kind"),g("path"),g("frame"),g("token"))).await;continue;}ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");eprintln!("GPUI_LOG {}",json!({"hub_connected":{"cid":v.cid,"generation":x["generation"],"epoch":x["epoch"],"at_ms":millis()}}));v.greeting=x;let _=events.send(Event::Hello).await;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;
+                /* i18n-ok: connection errors, logged */ "view"=>{if x.get("version").is_none()&&x["thread"].is_string()&&x["kind"].is_string() {let g=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::ViewShow(g("thread"),g("kind"),g("path"),g("frame"),g("token"))).await;continue;}ensure!(x["version"]==1&&x["renderer"]=="mobile"&&x["generation"].is_string()&&x["epoch"].is_string(),"unsupported hub greeting");inflater=(x["z"].as_str()==Some("deflate")).then(wire::Inflater::new);eprintln!("GPUI_LOG {}",json!({"hub_connected":{"cid":v.cid,"generation":x["generation"],"epoch":x["epoch"],"at_ms":millis()}}));v.greeting=x;let _=events.send(Event::Hello).await;v.drawn=false;if v.target["kind"]!="recent"&&v.restored==Restore::None&&v.saved.is_none(){v.restored=Restore::First;}let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;
                     // the star suggestion, if it is still out (a reconnect shows it again until it is decided)
                     let id=rpc_id();v.rpcs.insert(id,"star");sink.send(Message::Binary(wire::encode(&json!({"id":id,"m":"star.offer","p":{}})).into())).await?;
                     // the one-time telemetry notice, if the hub offers it (screens/tmnotice.rs)
@@ -258,8 +412,21 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     let id=rpc_id();v.rpcs.insert(id,"gpnotice");sink.send(Message::Binary(wire::encode(&json!({"id":id,"m":"gitpush.notice","p":{}})).into())).await?;},
                 "reply"=>{
                     let id=x["id"].as_u64().unwrap_or(0);
+                    if let Some(mut target) = dock_probes.remove(&id) {
+                        if x["ok"] == true {
+                            target["result"] = x["result"].clone();
+                            let _ = events.send(Event::Data("dock-probe", target)).await;
+                        }
+                        continue;
+                    }
                     if let Some(tag)=v.asks.remove(&id) {let _=events.send(Event::Answer(tag,x)).await;continue;}
-                    if let Some(tag)=v.rpcs.remove(&id) {if tag=="kicad" {let m=v.rpc_names.remove(&id).unwrap_or_default();let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};eprintln!("GPUI_LOG {}",json!({"kicad_rpc_reply":m,"id":id,"at_ms":crate::screens::kcomment::epoch_ms() as u64,"ok":x["ok"]==true,"state":x["state"],"mode":x["mode"],"pid":x["pid"],"warm":x["warm"],"started":x["started"],"why":x["why"],"prewarming":x["prewarming"],"error":why.chars().take(160).collect::<String>()}));let _=events.send(Event::KicadReply(m,x)).await;continue;}if tag=="star" {let _=events.send(Event::Star(if x["ok"]==true {x["result"]["offer"].clone()} else {Value::Null})).await;continue;}if tag=="tmnotice" {let _=events.send(Event::TmNotice(if x["ok"]==true {x["result"]["notice"].clone()} else {Value::Null})).await;continue;}if tag=="gpnotice" {let _=events.send(Event::GpNotice(if x["ok"]==true {x["result"]["notice"].clone()} else {Value::Null})).await;continue;}if tag==crate::streamer::TAG {if x["ok"]==true {let _=events.send(Event::Data(crate::streamer::TAG,x["result"].clone())).await;}continue;}if tag=="google" && x["ok"]==true {let _=events.send(Event::Data(tag.clone(),x["result"].clone())).await;}if tag=="acct" || (tag=="acct-moveall" && x["ok"]==true) {let _=events.send(Event::Data(tag.clone(),x["result"].clone())).await;}if tag=="steps" {let _=events.send(Event::Steps(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag.starts_with("probe") {let slot:usize=tag[5..].parse().unwrap_or(0);let m=x["result"]["matches"].as_array().map(|a|a.iter().filter_map(|p|Some((p[0].as_u64()? as usize,p[1].as_u64()? as usize))).collect()).unwrap_or_default();let _=events.send(Event::Probe(slot,m)).await;continue;}if tag=="resolve" {let _=events.send(Event::Refs(serde_json::json!({"resolved":x["result"]["resolved"].clone(),"error":x["result"]["error"].clone()}))).await;continue;}if tag=="refs" {let _=events.send(Event::Refs(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag=="names"||tag=="xsel"||tag=="xsel-tap" {let _=events.send(Event::Data(if tag=="names" {"names"} else if tag=="xsel" {"xsel"} else {"xsel-tap"},x)).await;continue;}if tag=="pick" {let _=events.send(Event::Pick(if x["ok"]==true {x["result"]["info"].as_str().unwrap_or("").to_string()} else {String::new()})).await;continue;}let ok=x["ok"]==true;let why=if ok&&tag.starts_with("hook"){crate::screens::bots::hook_answer(&x).to_string()}else if ok&&tag.starts_with("files"){x["result"].to_string()}else{crate::screens::settings::reply_error(&x)};let _=events.send(Event::Rpc(tag,ok,why)).await;continue;}
+                    if let Some(tag)=v.rpcs.remove(&id) {if tag=="hubupd" {if x["ok"]==true {let _=events.send(Event::Data("hubupd",x["result"].clone())).await;}continue;}if tag=="thread-context" {let _=events.send(Event::Data("thread-context",x)).await;continue;}if tag=="kicad" {let m=v.rpc_names.remove(&id).unwrap_or_default();let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};eprintln!("GPUI_LOG {}",json!({"kicad_rpc_reply":m,"id":id,"at_ms":crate::screens::kcomment::epoch_ms() as u64,"ok":x["ok"]==true,"state":x["state"],"mode":x["mode"],"pid":x["pid"],"warm":x["warm"],"started":x["started"],"why":x["why"],"prewarming":x["prewarming"],"error":why.chars().take(160).collect::<String>()}));let _=events.send(Event::KicadReply(m,x)).await;continue;}if tag=="star" {let _=events.send(Event::Star(if x["ok"]==true {x["result"]["offer"].clone()} else {Value::Null})).await;continue;}if tag=="tmnotice" {let _=events.send(Event::TmNotice(if x["ok"]==true {x["result"]["notice"].clone()} else {Value::Null})).await;continue;}if tag=="gpnotice" {let _=events.send(Event::GpNotice(if x["ok"]==true {x["result"]["notice"].clone()} else {Value::Null})).await;continue;}if tag==crate::streamer::TAG {if x["ok"]==true {let _=events.send(Event::Data(crate::streamer::TAG,x["result"].clone())).await;}continue;}if tag=="google" && x["ok"]==true {let _=events.send(Event::Data(tag.clone(),x["result"].clone())).await;}if tag=="acct" || (tag=="acct-moveall" && x["ok"]==true) {let _=events.send(Event::Data(tag.clone(),x["result"].clone())).await;}if tag=="steps" {let _=events.send(Event::Steps(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag.starts_with("probe") {let slot:usize=tag[5..].parse().unwrap_or(0);let m=x["result"]["matches"].as_array().map(|a|a.iter().filter_map(|p|Some((p[0].as_u64()? as usize,p[1].as_u64()? as usize))).collect()).unwrap_or_default();let _=events.send(Event::Probe(slot,m)).await;continue;}if tag=="resolve" {let _=events.send(Event::Refs(serde_json::json!({"resolved":x["result"]["resolved"].clone(),"error":x["result"]["error"].clone()}))).await;continue;}if tag=="refs" {let _=events.send(Event::Refs(if x["ok"]==true {x["result"].clone()} else {Value::Null})).await;continue;}if tag=="names"||tag=="xsel"||tag=="xsel-tap" {let _=events.send(Event::Data(if tag=="names" {"names"} else if tag=="xsel" {"xsel"} else {"xsel-tap"},x)).await;continue;}if tag=="pick" {let _=events.send(Event::Pick(if x["ok"]==true {x["result"]["info"].as_str().unwrap_or("").to_string()} else {String::new()})).await;continue;}let ok=x["ok"]==true;let why=if ok&&tag.starts_with("hook"){crate::screens::bots::hook_answer(&x).to_string()}else if ok&&tag.starts_with("files"){x["result"].to_string()}else{crate::screens::settings::reply_error(&x)};let _=events.send(Event::Rpc(tag,ok,why)).await;continue;}
+                    if dock_watch.as_ref().is_some_and(|(rid, _)| *rid == id) {
+                        let (_, mut watch) = dock_watch.take().unwrap();
+                        watch["tiles"] = x["result"]["tiles"].clone();
+                        watch["pending"] = json!(false);
+                        let _ = events.send(Event::Data("dock-watch", watch)).await;
+                    }
                     if let Some(is_post)=v.outgoing.remove(&id) {let name=v.rpc_names.remove(&id).unwrap_or_default();if !is_post {v.dirty=true;} /* a job's answer (mech.list, boards.list, fab.look...) is folded by the hub into this view: ask for it */
                         // every product RPC's answer is logged, so a refused send is never silent (the reply's error may be a plain string, a code or a message)
                         let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};
@@ -316,6 +483,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                                 let (Some(rpc_id),m)=(request["id"].as_u64(),request["m"].as_str().unwrap_or("")) else {continue};
                                 if m.starts_with("view.")||rpc_id>=(1<<47) {continue;}
                                 eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\",\"thread\":{},\"stale\":true}}",request["p"]["thread"]);
+                                if matches!(m, "kicad.watch" | "kicad.watch.set") { dock_watch = None; }
                                 v.outgoing.insert(rpc_id,is_post(m));v.rpc_names.insert(rpc_id,m.to_string());
                                 sink.send(Message::Binary(wire::encode(&request).into())).await?;
                             }
@@ -334,10 +502,20 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         if let Some(e)=client_cmd(command) {let _=events.send(e).await;continue;}
                         if command["type"]=="send" {
                             /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(command["hub"].is_null()||command["hub"]==v.hub,"cross-hub command refused");
-                            let request:Value=serde_json::from_str(command["text"].as_str().context("missing command text")?)?;
+                            let mut request:Value=serde_json::from_str(command["text"].as_str().context("missing command text")?)?;
                             let rpc_id=request["id"].as_u64().context("missing RPC id")?;
-                            let m=request["m"].as_str().unwrap_or("");ensure!(!m.starts_with("view.")&&rpc_id<(1<<47),"invalid product RPC");eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\",\"thread\":{}}}",request["p"]["thread"]);
-                            v.outgoing.insert(rpc_id,method=="view.action"&&is_post(m));v.rpc_names.insert(rpc_id,m.to_string());
+                            let m=request["m"].as_str().unwrap_or("").to_string();ensure!(!m.starts_with("view.")&&rpc_id<(1<<47),"invalid product RPC");eprintln!("GPUI_LOG {{\"rpc_sent\":\"{m}\",\"thread\":{}}}",request["p"]["thread"]);
+                            if m == "kicad.watch.set" {
+                                dock_watch = Some((rpc_id, dock_watch_request(&request, &r["shown"]["thread"])));
+                                announce = true;
+                            } else if m == "kicad.watch" {
+                                dock_watch = None;
+                                if request["p"]["force"] != true && request["p"].get("keptChunks").is_none() {
+                                    let hashes = crate::screens::plot::kept_chunk_hashes();
+                                    if let Some(obj) = request["p"].as_object_mut() { obj.insert("keptChunks".into(), json!(hashes)); }
+                                }
+                            }
+                            v.outgoing.insert(rpc_id,method=="view.action"&&is_post(&m));v.rpc_names.insert(rpc_id,m.clone());
                             // The send action's canonical command is named by the hub; ACK all sends from this action.
                             if method=="view.action" && m=="chat.send" {v.outgoing.insert(rpc_id,true);}
                             sink.send(Message::Binary(wire::encode(&request).into())).await?;
@@ -350,8 +528,11 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         let _=events.send(Event::Older(cursor,Some(rv))).await;
                         let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;
                     }
-                    /* i18n-ok: connection status, compared with Connected; drawn through trs */ else if on_older {v.dirty=true;}
-                    /* i18n-ok: connection status, compared with Connected; drawn through trs */ else if r["shown"].is_object(){let _=events.send(Event::Picture(rv,timing)).await;let _=events.send(Event::Status("Connected".into())).await;}
+                    else if on_older {v.dirty=true;}
+                    else if r["shown"].is_object(){
+                        let _=events.send(Event::Picture(rv,timing)).await;
+                        let _ = events.send(Event::Status("Connected".into())).await; // i18n-ok: protocol status translated by trs when drawn
+                    }
                 },
                 "view.control"=>{
                     let id=x["id"].as_u64().unwrap_or(0);let part=x["part"].as_u64().unwrap_or(u64::MAX);let text=x["text"].as_str().unwrap_or("");
@@ -368,13 +549,15 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     let state=x["state"].as_str().map(str::to_string);
                     if !key.is_empty() {let _=events.send(Event::Term(key,pid,b,reset,state)).await;}},
                 "star"=>{let _=events.send(Event::Star(x["offer"].clone())).await;},
+                // the hub is going (native/host/src/restarting.rs): the window says why while it is away
+                "hub.restarting"=>{let t=x["text"].as_str().unwrap_or("").to_string();if !t.is_empty(){let _=events.send(Event::Restarting(t)).await;}},
                 "telemetry.notice"=>{let _=events.send(Event::TmNotice(x["notice"].clone())).await;},
                 "gitpush.notice"=>{let _=events.send(Event::GpNotice(x["notice"].clone())).await;},
                 "browser.download"=>{let s=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::BrowserDownload(s("bot"),s("id"),s("name"),s("error"))).await;},
                 "info"=>{
                     // the merged project rows moved with no log line (a machine's origins learned, it away or back): the view is asked for again
                     if x["info"].get("mirrors.gen").is_some()&&!v.view_id.is_empty()&&v.pending.is_empty(){let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
-                    if let Some(m)=x["info"].as_object(){for(k,val) in m{if k=="hub.offer"{let _=events.send(Event::HubOffer(val.as_str().unwrap_or("").to_string())).await;}if k=="kicad.update"||k=="kicad.install"{let _=events.send(Event::KicadUpdate(k.clone(),val.as_str().unwrap_or("").to_string())).await;}if k.starts_with("kicad.progress."){let _=events.send(Event::KicadProgress(val.as_str().unwrap_or("").to_string())).await;}if k.starts_with("mgmt.")||k.starts_with("review.clicked."){let _=events.send(Event::Mgmt(k.clone(),val.as_str().unwrap_or("").to_string())).await;}if k.starts_with("kicad.comment."){let _=events.send(Event::KicadComment(val.as_str().unwrap_or("").to_string())).await;}if k.starts_with("kicad.reload."){let _=events.send(Event::KicadReload(val.as_str().unwrap_or("").to_string())).await;}if let Some(d)=k.strip_prefix("editor.kicad."){let _=events.send(Event::KicadEditor(d.to_string(),val.as_str().unwrap_or("").to_string())).await;}if let Some(owner)=k.strip_prefix("browser.tabs."){let _=events.send(Event::BrowserTabs(owner.to_string(),val.as_str().unwrap_or("").to_string())).await;}}}},
+                    if let Some(m)=x["info"].as_object(){for(k,val) in m{if k=="hub.back"{if let Some(t)=val.as_str().and_then(|v|serde_json::from_str::<Value>(v).ok()).and_then(|v|v["text"].as_str().map(str::to_string)).filter(|t|!t.is_empty()){let _=events.send(Event::Note(crate::i18n::trs(&t))).await;}}if k=="hub.offer"{let _=events.send(Event::HubOffer(val.as_str().unwrap_or("").to_string())).await;}if k=="kicad.update"||k=="kicad.install"{let _=events.send(Event::KicadUpdate(k.clone(),val.as_str().unwrap_or("").to_string())).await;}if k.starts_with("kicad.progress."){let _=events.send(Event::KicadProgress(val.as_str().unwrap_or("").to_string())).await;}if k.starts_with("mgmt.")||k.starts_with("review.clicked."){let _=events.send(Event::Mgmt(k.clone(),val.as_str().unwrap_or("").to_string())).await;}if k.starts_with("kicad.comment."){let _=events.send(Event::KicadComment(val.as_str().unwrap_or("").to_string())).await;}if k.starts_with("kicad.reload."){let _=events.send(Event::KicadReload(val.as_str().unwrap_or("").to_string())).await;}if let Some(d)=k.strip_prefix("editor.kicad."){let _=events.send(Event::KicadEditor(d.to_string(),val.as_str().unwrap_or("").to_string())).await;}if let Some(owner)=k.strip_prefix("browser.tabs."){let _=events.send(Event::BrowserTabs(owner.to_string(),val.as_str().unwrap_or("").to_string())).await;}}}},
                 "notify"=>{crate::screens::desk::show(&x);},"notify.clear"=>{crate::screens::desk::clear(&x);},
                 "sheets"=>{let _=events.send(Event::Sheets(x["rows"].as_str().unwrap_or("").to_string(),x["refs"].as_str().unwrap_or("").to_string())).await;},
                 "hb"=>{sink.send(Message::Binary(wire::encode(&json!({"id":0,"m":"ping","p":{}})).into())).await?;},
@@ -429,7 +612,7 @@ pub fn rpc_error(x:&Value)->String {
 /// The product RPCs whose ok answer is a message the hub took (the window then empties its box). A bot's chat sends `bots.say`, not `turn.start`.
 pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start","bots.say","bots.give"].contains(&m) }
 /// A view command that is for this client, not the hub: `compose` sets a thread's composer, `say` is one line for the person (a refusal, unless its `tone` is "note").
-pub fn client_cmd(c:&Value)->Option<Event>{let text=c["text"].as_str().unwrap_or("").to_string();match c["type"].as_str()?{"compose"=>Some(Event::Compose(c["thread"].as_str()?.to_string(),text)),"say" if c["tone"]=="note"=>Some(Event::Note(text)),"say" if c["of"]=="new-thread"=>Some(Event::Data("create-refused",serde_json::Value::String(text))),"say"=>Some(Event::Refused(text)),_=>None}}
+pub fn client_cmd(c:&Value)->Option<Event>{let text=c["text"].as_str().unwrap_or("").to_string();match c["type"].as_str()?{"compose"=>Some(Event::Compose(c["thread"].as_str()?.to_string(),text)),"say" if c["key"].as_str().is_some_and(|k| k.starts_with("viewer.layout.refusal."))=>Some(Event::Data("layout-refusal", c.clone())),"say" if c["tone"]=="note"=>Some(Event::Note(text)),"say" if c["of"]=="new-thread"=>Some(Event::Data("create-refused",serde_json::Value::String(text))),"say"=>Some(Event::Refused(text)),_=>None}}
 
 #[cfg(test)]
 mod refused_text_tests {
@@ -452,6 +635,19 @@ mod refused_text_tests {
 mod rpc_tests {
     use super::{is_post, rpc_error};
     use serde_json::json;
+    #[test]
+    fn dock_stream_keys_precede_the_watch_ack_and_include_both_sources() {
+        let p = json!({"p":{"root":"/project","sources":[
+            {"tile":"b","kind":"board","path":"b"},
+            {"tile":"s","kind":"3d","path":"b"},
+            {"tile":"s","kind":"board","path":"b"}
+        ]}});
+        let watch = super::dock_watch_request(&p, &json!({"id":"thread","viewer":{"tiles":{}}}));
+        assert_eq!(watch["thread"], "thread");
+        assert_eq!(watch["pending"], true);
+        assert_eq!(watch["tiles"]["b"], json!(["0|/project|b"]));
+        assert_eq!(watch["tiles"]["s"], json!(["2|/project|b","0|/project|b"]));
+    }
     #[test] fn a_failed_answer_always_says_something() {
         assert_eq!(rpc_error(&json!({"ok":false,"error":"unknown thread"})), "unknown thread", "a plain string, not null");
         assert_eq!(rpc_error(&json!({"ok":false,"error":{"code":"nope","message":"no such thing"}})), "no such thing");

@@ -34,7 +34,7 @@ fn white(s: &str) -> bool { s.chars().all(|c| matches!(c, ' ' | '\n' | '\r' | '\
 const NOTES: [&str; 4] = ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."];
 fn note(x: &str) -> bool { NOTES.iter().any(|h| x.starts_with(&format!("[Backplane] {h}"))) }
 /// Fold.blank: a message that shows nothing
-fn blank(e: &E) -> bool { e.msg && (e.private || (e.role == "assistant" && white(&e.text)) || (e.role == "system" && note(&e.text))) }
+fn blank(e: &E) -> bool { (e.msg && (e.private || (e.role == "assistant" && white(&e.text)) || (e.role == "system" && note(&e.text)))) || (!e.msg && e.kind == "ride" && super::thread::quiet_act(&e.role, &e.kind, &e.text)) }
 const CARRY: &str = "Backplane restarted while you were working. Continue where you left off.";
 fn api_err(x: &str) -> bool { x.starts_with("API Error") }
 fn told(x: &str) -> bool { x.starts_with(CARRY) }

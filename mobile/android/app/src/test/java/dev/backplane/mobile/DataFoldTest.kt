@@ -29,4 +29,14 @@ class DataFoldTest {
         assertEquals(true, (rows[2] as DRow.Fold).fold.live)
         assertEquals(false, (DataFold.rows(listOf(tool("1")), false)[0] as DRow.Fold).fold.live)
     }
+
+    // #1325: a shut thought's line, the desktop's screens/thought.rs `head_line`, from the table both are held to
+    @Test fun aThoughtShutShowsItsFirstLine() {
+        var f = File("").absoluteFile
+        while (!File(f, "test/mobile/thought_lines.json").exists()) f = f.parentFile
+        val cases = JSONArray(File(f, "test/mobile/thought_lines.json").readText())
+        for (i in 0 until cases.length()) { val c = cases.getJSONObject(i); assertEquals(c.getString("line"), DataFold.thoughtLine(c.getString("text"))) }
+        assertEquals(true, parseEntry(org.json.JSONObject("""{"id":"t","kind":"note","text":"a","tone":"thinking","folds":true}""")).folds)
+        assertEquals(false, parseEntry(org.json.JSONObject("""{"id":"n","kind":"note","text":"a"}""")).folds)
+    }
 }

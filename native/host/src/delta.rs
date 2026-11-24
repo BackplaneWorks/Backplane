@@ -1,5 +1,5 @@
-//! Keyed deltas of a view's body. The hub keeps the last three
-//! bodies it sent a view; a client that holds one (by its token) is sent only the ops that turn it into the new body:
+//! Keyed deltas of a view's body. The hub keeps the last sixteen
+//! bodies it sent a connection (session/mod.rs SENT_KEEP, across view.opens); a client that holds one (by its token) is sent only the ops that turn it into the new body:
 //!   ["s", path, value]   set the value at path ([] is the whole body)
 //!   ["a", path, specs]   rebuild the array at path; a spec is [0, i] (the base array's i-th element) or [1, value]
 //!   ["t", path]          set the request's own draft text at path

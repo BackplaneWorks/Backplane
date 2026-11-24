@@ -54,11 +54,11 @@ use K::*;
 /// Every variant `change` renames; the test below checks each field against codec's wire names.
 /// Requests to a thing elsewhere: only these may go to a linked machine (thread.delete is not one: law far_no_delete).
 pub const METHODS: &[&str] = &["turn.start", "turn.interrupt", "ask.answer", "queue.move", "queue.remove", "queue.resume", "queue.steer", "queue.edit",
-    "thread.settle", "thread.unsettle", "thread.back", "thread.rename", "thread.btw", "thread.modes", "thread.provider", "thread.effort", "thread.speed", "bots.space", "bots.routine_run",
+    "thread.settle", "thread.unsettle", "thread.back", "thread.rename", "thread.btw", "thread.modes", "thread.planonce", "thread.provider", "thread.effort", "thread.speed", "thread.context", "thread.context.mcp", "bots.space", "bots.routine_run",
     "thread.create", "thread.fork", "thread.archive", "thread.unarchive", "thread.pin", "thread.unpin",
     "project.add", "project.new", "project.remove", "fs.list", "fs.mkdir", "fs.find", "thread.detach", "todos.edit", "kicad.open", "viewer.state", "boards.list",
     // the viewers of a thread whose project is there: its Diff and its Files (listing, and a file's bytes to show here)
-    "git.diff", "files.dir", "files.get", "viewer.documents",
+    "git.diff", "files.dir", "files.get", "viewer.documents", "file.piece",
     // its Diff's Commit, PR and Revert act on that machine's repository
     "git.act", "git.revert",
     // a person's post in a room there
@@ -279,7 +279,7 @@ mod tests {
         assert_eq!(c["thread"], "", "not L~: the edit keeps the bot's thread");
     }
     #[test] fn far_a_post_in_a_room_there_goes_there() {
-        assert!(may("bots.post"));
+        assert!(may("bots.post") && may("thread.planonce"));
         assert_eq!(params_link(&json!({"room":"L~r1","text":"hi"})), "L");
         assert_eq!(params_local(&json!({"room":"L~r1","text":"hi","msg":"m1"}), "L"), json!({"room":"r1","text":"hi","msg":"m1"}));
         assert_eq!(params_link(&json!({"room":"r1","text":"hi"})), "", "a room here stays here");

@@ -28,7 +28,7 @@ import org.json.JSONObject
 // phone numbers in the dialer. A backplane:// link or a path is asked of the hub (link.resolve), which says what it opens: a thread (also one on a linked machine), a
 // project, a room, a file at a line, or a short note why not. DataRoot follows `DataClient.linkTarget`.
 data class LinkTarget(val kind: Kind, val id: String, val path: String = "", val line: Int = 0, val n: Long = System.nanoTime()) {
-    enum class Kind { THREAD, PROJECT, ROOM, FILE }
+    enum class Kind { THREAD, PROJECT, ROOM, FILE, SETTINGS }
 }
 
 /** What to ask the hub for a tapped link: a backplane:// address (this build's own scheme counts as it), or the path a bppath: link carries. */
@@ -39,15 +39,30 @@ private fun linkText(url: String): String? {
     return null
 }
 
+/** A file of the hub's machine a tapped path names, when this phone downloads it rather than asking link.resolve: a share (`/s/<token>/<name>`), or a
+ *  file a reply of [thread] lists (feature `fileLinks`) that Backplane's viewers do not draw. */
+fun DataClient.download(path: String, thread: String): Boolean {
+    val c = MdLinks.ctx ?: return false
+    FileFetch.shareRoute(path)?.let { Downloads.share(c, it); return true }
+    if (!has("fileLinks")) return false
+    val f = FileFetch.find(path, entries[thread].orEmpty().flatMap { it.files }) ?: return false
+    if (f.open == "view") return false
+    Downloads.file(c, f, thread); return true
+}
+
 fun DataClient.openLink(url: String, thread: String) {
     val text = linkText(url) ?: return
+    pathOf(url)?.let { if (download(it, thread)) return }
     scope.launch {
         // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
         for (i in 0 until 50) { if (conn == DataClient.Conn.ONLINE && has("links")) break; delay(100) }
         // a hub that does not know link.resolve: a thread link as before, the rest says so
         if (!has("links")) {
             val id = if (text.startsWith("backplane://thread/")) text.removePrefix("backplane://thread/").substringBefore('#').substringBefore('/') else ""
-            if (id.isNotEmpty()) linkTarget = LinkTarget(LinkTarget.Kind.THREAD, id) else say(Msg.android_link_old)
+            val page = if (text.startsWith("backplane://settings/")) text.removePrefix("backplane://settings/").substringBefore('#').substringBefore('?').trimEnd('/') else null
+            if (id.isNotEmpty()) linkTarget = LinkTarget(LinkTarget.Kind.THREAD, id)
+            else if (page != null) linkTarget = LinkTarget(LinkTarget.Kind.SETTINGS, page)
+            else say(Msg.android_link_old)
             return@launch
         }
         try {
@@ -57,7 +72,14 @@ fun DataClient.openLink(url: String, thread: String) {
                 "project" -> LinkTarget(LinkTarget.Kind.PROJECT, r.optString("project"))
                 "room" -> LinkTarget(LinkTarget.Kind.ROOM, r.optString("room"))
                 "file" -> LinkTarget(LinkTarget.Kind.FILE, r.optString("thread"), r.optString("path"), r.optInt("line"))
-                else -> { say(Tr.t(r.optString("note").ifEmpty { "That link does not open here." })); null }
+                "download" -> { MdLinks.ctx?.let { c -> Downloads.file(c, DFileLink(r.optString("path"), r.optString("name"), r.optLong("size", -1L), "download"), thread) }; null }
+                "settings" -> LinkTarget(LinkTarget.Kind.SETTINGS, r.optString("page"))
+                else -> {
+                    // a file the reply lists that no viewer here opens is downloaded instead
+                    val f = pathOf(url)?.let { p -> FileFetch.find(p, entries[thread].orEmpty().flatMap { it.files }) }
+                    val c = MdLinks.ctx
+                    if (f != null && c != null) Downloads.file(c, f, thread) else say(Tr.t(r.optString("note").ifEmpty { "That link does not open here." })); null
+                }
             }
         } catch (e: Exception) { say(if (conn == DataClient.Conn.ONLINE) (e.message ?: Msg.android_link_failed) else Msg.android_link_offline) }
     }

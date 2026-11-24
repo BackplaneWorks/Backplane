@@ -96,7 +96,11 @@ fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit, sea
 fun ThreadMenus(t: DThread, shown: Boolean, close: () -> Unit, deleted: () -> Unit = {}, search: (() -> Unit)? = null, buy: Pair<String, () -> Unit>? = null) {
     var renaming by remember(t.id) { mutableStateOf(false) }
     var deleting by remember(t.id) { mutableStateOf(false) }
-    if (shown) ActionSheet(t.title, threadActions(t, { renaming = true }, { deleting = true }, search, buy), close)
+    var contextOpen by remember(t.id) { mutableStateOf(false) }
+    val contextAction: List<Pair<String, () -> Unit>> =
+        if (DataClient.has("threadContext")) listOf("Context & Prompt" to { contextOpen = true }) else emptyList()
+    if (shown) ActionSheet(t.title, contextAction + threadActions(t, { renaming = true }, { deleting = true }, search, buy), close)
+    if (contextOpen) ThreadContextSheet(t.id) { contextOpen = false }
     if (renaming) TextPrompt(Msg.android_thread_rename, t.title, Msg.menu_rename, { renaming = false }) { DataClient.threadAct(t.id, "rename", it) }
     if (deleting) ActionSheet(Msg.android_thread_delete_ask(t.title), listOf("Delete thread" to { DataClient.threadAct(t.id, "delete"); deleted() }, "Keep it" to {}), { deleting = false })
 }

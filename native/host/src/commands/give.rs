@@ -80,6 +80,7 @@ async fn run(hub: &Arc<Hub>, who: &Caller, job: Job) -> Result<(), String> {
             '>' => send(to.clone(), vec![handoff::card_event(to, &format!("{act}.in"), at, &card), said(src, &act, &format!("\"{name}\""), at)]).await,
             '%' => {
                 let Some(h) = hub.rpc_for("thread.create") else { continue };
+                let model = crate::settings::models::sanitize_model_now(&provider, &model);
                 let r = h.call(hub, who, &json!(0), "thread.create", &json!({"project": to, "title": title, "provider": provider, "model": model})).await.into_iter().next().unwrap_or(Value::Null);
                 let Some(th) = r["thread"].as_str().filter(|_| r["ok"] == true).map(str::to_string) else { failed = r["error"].as_str().unwrap_or("the new thread could not be made").to_string(); continue };
                 let modes = json!({"$":"ModesSet","id":th,"runtime":if runtime.is_empty() { "full-access" } else { &runtime },"interaction":if interaction.is_empty() { "default" } else { &interaction },"model":model,"at":at});

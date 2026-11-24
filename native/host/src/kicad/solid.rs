@@ -14,8 +14,20 @@ pub fn fits_for(size: u64, step: bool) -> bool { size <= if step { MOST_STEP } e
 /// The most triangles a STEP's model goes out with: a phone takes (64 << 20) / 84 for a model, and a frame of about 10 bytes a triangle
 /// stays under the hub's 8 MB outbox. A model within it is sent exactly as meshed.
 pub const STEP_TRIS: usize = 600_000;
+/// The biggest GLB the hub reads when the person asked for a model past its limit (`kicad.big`, the page's "Load it anyway"). The GLB
+/// reader's own bounds (glb::MOST_TRIS) still hold, and what goes out is thinned to `STEP_TRIS` like a STEP's.
+pub const MOST_ASKED: u64 = 512 << 20;
+/// Whether a model's GLB of `size` bytes is read: `fits_for`, or up to MOST_ASKED once the person asked for it.
+pub fn fits_asked(size: u64, step: bool, asked: bool) -> bool { size <= if asked { MOST_ASKED } else if step { MOST_STEP } else { MOST } }
+/// The words every refusal of a model for its size starts with (the hub marks such a refusal `big` for the page's "Load it anyway").
+pub const BIG_WORDS: &str = "This 3D model is too big to show here";
 /// Solid.big: what a refused model says (its size in whole megabytes, rounded up)
-pub fn big(size: u64) -> String { format!("This 3D model is too big to show here ({} MB; the hub reads models up to {} MB)", (size + 1048575) >> 20, MOST >> 20) }
+pub fn big(size: u64) -> String { big_past(size, MOST) }
+/// What a model refused for its size says, with the limit it was held to (a STEP's mesh, or one the person asked for, has a higher one).
+pub fn big_for(size: u64, step: bool, asked: bool) -> String { big_past(size, if asked { MOST_ASKED } else if step { MOST_STEP } else { MOST }) }
+fn big_past(size: u64, most: u64) -> String { format!("{BIG_WORDS} ({} MB; the hub reads models up to {} MB)", (size + 1048575) >> 20, most >> 20) }
+/// Whether a refusal is one for the model's size.
+pub fn is_big(why: &str) -> bool { why.starts_with(BIG_WORDS) }
 
 /// Mech.upright: CAD parts are Z up, the viewer's world is Y up: (x, y, z) goes to (x, z, -y)
 pub fn upright(ts: &mut [Tri3]) { for t in ts { for v in [&mut t.a, &mut t.b, &mut t.c] { *v = [v[0], v[2], -v[1]] } } }
@@ -112,6 +124,9 @@ mod tests {
         assert!(thin(model.clone()).len() < 120, "the old grid (a 4000th of 2 m: 0.5 mm) kept {} of the 6 mm rim's 200", thin(model.clone()).len());
         let f = fit(model.clone(), 199); assert!(f.len() <= 199 && f.len() > 150, "over it: the finest grid that fits ({})", f.len());
         assert!(fits_for(MOST_STEP, true) && !fits_for(MOST + 1, false) && fits_for(MOST, false));
+        assert!(fits_asked(MOST + 1, false, true) && fits_asked(MOST_ASKED, false, true) && !fits_asked(MOST_ASKED + 1, true, true) && !fits_asked(MOST + 1, false, false));
+        assert_eq!(big_for(73 << 20, true, false), "This 3D model is too big to show here (73 MB; the hub reads models up to 64 MB)");
+        assert!(is_big(&big_for(MOST_ASKED + 1, false, true)) && !is_big("3D export failed: x"));
     }
     #[test] fn faces_go_as_runs_and_none_when_they_are_not_one_a_triangle() {
         assert_eq!(face_runs(&[0, 0, 0, 1, 2, 2], 6), vec![3, 1, 2]);

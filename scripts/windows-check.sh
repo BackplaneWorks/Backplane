@@ -9,12 +9,11 @@
 # so a debug build made here compiles them when the window opens (D3DCompile); a release client must be built on Windows (CI, release.yml).
 set -eu
 HERE=$(cd "$(dirname "$0")/.." && pwd)
-tc=${WIN_LLVM_MINGW:-$(ls -d "$HOME"/.local/opt/llvm-mingw-* 2>/dev/null | sort | tail -1)}
-[ -x "$tc/bin/x86_64-w64-mingw32-clang" ] || { echo "windows-check: no llvm-mingw (set WIN_LLVM_MINGW, or unpack one into ~/.local/opt)" >&2; exit 2; }
-rustup target list --installed | grep -qx x86_64-pc-windows-gnu || { echo "windows-check: rustup target add x86_64-pc-windows-gnu" >&2; exit 2; }
-export CC_x86_64_pc_windows_gnu=$tc/bin/x86_64-w64-mingw32-clang CXX_x86_64_pc_windows_gnu=$tc/bin/x86_64-w64-mingw32-clang++ AR_x86_64_pc_windows_gnu=$tc/bin/llvm-ar
-# the client's manifest (vendored gpui embeds it for a Windows target built here): llvm-mingw's windres
-export RC_x86_64_pc_windows_gnu=$tc/bin/x86_64-w64-mingw32-windres RC_x86_64_pc_windows_gnullvm=$tc/bin/x86_64-w64-mingw32-windres
+. "$HERE/scripts/lib-winmingw.sh"; tc=
+# the check (host, gpui, all) with BUILD_SLOTS=0 (the merge gate, or a lane sending it to Boat): every cargo-q runs on a Boat box, which sets up
+# its own llvm-mingw and target (scripts/cargo-q): none needed here (BQ_MAIN unset: it would take a local slot). Anything else: this machine's (fetched once on a Boat box).
+case "${1:-}" in --xwin|--build) win_mingw_env || exit 2; tc=$WIN_TC;;
+  *) if [ "${BUILD_SLOTS:-}" = 0 ] && [ -z "${BP_ON_BOAT:-}" ] && [ -z "${BP_NO_BOAT:-}" ]; then unset BQ_MAIN; else win_mingw_env || exit 2; tc=$WIN_TC; fi;; esac
 if [ "${1:-}" = --xwin ]; then
   # x86_64-pc-windows-msvc through cargo-xwin (Microsoft's CRT and SDK, fetched once into ~/.cache/cargo-xwin): the release target.
   # The client is built with PROFILE (default fast: no debug assertions), so it draws with the shader bytes in native/gpui/vendor/gpui/windows-shaders.
@@ -62,7 +61,7 @@ rc=0
 for c in ${1:-all}; do case $c in all) set -- host gpui;; *) set -- "$c";; esac
   for k in "$@"; do
     echo "== $k"
-    (cd "$HERE/native/$k" && CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$HERE/native/$k/target} "$HERE/scripts/cargo-q" check --offline --target x86_64-pc-windows-gnu --all-targets) || rc=1
+    (cd "$HERE/native/$k" && CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$HERE/native/$k/target} "$HERE/scripts/cargo-q" check --locked --offline --target x86_64-pc-windows-gnu --all-targets) || rc=1
   done
 done
 exit $rc

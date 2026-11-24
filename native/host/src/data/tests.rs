@@ -8,7 +8,7 @@ use tokio_tungstenite::connect_async;
 
 struct Fake(Arc<Hub>);
 impl RpcHandler for Fake {
-    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set", "thread.review"] }
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set", "thread.review", "thread.snooze"] }
     fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = &self.0; let at = now_ms() / 1000;
@@ -19,6 +19,9 @@ impl RpcHandler for Fake {
                 // /project's request: a folder named "full" holds something, any other is made with its first thread
                 "project.new" => if s(p, "path") == "full" { vec![json!({"t":"reply","id":id,"ok":false,"error":"/h/full is there and is not empty.","result":{"error":"/h/full is there and is not empty.","exists":"/h/full"}})] }
                     else { assert_eq!(p["empty"], true); vec![json!({"t":"reply","id":id,"ok":true,"thread":format!("made-{}", s(p, "text").len())})] },
+                // (the commands lane's: `for` 1h, tomorrow, 1w or off)
+                "thread.snooze" => { assert!(matches!(s(p, "for"), "1h" | "tomorrow" | "1w" | "off"), "the span as the row gave it: {p}");
+                    h.commit(&json!({"$":"ThreadSnoozed","id":s(p,"thread"),"until":if s(p, "for") == "off" { 0 } else { at + 3600 },"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.review" => { h.commit(&json!({"$":"SettingSet","key":format!("review.ro.{}", s(p, "thread")),"value":if p["on"] == true { "1" } else { "0" },"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "ask.answer" => { h.commit(&json!({"$":"AskClosed","id":s(p,"id"),"answer":s(p,"answer"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.modes" | "thread.effort" | "thread.provider" | "turn.interrupt" | "thread.pin" | "thread.rename" | "thread.detach" | "setting.set" => vec![json!({"t":"reply","id":id,"ok":true})],
@@ -46,6 +49,7 @@ async fn up_with(name: &str, more: &str) -> (crate::hub::TestHub, u16) {
     let cfg = Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
     let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     hub.register_rpc(Arc::new(Fake(hub.clone())));
+    hub.register_rpc(Arc::new(crate::settings::set::ModelsFavoriteRpc));
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
     { let hub = hub.clone(); tokio::spawn(async move { loop { let (st, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = wire::serve_with(h, st, false).await; }); } }); }
     (crate::hub::TestHub { hub, _tmp: dir }, port)
@@ -65,10 +69,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -132,6 +136,24 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     assert_eq!(ask(&mut ws, 9, "ask.answer", json!({"ask":"q1","answer":"accept"})).await["ok"], true);
     let r = ask(&mut ws, 10, "thread.entries", json!({"thread":"t1"})).await; assert!(r["result"]["entries"].as_array().unwrap().iter().all(|x| x["kind"] != "ask"), "an answered ask is no longer open");
     let _ = hub;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_phones_reply_keeps_the_desktops_in_reply_to_block() {
+    let (hub, port) = up("reply").await; let mut ws = open(port, "&enc=json").await; let h = next(&mut ws).await;
+    assert!(h["features"].as_array().unwrap().iter().any(|f| f == "reply"), "{h}");
+    let dir = crate::plat::tmp::dir("data-reply");
+    let pid = ask(&mut ws, 1, "project.add", json!({"path":dir.to_string_lossy()})).await["result"]["project"]["id"].as_str().unwrap().to_string();
+    let th = ask(&mut ws, 2, "thread.create", json!({"project":pid,"text":"first words"})).await["result"]["thread"]["id"].as_str().unwrap().to_string();
+    let quoted = "All done:\n- **merged**";
+    let r = ask(&mut ws, 3, "message.send", json!({"thread":th,"text":"make it faster","clientId":"c-r1","replyTo":{"id":"msg_A:0:aa","text":quoted}})).await; assert_eq!(r["ok"], true, "{r}");
+    let e = &r["result"]["entry"]; assert_eq!((e["text"].as_str(), e["replyTo"]["id"].as_str(), e["replyTo"]["quote"].as_str()), (Some("make it faster"), Some("msg_A:0:aa"), Some("All done:")), "{e}");
+    // the agent reads exactly what the desktop's Reply sends (session/composer.rs reply_block)
+    let kept = { let m = hub.model().await; m.tail(&hub.store, &th, 8).into_iter().find(|r| r.id == "c-r1").map(|r| r.text).unwrap() };
+    assert_eq!(kept, format!("{}\n\nmake it faster", crate::session::composer::reply_block("msg_A:0:aa", quoted)));
+    let es = ask(&mut ws, 4, "thread.entries", json!({"thread":th})).await; let got = es["result"]["entries"].as_array().unwrap().iter().find(|x| x["id"] == "c-r1").cloned().unwrap();
+    assert_eq!((got["text"].as_str(), got["replyTo"]["id"].as_str()), (Some("make it faster"), Some("msg_A:0:aa")), "{got}");
+    // a reply with nothing quoted, or no id, is a plain message
+    let r = ask(&mut ws, 5, "message.send", json!({"thread":th,"text":"plain","clientId":"c-r2","replyTo":{"id":"m1","text":"  "}})).await; assert!(r["result"]["entry"]["replyTo"].is_null(), "{r}");
+    let kept = { let m = hub.model().await; m.tail(&hub.store, &th, 8).into_iter().find(|r| r.id == "c-r2").map(|r| r.text).unwrap() }; assert_eq!(kept, "plain");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_subscriptions_push_entries_text_turns_and_list_changes() {
     let (hub, port) = up("subs").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
@@ -318,6 +340,13 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 8, "thread.act", json!({"thread":"t1","action":"pin"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["thread"]["id"], "t1");
     let r = ask(&mut ws, 9, "thread.act", json!({"thread":"t1","action":"explode"})).await; assert_eq!(r["ok"], false);
     let r = ask(&mut ws, 10, "thread.act", json!({"thread":"nope","action":"pin"})).await; assert_eq!(r["ok"], false);
+    // a section row's snooze and wake by the row's own value (sections.rs `snooze`, `wake`), and a project page's visit: the phones' and the web's `sidebar.act`
+    let r = ask(&mut ws, 101, "sidebar.act", json!({"action":"row-snooze","value":"t1|1h"})).await; assert_eq!(r["ok"], true, "{r}");
+    assert_eq!(ask(&mut ws, 102, "sidebar.act", json!({"action":"row-snooze","value":"hub|t1|off"})).await["ok"], true, "the window's value carries its hub first");
+    assert_eq!(ask(&mut ws, 103, "sidebar.act", json!({"action":"row-snooze","value":"t1|forever"})).await["ok"], false, "a span the hub does not know");
+    assert_eq!(ask(&mut ws, 104, "sidebar.act", json!({"action":"row-snooze","value":"nope|1h"})).await["ok"], false, "an unknown thread");
+    assert_eq!(ask(&mut ws, 105, "sidebar.act", json!({"action":"row-snooze","value":"t1"})).await["ok"], false, "no span");
+    assert_eq!(ask(&mut ws, 107, "sidebar.act", json!({"action":"explode","value":"t1"})).await["error"], "no such action");
     let r = ask(&mut ws, 11, "thread.act", json!({"thread":"t1","action":"rename","title":"  "})).await; assert_eq!(r["ok"], false, "a blank title is refused before any request");
     // the badge and Move to top level
     let r = ask(&mut ws, 12, "badge.list", json!({})).await; assert_eq!((r["result"]["colors"][0]["name"].as_str(), r["result"]["icons"][0].as_str()), (Some("blue"), Some("folder")));
@@ -330,6 +359,16 @@ impl crate::api::RpcHandler for PushState {
     assert!(p["css"].as_str().unwrap().starts_with('#') && !p["color"].as_str().unwrap().is_empty() && p["icon"] == "folder", "a project carries its badge: {p}");
     assert_eq!(r["result"]["threads"][0]["parent"], "", "a thread says what it is under");
 }
+#[tokio::test] async fn fork_action_returns_the_new_thread() {
+    let (fixture, port) = up("fork-action").await;
+    crate::commands::start(fixture.hub.clone());
+    let mut ws = open(port, "&enc=json").await;
+    let fork = ask(&mut ws, 81, "thread.act", json!({"thread":"t1","action":"fork"})).await;
+    let created = &fork["result"]["thread"];
+    assert_eq!(created["title"], "Fork: First", "{fork}");
+    assert_ne!(created["id"].as_str().unwrap(), "t1");
+}
+
 #[test] fn notify_says_what_the_gate_sent() {
     let n = ext::notify_of(&json!({"$":"PushSent","kind":"needs_you","thread":"t1","ask":"a1","key":"push-1","title":"Bub","body":"Approve?","badge":2,"through":false,"sent":1,"at":9}));
     assert_eq!(n, json!({"kind":"needs_you","thread":"t1","ask":"a1","key":"push-1","title":"Bub","body":"Approve?","badge":2,"through":false,"link":""}));
@@ -442,6 +481,31 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 3, "thread.review", json!({"thread":"t1","on":true})).await; assert_eq!(r["result"]["review"]["button"], "Allow edits", "{r}");
     let r = ask(&mut ws, 4, "thread.review", json!({"thread":"t2"})).await; assert_eq!(r["result"]["review"], Value::Null, "no review: no bar: {r}");
     let r = ask(&mut ws, 5, "thread.review", json!({})).await; assert!(r["error"].is_string() || r["result"].is_null(), "a thread is needed: {r}");
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_exposes_plan_asks_and_plan_mode_state() {
+    let extra = "{\"$\":\"ModesSet\",\"id\":\"t1\",\"runtime\":\"full-access\",\"interaction\":\"plan\",\"model\":\"\",\"at\":1700000050}\n{\"$\":\"AskOpened\",\"id\":\"qp1\",\"thread\":\"t1\",\"kind\":\"plan\",\"tool\":\"ExitPlanMode\",\"detail\":\"# Plan\\n1. Route USB\",\"options\":\"\",\"at\":1700000051}\n";
+    let (hub, port) = up_with("planask", extra).await;
+    let _policies = crate::statehost::start_unshared(hub.hub.clone());
+    for _ in 0..200 {
+        let ready = crate::statehost::with_state_of(&hub.hub, |st| {
+            st.interaction.get("t1").map(String::as_str) == Some("plan")
+                && st.asks.get("qp1").is_some_and(|(th, open)| th == "t1" && *open)
+        }).unwrap_or(false);
+        if ready { break }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let r = ask(&mut ws, 1, "thread.entries", json!({"thread":"t1"})).await;
+    let plan_entry = r["result"]["entries"].as_array().unwrap().iter().find(|e| e["id"] == "ask:qp1").unwrap();
+    assert_eq!(plan_entry["ask"]["kind"], "plan");
+    assert_eq!(plan_entry["ask"]["head"], "Proposed plan");
+    assert_eq!(plan_entry["ask"]["revise"], true);
+    assert_eq!(plan_entry["ask"]["options"], json!([{"id":"implement","label":"Implement"},{"id":"dismiss","label":"Dismiss"}]));
+    let r = ask(&mut ws, 2, "threads.list", json!({})).await;
+    let t1 = r["result"]["threads"].as_array().unwrap().iter().find(|t| t["id"] == "t1").unwrap();
+    assert_eq!(t1["planMode"]["interaction"], "plan");
+    assert_eq!(t1["planMode"]["phase"], "pending");
+    assert_eq!(t1["planMode"]["pending"], true);
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_hubs_note_to_the_agent_is_marked_agent_only_on_a_page_and_live() {
     let (hub, port) = up("agentonly").await;
@@ -749,12 +813,13 @@ fn a_reply_reaches_a_phone_as_its_body_and_reply_to() {
 }
 #[test] fn phones_get_the_management_panels_and_checks_info() {
     use super::phone_info;
-    for k in ["hub.offer", "mgmt.state.abc", "mgmt.bom.abc", "mgmt.life.abc", "mgmt.fab.abc", "kicad.checks.abc"] { assert!(phone_info(k), "{k}") }
+    for k in ["hub.offer", "provider.notice", "mgmt.state.abc", "mgmt.bom.abc", "mgmt.life.abc", "mgmt.fab.abc", "kicad.checks.abc"] { assert!(phone_info(k), "{k}") }
     for k in ["editor.kicad.abc", "kicad.progress.abc", "browser.tabs.x", "terms"] { assert!(!phone_info(k), "{k}") }
     assert!(super::FEATURES.contains(&"mgmt"));
+    assert!(super::FEATURES.contains(&"noProvider"));
     // a set_info frame as the hub pushes it: the phone's keys kept, the rest left out
-    let f = super::phone_info_frame(&json!({"t":"info","info":{"mgmt.bom.d1":"{}","editor.kicad.d1":"x"}})).unwrap();
-    assert_eq!(f, json!({"t":"info","info":{"mgmt.bom.d1":"{}"}}));
+    let f = super::phone_info_frame(&json!({"t":"info","info":{"mgmt.bom.d1":"{}","provider.notice":"{\"head\":\"x\"}","editor.kicad.d1":"x"}})).unwrap();
+    assert_eq!(f, json!({"t":"info","info":{"mgmt.bom.d1":"{}","provider.notice":"{\"head\":\"x\"}"}}));
     assert!(super::phone_info_frame(&json!({"t":"info","info":{"terms":"[]"}})).is_none());
 }
 
@@ -794,6 +859,12 @@ fn a_reply_and_a_notice_carry_their_code_to_copy() {
     assert_eq!(n["kind"], "note"); assert_eq!(n["copy"], json!([{"text":"scripts/land.sh --dry","cmd":true},{"text":"native/host","cmd":false}]));
     assert!(act_entry("t1", "x2", "warn", "error", "plain words", 1).unwrap().get("copy").is_none());
     assert!(super::FEATURES.contains(&"copy") && super::FEATURES.contains(&"termChat"));
+}
+// #1325: a thought reaches the phone as a note that folds (its whole text, `folds`); any other note does not
+#[test] fn a_thought_note_folds_on_the_phone() {
+    let n = act_entry("t1", "th1", "thinking", "thinking", "First the vias.\nThen the planes.", 1).unwrap();
+    assert_eq!((n["kind"].as_str(), n["tone"].as_str(), n["text"].as_str(), n["folds"].as_bool()), (Some("note"), Some("thinking"), Some("First the vias.\nThen the planes."), Some(true)), "{n}");
+    assert!(act_entry("t1", "x1", "info", "result", "done", 1).unwrap().get("folds").is_none());
 }
 
 #[tokio::test]
@@ -1062,7 +1133,7 @@ async fn socket_with_browser_refused_and_passive_rpcs_do_not_extend_idle_and_out
 
     let (client_io, server_io) = tokio::io::duplex(64 * 1024);
     let (h2, r2, dev2) = (hub.hub.clone(), reg.clone(), device_id.clone());
-    let srv = tokio::spawn(async move { socket_with_reg(h2, server_io, true, Principal::Browser { device_id: dev2 }, "bp.ts.net".into(), Some(r2)).await });
+    let srv = tokio::spawn(async move { socket_with_reg(h2, server_io, true, Principal::Browser { device_id: dev2 }, "bp.ts.net".into(), Some(r2), None).await });
     let (mut ws, _) = tokio_tungstenite::client_async("ws://bp.ts.net/ws?data=1&enc=json", client_io).await.unwrap();
     let hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
     assert_eq!(hello["t"], "hello");
@@ -1194,4 +1265,421 @@ async fn viewer_rail_omits_split_for_browser_only() {
     let _ = tokio::time::timeout(Duration::from_secs(1), srv).await;
     drop(hub);
     let _ = std::fs::remove_dir_all(&base);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn viewer_layout_over_a_socket_is_per_device_pushed_and_refuses_in_code_key_message() {
+    let dir = crate::plat::tmp::dir("data-layout-socket");
+    let root = dir.to_string_lossy().into_owned();
+    std::fs::write(dir.join("unit.kicad_pcb"), "(kicad_pcb)").unwrap();
+    std::fs::write(dir.join("unit.kicad_sch"), "(kicad_sch)").unwrap();
+    std::fs::create_dir_all(dir.join("mfg/rev1")).unwrap();
+    std::fs::write(dir.join("mfg/rev1/unit-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+    let more = format!("{}\n{}\n{}\n", json!({"$":"ProjectCreated","id":"pl","title":"L","root":root,"at":1700000050}), json!({"$":"ThreadCreated","id":"tl","project":"pl","title":"Layout","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000051}), json!({"$":"ThreadCreated","id":"tl2","project":"pl","title":"Second","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000052}));
+    let (hub, port) = up_with("layout", &more).await;
+    // the REAL watch handler: the subscription table it keeps per connection is what the assertions read
+    let plots = crate::files::kicad::watch::Plots::new(&hub.hub.cfg.home);
+    hub.register_rpc(Arc::new(crate::files::kicad::watch::KicadRpc(plots.clone())));
+    let held = |plots: &Arc<crate::files::kicad::watch::Plots>| -> std::collections::BTreeMap<u64, Vec<String>> { (1..2_000_000u64).filter_map(|c| { let mut k = plots.watched_keys(c); k.sort(); (!k.is_empty()).then_some((c, k)) }).collect() };
+    let _policies = crate::statehost::start_unshared(hub.hub.clone()); // this test's hub only: it must not claim the process-wide `policies()` for every other test
+    for _ in 0..60 { if crate::statehost::booted(&hub.hub) && crate::statehost::with_state_of(&hub.hub, |st| st.threads.contains_key("tl")).unwrap_or(false) { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    let mut a = open(port, "&enc=json").await;
+    let hello = next(&mut a).await;
+    assert!(hello["features"].as_array().unwrap().iter().any(|f| f == "layout"));
+    let mut b = open(port, "&enc=json").await; let _ = next(&mut b).await;
+    // a phone-sized and a desktop-sized connection of one device read their own fit of the same layout
+    let r = ask(&mut a, 1, "viewer.layout", json!({"thread":"tl","bounds":[390,844],"page":"board"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!((r["result"]["mode"].as_str(), r["result"]["tiles"].as_array().unwrap().len()), (Some("stack"), 1));
+    assert_eq!(ask(&mut b, 1, "viewer.layout", json!({"thread":"tl","bounds":[1400,900],"page":"board"})).await["result"]["mode"], "full");
+    let r = ask(&mut a, 2, "viewer.layout.act", json!({"thread":"tl","op":"add","kind":"gerbers","page":"board","bounds":[390,844]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert_eq!((r["result"]["tiles"].as_array().unwrap().len(), r["result"]["rev"].as_u64()), (2, Some(2)));
+    assert!(r["result"].to_string().find(&root).is_none(), "no project folder in a reply: {r}");
+    // the device's other connection is told, with no polling; it asks again and sees the same tree in its own fit
+    let push = next(&mut b).await;
+    assert_eq!(push, json!({"t":"layout","thread":"tl","rev":2}));
+    let again = ask(&mut b, 2, "viewer.layout", json!({"thread":"tl","bounds":[1400,900]})).await;
+    assert_eq!((again["result"]["rev"].as_u64(), again["result"]["mode"].as_str(), again["result"]["tiles"].as_array().unwrap().len()), (Some(2), Some("full"), 2));
+    // a refusal is {code, key, message}; a bad bounds is refused before anything is fitted
+    let e = ask(&mut a, 3, "viewer.layout.act", json!({"thread":"tl","op":"close","tile":"zz","bounds":[390,844]})).await;
+    assert_eq!((e["ok"].clone(), e["error"]["code"].as_str(), e["error"]["key"].as_str()), (json!(false), Some("notFound"), Some("viewer.layout.refusal.notfound")));
+    assert!(e["error"]["message"].as_str().is_some_and(|m| !m.is_empty()));
+    assert_eq!(ask(&mut a, 4, "viewer.layout", json!({"thread":"tl","bounds":"wide"})).await["error"]["code"], "invalidInput");
+    // a source outside the project is refused, a linked machine's thread is refused
+    assert_eq!(ask(&mut a, 5, "viewer.layout.act", json!({"thread":"tl","op":"add","kind":"gerbers","source":"../x","bounds":[390,844]})).await["error"]["code"], "invalidSource");
+    let far = ask(&mut a, 6, "viewer.layout", json!({"thread":"L~t1","bounds":[390,844],"page":"board"})).await;
+    assert!(far["ok"] == true && far["result"]["tiles"].as_array().unwrap().len() <= 1 && far["result"]["rev"] == 1, "a linked thread shows one derived tile: {far}");
+    assert_eq!(ask(&mut a, 6, "viewer.layout.act", json!({"thread":"L~t1","op":"add","kind":"mech","bounds":[390,844]})).await["error"]["code"], "linked");
+    // an older phone that never asks is not affected: viewer.rail answers as it did
+    assert_eq!(ask(&mut a, 7, "viewer.rail", json!({"thread":"tl","page":"board"})).await["ok"], true);
+    // the layout's watch set, against the real handler: every visible plot tile at once, each tile's keys (an array per tile), no folder outside the keys
+    let w = ask(&mut b, 3, "viewer.watch", json!({"thread":"tl","kind":"layout","bounds":[1400,900]})).await;
+    assert_eq!(w["ok"], true, "{w}");
+    assert_eq!(w["result"]["tiles"].as_object().unwrap().len(), 2, "{w}");
+    assert!(w["result"]["tiles"].as_object().unwrap().values().all(|k| k.as_array().is_some_and(|a| !a.is_empty())));
+    let mut other = w["result"].clone(); other.as_object_mut().unwrap().remove("tiles"); other.as_object_mut().unwrap().remove("keys");
+    assert!(other.to_string().find(&root).is_none(), "no project folder in a watch reply outside its keys: {w}");
+    let table = held(&plots);
+    assert_eq!(table.len(), 1, "the handler holds b's set: {table:?}");
+    let (cb, keys_b) = table.iter().next().map(|(c, k)| (*c, k.clone())).unwrap();
+    let mut want: Vec<String> = w["result"]["keys"].as_array().unwrap().iter().map(|k| k.as_str().unwrap().to_string()).collect(); want.sort();
+    assert_eq!(keys_b, want);
+    // a watch-only caller is told of the layout's changes too, and so is the sender
+    let r = ask(&mut a, 20, "viewer.layout.act", json!({"thread":"tl","op":"add","kind":"files","page":"board","bounds":[390,844]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    // (the real handler streams plot frames to b meanwhile: skip them)
+    let push = loop { let f = next(&mut b).await; if f["t"] == "layout" { break f } };
+    assert_eq!(push["t"], "layout", "{push}");
+    // a phone stack with Files focused: the visible set is EMPTY and the hub's handler is told (it stops what it was streaming for that connection)
+    let tiles = r["result"]["tiles"].as_array().unwrap().clone();
+    let files = tiles.iter().find(|t| t["kind"] == "files").unwrap()["id"].as_str().unwrap().to_string();
+    let board = tiles.iter().find(|t| t["kind"] == "board").unwrap()["id"].as_str().unwrap().to_string();
+    // the new tile (Files) is the focused one: the phone stack's visible set is empty already
+    let w = ask(&mut a, 21, "viewer.watch", json!({"thread":"tl","kind":"layout","bounds":[390,844]})).await;
+    assert_eq!((w["result"]["tiles"].clone(), w["result"]["keys"].clone()), (json!({}), json!([])), "{w}");
+    assert_eq!(ask(&mut a, 31, "viewer.layout.act", json!({"thread":"tl","op":"focus","tile":board,"bounds":[390,844]})).await["result"]["watch"]["tiles"].as_object().unwrap().len(), 1);
+    let ca = *held(&plots).keys().find(|c| **c != cb).expect("a's own set");
+    let r = ask(&mut a, 22, "viewer.layout.act", json!({"thread":"tl","op":"focus","tile":files,"bounds":[390,844]})).await;
+    assert_eq!(r["result"]["watch"]["tiles"], json!({}), "{r}");
+    assert_eq!(r["result"]["watch"]["keys"], json!([]));
+    assert!(plots.watched_keys(ca).is_empty(), "the empty set was sent: the hub no longer streams the Board to this connection");
+    // focus the Board again: the set comes back with the reply; b's set is untouched throughout
+    let r = ask(&mut a, 23, "viewer.layout.act", json!({"thread":"tl","op":"focus","tile":board,"bounds":[390,844]})).await;
+    assert_eq!(r["result"]["watch"]["tiles"].as_object().unwrap().len(), 1, "{r}");
+    assert_eq!(plots.watched_keys(ca).len(), 1);
+    assert_eq!(held(&plots).get(&cb), Some(&keys_b));
+    // a change on ANOTHER thread does not replace the watch this connection holds for `tl`
+    let r = ask(&mut a, 24, "viewer.layout.act", json!({"thread":"tl2","op":"add","kind":"gerbers","page":"board","bounds":[390,844]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(r["result"].get("watch").is_none(), "{r}");
+    assert_eq!(plots.watched_keys(ca).len(), 1);
+    // an invalid ordinary watch changes nothing: the connection still holds its set (the next valid one still lets it go)
+    assert_eq!(ask(&mut a, 25, "viewer.watch", json!({"thread":"tl","kind":"board","path":"../x"})).await["ok"], false);
+    let r = ask(&mut a, 26, "viewer.layout.act", json!({"thread":"tl","op":"focus","tile":files,"bounds":[390,844]})).await;
+    assert!(r["result"].get("watch").is_some(), "{r}");
+    // an ordinary watch lets the set go through `leave`, then replaces it as usual
+    assert_eq!(ask(&mut a, 27, "viewer.watch", json!({"thread":"tl","kind":"board"})).await["ok"], true);
+    assert_eq!(plots.watched_keys(ca).len(), 1);
+    let r = ask(&mut a, 28, "viewer.layout.act", json!({"thread":"tl","op":"focus","tile":board,"bounds":[390,844]})).await;
+    assert!(r["result"].get("watch").is_none(), "no set is held after the ordinary watch: {r}");
+    // bounds are required, and the refusal is the catalog's
+    let e = ask(&mut a, 29, "viewer.watch", json!({"thread":"tl","kind":"layout"})).await;
+    assert_eq!((e["error"]["code"].as_str(), e["error"]["key"].as_str()), (Some("invalidInput"), Some("viewer.layout.refusal.invalidinput")));
+    // zero bounds are clamped (to 100), not refused
+    assert_eq!(ask(&mut a, 30, "viewer.layout", json!({"thread":"tl","bounds":[0,0]})).await["result"]["bounds"], json!([100.0, 100.0]));
+    crate::files::watch_dir::forget_root(&root); // a Files tile drew the folder: leave nothing registered for another test's poll
+}
+
+#[path = "budget_tests.rs"] mod budget;
+
+/// The kept ask index answers what a pass over the log's last ASK_SCAN lines answers, as the log grows and the tail moves on; a thread's preview follows its newest message.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn kept_asks_and_previews_answer_as_a_fresh_read() {
+    let (h, _port) = up("keptasks").await;
+    let pass = |hub: &Hub| -> HashMap<String, u64> {
+        let n = hub.store.len(); let lines = hub.store.range(n.saturating_sub(ASK_SCAN), n).unwrap();
+        let (mut opened, mut closed) = (vec![], HashSet::new());
+        for l in lines { let e: Value = serde_json::from_str(&l).unwrap(); match s(&e, "$") { "AskOpened" => opened.push((s(&e, "id").to_string(), s(&e, "thread").to_string())), "AskClosed" => { closed.insert(s(&e, "id").to_string()); } _ => {} } }
+        let mut m = HashMap::new(); for (id, th) in opened { if !closed.contains(&id) { *m.entry(th).or_insert(0) += 1 } } m
+    };
+    assert_eq!(open_ask_counts(&h), pass(&h)); assert_eq!(open_ask_counts(&h)["t1"], 1, "LOG's ask");
+    let ask = |id: &str, th: &str| json!({"$":"AskOpened","id":id,"thread":th,"kind":"approval","tool":"Bash","detail":"x","options":"","at":1700000100});
+    h.commit_many(&[ask("q2", "t2"), ask("q3", "t2"), json!({"$":"AskClosed","id":"q2","answer":"yes","at":1700000101})]).await.unwrap();
+    assert_eq!(open_ask_counts(&h), pass(&h)); assert_eq!((open_ask_counts(&h)["t2"], ask_thread(&h, "q3"), ask_thread(&h, "q2")), (1, Some("t2".into()), None));
+    assert_eq!(open_asks(&h, "t2").len(), 1, "the thread's own open asks, from their lines");
+    // the tail moves past q1 and q3: they were opened before it, so neither counts any more, as a pass over the tail says
+    let filler: Vec<Value> = (0..ASK_SCAN).map(|i| json!({"$":"SettingSet","key":format!("k{}", i % 7),"value":format!("{i}"),"at":1700000200})).collect();
+    for c in filler.chunks(500) { h.commit_many(c).await.unwrap(); assert_eq!(open_ask_counts(&h), pass(&h)); }
+    assert!(open_ask_counts(&h).is_empty() && ask_thread(&h, "q3").is_none());
+    h.commit_many(&[ask("q4", "t1")]).await.unwrap(); assert_eq!(open_ask_counts(&h), pass(&h)); assert_eq!(open_ask_counts(&h)["t1"], 1);
+    // previews: kept while the thread has no new entry, read again once it has
+    let g = h.model().await; assert_eq!(preview_of(&h, &g, "t1"), "hi, how can I help with this long reply that goes on"); assert_eq!(preview_of(&h, &g, "t2"), ""); drop(g);
+    h.commit_many(&[json!({"$":"MessagePosted","thread":"t1","msg":"m9","role":"assistant","text":"a newer\nreply","at":1700000300})]).await.unwrap();
+    let g = h.model().await; assert_eq!(preview_of(&h, &g, "t1"), "a newer reply");
+}
+
+/// `z=deflate` (docs/PHONE-DATA.md, Compression): the hello as it is and naming the codec, then every frame binary raw DEFLATE on one stream; no `z`, frames as before.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_client_that_asks_for_deflate_gets_compressed_frames_after_a_plain_hello() {
+    use flate2::{Decompress, FlushDecompress};
+    let (_h, port) = up("zdeflate").await;
+    let mut ws = open(port, "&enc=json&z=deflate").await;
+    let hello = match tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap() { Message::Text(t) => serde_json::from_str::<Value>(t.as_str()).unwrap(), m => panic!("the hello is plain text: {m:?}") };
+    assert_eq!((hello["t"].as_str(), hello["z"].as_str()), (Some("hello"), Some("deflate")), "{hello}");
+    assert!(hello["features"].as_array().unwrap().iter().any(|f| f == "deflate"));
+    let mut z = Decompress::new(false);
+    let mut inflate = |b: &[u8]| { let mut out = Vec::with_capacity(b.len() * 8 + 1024); let start = z.total_in();
+        loop { let done = (z.total_in() - start) as usize; if out.capacity() - out.len() < 64 { out.reserve(out.capacity()) }
+            z.decompress_vec(&b[done..], &mut out, FlushDecompress::Sync).unwrap(); if (z.total_in() - start) as usize == b.len() && out.len() < out.capacity() { break } }
+        serde_json::from_slice::<Value>(&out).unwrap() };
+    let (mut raw, mut plain) = (0, 0);
+    for (id, m) in [(1u64, "projects.list"), (2, "threads.list"), (3, "projects.list")] {
+        ws.send(Message::Text(json!({"id":id,"m":m,"p":{}}).to_string().into())).await.unwrap();
+        loop {
+            let f = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.unwrap().unwrap().unwrap();
+            let Message::Binary(b) = f else { panic!("after the hello every frame is binary: {f:?}") };
+            let v = inflate(&b); raw += b.len(); plain += v.to_string().len();
+            if v["t"] == "reply" && v["id"] == id { assert_eq!(v["ok"], true, "{v}"); break }
+        }
+    }
+    assert!(raw * 2 < plain, "compressed: {raw} B for {plain} B of JSON");
+    // no z: as before
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await; assert!(hello.get("z").is_none());
+    let r = ask(&mut ws, 1, "projects.list", json!({})).await; assert_eq!(r["ok"], true);
+}
+
+/// `thread.open` (feature `open`): cold, everything with its hashes; held and unchanged, nothing but the subscription and the hashes; a new message or an ask answered,
+/// only what changed (an entry changed in place, which a sequence cursor would miss).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn thread_open_sends_only_the_parts_a_client_does_not_hold() {
+    let (h, port) = up("threadopen").await;
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let have_of = |r: &Value, held: &mut serde_json::Map<String, Value>| {
+        for (k, v) in r["h"].as_object().unwrap() { held.insert(k.clone(), v.clone()); }
+        for e in r["entries"].as_array().unwrap() { held.insert(e["id"].as_str().unwrap().into(), e["h"].clone()); }
+    };
+    let cold = ask(&mut ws, 1, "thread.open", json!({"thread":"t1"})).await; let c = &cold["result"];
+    assert_eq!(cold["ok"], true, "{cold}"); assert!(c["sub"].as_u64().unwrap() > 0);
+    for k in ["thread", "ids", "work", "queue", "buy", "rail"] { assert!(c.get(k).is_some(), "a cold open has {k}: {c}") }
+    let ids: Vec<&str> = c["ids"].as_array().unwrap().iter().map(|i| i.as_str().unwrap()).collect();
+    assert_eq!(ids.len(), c["entries"].as_array().unwrap().len(), "every entry of the page, each once");
+    assert!(c["entries"].as_array().unwrap().iter().all(|e| e["h"].as_str().map_or(false, |x| x.len() == 16)), "each entry carries its hash");
+    let plain = ask(&mut ws, 2, "thread.entries", json!({"thread":"t1"})).await;
+    assert_eq!(ids, plain["result"]["entries"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect::<Vec<_>>(), "the same page thread.entries reads");
+    let mut held = serde_json::Map::new(); have_of(c, &mut held);
+    let warm = ask(&mut ws, 3, "thread.open", json!({"thread":"t1","have":held})).await; let w = &warm["result"];
+    assert_eq!(w["entries"], json!([]), "{w}"); for k in ["thread", "ids", "work", "queue", "buy", "rail", "next"] { assert!(w.get(k).is_none(), "held and unchanged: no {k}: {w}") }
+    assert!(warm.to_string().len() < 500, "a warm open is small: {} B", warm.to_string().len());
+    // a new message: that entry, the ids, and the thread row (its preview moved); nothing else
+    h.commit(&json!({"$":"MessagePosted","thread":"t1","msg":"m9","role":"assistant","text":"all done","at":1700000100})).await.unwrap();
+    let r = ask(&mut ws, 4, "thread.open", json!({"thread":"t1","have":held})).await; let r = &r["result"];
+    assert_eq!(r["entries"].as_array().unwrap().iter().map(|e| e["id"].clone()).collect::<Vec<_>>(), [json!("m9")], "{r}");
+    assert!(r.get("ids").is_some() && r.get("thread").is_some() && r.get("rail").is_none());
+    have_of(r, &mut held);
+    // the ask answered: its own entry again, changed in place
+    h.commit(&json!({"$":"AskClosed","id":"q1","answer":"yes","at":1700000101})).await.unwrap();
+    let r = ask(&mut ws, 5, "thread.open", json!({"thread":"t1","have":held})).await; let r = &r["result"];
+    let changed: Vec<&str> = r["entries"].as_array().unwrap().iter().map(|e| e["id"].as_str().unwrap()).collect();
+    assert_eq!((changed.len(), r["thread"]["state"].as_str(), r["thread"]["waiting"].as_u64()), (0, Some("idle"), Some(0)), "the thread row again: no longer asking: {r}");
+    assert!(r["ids"].as_array().unwrap().iter().all(|i| i != "ask:q1"), "the answered ask is no entry of the page any more: {r}");
+    assert!(!ask(&mut ws, 6, "thread.open", json!({"thread":"nope"})).await["ok"].as_bool().unwrap());
+}
+
+/// `shell.sync` (feature `shell`): cold, every project with its threads; held and unchanged, only the hashes; a message, only its project again; a project removed, `removed`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn shell_sync_sends_only_the_projects_that_changed() {
+    let (h, port) = up("shellsync").await;
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let ids = |r: &Value, k: &str| -> Vec<String> { r[k].as_array().map(|a| a.iter().map(|x| x["id"].as_str().unwrap().to_string()).collect()).unwrap_or_default() };
+    let cold = ask(&mut ws, 1, "shell.sync", json!({})).await; let c = cold["result"].clone(); assert_eq!(cold["ok"], true, "{cold}");
+    let mut ps = ids(&c, "projects"); ps.sort(); assert_eq!(ps, ["p1", "p2"]);
+    let mut ts = ids(&c, "threads"); ts.sort(); assert_eq!(ts, ["t1", "t2", "t3"], "every thread under its project");
+    assert!(c["sub"].as_u64().unwrap() > 0 && c["h"]["p:p1"].is_string());
+    let held = c["h"].clone();
+    let warm = ask(&mut ws, 2, "shell.sync", json!({"have":held})).await; let w = &warm["result"];
+    for k in ["projects", "threads", "removed", "sections"] { assert!(w.get(k).is_none(), "nothing changed: no {k}: {w}") }
+    h.commit(&json!({"$":"MessagePosted","thread":"t3","msg":"m9","role":"assistant","text":"news","at":1700000100})).await.unwrap();
+    let r = ask(&mut ws, 3, "shell.sync", json!({"have":held})).await; let r = &r["result"];
+    assert_eq!(ids(r, "projects"), ["p2"], "only t3's project: {r}"); assert_eq!(ids(r, "threads"), ["t3"]);
+    h.commit(&json!({"$":"ProjectRemoved","id":"p2","at":1700000101})).await.unwrap();
+    let r = ask(&mut ws, 4, "shell.sync", json!({"have":held})).await; let r = &r["result"];
+    assert_eq!(r["removed"], json!(["p2"]), "{r}"); assert!(r.get("projects").is_none(), "p1 is as held");
+}
+
+/// The home (feature `home`): `hello.home` says where the uberbot lives as this hub sees it, and a lists subscription is told when that changes (`k:"home"`).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn the_hello_says_where_the_home_is_and_a_move_of_it_is_pushed() {
+    let (h, port) = up("homepush").await;
+    let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await;
+    let home = &hello["home"];
+    assert_eq!((home["kind"].as_str(), home["online"].as_bool(), home["queuedCount"].as_u64(), home["canMoveHere"].as_bool()), (Some("local"), Some(true), Some(0), Some(false)), "{hello}");
+    let sub = ask(&mut ws, 1, "subscribe", json!({"topic":"lists"})).await["result"]["sub"].clone();
+    h.commit(&json!({"$":"SettingSet","key":"home.at","value":json!({"link":"L9","name":"desktop","url":"https://desktop.example:8443","at":1}).to_string(),"at":1700000200})).await.unwrap();
+    let got = loop { let v = next(&mut ws).await; if v["t"] == "d" && v["k"] == "home" { break v } };
+    assert_eq!(got["sub"], sub);
+    assert_eq!((got["home"]["kind"].as_str(), got["home"]["name"].as_str(), got["home"]["online"].as_bool(), got["home"]["canMoveHere"].as_bool()), (Some("peer"), Some("desktop"), Some(true), Some(true)), "{got}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn settings_accounts_link_resolves_for_phones_and_hello_carries_no_provider() {
+    let (_h, port) = up("link-settings").await;
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert!(hello.get("noProvider").is_some(), "hello carries noProvider field: {hello}");
+    let r = ask(&mut ws, 1, "link.resolve", json!({"url":"backplane://settings/accounts","thread":""})).await;
+    assert_eq!(r["result"], json!({"kind":"settings","page":"accounts"}));
+}
+
+fn probed_models(installed: &[&str]) -> Value {
+    let mut about = serde_json::Map::new();
+    for (agent, _) in crate::present::keys::AGENTS {
+        let cli = if installed.contains(agent) { format!("/usr/bin/{agent}") } else { String::new() };
+        about.insert((*agent).to_string(), json!({"cli": cli}));
+    }
+    json!({"probed": true, "about": about})
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_populates_no_provider_and_live_clears_over_socket() {
+    let (h, port) = up("np-hello").await;
+    let mut guard = crate::settings::provider_notice::override_for_test(&h.hub, false, probed_models(&[]));
+    crate::settings::provider_notice::publish(&h.hub).await;
+    let mut ws_cached = open(port, "&enc=json").await;
+    let hello_cached = next(&mut ws_cached).await;
+    assert!(hello_cached["noProvider"].is_null(), "cached negative probe must not populate hello.noProvider before live scan: {hello_cached}");
+    drop(ws_cached);
+
+    guard = crate::settings::provider_notice::override_for_test(&h.hub, true, probed_models(&[]));
+    crate::settings::provider_notice::publish(&h.hub).await;
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert_eq!(hello["noProvider"]["reason"], "none_installed", "{hello}");
+    assert_eq!(hello["noProvider"]["url"], "backplane://settings/accounts");
+
+    let _ok_guard = crate::settings::provider_notice::override_for_test(&h.hub, true, probed_models(&["claude"]));
+    drop(guard);
+    crate::settings::provider_notice::publish(&h.hub).await;
+    let clear = loop {
+        let v = next(&mut ws).await;
+        if v["t"] == "info" && v["info"].get(crate::settings::provider_notice::INFO_KEY).is_some() {
+            break v;
+        }
+    };
+    assert_eq!(clear["info"][crate::settings::provider_notice::INFO_KEY], "");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_composer_btw_and_thread_create_refuse_without_side_effects_when_no_provider() {
+    let (h, port) = up("np-guard").await;
+    let _guard = crate::settings::provider_notice::override_for_test(&h.hub, true, probed_models(&[]));
+    let mut ws = open(port, "&enc=json").await;
+    let _hello = next(&mut ws).await;
+    let n0 = h.hub.store.len();
+
+    let btw = ask(&mut ws, 1, "composer.run", json!({"thread":"t1","text":"/btw why"})).await;
+    assert_eq!(btw["ok"], false, "{btw}");
+    assert_eq!(btw["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(btw["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+
+    let create_with_text = ask(&mut ws, 2, "thread.create", json!({"project":"p1","text":"hello world"})).await;
+    assert_eq!(create_with_text["ok"], false, "{create_with_text}");
+    assert_eq!(create_with_text["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(create_with_text["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+    assert_eq!(h.hub.store.len(), n0, "refused thread.create with initial prompt must leave zero ThreadCreated events");
+
+    let empty_create = ask(&mut ws, 3, "thread.create", json!({"project":"p1"})).await;
+    assert_eq!(empty_create["ok"], true, "opening an empty thread remains allowed so user sees proactive banner: {empty_create}");
+}
+
+#[test] fn data_user_message_carries_resolved_model_refs_only() {
+    let models_json = r#"{"claude":[{"value":"opus","label":"Opus 5.5","ok":true,"why":""},{"value":"claude-fable-5-2[1m]","label":"Fable 5.2","ok":true,"why":""}],"antigravity":[{"value":"gemini-4-neon","label":"Gemini 4 Neon","ok":true,"why":""}]}"#;
+    let mut en = json!({"id":"m1","kind":"user","text":"try &antigravity/gemini-4-neon, &claude/claude-fable-5-2[1m] and &provider/model","at":1});
+    with_refs_with(&mut en, Some(models_json));
+    assert_eq!(en["refs"], json!([
+        {"word":"&antigravity/gemini-4-neon","kind":"model","id":"","label":"Gemini 4 Neon"},
+        {"word":"&claude/claude-fable-5-2[1m]","kind":"model","id":"","label":"Fable 5.2"}
+    ]));
+
+    let mut none = json!({"id":"m2","kind":"user","text":"try &provider/model only","at":2});
+    with_refs_with(&mut none, Some(models_json));
+    assert!(none.get("refs").is_none(), "unresolved model ref must not attach refs: {none}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_models_favorite_toggles_pushes_deltas_and_enriches_picker() {
+    let (_hub, port) = up("favorites").await;
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert_eq!(hello["favoriteModels"], json!([]));
+
+    let sub = ask(&mut ws, 1, "subscribe", json!({"topic":"lists"})).await;
+    assert_eq!(sub["ok"], true);
+
+    let r1 = ask(&mut ws, 2, "models.favorite", json!({"provider":"claude","model":"opus"})).await;
+    assert_eq!(r1["ok"], true, "{r1}");
+    assert_eq!(r1["result"], json!({"starred":true,"favorites":["claude/opus"]}));
+
+    let push1 = loop {
+        let v = next(&mut ws).await;
+        if v["t"] == "d" && v["k"] == "favorites" { break v; }
+    };
+    assert_eq!(push1["favorites"], json!(["claude/opus"]));
+
+    let pk = ask(&mut ws, 3, "thread.picker", json!({"thread":"t1"})).await;
+    assert_eq!(pk["ok"], true, "{pk}");
+    let picker = &pk["result"]["picker"];
+    assert_eq!(picker["favoriteKeys"], json!(["claude/opus"]));
+    assert_eq!(picker["favorites"][0]["key"], "claude/opus");
+    assert_eq!(picker["favorites"][0]["provider"], "claude");
+    assert_eq!(picker["favorites"][0]["model"], "opus");
+    assert!(picker["agents"]["claude"]["models"].is_array());
+
+    // A fresh connection sees persisted favoriteModels in hello
+    let mut ws2 = open(port, "&enc=json").await;
+    let hello2 = next(&mut ws2).await;
+    assert_eq!(hello2["favoriteModels"], json!(["claude/opus"]));
+
+    // Unstarring clears and pushes empty favorites
+    let r2 = ask(&mut ws, 4, "models.favorite", json!({"provider":"claude","model":"opus","on":false})).await;
+    assert_eq!(r2["result"], json!({"starred":false,"favorites":[]}));
+    let push2 = loop {
+        let v = next(&mut ws).await;
+        if v["t"] == "d" && v["k"] == "favorites" { break v; }
+    };
+    assert_eq!(push2["favorites"], json!([]));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_link_resolve_handles_bot_thread_file_urls_and_download_fallback() {
+    let base = crate::plat::tmp::canonical("link-bot-file");
+    let proj_with_thread = base.join("proj-a");
+    let proj_no_thread = base.join("proj-b");
+    let proj_wt_only = base.join("proj-c");
+    let wt_dir = proj_wt_only.join(".backplane/worktrees/w1");
+    let outside = base.join("outside");
+    for d in [proj_with_thread.join("docs"), proj_no_thread.join("docs"), wt_dir.clone(), outside.clone()] {
+        std::fs::create_dir_all(&d).unwrap();
+    }
+    let pdf_a = proj_with_thread.join("docs/Parts List.pdf");
+    let pdf_b = proj_no_thread.join("docs/No Thread.pdf");
+    let pdf_c = proj_wt_only.join("docs/Main Only.pdf");
+    std::fs::create_dir_all(proj_wt_only.join("docs")).unwrap();
+    std::fs::write(&pdf_a, b"%PDF-1.4\na").unwrap();
+    std::fs::write(&pdf_b, b"%PDF-1.4\nb").unwrap();
+    std::fs::write(&pdf_c, b"%PDF-1.4\nc").unwrap();
+    std::fs::write(proj_with_thread.join(".env"), b"SECRET=1").unwrap();
+    std::fs::write(outside.join("secret.pdf"), b"%PDF-1.4\nout").unwrap();
+
+    let more = format!(
+        "{{\"$\":\"ProjectCreated\",\"id\":\"pa\",\"title\":\"A\",\"root\":{},\"at\":1700000100}}\n\
+         {{\"$\":\"ProjectCreated\",\"id\":\"pb\",\"title\":\"B\",\"root\":{},\"at\":1700000101}}\n\
+         {{\"$\":\"ProjectCreated\",\"id\":\"pc\",\"title\":\"C\",\"root\":{},\"at\":1700000102}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"ta\",\"project\":\"pa\",\"title\":\"A1\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000110}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"tc_wt\",\"project\":\"pc\",\"title\":\"Cwt\",\"env\":\"worktree\",\"branch\":\"b\",\"worktree\":{},\"provider\":\"claude\",\"model\":\"\",\"at\":1700000111}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"bot_th\",\"project\":\"\",\"title\":\"Bot\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000112}}\n",
+        json!(proj_with_thread.to_string_lossy()),
+        json!(proj_no_thread.to_string_lossy()),
+        json!(proj_wt_only.to_string_lossy()),
+        json!(wt_dir.to_string_lossy()),
+    );
+    let (_h, port) = up_with("bot-file", &more).await;
+    let mut ws = open(port, "&enc=json").await;
+    next(&mut ws).await;
+
+    let pct_path = |p: &std::path::Path| format!("file://{}", p.to_string_lossy().replace(' ', "%20"));
+
+    // Bot thread linking to a file in a registered project with an active non-worktree thread -> kind: "file"
+    let r1 = ask(&mut ws, 1, "link.resolve", json!({"url": pct_path(&pdf_a), "thread": "bot_th"})).await;
+    assert_eq!(r1["result"]["kind"], "file", "{r1}");
+    assert_eq!(r1["result"]["thread"], "ta", "{r1}");
+    assert_eq!(r1["result"]["path"], "docs/Parts List.pdf", "{r1}");
+
+    // Bot thread linking to a file in a registered project with NO threads -> kind: "download"
+    let r2 = ask(&mut ws, 2, "link.resolve", json!({"url": pct_path(&pdf_b), "thread": "bot_th"})).await;
+    assert_eq!(r2["result"]["kind"], "download", "{r2}");
+    assert_eq!(r2["result"]["path"], pdf_b.to_string_lossy().as_ref(), "{r2}");
+    assert_eq!(r2["result"]["name"], "No Thread.pdf", "{r2}");
+    assert_eq!(r2["result"]["size"], 10, "{r2}");
+
+    // Project whose only thread is a worktree that doesn't contain the file -> kind: "download" (not a 404 viewer thread)
+    let r3 = ask(&mut ws, 3, "link.resolve", json!({"url": pct_path(&pdf_c), "thread": "bot_th"})).await;
+    assert_eq!(r3["result"]["kind"], "download", "{r3}");
+    assert_eq!(r3["result"]["path"], pdf_c.to_string_lossy().as_ref(), "{r3}");
+
+    // Security refusals: .env inside project and file outside all projects -> kind: "none"
+    let r4 = ask(&mut ws, 4, "link.resolve", json!({"url": format!("file://{}/.env", proj_with_thread.to_string_lossy()), "thread": "bot_th"})).await;
+    assert_eq!(r4["result"]["kind"], "none", "{r4}");
+    let r5 = ask(&mut ws, 5, "link.resolve", json!({"url": format!("file://{}/secret.pdf", outside.to_string_lossy()), "thread": "bot_th"})).await;
+    assert_eq!(r5["result"]["kind"], "none", "{r5}");
 }

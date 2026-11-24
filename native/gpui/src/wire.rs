@@ -52,7 +52,71 @@ pub fn decode(bytes: &[u8]) -> Result<Value> {
     }
     /* i18n-ok: decoder errors, logged */ let mut r=Reader{bytes,at:0,nodes:0};let value=r.item(0)?;ensure!(r.at==bytes.len(),"trailing CBOR");Ok(value)
 }
+/// Maximum decompressed frame size for `?view=1&z=deflate` (matches the plot cap; `decode` still enforces `MAX_FRAME` for CBOR).
+pub const MAX_INFLATED: usize = 32 << 20;
+
+/// Per-connection raw DEFLATE stream decoder (RFC 1951, sync-flushed per frame).
+pub struct Inflater { inner: flate2::Decompress }
+impl Inflater {
+    pub fn new() -> Self { Self { inner: flate2::Decompress::new(false) } }
+    pub fn feed(&mut self, bytes: &[u8]) -> Result<Vec<u8>> {
+        let mut out = Vec::with_capacity(bytes.len().saturating_mul(3).min(MAX_INFLATED));
+        let mut pos = 0usize;
+        let mut chunk = [0u8; 16384];
+        loop {
+            let before_in = self.inner.total_in();
+            let before_out = self.inner.total_out();
+            let status = self.inner.decompress(&bytes[pos..], &mut chunk, flate2::FlushDecompress::Sync)
+                /* i18n-ok: decoder errors, logged */ .map_err(|e| anyhow::anyhow!("deflate frame error: {e}"))?;
+            let consumed = (self.inner.total_in() - before_in) as usize;
+            let produced = (self.inner.total_out() - before_out) as usize;
+            pos += consumed;
+            if produced > 0 {
+                /* i18n-ok: decoder errors, logged */ ensure!(out.len().saturating_add(produced) <= MAX_INFLATED, "inflated frame exceeds 32 MiB");
+                out.extend_from_slice(&chunk[..produced]);
+            }
+            if status == flate2::Status::StreamEnd { break; }
+            if pos >= bytes.len() && produced < chunk.len() { break; }
+            if consumed == 0 && produced == 0 {
+                /* i18n-ok: decoder errors, logged */ ensure!(pos >= bytes.len(), "deflate frame stalled before end of input");
+                break;
+            }
+        }
+        Ok(out)
+    }
+}
+
 #[cfg(test)] mod tests {
+
+    #[test] fn inflater_roundtrips_multiple_sync_flushed_frames_with_shared_window() {
+        use flate2::{Compress, Compression, FlushCompress};
+        let mut comp = Compress::new(Compression::fast(), false);
+        let mut inf = super::Inflater::new();
+        let f1 = br#"{"t":"reply","id":1,"result":{"rows":[{"id":"a","text":"hello world hello world"}]}}"#;
+        let f2 = br#"{"t":"reply","id":2,"result":{"rows":[{"id":"a","text":"hello world hello world"},{"id":"b","text":"again"}]}}"#;
+        let compress_frame = |c: &mut Compress, src: &[u8]| -> Vec<u8> {
+            let mut out = Vec::new();
+            let mut pos = 0;
+            let mut buf = [0u8; 4096];
+            loop {
+                let bi = c.total_in(); let bo = c.total_out();
+                c.compress(&src[pos..], &mut buf, FlushCompress::Sync).unwrap();
+                pos += (c.total_in() - bi) as usize;
+                let n = (c.total_out() - bo) as usize;
+                out.extend_from_slice(&buf[..n]);
+                if pos >= src.len() && n < buf.len() { break; }
+            }
+            out
+        };
+        let c1 = compress_frame(&mut comp, f1);
+        let c2 = compress_frame(&mut comp, f2);
+        assert_eq!(inf.feed(&c1).unwrap(), f1);
+        assert_eq!(inf.feed(&c2).unwrap(), f2);
+        // Second frame reuses the first frame's dictionary window, so it compresses much smaller than f2.
+        assert!(c2.len() < f2.len() / 2);
+        // Corrupt bytes fail cleanly.
+        assert!(inf.feed(&[0xff, 0xff, 0xff, 0xff]).is_err());
+    }
 
     #[test] fn a_long_view_under_the_frame_cap_decodes() {
         // an array of 100 000 small integers (one byte each) is 100 KB: over the old 50 000-value budget, well under the frame cap

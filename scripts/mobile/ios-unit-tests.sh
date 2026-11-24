@@ -26,7 +26,7 @@ run badge-symbols BadgeSymbolsTests.swift "$ROOT/native/host/src/present/badge.r
 run thread-find ThreadFindTests.swift "" ThreadFind.swift
 run voice-edit VoiceEditTests.swift "$ROOT/test/fixtures/voice-edits.json" VoiceEdit.swift
 run plot-parts PlotPartsTests.swift "" Plot.swift PlotParts.swift
-run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift ThreadGroups.swift TermModels.swift Outbox.swift Copyable.swift ../Shared/Tr.swift ../Shared/TrCatalog.swift
+run wire-json WireJSONTests.swift "" WireJSON.swift DataModels.swift FileFetch.swift ThreadGroups.swift TermModels.swift Outbox.swift Copyable.swift ../Shared/Tr.swift ../Shared/TrCatalog.swift
 run term-stream TermStreamTests.swift "" TermStream.swift
 run vt VtTests.swift "" Vt.swift
 run term-card TermCardTests.swift "" Vt.swift TermCard.swift
@@ -37,9 +37,16 @@ run viewer-backdrop ViewerBackdropTests.swift "" ViewerBackdrop.swift
 run browser-input BrowserInputTests.swift "$ROOT/test/mobile/browser_input_cases.json" BrowserInput.swift
 run google-loop GoogleLoopTests.swift "" GoogleLoopLogic.swift
 run swarm-model SwarmModelTests.swift "" SwarmModel.swift Copyable.swift
+run clone-model CloneModelTests.swift "" CloneModel.swift
 run section-menu SectionMenuTests.swift "" SectionMenu.swift
 run mcp-page McpPageTests.swift "" McpPage.swift
 run cat-pick CatPickTests.swift "" CatPick.swift
 run reply-images ReplyImagesTests.swift "" ReplyImages.swift
+run reply-draft ReplyDraftTests.swift "" ReplyDraft.swift
 run viewer-rail ViewerRailTests.swift "" ViewerRail.swift
+run hub-restart HubRestartTests.swift "" HubRestart.swift
+run link-grammar LinkGrammarTests.swift "" DataLinkGrammar.swift
+run file-fetch FileFetchTests.swift "" FileFetch.swift DataLinkGrammar.swift
+run plan-floorplanner PlanFloorplannerTests.swift "" PlanFloorplannerModel.swift
 sh "$ROOT/scripts/mobile/ios-outbox-test.sh" && echo "ok outbox"
+run home-model HomeModelTests.swift "" HomeModel.swift

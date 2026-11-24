@@ -42,6 +42,8 @@ pub struct PlotView {
     pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>, pub tess_ahead: std::rc::Rc<std::cell::Cell<bool>>,
     /// What the probe lights, tessellated for that exact camera and those lit pieces (a hash of `lit`).
     pub lit_tess: Option<(TessKey, u64, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
+    /// The search field while the Mech part picker is open.
+    pub part_search: Option<Entity<super::composer::Composer>>,
     /// The Boards menu (viewers::boards), held on the Board/Schematic page's camera for every page that shows it.
     pub boards: crate::viewers::boards::BoardsUi,
     /// The hub's probe this canvas last lit, with the source it was lit on ("<key>\u{1}<info>"): another source or another probe lights it again.
@@ -210,11 +212,12 @@ pub fn tap_at(app: &mut Backplane, slot: usize, key: &str, off: u32, at: (f32, f
     let (x, y) = v.to_plot(at.0 - f32::from(b.origin.x), at.1 - f32::from(b.origin.y), w, h);
     let found = app.screens.plot.frame_for(key).and_then(|f| super::plot::hit(f, x, y, 14. / v.scale, off));
     let pv = app.screens.pv(slot); pv.card = None;
-    for q in [0usize, 1, 2] { app.screens.pv(q).lit.clear(); }
+    for pv in app.screens.plots.mounted() { pv.lit.clear(); }
     let pv = app.screens.pv(slot);
     match found {
         Some(p) => { let req = serde_json::json!({"key": key, "at": p.chunk, "idx": p.info}); pv.picked = Some(p); app.screens.pick_slot = Some(slot);
-            let _ = app.tx.try_send(Command::Rpc("kicad.info".into(), crate::screens::settings::Secret(req), "pick")); }
+            if slot >= 3 { dock_request(app, slot, "pick", req); }
+            else { let _ = app.tx.try_send(Command::Rpc("kicad.info".into(), crate::screens::settings::Secret(req), "pick")); } }
         None => { pv.picked = None; if app.data["thread"]["viewer"]["probe"].as_str().map_or(false, |p| !p.is_empty()) { keep_probe(app, None); } }
     }
 }
@@ -430,7 +433,7 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
                 "+" | "=" | "plus" => Some(v.zoom(1.25, w / 2., h / 2., w, h, pv.fitted)), "-" | "minus" => Some(v.zoom(0.8, w / 2., h / 2., w, h, pv.fitted)),
                 "0" | "home" => { pv.view = None; cx.notify(); return }
                 // (a Split's probe is lit in both its panes: Escape clears it in both)
-                "escape" => { let all: &[usize] = if slot == 0 { &[0] } else { &[1, 2] }; for &i in all { let p = this.screens.pv(i); p.picked = None; p.card = None; p.lit.clear(); } keep_probe(this, None); cx.notify(); return }
+                "escape" => { for p in this.screens.plots.mounted() { p.picked = None; p.card = None; p.lit.clear(); } keep_probe(this, None); cx.notify(); return }
                 _ => None,
             };
             if let Some(nv) = nv { pv.touched = true; pv.view = Some(nv); super::follow::person_input(this, slot); cx.notify(); }
@@ -439,15 +442,9 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         .on_mouse_down(crate::mousecfg::BUTTONS[1], cx.listener(move |this, e: &MouseDownEvent, window, cx| { plot_down(this, slot, e, window, cx) }))
         .on_mouse_down(crate::mousecfg::BUTTONS[2], cx.listener(move |this, e: &MouseDownEvent, window, cx| { plot_down(this, slot, e, window, cx) }))
         .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
-            let pv = this.screens.pv(slot);
-            if let (Some((x, y)), Some(v), Some(act), Some(b), true) = (pv.drag, pv.view, pv.drag_act, pv.bounds, e.dragging()) {
-                let (nx, ny) = (f32::from(e.position.x), f32::from(e.position.y));
-                let moved = match act {
-                    Action::Pan => { pv.view = Some(v.pan(nx - x, ny - y)); true }
-                    Action::Zoom => { pv.view = Some(v.zoom(crate::mousecfg::drag_zoom_factor(ny - y, crate::mousecfg::invert()), f32::from(px(x) - b.origin.x), f32::from(px(y) - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted)); true }
-                    _ => false,
-                };
-                pv.drag = Some((nx, ny)); if moved { person_moved(this, slot); } cx.notify();
+            if plot_drag(this.screens.pv(slot), e) {
+                person_moved(this, slot);
+                cx.notify();
             }
         }))
         .on_mouse_up(MouseButton::Left, cx.listener(move |this, e: &MouseUpEvent, _, cx| { plot_up(this, slot, &key, off, e, cx) }))
@@ -484,6 +481,33 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
 
 /// The person moved or zoomed the view: the one place every plot input ends, so a camera that follows something lets go here (follow pauses).
 fn person_moved(app: &mut Backplane, slot: usize) { app.screens.pv(slot).touched = true; super::follow::person_input(app, slot); }
+
+/// Apply motion only for the button that began this gesture.
+fn plot_drag(pv: &mut PlotView, event: &MouseMoveEvent) -> bool {
+    if event.pressed_button.is_none() || event.pressed_button != pv.drag_btn {
+        return false;
+    }
+    let (Some((x, y)), Some(view), Some(action), Some(bounds)) =
+        (pv.drag, pv.view, pv.drag_act, pv.bounds)
+    else {
+        return false;
+    };
+    let (nx, ny) = (f32::from(event.position.x), f32::from(event.position.y));
+    pv.drag = Some((nx, ny));
+    pv.view = Some(match action {
+        Action::Pan => view.pan(nx - x, ny - y),
+        Action::Zoom => view.zoom(
+            crate::mousecfg::drag_zoom_factor(ny - y, crate::mousecfg::invert()),
+            f32::from(px(x) - bounds.origin.x),
+            f32::from(px(y) - bounds.origin.y),
+            f32::from(bounds.size.width),
+            f32::from(bounds.size.height),
+            pv.fitted,
+        ),
+        _ => return false,
+    });
+    true
+}
 
 /// A button went down on the plot: the table says whether it drags (and what the drag does) and whether a click of it selects.
 fn plot_down(this: &mut Backplane, slot: usize, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Backplane>) {
@@ -545,7 +569,7 @@ pub fn probe_part(app: &mut Backplane, r: &str) {
     if r.is_empty() { if app.data["thread"]["viewer"]["probe"].as_str().map_or(false, |p| !p.is_empty()) { keep_probe(app, None); } return }
     let Some(card) = super::plot::card(&format!("footprint {r};ref={r}")) else { return }; // i18n-ok: a probe's text, not drawn
     // (what a canvas had tapped is no longer the probe: its own mark goes, the hub's copy lights the part there)
-    for q in [0usize, 1, 2] { let pv = app.screens.pv(q); pv.picked = None; }
+    for pv in app.screens.plots.mounted() { pv.picked = None; }
     keep_probe(app, Some(&card));
     super::xprobe::tapped(app, &card);
 }
@@ -557,6 +581,77 @@ pub fn probed_part(app: &Backplane) -> String {
 }
 /// The probe this window just told the hub (and when): until the hub's copy says the same (or 3 s pass), the hub's older probe is not drawn over it.
 static PROBE_SENT: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+fn slot_key(app: &Backplane, slot: usize) -> Option<String> {
+    match slot {
+        0 => app.screens.plot.frame.as_ref().map(|f| f.key.clone()),
+        1 | 2 => app.data["thread"]["viewer"]["panes"][slot-1]["key"].as_str().map(str::to_owned),
+        _ => app.screens.tile_frame(app.screens.plots.tile_for_slot(slot)?).map(|f| f.key.clone()),
+    }
+}
+
+pub fn dock_plot_targets(app: &Backplane) -> Vec<(usize, String)> {
+    let viewer = &app.data["thread"]["viewer"];
+    let maximized = viewer["layout"]["maximized"].as_str();
+    viewer["tiles"].as_object().into_iter().flatten().filter_map(|(id, tile)| {
+        if maximized.is_some_and(|shown| shown != id)
+            || !matches!(tile["kind"].as_str(), Some("board" | "gerbers" | "schematic")) { return None; }
+        let slot = app.screens.plots.tile_slot(id)?;
+        Some((slot, slot_key(app, slot)?))
+    }).collect()
+}
+
+fn dock_request(app: &Backplane, slot: usize, action: &str, params: serde_json::Value) {
+    let Some(tile) = app.screens.plots.tile_for_slot(slot) else { return };
+    let target = serde_json::json!({"thread":app.screens.plots.owner, "tile":tile, "slot":slot,
+        "key":params["key"], "action":action, "probe":app.screens.plots[slot].probe_at,
+        "chunk":params["at"], "piece":params["idx"]});
+    let method = if action == "pick" { "kicad.info" } else { "kicad.probe" };
+    let _ = app.tx.try_send(Command::DockProbe { method, params, target });
+}
+
+fn probe_target_matches(reply: &serde_json::Value, owner: &str, slot: usize, key: Option<&str>) -> bool {
+    key.is_some() && reply["thread"].as_str() == Some(owner)
+        && reply["slot"].as_u64() == Some(slot as u64) && reply["key"].as_str() == key
+}
+
+#[cfg(test)]
+mod dock_probe_tests {
+    #[test]
+    fn replies_follow_the_exact_mount_and_source() {
+        let reply = serde_json::json!({"thread":"thread","slot":7,"key":"board"});
+        let matches = |owner, slot, key| super::probe_target_matches(&reply, owner, slot, Some(key));
+        assert!(matches("thread",7,"board"));
+        assert!(!matches("other",7,"board"));
+        assert!(!matches("thread",8,"board"));
+        assert!(!matches("thread",7,"new-board"));
+    }
+}
+
+pub fn dock_probe_reply(app: &mut Backplane, reply: &serde_json::Value) {
+    let Some(tile) = reply["tile"].as_str() else { return };
+    let Some(slot) = app.screens.plots.tile_slot(tile) else { return };
+    if !probe_target_matches(reply, &app.screens.plots.owner, slot, slot_key(app, slot).as_deref()) { return; }
+    if reply["action"] == "pick" && app.screens.pick_slot != Some(slot) { return; }
+    let pv = app.screens.pv(slot);
+    if reply["action"] == "pick" {
+        let Some(p) = pv.picked.as_ref() else { return };
+        if reply["chunk"].as_u64() != Some(p.chunk as u64) || reply["piece"].as_u64() != Some(p.info as u64) { return; }
+        let Some(card) = reply["result"]["info"].as_str().and_then(super::plot::card) else { return };
+        pv.card = Some(card.clone());
+        cross_probe(app, slot, &card);
+        report_state(app);
+    } else if reply["probe"].as_str() == Some(pv.probe_at.as_str()) {
+        let pieces = reply["result"]["matches"].as_array().into_iter().flatten().filter_map(|p|
+            Some((p[0].as_u64()? as usize, p[1].as_u64()? as usize)));
+        if reply["action"] == "frame" {
+            frame_on(app, slot, &pieces.collect::<Vec<_>>());
+        } else {
+            let room = 20000usize.saturating_sub(pv.lit.len());
+            pv.lit.extend(pieces.take(room));
+        }
+    }
+}
+
 /// The pieces of the probed part or connection on the plot `key` on canvas `slot`: a part by its `ref` on the schematic and the board (every unit of it);
 /// a board net by its name on the board, and on a schematic the groups its pads' pins are in; a schematic wire, label or junction by its group on its own
 /// sheet, and on the board the nets of the pins in it (the hub finds those through the other drawing, `card.src`). The hub answers with the pieces of the
@@ -564,7 +659,7 @@ static PROBE_SENT: std::sync::Mutex<Option<(String, std::time::Instant)>> = std:
 pub fn probe_one(app: &mut Backplane, slot: usize, key: &str, card: &super::plot::Card) {
     if key.is_empty() { return }
     let get = |k: &str| card.rows.iter().find(|r| r.0 == k).map(|r| r.1.clone()).filter(|v| !v.is_empty());
-    let tag: &'static str = ["probe0", "probe1", "probe2"][slot.min(2)];
+
     let board = |k: &str| k.starts_with("0|");
     // (a schematic pin names its part as `symbol`: the part is probed)
     let net = get("net").and_then(|n| if board(key) { Some(n) } else if board(&card.src) { Some(format!("{}\u{1}{n}", card.src)) } else { None });
@@ -573,17 +668,21 @@ pub fn probe_one(app: &mut Backplane, slot: usize, key: &str, card: &super::plot
     // (a difference of Gerbers vs board is lit by its place: kicad/gerber/compare.rs)
     for (name, value) in [("ref", get("ref").or_else(|| get("symbol"))), ("net", net), ("g", group), ("at", get("at"))] {
         let Some(value) = value else { continue };
-        let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": name, "value": value})), tag));
+        let params = serde_json::json!({"key":key,"name":name,"value":value});
+        if slot >= 3 { dock_request(app, slot, "light", params); }
+        else { let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(params), ["probe0","probe1","probe2"][slot])); }
     }
 }
 /// A tapped piece's net and part, lit on every plot the page shows (the web's cross-probe), and kept by the hub.
 pub fn cross_probe(app: &mut Backplane, slot: usize, card: &super::plot::Card) {
     let panes = app.data["thread"]["viewer"]["panes"].as_array().cloned().unwrap_or_default();
-    let targets: Vec<(usize, String)> = if panes.len() >= 3 { vec![(1, panes[0]["key"].as_str().unwrap_or("").to_string()), (2, panes[1]["key"].as_str().unwrap_or("").to_string())] }
+    let targets: Vec<(usize, String)> = if slot >= 3 {
+        dock_plot_targets(app)
+    } else if panes.len() >= 3 { vec![(1, panes[0]["key"].as_str().unwrap_or("").to_string()), (2, panes[1]["key"].as_str().unwrap_or("").to_string())] }
         else { vec![(slot, app.screens.plot.frame.as_ref().map(|f| f.key.clone()).unwrap_or_default())] };
     // the source it was picked on goes with it: a connection is found on the other drawing through it
     let mut card = card.clone();
-    if card.src.is_empty() { card.src = if slot == 0 { app.screens.plot.frame.as_ref().map(|f| f.key.clone()) } else { panes.get(slot - 1).and_then(|p| p["key"].as_str()).map(str::to_string) }.unwrap_or_default(); }
+    if card.src.is_empty() { card.src = slot_key(app, slot).unwrap_or_default(); }
     let (card, text) = (&card, card_text(&card));
     // (lit here at once: the hub's copy of this probe, when it comes back, finds it already lit)
     for (s, key) in targets {
@@ -615,7 +714,10 @@ pub fn probe_sync(cx: &mut Context<Backplane>, slot: usize, pv: &mut PlotView, k
     // the same probe on the same source is already lit (the tap that made it); otherwise light it here
     pv.card = Some(card.clone()); pv.lit.clear();
     let key = key.to_string();
-    cx.spawn(async move |this, cx| { let _ = this.update(cx, |app, _| probe_one(app, slot, &key, &card)); }).detach();
+    let expected = pv.probe_at.clone();
+    cx.spawn(async move |this, cx| { let _ = this.update(cx, |app, _| {
+        if app.screens.plots[slot].probe_at == expected { probe_one(app, slot, &key, &card); }
+    }); }).detach();
 }
 
 /// The box (plot micrometres) around the lit pieces on these chunks, padded so the part sits in some of its surroundings; None with nothing lit.
@@ -630,13 +732,14 @@ pub fn lit_box(chunks: &[std::sync::Arc<super::plot::Chunk>], lit: &[(usize, usi
 /// "Bring it into view" (0.14's probe chip): canvas `slot`'s camera on the probed part (its pieces asked of the hub by its ref; the answer comes as
 /// `Event::Probe(3 + slot, ..)`, `frame_on`), or on the lit net or piece when there is no part.
 pub fn bring_into_view(app: &mut Backplane, slot: usize) {
-    let key = if slot == 0 { app.screens.plot.frame.as_ref().map(|f| f.key.clone()) } else { app.data["thread"]["viewer"]["panes"][slot - 1]["key"].as_str().map(str::to_string) }.unwrap_or_default();
+    let key = slot_key(app, slot).unwrap_or_default();
     let card = app.screens.pv(slot).card.clone().or_else(|| app.data["thread"]["viewer"]["probe"].as_str().and_then(super::plot::card));
     // a part by its reference; a place (Gerbers vs board's difference) by its `at`: asked again, framed when the answer comes
     let r = card.and_then(|c| c.rows.iter().find(|x| x.0 == "ref" || x.0 == "symbol").map(|x| ("ref", x.1.clone())).or_else(|| c.rows.iter().find(|x| x.0 == "at").map(|x| ("at", x.1.clone())))).filter(|r| !r.1.is_empty());
     if let (Some((name, r)), false) = (r, key.is_empty()) {
-        let tag: &'static str = ["probe3", "probe4", "probe5"][slot.min(2)];
-        let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": name, "value": r})), tag));
+        let params = serde_json::json!({"key":key,"name":name,"value":r});
+        if slot >= 3 { dock_request(app, slot, "frame", params); }
+        else { let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(params), ["probe3","probe4","probe5"][slot])); }
         return
     }
     let lit = app.screens.pv(slot).lit.clone();
@@ -644,7 +747,7 @@ pub fn bring_into_view(app: &mut Backplane, slot: usize) {
 }
 /// The camera of canvas `slot` on these pieces, no closer than 12 times the whole drawing's fit.
 pub fn frame_on(app: &mut Backplane, slot: usize, pieces: &[(usize, usize)]) {
-    let key = if slot == 0 { app.screens.plot.frame.as_ref().map(|f| f.key.clone()) } else { app.data["thread"]["viewer"]["panes"][slot - 1]["key"].as_str().map(str::to_string) }.unwrap_or_default();
+    let key = slot_key(app, slot).unwrap_or_default();
     let Some(f) = app.screens.plot.frame_for(&key) else { return };
     let chunks = f.chunks.clone();
     let pv = app.screens.pv(slot);
@@ -672,9 +775,9 @@ pub fn state_json(v: &serde_json::Value, card: Option<&super::plot::Card>, lit: 
     state["report"] = serde_json::json!(2);
     // a stored layout of several tiles: what it holds ("kind\tsource"), since the page is only the focused tile's
     // (only the tiles on screen: a maximized tile hides the rest)
-    if open != "split" {
+    if super::viewer::is_tiled(v) {
         let visible = v["layout"]["maximized"].as_str().filter(|m| !m.is_empty());
-        if let Some(ts) = v["tiles"].as_object().filter(|t| t.len() >= 2) {
+        if let Some(ts) = v["tiles"].as_object() {
             state["tiles"] = serde_json::json!(ts.iter().filter(|(id, _)| visible.map_or(true, |m| m == id.as_str())).map(|(_, t)| format!("{}\t{}", t["kind"].as_str().unwrap_or(""), t["source"].as_str().unwrap_or(""))).collect::<Vec<_>>());
         }
     }
@@ -687,8 +790,13 @@ pub fn state_json(v: &serde_json::Value, card: Option<&super::plot::Card>, lit: 
 }
 pub fn report_state(app: &mut Backplane) {
     let v = app.data["thread"]["viewer"].clone();
-    let card = [0usize, 1, 2].iter().find_map(|i| app.screens.pv(*i).card.clone());
-    let lit: usize = (0..3).map(|i| app.screens.pv(i).lit.len()).sum();
+    let (card, lit) = if let Some(slot) = v["layout"]["focus"].as_str().and_then(|id| app.screens.plots.tile_slot(id)) {
+        let pv = &app.screens.plots[slot];
+        (pv.card.clone(), pv.lit.len())
+    } else {
+        let card = (0..3).find_map(|i| app.screens.plots[i].card.clone());
+        (card, (0..3).map(|i| app.screens.plots[i].lit.len()).sum())
+    };
     let mut state = state_json(&v, card.as_ref(), lit);
     // the embedded KiCad in this window's pane (Follow agent follows into it: host kicad/follow.rs); a window that cannot hold KiCad says false
     state["kicad"] = serde_json::json!(app.screens.kicad_shown.0); state["kicadFrame"] = serde_json::json!(app.screens.kicad_shown.1);
@@ -702,6 +810,33 @@ pub fn report_state(app: &mut Backplane) {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+
+    #[test]
+    fn plot_pan_moves_the_camera_with_the_button_that_started_it() {
+        let motion = |pressed_button| MouseMoveEvent {
+            position: point(px(30.), px(50.)),
+            pressed_button,
+            modifiers: Modifiers::default(),
+        };
+        for button in [MouseButton::Left, MouseButton::Middle, MouseButton::Right] {
+            let mut plot = PlotView {
+                drag: Some((10., 10.)),
+                drag_act: Some(Action::Pan),
+                drag_btn: Some(button),
+                view: Some(View { cx: 0., cy: 0., scale: 2. }),
+                bounds: Some(Bounds::new(point(px(0.), px(0.)), size(px(300.), px(200.)))),
+                ..PlotView::default()
+            };
+            assert!(!plot_drag(&mut plot, &motion(None)));
+            let other = if button == MouseButton::Left { MouseButton::Right } else { MouseButton::Left };
+            assert!(!plot_drag(&mut plot, &motion(Some(other))));
+            assert!(plot_drag(&mut plot, &motion(Some(button))));
+            let camera = plot.view.unwrap();
+            assert_eq!((camera.cx, camera.cy), (-10., -20.));
+            assert_eq!(plot.drag, Some((30., 50.)));
+        }
+    }
+
     #[test]
     fn stale_tessellation_releases_its_originating_slot() {
         let slot = PlotView::default();
@@ -836,10 +971,10 @@ mod tests {
         let plain = state_json(&json!({"open": "board", "key": "0|/p|"}), None, 0);
         assert!(plain.get("panes").is_none() && plain.get("dir").is_none() && plain.get("file").is_none() && plain.get("tiles").is_none());
         assert_eq!(plain["report"], 2, "this client says it reports the fields a show is read back from");
-        let stored = state_json(&json!({"open": "board", "key": "0|/p|", "tiles": {"t1": {"kind": "board", "source": "a.kicad_pcb"}, "t2": {"kind": "schematic", "source": "a.kicad_sch"}}}), None, 0);
+        let stored = state_json(&json!({"open":"board","tiled":true, "key": "0|/p|", "tiles": {"t1": {"kind": "board", "source": "a.kicad_pcb"}, "t2": {"kind": "schematic", "source": "a.kicad_sch"}}}), None, 0);
         let mut ts: Vec<String> = stored["tiles"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect(); ts.sort();
         assert_eq!(ts, ["board\ta.kicad_pcb", "schematic\ta.kicad_sch"]);
-        let hidden = state_json(&json!({"open": "board", "key": "0|/p|", "layout": {"maximized": "t1"}, "tiles": {"t1": {"kind": "board", "source": "a.kicad_pcb"}, "t2": {"kind": "schematic", "source": "a.kicad_sch"}}}), None, 0);
+        let hidden = state_json(&json!({"open":"board","tiled":true, "key": "0|/p|", "layout": {"maximized": "t1"}, "tiles": {"t1": {"kind": "board", "source": "a.kicad_pcb"}, "t2": {"kind": "schematic", "source": "a.kicad_sch"}}}), None, 0);
         assert_eq!(hidden["tiles"], json!(["board\ta.kicad_pcb"]), "a maximized tile hides the other from the report");
     }
     #[test] fn state_json_reports_gerbers_flag_and_empty_reason() {

@@ -166,8 +166,13 @@ pub fn cache_read(text: &str) -> Option<String> {
 
 /// A program's exit code and stdout, None when it could not start or ran out of time (it is killed then).
 async fn run(cmd: &Path, args: &[&str], env: &[(&str, &str)], limit: Duration) -> Option<(i32, String, String)> {
+    run_unset(cmd, args, env, &[], limit).await
+}
+/// [`run`] with `unset` taken out of the child's environment (used for `agy models` so an SSH-started hub reads a keyring sign-in).
+async fn run_unset(cmd: &Path, args: &[&str], env: &[(&str, &str)], unset: &[&str], limit: Duration) -> Option<(i32, String, String)> {
     let mut c = proc::tokio_cmd(Kind::Agent, cmd);
     if let Some(p) = probe_path() { c.env("PATH", p); }
+    for k in unset { c.env_remove(k); }
     c.args(args).envs(env.iter().copied()).stdin(std::process::Stdio::null()).kill_on_drop(true);
     let out = tokio::time::timeout(limit, c.output()).await.ok()?.ok()?;
     Some((out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()))
@@ -241,8 +246,10 @@ pub async fn detect(home: &Path) -> Found {
         let out = tokio::time::timeout(Duration::from_secs(10), c.output()).await.ok().and_then(Result::ok).map_or(String::new(), |o| String::from_utf8_lossy(&o.stdout).into_owned());
         let mut i = agy::info(&out);
         // no pinned agent: turns run the person's agy CLI (providers/agy_cli.rs), so the picker lists it and the models it offers this sign-in
-        if i.have.is_empty() { if let Some(p) = at("agy") { i.cli = version(&p).await;
-            i.cli_models = run(&p, &["models"], &[], Duration::from_secs(30)).await.filter(|r| r.0 == 0).map_or(vec![], |r| agy::cli_models(&r.1));
+        if i.have.is_empty() { if let Some(p) = at("agy") {
+            let unset = crate::agents::providers::agy_cli::storage_unset_here(&std::path::PathBuf::from(crate::plat::dirs::home_or_empty()));
+            i.cli = version(&p).await;
+            i.cli_models = run_unset(&p, &["models"], &[("AGY_CLI_DISABLE_AUTO_UPDATE", "1")], &unset, Duration::from_secs(30)).await.filter(|r| r.0 == 0).map_or(vec![], |r| agy::cli_models(&r.1));
             // the driver maps a thread's model and effort to agy's variant id from this list (kept only when agy listed something)
             if !i.cli_models.is_empty() { let _ = std::fs::create_dir_all(&root); let _ = std::fs::write(agy::bases_path(&home.to_string_lossy()), agy::bases_json(&agy::fold(&i.cli_models))); } } }
         i };
@@ -252,10 +259,22 @@ pub async fn detect(home: &Path) -> Found {
 
 /// One detection: a list that differs from the one in force is cached, pushed to every client and every view is drawn again. Answers whether it changed.
 pub async fn refresh(hub: &Arc<Hub>) -> bool {
+    super::tools_install::repair_codex_soon(hub);
     let info = info_of(&detect(&hub.cfg.home).await);
-    if !super::models::set_live(&info) { return false }
+    let first_scan = !super::models::probed_here();
+    let changed = super::models::set_live(&info);
+    // Mark live scan completed only after updating live models so callers never combine probed_here with stale cache data.
+    super::models::mark_probed();
+    if !changed {
+        if first_scan {
+            super::provider_notice::publish(hub).await;
+            hub.bump_views();
+        }
+        return false;
+    }
     let _ = std::fs::write(hub.cfg.home.join("models.cache.part"), cache_text(&info)).and_then(|_| std::fs::rename(hub.cfg.home.join("models.cache.part"), hub.cfg.home.join("models.cache")));
     hub.push_all(&json!({"t":"info","info":{"models":super::models::info(),"models.all":super::models::all()}}));
+    super::provider_notice::publish(hub).await;
     hub.bump_views();
     // a thread made before its agent was found (onboarding's first thread, on Claude, with only Codex installed) moves to one that is here
     if let Some(h) = hub.rpc_for("agents.fresh") { let _ = h.call(hub, &crate::api::Caller { gen: String::new(), client: 0 }, &json!(0), "agents.fresh", &json!({})).await; }
@@ -282,7 +301,11 @@ pub fn refresh_soon(hub: &Arc<Hub>) {
 
 /// At start: the list found last time at once, then a detection (after the window is up) and one every 15 minutes. A copy of a real log with no stand-ins probes nothing.
 pub fn start(hub: Arc<Hub>) {
-    if let Some(i) = std::fs::read_to_string(hub.cfg.home.join("models.cache")).ok().as_deref().and_then(cache_read) { super::models::set_live(&i); }
+    let cached = std::fs::read_to_string(hub.cfg.home.join("models.cache")).ok().as_deref().and_then(cache_read);
+    if let Some(i) = &cached {
+        // Warm the picker cache at startup, but keep negative notices/send guards quiet until this process's live scan completes.
+        super::models::set_live(i);
+    }
     if crate::copy::on() && std::env::var("BACKPLANE_AGENTS").map_or(true, |d| d.is_empty()) { return }
     super::models::set_detects();
     tokio::spawn(async move {

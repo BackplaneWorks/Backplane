@@ -44,11 +44,12 @@ impl<V: Render> Element for Entity<V> {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let mut element = self.update(cx, |view, cx| view.render(window, cx).into_any_element());
-        let layout_id = window.with_rendered_view(self.entity_id(), |window| {
-            element.request_layout(window, cx)
-        });
-        (layout_id, element)
+        window.with_rendered_view(self.entity_id(), |window| {
+            let mut element =
+                self.update(cx, |view, cx| view.render(window, cx).into_any_element());
+            let layout_id = element.request_layout(window, cx);
+            (layout_id, element)
+        })
     }
 
     fn prepaint(

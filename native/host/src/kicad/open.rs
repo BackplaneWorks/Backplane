@@ -21,10 +21,13 @@ pub fn program(cli: &str, tool: &str) -> Option<PathBuf> {
 }
 /// Start `tool` on `file`, detached: its own group, no pipes, the hub's working folder never held. Waited for off the hub's threads, so no zombie stays.
 pub fn launch(bin: &Path, file: &str) -> Result<(), String> {
+    let mut _permit = super::geomguard::begin_launch();
+    super::geomguard::fence_deferred(&mut _permit);
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, bin);
     c.arg(file).current_dir(Path::new(file).parent().unwrap_or(Path::new("/"))).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     crate::plat::proc::own_group(&mut c);
     let mut child = c.spawn().map_err(|e| format!("could not start {}: {e}", bin.display()))?;
+    drop(_permit);
     crate::plat::proc::adopt(child.id(), false);
     note_detached(&super::ipc::pro_of(&super::canonical::route(file)), child.id(), file);
     std::thread::spawn(move || { let _ = child.wait(); });
@@ -119,11 +122,16 @@ const NOTHING: &str = "Nothing KiCad is on show in this thread's viewer: show a 
 /// `viewer.state` report), else the thread's design; the runtime, the launch, and its line in the thread.
 pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, String> {
     if crate::copy::on() { return Err("a copy of the log opens nothing".into()) }
+    if let Some((link, far_th)) = thread.split_once('~') {
+        return super::remote::open_for_thread(hub, link, far_th, key).await;
+    }
     let rt = super::ipc::runtime(hub).await; let cli = rt.cli.clone();
     // Backplane's own runtime: never its first-run wizard on a press of Open in KiCad (seed_first_run; a stock KiCad's is left as it is)
     if let Some(root) = super::libtables::config_root() { let v = rt.version.clone(); let _ = tokio::task::spawn_blocking(move || seed_first_run(&root, &v)).await; }
-    // #1185: the person's own KiCad opens without the window geometry an older runtime's embedded KiCad saved (while no KiCad runs)
-    { let (v, h) = (rt.version.clone(), hub.cfg.home.clone()); let _ = tokio::task::spawn_blocking(move || super::geomguard::guard(&v, &h)).await; }
+    // #1185: the person's own KiCad opens without the window geometry an older runtime's embedded KiCad saved (while no KiCad runs);
+    // hold the launch permit until after KiCad is spawned so no deferred exit repair can overlap the launch.
+    let mut launch = super::geomguard::begin_launch();
+    let launch = { let (v, h) = (rt.version.clone(), hub.cfg.home.clone()); tokio::task::spawn_blocking(move || { super::geomguard::guard_for_launch(&mut launch, &v, &h); launch }).await.ok() };
     let key = if key.is_empty() { super::watch::viewer_state(thread).1["key"].as_str().unwrap_or("").to_string() } else { key.to_string() };
     let root = crate::files::root_of(hub, thread).await.map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
     // an Altium project: what is on show (a .PcbDoc or .SchDoc, else the project) opens in the person's Altium
@@ -135,6 +143,7 @@ pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, Str
         return r
     }
     let r = tokio::task::spawn_blocking(move || {
+        let _launch = launch;
         if !key.is_empty() { return shown(&key).and_then(|(tool, file)| run(&cli, tool, &file)) }
         // no viewer report: the thread's own design, if it has one
         let f = project::read(&super::canonical::design_root(&root));

@@ -761,6 +761,7 @@ def main() -> None:
         want_pid = None
         match_sub = None
         only_popup = False
+        include_all = False
         i = 0
         while i < len(args):
             if args[i] == "--pid" and i + 1 < len(args):
@@ -771,6 +772,9 @@ def main() -> None:
                 i += 2
             elif args[i] == "--popup":
                 only_popup = True
+                i += 1
+            elif args[i] == "--all":
+                include_all = True
                 i += 1
             else:
                 i += 1
@@ -785,7 +789,7 @@ def main() -> None:
                 continue
             if match_sub and match_sub not in w["title"].lower() and match_sub not in w["wm_class"].lower():
                 continue
-            if not only_popup and not w["title"] and not w["wm_class"]:
+            if not only_popup and not include_all and not w["title"] and not w["wm_class"]:
                 continue
             filtered.append(w)
         print(json.dumps(filtered))

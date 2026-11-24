@@ -191,7 +191,7 @@ pub fn nudge(hub: &Arc<Hub>) {
 pub fn fetch(url: &str, dir: &Path) -> Result<Vec<u8>, String> {
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let f = dir.join("fetched.json"); let _ = std::fs::remove_file(&f);
-    crate::update::svc::curl(url, &f, MAX_DOC).map_err(|e| e.replace("release feed", "KiCad pin feed"))?;
+    crate::update::svc::curl_for_feed(url, url, &f, MAX_DOC).map_err(|e| e.replace("release feed", "KiCad pin feed"))?;
     let b = std::fs::read(&f).map_err(|e| e.to_string()); let _ = std::fs::remove_file(&f); b
 }
 /// One pass over fetched bytes: open, admit and take into `feed`, and keep a document that is new in `dir`. Ok(whether the pin taken changed, what
@@ -376,6 +376,8 @@ mod tests {
         let get = |n: &str| fetch(&format!("{base}/{n}"), &d.join("scratch"));
         // offline (nothing listens on that port any more) and a 404: the compiled pin stands
         assert!(apply(&mut f, fetch("http://127.0.0.1:9/kicad-pins.json", &d.join("scratch")), &k, &d, Some(&install::LINUX), NOW, "").unwrap_err().contains("could not reach the KiCad pin feed"));
+        assert!(fetch("http://example.com/kicad-pins.json", &d.join("scratch")).unwrap_err().contains("outside allowed protocol"));
+        assert!(fetch("https://user:pass@example.com/kicad-pins.json", &d.join("scratch")).unwrap_err().contains("unsafe release URL"));
         assert!(apply(&mut f, get("missing.json"), &k, &d, Some(&install::LINUX), NOW, "").is_err());
         assert_eq!(f.taken(&install::LINUX, NOW), None);
         // the published one: taken, and kept on disk
@@ -445,7 +447,7 @@ mod tests {
             let files: std::collections::HashMap<String, Vec<u8>> = [("manifest.json", m.clone()), ("manifest.json.sig", sig.as_ref().to_vec()), ("manifest.json.keyid", b"k1".to_vec())].into_iter().map(|(n, b)| (format!("mem://{n}"), b)).collect();
             let get = |u: &str, out: &Path, _: u64| -> Result<(), String> { std::fs::write(out, files.get(u).ok_or("404")?).map_err(|e| e.to_string()) };
             let listed = crate::update::run::listing(br#"[{"tag_name":"v0.16.2","prerelease":false,"draft":false,"assets":[{"name":"manifest.json","browser_download_url":"mem://manifest.json"},{"name":"manifest.json.sig","browser_download_url":"mem://manifest.json.sig"},{"name":"manifest.json.keyid","browser_download_url":"mem://manifest.json.keyid"}]}]"#).unwrap();
-            let r = crate::update::run::find(&crate::update::run::Ask { current: "0.16.0", channel: "nightly", target: "linux-x64", keys: &keys(), bad: &[] }, &listed, &d, &get);
+            let r = crate::update::run::find(&crate::update::run::Ask { current: "0.16.0", channel: "stable", target: "linux-x64", keys: &keys(), bad: &[] }, &listed, &d, &get);
             assert!(r.as_ref().is_err_and(|e| e.contains("lists no assets") || e.contains("newer Backplane")), "{what}: {r:?}");
         }
     }

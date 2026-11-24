@@ -289,8 +289,12 @@ fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usiz
     let gs = |k: &str, d: &str| p.get(k).and_then(Value::as_str).unwrap_or(d).to_string();
     let env = gs("env", f.get("thread.env", "auto"));
     let title = gs("title", "New thread");
-    let provider = gs("provider", f.default_agent.as_deref().unwrap_or(f.get("agent.provider", "claude")));
-    let model = gs("model", f.get("agent.model", ""));
+    let default_prov = f.default_agent.as_deref().unwrap_or(f.get("agent.provider", "claude"));
+    let explicit_prov = p.get("provider").and_then(Value::as_str);
+    let provider = explicit_prov.unwrap_or(default_prov).to_string();
+    let default_model = if explicit_prov.is_some_and(|x| x != default_prov) { "" } else { f.get("agent.model", "") };
+    let raw_model = p.get("model").and_then(Value::as_str).unwrap_or(default_model);
+    let model = crate::settings::models::sanitize_model_now(&provider, raw_model);
     let mode = if scratch || env == "local" { "local" } else { "worktree" };
     let wt = if scratch { format!("{root}/{th}") } else { String::new() };
     let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":project,"title":title,"env":mode,"branch":"","worktree":wt,"provider":provider,"model":model,"at":at})];
@@ -335,7 +339,9 @@ fn hold(f: &Fold, th: &str, at: u64) -> Vec<Value> {
 fn modes(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
     let th = s(p, "thread", ""); let t = f.threads.get(&th).cloned().unwrap_or_default();
     let (rt, im, mo) = (if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() }, if t.interaction.is_empty() { "default".to_string() } else { t.interaction.clone() }, t.model.clone());
-    let mut ev = vec![json!({"$":"ModesSet","id":th,"runtime":runtime_of(&s(p, "runtime", &rt)),"interaction":if s(p, "interaction", &im) == "plan" { "plan" } else { "default" },"model":s(p, "model", &mo),"at":at})];
+    let model = crate::settings::models::sanitize_model_now(&t.provider, &s(p, "model", &mo));
+    let mut ev = vec![json!({"$":"ModesSet","id":th,"runtime":runtime_of(&s(p, "runtime", &rt)),"interaction":if s(p, "interaction", &im) == "plan" { "plan" } else { "default" },"model":model,"at":at})];
+    if p.get("interaction").is_some() && !f.setting(&format!("plan.once.{th}")).is_empty() { ev.push(json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":"","at":at})) }
     if p.get("model").is_some() { ev.extend(hold(f, &th, at)) }
     done(ev, id)
 }
@@ -381,9 +387,10 @@ fn buy(f: &Fold, at: u64, id: &Value, src: &str, b: &Buy) -> Option<Plan> {
     let th = hub_id("t", at, f.n());
     // the same folder, as a delegated task has; a source with no worktree of its own runs in the project folder, and a thread marked worktree with none would wait for one forever
     let env = if t.worktree.is_empty() { "local" } else { t.env.as_str() };
-    let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":t.project,"title":buy_title(f, &t.project),"env":env,"branch":t.branch,"worktree":t.worktree,"provider":t.provider,"model":t.model,"at":at})];
+    let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
+    let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":t.project,"title":buy_title(f, &t.project),"env":env,"branch":t.branch,"worktree":t.worktree,"provider":t.provider,"model":model,"at":at})];
     ev.extend(account_created(f, &th, &t.provider, at)); ev.extend(account_forked(f, &th, src, at));
-    ev.extend([json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access" } else { &t.runtime },"interaction":if t.interaction.is_empty() { "default" } else { &t.interaction },"model":t.model,"at":at}),
+    ev.extend([json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access" } else { &t.runtime },"interaction":if t.interaction.is_empty() { "default" } else { &t.interaction },"model":model,"at":at}),
         json!({"$":"SettingSet","key":format!("buy.{th}"),"value":src,"at":at}), json!({"$":"SettingSet","key":format!("buy.last.{src}"),"value":th,"at":at})]);
     Some(Plan { events: ev, reply: made(id, &th), stop: None, wt: None, scratch: None, act: Some(("post", th, "Buy it".to_string())) })
 }
@@ -394,11 +401,12 @@ fn fork(f: &Fold, at: u64, id: &Value, src: &str, cx: &Ctx) -> Option<Plan> {
     let scratch = t.project == "scratch"; let root = f.projects.get(&t.project).map(|x| x.root.clone()).unwrap_or_default();
     let env = if scratch || t.worktree.is_empty() { "local" } else { "worktree" };
     let why = format!("This thread is a fork of \"{}\" ({src}). You continue its work from where it stands; its conversation so far, oldest first:", t.title);
+    let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
     let mut ev = vec![
-        json!({"$":"ThreadCreated","id":th,"project":t.project,"title":format!("Fork: {}", t.title),"env":env,"branch":"","worktree":if scratch { format!("{root}/{th}") } else { String::new() },"provider":t.provider,"model":t.model,"at":at})];
+        json!({"$":"ThreadCreated","id":th,"project":t.project,"title":format!("Fork: {}", t.title),"env":env,"branch":"","worktree":if scratch { format!("{root}/{th}") } else { String::new() },"provider":t.provider,"model":model,"at":at})];
     ev.extend(account_created(f, &th, &t.provider, at));
     ev.extend([
-        json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access" } else { &t.runtime },"interaction":if t.interaction.is_empty() { "default" } else { &t.interaction },"model":t.model,"at":at}),
+        json!({"$":"ModesSet","id":th,"runtime":if t.runtime.is_empty() { "full-access" } else { &t.runtime },"interaction":if t.interaction.is_empty() { "default" } else { &t.interaction },"model":model,"at":at}),
         json!({"$":"ThreadForked","id":th,"source":src,"at":at})]);
     ev.extend(account_forked(f, &th, src, at));
     ev.extend([
@@ -430,6 +438,7 @@ fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, auto: bool) -> Opt
     let from = f.threads.get(&th).map(|t| t.provider.clone()).unwrap_or_default();
     // back to the provider the failover order moved it off, with no model named (Nov 11, Bub): the very model the thread asked for there, never the provider's default
     if model.is_empty() && from != to { let asked = crate::settings::fallback::Target::parse(f.setting(&format!("fallback.intent.{th}"))); if asked.provider == to { model = asked.model } }
+    model = crate::settings::models::sanitize_model_now(&to, &model);
     if running(f, &th) { return Some(Plan { events: vec![], reply: err(id, "a provider changes between turns: stop this one first"), stop: None, wt: None, scratch: None, act: None }) }
     // the same agent: the model and effort it names, if any (a picker that pressed an agent and then a model before it heard the first back asks this way)
     if from == to {

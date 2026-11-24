@@ -103,12 +103,15 @@ pub fn looked(st: &State, id: &str) -> bool {
 }
 pub fn settled(st: &State, id: &str) -> bool { st.threads.get(id).map_or(false, |t| shelf_of(t) == Shelf::Settled || t.archived) }
 
+/// A member of a live swarm (active or paused): its swarm's row stands for it. A member of one that is over is a thread like any other again, so an ask it
+/// still has open is never hidden.
+pub fn swarm_member(st: &State, id: &str) -> bool { st.swarm_of.get(id).and_then(|r| st.rooms_nav.get(r)).map_or(false, |r| r.swarm_live()) }
 /// D11 for a thread of a live state: whether the sidebar shows it.
 pub fn visible(st: &State, id: &str) -> bool {
     let Some(t) = st.threads.get(id) else { return false };
     if t.deleted || st.run_hidden(id) { return false }
     // a swarm's member is no row of its own: its swarm's row stands for it, and says when a member asks the person (present/sections.rs)
-    if st.swarm_of.contains_key(id) { return false }
+    if swarm_member(st, id) { return false }
     let w = status(st, id);
     // never hidden: what asks the person, whatever else is true of it (settled, archived, snoozed)
     if w == "needs" { return true }
@@ -124,6 +127,15 @@ pub fn look(st: &State, id: &str, now: u64) -> Vec<Value> {
     let Some(t) = st.threads.get(id) else { return vec![] };
     if !abnormal(status(st, id)) || !own(st, id) || num(st, &format!("sidebar.looked.{id}")) >= t.activity.max(1) { return vec![] }
     vec![json!({"$":"SettingSet","key":format!("sidebar.looked.{id}"),"value":now.max(t.activity).to_string(),"at":now})]
+}
+/// A visit is written at most once in ten minutes for a project (`sidebar.visit.<project id>`): the bench orders by it, and a log line for
+/// every thread opened would be noise.
+pub fn visit_due(st: &State, project: &str, now: u64) -> bool { !project.is_empty() && project != "scratch" /* sidebar::SCRATCH: the chats with no project */ && num(st, &format!("sidebar.visit.{project}")) + 600 <= now }
+/// Events a viewer's view.open of a thread adds for the bench (state/policy.rs `read`): the person was in its project now.
+pub fn visit(st: &State, id: &str, now: u64) -> Vec<Value> {
+    let Some(t) = st.threads.get(id) else { return vec![] };
+    if !visit_due(st, &t.project, now) { return vec![] }
+    vec![json!({"$":"SettingSet","key":format!("sidebar.visit.{}", t.project),"value":now.to_string(),"at":now})]
 }
 /// What a committed change leaves for the sidebar (state/policy.rs `derive`): a turn that starts ends a restart's cut mark.
 pub fn meta(st: &State, e: &Value) -> Vec<Value> {

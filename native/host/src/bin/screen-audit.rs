@@ -11,8 +11,11 @@
 #[path="../shelf.rs"] mod shelf;
 #[path="../signal.rs"] mod signal;
 #[path="../sidebar.rs"] mod sidebar;
+#[path="../present/swarm_need.rs"] #[allow(dead_code)] pub mod swarm_need;
 #[path="../session/slash.rs"] mod slash;
 #[path="../session/composer.rs"] pub mod composer;
+/// The composer's `/project <address>` asks the hub's clone module, which this program does not have: no address is one here.
+mod commands { pub mod clone { pub fn parse_address(_: &str) -> Option<()> { None } } }
 #[path="../session/patch.rs"] pub mod patch;
 #[path="../session/select.rs"] pub mod select;
 #[path="../session/pages.rs"] pub mod pages;
@@ -20,9 +23,15 @@ mod session { pub use crate::{composer, patch, select, pages}; }
 #[path="../present/tokstats.rs"] mod tokstats;
 #[path="../present/tz.rs"] mod tz;
 #[path="../present/keys.rs"] mod keys;
+#[path="../settings/favorites.rs"] #[allow(dead_code)] mod favorites;
 #[path="../settings/order_view.rs"] mod order_view;
+#[path="../settings/model_compat.rs"] mod model_compat;
 // the speed dial's table (agents/speed.rs) asks for the detected models; the audit counts screens and detects none
-mod settings { pub mod order { pub use crate::order_view::*; } pub mod models { pub fn info() -> String { String::new() } } }
+mod settings { pub mod order { pub use crate::order_view::*; } pub mod models {
+    pub use crate::favorites::{FAVORITES_KEY, parse_favorite_keys};
+    pub fn info() -> String { String::new() }
+    pub use crate::model_compat::{model_compatible, sanitize_model};
+} }
 #[path="../present/thread.rs"] mod thread;
 #[path="../present/window.rs"] mod window;
 #[path="../present/audit_files.rs"] mod files;
@@ -38,7 +47,7 @@ mod identity_context {
     pub fn browser(_: &Value, _: &str) -> (String, String) { Default::default() }
     pub fn far_exists(_: &str, _: &str) -> Option<bool> { None }
 }
-mod present { pub use crate::ready; }
+mod present { pub use crate::{ready, swarm_need}; }
 // the issue links' repository (present/thread.rs): the audit reads no project's git config, so it links nothing
 mod mirror { pub fn origin_of_root(_: &str) -> String { String::new() } }
 /// kicad/follow.rs keeps the hub to redraw the views after a follow; the audit has none.

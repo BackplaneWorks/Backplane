@@ -6,7 +6,7 @@
 //!
 //! Owning side (`RpcRoutes`): the same signature check and owner-only gate as `/far/log`; then `owner.mail` goes to the bots lane's `Bots::owner_received`; a
 //! request of `Fr.methods` runs as a local client's request, only when it is about something this hub shares (`Fr.allowed`, `Feed::allowed`); everything else is
-//! refused 403. NOT ported here: `mcp.call` (remote agents' tools, `Fm.serve`), `uber.sync`, and the viewers' reads: they answer 501 and say so.
+//! refused 403. The same signed owner link carries the uberbot op exchange.
 //!
 //! `OwnerLink` (the bots lane's transport for `owner.mail`): a signed POST of the request to a linked machine, only to one of the owner's own.
 use super::{far, farsend::{self, Outbox}, farsync::FarSync, peering::PReq};
@@ -19,13 +19,15 @@ fn now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EP
 /// `Fr.nonced`: a body of its own, so two equal requests in one second are two signed bodies, not a replay of one
 pub(super) fn nonced(body: &str) -> String { format!("{{\"n\":{},{}", Value::String(format!("{}.{}", now(), NONCE.fetch_add(1, Relaxed))), &body[1..]) }
 
+pub(crate) fn unavailable(code: u16) -> bool { matches!(code, 0 | 502 | 503 | 504) }
+
 /// One signed POST to `link`'s /far/rpc: (status, body); status 0 when it could not be made (no address, away, a copy).
 pub(super) async fn post(sync: &FarSync, hub: &Arc<Hub>, link: &str, body: &str) -> (u16, String) {
     let url = sync.peering.table.with(|p| p.url(link));
     if url.is_empty() { return (0, String::new()) }
     let r = super::botnet::to_peer(&hub.cfg.home, &url, link, now(), "/far/rpc", true, &nonced(body)).await;
     // the link's own answer says whether that machine is up, at once (the sidebar's "desktop is off"; mirror.rs also asks each minute)
-    hub.mirrors().set_away(link, r.code == 0); hub.mirrors().publish(hub).await;
+    hub.mirrors().set_away(link, unavailable(r.code)); hub.mirrors().publish(hub).await;
     (r.code, r.body)
 }
 fn err(id: &Value, e: &str) -> Vec<Value> { vec![json!({"t":"reply","id":id,"ok":false,"error":e})] }
@@ -101,7 +103,7 @@ impl Router {
         let th = p[key].as_str().unwrap_or("").to_string();
         let msg = local["msg"].as_str().unwrap_or("").to_string();
         self.out.hold_m(&th, &l, m, &msg, local, farsend::now_ms()); self.work(hub);
-        Some(json!({"t":"reply","id":id,"ok":true,"result":{"held":true}}))
+        Some(json!({"t":"reply","id":id,"ok":true,"result":{"held":true,"state":"queued"}}))
     }
     fn plan(&self, client: u64, id: &Value, m: &str, p: &Value) -> Result<String, Vec<Value>> {
         let viewer = super::farview::is_viewer(m);
@@ -131,11 +133,12 @@ impl Parts {
             if ok && (m == "term.open" || p["sources"].as_array().map_or(false, |a| !a.is_empty()) || !p["kind"].as_str().unwrap_or("").is_empty()) {
                 let root = if m == "kicad.watch" || m == "kicad.watch.set" { p["root"].as_str().unwrap_or("").to_string() } else { watching.lock().unwrap().get(&client).filter(|(wl, _)| wl == l).map(|(_, r)| r.clone()).unwrap_or_default() };
                 watching.lock().unwrap().insert(client, (l.to_string(), root));
-                if pulling.lock().unwrap().insert(client) { pull_loop(sync.clone(), hub.clone(), watching.clone(), pulling.clone(), client, l.to_string()); }
+                if !super::peerws::connected(&hub.cfg.home, l) && pulling.lock().unwrap().insert(client) { pull_loop(sync.clone(), hub.clone(), watching.clone(), pulling.clone(), client, l.to_string()); }
             } else if ok { watching.lock().unwrap().remove(&client); }
         }
         let frame = if code == 200 {
-            far::reply_on(serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"t":"reply","ok":false,"error":"invalid reply from that machine","id":0})), id, l)
+            let r = far::reply_on(serde_json::from_str::<Value>(&text).unwrap_or_else(|_| json!({"t":"reply","ok":false,"error":"invalid reply from that machine","id":0})), id, l);
+            crate::settings::provider_notice::rewrite_remote_reply(r, &machine_name(&sync, l))
         } else if code == 0 { err(id, "that machine is away").remove(0) } else { err(id, &format!("that machine did not take it: {}", text.chars().take(120).collect::<String>())).remove(0) };
         { let mut w = waiting.lock().unwrap(); if let Some(n) = w.get_mut(&client) { *n -= 1; if *n == 0 { w.remove(&client); } } }
         frame
@@ -187,7 +190,7 @@ impl FarRouter for Router {
             let body = json!({"id": 0, "m": "mcp.call", "p": {"tool": tool, "from": from, "args": args}}).to_string();
             let (code, text) = post(&self.sync, hub, link, &body).await;
             match code {
-                0 => Err("that machine is away".into()),
+                c if unavailable(c) => Err("that machine is away".into()),
                 // an older Backplane there answers but cannot run this yet (it predates mcp.call): it is not away, it needs the update
                 501 => Err(format!("{OLDER}: {}", text.chars().take(160).collect::<String>())),
                 200 => { let v: Value = serde_json::from_str(&text).map_err(|_| "invalid reply from that machine".to_string())?; Ok((v["ok"].as_bool().unwrap_or(false), v.get("body").cloned().unwrap_or(Value::Null))) }
@@ -224,6 +227,15 @@ async fn send_held(sync: Arc<FarSync>, hub: std::sync::Weak<Hub>, out: Arc<Outbo
             tokio::spawn(async move {
                 let body = item.body().to_string();
                 let (code, text) = post(&sync, &hub2, &item.link, &body).await;
+                let text = if code == 200 {
+                    serde_json::from_str::<Value>(&text)
+                        .ok()
+                        .filter(crate::settings::provider_notice::is_local_refusal_reply)
+                        .map(|v| crate::settings::provider_notice::rewrite_remote_reply(v, &machine_name(&sync, &item.link)).to_string())
+                        .unwrap_or(text)
+                } else {
+                    text
+                };
                 out2.answered(&item.msg, code, &text, farsend::now_ms());
                 busy2.lock().unwrap().retain(|m| *m != item.msg);
                 out2.kick.notify_one();
@@ -259,6 +271,15 @@ pub fn machines_of(sync: &FarSync) -> Vec<(String, String, String)> {
     rows.into_iter().zip(uniq).map(|(r, (_, label))| (r.0, label, r.2)).collect()
 }
 
+fn machine_name(sync: &FarSync, link: &str) -> String {
+    machines_of(sync)
+        .into_iter()
+        .find(|(id, _, _)| id == link)
+        .map(|(_, name, _)| name)
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| link.to_string())
+}
+
 /// The bots lane's transport for `owner.mail` (a signed POST to a linked machine); only to one of the owner's own (the request carries mail text).
 pub struct Link { pub sync: Arc<FarSync>, pub hub: std::sync::Weak<Hub>, pub copy: bool }
 impl OwnerLink for Link {
@@ -291,10 +312,17 @@ pub async fn serve(sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
 pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PReq) -> HttpReply {
     if copy { return HttpReply::text("403 Forbidden", "a hub on a copied log does not take /far/rpc") }
     let link = match sync.peering.signed_in("far-rpc", r) { Ok(p) => p, Err(e) => return e };
+    serve_authenticated(copy, sync, hub, &link, &r.body).await
+}
+
+/// Dispatch an already-authenticated `/far/rpc` payload (from HTTP `signed_in` or `/far/ws`).
+pub(crate) async fn serve_authenticated(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, link: &str, body: &[u8]) -> HttpReply {
+    if copy { return HttpReply::text("403 Forbidden", "a hub on a copied log does not take /far/rpc") }
+    let link = link.to_string();
     // a link says where it is now: taken for an approved link whether or not the machine finder lists it (it is how the finder comes to find it)
-    if let Ok(o) = serde_json::from_slice::<Value>(&r.body) { if o["m"] == "peer.address" { return super::mesh::address_received(sync, hub, &link, &o["p"]).await } }
+    if let Ok(o) = serde_json::from_slice::<Value>(body) { if o["m"] == "peer.address" { return super::mesh::address_received(sync, hub, &link, &o["p"]).await } }
     if !sync.own(&link) { return HttpReply::text("403 Forbidden", "threads are shared with the owner's own machines") }
-    let Ok(o) = serde_json::from_slice::<Value>(&r.body) else { return HttpReply::text("400 Bad Request", "not JSON") };
+    let Ok(o) = serde_json::from_slice::<Value>(body) else { return HttpReply::text("400 Bad Request", "not JSON") };
     let m = o["m"].as_str().unwrap_or("");
     if m == "owner.mail" {
         let Some(bots) = crate::bots::api::of(hub) else { return HttpReply::text("503 Service Unavailable", "bots are not running") };
@@ -329,7 +357,9 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     if m == "signin.state" || m == "signin.act" { return json_reply(&crate::settings::accounts_there::serve(hub, &link, m, &p).await) }
     // the project registry (net/registry.rs): kept on the home, from the owner's own machines only (checked above)
     if m == "registry.put" || m == "registry.get" { return json_reply(&super::registry::serve(hub, &link, m, &p).await) }
-    if m == "uber.sync" { return HttpReply::text("501 Not Implemented", "uber.sync is not ported on this hub yet") }
+    if m == "uber.sync" { return json_reply(&crate::bots::ubsync::serve(hub, &p).await) }
+    if m == "settings.sync" { return json_reply(&super::settings_sync::serve(hub, &p).await) }
+    if matches!(m, "kicad.manifest" | "kicad.blob" | "kicad.push" | "kicad.project" | "kicad.lock" | "kicad.unlock") { return json_reply(&crate::files::kicad::remote::serve(hub, &link, m, &p).await) }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");
         if !MCP_REMOTE.contains(&tool) { return HttpReply::text("403 Forbidden", "not something this machine shares") }
@@ -358,5 +388,5 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
 /// The bots lane's requests between machines: a room's members, a post in it
 const FAR_BOTS: &[&str] = &["bots.room_sync", "bots.room_post", "bots.list", "bots.room_join", "bots.room_leave", "bots.hello"];
 /// `Fm.names` the owner's machines may call here (Fm.remote)
-const MCP_REMOTE: &[&str] = &["thread_send", "thread_wait_now", "thread_interrupt", "thread_update", "thread_list", "thread_launch", "machine_list", "thread_read", "thread_handoff", "plane_read", "launch_report", "thread_settle"];
+const MCP_REMOTE: &[&str] = &["thread_send", "thread_wait_now", "thread_interrupt", "thread_update", "thread_list", "thread_launch", "machine_list", "thread_read", "thread_handoff", "plane_read", "launch_report", "thread_settle", "lock_acquire", "lock_release"];
 fn status(code: u16) -> &'static str { match code { 200 => "200 OK", 400 => "400 Bad Request", 403 => "403 Forbidden", 409 => "409 Conflict", 503 => "503 Service Unavailable", _ => "500 Internal Server Error" } }

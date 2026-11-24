@@ -60,7 +60,8 @@ Thumbs.db
 /// once would race for `index.lock`.
 pub async fn repo_lock(top: &str) -> tokio::sync::OwnedMutexGuard<()> {
     static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, std::sync::Arc<tokio::sync::Mutex<()>>>>> = std::sync::OnceLock::new();
-    let m = { let mut g = M.get_or_init(Default::default).lock().unwrap(); g.entry(top.to_string()).or_default().clone() };
+    let key = crate::files::kicad::canonical::same_file(top);
+    let m = { let mut g = M.get_or_init(Default::default).lock().unwrap(); g.entry(key).or_default().clone() };
     m.lock_owned().await
 }
 

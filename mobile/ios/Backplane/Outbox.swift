@@ -33,7 +33,8 @@ struct DQueueRow: Codable, Equatable, Hashable, Identifiable {
 }
 
 struct Outbox: Codable, Equatable {
-    struct Item: Codable, Equatable { var thread: String; var text: String; var clientId: String }
+    /// `replyTo`: the message it answers, as `message.send` takes it (`{id, text}`, feature `reply`); nil for a plain message (and in an older outbox file)
+    struct Item: Codable, Equatable { var thread: String; var text: String; var clientId: String; var replyTo: [String: String]? = nil }
     /// oldest first: the order they were written, and the order they go
     private(set) var items: [Item] = []
 
@@ -44,10 +45,10 @@ struct Outbox: Codable, Equatable {
     init(items: [Item] = []) { self.items = items }
 
     /// Keep a message. An empty text, or a clientId already kept, changes nothing.
-    mutating func push(thread: String, text: String, clientId: String) {
+    mutating func push(thread: String, text: String, clientId: String, replyTo: [String: String]? = nil) {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty, !clientId.isEmpty, !items.contains(where: { $0.clientId == clientId }) else { return }
-        items.append(Item(thread: thread, text: t, clientId: clientId))
+        items.append(Item(thread: thread, text: t, clientId: clientId, replyTo: replyTo))
     }
     /// Take one out (Remove, or Edit, whose text goes back into the draft); nil when it is not here.
     @discardableResult mutating func remove(_ clientId: String) -> Item? {

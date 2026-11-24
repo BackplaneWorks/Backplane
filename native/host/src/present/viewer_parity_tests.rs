@@ -13,10 +13,45 @@ use serde_json::{json, Value};
 
 const SNAPSHOT_REL: &str = "src/present/testdata/viewer_legacy_parity_main.json";
 
+/// %XX as the byte it stands for (a preview url's path).
+fn pct_decode(s: &str) -> String {
+    let b = s.as_bytes(); let mut out = Vec::with_capacity(b.len()); let mut i = 0;
+    let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() { if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) { out.push(h << 4 | l); i += 3; continue } }
+        out.push(b[i]); i += 1
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+/// `<ROOT>\a\b` (or `<ROOT>\\a\\b` inside JSON text) as `<ROOT>/a/b`: only the separators of a path that starts at <ROOT>.
+fn unix_under_root(s: &str) -> String {
+    let mut out = String::with_capacity(s.len()); let mut rest = s;
+    while let Some(i) = rest.find("<ROOT>") {
+        out.push_str(&rest[..i + 6]); rest = &rest[i + 6..];
+        let b = rest.as_bytes(); let mut j = 0;
+        while j < b.len() && !matches!(b[j], b'"' | b'\t' | b'|' | b' ' | b'\n') {
+            if b[j] == b'\\' {
+                if b.get(j + 1) == Some(&b'"') { break } // an escaped quote ends a JSON string: the path ended before it
+                out.push('/'); j += if b.get(j + 1) == Some(&b'\\') { 2 } else { 1 }; continue;
+            }
+            let c = rest[j..].chars().next().unwrap(); out.push(c); j += c.len_utf8();
+        }
+        rest = &rest[j..];
+    }
+    out.push_str(rest); out
+}
+
 fn normalize(v: &Value, root: &str) -> Value {
     match v {
         Value::String(s) => {
-            let s = s.replace(root, "<ROOT>");
+            // the root as written, and as written inside a command's JSON text (a Windows root's `\` doubled there)
+            let esc = { let q = serde_json::to_string(root).unwrap(); q[1..q.len() - 1].to_string() }; // as #1473 does it
+            let s = s.replace(&esc, "<ROOT>").replace(root, "<ROOT>");
+            // on Windows a file under the root keeps the OS's `\` (kicad::project's own names): the snapshot is Linux's, so a path under <ROOT> is
+            // read with `/`, up to its end (a quote, tab, `|`, space or line end)
+            // a preview's url carries the path percent-encoded (Windows' `:` and `\` too): read it decoded, as the snapshot's has nothing to encode
+            let s = if cfg!(windows) && s.starts_with("/img?path=") { format!("/img?path={}", pct_decode(&s["/img?path=".len()..])).replace(&root.replace('\\', "\\\\"), "<ROOT>").replace(root, "<ROOT>") } else { s };
+            let s = if cfg!(windows) { unix_under_root(&s) } else { s };
             // history sources carry the repo top's byte length before it (`rv::hist_git`): it varies with the temp folder's name
             let mut parts: Vec<String> = s.split('\t').map(str::to_string).collect();
             for i in 0..parts.len().saturating_sub(1) {
@@ -44,9 +79,16 @@ fn normalize(v: &Value, root: &str) -> Value {
 /// from a viewer picture so every legacy field is compared in full against `origin/main`.
 fn strip_additive_2a(mut v: Value) -> Value {
     if let Some(o) = v.as_object_mut() {
+        assert!(o.get("tiled").is_none());
         o.remove("layout");
         o.remove("tiles");
         o.remove("showToken");
+        // the downloads (files/share.rs) are additive too: a part's file and the Files page's way to mfg/
+        if let Some(m) = o.get_mut("mech").and_then(Value::as_object_mut) {
+            m.remove("down"); m.remove("downName");
+            for p in m.get_mut("parts").and_then(Value::as_array_mut).into_iter().flatten() { if let Some(po) = p.as_object_mut() { po.remove("down"); po.remove("downName"); } }
+        }
+        if let Some(f) = o.get_mut("files").and_then(Value::as_object_mut) { f.remove("mfg"); }
         if let Some(rail) = o.get_mut("rail").and_then(Value::as_array_mut) {
             for entry in rail {
                 if let Some(eo) = entry.as_object_mut() {
@@ -69,7 +111,8 @@ fn snap_step(st: &State, sess: &Value, cmds: &[Value], root: &str) -> Value {
 }
 
 fn fixture() -> (crate::plat::tmp::TempDir, String, std::path::PathBuf, State) {
-    let td = crate::plat::tmp::dir("viewer-parity-main");
+    // canonical: the hub canonicalizes what it lists (Gerbers, a preview), and a Windows runner's TMP is in 8.3 form (RUNNER~1)
+    let td = crate::plat::tmp::canonical("viewer-parity-main");
     let root_p = td.path().to_path_buf();
     let root = root_p.to_string_lossy().into_owned();
 
@@ -347,6 +390,7 @@ fn legacy_single_page_flows_match_origin_main_snapshot() {
 /// the pictures, commands and drafts must be main's (the snapshot's `agent_show_each_kind`), except the differences listed here.
 #[test]
 fn agent_show_from_idle_matches_main_view_for_each_kind() {
+    let _shows = viewer::shows_shared(); // the process's show table (viewer::SHOWS_TEST_LOCK)
     let expected = load_snapshot()["flows"].clone();
     let want = expected["agent_show_each_kind"].as_array().expect("agent_show_each_kind flow");
     let (_td, root, _rp, st) = fixture();
@@ -366,4 +410,13 @@ fn agent_show_from_idle_matches_main_view_for_each_kind() {
         diff_paths(&want[i], &got, &format!("/{k}"), &mut diffs);
     }
     assert!(diffs.is_empty(), "view-show differs from main's `view` from idle (main vs branch):\n{}", diffs.join("\n"));
+}
+
+#[test]
+fn a_windows_path_under_the_root_reads_as_the_snapshots() {
+    assert_eq!(unix_under_root("<ROOT>\\proj.kicad_pro"), "<ROOT>/proj.kicad_pro");
+    assert_eq!(unix_under_root("{\"root\":\"<ROOT>\\\\sub\\\\a.kicad_pcb\",\"x\":1}"), "{\"root\":\"<ROOT>/sub/a.kicad_pcb\",\"x\":1}");
+    assert_eq!(unix_under_root("0|<ROOT>|<ROOT>\\a\tb\\c"), "0|<ROOT>|<ROOT>/a\tb\\c");
+    assert_eq!(unix_under_root("no root \\ here"), "no root \\ here");
+    assert_eq!(pct_decode("C%3A%5Cp%5Cdocs%5Cread%20me.txt"), "C:\\p\\docs\\read me.txt"); assert_eq!(pct_decode("a%2"), "a%2");
 }

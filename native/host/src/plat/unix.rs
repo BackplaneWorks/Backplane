@@ -34,6 +34,18 @@ pub mod fs {
     pub fn sync_dir(d: &std::path::Path) -> std::io::Result<()> { std::fs::File::open(d)?.sync_all() }
     /// Random bytes from the OS (no fallback).
     pub fn random(b: &mut [u8]) -> std::io::Result<()> { use std::io::Read; std::fs::File::open("/dev/urandom").and_then(|mut f| f.read_exact(b)) }
+    /// The real path of an open file, from the handle itself (what was opened, whatever the path's links do after): Linux `/proc/self/fd`,
+    /// macOS `F_GETPATH`.
+    pub fn path_of(f: &std::fs::File) -> std::io::Result<std::path::PathBuf> {
+        use std::os::fd::AsRawFd;
+        #[cfg(target_os = "macos")] {
+            let mut b = vec![0u8; libc::PATH_MAX as usize + 1];
+            if unsafe { libc::fcntl(f.as_raw_fd(), libc::F_GETPATH, b.as_mut_ptr()) } == -1 { return Err(std::io::Error::last_os_error()) }
+            let n = b.iter().position(|c| *c == 0).unwrap_or(b.len());
+            return Ok(std::path::PathBuf::from(name_from(&b[..n])))
+        }
+        #[cfg(not(target_os = "macos"))] { std::fs::read_link(format!("/proc/self/fd/{}", f.as_raw_fd())) }
+    }
 }
 
 /// The OS error numbers the hub names.
@@ -86,11 +98,43 @@ pub mod proc {
     /// After the spawn of a child given `own_group` / `agent_group`: nothing to do on Unix (the group is the leader's pid).
     pub fn adopt(_pid: u32, _die_with_hub: bool) {}
     /// Signal the process group a leader made (`kill(-pid, sig)`). True if it was sent.
-    pub fn kill_group(pid: u32, sig: i32) -> bool { unsafe { libc::kill(-(pid as i32), sig) == 0 } }
-    /// Signal one process. True if it was sent.
-    pub fn kill(pid: u32, sig: i32) -> bool { unsafe { libc::kill(pid as i32, sig) == 0 } }
+    /// Never 0 or 1 (`kill(0)`/`kill(-1)`: our own group, every process we may signal), never past i32 (it would wrap), never the hub's own pid or group (under the guard the hub
+    /// leads its group: a stale pid equal to ours would end the hub with the signal, a SIGKILL the guard can only call "killed by signal 9").
+    pub fn kill_group(pid: u32, sig: i32) -> bool { if !signalable(pid) { return false } unsafe { libc::kill(-(pid as i32), sig) == 0 } }
+    /// Signal one process. True if it was sent. The same refusals as `kill_group`.
+    pub fn kill(pid: u32, sig: i32) -> bool { if !signalable(pid) { return false } unsafe { libc::kill(pid as i32, sig) == 0 } }
+    pub(crate) fn signalable(pid: u32) -> bool {
+        let me = std::process::id();
+        let ok = pid > 1 && pid <= i32::MAX as u32 && pid != me && pid as i32 != unsafe { libc::getpgrp() };
+        if !ok && pid > 1 { eprintln!("backplane-hub: refused to signal pid {pid}: it is this hub or its process group"); }
+        ok
+    }
     /// Whether a process is there (kill 0).
     pub fn alive(pid: u32) -> bool { pid > 0 && unsafe { libc::kill(pid as i32, 0) } == 0 }
+    /// State of a direct child PID polled with `WNOWAIT` (leaving the zombie in place so `pid` / its pgid cannot be recycled).
+    #[allow(dead_code)] // bp-plot includes plat/unix.rs
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    pub enum ChildWait {
+        Running,
+        Exited,
+        NotChild,
+    }
+
+    /// Non-reaping status poll of child `pid`. `ECHILD` returns `NotChild` (distinct from `Exited`, so callers never signal an unowned PID).
+    #[allow(dead_code)] // bp-plot includes plat/unix.rs
+    pub fn poll_child_nowait(pid: u32) -> ChildWait {
+        if pid == 0 || pid > i32::MAX as u32 { return ChildWait::NotChild }
+        unsafe {
+            let mut si: libc::siginfo_t = std::mem::zeroed();
+            if libc::waitid(libc::P_PID, pid as libc::id_t, &mut si, libc::WEXITED | libc::WNOHANG | libc::WNOWAIT) != 0 {
+                return match std::io::Error::last_os_error().raw_os_error() {
+                    Some(libc::ECHILD) => ChildWait::NotChild,
+                    _ => ChildWait::Running,
+                };
+            }
+            if si.si_pid() == pid as libc::pid_t { ChildWait::Exited } else { ChildWait::Running }
+        }
+    }
     /// Whether anything is left in the process group a leader made (kill(-pid, 0)), or the leader itself.
     pub fn group_alive(pid: u32) -> bool { pid > 0 && (unsafe { libc::kill(-(pid as i32), 0) } == 0 || alive(pid)) }
     /// Whether a process is there, including another user's (kill 0 answering EPERM).
@@ -192,6 +236,18 @@ pub mod hub {
     pub fn program(p: &std::ffi::OsStr) -> std::ffi::OsString { p.to_os_string() }
     /// What to start for `p` and the arguments before the caller's: the program itself (the kernel reads `#!`).
     pub fn launch(p: &std::ffi::OsStr) -> (std::ffi::OsString, Vec<std::ffi::OsString>) { (p.to_os_string(), vec![]) }
+    /// This machine's host name via `gethostname(2)`: no child process, no PATH lookup, no SIGCHLD wait (#1607).
+    pub fn hostname() -> String {
+        let mut buf = [0u8; 256];
+        if unsafe { libc::gethostname(buf.as_mut_ptr() as *mut libc::c_char, buf.len()) } != 0 { return String::new() }
+        let n = buf.iter().position(|&b| b == 0).unwrap_or(buf.len());
+        String::from_utf8_lossy(&buf[..n]).trim().to_string()
+    }
+    /// Monotonic awake seconds since first call (pauses while macOS/Linux sleeps, matching tokio timers).
+    pub fn awake_s() -> u64 {
+        static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        T0.get_or_init(std::time::Instant::now).elapsed().as_secs()
+    }
 }
 
 pub mod time {

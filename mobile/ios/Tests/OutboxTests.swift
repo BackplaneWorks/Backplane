@@ -82,4 +82,15 @@ final class OutboxTests: XCTestCase {
         XCTAssertEqual(Outbox.draft("  \n", adding: "hello"), "hello")
         XCTAssertEqual(Outbox.draft("typed \n", adding: "hello"), "typed\n\nhello")
     }
+
+    func testAReplyWaitsWithWhatItAnswers() {
+        var o = Outbox()
+        o.push(thread: "t1", text: "make it faster", clientId: "c1", replyTo: ["id": "m9", "text": "All done"])
+        o.push(thread: "t1", text: "plain", clientId: "c2")
+        XCTAssertEqual(o.items.map(\.replyTo), [["id": "m9", "text": "All done"], nil])
+        // an outbox written before replies reads back as plain messages
+        let old = #"{"items":[{"thread":"t1","text":"hi","clientId":"c3"}]}"#.data(using: .utf8)!
+        XCTAssertNil(try JSONDecoder().decode(Outbox.self, from: old).items.first?.replyTo)
+        let back = try! JSONDecoder().decode(Outbox.self, from: JSONEncoder().encode(o)); XCTAssertEqual(back, o)
+    }
 }

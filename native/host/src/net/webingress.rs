@@ -42,6 +42,248 @@ impl BrowserIngress<'_> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn terminal_lazy_assets_require_paired_session() {
+        for path in ["/assets/terminal.js", "/assets/xterm.css"] {
+            assert!(static_asset(path, false).is_none(), "{path} must require pairing");
+            assert!(static_asset(path, true).is_some(), "{path} must be served when paired");
+        }
+    }
+
+    #[tokio::test]
+    async fn ws_upgrade_targets_enforce_exact_allowlist_and_auth() {
+        use futures_util::{SinkExt, StreamExt};
+        use serde_json::{json, Value};
+        use std::sync::Arc;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tokio_tungstenite::tungstenite::{client::IntoClientRequest, Message};
+
+        let dir = crate::plat::tmp::dir("webingress-ws-targets");
+        std::fs::write(dir.join("token"), "tok").unwrap();
+        std::fs::write(
+            dir.join("events.jsonl"),
+            "{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1700000040}\n",
+        )
+        .unwrap();
+        let cfg = crate::hub::Cfg {
+            home: dir.to_path_buf(),
+            version: "0.16.4".into(),
+            commit: "test".into(),
+            listen: "127.0.0.1:0".into(),
+            os: "linux".into(),
+            arch: "x64".into(),
+        };
+        let hub = crate::hub::Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) }))
+            .await
+            .unwrap();
+        let (reg, _routes) = crate::net::start::open(&hub.cfg.home, "127.0.0.1", 0).unwrap();
+        let (req_json, poll_cookie) = reg.browser_request("person@example.com", "Test Browser").unwrap();
+        assert!(reg.browser_decide(req_json["id"].as_str().unwrap(), true));
+        let session_cookie = reg.browser_wait("person@example.com", &poll_cookie).await.unwrap().unwrap();
+        let authority = "web.example.test:8443";
+
+        let raw_status = |target: String, cookie: Option<String>| {
+            let hub = hub.clone();
+            async move {
+                let (mut client, server) = tokio::io::duplex(16 * 1024);
+                let srv = tokio::spawn(async move { serve(hub, server, authority).await });
+                let mut req = format!(
+                    "GET {target} HTTP/1.1\r\nHost: {authority}\r\nOrigin: https://{authority}\r\n\
+                     Tailscale-User-Login: person@example.com\r\nConnection: Upgrade\r\n\
+                     Upgrade: websocket\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                     Sec-WebSocket-Version: 13\r\n"
+                );
+                if let Some(c) = cookie {
+                    req.push_str(&format!("Cookie: __Host-bp_web={c}\r\n"));
+                }
+                req.push_str("\r\n");
+                client.write_all(req.as_bytes()).await.unwrap();
+                let mut resp = Vec::new();
+                client.read_to_end(&mut resp).await.unwrap();
+                let _ = srv.await;
+                let text = String::from_utf8_lossy(&resp);
+                text.lines().next().unwrap_or("").to_owned()
+            }
+        };
+
+        for target in ["/ws?data=1&enc=json", "/ws?data=1&enc=json&z=deflate"] {
+            // Unpaired upgrade must get 401 on both exact URLs.
+            let status = raw_status(target.to_owned(), None).await;
+            assert!(status.starts_with("HTTP/1.1 401 "), "{target} unpaired: got {status}");
+
+            // Paired upgrade must succeed and answer data/1 RPC: as it is, or (`z=deflate`, docs/PHONE-DATA.md Compression) a plain hello naming the codec, then raw DEFLATE.
+            let (client_io, server_io) = tokio::io::duplex(64 * 1024);
+            let h2 = hub.clone();
+            let srv = tokio::spawn(async move { serve(h2, server_io, authority).await });
+            let mut ws_req = format!("ws://{authority}{target}").into_client_request().unwrap();
+            let headers = ws_req.headers_mut();
+            headers.insert("Origin", format!("https://{authority}").parse().unwrap());
+            headers.insert("Tailscale-User-Login", "person@example.com".parse().unwrap());
+            headers.insert("Cookie", format!("__Host-bp_web={session_cookie}").parse().unwrap());
+            let (mut ws, _) = tokio_tungstenite::client_async(ws_req, client_io).await.unwrap();
+            let hello: Value = serde_json::from_str(&ws.next().await.unwrap().unwrap().into_text().unwrap()).unwrap();
+            assert_eq!(hello["t"], "hello", "{target}: expected hello frame");
+            let deflate = target.ends_with("&z=deflate");
+            assert_eq!(hello["z"].as_str(), deflate.then_some("deflate"), "{target}: the hello names the codec only when it was asked for");
+            ws.send(Message::Text(json!({"id":1,"m":"projects.list","p":{}}).to_string().into())).await.unwrap();
+            let mut z = flate2::Decompress::new(false);
+            let reply: Value = loop {
+                let v: Value = match ws.next().await.unwrap().unwrap() {
+                    Message::Text(t) if !deflate => serde_json::from_str(t.as_str()).unwrap(),
+                    Message::Binary(b) if deflate => {
+                        let mut out = Vec::with_capacity(b.len() * 8 + 1024); let start = z.total_in();
+                        loop { let done = (z.total_in() - start) as usize; if out.capacity() - out.len() < 64 { out.reserve(out.capacity()) }
+                            z.decompress_vec(&b[done..], &mut out, flate2::FlushDecompress::Sync).unwrap(); if (z.total_in() - start) as usize == b.len() && out.len() < out.capacity() { break } }
+                        serde_json::from_slice(&out).unwrap()
+                    }
+                    m => panic!("{target}: a frame of the wrong kind: {m:?}"),
+                };
+                if v["t"] == "reply" { break v }
+            };
+            assert_eq!(reply["t"], "reply", "{target}: expected data/1 reply");
+            assert_eq!(reply["id"], 1);
+            assert_eq!(reply["ok"], true);
+            let _ = ws.close(None).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(1), srv).await;
+        }
+
+        // Unknown query parameters must still be refused with 404 even when paired.
+        for bad in [
+            "/ws?data=1&enc=json&z=deflate&extra=1",
+            "/ws?data=1&enc=json&z=gzip",
+            "/ws?data=1&enc=cbor",
+        ] {
+            let status = raw_status(bad.to_owned(), Some(session_cookie.clone())).await;
+            assert!(status.starts_with("HTTP/1.1 404 "), "{bad} must be refused, got {status}");
+        }
+    }
+
+    // the file routes on the browser ingress (files/share.rs): a paired browser only, a share's token alone is not enough, nothing stored,
+    // a revoked browser refused on its next request (a conditional or ranged one too), and only project files, never the far copies or extra roots
+    #[tokio::test]
+    async fn file_routes_answer_a_paired_browser_only() {
+        use crate::{hub::{Cfg, Hub}, presenter};
+        let top = crate::plat::tmp::canonical("ingress-files"); let (home, proj) = (top.join("home"), top.join("proj"));
+        std::fs::create_dir_all(proj.join("mfg")).unwrap(); std::fs::create_dir_all(home.join("far-files/L")).unwrap();
+        std::fs::write(home.join("token"), "roottoken").unwrap();
+        std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":{:?},\"at\":1}}\n{{\"$\":\"SettingSet\",\"key\":\"web.enabled\",\"value\":\"1\",\"at\":1}}\n", proj.to_string_lossy())).unwrap();
+        std::fs::write(proj.join("mfg/bom.csv"), b"a,b\n").unwrap(); std::fs::write(proj.join("page.html"), b"<script>x</script>").unwrap();
+        std::fs::write(home.join("far-files/L/x.zip"), b"far").unwrap();
+        let cfg = Cfg { home: home.clone(), version: "0".into(), commit: "c".into(), listen: "127.0.0.1:1".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, std::sync::Arc::new(presenter::Canned { reply: serde_json::json!({"remoteReady":false,"cmds":[],"session":{}}) })).await.unwrap();
+        let (reg, _routes) = crate::net::start::open(&home, "127.0.0.1", 1).unwrap();
+        let login = "person@example.com";
+        let (req, pair) = reg.browser_request(login, "Browser").unwrap();
+        assert!(reg.browser_decide(req["id"].as_str().unwrap(), true));
+        let cookie = reg.browser_wait(login, &pair).await.unwrap().unwrap();
+        let authority = "web.example.ts.net:8443";
+        let ask = |target: String, extra: String| { let hub = hub.clone(); async move {
+            let (mut a, b) = tokio::io::duplex(1 << 20);
+            let t = tokio::spawn(async move { serve(hub, b, authority).await });
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            a.write_all(format!("GET {target} HTTP/1.1\r\nHost: {authority}\r\nTailscale-User-Login: {login}\r\n{extra}\r\n").as_bytes()).await.unwrap();
+            let mut out = vec![]; a.read_to_end(&mut out).await.unwrap(); let _ = t.await;
+            let i = out.windows(4).position(|w| w == b"\r\n\r\n").unwrap_or(out.len());
+            (String::from_utf8_lossy(&out[..i]).into_owned(), out[(i + 4).min(out.len())..].to_vec()) } };
+        let c = format!("Cookie: __Host-bp_web={cookie}\r\n");
+        let enc = |p: &std::path::Path| p.to_string_lossy().replace('/', "%2F");
+        let bom = format!("/file?path={}", enc(&proj.join("mfg/bom.csv")));
+        assert!(ask(bom.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "unpaired");
+        let head = |target: String, extra: String| { let hub = hub.clone(); async move {
+            let (mut a, b) = tokio::io::duplex(1 << 20);
+            let t = tokio::spawn(async move { serve(hub, b, authority).await });
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            // (the ingress asks every method but GET for its one exact Origin)
+            a.write_all(format!("HEAD {target} HTTP/1.1\r\nHost: {authority}\r\nOrigin: https://{authority}\r\nTailscale-User-Login: {login}\r\n{extra}\r\n").as_bytes()).await.unwrap();
+            let mut out = vec![]; a.read_to_end(&mut out).await.unwrap(); let _ = t.await; String::from_utf8_lossy(&out).into_owned() } };
+        let missing = format!("/file?path={}", enc(&proj.join("none.csv")));
+        let (h1, h2) = (head(bom.clone(), String::new()).await, head(missing.clone(), String::new()).await);
+        assert!(h1.contains("sandbox") && h1.contains("Cross-Origin-Resource-Policy: same-origin") && h1.contains("Referrer-Policy: no-referrer") && h1.contains("nosniff"), "the unpaired 401 carries the file routes' guards: {h1}");
+        assert!(h1.starts_with("HTTP/1.1 401") && h1.contains("unpaired") && h1 == h2, "HEAD unpaired: 401 alike for a file that is there and one that is not: {h1}");
+        let h = head(bom.clone(), format!("Cookie: __Host-bp_web={cookie}\r\n")).await;
+        assert!(h.starts_with("HTTP/1.1 200") && h.contains("Content-Length: 4") && h.ends_with("\r\n\r\n"), "HEAD paired: the headers, no body: {h}");
+        let (h, b) = ask(bom.clone(), c.clone()).await;
+        assert!(h.starts_with("HTTP/1.1 200") && b == b"a,b\n", "{h}");
+        for need in ["Cache-Control: private, no-store", "sandbox", "Cross-Origin-Resource-Policy: same-origin", "Referrer-Policy: no-referrer", "nosniff"] { assert!(h.contains(need), "{need}: {h}") }
+        let (h, _) = ask(format!("/file?path={}&inline=1", enc(&proj.join("page.html"))), c.clone()).await;
+        assert!(h.contains("Content-Disposition: attachment") && h.contains("application/octet-stream"), "html is never inline at our origin: {h}");
+        assert!(ask(format!("/file?path={}", enc(&home.join("far-files/L/x.zip"))), c.clone()).await.0.starts_with("HTTP/1.1 403"), "not the far copies for a browser");
+        assert!(ask(format!("/files/get?thread=project-home-p1&path=mfg%2Fbom.csv"), c.clone()).await.0.starts_with("HTTP/1.1 200"));
+        let made = crate::files::share::create(&hub, "t1", &serde_json::json!({"path": proj.join("mfg/bom.csv").to_string_lossy()})).await.unwrap();
+        let link = made["link"].as_str().unwrap().to_string();
+        assert!(ask(link.clone(), String::new()).await.0.starts_with("HTTP/1.1 401"), "a share's token is no credential on the browser ingress");
+        let (h, _) = ask(link.clone(), c.clone()).await; assert!(h.starts_with("HTTP/1.1 200") && h.contains("no-store"), "{h}");
+        std::fs::write(proj.join(".env"), b"K=1").unwrap();
+        assert!(ask("/files/get?thread=project-home-p1&path=.env".into(), c.clone()).await.0.starts_with("HTTP/1.1 403"), "the Files tab's download keeps the secret rule");
+        // a share a native client may open, of a file the browser may not reach: the browser gets the intersection
+        let far = crate::files::share::create(&hub, "t1", &serde_json::json!({"path": home.join("far-files/L/x.zip").to_string_lossy()})).await.unwrap();
+        assert!(ask(far["link"].as_str().unwrap().to_string(), c.clone()).await.0.starts_with("HTTP/1.1 403"), "a share opens to a browser only within the browser's roots");
+        // /blob/<sha256>: unpaired -> 401; paired -> 200 with ETag + immutable private cache + hardened sandbox CSP; If-None-Match -> 304
+        hub.register_http(std::sync::Arc::new(crate::files::blob::BlobHttp));
+        let sha = crate::files::blob::register_bytes(&home, proj.join("mfg/bom.csv"), "text/csv", b"a,b\n");
+        let blob_route = format!("/blob/{sha}");
+        let (uh_blob, _) = ask(blob_route.clone(), String::new()).await;
+        assert!(uh_blob.starts_with("HTTP/1.1 401"), "unpaired /blob must be 401: {uh_blob}");
+        for need in ["sandbox", "Referrer-Policy: no-referrer", "X-Content-Type-Options: nosniff", "Cross-Origin-Resource-Policy: same-origin"] {
+            assert!(uh_blob.contains(need), "unpaired /blob missing {need}: {uh_blob}");
+        }
+        assert!(!uh_blob.contains("script-src 'self'"), "unpaired /blob must not carry app CSP: {uh_blob}");
+        let (bh, bb) = ask(blob_route.clone(), c.clone()).await;
+        assert!(bh.starts_with("HTTP/1.1 200") && bb == b"a,b\n", "paired /blob: {bh}");
+        assert!(bh.contains("Cache-Control: private, max-age=31536000, immutable"), "immutable private cache: {bh}");
+        assert!(!bh.contains("Cache-Control: public"), "never public cache: {bh}");
+        assert!(bh.contains("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox"), "sandbox CSP: {bh}");
+        assert!(!bh.contains("script-src 'self'"), "blob must not carry app CSP: {bh}");
+        assert!(bh.contains("Referrer-Policy: no-referrer"), "referrer policy: {bh}");
+        assert!(bh.contains("X-Content-Type-Options: nosniff"), "nosniff: {bh}");
+        assert!(bh.contains("Cross-Origin-Resource-Policy: same-origin"), "corp header: {bh}");
+        let blob_etag = bh.lines().find_map(|l| l.strip_prefix("ETag: ").map(str::trim).map(str::to_string)).expect("ETag on /blob");
+        let (bh304, bb304) = ask(blob_route.clone(), format!("{c}If-None-Match: {blob_etag}\r\n")).await;
+        assert!(bh304.starts_with("HTTP/1.1 304") && bb304.is_empty(), "304 on /blob: {bh304}");
+        assert!(!bh304.to_ascii_lowercase().contains("content-length:"), "304 must omit Content-Length: {bh304}");
+        assert!(bh304.contains("Cache-Control: private, max-age=31536000, immutable"), "304 private immutable: {bh304}");
+        assert!(bh304.contains("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox"), "304 sandbox CSP: {bh304}");
+        assert!(bh304.contains("Referrer-Policy: no-referrer"), "304 referrer policy: {bh304}");
+        assert!(bh304.contains("X-Content-Type-Options: nosniff"), "304 nosniff: {bh304}");
+        let head_blob = head(blob_route.clone(), c.clone()).await;
+        for bad_hdr in [
+            ask("/blob/not-a-hash".into(), c.clone()).await.0,
+            head_blob.clone(),
+        ] {
+            assert!(bad_hdr.starts_with("HTTP/1.1 404"), "bad/HEAD /blob must be 404: {bad_hdr}");
+            assert!(bad_hdr.contains("sandbox") && bad_hdr.contains("Referrer-Policy: no-referrer") && bad_hdr.contains("X-Content-Type-Options: nosniff"), "{bad_hdr}");
+            assert!(!bad_hdr.contains("script-src 'self'"), "404 /blob must not carry app CSP: {bad_hdr}");
+        }
+        assert!(head_blob.ends_with("\r\n\r\n"), "HEAD /blob must be bodyless: {head_blob}");
+        let unauth_files_get = ask("/files/get?thread=project-home-p1&path=mfg%2Fbom.csv".into(), String::new()).await.0;
+        assert!(unauth_files_get.starts_with("HTTP/1.1 401"), "{unauth_files_get}");
+        for need in ["sandbox", "Referrer-Policy: no-referrer", "X-Content-Type-Options: nosniff", "Cross-Origin-Resource-Policy: same-origin"] {
+            assert!(unauth_files_get.contains(need), "unpaired /files/get missing {need}: {unauth_files_get}");
+        }
+        assert!(!unauth_files_get.contains("script-src 'self'"), "unpaired /files/get must not carry app CSP: {unauth_files_get}");
+
+        let svg_bytes = b"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>";
+        let svg_path = proj.join("mfg/evil.svg");
+        std::fs::write(&svg_path, svg_bytes).unwrap();
+        let svg_sha = crate::files::blob::register_bytes(&home, svg_path, "image/svg+xml", svg_bytes);
+        let (svg_h, svg_b) = ask(format!("/blob/{svg_sha}"), c.clone()).await;
+        assert!(svg_h.starts_with("HTTP/1.1 200") && svg_b == svg_bytes, "paired svg /blob: {svg_h}");
+        assert!(svg_h.contains("Cache-Control: private, max-age=31536000, immutable"), "{svg_h}");
+        assert!(svg_h.contains("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox"), "{svg_h}");
+        assert!(!svg_h.contains("script-src 'self'"), "{svg_h}");
+        assert!(svg_h.contains("Referrer-Policy: no-referrer"), "{svg_h}");
+        assert!(svg_h.contains("X-Content-Type-Options: nosniff"), "{svg_h}");
+        assert!(svg_h.contains("Content-Disposition: attachment"), "{svg_h}");
+
+        let tag = ask(bom.clone(), c.clone()).await.0.lines().find_map(|l| l.strip_prefix("ETag: ").map(str::to_string)).unwrap();
+        let device = reg.list()["devices"].as_array().unwrap().iter().find(|d| d["kind"] == "browser").unwrap()["id"].as_str().unwrap().to_string();
+        assert_eq!(reg.revoke(&device)["ok"], true);
+        for extra in [String::new(), format!("If-None-Match: {tag}\r\n"), format!("Range: bytes=1-\r\nIf-Range: {tag}\r\n")] {
+            assert!(ask(bom.clone(), format!("{c}{extra}")).await.0.starts_with("HTTP/1.1 401"), "a revoked browser: {extra:?}");
+        }
+        drop(hub);
+    }
+
     #[tokio::test]
     async fn pairing_limits_and_deadline() {
         use crate::net::pairing::{Registry, GUESS_ALL, GUESS_CLIENT, urandom};
@@ -132,6 +374,26 @@ const SECURITY_HEADERS: &str = concat!(
 
 fn json_response(status: &str, body: serde_json::Value, extra: &str) -> Vec<u8> {
     crate::wire::response_for(status, "application/json", &format!("{SECURITY_HEADERS}{extra}"), body.to_string().as_bytes())
+}
+
+fn is_blob_path(route: &str) -> bool {
+    route == "/blob" || route.starts_with("/blob/")
+}
+
+fn is_media_route(route: &str) -> bool {
+    is_blob_path(route) || is_protected_asset(route)
+}
+
+fn asset_json_response(status: &str, body: serde_json::Value) -> Vec<u8> {
+    crate::wire::response_for(
+        status,
+        "application/json",
+        &format!(
+            "Cache-Control: private, no-store\r\n{}Cross-Origin-Resource-Policy: same-origin\r\n",
+            crate::files::serve::MEDIA_SECURITY_HEADERS
+        ),
+        body.to_string().as_bytes(),
+    )
 }
 
 fn cookie_header(name: &str, value: &str, seconds: u32) -> String {
@@ -255,24 +517,69 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     let login = single_header(&req, "tailscale-user-login").unwrap_or("").to_owned();
     let ingress = BrowserIngress { authority, verified_login: &login };
     let upgrade = req.route() == "/ws";
+    let media_route = is_media_route(req.route());
+    let is_head = req.method == "HEAD";
+    let route_json = |status: &str, body: serde_json::Value| {
+        if media_route {
+            if is_head {
+                crate::wire::response_for(
+                    status,
+                    "application/json",
+                    &format!(
+                        "Cache-Control: private, no-store\r\n{}Cross-Origin-Resource-Policy: same-origin\r\n",
+                        crate::files::serve::MEDIA_SECURITY_HEADERS
+                    ),
+                    &[],
+                )
+            } else {
+                asset_json_response(status, body)
+            }
+        } else {
+            json_response(status, body, "")
+        }
+    };
     let reply = if hub.setting("web.enabled").await.as_deref() != Some("1") {
-        json_response("404 Not Found", json!({}), "")
+        route_json("404 Not Found", json!({}))
+    } else if req.route() == "/auth/web/setup" {
+        #[cfg(target_os = "linux")]
+        let ok = unix_proxy && req.method == "GET" && req.target == "/auth/web/setup"
+            && normalize_unix_authority(&mut req, authority)
+            && !req.headers.iter().any(|(name, _)| name.eq_ignore_ascii_case("tailscale-funnel-request"))
+            && single_header(&req, "x-backplane-setup").is_some_and(|n|
+                super::webprobe::consume(&hub.cfg.home, authority, n));
+        #[cfg(not(target_os = "linux"))]
+        let ok = false;
+        crate::wire::response_for(if ok { "204 No Content" } else { "404 Not Found" }, "text/plain", SECURITY_HEADERS, &[])
     } else if (unix_proxy && !normalize_unix_authority(&mut req, authority)) || !ingress.accepts(&req, upgrade) || login == "tagged-devices" {
-        json_response("401 Unauthorized", json!({"state":"unauthorized"}), "")
+        route_json("401 Unauthorized", json!({"state":"unauthorized"}))
     } else if req.target.split_once('?').is_some_and(|(_, query)| query.split('&').any(|field| {
         let key = field.split('=').next().unwrap_or("");
         crate::files::fm::from_uri(key).eq_ignore_ascii_case("token")
     })) {
-        json_response("400 Bad Request", json!({"state":"invalid_request"}), "")
+        route_json("400 Bad Request", json!({"state":"invalid_request"}))
     } else if req.method == "GET" && req.target == "/auth/web/info" {
         json_response("200 OK", json!({"address":format!("https://{authority}")}), "")
-    } else if upgrade && req.method == "GET" && req.target == "/ws?data=1&enc=json" {
+    } else if upgrade && req.method == "GET" && is_browser_ws_target(&req.target) {
         let registry = crate::net::start::registry(&hub.cfg.home);
         if let Some(device_id) = registry.and_then(|r| crate::auth::browser_device(&r, &req, &login)) {
             let stream = tokio::io::join(std::io::Cursor::new(bytes).chain(reader), writer);
-            return crate::data::socket_with(hub, stream, true, crate::data::Principal::Browser { device_id }, authority.into()).await;
+            // `z=deflate`: its frames compressed (docs/PHONE-DATA.md, Compression; the browser inflates with DecompressionStream("deflate-raw"))
+            let z = if req.target.ends_with("&z=deflate") { Some("deflate") } else { None };
+            return crate::data::socket_with_z(hub, stream, true, crate::data::Principal::Browser { device_id }, authority.into(), z).await;
         }
         json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
+    } else if matches!(req.method.as_str(), "GET" | "HEAD") && (req.route() == "/file" || req.route() == "/files/get" || req.route().starts_with("/s/")) {
+        // a project's file, and a share: to a paired browser only (a share's token is no credential here; an unpaired browser reaches
+        // nothing but pairing), streamed and ranged, never inline as anything that runs, never stored (files/share.rs `Who::Browser`)
+        let device = crate::net::start::registry(&hub.cfg.home).and_then(|r| crate::auth::browser_device(&r, &req, &login));
+        if device.is_none() {
+            asset_json_response("401 Unauthorized", json!({"state":"unpaired"}))
+        } else {
+            use crate::files::share::{serve_file, serve_files_get, serve_share, Who};
+            let r = match req.route() { "/file" => serve_file(&hub, &mut writer, Who::Browser, &req).await, "/files/get" => serve_files_get(&hub, &mut writer, Who::Browser, &req).await, _ => serve_share(&hub, &mut writer, Who::Browser, &format!("browser:{}", device.as_deref().unwrap_or("")), &req).await };
+            if r.is_ok() { writer.shutdown().await.ok(); }
+            return Ok(());
+        }
     } else if req.method == "GET" && (req.target == "/" || req.target.starts_with("/assets/")) {
         let paired = crate::net::start::registry(&hub.cfg.home)
             .and_then(|r| crate::auth::browser_device(&r, &req, &login)).is_some();
@@ -284,7 +591,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
     } else if req.method == "GET" && is_protected_asset(req.route()) {
         let registry = crate::net::start::registry(&hub.cfg.home);
         if registry.and_then(|r| crate::auth::browser_device(&r, &req, &login)).is_none() {
-            json_response("401 Unauthorized", json!({"state":"unpaired"}), "")
+            asset_json_response("401 Unauthorized", json!({"state":"unpaired"}))
         } else {
             let result = if req.route() == "/message-image" {
                 crate::files::imgroutes::snapshot_response(&hub, &req, None).await
@@ -293,10 +600,20 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             } else {
                 crate::api::HttpReply::text("404 Not Found", "Unavailable")
             };
-            // Only carry the content disposition from the underlying resource.
-            let mut headers = SECURITY_HEADERS.to_owned();
+            // Only carry the content disposition (and ETag for immutable /blob/ assets) from the underlying resource.
+            let is_blob = req.route().starts_with("/blob/");
+            let cache = if is_blob && matches!(result.status, "200 OK" | "304 Not Modified") {
+                "Cache-Control: private, max-age=31536000, immutable\r\n"
+            } else {
+                "Cache-Control: private, no-store\r\n"
+            };
+            let mut headers = format!(
+                "{cache}{}Cross-Origin-Resource-Policy: same-origin\r\n",
+                crate::files::serve::MEDIA_SECURITY_HEADERS
+            );
             for line in result.extra.lines() {
-                if line.to_ascii_lowercase().starts_with("content-disposition:") {
+                let lower = line.to_ascii_lowercase();
+                if lower.starts_with("content-disposition:") || (is_blob && lower.starts_with("etag:")) {
                     headers.push_str(line.trim_end());
                     headers.push_str("\r\n");
                 }
@@ -348,7 +665,7 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             json_response("400 Bad Request", json!({"state":"invalid_request"}), "")
         }
     } else {
-        json_response("404 Not Found", json!({}), "")
+        route_json("404 Not Found", json!({}))
     };
     writer.write_all(&reply).await?;
     writer.shutdown().await?;
@@ -356,8 +673,13 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
 }
 
 
+fn is_browser_ws_target(target: &str) -> bool {
+    matches!(target, "/ws?data=1&enc=json" | "/ws?data=1&enc=json&z=deflate")
+}
+
 fn is_protected_asset(path: &str) -> bool {
     matches!(path, "/files/get" | "/message-image") ||
+        path.strip_prefix("/blob/").is_some_and(|h| h.len() == 64 && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))) ||
         path.strip_prefix("/bots/").and_then(|p| p.strip_suffix("/screen.jpg"))
             .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
 }
@@ -374,6 +696,8 @@ fn static_asset(path: &str, paired: bool) -> Option<(&'static str, &'static [u8]
         "/assets/pair.js" => asset!("application/javascript", "assets/pair.js"),
         "/assets/app.js" if paired => asset!("application/javascript", "assets/app.js"),
         "/assets/mesh-worker.js" if paired => asset!("application/javascript", "assets/mesh-worker.js"),
+        "/assets/terminal.js" if paired => asset!("application/javascript", "assets/terminal.js"),
+        "/assets/xterm.css" if paired => asset!("text/css", "assets/xterm.css"),
         "/assets/style.css" => asset!("text/css", "assets/style.css"),
         "/assets/favicon.svg" => asset!("image/svg+xml", "assets/favicon.svg"),
         "/assets/favicon-light.svg" => asset!("image/svg+xml", "assets/favicon-light.svg"),

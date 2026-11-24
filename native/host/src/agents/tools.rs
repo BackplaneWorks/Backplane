@@ -43,7 +43,7 @@ impl Agents {
         let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(_, t)| (if bot { !t.project.is_empty() } else { t.project == project }) && !t.deleted).map(|(k, _)| k.clone()).collect() };
         ids.sort(); let mut out = vec![];
         for id in ids {
-            if let Some(m) = &room { if m.hidden(thread, &id).await { continue } } // Mcp.run.threads
+            if let Some(m) = &room { if m.hidden(thread, &id).await { continue } } else if crate::state::is_mail_run_id(&id) { continue } // Mcp.run.threads
             if let Some(j) = self.thread_json(&id).await { out.push(j) }
         }
         (true, json!({"threads":out}))
@@ -126,7 +126,8 @@ impl Agents {
         let (from, was_model, running) = { let w = self.world().await; match w.threads.get(target) { Some(t) => (t.provider.clone(), t.model.clone(), w.running(target)), None => return fail("No such thread.") } };
         let to = { let p = sv(a, "provider").trim().to_lowercase(); if p.is_empty() { from.clone() } else { p } };
         if to != "claude" && super::providers::driver(&to).is_none() { return fail(&format!("{to} is not a provider this hub runs (orchestrator_capabilities lists them)")) }
-        let model = match a.get("model") { Some(Value::String(m)) => m.trim().to_string(), Some(Value::Null) | None => if to == from { was_model.clone() } else { String::new() }, Some(_) => return fail("model is a string (empty for the provider's default)") };
+        let raw_model = match a.get("model") { Some(Value::String(m)) => m.trim().to_string(), Some(Value::Null) | None => if to == from { was_model.clone() } else { String::new() }, Some(_) => return fail("model is a string (empty for the provider's default)") };
+        let model = crate::settings::models::sanitize_model_now(&to, &raw_model);
         if running { return fail(if target == thread { "a thread's provider and model change between turns, and this is its turn: ask from another thread, or the person, once it ends" } else { "a provider changes between turns: that thread is running; thread_interrupt it first, or wait for its turn to end" }) }
         if to != from || model != was_model {
             let Some(h) = self.hub.rpc_for("thread.provider") else { return fail("switching providers is not available") };
@@ -221,16 +222,52 @@ impl Agents {
             let pend = self.pending_ev(&th, 0, ask, now).await; self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now}), pend]).await;
             return self.deliver(&th, &hub_id("m", now, self.seq()), crate::settings::order::answer_text(answer), None, vec![]).await
         }
-        let mut ev = vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now})];
         let implement = a.kind == "plan" && answer == "implement";
-        if implement { let t = { let w = self.world().await; w.threads.get(&th).cloned() }; if let Some(t) = t { ev.push(json!({"$":"ModesSet","id":th,"runtime":t.runtime,"interaction":"default","model":t.model,"at":now})) } }
-        else if !th.is_empty() && (a.kind == "input" || a.kind == "approval") { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", now, self.seq()),"tone":"info","kind":"answer","summary":mcp::ans_line(&a.kind, &a.tool, &a.detail, answer),"at":now})) }
+        let revise = if a.kind == "plan" { answer.strip_prefix("revise:").map(str::trim).map(str::to_string) } else { None };
+        if let Some(ref fb) = revise { if fb.is_empty() { return Err("Enter feedback to revise the plan.".to_string()) } }
+        let (t, had_once, had_ask_once) = {
+            let w = self.world().await;
+            (w.threads.get(&th).cloned(), !w.setting(&format!("plan.once.{th}")).is_empty(), !w.setting(&format!("plan.ask.once.{ask}")).is_empty())
+        };
+        let mut ev = vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now})];
+        if a.kind == "plan" && had_ask_once {
+            ev.push(json!({"$":"SettingSet","key":format!("plan.ask.once.{ask}"),"value":"","at":now}));
+        }
+        if implement {
+            if let Some(t) = t {
+                let rt = if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() };
+                let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
+                ev.push(json!({"$":"ModesSet","id":th,"runtime":rt,"interaction":"default","model":model,"at":now}));
+            }
+            if had_once { ev.push(json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":"","at":now})) }
+            if !th.is_empty() { ev.push(json!({"$":"SettingSet","key":format!("plan.executing.{th}"),"value":"1","at":now})) }
+        } else if let Some(ref fb) = revise {
+            if let Some(t) = t {
+                let rt = if t.runtime.is_empty() { "full-access".to_string() } else { t.runtime.clone() };
+                let model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
+                ev.push(json!({"$":"ModesSet","id":th,"runtime":rt,"interaction":"plan","model":model,"at":now}));
+                if (had_ask_once || had_once) && !th.is_empty() {
+                    let flag = if t.turn == "running" { "2" } else { "1" };
+                    ev.push(json!({"$":"SettingSet","key":format!("plan.once.{th}"),"value":flag,"at":now}));
+                }
+            }
+            if !th.is_empty() { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", now, self.seq()),"tone":"info","kind":"answer","summary":format!("Requested plan revision: {}", fb.chars().take(160).collect::<String>()),"at":now})) }
+        } else if a.kind == "plan" {
+            if !th.is_empty() { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", now, self.seq()),"tone":"info","kind":"answer","summary":"Proposed plan dismissed","at":now})) }
+        } else if !th.is_empty() && (a.kind == "input" || a.kind == "approval") {
+            ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("k", now, self.seq()),"tone":"info","kind":"answer","summary":mcp::ans_line(&a.kind, &a.tool, &a.detail, answer),"at":now}))
+        }
         let pend = self.pending_ev(&th, 0, ask, now).await; ev.push(pend);
-        self.commit_events(ev).await;
+        if implement {
+            self.deliver(&th, &hub_id("m", now, self.seq()), "Implement the proposed plan.", None, ev).await?;
+        } else if let Some(fb) = revise {
+            self.deliver(&th, &hub_id("m", now, self.seq()), &format!("Revise the proposed plan based on this feedback:\n\n{fb}"), None, ev).await?;
+        } else {
+            self.commit_events(ev).await;
+        }
         if let Some(p) = self.parked.lock().unwrap().remove(ask) { let _ = p.tx.send(answer.to_string()); }
         let th_of = self.driver_asks.lock().unwrap().remove(ask); if let Some(t) = th_of { let _ = self.actor(&t).try_send(super::Cmd::Answer { ask: ask.to_string(), answer: answer.to_string() }); }
         if a.tool == "order_quote" { crate::settings::order::answered(self, ask, &th, answer) } // the only thing that sends the files: the person's own Send
-        if implement { return self.deliver(&th, &hub_id("m", now, self.seq()), "Implement the proposed plan.", None, vec![]).await }
         Ok(())
     }
 }

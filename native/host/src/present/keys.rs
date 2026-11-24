@@ -210,12 +210,14 @@ pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, speed:
 /// The combined chip of a thread (`combo`), from the state.
 pub fn combo_of(st: &State, id: &str, now_s: u64) -> Value {
     let Some(t) = st.threads.get(id) else { return Value::Null };
+    let info = crate::agents::speed::info_now();
+    let model = crate::settings::models::sanitize_model(&t.provider, &t.model, info.is_object().then_some(&info));
     let snap = allowance_of(st, id, &t.provider);
     let acct = account_of(st, id, &t.provider, &snap);
     let effort = st.settings.get(&format!("effort.{id}")).map(String::as_str).unwrap_or("");
     let want = st.settings.get(&format!("speed.{id}")).map(String::as_str).unwrap_or("");
-    let speed = if want.is_empty() { "" } else { crate::agents::speed::effective(&crate::agents::speed::info_now(), &t.provider, &t.model, want) };
-    combo(&snap, &t.provider, &t.model, effort, speed, (&acct.0, &acct.1, acct.2), &super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc), now_s)
+    let speed = if want.is_empty() { "" } else { crate::agents::speed::effective(&info, &t.provider, &model, want) };
+    combo(&snap, &t.provider, &model, effort, speed, (&acct.0, &acct.1, acct.2), &super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc), now_s)
 }
 /// The phones' picker for a thread on an account provider: an Account section (the CLI's own login, then each saved account of the provider, with what it has
 /// left; a press is `thread.pick {action: account, value: "<profile>\u{1f}<epoch>"}`, "" the CLI's own) and a Usage section (the thread's account's windows with
@@ -317,6 +319,8 @@ pub fn chip(provider: &str, model: &str, effort: &str, efforts: bool) -> String 
 /// Mob.picker.ctx.loc: the model chip and its label, the model menu (the thread's provider's models, each with what its CLI calls it), the efforts its model
 /// takes and the agents (with what each is and whether it can be used). Without the hub's models info: the provider's default only.
 pub fn picker_with(provider: &str, model: &str, effort: &str, reading: &str, models: Option<&Value>) -> Value {
+    let model = crate::settings::models::sanitize_model(provider, model, models);
+    let model = model.as_str();
     let label = format!("{} · {}{}{}", provider, if model.is_empty() { "default" } else { model }, if effort.is_empty() { String::new() } else { format!(" · {}", effort_label(effort)) }, usage_tail(provider, reading));
     let choice = |l: String, v: &str, on: bool| json!({"label": l, "value": v, "on": on});
     let es = model_efforts(models, provider, model);
@@ -337,6 +341,11 @@ pub fn with_speed(mut p: Value, models: Option<&Value>, provider: &str, model: &
     if !now.is_empty() { let l = crate::agents::speed::label(now);
         for k in ["chip", "label"] { let x = format!("{}{}{l}", p[k].as_str().unwrap_or(""), if k == "chip" { " / " } else { " \u{b7} " }); p[k] = json!(x) } }
     p["speeds"] = json!(d); p
+}
+/// Attach persisted favorite model keys (`["provider/model", ...]`) onto the desktop picker payload.
+pub fn with_favorites(mut p: Value, raw: &str) -> Value {
+    p["favorites"] = json!(crate::settings::models::parse_favorite_keys(raw));
+    p
 }
 
 /// The model menu once the hub's `models` info is known (Models.menu): the provider's default first, its models (each with its CLI's label as `note`, and the efforts it
@@ -472,14 +481,41 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
     let (models, agents) = picker_agents_of(models_text);
     let mine = models.as_deref().map(|i| info_for_thread(st, id, i));
-    m.insert("picker".into(), with_speed(picker_with(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()), mine.as_ref(), &t.provider, &t.model, get(format!("speed.{id}"))));
+    let model = crate::settings::models::sanitize_model(&t.provider, &t.model, mine.as_ref());
+    let p = with_speed(picker_with(&t.provider, &model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()), mine.as_ref(), &t.provider, &model, get(format!("speed.{id}")));
+    m.insert("picker".into(), with_favorites(p, get(crate::settings::models::FAVORITES_KEY.into())));
     m.insert("pickerAgents".into(), agents);
     m.insert("claude".into(), json!(t.provider == "claude"));
     // "Plan first, this turn only" set (commands/plan.rs thread.planonce): the picker's toggle is on until the turn it was set for ends
     m.insert("planOnce".into(), json!(!get(format!("plan.once.{id}")).is_empty()));
-    m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
+    m.insert("planMode".into(), plan_mode(st, id));
+    m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &model, now_s)));
     m.insert("combo".into(), combo_of(st, id, now_s));
     Some(m)
+}
+
+/// Thread Plan Mode snapshot (`present::keys::plan_mode`): driven from state, open asks, and settings across five phases.
+pub fn plan_mode(st: &State, id: &str) -> Value {
+    let Some(t) = st.threads.get(id) else { return Value::Null };
+    let pending = st.ask_data.iter().any(|(_, th, k, _, _, _)| th == id && k == "plan");
+    if t.provider != "claude" && !pending { return Value::Null }
+    let interaction = st.interaction.get(id).map(String::as_str).unwrap_or("default");
+    let once = !st.settings.get(&format!("plan.once.{id}")).map_or(true, String::is_empty);
+    let exec = !st.settings.get(&format!("plan.executing.{id}")).map_or(true, String::is_empty);
+    let running = matches!(t.turn, crate::state::Turn::Running);
+    let phase = if pending { "pending" }
+        else if interaction == "plan" { if running { "planning" } else { "armed" } }
+        else if exec && running { "executing" }
+        else { "off" };
+    let scope = if interaction == "plan" { if once { "once" } else { "always" } } else { "off" };
+    let label = match phase {
+        "pending" => "Plan awaiting review",
+        "executing" => "Building plan",
+        "planning" => "Planning",
+        "armed" => if once { "Plan (1 turn)" } else { "Plan" },
+        _ => "",
+    };
+    json!({"phase": phase, "interaction": interaction, "once": once, "scope": scope, "label": label, "pending": pending, "executing": phase == "executing"})
 }
 
 #[cfg(test)]
@@ -672,5 +708,48 @@ mod tests {
         assert_eq!(l, [("".to_string(), false), ("fable".to_string(), false), ("opus".to_string(), true)]);
         let v = model_choices(&ms, "codex", "gpt-x"); assert_eq!(v.as_array().unwrap().len(), 2); assert_eq!(v[1]["value"], "gpt-x");
         assert_eq!(model_choices(&ms, "grok", "")[0]["on"], true);
+    }
+    #[test] fn plan_mode_tracks_all_five_phases_and_only_shows_for_claude_or_open_plan() {
+        let mut st = State::new();
+        for l in [
+            r#"{"$":"ProjectCreated","id":"p1","title":"P","folder":"/p","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t1","project":"p1","title":"Claude","provider":"claude","model":"","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t2","project":"p1","title":"Codex","provider":"codex","model":"","at":1}"#,
+        ] { st.apply_line(l); }
+        assert!(plan_mode(&st, "t2").is_null());
+        assert_eq!(plan_mode(&st, "t1")["phase"], "off");
+
+        st.apply_line(r#"{"$":"ModesSet","id":"t1","runtime":"full-access","interaction":"plan","model":"","at":2}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["scope"].as_str(), plan_mode(&st, "t1")["label"].as_str()), (Some("armed"), Some("always"), Some("Plan")));
+
+        st.apply_line(r#"{"$":"SettingSet","key":"plan.once.t1","value":"1","at":3}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["scope"].as_str(), plan_mode(&st, "t1")["label"].as_str()), (Some("armed"), Some("once"), Some("Plan (1 turn)")));
+
+        st.apply_line(r#"{"$":"TurnChanged","thread":"t1","state":"running","at":4}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["label"].as_str()), (Some("planning"), Some("Planning")));
+
+        st.apply_line(r#"{"$":"AskOpened","id":"q1","thread":"t1","kind":"plan","tool":"ExitPlanMode","detail":"1. step","options":"","at":5}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["pending"].as_bool()), (Some("pending"), Some(true)));
+
+        st.apply_line(r#"{"$":"AskClosed","id":"q1","answer":"implement","at":6}"#);
+        st.apply_line(r#"{"$":"ModesSet","id":"t1","runtime":"full-access","interaction":"default","model":"","at":6}"#);
+        st.apply_line(r#"{"$":"SettingSet","key":"plan.once.t1","value":"","at":6}"#);
+        st.apply_line(r#"{"$":"SettingSet","key":"plan.executing.t1","value":"1","at":6}"#);
+        assert_eq!((plan_mode(&st, "t1")["phase"].as_str(), plan_mode(&st, "t1")["executing"].as_bool()), (Some("executing"), Some(true)));
+
+        st.apply_line(r#"{"$":"TurnChanged","thread":"t1","state":"idle","at":7}"#);
+        assert_eq!(plan_mode(&st, "t1")["phase"], "off");
+        assert!(!st.settings.contains_key("plan.executing.t1"));
+    }
+    #[test] fn keys_includes_normalized_picker_favorites_and_as_helper_strips_them() {
+        let mut st = State::new();
+        for l in [
+            r#"{"$":"ProjectCreated","id":"p1","title":"P","folder":"/p","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t1","project":"p1","title":"T","provider":"claude","model":"opus","at":1}"#,
+            r#"{"$":"SettingSet","key":"models.favorites","value":"[\"@Claude/opus\",\"codex/gpt-6\"]","at":2}"#,
+        ] { st.apply_line(l); }
+        let k = keys(&st, "t1", 10, "", None).unwrap();
+        assert_eq!(k["picker"]["favorites"], json!(["claude/opus", "codex/gpt-6"]));
+        assert!(as_helper(&k["picker"]).get("favorites").is_none());
     }
 }

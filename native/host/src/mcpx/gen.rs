@@ -17,6 +17,10 @@ pub struct Ctx { pub exe: String, pub url: String, pub pcbparts: bool }
 
 pub type Vault<'a> = &'a dyn Fn(&str) -> Option<String>;
 /// A header's value with its secret put in; None when the vault does not hold it.
+fn private_header(server: &Server, kv: &Kv) -> bool {
+    server.id.starts_with("project-") || kv.secret
+}
+
 pub fn value(kv: &Kv, vault: Vault) -> Option<String> { if kv.secret { vault(&kv.v).map(|x| format!("{}{x}", kv.pre)) } else { Some(kv.v.clone()) } }
 
 /// The wrapper an agent starts for a stdio server: (command, args, env).
@@ -35,9 +39,9 @@ pub fn claude(servers: &[&Server], c: &Ctx, vault: Vault) -> Value {
     for s in servers {
         let v = if s.remote() {
             let mut o = json!({"type": s.transport, "url": s.url});
-            let plain: Vec<(String, String)> = s.headers.iter().filter(|k| !k.secret).map(|k| (k.k.clone(), k.v.clone())).collect();
+            let plain: Vec<(String, String)> = s.headers.iter().filter(|k| !private_header(s, k)).map(|k| (k.k.clone(), k.v.clone())).collect();
             if !plain.is_empty() { o["headers"] = obj(&plain) }
-            if s.headers.iter().any(|k| k.secret) { o["headersHelper"] = json!(format!("{} --mcp-headers {} {}", sh_quote(&c.exe), sh_quote(&s.id), sh_quote(&c.url))) }
+            if s.headers.iter().any(|k| private_header(s, k)) { o["headersHelper"] = json!(format!("{} --mcp-headers {} {}", sh_quote(&c.exe), sh_quote(&s.id), sh_quote(&c.url))) }
             let _ = vault; o
         } else { let (cmd, args, env) = wrapper(s, c); json!({"type":"stdio","command":cmd,"args":args,"env":obj(&env)}) };
         m.insert(s.id.clone(), v);
@@ -64,10 +68,10 @@ pub fn codex(servers: &[&Server], c: &Ctx, vault: Vault) -> (Vec<String>, Vec<(S
         let p = format!("mcp_servers.{}", s.id);
         if s.remote() {
             set(format!("{p}.url"), toml_str(&s.url));
-            let plain: Vec<(String, String)> = s.headers.iter().filter(|k| !k.secret).map(|k| (k.k.clone(), k.v.clone())).collect();
+            let plain: Vec<(String, String)> = s.headers.iter().filter(|k| !private_header(s, k)).map(|k| (k.k.clone(), k.v.clone())).collect();
             if !plain.is_empty() { set(format!("{p}.http_headers"), toml_tbl(&plain)) }
             let mut envh = vec![];
-            for (i, h) in s.headers.iter().filter(|k| k.secret).enumerate() { if let Some(v) = value(h, vault) { let var = codex_var(&s.id, i); envh.push((h.k.clone(), var.clone())); env.push((var, v)) } }
+            for (i, h) in s.headers.iter().filter(|k| private_header(s, k)).enumerate() { if let Some(v) = value(h, vault) { let var = codex_var(&s.id, i); envh.push((h.k.clone(), var.clone())); env.push((var, v)) } }
             if !envh.is_empty() { set(format!("{p}.env_http_headers"), toml_tbl(&envh)) }
             if !s.disabled_tools.is_empty() { set(format!("{p}.disabled_tools"), toml_arr(&s.disabled_tools)) }
         } else {
@@ -102,6 +106,13 @@ pub fn acp(servers: &[&Server], c: &Ctx, vault: Vault) -> Value {
         } else { let (cmd, args, env) = wrapper(s, c); json!({"name": s.id, "command": cmd, "args": args, "env": nv(&env)}) });
     }
     Value::Array(out)
+}
+
+/// Provider extensions get ACP's normalized servers over the agent's private environment.
+pub fn extension_env(acp: &Value, key: &str) -> Option<(String, String)> {
+    let entries: Vec<_> = acp.as_array().into_iter().flatten()
+        .filter(|s| s["name"].as_str().is_some_and(|n| n.starts_with("project-"))).collect();
+    (!entries.is_empty()).then(|| (key.into(), json!(entries).to_string()))
 }
 
 /// What the list means for one thread, as a short hash: a long-lived agent (Claude) whose servers changed is started again at its next turn.
@@ -142,6 +153,27 @@ mod tests {
         for a in kv { let (_, v) = a.split_once('=').unwrap(); crate::mcpx::toml::parse(&format!("x = {v}\n")).unwrap_or_else(|e| panic!("{v}: {e}")); }
         let (_, env) = codex(&[&rem()], &c(), &|_| None); assert!(env.is_empty(), "a secret the vault lacks is left out");
         assert_eq!(codex_approve(&["gh".into()], ""), ["-c", "mcp_servers.gh.default_tools_approval_mode=\"approve\""]); assert!(codex_approve(&["gh".into()], "approval-required").is_empty());
+    }
+    #[test] fn project_configs_keep_credentials_out_of_provider_arguments() {
+        let mut local = st();
+        local.id = "project-test_stdio".into();
+        let mut remote = rem();
+        remote.id = "project-test_http".into();
+        remote.headers.push(Kv::lit("X-Example-Key", "example-sensitive-value"));
+        let servers = [&local, &remote];
+        let claude_config = claude(&servers, &c(), &vault);
+        assert!(claude_config["mcpServers"][&remote.id].get("headers").is_none());
+        assert!(!claude_config.to_string().contains("example-sensitive-value"));
+        let (argv, env) = codex(&servers, &c(), &vault);
+        assert!(!argv.join(" ").contains("example-sensitive-value"));
+        assert!(env.iter().any(|(_, v)| v == "example-sensitive-value"));
+        let acp = acp(&servers, &c(), &vault);
+        assert_eq!(acp[2]["args"], json!(["--mcp-run", local.id]));
+        let (_, config) = extension_env(&acp, "BACKPLANE_TEST_SERVERS").unwrap();
+        let extension: Value = serde_json::from_str(&config).unwrap();
+        assert_eq!(extension.as_array().unwrap().len(), 2);
+        assert_eq!(extension[0]["env"][0]["name"], "BACKPLANE_MCP_URL");
+        assert_eq!(extension[1]["headers"][2]["value"], "example-sensitive-value");
     }
     #[test] fn acp_gets_name_value_lists() {
         let (a, b) = (st(), rem()); let v = acp(&[&a, &b], &c(), &vault);

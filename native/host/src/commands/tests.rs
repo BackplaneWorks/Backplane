@@ -156,6 +156,10 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
         json!({"$":"SettingSet","key":"account.failover.preference.t1","value":"","at":0}), json!({"$":"SettingSet","key":"fallback.intent.t1","value":"","at":0})]);
     let (e, _) = ask(&h, "thread.modes", json!({"thread":"t1","runtime":"nonsense"})).await;
     assert_eq!(e[0], json!({"$":"ModesSet","id":"t1","runtime":"full-access","interaction":"plan","model":"opus","at":0}));
+    let (e, r) = ask(&h, "thread.planonce", json!({"thread":"t1","on":true})).await; assert_eq!(r, ok());
+    assert!(e.iter().any(|x| x["$"] == "SettingSet" && x["key"] == "plan.once.t1" && x["value"] == "1"));
+    let (e, r) = ask(&h, "thread.modes", json!({"thread":"t1","interaction":"plan"})).await; assert_eq!(r, ok());
+    assert!(e.iter().any(|x| x["$"] == "SettingSet" && x["key"] == "plan.once.t1" && x["value"] == ""), "switching to always-plan clears plan.once");
 }
 #[tokio::test] async fn effort_is_kept_only_as_a_level_the_provider_offers() {
     let h = hub("effort").await;
@@ -687,4 +691,69 @@ async fn ask_on(h: &Arc<Hub>, c: &mut crate::hub::Conn, m: &str, p: Value) -> (V
     let (e, _) = ask(&h, "thread.pin", json!({"thread":"t3"})).await;
     assert_eq!(e[0], json!({"$":"ThreadPinned","id":"t3","pinned":true,"at":0})); assert_eq!(e[1], json!({"$":"ThreadPinned","id":"t1","pinned":false,"at":0}), "{e:?}");
     let (e, _) = ask(&h, "thread.pin", json!({"thread":"t3"})).await; assert_eq!(e.len(), 1, "pinning a pinned one unpins nothing: {e:?}");
+}
+
+#[tokio::test] async fn project_new_and_start_with_text_refuse_without_creating_folder_or_events_when_no_provider() {
+    let h = hub("np-proj").await;
+    let mut about = serde_json::Map::new();
+    for (agent, _) in crate::present::keys::AGENTS {
+        about.insert((*agent).to_string(), json!({"cli": ""}));
+    }
+    let _guard = crate::settings::provider_notice::override_for_test(&h, true, json!({"probed": true, "about": about}));
+    let parent = crate::plat::tmp::dir("cmds-np-dir");
+    let target = parent.join("fresh-proj");
+    let (ev, r) = ask(&h, "project.new", json!({"path": target.to_string_lossy(), "empty": true, "text": "build it"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!(r["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(r["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+    assert!(ev.is_empty(), "refused project.new must log zero events: {ev:?}");
+    assert!(!target.exists(), "refused project.new must create no folder on disk");
+
+    let (ev2, r2) = ask(&h, "project.start", json!({"project": "p1", "msg": "start-1", "text": "hello"})).await;
+    assert_eq!(r2["ok"], false, "{r2}");
+    assert_eq!(r2["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert!(ev2.is_empty(), "refused project.start must log zero events: {ev2:?}");
+}
+
+#[tokio::test] async fn mismatched_provider_and_model_are_sanitized_everywhere() {
+    let h = hub("mismatch").await;
+    // Persisted codex + opus (exact bug state) -> thread.create clears model to ""
+    h.commit(&json!({"$":"SettingSet","key":"agent.provider","value":"codex","at":9})).await.unwrap();
+    h.commit(&json!({"$":"SettingSet","key":"agent.model","value":"opus","at":9})).await.unwrap();
+    let (e, r) = ask(&h, "thread.create", json!({"project":"p1"})).await;
+    assert_eq!(r["ok"], true);
+    assert_eq!(e[0]["provider"], "codex");
+    assert_eq!(e[0]["model"], "", "persisted codex+opus must sanitize to default");
+
+    // claude + opus default, explicit provider: "codex" -> must NOT inherit opus
+    h.commit(&json!({"$":"SettingSet","key":"agent.provider","value":"claude","at":10})).await.unwrap();
+    let (e, r) = ask(&h, "thread.create", json!({"project":"p1","provider":"codex"})).await;
+    assert_eq!(r["ok"], true);
+    assert_eq!(e[0]["provider"], "codex");
+    assert_eq!(e[0]["model"], "", "explicit codex must not inherit claude agent.model");
+
+    // Explicit thread.create {provider: "codex", model: "opus"} -> sanitized to ""
+    let (e, r) = ask(&h, "thread.create", json!({"project":"p1","provider":"codex","model":"opus"})).await;
+    assert_eq!(r["ok"], true);
+    let th_codex = r["thread"].as_str().unwrap().to_string();
+    assert_eq!(e[0]["provider"], "codex");
+    assert_eq!(e[0]["model"], "", "explicit codex+opus sanitized");
+    h.commit_many(&e).await.unwrap();
+
+    // thread.modes with "opus" on a codex thread -> sanitized to ""
+    let (e, r) = ask(&h, "thread.modes", json!({"thread": th_codex, "model": "opus"})).await;
+    assert_eq!(r["ok"], true);
+    assert_eq!(e[0]["model"], "", "thread.modes must sanitize opus on codex");
+
+    // thread.provider switching to codex with model "opus" -> sanitized to ""
+    let (e, r) = ask(&h, "thread.provider", json!({"thread": "t1", "provider": "codex", "model": "opus"})).await;
+    assert_eq!(r["ok"], true);
+    assert_eq!(e.iter().find(|x| x["$"] == "ProviderSet").unwrap()["model"], "", "thread.provider must sanitize opus on codex");
+
+    // thread.fork on a persisted codex + opus thread -> fork gets model ""
+    h.commit(&json!({"$":"ThreadCreated","id":"tbad","project":"p1","title":"Bad","env":"local","branch":"","worktree":"","provider":"codex","model":"opus","at":11})).await.unwrap();
+    let (e, r) = ask(&h, "thread.fork", json!({"thread": "tbad"})).await;
+    assert_eq!(r["ok"], true);
+    assert_eq!(e[0]["provider"], "codex");
+    assert_eq!(e[0]["model"], "", "fork of persisted codex+opus clears model");
 }

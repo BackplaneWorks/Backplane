@@ -37,9 +37,12 @@ pub fn b_bind(machine: &str, bot: &str, thread: &str, name: &str) -> String { sh
 impl World {
     /// Ub.ops.with: these bodies as this machine's next ops under `uid` (none without a machine id or a uid)
     pub fn ops_with(&self, uid: &str, now: u64, bodies: &[String]) -> Vec<Value> {
-        let me = self.me(); if me.is_empty() || uid.is_empty() { return vec![] }
-        let (mut n, mut last) = (self.vv(uid, &me) + 1, self.hlc(uid)); let mut out = vec![];
-        for b in bodies { let s = stamp_next(&last, now, &me); out.push(json!({"$":"UberOp","uid":uid,"origin":me,"n":n,"stamp":s,"op":b,"at":now})); last = s; n += 1 }
+        self.ops_as(uid, &self.me(), now, bodies)
+    }
+    pub(crate) fn ops_as(&self, uid: &str, me: &str, now: u64, bodies: &[String]) -> Vec<Value> {
+        if me.is_empty() || uid.is_empty() { return vec![] }
+        let (mut n, mut last) = (self.vv(uid, me) + 1, self.hlc(uid)); let mut out = vec![];
+        for b in bodies { let s = stamp_next(&last, now, me); out.push(json!({"$":"UberOp","uid":uid,"origin":me,"n":n,"stamp":s,"op":b,"at":now})); last = s; n += 1 }
         out
     }
     pub fn ops(&self, now: u64, bodies: &[String]) -> Vec<Value> { self.ops_with(&self.uid(), now, bodies) }
@@ -198,7 +201,8 @@ impl Bots {
         let (look, auto, color) = super::catrig::of_event(&json!({"name": name, "look": look, "auto": offer["auto"], "color": offer["color"]}));
         if !super::rpc::name_ok(&name) || w.named(&name).is_some() { return vec![err(id, &format!("this machine has a bot called {name} already; rename it first"))] }
         let (bot, th) = (self.hub_id("b", now), self.hub_id("t", now));
-        let (provider, model) = (crate::settings::models::default_now(&w.setting("agent.provider", "claude"), ""), w.setting("agent.model", ""));
+        let provider = crate::settings::models::default_now(&w.setting("agent.provider", "claude"), "");
+        let model = crate::settings::models::sanitize_model_now(&provider, &w.setting("agent.model", ""));
         let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now}),
             super::catrig::with(json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":look,"persona":"","at":now}), look, auto, &color),
             json!({"$":"UberSet","bot":bot,"uid":uid,"at":now}), json!({"$":"SettingSet","key":"uber.offer","value":"","at":now})];

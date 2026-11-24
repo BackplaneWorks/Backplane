@@ -71,6 +71,9 @@ extension DataClient {
         // (a stop changes nothing here: it may come after the next viewer has begun, and that one drops the last one's plots itself)
         var serial = 0
         if !kind.isEmpty { let b = plots.begin(slot); serial = b.serial; if !b.kept.isEmpty { p["kept"] = b.kept } }
+        if has("keptChunks") && (kind == "board" || kind == "schematic" || kind == "gerbers" || kind == "split") {
+            p["keptChunks"] = plots.keptChunkHashes()
+        }
         do {
             let r: DWatch = try await call("viewer.watch", p)
             if !kind.isEmpty { plots.shown(r.keys.isEmpty ? PlotStore.keys(kind: kind, root: r.root, path: path) : r.keys, of: serial) }
@@ -126,6 +129,7 @@ struct DataViewerView: View {
     @State private var boardPick = ""
     @State private var sheetPick = ""
     @State private var choosing: String?
+    @State private var mgmtOpen = ""
     init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0) {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
@@ -211,13 +215,38 @@ struct DataViewerView: View {
                 let on = client.sheets.first { $0.file == schPath } ?? client.sheets[0]
                 DataPickerHead(what: Tr.t("Sheet"), name: on.name, sub: Tr.ios_viewer_sheets_n(n: client.sheets.count)) { choosing = "sheets" }.accessibilityIdentifier("data.viewer.sheets")
             }
+            let shownTarget = target?.tab == tab ? target?.path : nil
+            let panelsOf = PlanFloorplannerLogic.resolveMgmtProject(
+                targetPath: shownTarget,
+                selectedBoard: board.map { PlanBoardRef(value: $0.value, pcb: $0.pcb, sch: $0.sch, project: $0.project) },
+                boards: (files?.boards ?? []).map { PlanBoardRef(value: $0.value, pcb: $0.pcb, sch: $0.sch, project: $0.project) },
+                root: files?.root ?? ""
+            )
             Group {
                 switch tab {
-                case "Board": DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : (board?.pcb ?? ""), has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil || target != nil, none: "No board in this project yet")
-                case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: schPath, has: files == nil || !(files?.sch ?? "").isEmpty || board != nil || target != nil, none: "No schematic in this project yet", tree: board?.sch ?? "")
+                case "Board":
+                    ZStack(alignment: .bottom) {
+                        DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : (board?.pcb ?? ""), has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil || target != nil, none: "No board in this project yet")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.bottom, client.has("mgmt") && mgmtOpen.isEmpty ? 42 : 0)
+                            .allowsHitTesting(mgmtOpen.isEmpty)
+                        if client.has("mgmt") {
+                            DataMgmtHost(client: client, project: panelsOf, home: files?.root ?? "", open: $mgmtOpen)
+                        }
+                    }
+                case "Schematic":
+                    ZStack(alignment: .bottom) {
+                        DataPlotTab(client: client, thread: thread, kind: "schematic", path: schPath, has: files == nil || !(files?.sch ?? "").isEmpty || board != nil || target != nil, none: "No schematic in this project yet", tree: board?.sch ?? "")
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.bottom, client.has("mgmt") && mgmtOpen.isEmpty ? 42 : 0)
+                            .allowsHitTesting(mgmtOpen.isEmpty)
+                        if client.has("mgmt") {
+                            DataMgmtHost(client: client, project: panelsOf, home: files?.root ?? "", open: $mgmtOpen)
+                        }
+                    }
                 // unknown files (no hub yet) still open the 3D view: it shows the model it showed last
                 case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: board?.pcb ?? "", has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil, none: "No board in this project yet")
-                case "Gerbers": DataPlotTab(client: client, thread: thread, kind: "gerbers", path: "", has: true, none: "No Gerbers in this project yet")
+                case "Gerbers": DataPlotTab(client: client, thread: thread, kind: "gerbers", path: "", has: true, none: "No Gerber files in this project yet")
                 case "Split": DataSplitTab(client: client, thread: thread, files: files, board: board)
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
@@ -666,12 +695,16 @@ struct DataFilePreview: View {
     @State private var failed = false
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Button { close() } label: { Text("‹ " + (path.split(separator: "/").last.map(String.init) ?? path)).font(.system(.subheadline, design: .monospaced).bold()) }.accessibilityIdentifier("data.preview.back"); Spacer() }
+            HStack { Button { close() } label: { Text("‹ " + (path.split(separator: "/").last.map(String.init) ?? path)).font(.system(.subheadline, design: .monospaced).bold()) }.accessibilityIdentifier("data.preview.back"); Spacer()
+                // the file itself, to keep or open in another app (docs/file-links.md: the Files tab's Download, `/files/get`)
+                Button(Tr.t("Download")) { DDownloads.shared.project(thread: thread.id, path: path) }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("data.preview.download") }
                 .padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.panel)
             Divider()
             if failed { Text(Tr.t("This file could not be read.")).foregroundStyle(BackplaneDesign.bad).padding(16) }
             else if let d = data {
-                if imageExt.contains(ext(path)), let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().padding(8).accessibilityIdentifier("data.preview.image") }
+                if imageExt.contains(ext(path)), let dec = DDecodedImage.decode(d) {
+                    DPictureView(image: dec.image, animated: dec.animated, contentMode: .fit).padding(8).accessibilityIdentifier("data.preview.image")
+                }
                 else if ext(path) == "pdf" { DataPDFView(data: d).accessibilityIdentifier("data.preview.pdf") }
                 else if d.count < 200_000, !d.contains(0) {
                     let t = String(decoding: d, as: UTF8.self)

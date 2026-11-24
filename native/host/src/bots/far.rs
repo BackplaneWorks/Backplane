@@ -16,9 +16,13 @@ use std::{collections::HashMap, sync::{Arc, Mutex, Weak}};
 
 pub(super) fn gs<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 
-/// The state of the room traffic this machine keeps: what each room last sent a machine, and the changes it applied from one (so they are not sent back).
+/// The state of the room traffic this machine keeps: what each room last sent a machine; each change applied from one, until the forward of the
+/// commit that stored it has seen it (so that change is not sent back: several can be waiting, one per sync); and each room's changes still to forward, in commit order.
 #[derive(Default)]
-pub struct FarState { sent: Mutex<HashMap<(String, String), String>>, applied: Mutex<HashMap<(String, String), String>>, pub(super) mesh: super::mesh::MeshState }
+pub struct FarState { sent: Mutex<HashMap<(String, String), String>>, applied: Mutex<HashMap<(String, String), Vec<String>>>,
+    queue: Mutex<HashMap<String, std::collections::VecDeque<Value>>>, pub(super) mesh: super::mesh::MeshState }
+/// The most applied changes from one machine to one room kept waiting for their forward (a commit that failed leaves its entry; these go first)
+const APPLIED_MAX: usize = 16;
 
 /// Registered on the hub once the bots and the transport exist: a committed room change or post goes to the machine that has members in it.
 pub struct FarOut(pub Weak<Bots>);
@@ -27,7 +31,13 @@ impl Observer for FarOut {
         let ev: Vec<Value> = events.iter().filter(|e| matches!(e["$"].as_str(), Some("RoomSet" | "RoomDeleted" | "RoomPosted"))).cloned().collect();
         if ev.is_empty() { return }
         let Some(b) = self.0.upgrade() else { return };
-        tokio::spawn(async move { b.far_forward(ev).await });
+        // one room's changes go out in the order they were committed (a forward reads the room as it is then, so a later one never overtakes an earlier one
+        // with newer state); rooms do not wait for each other. A room with no drain running starts one; it ends when the room's queue is empty.
+        let mut start: Vec<String> = vec![];
+        { let mut q = b.far.queue.lock().unwrap();
+          for e in ev { let room = if gs(&e, "$") == "RoomPosted" { gs(&e, "room") } else { gs(&e, "id") }.to_string();
+              let d = q.entry(room.clone()).or_default(); if d.is_empty() && !start.contains(&room) { start.push(room) } d.push_back(e) } }
+        for room in start { let b = b.clone(); tokio::spawn(async move { b.far_drain(&room).await }); }
     }
 }
 
@@ -81,6 +91,15 @@ impl Bots {
     }
 
     /// Room changes and posts just committed here, sent to the machine that has members in the room
+    /// Forward one room's queued changes one at a time; the queue entry goes when it is empty (under the same lock `FarOut` adds to it with)
+    async fn far_drain(self: &Arc<Self>, room: &str) {
+        loop {
+            let Some(e) = ({ let mut q = self.far.queue.lock().unwrap(); match q.get(room).and_then(|d| d.front().cloned()) { Some(e) => Some(e), None => { q.remove(room); None } } }) else { return };
+            self.far_forward(vec![e]).await;
+            let mut q = self.far.queue.lock().unwrap();
+            if let Some(d) = q.get_mut(room) { d.pop_front(); if d.is_empty() { q.remove(room); return } }
+        }
+    }
     pub async fn far_forward(self: &Arc<Self>, events: Vec<Value>) {
         if self.machines().is_empty() { return }
         for e in events {
@@ -91,7 +110,10 @@ impl Bots {
             match kind.as_str() {
                 "RoomPosted" => {
                     if gs(&e, "from").contains('@') || room.starts_with("dm:") { continue }
-                    for l in now_links { self.far_send(&l, "bots.room_post", json!({"room":room,"msg":gs(&e, "id"),"from":gs(&e, "from"),"text":gs(&e, "text"),"hop":e["hop"],"at":e["at"]})).await; }
+                    for l in now_links {
+                        let r = self.far_send(&l, "bots.room_post", json!({"room":room,"msg":gs(&e, "id"),"from":gs(&e, "from"),"text":gs(&e, "text"),"hop":e["hop"],"at":e["at"]})).await;
+                        if !matches!(r, Some((200, _))) { eprintln!("bots: a post in room {room} was not taken by {l}: {r:?}") }
+                    }
                 }
                 _ => {
                     let live: Vec<String> = if kind == "RoomDeleted" { vec![] } else { now_links.clone() };
@@ -102,9 +124,15 @@ impl Bots {
                         let key = (room.clone(), l.clone());
                         let wire = if gone { vec![] } else { self.to_wire(&l, &members).await };
                         let sig = if gone { "\u{0}deleted".to_string() } else { format!("{name}\n{}\n{life:?}", wire.join("\n")) };
-                        let came = { let mut ap = self.far.applied.lock().unwrap(); let hit = ap.get(&key).map_or(false, |m| *m == if gone { sig.clone() } else { members.join("\n") }); if hit { ap.remove(&key); } hit };
-                        if came { // it came from that machine: not sent back
-                            if gone { self.far.sent.lock().unwrap().remove(&key); } else { self.far.sent.lock().unwrap().insert(key, sig); }
+                        // this commit stored a change from that machine: not sent back. Known by the event's own state, not the room's now: a second change
+                        // from the same machine may be applied (or stored) by the time this forward runs, and an earlier one taken for ours would go back
+                        // as a change and undo the later one there. That machine holds the event's state: the next change of ours is measured against it.
+                        let mine = if kind == "RoomDeleted" { "\u{0}deleted".to_string() } else { gs(&e, "members").to_string() };
+                        let came = { let mut ap = self.far.applied.lock().unwrap(); let hit = ap.get_mut(&key).and_then(|v| v.iter().position(|m| *m == mine).map(|i| { v.remove(i); v.is_empty() })); if hit == Some(true) { ap.remove(&key); } hit.is_some() };
+                        if came {
+                            let ms: Vec<String> = mine.lines().filter(|m| !m.is_empty()).map(str::to_string).collect();
+                            if kind == "RoomDeleted" || !self.remote_link(&ms).contains(&l) { self.far.sent.lock().unwrap().remove(&key); }
+                            else { let held = format!("{}\n{}\n{:?}", gs(&e, "name"), self.to_wire(&l, &ms).await.join("\n"), super::world::life(&e, life)); self.far.sent.lock().unwrap().insert(key, held); }
                             continue
                         }
                         if self.far.sent.lock().unwrap().get(&key) == Some(&sig) { continue }
@@ -118,6 +146,11 @@ impl Bots {
         }
     }
 
+    /// A change from `link` about to be stored: its forward knows it by this state (`members`, or "\0deleted")
+    fn far_applied(&self, room: &str, link: &str, state: &str) {
+        let mut ap = self.far.applied.lock().unwrap(); let v = ap.entry((room.to_string(), link.to_string())).or_default();
+        v.push(state.to_string()); if v.len() > APPLIED_MAX { v.remove(0); }
+    }
     /// The other machine's side: a request from `link` (the route has vouched for it)
     pub async fn far_received(self: &Arc<Self>, link: &str, m: &str, p: &Value) -> (u16, String) {
         match m {
@@ -138,14 +171,14 @@ impl Bots {
         if let Some(r) = &existing { if !r.deleted && !self.remote_link(&r.members).contains(&link.to_string()) { return (409, "that room is not shared with you".into()) } }
         if p["deleted"].as_bool().unwrap_or(false) {
             if existing.map_or(true, |r| r.deleted) { return (200, "ok".into()) }
-            self.far.applied.lock().unwrap().insert((room.clone(), link.to_string()), "\u{0}deleted".into());
+            self.far_applied(&room, link, "\u{0}deleted");
             return match self.hub.commit(&json!({"$":"RoomDeleted","id":room,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
         }
         let wire: Vec<String> = p["members"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
         let members = self.from_wire(link, &wire).await;
         if !members.iter().any(|m| !m.contains('@')) { // nobody of ours is in it (any more): the copy goes
             if existing.map_or(true, |r| r.deleted) { return (200, "no member here".into()) }
-            self.far.applied.lock().unwrap().insert((room.clone(), link.to_string()), "\u{0}deleted".into());
+            self.far_applied(&room, link, "\u{0}deleted");
             return match self.hub.commit(&json!({"$":"RoomDeleted","id":room,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
         }
         let name = if gs(p, "name").is_empty() { "room" } else { gs(p, "name") };
@@ -156,7 +189,7 @@ impl Bots {
         // members are compared by the link they are on: a room made here keeps `bob@m1` as typed, the same bot told back by a third machine reads `bob@L01`
         if let Some(r) = existing.as_ref().filter(|r| !r.deleted) { if self.by_link(&r.members) == self.by_link(&members) && r.name == name && life == was { return (200, "ok".into()) } }
         let text = members.join("\n");
-        self.far.applied.lock().unwrap().insert((room.clone(), link.to_string()), text.clone());
+        self.far_applied(&room, link, &text);
         match self.hub.commit(&json!({"$":"RoomSet","id":room,"name":name,"members":text,"ephemeral":life.0,"closed":life.1,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
     }
     async fn far_room_post(self: &Arc<Self>, link: &str, p: &Value) -> (u16, String) {

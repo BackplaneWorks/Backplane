@@ -57,9 +57,13 @@ elif [ -n "${ww:-}" ]; then X mousemove $((wx + ww / 2)) $((wy + wh / 2)) click 
   t=$(date +%s.%N); X key ctrl+semicolon
   for _ in $(seq 40); do [ -n "$(klog painted)" ] && break; sleep 0.25; done; shot 11-comment
   if [ -n "$(klog painted)" ]; then ok "Ctrl+; in KiCad opens Backplane's comment window"; tm comment-window "$(python3 -c "import time;print(round(time.time()-$t,2))")"
-    X type --delay 30 "bare gate note"; sleep 0.3; X key Return
-    for _ in $(seq 40); do grep -q 'bare gate note' "$HUBH/events.jsonl" 2>/dev/null && break; sleep 0.25; done
-    grep -q 'bare gate note' "$HUBH/events.jsonl" && ok "the comment posted to the thread" || bad "the comment window posted nothing to the thread"
+    X type --delay 30 "bare gate note"; sleep 0.3; X key Return; t=$(date +%s.%N)
+    # 10 s is the bound; it waits 60 so a slow post says how slow (a44963adbc: the client's post took 21.7 s while the hub's mailroom looped)
+    for _ in $(seq 240); do grep -q 'bare gate note' "$HUBH/events.jsonl" 2>/dev/null && break; sleep 0.25; done
+    CT=$(python3 -c "import time;print(round(time.time()-$t,1))")
+    if ! grep -q 'bare gate note' "$HUBH/events.jsonl"; then bad "the comment window posted nothing to the thread in 60 s ($(klog post | cut -c1-200))"
+    elif python3 -c "import sys; sys.exit(0 if $CT <= 10 else 1)"; then ok "the comment posted to the thread (in $CT s)"
+    else bad "the comment posted to the thread only after $CT s (bound 10 s; $(klog post | cut -c1-200))"; fi
   else bad "Ctrl+; opened no comment window (selection: $(head -c 160 "$OUT/logs/comment-select.json"))"; cut_ 2 comment "Ctrl+; in the embedded KiCad opened no comment window on a fresh install"; fi
 else bad "no KiCad frame to give the keyboard to (shown=$SHOWN)"; fi
 

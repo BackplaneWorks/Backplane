@@ -245,7 +245,10 @@ start_xvfb_and_wm() {
     xvb=$(command -v Xvfb)
   fi
   # REAL_HARDWARE=1: a private display the GPU draws (lib/gpu_display.sh); Xvfb has none. KEMBED_XVFB=1 keeps Xvfb.
-  if [ "${REAL_HARDWARE:-0}" = "1" ] && [ "${KEMBED_XVFB:-0}" != "1" ] && gpu_display_available; then
+  # KEMBED_DISPLAY=:N: a display that is already there (a real desktop session, its own window manager: KEMBED_WM=none), not a private one
+  if [ -n "${KEMBED_DISPLAY:-}" ]; then
+    DISP=$KEMBED_DISPLAY; export DISPLAY="$DISP"
+  elif [ "${REAL_HARDWARE:-0}" = "1" ] && [ "${KEMBED_XVFB:-0}" != "1" ] && gpu_display_available; then
     start_gpu_display || return 1
   else
   d=$((520 + $$ % 200))
@@ -266,10 +269,16 @@ default_border none
 hide_edge_borders both
 ipc-socket $OUT/i3.sock
 EOF
-  if [ "${KEMBED_WM:-i3}" != mutter ]; then
-  own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" i3 -c "$OUT/i3.conf" >"$OUT/i3.log" 2>&1
-  for _ in $(seq 30); do [ -S "$OUT/i3.sock" ] && break; sleep 0.1; done
-  fi
+  # KEMBED_WM=openbox|xfwm4: that window manager instead of i3 (click to focus, windows placed where they ask, stacked not tiled), for a
+  # suite that must hold under more than one (embed_pointer_keys_e2e); the i3-only commands then do nothing
+  case "${KEMBED_WM:-i3}" in
+    mutter|none) ;;
+    openbox) own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" openbox --sm-disable >"$OUT/wm.log" 2>&1; sleep 1 ;;
+    # (xfwm4 reads its settings over D-Bus from xfconfd: a session bus of its own)
+    xfwm4) own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" dbus-run-session -- xfwm4 --compositor=off --sm-client-disable >"$OUT/wm.log" 2>&1; sleep 2 ;;
+    *) own env DISPLAY="$DISP" XDG_RUNTIME_DIR="$OUT/run" i3 -c "$OUT/i3.conf" >"$OUT/i3.log" 2>&1
+       for _ in $(seq 30); do [ -S "$OUT/i3.sock" ] && break; sleep 0.1; done ;;
+  esac
 
   # mutter places a client where it likes at the size it asked for (1400x900, centred); i3 tiles it over the screen. Under mutter each
   # client window is maximized as it appears, so a suite sees the same pane as under i3 (KEMBED_WM_KEEP_MAX=0 leaves it as GNOME puts it)

@@ -92,6 +92,10 @@ pub(crate) fn clock(at: u64, now: u64, zone: &Rule) -> String {
     let days = (w / 86400) as i64; let (_, m, d) = civil(days);
     format!("{} {} {} {}", DAYS[((days + 3).rem_euclid(7)) as usize], d, MONS[m - 1], hm(w))
 }
+/// Restart.row: the row a turn the restart cut and carried on stands for, with when (the carry's own time, a moment after the hub came back)
+/// The hub's own note that a turn the restart cut carries on (agents::carry_on), its row shown as `carry_row`
+pub(crate) fn restart_note(e: &Ent) -> bool { !e.msg && e.akind == "restart" && e.text == "Continuing after the restart" }
+pub(crate) fn carry_row(clock: &str) -> String { if clock.is_empty() { "Interrupted by a restart, picking up again".into() } else { format!("Interrupted by a restart at {clock}, picking up again") } }
 fn took(s: u64) -> String {
     if s < 60 { format!("{s}s") } else if s < 3600 { format!("{}m {}s", s / 60, s % 60) } else { format!("{}h {}m", s / 3600, (s % 3600) / 60) }
 }
@@ -168,8 +172,10 @@ pub fn bot_private(id: &str, role: &str, text: &str) -> bool {
 /// The hub's routine bookkeeping in a thread, which every client leaves out of the timeline (the log keeps it; agents read it with thread_read):
 /// the snapshot before each turn (agents/snapguard.rs, files/snapshot.rs `Snap::line`; the user message's Restore to before this carries it
 /// instead), a folder made a git repository, and the design files committed or recorded at a turn's end (agents/design.rs). A warning or an
-/// error is never quiet, nor a commit line that says its push failed.
+/// error is never quiet, nor a commit line that says its push failed. Also the delivery bookkeeping of waiting messages (agents/codex.rs `ride_done`: "Delivered
+/// with a new turn: N waiting message(s)", "Delivered with the steer: …"; Nov 20, a "ride Delivered with a new turn: 41 waiting message(s)" row in Bub's chat).
 pub fn quiet_act(role: &str, akind: &str, text: &str) -> bool {
+    if akind == "ride" && role == "info" { return text.starts_with("Delivered ") }
     if akind != "git" || role != "info" { return false }
     if snap_line(text).is_some() || text.starts_with("Made this folder a git repository") || text.starts_with("The snapshot of this project is taking more than") { return true }
     (text.starts_with("Committed ") || text.starts_with("Recorded ")) && text.contains(" design file") && !text.contains("not pushed")
@@ -358,11 +364,11 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &
             if o { for (k, r) in run.iter().enumerate() { let mut a = act(r, id); if live && k + 1 == run.len() && !is_step(r) { a["now"] = json!(true) } out.push(a) } }
             i = j; continue;
         }
-        if !e.msg { out.push(plain_act(e)); i += 1; continue }
         // a zone that cannot be known degrades the time stamps (empty), not the screen
         let c = zone.map(|z| clock(e.at, now, z));
+        if !e.msg { let mut a = plain_act(e); if restart_note(e) { a["text"] = json!(carry_row(c.as_deref().unwrap_or(""))) } out.push(fold_thought(a, open)); i += 1; continue }
         if e.role == "user" && e.text.starts_with(CARRY) {
-            out.push(json!({"id": e.id, "kind": "act", "tone": "info restart", "label": "restart", "text": "Continuing after the restart"}));
+            out.push(json!({"id": e.id, "kind": "act", "tone": "info restart", "label": "restart", "text": carry_row(c.as_deref().unwrap_or(""))}));
         } else if e.role == "user" {
             // Rto.of: a reply's quote block is the agent's; every client shows the body and an "In reply to" line naming the message
             let (reply, shown) = match crate::session::composer::reply_split(&e.text) { Some((id, q, b)) => (Some((id, q)), b), None => (None, e.text.clone()) };
@@ -391,6 +397,8 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &
             let (text, blocks, s) = if e.id.starts_with("@live:") { ("Working".to_string(), md_blocks("Working"), String::new()) } else if api_err(&e.text) { (e.text.clone(), md_blocks(&api_say(&e.text)), s) } else { (e.text.clone(), md_blocks(&e.text), s) };
             let imgs = if newest_replies.contains(e.id.as_str()) { images(&e.id, &e.text) } else { vec![] };
             let mut row = json!({"id": e.id, "kind": "assistant", "text": text, "blocks": blocks, "images": imgs, "stamp": if mid { String::new() } else { s.clone() }});
+            // the files it names that every client may open or download (files/share.rs)
+            if !e.id.starts_with("@live:") { let f = crate::files::share::linkable(&e.text); if !f.is_empty() { row["files"] = json!(f) } }
             if mid && !s.is_empty() { row["hover"] = json!(s) }
             out.push(row);
         }
@@ -438,6 +446,19 @@ pub(crate) fn plain_act(e: &Ent) -> Value {
     let mut a = json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text});
     // a notice's code (an error naming a command to run, a path): the clients draw copy buttons for it (md/copy.rs)
     let copy = crate::md::copy::spans(&text); if !copy.is_empty() { a["copy"] = json!(copy) }
+    // a thought (Fold.think): shown folded to its first line, opened to the whole of it with a tap (the setting agent.thinking says "folded")
+    if e.role == THINK && !text.is_empty() { a["folds"] = json!(true) }
+    a
+}
+/// The tone of a thought the agent sent (agents/lines.rs, codex.rs).
+pub const THINK: &str = "thinking";
+/// Fold.think.open: a thought opens and shuts as a run of tool calls does, by the person's `fold:<id>` choice (shut until opened); `value` is the
+/// `fold` action that flips it, and an open one carries its Markdown `blocks`, drawn as a reply's.
+fn fold_thought(mut a: Value, open: &dyn Fn(&str) -> bool) -> Value {
+    if a["folds"] != true { return a }
+    let id = a["id"].as_str().unwrap_or("").to_string(); let o = open(&id);
+    a["open"] = json!(o); a["value"] = json!(format!("{}{id}", if o { "0" } else { "1" }));
+    if o { a["blocks"] = json!(md_blocks(a["text"].as_str().unwrap_or(""))) }
     a
 }
 
@@ -603,6 +624,7 @@ fn asks_json(st: &State, thread: &str, draft: &str) -> Result<Vec<Value>, &'stat
         let head = if files { format!("Backplane needs · {head}") } else { head };
         let mut card = json!({"id": id, "kind": kind, "head": head, "detail": if kind == "plan" { String::new() } else { detail.clone() },
             "blocks": if kind == "plan" { md_blocks(detail) } else { vec![] }, "buttons": buttons});
+        if kind == "plan" { card["revise"] = json!(true); card["revisePre"] = json!(format!("{id}|revise:")); card["raw"] = json!(detail); }
         if files { card["needs"] = json!(true) }
         out.push(card);
     }
@@ -683,7 +705,7 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     for e in entries.iter_mut() {
         if e["kind"] == "term" { let id = e["id"].as_str().unwrap_or("").to_string(); e["key"] = json!(term_key(thread, &id)); }
         if e["kind"] == "user" { let text = e["text"].as_str().unwrap_or("").to_string(); let mut refs = crate::session::composer::mention::refs_in(st, hub, &text);
-            if text.contains('$') { let (cwd, prov, iso) = crate::session::composer::mention::thread_skill_facts(st, thread); refs.extend(crate::agents::skills::chips(&crate::agents::skills::popup_index(&cwd), &text, &prov, iso)); }
+            if text.contains('$') { let (cwd, prov, iso) = crate::session::composer::mention::thread_skill_facts(st, thread); let model = st.threads.get(thread).map(|t| t.model.as_str()).unwrap_or(""); let skills = crate::agents::skills::for_model(&crate::agents::skills::popup_index(&cwd), &prov, model); refs.extend(crate::agents::skills::chips(&skills, &text, &prov, iso)); }
             if !refs.is_empty() { e["refs"] = Value::Array(refs); } }
     }
     o.insert("entries".into(), Value::Array(entries));
@@ -772,9 +794,14 @@ mod tests {
     /// The recorded helper replies predate s04 (a reply inside a turn keeps its time for hover) and s03 (the running call marked): put those back as the helper drew them.
     fn as_helper(v: &Value) -> Value {
         let mut v = v.clone();
-        if let Some(viewer) = v.get_mut("viewer").and_then(Value::as_object_mut) { assert_eq!(viewer.remove("mode").unwrap()["want"], "viewer"); viewer.remove("runtime"); viewer.remove("rail"); viewer.remove("has"); viewer.remove("layout"); viewer.remove("tiles"); viewer.remove("showToken"); }
+        if let Some(viewer) = v.get_mut("viewer").and_then(Value::as_object_mut) { assert_eq!(viewer.remove("mode").unwrap()["want"], "viewer"); assert!(viewer.get("tiled").is_none()); viewer.remove("runtime"); viewer.remove("rail"); viewer.remove("has"); viewer.remove("layout"); viewer.remove("tiles"); viewer.remove("showToken"); }
         let fix = |e: &mut Value| { if let Some(h) = e.as_object_mut().and_then(|o| o.remove("hover")) { e["stamp"] = h } if let Some(o) = e.as_object_mut() { o.remove("now"); } };
-        match &mut v { Value::Array(a) => a.iter_mut().for_each(fix), Value::Object(o) => if let Some(Value::Array(a)) = o.get_mut("entries") { a.iter_mut().for_each(fix) }, _ => {} }
+        match &mut v { Value::Array(a) => a.iter_mut().for_each(fix), Value::Object(o) => {
+            if let Some(Value::Array(a)) = o.get_mut("entries") { a.iter_mut().for_each(fix) }
+            if let Some(Value::Array(asks)) = o.get_mut("asks") {
+                for a in asks { if let Some(ao) = a.as_object_mut() { ao.remove("revise"); ao.remove("revisePre"); ao.remove("raw"); } }
+            }
+        }, _ => {} }
         v
     }
     fn fixture() -> Value { serde_json::from_str(&std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json")).unwrap()).unwrap() }
@@ -795,7 +822,7 @@ mod tests {
         let got = as_helper(&got);
         for (k, w) in want.as_object().unwrap() { if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w); continue } assert_eq!(got.get(k), Some(w), "key {k}"); }
         // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`), the picker's other agents (`pickerAgents`) and the header's project (`project`) are Backplane's own: the recorded helper reply has no such keys
-        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView" | "planOnce" | "review" | "unanswered")).count(), want.as_object().unwrap().len());
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView" | "planOnce" | "planMode" | "review" | "unanswered")).count(), want.as_object().unwrap().len());
     }
     // Diff opened on thread A leaves the session's panel on; a view of thread B (the + makes it and goes there) is accepted, not refused as an unported page
     #[test] fn a_view_of_another_thread_after_diff_on_one_is_accepted() {
@@ -945,6 +972,22 @@ mod tests {
         assert!(row(true, "").get("unread").is_none() && row(false, "u2").get("unread").is_none(), "read, or the turn over: as any other");
         assert_eq!(row(true, "u")["stamp"], "21:57", "another id in the list is not this one");
     }
+    // #1325 (Fold.think): a thought is a fold of its own: shut until the person opens it, its whole text kept either way, Markdown blocks once open,
+    // the `fold` action's value flipping it; the phones get `folds` on its note
+    #[test] fn a_thought_folds_and_opens_by_the_persons_choice() {
+        let th = Ent { id: "th1".into(), msg: false, role: THINK.into(), akind: THINK.into(), text: "First I check the vias.\n\nThen the **planes**.".into(), at: 1699999001 };
+        let es = [m("u", "user", "go", 1699999000), th.clone(), m("a1", "assistant", "done", 1699999002)];
+        let row = |open: bool| entries_w(&es, false, false, "", &|id| open && id == "th1", 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap().into_iter().find(|e| e["id"] == "th1").unwrap();
+        let shut = row(false);
+        assert_eq!((shut["folds"].as_bool(), shut["open"].as_bool(), shut["value"].as_str(), shut["text"].as_str()), (Some(true), Some(false), Some("1th1"), Some(th.text.as_str())), "{shut}");
+        assert!(shut.get("blocks").is_none(), "a shut thought sends no blocks");
+        let open = row(true);
+        assert_eq!((open["open"].as_bool(), open["value"].as_str()), (Some(true), Some("0th1")));
+        assert_eq!(open["blocks"].as_array().map(|b| b.len()), Some(2), "two paragraphs: {open}");
+        let tool = entries_w(&[tl("t1", "Bash", "ls", 1699999001)], false, false, "", &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        assert!(tool.iter().all(|e| e.get("folds").is_none()), "a tool call is no thought");
+        let empty = Ent { text: String::new(), ..th.clone() }; assert!(plain_act(&empty).get("folds").is_none(), "an empty thought has nothing to open");
+    }
     // s03: in an open fold of the running turn, the call that runs is marked
     #[test] fn the_running_call_in_an_open_fold_is_marked() {
         let es = [m("u", "user", "go", 1699999000), tl("t1", "Bash", "ls", 1699999001), tl("t2", "Read", "f", 1699999002)];
@@ -1027,6 +1070,8 @@ mod tests {
         for (tone, x) in [("warn", "Design files not committed to main: the project is not in a git repository"), ("info", "Committed 1 design file to main as abc1234; not pushed: fatal: no remote"),
             ("info", "This request is a review: the design files are read-only for it"), ("info", "Restored the project to before turn 3 (snapshot 1234abc) as 9999999."), ("warn", "No snapshot before this turn: disk full")] { assert!(!quiet_act(tone, "git", x), "{x}") }
         assert!(!quiet_act("info", "tool", snap_new), "only the hub's git rows");
+        for x in ["Delivered with a new turn: 41 waiting message(s)", "Delivered with the steer: 2 waiting message(s)"] { assert!(quiet_act("info", "ride", x), "{x}") }
+        assert!(!quiet_act("warn", "ride", "Delivered with a new turn: 1 waiting message(s)") && !quiet_act("info", "tool", "Delivered with a new turn: 1 waiting message(s)"), "only the hub's own ride rows");
         // a thread: two turns, the same warning each turn
         let warn = "Design files not committed to main: the project is not in a git repository";
         let es = vec![m("u1", "user", "route it", 1), g("s1", "info", snap_new), m("a1", "assistant", "done", 2), g("c1", "info", "Committed 1 design file to main as abc1234: a.kicad_pcb"), g("w1", "warn", warn),

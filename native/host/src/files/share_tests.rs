@@ -1,0 +1,282 @@
+use super::*;
+
+fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::canonical(&format!("share-{n}")) }
+
+#[test] fn the_rule_is_applied_to_the_handle_opened() {
+    let d = tmp("handle"); let (proj, out, home) = (d.join("proj"), d.join("out"), d.join("home"));
+    for x in [&proj, &out, &home] { std::fs::create_dir_all(x).unwrap() }
+    std::fs::write(proj.join("a.zip"), b"in").unwrap(); std::fs::write(out.join("b.zip"), b"out").unwrap();
+    let roots = vec![proj.clone()];
+    let o = open_checked(Who::Native, &roots, &home, &s(&proj.join("a.zip"))).unwrap();
+    assert_eq!((o.real.clone(), o.md.len()), (proj.join("a.zip"), 2), "the handle's own path and size");
+    // a path that is a link when opened is never followed: a swap of the checked file for a link to one outside fails at the open
+    crate::plat::fs::symlink(out.join("b.zip"), proj.join("swapped.zip")).unwrap();
+    assert!(open_real(Who::Native, &roots, &home, &proj.join("swapped.zip")).is_err(), "O_NOFOLLOW");
+    // a file the handle says is outside the roots is refused even when opened by a path inside
+    assert_eq!(open_real(Who::Native, &roots, &home, &out.join("b.zip")).err(), Some("that file is not in a project"));
+    assert!(open_checked(Who::Native, &roots, &home, &s(&proj)).is_err(), "a folder");
+}
+
+#[test] fn the_store_is_private_from_its_first_byte_and_revokes_say_when_they_fail() {
+    let d = tmp("mutate");
+    let sh = Share { id: "a".into(), token: "t".repeat(48), path: "/p/a.zip".into(), name: "a.zip".into(), size: 1, thread: "t1".into(), created: 1, expires: u64::MAX, tailnet: false, url: String::new() };
+    mutate(&d, |v| v.push(sh.clone())).unwrap();
+    assert_eq!(drop_shares(&d, Some("nope")).unwrap_err(), "no such share");
+    let (left, went) = drop_shares(&d, Some("a")).unwrap(); assert!(left.is_empty() && went);
+    assert!(!d.join("shares-v1.json.tmp").exists());
+    // a store that cannot be written: the revoke says so and the share stays
+    mutate(&d, |v| v.push(sh.clone())).unwrap();
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&*d, std::fs::Permissions::from_mode(0o500)).unwrap();
+        let r = drop_shares(&d, Some("a"));
+        std::fs::set_permissions(&*d, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(r.unwrap_err().starts_with("could not save the shares"), "reported");
+        assert_eq!(load(&d).len(), 1, "not revoked on disk, and not said to be");
+    }
+}
+
+#[test] fn refusals_carry_the_same_guards_as_answers() {
+    let r = String::from_utf8(refusal("403 Forbidden", "that file is not shared")).unwrap();
+    for need in ["X-Content-Type-Options: nosniff", "sandbox", "Cross-Origin-Resource-Policy: same-origin", "Referrer-Policy: no-referrer", "no-store", "Content-Length: 23"] { assert!(r.contains(need), "{need}: {r}") }
+}
+fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
+
+#[test] fn a_file_under_a_root_is_served_and_nothing_else_is() {
+    let d = tmp("rule"); let (proj, home, out) = (d.join("proj"), d.join("home"), d.join("out"));
+    for x in [&proj, &home, &out, &proj.join("mfg"), &proj.join(".git"), &proj.join(".backplane"), &proj.join("sub/.ssh"), &home.join("attachments"), &home.join("secrets")] { std::fs::create_dir_all(x).unwrap() }
+    let w = |p: &Path| std::fs::write(p, b"x").unwrap();
+    for f in ["mfg/board.zip", "a.step", ".git/config", ".env", ".env.local", "id_rsa", "id_ed25519.pub", "server.pem", "k.key", "sub/.ssh/known_hosts", ".backplane/review.md", ".hidden", "credentials.json", ".backplane.json"] { w(&proj.join(f)) }
+    w(&out.join("x.zip")); w(&home.join("attachments/a.png")); w(&home.join("secrets/vault.json")); w(&home.join("token"));
+    let roots = vec![proj.clone(), home.join("attachments")];
+    let ok = |p: &str| check(&roots, &home, p).map(|(r, _)| r);
+    assert_eq!(ok(&s(&proj.join("mfg/board.zip"))).unwrap(), proj.join("mfg/board.zip"));
+    assert!(ok(&s(&proj.join("a.step"))).is_ok() && ok(&s(&proj.join(".backplane/review.md"))).is_ok() && ok(&s(&proj.join(".backplane.json"))).is_ok());
+    assert!(ok(&s(&home.join("attachments/a.png"))).is_ok(), "the hub's attachments are the person's own files");
+    for bad in [".git/config", ".env", ".env.local", "id_rsa", "id_ed25519.pub", "server.pem", "k.key", "sub/.ssh/known_hosts", ".hidden", "credentials.json"] {
+        assert_eq!(ok(&s(&proj.join(bad))).unwrap_err(), "that file is not shared", "{bad}");
+    }
+    assert_eq!(ok(&s(&out.join("x.zip"))).unwrap_err(), "that file is not in a project");
+    assert_eq!(ok(&s(&home.join("secrets/vault.json"))).unwrap_err(), "that file is not shared", "a vault, even were its home a root");
+    assert_eq!(check(&[home.clone()], &home, &s(&home.join("token"))).unwrap_err(), "that file is not shared", "nothing of the hub's home but its two folders");
+    assert_eq!(ok(&s(&proj.join("mfg"))).unwrap_err(), "not a file");
+    assert_eq!(ok(&s(&proj.join("none.txt"))).unwrap_err(), "no such file");
+    for bad in ["mfg/board.zip", "", "/", &format!("{}/mfg/../a.step", s(&proj)), &format!("{}/./a.step", s(&proj)), "/etc/pass\0wd"] { assert!(ok(bad).is_err(), "{bad:?}") }
+    assert!(ok(&format!("file://{}", s(&proj.join("a.step")))).is_ok());
+    // a link inside the project to a file outside it is the file outside it
+    crate::plat::fs::symlink(out.join("x.zip"), proj.join("link.zip")).unwrap();
+    assert_eq!(ok(&s(&proj.join("link.zip"))).unwrap_err(), "that file is not in a project");
+    crate::plat::fs::symlink(&out, proj.join("outdir")).unwrap();
+    assert!(ok(&s(&proj.join("outdir/x.zip"))).is_err());
+    // a link to a secret is a secret
+    crate::plat::fs::symlink(proj.join(".env"), proj.join("env.txt")).unwrap();
+    assert!(ok(&s(&proj.join("env.txt"))).is_err());
+}
+
+#[test] fn roots_are_live_projects_and_worktrees_never_the_home_or_slash() {
+    let d = tmp("roots"); let home = d.join("home"); std::fs::create_dir_all(home.join("attachments")).unwrap();
+    let (a, b, wt) = (d.join("a"), d.join("b"), d.join("wt")); for x in [&a, &b, &wt] { std::fs::create_dir_all(x).unwrap() }
+    let mut m = crate::model::Model::default();
+    m.projects.insert("p1".into(), crate::model::ProjectMeta { title: "a".into(), root: s(&a), removed: false });
+    m.projects.insert("p2".into(), crate::model::ProjectMeta { title: "b".into(), root: s(&b), removed: true });
+    m.projects.insert("p3".into(), crate::model::ProjectMeta { title: "h".into(), root: crate::plat::dirs::home_or_empty(), removed: false });
+    m.projects.insert("p4".into(), crate::model::ProjectMeta { title: "r".into(), root: "/".into(), removed: false });
+    let mut t = crate::model::ThreadMeta::default(); t.project = "p1".into(); t.worktree = s(&wt); m.threads.insert("t1".into(), t);
+    let r = roots_of(&m, &home, "");
+    assert!(r.contains(&a) && r.contains(&wt) && r.contains(&home.join("attachments")), "{r:?}");
+    assert!(!r.contains(&b), "a removed project");
+    assert!(!r.iter().any(|x| x.parent().is_none()) && !r.iter().any(|x| s(x) == crate::plat::dirs::home_or_empty()), "never / or the whole home: {r:?}");
+}
+
+#[test] fn the_paths_a_message_names() {
+    let t = "Saved `/p/mfg/gerbers.zip` and /p/mech/case.step.\nSee /p/src/main.rs:42 and (~/x/bom.csv), also https://x.io/a and relative/b.txt and /p/dir/";
+    assert_eq!(candidates(t), vec!["/p/mfg/gerbers.zip", "/p/mech/case.step", "/p/src/main.rs", "~/x/bom.csv"]);
+    assert!(candidates("file:///p/a.zip, done").contains(&"/p/a.zip".to_string()));
+}
+
+#[test] fn ranges_resume_only_the_same_file() {
+    assert_eq!(plan("bytes=10-", "", "\"t\"", 100), Ok(("206 Partial Content", 10, 99)));
+    assert_eq!(plan("bytes=10-", "\"t\"", "\"t\"", 100), Ok(("206 Partial Content", 10, 99)), "If-Range of this file: the range");
+    assert_eq!(plan("bytes=10-", "\"old\"", "\"t\"", 100), Ok(("200 OK", 0, 99)), "the file changed: all of it again");
+    assert_eq!(plan("", "", "\"t\"", 100), Ok(("200 OK", 0, 99)));
+    assert_eq!(plan("bytes=200-", "", "\"t\"", 100), Err(()));
+}
+
+#[test] fn lives_and_names() {
+    assert_eq!(life(&Value::Null), Ok(DEFAULT_LIFE_S)); assert_eq!(life(&json!("30m")), Ok(1800)); assert_eq!(life(&json!("12h")), Ok(43200));
+    assert_eq!(life(&json!("7d")), Ok(7 * 86400)); assert_eq!(life(&json!("400d")), Ok(MAX_LIFE_S)); assert_eq!(life(&json!(90)), Ok(90));
+    for bad in [json!("0h"), json!("soon"), json!(0), json!(-1), json!(true)] { assert!(life(&bad).is_err(), "{bad}") }
+    assert_eq!(share_route("ab", "my board.zip"), "/s/ab/my%20board.zip");
+    let d = disposition("ä \"x\".zip", false);
+    assert!(d.starts_with("Content-Disposition: attachment; filename=\"_ _x_.zip\"; filename*=UTF-8''%C3%A4%20%22x%22.zip"), "{d}");
+    assert!(!d.contains('\n') || d.ends_with("\r\n"));
+    assert_eq!(ctype("A.STEP"), "model/step"); assert_eq!(ctype("x.unknown"), "application/octet-stream");
+    for n in [".env", "id_rsa", "x.pem", "vault.json", "secrets.yaml", "token", "settings.local.json"] { assert!(secret_name(n), "{n}") }
+    for n in ["board.kicad_pcb", "bom.csv", "tokenizer.rs", "keyboard.step"] { assert!(!secret_name(n), "{n}") }
+}
+
+#[tokio::test] async fn a_stream_is_the_range_asked_and_head_is_no_body() {
+    let d = tmp("stream"); let f = d.join("big.bin");
+    let data: Vec<u8> = (0..(3 * BUF + 17)).map(|i| (i % 251) as u8).collect(); std::fs::write(&f, &data).unwrap();
+    let md = std::fs::metadata(&f).unwrap();
+    let get = |hs: Vec<(&str, String)>, method: &str| { let mut r = Req::new(method, "/file?path=x", hs.into_iter().map(|(a, b)| (a.to_string(), b)).collect()); r.peer = None; r };
+    let run = |r: Req| { let f = f.clone(); async move { let mut out: Vec<u8> = vec![]; let o = open_real(Who::Native, &[f.parent().unwrap().to_path_buf()], Path::new("/nonexistent-home"), &f).unwrap(); stream(&mut out, Who::Native, &r, o, "big.bin").await.unwrap(); out } };
+    let split = |v: &[u8]| { let i = v.windows(4).position(|w| w == b"\r\n\r\n").unwrap(); (String::from_utf8_lossy(&v[..i]).into_owned(), v[i + 4..].to_vec()) };
+    let (h, b) = split(&run(get(vec![], "GET")).await);
+    assert!(h.starts_with("HTTP/1.1 200 OK") && h.contains(&format!("Content-Length: {}", data.len())) && h.contains("Accept-Ranges: bytes") && h.contains("ETag: \"") && h.contains("attachment; filename=\"big.bin\""), "{h}");
+    assert_eq!(b, data);
+    let tag = etag(&md);
+    let (h, b) = split(&run(get(vec![("Range", format!("bytes={}-", BUF + 5)), ("If-Range", tag.clone())], "GET")).await);
+    assert!(h.starts_with("HTTP/1.1 206") && h.contains(&format!("Content-Range: bytes {}-{}/{}", BUF + 5, data.len() - 1, data.len())), "{h}");
+    assert_eq!(b, data[BUF + 5..]);
+    let (h, b) = split(&run(get(vec![("Range", "bytes=0-9".into()), ("If-Range", "\"other\"".into())], "GET")).await);
+    assert!(h.starts_with("HTTP/1.1 200") && b == data, "a changed file is sent whole");
+    let (h, b) = split(&run(get(vec![], "HEAD")).await); assert!(h.starts_with("HTTP/1.1 200") && b.is_empty());
+    let out = run(get(vec![("Range", "bytes=999999-".into())], "GET")).await; assert!(out.starts_with(b"HTTP/1.1 416"));
+    assert!(String::from_utf8_lossy(&out).contains(&format!("Content-Range: bytes */{}\r\n", data.len())), "a 416 says the size");
+}
+
+#[test] fn shares_are_kept_privately_and_listed_newest_first() {
+    let d = tmp("store");
+    let sh = |id: &str, at: u64| Share { id: id.into(), token: "t".repeat(48), path: "/p/a.zip".into(), name: "a.zip".into(), size: 1, thread: "t1".into(), created: at, expires: at + 10, tailnet: false, url: String::new() };
+    save(&d, &[sh("a", 1), sh("b", 2)]).unwrap();
+    assert_eq!(load(&d).len(), 2);
+    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(store_path(&d)).unwrap().permissions().mode() & 0o777, 0o600) }
+    let l = listed(&load(&d)); assert_eq!((l[0]["id"].as_str(), l[1]["id"].as_str()), (Some("b"), Some("a")));
+    assert_eq!(l[0]["link"], format!("/s/{}/a.zip", "t".repeat(48)));
+}
+
+#[test] fn headers_never_let_a_file_act_with_the_origin_and_never_leak_a_share() {
+    for who in [Who::Native, Who::Browser, Who::Share] {
+        let h = String::from_utf8(head_bytes(who, "200 OK", "text/plain; charset=utf-8", 1, "")).unwrap();
+        for need in ["X-Content-Type-Options: nosniff", "sandbox", "Cross-Origin-Resource-Policy: same-origin", "Referrer-Policy: no-referrer", "default-src 'none'"] { assert!(h.contains(need), "{who:?} {need}") }
+        assert!(h.contains(if who == Who::Native { "Cache-Control: private, no-cache" } else { "Cache-Control: private, no-store" }), "{who:?}");
+    }
+    for t in ["image/png", "application/pdf", "text/plain; charset=utf-8"] { assert!(inline_ok(t)) }
+    for t in ["text/html", "image/svg+xml", "text/csv; charset=utf-8", "application/json", "application/octet-stream", "application/xhtml+xml"] { assert!(!inline_ok(t), "{t}") }
+    for n in ["a.html", "a.htm", "a.svg", "a.xhtml", "a.js"] { assert!(!inline_ok(ctype(n)), "{n}: {}", ctype(n)) }
+}
+
+#[test] fn a_project_that_holds_the_hub_home_opens_no_far_copy_to_a_browser() {
+    let d = tmp("overlap"); let (proj, home) = (d.join("proj"), d.join("proj/bphome"));
+    for x in [home.join("attachments"), home.join("far-files/L"), home.join("secrets")] { std::fs::create_dir_all(x).unwrap() }
+    std::fs::write(home.join("attachments/a.png"), b"a").unwrap(); std::fs::write(home.join("far-files/L/x.zip"), b"f").unwrap(); std::fs::write(home.join("events.jsonl"), b"{}").unwrap();
+    let roots = vec![proj.clone()]; // the project root holds the home; no other root listed
+    let far = s(&home.join("far-files/L/x.zip"));
+    assert!(open_checked(Who::Browser, &roots, &home, &far).is_err(), "a browser: never the far copies, even through a project around the home");
+    assert!(open_checked(Who::Native, &roots, &home, &far).is_ok(), "a native client may");
+    assert!(open_checked(Who::Browser, &roots, &home, &s(&home.join("attachments/a.png"))).is_ok());
+    for who in [Who::Browser, Who::Native, Who::Share] { assert!(open_checked(who, &roots, &home, &s(&home.join("events.jsonl"))).is_err(), "{who:?}: nothing else of the home") }
+}
+
+#[test] fn a_damaged_store_is_never_overwritten() {
+    let d = tmp("damaged");
+    std::fs::write(d.join("shares-v1.json"), b"{not json").unwrap();
+    assert!(mutate(&d, |v| v.clear()).unwrap_err().contains("damaged"), "the change fails and says why");
+    assert_eq!(std::fs::read(d.join("shares-v1.json")).unwrap(), b"{not json", "left as it was");
+    std::fs::remove_file(d.join("shares-v1.json")).unwrap();
+    assert!(mutate(&d, |v| v.len()).is_ok(), "no store yet is an empty list");
+}
+
+#[test] fn file_urls_and_markdown_links_extract_decode_and_check_safely() {
+    let t = concat!(
+        "See [Parts_List.pdf](file:///home/user/proj/docs/Parts_List.pdf) and ",
+        "[My Doc](file:///home/user/proj/docs/My%20Doc%20(Final).pdf) and ",
+        "[Ref](file://localhost/home/user/proj/docs/Spec%20Sheet.pdf#page=2) and ",
+        "file:///home/user/proj/src/main.rs#L10-L20 and /home/user/proj/src/lib.rs:12:3"
+    );
+    assert_eq!(
+        candidates(t),
+        vec![
+            "/home/user/proj/docs/Parts_List.pdf",
+            "/home/user/proj/docs/My Doc (Final).pdf",
+            "/home/user/proj/docs/Spec Sheet.pdf",
+            "/home/user/proj/src/main.rs",
+            "/home/user/proj/src/lib.rs",
+        ]
+    );
+
+    let d = tmp("fileurl");
+    let (proj, home, out) = (d.join("proj"), d.join("home"), d.join("out"));
+    std::fs::create_dir_all(proj.join("docs")).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let pdf = proj.join("docs/My Doc (Final).pdf");
+    std::fs::write(&pdf, b"%PDF-1.4\n").unwrap();
+    std::fs::write(proj.join(".env"), b"SECRET=1").unwrap();
+    std::fs::write(out.join("outside.pdf"), b"%PDF-1.4\n").unwrap();
+    let roots = vec![proj.clone()];
+
+    let encoded_url = format!("file://{}/docs/My%20Doc%20(Final).pdf#page=2", s(&proj));
+    let localhost_url = format!("file://localhost{}/docs/My%20Doc%20(Final).pdf", s(&proj));
+    assert_eq!(local_path(&encoded_url), Some(pdf.clone()));
+    assert_eq!(local_path(&localhost_url), Some(pdf.clone()));
+    assert!(check(&roots, &home, &encoded_url).is_ok());
+    assert!(check(&roots, &home, &localhost_url).is_ok());
+
+    // Security refusals: traversal, NUL, secret, outside project
+    assert!(local_path(&format!("file://{}/docs/%2e%2e/.env", s(&proj))).is_none());
+    assert!(local_path(&format!("file://{}/docs/a%00b.pdf", s(&proj))).is_none());
+    assert_eq!(check(&roots, &home, &format!("file://{}/.env", s(&proj))).unwrap_err(), "that file is not shared");
+    assert_eq!(check(&roots, &home, &format!("file://{}/outside.pdf", s(&out))).unwrap_err(), "that file is not in a project");
+
+    // linkable_with picks up markdown file:// PDF as view and drops .env / outside files
+    let msg = format!(
+        "[My Doc]({}) and [env](file://{}/.env) and [out](file://{}/outside.pdf)",
+        encoded_url, s(&proj), s(&out)
+    );
+    let links = linkable_with(&roots, &home, &msg);
+    assert_eq!(links, vec![json!({
+        "path": s(&pdf),
+        "name": "My Doc (Final).pdf",
+        "size": 9,
+        "open": "view"
+    })]);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn serve_file_serves_project_pdf_by_path_and_file_url() {
+    let d = tmp("serve-file");
+    let (proj, home, out) = (d.join("proj"), d.join("home"), d.join("out"));
+    std::fs::create_dir_all(proj.join("docs")).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::create_dir_all(&out).unwrap();
+    let pdf = proj.join("docs/Parts List.pdf");
+    std::fs::write(&pdf, b"%PDF-1.4\nhello").unwrap();
+    std::fs::write(proj.join(".env"), b"SECRET=1").unwrap();
+    std::fs::write(out.join("out.pdf"), b"%PDF-1.4\n").unwrap();
+
+    std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"proj\",\"root\":{},\"at\":1700000000}}\n", serde_json::Value::from(s(&proj)))).unwrap();
+    let cfg = crate::hub::Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+    let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+    refresh(&hub).await;
+
+    let split = |v: &[u8]| {
+        let i = v.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        (String::from_utf8_lossy(&v[..i]).into_owned(), v[i + 4..].to_vec())
+    };
+    let fetch = |target: String| {
+        let hub = hub.clone();
+        async move {
+            let mut out_buf = Vec::new();
+            let req = Req::new("GET", &target, Default::default());
+            serve_file(&hub, &mut out_buf, Who::Native, &req).await.unwrap();
+            out_buf
+        }
+    };
+
+    let enc = |v: &str| crate::md::refs::pct(v).replace("%2F", "/");
+    let (h1, b1) = split(&fetch(format!("/file?path={}", enc(&s(&pdf)))).await);
+    assert!(h1.starts_with("HTTP/1.1 200 OK") && h1.contains("Content-Type: application/pdf"), "{h1}");
+    assert_eq!(b1, b"%PDF-1.4\nhello");
+
+    let file_url = format!("file://{}", enc(&s(&pdf)));
+    let (h2, b2) = split(&fetch(format!("/file?path={}", crate::md::refs::pct(&file_url))).await);
+    assert!(h2.starts_with("HTTP/1.1 200 OK") && h2.contains("Content-Type: application/pdf"), "{h2}");
+    assert_eq!(b2, b"%PDF-1.4\nhello");
+
+    let (h3, _) = split(&fetch(format!("/file?path={}", crate::md::refs::pct(&s(&proj.join(".env"))))).await);
+    assert!(h3.starts_with("HTTP/1.1 403"), "{h3}");
+
+    let (h4, _) = split(&fetch(format!("/file?path={}", crate::md::refs::pct(&s(&out.join("out.pdf"))))).await);
+    assert!(h4.starts_with("HTTP/1.1 403"), "{h4}");
+}

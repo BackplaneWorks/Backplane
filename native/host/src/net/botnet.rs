@@ -3,7 +3,7 @@
 //! argv or a log), and verifying signed requests in. Nothing here talks to the hub.
 use super::sign;
 use std::{path::{Path, PathBuf}, process::Stdio};
-use tokio::{io::AsyncWriteExt, process::Command};
+use tokio::io::AsyncWriteExt;
 
 /// A reply from a peer: curl printed the body, then a line with the status code. Code 0: no request was made.
 pub struct Resp { pub code: u16, pub body: String }
@@ -81,6 +81,10 @@ pub async fn signed(home: &Path, url: &str, peer: &str, secret: &str, now: u64, 
     if path != "/far/tunnel" {
         if let Some((code, body)) = super::alwayson::tunnel::ends().call(peer, if post { "POST" } else { "GET" }, path, &headers(peer, now, &sig), if post { body } else { "" }).await { return Resp { code, body } }
     }
+    // persistent hub-to-hub binary WS (net/peerws.rs): zero curl, zero temp file, zero fsync when connected
+    if post && matches!(path, "/far/rpc" | "/far/push" | "/far/log") {
+        if let Some((code, body)) = super::peerws::call(home, peer, path, body).await { return Resp { code, body } }
+    }
     if !post { return curl(args(None, &target), headers(peer, now, &sig)).await }
     mkdir(&home.join("secrets")); mkdir(&home.join("secrets/tmp"));
     let file = home.join("secrets/tmp").join(hex::encode(super::pairing::urandom(8)));
@@ -123,21 +127,24 @@ pub fn choose_url(env: &str, tailnet: bool, dns: &str, serve: &str, host: &str, 
 pub(crate) async fn served_url(port: u16) -> String {
     static LAST: std::sync::Mutex<Option<(std::time::Instant, u16, String)>> = std::sync::Mutex::new(None);
     if let Some((t, p, u)) = LAST.lock().unwrap().clone() { if p == port && t.elapsed() < std::time::Duration::from_secs(30) { return u } }
-    let out = tokio::time::timeout(std::time::Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["serve", "status", "--json"]).stderr(Stdio::null()).output()).await;
+    let out = tokio::time::timeout(std::time::Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["serve", "status", "--json"]).stderr(Stdio::null()).kill_on_drop(true).output()).await;
     let u = match out { Ok(Ok(o)) if o.status.success() => super::tailnet::serve(&String::from_utf8_lossy(&o.stdout), &port.to_string()), _ => String::new() };
     *LAST.lock().unwrap() = Some((std::time::Instant::now(), port, u.clone())); u
 }
 /// Self.DNSName of `tailscale status --json`, without the trailing dot; "" when there is none.
 pub async fn tailscale_dns() -> String {
-    let Ok(o) = tokio::time::timeout(std::time::Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["status", "--json"]).stderr(Stdio::null()).output()).await else { return String::new() };
+    let Ok(o) = tokio::time::timeout(std::time::Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["status", "--json"]).stderr(Stdio::null()).kill_on_drop(true).output()).await else { return String::new() };
     let Ok(o) = o else { return String::new() };
     serde_json::from_slice::<serde_json::Value>(&o.stdout).ok().and_then(|j| j["Self"]["DNSName"].as_str().map(|s| s.trim_end_matches('.').to_string())).unwrap_or_default()
 }
-/// This machine's name for others: BACKPLANE_NAME, else its host name.
+fn name_with(env: Option<&str>, host: impl FnOnce() -> String) -> String {
+    if let Some(e) = env.map(str::trim).filter(|e| !e.is_empty()) { return clean(e) }
+    clean(&host())
+}
+/// This machine's name for others: BACKPLANE_NAME, else its host name (read in-process, never spawning `hostname`:
+/// `GET /` and `GET /pair` call this on every request, #1607).
 pub async fn name() -> String {
-    if let Ok(e) = std::env::var("BACKPLANE_NAME") { if !e.trim().is_empty() { return clean(e.trim()) } }
-    let h = crate::proc::tokio_cmd(crate::proc::Kind::Local, "hostname").stderr(Stdio::null()).output().await.ok().map(|o| String::from_utf8_lossy(&o.stdout).lines().next().unwrap_or("").trim().to_string()).unwrap_or_default();
-    clean(&h)
+    name_with(std::env::var("BACKPLANE_NAME").ok().as_deref(), crate::plat::hub::hostname)
 }
 
 /// An unsigned POST with no body (tests: a route that must refuse it).
@@ -201,5 +208,12 @@ mod tests {
         let r = parse_resp(b"{\"invite\":\"x\"}\n200"); assert_eq!((r.code, r.body.as_str()), (200, "{\"invite\":\"x\"}"));
         let r = parse_resp(b"line1\nline2\n403"); assert_eq!((r.code, r.body.as_str()), (403, "line1\nline2"));
         assert_eq!(parse_resp(b"").code, 0);
+    }
+    #[tokio::test] async fn botnet_name_reads_hostname_in_process_and_honors_env_override() {
+        assert_eq!(name_with(Some(" Desk 1 "), || panic!("must not read hostname when BACKPLANE_NAME is set")), "Desk1");
+        assert_eq!(name_with(Some("  "), || "my-host.local".into()), "my-host.local");
+        let h = crate::plat::hub::hostname();
+        assert!(!h.is_empty(), "in-process hostname is populated");
+        assert_eq!(name().await, name_with(std::env::var("BACKPLANE_NAME").ok().as_deref(), crate::plat::hub::hostname));
     }
 }

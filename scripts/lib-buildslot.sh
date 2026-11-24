@@ -16,21 +16,48 @@ bq_jobs() { local n g c j; n=$(bq_slots); g=$(( $(bq_mem_gb) / (2 * n) )); c=$((
 # BQ_SCOPE: a build runs in a transient scope of its own in bpbuild.slice, never in the scope of whoever started it. An agent's build used to run inside the hub's scope
 # (the hub, its agents, their builds and tests: 28 GB), so systemd-oomd's pressure kill took the whole hub with it (Nov 12 01:25 and 02:16). Now a build is its own
 # candidate: oomd kills the build, the hub's scope (ManagedOOMPreference=avoid, fresh.sh) is picked last. MemoryMax (BQ_MEM_MAX, 60%) stops one runaway build alone.
-# No user systemd (a Boat box, the Mac, a container) or BQ_NO_SCOPE=1: the command runs as it is.
+# No user systemd (the Mac, a container), a Boat box (BP_ON_BOAT) or BQ_NO_SCOPE=1: the command runs as it is. A Boat box has user systemd, but it
+# runs nothing but builds, and 60% of its memory (9 GB of a 15 GB box) is less than the hub's test build needs: the scope's memory cgroup
+# killed rustc there and systemd then sent the rest of the build SIGTERM (exit 143 at about 55 s, Nov 20, bp-build-1 23:21:58).
 bq_scope() { BQ_SCOPE=()
-  [ -z "${BQ_NO_SCOPE:-}" ] && command -v systemd-run > /dev/null 2>&1 && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ] || return 0
+  [ -z "${BQ_NO_SCOPE:-}" ] && [ -z "${BP_ON_BOAT:-}" ] && command -v systemd-run > /dev/null 2>&1 && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ] || return 0
   BQ_SCOPE=(systemd-run --user --scope -q --collect --slice=bpbuild.slice -p "MemoryMax=${BQ_MEM_MAX:-60%}" -p ManagedOOMPreference=none --); }
 # bq_run CALLBACK CMD...: run CMD holding a slot, waiting for a free one (CALLBACK, if any, is run once when it has to wait, with the number of local builds ahead of it). `flock -o` closes the lock's descriptor in CMD,
 # so nothing CMD leaves running in the background (a sleep, a server) can keep the slot after CMD ends; the flock process itself holds it until CMD exits.
-bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i n rc waited=0 tick=0; shift; mkdir -p "$d"; bq_scope
+# BQ_FAIR (the merge gate, which holds no lock while it waits): waiters take turns, first come first served. Each takes a ticket
+# ($d/line.<ns>.<pid>) when it first has to wait; only the oldest live ticket tries for a slot or a box, the others say their place every minute.
+# A ticket goes when its command starts (a slot: inside the slot; a box: just before it is tried, and back under the same name if every box was busy).
+# a ticket names its waiter by pid and start time (line.<ns>.<pid>.<start>): a pid given out again is not the waiter
+bq_start() { [ -r "/proc/$1/stat" ] && sed 's/^.*) //' "/proc/$1/stat" | cut -d' ' -f20 || ps -o lstart= -p "$1" 2>/dev/null | tr -cd '0-9'; }
+bq_line() { local d=$1 f p st r; for f in "$d"/line.*; do [ -e "$f" ] || continue; r=${f##*/line.}; p=$(printf '%s' "$r" | cut -d. -f2); st=$(printf '%s' "$r" | cut -d. -f3)
+  { kill -0 "$p" 2>/dev/null && [ "$(bq_start "$p")" = "$st" ]; } || { rm -f "$f"; continue; }; echo "$f"; done | sort; }
+bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i n rc waited=0 tick=0 tk= said=-60 pl; shift; mkdir -p "$d"; bq_scope
+  local run=("$@")
+  # BQ_FAIR: a newcomer joins the line at once when someone already waits in it, rather than taking a slot from under them
+  if [ -n "${BQ_FAIR:-}" ] && [ -n "$(bq_line "$d")" ]; then waited=1; [ -n "$cb" ] && "$cb" "$(bq_slots)"; tk=$d/line.$(date +%s%N).$$.$(bq_start $$); : > "$tk"; trap 'rm -f "$tk"' EXIT; fi
   while :; do n=$(bq_slots)
+    if [ -n "$tk" ]; then                                   # in the line: only its head tries
+      [ -e "$tk" ] || : > "$tk"
+      pl=$(bq_line "$d" | grep -n -x -F "$tk" | cut -d: -f1)
+      if [ "${pl:-1}" != 1 ]; then
+        [ $((tick - said)) -lt 60 ] || { echo "cargo-q: waiting for a build slot or a Boat box: place $pl in line ($((tick / 60)) min so far)" >&2; said=$tick; }
+        if [ -n "${BQ_WAIT_MAX:-}" ] && [ "$tick" -ge "$BQ_WAIT_MAX" ]; then rm -f "$tk"; echo "cargo-q: no build slot for ${BQ_WAIT_MAX}s (place $pl in line): giving up" >&2; return 75; fi
+        tick=$((tick + 1)); sleep 1; continue
+      fi
+      run=(env BQ_TICKET_RM="$tk" sh -c 'rm -f "$BQ_TICKET_RM"; exec "$@"' sh "$@")   # its ticket goes as its command starts
+    fi
     # the main builder has a slot of its own besides the shared ones: lanes starting builds all day cannot starve it (BQ_MAIN=1, set by main-build.sh; one builder, so one slot)
-    if [ -n "${BQ_MAIN:-}" ]; then flock -n -E 200 -o "$d/slot.main" ${BQ_SCOPE[@]+"${BQ_SCOPE[@]}"} "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; fi
-    for ((i = 0; i < n; i++)); do flock -n -E 200 -o "$d/slot.$i" ${BQ_SCOPE[@]+"${BQ_SCOPE[@]}"} "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; done
+    if [ -n "${BQ_MAIN:-}" ]; then flock -n -E 200 -o "$d/slot.main" ${BQ_SCOPE[@]+"${BQ_SCOPE[@]}"} "${run[@]}"; rc=$?; [ "$rc" -ne 200 ] && { [ -z "$tk" ] || rm -f "$tk"; return "$rc"; }; fi
+    for ((i = 0; i < n; i++)); do flock -n -E 200 -o "$d/slot.$i" ${BQ_SCOPE[@]+"${BQ_SCOPE[@]}"} "${run[@]}"; rc=$?; [ "$rc" -ne 200 ] && { [ -z "$tk" ] || rm -f "$tk"; return "$rc"; }; done
     # every slot is taken: with BQ_OFFLOAD=1, and only once the wait is long or memory is low (bq_offload_now), the same command runs on a Boat box (scripts/lib-boat.sh;
     # the command sees BP_BOAT_IDX and does the run there). 98 = no box could be used (it said why): keep waiting locally. 200 = the boxes are busy too: look again every few seconds.
-    if [ -n "${BQ_OFFLOAD:-}" ] && [ -z "${BQ_MAIN:-}" ] && [ $((tick % 5)) = 0 ] && bq_offload_now "$tick" && bo_ready; then bo_try "$@"; rc=$?; case "$rc" in 98|200) ;; *) return "$rc";; esac; fi
-    if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb" "$n"; fi; tick=$((tick + 1)); sleep 1; done; }
+    if [ -n "${BQ_OFFLOAD:-}" ] && [ -z "${BQ_MAIN:-}" ] && [ $((tick % 5)) = 0 ] && bq_offload_now "$tick" && bo_ready; then
+      [ -z "$tk" ] || rm -f "$tk"; bo_try "$@"; rc=$?; case "$rc" in 98|200) [ -z "$tk" ] || : > "$tk";; *) return "$rc";; esac; fi
+    if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb" "$n"
+      [ -z "${BQ_FAIR:-}" ] || { tk=$d/line.$(date +%s%N).$$.$(bq_start $$); : > "$tk"; trap 'rm -f "$tk"' EXIT; }; fi
+    # BQ_WAIT_MAX (seconds; the merge gate sets it): a wait that long ends with a line instead of waiting for good
+    if [ -n "${BQ_WAIT_MAX:-}" ] && [ "$tick" -ge "$BQ_WAIT_MAX" ]; then [ -z "$tk" ] || rm -f "$tk"; echo "cargo-q: no build slot for ${BQ_WAIT_MAX}s ($n here$([ -n "${BQ_OFFLOAD:-}" ] && echo ', and no Boat box free' || echo ', Boat not usable for this command')): giving up" >&2; return 75; fi
+    tick=$((tick + 1)); sleep 1; done; }
 # sccache shares compiled dependencies between worktrees (a new lane no longer compiles tokio, naga, zbus... from cold); through sccache-tmp, so the shared server never lives in a test run's TMPDIR
 bq_cc() { [ -z "${NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && command -v sccache > /dev/null 2>&1 || return 0
   export RUSTC_WRAPPER=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sccache-tmp SCCACHE_DIR=${SCCACHE_DIR:-$BP_DATA/sccache} SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-$([ "$BP_DATA" = "$HOME/.cache" ] && echo 20G || echo 80G)}; }

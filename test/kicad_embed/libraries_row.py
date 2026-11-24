@@ -73,6 +73,9 @@ class Hub:
             if s.count("\nMCPCALL ") > before: break
             time.sleep(0.3)
         time.sleep(2)
+        # no log at all: the stand-in made no call this whole row (its turn never started: on a box without git the hub opens an Install
+        # Git ask instead, agents/snapguard.rs). Each step then fails with that answer instead of the row ending in a traceback.
+        if not os.path.exists(log): return {"error": f"no answer to {tool}: the stand-in agent made no MCP call in {wait} s ({log} was never written)"}
         lines = [l for l in open(log, errors="replace").read().splitlines() if l.startswith(f"MCPCALL {tool} ")]
         if not lines: return {"error": f"no answer to {tool}"}
         try:

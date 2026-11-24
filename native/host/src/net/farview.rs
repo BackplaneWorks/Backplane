@@ -29,6 +29,23 @@ fn sub_of(hub: &Arc<Hub>, link: &str, sub: u64, create: bool) -> Option<(u64, Ar
     if !create || m.len() >= MAX_SUBS { return None }
     let client = hub.fresh_client(); let out = Arc::new(tokio::sync::Mutex::new(hub.attach(client)));
     m.insert((link.to_string(), sub), Sub { client, out: out.clone(), seen: Instant::now() });
+    // When a persistent /far/ws socket is open to `link`, push viewer frames directly (binary, zero base64, zero 900ms long-poll).
+    if super::peerws::connected(&hub.cfg.home, link) {
+        let (home, link_s, out_c) = (hub.cfg.home.clone(), link.to_string(), out.clone());
+        tokio::spawn(async move {
+            let mut g = out_c.lock().await;
+            while let Some(o) = g.recv().await {
+                let sent = match o {
+                    Out::Raw(b) => super::peerws::push_viewer_raw(&home, &link_s, sub, &b),
+                    Out::Value(v) => super::peerws::push_viewer_json(&home, &link_s, sub, &v),
+                    Out::Close => break,
+                };
+                if !sent {
+                    break;
+                }
+            }
+        });
+    }
     Some((client, out))
 }
 

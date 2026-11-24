@@ -26,22 +26,23 @@ build() {
   mb "$T/outside/precious" 1 "9 days ago"; ln -sfn "$T/outside" "$H/target/link"; old "$H/target/link" "9 days ago"
 }
 
-# 1. under the high mark: only the dead job goes
+# 1. under the high mark: dead job dirs and stale (>24h) incremental crates go, live incremental and deps stay
 build
-out=$(python3 -I "$G" guard --home "$H" --cap-gb 1 --high 80 --low 70)
+out=$(python3 -I "$G" guard --home "$H" --cap-gb 1 --high 70 --low 55)
 [ ! -e "$H/.bpjobs/1-1" ] && [ -e "$H/.bpjobs/2-2" ] && ok "a dead job dir goes, the live one stays" || no "job dirs: $out"
-[ -e "$H/target/cold/fast/deps/libold.rlib" ] && [ -e "$H/target/hot/debug/incremental/crate-old" ] && ok "under the high mark no build output goes" || no "pruned under the mark: $out"
+[ ! -e "$H/target/hot/debug/incremental/crate-old" ] && [ -e "$H/target/hot/debug/incremental/crate-new" ] && ok "stale incremental (>24h) goes even under the high mark, live stays" || no "stale incremental under mark: $out"
+[ -e "$H/target/cold/fast/deps/libold.rlib" ] && ok "under the high mark deps stay" || no "pruned deps under the mark: $out"
 
 # 2. over the high mark (~19 MB on a 16 MB cap): the stale incremental first, then the cold dir; the hot dir's live state stays
 build
-out=$(python3 -I "$G" guard --home "$H" --cap-gb 0.016 --high 80 --low 70)
+out=$(python3 -I "$G" guard --home "$H" --cap-gb 0.016 --high 70 --low 55)
 [ ! -e "$H/target/hot/debug/incremental/crate-old" ] && ok "a stale incremental crate goes" || no "stale incremental kept: $out"
 [ -e "$H/target/hot/debug/incremental/crate-new" ] && [ -e "$H/target/hot/debug/deps/libnew.rlib" ] && ok "the hot target dir keeps its live state" || no "hot dir pruned: $out"
 [ ! -e "$H/target/cold/fast/deps/libold.rlib" ] && ok "old deps of the cold dir go" || no "cold deps kept: $out"
 [ -f "$T/outside/precious" ] && ok "a symlink in target/ is not followed" || no "followed a symlink: $out"
 echo "$out" | grep -q '^boat-disk: .*% -> .*%.*removed' && ok "it logs what it removed" || no "no log line: $out"
 pct=$(python3 -I "$G" report --home "$H" --cap-gb 0.016 | python3 -I -c 'import sys,json;print(json.load(sys.stdin)["pct"])')
-python3 -I -c "import sys;sys.exit(0 if float('$pct') < 80 else 1)" && ok "under the high mark afterwards ($pct%)" || no "still $pct% full: $out"
+python3 -I -c "import sys;sys.exit(0 if float('$pct') < 70 else 1)" && ok "under the high mark afterwards ($pct%)" || no "still $pct% full: $out"
 
 # 3. --dry-run removes nothing; report is one JSON line with the fields boat-pool.sh status reads
 build
@@ -60,7 +61,7 @@ SCCACHE_DIR= SCCACHE_CACHE_SIZE=6M python3 -I "$G" guard --home "$H" --cap-gb 1 
 
 # 6. the lazy home sets a directory's own mtime to when it was hydrated: age comes from the files inside
 build; touch -h "$H/target/hot/debug/incremental/crate-old" "$H/target/cold" "$H/target/cold/fast" "$H/target/cold/fast/incremental/crate-c"
-out=$(python3 -I "$G" guard --home "$H" --cap-gb 0.016 --high 80 --low 70)
+out=$(python3 -I "$G" guard --home "$H" --cap-gb 0.016 --high 70 --low 55)
 [ ! -e "$H/target/hot/debug/incremental/crate-old" ] && [ ! -e "$H/target/cold/fast/deps/libold.rlib" ] && ok "a freshly hydrated dir with old files counts as old" || no "dir mtime trusted: $out"
 
 # 7. lib-boat.sh bo_out reads the command's stdout from both shapes `boat exec --json` gives: one object, or a stream of lines for a longer command

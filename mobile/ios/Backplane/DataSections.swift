@@ -17,7 +17,15 @@ struct DSecRow: Decodable, Identifiable, Equatable {
     var menu: [DMenuItem]
     /// the fold the hub keeps for a project row (`sidebar.fold.<key>`): the action its chevron sends, folded now, the rows it hides or would hide
     var fold: String; var folded: Bool; var under: Int
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under }
+    /// a swarm row's: what it wants of the person, one line and its buttons (the hub's present/swarm_need.rs); nil when it wants nothing
+    var need: DSwarmNeed?
+    /// its status as a word (the hub's `label` and `tone`: bad, run, wait, ok; an older hub sends none and `pill` reads `word` and `want`)
+    var label: String; var badgeTone: String
+    /// the spans it can be snoozed for (`row-snooze` with an option's value), the thread one press settles, and a snoozed row's wake value
+    var snooze: [DSnoozeOpt]; var settle: String; var wake: String
+    /// a project with a board in its folder
+    var hasBoard: Bool
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under, need, label, tone, snooze, settle, wake, hasBoard }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
@@ -26,14 +34,17 @@ struct DSecRow: Decodable, Identifiable, Equatable {
         icon = c.str(.icon); css = c.str(.css); dots = (try? c.decode([DSecDot].self, forKey: .dots)) ?? []; more = c.int(.more); rest = c.int(.rest)
         menu = (try? c.decode([DMenuItem].self, forKey: .menu)) ?? []
         fold = c.str(.fold); folded = c.bool(.folded); under = c.int(.under)
+        need = kind == "swarm" ? DSwarmNeed.of(c, .need) : nil
+        label = c.str(.label); badgeTone = c.str(.tone); snooze = (try? c.decode([DSnoozeOpt].self, forKey: .snooze)) ?? []; settle = c.str(.settle); wake = c.str(.wake)
+        hasBoard = c.bool(.hasBoard)
     }
     var isProject: Bool { !key.isEmpty }
     /// a chevron on the row: something is under it, or it is folded (an older hub sends no fold)
     var canFold: Bool { !fold.isEmpty && (folded || under > 0) }
     /// a live swarm's row (`kind` swarm): it opens the swarm's page, its room
     var swarmRoom: String? { kind == "swarm" ? (nav.hasPrefix("@room:") ? String(nav.dropFirst(6)) : nil) : nil }
-    /// what a thread row's dot is: red when it asks, the accent while it works, dim when stopped
-    var tone: Color { switch word { case "needs": return BackplaneDesign.bad; case "running", "monitoring", "limit": return BackplaneDesign.accent; case "failed", "cut", "interrupted": return BackplaneDesign.bad.opacity(0.6); default: return BackplaneDesign.faint } }
+    /// the row's status, a word with its icon; nil for a thread with nothing to say
+    var pill: HomePill? { isProject ? nil : Home.pill(label: label, tone: badgeTone, word: word, want: want) }
 }
 struct DSecDot: Decodable, Equatable { var short: String; var here: Bool; var dim: Bool
     enum CodingKeys: String, CodingKey { case short, here, dim }
@@ -56,6 +67,25 @@ struct DProjectPage: Decodable, Equatable { var key: String; var sections: [DSec
 struct DSections: Decodable { var sections: [DSection]; var groupsTo: [DGroupTo]; var page: DProjectPage?
     enum CodingKeys: String, CodingKey { case sections, groupsTo, page }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); sections = (try? c.decode([DSection].self, forKey: .sections)) ?? []; groupsTo = (try? c.decode([DGroupTo].self, forKey: .groupsTo)) ?? []; page = try? c.decode(DProjectPage.self, forKey: .page) } }
+// (here, beside DSections: DataModels.swift is compiled without this file by the wire test, scripts/mobile/ios-unit-tests.sh)
+struct DShellSyncReply: Decodable {
+    let sub: Int
+    let projects: [DProject]?
+    let threads: [DThread]?
+    let removed: [String]?
+    let sections: DSections?
+    let h: [String: String]?
+    enum CodingKeys: String, CodingKey { case sub, projects, threads, removed, sections, h }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
+        projects = try? c.decode([DProject].self, forKey: .projects)
+        threads = try? c.decode([DThread].self, forKey: .threads)
+        removed = try? c.decode([String].self, forKey: .removed)
+        sections = try? c.decode(DSections.self, forKey: .sections)
+        h = try? c.decode([String: String].self, forKey: .h)
+    }
+}
 /// A project's page on the navigation stack: its key and name.
 struct DProjectRoute: Hashable { var key: String; var title: String }
 
@@ -69,26 +99,108 @@ struct DataSectionHead: View {
                 Text(Tr.t(s.title).uppercased()).dmono(11, bold: s.id == "needs").foregroundStyle(s.id == "needs" ? BackplaneDesign.bad : BackplaneDesign.dim).lineLimit(1)
                 if s.fold || s.kind == "threads" { Text("\(s.count)").dmono(11).foregroundStyle(BackplaneDesign.faint) }
                 Spacer(minLength: 0)
-            }.padding(.leading, 10).padding(.top, 10).frame(minHeight: 30).contentShape(Rectangle())
+            }.padding(.leading, 14).padding(.trailing, 12).padding(.top, 10).frame(minHeight: s.fold ? 44 : 34).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityIdentifier("data.section." + s.id)
     }
 }
-/// A thread row of a section; one whose machine is off is listed, dimmed, and opens nothing.
+/// A row's status as a word with its icon, square as the rest of the app: red and solid when the person is wanted or it stopped, the accent
+/// while it works, quiet when it waits or is done. It replaced the row's coloured dot, which said almost nothing at a glance.
+struct DStatusPill: View {
+    let pill: HomePill
+    private var color: Color { switch pill.tone { case "bad": BackplaneDesign.bad; case "run": BackplaneDesign.accent; case "ok": BackplaneDesign.ok; default: BackplaneDesign.dim } }
+    var body: some View {
+        // solid when the person must act (approve, answer, sign in); a stop is red too, as a line: it waits for nobody
+        let solid = pill.tone == "bad" && pill.label != "Failed" && pill.label != "Stopped"
+        HStack(spacing: 4) {
+            Image(systemName: pill.symbol).font(.system(size: 10, weight: .bold))
+            Text(Tr.t(pill.label)).dmono(11, bold: true).lineLimit(1)
+        }
+        .foregroundStyle(solid ? BackplaneDesign.background : color)
+        .padding(.horizontal, 7).frame(minHeight: 24)
+        .background(solid ? color : color.opacity(0.12))
+        .overlay(Rectangle().strokeBorder(color, lineWidth: 1))
+        .fixedSize().accessibilityElement(children: .combine)
+    }
+}
+/// A project with a board in it: a small chip beside its name.
+struct DBoardBadge: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "cpu").font(.system(size: 9, weight: .semibold))
+            Text(Tr.t("PCB")).dmono(10, bold: true)
+        }
+        .foregroundStyle(BackplaneDesign.ok).padding(.horizontal, 5).frame(minHeight: 18)
+        .overlay(Rectangle().strokeBorder(BackplaneDesign.ok.opacity(0.6), lineWidth: 1)).fixedSize().accessibilityElement(children: .combine)
+    }
+}
+/// A thread row of a section: its title, under it where it is and when, and its status as a word at the right. One whose machine is off is
+/// listed, dimmed, and opens nothing. A snoozed row (the hub's `wake`) says when it comes back.
 struct DataSectionThread: View {
-    let r: DSecRow; var indent: CGFloat = 12; var showProject = false; var quiet = false; let open: (String) -> Void
+    let r: DSecRow; var indent: CGFloat = 14; var showProject = false; let open: (String) -> Void
+    private var sub: String {
+        var parts: [String] = []
+        if showProject && !r.project.isEmpty { parts.append(r.project) }
+        if let m = r.mark { parts.append(dAway(m.short, m.away)) }
+        if !r.wake.isEmpty { parts.append(Tr.mobile_snooze_wakes(time: r.ago)) } else if !r.ago.isEmpty { parts.append(r.ago) }
+        return parts.joined(separator: " · ")
+    }
     var body: some View {
         Button { if !r.off { open(r.nav) } } label: {
-            HStack(spacing: 8) {
-                Circle().fill(r.tone).frame(width: 7, height: 7)
-                Text(r.title).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
-                if r.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.pinned." + r.id) }
-                if showProject { Text(r.project).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1) }
+            HStack(spacing: 10) {
+                VStack(alignment: .leading, spacing: 3) {
+                    HStack(spacing: 6) {
+                        Text(r.title).dmono(14).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                        if r.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.pinned." + r.id) }
+                    }
+                    if !sub.isEmpty { Text(sub).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.middle) }
+                }
                 Spacer(minLength: 0)
-                if let m = r.mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
-                if quiet { Text(r.ago).dmono(11).foregroundStyle(BackplaneDesign.faint) }
-                else { Text(r.want.isEmpty ? Tr.t(r.say.isEmpty ? r.ago : r.say) : Tr.t(r.want)).dmono(11).foregroundStyle(r.want.isEmpty ? BackplaneDesign.faint : BackplaneDesign.bad) }
-            }.padding(.leading, indent).padding(.trailing, 12).frame(minHeight: 36).contentShape(Rectangle()).opacity(r.off ? 0.55 : 1)
+                if let p = r.pill { DStatusPill(pill: p).accessibilityIdentifier("data.section.pill." + r.id) }
+            }.padding(.leading, indent).padding(.trailing, 12).padding(.vertical, 6).frame(minHeight: 52).contentShape(Rectangle()).opacity(r.off ? 0.55 : 1)
         }.buttonStyle(.plain).accessibilityIdentifier("data.section.thread." + r.id)
+    }
+}
+/// A swarm row that wants the person (its `need`): the row, the need's line, and one small button per action under it. A press on the row or on
+/// "board" opens the swarm's page; "open" the member's thread; the others call `swarm.act` (Swarm.press), and its reply may open an account's
+/// sign-in or a thread. A refusal shows the hub's words under the buttons. `after` runs once the hub has answered (a project page reads its lists again).
+struct DataSwarmNeedRow: View {
+    let client: DataClient; let r: DSecRow; let need: DSwarmNeed; let room: String
+    let openRoom: () -> Void; let openThread: (String) -> Void; var after: () async -> Void = {}
+    @State private var busy = false
+    @State private var error = ""
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            DataSectionThread(r: r) { _ in openRoom() }
+            Text(Tr.t(need.line)).dmono(11).foregroundStyle(BackplaneDesign.bad).lineLimit(1).truncationMode(.tail)
+                .padding(.leading, 14).padding(.trailing, 12).padding(.top, -2).accessibilityIdentifier("data.section.need." + r.id)
+            HStack(spacing: 6) {
+                ForEach(Swarm.buttons(need, rowRoom: room)) { a in
+                    Button(Tr.t(a.label)) { press(a) }.buttonStyle(DButton(primary: false, compact: true)).disabled(busy)
+                        .accessibilityIdentifier("data.section.need." + a.act + "." + r.id)
+                }
+                Spacer(minLength: 0)
+            }.padding(.leading, 14).padding(.trailing, 12).padding(.top, 6).padding(.bottom, error.isEmpty ? 8 : 4)
+            if !error.isEmpty { Text(error).dmono(11).foregroundStyle(BackplaneDesign.bad).lineLimit(2).padding(.leading, 14).padding(.trailing, 12).padding(.bottom, 8).accessibilityIdentifier("data.section.need.error." + r.id) }
+        }
+    }
+    private func press(_ a: DSwarmNeedAct) {
+        switch Swarm.press(a, rowRoom: room) {
+        case .board?: openRoom()
+        case .thread(let t)?: openThread(t)
+        case .request(let p)?:
+            busy = true; error = ""
+            Task {
+                do {
+                    switch try await client.swarmNeedAct(p) {
+                    case .account(let id)?: client.pushAccount = id
+                    case .thread(let t)?: openThread(t)
+                    case nil: break
+                    }
+                } catch { self.error = error.localizedDescription }
+                busy = false; await after()
+            }
+        case nil: break
+        }
     }
 }
 extension View {
@@ -99,31 +211,49 @@ extension View {
         contextMenu {
             if !r.hide.isEmpty { Button(Tr.t("Hide"), systemImage: "eye.slash") { Task { await client.sidebarAct("thread-hide", r.hide) } } }
             if !r.isProject && r.swarmRoom == nil { ForEach(r.menu) { m in Button(Tr.t(m.label)) { Task { await client.sectionThreadAct(r.id, m.id); await after() } }.accessibilityIdentifier("data.section." + m.id + "." + r.id) } }
+            // what a swipe does, for a finger that would rather press: the spans it can be snoozed for, or Wake
+            if !r.snooze.isEmpty { Menu { ForEach(r.snooze) { o in Button(Tr.t(o.label)) { Task { await client.snoozeRow(o.value); await after() } } } } label: { Label(Tr.t("Snooze"), systemImage: "clock") } }
+            if !r.wake.isEmpty { Button(Tr.t("Wake"), systemImage: "bell") { Task { await client.snoozeRow(r.wake); await after() } } }
+        }
+    }
+    /// A thread row's swipes (native, in a List): to the left Snooze, one button per span the hub offers (a full swipe takes the first, 1 hour), or
+    /// Wake on a snoozed row; to the right Settle, on a row the hub lets one press settle. A row with neither has no swipe.
+    func rowSwipes(_ r: DSecRow, _ client: DataClient, after: @escaping () async -> Void = {}) -> some View {
+        swipeActions(edge: .trailing, allowsFullSwipe: true) {
+            ForEach(r.snooze) { o in
+                Button { Task { await client.snoozeRow(o.value); await after() } } label: { Label(Tr.t(o.label), systemImage: "clock") }
+                    .tint(o.id == r.snooze.first?.id ? BackplaneDesign.accent : BackplaneDesign.dim).accessibilityIdentifier("data.section.snooze." + r.id)
+            }
+            if !r.wake.isEmpty { Button { Task { await client.snoozeRow(r.wake); await after() } } label: { Label(Tr.t("Wake"), systemImage: "bell") }.tint(BackplaneDesign.accent).accessibilityIdentifier("data.section.wake." + r.id) }
+        }
+        .swipeActions(edge: .leading, allowsFullSwipe: true) {
+            if !r.settle.isEmpty { Button { Task { await client.sectionThreadAct(r.id, "settle"); await after() } } label: { Label(Tr.t("Settle"), systemImage: "checkmark") }.tint(BackplaneDesign.ok).accessibilityIdentifier("data.section.settle." + r.id) }
         }
     }
 }
-/// A project row of a section: its badge and name, the machines' dots, its running count; a press opens its page.
+/// A project row of a section: its badge and name, a PCB chip when it has a board, the machines' dots, what runs and what waits in it; a press
+/// opens its page. `tall` is a row of the bench (Pinned, Recent): the ones a thumb goes for.
 struct DataSectionProject: View {
-    let r: DSecRow; var faded = false; var toggleFold: () -> Void = {}
+    let r: DSecRow; var faded = false; var tall = false; var toggleFold: () -> Void = {}
     var body: some View {
         HStack(spacing: 8) {
             // the fold: a tap on the chevron folds its threads away or back (the hub keeps it); a tap elsewhere opens the page
-            Group {
-                if r.canFold {
-                    Button(action: toggleFold) { Image(systemName: r.folded ? "chevron.right" : "chevron.down").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint).frame(width: 22, height: 38).contentShape(Rectangle()) }
-                        .buttonStyle(.plain).accessibilityLabel(Tr.t(r.folded ? "Show" : "Hide")).accessibilityIdentifier("data.section.fold." + r.key)
-                } else { Color.clear.frame(width: 22, height: 38) }
-            }.padding(.trailing, -4)
-            if r.icon == "backplane" { BrandMark(size: 13) } else { Image(systemName: dataBadgeSymbol(r.icon)).font(.system(size: 13)).foregroundStyle(Color(css: r.css) ?? BackplaneDesign.ok) }
-            Text(r.title).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
-            if r.dots.count > 1 { HStack(spacing: 3) { ForEach(Array(r.dots.enumerated()), id: \.offset) { _, d in Circle().fill(d.dim ? BackplaneDesign.faint : (d.here ? BackplaneDesign.accent : BackplaneDesign.dim)).frame(width: 5, height: 5) } } }
+            if r.canFold {
+                Button(action: toggleFold) { Image(systemName: r.folded ? "chevron.right" : "chevron.down").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint).frame(width: 30, height: 44).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).accessibilityLabel(Tr.t(r.folded ? "Show" : "Hide")).accessibilityIdentifier("data.section.fold." + r.key).padding(.trailing, -8)
+            } else { Color.clear.frame(width: 6, height: 44) }
+            if r.icon == "backplane" { BrandMark(size: tall ? 16 : 14) } else { Image(systemName: dataBadgeSymbol(r.icon)).font(.system(size: tall ? 16 : 14)).foregroundStyle(Color(css: r.css) ?? BackplaneDesign.ok).frame(width: 20) }
+            Text(r.title).dmono(14, bold: tall).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+            if r.hasBoard { DBoardBadge().accessibilityIdentifier("data.section.board." + r.key) }
+            if r.dots.count > 1 { HStack(spacing: 3) { ForEach(Array(r.dots.enumerated()), id: \.offset) { _, d in Circle().fill(d.dim ? BackplaneDesign.faint : (d.here ? BackplaneDesign.accent : BackplaneDesign.dim)).frame(width: 5, height: 5) } }.accessibilityHidden(true) }
             Spacer(minLength: 0)
             if r.rest > 0 { Text("\(r.rest)").dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.rest." + r.key) }
-            if r.running > 0 { Text(Tr.ios_sections_running(n: r.running)).dmono(11).foregroundStyle(BackplaneDesign.accent) }
+            if r.running > 0 { Text(Tr.ios_sections_running(n: r.running)).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent).lineLimit(1).fixedSize() }
             // what of it waits on the person (its rows are in Needs you, folded or not)
-            if r.needsCount > 0 { Text("\(r.needsCount)").dmono(10).foregroundStyle(BackplaneDesign.background).padding(.horizontal, 5).background(BackplaneDesign.bad).accessibilityIdentifier("data.section.needs." + r.key) }
+            if r.needsCount > 0 { Text("\(r.needsCount)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.background).padding(.horizontal, 6).frame(minHeight: 20).background(BackplaneDesign.bad).accessibilityIdentifier("data.section.needs." + r.key) }
             if r.pinned { Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(BackplaneDesign.dim) }
-        }.padding(.trailing, 12).frame(minHeight: 38).contentShape(Rectangle()).opacity(faded || r.projOff ? 0.55 : 1)
+            Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint).accessibilityHidden(true)
+        }.padding(.leading, 8).padding(.trailing, 12).frame(minHeight: tall ? 52 : 46).contentShape(Rectangle()).opacity(faded || r.projOff ? 0.55 : 1)
     }
 }
 
@@ -160,13 +290,17 @@ struct DataProjectPageView: View {
             if let page {
                 ForEach(page.sections.filter { !$0.rows.isEmpty || ($0.fold && $0.count > 0) }) { s in
                     DataSectionHead(s: s) { if s.toggle == "page-older" { older.toggle() } else { done.toggle() }; Task { await load() } }.dataRow()
-                    ForEach(s.rows) { r in DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.farHide(r, client) { await load() }.dataRow() }
+                    ForEach(s.rows) { r in
+                        if let room = r.swarmRoom, let n = r.need { DataSwarmNeedRow(client: client, r: r, need: n, room: room, openRoom: { path.append(DSwarmRoute(id: room, name: r.title)) }, openThread: { path.append($0) }) { await load() }.dataRow() }
+                        else { DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.farHide(r, client) { await load() }.rowSwipes(r, client) { await load() }.dataRow() }
+                    }
                 }
                 if page.sections.allSatisfy({ $0.rows.isEmpty && $0.count == 0 }) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(14).dataRow() }
             } else { DLoading(text: Tr.t("Loading…")).dataRow() }
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
-        .navigationTitle(route.title).task { await load() }.refreshable { await load() }
+        // opening the page is a visit: the hub's bench (Recent) follows where the person was last, on this phone too
+        .navigationTitle(route.title).task { await client.visitProject(route.key); await load() }.refreshable { await load() }
         .toolbar { if let p = project { ToolbarItem(placement: .primaryAction) { Button { onNew(p.id) } label: { Image(systemName: "plus") }.accessibilityIdentifier("data.project.page.new") } } }
         .toolbar { if let b = buy { ToolbarItem(placement: .primaryAction) { Button { buyAsk = b } label: { Image(systemName: "cart") }.disabled(buying).accessibilityLabel(Tr.t(b.label)).accessibilityIdentifier("data.project.page.buy") } } }
         .confirmationDialog(Tr.ios_buy_ask(project: route.title), isPresented: Binding(get: { buyAsk != nil }, set: { if !$0 { buyAsk = nil } }), titleVisibility: .visible) {

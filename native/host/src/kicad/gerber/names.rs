@@ -16,7 +16,7 @@ pub fn is_fab_file(name: &str) -> bool { is_gerber(name) || is_drill(name) || is
 
 /// Canonicalise `p` only if it resolves inside `canon_root` (skips symlinks escaping the project root).
 pub(crate) fn canon_in(p: &Path, canon_root: &Path) -> Option<PathBuf> {
-    let c = std::fs::canonicalize(p).ok()?;
+    let c = crate::plat::fs::canonicalize(p).ok()?;
     c.starts_with(canon_root).then_some(c)
 }
 
@@ -29,10 +29,10 @@ pub fn set_files_in(path: &Path, root: Option<&Path>) -> Vec<PathBuf> {
 
 fn set_listing(path: &Path, root: Option<&Path>) -> (Vec<PathBuf>, Option<std::time::SystemTime>) {
     let bound = match root {
-        Some(r) => match std::fs::canonicalize(r) { Ok(c) => c, Err(_) => return Default::default() },
+        Some(r) => match crate::plat::fs::canonicalize(r) { Ok(c) => c, Err(_) => return Default::default() },
         None => {
             let base = if path.is_file() { path.parent().unwrap_or(path) } else { path };
-            match std::fs::canonicalize(base) { Ok(c) => c, Err(_) => return Default::default() }
+            match crate::plat::fs::canonicalize(base) { Ok(c) => c, Err(_) => return Default::default() }
         }
     };
     let Some(canon_path) = canon_in(path, &bound) else { return Default::default() };
@@ -73,7 +73,7 @@ pub fn is_set_path(p: &Path) -> bool {
 }
 /// Fast presence check: whether a project has at least one eligible Gerber set inside its canonical root (stops at the first match).
 pub fn has_gerbers(root: &Path) -> bool {
-    let Ok(canon_root) = std::fs::canonicalize(root) else { return false };
+    let Ok(canon_root) = crate::plat::fs::canonicalize(root) else { return false };
     fn walk(d: &Path, depth: u32, canon_root: &Path) -> bool {
         let Some(cd) = canon_in(d, canon_root) else { return false };
         let Ok(rd) = std::fs::read_dir(&cd) else { return false };
@@ -95,7 +95,7 @@ pub fn default_set(root: &Path) -> Option<PathBuf> {
 
 /// Project-relative set and newest fabrication file modification time in that set.
 pub fn newest_set(root: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
-    let canon_root = std::fs::canonicalize(root).ok()?;
+    let canon_root = crate::plat::fs::canonicalize(root).ok()?;
     let mut best: Option<(std::time::SystemTime, PathBuf)> = None;
     fn walk(d: &Path, depth: u32, canon_root: &Path, best: &mut Option<(std::time::SystemTime, PathBuf)>) {
         let Some(cd) = canon_in(d, canon_root) else { return };
@@ -118,7 +118,7 @@ pub fn newest_set(root: &Path) -> Option<(PathBuf, std::time::SystemTime)> {
 /// never leaving `root` when provided. Returns the canonical path when `root` is provided.
 pub fn board_of_in(set: &Path, root: Option<&Path>) -> Option<std::path::PathBuf> {
     let canon_root = match root {
-        Some(r) => Some(std::fs::canonicalize(r).ok()?),
+        Some(r) => Some(crate::plat::fs::canonicalize(r).ok()?),
         None => None,
     };
     let start = match &canon_root {
@@ -144,7 +144,7 @@ pub fn board_of_in(set: &Path, root: Option<&Path>) -> Option<std::path::PathBuf
 
 /// The RPC watch validates operands against the registered spelling of the root.
 pub fn board_for_watch(set: &Path, root: &Path) -> Option<PathBuf> {
-    let canonical_root = root.canonicalize().ok()?;
+    let canonical_root = crate::plat::fs::canonicalize(root).ok()?;
     let board = board_of_in(set, Some(&canonical_root))?;
     Some(root.join(board.strip_prefix(canonical_root).ok()?))
 }
@@ -234,6 +234,6 @@ mod tests {
         assert!(sym_set.starts_with(&sym_root), "watch-key spelling stays under symlinked root: {sym_set:?}");
         let sym_files = set_files_in(&sym_set, Some(&sym_root));
         assert_eq!(sym_files.len(), 1);
-        assert_eq!(sym_files[0], std::fs::canonicalize(mfg.join("in-F_Cu.gbr")).unwrap(), "I/O paths returned are canonical");
+        assert_eq!(sym_files[0], crate::plat::fs::canonicalize(mfg.join("in-F_Cu.gbr")).unwrap(), "I/O paths returned are canonical");
     }
 }

@@ -14,6 +14,7 @@ mod copy_outs;
 pub mod alwayson;
 pub mod botnet;
 pub mod homemove;
+pub mod home;
 pub mod farfiles;
 pub mod devices;
 pub mod devicespage;
@@ -36,12 +37,15 @@ pub mod pairing;
 pub mod plan;
 pub mod registry;
 pub mod peerrpc;
+pub mod peerver;
+pub mod peerws;
 pub mod peerhttp;
 pub mod peering;
 pub mod peers;
 pub mod qr;
 pub mod routes;
 pub mod rpc;
+pub mod settings_sync;
 pub mod sign;
 pub mod start;
 pub mod tailnet;
@@ -80,6 +84,7 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         hub.register_http(std::sync::Arc::new(farsync::FarRoutes(sync.clone())));
         // /far/rpc: asking (a client's request about a thing elsewhere goes there) and answering; the bots lane's owner.mail transport
         hub.register_http(std::sync::Arc::new(rpc::RpcRoutes(sync.clone())));
+        peerws::start(&hub, sync.clone());
         { // the person's messages to threads elsewhere wait in <home>/far-sends.json until their machine takes them (net/farsend.rs)
             let out = farsend::set_global(farsend::Outbox::open(Some(hub.cfg.home.join("far-sends.json"))));
             hub.register_rpc(std::sync::Arc::new(farsend::Rpc(out.clone()))); let _ = crate::session::composer::UNSENT.set(farsend::rows_now);

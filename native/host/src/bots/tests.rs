@@ -42,7 +42,11 @@ fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
 async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m).expect("handler"); h.call(hub, &caller(), &json!(7), m, &p).await.remove(0) }
 fn log(hub: &Arc<Hub>) -> Vec<Value> { hub.store.range(0, usize::MAX).unwrap().iter().filter_map(|l| serde_json::from_str(l).ok()).collect() }
 fn kinds(hub: &Arc<Hub>, from: usize) -> Vec<String> { log(hub)[from..].iter().map(|e| e["$"].as_str().unwrap_or("").to_string()).collect() }
-async fn until(hub: &Arc<Hub>, f: impl Fn(&[Value]) -> bool) { for _ in 0..2400 { if f(&log(hub)) { return } tokio::time::sleep(std::time::Duration::from_millis(50)).await } panic!("timed out") }
+/// Waits for the state `f` sees in the hub's log; a stuck wait says which call it was (`#[track_caller]` on a plain fn: an async fn cannot carry it)
+#[track_caller] fn until<'a>(hub: &'a Arc<Hub>, f: impl Fn(&[Value]) -> bool + 'a) -> impl std::future::Future<Output = ()> + 'a {
+    let at = std::panic::Location::caller();
+    async move { for _ in 0..2400 { if f(&log(hub)) { return } tokio::time::sleep(std::time::Duration::from_millis(50)).await } panic!("timed out waiting at {at}") }
+}
 // (`until` returns when the state is there; two minutes is only how long a stuck one is waited for)
 /// creates a bot and waits for its home job (the WorktreeSet that follows the reply), so a later count of events is steady
 async fn bot(hub: &Arc<Hub>, name: &str) -> String {
@@ -62,7 +66,7 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     assert!(log(&hub).iter().any(|e| e["$"] == "WorktreeSet"), "the folder is made before the reply: a message sent at once to a new bot has somewhere to run");
     until(&hub, |l| l.iter().any(|e| e["$"] == "WorktreeSet")).await;
     let w = log(&hub).into_iter().find(|e| e["$"] == "WorktreeSet").unwrap();
-    assert_eq!(w["id"], ev[0]["id"]); assert!(w["worktree"].as_str().unwrap().ends_with(&format!("/bots/{b}")));
+    assert_eq!(w["id"], ev[0]["id"]); assert!(crate::plat::tmp::sl(w["worktree"].as_str().unwrap()).ends_with(&format!("/bots/{b}")));
     let taken = rpc(&hub, "bots.create", json!({"name":"ADA"})).await; assert_eq!(taken["error"], "a bot named ADA already exists");
     for bad in ["", "a b", &"x".repeat(25), "é"] { assert_eq!(rpc(&hub, "bots.create", json!({"name":bad})).await["error"], "a bot's name is 1 to 24 letters, digits, - or _", "{bad:?}") }
 }
@@ -348,8 +352,13 @@ fn norm(ev: &[Value]) -> Vec<String> {
         let mut e = e.clone();
         if e["$"] == "BotSet" { if let Some(o) = e.as_object_mut() { o.remove("auto"); o.remove("color"); if let Some(l) = o.get("look").and_then(Value::as_u64) { o.insert("look".into(), json!(l % 72)); } } }
         if e["$"] == "UberOp" { if let Ok(mut op) = serde_json::from_str::<Value>(e["op"].as_str().unwrap_or("")) { if op["k"] == "who" { if let Some(l) = op["look"].as_u64() { op["look"] = json!(l % 72); e["op"] = json!(op.to_string()); } } } }
+        if e["$"] == "WorktreeSet" {
+            if let Some(wt) = e.get("worktree").and_then(Value::as_str) {
+                let wt = crate::plat::tmp::sl(wt);
+                if let Some(i) = wt.rfind("/bots/") { e["worktree"] = json!(format!("<home>{}", &wt[i..])); }
+            }
+        }
         let s = serde_json::to_string(&e).unwrap();
-        let s = match s.rfind("/bots/") { Some(i) if s[..i].contains("\"worktree\":\"") => { let a = s.rfind("\"worktree\":\"").unwrap() + 12; format!("{}<home>{}", &s[..a], &s[i..]) } _ => s };
         let cs: Vec<char> = s.chars().collect(); let mut out = String::new(); let mut i = 0;
         while i < cs.len() {
             let c = cs[i];
@@ -1334,6 +1343,14 @@ fn stored(e: &Value) -> Value {
     hub.commit(&json!({"$":"SettingSet","key":"room.answer","value":"off","at":1})).await.unwrap(); // the recording is of a hub that left a bot's reply in its chat (Room.answer posts it in the room)
     let work = crate::plat::tmp::canonical("ledger");
     std::fs::write(work.join("afile"), "x").unwrap(); let w = work.to_str().unwrap().to_string();
+    let mut w_forms = vec![w.replace('\\', "\\\\")];
+    w_forms.extend(crate::plat::fs::path_forms(&w));
+    if cfg!(windows) {
+        if let Some(n) = work.file_name().and_then(|s| s.to_str()) { w_forms.push(format!("/tmp/{n}")); }
+    }
+    w_forms.sort_by(|a, b| b.len().cmp(&a.len()));
+    w_forms.dedup();
+    let unwork = |mut s: String| { for f in &w_forms { s = s.replace(f, "/tmp/bp-rec-work"); } s };
     let (mut done, mut n) = (0usize, 0); let mut ids: Vec<(String, String)> = vec![];
     for c in rec["calls"].as_array().unwrap() {
         let (name, pre, post) = (c["name"].as_str().unwrap(), c["pre"].as_u64().unwrap() as usize, c["post"].as_u64().unwrap() as usize);
@@ -1349,7 +1366,7 @@ fn stored(e: &Value) -> Value {
         let raw = c["result"]["content"][0]["text"].as_str().unwrap();
         let want: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!(raw));
         assert_eq!(c["result"]["isError"].as_bool().unwrap(), !ok, "{name} {args}: {body}");
-        let got: Value = serde_json::from_str(&body.to_string().replace(&w, "/tmp/bp-rec-work")).unwrap();
+        let got: Value = serde_json::from_str(&unwork(body.to_string())).unwrap();
         // Push.gate: the JS hub let any bot reach the phone; here only the uberbot does, and this recording has none
         let mut want = want; if name == "notify_person" && want["note"] == "sent to the person" { want["note"] = json!(DESK_ONLY) }
         assert_eq!(scrubbed(&got), scrubbed(&want), "{name} {args}");
@@ -1357,7 +1374,7 @@ fn stored(e: &Value) -> Value {
         // what the call left in the log; a mark an alert gets is the state lane's (no Transform on this hub)
         let mine: Vec<Value> = log(&hub)[at..].iter().filter(|e| tool_line(e)).map(stored).collect();
         let theirs: Vec<Value> = js[pre.max(done)..post].iter().filter(|e| tool_line(e) && !(["notify_person", "project_create"].contains(&name) && e["key"].as_str().map_or(false, |k| k.starts_with("told.") || k.starts_with("alert.") && name == "project_create"))).map(stored).collect();
-        let mine: Vec<Value> = serde_json::from_str(&serde_json::to_string(&mine).unwrap().replace(&w, "/tmp/bp-rec-work")).unwrap();
+        let mine: Vec<Value> = serde_json::from_str(&unwork(serde_json::to_string(&mine).unwrap())).unwrap();
         assert_eq!(mine, theirs, "{name} {args}");
         // the rest of what happened meanwhile (an ask closing, a turn) is the hub's, and comes from the recording
         let rest: Vec<Value> = js[pre.max(done)..post].iter().filter(|e| !tool_line(e)).cloned().collect(); hub.commit_many(&rest).await.unwrap(); done = post.max(done);
@@ -1618,13 +1635,19 @@ fn ring_form(words: &str, audio: &[u8], at: u64) -> Vec<u8> {
 
 // ---- bots across linked machines (bots/far.rs): two hubs, each with its Bots, wired to each other through an OwnerLink that calls the other's `far_received`
 // (the route's own gate, "only a link that is one of the owner's own", is net/rpc/tests.rs)
-struct Wire { to: std::sync::OnceLock<Arc<Bots>>, as_link: String, peer_name: String, up: std::sync::atomic::AtomicBool, seen: StdMutex<Vec<String>> }
+struct Wire { to: std::sync::OnceLock<Arc<Bots>>, as_link: String, peer_name: String, up: std::sync::atomic::AtomicBool, seen: StdMutex<Vec<String>>, hold: Hold }
+/// `bots.hello` held while `on` (a slow machine, made exact): `waiting` counts the ones that arrived
+#[derive(Default)] struct Hold { on: std::sync::atomic::AtomicBool, waiting: std::sync::atomic::AtomicUsize }
 impl mail::owner::OwnerLink for Wire {
     fn post<'a>(&'a self, link: &'a str, body: String) -> Fut<'a, Option<(u16, String)>> {
         Box::pin(async move {
             if link != "L1" || !self.up.load(std::sync::atomic::Ordering::SeqCst) { return None }
             let o: Value = serde_json::from_str(&body).unwrap(); let (m, p) = (o["m"].as_str().unwrap().to_string(), o["p"].clone());
             self.seen.lock().unwrap().push(m.clone());
+            if m == "bots.hello" && self.hold.on.load(std::sync::atomic::Ordering::SeqCst) {
+                self.hold.waiting.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                while self.hold.on.load(std::sync::atomic::Ordering::SeqCst) { tokio::time::sleep(std::time::Duration::from_millis(10)).await }
+            }
             let to = self.to.get().unwrap();
             if m == "mcp.call" { // what net/rpc.rs makes of it
                 let (c, t) = to.far_received(&self.as_link, &format!("tool.{}", p["tool"].as_str().unwrap()), &p["args"]).await;
@@ -1638,8 +1661,8 @@ impl mail::owner::OwnerLink for Wire {
 struct Two { ba: Arc<Bots>, ra: Arc<Rec>, bb: Arc<Bots>, rb: Arc<Rec>, ada: String, bob: String, wa: Arc<Wire>, ha: crate::hub::TestHub, hb: crate::hub::TestHub }
 async fn two(tag: &str) -> Two {
     let (ha, ba, ra) = start(&format!("far{tag}A"), "").await; let (hb, bb, rb) = start(&format!("far{tag}B"), "").await;
-    let wa = Arc::new(Wire { to: Default::default(), as_link: "L1".into(), peer_name: "deskB".into(), up: true.into(), seen: Default::default() });
-    let wb = Arc::new(Wire { to: Default::default(), as_link: "L1".into(), peer_name: "deskA".into(), up: true.into(), seen: Default::default() });
+    let wa = Arc::new(Wire { to: Default::default(), as_link: "L1".into(), peer_name: "deskB".into(), up: true.into(), seen: Default::default(), hold: Default::default() });
+    let wb = Arc::new(Wire { to: Default::default(), as_link: "L1".into(), peer_name: "deskA".into(), up: true.into(), seen: Default::default(), hold: Default::default() });
     wa.to.set(bb.clone()).ok(); wb.to.set(ba.clone()).ok();
     ba.set_owner_link(wa.clone()); bb.set_owner_link(wb); ba.far_start(); bb.far_start();
     let (ada, bob) = (bot(&ha, "ada").await, bot(&hb, "bob").await);
@@ -1671,6 +1694,26 @@ fn room_members(hub: &Arc<Hub>, room: &str) -> Option<String> { log(hub).iter().
     assert_eq!((posts(&t.ha, &rid).len(), posts(&t.hb, &rid).len()), (2, 2), "each post once on each machine, none sent back: {:?} {:?}", posts(&t.ha, &rid), posts(&t.hb, &rid));
     assert_eq!(log(&t.ha).iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count(), 1, "the room change was not sent back and forth");
     assert_eq!(log(&t.hb).iter().filter(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str()).count(), 1);
+}
+/// Two changes from one machine, the second applied before the first one's forward has run: neither goes back. The forward of the first knows it
+/// came from there by its own state, not by the last change applied (which once made it send the older state back as a change: the other machine
+/// stored it and its newer members were gone, and a post of the member it lost was refused there).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn two_changes_from_one_machine_in_a_row_are_not_sent_back() {
+    let t = two("echo").await;
+    let rid = "r1795000000-77";
+    let sync = |members: Value| json!({"room":rid,"name":"lab","members":members,"deleted":false,"ephemeral":false,"closed":false});
+    // A's forward of the first change asks B who it is (a machine id it has not learned yet) and is held there
+    t.wa.hold.on.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(t.ba.far_received("L1", "bots.room_sync", &sync(json!(["ada", "bob@L1"]))).await.0, 200);
+    for _ in 0..200 { if t.wa.hold.waiting.load(std::sync::atomic::Ordering::SeqCst) > 0 { break } tokio::time::sleep(std::time::Duration::from_millis(25)).await }
+    assert!(t.wa.hold.waiting.load(std::sync::atomic::Ordering::SeqCst) > 0, "the first forward reached B");
+    // meanwhile B's next change: cy joined
+    assert_eq!(t.ba.far_received("L1", "bots.room_sync", &sync(json!(["ada", "bob@L1", "cy@L1"]))).await.0, 200);
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    t.wa.hold.on.store(false, std::sync::atomic::Ordering::SeqCst);
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    assert!(room_members(&t.ha, rid).unwrap().contains("cy@L1"));
+    assert!(!t.wa.seen.lock().unwrap().iter().any(|m| m == "bots.room_sync"), "A sent B's change back to B: {:?}; B stored {:?}", t.wa.seen.lock().unwrap(), room_members(&t.hb, rid));
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn leaving_and_joining_a_shared_room_reaches_the_other_machine() {
     let t = two("member").await;
@@ -1863,4 +1906,21 @@ async fn three(tag: &str) -> Three {
     assert_eq!(member_in("ada@L10", "L10", bot_id, lom).as_deref(), Some("ada@L10"));
     assert_eq!(member_in("cy@mid2", "L10", bot_id, lom).as_deref(), Some("cy@L12"));
     assert_eq!(member_in("dee@mid7", "L10", bot_id, lom), None, "a machine this one has no link to is dropped");
+}
+
+#[tokio::test] async fn bots_say_refuses_when_no_provider_without_waking_or_posting() {
+    let (hub, _b, rec) = start("np-say", "").await;
+    let b = bot(&hub, "ada").await;
+    let from = log(&hub).len();
+    let mut about = serde_json::Map::new();
+    for (agent, _) in crate::present::keys::AGENTS {
+        about.insert((*agent).to_string(), json!({"cli": ""}));
+    }
+    let _guard = crate::settings::provider_notice::override_for_test(&hub, true, json!({"probed": true, "about": about}));
+    let r = rpc(&hub, "bots.say", json!({"bot": b, "text": "hello"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!(r["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(r["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+    assert!(kinds(&hub, from).is_empty(), "refused bots.say must emit zero BotWoke/MessagePosted events");
+    assert!(rec.got.lock().unwrap().is_empty(), "refused bots.say must deliver nothing to Inbox");
 }

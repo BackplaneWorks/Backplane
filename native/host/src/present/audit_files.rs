@@ -3,10 +3,12 @@
 #[path="../files/dir.rs"] pub mod dir;
 #[path="../files/ops.rs"] pub mod ops;
 #[path="../files/mimg.rs"] pub mod mimg;
+/// The audit serves no files: no message names a file it links.
+pub mod share { pub fn linkable(_: &str) -> Vec<serde_json::Value> { vec![] } pub fn listed_now() -> Vec<serde_json::Value> { vec![] } pub fn revoke_now(_: &str) -> Result<(), String> { Ok(()) } }
 /// The folder watcher needs the hub; the audit has none, so its calls do nothing.
 pub mod watch_dir { pub fn touch(_root: &str, _dir: &str, _sig: u64) {} pub fn signature(_listing: &str) -> u64 { 0 } }
 /// Pure version wire encoder matching `files/rv.rs` `hist_git`.
-pub mod rv { pub fn hist_git(g: &str, c: &str, top: &str, rel: &str) -> String { format!("git\t{g}\t{c}\t{}\t{top}/{rel}", top.chars().count()) } pub fn version_has_file(_: &str, _: &str, _: &str) -> bool { false } }
+pub mod rv { pub fn hist_git(g: &str, c: &str, top: &str, rel: &str) -> String { format!("git\t{g}\t{c}\t{}\t{top}/{rel}", top.chars().count()) } pub struct ProbeBudget; impl ProbeBudget { pub fn new(_: std::time::Duration) -> Self { ProbeBudget } } pub const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(4); pub fn version_has_file_in(_: &ProbeBudget, _: &str, _: &str, _: &str) -> bool { false } }
 /// The audit reads no project folders: a thread's design is shown from the folder it names.
 pub mod kicad { pub mod canonical { pub fn design_root(root: &str) -> String { root.to_string() } } pub mod gerber { pub use super::super::gerber_names::*; } pub mod embed { pub fn resolve_pro(_: &str) -> Result<String, String> { Err(String::new()) } pub fn rail_simulation(_: &str) -> Option<&'static str> { None } pub fn runtime_picture(_: &str, _: &str) -> serde_json::Value { serde_json::Value::Null } pub fn session_state(_: &str) -> serde_json::Value { serde_json::Value::Null } } pub mod project { pub struct Files { pub pcb: String, pub sch: String }
     pub fn read(_: &str) -> Files { Files { pcb: String::new(), sch: String::new() } }

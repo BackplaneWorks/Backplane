@@ -26,10 +26,18 @@ impl Ver {
 }
 
 /// What a stored `update.channel` means: stable, beta or nightly. Anything else is stable. (0.15.0 to 0.15.3 read a stored "nightly", 0.14's name, as beta; from 0.15.4
-/// it is the nightly channel again, which also takes every beta and release.)
+/// it is the nightly channel again, tracking nightly builds of `main`.)
 pub fn channel(raw: &str) -> &'static str { match raw.trim() { "beta" => "beta", "nightly" => "nightly", _ => "stable" } }
-/// How much a channel takes: stable < beta < nightly. A channel takes its own releases and those of every channel below it.
-pub fn rank(channel: &str) -> u8 { match channel { "nightly" => 2, "beta" => 1, _ => 0 } }
+/// Whether `ch` accepts a release whose channel is `release_channel`:
+/// stable takes only stable; beta takes stable and beta; nightly takes only nightly builds
+/// (a stable hotfix or release branch may carry a higher semver than a newer nightly on `main`).
+pub fn takes(ch: &str, release_channel: &str) -> bool {
+    match channel(ch) {
+        "nightly" => release_channel == "nightly",
+        "beta" => matches!(release_channel, "stable" | "beta"),
+        _ => release_channel == "stable",
+    }
+}
 
 /// The exact shape of a tag this updater accepts: `vX.Y.Z`, `vX.Y.Z-beta.N`, or 0.14's `vX.Y.Z-nightly.YYYYMMDD.N`. It becomes a folder name (`builds/<tag>/`), so nothing else gets through.
 pub fn tag_ok(tag: &str) -> bool {
@@ -52,12 +60,16 @@ pub fn tag_channel(tag: &str) -> &'static str { if tag.contains("-nightly.") { "
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Rel { pub tag: String, pub prerelease: bool, pub draft: bool, pub signed: bool }
 
-/// Whether a channel takes a release. Stable takes only full releases; beta takes those and the betas; nightly takes all three.
-pub fn wants(channel: &str, r: &Rel) -> bool {
+/// Whether a channel takes a release. Stable takes only full releases; beta takes full releases and betas;
+/// nightly takes only nightly builds (never a stable release/hotfix or a beta).
+pub fn wants(ch: &str, r: &Rel) -> bool {
     if r.draft || !r.signed || !tag_ok(&r.tag) { return false }
-    match tag_channel(&r.tag) { "stable" => !r.prerelease, t => rank(t) <= rank(channel) }
+    let tc = tag_channel(&r.tag);
+    if tc == "stable" && r.prerelease { return false }
+    takes(ch, tc)
 }
-/// The newest release the channel takes that is newer than `current`, whatever order the list came in. Moving from beta to stable never goes back: it waits for a newer stable.
+/// The newest release the channel takes that is newer than `current`, whatever order the list came in.
+/// Moving from beta or nightly to stable waits for a newer stable; staying on nightly tracks only newer nightlies.
 pub fn offer<'a>(current: &str, channel: &str, rels: &'a [Rel]) -> Option<&'a Rel> {
     let cur = Ver::parse(current);
     rels.iter().filter(|r| wants(channel, r) && Ver::parse(&r.tag).newer(&cur)).max_by(|a, b| Ver::parse(&a.tag).cmp(&Ver::parse(&b.tag)))
@@ -153,7 +165,7 @@ pub fn pick<'a>(m: &'a Manifest, tag: &str, channel: &str, target: &str) -> Resu
     if m.tag != tag || !tag_ok(tag) { return Err("the manifest is for another release".into()) }
     if m.version != tag[1..] { return Err("the manifest's version does not match its tag".into()) }
     if m.channel != tag_channel(tag) { return Err("the manifest's channel does not match its tag".into()) }
-    if rank(&m.channel) > rank(channel) { return Err("that release is not on this channel".into()) }
+    if !takes(channel, &m.channel) { return Err("that release is not on this channel".into()) }
     let a = m.assets.get(target).ok_or_else(|| format!("no build for {target} in this release yet"))?;
     if a.name != archive_name(tag, target) { return Err("the manifest names an unexpected file".into()) }
     if a.sha256.len() != 64 || !a.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) { return Err("the manifest's checksum is malformed".into()) }
@@ -193,20 +205,61 @@ mod tests {
         for t in ["v0.15.1", "v0.15.1-beta.2", "v0.3.1-nightly.20260923.1"] { assert!(tag_ok(t), "{t}"); }
         for t in ["", "0.15.1", "v0.15", "v0.15.1.2", "v0.15.1-rc.1", "v0.15.1-beta", "v0.15.1-beta.x", "v0.15.1/../../x", "v../../x", "v0.15.1-beta.2 ", "v٠.1.2", "v99999999999.1.2"] { assert!(!tag_ok(t), "{t:?}"); }
     }
-    #[test] fn nightly_takes_all_three_and_the_others_never_a_nightly() {
+    #[test] fn nightly_tracks_only_nightlies_and_other_channels_never_take_a_nightly() {
         let rs = [rel("v0.15.3", false), rel("v0.16.0-beta.1", true), rel("v0.16.0-nightly.20261114.1", true), rel("v0.15.4-nightly.20261113.1", true)];
         assert_eq!(offer("0.15.3", "stable", &rs), None);
         assert_eq!(offer("0.15.3", "beta", &rs).unwrap().tag, "v0.16.0-beta.1");
         assert_eq!(offer("0.15.3", "nightly", &rs).unwrap().tag, "v0.16.0-nightly.20261114.1", "a nightly sorts after the betas of its version");
-        assert_eq!(offer("0.15.4-nightly.20261113.1", "nightly", &[rel("v0.15.4", false)]).unwrap().tag, "v0.15.4", "the release follows its nightlies");
+        assert_eq!(offer("0.15.4-nightly.20261113.1", "nightly", &[rel("v0.15.4", false)]), None, "a stable release never replaces a nightly");
         assert_eq!(offer("0.15.4-nightly.20261113.1", "nightly", &[rel("v0.15.4-nightly.20261113.2", true)]).unwrap().tag, "v0.15.4-nightly.20261113.2", "a second cut the same day");
         assert!(!wants("beta", &rel("v0.16.0-nightly.20261114.1", true)) && !wants("stable", &rel("v0.16.0-nightly.20261114.1", false)), "a nightly is never offered off its channel");
         assert!(!wants("nightly", &rel("v0.16.0", true)), "a flagged prerelease with a release's tag is no channel's");
+        assert!(!wants("nightly", &rel("v0.16.0", false)) && !wants("nightly", &rel("v0.16.0-beta.1", true)), "nightly never takes stable releases or betas");
         assert_eq!((tag_channel("v0.16.0-nightly.20261114.1"), tag_channel("v0.16.0-beta.1"), tag_channel("v0.16.0")), ("nightly", "beta", "stable"));
         assert!(pick(&manifest("v0.16.0-nightly.20261114.1", "nightly"), "v0.16.0-nightly.20261114.1", "nightly", "linux-x64").is_ok());
         assert!(pick(&manifest("v0.16.0-nightly.20261114.1", "nightly"), "v0.16.0-nightly.20261114.1", "beta", "linux-x64").unwrap_err().contains("not on this channel"));
+        assert!(pick(&manifest("v0.16.0-nightly.20261114.1", "nightly"), "v0.16.0-nightly.20261114.1", "stable", "linux-x64").unwrap_err().contains("not on this channel"));
         assert!(pick(&manifest("v0.16.0-nightly.20261114.1", "beta"), "v0.16.0-nightly.20261114.1", "nightly", "linux-x64").unwrap_err().contains("does not match its tag"), "a nightly's manifest says nightly");
-        assert!(pick(&manifest("v0.16.0-beta.1", "beta"), "v0.16.0-beta.1", "nightly", "linux-x64").is_ok() && pick(&manifest("v0.16.0", "stable"), "v0.16.0", "nightly", "linux-x64").is_ok());
+        assert!(pick(&manifest("v0.16.0-beta.1", "beta"), "v0.16.0-beta.1", "nightly", "linux-x64").unwrap_err().contains("not on this channel"));
+        assert!(pick(&manifest("v0.16.0", "stable"), "v0.16.0", "nightly", "linux-x64").unwrap_err().contains("not on this channel"));
+    }
+    #[test] fn stable_hotfix_never_replaces_nightly_and_channel_transitions_work() {
+        // Exact #1478 scenario: running v0.16.4-nightly.20261119.2 on nightly when v0.16.4 (0.16.3 hotfix 1) is released.
+        let hotfix_feed = [rel("v0.16.3", false), rel("v0.16.4-nightly.20261119.2", true), rel("v0.16.4", false)];
+        assert_eq!(offer("0.16.4-nightly.20261119.2", "nightly", &hotfix_feed), None);
+
+        // Even higher stable or beta releases never replace a nightly while on the nightly channel.
+        let higher_non_nightly = [rel("v0.16.4", false), rel("v0.16.5", false), rel("v0.17.0", false), rel("v0.17.0-beta.1", true)];
+        assert_eq!(offer("0.16.4-nightly.20261119.2", "nightly", &higher_non_nightly), None);
+
+        // Newer nightly on the same X.Y.Z wins over a stable hotfix.
+        let same_ver_nightly = [rel("v0.16.4", false), rel("v0.16.4-nightly.20261119.3", true)];
+        assert_eq!(offer("0.16.4-nightly.20261119.2", "nightly", &same_ver_nightly).unwrap().tag, "v0.16.4-nightly.20261119.3");
+
+        // Next-version nightly after a hotfix claims v0.16.4.
+        let next_nightly = [rel("v0.16.4", false), rel("v0.16.5-nightly.20261120.1", true), rel("v0.17.0", false)];
+        assert_eq!(offer("0.16.4-nightly.20261119.2", "nightly", &next_nightly).unwrap().tag, "v0.16.5-nightly.20261120.1");
+
+        // Stable -> Nightly transitions: picks a strictly newer nightly, never a stable release, and never downgrades.
+        assert_eq!(offer("0.16.3", "nightly", &[rel("v0.16.4", false), rel("v0.16.4-nightly.20261119.2", true)]).unwrap().tag, "v0.16.4-nightly.20261119.2");
+        assert_eq!(offer("0.16.4", "nightly", &[rel("v0.16.4", false), rel("v0.16.4-nightly.20261119.2", true)]), None);
+        assert_eq!(offer("0.16.4", "nightly", &[rel("v0.16.4", false), rel("v0.16.5-nightly.20261120.1", true)]).unwrap().tag, "v0.16.5-nightly.20261120.1");
+
+        // Nightly -> Stable transitions: ignores nightlies, waits for a stable >= X.Y.Z of the nightly.
+        assert_eq!(offer("0.16.4-nightly.20261119.2", "stable", &[rel("v0.16.3", false), rel("v0.16.4-nightly.20261119.3", true), rel("v0.16.5-nightly.20261120.1", true)]), None);
+        assert_eq!(offer("0.16.4-nightly.20261119.2", "stable", &[rel("v0.16.3", false), rel("v0.16.4", false), rel("v0.16.5-nightly.20261120.1", true)]).unwrap().tag, "v0.16.4");
+
+        // Nightly -> Beta transitions: ignores nightlies, waits for beta or stable newer than current.
+        assert_eq!(offer("0.16.4-nightly.20261119.2", "beta", &[rel("v0.16.4-beta.1", true), rel("v0.16.5-nightly.20261120.1", true)]), None);
+        assert_eq!(offer("0.16.4-nightly.20261119.2", "beta", &[rel("v0.16.4", false), rel("v0.16.5-beta.1", true), rel("v0.16.5-nightly.20261120.1", true)]).unwrap().tag, "v0.16.5-beta.1");
+
+        // Beta -> Stable on beta channel remains unchanged.
+        assert_eq!(offer("0.16.4-beta.1", "beta", &[rel("v0.16.4", false), rel("v0.16.4-nightly.20261119.2", true)]).unwrap().tag, "v0.16.4");
+
+        // Channel normalization in `takes`: trimmed and unknown channels fall back to stable.
+        assert!(takes(" nightly ", "nightly") && !takes(" nightly ", "stable") && !takes(" nightly ", "beta"));
+        assert!(takes(" beta ", "beta") && takes(" beta ", "stable") && !takes(" beta ", "nightly"));
+        assert!(takes("canary", "stable") && !takes("canary", "beta") && !takes("canary", "nightly"));
     }
     #[test] fn stable_takes_full_releases_and_beta_takes_both() {
         let rs = [rel("v0.16.0", false), rel("v0.17.0-beta.1", true)];

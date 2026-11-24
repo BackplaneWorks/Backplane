@@ -28,10 +28,15 @@ pub fn is_guard_event(e: &Value) -> bool {
     (e["$"] == "ActivityLogged" && e["kind"] == "git" && e["act"].as_str().is_some_and(|a| a.starts_with("sg")))
         || (e["$"] == "SettingSet" && e["key"].as_str().is_some_and(|k| k.starts_with("review.ro.") || k.starts_with("restore.ask.")))
 }
+/// Timeout for the git availability probe before write_guard / turn_guard_start.
+pub const GIT_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+/// Timeout for the pre-write snapshot inside `write_guard` so a stalled git/repo_lock never hangs BeginCommit for 300s.
+pub const WRITE_SNAP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
 /// Whether git runs here (Windows: one installed since this hub started is put on its PATH first).
 pub async fn git_runs() -> bool {
     crate::settings::tools_install::git_pick_up();
-    crate::files::git::proc_ro("git", &["--version"], "/", &[]).await.code == 0
+    crate::files::git::read_within(GIT_PROBE_TIMEOUT, "git", &["--version"], "/", &[]).await.code == 0
 }
 /// The ask a mass deletion waits on.
 pub const MASS_TOOL: &str = "mass_delete";
@@ -130,6 +135,11 @@ impl Agents {
     /// `turn_guard_start`; `new_turn` false for a guard taken late, at a write of a turn that has none (an earlier turn's restore ask stays open).
     async fn guard_begin(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>, new_turn: bool) {
         if crate::copy::on() || cwd.is_empty() { return }
+        let g = self.compute_guard(th, cwd, text, new_turn).await;
+        self.turn_guards.lock().unwrap().insert(th.to_string(), g);
+    }
+    /// Compute the snapshot and review state without mutating `self.turn_guards` (used so a timed-out detached call cannot overwrite a newer turn).
+    async fn compute_guard(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>, new_turn: bool) -> TurnGuard {
         let cur = self.world().await.setting(&review_key(th)).to_string(); let prev = cur == "1";
         let review = text.map_or(prev, |t| review_next(prev, t));
         // a new message decides afresh; the person's "off" ("0") lasts until it, a late guard (no text) keeps what is set
@@ -138,7 +148,7 @@ impl Agents {
         if review && !prev { self.guard_say(th, "info", format!("{REVIEW_WHY} Allow edits (over the message box) switches it off, or ask for a change in a message.")).await }
         if new_turn { self.close_restore_asks(th).await }
         let root = kc::design_root(cwd);
-        if !std::path::Path::new(&root).is_dir() { self.turn_guards.lock().unwrap().insert(th.to_string(), TurnGuard { review, ..Default::default() }); return } // no folder: nothing to snapshot (the turn says why it cannot run there)
+        if !std::path::Path::new(&root).is_dir() { return TurnGuard { review, ..Default::default() } } // no folder: nothing to snapshot (the turn says why it cannot run there)
         let mut g = TurnGuard { review, ..Default::default() };
         // The agent gets the turn only once the snapshot is taken: it must hold the state before the turn, whatever the agent's own tools write
         // (#1233, #1246). The snapshot is incremental (files/snapshot.rs keeps its index between turns), so it is quick after the first; a slow one
@@ -148,7 +158,7 @@ impl Agents {
         let r = self.take_snapshot(th, &root).await;
         say.abort();
         if let Some((top, turn, reference)) = r { g = TurnGuard { top, turn, reference, ..g } }
-        self.turn_guards.lock().unwrap().insert(th.to_string(), g);
+        g
     }
 
     /// The folder `root` made a repository if it is in none, and its work tree snapshotted for `th`'s next turn: (top, turn, reference), None when
@@ -168,24 +178,84 @@ impl Agents {
         }
     }
 
+    /// Run a future on a detached task bounded by `limit` so a caller timeout never drops the spawned task's guards (such as `repo_lock`)
+    /// while an underlying non-abortable write subprocess is still finishing.
+    pub(crate) async fn await_detached<T: Send + 'static>(
+        limit: std::time::Duration,
+        fut: impl std::future::Future<Output = T> + Send + 'static,
+    ) -> Result<T, ()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let res = fut.await;
+            let _ = tx.send(res);
+        });
+        match tokio::time::timeout(limit, rx).await {
+            Ok(Ok(v)) => Ok(v),
+            _ => Err(()),
+        }
+    }
+
     /// Before a write through the hub to `path` (absolute): a review refuses it when it is a design file; the turn's first write snapshots
     /// first (again, when the person or the agent changed something since the turn's snapshot).
     pub async fn write_guard(self: &Arc<Self>, th: &str, path: &str) -> Result<(), String> {
+        self.write_guard_within(th, path, WRITE_SNAP_TIMEOUT).await
+    }
+    pub(crate) async fn write_guard_within(self: &Arc<Self>, th: &str, path: &str, limit: std::time::Duration) -> Result<(), String> {
         if crate::copy::on() { return Ok(()) }
         let rel = path.rsplit_once("/.backplane/worktrees/").map(|x| x.1.split_once('/').map_or("", |y| y.1).to_string()).unwrap_or_else(|| path.to_string());
         let design = kc::is_design(&rel) || kc::is_document(path) || path.ends_with(".kicad_pro");
         if design && self.in_review(th).await { return Err(sn::review_refusal(path.rsplit('/').next().unwrap_or(path))) }
         let g = self.turn_guard(th);
         if g.as_ref().is_some_and(|g| g.wrote) { return Ok(()) }
+        let prev_person = g.as_ref().is_some_and(|g| g.person);
+        let timed_out = || {
+            let secs = limit.as_secs_f64();
+            let secs_str = if secs >= 1.0 && secs.fract() == 0.0 { format!("{} s", secs as u64) } else { format!("{secs:.2} s") };
+            (
+                format!("No snapshot before this turn's first edit: pre-write git snapshot timed out after {secs_str}"),
+                format!("KiCad write blocked: pre-write git snapshot timed out after {secs_str} (git or the project repository lock did not finish). Retry once git is idle."),
+            )
+        };
         match g {
             Some(g) if !g.top.is_empty() => {
                 let title = self.thread_title(th).await;
-                let r = sn::snapshot(&g.top, th, &format!("{}-edit", g.reference), &sn::snap_msg(th, g.turn, &title, "before its first edit"), self.off_branch().await).await;
-                if let Err(e) = r { self.guard_say(th, "warn", format!("No snapshot before this turn's first edit: {e}")).await }
+                let off_branch = self.off_branch().await;
+                let top = g.top.clone();
+                let reference = format!("{}-edit", g.reference);
+                let msg = sn::snap_msg(th, g.turn, &title, "before its first edit");
+                let th_s = th.to_string();
+                match Self::await_detached(limit, async move { sn::snapshot(&top, &th_s, &reference, &msg, off_branch).await }).await {
+                    Ok(Ok(_)) => {}
+                    Ok(Err(e)) => self.guard_say(th, "warn", format!("No snapshot before this turn's first edit: {e}")).await,
+                    Err(()) => {
+                        let (say_msg, err_msg) = timed_out();
+                        self.guard_say(th, "warn", say_msg).await;
+                        return Err(err_msg);
+                    }
+                }
             }
             // no snapshot of this turn yet (a turn that started before this hub did): take it now
             _ if !git_runs().await => { self.git_missing(th).await; return Err(GIT_MISSING.into()) }
-            _ => { let cwd = self.world().await.cwd(th); let review = self.in_review(th).await; self.guard_begin(th, &cwd, None, false).await; if let Some(x) = self.turn_guards.lock().unwrap().get_mut(th) { x.review = review } }
+            _ => {
+                let cwd = self.world().await.cwd(th);
+                if !crate::copy::on() && !cwd.is_empty() {
+                    let me = self.clone();
+                    let th_s = th.to_string();
+                    match Self::await_detached(limit, async move { me.compute_guard(&th_s, &cwd, None, false).await }).await {
+                        Ok(mut computed) => {
+                            computed.wrote = true;
+                            computed.person |= prev_person;
+                            self.turn_guards.lock().unwrap().insert(th.to_string(), computed);
+                            return Ok(());
+                        }
+                        Err(()) => {
+                            let (say_msg, err_msg) = timed_out();
+                            self.guard_say(th, "warn", say_msg).await;
+                            return Err(err_msg);
+                        }
+                    }
+                }
+            }
         }
         if let Some(x) = self.turn_guards.lock().unwrap().get_mut(th) { x.wrote = true }
         Ok(())

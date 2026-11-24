@@ -148,28 +148,50 @@ pub fn holds_proof(health: &serde_json::Value) -> bool {
     health["folding"].as_u64().unwrap_or(0) > 0 || health["migrating"]["state"] == "running" || health["status"] == "migrating"
 }
 
-/// The machine slept since the last look: the wall clock moved this much more than the monotonic one (`Instant`, which stops in sleep on macOS
-/// and Linux). A clock set by hand or by NTP can look the same; that only costs a short grace.
+/// Whether a probe proves this build started cleanly: requires a healthy (`well`) answer, not already stable,
+/// no fold/migration holding proof, and `up_s >= need_s` awake seconds since ready.
+pub fn proven(well: bool, body: &serde_json::Value, stable: bool, up_s: u64, need_s: u64) -> bool {
+    well && !stable && !holds_proof(body) && up_s >= need_s
+}
+
+/// The machine slept since the last look: the wall clock moved this much more than the suspend-excluding awake clock.
+/// A clock set by hand or by NTP can look the same; that only costs a short grace.
 pub const SLEEP_JUMP_S: u64 = 10;
 /// How long after a wake a failed health check is not counted: a Mac's DarkWake lasts about 2 s, too short for the hub's 10 s checks to run, and
 /// a full wake gives the hub one round of them to catch up.
 pub const WAKE_GRACE_S: u64 = 30;
 /// Tells a sleep from a hang. `tick` each turn of the guard's loop: true when the machine slept since the last tick.
-pub struct SleepClock { last: Option<(std::time::SystemTime, std::time::Instant)>, woke: Option<std::time::Instant> }
+pub struct SleepClock { last: Option<(std::time::SystemTime, u64)>, woke: Option<u64> }
 impl SleepClock {
     pub fn new() -> SleepClock { SleepClock { last: None, woke: None } }
-    pub fn tick(&mut self, wall: std::time::SystemTime, mono: std::time::Instant) -> bool {
-        let slept = self.last.map_or(false, |(w, m)| {
+    pub fn tick(&mut self, wall: std::time::SystemTime, awake_s: u64) -> bool {
+        let slept = self.last.map_or(false, |(w, a)| {
             let dw = wall.duration_since(w).map_or(0, |d| d.as_secs());
-            let dm = mono.saturating_duration_since(m).as_secs();
-            dw > dm + SLEEP_JUMP_S
+            let da = awake_s.saturating_sub(a);
+            dw > da + SLEEP_JUMP_S
         });
-        self.last = Some((wall, mono));
-        if slept { self.woke = Some(mono) }
+        self.last = Some((wall, awake_s));
+        if slept { self.woke = Some(awake_s) }
         slept
     }
-    /// Whether `mono` is within the grace after the last wake.
-    pub fn waking(&self, mono: std::time::Instant) -> bool { self.woke.map_or(false, |w| mono.saturating_duration_since(w).as_secs() < WAKE_GRACE_S) }
+    /// Whether `awake_s` is within the grace after the last wake.
+    pub fn waking(&self, awake_s: u64) -> bool { self.woke.map_or(false, |w| awake_s.saturating_sub(w) < WAKE_GRACE_S) }
+}
+
+/// Tracks whether the guard is currently in rescue mode so automatic retry loops alert once on entry,
+/// never re-alert on each retry (even though `one_run` transitions `state` through `"starting"`), and
+/// reset only on hub recovery or an explicit control request.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RescueState { pub active: bool }
+impl RescueState {
+    /// Enter or stay in rescue. Returns `true` only on the first entry (when an alert should fire).
+    pub fn enter(&mut self) -> bool {
+        if self.active { return false }
+        self.active = true;
+        true
+    }
+    /// Leave rescue (hub came up healthy, or a control request reset the plan). Returns `true` if previously in rescue.
+    pub fn leave(&mut self) -> bool { std::mem::replace(&mut self.active, false) }
 }
 
 #[cfg(test)]
@@ -300,19 +322,63 @@ mod tests {
         assert!(!holds_proof(&serde_json::Value::Null), "an old build's /hello says neither");
     }
 
-    #[test] fn a_sleep_is_told_from_a_hang_by_the_two_clocks() {
-        use std::time::{Duration, Instant, SystemTime};
-        let (w0, m0) = (SystemTime::now(), Instant::now());
-        let mut c = SleepClock::new();
-        assert!(!c.tick(w0, m0), "the first look has nothing to compare");
-        assert!(!c.tick(w0 + Duration::from_secs(5), m0 + Duration::from_secs(5)), "awake: both clocks moved together");
-        assert!(!c.waking(m0 + Duration::from_secs(5)));
-        // 17 minutes asleep: the wall clock jumps, the monotonic one barely moves
-        let (w, m) = (w0 + Duration::from_secs(1057), m0 + Duration::from_secs(6));
-        assert!(c.tick(w, m), "a sleep");
-        assert!(c.waking(m + Duration::from_secs(2)), "a DarkWake's probe is not counted");
-        assert!(!c.waking(m + Duration::from_secs(WAKE_GRACE_S)), "the grace ends");
-        assert!(!c.tick(w + Duration::from_secs(3), m + Duration::from_secs(3)), "awake again");
-        assert!(!c.tick(w, m + Duration::from_secs(4)), "a wall clock set back is no sleep");
+    #[test]
+    fn a_sleep_is_told_from_a_hang_by_the_two_clocks() {
+        use std::time::{Duration, SystemTime};
+
+        let mut clock = SleepClock::new();
+        let mut wall = SystemTime::UNIX_EPOCH + Duration::from_secs(1_700_000_000);
+        let mut awake = 100u64;
+
+        assert!(!clock.tick(wall, awake));
+        assert!(!clock.waking(awake));
+
+        // Normal awake advance (5s wall, 5s awake): not sleep.
+        wall += Duration::from_secs(5);
+        awake += 5;
+        assert!(!clock.tick(wall, awake));
+        assert!(!clock.waking(awake));
+
+        // 17-minute lid-close sleep: wall jumps 1020s while awake clock ticks only 1s.
+        wall += Duration::from_secs(17 * 60);
+        awake += 1;
+        assert!(clock.tick(wall, awake));
+        assert!(clock.waking(awake));
+        assert!(clock.waking(awake + WAKE_GRACE_S - 1));
+        assert!(!clock.waking(awake + WAKE_GRACE_S));
+
+        // Normal ticks right after waking stay false without clearing the grace window early.
+        wall += Duration::from_secs(SLEEP_JUMP_S - 5);
+        awake += SLEEP_JUMP_S - 5;
+        assert!(!clock.tick(wall, awake));
+        assert!(clock.waking(awake));
+
+        // Backward wall-clock jump (e.g. NTP step) is not treated as sleep.
+        wall -= Duration::from_secs(60);
+        awake += 2;
+        assert!(!clock.tick(wall, awake));
+    }
+
+    #[test]
+    fn a_failed_probe_never_proves_a_build_even_past_stable() {
+        use serde_json::json;
+        assert!(!proven(false, &serde_json::Value::Null, false, 120, 60));
+        assert!(!proven(false, &json!({"status": "starting"}), false, 120, 60));
+        assert!(!proven(true, &json!({"status": "ok", "folding": 1}), false, 120, 60));
+        assert!(!proven(true, &json!({"status": "ok", "folding": 0}), false, 59, 60));
+        assert!(proven(true, &json!({"status": "ok", "folding": 0}), false, 60, 60));
+        assert!(!proven(true, &json!({"status": "ok", "folding": 0}), true, 120, 60));
+    }
+
+    #[test]
+    fn rescue_alerts_once_across_retries_until_recovery_or_reset() {
+        let mut r = RescueState::default();
+        assert!(!r.leave(), "not in rescue yet");
+        assert!(r.enter(), "first entry into rescue fires an alert");
+        assert!(!r.enter(), "subsequent automatic retries stay silent");
+        assert!(!r.enter(), "even across multiple retries");
+        assert!(r.leave(), "hub recovered or control request cleared rescue");
+        assert!(!r.leave(), "already left");
+        assert!(r.enter(), "a later rescue episode alerts again");
     }
 }

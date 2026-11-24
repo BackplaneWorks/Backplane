@@ -42,6 +42,12 @@ pub fn install(src: &Path, prefix: &Path, tag: &str) -> std::io::Result<PathBuf>
     std::fs::rename(&fresh, &guard)?;
     /* i18n-ok: file and env names */ let current = prefix.join("CURRENT");
     if !current.is_file() { let t = prefix.join(".CURRENT.tmp"); std::fs::write(&t, format!("{tag}\n"))?; std::fs::rename(&t, &current)?; }
+    // where no guard runs (the app uses a hub on another machine), nothing would move CURRENT: the app's next launch tries a newer build put
+    // here by hand, as it tries one it fetched (appkeep.rs). A guard owns CURRENT when it runs.
+    let cur = crate::appkeep::current(prefix);
+    if !cur.is_empty() && crate::appkeep::newer(tag, &cur) && !crate::appkeep::guard_runs(prefix) {
+        crate::appkeep::set_manual_next(prefix, tag)?;
+    }
     Ok(dest.join("backplane-gpui.exe"))
 }
 
@@ -71,6 +77,18 @@ pub fn headless(dir: Option<PathBuf>) -> i32 {
     }
 }
 
+/// Prepare a tracked trial before spawning a manually installed newer build (`maybe_install`), acquiring an exclusive `clients.lock` and
+/// ensuring no live trial or guard owns the prefix. Keeps `clients.lock` held until the child's PID is recorded or cleaned up.
+pub(crate) fn prepare_upgrade_trial(prefix: &Path, tag: &str) -> Option<(String, std::fs::File)> {
+    let lock = std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(prefix.join("clients.lock")).ok()?;
+    lock.try_lock().ok()?;
+    let cur = crate::appkeep::current(prefix);
+    if cur.is_empty() || !crate::appkeep::newer(tag, &cur) { return None; }
+    let nonce = format!("inst-{}-{}", std::process::id(), crate::appkeep::now());
+    crate::appkeep::begin_if_no_live_trial(prefix, tag, &cur, std::process::id(), &nonce).ok()?;
+    Some((nonce, lock))
+}
+
 /// Windows, before the window opens: when `offer` says so, ask; on Install, install and start the installed client with the same arguments.
 /// Answers true when this process should end (the installed one runs). Not now, or a failed install, runs this one as it is.
 #[cfg(windows)]
@@ -82,13 +100,33 @@ pub fn maybe_install(pending: bool) -> bool {
     let guarded = crate::launch::guarded_install(&me).is_some();
     if !offer(pending, guarded, std::env::var_os("BACKPLANE_HUB_BIN").is_some(), under, |f| dir.join(f).is_file()) { return false }
     if !ask(&prefix) { return false }
-    let app = match install(dir, &prefix, &tag()) {
+    let t = tag();
+    let app = match install(dir, &prefix, &t) {
         Ok(a) => a,
         Err(e) => { say(&crate::i18n::tf("gpui.install.failed", &[("dir", prefix.display().to_string().into()), ("why", e.to_string().into())])); return false }
     };
     shortcut(&prefix);
     use std::os::windows::process::CommandExt;
-    std::process::Command::new(&app).args(std::env::args_os().skip(1)).creation_flags(0x0000_0200).spawn().is_ok()
+    let held = prepare_upgrade_trial(&prefix, &t);
+    let mut cmd = std::process::Command::new(&app);
+    cmd.args(std::env::args_os().skip(1)).creation_flags(0x0000_0200);
+    if let Some((ref n, _)) = held { cmd.env(crate::selfupdate::TRIAL_ENV, n); }
+    match cmd.spawn() {
+        Ok(child) => {
+            if let Some((ref n, lock)) = held {
+                crate::appkeep::update_trial_pid(&prefix, &t, n, child.id());
+                drop(lock);
+            }
+            true
+        }
+        Err(_) => {
+            if let Some((ref n, lock)) = held {
+                crate::appkeep::forget_if_nonce(&prefix, n);
+                drop(lock);
+            }
+            false
+        }
+    }
 }
 
 #[cfg(windows)]
@@ -169,9 +207,39 @@ mod tests {
         assert!(pre.join("builds/v0.15.1/backplane-gpui.exe").is_file() && pre.join("builds/v0.15.0/backplane-gpui.exe").is_file());
         assert_eq!(std::fs::read_to_string(pre.join("backplane.exe")).unwrap(), "guard 2");
         assert_eq!(std::fs::read_to_string(pre.join("CURRENT")).unwrap(), "v0.15.0\n", "the guard moves CURRENT, after its health check");
+        assert_eq!(crate::appkeep::next(&pre), "v0.15.1", "or, with no guard, the app's next launch tries it");
         let left: Vec<String> = std::fs::read_dir(pre.join("builds")).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
         assert!(left.iter().all(|n| !n.starts_with('.')), "no scratch left: {left:?}");
         #[cfg(windows)] assert!(crate::launch::guarded_install(&app).is_some(), "the installed client is run by the guard");
         let _ = (std::fs::remove_dir_all(&src), std::fs::remove_dir_all(&pre));
+    }
+    #[test] fn upgrade_trial_respects_guard_lock_and_promotes_without_guard() {
+        let (src, pre) = (tmp("upg-src"), tmp("upg-pre"));
+        for f in ["backplane-gpui.exe", "backplane-hub.exe", "backplane.exe", "COMMIT"] { std::fs::write(src.join(f), f).unwrap(); }
+        install(&src, &pre, "v0.15.0").unwrap();
+        assert_eq!(crate::appkeep::current(&pre), "v0.15.0");
+
+        // When a guard holds .guard.lock, installer leaves CURRENT/next/trial alone
+        let lock = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(pre.join(".guard.lock")).unwrap();
+        lock.lock_shared().unwrap();
+        install(&src, &pre, "v0.16.0").unwrap();
+        assert_eq!(crate::appkeep::next(&pre), "");
+        assert!(prepare_upgrade_trial(&pre, "v0.16.0").is_none());
+        drop(lock);
+
+        // Without a guard, manual install writes manual next; while another window holds clients.lock, prepare_upgrade_trial defers
+        install(&src, &pre, "v0.16.0").unwrap();
+        assert_eq!(crate::appkeep::next(&pre), "v0.16.0");
+        assert!(crate::appkeep::is_manual_next(&pre, "v0.16.0"));
+        let shared = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(pre.join("clients.lock")).unwrap();
+        shared.lock_shared().unwrap();
+        assert!(prepare_upgrade_trial(&pre, "v0.16.0").is_none(), "shared clients.lock blocks upgrade trial handoff");
+        drop(shared);
+
+        // With no competing window or guard, prepares a tracked trial and promotes cleanly
+        let (nonce, held_lock) = prepare_upgrade_trial(&pre, "v0.16.0").unwrap();
+        drop(held_lock);
+        assert_eq!(crate::appkeep::opened(&pre, "v0.16.0", Some(&nonce)), Some("v0.16.0".into()));
+        assert_eq!(crate::appkeep::current(&pre), "v0.16.0");
     }
 }

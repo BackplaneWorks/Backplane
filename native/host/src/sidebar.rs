@@ -203,17 +203,22 @@ fn kids_hidden<'a>(st: &'a State) -> HashSet<&'a str> {
     // a swarm's members (docs/SWARM.md): the swarm is one row of its project, its threads open from its page
     k.extend(st.swarm_of.keys().map(String::as_str)); k
 }
-/// A live swarm as the sidebar's sections place it (lane J, present/sections.rs): one row under its project, opened by `nav`.
+/// A live swarm as the sidebar's sections place it (lane J, present/sections.rs): one row under its project, opened by `nav`. `need`: what it wants of the
+/// person, in one line with its actions (present/swarm_need.rs), when anything.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SwarmRow { pub id: String, pub project: String, pub title: String, pub word: &'static str, pub activity: u64, pub nav: String }
-/// The live swarms (active or paused), newest first. `word` in the sections' words: `needs` when a guard paused it (circular, chatter, budget, idle: the
-/// person decides what next) or a member waits on an ask, `failed` when a member's last turn failed, else `running` (a swarm the person paused included).
-/// A swarm's member threads are in `State::swarm_of`: they are no row of their own.
+pub struct SwarmRow { pub id: String, pub project: String, pub title: String, pub word: &'static str, pub activity: u64, pub nav: String, pub need: Option<crate::present::swarm_need::Need> }
+/// The live swarms (active or paused), newest first. `word` in the sections' words: `needs` when it waits on the person (a guard paused it and the pause is
+/// theirs, a member asks or needs their sign-in), `failed` when a member's last turn failed for another reason, else `running` (a swarm the person paused, and a
+/// bot's swarm whose routine pause its starter handles, included). A swarm's member threads are in `State::swarm_of`: they are no row of their own.
 pub fn live_swarms(st: &State) -> Vec<SwarmRow> {
     let mut v: Vec<SwarmRow> = st.rooms_nav.iter().filter(|(_, r)| r.swarm_live()).map(|(id, r)| {
-        let ts = || r.threads.iter().filter_map(|t| st.threads.get(t.as_str()));
-        let word = if (r.state == "paused" && r.reason != "person") || ts().any(|t| t.pending > 0) { "needs" } else if ts().any(|t| t.turn == Turn::Failed) { "failed" } else { "running" };
-        SwarmRow { id: id.clone(), project: r.project.clone(), title: r.name.clone(), word, activity: r.last, nav: format!("@room:{id}") } }).collect();
+        let rec: Value = st.settings.get(&crate::present::swarm_need::key(id)).and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
+        let names: Vec<String> = r.threads.iter().map(|t| st.settings.get(&format!("room.member.{id}.thread:{t}")).and_then(|s| serde_json::from_str::<Value>(s).ok()).and_then(|m| m["name"].as_str().map(str::to_string)).unwrap_or_else(|| "peer".into())).collect();
+        let ms: Vec<crate::present::swarm_need::Member> = r.threads.iter().zip(&names).map(|(t, n)| { let th = st.threads.get(t.as_str());
+            crate::present::swarm_need::Member { thread: t, name: n, provider: th.map_or("", |x| x.provider.as_str()), failed: th.map_or(false, |x| x.turn == Turn::Failed), asking: crate::state::visible::wants_person(st, t) } }).collect();
+        let need = crate::present::swarm_need::of(&r.state, &r.reason, &rec, &ms);
+        let word = match need.as_ref().map(|n| n.why) { Some("failed") => "failed", Some(_) => "needs", None => "running" };
+        SwarmRow { id: id.clone(), project: r.project.clone(), title: r.name.clone(), word, activity: r.last, nav: format!("@room:{id}"), need } }).collect();
     v.sort_by(|a, b| b.activity.cmp(&a.activity).then(a.id.cmp(&b.id))); v
 }
 /// A project's swarms as sidebar rows, newest first: the live ones only (active or paused; one that is over leaves, as a settled thread does).

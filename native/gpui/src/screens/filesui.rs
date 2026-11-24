@@ -66,6 +66,8 @@ pub fn step(sel: Option<usize>, len: usize, key: &str) -> Option<usize> {
 /// A name a new file or folder may have here: the hub's `plain_name` rule (one visible component).
 pub fn valid_name(n: &str) -> bool { !n.is_empty() && n != "." && n != ".." && !n.starts_with('.') && !n.contains(['/', '\\', '\0', '\n', '\t', '\r']) && n.len() <= 255 }
 /// The folder on show: the last breadcrumb's path ("" is the project root).
+/// The folder of the project's manufacturing outputs, while the hub offers it (`mfg`: the project has mfg/ and the page is elsewhere).
+pub fn mfg_of(files: &Value) -> Option<&str> { files["mfg"].as_str().filter(|m| !m.is_empty()) }
 pub fn cur_dir(files: &Value) -> String { files["trail"].as_array().and_then(|t| t.last()).and_then(|c| c["value"].as_str()).unwrap_or("").to_string() }
 pub fn join(dir: &str, name: &str) -> String { if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") } }
 /// The Lucide icon for a row's kind and the colour token it takes.
@@ -99,14 +101,13 @@ pub fn unique(name: &str, taken: &dyn Fn(&str) -> bool) -> String {
 }
 /// A name the saver may write: no path parts.
 pub fn save_name(n: &str) -> String { let n = n.rsplit(['/', '\\']).next().unwrap_or(""); let n = n.trim_start_matches('.'); if n.is_empty() { "download".into() } else { n.replace(['\0', '\n', '\r'], "_") } }
-pub fn downloads_dir() -> PathBuf { std::env::var_os("BACKPLANE_GPUI_DOWNLOADS").map(PathBuf::from).unwrap_or_else(|| crate::plat::user_home().unwrap_or_default().join("Downloads")) }
 
 impl FileRow { pub fn down(&self) -> String { self.down.clone() } }
 
 // ------------------------------------------------------------------ state, events
 
 fn thread_id(this: &Backplane) -> String { let t = this.data["thread"]["id"].as_str().unwrap_or(""); t.rsplit_once('|').map_or(t, |(_, i)| i).to_string() }
-fn rows_now(this: &Backplane) -> (Vec<FileRow>, String) { let f = &this.data["thread"]["viewer"]["files"]; (viewer::file_rows(f), cur_dir(f)) }
+fn rows_now(this: &Backplane) -> (Vec<FileRow>, String) { let f = super::tile_pages::focused_files(&this.data["thread"]); (viewer::file_rows(f), cur_dir(f)) }
 fn filter_text(this: &Backplane, cx: &App) -> String { this.screens.files.filter.as_ref().map_or(String::new(), |f| f.read(cx).content.to_string()) }
 
 /// Called each frame (glue.rs): make the fields once, reset on a new folder, start the fetch a preview needs.
@@ -122,7 +123,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let viewer = &this.data["thread"]["viewer"];
     let open = viewer["open"].as_str().unwrap_or("").to_string();
     if open == "files" {
-        let dir = cur_dir(&viewer["files"]);
+        let dir = cur_dir(super::tile_pages::focused_files(&this.data["thread"]));
         if dir != this.screens.files.dir { this.screens.files.dir = dir; this.screens.files.sel = None; this.screens.files.menu = None; this.screens.files.mode = Mode::Browse;
             if let Some(f) = this.screens.files.filter.clone() { f.update(cx, |i, cx| i.set(String::new(), cx)); } }
     }
@@ -229,7 +230,7 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
         Do::Up => { let _ = this.tx.try_send(Command::Action("fm-up".into(), String::new())); }
         Do::Back => { let _ = this.tx.try_send(Command::Action("fm".into(), String::new())); }
         Do::Download(i) => if let Some(r) = row(i) { download(this, r.down(), r.label.clone(), r.kind == "folder", cx) },
-        Do::DownloadDir => { let url = this.data["thread"]["viewer"]["files"]["zip"].as_str().unwrap_or("").to_string(); let n = this.data["thread"]["viewer"]["files"]["zipName"].as_str().unwrap_or("project.zip").to_string(); download(this, url, n, true, cx) }
+        Do::DownloadDir => { let f = super::tile_pages::focused_files(&this.data["thread"]); let url = f["zip"].as_str().unwrap_or("").to_string(); let n = f["zipName"].as_str().unwrap_or("project.zip").to_string(); download(this, url, n, true, cx) }
         Do::Rename(i) => if let Some(r) = row(i) { this.screens.files.mode = Mode::Rename(r.value.clone()); if let Some(n) = this.screens.files.name.clone() { n.update(cx, |x, cx| x.set(r.label.clone(), cx)); if let Some(w) = window { w.focus(&n.read(cx).focus_handle(cx)); } } },
         Do::NewFolder => { this.screens.files.mode = Mode::NewFolder; if let Some(n) = this.screens.files.name.clone() { n.update(cx, |x, cx| x.set(String::new(), cx)); if let Some(w) = window { w.focus(&n.read(cx).focus_handle(cx)); } } }
         Do::Delete(i) => if let Some(r) = row(i) { this.screens.files.mode = Mode::Delete(r.value.clone()) },
@@ -258,24 +259,20 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
     cx.notify();
 }
 
-/// Save `url` (a hub path) as a file in the downloads folder (never over a file). The window says where it went.
+/// Save `url` (a hub path) as a file in the downloads folder (never over a file), through the window's downloads (dlbar.rs: streamed, resumed
+/// after errors, any size). The status line says where it went.
 pub fn download(this: &mut Backplane, url: String, name: String, zip: bool, cx: &mut Context<Backplane>) {
-    let Some(t) = this.screens.attacher.target.clone() else { return say(this, trs("No hub address to download from"), cx) };
+    if this.screens.attacher.target.is_none() { return say(this, trs("No hub address to download from"), cx) }
     if url.is_empty() { return say(this, trs("This entry cannot be downloaded"), cx) }
     let mut file = save_name(&name); if zip && !file.to_lowercase().ends_with(".zip") { file.push_str(".zip") }
     say(this, tf("gpui.b.files.downloading", &[("file", (&file).into())]), cx);
-    cx.spawn(async move |weak, cx| {
-        let r = cx.background_executor().spawn(async move {
-            let b = http_get(&t, &url, 260 << 20)?;
-            let dir = downloads_dir(); std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-            let name = unique(&file, &|n| dir.join(n).exists()); let p = dir.join(&name);
-            std::fs::write(&p, &b).map_err(|e| e.to_string())?; Ok::<_, String>((p, b.len()))
-        }).await;
-        // the metric keeps the English words (scripts read it); the window says them in the language in force
-        let _ = weak.update(cx, |this, cx| { /* i18n-ok: the metric's English */ let (m, ok) = match &r { Ok((p, n)) => (format!("Saved {} ({} bytes)", p.display(), n), true), Err(e) => (format!("Download failed: {e}"), false) };
-            let said = match &r { Ok((p, n)) => tf("gpui.b.files.saved", &[("path", p.display().to_string().into()), ("n", (*n).into())]), Err(e) => tf("gpui.b.files.download.failed", &[("why", trs(e).into())]) };
-            this.m("files_download", json!({"ok": ok, "message": m, "path": r.as_ref().ok().map(|(p, _)| p.display().to_string()), "bytes": r.as_ref().ok().map(|x| x.1)})); say(this, said, cx); });
-    }).detach();
+    this.download(url, file, super::dlbar::From::Files, cx);
+}
+/// A Files download ended: the status line and the metric scripts read (its English words).
+pub fn download_done(this: &mut Backplane, r: &Result<(PathBuf, u64), String>, cx: &mut Context<Backplane>) {
+    /* i18n-ok: the metric's English */ let (m, ok) = match r { Ok((p, n)) => (format!("Saved {} ({} bytes)", p.display(), n), true), Err(e) => (format!("Download failed: {e}"), false) };
+    let said = match r { Ok((p, n)) => tf("gpui.b.files.saved", &[("path", p.display().to_string().into()), ("n", (*n).into())]), Err(e) => tf("gpui.b.files.download.failed", &[("why", trs(e).into())]) };
+    this.m("files_download", json!({"ok": ok, "message": m, "path": r.as_ref().ok().map(|(p, _)| p.display().to_string()), "bytes": r.as_ref().ok().map(|x| x.1)})); say(this, said, cx);
 }
 
 fn upload(this: &mut Backplane, paths: Vec<PathBuf>, dir: &str, cx: &mut Context<Backplane>) {
@@ -310,13 +307,13 @@ fn small_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static 
 
 /// `actions`: the viewer pane's own controls (screens::viewer), at the end of the page's bar.
 pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &FilesUi, actions: super::pane_header::Header) -> AnyElement {
-    let c = |n: &str| theme::color(light, n);
-    let rows = viewer::file_rows(files);
-    let q = ui.filter.as_ref().map(|f| f.read(cx).content.to_string()).unwrap_or_default();
-    let vis = visible(&rows, &q);
+    let bar = super::pane_header::pane_header(light, actions.identity, files_tools(cx, files), actions.controls);
+    files_body(cx, light, files, ui, Some(bar))
+}
+
+pub(super) fn files_tools(cx: &Context<Backplane>, files: &Value) -> Vec<super::pane_header::Tool> {
+    use super::pane_header::{Press, button, command};
     let trail = viewer::crumbs(files);
-    let focus = ui.focus.clone();
-    use super::pane_header::{Press, button, command, pane_header};
     let mut up = button(cx, "fm-up", trs("Up"), Press::File(Do::Up));
     up.enabled = trail.len() > 1;
     up.icon = Some("arrow-up");
@@ -334,7 +331,22 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
         tool.icon = Some(icon);
         tools.push(tool);
     }
-    let bar = pane_header(light, actions.identity, tools, actions.controls);
+    // the project's manufacturing outputs (the hub's `mfg`: the folder to go to, given while the project has one)
+    if let Some(m) = mfg_of(files) {
+        let mut tool = command(cx, "fm-mfg".to_string(), t("gpui.dl.manufacturing"), false, "fm-cd", m.to_string());
+        tool.icon = Some("folder");
+        tools.push(tool);
+    }
+    tools
+}
+
+pub(super) fn files_body(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &FilesUi, bar: Option<AnyElement>) -> AnyElement {
+    let standalone = bar.is_some();
+    let c = |n: &str| theme::color(light, n);
+    let rows = viewer::file_rows(files);
+    let q = ui.filter.as_ref().map(|f| f.read(cx).content.to_string()).unwrap_or_default();
+    let vis = visible(&rows, &q);
+    let focus = ui.focus.clone();
     let mut col = div().size_full().flex().flex_col().relative();
     if let Some(f) = focus.clone() { col = col.track_focus(&f); }
     col = col.key_context("FilesPage").on_key_down(cx.listener(|this, e: &KeyDownEvent, w, cx| {
@@ -345,7 +357,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
         let key = if (m.control || m.platform) && k == "f" { "find".to_string() } else if m.control || m.alt || m.platform { return } else { k.to_string() };
         act(this, Do::Key(key), Some(w), cx);
     }));
-    col = col.child(bar);
+    col = col.children(bar);
     // filter + status line
     let filt = div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).child(crate::art::icon("search", 13., c("dim")))
         .child(div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(ui.filter.clone()))
@@ -383,7 +395,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     if rows.len() > MAX_ROWS { list = list.child(div().px_3().py_1().text_color(c("dim")).child(tf("gpui.b.files.more", &[("n", (rows.len() - MAX_ROWS).into())]))); }
     if vis.is_empty() { list = list.child(div().px_3().py_2().text_color(c("dim")).child(if files["ready"] == false { trs("Loading…") } else if !files["error"].as_str().unwrap_or("").is_empty() { trs(files["error"].as_str().unwrap_or("")) } else if rows.is_empty() { trs("Empty folder. Drop files here to upload.") } else { trs("Nothing matches") })); }
     list = list.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| { this.m("files_drop", json!({"paths": paths.paths().iter().map(|p| p.display().to_string()).collect::<Vec<_>>()})); act(this, Do::Upload(paths.paths().to_vec()), None, cx) }));
-    col = col.child(super::viewer::main_body(list));
+    col = col.child(if standalone { super::viewer::main_body(list) } else { list });
     if let Some((i, pos)) = ui.menu {
         if let Some(r) = vis.get(i).and_then(|&k| rows.get(k)) {
             let items = menu_items(r);
@@ -414,7 +426,7 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
     let bar = bar.child(actions);
     let img_el = |url: &str| -> AnyElement {
         match images.get(target, url) {
-            Slot::Ready(img) => { let (w, h) = super::images::dims(&img.bytes).map_or((480., 360.), |(w, h)| super::images::fit(w, h, 480., 4000.)); div().p_3().child(div().w(px(w)).h(px(h)).flex_none().child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain))).into_any_element() }
+            Slot::Ready(img) => { let (w, h) = super::images::dims(&img.bytes).map_or((480., 360.), |(w, h)| super::images::fit(w, h, 480., 4000.)); div().p_3().child(div().w(px(w)).h(px(h)).flex_none().child(gpui::img(images.decoded(url).map_or(ImageSource::Image(img), ImageSource::Render)).id(SharedString::from(format!("fimg-{url}"))).size_full().object_fit(ObjectFit::Contain))).into_any_element() }
             Slot::Loading => div().p_3().text_color(c("dim")).child(trs("Loading…")).into_any_element(),
             Slot::Failed => div().p_3().text_color(c("bad")).child(trs("Could not load the file")).into_any_element(),
         }
@@ -502,6 +514,9 @@ mod tests {
         for n in ["a", "my file.txt", "x.kicad_pcb"] { assert!(valid_name(n), "{n}") }
         for n in ["", ".", "..", ".env", "a/b", "a\\b", "a\tb", "a\nb"] { assert!(!valid_name(n), "{n:?}") }
         assert!(!valid_name(&"x".repeat(256)));
+    }
+    #[test] fn manufacturing_is_offered_only_while_the_hub_says_so() {
+        assert_eq!(mfg_of(&serde_json::json!({"mfg": "mfg"})), Some("mfg")); assert_eq!(mfg_of(&serde_json::json!({"mfg": ""})), None); assert_eq!(mfg_of(&Value::Null), None);
     }
     #[test] fn the_folder_on_show_is_the_last_crumb() {
         let f: Value = serde_json::from_str(r#"{"trail":[{"label":"p","action":"fm-cd","value":""},{"label":"docs","action":"fm-cd","value":"docs"},{"label":"sub","action":"fm-cd","value":"docs/sub"}]}"#).unwrap();

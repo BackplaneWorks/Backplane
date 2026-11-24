@@ -10,6 +10,17 @@
     let d = crate::plat::tmp::dir("plat");
     let f = d.join("hello"); std::fs::write(&f, "#!/bin/sh\necho \"hi $1\"\n").unwrap();
     { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
-    let o = crate::proc::std_cmd(crate::proc::Kind::Local, &f).arg("there").output().unwrap();
+    // Another parallel test can fork while the fixture is being written. Its child
+    // briefly inherits the writer until exec closes it, even after our write returns.
+    let start = std::time::Instant::now();
+    let o = loop {
+        match crate::proc::std_cmd(crate::proc::Kind::Local, &f).arg("there").output() {
+            Err(err) if cfg!(unix) && err.raw_os_error() == Some(crate::plat::errno::ETXTBSY)
+                && start.elapsed() < std::time::Duration::from_secs(1) => {
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            result => break result.unwrap(),
+        }
+    };
     assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "hi there");
 }

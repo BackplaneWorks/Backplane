@@ -2,7 +2,7 @@
 //! always-on hub (boat-hub) is the front: the Pebble app posts there, always. While another linked machine owns the hook, the front passes each
 //! delivery to it unchanged (headers and body; the owner checks the token as it always does) and answers with the owner's answer. Once the hook
 //! is here (its secret files are), the front handles it itself. Settings: `ring.front` on every hub (the front's URL base, which the Ring page shows)
-//! and, on the front, `ring.front.to.<hook>` (the link of the machine that owns that hook now; "" when this hub does).
+//! and `ring.front.link` (the paired link, or `here` on the front). On the front, `ring.front.to.<hook>` (the link of the machine that owns that hook now; "" when this hub does).
 use crate::{hub::Hub, net::botnet};
 use serde_json::{json, Value};
 use std::sync::Arc;
@@ -56,8 +56,14 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, p: &Value) -> Value {
     if !botnet::safe(hid) || hid.is_empty() { return json!({"ok": false, "error": "no such hook"}) }
     let on = p["on"].as_bool().unwrap_or(true);
     let base = super::ring::base(hub).await;
-    let _ = hub.commit(&json!({"$":"SettingSet","key":format!("ring.front.to.{hid}"),"value": if on { link } else { "" },"at": crate::hub::now_ms() / 1000})).await;
-    let _ = hub.commit(&json!({"$":"SettingSet","key":"ring.front","value": base,"at": crate::hub::now_ms() / 1000})).await;
+    let now = crate::hub::now_ms() / 1000;
+    if let Err(error) = hub.commit_many(&[
+        json!({"$":"SettingSet","key":format!("ring.front.to.{hid}"),"value":if on { link } else { "" },"at":now}),
+        json!({"$":"SettingSet","key":"ring.front","value":base,"at":now}),
+        json!({"$":"SettingSet","key":"ring.front.link","value":"here","at":now}),
+    ]).await {
+        return json!({"ok":false,"error":format!("{error:#}")});
+    }
     json!({"ok": true, "url": format!("{base}/hook/{hid}"), "base": base})
 }
 

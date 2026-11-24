@@ -13,6 +13,47 @@
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct R { pub x: i32, pub y: i32, pub w: i32, pub h: i32 }
 
+/// #1185: upper bound on physical coordinates/dimensions sent to an embedded KiCad container or frame (matches host `geomguard::LIMIT`).
+pub const MAX_COORD: i32 = 20_000;
+/// Initial hidden size for a newly created container before the first `place()` (matches KiCad's `CreateHolder` 800x600 so `fitToParent`/`PrepareFrame` never shrinks a frame to 1x1).
+pub const INIT_CONTAINER_W: i32 = 800;
+pub const INIT_CONTAINER_H: i32 = 600;
+
+/// Validate a physical pane rectangle before applying it to a container or child frame.
+pub fn sane_rect(r: R) -> Option<R> {
+    (r.w > 0 && r.h > 0 && r.w < MAX_COORD && r.h < MAX_COORD && r.x > -MAX_COORD && r.x < MAX_COORD && r.y > -MAX_COORD && r.y < MAX_COORD).then_some(r)
+}
+
+/// Convert logical GPUI bounds and scale factor into a validated physical `R`, rejecting NaN, infinity, non-positive scale/size, and out-of-range coordinates before `as i32` saturation.
+pub fn pane_rect_from_f32(x: f32, y: f32, w: f32, h: f32, scale: f32) -> Option<R> {
+    if !(x.is_finite() && y.is_finite() && w.is_finite() && h.is_finite() && scale.is_finite() && scale > 0.0) {
+        return None;
+    }
+    let s = scale as f64;
+    let (rx, ry, rw, rh) = ((x as f64 * s).round(), (y as f64 * s).round(), (w as f64 * s).round(), (h as f64 * s).round());
+    let lim = MAX_COORD as f64;
+    if rx.abs() >= lim || ry.abs() >= lim || rw <= 0.0 || rh <= 0.0 || rw >= lim || rh >= lim {
+        return None;
+    }
+    sane_rect(R { x: rx as i32, y: ry as i32, w: rw as i32, h: rh as i32 })
+}
+
+/// Windows: center position `(x, y)` for a floating KiCad dialog over `owner` `(left, top, right, bottom)` using raw `dialog`
+/// `(left, top, right, bottom)` bounds, or `None` when `owner` is minimized/off-screen or dimensions overflow/are out of range.
+pub fn dialog_center_pos(owner: (i32, i32, i32, i32), dialog: (i32, i32, i32, i32)) -> Option<(i32, i32)> {
+    let (l, t, r, b) = owner;
+    let (dl, dt, dr, db) = dialog;
+    let (ow, oh) = (r.checked_sub(l)?, b.checked_sub(t)?);
+    let (dw, dh) = (dr.checked_sub(dl)?, db.checked_sub(dt)?);
+    if l <= -MAX_COORD || t <= -MAX_COORD || l >= MAX_COORD || t >= MAX_COORD
+        || ow <= 0 || oh <= 0 || ow >= MAX_COORD || oh >= MAX_COORD
+        || dw <= 0 || dh <= 0 || dw >= MAX_COORD || dh >= MAX_COORD
+    {
+        return None;
+    }
+    Some((l + (ow - dw) / 2, t + (oh - dh) / 2))
+}
+
 /// The kind of an editor frame from its title, for stock KiCad (the fork reports kinds itself), named as the hub and the fork's embed IPC name
 /// them: `PCB`, `SCH`, `PCB_3D`, `SYMBOL_EDITOR`, `FOOTPRINT_EDITOR`, or `MANAGER` (the project manager, hosting the editors; never shown).
 pub fn kind_of_title(title: &str) -> &'static str {
@@ -108,10 +149,65 @@ pub fn floating_dialog(style: u32, class: &str) -> bool {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame { pub window: u64, pub title: String, pub kind: &'static str }
 
+/// Which top-levels have a KiCad pane's frame on screen now (the pane in the page, its frame placed): the Linux focus proxy is used only
+/// there. Elsewhere nothing of KiCad is under the pointer, the descendant rule cannot give it a key, and the focus stays where GPUI and the
+/// Browser tab put it, as before #1505 (a click into the Browser's page with a pane hidden in the window was moved off the page).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+/// Keyed by the top-level and, within it, by the native child (a pane's container; the Browser's page can register its own): the
+/// top-level counts as on screen while any of its children is.
+#[derive(Debug, Default)]
+pub(crate) struct PaneScreens(std::collections::HashMap<u64, std::collections::HashSet<u64>>);
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+impl PaneScreens {
+    /// Child `child` of top-level `top` on screen or not: true when this brings the top-level on screen (none of its children was; the
+    /// redirect resumes: a focus left on the top-level itself moves to its proxy)
+    pub(crate) fn set(&mut self, top: u64, child: u64, on: bool) -> bool {
+        let was = self.on(top);
+        if on { self.0.entry(top).or_default().insert(child); } else if let Some(s) = self.0.get_mut(&top) { s.remove(&child); if s.is_empty() { self.0.remove(&top); } }
+        !was && self.on(top)
+    }
+    pub(crate) fn on(&self, top: u64) -> bool { self.0.get(&top).is_some_and(|s| !s.is_empty()) }
+}
+
+/// The Linux focus proxy's redirect cap (#1519): at most `per` redirects of the focus to the proxy within `span`; one more starts a rest of
+/// `rest` with the focus left on the top-level, and when the rest has run out one re-check is due (the pane's tick moves a focus still
+/// left on the top-level to the proxy again, counted as the next burst's first). Pure, so its cycle is tested on every platform.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[derive(Debug)]
+pub(crate) struct RedirectCap { per: u32, span: std::time::Duration, rest: std::time::Duration, start: Option<std::time::Instant>, n: u32, rest_until: Option<std::time::Instant>, recheck_due: bool }
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+impl RedirectCap {
+    pub(crate) const fn new(per: u32, span: std::time::Duration, rest: std::time::Duration) -> Self {
+        RedirectCap { per, span, rest, start: None, n: 0, rest_until: None, recheck_due: false }
+    }
+    /// A redirect asked for at `now`: allowed, or refused (resting, or this one tripped the cap; then true is never answered before the
+    /// rest has run out). Returns (allowed, tripped now).
+    pub(crate) fn allow(&mut self, now: std::time::Instant) -> (bool, bool) {
+        if let Some(r) = self.rest_until { if now < r { return (false, false) } self.rest_until = None; self.start = None; self.n = 0; }
+        if self.start.is_none_or(|s| now.duration_since(s) > self.span) { self.start = Some(now); self.n = 0; }
+        self.n += 1;
+        if self.n > self.per { self.rest_until = Some(now + self.rest); self.recheck_due = true; return (false, true) }
+        (true, false)
+    }
+    /// Milliseconds to the next recovery check, or an indefinite wait with no recovery pending.
+    #[cfg(target_os = "linux")]
+    fn recheck_timeout(&self, now: std::time::Instant) -> i32 {
+        if !self.recheck_due { return -1 }
+        let remaining = self.rest_until.map_or(std::time::Duration::ZERO, |until| until.saturating_duration_since(now));
+        remaining.as_nanos().div_ceil(1_000_000).min(i32::MAX as u128) as i32
+    }
+    /// True once when a rest has run out, then false until the cap trips again.
+    pub(crate) fn recheck(&mut self, now: std::time::Instant) -> bool {
+        if !self.recheck_due || self.rest_until.is_some_and(|r| now < r) { return false }
+        self.recheck_due = false;
+        true
+    }
+}
+
 #[cfg(target_os = "linux")]
 mod imp {
     use super::{Frame, R};
-    use std::sync::{Mutex, MutexGuard, OnceLock};
+    use std::{os::{fd::AsRawFd, unix::net::UnixDatagram}, sync::{Arc, Mutex, MutexGuard, OnceLock, atomic::{AtomicBool, Ordering}}, time::Instant};
     use x11rb::{connection::Connection, protocol::{shape::{self, ConnectionExt as _}, xproto::*}, rust_connection::RustConnection, wrapper::ConnectionExt as _};
 
     static SCREEN: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
@@ -141,12 +237,217 @@ mod imp {
         let g = conn()?; let c = g.as_ref().unwrap();
         let scr = c.setup().roots.get(SCREEN.load(std::sync::atomic::Ordering::Relaxed))?;
         let id = c.generate_id().ok()?;
-        c.create_window(scr.root_depth, id, parent, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
+        c.create_window(scr.root_depth, id, parent, 0, 0, super::INIT_CONTAINER_W as u16, super::INIT_CONTAINER_H as u16, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
             &CreateWindowAux::new().background_pixmap(x11rb::NONE).border_pixel(scr.black_pixel).colormap(scr.default_colormap)
                 .event_mask(EventMask::SUBSTRUCTURE_NOTIFY)).ok()?.check().ok()?;
-        let _ = c.flush(); containers().lock().unwrap().insert(id); Some(id as u64)
+        let _ = c.flush(); containers().lock().unwrap().insert(id);
+        // Keep a second subscription for the pane's pump if the watcher is unavailable.
+        let mask = c.get_window_attributes(parent).ok().and_then(|r| r.reply().ok()).map_or(EventMask::NO_EVENT, |a| a.your_event_mask);
+        let _ = c.change_window_attributes(parent, &ChangeWindowAttributesAux::new().event_mask(mask | EventMask::FOCUS_CHANGE));
+        focus_proxy(c, parent);
+        Some(id as u64)
     }
     pub fn container_for(parent: u64, _key: &str) -> Option<u64> { container(parent) }
+    /// Per top-level that holds a pane: a window of ours that is not an ancestor of KiCad's frame, holding the X focus while Backplane has
+    /// the keyboard. With the focus on the top-level itself, core X gave every key to the window under the pointer when that was inside it,
+    /// and KiCad's frame is (the top-level > our container > KiCad): typing in the composer with the pointer resting over the pane ran KiCad's
+    /// hotkeys (the right-rail lead's gate a2; as long as the pane has been embedded on Linux). Focused here, the keys go to this window,
+    /// which GPUI made and reads as the top-level's own (a key never propagates above the focus window); GPUI's window stays active (a
+    /// FocusOut with detail Inferior is not a deactivation: client.rs). InputOnly, 1x1, outside the window: never under the pointer.
+    fn proxies() -> &'static Mutex<std::collections::HashMap<u32, u32>> { static P: OnceLock<Mutex<std::collections::HashMap<u32, u32>>> = OnceLock::new(); P.get_or_init(Default::default) }
+    fn focus_proxy(c: &RustConnection, top: u32) -> Option<u32> {
+        if let Some(p) = proxies().lock().unwrap().get(&top).copied() { return Some(p) }
+        // GPUI's own (vendor gpui PATCH.md, x11 `key_proxy`): it reads the keys, since a key never propagates above the focus window
+        let id = prop32(c, top, atom(c, "_BACKPLANE_KEY_PROXY"), AtomEnum::WINDOW).first().copied().filter(|&p| p != 0)?;
+        // the top-level's focus changes come to the focus watcher's connection too (each client selects its own): a focus put on it (the
+        // window manager, GPUI's activate) moves on to the proxy at once (watch_focus)
+        proxies().lock().unwrap().insert(top, id);
+        watch_focus(top);
+        // The top-level can already have focus when a child attaches, with no FocusIn to come.
+        redirect_focus(c, Some(top));
+        let _ = c.flush();
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy": id, "top": top})); }
+        Some(id)
+    }
+    /// The focus watcher: a connection and a thread of their own, FocusChange selected on every top-level with a proxy, for every native
+    /// child (a KiCad pane's container, the Browser's page): the focus put on a top-level itself (the window manager on a click or
+    /// activation, GPUI's activate) goes on to its proxy at once, while a child is on screen there (pane_on_screen). Not when it went into a
+    /// child (the proxy, KiCad, the Browser's Chromium). Also while the pane still says KiCad has the keys: a click outside the pane that the
+    /// window manager answers by focusing the top-level (openbox, xfwm4) comes before GPUI has handled the click, and in that gap (4-40 ms
+    /// measured) a key over the pane went to KiCad (the race, 1 of 20 on a real desktop). The pane reads its keys from the X focus
+    /// (has_focus of its container), and a focus on the top-level or on its proxy reads the same there; a hand-in that follows focuses
+    /// KiCad's frame from either. Its own thread, not the pane's wake thread: a window with only the Browser has no pane to wake, and the
+    /// thread waits on nothing but these events (the wake thread also reads the pane's own).
+    struct FocusWatcher {
+        connection: Arc<RustConnection>,
+        wake: UnixDatagram,
+    }
+    static WATCHER: OnceLock<Option<FocusWatcher>> = OnceLock::new();
+    static WATCHER_RUNNING: AtomicBool = AtomicBool::new(false);
+
+    fn watcher_error(stage: &str, error: impl std::fmt::Display) {
+        eprintln!("GPUI_LOG {}", serde_json::json!({"native_focus_watcher": stage, "error": error.to_string()}));
+    }
+
+    impl FocusWatcher {
+        fn start() -> Result<Self, Box<dyn std::error::Error>> {
+            let connection = Arc::new(RustConnection::connect(None)?.0);
+            let (wake, notices) = UnixDatagram::pair()?;
+            wake.set_nonblocking(true)?;
+            let receiver = connection.clone();
+            WATCHER_RUNNING.store(true, Ordering::Release);
+            let thread = std::thread::Builder::new().name("x11-focus-proxy".into()).spawn(move || {
+                let result = watch_focus_events(&receiver, &notices);
+                WATCHER_RUNNING.store(false, Ordering::Release);
+                watcher_error("stopped", result);
+                // FocusIn may already have been consumed by the pump before the failure.
+                if let Some(g) = conn() {
+                    redirect_focus(g.as_ref().unwrap(), None);
+                }
+            });
+            if let Err(error) = thread {
+                WATCHER_RUNNING.store(false, Ordering::Release);
+                return Err(error.into());
+            }
+            Ok(Self { connection, wake })
+        }
+    }
+
+    fn watch_focus_events(c: &RustConnection, notices: &UnixDatagram) -> Box<dyn std::error::Error> {
+        let mut fds = [
+            libc::pollfd { fd: c.stream().as_raw_fd(), events: libc::POLLIN, revents: 0 },
+            libc::pollfd { fd: notices.as_raw_fd(), events: libc::POLLIN, revents: 0 },
+        ];
+        loop {
+            let timeout = {
+                let mut cap = CAP.lock().unwrap_or_else(|e| e.into_inner());
+                let now = Instant::now();
+                let timeout = cap.recheck_timeout(now);
+                let due = cap.recheck(now);
+                drop(cap);
+                if due { redirect_focus(c, None); }
+                timeout
+            };
+            match c.poll_for_event() {
+                Ok(Some(x11rb::protocol::Event::FocusIn(f))) => { redirect_focus(c, Some(f.event)); }
+                Ok(Some(_)) => {}
+                Err(error) => return error.into(),
+                Ok(None) => {
+                    if unsafe { libc::poll(fds.as_mut_ptr(), fds.len() as _, timeout) } < 0 {
+                        let error = std::io::Error::last_os_error();
+                        if error.kind() == std::io::ErrorKind::Interrupted { continue }
+                        return error.into();
+                    }
+                    if fds[1].revents & libc::POLLIN != 0 {
+                        if let Err(error) = notices.recv(&mut [0]) { return error.into() }
+                    }
+                }
+            }
+        }
+    }
+
+    fn watch_focus(top: u32) {
+        let Some(watcher) = WATCHER.get_or_init(|| match FocusWatcher::start() {
+            Ok(watcher) => Some(watcher),
+            Err(error) => { watcher_error("failed to start", error); None } // i18n-ok: structured diagnostic log
+        }) else { return };
+        let result = watcher.connection.change_window_attributes(top,
+            &ChangeWindowAttributesAux::new().event_mask(EventMask::FOCUS_CHANGE));
+        let error = match result {
+            Ok(request) => request.check().err().map(|e| e.to_string()),
+            Err(error) => Some(error.to_string()),
+        };
+        if let Some(error) = error { watcher_error("could not subscribe", error); } // i18n-ok: structured diagnostic log
+        // The checked request can queue events in x11rb while draining the socket.
+        let _ = watcher.wake.send(&[0]);
+    }
+
+    // The event may have been queued before focus moved elsewhere. With no event (cap recovery),
+    // look up the top-level that actually holds focus, across all registered native children.
+    fn redirect_focus(c: &RustConnection, event_top: Option<u32>) {
+        let proxy_for = |top| proxies().lock().unwrap().get(&top).copied().filter(|_| pane_on_screen(top));
+        let event_proxy = event_top.and_then(proxy_for);
+        if event_top.is_some() && event_proxy.is_none() { return }
+        with_server_grab(c, || {
+            let Some(focus) = c.get_input_focus().ok().and_then(|request| request.reply().ok()).map(|r| r.focus) else { return };
+            if event_top.is_some_and(|top| top != focus) { return }
+            if let Some(proxy) = event_proxy.or_else(|| proxy_for(focus)).filter(|_| redirect_allowed()) {
+                let _ = c.set_input_focus(InputFocus::PARENT, proxy, x11rb::CURRENT_TIME);
+            }
+        });
+    }
+
+    // A focus check and its SetInputFocus are one operation with respect to other X clients.
+    fn with_server_grab(c: &RustConnection, operation: impl FnOnce()) {
+        if c.grab_server().is_err() { return }
+        operation();
+        let _ = c.ungrab_server();
+        let _ = c.flush();
+    }
+
+    /// Native children that are not a KiCad pane's container (the Browser's page: cef_native), per top-level: the proxy is kept while any is.
+    fn others() -> &'static Mutex<std::collections::HashMap<u32, std::collections::HashSet<u64>>> { static O: OnceLock<Mutex<std::collections::HashMap<u32, std::collections::HashSet<u64>>>> = OnceLock::new(); O.get_or_init(Default::default) }
+    /// A native child `child` of ours (not KiCad's) made in top-level `top`: the top-level's proxy found and watched, as for a pane.
+    /// It counts as on screen once `note_pane_on_screen(top, child, true)` says so.
+    pub fn adopt_child(top: u64, child: u64) {
+        others().lock().unwrap().entry(top as u32).or_default().insert(child);
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap(); focus_proxy(c, top as u32);
+    }
+    /// That child gone: off screen, and the proxy dropped when nothing else of ours is in the top-level.
+    pub fn release_child(top: u64, child: u64) {
+        note_pane_on_screen(top, child, false);
+        let top = top as u32;
+        let empty = { let mut o = others().lock().unwrap(); if let Some(s) = o.get_mut(&top) { s.remove(&child); if s.is_empty() { o.remove(&top); } } !o.contains_key(&top) };
+        if !empty { return }
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let parent_of = |w: u32| c.query_tree(w).ok().and_then(|q| q.reply().ok()).map(|t| t.parent);
+        let ours = containers().lock().unwrap().iter().copied().collect::<Vec<_>>();
+        // The watcher can keep its FocusChange selection until X destroys the top-level. Without a proxy it ignores those events.
+        if !ours.into_iter().any(|o| parent_of(o) == Some(top)) { proxies().lock().unwrap().remove(&top); }
+    }
+    /// Return the keyboard only from this Browser container. Serialize the ownership check
+    /// and the focus change on the X server so a click in another window cannot intervene.
+    #[cfg(feature = "cef")]
+    pub fn focus_home(top: u64, container: u64) {
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let w = home_of(top as u32);
+        with_server_grab(c, || {
+            if focus_in(c, container as u32) {
+                let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME);
+            }
+        });
+    }
+    /// The redirect, at most REDIRECTS_PER within REDIRECT_SPAN: a window manager that puts the focus back on the top-level
+    /// each time it moves (none seen; the review's guard) gets the proxy a few times, then the top-level is left focused for REDIRECT_REST,
+    /// said once, instead of the two of them trading the focus as fast as the X server allows
+    const REDIRECTS_PER: u32 = 4;
+    const REDIRECT_SPAN: std::time::Duration = std::time::Duration::from_millis(100);
+    const REDIRECT_REST: std::time::Duration = std::time::Duration::from_secs(1);
+    static CAP: Mutex<super::RedirectCap> = Mutex::new(super::RedirectCap::new(REDIRECTS_PER, REDIRECT_SPAN, REDIRECT_REST));
+    fn redirect_allowed() -> bool {
+        let (ok, tripped) = CAP.lock().unwrap_or_else(|e| e.into_inner()).allow(std::time::Instant::now());
+        if tripped {
+            // The cap can also trip on the UI thread as a native child comes on screen.
+            // Interrupt the watcher's indefinite wait so it schedules the recovery.
+            if let Some(Some(watcher)) = WATCHER.get() { let _ = watcher.wake.send(&[0]); }
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_proxy_rest": {"redirects": REDIRECTS_PER, "within_ms": REDIRECT_SPAN.as_millis() as u64, "rest_ms": REDIRECT_REST.as_millis() as u64}})); }
+        ok
+    }
+    static SCREENS: std::sync::LazyLock<Mutex<super::PaneScreens>> = std::sync::LazyLock::new(Default::default);
+    fn pane_on_screen(top: u32) -> bool { SCREENS.lock().unwrap_or_else(|e| e.into_inner()).on(top as u64) }
+    /// Whether a pane's frame (`child`: its container) is on screen in top-level `top` (in the page, placed), from the pane's placement,
+    /// tick, rehome, detach() and Drop. Coming on screen with the focus on the top-level itself and Backplane holding the keys, the focus moves to the proxy (the redirect resumes)
+    pub fn note_pane_on_screen(top: u64, child: u64, on: bool) {
+        if top == 0 { return }
+        let came = SCREENS.lock().unwrap_or_else(|e| e.into_inner()).set(top, child, on);
+        if !came { return }
+        // Check actual X focus. A pane's last tick may report keys after it closes,
+        // and a pane in another window says nothing about this top-level.
+        if let Some(g) = conn() { redirect_focus(g.as_ref().unwrap(), Some(top as u32)); }
+    }
+    /// The window the keyboard goes to when it is Backplane's in top-level `w`: its focus proxy while a pane's frame is on screen there,
+    /// else `w` itself
+    fn home_of(w: u32) -> u32 { if !pane_on_screen(w) { return w } proxies().lock().unwrap().get(&w).copied().unwrap_or(w) }
     /// Every child of `old` (stock KiCad's frames, or the fork's holder) moved into `new`, unmapped where it was not shown: a pane moved to
     /// another window (popped out, or back in) takes KiCad with it, its state untouched.
     pub fn move_frames(old: u64, new: u64) {
@@ -183,6 +484,14 @@ mod imp {
         let container = container as u32;
         containers().lock().unwrap().remove(&container);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        // the last container in its top-level gone: no pane there any more, so no proxy kept for it (the focus is left where it is: on the
+        // proxy, GPUI reads its keys as before; a later focus on the top-level stays there, as in a window that never had a pane)
+        let parent_of = |w: u32| c.query_tree(w).ok().and_then(|q| q.reply().ok()).map(|t| t.parent);
+        if let Some(top) = parent_of(container) {
+            let others = containers().lock().unwrap().iter().copied().collect::<Vec<_>>();
+            let browser = self::others().lock().unwrap().contains_key(&top);
+            if !browser && !others.into_iter().any(|o| parent_of(o) == Some(top)) { proxies().lock().unwrap().remove(&top); }
+        }
         let _ = c.allow_events(Allow::REPLAY_POINTER, x11rb::CURRENT_TIME);
         let _ = c.ungrab_button(ButtonIndex::ANY, container, ModMask::ANY);
         let _ = c.destroy_window(container); let _ = c.flush();
@@ -452,6 +761,68 @@ mod imp {
         for k in mine { if Some(*k) != show { let _ = c.unmap_window(*k as u32); } }
         let _ = c.flush();
     }
+    /// What each KiCad frame was last told of its place on screen (its root position and size, by synthetic ConfigureNotify): a
+    /// reparented wx frame does not learn its root position by itself, and wxGTK places its popups, context menus, tooltips and combo
+    /// drop-downs from it. A frame is told again whenever that differs from what it was told: the first time it is shown (a new frame,
+    /// one adopted, one of a KiCad started again: `told_reset`), when the pane or Backplane's window moved (`sync_root`, and `place`),
+    /// when it is resized, and when it is shown again after the root position changed while another frame was on show (`show_local`).
+    /// The same place again is not told (rail-round4: one ConfigureNotify per placement, three per Board<->Schematic switch).
+    static TOLD: std::sync::Mutex<Option<std::collections::HashMap<u32, (i32, i32, u32, u32)>>> = std::sync::Mutex::new(None);
+    /// Tell frame `k` it is at `at` (root x, y, width, height) unless that is what it was last told; true when it was told (flushed).
+    fn tell(c: &RustConnection, k: Window, at: (i32, i32, u32, u32), why: &str) -> bool {
+        { let mut t = TOLD.lock().unwrap(); let m = t.get_or_insert_with(Default::default);
+          if m.get(&k) == Some(&at) { return false }
+          if m.len() > 256 { m.clear(); }
+          m.insert(k, at); }
+        // BACKPLANE_KICAD_DEBUG: each synthetic ConfigureNotify sent, with why: placed (a placement whose place differs from the told
+        // one: new, moved, resized), moved / resized (sync_root), shown (a frame shown again at a place it was not told)
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_notify": [at.0, at.1, at.2, at.3], "frame": k, "why": why, "at_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)}));
+        }
+        let ev = ConfigureNotifyEvent { response_type: CONFIGURE_NOTIFY_EVENT, sequence: 0, event: k, window: k, above_sibling: x11rb::NONE,
+            x: at.0 as i16, y: at.1 as i16, width: at.2 as u16, height: at.3 as u16, border_width: 0, override_redirect: false };
+        let _ = c.send_event(false, k, EventMask::STRUCTURE_NOTIFY, ev);
+        let _ = c.flush();
+        true
+    }
+    /// Another KiCad (a restart): every frame is told its place again.
+    pub fn told_reset() { *TOLD.lock().unwrap() = None; }
+    /// A re-place at the rect the container already has (a tab switch, the frames poll, the hub's echo of it): `show` mapped and raised
+    /// over the others (unmapped), as place_local does, with no configure; told its place only if it was not told this one. False when
+    /// there was nothing to do: `show` already viewable and every other frame of ours unmapped (the frames poll's and the hub's re-place
+    /// after a switch): then no request but those reads goes out.
+    pub fn show_local(container: u64, show: Option<u64>, mine: &[u64]) -> bool {
+        let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
+        let state = |w: u64| c.get_window_attributes(w as u32).ok().and_then(|q| q.reply().ok()).map(|a| a.map_state);
+        let size = c.get_geometry(container as u32).ok().and_then(|q| q.reply().ok()).map(|g| (g.width as u32, g.height as u32));
+        if let Some(k) = show.filter(|k| mine.contains(k)) {
+            if state(k) == Some(MapState::VIEWABLE) && mine.iter().filter(|o| **o != k).all(|o| state(*o) == Some(MapState::UNMAPPED)) {
+                // nothing to map; still told its place if it differs from the one it was told (KiCad mapped this frame itself after
+                // the window moved while another was on show: its popups would open at the old place). TOLD dedupes: usually nothing
+                if let (Some(root), Some((w, h))) = (root(c), size) {
+                    if let Some(t) = c.translate_coordinates(container as u32, root, 0, 0).ok().and_then(|q| q.reply().ok()) { tell(c, k as u32, (t.dst_x as i32, t.dst_y as i32, w, h), "shown"); }
+                }
+                return false
+            }
+        }
+        if let Some(k) = show.filter(|k| mine.contains(k)) {
+            // a frame never shown at this size (one shown here for the first time) is sized to the container; one already so is not touched
+            if let (Some((w, h)), Some(fg)) = (size, c.get_geometry(k as u32).ok().and_then(|q| q.reply().ok())) {
+                if (fg.x as i32, fg.y as i32, fg.width as u32, fg.height as u32) != (0, 0, w, h) {
+                    let _ = c.configure_window(k as u32, &ConfigureWindowAux::new().x(0).y(0).width(w).height(h).border_width(0));
+                }
+            }
+            keep_pixels(c, k as u32, 3);
+            let _ = c.configure_window(k as u32, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE));
+            let _ = c.map_window(k as u32);
+        }
+        for k in mine { if Some(*k) != show { let _ = c.unmap_window(*k as u32); } }
+        let _ = c.flush();
+        let (Some(k), Some(root), Some((w, h))) = (show, root(c), size) else { return true };
+        let Some(t) = c.translate_coordinates(container as u32, root, 0, 0).ok().and_then(|q| q.reply().ok()) else { return true };
+        tell(c, k as u32, (t.dst_x as i32, t.dst_y as i32, w, h), "shown");
+        true
+    }
     /// `w` and its windows `depth` levels down keep what is on screen under them until they draw (no X background is painted on map or
     /// expose): what the person sees between a map and KiCad's first paint is the last good picture, never a flash of background.
     fn keep_pixels(c: &RustConnection, w: Window, depth: u32) {
@@ -463,7 +834,7 @@ mod imp {
         let container = container as u32;
         let show = show.map(|x| x as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let Some(r) = r else { let _ = c.unmap_window(container); let _ = c.flush(); return };
+        let Some(r) = r.and_then(super::sane_rect) else { let _ = c.unmap_window(container); let _ = c.flush(); return };
         let (w, h) = (r.w.max(1) as u32, r.h.max(1) as u32);
         let _ = c.configure_window(container, &ConfigureWindowAux::new().x(r.x).y(r.y).width(w).height(h));
         if let Some(t) = c.query_tree(container).ok().and_then(|q| q.reply().ok()) {
@@ -486,18 +857,8 @@ mod imp {
         if show.is_some() { let _ = c.map_window(container); } else { let _ = c.unmap_window(container); }
         if let (Some(k), Some(root)) = (show, root(c)) {
             if let Some(t) = c.translate_coordinates(container, root, 0, 0).ok().and_then(|r| r.reply().ok()) {
-                let at = (t.dst_x as i32, t.dst_y as i32);
-                if managed.is_some() || at != *last_root {
-                    // BACKPLANE_KICAD_DEBUG: the synthetic ConfigureNotify this placement sends the frame (its root position: X does not tell
-                    // a child that its parent moved): `why` managed (every placement of a managed frame) or moved (the pane moved on screen)
-                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
-                        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_notify": [t.dst_x, t.dst_y, w, h], "frame": k, "why": if at != *last_root { "moved" } else { "managed" }, "at_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)}));
-                    }
-                    *last_root = at;
-                    let ev = ConfigureNotifyEvent { response_type: CONFIGURE_NOTIFY_EVENT, sequence: 0, event: k, window: k, above_sibling: x11rb::NONE,
-                        x: t.dst_x, y: t.dst_y, width: w as u16, height: h as u16, border_width: 0, override_redirect: false };
-                    let _ = c.send_event(false, k, EventMask::STRUCTURE_NOTIFY, ev);
-                }
+                *last_root = (t.dst_x as i32, t.dst_y as i32);
+                tell(c, k, (t.dst_x as i32, t.dst_y as i32, w, h), "placed");
             }
         }
         let _ = c.flush();
@@ -506,6 +867,7 @@ mod imp {
     /// Re-check the container's root coordinates and `show`'s geometry (e.g. on a pure WM top-level move, or right after GTK's deferred
     /// `gtk_widget_show` maps `show` at its own default size) and sync `show` to `(0, 0, w, h)` + current root position.
     pub fn sync_root(container: u64, r: R, show: u64, last_root: &mut (i32, i32)) {
+        let Some(r) = super::sane_rect(r) else { return };
         let (container, show) = (container as u32, show as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let (uw, uh) = (r.w.max(1) as u32, r.h.max(1) as u32);
@@ -522,16 +884,8 @@ mod imp {
         let Some(t) = c.translate_coordinates(container, root, 0, 0).ok().and_then(|q| q.reply().ok()) else { if resized { let _ = c.flush(); } return };
         let at = (t.dst_x as i32, t.dst_y as i32);
         if resized || at != *last_root {
-            // BACKPLANE_KICAD_DEBUG: as place's (sync_root: an unchanged placement whose frame was resized or whose pane moved)
-            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
-                eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_place_notify": [t.dst_x, t.dst_y, uw, uh], "frame": show, "why": if resized { "resized" } else { "moved" }, "sync": true, "at_ms": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64)}));
-            }
             *last_root = at;
-            let (w, h) = (uw as u16, uh as u16);
-            let ev = ConfigureNotifyEvent { response_type: CONFIGURE_NOTIFY_EVENT, sequence: 0, event: show, window: show, above_sibling: x11rb::NONE,
-                x: t.dst_x, y: t.dst_y, width: w, height: h, border_width: 0, override_redirect: false };
-            let _ = c.send_event(false, show, EventMask::STRUCTURE_NOTIFY, ev);
-            let _ = c.flush();
+            if !tell(c, show, (t.dst_x as i32, t.dst_y as i32, uw, uh), if resized { "resized" } else { "moved" }) && resized { let _ = c.flush(); }
         }
     }
 
@@ -553,7 +907,24 @@ mod imp {
     /// X11: no activation takes the keys back after a close: hand in at once
     pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
     pub fn keep_focus(_top: u64) -> bool { false }
-    pub fn note_pane_keys(_kicad: bool) {}
+    /// Whether KiCad has the keyboard now (the pane's tick). Its change to Backplane moves a focus left on a top-level to its proxy; the
+    /// focus watcher's redirect does not wait for it
+    static PANE_KEYS: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    pub fn note_pane_keys(kicad: bool) {
+        // (called every tick: only a change to Backplane's keyboard looks at the focus)
+        let was = PANE_KEYS.swap(kicad, std::sync::atomic::Ordering::SeqCst);
+        // a rest of the redirect cap run out with Backplane holding the keyboard: a focus still on a top-level goes to its proxy (else the
+        // cap would leave #1505's fault in place until the next focus change)
+        if !kicad && !WATCHER_RUNNING.load(Ordering::Acquire)
+            && CAP.lock().unwrap_or_else(|e| e.into_inner()).recheck(Instant::now())
+        {
+            if let Some(g) = conn() { redirect_focus(g.as_ref().unwrap(), None); }
+            return;
+        }
+        // A pane can release the keyboard with focus already on the top-level.
+        if kicad || !was { return }
+        if let Some(g) = conn() { redirect_focus(g.as_ref().unwrap(), None); }
+    }
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
@@ -568,7 +939,7 @@ mod imp {
     #[track_caller]
     pub fn focus(w: u64) {
         if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {{\"kicad_focus\":{w},\"at\":\"{}\"}}", std::panic::Location::caller()); }
-        let w = w as u32;
+        let w = home_of(w as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let viewable = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()).map_or(false, |a| a.map_state == MapState::VIEWABLE);
         if viewable { let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); let _ = c.flush(); }
@@ -616,8 +987,14 @@ mod imp {
     }
     /// Whether the X keyboard focus is in `container` (on one of its frames or their windows): the editor has the keys.
     pub fn has_focus(container: u64) -> bool {
-        let container = container as u32;
-        let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
+        let Some(g) = conn() else { return false };
+        focus_in(g.as_ref().unwrap(), container as u32)
+    }
+    /// Strict live focus check for placement decisions (same as `has_focus` on X11).
+    pub fn has_live_focus(container: u64) -> bool { has_focus(container) }
+
+    fn focus_in(c: &RustConnection, container: u32) -> bool {
+        if container <= 1 { return false }
         let Some(mut w) = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|f| f.focus) else { return false };
         let root = root(c).unwrap_or(0);
         for _ in 0..32 { if w == container { return true } if w == root || w == 0 || w == 1 { return false }
@@ -691,6 +1068,39 @@ mod imp {
         let per = m.keysyms_per_keycode as usize;
         m.keysyms.chunks(per.max(1)).position(|k| k.contains(&keysym)).map(|i| lo + i as u8)
     }
+    fn pane_fallback_top(watcher_running: bool, top: u32) -> Option<u32> {
+        (!watcher_running).then_some(top)
+    }
+
+    #[cfg(test)]
+    mod focus_watcher_tests {
+        use super::*;
+        use std::time::Duration;
+
+        #[test]
+        fn watcher_waits_for_and_recovers_from_each_cap_rest() {
+            let ms = Duration::from_millis;
+            let now = Instant::now();
+            let mut cap = super::super::RedirectCap::new(1, ms(100), ms(1000));
+            assert_eq!(cap.recheck_timeout(now), -1);
+            for start in [now, now + ms(1010)] {
+                assert_eq!(cap.allow(start), (true, false));
+                assert_eq!(cap.allow(start + ms(5)), (false, true));
+                assert_eq!(cap.recheck_timeout(start + ms(6)), 999);
+                assert_eq!(cap.recheck_timeout(start + ms(1005)), 0);
+                assert!(cap.recheck(start + ms(1005)));
+                assert_eq!(cap.recheck_timeout(start + ms(1005)), -1);
+                assert!(!cap.recheck(start + ms(1006)));
+            }
+        }
+
+        #[test]
+        fn pane_pump_redirects_only_without_a_watcher() {
+            assert_eq!(pane_fallback_top(false, 42), Some(42));
+            assert_eq!(pane_fallback_top(true, 42), None);
+        }
+    }
+
     /// What came to our own connection since the last call (drained): the grabbed escape chord, and the fork's ClientMessages to the container
     /// (`_BACKPLANE_KEY`: a reserved chord pressed in KiCad, as a gpui keystroke; `_BACKPLANE_FOCUS`: a click gave KiCad the keyboard).
     /// What our connection read for the pane and it has not taken yet (`pump` fills it, `events` empties it).
@@ -712,6 +1122,11 @@ mod imp {
                 x11rb::protocol::Event::ButtonPress(b) => {
                     let _ = c.allow_events(Allow::REPLAY_POINTER, b.time);
                     out.push(super::Ev::Click);
+                }
+                x11rb::protocol::Event::FocusIn(f) => {
+                    if let Some(top) = pane_fallback_top(WATCHER_RUNNING.load(Ordering::Acquire), f.event) {
+                        redirect_focus(c, Some(top));
+                    }
                 }
                 x11rb::protocol::Event::ClientMessage(m) if m.format == 32 => {
                     let d = m.data.as_data32();
@@ -849,6 +1264,93 @@ pub mod placeq {
     pub fn still_ours(j: &Job, is_window: bool, owner_pid: u32, in_parent: bool) -> bool { is_window && owner_pid == j.pid && (j.parent == 0 || in_parent) }
 }
 
+/// #1403: the keyboard handed back to Backplane's window off the UI thread (imp's `focuser`). On Windows `SetFocus` on our top-level must
+/// send WM_KILLFOCUS to the KiCad window that has the keyboard; KiCad's frame is a child of our container, so the two threads' input is
+/// joined and that send waits for KiCad's UI thread: leaving the pane during its DRC froze Backplane until the DRC ended (12 s). The
+/// request state is pure: the latest wanted keyboard owner wins, at most one call is in flight per worker, and a worker stuck on a KiCad
+/// that never answers is left behind (a new one serves the next request).
+pub mod focusq {
+    use std::time::{Duration, Instant};
+    /// Who is to have the keyboard: our window (`activate`: also made the foreground, an explicit hand-back) or KiCad's frame (a hand-in,
+    /// posted to KiCad on the UI thread as before: it never waits).
+    #[derive(Clone, Copy, Debug, PartialEq)]
+    pub enum To { Ours { window: u64, activate: bool }, Kicad { target: u64, pid: u32 } }
+    /// What a worker does after its call returned (`Q::returned`).
+    #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+    pub struct Returned {
+        /// its hand-back is still the latest request: where the keyboard went is recorded (FOCUS_ESCAPED); a stale one records nothing
+        pub record: bool,
+        /// apply the latest hand-back once more (a hand-in KiCad had queued took the keyboard back meanwhile)
+        pub again: bool,
+        /// a hand-in asked while its call was in flight, which its call then undid (the keyboard ended ours): post it to KiCad again (the
+        /// window, and the KiCad process it must still belong to)
+        pub hand_in: Option<(u64, u32)>,
+    }
+    #[derive(Default)]
+    pub struct Q {
+        seq: u64,
+        /// the latest request and its number
+        pub latest: Option<(u64, To)>,
+        /// the newest hand-back a worker has taken
+        pub taken: u64,
+        /// the current worker's generation, whether one runs, and since when its call has been in flight
+        pub era: u64, pub running: bool, pub busy_since: Option<Instant>,
+        /// workers left behind on a KiCad that does not answer (they end when it does, or is killed)
+        pub stuck: u32,
+        /// the hand-back applied once more already (a hand-in KiCad had queued took the keyboard back): never more than once
+        pub retried: u64,
+    }
+    /// Whether KiCad's own focus notice (it took the keyboard) is a hand-in to note: only after a press in the pane that came after the last
+    /// hand-back was asked for (ms clocks). KiCad freed from a DRC takes the keyboard from an older queued activate too and says so: noted,
+    /// it would void the hand-back's one retry and leave the keys in KiCad against the person's last act. Pure.
+    pub fn focus_notice_is_hand_in(press_at_ms: u64, hand_back_asked_ms: u64) -> bool { press_at_ms >= hand_back_asked_ms }
+    /// How long a call may be in flight before a new request gets a new worker; at most this many are ever left behind.
+    pub const STUCK_AFTER: Duration = Duration::from_secs(2);
+    pub const MAX_STUCK: u32 = 3;
+    impl Q {
+        /// A request. For a hand-back: whether a worker is to be started (none runs, or the running one is stuck: it is left behind, its
+        /// generation retired, and it applies nothing when it returns), and the generation it serves.
+        pub fn ask(&mut self, to: To, now: Instant) -> Option<u64> {
+            self.seq += 1; self.latest = Some((self.seq, to));
+            if !matches!(to, To::Ours { .. }) { return None }
+            let stuck = self.busy_since.is_some_and(|t| now.duration_since(t) >= STUCK_AFTER);
+            if self.running && !stuck { return None }
+            if self.running && stuck { if self.stuck >= MAX_STUCK { return None } self.stuck += 1; }
+            self.era += 1; self.running = true; self.busy_since = None;
+            Some(self.era)
+        }
+        /// The worker of generation `era` looks for work: the newest hand-back not taken yet (it becomes in flight), or None (nothing to do,
+        /// or it was retired).
+        pub fn take(&mut self, era: u64, now: Instant) -> Option<(u64, u64, bool)> {
+            if era != self.era { return None }
+            match self.latest {
+                Some((s, To::Ours { window, activate })) if s > self.taken => { self.taken = s; self.busy_since = Some(now); Some((s, window, activate)) }
+                _ => None,
+            }
+        }
+        /// The worker's call returned. `focus_ours`: the keyboard is in our window's thread now. Whether to apply the latest hand-back
+        /// again: a hand-in KiCad had queued before it (its WM_ACTIVATE, handled after our WM_KILLFOCUS) took the keyboard back meanwhile,
+        /// and the person still wants it in Backplane. A hand-in asked after it wins: nothing more.
+        /// `seq`: the hand-back it applied. A retired worker (left behind) does nothing here: it is counted off once, when it ends.
+        pub fn returned(&mut self, era: u64, seq: u64, focus_ours: bool) -> Returned {
+            if era != self.era { return Returned::default() }
+            self.busy_since = None;
+            match self.latest {
+                Some((s, To::Ours { .. })) if s == seq => {
+                    let again = !focus_ours && self.retried != s;
+                    if again { self.retried = s; self.taken = s.saturating_sub(1); }
+                    Returned { record: true, again, hand_in: None }
+                }
+                // (never a target of 0: PostMessageW(NULL) posts to the calling thread; a hand-in by a press has nothing to post)
+                Some((s, To::Kicad { target, pid })) if s > seq && focus_ours && target != 0 => Returned { record: false, again: false, hand_in: Some((target, pid)) },
+                _ => Returned::default(),
+            }
+        }
+        /// The worker of `era` ends (idle): a later hand-back starts another.
+        pub fn ended(&mut self, era: u64) { if era == self.era { self.running = false; self.busy_since = None; } else { self.stuck = self.stuck.saturating_sub(1) } }
+    }
+}
+
 #[cfg(windows)]
 mod imp {
     use super::{Ev, Frame, R};
@@ -904,13 +1406,18 @@ mod imp {
         }
         fn line(call: &str, at: &std::panic::Location, hwnd: u64, flags: u64, ms: u64, thread: u32) -> serde_json::Value {
             let (pid, wt) = owner(hwnd);
-            serde_json::json!({"call": call, "at": at.to_string(), "hwnd": hwnd, "owner_pid": pid, "owner_thread": wt, "our_pid": std::process::id(), "flags": flags, "ms": ms, "thread": thread, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64})
+            let name = NAMES.lock().unwrap().get(&thread).cloned().unwrap_or_default();
+            serde_json::json!({"call": call, "at": at.to_string(), "hwnd": hwnd, "owner_pid": pid, "owner_thread": wt, "our_pid": std::process::id(), "flags": flags, "ms": ms, "thread": thread, "thread_name": name, "epoch_ms": crate::screens::kcomment::epoch_ms() as u64})
         }
+        /// each calling thread's name ("main" for the UI thread, "kicad-focus", "kicad-placer"), noted at its first probed call
+        static NAMES: std::sync::LazyLock<Mutex<std::collections::HashMap<u32, String>>> = std::sync::LazyLock::new(Default::default);
+        thread_local! { static NAMED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
         pub fn enter(call: &'static str, at: &'static std::panic::Location<'static>, hwnd: u64, flags: u64) -> G {
             if !on() { return G(None) }
             let outer = DEPTH.with(|d| { let n = d.get(); d.set(n + 1); n == 0 });
             if !outer { return G(None) }
             if !DOG.swap(true, Ordering::SeqCst) { std::thread::spawn(watchdog); }
+            if !NAMED.with(|n| n.replace(true)) { NAMES.lock().unwrap().insert(tid(), std::thread::current().name().unwrap_or("?").to_string()); }
             let (seq, at, where_) = (SEQ.fetch_add(1, Ordering::SeqCst) + 1, Instant::now(), at);
             { let mut c = CUR.lock().unwrap(); let me = tid(); c.retain(|x| x.4 != me); c.push((call, where_, hwnd, flags, me, at, seq)); }
             G(Some((call, where_, hwnd, flags, seq, at)))
@@ -990,6 +1497,83 @@ mod imp {
     /// #1343: KiCad windows' placements, run by a worker thread per KiCad UI thread (it owns no windows, so its input queue is never
     /// joined to KiCad's and SWP_ASYNCWINDOWPOS really posts). If one ever waited, only that KiCad's windows wait behind it (they could
     /// not move before KiCad is free anyway); Backplane's UI thread never does. The probe covers the worker's calls too.
+    /// #1403: the keyboard handed back to our window by a worker thread (focusq): `SetFocus` there waits for KiCad's UI thread when KiCad
+    /// is busy, so it never runs on Backplane's. The worker joins our UI thread's input only for the call (AttachThreadInput, detached on
+    /// every path), holds no lock while it waits, and one stuck on a KiCad that never answers is left behind for a new one.
+    mod focuser {
+        use super::super::focusq::{Q, To};
+        use std::{sync::{Condvar, Mutex, OnceLock}, time::{Duration, Instant}};
+        use windows_sys::Win32::UI::WindowsAndMessaging::GUITHREADINFO;
+        fn st() -> &'static (Mutex<Q>, Condvar) { static S: OnceLock<(Mutex<Q>, Condvar)> = OnceLock::new(); S.get_or_init(Default::default) }
+        const IDLE: Duration = Duration::from_secs(10);
+        fn dbg() -> bool { std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() }
+        /// A hand-in to KiCad (posted on the UI thread as before): noted, so a hand-back still in flight does not pull the keyboard out after.
+        pub fn kicad(target: u64) {
+            let mut pid = 0u32;
+            if target != 0 { unsafe { super::GetWindowThreadProcessId(super::hwnd(target), &mut pid); } }
+            let (q, cv) = st(); q.lock().unwrap().ask(To::Kicad { target, pid }, Instant::now()); cv.notify_all();
+        }
+        /// The keyboard to our window `w` (`activate`: made the foreground too), from `ui` (Backplane's UI thread id).
+        pub fn ours(w: u64, activate: bool, ui: u32) {
+            let (q, cv) = st();
+            super::HANDBACK_ASKED_AT.store(super::mono_ms().max(1), std::sync::atomic::Ordering::SeqCst);
+            let spawn = q.lock().unwrap().ask(To::Ours { window: w, activate }, Instant::now());
+            if let Some(era) = spawn { std::thread::Builder::new().name("kicad-focus".into()).spawn(move || worker(era, ui)).ok(); }
+            cv.notify_all();
+        }
+        fn worker(era: u64, ui: u32) {
+            let (q, cv) = st();
+            loop {
+                let job = {
+                    let mut g = q.lock().unwrap();
+                    loop {
+                        if g.era != era { break None }
+                        if let Some(j) = g.take(era, Instant::now()) { break Some(j) }
+                        let (ng, to) = cv.wait_timeout(g, IDLE).unwrap(); g = ng;
+                        if to.timed_out() && g.era == era && g.latest.is_some_and(|(s, x)| !matches!(x, To::Ours { .. }) || s <= g.taken) { g.ended(era); return }
+                    }
+                };
+                let Some((seq, w, activate)) = job else { q.lock().unwrap().ended(era); return };
+                let t0 = Instant::now();
+                let (ours, escaped) = unsafe { apply(w, activate, ui) };
+                let r = {
+                    let mut g = q.lock().unwrap();
+                    let r = g.returned(era, seq, ours);
+                    // recorded only by the latest request's call, under the lock (a stale one woke after a hand-in and said "escaped")
+                    if r.record { super::FOCUS_ESCAPED.store(escaped, std::sync::atomic::Ordering::SeqCst); }
+                    // a hand-in that came while the call was in flight, which the call undid: posted to KiCad again, under the lock (a post
+                    // never waits), only to a window that still exists and is another process's (KiCad's), never our own
+                    if let Some((t, kpid)) = r.hand_in {
+                        let h = super::hwnd(t);
+                        let mut pid = 0u32;
+                        // still the same KiCad's window (its handle not reused by another process since)
+                        let live = unsafe { super::IsWindow(h) } != 0 && unsafe { super::GetWindowThreadProcessId(h, &mut pid) } != 0 && pid == kpid && pid != std::process::id();
+                        if live { unsafe { super::PostMessageW(h, super::WM_ACTIVATE, 1, 0); } }
+                    }
+                    r
+                };
+                if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back_done": {"seq": seq, "window": w, "ms": t0.elapsed().as_millis() as u64, "focus_ours": ours, "again": r.again, "recorded": r.record, "hand_in_again": r.hand_in}})); }
+                if r.again { cv.notify_all(); }
+            }
+        }
+        /// One hand-back: our thread's input joined for the call, SetFocus (and SetForegroundWindow for an explicit one), detached; whether
+        /// the keyboard is in our UI thread's windows after. Nothing is held while it waits.
+        unsafe fn apply(w: u64, activate: bool, ui: u32) -> (bool, bool) {
+            let h = super::hwnd(w);
+            if unsafe { super::IsWindow(h) } == 0 { return (true, false) }
+            let me = unsafe { super::GetCurrentThreadId() };
+            let joined = unsafe { super::AttachThreadInput(me, ui, 1) } != 0;
+            if activate {
+                let ok = unsafe { super::SetForegroundWindow(h) };
+                if dbg() { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back": {"window": w, "activated": ok != 0}})); }
+            }
+            if joined { unsafe { super::SetFocus(h); } }
+            let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..unsafe { std::mem::zeroed() } };
+            let focus_tid = if unsafe { super::GetGUIThreadInfo(0, &mut gti) } != 0 && !gti.hwndFocus.is_null() { unsafe { super::GetWindowThreadProcessId(gti.hwndFocus, std::ptr::null_mut()) } } else { 0 };
+            if joined { unsafe { super::AttachThreadInput(me, ui, 0); } }
+            (focus_tid == 0 || focus_tid == ui, focus_tid != 0 && focus_tid != ui)
+        }
+    }
     mod placer {
         use super::super::placeq::{still_ours, Job, Q};
         use std::{collections::HashMap, sync::{Arc, Condvar, Mutex, OnceLock}};
@@ -1075,9 +1659,12 @@ mod imp {
     /// that followed the hand-back is the click's own, never stale (opening-focus run B5: a canvas click 0.5 s after Ctrl+` lost
     /// its notice to a time-only rule).
     static PANE_PRESS_AT: AtomicU64 = AtomicU64::new(0);
+    /// when a hand-back was last asked for (focuser::ours): KiCad's focus notice is a hand-in only after a press in the pane since
+    static HANDBACK_ASKED_AT: AtomicU64 = AtomicU64::new(0);
     /// The pane's view of who has the keys (true: KiCad's shown editor), noted each tick, for the reclaim's decision.
     static PANE_KEYS: AtomicBool = AtomicBool::new(false);
     pub fn note_pane_keys(kicad: bool) { PANE_KEYS.store(kicad, Ordering::SeqCst); }
+    pub fn note_pane_on_screen(_top: u64, _child: u64, _on: bool) {}
     /// When a button last went down in Backplane's own window outside the pane (`button_over`): the person taking the
     /// keys to Backplane, as opposed to focus drifting there on its own (a pre-warmed frame's activation ending).
     static BACKPLANE_PRESS_AT: AtomicU64 = AtomicU64::new(0);
@@ -1111,6 +1698,8 @@ mod imp {
     unsafe fn handle_child_mouse_down(container: HWND, button_msg: u32) {
         PANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
         let already = unsafe { in_child_focus(container) };
+        // a press in KiCad's frame is a hand-in too: noted in the hand-back queue (nothing to post again: target 0)
+        focuser::kicad(0);
         FOCUS_ESCAPED.store(false, Ordering::SeqCst);
         CHILD_FOCUSED.store(true, Ordering::SeqCst);
         unsafe { attach_visible_child_queue(container); }
@@ -1138,6 +1727,10 @@ mod imp {
                     }
                     return 0;
                 }
+                // KiCad took the keyboard on a click into its frame: a hand-in, noted in the hand-back queue, but only when a press in the pane
+                // came after the last hand-back was asked for. KiCad freed from a DRC also takes the keyboard from an older queued activate and
+                // says so: noted, that would have voided the hand-back's one retry and left the keys in KiCad against the person's last act
+                if super::focusq::focus_notice_is_hand_in(PANE_PRESS_AT.load(Ordering::SeqCst), HANDBACK_ASKED_AT.load(Ordering::SeqCst)) { focuser::kicad(fw); }
                 FOCUS_ESCAPED.store(false, Ordering::SeqCst);
                 CHILD_FOCUSED.store(true, Ordering::SeqCst);
                 if fw != 0 {
@@ -1270,7 +1863,7 @@ mod imp {
                 cls.as_ptr(),
                 null_mut(),
                 WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
-                0, 0, 1, 1,
+                0, 0, super::INIT_CONTAINER_W, super::INIT_CONTAINER_H,
                 p,
                 null_mut(),
                 null_mut(),
@@ -1430,10 +2023,9 @@ mod imp {
             if first_seen {
                 let (mut tr, mut dr) = (RECT::default(), RECT::default());
                 if unsafe { GetWindowRect(ctx.toplevel, &mut tr) != 0 && GetWindowRect(w, &mut dr) != 0 } {
-                    let (dw, dh) = (dr.right - dr.left, dr.bottom - dr.top);
-                    let x = tr.left + ((tr.right - tr.left) - dw) / 2;
-                    let y = tr.top + ((tr.bottom - tr.top) - dh) / 2;
-                    placer::set_pos(id_of(w), 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS, 0);
+                    if let Some((x, y)) = super::dialog_center_pos((tr.left, tr.top, tr.right, tr.bottom), (dr.left, dr.top, dr.right, dr.bottom)) {
+                        placer::set_pos(id_of(w), 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS, 0);
+                    }
                 }
             }
             1
@@ -1492,7 +2084,7 @@ mod imp {
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
         ACTIVE_CONTAINER.store(container, Ordering::SeqCst);
-        let Some(r) = r else {
+        let Some(r) = r.and_then(super::sane_rect) else {
             unsafe { ShowWindowAsync(c, SW_HIDE); }
             return;
         };
@@ -1519,6 +2111,7 @@ mod imp {
 
     /// Keep `show` sized to `(0, 0, w, h)` asynchronously (e.g. right after KiCad's `ShowFrame` reveals a frame at its default size).
     pub fn sync_root(container: u64, r: R, show: u64, last_root: &mut (i32, i32)) {
+        let Some(r) = super::sane_rect(r) else { return };
         let (c, s) = (hwnd(container), hwnd(show));
         if c.is_null() || s.is_null() { return }
         let (w, h) = (r.w.max(1), r.h.max(1));
@@ -1684,12 +2277,14 @@ mod imp {
             let target_tid = GetWindowThreadProcessId(h, null_mut());
             if target_tid != 0 && target_tid != cur {
                 if let Ok(mut set) = handed_in().lock() { set.insert(w); }
+                // the hand-in noted first: a hand-back worker returning now records nothing and pulls nothing (focusq)
+                let target = focus_target_in_frame(h);
+                focuser::kicad(target as usize as u64);
                 FOCUS_ESCAPED.store(false, Ordering::SeqCst);
                 CHILD_FOCUSED.store(true, Ordering::SeqCst);
                 CLICK_GRACE_UNTIL.store(mono_ms() + 500, Ordering::SeqCst);
                 ATTACHED_TID.store(target_tid as u64, Ordering::SeqCst);
                 AttachThreadInput(cur, target_tid, 1);
-                let target = focus_target_in_frame(h);
                 PostMessageW(target, WM_ACTIVATE, 1, 0);
                 return;
             }
@@ -1708,19 +2303,9 @@ mod imp {
                     AttachThreadInput(cur, focus_tid, 0);
                 }
             }
-            // Activate only on an explicit hand-back, after detaching; never a foreign HWND here.
-            if activate {
-                let ok = SetForegroundWindow(h);
-                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
-                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back": {"window": w, "activated": ok != 0}}));
-                }
-            }
-            SetFocus(h);
-            let mut gti2 = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
-            let escaped = GetGUIThreadInfo(0, &mut gti2) != 0
-                && !gti2.hwndFocus.is_null()
-                && GetWindowThreadProcessId(gti2.hwndFocus, null_mut()) != cur;
-            FOCUS_ESCAPED.store(escaped, Ordering::SeqCst);
+            // #1403: SetFocus (and, for an explicit hand-back, SetForegroundWindow: after detaching, never a foreign HWND) by the focus worker:
+            // it waits for KiCad's UI thread when KiCad is busy (its DRC), and Backplane's never does
+            focuser::ours(w, activate, cur);
         }
     }
 
@@ -1776,6 +2361,15 @@ mod imp {
             }
             false
         }
+    }
+    /// Strict live foreground focus check for placement decisions: unlike `has_focus`, never returns
+    /// true on `CLICK_GRACE_UNTIL` when the foreground queue's focus is outside `container`, and does
+    /// not perform `has_focus`'s cold-construction reclaim side effect.
+    pub fn has_live_focus(container: u64) -> bool {
+        if FOCUS_ESCAPED.load(Ordering::SeqCst) { return false }
+        let c = hwnd(container);
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return false }
+        unsafe { in_child_focus(c) }
     }
 
     /// Windows: the press handler reads the window under the pointer already (WindowFromPoint); never so here.
@@ -2274,6 +2868,7 @@ mod imp {
     pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
     pub fn keep_focus(_top: u64) -> bool { false }
     pub fn note_pane_keys(_kicad: bool) {}
+    pub fn note_pane_on_screen(_top: u64, _child: u64, _on: bool) {}
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
     pub fn backplane_press_ms_ago() -> u64 { u64::MAX }
@@ -2287,6 +2882,7 @@ mod imp {
     /// Unknown here: the window's own key-up decides.
     pub fn semicolon_held() -> Option<bool> { None }
     pub fn has_focus(_container: u64) -> bool { false }
+    pub fn has_live_focus(_container: u64) -> bool { false }
     pub fn focus_in_pid(_pid: u32) -> bool { false }
     pub fn pointer_on_other_window(_w: u64) -> bool { false }
     pub fn button_over(_w: u64) -> Option<bool> { None }
@@ -2305,6 +2901,104 @@ pub use imp::*;
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_focus_proxy_is_used_only_where_a_panes_frame_is_on_screen() {
+        let mut s = super::PaneScreens::default();
+        assert!(!s.on(7), "no pane on screen: the focus stays where GPUI and the Browser put it");
+        assert!(s.set(7, 70, true), "coming on screen: the redirect resumes (a focus on the top-level moves to the proxy)");
+        assert!(s.on(7) && !s.on(8), "per top-level: another window's pane is its own");
+        assert!(!s.set(7, 70, true), "still on screen: no new transition (the tick does not move the focus again)");
+        assert!(!s.set(7, 71, true), "a second child on screen in the same window: already on, no transition");
+        assert!(!s.set(7, 70, false) && s.on(7), "one child off, the other still on screen: still on");
+        assert!(!s.set(7, 71, false) && !s.on(7), "the last child off (another viewer on show): off, nothing moved");
+        assert!(s.set(7, 70, true), "back in the page: on again");
+    }
+    #[test] fn the_focus_proxy_cap_trips_rests_rechecks_once_and_counts_a_new_burst() {
+        use std::time::{Duration, Instant};
+        let ms = Duration::from_millis;
+        let mut cap = super::RedirectCap::new(4, ms(100), ms(1000));
+        let t0 = Instant::now();
+        for k in 0..4 { assert_eq!(cap.allow(t0 + ms(k * 10)), (true, false), "redirect {k} of the burst allowed"); }
+        assert_eq!(cap.allow(t0 + ms(40)), (false, true), "the fifth within 100 ms trips the cap");
+        assert_eq!(cap.allow(t0 + ms(500)), (false, false), "resting: refused, not tripped again");
+        assert!(!cap.recheck(t0 + ms(900)), "no re-check before the rest has run out");
+        assert!(cap.recheck(t0 + ms(1041)), "the rest run out: one re-check");
+        assert!(!cap.recheck(t0 + ms(1081)), "and only one (the tick does not spin)");
+        assert_eq!(cap.allow(t0 + ms(1042)), (true, false), "the re-check's redirect counts as a new burst's first");
+        for k in 1..4 { assert_eq!(cap.allow(t0 + ms(1042 + k)), (true, false)); }
+        assert_eq!(cap.allow(t0 + ms(1050)), (false, true), "a window manager still fighting trips it again");
+        assert!(cap.recheck(t0 + ms(2051)), "and is re-checked again after the next rest");
+        let mut slow = super::RedirectCap::new(4, ms(100), ms(1000));
+        for k in 0..20 { assert_eq!(slow.allow(t0 + ms(k * 150)), (true, false), "redirects spread out never trip it"); }
+        assert!(!slow.recheck(t0 + ms(5000)), "no rest, no re-check");
+    }
+    #[test] fn kicads_focus_notice_is_a_hand_in_only_after_a_press_since_the_last_hand_back() {
+        use super::focusq::focus_notice_is_hand_in;
+        assert!(focus_notice_is_hand_in(2000, 1500), "a press in the pane after the hand-back: KiCad took the keys on it");
+        assert!(!focus_notice_is_hand_in(1000, 1500), "no press since the hand-back (KiCad freed from a DRC, an old queued activate): not noted, the retry stands");
+        assert!(focus_notice_is_hand_in(1500, 1500), "a press in the same ms as the hand-back's ask: the press is the later act");
+        assert!(focus_notice_is_hand_in(5, 0), "no hand-back ever asked (0): any press counts");
+        assert!(focus_notice_is_hand_in(0, 0), "neither yet: KiCad's own notice is noted, as before the queue");
+    }
+    #[test] fn a_hand_back_collapses_to_the_latest_wanted_owner() {
+        use super::focusq::{Q, To, STUCK_AFTER, MAX_STUCK};
+        use std::time::{Duration, Instant};
+        let ours = |w| To::Ours { window: w, activate: false };
+        let t0 = Instant::now();
+        // two hand-backs while one is in flight: one call at a time, the newest applied next
+        let mut q = Q::default();
+        let g = q.ask(ours(1), t0).expect("a worker for the first hand-back");
+        assert_eq!(q.take(g, t0), Some((1, 1, false)));
+        assert_eq!(q.ask(ours(2), t0), None, "in flight: no second worker"); assert_eq!(q.ask(ours(3), t0), None);
+        assert!(!q.returned(g, 1, true).again);
+        assert_eq!(q.take(g, t0), Some((3, 3, false)), "the latest only (2 collapsed into 3)");
+        assert!(!q.returned(g, 3, true).again); assert_eq!(q.take(g, t0), None);
+        // leave the pane during a DRC (hand-back in flight), click back into it before the DRC ends: KiCad keeps the keyboard
+        let mut q = Q::default();
+        let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
+        q.ask(To::Kicad { target: 9, pid: 7 }, t0);
+        let r = q.returned(g, 1, true);
+        assert!(!r.again, "the stale hand-back pulls nothing out after the hand-in");
+        assert!(!r.record, "and records nothing about where the keyboard is (the review's A)");
+        assert_eq!(r.hand_in, Some((9, 7)), "its call took the keyboard from the hand-in: posted to KiCad again (the review's B)");
+        // a hand-in by a press into KiCad's frame (target 0): noted, so the stale call records nothing, and nothing is posted to 0
+        let mut q = Q::default();
+        let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
+        q.ask(To::Kicad { target: 0, pid: 0 }, t0);
+        let r = q.returned(g, 1, true);
+        assert!(!r.record && !r.again && r.hand_in.is_none(), "never a re-post to a target of 0 (PostMessageW(NULL) is the caller's own queue)");
+        assert_eq!(q.take(g, t0), None);
+        // the reverse: a hand-in KiCad had queued takes the keyboard back after our hand-back: applied once more, then never again
+        let mut q = Q::default();
+        q.ask(To::Kicad { target: 9, pid: 7 }, t0);
+        let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0).unwrap();
+        assert!(q.returned(g, 2, false).again, "the keyboard not ours after the call: once more");
+        assert_eq!(q.take(g, t0), Some((2, 1, false)));
+        assert!(!q.returned(g, 2, false).again, "never a loop");
+        // a KiCad that never answers: after STUCK_AFTER a new request gets a new worker, the old one applies nothing when it returns
+        let mut q = Q::default();
+        let e1 = q.ask(ours(1), t0).unwrap(); q.take(e1, t0).unwrap();
+        let later = t0 + STUCK_AFTER + Duration::from_millis(1);
+        let e2 = q.ask(ours(2), later).expect("a new worker past the stuck one");
+        assert_ne!(e1, e2); assert_eq!(q.take(e1, later), None, "the old generation takes nothing");
+        assert_eq!(q.take(e2, later), Some((2, 2, false)));
+        assert_eq!(q.returned(e1, 1, true), Default::default(), "the stuck one returning (KiCad killed) applies and records nothing");
+        q.ended(e1); assert_eq!(q.stuck, 0, "and is let go");
+        // never more than MAX_STUCK left behind
+        let mut q = Q::default(); let mut t = t0; let g = q.ask(ours(1), t).unwrap(); q.take(g, t).unwrap();
+        for i in 0..MAX_STUCK + 2 { t += STUCK_AFTER + Duration::from_millis(1); if let Some(g) = q.ask(ours(10 + i as u64), t) { q.take(g, t); } }
+        assert!(q.stuck <= MAX_STUCK);
+        // the review's C: three left behind, one of them returns and ends: counted off once, not twice
+        let mut q = Q::default(); let mut t = t0; let mut gens = vec![];
+        let g = q.ask(ours(1), t).unwrap(); q.take(g, t).unwrap(); gens.push(g);
+        for i in 0..MAX_STUCK { t += STUCK_AFTER + Duration::from_millis(1); let g = q.ask(ours(10 + i as u64), t).unwrap(); q.take(g, t).unwrap(); gens.push(g); }
+        assert_eq!(q.stuck, MAX_STUCK);
+        let old = gens[0];
+        q.returned(old, 1, true); q.ended(old);
+        assert_eq!(q.stuck, MAX_STUCK - 1, "one left-behind worker ending is one fewer");
+        // idle: the worker ends, the next hand-back starts another
+        let mut q = Q::default(); let g = q.ask(ours(1), t0).unwrap(); q.take(g, t0); q.returned(g, 1, true); q.ended(g);
+        assert!(q.ask(ours(2), t0).is_some());
+    }
     #[test] fn a_kicad_windows_placements_keep_only_the_latest_and_a_hide_drops_them() {
         use super::placeq::{still_ours, Job, Q};
         let j = |h: u64, w: i32| Job { hwnd: h, after: 0, x: 0, y: 0, w, h: 10, flags: 0, pid: 7, parent: 1, seq: 0 };
@@ -2392,5 +3086,34 @@ mod tests {
         for r in &k { assert!(!(r.x < 200 && r.x + r.w > 100 && r.y < 150 && r.y + r.h > 50), "{r:?} overlaps the hole"); }
         let all = cut(pane, &[R { x: 0, y: 0, w: 1000, h: 1000 }]);
         assert!(all.is_empty(), "covered whole");
+    }
+    #[test] fn pane_geometry_and_dialog_centering_reject_invalid_or_offscreen_rects() {
+        assert_eq!(sane_rect(R { x: 100, y: 50, w: 800, h: 600 }), Some(R { x: 100, y: 50, w: 800, h: 600 }));
+        assert_eq!(sane_rect(R { x: 0, y: 0, w: 10, h: 10 }), Some(R { x: 0, y: 0, w: 10, h: 10 }));
+        assert_eq!(sane_rect(R { x: -1920, y: -100, w: 1200, h: 900 }), Some(R { x: -1920, y: -100, w: 1200, h: 900 }));
+        assert_eq!(sane_rect(R { x: 0, y: 0, w: 0, h: 600 }), None);
+        assert_eq!(sane_rect(R { x: 0, y: 0, w: 800, h: -5 }), None);
+        assert_eq!(sane_rect(R { x: -32000, y: 10, w: 800, h: 600 }), None);
+        assert_eq!(sane_rect(R { x: i32::MIN, y: i32::MIN, w: 800, h: 600 }), None);
+        assert_eq!(sane_rect(R { x: 10, y: 10, w: 20_000, h: 600 }), None);
+
+        assert_eq!(pane_rect_from_f32(10.0, 20.0, 500.0, 400.0, 1.5), Some(R { x: 15, y: 30, w: 750, h: 600 }));
+        assert_eq!(pane_rect_from_f32(f32::NAN, 0.0, 500.0, 400.0, 1.0), None);
+        assert_eq!(pane_rect_from_f32(f32::INFINITY, 0.0, 500.0, 400.0, 1.0), None);
+        assert_eq!(pane_rect_from_f32(0.0, 0.0, f32::INFINITY, 400.0, 1.0), None);
+        assert_eq!(pane_rect_from_f32(0.0, 0.0, 500.0, 400.0, 0.0), None);
+        assert_eq!(pane_rect_from_f32(0.0, 0.0, 500.0, 400.0, -1.0), None);
+        assert_eq!(pane_rect_from_f32(-32000.0, -32000.0, 500.0, 400.0, 1.0), None);
+        assert_eq!(pane_rect_from_f32(0.0, 0.0, 1e9, 400.0, 1.0), None);
+
+        assert_eq!(dialog_center_pos((100, 100, 1100, 900), (0, 0, 400, 300)), Some((400, 350)));
+        assert_eq!(dialog_center_pos((-1920, 0, 0, 1080), (10, 20, 410, 320)), Some((-1160, 390)), "multi-monitor negative x");
+        assert_eq!(dialog_center_pos((-11_520, 0, -7_680, 2_160), (0, 0, 400, 300)), Some((-9_800, 930)), "far-left multi-monitor owner");
+        assert_eq!(dialog_center_pos((-32000, -32000, -31840, -31970), (0, 0, 400, 300)), None, "Windows minimized toplevel");
+        assert_eq!(dialog_center_pos((i32::MIN, i32::MIN, 0, 0), (0, 0, 400, 300)), None);
+        assert_eq!(dialog_center_pos((100, 100, 1100, 900), (i32::MIN, 0, 0, 100)), None);
+        assert_eq!(dialog_center_pos((100, 100, 100, 900), (0, 0, 400, 300)), None);
+        assert_eq!(dialog_center_pos((100, 100, 1100, 900), (0, 0, 0, 300)), None);
+        assert_eq!(dialog_center_pos((100, 100, 30000, 900), (0, 0, 400, 300)), None);
     }
 }

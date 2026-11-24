@@ -1,18 +1,19 @@
 #!/bin/bash
 # Hot reload for fresh mode (scripts/fresh.sh, ~/.backplane-gpui-fresh): follow the builds dev-cut.sh publishes and relaunch the fresh hub and window on each.
 #   scripts/fresh-watch.sh            stay in the foreground (Ctrl-C stops following; the app keeps running)
-# Same hub binary: only the window is reopened, at once. A new hub waits until no turn is running (a restart cuts a turn); Enter in a terminal relaunches anyway.
+# Same hub binary: only the window is reopened, at once. A new hub waits while a turn the person is waiting on runs (a thread they wrote to in the last 10 minutes),
+# and never longer than GPUI_RELOAD_CAP (600 s): other turns carry on after the restart. Enter in a terminal, or the bar's Restart now, relaunches at once.
 # The window comes back where it was (gpui-place.json, gpui-drafts.json in the home). A build whose hub does not answer is marked bad and the build before is put back; with a guard (docs/HUB-RESILIENCE.md) that happens inside the start.
-# Env: FRESH_DIR, FRESH_PORT (as fresh.sh), GPUI_DEV_DIR, GPUI_RELOAD_POLL (s, default 2), GPUI_RELOAD_BOOT (s the hub may take to answer, default 120).
+# Env: FRESH_DIR, FRESH_PORT (as fresh.sh), GPUI_DEV_DIR, GPUI_RELOAD_POLL (s, default 2), GPUI_RELOAD_BOOT (s the hub may take to answer, default 120), GPUI_RELOAD_CAP (s a new build waits at most, default 600).
 set -u
 # The hub reaps every process that carries its BACKPLANE_AGENT_OWNER mark and is not its child (agents/proc.rs reap_orphans). A watcher started from an agent turn inherits the mark,
 # and the first hub restart it makes would kill it, and the window it is about to open. Run again without the mark.
 if [ -n "${BACKPLANE_AGENT_OWNER:-}" ]; then exec env -u BACKPLANE_AGENT_OWNER "$0" "$@"; fi
 HERE=$(cd "$(dirname "$0")" && pwd)
 D=${FRESH_DIR:-$HOME/.backplane-gpui-fresh}; PORT=${FRESH_PORT:-3797}; H=$D/home
-DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; POLL=${GPUI_RELOAD_POLL:-2}; BOOT=${GPUI_RELOAD_BOOT:-120}
+DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; POLL=${GPUI_RELOAD_POLL:-2}; BOOT=${GPUI_RELOAD_BOOT:-120}; CAP=${GPUI_RELOAD_CAP:-600}
 ST=${BACKPLANE_DEV_STATUS:-$DEV/STATUS}
-status() { printf '{"phase":"%s","text":"%s","done":0,"total":0%s}\n' "$1" "$2" "${3:-}" > "$ST.w" && mv -f "$ST.w" "$ST"; }
+status() { printf '{"phase":"%s","text":"%s","done":%s,"total":%s%s}\n' "$1" "$2" "${4:-0}" "${5:-0}" "${3:-}" > "$ST.w" && mv -f "$ST.w" "$ST"; }   # done/total: the countdown's fill
 REQ=$DEV/RESTART   # the window's Restart now (two clicks) leaves this file: it is a press of Enter
 clear_status() { rm -f "$ST" "$ST.w"; }
 say() { printf '%s %s\n' "$(date +%H:%M:%S)" "$*"; }
@@ -45,12 +46,18 @@ go() {  # go BUILD_DIR WHAT(client|both): relaunch on that build
   export BIN=$b FRESH_TAILNET_PORT=$(cat "$D/tailnet.port" 2>/dev/null || true)
   [ -n "$FRESH_TAILNET_PORT" ] || unset FRESH_TAILNET_PORT
   if [ "$2" = client ]; then p=$(pid client); alive "$p" && kill "$p"; rm -f "$D/client.pid"; sleep 1
-  else p=$(pid hub); FRESH_RESTART=1 "$HERE/fresh.sh" stop >/dev/null; local i=0; while alive "$p" && [ $i -lt 100 ]; do sleep 0.2; i=$((i+1)); done; fi
+  # the hub tells every window and phone why it goes (native/host/src/restarting.rs): this file names the build it comes back on
+  else printf '{"reason":"build","build":"%s"}\n' "$(basename "$b")" > "$H/restart.next" 2>/dev/null || true
+       p=$(pid hub); FRESH_RESTART=1 "$HERE/fresh.sh" stop >/dev/null; local i=0; while alive "$p" && [ $i -lt 100 ]; do sleep 0.2; i=$((i+1)); done; fi
   "$HERE/fresh.sh" start || return 1
   local i=0; while [ $i -lt "$BOOT" ]; do hello && return 0; alive "$(pid hub)" || return 1; sleep 1; i=$((i+1)); done; return 1
 }
 trap 'echo; say "stopped following; the app keeps running"; exit 0' INT TERM
 [ -d "$H" ] || { echo "fresh-watch: no fresh home in $H: run fresh.sh start first" >&2; exit 1; }
+# the hub tells every client when no watcher runs (native/host/src/restarting.rs, watcher): this file is how it knows one does
+WPID=$D/watch.pid; printf '%s\n' "$$" > "$WPID"; trap 'rm -f "$WPID"' EXIT
+# the watchdog that brings this watcher back when it dies: its units and timer put right if they are not (hub-watchdog.sh ensure). Only for the person's own fresh home.
+[ "$D" != "$HOME/.backplane-gpui-fresh" ] || [ -n "${FRESH_NO_WATCHDOG:-}" ] || "$HERE/hub-watchdog.sh" ensure 2>&1 | while read -r l; do say "$l"; done
 say "following $DEV/CURRENT (shown: $(shown), hub: $(basename "$(running_dir)"))"
 rm -f "$REQ"; waiting=
 SELF=$(cksum < "$0")
@@ -61,18 +68,24 @@ while :; do
   if [ -z "$c" ] || [ "$c" = "$now" ] || is_bad "$c" || [ ! -d "$DEV/builds/$c" ]; then waiting=; sleep "$POLL"; continue; fi
   what=both; cmp -s "$(running_dir)/backplane-hub" "$DEV/builds/$c/backplane-hub" 2>/dev/null && what=client
   if [ "$what" = both ] && alive "$(pid hub)"; then
-    n=$(turns)
-    if [ "$n" != 0 ]; then
-      # one desktop notification per build; the window's bar follows the count silently
-      [ "$waiting" = "$c" ] || tell "Build $c is ready; waiting for $n running turn(s) to finish (Enter relaunches now)."
-      hk=$(tr -d '"\\' < "$DEV/builds/$c/HAIKU" 2>/dev/null | paste -sd'|' | sed 's/|/ \/ /g')   # the build's haiku, on one line
-      bg=$(turns background); case "$bg" in ''|0|'?') bg=;; *) bg=", $bg thread(s) on background work";; esac
+    # A new build waits only for the turns the person is waiting on (a thread they wrote to in the last 10 minutes: /dev/turns `waited`; an older hub
+    # without it: every running turn), and for at most CAP seconds from when the first build began to wait: with agents always mid-turn the count of
+    # running turns never reached 0 and no build applied for a day (Nov 20). Every other turn carries on after the restart ("Continuing after the restart").
+    n=$(turns); w=$(turns waited); [ "$w" = '?' ] && w=$n
+    [ -n "$waiting" ] || since=$(date +%s)
+    left=$(( CAP - ($(date +%s) - since) )); [ "$left" -gt 0 ] || left=0
+    if [ "$w" != 0 ] && [ "$left" -gt 0 ]; then
+      mins=$(( (left + 59) / 60 ))
+      # one desktop notification per build; the window's bar follows the count and the countdown silently
+      [ "$waiting" = "$c" ] || tell "Build $c is ready; it relaunches within $mins min, sooner when the $w turn(s) you are waiting on end (Enter relaunches now)."
+      hk=; [ -r "$DEV/builds/$c/HAIKU" ] && hk=$(tr -d '"\\' < "$DEV/builds/$c/HAIKU" | paste -sd'|' | sed 's/|/ \/ /g')   # the build's haiku, on one line (a build may have none)
       tn=$n; [ "$tn" = '?' ] && tn=0
-      waiting=$c; status waiting "Build ${c##*-} ready: waiting for $n running turn(s) to end$bg" ",\"action\":\"restart\",\"turns\":$tn,\"haiku\":\"$hk\""
+      waiting=$c; status waiting "Build ${c##*-} ready: relaunching in $mins min, or when the $w turn(s) you are waiting on end" ",\"action\":\"restart\",\"turns\":$tn,\"haiku\":\"$hk\",\"deadline\":$((since + CAP))" "$((CAP - left))" "$CAP"
       if [ -e "$REQ" ]; then rm -f "$REQ"; say "relaunch asked for from the window"
       elif [ -t 0 ]; then read -r -t "$POLL" _ || continue
       else sleep "$POLL"; continue; fi
-    fi
+    elif [ "$w" != 0 ]; then say "relaunching after $((CAP / 60)) min with $w turn(s) still running: they carry on after the restart"
+    elif [ "$n" != 0 ]; then say "relaunching with $n running turn(s) nobody is waiting on: they carry on after the restart"; fi
   fi
   waiting=; prev=$(running_dir); say "relaunching on $c ($what)"; status relaunching "Relaunching on build ${c##*-}"
   if go "$DEV/builds/$c" "$what"; then printf '%s\n' "$c" > "$SHOWN"; clear_status; g=$(guard_build)

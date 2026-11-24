@@ -48,8 +48,8 @@ fn typing(w: &str) -> Option<(char, String)> {
     let mut cs = w.chars(); let sig = cs.next()?;
     if !matches!(sig, '@' | '>' | '%' | '#' | '&' | '~') { return None }
     let q: String = cs.collect();
-    // a model id (`provider/model`) holds more than a slug does (settings/mentions.rs)
-    let ok = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_' || (sig == '&' && matches!(c, '/' | '.' | ':' | '+'));
+    // a model id (`provider/model`) holds more than a slug does (settings/mentions.rs), including `[1m]`
+    let ok = |c: char| c.is_ascii_alphanumeric() || c == '-' || c == '_' || (sig == '&' && matches!(c, '/' | '.' | ':' | '+' | '[' | ']'));
     q.chars().all(ok).then(|| (sig, q.to_ascii_lowercase()))
 }
 
@@ -68,7 +68,7 @@ struct Cand { word: String, about: String, score: u32, same: bool, at: u64 }
 /// What the `$` popup and the chips need of a thread: the folder it works in, its provider, and whether its Claude runs under an account profile.
 pub fn thread_skill_facts(st: &State, thread: &str) -> (String, String, bool) {
     let Some(t) = st.threads.get(thread) else { return (String::new(), String::new(), false) };
-    let cwd = if !t.worktree.is_empty() { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() };
+    let cwd = if !t.worktree.is_empty() && st.settings.get(&format!("kicad.main.{thread}")).is_none_or(|s| s != "on") { t.worktree.clone() } else { st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default() };
     let bound = st.settings.get(&format!("account.thread.{thread}.{}", t.provider)).map_or(false, |r| serde_json::from_str::<Value>(r).ok().map_or(true, |j| !j["id"].as_str().unwrap_or("").is_empty()));
     (cwd, t.provider.clone(), bound)
 }
@@ -80,7 +80,9 @@ pub fn about(st: &State, id: &str, plain: String) -> String { st.settings.get(&f
 pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
     if token(draft).starts_with('$') {
         let (cwd, provider, isolated) = thread_skill_facts(st, here);
-        return crate::agents::skills::rows(&crate::agents::skills::popup_index(&cwd), token(draft), &provider, isolated);
+        let model = st.threads.get(here).map(|t| t.model.as_str()).unwrap_or("");
+        let skills = crate::agents::skills::for_model(&crate::agents::skills::popup_index(&cwd), &provider, model);
+        return crate::agents::skills::rows(&skills, token(draft), &provider, isolated);
     }
     let Some((sig, q)) = typing(token(draft)) else { return vec![] };
     let ms = machines();
@@ -97,6 +99,7 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("~{s}"), about: format!("machine · {}", if m.away { "away" } else { "here" }), score: sc + if m.away { 0 } else { 5 }, same: false, at: 0 }) }
         },
         '>' if on.is_some() => for (id, t) in &on.unwrap().threads {
+            if crate::state::is_mail_run_id(id) { continue }
             let s = slug(t); let sc = score(&s, t, &q);
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!(">{s}"), about: format!("thread · {}", on.unwrap().name), score: sc, same: false, at: id.len() as u64 }) }
         },
@@ -105,7 +108,7 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("%{s}"), about: format!("project · {}", on.unwrap().name), score: sc, same: false, at: 0 }) }
         },
         '>' => {
-            let live: Vec<(&String, &crate::state::Thread)> = st.threads.iter().filter(|(i, t)| !t.deleted && i.as_str() != here && !t.title.trim().is_empty()).collect();
+            let live: Vec<(&String, &crate::state::Thread)> = st.threads.iter().filter(|(i, t)| !t.deleted && !st.run_hidden(i) && i.as_str() != here && !t.title.trim().is_empty()).collect();
             let mut seen: std::collections::HashMap<String, usize> = Default::default();
             for (_, t) in &live { *seen.entry(slug(&t.title)).or_default() += 1 }
             for (id, t) in live {
@@ -147,11 +150,57 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
 /// The words of a text that start with a sigil, its punctuation off, each once, in order.
 fn sigil_words(text: &str) -> Vec<String> {
     let mut out: Vec<String> = vec![];
-    for w in text.split(|c: char| c.is_whitespace()) {
-        let w = w.trim_start_matches(|c| matches!(c, '(' | '[' | '"' | '\'' | '`')).trim_end_matches(|c| matches!(c, '.' | ',' | ':' | ';' | '!' | '?' | ')' | ']' | '"' | '\'' | '`'));
+    for raw in text.split(|c: char| c.is_whitespace()) {
+        let mut w = raw.trim_start_matches(|c| matches!(c, '(' | '[' | '"' | '\'' | '`'));
+        loop {
+            let trimmed = w.trim_end_matches(|c| matches!(c, '.' | ',' | ':' | ';' | '!' | '?' | ')' | '"' | '\'' | '`'));
+            if trimmed.len() < w.len() { w = trimmed; continue }
+            if w.ends_with(']') && w.bytes().filter(|&b| b == b']').count() > w.bytes().filter(|&b| b == b'[').count() {
+                w = &w[..w.len() - 1];
+                continue;
+            }
+            break;
+        }
         if w.len() > 1 && matches!(w.chars().next(), Some('@' | '>' | '%' | '#' | '&' | '~')) && !out.iter().any(|x| x == w) { out.push(w.to_string()) }
     }
     out
+}
+
+fn resolve_model(all: &Value, rest: &str) -> Option<String> {
+    let (pr, m) = rest.split_once('/')?;
+    let rows = all[pr].as_array()?;
+    let r = rows.iter().find(|r| r["value"].as_str() == Some(m))?;
+    let raw = r["label"].as_str().unwrap_or(m);
+    let short = raw.split(" · ").next().map(str::trim).filter(|s| !s.is_empty()).unwrap_or(raw);
+    Some(short.to_string())
+}
+
+/// Parses the hub's current models catalog (`MODELS`) once as a JSON `Value`.
+pub fn models_catalog() -> Value {
+    let raw = MODELS.get().map(|f| f()).unwrap_or_default();
+    serde_json::from_str(&raw).unwrap_or(Value::Null)
+}
+
+/// Resolved `&provider/model` references in `text`, in order, each once, against a pre-parsed `models` catalog.
+pub fn model_refs_in_catalog(text: &str, all: &Value) -> Vec<Value> {
+    let words = sigil_words(text);
+    if !words.iter().any(|w| w.starts_with('&')) { return vec![] }
+    words.into_iter().filter(|w| w.starts_with('&')).filter_map(|w| {
+        resolve_model(all, &w[1..]).map(|label| json!({"word": w, "kind": "model", "id": "", "label": label}))
+    }).collect()
+}
+
+/// Resolved `&provider/model` references in `text`, in order, each once, against `models_json` (`{provider: [{value, label, ..}]}`).
+pub fn model_refs_in_with(text: &str, models_json: &str) -> Vec<Value> {
+    if !text.contains('&') { return vec![] }
+    let all: Value = serde_json::from_str(models_json).unwrap_or(Value::Null);
+    model_refs_in_catalog(text, &all)
+}
+
+/// Resolved `&provider/model` references in `text`, in order, each once: `{word, kind: "model", id: "", label}`.
+pub fn model_refs_in(text: &str) -> Vec<Value> {
+    if !text.contains('&') { return vec![] }
+    model_refs_in_catalog(text, &models_catalog())
 }
 
 /// What a `/give` names: `(sigil, id, name)` for each `>thread`, `%project` and `@bot` the text points at, each once, in order. Lists are `(id, title)`; a slug two threads share takes the id's tail, as the popup writes it.
@@ -195,7 +244,7 @@ pub fn refs_in(st: &State, hub: &str, text: &str) -> Vec<Value> {
                     !s.is_empty() && (rest == s || (n > 1 && rest == format!("{s}-{}", id.rsplit('-').next().unwrap_or("")))) }).map(|(id, t)| ("thread", q(id), t.title.clone())),
             '%' => st.projects.iter().filter(|(_, p)| !p.removed).find(|(_, p)| slug(&p.title) == rest.to_ascii_lowercase()).map(|(id, p)| ("project", q(id), p.title.clone())),
             '#' => st.rooms_nav.iter().find(|(_, r)| !r.ephemeral && slug(&r.name) == rest.to_ascii_lowercase()).map(|(id, r)| ("room", q(id), r.name.clone())),
-            _ => rest.split_once('/').and_then(|(pr, m)| all[pr].as_array().and_then(|rows| rows.iter().find(|r| r["value"].as_str() == Some(m))).map(|r| ("model", String::new(), r["label"].as_str().unwrap_or(m).to_string()))),
+            _ => resolve_model(&all, rest).map(|label| ("model", String::new(), label)),
         } };
         if let Some((kind, id, label)) = hit { out.push(json!({"word": w, "kind": kind, "id": id, "label": label})) }
     }
@@ -255,6 +304,15 @@ mod tests {
         assert_eq!(words("&son"), ["&claude/sonnet", "&claude/claude-sonnet-5", "&claude/claude-sonnet-4-6"]);
         assert_eq!(words("&")[..3], ["&claude/opus", "&claude/claude-fable-5-2", "&claude/sonnet"]);
         assert!(rows(&st, "t", "&").last().unwrap()["desc"].as_str().unwrap().contains("not usable"));
+        let r = refs_in(&st, "h", "use [&claude/opus] and &provider/model.");
+        let got: Vec<(&str, &str, &str)> = r.iter().map(|x| (x["word"].as_str().unwrap(), x["kind"].as_str().unwrap(), x["label"].as_str().unwrap())).collect();
+        assert_eq!(got, [("&claude/opus", "model", "Opus 5.5")]);
+        let cat = r#"{"claude":[{"value":"claude-fable-5-2[1m]","label":"Fable 5.2 · claude-fable-5-2","ok":true},{"value":"sonnet","label":"Sonnet 5.5 · claude-sonnet-5-5","ok":true}]}"#;
+        assert_eq!(model_refs_in_with("see &claude/claude-fable-5-2[1m], [&claude/sonnet] and &provider/model", cat), vec![
+            json!({"word": "&claude/claude-fable-5-2[1m]", "kind": "model", "id": "", "label": "Fable 5.2"}),
+            json!({"word": "&claude/sonnet", "kind": "model", "id": "", "label": "Sonnet 5.5"}),
+        ]);
+        assert!(model_refs_in_with("see &provider/model", cat).is_empty());
     }
     #[test] fn threads_and_projects_are_offered_best_match_first() {
         let mut st = State::new();

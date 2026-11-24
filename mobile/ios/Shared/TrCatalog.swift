@@ -469,6 +469,36 @@ hub.acct.claude.cli.login	Claude CLI login	Claude CLI ログイン	Sesión de Cl
 hub.acct.codex.cli.login	Codex CLI login	Codex CLI ログイン	Sesión de Codex CLI
 hub.acct.fable.weekly	Fable weekly	Fable 週間	Semanal Fable
 ios.acct.also	Also added as {names}: the same account, counted once	{names} としても追加済み：同じアカウントとして一度だけ数えます	También añadida como {names}: la misma cuenta, contada una vez
+ios.clone.mode	Clone from git	Gitからクローン	Clonar desde git
+ios.clone.repo.hint	https or ssh URL, or owner/repo	https または ssh の URL、または owner/repo	URL https o ssh, o owner/repo
+ios.clone.signin	Sign in to GitHub	GitHub にサインイン	Iniciar sesión en GitHub
+ios.clone.change	Change folder	フォルダを変更	Cambiar carpeta
+ios.clone.name	Folder name	フォルダ名	Nombre de la carpeta
+ios.clone.thread	Start a thread	スレッドを始める	Empezar un hilo
+ios.clone.go	Clone	クローン	Clonar
+ios.clone.into	Into {dest}	保存先：{dest}	En {dest}
+ios.clone.same	That folder is a clone of it already: it is added as it is.	そのフォルダはすでにこのリポジトリのクローンです。そのまま追加します。	Esa carpeta ya es un clon: se añade tal cual.
+ios.clone.title	Cloning {repo}	{repo} をクローン中	Clonando {repo}
+ios.clone.cloned	Cloned {repo}	{repo} をクローンしました	{repo} clonado
+ios.clone.cancelled	Cancelled	キャンセルしました	Cancelado
+ios.clone.code	Enter this code at {url}	このコードを {url} で入力してください	Introduce este código en {url}
+ios.clone.signin.starting	Starting the sign-in…	サインインを開始中…	Iniciando la sesión…
+ios.clone.signin.done	Signed in to GitHub.	GitHub にサインインしました。	Sesión iniciada en GitHub.
+ios.clone.signin.open	Open the page	ページを開く	Abrir la página
+ios.clone.loading	Reading your repositories…	リポジトリを読み込み中…	Leyendo tus repositorios…
+mobile.tab.inbox	Inbox	受信トレイ	Bandeja
+mobile.tab.crew	Crew	クルー	Equipo
+mobile.tab.bench	Bench	ベンチ	Banco
+mobile.inbox.clear	All clear	対応待ちなし	Todo en orden
+mobile.inbox.clear.note	Nothing needs you and nothing is running.	対応待ちも実行中のものもありません。	Nada te necesita y nada está en marcha.
+mobile.inbox.talk.bub	Talk to Bub	Bubと話す	Hablar con Bub
+mobile.inbox.jump.in	Jump back in	最近開いたプロジェクト	Volver a entrar
+mobile.inbox.open.bench	Open Bench	ベンチを開く	Abrir el banco
+mobile.badge.pcb	PCB	PCB	PCB
+mobile.pill.waiting	Waiting	待機中	En espera
+mobile.snooze.wakes	Wakes in {time}	{time}後に再開	Vuelve en {time}
+mobile.bench.all	All projects	すべてのプロジェクト	Todos los proyectos
+mobile.snooze.for	Snooze for	スヌーズする期間	Posponer
 common.cancel	Cancel	キャンセル	Cancelar
 common.delete	Delete	削除	Eliminar
 common.save	Save	保存	Guardar
@@ -687,6 +717,13 @@ apierr.say	{kind, select, overloaded {Claude's API was overloaded} rate {Claude'
 apierr.details	details	詳細	detalles
 restart.continuing	Continuing after the restart	再起動のあと続けています	Continuando tras el reinicio
 restart.told	what it was told	伝えた内容	lo que se le dijo
+restart.interrupted	Interrupted by a restart at {clock}, picking up again	{clock}に再起動で中断、続きから再開します	Interrumpido por un reinicio a las {clock}; se retoma
+restart.interrupted.plain	Interrupted by a restart, picking up again	再起動で中断、続きから再開します	Interrumpido por un reinicio; se retoma
+hub.restarting	Restarting Backplane…	Backplaneを再起動しています…	Reiniciando Backplane…
+hub.restarting.build	Restarting Backplane… (new build {build})	Backplaneを再起動しています…（新しいビルド {build}）	Reiniciando Backplane… (nueva compilación {build})
+hub.stopped	Backplane stopped	Backplaneは停止しました	Backplane se detuvo
+hub.back.crash	Backplane is back after it stopped unexpectedly	予期せず停止したBackplaneが戻りました	Backplane volvió tras detenerse de forma inesperada
+hub.watcher.missing	Auto-update watcher not running: new builds will not reach this app	自動更新の監視が動いていません：新しいビルドはこのアプリに届きません	El vigilante de actualizaciones no está en marcha: las compilaciones nuevas no llegarán a esta app
 bots.tab.chat	Chat	チャット	Chat
 bots.tab.space	Space	スペース	Space
 bots.tab.browser	Browser	ブラウザ	Navegador
@@ -1814,6 +1851,35 @@ settings.settle.personal.note	Read, completed personal conversations settle afte
 gpui.settings.more	… {n} more	…ほか{n}件	… {n} más
 gpui.settings.textpct	{pct}% of the standard size.	標準の{pct}%です。	{pct}% del tamaño estándar.
 gpui.settings.px	{px} px.	{px} pxです。	{px} px.
+gpui.appupdate.hub	Hub: Backplane {version}	ハブ: Backplane {version}	Hub: Backplane {version}
+gpui.appupdate.label	This computer's app: {tag}	このコンピューターのアプリ: {tag}	La app de este ordenador: {tag}
+gpui.appupdate.label.mac	This Mac's app: {tag}	このMacのアプリ: {tag}	La app de este Mac: {tag}
+gpui.appupdate.differs	Differs from the hub ({hub}).	ハブ ({hub}) とバージョンが異なります。	Difiere del hub ({hub}).
+gpui.appupdate.off	Updates are off on this computer.	このコンピューターでは更新がオフです。	Las actualizaciones están desactivadas en este ordenador.
+gpui.appupdate.guard	Updated by this computer's own hub.	このコンピューターのハブが更新します。	La actualiza el hub de este mismo ordenador.
+gpui.appupdate.checking	Checking for updates.	更新を確認しています。	Buscando actualizaciones.
+gpui.appupdate.downloading	Downloading {tag}.	{tag}をダウンロードしています。	Descargando {tag}.
+gpui.appupdate.ready	{tag} is ready: used the next time Backplane opens.	{tag}の準備ができました。次にBackplaneを開いたときに使われます。	{tag} está lista: se usará la próxima vez que se abra Backplane.
+gpui.appupdate.failed	The last check failed.	前回の確認に失敗しました。	La última comprobación falló.
+gpui.appupdate.err.network	Could not reach the release feed.	リリースフィードに接続できませんでした。	No se pudo conectar al feed de versiones.
+gpui.appupdate.err.platform	No build is available for this platform.	このプラットフォーム向けのビルドはありません。	No hay ninguna compilación disponible para esta plataforma.
+gpui.appupdate.err.verify	Update verification failed.	更新の検証に失敗しました。	Falló la verificación de la actualización.
+gpui.appupdate.err.package	The downloaded update package could not be installed.	ダウンロードした更新パッケージをインストールできませんでした。	No se pudo instalar el paquete de actualización descargado.
+gpui.appupdate.closeothers	Close other Backplane windows first to update.	更新するには、他のBackplaneウィンドウを先に閉じてください。	Cierra las demás ventanas de Backplane primero para actualizar.
+gpui.appupdate.idle	Up to date, checked {when}.	最新です。{when}に確認しました。	Al día, comprobado a las {when}.
+gpui.appupdate.never	Not checked yet.	まだ確認していません。	Aún no se ha comprobado.
+gpui.appupdate.updated	Updated to {tag}.	{tag}に更新しました。	Actualizada a {tag}.
+gpui.appupdate.updated.when	Updated to {tag}. Up to date, checked {when}.	{tag}に更新しました。最新です。{when}に確認しました。	Actualizada a {tag}. Al día, comprobado a las {when}.
+gpui.appupdate.stayed	{tag} did not start, so this build stayed.	{tag}が起動しなかったため、このビルドのままです。	{tag} no arrancó, así que se mantuvo esta versión.
+gpui.appupdate.stayed.when	{tag} did not start, so this build stayed. Checked {when}.	{tag}が起動しなかったため、このビルドのままです。{when}に確認しました。	{tag} no arrancó, así que se mantuvo esta versión. Comprobado a las {when}.
+gpui.appupdate.local	Updated with this computer's hub.	このコンピューターのハブと一緒に更新されます。	Se actualiza con el hub de este ordenador.
+gpui.appupdate.package	Updated by its package.	パッケージで更新されます。	Se actualiza con su paquete.
+gpui.appupdate.restart	Restart to update	再起動して更新	Reiniciar para actualizar
+gpui.appupdate.samehub	Same as the hub ({channel})	ハブと同じ ({channel})	Igual que el hub ({channel})
+gpui.appnotice.ready	Backplane {tag} is ready.	Backplane {tag}の準備ができました。	Backplane {tag} está lista.
+gpui.appnotice.appbehind	This app is {app}; the hub runs {hub}.	このアプリは{app}、ハブは{hub}です。	Esta app es la {app}; el hub ejecuta la {hub}.
+gpui.appnotice.hubbehind	The hub runs {hub}, older than this app ({app}).	ハブは{hub}で、このアプリ ({app}) より古いです。	El hub ejecuta la {hub}, más antigua que esta app ({app}).
+gpui.appnotice.checkhub	Check the hub	ハブを確認	Comprobar el hub
 gpui.keys.fixed	{key}. Fixed.	{key}。固定です。	{key}. Fijo.
 gpui.keys.now	Now {key}. Press to take the next key.	現在は{key}。押すと次のキーに変わります。	Ahora {key}. Pulsa para tomar la siguiente tecla.
 gpui.keys.notyet	Not yet: {why}.	未対応: {why}。	Aún no: {why}.
@@ -1946,6 +2012,25 @@ gpui.paste.the.address.the.browser	Paste the address the browser landed on.	ブ�
 gpui.paste.the.address.the.browser2	Paste the address the browser landed on	ブラウザーが開いたアドレスを貼り付け	Pega la dirección en la que aterrizó el navegador
 gpui.confirm.remove	Confirm remove	削除を確定	Confirmar quitar
 gpui.submit	Submit	送信	Enviar
+gpui.paste.a.pairing.link.pair	Paste a pairing link (…/pair#invite=…)	ペアリングリンクを貼り付け (…/pair#invite=…)	Pega un enlace de vinculación (…/pair#invite=…)
+gpui.hub.address.e.g.https	Hub address, e.g. https://desktop.tail9e0cf2.ts.net:8451	ハブのアドレス（例: https://desktop.tail9e0cf2.ts.net:8451）	Dirección del hub, p. ej. https://desktop.tail9e0cf2.ts.net:8451
+gpui.on.the.hub.s.machine	On the hub's machine: Settings → Devices → Add a device, then paste its link here.	ハブのマシンで: 設定 → デバイス → デバイスを追加、そのリンクをここに貼り付けます。	En la máquina del hub: Ajustes → Dispositivos → Añadir un dispositivo, y pega aquí su enlace.
+gpui.select.all	Select all	すべて選択	Seleccionar todo
+home.away	Home ({name}) is away	ホーム（{name}）はオフラインです	El inicio ({name}) no está disponible
+home.away.since	Home ({name}) is away since {time}	ホーム（{name}）は {time} からオフラインです	El inicio ({name}) no está disponible desde las {time}
+home.away.queued	Home ({name}) is away · {n} queued	ホーム（{name}）はオフラインです · {n} 件待機中	El inicio ({name}) no está disponible · {n} en cola
+home.away.since.queued	Home ({name}) is away since {time} · {n} queued	ホーム（{name}）は {time} からオフラインです · {n} 件待機中	El inicio ({name}) no está disponible desde las {time} · {n} en cola
+home.moving	Moving home to {to}…	ホームを {to} へ移動中…	Moviendo el inicio a {to}…
+home.moving.step	Moving home to {to}: {step}	ホームを {to} へ移動中: {step}	Moviendo el inicio a {to}: {step}
+home.move.failed	Home move failed	ホームの移動に失敗しました	No se pudo mover el inicio
+home.move.failed.note	Home move failed: {note}	ホームの移動に失敗しました: {note}	No se pudo mover el inicio: {note}
+home.machine	Home machine	ホームマシン	Máquina de inicio
+home.move.here	Make this machine the home	このマシンをホームにする	Hacer de esta máquina el inicio
+gpui.settings.group.general	General	一般	General
+gpui.settings.group.agents	Agents and tools	エージェントとツール	Agentes y herramientas
+gpui.settings.group.workspace	Workspace	ワークスペース	Espacio de trabajo
+gpui.settings.web.ui	Web UI	Web UI	Interfaz web
+gpui.settings.shared.files	Shared files	共有ファイル	Archivos compartidos
 gpui.imp.could.not.keep.this.draft	Could not keep this draft on this device. Retry.	この下書きをこの端末に保存できませんでした。再試行してください。	No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change	Describe the change…	変更内容を書いてください…	Describe el cambio…
 gpui.imp.describe.the.behavior.in.detail	Describe the behavior in detail: what you did and what you saw.	操作した内容と、そのとき見えたことを詳しく書いてください。	Describe el comportamiento en detalle: qué hiciste y qué viste.
@@ -2337,6 +2422,17 @@ gpui.show.all	Show All	すべてを表示	Mostrar todo
 gpui.close.window	Close Window	ウインドウを閉じる	Cerrar ventana
 gpui.close.the.window.on.a	Close the window, on a Mac: the hub keeps running	ウインドウを閉じる（Mac）：ハブは動き続けます	Cerrar la ventana, en Mac: el hub sigue ejecutándose
 gpui.hide.backplane.on.a.mac	Hide Backplane, on a Mac: KiCad's editor hides with it and comes back with it	Backplane を隠す（Mac）：KiCad のエディタも一緒に隠れ、一緒に戻ります	Ocultar Backplane, en Mac: el editor de KiCad se oculta con él y vuelve con él
+gpui.dl.percent	{name} · {pct}%	{name} · {pct}%	{name} · {pct}%
+gpui.dl.mb	{name} · {mb} MB	{name} · {mb} MB	{name} · {mb} MB
+gpui.dl.saved	Saved {name}	{name} を保存しました	Guardado {name}
+gpui.dl.failed	{name}: download failed: {why}	{name}: ダウンロードに失敗しました: {why}	{name}: la descarga falló: {why}
+gpui.dl.manufacturing	Manufacturing	製造	Fabricación
+gpui.dl.the.download.ended.early	the download ended early	ダウンロードが途中で終わりました	la descarga terminó antes de tiempo
+gpui.dl.the.hub.closed.the.connection	the hub closed the connection	ハブが接続を閉じました	el hub cerró la conexión
+gpui.dl.that.file.is.not.there	that file is not there any more	そのファイルはもうありません	ese archivo ya no está
+gpui.dl.the.hub.does.not.share	the hub does not share that file	ハブはそのファイルを共有していません	el hub no comparte ese archivo
+gpui.dl.the.hub.kept.changing.the	the hub kept changing the file	ハブ上のファイルが変わり続けました	el archivo del hub no dejaba de cambiar
+gpui.dl.the.hub.sent.the.file	the hub sent the file in a form this client does not read	ハブがこのクライアントの読めない形式でファイルを送りました	el hub envió el archivo en una forma que este cliente no lee
 gpui.c.commit	Commit	コミット	Commit
 gpui.c.diff.cut	… the rest of the diff is not shown	… 差分の残りは表示されていません	… el resto del diff no se muestra
 gpui.c.loading.board	Loading the board…	基板を読み込み中…	Cargando la placa…
@@ -2519,9 +2615,20 @@ gpui.keys.kcomment	Comment on what is selected in KiCad, from Backplane or from 
 gpui.c.kicad.dialog	KiCad has “{title}” open	KiCad で「{title}」が開いています	KiCad tiene “{title}” abierto
 gpui.c.kicad.asking	KiCad is asking: {title}	KiCad からの確認: {title}	KiCad pregunta: {title}
 gpui.kicad.update.installed	Backplane KiCad {version} is installed: reopen KiCad on it (your unsaved changes are kept until you save or close)	Backplane KiCad {version} をインストールしました。KiCad を開き直すと新しい版になります（未保存の変更は保存か閉じるまで残ります）	Backplane KiCad {version} está instalado: vuelve a abrir KiCad con él (tus cambios sin guardar se conservan hasta que guardes o cierres)
+gpui.kicad.update.missing	KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}, with no administrator password.	KiCad がインストールされていません。Backplane KiCad {version}（{size}）を {folder} に入れます。管理者のパスワードは要りません。	KiCad no está instalado. Backplane KiCad {version} ({size}) se instala en {folder}, sin contraseña de administrador.
+gpui.kicad.update.missing.admin	KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}.	KiCad がインストールされていません。Backplane KiCad {version}（{size}）を {folder} に入れます。	KiCad no está instalado. Backplane KiCad {version} ({size}) se instala en {folder}.
+gpui.kicad.update.install	Install KiCad	KiCad をインストール	Instalar KiCad
+gpui.kicad.update.set.path	Set a path…	パスを設定…	Indicar una ruta…
+gpui.c.kicad.missing.row	Install KiCad above to edit here, or set the path of a KiCad you have.	ここで編集するには上で KiCad をインストールするか、お持ちの KiCad のパスを設定してください。	Instala KiCad arriba para editar aquí, o indica la ruta de un KiCad que tengas.
+gpui.c.kicad.missing.edit	KiCad isn't installed. Press Edit to install it here.	KiCad がインストールされていません。編集を押すとここにインストールできます。	KiCad no está instalado. Pulsa Editar para instalarlo aquí.
 gpui.c.kicad.full.screen	Full screen	全画面	Pantalla completa
 gpui.c.kicad.exit.full.screen	Exit full screen	全画面を終了	Salir de pantalla completa
 gpui.c.kicad.the.editor.takes.the.whole	The editor takes the whole window; only this row stays	エディタがウィンドウ全体を使います。この行だけが残ります	El editor ocupa toda la ventana; solo queda esta fila
+gpui.c.kicad.closing	KiCad is closing. The editor opens again once it has closed.	KiCad を閉じています。閉じ終わるとエディタがもう一度開きます。	KiCad se está cerrando. El editor vuelve a abrirse cuando termine de cerrarse.
+gpui.c.kicad.closing.ask	KiCad is waiting for an answer before it closes: "{title}". Its window may be behind another one.	KiCad は閉じる前に応答を待っています:「{title}」。そのウィンドウが別のウィンドウの後ろにあるかもしれません。	KiCad espera una respuesta antes de cerrarse: «{title}». Su ventana puede estar detrás de otra.
+gpui.c.solid.load.big	Load it anyway	それでも読み込む	Cargarlo de todos modos
+gpui.c.solid.loading.big	Loading it anyway…	それでも読み込み中…	Cargándolo de todos modos…
+gpui.c.solid.big.next	Loading it may take a while and a lot of memory.	読み込みには時間と多くのメモリがかかることがあります。	Cargarlo puede tardar y usar mucha memoria.
 gpui.assets.missing	Assets missing in {dir}: {files}	{dir} にアセットがありません: {files}	Faltan recursos en {dir}: {files}
 gpui.connecting	Connecting…	接続中…	Conectando…
 gpui.connected	Connected	接続済み	Conectado
@@ -2656,6 +2763,9 @@ gpui.no.models	No models	モデルがありません	Sin modelos
 gpui.picker.more	{n} more: search to find them	ほか{n}件: 検索して探してください	{n} más: busca para encontrarlos
 gpui.picker.speed	Speed	速度	Velocidad
 gpui.picker.speed.normal.only	{model} runs at Normal speed only	{model}は標準の速度でのみ動きます	{model} solo funciona a velocidad Normal
+gpui.picker.favorites	Favorites	お気に入り	Favoritos
+gpui.picker.favorite.add	Add to favorites	お気に入りに追加	Añadir a favoritos
+gpui.picker.favorite.remove	Remove from favorites	お気に入りから外す	Quitar de favoritos
 gpui.speed.normal	Normal	標準	Normal
 gpui.speed.fast	Fast	高速	Rápido
 gpui.speed.ultrafast	UltraFast	超高速	Ultrarrápido
@@ -4196,6 +4306,45 @@ android.copy.run	Run in terminal	ターミナルで実行	Ejecutar en la termina
 android.copy.fullscreen	The terminal is running a full-screen program: quit it, then try again.	ターミナルで全画面のプログラムが動いています。終了してからもう一度お試しください。	La terminal está ejecutando un programa a pantalla completa: ciérralo y vuelve a intentarlo.
 android.term.chat.old	This hub has no terminal for chats yet. Update it to use one here.	このハブにはまだチャットのターミナルがありません。使うにはハブを更新してください。	Este hub aún no tiene terminal para los chats. Actualízalo para usarla aquí.
 android.browser.head	BROWSER	ブラウザー	NAVEGADOR
+android.clone.mode.folder	Open folder	フォルダを開く	Abrir carpeta
+android.clone.mode.git	Clone from git	Git からクローン	Clonar desde git
+android.clone.repo.hint	https or ssh URL, or owner/repo	https または ssh の URL、または owner/repo	URL https o ssh, o propietario/repo
+android.clone.private	private	非公開	privado
+android.clone.signin	Sign in to GitHub	GitHub にサインイン	Iniciar sesión en GitHub
+android.clone.into	Clone into	クローン先	Clonar en
+android.clone.folder.change	Change folder	フォルダを変更	Cambiar carpeta
+android.clone.folder.use	Clone into this folder	このフォルダにクローン	Clonar en esta carpeta
+android.clone.name.hint	Folder name	フォルダ名	Nombre de la carpeta
+android.clone.thread	Start a thread	スレッドを開始	Iniciar un hilo
+android.clone.go	Clone	クローン	Clonar
+android.clone.same	That folder is already a clone of this repository: it's added as it is.	そのフォルダはすでにこのリポジトリのクローンです。そのまま追加します。	Esa carpeta ya es un clon de este repositorio: se añade tal cual.
+android.clone.retry	Try again	もう一度試す	Reintentar
+android.clone.loading	Reading your repositories…	リポジトリを読み込んでいます…	Leyendo tus repositorios…
+android.clone.signin.code	Enter this code on GitHub's sign-in page:	GitHub のサインインページでこのコードを入力してください:	Escribe este código en la página de inicio de sesión de GitHub:
+android.clone.signin.wait	Starting the sign-in…	サインインを開始しています…	Iniciando el inicio de sesión…
+android.clone.signin.done	Signed in to GitHub.	GitHub にサインインしました。	Sesión iniciada en GitHub.
+android.clone.signin.failed	The GitHub sign-in didn't finish.	GitHub へのサインインが完了しませんでした。	El inicio de sesión en GitHub no terminó.
+android.clone.hint.nogh	Install the GitHub CLI (gh) on this machine to see your GitHub repositories here.	このマシンに GitHub CLI (gh) をインストールすると、ここに GitHub のリポジトリが表示されます。	Instala la CLI de GitHub (gh) en esta máquina para ver aquí tus repositorios de GitHub.
+android.clone.hint.signedout	Sign in to GitHub to see your repositories here.	GitHub にサインインすると、ここにリポジトリが表示されます。	Inicia sesión en GitHub para ver aquí tus repositorios.
+android.clone.hint.error	Couldn't list your GitHub repositories.	GitHub のリポジトリを一覧できませんでした。	No se pudieron listar tus repositorios de GitHub.
+android.clone.phase.starting	Starting	開始中	Iniciando
+android.clone.phase.connecting	Connecting	接続中	Conectando
+android.clone.phase.counting	Counting objects	オブジェクトを数えています	Contando objetos
+android.clone.phase.compressing	Compressing objects	オブジェクトを圧縮しています	Comprimiendo objetos
+android.clone.phase.receiving	Receiving objects	オブジェクトを受信しています	Recibiendo objetos
+android.clone.phase.resolving	Resolving deltas	差分を解決しています	Resolviendo deltas
+android.clone.phase.updating	Updating files	ファイルを更新しています	Actualizando archivos
+android.clone.phase.lfs	Downloading large files (LFS)	大きなファイル (LFS) をダウンロードしています	Descargando archivos grandes (LFS)
+android.clone.phase.adding	Adding the project	プロジェクトを追加しています	Añadiendo el proyecto
+android.clone.phase.cancelled	Cancelled	キャンセルしました	Cancelado
+android.clone.busy	{path} already exists and isn't empty. Pick another folder or name.	{path} はすでにあり、空ではありません。別のフォルダか名前を選んでください。	{path} ya existe y no está vacía. Elige otra carpeta u otro nombre.
+android.clone.file	{path} is a file. Pick another folder or name.	{path} はファイルです。別のフォルダか名前を選んでください。	{path} es un archivo. Elige otra carpeta u otro nombre.
+android.download.saved	Saved to Downloads	ダウンロードに保存しました	Guardado en Descargas
+android.download.of	{have} of {total}	{have} / {total}	{have} de {total}
+android.download.share	Share	共有	Compartir
+android.download.retry	Retry	再試行	Reintentar
+android.download.noapp	No app here opens that file.	このファイルを開けるアプリがありません。	Ninguna app aquí abre ese archivo.
+android.download.button	Download	ダウンロード	Descargar
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
@@ -4231,6 +4380,31 @@ gpui.picker.key.complete	complete	補完	completar
 gpui.picker.key.open	open project	プロジェクトを開く	abrir proyecto
 gpui.picker.added	added	追加済み	añadido
 gpui.picker.more.typed	{n} more: type to filter	ほか{n}件: 入力して絞り込む	{n} más: escribe para filtrar
+gpui.clone.tab	Clone from git	Gitからクローン	Clonar desde git
+gpui.clone.change	Change	変更	Cambiar
+gpui.clone.thread	Start a thread in it	スレッドを始める	Empezar un hilo en él
+gpui.clone.retry	Try again	もう一度	Reintentar
+gpui.clone.signin	Sign in to GitHub	GitHubにサインイン	Iniciar sesión en GitHub
+gpui.clone.back	Back	戻る	Atrás
+gpui.clone.open.thread	Open the thread	スレッドを開く	Abrir el hilo
+gpui.clone.open.project	Open the project	プロジェクトを開く	Abrir el proyecto
+gpui.clone.private	private	非公開	privado
+gpui.clone.loading	Loading your GitHub repositories…	GitHubのリポジトリを読み込み中…	Cargando tus repositorios de GitHub…
+gpui.clone.signin.list	Sign in to GitHub to see your repositories here	GitHubにサインインするとリポジトリがここに出ます	Inicia sesión en GitHub para ver aquí tus repositorios
+gpui.clone.signin.code	Sign in to GitHub: enter this code at the address below, on any device.	GitHubにサインイン: どの端末からでも、下のアドレスでこのコードを入力してください。	Inicia sesión en GitHub: introduce este código en la dirección de abajo, desde cualquier dispositivo.
+gpui.clone.signin.asking	Asking GitHub for a sign-in code…	GitHubにサインインコードを求めています…	Pidiendo a GitHub un código de inicio de sesión…
+gpui.clone.signin.done	Signed in to GitHub. Try again.	GitHubにサインインしました。もう一度お試しください。	Sesión iniciada en GitHub. Reinténtalo.
+gpui.clone.cancel	Cancel	キャンセル	Cancelar
+gpui.picker.key.pick	pick	選ぶ	elegir
+gpui.clone.phase.connecting	Connecting	接続中	Conectando
+gpui.clone.phase.receiving	Receiving objects	オブジェクトを受信中	Recibiendo objetos
+gpui.clone.phase.resolving	Resolving deltas	差分を解決中	Resolviendo deltas
+gpui.clone.phase.updating	Updating files	ファイルを更新中	Actualizando archivos
+gpui.clone.phase.counting	Counting objects	オブジェクトを数えています	Contando objetos
+gpui.clone.phase.compressing	Compressing objects	オブジェクトを圧縮中	Comprimiendo objetos
+gpui.clone.phase.lfs	Downloading large files (LFS)	大きなファイルをダウンロード中 (LFS)	Descargando archivos grandes (LFS)
+gpui.clone.phase.adding	Adding the project	プロジェクトを追加中	Añadiendo el proyecto
+gpui.clone.phase.starting	Starting	開始中	Empezando
 gpui.assembly	Assembly	アセンブリ	Ensamblaje
 gpui.mech	Mech	機構	Mech
 gpui.readme	README	README	README
@@ -4574,6 +4748,191 @@ viewer.layout.refusal.unknownframe	Unknown KiCad frame	不明な KiCad フレー
 viewer.layout.refusal.invalidinput	Invalid layout request	無効なレイアウト要求です	Solicitud de diseño no válida
 viewer.layout.refusal.toomany	Too many tiles open	タイルが多すぎます	Demasiados mosaicos abiertos
 viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウトのソースが多すぎます	Demasiadas fuentes en un diseño
+viewer.layout.refusal.unresolvedversion	That version is not in this project's history	このバージョンはこのプロジェクトの履歴にありません	Esa versión no está en el historial de este proyecto
+viewer.layout.refusal.nohistory	This page has no history	このページには履歴がありません	Esta página no tiene historial
+viewer.layout.refusal.linked	That layout is shown on its own machine only for now.	そのレイアウトは今のところ元のマシンでのみ表示されます。	Ese diseño solo se muestra por ahora en su propia máquina.
+viewer.layout.refusal.notondevice	That cannot be a tile here.	ここではタイルにできません。	Eso no puede ser un mosaico aquí.
+viewer.layout.refusal.starting	The hub is starting.	ハブを起動しています。	El hub se está iniciando.
+viewer.footprinteditor	Footprint Editor	フットプリントエディター	Editor de huellas
+viewer.symboleditor	Symbol Editor	シンボルエディター	Editor de símbolos
+web.clone.tab	Clone from git	git からクローン	Clonar desde git
+web.clone.repo.placeholder	https or ssh URL, or owner/repo	https / ssh の URL、または owner/repo	URL https o ssh, o propietario/repositorio
+web.clone.private	private	非公開	privado
+web.clone.signin	Sign in to GitHub	GitHub にサインイン	Iniciar sesión en GitHub
+web.clone.signin.wait	Starting GitHub sign-in…	GitHub のサインインを開始しています…	Iniciando sesión en GitHub…
+web.clone.signin.enter	Enter this code on GitHub:	このコードを GitHub に入力してください:	Introduce este código en GitHub:
+web.clone.signin.done	Signed in to GitHub	GitHub にサインインしました	Sesión iniciada en GitHub
+web.clone.copied	Copied	コピーしました	Copiado
+web.clone.change.folder	Change folder	フォルダを変更	Cambiar carpeta
+web.clone.folder.name	Folder name	フォルダ名	Nombre de la carpeta
+web.clone.start.thread	Start a thread	スレッドを開始	Empezar un hilo
+web.clone.first	First message: {text}	最初のメッセージ: {text}	Primer mensaje: {text}
+web.clone.same	Already cloned there: it is added as it is.	すでにそこにクローンされています: そのまま追加します。	Ya está clonado ahí: se añade tal cual.
+web.clone.go	Clone	クローン	Clonar
+web.clone.cloning	Cloning {repo} into {dest}	{repo} を {dest} にクローン中	Clonando {repo} en {dest}
+web.clone.cloned	Cloned {repo} into {dest}	{repo} を {dest} にクローンしました	{repo} clonado en {dest}
+web.clone.stopped	Stopped cloning {repo}	{repo} のクローンを中止しました	Se detuvo la clonación de {repo}
+web.clone.retry	Try again	もう一度	Reintentar
+web.clone.back	Back	戻る	Atrás
+web.clone.open.thread	Open the thread	スレッドを開く	Abrir el hilo
+web.clone.open.project	Open the project	プロジェクトを開く	Abrir el proyecto
+web.clone.add.dir	Add {dir}	{dir} を追加	Añadir {dir}
+web.clone.use.dir	Use {dir}	{dir} を使う	Usar {dir}
+web.clone.up	Up	上へ	Subir
+web.clone.loading	Loading…	読み込み中…	Cargando…
+web.clone.no.folders	No folders here	フォルダがありません	No hay carpetas aquí
+gpui.c.kicad.opening	Opening the {editor}: {job}… {secs} s	{editor}を開いています: {job}… {secs} 秒	Abriendo el {editor}: {job}… {secs} s
+gpui.c.kicad.openingbare	Opening the {editor}… {secs} s	{editor}を開いています… {secs} 秒	Abriendo el {editor}… {secs} s
+gpui.c.kicad.openfailed	The {editor} did not open	{editor}が開きませんでした	El {editor} no se abrió
+viewer.tile.rail.add	Shift-click or middle-click to add beside the focused tile.	Shift＋クリックまたは中央クリックで、選択中のタイルの隣に追加します。	Mayús+clic o clic central para añadir junto al panel activo.
+viewer.tile.add	Add beside	隣に追加	Añadir al lado
+viewer.tile.maximize	Maximize tile	タイルを最大化	Maximizar panel
+viewer.tile.restore	Restore tile	タイルを元に戻す	Restaurar panel
+viewer.tile.focus	Focus tile	タイルを選択	Enfocar panel
+viewer.tile.embedded	Return to the viewer to add a tile beside this one.	隣にタイルを追加するにはビューアーに戻ってください。	Vuelve al visor para añadir un panel al lado.
+viewer.tile.simulation.single	Close the other tiles to open Simulation in KiCad.	ほかのタイルを閉じると、KiCad でシミュレーションを開けます。	Cierra los demás paneles para abrir Simulación en KiCad.
+viewer.tile.add.tip	Add beside…	隣に追加…	Añadir al lado…
+viewer.tile.left	Add on the left	左に追加	Añadir a la izquierda
+viewer.tile.right	Add on the right	右に追加	Añadir a la derecha
+viewer.tile.top	Add above	上に追加	Añadir arriba
+viewer.tile.bottom	Add below	下に追加	Añadir abajo
+web.pair.subtitle	Pair this browser with your hub. Approve the 6-digit code in Backplane › Settings › Devices.	このブラウザーをハブとペアリングします。Backplane › 設定 › デバイス で 6 桁のコードを承認してください。	Vincula este navegador con tu hub. Aprueba el código de 6 dígitos en Backplane › Ajustes › Dispositivos.
+web.pair.name	Browser name	ブラウザー名	Nombre del navegador
+web.pair.request	Request pairing	ペアリングをリクエスト	Solicitar vinculación
+web.pair.code	Comparison code	確認コード	Código de comparación
+web.pair.approve.in	Approve on desktop or paired phone · expires in {time}	デスクトップまたはペアリング済みの端末で承認してください · 有効期限 {time}	Aprueba en el escritorio o en un teléfono vinculado · caduca en {time}
+web.pair.expired	Pairing code expired. Request a new code to try again.	ペアリングコードの有効期限が切れました。新しいコードをリクエストしてください。	El código de vinculación caducó. Solicita uno nuevo para intentarlo otra vez.
+web.pair.approved	Approved. Opening Backplane…	承認されました。Backplane を開いています…	Aprobado. Abriendo Backplane…
+web.pair.denied	Pairing request was denied.	ペアリングのリクエストが拒否されました。	Se rechazó la solicitud de vinculación.
+web.pair.cancelled	Cancelled.	キャンセルしました。	Cancelado.
+web.pair.requesting	Requesting pairing code…	ペアリングコードをリクエストしています…	Solicitando código de vinculación…
+web.pair.failed	Pairing request failed ({status})	ペアリングのリクエストに失敗しました ({status})	Falló la solicitud de vinculación ({status})
+web.pair.ratelimited	Too many pairing attempts. Wait a moment and try again.	ペアリングの試行回数が多すぎます。しばらく待ってからやり直してください。	Demasiados intentos de vinculación. Espera un momento e inténtalo de nuevo.
+web.pair.nocode	Hub did not return a comparison code.	ハブから確認コードが返されませんでした。	El hub no devolvió un código de comparación.
+web.pair.unreachable	Could not reach the hub. Check your tailnet connection.	ハブに接続できませんでした。tailnet の接続を確認してください。	No se pudo conectar con el hub. Comprueba tu conexión de tailnet.
+web.chat.loading	Loading messages…	メッセージを読み込んでいます…	Cargando mensajes…
+web.chat.choose	Choose a project thread on the left to begin.	左側からプロジェクトのスレッドを選んで開始してください。	Elige un hilo de proyecto a la izquierda para empezar.
+web.chat.empty	No messages yet. Type below to start a turn.	まだメッセージはありません。下に入力して開始してください。	Aún no hay mensajes. Escribe abajo para iniciar un turno.
+web.chat.streaming	Streaming…	受信中…	Transmitiendo…
+web.chat.finished	Finished {time}	完了 {time}	Terminado {time}
+web.chat.finished.dur	Finished {time} · {dur}	完了 {time} · {dur}	Terminado {time} · {dur}
+web.chat.answer.placeholder	Type answer…	回答を入力…	Escribe una respuesta…
+web.chat.answer.btn	Answer	回答	Responder
+web.chat.answered	Answered: {answer}	回答済み: {answer}	Respondido: {answer}
+web.chat.review.mode	Review mode	レビューモード	Modo de revisión
+web.composer.attach	Attach image	画像を添付	Adjuntar imagen
+web.composer.voice	Voice dictation	音声入力	Dictado por voz
+web.composer.unsupported	Unsupported image type: {type}	未対応の画像形式です: {type}	Tipo de imagen no compatible: {type}
+web.composer.maximages	At most {max} images per message.	1 件のメッセージに添付できる画像は最大 {max} 枚です。	Como máximo {max} imágenes por mensaje.
+web.logout.failed	Could not confirm sign-out. Try again.	サインアウトを確認できませんでした。もう一度お試しください。	No se pudo confirmar el cierre de sesión. Inténtalo de nuevo.
+thread.context.title	Context & Prompt	コンテキストとプロンプト	Contexto e instrucciones
+thread.context.instructions	Instructions	指示	Instrucciones
+thread.context.system	System Prompt	システムプロンプト	Instrucciones del sistema
+thread.context.skills	Skills	スキル	Habilidades
+thread.context.mcp	Project MCPs	プロジェクトの MCP	MCP del proyecto
+thread.context.mcp.short	MCPs	MCP	MCP
+thread.context.reading	Reading thread context…	スレッドのコンテキストを読み込み中…	Leyendo el contexto del hilo…
+thread.context.none.instructions	No project instructions found.	プロジェクトの指示が見つかりません。	No se encontraron instrucciones del proyecto.
+thread.context.none.mcp	No project MCP configurations found.	プロジェクトの MCP 設定が見つかりません。	No se encontraron configuraciones MCP del proyecto.
+thread.context.native.note	Backplane’s launch prompt. Native files are loaded by the provider.	Backplane が起動時に渡すプロンプトです。ネイティブファイルはプロバイダーが読み込みます。	Instrucciones de inicio de Backplane. El proveedor carga los archivos nativos.
+thread.context.copy	Copy prompt	プロンプトをコピー	Copiar instrucciones
+thread.context.copied	Prompt copied.	プロンプトをコピーしました。	Se copiaron las instrucciones.
+thread.context.base	Backplane	Backplane	Backplane
+thread.context.injected.label	Injected project instructions	追加されたプロジェクトの指示	Instrucciones del proyecto añadidas
+thread.context.index	Available skills index	利用可能なスキルの一覧	Índice de habilidades disponibles
+thread.context.scope.user	User	ユーザー	Usuario
+thread.context.scope.bundled	Bundled	同梱	Incluidas
+thread.context.native	Native	ネイティブ	Nativo
+thread.context.injected	Injected	追加済み	Añadido
+thread.context.cross	Cross-provider	プロバイダー共通	Entre proveedores
+thread.context.explicit	Explicit invocation	明示的な呼び出し	Invocación explícita
+thread.context.untrusted	Untrusted	未承認	Sin aprobar
+thread.context.invalid	Invalid	無効	No válido
+thread.context.trust	Trust and enable	承認して有効にする	Confiar y activar
+thread.context.enable	Enable	有効にする	Activar
+thread.context.disable	Disable	無効にする	Desactivar
+thread.context.size	{bytes} B · ≈{tokens} tokens	{bytes} B・約{tokens}トークン	{bytes} B · ≈{tokens} tokens
+thread.context.unreachable	Could not reach the hub.	ハブに接続できませんでした。	No se pudo conectar con el hub.
+gpui.planmode.top.once	Plan (1 turn)	計画 (1回)	Plan (1 turno)
+gpui.planmode.top.planning	Planning	計画中	Planificando
+gpui.planmode.top.pending	Review plan	計画を確認	Revisar plan
+gpui.planmode.top.executing	Building plan	計画を実行中	Ejecutando plan
+gpui.planmode.tip	Plan before acting (1 turn, always, or off)	実行前に計画を作成 (1回・常時・オフ)	Planificar antes de actuar (1 turno, siempre u off)
+gpui.planmode.chip.building	Building	実行中	Ejecutando
+gpui.planmode.chip.once	Plan · 1t	計画 · 1回	Plan · 1t
+gpui.planmode.bar.once	Plan mode (1 turn) — explores and proposes a plan before editing	計画モード (1回) — 編集前に調査して計画を提案します	Modo plan (1 turno) — explora y propone un plan antes de editar
+gpui.planmode.bar.always	Plan mode — explores and proposes a plan before editing	計画モード — 編集前に調査して計画を提案します	Modo plan — explora y propone un plan antes de editar
+gpui.planmode.bar.planning	Planning — drafting a plan before edits	計画中 — 編集前の計画を作成しています	Planificando — redactando un plan antes de editar
+gpui.planmode.bar.pending	Proposed plan awaits review below	提案された計画が下のレビューを待っています	El plan propuesto espera revisión abajo
+gpui.planmode.bar.executing	Building the approved plan	承認された計画を実行しています	Ejecutando el plan aprobado
+gpui.planmode.scope.once	1 turn	1回	1 turno
+gpui.planmode.scope.always	Always	常時	Siempre
+gpui.ask.plan.ready	Ready for review	確認待ち	Listo para revisar
+gpui.ask.plan.revise	Revise	修正	Revisar
+gpui.ask.plan.sendrev	Send revision	修正を送る	Enviar revisión
+gpui.ask.plan.reviseph	What should change in the plan?	計画のどこを変更しますか？	¿Qué debería cambiar en el plan?
+gpui.mgmt.plan.st.blocked	Blocked	ブロック	Bloqueado
+gpui.mgmt.plan.st.routing	Routing	配線中	Ruteando
+gpui.mgmt.plan.st.awaiting	Awaiting review	承認待ち	Esperando revisión
+gpui.mgmt.plan.st.verified	Verified	検証済み	Verificado
+gpui.mgmt.plan.st.routed	Routed	配線済み	Ruteado
+gpui.mgmt.plan.st.approved	Approved	承認済み	Aprobado
+gpui.mgmt.plan.st.partial	Partial	一部完了	Parcial
+gpui.mgmt.plan.st.rejected	Rejected	却下	Rechazado
+gpui.mgmt.plan.st.empty	Empty	空	Vacío
+gpui.mgmt.plan.refused	KiCad refused	KiCad が拒否しました	KiCad lo rechazó
+gpui.mgmt.plan.emptysub	Layers, corridors, and planes appear here once a plan is proposed.	計画が提案されると、レイヤー・コリドー・ベタ領域がここに表示されます。	Las capas, corredores y planos aparecerán aquí cuando se proponga un plan.
+gpui.mgmt.plan.verify	Verify	検証	Verificar
+gpui.mgmt.plan.reqplain	Approval requested	承認が求められています	Aprobación solicitada
+gpui.mgmt.plan.requested	Approval requested: {what}	承認が求められています: {what}	Aprobación solicitada: {what}
+gpui.mgmt.plan.stackup	Stackup & impedances	スタックアップとインピーダンス	Apilado e impedancias
+gpui.keys.planmode	Toggle Plan mode (off · 1 turn · always)	計画モードを切り替え (オフ・1回・常時)	Alternar modo plan (off · 1 turno · siempre)
+gpui.keys.mgmt.plan	Plan panel beside the design: open or close	設計横の計画パネル: 開くまたは閉じる	Panel de plan junto al diseño: abrir o cerrar
+web.plan.awaiting	{n} awaiting approval	{n} 件が承認待ち	{n} esperando aprobación
+web.plan.net.one	1 net	1 ネット	1 red
+web.plan.nets	{n} nets	{n} ネット	{n} redes
+gpui.mgmt.plan.view.canvas	Canvas	キャンバス	Lienzo
+gpui.mgmt.plan.view.split	Split	分割	Dividido
+gpui.mgmt.plan.view.list	List	リスト	Lista
+gpui.mgmt.plan.grid.all	All layers	全レイヤー	Todas las capas
+gpui.mgmt.plan.grid.pair	Side by side	並べて表示	Lado a lado
+gpui.mgmt.plan.grid.single	Single	単一	Única
+gpui.mgmt.plan.expand	Expand	拡大	Expandir
+gpui.mgmt.plan.compact	Compact	標準	Compacto
+gpui.mgmt.plan.sync	Link zoom	ズーム連動	Vincular zoom
+gpui.mgmt.plan.fit	Fit	全体表示	Ajustar
+gpui.mgmt.plan.lock	Lock	ロック	Bloquear
+gpui.mgmt.plan.unlock	Unlock	ロック解除	Desbloquear
+gpui.mgmt.plan.layer.move	Move to layer	レイヤー移動	Mover a capa
+gpui.mgmt.plan.width	Width	幅	Ancho
+gpui.mgmt.plan.addnote	Add note	メモを追加	Añadir nota
+gpui.mgmt.plan.note.placeholder	Steering note for router…	ルーターへの指示メモ…	Nota de guiado para el router…
+gpui.mgmt.plan.hint	Drag waypoints to steer · Click + on edge to insert · Right-click vertex to remove	頂点をドラッグして誘導 · 辺の + をクリックで追加 · 頂点を右クリックで削除	Arrastra vértices para guiar · Clic en + del borde para insertar · Clic derecho en vértice para quitar
+gpui.mgmt.plan.rejectlayer	Reject layer	レイヤーを却下	Rechazar capa
+gpui.mgmt.plan.edited	Edited	編集済み	Editado
+gpui.mgmt.plan.locked	Locked	ロック中	Bloqueado
+gpui.mgmt.plan.noitems	No corridors or planes on this layer	このレイヤーにコリドーまたはプレーンがありません	Sin corredores ni planos en esta capa
+gpui.mgmt.plan.stackup.short	Stackup	スタックアップ	Apilamiento
+gpui.mgmt.plan.layer.short	Layer	レイヤー	Capa
+gpui.mgmt.plan.awaiting.short	{n} awaiting	{n} 承認待ち	{n} pendientes
+gpui.mgmt.plan.done.of	{done}/{total} done	{done}/{total} 完了	{done}/{total} listo
+gpui.planmode.chip.review	Plan · review	計画 · レビュー	Plan · revisar
+mobile.plan.steer	Steer	誘導	Guiar
+mobile.plan.details	Details	詳細	Detalles
+mobile.plan.reset	Reset	リセット	Restablecer
+mobile.plan.removepoint	Remove point	頂点を削除	Quitar punto
+mobile.plan.touchhint	Drag waypoints to steer · Tap + to add · Tap point to remove	頂点をドラッグして誘導 · + をタップで追加 · 頂点をタップで削除	Arrastra vértices para guiar · Toca + para añadir · Toca un vértice para quitar
+mobile.plan.copied	Copied	コピーしました	Copiado
+mobile.plan.widthmm	{v} mm	{v} mm	{v} mm
+mobile.plan.coord	({x}, {y} mm)	({x}, {y} mm)	({x}, {y} mm)
+provider.notice.head	No AI provider connected	AI プロバイダーが接続されていません	No hay ningún proveedor de IA conectado
+provider.notice.text.none	Connect Claude, Codex, Antigravity, or another provider to start chatting.	チャットを始めるには、Claude、Codex、Antigravity などのプロバイダーを接続してください。	Conecta Claude, Codex, Antigravity u otro proveedor para empezar a chatear.
+provider.notice.text.signedout	Sign in to Claude, Codex, or another provider in Settings → Accounts to start chatting.	チャットを始めるには、設定 → アカウントで Claude、Codex などのプロバイダーにサインインしてください。	Inicia sesión en Claude, Codex u otro proveedor en Configuración → Cuentas para empezar a chatear.
+provider.notice.button	Open Settings → Accounts	設定 → アカウントを開く	Abrir Configuración → Cuentas
+provider.notice.senderr	No AI provider connected yet. Open Settings → Accounts to connect Claude, Codex, Antigravity, or another provider.	AI プロバイダーがまだ接続されていません。設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。	Aún no hay ningún proveedor de IA conectado. Abre Configuración → Cuentas para conectar Claude, Codex, Antigravity u otro proveedor.
+provider.notice.senderr.remote	No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.	{machine} に AI プロバイダーが接続されていません。{machine} で設定 → アカウントを開いて、Claude、Codex、Antigravity などのプロバイダーを接続してください。	No hay ningún proveedor de IA conectado en {machine}. Abre Configuración → Cuentas en {machine} para conectar Claude, Codex, Antigravity u otro proveedor.
+web.settings.providers	AI providers	AI プロバイダー	Proveedores de IA
+web.settings.providers.browser	Connect a provider in the Backplane desktop or mobile app under Settings → Accounts.	Backplane のデスクトップまたはモバイルアプリの設定 → アカウントからプロバイダーを接続してください。	Conecta un proveedor en la aplicación de escritorio o móvil de Backplane en Configuración → Cuentas.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -4698,6 +5057,12 @@ viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウ
 
     /// apierr.say = {kind, select, overloaded {Claude's API was overloaded} rate {Claude's API hit its rate limit} server {Claude's API had an internal error} auth {Claude's API refused the sign-in} other {Claude's API answered with an error}}{code} and ended the turn{why}.
     static func apierr_say(kind: String, code: String, why: String) -> String { f("apierr.say", ["kind": kind, "code": code, "why": why]) }
+
+    /// restart.interrupted = Interrupted by a restart at {clock}, picking up again
+    static func restart_interrupted(clock: String) -> String { f("restart.interrupted", ["clock": clock]) }
+
+    /// hub.restarting.build = Restarting Backplane… (new build {build})
+    static func hub_restarting_build(build: String) -> String { f("hub.restarting.build", ["build": build]) }
 
     /// history.step = Step {step}
     static func history_step(step: String) -> String { f("history.step", ["step": step]) }
@@ -5377,6 +5742,51 @@ viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウ
     /// gpui.settings.px = {px} px.
     static func gpui_settings_px(px: String) -> String { f("gpui.settings.px", ["px": px]) }
 
+    /// gpui.appupdate.hub = Hub: Backplane {version}
+    static func gpui_appupdate_hub(version: String) -> String { f("gpui.appupdate.hub", ["version": version]) }
+
+    /// gpui.appupdate.label = This computer's app: {tag}
+    static func gpui_appupdate_label(tag: String) -> String { f("gpui.appupdate.label", ["tag": tag]) }
+
+    /// gpui.appupdate.label.mac = This Mac's app: {tag}
+    static func gpui_appupdate_label_mac(tag: String) -> String { f("gpui.appupdate.label.mac", ["tag": tag]) }
+
+    /// gpui.appupdate.differs = Differs from the hub ({hub}).
+    static func gpui_appupdate_differs(hub: String) -> String { f("gpui.appupdate.differs", ["hub": hub]) }
+
+    /// gpui.appupdate.downloading = Downloading {tag}.
+    static func gpui_appupdate_downloading(tag: String) -> String { f("gpui.appupdate.downloading", ["tag": tag]) }
+
+    /// gpui.appupdate.ready = {tag} is ready: used the next time Backplane opens.
+    static func gpui_appupdate_ready(tag: String) -> String { f("gpui.appupdate.ready", ["tag": tag]) }
+
+    /// gpui.appupdate.idle = Up to date, checked {when}.
+    static func gpui_appupdate_idle(when: String) -> String { f("gpui.appupdate.idle", ["when": when]) }
+
+    /// gpui.appupdate.updated = Updated to {tag}.
+    static func gpui_appupdate_updated(tag: String) -> String { f("gpui.appupdate.updated", ["tag": tag]) }
+
+    /// gpui.appupdate.updated.when = Updated to {tag}. Up to date, checked {when}.
+    static func gpui_appupdate_updated_when(tag: String, when: String) -> String { f("gpui.appupdate.updated.when", ["tag": tag, "when": when]) }
+
+    /// gpui.appupdate.stayed = {tag} did not start, so this build stayed.
+    static func gpui_appupdate_stayed(tag: String) -> String { f("gpui.appupdate.stayed", ["tag": tag]) }
+
+    /// gpui.appupdate.stayed.when = {tag} did not start, so this build stayed. Checked {when}.
+    static func gpui_appupdate_stayed_when(tag: String, when: String) -> String { f("gpui.appupdate.stayed.when", ["tag": tag, "when": when]) }
+
+    /// gpui.appupdate.samehub = Same as the hub ({channel})
+    static func gpui_appupdate_samehub(channel: String) -> String { f("gpui.appupdate.samehub", ["channel": channel]) }
+
+    /// gpui.appnotice.ready = Backplane {tag} is ready.
+    static func gpui_appnotice_ready(tag: String) -> String { f("gpui.appnotice.ready", ["tag": tag]) }
+
+    /// gpui.appnotice.appbehind = This app is {app}; the hub runs {hub}.
+    static func gpui_appnotice_appbehind(app: String, hub: String) -> String { f("gpui.appnotice.appbehind", ["app": app, "hub": hub]) }
+
+    /// gpui.appnotice.hubbehind = The hub runs {hub}, older than this app ({app}).
+    static func gpui_appnotice_hubbehind(hub: String, app: String) -> String { f("gpui.appnotice.hubbehind", ["hub": hub, "app": app]) }
+
     /// gpui.keys.fixed = {key}. Fixed.
     static func gpui_keys_fixed(key: String) -> String { f("gpui.keys.fixed", ["key": key]) }
 
@@ -5403,6 +5813,27 @@ viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウ
 
     /// gpui.google.bots = Bots: {bots}
     static func gpui_google_bots(bots: String) -> String { f("gpui.google.bots", ["bots": bots]) }
+
+    /// home.away = Home ({name}) is away
+    static func home_away(name: String) -> String { f("home.away", ["name": name]) }
+
+    /// home.away.since = Home ({name}) is away since {time}
+    static func home_away_since(name: String, time: String) -> String { f("home.away.since", ["name": name, "time": time]) }
+
+    /// home.away.queued = Home ({name}) is away · {n} queued
+    static func home_away_queued(name: String, n: String) -> String { f("home.away.queued", ["name": name, "n": n]) }
+
+    /// home.away.since.queued = Home ({name}) is away since {time} · {n} queued
+    static func home_away_since_queued(name: String, time: String, n: String) -> String { f("home.away.since.queued", ["name": name, "time": time, "n": n]) }
+
+    /// home.moving = Moving home to {to}…
+    static func home_moving(to: String) -> String { f("home.moving", ["to": to]) }
+
+    /// home.moving.step = Moving home to {to}: {step}
+    static func home_moving_step(to: String, step: String) -> String { f("home.moving.step", ["to": to, "step": step]) }
+
+    /// home.move.failed.note = Home move failed: {note}
+    static func home_move_failed_note(note: String) -> String { f("home.move.failed.note", ["note": note]) }
 
     /// gpui.imp.why.choose.image = {why} Choose an image instead.
     static func gpui_imp_why_choose_image(why: String) -> String { f("gpui.imp.why.choose.image", ["why": why]) }
@@ -5602,6 +6033,18 @@ viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウ
     /// gpui.the.hub.answered = the hub answered {status}
     static func gpui_the_hub_answered(status: String) -> String { f("gpui.the.hub.answered", ["status": status]) }
 
+    /// gpui.dl.percent = {name} · {pct}%
+    static func gpui_dl_percent(name: String, pct: String) -> String { f("gpui.dl.percent", ["name": name, "pct": pct]) }
+
+    /// gpui.dl.mb = {name} · {mb} MB
+    static func gpui_dl_mb(name: String, mb: String) -> String { f("gpui.dl.mb", ["name": name, "mb": mb]) }
+
+    /// gpui.dl.saved = Saved {name}
+    static func gpui_dl_saved(name: String) -> String { f("gpui.dl.saved", ["name": name]) }
+
+    /// gpui.dl.failed = {name}: download failed: {why}
+    static func gpui_dl_failed(name: String, why: String) -> String { f("gpui.dl.failed", ["name": name, "why": why]) }
+
     /// gpui.c.kicad.open.on = Open in KiCad on {machine}
     static func gpui_c_kicad_open_on(machine: String) -> String { f("gpui.c.kicad.open.on", ["machine": machine]) }
 
@@ -5751,6 +6194,15 @@ viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウ
 
     /// gpui.kicad.update.installed = Backplane KiCad {version} is installed: reopen KiCad on it (your unsaved changes are kept until you save or close)
     static func gpui_kicad_update_installed(version: String) -> String { f("gpui.kicad.update.installed", ["version": version]) }
+
+    /// gpui.kicad.update.missing = KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}, with no administrator password.
+    static func gpui_kicad_update_missing(version: String, size: String, folder: String) -> String { f("gpui.kicad.update.missing", ["version": version, "size": size, "folder": folder]) }
+
+    /// gpui.kicad.update.missing.admin = KiCad isn't installed. Backplane KiCad {version} ({size}) goes into {folder}.
+    static func gpui_kicad_update_missing_admin(version: String, size: String, folder: String) -> String { f("gpui.kicad.update.missing.admin", ["version": version, "size": size, "folder": folder]) }
+
+    /// gpui.c.kicad.closing.ask = KiCad is waiting for an answer before it closes: "{title}". Its window may be behind another one.
+    static func gpui_c_kicad_closing_ask(title: String) -> String { f("gpui.c.kicad.closing.ask", ["title": title]) }
 
     /// gpui.assets.missing = Assets missing in {dir}: {files}
     static func gpui_assets_missing(dir: String, files: String) -> String { f("gpui.assets.missing", ["dir": dir, "files": files]) }
@@ -6997,6 +7449,15 @@ viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウ
     /// android.buy.ask = Start a buy thread for {project}?
     static func android_buy_ask(project: String) -> String { f("android.buy.ask", ["project": project]) }
 
+    /// android.clone.busy = {path} already exists and isn't empty. Pick another folder or name.
+    static func android_clone_busy(path: String) -> String { f("android.clone.busy", ["path": path]) }
+
+    /// android.clone.file = {path} is a file. Pick another folder or name.
+    static func android_clone_file(path: String) -> String { f("android.clone.file", ["path": path]) }
+
+    /// android.download.of = {have} of {total}
+    static func android_download_of(have: String, total: String) -> String { f("android.download.of", ["have": have, "total": total]) }
+
     /// ios.sections.running = {n, number} running
     static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }
 
@@ -7234,6 +7695,21 @@ viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウ
     /// ios.acct.also = Also added as {names}: the same account, counted once
     static func ios_acct_also(names: String) -> String { f("ios.acct.also", ["names": names]) }
 
+    /// ios.clone.into = Into {dest}
+    static func ios_clone_into(dest: String) -> String { f("ios.clone.into", ["dest": dest]) }
+
+    /// ios.clone.title = Cloning {repo}
+    static func ios_clone_title(repo: String) -> String { f("ios.clone.title", ["repo": repo]) }
+
+    /// ios.clone.cloned = Cloned {repo}
+    static func ios_clone_cloned(repo: String) -> String { f("ios.clone.cloned", ["repo": repo]) }
+
+    /// ios.clone.code = Enter this code at {url}
+    static func ios_clone_code(url: String) -> String { f("ios.clone.code", ["url": url]) }
+
+    /// mobile.snooze.wakes = Wakes in {time}
+    static func mobile_snooze_wakes(time: String) -> String { f("mobile.snooze.wakes", ["time": time]) }
+
     /// gpui.sections.move.to = Move to {group}
     static func gpui_sections_move_to(group: String) -> String { f("gpui.sections.move.to", ["group": group]) }
 
@@ -7365,4 +7841,79 @@ viewer.layout.refusal.toomanysources	Too many sources in one layout	レイアウ
 
     /// history.snap = Before turn {turn}
     static func history_snap(turn: String) -> String { f("history.snap", ["turn": turn]) }
+
+    /// web.clone.first = First message: {text}
+    static func web_clone_first(text: String) -> String { f("web.clone.first", ["text": text]) }
+
+    /// web.clone.cloning = Cloning {repo} into {dest}
+    static func web_clone_cloning(repo: String, dest: String) -> String { f("web.clone.cloning", ["repo": repo, "dest": dest]) }
+
+    /// web.clone.cloned = Cloned {repo} into {dest}
+    static func web_clone_cloned(repo: String, dest: String) -> String { f("web.clone.cloned", ["repo": repo, "dest": dest]) }
+
+    /// web.clone.stopped = Stopped cloning {repo}
+    static func web_clone_stopped(repo: String) -> String { f("web.clone.stopped", ["repo": repo]) }
+
+    /// web.clone.add.dir = Add {dir}
+    static func web_clone_add_dir(dir: String) -> String { f("web.clone.add.dir", ["dir": dir]) }
+
+    /// web.clone.use.dir = Use {dir}
+    static func web_clone_use_dir(dir: String) -> String { f("web.clone.use.dir", ["dir": dir]) }
+
+    /// gpui.c.kicad.opening = Opening the {editor}: {job}… {secs} s
+    static func gpui_c_kicad_opening(editor: String, job: String, secs: String) -> String { f("gpui.c.kicad.opening", ["editor": editor, "job": job, "secs": secs]) }
+
+    /// gpui.c.kicad.openingbare = Opening the {editor}… {secs} s
+    static func gpui_c_kicad_openingbare(editor: String, secs: String) -> String { f("gpui.c.kicad.openingbare", ["editor": editor, "secs": secs]) }
+
+    /// gpui.c.kicad.openfailed = The {editor} did not open
+    static func gpui_c_kicad_openfailed(editor: String) -> String { f("gpui.c.kicad.openfailed", ["editor": editor]) }
+
+    /// web.pair.approve.in = Approve on desktop or paired phone · expires in {time}
+    static func web_pair_approve_in(time: String) -> String { f("web.pair.approve.in", ["time": time]) }
+
+    /// web.pair.failed = Pairing request failed ({status})
+    static func web_pair_failed(status: String) -> String { f("web.pair.failed", ["status": status]) }
+
+    /// web.chat.finished = Finished {time}
+    static func web_chat_finished(time: String) -> String { f("web.chat.finished", ["time": time]) }
+
+    /// web.chat.finished.dur = Finished {time} · {dur}
+    static func web_chat_finished_dur(time: String, dur: String) -> String { f("web.chat.finished.dur", ["time": time, "dur": dur]) }
+
+    /// web.chat.answered = Answered: {answer}
+    static func web_chat_answered(answer: String) -> String { f("web.chat.answered", ["answer": answer]) }
+
+    /// web.composer.unsupported = Unsupported image type: {type}
+    static func web_composer_unsupported(type: String) -> String { f("web.composer.unsupported", ["type": type]) }
+
+    /// web.composer.maximages = At most {max} images per message.
+    static func web_composer_maximages(max: String) -> String { f("web.composer.maximages", ["max": max]) }
+
+    /// thread.context.size = {bytes} B · ≈{tokens} tokens
+    static func thread_context_size(bytes: String, tokens: String) -> String { f("thread.context.size", ["bytes": bytes, "tokens": tokens]) }
+
+    /// gpui.mgmt.plan.requested = Approval requested: {what}
+    static func gpui_mgmt_plan_requested(what: String) -> String { f("gpui.mgmt.plan.requested", ["what": what]) }
+
+    /// web.plan.awaiting = {n} awaiting approval
+    static func web_plan_awaiting(n: String) -> String { f("web.plan.awaiting", ["n": n]) }
+
+    /// web.plan.nets = {n} nets
+    static func web_plan_nets(n: String) -> String { f("web.plan.nets", ["n": n]) }
+
+    /// gpui.mgmt.plan.awaiting.short = {n} awaiting
+    static func gpui_mgmt_plan_awaiting_short(n: String) -> String { f("gpui.mgmt.plan.awaiting.short", ["n": n]) }
+
+    /// gpui.mgmt.plan.done.of = {done}/{total} done
+    static func gpui_mgmt_plan_done_of(done: String, total: String) -> String { f("gpui.mgmt.plan.done.of", ["done": done, "total": total]) }
+
+    /// mobile.plan.widthmm = {v} mm
+    static func mobile_plan_widthmm(v: String) -> String { f("mobile.plan.widthmm", ["v": v]) }
+
+    /// mobile.plan.coord = ({x}, {y} mm)
+    static func mobile_plan_coord(x: String, y: String) -> String { f("mobile.plan.coord", ["x": x, "y": y]) }
+
+    /// provider.notice.senderr.remote = No AI provider connected on {machine}. Open Settings → Accounts on {machine} to connect Claude, Codex, Antigravity, or another provider.
+    static func provider_notice_senderr_remote(machine: String) -> String { f("provider.notice.senderr.remote", ["machine": machine]) }
 }

@@ -117,7 +117,7 @@ async fn machine_git() -> Option<PathBuf> {
 async fn elevated() -> bool {
     if !cfg!(windows) { return false }
     let Some(f) = std::env::var_os("SystemRoot").map(|r| Path::new(&r).join("System32").join("fltmc.exe")) else { return false };
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, f); c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, f); c.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
     matches!(tokio::time::timeout(std::time::Duration::from_secs(20), c.status()).await, Ok(Ok(s)) if s.success())
 }
 /// Git for Windows' command line from an elevated hub: its switches less `/CURRENTUSER` and no `/DIR`, so the all-users install it makes stays in Program Files.
@@ -128,7 +128,7 @@ async fn registered_in(hive: &str, p: &WinInstaller) -> Option<PathBuf> {
     if !cfg!(windows) { return None }
     let reg = std::env::var_os("SystemRoot").map(|r| Path::new(&r).join("System32").join("reg.exe"))?;
     let key = if hive.contains('\\') { format!("{hive}\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", uninstall_key(p)) } else { format!("{hive}\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", uninstall_key(p)) };
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, reg); c.args(["query", &key, "/v", "UninstallString"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, reg); c.args(["query", &key, "/v", "UninstallString"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
     let o = tokio::time::timeout(std::time::Duration::from_secs(20), c.output()).await.ok()?.ok()?;
     registered_dir(&String::from_utf8_lossy(&o.stdout))
 }
@@ -168,40 +168,61 @@ echo "Running the installer"
 bash "$t"
 "#;
 
-/// Codex's standalone binary at a pinned release: the download from that tag, a check of its size and sha256 against the pin (`CODEX_TAG`,
-/// `codex_asset`), then the move into `$1` (a folder the hub puts on its PATH). Arguments: folder, asset, name to give it, kind (tar.gz or raw),
-/// tag, sha256, size. Nothing is placed unless both match.
+/// Codex's standalone binaries at a pinned release: download one or more pinned assets (`CODEX_TAG`, `codex_bundle`), check each asset's size and
+/// sha256 and extract it to a staging directory before atomically placing them into `$1` (a folder the hub puts on its PATH).
+/// Arguments: folder, tag, followed by one or more 5-tuples `(asset, binary_name, kind, sha256, size)`.
+/// Nothing is placed unless every asset passes verification.
 pub const CODEX_SH: &str = r#"set -eu
-dest=$1; asset=$2; name=$3; kind=$4; tag=$5; want=$6; size=$7
+dest=$1; tag=$2; shift 2
 fail() { echo "$*" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || fail 'curl or wget is needed to download Codex, and neither was found'
 if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 30 -o "$1" "$2"; }
 elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only --connect-timeout=30 --read-timeout=30 -O "$1" "$2"; }
 else get() { echo 'curl or wget is needed to download it, and neither was found' >&2; return 1; }; fi
 if command -v cygpath >/dev/null 2>&1; then dest=$(cygpath -u "$dest"); fi
-case "$asset" in codex-*) ;; *) fail 'Invalid Codex asset' ;; esac
-tmp=$(mktemp -d); trap 'rm -rf "$tmp"' 0
-[ -n "$tag" ] && [ "${#want}" -eq 64 ] && [ -n "$size" ] || fail "No pinned checksum for $asset"
+[ $# -ge 5 ] && [ $(( $# % 5 )) -eq 0 ] || fail 'Invalid Codex arguments'
+[ -n "$tag" ] || fail 'No pinned checksum'
 case "$tag" in *[!A-Za-z0-9._-]*) fail 'Invalid Codex release' ;; esac
-echo "Downloading $asset"
-get "$tmp/pkg" "https://github.com/openai/codex/releases/download/$tag/$asset" || fail "Could not download $asset"
-echo 'Checking the checksum'
-len=$(wc -c < "$tmp/pkg" | tr -d ' ')
-[ "$len" = "$size" ] || fail 'Codex size mismatch'
-if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/pkg" | cut -d' ' -f1); else got=$(shasum -a 256 "$tmp/pkg" | cut -d' ' -f1); fi
-[ "$want" = "$got" ] || fail 'Codex checksum mismatch'
-mkdir -p "$dest" "$tmp/x"
-if [ "$kind" = tar.gz ]; then
-  tar -xzf "$tmp/pkg" -C "$tmp/x"
-  f=$(find "$tmp/x" -type f -name 'codex*' | head -n 1)
-  [ -n "$f" ] || fail 'The Codex archive holds no program'
-  mv "$f" "$tmp/bin"
-else
-  mv "$tmp/pkg" "$tmp/bin"
-fi
-chmod +x "$tmp/bin"
-mv "$tmp/bin" "$dest/$name"
-echo "Installed in $dest/$name"
+tmp=$(mktemp -d); trap 'rm -rf "$tmp"; [ -n "${dest:-}" ] && rm -f "$dest"/.codex-stage.$$.*' 0
+mkdir -p "$tmp/stage"
+: > "$tmp/names"
+while [ $# -ge 5 ]; do
+  asset=$1; name=$2; kind=$3; want=$4; size=$5; shift 5
+  case "$asset" in codex-*) ;; *) fail 'Invalid Codex asset' ;; esac
+  case "$name" in ''|*[!A-Za-z0-9._-]*|..|.) fail 'Invalid Codex binary name' ;; esac
+  [ "${#want}" -eq 64 ] && [ -n "$size" ] || fail "No pinned checksum for $asset"
+  echo "Downloading $asset"
+  get "$tmp/pkg" "https://github.com/openai/codex/releases/download/$tag/$asset" || fail "Could not download $asset"
+  echo 'Checking the checksum'
+  len=$(wc -c < "$tmp/pkg" | tr -d ' \t\r\n')
+  [ "$len" = "$size" ] || fail 'Codex size mismatch'
+  if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/pkg" | cut -d' ' -f1); else got=$(shasum -a 256 "$tmp/pkg" | cut -d' ' -f1); fi
+  [ "$want" = "$got" ] || fail 'Codex checksum mismatch'
+  if [ "$kind" = tar.gz ]; then
+    rm -rf "$tmp/x" && mkdir -p "$tmp/x"
+    tar -xzf "$tmp/pkg" -C "$tmp/x"
+    base=${name%.exe}
+    f=$(find "$tmp/x" -type f -name "$base*" | head -n 1)
+    [ -n "$f" ] || fail 'The Codex archive holds no program'
+    mv "$f" "$tmp/stage/$name"
+    rm -f "$tmp/pkg"
+  else
+    mv "$tmp/pkg" "$tmp/stage/$name"
+  fi
+  chmod +x "$tmp/stage/$name"
+  printf '%s\n' "$name" >> "$tmp/names"
+done
+mkdir -p "$dest"
+first=''
+while IFS= read -r name; do
+  [ ! -d "$dest/$name" ] || fail "$dest/$name is a directory"
+  stage="$dest/.codex-stage.$$.$name"
+  mv "$tmp/stage/$name" "$stage"
+  chmod +x "$stage"
+  mv -f "$stage" "$dest/$name"
+  [ -n "$first" ] || first=$name
+done < "$tmp/names"
+echo "Installed in $dest/$first"
 "#;
 
 /// FreeCAD's own release for Linux and macOS, from its GitHub releases, into `$2` (the hub's `freecad` folder, where `freecad/command` names
@@ -263,18 +284,53 @@ pub fn freecad_sys(os: &str, arch: &str) -> Option<&'static str> {
 /// The Codex release the installer is pinned to (github.com/openai/codex/releases/tag/rust-v0.170.0). Bump it with the table below: each
 /// asset's size and the sha256 GitHub lists for it (`gh api repos/openai/codex/releases/tags/<tag>`). The tests check the table's shape.
 pub const CODEX_TAG: &str = "rust-v0.170.0";
-/// A Codex release asset's pin: (asset, the name it is given, kind, sha256, size).
+/// One pinned Codex release asset: (asset filename, installed binary name, kind ("tar.gz" or "raw"), sha256, size).
 pub type CodexPin = (&'static str, &'static str, &'static str, &'static str, u64);
-pub const CODEX_PINS: &[(&str, &str, CodexPin)] = &[
-    ("linux", "x64", ("codex-x86_64-unknown-linux-musl.tar.gz", "codex", "tar.gz", "d054916ccd28a53820376b8d2f7c875184ca8f40fcd44bbabeb8ee240ce247f5", 119025052)),
-    ("linux", "arm64", ("codex-aarch64-unknown-linux-musl.tar.gz", "codex", "tar.gz", "0da6b061f6b5223901a5a73e841bd1466596e2ef620d68823360febed2ff7ebc", 121314071)),
-    ("darwin", "arm64", ("codex-aarch64-apple-darwin.tar.gz", "codex", "tar.gz", "7c9f21d5cbae4860d14b379fdcf709ff399ce874fd714b58783e1b4199c2b9a9", 114545562)),
-    ("darwin", "x64", ("codex-x86_64-apple-darwin.tar.gz", "codex", "tar.gz", "c858bb0149b003a8cf8840a1143c4d953f18bea23ba6ea861d5fdf0b5e29a5a3", 124603199)),
-    ("windows", "x64", ("codex-x86_64-pc-windows-msvc.exe", "codex.exe", "raw", "8d06dc231dba649c7d48d3eecab239c452a1ac498c41dd6492a6f301b90a22ce", 385571120)),
-    ("windows", "arm64", ("codex-aarch64-pc-windows-msvc.exe", "codex.exe", "raw", "57e60c27714335aa05bfe64c65f11e874bf29633fe7515c1298faf9b5db1ac29", 326498096)),
+/// Codex's pinned release assets for one platform: the main `codex` CLI and its companion `codex-code-mode-host`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CodexBundle {
+    pub codex: CodexPin,
+    pub code_mode_host: CodexPin,
+}
+pub const CODEX_PINS: &[(&str, &str, CodexBundle)] = &[
+    ("linux", "x64", CodexBundle {
+        codex: ("codex-x86_64-unknown-linux-musl.tar.gz", "codex", "tar.gz", "d054916ccd28a53820376b8d2f7c875184ca8f40fcd44bbabeb8ee240ce247f5", 119025052),
+        code_mode_host: ("codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz", "codex-code-mode-host", "tar.gz", "18ab29d970586890085c3eba1d55068fd66262154855e51a54f3708522fa4dc5", 27439149),
+    }),
+    ("linux", "arm64", CodexBundle {
+        codex: ("codex-aarch64-unknown-linux-musl.tar.gz", "codex", "tar.gz", "0da6b061f6b5223901a5a73e841bd1466596e2ef620d68823360febed2ff7ebc", 121314071),
+        code_mode_host: ("codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz", "codex-code-mode-host", "tar.gz", "8ae871c5d494aa5842fff37adbbac9ca586b0c8af40d80d90feb8d1e10f86a59", 27615801),
+    }),
+    ("darwin", "arm64", CodexBundle {
+        codex: ("codex-aarch64-apple-darwin.tar.gz", "codex", "tar.gz", "7c9f21d5cbae4860d14b379fdcf709ff399ce874fd714b58783e1b4199c2b9a9", 114545562),
+        code_mode_host: ("codex-code-mode-host-aarch64-apple-darwin.tar.gz", "codex-code-mode-host", "tar.gz", "6fa48c023b445bfc52eb7f026a713f592a58e45d31e47d36a5498d75bbd6fbca", 25382409),
+    }),
+    ("darwin", "x64", CodexBundle {
+        codex: ("codex-x86_64-apple-darwin.tar.gz", "codex", "tar.gz", "c858bb0149b003a8cf8840a1143c4d953f18bea23ba6ea861d5fdf0b5e29a5a3", 124603199),
+        code_mode_host: ("codex-code-mode-host-x86_64-apple-darwin.tar.gz", "codex-code-mode-host", "tar.gz", "27092a235516773db88927c7413bbd54e7030cc5d96d66158851438ef905c741", 27399761),
+    }),
+    ("windows", "x64", CodexBundle {
+        codex: ("codex-x86_64-pc-windows-msvc.exe", "codex.exe", "raw", "8d06dc231dba649c7d48d3eecab239c452a1ac498c41dd6492a6f301b90a22ce", 385571120),
+        code_mode_host: ("codex-code-mode-host-x86_64-pc-windows-msvc.exe", "codex-code-mode-host.exe", "raw", "4dd22666894cbad119023ed64c973105050146f59847bacb8094dfe456efbb62", 80682800),
+    }),
+    ("windows", "arm64", CodexBundle {
+        codex: ("codex-aarch64-pc-windows-msvc.exe", "codex.exe", "raw", "57e60c27714335aa05bfe64c65f11e874bf29633fe7515c1298faf9b5db1ac29", 326498096),
+        code_mode_host: ("codex-code-mode-host-aarch64-pc-windows-msvc.exe", "codex-code-mode-host.exe", "raw", "dfc2b387a7f3fa70cac36d7ae4c6c22d455d9bb211ba7e4ef00e9b5cbad3d96c", 74984240),
+    }),
 ];
-/// Codex's pinned release asset for a system. Hub `os` and `arch` words (linux, darwin, windows; x64, arm64).
-pub fn codex_asset(os: &str, arch: &str) -> Option<CodexPin> { CODEX_PINS.iter().find(|(o, a, _)| *o == os && *a == arch).map(|(_, _, p)| *p) }
+/// Codex's pinned release bundle (`codex` + `codex-code-mode-host`) for a system. Hub `os` and `arch` words (linux, darwin, windows; x64, arm64).
+pub fn codex_bundle(os: &str, arch: &str) -> Option<CodexBundle> { CODEX_PINS.iter().find(|(o, a, _)| *o == os && *a == arch).map(|(_, _, b)| *b) }
+/// Codex's pinned `codex` CLI release asset for a system.
+pub fn codex_asset(os: &str, arch: &str) -> Option<CodexPin> { codex_bundle(os, arch).map(|b| b.codex) }
+pub fn codex_binary_name(os: &str) -> &'static str { if os == "windows" { "codex.exe" } else { "codex" } }
+pub fn codex_code_mode_host_name(os: &str) -> &'static str { if os == "windows" { "codex-code-mode-host.exe" } else { "codex-code-mode-host" } }
+pub fn codex_plan_for(tools: &Path, tag: &str, pins: &[CodexPin]) -> Plan {
+    let mut args = vec![tools.to_string_lossy().into_owned(), tag.to_string()];
+    for &(asset, name, kind, sha, size) in pins {
+        args.extend([asset.into(), name.into(), kind.into(), sha.into(), size.to_string()]);
+    }
+    Plan::Sh(CODEX_SH, args)
+}
 /// What the Install button says before it runs: whether the install is checked against a pin, or runs the vendor's own script (named, with its address).
 pub fn install_notice(tool: &str, os: &str) -> String {
     let script = match (tool, os) {
@@ -327,8 +383,8 @@ pub fn plan(tool: &str, os: &str, arch: &str, winget: bool, node: bool) -> Optio
         "grok" if unix => Some(Plan::Sh(VENDOR_SH, vec![GROK_SH.into()])),
         "grok" if os == "windows" => Some(Plan::Ps(GROK_PS)),
         "opencode" if unix => Some(Plan::Sh(VENDOR_SH, vec![OPENCODE_SH.into()])),
-        "codex" => match codex_asset(os, arch) {
-            Some((asset, name, kind, sha, size)) => Some(Plan::Sh(CODEX_SH, vec![tools_dir().to_string_lossy().into_owned(), asset.into(), name.into(), kind.into(), CODEX_TAG.into(), sha.into(), size.to_string()])),
+        "codex" => match codex_bundle(os, arch) {
+            Some(b) => Some(codex_plan_for(&tools_dir(), CODEX_TAG, &[b.codex, b.code_mode_host])),
             // no standalone build for this system: npm only when Node is already there
             None if node => Some(Plan::Sh("exec npm install -g @openai/codex", vec![])),
             None => Some(Plan::Link(CODEX_RELEASES)),
@@ -348,6 +404,106 @@ echo \"Run in a terminal: sudo $a\"; exit 1";
 
 /// Each tool's install: state, note and the share downloaded (0 to 1, a download with a known size only).
 static STATE: Mutex<BTreeMap<String, (String, String, Option<f64>)>> = Mutex::new(BTreeMap::new());
+static CODEX_REPAIR_FAIL_AT: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+fn codex_busy(m: &BTreeMap<String, (String, String, Option<f64>)>) -> bool {
+    ["codex", "update:codex", "repair:codex"].iter().any(|k| m.get(*k).map_or(false, |(s, _, _)| s == "running"))
+}
+fn is_runnable_file(p: &Path, os: &str) -> bool {
+    let _ = os;
+    let Ok(meta) = std::fs::metadata(p) else { return false };
+    if !meta.is_file() { return false }
+    #[cfg(unix)]
+    if os != "windows" {
+        use std::os::unix::fs::PermissionsExt;
+        return meta.permissions().mode() & 0o111 != 0;
+    }
+    true
+}
+/// Whether Backplane's own `tools` directory has `codex` without a runnable companion `codex-code-mode-host`.
+pub fn codex_needs_companion_repair(tools: &Path, os: &str) -> bool {
+    tools.join(codex_binary_name(os)).is_file() && !is_runnable_file(&tools.join(codex_code_mode_host_name(os)), os)
+}
+/// Whether an installed `codex --version` line matches `tag` (e.g. `codex-cli 0.170.0` vs `rust-v0.170.0`).
+pub fn codex_version_matches_tag(version_output: Option<&str>, tag: &str) -> bool {
+    let Some(installed) = version_output.and_then(super::agent_versions::parse) else { return false };
+    let Some(expected) = super::agent_versions::parse(tag.strip_prefix("rust-v").unwrap_or(tag)) else { return false };
+    installed == expected
+}
+/// Plan to repair a Backplane-managed Codex install that is missing `codex-code-mode-host`.
+/// Installs only `codex-code-mode-host` when the installed `codex` already matches `tag`, or both binaries from `tag` otherwise.
+pub fn codex_repair_plan_for(tools: &Path, os: &str, tag: &str, bundle: CodexBundle, installed_version: Option<&str>) -> Option<Plan> {
+    if !codex_needs_companion_repair(tools, os) { return None }
+    if codex_version_matches_tag(installed_version, tag) {
+        Some(codex_plan_for(tools, tag, &[bundle.code_mode_host]))
+    } else {
+        Some(codex_plan_for(tools, tag, &[bundle.codex, bundle.code_mode_host]))
+    }
+}
+pub fn codex_repair_plan(tools: &Path, os: &str, arch: &str, installed_version: Option<&str>) -> Option<Plan> {
+    codex_repair_plan_for(tools, os, CODEX_TAG, codex_bundle(os, arch)?, installed_version)
+}
+/// Repairs a Backplane-managed Codex install in `tools` when `codex` exists without `codex-code-mode-host`.
+/// Returns `Ok(true)` if a repair ran and succeeded, `Ok(false)` if no repair was needed or allowed.
+pub(crate) async fn repair_codex_in(hub: &Arc<Hub>, tools: &Path, os: &str, tag: &str, bundle: CodexBundle, path_override: Option<&std::ffi::OsStr>) -> Result<bool, String> {
+    if crate::copy::on() || !codex_needs_companion_repair(tools, os) { return Ok(false) }
+    let codex_path = tools.join(codex_binary_name(os));
+    let mut ver_cmd = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &codex_path);
+    ver_cmd.arg("--version").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    let installed_version = match tokio::time::timeout(std::time::Duration::from_secs(10), ver_cmd.output()).await {
+        Ok(Ok(o)) if o.status.success() => {
+            let out = String::from_utf8_lossy(&o.stdout);
+            Some(if out.trim().is_empty() { String::from_utf8_lossy(&o.stderr).into_owned() } else { out.into_owned() })
+        }
+        _ => None,
+    };
+    let Some(plan) = codex_repair_plan_for(tools, os, tag, bundle, installed_version.as_deref()) else { return Ok(false) };
+    let Some((prog, args)) = command(&plan) else { return Ok(false) };
+    let log_dir = hub.cfg.home.join("installs");
+    let _ = std::fs::create_dir_all(&log_dir);
+    let log = log_dir.join("repair-codex.log");
+    let res = run(hub, "repair:codex", &prog, &args, path_override, &log).await;
+    STATE.lock().unwrap().remove("repair:codex");
+    hub.set_info("onboard.installs", &snapshot()).await;
+    hub.bump_views();
+    res?;
+    if codex_needs_companion_repair(tools, os) {
+        return Err(format!("Codex repair finished, but {} is still missing", codex_code_mode_host_name(os)));
+    }
+    Ok(true)
+}
+/// Automatically repairs an existing Backplane-managed Codex install in the background if `codex-code-mode-host` is missing.
+pub fn repair_codex_soon(hub: &Arc<Hub>) {
+    if crate::copy::on() || crate::guard::safe() || cfg!(test) || crate::agents::proc::Cli::from_env().test_mode() { return }
+    let tools = tools_dir();
+    if !codex_needs_companion_repair(&tools, &hub.cfg.os) { return }
+    let Some(bundle) = codex_bundle(&hub.cfg.os, &hub.cfg.arch) else { return };
+    if CODEX_REPAIR_FAIL_AT.lock().unwrap().is_some_and(|t| t.elapsed() < std::time::Duration::from_secs(300)) { return }
+    {
+        let mut state = STATE.lock().unwrap();
+        if codex_busy(&state) { return }
+        state.insert("repair:codex".into(), ("running".into(), format!("Repairing {}.", codex_code_mode_host_name(&hub.cfg.os)), None));
+    }
+    let h = hub.clone();
+    let os = hub.cfg.os.clone();
+    tokio::spawn(async move {
+        let res = repair_codex_in(&h, &tools, &os, CODEX_TAG, bundle, None).await;
+        STATE.lock().unwrap().remove("repair:codex");
+        h.set_info("onboard.installs", &snapshot()).await;
+        h.bump_views();
+        match res {
+            Ok(true) => {
+                *CODEX_REPAIR_FAIL_AT.lock().unwrap() = None;
+                eprintln!("tools_install: repaired {} in {}", codex_code_mode_host_name(&os), tools.display());
+                super::models_probe::refresh_soon(&h);
+            }
+            Ok(false) => {}
+            Err(why) => {
+                *CODEX_REPAIR_FAIL_AT.lock().unwrap() = Some(std::time::Instant::now());
+                eprintln!("tools_install: {} repair failed: {why}", codex_code_mode_host_name(&os));
+            }
+        }
+    });
+}
 fn snapshot() -> String {
     let m = STATE.lock().unwrap();
     Value::Object(m.iter().map(|(k, (s, n, b))| { let mut v = json!({"state": s, "note": n}); if let Some(b) = b { v["progress"] = json!(b); } (k.clone(), v) }).collect()).to_string()
@@ -393,7 +549,11 @@ pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: 
     let Some(p) = p else { return Err(format!("{tool} has no install button; follow its guide")) };
     // FreeCAD's own release goes into the hub's folder, where the hub then finds it (freecad/command)
     let p = match p { Plan::Sh(s, mut a) if tool == "freecad" => { a.push(hub.cfg.home.join("freecad").to_string_lossy().into_owned()); Plan::Sh(s, a) } p => p };
-    if STATE.lock().unwrap().get(tool).map_or(false, |(s, _, _)| s == "running") { return Err(format!("{tool} is being installed already")) }
+    {
+        let state = STATE.lock().unwrap();
+        let busy = if tool == "codex" || tool == "update:codex" { codex_busy(&state) } else { state.get(tool).map_or(false, |(s, _, _)| s == "running") };
+        if busy { return Err(format!("{tool} is being installed already")) }
+    }
     if let Plan::Direct(pin) = p {
         let tool = tool.to_string(); let name = tool.clone();
         say(hub, &tool, "running", "Starting.").await;
@@ -406,14 +566,19 @@ pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: 
         });
         return Ok(format!("installing {name}"))
     }
+    // Agent updaters can invoke their package manager by name (Codex uses brew for a Homebrew cask).
+    let cli_path = matches!(&p, Plan::Run(..)).then(|| crate::agents::proc::Cli::from_env().child_path()).flatten();
     let Some((prog, args)) = command(&p) else { return Err("open its download page".into()) };
     let tool = tool.to_string(); let name = tool.clone();
     say(hub, &tool, "running", "Starting.").await;
     let h = hub.clone();
     let log = hub.cfg.home.join("installs"); let _ = std::fs::create_dir_all(&log); let log = log.join(format!("{}.log", tool.replace(':', "-")));
     tokio::spawn(async move {
-        let r = run(&h, &tool, &prog, &args, &log).await;
-        match r { Ok(()) => say(&h, &tool, "done", "Installed.").await, Err(why) => say(&h, &tool, "failed", &why).await }
+        let r = run(&h, &tool, &prog, &args, cli_path.as_deref(), &log).await;
+        match r { Ok(()) => say(&h, &tool, "done", "Installed.").await, Err(why) => {
+            eprintln!("onboard: {tool} failed: {why}");
+            say(&h, &tool, "failed", &why).await;
+        } }
         super::models_probe::refresh_soon(&h); // the picker finds what was just installed (or updated) now, not at the next 15-minute round
         after(h).await;
     });
@@ -501,10 +666,16 @@ async fn direct(hub: &Arc<Hub>, tool: &str, p: &'static WinInstaller, dir: &Path
     say(hub, tool, "running", &format!("Installed in {}", dest.display())).await;
     Ok(())
 }
-async fn run(hub: &Arc<Hub>, tool: &str, prog: &str, args: &[String], log: &Path) -> Result<(), String> {
+fn install_command(prog: &str, cli_path: Option<&std::ffi::OsStr>) -> tokio::process::Command {
+    let program = std::env::var_os("BACKPLANE_TOOL_INSTALLER").filter(|s| !s.is_empty()).unwrap_or_else(|| prog.into());
+    let mut command = crate::proc::tokio_cmd(crate::proc::Kind::Net, program);
+    if let Some(path) = cli_path { command.env("PATH", path); }
+    command
+}
+async fn run(hub: &Arc<Hub>, tool: &str, prog: &str, args: &[String], cli_path: Option<&std::ffi::OsStr>, log: &Path) -> Result<(), String> {
     let out = std::fs::File::create(log).map_err(|e| format!("could not write {}: {e}", log.display()))?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, std::env::var_os("BACKPLANE_TOOL_INSTALLER").filter(|s| !s.is_empty()).unwrap_or_else(|| prog.into()));
+    let mut c = install_command(prog, cli_path);
     c.args(args).stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err)).kill_on_drop(false);
     crate::plat::proc::own_group_tokio(&mut c);
     let mut child = c.spawn().map_err(|e| format!("could not start {prog}: {e}"))?;
@@ -522,6 +693,16 @@ async fn run(hub: &Arc<Hub>, tool: &str, prog: &str, args: &[String], log: &Path
 mod tests {
     use super::*;
     #[cfg(unix)] use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn agent_updater_inherits_the_path_used_to_discover_its_cli() {
+        let path = std::ffi::OsStr::new("/usr/bin:/bin:/opt/homebrew/bin");
+        let updater = install_command("/opt/homebrew/bin/codex", Some(path));
+        assert_eq!(
+            updater.as_std().get_envs().find(|(key, _)| *key == "PATH"),
+            Some((std::ffi::OsStr::new("PATH"), Some(path))),
+        );
+    }
 
     /// Every tool on every system: the button it gets (or the page).
     #[test] fn each_tool_gets_its_vendors_own_installer_per_system() {
@@ -547,12 +728,32 @@ mod tests {
         assert_eq!(plan("pi", "linux", "x64", false, false), None, "no button for a tool with no installer we know");
     }
     #[test] fn codex_is_its_standalone_binary_and_never_needs_node() {
-        for (os, arch, asset) in [("linux", "x64", "codex-x86_64-unknown-linux-musl.tar.gz"), ("linux", "arm64", "codex-aarch64-unknown-linux-musl.tar.gz"), ("darwin", "arm64", "codex-aarch64-apple-darwin.tar.gz"), ("darwin", "x64", "codex-x86_64-apple-darwin.tar.gz"), ("windows", "x64", "codex-x86_64-pc-windows-msvc.exe"), ("windows", "arm64", "codex-aarch64-pc-windows-msvc.exe")] {
+        for (os, arch, codex_asset, host_asset) in [
+            ("linux", "x64", "codex-x86_64-unknown-linux-musl.tar.gz", "codex-code-mode-host-x86_64-unknown-linux-musl.tar.gz"),
+            ("linux", "arm64", "codex-aarch64-unknown-linux-musl.tar.gz", "codex-code-mode-host-aarch64-unknown-linux-musl.tar.gz"),
+            ("darwin", "arm64", "codex-aarch64-apple-darwin.tar.gz", "codex-code-mode-host-aarch64-apple-darwin.tar.gz"),
+            ("darwin", "x64", "codex-x86_64-apple-darwin.tar.gz", "codex-code-mode-host-x86_64-apple-darwin.tar.gz"),
+            ("windows", "x64", "codex-x86_64-pc-windows-msvc.exe", "codex-code-mode-host-x86_64-pc-windows-msvc.exe"),
+            ("windows", "arm64", "codex-aarch64-pc-windows-msvc.exe", "codex-code-mode-host-aarch64-pc-windows-msvc.exe"),
+        ] {
             let Some(Plan::Sh(script, a)) = plan("codex", os, arch, false, false) else { panic!("{os} {arch}") };
-            assert_eq!(script, CODEX_SH); assert_eq!(a[1], asset); assert!(!script.contains("npm"), "no Node");
-            assert_eq!(a[4], CODEX_TAG); assert_eq!(a[5].len(), 64); assert!(a[5].chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "a pinned lowercase sha256"); assert!(a[6].parse::<u64>().unwrap() > 0, "a pinned size");
+            assert_eq!(script, CODEX_SH);
+            assert!(!script.contains("npm"), "no Node");
             assert!(!script.contains("releases/latest"), "pinned, never the latest");
-            assert_eq!(a[2], if os == "windows" { "codex.exe" } else { "codex" });
+            assert_eq!(a.len(), 12);
+            assert_eq!(a[1], CODEX_TAG);
+            // first tuple: codex
+            assert_eq!(a[2], codex_asset);
+            assert_eq!(a[3], codex_binary_name(os));
+            assert_eq!(a[5].len(), 64);
+            assert!(a[5].chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "a pinned lowercase sha256");
+            assert!(a[6].parse::<u64>().unwrap() > 0, "a pinned size");
+            // second tuple: codex-code-mode-host (placed last as the repair completion marker)
+            assert_eq!(a[7], host_asset);
+            assert_eq!(a[8], codex_code_mode_host_name(os));
+            assert_eq!(a[10].len(), 64);
+            assert!(a[10].chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "a pinned lowercase sha256");
+            assert!(a[11].parse::<u64>().unwrap() > 0, "a pinned size");
         }
         assert_eq!(plan("codex", "freebsd", "x64", false, false), Some(Plan::Link(CODEX_RELEASES)));
         assert!(matches!(plan("codex", "freebsd", "x64", false, true), Some(Plan::Sh(s, _)) if s.contains("npm install -g @openai/codex")), "npm only as a fallback, with Node already there");
@@ -582,29 +783,101 @@ mod tests {
 
     #[cfg(unix)] fn exe(p: &Path, body: &str) { std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap() }
     #[cfg(unix)] fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("tools-{n}")) }
-    /// The real Codex script against a stand-in `curl` that serves a release listing in GitHub's layout and an archive.
-    #[cfg(unix)] fn codex_run(r: &Path, digest_ok: bool) -> (bool, String, PathBuf) { codex_run_with(r, digest_ok, 0) }
-    /// `size_delta`: how far the pinned size is from the real one.
-    #[cfg(unix)] fn codex_run_with(r: &Path, digest_ok: bool, size_delta: u64) -> (bool, String, PathBuf) {
-        let asset = "codex-x86_64-unknown-linux-musl.tar.gz";
-        let serve = r.join("serve"); std::fs::create_dir_all(serve.join("pkg")).unwrap();
-        exe(&serve.join("pkg/codex-x86_64-unknown-linux-musl"), "#!/bin/sh\necho codex 9.9.9\n");
-        assert!(std::process::Command::new("tar").arg("-czf").arg(serve.join(asset)).arg("-C").arg(serve.join("pkg")).arg("codex-x86_64-unknown-linux-musl").status().unwrap().success());
-        let sum = String::from_utf8(std::process::Command::new("sha256sum").arg(serve.join(asset)).output().unwrap().stdout).unwrap().split(' ').next().unwrap().to_string();
-        let bad = "0".repeat(64); let size = std::fs::metadata(serve.join(asset)).unwrap().len();
-        // the pinned release's download address: the script asks for nothing else (no release listing is served)
-        std::fs::write(serve.join("sentinel"), "x").unwrap();
+    #[cfg(unix)] fn tar_gz_fixture(serve: &Path, archive: &str, inner_name: &str, body: &str) -> (String, u64) {
+        let pkg = serve.join(format!("pkg-{inner_name}"));
+        std::fs::create_dir_all(&pkg).unwrap();
+        exe(&pkg.join(inner_name), body);
+        assert!(std::process::Command::new("tar").arg("-czf").arg(serve.join(archive)).arg("-C").arg(&pkg).arg(inner_name).status().unwrap().success());
+        let sum = String::from_utf8(std::process::Command::new("sha256sum").arg(serve.join(archive)).output().unwrap().stdout).unwrap().split(' ').next().unwrap().to_string();
+        let size = std::fs::metadata(serve.join(archive)).unwrap().len();
+        (sum, size)
+    }
+    #[cfg(unix)] fn serve_curl(r: &Path, serve: &Path) -> PathBuf {
         let bin = r.join("bin"); std::fs::create_dir_all(&bin).unwrap();
         exe(&bin.join("curl"), &format!("#!/bin/sh\nwhile [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\nf={}/$(basename \"$1\")\n[ -f \"$f\" ] || exit 22\ncp \"$f\" \"$out\"\n", serve.display()));
+        bin
+    }
+    /// The real Codex script against a stand-in `curl` serving both `codex` and `codex-code-mode-host` archives.
+    #[cfg(unix)] fn codex_run(r: &Path, digest_ok: bool) -> (bool, String, PathBuf) { codex_run_with(r, digest_ok, 0) }
+    /// `size_delta`: how far the pinned size is from the real one (applied to the second asset to test all-or-nothing staging).
+    #[cfg(unix)] fn codex_run_with(r: &Path, digest_ok: bool, size_delta: u64) -> (bool, String, PathBuf) {
+        let host_asset = "codex-code-mode-host-aarch64-apple-darwin.tar.gz";
+        let codex_asset_name = "codex-aarch64-apple-darwin.tar.gz";
+        let serve = r.join("serve"); std::fs::create_dir_all(&serve).unwrap();
+        let (codex_sum, codex_size) = tar_gz_fixture(&serve, codex_asset_name, "codex-aarch64-apple-darwin", "#!/bin/sh\necho codex-cli 9.9.9\n");
+        let (host_sum, host_size) = tar_gz_fixture(&serve, host_asset, "codex-code-mode-host-aarch64-apple-darwin", "#!/bin/sh\necho code-mode-host 9.9.9\n");
+        let bad = "0".repeat(64);
+        std::fs::write(serve.join("sentinel"), "x").unwrap();
+        let bin = serve_curl(r, &serve);
         let dest = r.join("my tools/bin");
-        let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(&dest).arg(asset).arg("codex").arg("tar.gz").arg("rust-v9.9.9").arg(if digest_ok { &sum } else { &bad }).arg((size + size_delta).to_string()).env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
+        let o = std::process::Command::new("sh")
+            .arg("-c").arg(CODEX_SH).arg("sh")
+            .arg(&dest).arg("rust-v9.9.9")
+            .arg(codex_asset_name).arg("codex").arg("tar.gz").arg(&codex_sum).arg(codex_size.to_string())
+            .arg(host_asset).arg("codex-code-mode-host").arg("tar.gz").arg(if digest_ok { &host_sum } else { &bad }).arg((host_size + size_delta).to_string())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
         (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)), dest)
     }
     #[cfg(unix)] #[test] fn the_codex_script_places_a_binary_whose_digest_matches_and_runs() {
         let r = tmp("ok"); let (ok, out, dest) = codex_run(&r, true);
         assert!(ok, "{out}");
-        assert_eq!(out.lines().collect::<Vec<_>>(), ["Downloading codex-x86_64-unknown-linux-musl.tar.gz", "Checking the checksum", &format!("Installed in {}/codex", dest.display())]);
-        let v = std::process::Command::new(dest.join("codex")).arg("--version").output().unwrap(); assert_eq!(String::from_utf8_lossy(&v.stdout).trim(), "codex 9.9.9", "it runs");
+        assert_eq!(out.lines().collect::<Vec<_>>(), [
+            "Downloading codex-aarch64-apple-darwin.tar.gz",
+            "Checking the checksum",
+            "Downloading codex-code-mode-host-aarch64-apple-darwin.tar.gz",
+            "Checking the checksum",
+            &format!("Installed in {}/codex", dest.display()),
+        ]);
+        let v = std::process::Command::new(dest.join("codex")).arg("--version").output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&v.stdout).trim(), "codex-cli 9.9.9", "codex runs");
+        let hv = std::process::Command::new(dest.join("codex-code-mode-host")).arg("--version").output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&hv.stdout).trim(), "code-mode-host 9.9.9", "codex-code-mode-host runs");
+        let _ = std::fs::remove_dir_all(&r);
+    }
+    #[cfg(unix)] #[test] fn codex_script_installs_raw_windows_pair() {
+        let r = tmp("raw");
+        let serve = r.join("serve"); std::fs::create_dir_all(&serve).unwrap();
+        let host_asset = "codex-code-mode-host-x86_64-pc-windows-msvc.exe";
+        let codex_asset_name = "codex-x86_64-pc-windows-msvc.exe";
+        std::fs::write(serve.join(codex_asset_name), b"MZcodex").unwrap();
+        std::fs::write(serve.join(host_asset), b"MZhost").unwrap();
+        let sha_of = |p: &Path| String::from_utf8(std::process::Command::new("sha256sum").arg(p).output().unwrap().stdout).unwrap().split(' ').next().unwrap().to_string();
+        let (cs, cl) = (sha_of(&serve.join(codex_asset_name)), std::fs::metadata(serve.join(codex_asset_name)).unwrap().len());
+        let (hs, hl) = (sha_of(&serve.join(host_asset)), std::fs::metadata(serve.join(host_asset)).unwrap().len());
+        let bin = serve_curl(&r, &serve);
+        let dest = r.join("win tools/bin");
+        let o = std::process::Command::new("sh")
+            .arg("-c").arg(CODEX_SH).arg("sh")
+            .arg(&dest).arg("rust-v9.9.9")
+            .arg(codex_asset_name).arg("codex.exe").arg("raw").arg(&cs).arg(cl.to_string())
+            .arg(host_asset).arg("codex-code-mode-host.exe").arg("raw").arg(&hs).arg(hl.to_string())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
+        assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
+        assert_eq!(std::fs::read(dest.join("codex.exe")).unwrap(), b"MZcodex");
+        assert_eq!(std::fs::read(dest.join("codex-code-mode-host.exe")).unwrap(), b"MZhost");
+        let _ = std::fs::remove_dir_all(&r);
+    }
+    #[cfg(unix)] #[test] fn codex_script_withholds_host_and_cleans_stage_when_codex_move_fails() {
+        let r = tmp("stage-fail");
+        let serve = r.join("serve"); std::fs::create_dir_all(&serve).unwrap();
+        let codex_asset_name = "codex-aarch64-apple-darwin.tar.gz";
+        let host_asset = "codex-code-mode-host-aarch64-apple-darwin.tar.gz";
+        let (codex_sum, codex_size) = tar_gz_fixture(&serve, codex_asset_name, "codex-aarch64-apple-darwin", "#!/bin/sh\necho codex-cli 9.9.9\n");
+        let (host_sum, host_size) = tar_gz_fixture(&serve, host_asset, "codex-code-mode-host-aarch64-apple-darwin", "#!/bin/sh\necho code-mode-host 9.9.9\n");
+        let bin = serve_curl(&r, &serve);
+        let dest = r.join("dest/bin");
+        // Pre-create dest/codex as a directory so `mv -f "$stage" "$dest/codex"` fails during Phase 2.
+        std::fs::create_dir_all(dest.join("codex")).unwrap();
+        let o = std::process::Command::new("sh")
+            .arg("-c").arg(CODEX_SH).arg("sh")
+            .arg(&dest).arg("rust-v9.9.9")
+            .arg(codex_asset_name).arg("codex").arg("tar.gz").arg(&codex_sum).arg(codex_size.to_string())
+            .arg(host_asset).arg("codex-code-mode-host").arg("tar.gz").arg(&host_sum).arg(host_size.to_string())
+            .env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
+        assert!(!o.status.success(), "move onto directory must fail");
+        assert!(!dest.join("codex-code-mode-host").exists(), "host must not be placed if codex move failed");
+        let staged: Vec<_> = std::fs::read_dir(&dest).unwrap().flatten().filter(|e| e.file_name().to_string_lossy().starts_with(".codex-stage.")).collect();
+        assert!(staged.is_empty(), "trap must clean up staging files: {staged:?}");
         let _ = std::fs::remove_dir_all(&r);
     }
     /// A PATH with this machine's programs but curl and wget (a stock Ubuntu desktop has wget only): `wget` adds the stand-in `wget -O OUT URL`.
@@ -618,9 +891,9 @@ mod tests {
     }
     #[cfg(unix)] #[test] fn with_no_curl_the_codex_script_downloads_with_wget_and_with_neither_says_so() {
         let r = tmp("wget"); let _ = codex_run(&r, true); let serve = r.join("serve");
-        let sum = String::from_utf8(std::process::Command::new("sha256sum").arg(serve.join("codex-x86_64-unknown-linux-musl.tar.gz")).output().unwrap().stdout).unwrap().split(' ').next().unwrap().to_string();
-        let size = std::fs::metadata(serve.join("codex-x86_64-unknown-linux-musl.tar.gz")).unwrap().len(); let dest = r.join("w/bin");
-        let run = |p: &Path| { let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(&dest).arg("codex-x86_64-unknown-linux-musl.tar.gz").arg("codex").arg("tar.gz").arg("rust-v9.9.9").arg(&sum).arg(size.to_string()).env("PATH", p).output().unwrap(); (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))) };
+        let sum = String::from_utf8(std::process::Command::new("sha256sum").arg(serve.join("codex-aarch64-apple-darwin.tar.gz")).output().unwrap().stdout).unwrap().split(' ').next().unwrap().to_string();
+        let size = std::fs::metadata(serve.join("codex-aarch64-apple-darwin.tar.gz")).unwrap().len(); let dest = r.join("w/bin");
+        let run = |p: &Path| { let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(&dest).arg("rust-v9.9.9").arg("codex-aarch64-apple-darwin.tar.gz").arg("codex").arg("tar.gz").arg(&sum).arg(size.to_string()).env("PATH", p).output().unwrap(); (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))) };
         let (ok, out) = run(&no_curl(&r, &serve, false)); assert!(!ok && out.contains("curl or wget is needed to download Codex"), "{out}");
         let (ok, out) = run(&no_curl(&r, &serve, true)); assert!(ok, "{out}"); assert!(dest.join("codex").is_file());
         // the vendor wrapper (Claude, Grok, OpenCode) downloads its installer with wget too
@@ -633,27 +906,135 @@ mod tests {
         let r = tmp("bad"); let (ok, out, dest) = codex_run(&r, false);
         assert!(!ok && out.trim_end().ends_with("Codex checksum mismatch"), "{out}");
         assert!(!dest.join("codex").exists(), "nothing placed");
+        assert!(!dest.join("codex-code-mode-host").exists(), "first asset also withheld on later mismatch");
         let _ = std::fs::remove_dir_all(&r);
     }
     #[cfg(unix)] #[test] fn the_codex_script_places_nothing_when_the_size_differs() {
         let r = tmp("size"); let (ok, out, dest) = codex_run_with(&r, true, 1);
         assert!(!ok && out.trim_end().ends_with("Codex size mismatch"), "{out}");
         assert!(!dest.join("codex").exists(), "nothing placed");
+        assert!(!dest.join("codex-code-mode-host").exists(), "first asset also withheld on size mismatch");
         let _ = std::fs::remove_dir_all(&r);
     }
     #[cfg(unix)] #[test] fn the_codex_script_refuses_a_missing_pin() {
-        let r = tmp("nopin"); let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(r.join("d")).arg("codex-x.tar.gz").arg("codex").arg("tar.gz").arg("rust-v1").arg("").arg("1").output().unwrap();
+        let r = tmp("nopin");
+        let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(r.join("d")).arg("rust-v1").arg("codex-x.tar.gz").arg("codex").arg("tar.gz").arg("").arg("1").output().unwrap();
         assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("No pinned checksum"));
+        let bad_args = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(r.join("d")).arg("rust-v1").arg("codex-x.tar.gz").output().unwrap();
+        assert!(!bad_args.status.success() && String::from_utf8_lossy(&bad_args.stderr).contains("Invalid Codex arguments"));
         let _ = std::fs::remove_dir_all(&r);
     }
     #[test] fn the_codex_pins_are_whole_and_the_notice_names_the_vendor_script() {
         assert_eq!(CODEX_PINS.len(), 6);
-        for (os, arch, (asset, name, kind, sha, size)) in CODEX_PINS { assert_eq!(codex_asset(os, arch).unwrap().0, *asset); assert!(asset.starts_with("codex-") && !asset.contains(['/', '\\'])); assert!(!name.is_empty() && (*kind == "tar.gz" || *kind == "raw")); assert!(sha.len() == 64 && sha.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "{asset}"); assert!(*size > 0); }
+        for (os, arch, bundle) in CODEX_PINS {
+            assert_eq!(codex_bundle(os, arch).unwrap(), *bundle);
+            assert_eq!(codex_asset(os, arch).unwrap(), bundle.codex);
+            let check = |(asset, name, kind, sha, size): CodexPin, prefix: &str, expected_name: &str| {
+                assert!(asset.starts_with(prefix) && !asset.contains(['/', '\\']), "{asset}");
+                assert_eq!(name, expected_name);
+                assert!(kind == "tar.gz" || kind == "raw");
+                assert!(sha.len() == 64 && sha.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)), "{asset}");
+                assert!(size > 0);
+            };
+            check(bundle.codex, "codex-", codex_binary_name(os));
+            check(bundle.code_mode_host, "codex-code-mode-host-", codex_code_mode_host_name(os));
+        }
         assert!(CODEX_TAG.starts_with("rust-v"));
         let n = install_notice("claude", "linux"); assert!(n.contains("runs the vendor's own installer script from https://claude.ai/install.sh") && n.contains("not checked"), "{n}");
         assert!(install_notice("claude", "windows").contains("https://claude.ai/install.ps1"));
         assert!(install_notice("grok", "darwin").contains(GROK_SH) && install_notice("opencode", "linux").contains(OPENCODE_SH));
         assert!(install_notice("codex", "linux").contains(CODEX_TAG) && install_notice("codex", "linux").contains("sha256"));
+    }
+    #[test] fn codex_repair_detects_missing_or_non_executable_companion_only_in_tools_dir() {
+        let r = crate::plat::tmp::dir("tools-repair-detect");
+        assert!(!codex_needs_companion_repair(&r, "darwin"), "empty dir needs no repair");
+        std::fs::write(r.join("codex"), "#!/bin/sh\n").unwrap();
+        assert!(codex_needs_companion_repair(&r, "darwin"), "codex without codex-code-mode-host needs repair");
+        assert!(codex_needs_companion_repair(&r, "linux"), "linux missing companion needs repair");
+        #[cfg(unix)] {
+            std::fs::write(r.join("codex-code-mode-host"), "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(r.join("codex-code-mode-host"), std::fs::Permissions::from_mode(0o644)).unwrap();
+            assert!(codex_needs_companion_repair(&r, "darwin"), "non-executable companion needs repair on unix");
+            std::fs::set_permissions(r.join("codex-code-mode-host"), std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(!codex_needs_companion_repair(&r, "darwin"), "executable companion needs no repair");
+        }
+        let w = r.join("win"); std::fs::create_dir_all(&w).unwrap();
+        assert!(!codex_needs_companion_repair(&w, "windows"));
+        std::fs::write(w.join("codex.exe"), b"MZ").unwrap();
+        assert!(codex_needs_companion_repair(&w, "windows"), "windows codex.exe without codex-code-mode-host.exe needs repair");
+        std::fs::write(w.join("codex-code-mode-host.exe"), b"MZ").unwrap();
+        assert!(!codex_needs_companion_repair(&w, "windows"));
+        let _ = std::fs::remove_dir_all(&r);
+    }
+    #[test] fn codex_repair_plan_fetches_companion_only_when_version_matches_and_both_when_mismatched() {
+        let r = crate::plat::tmp::dir("tools-repair-plan");
+        for (os, arch, codex_bin, host_bin) in [
+            ("darwin", "arm64", "codex", "codex-code-mode-host"),
+            ("linux", "x64", "codex", "codex-code-mode-host"),
+            ("windows", "x64", "codex.exe", "codex-code-mode-host.exe"),
+        ] {
+            let d = r.join(format!("{os}-{arch}")); std::fs::create_dir_all(&d).unwrap();
+            assert_eq!(codex_repair_plan(&d, os, arch, None), None, "not installed -> no repair");
+            std::fs::write(d.join(codex_bin), b"x").unwrap();
+            let Some(Plan::Sh(s, a)) = codex_repair_plan(&d, os, arch, Some("codex-cli 0.170.0")) else { panic!("{os} {arch} match") };
+            assert_eq!(s, CODEX_SH);
+            assert_eq!(a.len(), 7, "matching version installs companion only: {a:?}");
+            assert_eq!(a[3], host_bin);
+            let Some(Plan::Sh(_, both)) = codex_repair_plan(&d, os, arch, Some("codex-cli 0.169.0")) else { panic!("{os} {arch} mismatch") };
+            assert_eq!(both.len(), 12, "older version installs both from pinned tag: {both:?}");
+            assert_eq!(both[3], codex_bin);
+            assert_eq!(both[8], host_bin);
+            let Some(Plan::Sh(_, unknown)) = codex_repair_plan(&d, os, arch, None) else { panic!("{os} {arch} unknown") };
+            assert_eq!(unknown.len(), 12, "unreadable version installs both from pinned tag");
+        }
+        let _ = std::fs::remove_dir_all(&r);
+    }
+    #[test] fn codex_busy_blocks_concurrent_install_update_and_repair() {
+        let mut m = BTreeMap::new();
+        assert!(!codex_busy(&m));
+        m.insert("claude".into(), ("running".into(), "".into(), None));
+        assert!(!codex_busy(&m));
+        for key in ["codex", "update:codex", "repair:codex"] {
+            m.insert(key.into(), ("running".into(), "".into(), None));
+            assert!(codex_busy(&m), "{key} running must block");
+            m.insert(key.into(), ("done".into(), "".into(), None));
+            assert!(!codex_busy(&m), "{key} done must not block");
+        }
+    }
+    #[cfg(unix)] #[tokio::test(flavor = "multi_thread")] async fn codex_repair_installs_missing_code_mode_host_alongside_existing_codex() {
+        let r = tmp("repair-run");
+        let home = r.join("hub"); std::fs::create_dir_all(&home).unwrap();
+        let hub = Hub::start(crate::hub::Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "darwin".into(), arch: "arm64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        let serve = r.join("serve"); std::fs::create_dir_all(&serve).unwrap();
+        let host_asset = "codex-code-mode-host-aarch64-apple-darwin.tar.gz";
+        let codex_asset_name = "codex-aarch64-apple-darwin.tar.gz";
+        let (host_sum, host_size) = tar_gz_fixture(&serve, host_asset, "codex-code-mode-host-aarch64-apple-darwin", "#!/bin/sh\necho code-mode-host 9.9.9\n");
+        let (codex_sum, codex_size) = tar_gz_fixture(&serve, codex_asset_name, "codex-aarch64-apple-darwin", "#!/bin/sh\necho codex-cli 9.9.9\n");
+        let bundle = CodexBundle {
+            codex: (codex_asset_name, "codex", "tar.gz", Box::leak(codex_sum.into_boxed_str()), codex_size),
+            code_mode_host: (host_asset, "codex-code-mode-host", "tar.gz", Box::leak(host_sum.into_boxed_str()), host_size),
+        };
+        let bin = serve_curl(&r, &serve);
+        let path = std::ffi::OsString::from(format!("{}:/usr/bin:/bin", bin.display()));
+
+        // Case A: existing codex matches tag version -> installs only missing codex-code-mode-host, leaves codex untouched
+        let tools_a = r.join("tools-a"); std::fs::create_dir_all(&tools_a).unwrap();
+        exe(&tools_a.join("codex"), "#!/bin/sh\n# existing-marker\necho codex-cli 9.9.9\n");
+        assert!(repair_codex_in(&hub, &tools_a, "darwin", "rust-v9.9.9", bundle, Some(path.as_os_str())).await.unwrap());
+        assert!(tools_a.join("codex-code-mode-host").is_file());
+        assert!(std::fs::read_to_string(tools_a.join("codex")).unwrap().contains("existing-marker"), "matching codex was preserved");
+        let hv = std::process::Command::new(tools_a.join("codex-code-mode-host")).arg("--version").output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&hv.stdout).trim(), "code-mode-host 9.9.9");
+        assert!(!repair_codex_in(&hub, &tools_a, "darwin", "rust-v9.9.9", bundle, Some(path.as_os_str())).await.unwrap(), "idempotent once repaired");
+
+        // Case B: existing codex is older than tag -> installs both codex-code-mode-host and matching codex
+        let tools_b = r.join("tools-b"); std::fs::create_dir_all(&tools_b).unwrap();
+        exe(&tools_b.join("codex"), "#!/bin/sh\necho codex-cli 9.8.0\n");
+        assert!(repair_codex_in(&hub, &tools_b, "darwin", "rust-v9.9.9", bundle, Some(path.as_os_str())).await.unwrap());
+        let cv = std::process::Command::new(tools_b.join("codex")).arg("--version").output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&cv.stdout).trim(), "codex-cli 9.9.9");
+        assert!(tools_b.join("codex-code-mode-host").is_file());
+        let _ = std::fs::remove_dir_all(&r);
     }
     #[cfg(unix)] #[test] fn the_vendor_script_stops_when_the_download_fails() {
         let r = tmp("vendor"); let bin = r.join("bin"); std::fs::create_dir_all(&bin).unwrap();

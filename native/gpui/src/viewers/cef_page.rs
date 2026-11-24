@@ -11,6 +11,7 @@ use gpui::{prelude::*, *};
 use std::{ops::Range, sync::{Arc, Mutex}};
 
 pub struct CefPage {
+    pub header_owner: Option<WeakEntity<crate::Backplane>>,
     tabs: Vec<Arc<Tab>>, active: usize, focus: FocusHandle, bar_focus: FocusHandle, bar_text: String, bar_edit: bool,
     bounds: Arc<Mutex<Option<Bounds<Pixels>>>>, image: Option<Arc<RenderImage>>, retired: Vec<Arc<RenderImage>>,
     wake: async_channel::Sender<()>, hub: tokio::sync::mpsc::Sender<Command>, owner: String, port: u16,
@@ -18,7 +19,7 @@ pub struct CefPage {
     /// windowed: the client window (None until the first render decides; Some(None): off screen), the pane's marker hitbox in the last frame,
     /// where each tab's child was put (by tab), whether something drawn later covers the pane, gpui keys from the page waiting for a window
     host: Option<Option<native::Host>>, marker: Arc<Mutex<Option<HitboxId>>>, placed: std::collections::HashMap<usize, (Option<native::R>, u64)>, covered: bool,
-    from_page: Vec<(String, cef::KeyEvent)>, lat_native: Arc<Mutex<f64>>, want_focus: bool, want_yank: bool, dispatching: Arc<std::sync::atomic::AtomicBool>, subs: Vec<Subscription>,
+    from_page: Vec<(String, cef::KeyEvent)>, lat_native: Arc<Mutex<f64>>, focus_handoff: super::cef_focus::FocusHandoff, pending_self_blur_seq: Option<u64>, dispatching: Arc<std::sync::atomic::AtomicBool>, subs: Vec<Subscription>,
 }
 
 impl CefPage {
@@ -31,9 +32,19 @@ impl CefPage {
                 cx.background_executor().timer(std::time::Duration::from_millis(16)).await; // at most ~60 repaints a second
             }
         }).detach();
-        let mut me = CefPage { tabs: Vec::new(), active: 0, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bar_text: String::new(), bar_edit: false, bounds: Arc::default(), image: None, retired: Vec::new(), wake, hub, owner, port, taken: false, light: false, start: "about:blank".into(), fresh: false, sample: [0; 3], lat_probe: None, lat_ms: -1.0, buttons: 0, visible: false, composing: false, attached: Vec::new(), status: String::new(), stats: (0, 0, 0), last_mouse: (0, 0),
-            host: None, marker: Arc::default(), placed: Default::default(), covered: false, from_page: Vec::new(), lat_native: Arc::new(Mutex::new(-1.0)), want_focus: false, want_yank: false, dispatching: Arc::default(), subs: Vec::new() };
+        let mut me = CefPage { header_owner: None, tabs: Vec::new(), active: 0, focus: cx.focus_handle(), bar_focus: cx.focus_handle(), bar_text: String::new(), bar_edit: false, bounds: Arc::default(), image: None, retired: Vec::new(), wake, hub, owner, port, taken: false, light: false, start: "about:blank".into(), fresh: false, sample: [0; 3], lat_probe: None, lat_ms: -1.0, buttons: 0, visible: false, composing: false, attached: Vec::new(), status: String::new(), stats: (0, 0, 0), last_mouse: (0, 0),
+            host: None, marker: Arc::default(), placed: Default::default(), covered: false, from_page: Vec::new(), lat_native: Arc::new(Mutex::new(-1.0)), focus_handoff: super::cef_focus::FocusHandoff::new(), pending_self_blur_seq: None, dispatching: Arc::default(), subs: Vec::new() };
         me
+    }
+    pub(super) fn settled(&self) -> Option<&'static str> {
+        let tab = self.tab()?;
+        let state = tab.st.lock().unwrap();
+        if !state.load_error.is_empty() { return Some("error"); }
+        if state.loading || state.url.is_empty() { return None; }
+        let shown = if tab.windowed() {
+            self.placed.get(&(Arc::as_ptr(tab) as usize)).is_some_and(|(rect, handle)| rect.is_some() && *handle != 0)
+        } else { self.image.is_some() };
+        shown.then_some("ready")
     }
     fn windowed(&self) -> bool { matches!(self.host, Some(Some(_))) }
     /// First render: windowed when the client's window can be Chromium's parent and BACKPLANE_CEF_OSR is not set, else off screen; said in the log.
@@ -50,9 +61,62 @@ impl CefPage {
             window.on_frame_drawn(move |window, cx| weak.update(cx, |this, cx| this.after_frame(window, cx)).is_ok());
             // the keyboard follows gpui's focus: onto the page, Chromium's window has it; off the page (only while this window is the active one,
             // so another program's never is taken), the client's window has it again
-            self.subs.push(cx.on_focus(&self.focus, window, |this, _, _| { if let Some(t) = this.tab() { t.give_keyboard(true); } }));
-            self.subs.push(cx.on_blur(&self.focus, window, |this, window, _| { if window.is_window_active() { if let Some(t) = this.tab() { t.give_keyboard(false); } } }));
+            self.subs.push(cx.on_focus(&self.focus, window, |this, _, _| {
+                this.pending_self_blur_seq = None;
+                this.focus_handoff.on_host_focus();
+                if let Some(t) = this.tab() { t.give_keyboard(true); }
+            }));
+            self.subs.push(cx.on_blur(&self.focus, window, |this, window, cx| {
+                let self_blur = this.pending_self_blur_seq.take();
+                if window.is_window_active() {
+                    if let Some(plan_seq) = self_blur {
+                        if let Some(t) = this.tab().cloned()
+                            && let Some(press_seq) = native::fresh_press_seq_after(t.outer(), plan_seq)
+                            && this.focus_handoff.recover_click_after_yank(t.focus_id, press_seq)
+                        {
+                            window.focus(&this.focus);
+                            this.bar_edit = false;
+                            t.give_keyboard(true);
+                            this.take_over();
+                            let weak = cx.entity().downgrade();
+                            window.defer(cx, move |window, cx| {
+                                window.refresh();
+                                let _ = weak.update(cx, |_, cx| cx.notify());
+                            });
+                            return;
+                        }
+                        this.focus_handoff.on_host_blur(plan_seq);
+                        for t in &this.tabs { native::clear_press_up_to(t.outer(), plan_seq); }
+                    } else {
+                        let outers: Vec<u64> = this.tabs.iter().map(|t| t.outer()).collect();
+                        let seq = native::clear_presses(&outers);
+                        this.focus_handoff.on_host_blur(seq);
+                        if let Some(t) = this.tab().cloned() {
+                            t.yank_keyboard_up_to(seq);
+                            if let Some(press_seq) = native::fresh_press_seq_after(t.outer(), seq)
+                                && this.focus_handoff.recover_click_after_yank(t.focus_id, press_seq)
+                            {
+                                window.focus(&this.focus);
+                                this.bar_edit = false;
+                                t.give_keyboard(true);
+                                this.take_over();
+                                let weak = cx.entity().downgrade();
+                                window.defer(cx, move |window, cx| {
+                                    window.refresh();
+                                    let _ = weak.update(cx, |_, cx| cx.notify());
+                                });
+                            }
+                        }
+                    }
+                }
+            }));
+            self.subs.push(cx.observe_window_activation(window, |this, window, _| { if !window.is_window_active() { this.on_window_deactivate(); } }));
         }
+    }
+    fn on_window_deactivate(&mut self) {
+        self.pending_self_blur_seq = None;
+        let outers: Vec<u64> = self.tabs.iter().map(|t| t.outer()).collect();
+        self.focus_handoff.on_window_deactivate(native::clear_presses(&outers));
     }
     /// windowed, after every frame gpui drew: each tab's child over the pane (the active one, when the pane was drawn and nothing drawn later covers
     /// it) or hidden (the rest). A sliver under 12 px (a splitter's grip at the pane's edge) does not count as covering.
@@ -106,16 +170,28 @@ impl CefPage {
             match paths { Some(p) if !p.is_empty() => { let mut l = cef::CefStringList::new(); for x in p { l.append(&x.to_string_lossy()); } cb.cont(Some(&mut l)); } _ => cb.cancel() }
         }).detach();
     }
+    fn drain_focus_events(&mut self) -> bool {
+        let mut person = false;
+        let active_id = self.tab().map(|t| t.focus_id);
+        for t in &self.tabs {
+            let mut st = t.st.lock().unwrap();
+            let ev = super::cef_focus::TabFocusEvents {
+                click_seq: std::mem::take(&mut st.click_seq),
+                key_seq: std::mem::take(&mut st.key_seq),
+                got_focus_seq: std::mem::take(&mut st.got_focus_seq),
+                took_focus_seq: std::mem::take(&mut st.took_focus_seq),
+            };
+            if self.focus_handoff.on_pump_tab(t.focus_id, ev, Some(t.focus_id) == active_id) {
+                person = true;
+            }
+        }
+        person
+    }
     /// Frames, popups, closed tabs, address changes: everything CEF's callbacks left for the main thread.
     fn pump(&mut self, cx: &mut Context<Self>) {
-        let (mut popups, mut dialogs, mut person) = (Vec::new(), Vec::new(), false);
-        for t in &self.tabs { let mut st = t.st.lock().unwrap(); popups.append(&mut st.popup_tabs); dialogs.append(&mut st.dialogs); if !st.download.is_empty() { self.status = st.download.clone(); }
-            // Chromium took the keyboard: on the person's click the page takes gpui's focus too; by itself (a page shown, a script's focus())
-            // it gives the keyboard back unless the page already has gpui's focus
-            let got = std::mem::take(&mut st.got_focus);
-            if std::mem::take(&mut st.person) { person = true; self.want_focus = true; } else if got { self.want_yank = true; }
-            self.from_page.append(&mut st.keys);
-            if std::mem::take(&mut st.took_focus) { self.want_focus = false; } }
+        let person = self.drain_focus_events();
+        let (mut popups, mut dialogs) = (Vec::new(), Vec::new());
+        for t in &self.tabs { let mut st = t.st.lock().unwrap(); popups.append(&mut st.popup_tabs); dialogs.append(&mut st.dialogs); if !st.download.is_empty() { self.status = st.download.clone(); } self.from_page.append(&mut st.keys); }
         for t in popups { self.tabs.push(t); self.active = self.tabs.len() - 1; self.image = None; self.bar_edit = false; }
         for d in dialogs { self.file_dialog(d, cx); }
         if person { self.take_over(); }
@@ -147,8 +223,19 @@ impl CefPage {
     }
     fn mods(m: &Modifiers, buttons: u32) -> u32 { cef::flags(m.shift, m.control, m.alt, false, false, false) | if m.platform { cef::COMMAND } else { 0 } | buttons }
     fn take_over(&mut self) { if !self.taken { self.taken = true; self.rpc(serde_json::json!({"bot": self.owner, "op": "takeover"})); } }
-    /// windowed: the keyboard goes back to the client too, so the person's next click into the page is seen as theirs (on_set_focus)
-    fn hand_back(&mut self, cx: &mut Context<Self>) { if self.taken { self.taken = false; self.rpc(serde_json::json!({"bot": self.owner, "op": "handback"})); if self.windowed() { if let Some(t) = self.tab() { t.give_keyboard(false); } } cx.notify(); } }
+    /// windowed: the keyboard goes back to the client via render (gated by window activity), so an inactive window never steals OS focus
+    fn hand_back(&mut self, cx: &mut Context<Self>) {
+        if self.taken {
+            self.taken = false;
+            self.rpc(serde_json::json!({"bot": self.owner, "op": "handback"}));
+            if self.windowed() {
+                let origin = self.tab().map(|t| t.focus_id);
+                let outers: Vec<u64> = self.tabs.iter().map(|t| t.outer()).collect();
+                self.focus_handoff.request_blur(origin, native::clear_presses(&outers));
+            }
+            cx.notify();
+        }
+    }
     fn go(&mut self, cx: &mut Context<Self>) {
         let raw = self.bar_text.trim().to_string(); if raw.is_empty() { return }
         let url = if raw.contains("://") || raw.starts_with("about:") || raw.starts_with("file:") { raw } else if raw.contains(' ') || !raw.contains('.') && !raw.starts_with("localhost") { format!("https://www.google.com/search?q={}", raw.replace(' ', "+")) } else if raw.starts_with("localhost") || raw.starts_with("127.") { format!("http://{raw}") } else { format!("https://{raw}") };
@@ -194,7 +281,7 @@ impl CefPage {
         if self.bar_focus.is_focused(window) { return }
         if let (Some(t), Some(vk)) = (self.tab(), cef::vk(&e.keystroke.key)) { t.key(1, Self::mods(&e.keystroke.modifiers, 0), vk, vk, vk as u16); }
     }
-    fn act(&mut self, a: super::chrome::Act, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn act(&mut self, a: super::chrome::Act, window: &mut Window, cx: &mut Context<Self>) {
         use super::chrome::Act::*;
         match a {
             Back => { if let Some(t) = self.tab() { t.back(); } } Forward => { if let Some(t) = self.tab() { t.forward(); } }
@@ -220,8 +307,63 @@ impl Render for CefPage {
         for old in self.retired.drain(..) { let _ = window.drop_image(old); }
         if self.host.is_none() { self.decide(window, cx); }
         if self.tabs.is_empty() { self.new_tab(&self.start.clone(), cx); }
-        if std::mem::take(&mut self.want_focus) && !self.focus.is_focused(window) { window.focus(&self.focus); self.bar_edit = false; }
-        if std::mem::take(&mut self.want_yank) && !self.focus.is_focused(window) && window.is_window_active() { if let Some(t) = self.tab() { t.give_keyboard(false); } }
+        if self.drain_focus_events() { self.take_over(); }
+        let active_id = self.tab().map(|t| t.focus_id);
+        let page_focused = self.focus.is_focused(window);
+        let window_active = window.is_window_active();
+        if window_active
+            && let Some(cutoff) = self.focus_handoff.pending_press_cutoff_for_active(active_id, page_focused)
+            && let Some(t) = self.tab().cloned()
+            && let Some(press_seq) = native::fresh_press_seq_after(t.outer(), cutoff)
+            && self.focus_handoff.on_pending_click(t.focus_id, press_seq)
+        {
+            self.take_over();
+        }
+        let plan = self.focus_handoff.take_render_plan(active_id, page_focused, window_active);
+        match plan.gpui {
+            super::cef_focus::GpuiFocusChange::FocusPage => { self.pending_self_blur_seq = None; window.focus(&self.focus); self.bar_edit = false; }
+            super::cef_focus::GpuiFocusChange::BlurPage => { self.pending_self_blur_seq = window.is_window_active().then_some(plan.blur_cutoff_seq); window.blur(); }
+            super::cef_focus::GpuiFocusChange::None => {}
+        }
+        for y in &plan.release_cef_only {
+            if let Some(t) = self.tabs.iter().find(|t| t.focus_id == y.tab) {
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_release_bg": true})); }
+                t.release_cef_focus_up_to(y.cutoff_seq);
+            }
+        }
+        if !plan.yank_to_host.is_empty() {
+            let mut yanked_any = false;
+            for y in &plan.yank_to_host {
+                if let Some(t) = self.tabs.iter().find(|t| t.focus_id == y.tab) {
+                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_yank": true})); }
+                    t.yank_keyboard_up_to(y.cutoff_seq);
+                    yanked_any = true;
+                }
+            }
+            if !yanked_any
+                && (plan.active_blur_or_yank_cutoff(active_id).is_some() || active_id.is_none())
+                && let Some(Some(host)) = self.host
+            {
+                native::focus_host(host, 0);
+            }
+        }
+        if let Some(tab_id) = plan.restore_active
+            && let Some(t) = self.tabs.iter().find(|t| t.focus_id == tab_id)
+        {
+            t.give_keyboard(true);
+        }
+        if window.is_window_active()
+            && let Some(cutoff) = plan.recovery_cutoff_for_active(active_id, self.focus_handoff.recovery_floor_seq())
+            && let Some(t) = self.tab().cloned()
+            && let Some(press_seq) = native::fresh_press_seq_after(t.outer(), cutoff)
+            && self.focus_handoff.recover_click_after_yank(t.focus_id, press_seq)
+        {
+            self.pending_self_blur_seq = None;
+            window.focus(&self.focus);
+            self.bar_edit = false;
+            t.give_keyboard(true);
+            self.take_over();
+        }
         if !self.from_page.is_empty() {
             let keys = std::mem::take(&mut self.from_page); let flag = self.dispatching.clone(); let tab = self.tab().cloned();
             window.defer(cx, move |window, cx| for (ks, e) in keys {
@@ -242,7 +384,7 @@ impl Render for CefPage {
         let tabs: Vec<super::chrome::TabView> = self.tabs.iter().enumerate().map(|(i, t)| { let st = t.st.lock().unwrap(); super::chrome::TabView { id: i.to_string(), title: st.title.clone(), url: st.url.clone(), active: i == self.active } }).collect();
         let cur_url = self.tab().map(|t| t.st.lock().unwrap().url.clone()).unwrap_or_default();
         let value = if bar_focused && self.bar_edit { self.bar_text.clone() } else if cur_url == "about:blank" { String::new() } else { cur_url };
-        let (strip, chrome) = super::chrome::render(&tabs, super::chrome::NavIn { light: self.light, value, focused: bar_focused, taken: self.taken, have: !self.tabs.is_empty(), loading, can_back: back, can_forward: fwd, bar_focus: &self.bar_focus }, cx,
+        let (strip, chrome) = super::chrome::render(self.header_owner.as_ref(), &tabs, super::chrome::NavIn { light: self.light, value, focused: bar_focused, taken: self.taken, have: !self.tabs.is_empty(), loading, can_back: back, can_forward: fwd, bar_focus: &self.bar_focus }, cx,
             |this: &mut CefPage, a, w, cx| this.act(a, w, cx), |this, e, w, cx| this.key_down(e, w, cx));
         let c = |n: &str| crate::theme::color(self.light, n);
         // windowed: nothing gpui draws shows over Chromium's window, so the load error and the download line go at the end of the tab strip

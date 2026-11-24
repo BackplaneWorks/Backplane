@@ -14,6 +14,8 @@ mod signal;
 #[path = "../sidebar.rs"]
 #[allow(dead_code)]
 mod sidebar;
+#[path="../present/swarm_need.rs"] #[allow(dead_code)] pub mod swarm_need;
+mod present { pub use crate::swarm_need; }
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
 fn main() {

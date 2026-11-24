@@ -2,7 +2,7 @@
 //! (the launcher's report "… completed") is work the person asked for coming in: it is not routine FYI for triage to keep quiet. Such a report skips the
 //! triage run and joins the owner's done batch; finishes that come within `WINDOW` seconds of the first go out together. The batch is one private lane whose
 //! brief asks for at most one tell_person, and only for what is material (gate.rs: a landing, a release, or an ask; Nov 20, pref.fewer-progress-notes). A lane
-//! that ends without telling has the hub's plain digest go through the same gate: a landing joins the 30-minute batch, progress is not told. A turn-end
+//! that ends without telling has told nothing: the hub's plain digest names no verified ref, so it is recorded and never posted. A turn-end
 //! report that opens with no-change words makes no lane at all.
 //! Progress (a thread's message mid-turn, a report while its work still runs) and asks keep their own paths. No message text or address is logged here.
 use super::{escalate::private_told_key, route::{jshow, ref_uri, take_chars, Ctx, Step}, Body};
@@ -52,7 +52,7 @@ pub fn digest(xs: &[Value]) -> String {
 pub fn running_build() -> String {
     std::env::current_exe().ok().and_then(|p| p.parent().and_then(|d| d.file_name()).map(|n| n.to_string_lossy().to_string())).filter(|n| n.matches('-').count() >= 2).unwrap_or_default()
 }
-const DONE_HEAD: &str = "[Private mailroom: launched threads ended a turn. Each item below is a launched thread (often a lead) that ended a turn; most turn-ends are progress, not news. The person's rules in <owner_preferences> (pref.fewer-progress-notes among them) rule here: speak only when something landed on main, was released for them to try, or needs their decision, approval or answer. For each item, thread_read it if unsure. If one is material, call tell_person ONCE with the key given below and its kind (landed, release or needs_you): one short plain line per material item, what landed and whether it is in their running build, or exactly what they must decide. If nothing is material, end silently with no tell: that is the right outcome. Never tell \"nothing landed\", \"nothing to try\", \"still waiting\", \"in review\", \"queued\" or \"rebased\": the hub refuses it. Landings are collected and reach the person at most every 30 minutes; needs_you goes at once.]\n";
+const DONE_HEAD: &str = "[Private mailroom: launched threads ended a turn. Each item below is a launched thread (often a lead) that ended a turn; most turn-ends are progress, not news. The person's rules in <owner_preferences> (pref.fewer-progress-notes among them) rule here: speak only when something landed on main, was released for them to try, or needs their decision, approval or answer. For each item, thread_read it if unsure. If one is material, call tell_person ONCE with the key given below, its kind (landed, release or needs_you) and its ref (owner/repo#N merged, commit:owner/repo@sha, release:owner/repo@tag published, ask:<id> open: the hub verifies it and refuses a tell without one): one short plain line per material item, what landed and whether it is in their running build, or exactly what they must decide. If nothing is material, end silently with no tell: that is the right outcome. Never tell \"nothing landed\", \"nothing to try\", \"still waiting\", \"in review\", \"queued\" or \"rebased\": the hub refuses it. Landings are collected and reach the person at most every 30 minutes; needs_you goes at once.]\n";
 
 impl<'a> Ctx<'a> {
     /// Done.admit (Mail.route, the owner's inbound launch report of a finish): the report joins the batch instead of a triage run; its ticket is claimed so the
@@ -101,9 +101,9 @@ impl<'a> Ctx<'a> {
         let cs = vec![set(handed_key(lane), &self.now.to_string(), self.now)]; self.replay(&cs);
         let bot = self.w.private_owner(lane);
         if key.is_empty() || text.is_empty() || !self.setting(&private_told_key(&bot, &key), "").is_empty() { return Some(Step { cs, outs: vec![] }) }
-        // Gate.tell: the hub's digest is gated like any tell: a digest of progress is not told, a landing joins the batch
-        let st = Step { cs, outs: vec![] };
-        match self.tell_gate(lane, &text, &key, "landed") { Ok((told, _)) => Some(st.cat(told)), Err(_) => Some(st) }
+        // Gate.tell: the hub's own digest names no verified landing, release or ask, so it is never told (Nov 20: 56 "Done: …" digests reached the person): a lane
+        // that has something material tells it with tell_person and its ref; silence is the right end
+        let _ = text; Some(Step { cs, outs: vec![] })
     }
     /// the owners with a done batch whose window is over
     pub fn done_due(&self) -> Vec<String> {

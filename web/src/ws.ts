@@ -1,5 +1,25 @@
 // data/1 JSON + binary CBOR WebSocket client for Backplane web UI.
 // Authenticates strictly via the HttpOnly __Host-bp_web cookie (never ?token=).
+import { RawInflater } from "./inflate";
+import type { NoProviderNotice } from "./provider-notice";
+
+export interface HomeMoving {
+  to: string;
+  state: "moving" | "failed";
+  step?: string;
+  note?: string;
+}
+
+export interface HomeInfo {
+  kind: "local" | "peer" | "boat";
+  id: string;
+  name: string;
+  online: boolean;
+  awaySince?: number;
+  queuedCount: number;
+  canMoveHere: boolean;
+  moving?: HomeMoving;
+}
 
 export interface HelloFrame {
   t: "hello";
@@ -9,11 +29,15 @@ export interface HelloFrame {
   version: string;
   epoch: string;
   now: number;
+  z?: string;
+  home?: HomeInfo;
   features?: string[];
   commands?: Array<{ word: string; label: string; desc: string }>;
   theme?: string;
   locale?: string;
+  favoriteModels?: string[];
   notice?: unknown;
+  noProvider?: NoProviderNotice | null;
 }
 
 export interface DataPush {
@@ -25,6 +49,19 @@ export interface DataPush {
 
 export type JsonFrame = HelloFrame | DataPush | { t: string; [key: string]: unknown };
 export type ConnState = "connecting" | "connected" | "reconnecting" | "revoked";
+
+export class HubRpcError extends Error {
+  public code?: string;
+  public machine?: string;
+  public thread?: string;
+  constructor(message: string, opts?: { code?: string; machine?: string; thread?: string }) {
+    super(message);
+    this.name = "HubRpcError";
+    this.code = opts?.code;
+    this.machine = opts?.machine;
+    this.thread = opts?.thread;
+  }
+}
 
 interface PendingCall {
   resolve: (v: unknown) => void;
@@ -40,8 +77,12 @@ export class HubClient {
   private reconnectDelay = 500;
   private reconnectTimer: number | null = null;
   private closed = false;
+  private inflater: RawInflater | null = null;
+  private textDecoder = new TextDecoder();
 
   public hello: HelloFrame | null = null;
+  /** The hub said it is restarting (`hub.restarting`, docs/PHONE-DATA.md, Restarts): what it said and when; gone at the next hello. */
+  public restarting: { reason: string; build: string; text: string; at: number } | null = null;
   private features = new Set<string>();
 
   private stateListeners = new Set<(s: ConnState, hello: HelloFrame | null) => void>();
@@ -121,27 +162,28 @@ export class HubClient {
 
   private openSocket(): void {
     if (this.closed) return;
+    this.inflater = null;
     const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const url = `${proto}//${window.location.host}/ws?data=1&enc=json`;
+    const url = `${proto}//${window.location.host}/ws?data=1&enc=json&z=deflate`;
     const ws = new WebSocket(url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
 
-    ws.addEventListener("message", (ev) => {
-      if (ev.data instanceof ArrayBuffer) {
-        for (const fn of this.binaryListeners) fn(ev.data);
-        return;
-      }
-      if (typeof ev.data !== "string") return;
+    const handleJson = (text: string): void => {
       let frame: JsonFrame;
       try {
-        frame = JSON.parse(ev.data) as JsonFrame;
+        frame = JSON.parse(text) as JsonFrame;
       } catch {
         return;
       }
+      if (frame.t === "hub.restarting") {
+        this.restarting = { reason: String(frame.reason ?? ""), build: String(frame.build ?? ""), text: String(frame.text ?? ""), at: Date.now() };
+      }
       if (frame.t === "hello") {
+        this.restarting = null;
         this.hello = frame as HelloFrame;
         this.features = new Set(this.hello.features ?? []);
+        this.inflater = this.hello.z === "deflate" ? new RawInflater() : null;
         this.reconnectDelay = 500;
         this.setState("connected");
       } else if (frame.t === "reply" && typeof frame.id === "number") {
@@ -159,12 +201,42 @@ export class HubClient {
                 : (errObj && typeof errObj === "object" && "message" in errObj)
                   ? String((errObj as { message: unknown }).message)
                   : "Request failed";
-            call.reject(new Error(msg));
+            const code = typeof frame.errorCode === "string" ? frame.errorCode : undefined;
+            const machine = typeof frame.machine === "string" ? frame.machine : undefined;
+            const thread = typeof frame.thread === "string" ? frame.thread : undefined;
+            call.reject(new HubRpcError(msg, { code, machine, thread }));
           }
         }
         return;
       }
       for (const fn of this.frameListeners) fn(frame);
+    };
+
+    ws.addEventListener("message", (ev) => {
+      if (ev.data instanceof ArrayBuffer) {
+        if (this.inflater) {
+          let raw: Uint8Array;
+          try {
+            raw = this.inflater.feed(new Uint8Array(ev.data));
+          } catch {
+            // Broken deflate stream: close and reconnect.
+            ws.close();
+            return;
+          }
+          // Treat frames starting with '{' (0x7b) as JSON text; everything else (plots, binary CBOR) goes to binary listeners.
+          if (raw.length > 0 && raw[0] === 0x7b) {
+            handleJson(this.textDecoder.decode(raw));
+          } else {
+            const copy = raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength);
+            for (const fn of this.binaryListeners) fn(copy);
+          }
+          return;
+        }
+        for (const fn of this.binaryListeners) fn(ev.data);
+        return;
+      }
+      if (typeof ev.data !== "string") return;
+      handleJson(ev.data);
     });
 
     ws.addEventListener("close", (ev) => {

@@ -41,7 +41,7 @@ struct DViewerRailHas: Decodable, Equatable {
         switch tab {
         case "Board", "3D": return board
         case "Schematic": return schematic
-        case "Split": return board || schematic
+        case "Split": return board && schematic
         case "Mech": return mech
         case "Gerbers": return gerbers
         default: return true

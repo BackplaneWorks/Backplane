@@ -12,7 +12,18 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("git", "Projects and git"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("mouse", "Mouse and trackpad"), ("browser", "Browser"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("notifications", "Notifications"), ("timezone", "Time zone"),
+    ("agents", "Agents"), ("writing", "Writing"), ("keys", "API keys"), ("mcp", "MCP servers"), ("voice", "Voice"), ("rules", "Rules and task board"), ("usage", "Usage"),
+    ("git", "Projects and git"), ("cad", "CAD"), ("browser", "Browser"), ("mouse", "Mouse and trackpad"), ("ordering", "Ordering"),
+    ("devices", "Devices"), ("machines", "Machines"), ("network", "Network and updates"),
+    ("setup", "Setup"), ("privacy", "Privacy"), ("about", "About"), ("developer", "Developer")];
+/// The menu's groups, in order: each menu row says its group (`group`), and a client draws the name once above the group's first page. Every page is in one.
+pub const GROUPS: &[(&str, &[&str])] = &[("General", &["appearance", "threads", "notifications", "timezone"]), ("Agents and tools", &["agents", "writing", "keys", "mcp", "voice", "rules", "usage"]),
+    ("Workspace", &["git", "cad", "browser", "mouse", "ordering"]), ("Connect", &["devices", "machines", "network"]), ("System", &["setup", "privacy", "about", "developer"])];
+pub fn group_of(id: &str) -> &'static str { GROUPS.iter().find(|(_, ps)| ps.contains(&id)).map_or("", |(g, _)| *g) }
+/// The page an id names: three pages were folded into their neighbours (Web UI into Devices, Ring into Voice, Import from 0.14 into Setup), and
+/// their old ids still open the page that holds them now (a `settings-page` press, a `backplane://settings/<id>` link, a session saved on one).
+pub fn canon(id: &str) -> &str { match id { "web" => "devices", "ring" => "voice", "import" => "setup", o => o } }
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -20,7 +31,7 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn draft<'a>(session: &'a Value, k: &str) -> &'a str { s(&session["drafts"], k) }
 fn set<'a>(st: &'a State, k: &str, dflt: &'a str) -> &'a str { st.settings.get(k).map(String::as_str).unwrap_or(dflt) }
 pub fn is_open(session: &Value) -> bool { session["open"]["settings"].as_bool().unwrap_or(false) }
-pub fn page(session: &Value) -> &str { let p = draft(session, "@settings.page"); if PAGES.iter().any(|(id, _)| *id == p) { p } else { "" } }
+pub fn page(session: &Value) -> &str { let p = canon(draft(session, "@settings.page")); if PAGES.iter().any(|(id, _)| *id == p) { p } else { "" } }
 
 // ---- rows ----
 fn btn(label: &str, action: &str, value: &str, on: bool) -> Value { json!({"label": label, "action": action, "value": value, "on": on}) }
@@ -62,7 +73,8 @@ fn update_row(version: &str, status: &str) -> Value {
     let waiting = serde_json::from_str::<Value>(status).map_or(false, |v| v["state"] == "waiting");
     let mut b = if check { vec![btn("Check now", "update-check", "", false)] } else { vec![] };
     if waiting { b.push(btn("Update now", "update-now", "", false)); }
-    row(&format!("Backplane {version}"), &line, b)
+    // "Hub": a desktop client puts its own version beside this row (native/gpui selfupdate.rs), and the two can differ
+    row(&format!("Hub: Backplane {version}"), &line, b)
 }
 
 /// Settings › Browser: the start page a new or empty Browser tab opens (settings/browser_start.rs, the phones draw the same rows from `browser.page`).
@@ -176,7 +188,7 @@ fn developer(st: &State) -> Vec<Value> {
 fn about(st: &State, info: &Value) -> Vec<Value> {
     let v = VERSION.get().map(String::as_str).unwrap_or("");
     let _ = st;
-    let mut r = vec![row(&format!("Backplane {v}"), "Updates are under Network.", vec![])];
+    let mut r = vec![row(&format!("Hub: Backplane {v}"), "Updates are under Network.", vec![])];
     // what this window's Browser tab is (a desktop client says; a phone says nothing)
     match info["client"]["browser"].as_str() {
         Some("frames") => r.push(row("Browser", "Frame mode: the hub's browser draws each page and this window shows it.", vec![])),
@@ -203,7 +215,9 @@ fn agents(st: &State, info: &Value) -> Vec<Value> {
     let models: Value = info["models"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
     let prov = set(st, "agent.provider", "claude");
     let cli = models["about"][prov]["cli"].as_str().unwrap_or("");
-    let model = set(st, "agent.model", "");
+    let raw_model = set(st, "agent.model", "");
+    let model_clean = crate::settings::models::sanitize_model(prov, raw_model, models.is_object().then_some(&models));
+    let model = model_clean.as_str();
     let updates = agent_updates(&models, info);
     let mut ids: Vec<&str> = vec![""];
     ids.extend(models[prov].as_array().into_iter().flatten().filter_map(Value::as_str).take(12));
@@ -264,7 +278,7 @@ fn network(st: &State, info: &Value) -> Vec<Value> {
         row(&format!("Tailscale: {state}"), &note, vec![]),
         // no tailnet link: pairing still works on the local network or this computer, from Devices (where the links are made since 0.15)
         if link.is_empty() { row("Pairing link", PAIR_ELSEWHERE, vec![btn("Devices", "settings-page", "devices", false)]) } else { row("Pairing link", link, vec![]) },
-        row("Update channel", "Stable takes releases; beta also takes betas; nightly also takes a build of main each night.", chips(&["stable", "beta", "nightly"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
+        row("Update channel", "Stable takes releases; beta also takes betas; nightly tracks nightly builds of main.", chips(&["stable", "beta", "nightly"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
         update_row(version, &i("update.status")),
     ].into_iter().chain(boat_hub_rows(i("boathub.cost"), crate::hub::now_ms() / 1000)).collect()
 }
@@ -312,6 +326,36 @@ pub fn loopback_invite(invite: &str) -> bool {
 }
 fn row_tone(label: &str, note: &str, tone: &str) -> Value { let mut r = row(label, note, vec![]); r["tone"] = json!(tone); r }
 
+fn web_ui(st: &State, info: &Value) -> Vec<Value> {
+    let status: Value = info["web.status"].as_str().and_then(|v| serde_json::from_str(v).ok()).unwrap_or(Value::Null);
+    let enabled = set(st, "web.enabled", "") == "1";
+    let mut rows = Vec::new();
+    let reason = status["reason"].as_str().unwrap_or(if cfg!(target_os = "linux") { "Browser access requires a verified Tailscale HTTPS connection." } else { "This release supports browser access on Linux hubs only." });
+    let available = status["available"] == true;
+    let buttons = if enabled || available || status["canEnable"] == true {
+        vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]
+    } else { vec![] };
+    rows.push(row("Browser access", if available { "Pair a browser over HTTPS on your tailnet. A paired browser can use the terminal." } else { reason }, buttons));
+    if status["operatorRequired"] == true {
+        let command = r#"sudo tailscale set --operator="$(id -un)""#;
+        rows.push(row("Run once in your terminal", command, vec![btn("Copy", "copy", command, false)]));
+        rows.push(row("Operator permission", "This user can manage Tailscale on this computer without sudo.", vec![]));
+    }
+    if enabled && !available {
+        if let Some(command) = status["command"].as_str() {
+            rows.push(row("Set up private HTTPS forwarding", command, vec![btn("Set up forwarding", "device-web-setup", command, false)]));
+        }
+    }
+    if enabled && available {
+        if let Some(address) = status["address"].as_str() {
+            let mut link = row("Web address", address, vec![]);
+            link["qr"] = json!(crate::net::qr::text(address).lines().collect::<Vec<_>>());
+            rows.push(link);
+        }
+    }
+    rows
+}
+
 /// Settings → Devices: Add a device, the paired devices, the local network addresses the hub was let answer on, and the pairing
 /// links (net/pairing.rs `Registry::list` with `lan` and `host`, put in `info.devices` by the presenter's caller: `routes::AuthRoutes::devices`).
 /// An invitation made here (`device-invite`, kept in the draft `@invite`) carries every address it can be shown with (net/plan.rs): the
@@ -340,7 +384,7 @@ pub fn devices(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     } else if let Some(e) = inv["error"].as_str() { r.push(row("Add a device", &format!("Could not make an invitation: {e}."), vec![btn("Try again", "device-invite", "", false)])) }
     else { r.push(row("Add a device", "Makes a link, a QR code and a short code for one new device. Each works once, for ten minutes.", vec![btn("Add a device", "device-invite", "", false)])) }
     let enabled = set(st, "web.enabled", "") == "1";
-    r.push(row("Browser access", "Pair a browser over HTTPS using the dedicated Backplane tailnet name. A paired browser can use the terminal.",
+    r.push(row("Browser access", "Pair a browser over HTTPS on your tailnet. A paired browser can use the terminal.",
         vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]));
     if enabled {
         for req in list["browserPending"].as_array().into_iter().flatten() {
@@ -373,6 +417,14 @@ pub fn devices(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         if !live { continue }
         let who = if s(i, "deviceName").is_empty() { String::new() } else { format!(" · {}", s(i, "deviceName")) };
         r.push(row(&format!("Pairing link · {state}{who}"), "", vec![btn("Revoke", "device-uninvite", s(i, "id"), false)]));
+    }
+    // the files agents shared (files/share.rs, `file_share`): each works without pairing until it expires or is revoked here
+    let e = draft(session, "@share.err");
+    if !e.is_empty() { r.push(row_tone("Shared files", e, "bad")) }
+    for sh in info["shares"].as_array().into_iter().flatten() {
+        let until = crate::agents::rules::when(&zone_of(st).0, sh["expires"].as_u64().unwrap_or(0), now / 1000);
+        let tail = if s(sh, "url").is_empty() { String::new() } else { format!(" · also on the tailnet: {}", s(sh, "url")) };
+        r.push(row(&format!("Shared file · {}", s(sh, "name")), &format!("{} · until {until}{tail}", s(sh, "path")), vec![btn("Revoke", "device-share-revoke", s(sh, "id"), false)]));
     }
     r
 }
@@ -458,6 +510,7 @@ pub fn device_act(action: &str, value: &str) -> Option<Value> {
         }
         "device-revoke" => { crate::net::start::revoke("revoke", value); json!({}) }
         "device-uninvite" => { crate::net::start::revoke("uninvite", value); json!({}) }
+        "device-share-revoke" => json!({"drafts": {"@share.err": crate::files::share::revoke_now(value).err().map_or(String::new(), |e| format!("Could not revoke that share: {e}."))}}),
         _ => return None,
     })
 }
@@ -566,7 +619,9 @@ fn writing(st: &State, info: &Value) -> Vec<Value> {
     const TEXT: &[&str] = &["claude", "codex", "grok", "muse"];
     let models: Value = info["models"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
     let prov = { let p = set(st, "text.provider", "claude").trim(); if TEXT.contains(&p) { p } else { "claude" } };
-    let model = set(st, "text.model", "").trim();
+    let raw_model = set(st, "text.model", "").trim();
+    let model_clean = crate::settings::models::sanitize_model(prov, raw_model, models.is_object().then_some(&models));
+    let model = model_clean.as_str();
     let mut ids: Vec<&str> = vec![""];
     ids.extend(models[prov].as_array().into_iter().flatten().filter_map(Value::as_str).take(12));
     if !ids.contains(&model) { ids.push(model); }
@@ -817,20 +872,44 @@ fn mcp_patch(p: serde_json::Map<String, Value>) -> Value {
     json!({"drafts": d})
 }
 
+/// A section's name inside a page: a row of only its label, which the clients draw as a heading.
+fn head(label: &str) -> Value { row(label, "", vec![]) }
+/// Settings → Devices as the window shows it: the devices page with the whole of browser access in one section (its switch, the forwarding
+/// setup and the web address, then the browsers waiting for approval) where the page's one Browser access row was. The phones keep `devices`.
+fn devices_and_web(st: &State, session: &Value, info: &Value) -> Vec<Value> {
+    let mut r = devices(st, session, info);
+    let Some(at) = r.iter().position(|x| x["label"] == "Browser access") else { return r };
+    let waiting = r[at + 1..].iter().take_while(|x| x["buttons"].as_array().map_or(false, |b| b.iter().any(|b| b["action"] == "device-web-approve"))).count();
+    // the switch stays whatever the hub reports of its web status (the devices row always had it)
+    let mut web = vec![head("Web UI")]; web.extend(web_ui(st, info));
+    if web.get(1).map_or(false, |w| w["buttons"].as_array().map_or(true, Vec::is_empty)) { web[1]["buttons"] = r[at]["buttons"].clone(); }
+    let rest = r.split_off(at + 1 + waiting); let asks = r.split_off(at + 1); r.truncate(at);
+    r.extend(web); r.extend(asks);
+    let shared = |x: &Value| x["label"].as_str().map_or(false, |l| l.starts_with("Shared file · ") || l == "Shared files");
+    if rest.iter().any(|x| !shared(x)) { r.push(head("Paired devices")); }
+    for x in rest { if shared(&x) && !r.iter().any(|h| h["label"] == "Shared files" && h["note"] == "") { r.push(head("Shared files")); } r.push(x); }
+    r
+}
+
 /// One page's rows (without the way back).
 fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
-    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "mouse" => mouse(st), "browser" => browser(st, session), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
+    match p { "appearance" => appearance(st), "threads" => threads(st, session), "git" => git(st), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => { let mut r = super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()); r.push(head("Import from 0.14")); r.extend(super::onboard::import_rows(info)); r }, "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "mouse" => mouse(st), "browser" => browser(st, session), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices_and_web(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
             r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
             r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
-            r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] }
+            r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => { let mut r = voice(st, session, info); r.push(head("Ring")); r.extend(ring(st, session, info)); r }, "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] }
 }
-/// What the Settings search looks through for each page besides its title: its rows' labels as a fresh hub shows them, one a line, made once.
-/// (Setup and Import read the disk and are found by their titles.)
-fn page_words(id: &str) -> &'static str {
-    static W: OnceLock<Vec<(&'static str, String)>> = OnceLock::new();
+/// What the Settings search looks through for each page besides its title: its rows' labels as a fresh hub shows them, one a line (`words`), and
+/// each of those rows' notes on the same line of `notes` (a note's own line breaks are spaces there), made once.
+/// (Setup reads the disk: it is found by its title and the names of what it holds.)
+fn page_words(id: &str) -> (&'static str, &'static str) {
+    static W: OnceLock<Vec<(&'static str, String, String)>> = OnceLock::new();
     let all = W.get_or_init(|| { let (st, none) = (State::default(), json!({}));
-        PAGES.iter().map(|(id, _)| (*id, if matches!(*id, "setup" | "import") { String::new() } else { rows_of(&st, &none, &none, id).iter().filter_map(|r| r["label"].as_str()).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n") })).collect() });
-    all.iter().find(|(p, _)| *p == id).map_or("", |(_, w)| w.as_str())
+        PAGES.iter().map(|(id, _)| { let mut rows = if *id == "setup" { vec![head("Setup"), head("Import from 0.14")] } else { rows_of(&st, &none, &none, id) };
+            // what Devices shows only once browser access is on, or something is paired or shared: found by name all the same
+            if *id == "devices" { rows.extend(["Set up private HTTPS forwarding", "Web address", "Paired devices", "Shared files"].map(head)); }
+            let found: Vec<(&str, String)> = rows.iter().filter_map(|r| Some((r["label"].as_str().filter(|l| !l.is_empty())?, r["note"].as_str().unwrap_or("").replace('\n', " ")))).collect();
+            (*id, found.iter().map(|(l, _)| *l).collect::<Vec<_>>().join("\n"), found.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join("\n")) }).collect() });
+    all.iter().find(|(p, _, _)| *p == id).map_or(("", ""), |(_, w, n)| (w.as_str(), n.as_str()))
 }
 
 /// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back.
@@ -838,7 +917,8 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     let p = page(session);
     let rows = if p.is_empty() {
         // `words`: what the page holds, for a client's search (the desktop's nav finds "Group projects" under Appearance)
-        PAGES.iter().map(|(id, title)| { let mut r = row(title, "", vec![btn(&format!("{title} ›"), "settings-page", id, false)]); r["words"] = json!(page_words(id)); r }).collect()
+        // `group`: the name a client draws once above the group's first page
+        PAGES.iter().map(|(id, title)| { let mut r = row(title, "", vec![btn(&format!("{title} ›"), "settings-page", id, false)]); let (words, notes) = page_words(id); r["words"] = json!(words); r["notes"] = json!(notes); r["group"] = json!(group_of(id)); r }).collect()
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
@@ -864,10 +944,11 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "flag" if value == "settings" => { let opening = !is_open(session); let mut p = json!({"open": {"settings": opening}});
             if opening { let (shut, c) = super::viewer::shut(hub, session); crate::session::patch::merge(&mut p, &shut); cmds.extend(c); if let Some(r) = p["rid"].as_u64() { rid = r; } } p }
         "settings-page" => {
+            let value = canon(value);
             let p = if PAGES.iter().any(|(id, _)| *id == value) { value } else { "" };
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
             if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
-            if p == "ring" { send(session, hub, "ring.search", json!({}), &mut cmds, &mut rid); } // the list and the setup as they stand now, the search kept
+            if p == "voice" { send(session, hub, "ring.search", json!({}), &mut cmds, &mut rid); } // the list and the setup as they stand now, the search kept
             let mut patch = json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.qfrom": Value::Null, "@f.qto": Value::Null, "@quiet.err": "", "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@kinstall": "", "@f.kname": "", "@keys.rm": "", "@key.err": ""}});
             // a page asked for while Settings is shut (the KiCad pane's Install Backplane KiCad): Settings opens on it in this one action. A
             // flag sent just before it carries the same session, so this one's answer would overwrite its opening and leave Settings shut
@@ -892,11 +973,11 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "board-done" => { send(session, hub, "board.set", json!({"item": {"id": value, "status": "done"}}), &mut cmds, &mut rid); json!({}) }
         "board-drop" => { send(session, hub, "board.drop", json!({"id": value}), &mut cmds, &mut rid); json!({}) }
         // Devices: an invitation made here (the registry is the hub's own, the same one /auth/invitations uses), a device or a link revoked
-        "device-web-access" | "device-web-approve" | "device-web-deny" => {
+        "device-web-setup" | "device-web-access" | "device-web-approve" | "device-web-deny" => {
             send(session, hub, "devices.page.act", json!({"action":action,"value":value}), &mut cmds, &mut rid);
             json!({})
         }
-        "device-invite" | "device-revoke" | "device-uninvite" | "device-addr" | "device-lan-on" | "device-lan-off" => return device_act(action, value).map(|patch| Out { patch, cmds }),
+        "device-invite" | "device-revoke" | "device-uninvite" | "device-share-revoke" | "device-addr" | "device-lan-on" | "device-lan-off" => return device_act(action, value).map(|patch| Out { patch, cmds }),
         "kicad-path" => {
             if !session["drafts"]["@f.kpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
             let raw = draft(session, "@f.kpath").trim().to_string();
@@ -1028,6 +1109,15 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
 
 #[cfg(test)]
 mod tests {
+    #[test] fn devices_lists_each_live_share_with_its_revoke() {
+        let info = json!({"now": 1_000_000_000_000u64, "shares": [{"id": "sh1", "name": "gerbers.zip", "path": "/p/mfg/gerbers.zip", "expires": 1_000_003_600u64, "url": ""}, {"id": "sh2", "name": "case.step", "path": "/p/mech/case.step", "expires": 1_000_003_600u64, "url": "https://m.t.ts.net:8443/s/x/case.step"}]});
+        let r = devices(&State::default(), &json!({}), &info);
+        let by = |l: &str| r.iter().find(|x| x["label"] == l).cloned().unwrap_or_else(|| panic!("{l}: {r:?}"));
+        let a = by("Shared file · gerbers.zip"); assert_eq!((a["buttons"][0]["action"].as_str(), a["buttons"][0]["value"].as_str()), (Some("device-share-revoke"), Some("sh1")));
+        assert!(a["note"].as_str().unwrap().starts_with("/p/mfg/gerbers.zip · until "));
+        assert!(by("Shared file · case.step")["note"].as_str().unwrap().contains("also on the tailnet: https://m.t.ts.net:8443/s/x/case.step"));
+    }
+
     use super::*;
     fn st(kv: &[(&str, &str)]) -> State { let mut s = State::new(); for (k, v) in kv { s.settings.insert(k.to_string(), v.to_string()); } s }
     fn labels(v: &Value) -> Vec<String> { v["rows"].as_array().unwrap().iter().map(|r| r["label"].as_str().unwrap().to_string()).collect() }
@@ -1044,7 +1134,7 @@ mod tests {
         let sent = |a: &str, v: &str, session: Value| { let o = act("h", &session, a, v).unwrap(); o.cmds.iter().map(|c| serde_json::from_str::<Value>(c["text"].as_str().unwrap()).unwrap()).map(|m| (m["m"].as_str().unwrap().to_string(), m["p"].clone())).collect::<Vec<_>>() };
         assert_eq!(sent("ring-op", "hear:n1:openai", json!({})), [("ring.hear".to_string(), json!({"note": "n1", "engine": "openai"}))]);
         assert_eq!(sent("ring-search", "", json!({"drafts": {"@f.ringq": " jeff "}})), [("ring.search".to_string(), json!({"q": "jeff"}))]);
-        assert_eq!(sent("settings-page", "ring", json!({})).iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["ring.search"]);
+        assert_eq!(sent("settings-page", "ring", json!({})).iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["bots.voice", "ring.search"], "Ring is a section of Voice: the page reads both afresh");
         assert!(act("h", &json!({}), "ring-op", "rm:n1").is_none());
     }
     #[test] fn lean_devices_page_tracks_browser_approval_switch() {
@@ -1080,8 +1170,33 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Projects and git", "Notifications", "Agents", "MCP servers", "Writing", "CAD", "Mouse and trackpad", "Browser", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Notifications", "Time zone", "Agents", "Writing", "API keys", "MCP servers", "Voice", "Rules and task board", "Usage", "Projects and git", "CAD", "Browser", "Mouse and trackpad", "Ordering", "Devices", "Machines", "Network and updates", "Setup", "Privacy", "About", "Developer"]);
+        let groups: Vec<&str> = v["rows"].as_array().unwrap().iter().map(|r| r["group"].as_str().unwrap()).collect();
+        let mut names = groups.clone(); names.dedup();
+        assert_eq!(names, ["General", "Agents and tools", "Workspace", "Connect", "System"], "every page is in a group, and a group's pages are together");
+        assert_eq!(GROUPS.iter().map(|(_, p)| p.len()).sum::<usize>(), PAGES.len()); assert!(PAGES.iter().all(|(id, _)| !group_of(id).is_empty()));
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
+    }
+    #[test] fn a_folded_pages_old_id_opens_the_page_that_holds_it() {
+        for (old, now, head) in [("web", "devices", "Web UI"), ("ring", "voice", "Ring"), ("import", "setup", "Import from 0.14")] {
+            assert_eq!(act("h", &json!({}), "settings-page", old).unwrap().patch["drafts"]["@settings.page"], now, "{old}");
+            assert_eq!(page(&json!({"drafts": {"@settings.page": old}})), now, "a session saved on the old page");
+            assert_eq!(crate::present::screen::settings_link(&format!("backplane://settings/{old}")), Some(now));
+            let v = view(&st(&[]), &json!({"drafts": {"@settings.page": old}}), &json!({}));
+            assert_eq!(v, view(&st(&[]), &json!({"drafts": {"@settings.page": now}}), &json!({})));
+            assert!(v["rows"].as_array().unwrap().iter().any(|r| r["label"] == head && r["note"] == "" && r["buttons"] == json!([])), "{old}: its rows are under their own heading: {v}");
+        }
+    }
+    #[test] fn devices_holds_the_whole_of_browser_access_in_one_section() {
+        let info = json!({"web.status": json!({"available": false, "canEnable": true, "command": "/usr/bin/tailscale serve"}).to_string(),
+            "devices": {"browserPending": [{"id": "pending", "name": "Firefox", "login": "a@example.com", "code": "123456"}], "devices": [{"id": "d1", "name": "Phone"}]}, "shares": [{"id": "s1", "name": "a.pdf", "path": "/home/user/a.pdf", "expires": 1}]});
+        let l: Vec<String> = pg_rows("devices", &[("web.enabled", "1")], json!({}), info).iter().map(|r| r["label"].as_str().unwrap().to_string()).collect();
+        assert_eq!(l, ["Devices", "Add a device", "Web UI", "Browser access", "Set up private HTTPS forwarding", "Firefox", "Paired devices", "Phone", "Shared files", "Shared file · a.pdf"]);
+        assert_eq!(l.iter().filter(|x| *x == "Browser access").count(), 1, "one switch, not one on each of two pages");
+        let only_shared: Vec<String> = pg_rows("devices", &[], json!({}), json!({"shares": [{"id": "s1", "name": "a.pdf", "path": "/home/user/a.pdf", "expires": 1}]})).iter().map(|r| r["label"].as_str().unwrap().to_string()).collect();
+        assert_eq!(only_shared, ["Devices", "Add a device", "Web UI", "Browser access", "Shared files", "Shared file · a.pdf"], "no empty Paired devices heading");
+        let menu = view(&st(&[]), &json!({}), &json!({})); let words = menu["rows"].as_array().unwrap().iter().find(|r| r["buttons"][0]["value"] == "devices").unwrap()["words"].as_str().unwrap().to_string();
+        for w in ["Set up private HTTPS forwarding", "Web address"] { assert!(words.lines().any(|l| l == w), "the search finds {w} before browser access is on"); }
     }
     #[test] fn projects_and_git_offers_auto_push_off_by_default() {
         let lit = |s: &State| { let v = view(s, &json!({"open": {"settings": true}, "drafts": {"@settings.page": "git"}}), &json!({})); v["rows"].as_array().unwrap().iter().flat_map(|r| r["buttons"].as_array().cloned().unwrap_or_default()).filter(|b| b["on"] == true).map(|b| b["value"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
@@ -1102,6 +1217,7 @@ mod tests {
     }
     #[test] fn about_says_what_this_windows_browser_tab_is() {
         let about = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); labels(&v) };
+        assert!(about(json!({"kind": "desktop"})).iter().any(|l| l.starts_with("Hub: Backplane ")));
         let notes = |client: Value| { let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {"@settings.page": "about"}}), &json!({"client": client})); v["rows"].as_array().unwrap().iter().map(|r| r["note"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
         assert!(about(json!({"kind": "desktop", "browser": "frames"})).contains(&"Browser".to_string()));
         assert!(notes(json!({"kind": "desktop", "browser": "frames"})).iter().any(|n| n.starts_with("Frame mode")));
@@ -1136,7 +1252,7 @@ mod tests {
         assert_eq!(by("Pairing link · open")["buttons"][0]["action"], "device-uninvite");
         assert!(r.iter().all(|x| x["label"] != "Pairing link · used · Phone"), "a used link whose device was revoked is history, not listed");
         assert_eq!(by("Browser access")["buttons"][0]["value"], "1", "browser access starts off");
-        assert_eq!(r.len(), 5, "a machine invite is Bots' and is not listed");
+        assert_eq!(r.iter().map(|x| x["label"].as_str().unwrap()).collect::<Vec<_>>(), ["Devices", "Add a device", "Web UI", "Browser access", "Paired devices", "Phone", "Pairing link · open"], "a machine invite is Bots' and is not listed");
     }
     #[test] fn a_device_link_that_names_only_this_computer_says_so() {
         let inv = |local: bool| json!({"link": "http://127.0.0.1:3797/pair#invite=x", "code": "ABCD2345", "expiresAt": FAR, "routes": [if local { "http://127.0.0.1:3797" } else { "http://100.64.1.2:3797" }], "localOnly": local}).to_string();
@@ -1162,6 +1278,25 @@ mod tests {
     }
     fn by<'a>(r: &'a [Value], l: &str) -> &'a Value { r.iter().find(|x| x["label"] == l).unwrap_or_else(|| panic!("no row {l}: {r:?}")) }
     /// Add a device: Tailscale first, its own link and QR code, the code beside the hub address and the expiry; the link and code copy.
+    #[test] fn web_operator_grant_is_copy_only() {
+        let status = json!({"operatorRequired":true, "command":"/usr/bin/tailscale serve"});
+        let rows = pg_rows("web", &[("web.enabled","1")], json!({}), json!({"web.status":status.to_string()}));
+        let grant = by(&rows,"Run once in your terminal");
+        assert_eq!(grant["buttons"][0]["action"], "copy");
+        assert_eq!(grant["buttons"][0]["value"], grant["note"]);
+        assert_eq!(by(&rows,"Set up private HTTPS forwarding")["buttons"][0]["value"], "/usr/bin/tailscale serve");
+    }
+    #[test] fn web_ui_shows_only_the_active_address() {
+        let address = "https://bp.example.ts.net";
+        let info = json!({"web.status":json!({"available":true,"address":address}).to_string()});
+        assert!(pg_rows("web", &[], json!({}), info.clone()).iter().all(|row| row["label"] != "Web address" && row.get("qr").is_none()));
+        let rows = pg_rows("web", &[("web.enabled", "1")], json!({}), info);
+        let link = by(&rows, "Web address");
+        assert_eq!(link["note"], address);
+        assert_eq!(link["qr"], json!(crate::net::qr::text(address).lines().collect::<Vec<_>>()));
+        let unavailable = pg_rows("web", &[], json!({}), json!({}));
+        assert_eq!(by(&unavailable, "Browser access")["buttons"][0]["value"], "1", "the switch is there whatever the hub knows of its web status");
+    }
     #[test] fn devices_an_invitation_shows_the_chosen_address_link_qr_code_and_expiry() {
         let r = dev_rows(json!({"@invite": invite3(false)}), json!({"devices": [], "invitations": [], "lan": [], "host": "127.0.0.1"}));
         let pick = by(&r, "Reach this hub by");
@@ -1506,6 +1641,11 @@ mod tests {
         assert!(words("appearance").lines().any(|l| l == "Theme") && words("appearance").lines().any(|l| l == "Thread list"), "{}", words("appearance"));
         assert!(!words("threads").contains("Thread list") && !words("threads").is_empty());
         assert!(v["rows"].as_array().unwrap().iter().all(|r| r["words"].is_string() && r["note"] == ""), "words are not a note: nothing more is drawn");
+        let notes = |page: &str| v["rows"].as_array().unwrap().iter().find(|r| r["buttons"][0]["value"] == page).unwrap()["notes"].as_str().unwrap().to_string();
+        for (id, _) in PAGES { assert_eq!(words(id).split('\n').count(), notes(id).split('\n').count(), "{id}: a note for each label, on its line"); }
+        let at = words("appearance").lines().position(|l| l == "Group projects").unwrap();
+        assert!(notes("appearance").split('\n').nth(at).unwrap().contains("git owner"));
+        assert!(words("devices").lines().any(|l| l == "Web UI") && words("voice").lines().any(|l| l == "Ring") && words("setup").lines().any(|l| l == "Import from 0.14"), "a folded page is found by its old name");
     }
     #[test] fn ordering_hides_its_estimates_when_off() {
         let on = page_rows(&st(&[]), "ordering", json!({})); assert_eq!(on[3]["buttons"][0]["on"], true);
@@ -1540,6 +1680,7 @@ mod tests {
     }
     #[test] fn the_update_line_says_what_the_hub_is_doing() {
         let r = |s: &str| update_row("0.15.0", s);
+        assert_eq!(r("")["label"], "Hub: Backplane 0.15.0");
         assert_eq!(r("")["note"], "Updated by its package."); assert_eq!(r(r#"{"state":"package"}"#)["buttons"], json!([]), "nothing to press");
         assert_eq!(r(r#"{"state":"idle"}"#)["note"], "Up to date, checked hourly."); assert_eq!(r(r#"{"state":"idle"}"#)["buttons"][0]["action"], "update-check");
         assert_eq!(r(r#"{"state":"waiting","available":"v9"}"#)["buttons"][0]["action"], "update-now", "waiting on turns: Update now goes ahead"); assert!(r(r#"{"state":"idle"}"#)["buttons"].as_array().unwrap().iter().all(|b| b["action"] != "update-now"));
@@ -1574,6 +1715,9 @@ mod tests {
         assert_eq!(r[3]["note"], "opus: Opus 5.5"); assert_eq!(r[2]["buttons"][0]["on"], true, "claude is the default provider");
         let r = page_rows(&st(&[("agent.provider", "codex")]), "agents", json!({}));
         assert_eq!(r[2]["note"], "codex is not installed");
+        let r = page_rows(&st(&[("agent.provider", "codex"), ("agent.model", "opus")]), "agents", json!({}));
+        assert!(r[3]["note"].as_str().unwrap().starts_with("default:"), "mismatched agent.model sanitized on display: {}", r[3]);
+        assert!(!r[3]["buttons"].as_array().unwrap().iter().any(|b| b["label"] == "opus"), "no bogus opus chip under codex");
     }
 
     #[test] fn the_boat_hub_rows_show_its_cost_and_warn_before_the_plan_runs_out() {

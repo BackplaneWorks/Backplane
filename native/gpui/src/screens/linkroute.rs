@@ -3,8 +3,18 @@
 //! its project's thread and the viewer tab that draws it, never the system's app for a design file), anything else says so.
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Route { Web(String), Hub(String), File(String), /** a part, pin or net of the thread's design (screens/xprobe.rs) */ Design(String), Note(&'static str),
-    /** an agent's plan review (`backplane://plan/<board from the project folder>`, the hub's plan/mod.rs `review_link`): that board with its Plan panel */ Plan(String) }
+pub enum Route { Web(String), Hub(String), File(String), Settings(String), /** a part, pin or net of the thread's design (screens/xprobe.rs) */ Design(String), Note(&'static str),
+    /** an agent's plan review (`backplane://plan/<board from the project folder>`, the hub's plan/mod.rs `review_link`): that board with its Plan panel */ Plan(String),
+    /** a file an agent shared (`/s/<token>/<name>`, the hub's files/share.rs `share_route`): it downloads from the hub */ Share(String) }
+
+/// Match `backplane://settings/<page>` (or app scheme alias) and return the normalized page name.
+pub fn settings_page(href: &str) -> Option<String> {
+    let h = href.trim();
+    let rest = ["backplane://settings/", "bpgpui://settings/", "backplane-gpui://settings/"]
+        .iter().find_map(|p| h.strip_prefix(p))?;
+    let page = rest.split(['#', '?']).next().unwrap_or("").trim_end_matches('/');
+    (!page.is_empty()).then(|| page.to_string())
+}
 
 /// `%XX` decoded (a link's path segments, as the hub's md/refs.rs `uri` writes them); a bad escape is kept as it is.
 fn unpct(s: &str) -> String {
@@ -17,12 +27,63 @@ fn unpct(s: &str) -> String {
 pub fn route(href: &str, file: bool) -> Route {
     let h = href.trim();
     if let Some(rel) = h.strip_prefix("backplane://plan/").map(|r| r.split(['#', '?']).next().unwrap_or("")).filter(|r| !r.is_empty()) { return Route::Plan(rel.split('/').map(unpct).collect::<Vec<_>>().join("/")) }
+    if let Some(page) = settings_page(h) { return Route::Settings(page) }
     if let Some(w) = h.strip_prefix(super::xprobe::HREF).filter(|w| !w.is_empty()) { return Route::Design(w.to_string()) }
     if h.starts_with("backplane://") || crate::pairing::is_open_link(h) { return Route::Hub(h.to_string()) }
     if h.starts_with("https://") || h.starts_with("http://") || h.starts_with("mailto:") { return Route::Web(h.to_string()) }
+    if share_name(h).is_some() { return Route::Share(h.to_string()) }
     // a path, or a file:// address: inside Backplane (the hub's `link-file`)
     if (file || h.starts_with("file://")) && !h.is_empty() { return Route::File(h.to_string()) }
     /* i18n-ok: the note is drawn through trs */ Route::Note("That link does not open here.")
+}
+
+/// A share's file name, when `href` is a share's address on the hub (`/s/<token>/<name>`, the token hex as the hub makes it).
+pub fn share_name(href: &str) -> Option<String> {
+    let rest = href.trim().strip_prefix("/s/")?; let rest = rest.split(['?', '#']).next().unwrap_or(rest);
+    let (token, name) = rest.split_once('/')?;
+    (token.len() >= 16 && token.bytes().all(|b| b.is_ascii_alphanumeric()) && !name.is_empty() && !name.contains('/')).then(|| crate::viewers::downloads::safe_name(&crate::viewers::downloads::unpct(name)))
+}
+/// A path as a message and the hub's `files` spell it, without what a link adds: `file://`, a `:line` (`:12`, `:L12`) or an anchor.
+fn bare(p: &str) -> &str {
+    let p = p.trim(); let p = p.strip_prefix("file://").unwrap_or(p); let p = p.split('#').next().unwrap_or(p);
+    let p = p.split_once(":L").map_or(p, |(a, b)| if b.chars().next().map_or(false, |c| c.is_ascii_digit()) { a } else { p });
+    match p.rsplit_once(':') { Some((a, b)) if !b.is_empty() && b.bytes().all(|c| c.is_ascii_digit()) => a, _ => p }
+}
+/// The entry of a message's `files` (the hub's `{path, name, size, open}`) that a file link names.
+pub fn listed<'a>(href: &str, files: &'a serde_json::Value) -> Option<&'a serde_json::Value> {
+    let want = bare(href);
+    files.as_array()?.iter().find(|f| f["path"].as_str().map_or(false, |p| !want.is_empty() && bare(p) == want))
+}
+/// The hub address that downloads a file of the hub's machine (`/file`), and the name it is saved as. A thread of another machine
+/// (`<link>~<id>`) names itself, so its hub reads the file there. A path the hub cannot take whole (relative, outside a far thread) has none.
+pub fn file_download(path: &str, thread: &str) -> Option<(String, String)> {
+    let p = bare(path);
+    let abs = p.starts_with('/') || p.starts_with("~/") || p.as_bytes().get(1) == Some(&b':') || p.starts_with("\\\\");
+    let far = thread.contains('~');
+    if p.is_empty() || (!abs && !far) { return None }
+    use crate::viewers::downloads::{pct, safe_name};
+    let url = if far { format!("/file?thread={}&path={}", pct(thread), pct(p)) } else { format!("/file?path={}", pct(p)) };
+    Some((url, safe_name(file_name(p))))
+}
+/// What a press on a file link does (docs/file-links.md): on this computer's hub it opens inside Backplane (`link-file`) as always. On another
+/// computer's hub a file the hub lists for the message with `open: "download"` comes down to this computer; one Backplane's viewers draw
+/// (`view`) and any path the hub did not list still open in the viewer, which reads through the hub.
+#[derive(Clone, Debug, PartialEq)]
+pub enum FileGo { Open(String), Download { url: String, name: String } }
+pub fn file_go(href: &str, files: &serde_json::Value, remote: bool, thread: &str) -> FileGo {
+    if remote { if let Some(f) = listed(href, files).filter(|f| f["open"] == "download") {
+        if let Some((url, name)) = file_download(f["path"].as_str().unwrap_or(""), thread) {
+            let name = f["name"].as_str().filter(|n| !n.is_empty()).map(crate::viewers::downloads::safe_name).unwrap_or(name);
+            return FileGo::Download { url, name }
+        }
+    } }
+    FileGo::Open(href.trim().to_string())
+}
+/// The Download a file link's menu offers: on another computer's hub, any path the hub could serve (it says no to one it does not share).
+pub fn menu_download(href: &str, files: &serde_json::Value, remote: bool, thread: &str) -> Option<(String, String)> {
+    if !remote { return None }
+    let name = listed(href, files).and_then(|f| f["name"].as_str()).filter(|n| !n.is_empty()).map(crate::viewers::downloads::safe_name);
+    file_download(href, thread).map(|(u, n)| (u, name.unwrap_or(n)))
 }
 
 /// A file the viewer draws, by its name (the hub's present/filelink.rs `design_kind`): a KiCad board, schematic or project, a STEP, STP or
@@ -102,10 +163,37 @@ mod tests {
         // the same file in another case: one file where the file system ignores case, two where it does not
         assert!(shows_file_as("board", r"0|C:\w|C:\w\Main.kicad_pcb", "main", true)); assert!(!shows_file_as("board", "0|/w|/w/Main.kicad_pcb", "main", false));
     }
+    #[test] fn on_another_computers_hub_a_listed_download_comes_down_and_the_rest_open() {
+        let files = serde_json::json!([{"path": "/w/p/mfg/gerbers.zip", "name": "gerbers.zip", "size": 9, "open": "download"}, {"path": "~/w/p/main.kicad_pcb", "name": "main.kicad_pcb", "size": 9, "open": "view"}]);
+        assert_eq!(file_go("/w/p/mfg/gerbers.zip", &files, true, "t1"), FileGo::Download { url: "/file?path=%2Fw%2Fp%2Fmfg%2Fgerbers.zip".into(), name: "gerbers.zip".into() });
+        assert_eq!(file_go("file:///w/p/mfg/gerbers.zip:3", &files, true, "t1"), FileGo::Download { url: "/file?path=%2Fw%2Fp%2Fmfg%2Fgerbers.zip".into(), name: "gerbers.zip".into() }, "the link's own spelling");
+        assert_eq!(file_go("/w/p/mfg/gerbers.zip", &files, false, "t1"), FileGo::Open("/w/p/mfg/gerbers.zip".into()), "this computer's hub: as always");
+        assert_eq!(file_go("~/w/p/main.kicad_pcb", &files, true, "t1"), FileGo::Open("~/w/p/main.kicad_pcb".into()), "the viewer draws it");
+        assert_eq!(file_go("/w/p/other.bin", &files, true, "t1"), FileGo::Open("/w/p/other.bin".into()), "not listed: the hub did not allow it");
+        assert_eq!(file_go("/w/p/mfg/gerbers.zip", &files, true, "desk~t9"), FileGo::Download { url: "/file?thread=desk~t9&path=%2Fw%2Fp%2Fmfg%2Fgerbers.zip".into(), name: "gerbers.zip".into() }, "another machine's thread");
+        assert_eq!(menu_download("/w/p/x.bin:4", &serde_json::Value::Null, true, "t1"), Some(("/file?path=%2Fw%2Fp%2Fx.bin".into(), "x.bin".into())), "the menu offers any absolute path");
+        assert_eq!(menu_download("src/x.rs", &serde_json::Value::Null, true, "t1"), None, "a relative path has no file on the hub to ask for");
+        assert_eq!(menu_download("src/x.rs", &serde_json::Value::Null, true, "desk~t9"), Some(("/file?thread=desk~t9&path=src%2Fx.rs".into(), "x.rs".into())), "a far thread reads its own folder");
+        assert_eq!(menu_download("/w/x.bin", &files, false, "t1"), None, "this computer's hub: no Download");
+    }
+    #[test] fn a_share_link_is_a_download_from_the_hub() {
+        let tok = "0123456789abcdef0123456789abcdef";
+        assert_eq!(route(&format!("/s/{tok}/a%20b.zip"), false), Route::Share(format!("/s/{tok}/a%20b.zip")));
+        assert_eq!(route(&format!("/s/{tok}/a%20b.zip"), true), Route::Share(format!("/s/{tok}/a%20b.zip")), "drawn as a path too");
+        assert_eq!(share_name(&format!("/s/{tok}/a%20b.zip")).as_deref(), Some("a b.zip"));
+        assert_eq!(share_name("/s/x/a.zip"), None); assert_eq!(share_name(&format!("/s/{tok}/")), None); assert_eq!(share_name(&format!("/s/{tok}/a/b")), None);
+        assert_eq!(route("/srv/s/a.txt", true), Route::File("/srv/s/a.txt".into()));
+    }
     #[test] fn what_opens_nowhere_is_a_note() {
         assert!(matches!(route("ftp://x", false), Route::Note(_))); assert!(matches!(route("", true), Route::Note(_))); assert!(matches!(route("javascript:alert(1)", false), Route::Note(_)));
     }
     #[test] fn the_hover_target_drops_a_message_anchor_only_on_backplane_links() {
         assert_eq!(target("backplane://thread/t1#m3"), "backplane://thread/t1"); assert_eq!(target("https://a.io/#x"), "https://a.io/#x");
+    }
+    #[test] fn settings_links_route_to_settings_page() {
+        assert_eq!(route("backplane://settings/accounts", false), Route::Settings("accounts".into()));
+        assert_eq!(route("bpgpui://settings/accounts/", false), Route::Settings("accounts".into()));
+        assert_eq!(route("backplane://settings/agents?x=1", false), Route::Settings("agents".into()));
+        assert_eq!(settings_page("https://example.com/settings/accounts"), None);
     }
 }

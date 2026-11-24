@@ -11,7 +11,7 @@
 use super::{nng, proto::{self, Reply, Schema}};
 use serde_json::{json, Value};
 use std::{collections::{HashMap, VecDeque}, path::Path, process::Stdio, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex}, time::Duration};
-use tokio::{io::{AsyncBufReadExt, AsyncRead, BufReader}, process::Command, sync::{mpsc, oneshot}};
+use tokio::{io::{AsyncBufReadExt, AsyncRead, BufReader}, sync::{mpsc, oneshot}};
 
 /// Where answers and events go, as the objects the helper would have written.
 pub type Sink = Arc<dyn Fn(Value) + Send + Sync>;
@@ -19,17 +19,52 @@ pub type Sink = Arc<dyn Fn(Value) + Send + Sync>;
 pub const CONN_CLOSED: &str = "KiCad IPC connection closed; request outcome unknown";
 const READY: &str = "KiCad API server listening at ";
 const TIMEOUT_MS: u64 = 30000;
+/// How long after child exit we keep draining stdout/stderr before emitting `exit` anyway (so a pipe-holding grandchild never stalls readiness invalidation).
+pub const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(1500);
 
 fn fail(id: Value, error: &str, status: Option<&str>) -> Value { match status { Some(s) => json!({"id":id,"ok":false,"status":s,"error":error}), None => json!({"id":id,"ok":false,"error":error}) } }
 
-struct Job { id: Value, schema: Arc<Schema>, ty: String, message: Value, timeout: u64, client: String }
+struct Job { id: Value, schema: Arc<Schema>, ty: String, message: Value, timeout: u64, deadline: tokio::time::Instant, client: String }
 struct Slot { jobs: mpsc::UnboundedSender<Job>, shut: oneshot::Sender<()> }
+#[derive(Clone, Copy, Debug)]
+struct SpawnState { seq: u64, pid: u32, exited: bool }
 
 /// One hub's transport. `handle` never blocks: the work runs on tasks and answers through the sink. Call it on the runtime.
-pub struct Native { socks: HashMap<String, Slot>, desc: String, client: String, sink: Sink }
+pub struct Native {
+    socks: HashMap<String, Slot>,
+    runs: Arc<Mutex<HashMap<String, SpawnState>>>,
+    next_seq: u64,
+    pipe_drain_grace: Duration,
+    desc: String,
+    client: String,
+    sink: Sink,
+}
 impl Native {
     /// `desc`: the descriptor set for requests that name none (the helper's --desc).
-    pub fn new(desc: &str, sink: Sink) -> Native { Native { socks: HashMap::new(), desc: desc.into(), client: format!("backplane-{}", std::process::id()), sink } }
+    pub fn new(desc: &str, sink: Sink) -> Native {
+        Native {
+            socks: HashMap::new(),
+            runs: Arc::new(Mutex::new(HashMap::new())),
+            next_seq: 0,
+            pipe_drain_grace: PIPE_DRAIN_GRACE,
+            desc: desc.into(),
+            client: format!("backplane-{}", std::process::id()),
+            sink,
+        }
+    }
+    #[cfg(test)]
+    pub fn set_pipe_drain_grace(&mut self, grace: Duration) { self.pipe_drain_grace = grace; }
+    /// Active PID of the latest spawned server for `key`, or 0 if unspawned or already exited.
+    pub fn pid_of(&self, key: &str) -> u32 {
+        self.runs.lock().unwrap().get(key).filter(|st| !st.exited).map_or(0, |st| st.pid)
+    }
+    /// Whether the latest spawned server for `key` is alive (`None` if unknown or still spawning).
+    pub fn process_alive(&self, key: &str) -> Option<bool> {
+        let st = *self.runs.lock().unwrap().get(key)?;
+        if st.exited { return Some(false) }
+        if st.pid == 0 { return None }
+        Some(crate::plat::proc::alive(st.pid))
+    }
 
     pub fn handle(&mut self, r: Value) {
         let id = r.get("id").cloned().unwrap_or(Value::Null);
@@ -45,13 +80,18 @@ impl Native {
         let schema = proto::load(r.get("desc").and_then(Value::as_str).unwrap_or(&self.desc));
         if !schema.knows(&ty) { return (self.sink)(fail(id, proto::NO_SCHEMA, None)) }
         // `client`: the request's actor (the fork's co-editing names undo groups and changes by it); default the hub's own name
-        let job = Job { id, schema, ty, timeout: r["timeout"].as_u64().unwrap_or(TIMEOUT_MS), message: r.get("message").cloned().unwrap_or(Value::Null), client: r["client"].as_str().unwrap_or("").to_string() };
+        let timeout = r["timeout"].as_u64().unwrap_or(TIMEOUT_MS);
+        let deadline = tokio::time::Instant::now() + Duration::from_millis(timeout);
+        let job = Job { id, schema, ty, timeout, deadline, message: r.get("message").cloned().unwrap_or(Value::Null), client: r["client"].as_str().unwrap_or("").to_string() };
         let slot = self.socks.entry(sock.clone()).or_insert_with(|| {
             let (jobs, rx) = mpsc::unbounded_channel(); let (shut, down) = oneshot::channel();
-            tokio::spawn(worker(sock, rx, down, self.client.clone(), self.sink.clone()));
+            tokio::spawn(worker(sock.clone(), rx, down, self.client.clone(), self.sink.clone()));
             Slot { jobs, shut }
         });
-        if let Err(e) = slot.jobs.send(job) { (self.sink)(fail(e.0.id, CONN_CLOSED, None)) }
+        if let Err(e) = slot.jobs.send(job) {
+            self.socks.remove(&sock);
+            (self.sink)(fail(e.0.id, CONN_CLOSED, None))
+        }
     }
 
     fn spawn(&mut self, id: Value, r: &Value) {
@@ -67,7 +107,11 @@ impl Native {
             },
             Some(_) => return (self.sink)(fail(id, "invalid KiCad environment", None)),
         }
-        start_server(key, argv, r["memory"].as_str().map(String::from), env, self.sink.clone());
+        let launch_gen = r.get("gen").and_then(Value::as_u64);
+        self.next_seq += 1;
+        let seq = self.next_seq;
+        self.runs.lock().unwrap().insert(key.clone(), SpawnState { seq, pid: 0, exited: false });
+        start_server(key, seq, launch_gen, argv, r["memory"].as_str().map(String::from), env, self.runs.clone(), self.pipe_drain_grace, self.sink.clone());
         (self.sink)(json!({"id":id,"ok":true}))
     }
 }
@@ -78,6 +122,10 @@ async fn worker(sock: String, mut rx: mpsc::UnboundedReceiver<Job>, mut down: on
     let (mut conn, mut token) = (None, String::new());
     loop {
         let job = tokio::select! { biased; _ = &mut down => break, j = rx.recv() => match j { Some(j) => j, None => break } };
+        if tokio::time::Instant::now() >= job.deadline {
+            sink(fail(job.id, &format!("KiCad did not answer in {} s", job.timeout as f64 / 1000.0), None));
+            continue
+        }
         let id = job.id.clone();
         tokio::select! {
             biased;
@@ -90,23 +138,30 @@ async fn worker(sock: String, mut rx: mpsc::UnboundedReceiver<Job>, mut down: on
 }
 /// One request. The codec runs off the runtime's threads: a big board's reply takes a while, and a panic there must answer this request, not lose it.
 async fn one(sock: &str, job: Job, conn: &mut Option<nng::Req>, token: &mut String, client: &str) -> Value {
-    let Job { id, schema, ty, message, timeout, client: actor } = job;
+    let Job { id, schema, ty, message, timeout, deadline, client: actor } = job;
     let (s, t, tok, cl) = (schema.clone(), ty.clone(), token.clone(), if actor.is_empty() { client.to_string() } else { actor });
-    let bytes = match tokio::task::spawn_blocking(move || proto::encode_request(&s, &t, &message, &tok, &cl)).await.unwrap_or_else(|e| Err(e.to_string())) {
-        Ok(b) => b,
-        Err(e) => return fail(id, &format!("bad message for {ty}: {e}"), Some("AS_BAD_REQUEST")),
+    let bytes = match tokio::time::timeout_at(deadline, tokio::task::spawn_blocking(move || proto::encode_request(&s, &t, &message, &tok, &cl))).await {
+        Ok(Ok(Ok(b))) => b,
+        Ok(Ok(Err(e))) => return fail(id, &format!("bad message for {ty}: {e}"), Some("AS_BAD_REQUEST")),
+        Ok(Err(e)) => return fail(id, &format!("bad message for {ty}: {e}"), Some("AS_BAD_REQUEST")),
+        Err(_) => return fail(id, &format!("KiCad did not answer in {} s", timeout as f64 / 1000.0), None),
     };
-    let reply = match tokio::time::timeout(Duration::from_millis(timeout), exchange(sock, conn, &bytes)).await {
+    if tokio::time::Instant::now() >= deadline {
+        return fail(id, &format!("KiCad did not answer in {} s", timeout as f64 / 1000.0), None)
+    }
+    let reply = match tokio::time::timeout_at(deadline, exchange(sock, conn, &bytes)).await {
         Ok(Ok(b)) => b,
         Ok(Err(e)) => { *conn = None; return fail(id, &e, None) }
         Err(_) => { *conn = None; return fail(id, &format!("KiCad did not answer in {} s", timeout as f64 / 1000.0), None) }
     };
-    match tokio::task::spawn_blocking(move || proto::decode_response(&schema, &reply)).await.unwrap_or_else(|e| Err(e.to_string())) {
-        Ok(rep) => {
+    match tokio::time::timeout_at(deadline, tokio::task::spawn_blocking(move || proto::decode_response(&schema, &reply))).await {
+        Ok(Ok(Ok(rep))) => {
             if !rep.token().is_empty() { *token = rep.token().to_string() }
             match rep { Reply::Ok { ty, message, .. } => json!({"id":id,"ok":true,"type":ty,"message":message}), Reply::Err { status, error, .. } => fail(id, &error, Some(&status)) }
         }
-        Err(e) => fail(id, &format!("bad reply: {e}"), None),
+        Ok(Ok(Err(e))) => fail(id, &format!("bad reply: {e}"), None),
+        Ok(Err(e)) => fail(id, &format!("bad reply: {e}"), None),
+        Err(_) => fail(id, &format!("KiCad did not answer in {} s", timeout as f64 / 1000.0), None),
     }
 }
 async fn exchange(sock: &str, conn: &mut Option<nng::Req>, bytes: &[u8]) -> Result<Vec<u8>, String> {
@@ -155,15 +210,21 @@ pub(super) fn sockets_at(requested: &str) -> HashMap<String, String> {
 }
 fn socket_arg(argv: &[String]) -> String { argv.iter().position(|a| a == "--socket").and_then(|i| argv.get(i + 1)).cloned().unwrap_or_default() }
 
-struct Run { key: String, said: AtomicBool, done: AtomicBool, tail: Mutex<VecDeque<String>>, sink: Sink }
+struct Run { key: String, launch_gen: Option<u64>, said: AtomicBool, exited: AtomicBool, done: AtomicBool, tail: Mutex<VecDeque<String>>, sink: Sink }
 impl Run {
     fn keep(&self, l: &str) { let mut t = self.tail.lock().unwrap(); t.push_back(l.to_string()); if t.len() > 12 { t.pop_front(); } }
-    fn line(&self, text: String) { (self.sink)(json!({"event":"line","key":self.key,"text":text})) }
+    fn line(&self, text: String) {
+        let mut o = json!({"event":"line","key":self.key,"text":text});
+        if let Some(g) = self.launch_gen { o["gen"] = json!(g); }
+        (self.sink)(o)
+    }
     fn end(&self, code: i32, extra: Option<String>) {
         if self.done.swap(true, Ordering::SeqCst) { return }
         let t: Vec<String> = extra.into_iter().chain(self.tail.lock().unwrap().iter().cloned()).collect();
         let t = t.join("\n"); let n = t.chars().count();
-        (self.sink)(json!({"event":"exit","key":self.key,"code":code,"tail":t.chars().skip(n.saturating_sub(400)).collect::<String>()}))
+        let mut o = json!({"event":"exit","key":self.key,"code":code,"tail":t.chars().skip(n.saturating_sub(400)).collect::<String>()});
+        if let Some(g) = self.launch_gen { o["gen"] = json!(g); }
+        (self.sink)(o)
     }
     fn out_line(&self, l: String) { // the ready line counts once, whoever saw it first
         self.keep(&l);
@@ -181,12 +242,22 @@ async fn lines<R: AsyncRead + Unpin>(r: R, mut each: impl FnMut(String)) {
         each(String::from_utf8_lossy(&v).into_owned());
     }
 }
-fn start_server(key: String, argv0: Vec<String>, memory: Option<String>, env: Vec<(String, String)>, sink: Sink) {
+fn start_server(
+    key: String,
+    seq: u64,
+    launch_gen: Option<u64>,
+    argv0: Vec<String>,
+    memory: Option<String>,
+    env: Vec<(String, String)>,
+    runs: Arc<Mutex<HashMap<String, SpawnState>>>,
+    pipe_drain_grace: Duration,
+    sink: Sink,
+) {
     let at = socket_arg(&argv0); let before = sockets_at(&at);
     let argv = wrap(argv0, memory.as_deref());
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &argv[0]);
     c.args(&argv[1..]).envs(env).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).current_dir("/").kill_on_drop(false);
-    let run = Arc::new(Run { key, said: AtomicBool::new(false), done: AtomicBool::new(false), tail: Mutex::new(VecDeque::new()), sink });
+    let run = Arc::new(Run { key, launch_gen, said: AtomicBool::new(false), exited: AtomicBool::new(false), done: AtomicBool::new(false), tail: Mutex::new(VecDeque::new()), sink });
     tokio::spawn(async move {
         // "Text file busy": a program written a moment ago is still open for writing in a child another thread just forked (the child holds the descriptor until its own exec);
         // it passes in a few milliseconds, as for the accounts' CLI (accounts_io)
@@ -195,27 +266,40 @@ fn start_server(key: String, argv0: Vec<String>, memory: Option<String>, env: Ve
             match c.spawn() {
                 Ok(c) => break c,
                 Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => { tries += 1; tokio::time::sleep(Duration::from_millis(25)).await }
-                Err(e) => return run.end(127, Some(e.to_string())),
+                Err(e) => {
+                    run.exited.store(true, Ordering::SeqCst);
+                    if let Some(st) = runs.lock().unwrap().get_mut(&run.key).filter(|st| st.seq == seq) { st.exited = true; }
+                    return run.end(127, Some(e.to_string()));
+                }
             }
         };
+        let pid = child.id().unwrap_or(0);
+        if let Some(st) = runs.lock().unwrap().get_mut(&run.key).filter(|st| st.seq == seq) { st.pid = pid; }
         let (out, err) = (child.stdout.take(), child.stderr.take());
         if !at.is_empty() { // KiCad buffers stdout on a pipe: report its freshly bound socket; the hub still requires Ping and a matching GetVersion
             let run = run.clone();
             tokio::spawn(async move {
-                while !run.done.load(Ordering::SeqCst) && !run.said.load(Ordering::SeqCst) {
+                while !run.done.load(Ordering::SeqCst) && !run.exited.load(Ordering::SeqCst) && !run.said.load(Ordering::SeqCst) {
                     tokio::time::sleep(Duration::from_millis(100)).await;
+                    if run.exited.load(Ordering::SeqCst) { return }
                     if let Some((path, _)) = sockets_at(&at).into_iter().find(|(p, i)| before.get(p) != Some(i)) {
-                        if !run.done.load(Ordering::SeqCst) && !run.said.swap(true, Ordering::SeqCst) { run.line(format!("{READY}{path}")) }
+                        if !run.done.load(Ordering::SeqCst) && !run.exited.load(Ordering::SeqCst) && !run.said.swap(true, Ordering::SeqCst) { run.line(format!("{READY}{path}")) }
                         return
                     }
                 }
             });
         }
         let (a, b) = (run.clone(), run.clone());
-        let so = tokio::spawn(async move { if let Some(o) = out { lines(o, |l| a.out_line(l)).await } });
-        let se = tokio::spawn(async move { if let Some(e) = err { lines(e, |l| b.keep(&l)).await } });
+        let mut so = tokio::spawn(async move { if let Some(o) = out { lines(o, |l| a.out_line(l)).await } });
+        let mut se = tokio::spawn(async move { if let Some(e) = err { lines(e, |l| b.keep(&l)).await } });
         let code = child.wait().await.map(|s| s.code().unwrap_or(128)).unwrap_or(1); // no code: a signal ended it, and not one of ours
-        let _ = so.await; let _ = se.await;
+        run.exited.store(true, Ordering::SeqCst);
+        if let Some(st) = runs.lock().unwrap().get_mut(&run.key).filter(|st| st.seq == seq) { st.exited = true; }
+        let drain = async { let _ = (&mut so).await; let _ = (&mut se).await; };
+        if tokio::time::timeout(pipe_drain_grace, drain).await.is_err() {
+            so.abort();
+            se.abort();
+        }
         run.end(code, None);
     });
 }
@@ -329,4 +413,67 @@ mod tests {
     }
     #[test] fn wrap_only_with_a_memory_cap() { assert_eq!(wrap(vec!["a".into()], None), vec!["a".to_string()]); }
     #[test] fn socket_argument() { assert_eq!(socket_arg(&["x".into(), "--socket".into(), "/s".into()]), "/s"); assert_eq!(socket_arg(&["x".into()]), ""); }
+
+    #[cfg(unix)]
+    #[tokio::test] async fn exit_is_reported_even_when_a_grandchild_keeps_pipes_open() {
+        let d = tmp("pipe-leak");
+        let pidf = format!("{d}/grand.pid");
+        let f = script(&d, &format!("sleep 30 &\npid=$!\necho $pid > '{pidf}'\necho hi\nexit 0"));
+        let (mut n, mut r) = native("");
+        n.set_pipe_drain_grace(Duration::from_millis(200));
+        n.handle(json!({"id":1,"op":"spawn","key":"p","argv":[f]}));
+        assert_eq!(next(&mut r).await, json!({"id":1,"ok":true}));
+        let mut exit_ev = None;
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+        while tokio::time::Instant::now() < deadline {
+            if let Ok(Some(o)) = tokio::time::timeout(Duration::from_secs(3), r.recv()).await {
+                if o["event"] == "exit" { exit_ev = Some(o); break }
+            } else {
+                break
+            }
+        }
+        let exit_ev = exit_ev.expect("exit event must arrive even when grandchild holds pipes open");
+        assert_eq!(exit_ev["code"], json!(0));
+        assert_eq!(n.process_alive("p"), Some(false));
+        if let Ok(s) = std::fs::read_to_string(&pidf) {
+            if let Ok(gpid) = s.trim().parse::<u32>() {
+                crate::plat::proc::kill(gpid, crate::plat::proc::KILL);
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test] async fn queued_request_past_deadline_is_not_sent_to_kicad() {
+        let (path, l, _d) = stand_in::sock("kipc-deadline");
+        let desc = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .ancestors()
+            .find(|d| d.join("test/fixtures/kipc/api.desc").is_file())
+            .unwrap()
+            .join("test/fixtures/kipc/api.desc")
+            .to_string_lossy()
+            .into_owned();
+        let reqs_seen = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let seen_srv = reqs_seen.clone();
+        let srv = tokio::spawn(async move {
+            let (mut s, _) = stand_in::accept(&l).await;
+            let (id, _) = stand_in::read_req(&mut s).await.unwrap();
+            seen_srv.fetch_add(1, Ordering::SeqCst);
+            // Hold request 1 long enough that queued request 2 expires in the worker queue before dispatch.
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            stand_in::write_rep(&mut s, id, &version_reply()).await;
+            if let Ok(Some(_)) = tokio::time::timeout(Duration::from_millis(300), stand_in::read_req(&mut s)).await {
+                seen_srv.fetch_add(1, Ordering::SeqCst);
+            }
+        });
+        let (mut n, mut r) = native("");
+        n.handle(json!({"id":1,"sock":path,"type":"kiapi.common.commands.Ping","timeout":2000}));
+        n.handle(json!({"id":2,"sock":path,"desc":desc,"type":"kiapi.common.commands.BeginCommit","message":{},"timeout":120}));
+        let mut got = vec![next(&mut r).await, next(&mut r).await];
+        got.sort_by_key(|o| o["id"].as_i64());
+        assert_eq!(got[0]["ok"], json!(true));
+        assert_eq!(got[1]["ok"], json!(false));
+        assert!(got[1]["error"].as_str().unwrap().contains("did not answer in 0.12 s"), "{}", got[1]);
+        srv.await.unwrap();
+        assert_eq!(reqs_seen.load(Ordering::SeqCst), 1, "expired queued BeginCommit must never be sent to KiCad");
+    }
 }

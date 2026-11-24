@@ -136,8 +136,11 @@ pub fn worth(old: &str, new: &Value, now: u64) -> bool {
 
 // ---- reading the CLIs ----
 
-async fn run(cmd: &Path, args: &[&str], limit: Duration) -> Option<(i32, String, String)> {
+async fn run(cmd: &Path, args: &[&str], limit: Duration) -> Option<(i32, String, String)> { run_unset(cmd, args, limit, &[]).await }
+/// [`run`] with `unset` taken out of the CLI's environment (agy's sign-in store: agy_cli.rs `storage_unset`).
+async fn run_unset(cmd: &Path, args: &[&str], limit: Duration, unset: &[&str]) -> Option<(i32, String, String)> {
     let mut c = proc::tokio_cmd(Kind::Agent, cmd);
+    for k in unset { c.env_remove(k); }
     if let Some(p) = Cli::from_env().child_path() { c.env("PATH", p); }
     // a read in its own scratch folder, so nothing the CLI writes beside its working folder lands in a project
     let tmp = std::env::temp_dir(); c.current_dir(&tmp);
@@ -176,7 +179,7 @@ pub async fn read(cli: &Cli, home: &str, provider: &str, now: u64) -> Option<Val
     let prog = cli.resolve(cli_of(provider)).ok()?;
     Some(match provider {
         "antigravity" if crate::agents::providers::agy::pinned(home) => json!({"provider":provider,"state":"unreported","at":0,"attempted_at":now,"source":"none","reason":"usage not reported by Backplane's pinned Antigravity agent","windows":[]}),
-        "antigravity" => reading(provider, "agy-quota", match run(&prog, &["-p", "/quota"], Duration::from_secs(45)).await {
+        "antigravity" => reading(provider, "agy-quota", match run_unset(&prog, &["-p", "/quota"], Duration::from_secs(45), &crate::agents::providers::agy_cli::storage_unset_here(&std::path::PathBuf::from(crate::plat::dirs::home_or_empty()))).await {
             Some((0, o, _)) => Ok((agy_quota(&o), String::new())),
             Some((2, o, e)) => Err(format!("Antigravity has no account quota to show ({})", { let l = last_line(&format!("{o}\n{e}")); if l.is_empty() { "an API key is in use".into() } else { l } })),
             Some((c, o, e)) => Err(format!("agy /quota failed: {}", { let l = last_line(&format!("{e}\n{o}")); if l.is_empty() { format!("exit {c}") } else { l } })),

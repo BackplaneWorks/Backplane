@@ -20,9 +20,9 @@ pub struct Package { pub platform: &'static str, pub version: &'static str, pub 
 /// bp.12.4, no capability). Windows: bp.10 until its fixes ship. Apple Silicon: bp.12.5, the bp.12.4 code with the macOS build, its
 /// launchers (bin/kicad, bin/pcbnew, bin/eeschema) and manifest minOs 15.0 (`os_floor`); bp.13 brings KiCad in the pane there. Each pin is
 /// its one line; the tests read them. A newer pin published in the signed feed (`pins.rs`, docs/kicad-pins.md) replaces one at run time.
-pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.13.3", release: "backplane-kicad-v10.99.0-bp.13.3", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.13.3.tar.gz", sha256: "0633230dc75c87272e21432b04f929ff2838209dd17b1be0ea97c7f891329a85", format: "tar.gz", cli: "bin/kicad-cli", size: 1019398675, caps: &[], min_os: &[] };
-pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.13.3", release: "backplane-kicad-v10.99.0-bp.13.3", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.13.3.tar.gz", sha256: "9db3b082ab3f48e8ed3e9515a4d94631c308efd55ce10ed76851199370f08802", format: "tar.gz", cli: "bin/kicad-cli", size: 1106823193, caps: &[], min_os: &[] };
-pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.13.3", release: "backplane-kicad-v10.99.0-bp.13.3", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.13.3.zip", sha256: "88dc763279fe5ebc9e037ac43bfda5da34638b362cfc3931c884d928f6d9c21e", format: "zip", cli: "bin/kicad-cli.exe", size: 865966402, caps: &[], min_os: &[] };
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.13.5", release: "backplane-kicad-v10.99.0-bp.13.5", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.13.5.tar.gz", sha256: "cc8b7ad1a09ab684b612d35fbfbc2ffcad3b9a0909b7f0f65b676a46aa05a5b6", format: "tar.gz", cli: "bin/kicad-cli", size: 1019374035, caps: &[], min_os: &[] };
+pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.13.5", release: "backplane-kicad-v10.99.0-bp.13.5", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.13.5.tar.gz", sha256: "a8b5ee7885cbf6119a398166864c0b132e977a84e008e521da4952edb03d3c63", format: "tar.gz", cli: "bin/kicad-cli", size: 1106843126, caps: &[], min_os: &[] };
+pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.13.5", release: "backplane-kicad-v10.99.0-bp.13.5", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.13.5.zip", sha256: "55c332e6563c24d4a7af3b23d01ab4beb9a4ee9ee3970d9692984dbc1ecddada", format: "zip", cli: "bin/kicad-cli.exe", size: 865968650, caps: &[], min_os: &[] };
 /// A package's download in words: "about 1.1 GB", "about 980 MB"; "about 1 GB" while its size is not known (a placeholder pin).
 pub fn size_words(p: &Package) -> String {
     let mb = p.size >> 20;
@@ -87,6 +87,68 @@ pub fn parent(home: &Path) -> PathBuf {
 }
 pub fn managed_parent(windows: bool, local_app_data: Option<&std::ffi::OsStr>, home: &Path) -> PathBuf {
     match local_app_data.filter(|d| windows && !d.is_empty()) { Some(d) => Path::new(d).join("Backplane").join("kicad"), None => home.join("kicad") }
+}
+/// How many times its archive a runtime takes unpacked, for the free-space check before an install (no pin says its unpacked size; the
+/// pin format is not changed for it). Measured Nov 21 on the bp.13.3 packages: macOS 4.11× (on disk, APFS), Linux 4.66×, Windows 4.73×
+/// (its zip's file sizes): the largest, rounded up, for every platform.
+pub const UNPACK_X: u64 = 5;
+/// The bytes an install of `p` needs free where it goes, with `partial` bytes of its download already there: the rest of the download,
+/// the runtime unpacked (`UNPACK_X` times the archive; the archive stays until the runtime is in place), and a tenth more. None for a pin
+/// whose size is not known (a placeholder): no check. Pure.
+pub fn need_bytes(p: &Package, partial: u64) -> Option<u64> {
+    if p.size == 0 { return None }
+    let n = p.size.saturating_sub(partial).saturating_add(p.size.saturating_mul(UNPACK_X));
+    Some(n.saturating_add(n / 10))
+}
+/// Gigabytes in words for the space refusal: "6.3 GB" (decimal, as the disk tools and Finder say them).
+pub fn gb_words(b: u64) -> String { format!("{:.1} GB", b as f64 / 1e9) }
+/// Why an install is refused for space, before anything downloads: None when `free` is enough, or not known (an install that may fit is
+/// not refused for a number the system would not give). Pure.
+pub fn space_refusal(need: Option<u64>, free: Option<u64>, folder: &str) -> Option<String> {
+    match (need, free) {
+        (Some(n), Some(f)) if f < n => Some(format!("Not enough free space for KiCad: it needs about {} in {folder}, and {} is free", gb_words(n), gb_words(f))),
+        _ => None,
+    }
+}
+/// The free bytes on the disk that holds `dir` (its nearest existing folder: the install's folder is made by the install). None when the
+/// system does not say.
+pub fn free_bytes(dir: &Path) -> Option<u64> {
+    let mut at = dir;
+    while !at.exists() { at = at.parent()?; }
+    #[cfg(unix)] {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(at.as_os_str().as_bytes()).ok()?; let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 { return None }
+        Some((st.f_bavail as u64).saturating_mul(st.f_frsize as u64))
+    }
+    #[cfg(windows)] {
+        use std::os::windows::ffi::OsStrExt;
+        let w: Vec<u16> = at.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+        let mut free: u64 = 0;
+        let ok = unsafe { windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(w.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut()) };
+        if ok == 0 { None } else { Some(free) }
+    }
+    #[cfg(not(any(unix, windows)))] { let _ = at; None }
+}
+/// The install's folder as the person reads it in the offer: the home folder as `~` where there is one (Linux, macOS), the full path on
+/// Windows (%LOCALAPPDATA%\Backplane\kicad). Pure.
+pub fn folder_words(folder: &Path, user_home: Option<&Path>, windows: bool) -> String {
+    let f = folder.to_string_lossy().to_string();
+    if windows { return f }
+    match user_home.and_then(|h| folder.strip_prefix(h).ok()) { Some(rest) if rest.as_os_str().is_empty() => "~".into(), Some(rest) => format!("~/{}", rest.to_string_lossy()), None => f }
+}
+/// Whether installing into Backplane's own folder needs an administrator's password: never, on every platform (`managed_parent` is the
+/// person's own: %LOCALAPPDATA% on Windows, the hub's home elsewhere). The offer says "with no administrator password" only while this holds.
+pub fn needs_admin(_os: &str) -> bool { false }
+/// The offer at Edit when no KiCad is found (`status` "missing"): published in `kicad.update` as {missing, to, size, mb, folder, admin} (no `offer`: not an update)
+/// for a package this computer has, or {missing, nopackage, words} when none is published for it; None when KiCad is not missing. The
+/// client shows it only after the person's Edit press (kicad_update.rs); only its Install press installs. Pure.
+pub fn missing_offer(p: Option<&Package>, status: &str, folder: &str, os: &str) -> Option<serde_json::Value> {
+    if status != "missing" { return None }
+    Some(match p {
+        Some(p) => json!({"missing": true, "to": p.version, "size": size_words(p), "mb": p.size >> 20, "folder": folder, "admin": needs_admin(os)}),
+        None => json!({"missing": true, "nopackage": true, "words": none_here()}),
+    })
 }
 /// This computer in words, for "none is published for …".
 pub fn this_computer() -> String { format!("{} {}", std::env::consts::OS, std::env::consts::ARCH) }
@@ -343,6 +405,19 @@ pub(crate) fn sha256_file(f: &Path) -> Result<String, String> {
     loop { let n = std::io::Read::read(&mut r, &mut b).map_err(|e| e.to_string())?; if n == 0 { break } h.update(&b[..n]) }
     Ok(hex::encode(h.finalize()))
 }
+/// Spawn `c`, again for a moment while exec says "Text file busy": a program written a moment ago (a test's stand-in curl, an installer
+/// just fetched) is still open for writing in a child another thread forked meanwhile, which holds the descriptor until its own exec. It
+/// passes in milliseconds (at most 40 x 25 ms here). Unanswered, `length` read no size (the full hub suite, Nov 20: "already downloaded"
+/// not said) and `tool` said "could not start".
+async fn spawn_busy(c: &mut tokio::process::Command) -> std::io::Result<tokio::process::Child> {
+    let mut tries = 0;
+    loop {
+        match c.spawn() {
+            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => { tries += 1; tokio::time::sleep(std::time::Duration::from_millis(25)).await }
+            r => return r,
+        }
+    }
+}
 /// One program to its end (through proc.rs, in its own group, its output into the log); Err with its last line when it fails.
 pub(crate) async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: impl FnMut()) -> Result<String, String> {
     let out = std::fs::OpenOptions::new().create(true).append(true).open(log).map_err(|e| e.to_string())?;
@@ -351,7 +426,7 @@ pub(crate) async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: imp
     c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::from(err));
     crate::plat::proc::own_group_tokio(&mut c);
     let from = std::fs::metadata(log).map_or(0, |m| m.len());
-    let mut child = c.spawn().map_err(|e| format!("could not start {}: {e}", prog.display()))?;
+    let mut child = spawn_busy(&mut c).await.map_err(|e| format!("could not start {}: {e}", prog.display()))?;
     let mut so = child.stdout.take();
     let read = tokio::spawn(async move { let mut s = String::new(); if let Some(o) = so.as_mut() { let _ = tokio::io::AsyncReadExt::read_to_string(o, &mut s).await; } s });
     let status = loop { match tokio::time::timeout(std::time::Duration::from_secs(1), child.wait()).await { Ok(r) => break r.map_err(|e| e.to_string())?, Err(_) => tick() } };
@@ -416,7 +491,9 @@ pub fn partial(parent: &Path, p: &Package) -> PathBuf { parent.join(".partial").
 async fn length(g: &Getter, url: &str) -> u64 {
     let (prog, args): (&Path, Vec<&str>) = match g { Getter::Curl(x) => (x, vec!["--proto", "=https", "--tlsv1.2", "-fsSIL", "--max-time", "20", url]), Getter::Wget(x) => (x, vec!["--spider", "-S", "--https-only", "--timeout=20", "--tries=1", url]) };
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, prog); c.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    let Ok(Ok(o)) = tokio::time::timeout(std::time::Duration::from_secs(25), c.output()).await else { return 0 };
+    c.kill_on_drop(true);
+    let Ok(child) = spawn_busy(&mut c).await else { return 0 };
+    let Ok(Ok(o)) = tokio::time::timeout(std::time::Duration::from_secs(25), child.wait_with_output()).await else { return 0 };
     content_length(&format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
 }
 /// The last Content-Length in a run of response headers (after redirects, the file's own).
@@ -683,15 +760,8 @@ pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path,
     let mut c = match standin { Some(s) => crate::proc::tokio_cmd(crate::proc::Kind::Net, s), None => { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, "sh"); c.arg("-c").arg(SCRIPT).arg("sh"); c } };
     c.args(args(parent, p)).current_dir(parent).stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err));
     crate::plat::proc::own_group_tokio(&mut c);
-    // "Text file busy": an installer written a moment ago is still open for writing in a child another thread just forked; it passes in a few milliseconds
-    let mut tries = 0;
-    let mut child = loop {
-        match c.spawn() {
-            Ok(c) => break c,
-            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => { tries += 1; tokio::time::sleep(std::time::Duration::from_millis(25)).await }
-            Err(e) => return Err(format!("could not start the installer: {e}")),
-        }
-    };
+    // "Text file busy": an installer written a moment ago is still open for writing in a child another thread just forked (spawn_busy)
+    let mut child = spawn_busy(&mut c).await.map_err(|e| format!("could not start the installer: {e}"))?;
     if let Some(id) = child.id() { crate::plat::proc::adopt(id, false) }
     let mut said = String::new();
     let status = loop {
@@ -727,8 +797,11 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
     let env = super::ipc::runtime(hub).await;
     if let Some(why) = refusal(&env.cli, &env.status, &env.version, consent, RUNNING.load(Ordering::SeqCst), package()) { return Err(why) }
     let p = package().expect("refusal checks the package");
-    if RUNNING.swap(true, Ordering::SeqCst) { return Err("KiCad is being installed already".into()) }
     let parent = parent(&hub.cfg.home);
+    // enough space for it, before anything downloads (what an earlier try left counts: the download continues it)
+    let folder = folder_words(&parent, std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).map(PathBuf::from).as_deref(), cfg!(windows));
+    if let Some(why) = space_refusal(need_bytes(p, partial_bytes(&hub.cfg.home, p)), free_bytes(&parent), &folder) { eprintln!("kicad: install refused: {why}"); return Err(why) }
+    if RUNNING.swap(true, Ordering::SeqCst) { return Err("KiCad is being installed already".into()) }
     // a stand-in installer (tests and rigs): the same arguments, so no real KiCad is downloaded or touched
     let standin = std::env::var_os("BACKPLANE_KICAD_INSTALLER").filter(|s| !s.is_empty()).map(PathBuf::from);
     eprintln!("kicad: installing Backplane KiCad {} into {}{}", p.version, parent.display(), standin.as_ref().map_or(String::new(), |s| format!(" (stand-in {})", s.display())));
@@ -755,6 +828,9 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
         RUNNING.store(false, Ordering::SeqCst);
         // Settings > CAD names the new KiCad (and its Install row goes) before the install says it is done: whoever reads "done" reads the new status with it
         super::ipc::publish_cad(&h).await;
+        // the pane's `support` from the new runtime (its manifest and api.desc), before anyone reads "done": else the pane kept the missing
+        // runtime's until something read it again
+        if r.is_ok() { let env = super::ipc::runtime(&h).await; super::embed::refresh_support(&h.cfg.home, &env); }
         match &r {
             Ok(dir) => { eprintln!("kicad: installed Backplane KiCad {} in {dir}", p.version); say(&h, "done", p.version, &format!("Installed Backplane KiCad {} in {dir}", p.version)).await }
             // a stopped download is not a failure for good: its own words, and its bytes (the bar stays where it got to)
@@ -774,6 +850,42 @@ mod tests {
     #[cfg(unix)] fn exe(p: &Path, body: &str) { std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap() }
     fn rt() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap() }
 
+    #[test] fn an_install_is_refused_for_space_before_anything_downloads() {
+        let p = Package { size: 1_000_000_000, ..LINUX };
+        // archive + 5x unpacked + a tenth
+        assert_eq!(need_bytes(&p, 0), Some(6_600_000_000));
+        assert_eq!(need_bytes(&p, 400_000_000), Some(6_160_000_000), "what an earlier try downloaded is not needed again");
+        assert_eq!(need_bytes(&p, 2_000_000_000), Some(5_500_000_000), "a partial larger than the pin (a changed pin): none left to download, never below zero");
+        assert_eq!(need_bytes(&Package { size: 0, ..LINUX }, 0), None, "a placeholder pin with no size: no check");
+        let r = space_refusal(Some(6_600_000_000), Some(2_000_000_000), "~/.backplane/kicad").unwrap();
+        assert_eq!(r, "Not enough free space for KiCad: it needs about 6.6 GB in ~/.backplane/kicad, and 2.0 GB is free");
+        assert_eq!(space_refusal(Some(6_600_000_000), Some(6_600_000_000), "f"), None, "exactly enough");
+        assert_eq!(space_refusal(Some(6_600_000_000), None, "f"), None, "free space not known: proceeds");
+        assert_eq!(space_refusal(None, Some(1), "f"), None, "need not known: proceeds");
+        // the three bp.13.3 packages, measured unpacked (Nov 21): every one fits under UNPACK_X
+        for (archive, unpacked) in [(1_106_823_193u64, 4_547_002_368u64), (1_022_758_312, 4_767_741_082), (865_966_402, 4_099_417_416)] { assert!(archive * UNPACK_X >= unpacked, "{archive} -> {unpacked}"); }
+    }
+    #[test] fn free_space_is_read_where_the_install_goes_or_above_it() {
+        let d = tmp("free"); let deep = d.join("not/made/yet");
+        assert!(free_bytes(&deep).is_some_and(|b| b > 0), "the nearest existing folder's disk");
+    }
+    #[test] fn the_offer_names_the_folder_as_the_person_reads_it() {
+        assert_eq!(folder_words(Path::new("/home/ann/.backplane/kicad"), Some(Path::new("/home/ann")), false), "~/.backplane/kicad");
+        assert_eq!(folder_words(Path::new("/srv/bp/kicad"), Some(Path::new("/home/ann")), false), "/srv/bp/kicad", "outside the home: in full");
+        assert_eq!(folder_words(Path::new(r"C:\Users\Ann\AppData\Local\Backplane\kicad"), Some(Path::new(r"C:\Users\Ann")), true), r"C:\Users\Ann\AppData\Local\Backplane\kicad", "Windows: in full");
+        for os in ["linux", "macos", "windows"] { assert!(!needs_admin(os), "{os}: Backplane's own folder is the person's") }
+    }
+    #[test] fn no_kicad_at_all_is_offered_the_install_and_one_with_no_package_says_why() {
+        let o = missing_offer(Some(&LINUX), "missing", "~/.backplane/kicad", "linux").unwrap();
+        assert_eq!((o["offer"].as_bool(), o["missing"].as_bool(), o["to"].as_str(), o["folder"].as_str(), o["admin"].as_bool()), (None, Some(true), Some(LINUX.version), Some("~/.backplane/kicad"), Some(false)), "not an update offer");
+        assert_eq!(o["size"], size_words(&LINUX));
+        let n = missing_offer(None, "missing", "f", "linux").unwrap();
+        assert!(n["nopackage"] == true && n["offer"].is_null() && !n["words"].as_str().unwrap_or("").is_empty());
+        for st in ["ok", "stock", "old", "broken", "checking", ""] { assert!(missing_offer(Some(&LINUX), st, "f", "linux").is_none(), "{st}") }
+        // consent is still the install's own: the offer installs nothing
+        assert!(refusal("", "missing", "", false, false, Some(&LINUX)).is_some_and(|w| w.contains("consent")));
+        assert_eq!(refusal("", "missing", "", true, false, Some(&LINUX)), None);
+    }
     #[test] fn the_catalog_is_0_14s_by_the_hubs_own_os_and_arch() {
         assert_eq!(pick("linux", "x86_64"), Some(&LINUX)); assert_eq!(pick("Linux", "amd64"), Some(&LINUX));
         assert_eq!(pick("macos", "aarch64"), Some(&MAC)); assert_eq!(pick("Darwin", "arm64"), Some(&MAC));
@@ -1101,6 +1213,18 @@ cp \"$f\" \"$out\"
         assert_eq!(content_length("HTTP/2 200\n"), 0);
     }
     /// A download that stops keeps what it has and says how far it got; the next try continues it; one already whole is not asked for again.
+    /// The full suite's race (Nov 20, a_stopped_download_is_kept_said_and_continued failed once in 4038 beside the rest, passed 3 of 3
+    /// alone): the stand-in curl written just before the size is asked is "busy" while another test thread's fork still holds it open for
+    /// writing. Held open here for 150 ms, deterministically: the size is still read (it was 0 before spawn_busy), and so is a step's run.
+    #[cfg(unix)] #[test] fn a_program_still_open_for_writing_elsewhere_is_waited_for_not_taken_as_no_answer() {
+        let r = tmp("rf-busy"); let (p, bin) = fixture(&r, false);
+        let t = tools_in(false, None, &sysdirs(&bin)).unwrap(); let curl = bin.join("curl");
+        let hold = |ms: u64| { let f = std::fs::OpenOptions::new().append(true).open(&curl).unwrap(); std::thread::spawn(move || { std::thread::sleep(std::time::Duration::from_millis(ms)); drop(f) }) };
+        let size = std::fs::metadata(r.join("serve").join(p.asset)).unwrap().len();
+        let h = hold(400); assert_eq!(rt().block_on(length(&t.get, &format!("https://x/r/{}", p.asset))), size, "the size, once the program is free"); h.join().unwrap();
+        let h = hold(400); let got = rt().block_on(tool(&curl, &["--proto".into(), "=https".into(), "-fsSIL".into(), format!("https://x/r/{}", p.asset)], &r.join("log"), || {}));
+        assert!(got.as_ref().is_ok_and(|o| content_length(o) == size), "{got:?}"); h.join().unwrap();
+    }
     #[cfg(unix)] #[test] fn a_stopped_download_is_kept_said_and_continued() {
         let r = tmp("rf-stop"); let (p, bin) = fixture(&r, false);
         let t = tools_in(false, None, &sysdirs(&bin)).unwrap(); let parent = r.join("home/kicad");

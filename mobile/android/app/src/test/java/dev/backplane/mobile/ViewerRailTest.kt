@@ -215,4 +215,29 @@ class ViewerRailTest {
         assertEquals("Files", ctrl.tab)
         assertEquals(listOf("fetch:t1:gerbers", "stop:t1"), log)
     }
+
+    @Test fun split_requires_both_board_and_schematic_matching_hub() {
+        assertFalse(ViewerRailHas(board = true, schematic = false, mech = false, gerbers = false).available("Split"))
+        assertFalse(ViewerRailHas(board = false, schematic = true, mech = false, gerbers = false).available("Split"))
+        assertTrue(ViewerRailHas(board = true, schematic = true, mech = false, gerbers = false).available("Split"))
+
+        val entries = listOf(
+            ViewerRailEntry("board", "Board", "design", "off"),
+            ViewerRailEntry("schematic", "Schematic", "design", "disabled", "No schematic in this project"),
+            ViewerRailEntry("split", "Split", "design", "on"),
+        )
+        val (s1, req1) = ViewerRailState(threadId = "t1").beginRequest("t1", hasRail = true)
+        val out = s1.onReply(
+            req1,
+            entries,
+            has = ViewerRailHas(board = true, schematic = false, mech = false, gerbers = false),
+            hasRail = true,
+            gerbersSupported = false,
+            currentTab = "Split",
+            hasFileLink = false,
+        )
+        assertTrue(out.accepted)
+        assertEquals("Board", out.tab)
+        assertFalse(out.stopWatch)
+    }
 }

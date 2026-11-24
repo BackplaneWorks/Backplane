@@ -1,4 +1,5 @@
 //! The window: layout and colours follow the web client (src/web/style.css tokens).
+use crate::screens::siderow::PillEl;
 use crate::script::{Ctl, CtlEntry};
 use crate::{art, hub::Command, string, theme, Backplane, Send};
 use crate::i18n::{tf, trs};
@@ -8,7 +9,7 @@ use serde_json::Value;
 #[derive(Default)]
 pub(crate) struct RailRow<'a> {
     pub id: &'a str, pub label: &'a str, icon: &'a str, group: &'a str, pub key: &'a str,
-    pub state: &'a str, why: &'a str,
+    pub state: &'a str, why: &'a str, present: bool,
 }
 
 pub(crate) fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
@@ -16,7 +17,7 @@ pub(crate) fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
         return rows.iter().filter(|r| simulation || r["id"] != "simulation").map(|row| {
             let field = |name: &str| row[name].as_str().unwrap_or("");
             RailRow { id: field("id"), label: field("label"), icon: field("icon"), group: field("group"),
-                key: field("key"), state: field("state"), why: field("why") }
+                key: field("key"), state: field("state"), why: field("why"), present: row["present"] == true }
         }).collect();
     }
     // Older hubs send choices and simFrame. Keep their existing rail and grouping.
@@ -70,7 +71,7 @@ pub(crate) fn rail_enabled(viewer: &Value, id: &str) -> bool {
 /// The rail entry lit for an embedded KiCad pane's wanted frame (`KicadPane::tab()`, which can be
 /// ahead of KiCad while `pending_show` is set). Symbols and Footprints light their owning design
 /// entry (Schematic and Board); Simulator lights Simulation. Pure mapping: never calls back into the pane.
-fn kicad_rail_id(frame: &str) -> Option<&'static str> {
+pub(crate) fn kicad_rail_id(frame: &str) -> Option<&'static str> {
     match frame {
         "PCB" | "FOOTPRINT_EDITOR" => Some("board"), // i18n-ok: wire frame kind enum names
         "SCH" | "SYMBOL_EDITOR" => Some("schematic"), // i18n-ok: wire frame kind enum names
@@ -278,9 +279,17 @@ fn chip(light: bool, label: String) -> Div {
     div().px_3().py_1().flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).whitespace_nowrap().child(label)
 }
 
-/// A message's references as little cards under it: a bot, thread, project or room goes there on a click; a model is only named.
-fn ref_cards(cx: &mut Context<Backplane>, light: bool, mid: &str, refs: &Value) -> Option<Div> {
-    let list = refs.as_array().filter(|r| !r.is_empty())?;
+/// References kept as cards under a message (`bot`, `thread`, `project`, `room`, `skill`, `machine`, plus any model ref that was not rendered inline).
+fn card_refs<'a>(refs: &'a Value, inline_models: &std::collections::HashSet<String>) -> Vec<&'a Value> {
+    refs.as_array().into_iter().flatten().filter(|r| {
+        !(r["kind"].as_str() == Some("model") && r["word"].as_str().is_some_and(|w| inline_models.contains(w)))
+    }).collect()
+}
+
+/// A message's references as little cards under it: a bot, thread, project or room goes there on a click; any non-inline model ref is named too.
+fn ref_cards(cx: &mut Context<Backplane>, light: bool, mid: &str, refs: &Value, inline_models: &std::collections::HashSet<String>) -> Option<Div> {
+    let list = card_refs(refs, inline_models);
+    if list.is_empty() { return None }
     let c = |n: &str| theme::color(light, n);
     let mut row = div().flex().flex_wrap().gap_2();
     for (i, r) in list.iter().enumerate() {
@@ -373,8 +382,17 @@ impl Backplane {
                 /* i18n-ok: a ctl label */ if kids > 0 && tree { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
                 let pin_group = SharedString::from(format!("row-{id}"));
                 let pin = crate::screens::siderow::pin_button(cx, light, t, pin_group.clone());
+                // the hub's status label (`label`, `tone`): drawn as a word where the dot was. A row of the lists across projects (Needs you, Running,
+                // Snoozed: `sub`) has two lines: its title, then its label, its project and its age
+                let pill = crate::screens::siderow::pill(light, t);
+                let labelled = t["label"].is_string();
+                let inbox = labelled && !sub.is_empty();
+                let gutter = if inbox { 10. } else { gutter };
+                { let (snz, wake) = (&t["snooze"], string(t, "wake"));
+                  if !wake.is_empty() { ctl.push(CtlEntry { id: format!("wake:{raw}"), label: "Wake".into() /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-snooze".into(), wake) }); }
+                  for o in snz.as_array().into_iter().flatten() { ctl.push(CtlEntry { id: format!("snooze:{raw}:{}", string(o, "label")), label: format!("Snooze {}", string(o, "label")) /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-snooze".into(), string(o, "value")) }); } }
                 { let (action, value) = crate::screens::siderow::pin_press(t); ctl.push(CtlEntry { id: format!("pin:{raw}"), label: action.into(), ctl: Ctl::Node(action.into(), value) }); }
-                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).group(pin_group).flex().items_center().gap_2().pr_3().h(crate::scale::tpx(32.)).when(faded || t["off"] == true, |d| d.opacity(0.55))
+                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).group(pin_group).relative().flex().items_center().gap_2().pr_3().h(crate::scale::tpx(if inbox { 42. } else { 32. })).when(faded || t["off"] == true, |d| d.opacity(0.55))
                     // a row under its project: no bar and no block when open (the person, 2026-11-15); its L says where it is
                     .border_l_2().border_color(if selected && !under { c("accent") } else { transparent_black().into() })
                     .bg(if selected && !under { c("raise") } else { transparent_black().into() }).hover(|s| s.bg(c("raise"))).cursor_pointer()
@@ -387,14 +405,29 @@ impl Backplane {
                     // as the project's own; the open one's L a shade brighter
                     .child(toggle.map_or_else(|| div().w(px(gutter)).h_full().flex_shrink_0().relative().when(under, |d| { let l = c(if selected { "dim" } else { "line" });
                         d.child(div().absolute().left(px(36.)).top_0().w(px(1.)).h(relative(0.5)).bg(l))
-                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).child(crate::screens::siderow::dot(light, t)).child(if crate::screens::siderow::renaming(&self.data, &id, "thread") { crate::screens::siderow::field(light, &self.screens.fields, &id) } else { div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().relative().child(div().min_w_0().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(sub.to_string())))
+                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).children((!labelled).then(|| crate::screens::siderow::dot(light, t))).child(if crate::screens::siderow::renaming(&self.data, &id, "thread") { crate::screens::siderow::field(light, &self.screens.fields, &id) } else if inbox {
+                        let (proj, ago) = (sub.trim().to_string(), trs(&string(t, "ago")));
+                        div().flex_1().min_w_0().flex().flex_col().justify_center().gap(px(1.)).relative()
+                            .child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().line_height(crate::scale::tpx(18.)).child(string(t, "title")))
+                            .child(div().flex().items_center().gap(px(6.)).min_w_0().overflow_hidden().whitespace_nowrap().text_size(crate::scale::tpx(11.)).line_height(crate::scale::tpx(16.)).text_color(c("faint"))
+                                .children(pill.clone_el())
+                                .children((!proj.is_empty()).then(|| div().min_w_0().overflow_hidden().text_ellipsis().text_color(c("dim")).child(proj)))
+                                .child(div().flex_shrink_0().child(ago)))
+                            .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element()
+                    } else { div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().relative().child(div().min_w_0().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(sub.to_string())))
                         // held Ctrl: this row's Ctrl+digit; held Alt, in the Active view: its project's Alt+digit; over the title's end, so nothing moves (screens/hints.rs)
                         .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).or_else(|| (!sub.is_empty()).then(|| crate::screens::hints::digit_of(&self.screens.hold_projects, pid)).flatten()).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element() })
-                    .child(pin) // the pin: always on a pinned row, on hover on the others
+                    .children(crate::screens::siderow::settle_button(cx, light, t, SharedString::from(format!("row-{id}")))) // Settle in one press, under the pointer (the hub's `settle`: a stop that asks nothing)
+                    // under the pointer: Snooze (a span from its menu; Wake on a snoozed row), Settle in one press (the hub's `settle`: a stop that asks
+                    // nothing), the pin (always on a pinned row). On a two-line row they lie over the title's end, so they take no width from it
+                    .child({ let g = SharedString::from(format!("row-{id}"));
+                        let acts = div().flex().items_center().gap_1().children(crate::screens::siderow::snooze_button(cx, light, t, g.clone())).children(crate::screens::siderow::settle_button(cx, light, t, g.clone())).child(pin);
+                        if inbox { let raise = c("raise"); acts.absolute().right(px(8.)).top(px(4.)).px(px(2.)).group_hover(g, move |s| s.bg(raise)) } else { acts.flex_shrink_0() } })
                     .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id)) // (another machine's thread: its name, dim; none for this machine's)
-                    .child({ let want = string(t, "want"); // a red row says what it wants where its age goes (0.14 Side.want, r01)
+                    .children((labelled && !inbox).then(|| pill.clone_el()).flatten()) // under its project: the label before its age
+                    .children((!inbox).then(|| { let want = if labelled { String::new() } else { string(t, "want") }; // a red row says what it wants where its age goes (0.14 Side.want, r01); the label says it now
                         if want.is_empty() { div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if kids > 0 && !under && string(t, "agents").is_empty() { format!("{kids}") } else { trs(&string(t, "ago")) }) }
-                        else { div().text_size(crate::scale::tpx(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want)) } }).into_any_element()
+                        else { div().text_size(crate::scale::tpx(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want)) } })).into_any_element()
     }
 }
 
@@ -433,12 +466,23 @@ impl Backplane {
         let was_streamed = kind == "assistant" && !id.starts_with('@') && !self.screens.streamed.is_empty() && { let a: String = self.screens.streamed.trim().chars().take(60).collect(); text.trim_start().starts_with(&a) };
         let row: AnyElement = match kind {
             "user" => {
-                let wide = crate::screens::timeline::bubble_full_width(&text, &e["attachments"]);
-                let ref_words: Vec<String> = e["refs"].as_array().into_iter().flatten().map(|r| string(r, "word")).collect();
-                let body = crate::screens::timeline::user_text(&reg, light, &text, &ref_words);
+                let mut model_chips = Vec::new();
+                let mut other_ref_words = Vec::new();
+                for r in e["refs"].as_array().into_iter().flatten() {
+                    let word = string(r, "word");
+                    if word.is_empty() { continue }
+                    if r["kind"].as_str() == Some("model") {
+                        let label = string(r, "label");
+                        if !label.is_empty() { model_chips.push(crate::screens::md::ModelChip { word, label }); }
+                    } else {
+                        other_ref_words.push(word);
+                    }
+                }
+                let (body, inline_models) = crate::screens::timeline::user_text_with_models(&reg, light, &text, &other_ref_words, &model_chips);
+                let wide = crate::screens::timeline::bubble_full_width_with_chips(&text, &e["attachments"], !inline_models.is_empty());
                 let atts = crate::screens::timeline::attachments(cx, light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
                 let tools = msg_tools(cx, light, &id, &text);
-                let cards = ref_cards(cx, light, &id, &e["refs"]);
+                let cards = ref_cards(cx, light, &id, &e["refs"], &inline_models);
                 // r05: a follow-up the agent has not read yet: its text a step dimmer, its time ("not read yet · 06:13") in the queued colour
                 let unread = e["unread"] == true;
                 let spoken = crate::screens::voice::bubble_mark(cx, light, &self.screens.voice, &id, &e["voice"]);
@@ -472,9 +516,10 @@ impl Backplane {
                 div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().child(
                     with_rect(div().id(SharedString::from(format!("f-{id}"))), || format!("fold:{id}")).w_full().min_w_0().overflow_hidden().flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).cursor_pointer()
                         .hover(|s| s.bg(c("raise")))
-                        .on_click(cx.listener(move |this, _, _, cx| { this.fold_click(value.clone()); cx.notify(); }))
                         .child(div().flex_shrink_0().flex().items_center().child(ic(light, if e["open"] == true { "chevron-down" } else { "chevron-right" }, 14., "dim")))
-                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(&text)))).into_any_element()
+                        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(&text)))
+                        // a click opens and shuts it, and the keyboard too: Tab to it, Enter or Space (screens/thought.rs)
+                        .map(|d| crate::screens::thought::keyed(d, &id, value, light, cx))).into_any_element()
             }
             // the agent still working: a blue square that breathes beside the word (the one animation on screen, only while this row is; blue as the sidebar's and the head's working dots, 0.14's --st-work)
             "assistant" if id.starts_with("@live:") || id.starts_with("@working:") => {
@@ -520,6 +565,12 @@ impl Backplane {
             // s03: the call that runs now, in an open fold of the running turn: its name in the accent with the live mark beside it
             _ if !text.is_empty() && e["now"] == true => div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("text"))
                 .child(div().size(px(6.)).flex_shrink_0().bg(c("accent"))).child(div().text_color(c("accent")).child(string(&e, "label"))).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.lines().next().unwrap_or("").to_string())).into_any_element(),
+            // a thought (#1325): folded to its first line, opened by a click or Enter on it (screens/thought.rs), as a run of tool calls is
+            _ if e["folds"] == true && !text.is_empty() => {
+                let body = match e["blocks"].as_array() { Some(b) if e["open"] == true && !b.is_empty() => { let parsed = self.screens.parsed.get(&id, &text, b); crate::screens::timeline::blocks(cx, &reg, light, &parsed, &id) }
+                    _ if e["open"] == true => vec![crate::screens::timeline::user_text(&reg, light, &text, &[])], _ => vec![] };
+                crate::screens::thought::row(self, cx, light, &e, body)
+            }
             // an activity: its kind faint, what it did on one line (a heredoc's first line, "…"), as 0.14's .act; an error, a warning or a restart says all of it
             _ if !text.is_empty() => {
                 let tone = string(&e, "tone"); let whole = act_whole(&tone);
@@ -574,15 +625,62 @@ impl Backplane {
         // always on: listening is shown at the top of the sidebar whenever it is on
         if let Some(r) = crate::screens::voice::always_row(cx, light, &self.screens.voice, self.screens.voice.always_wanted) { rows.push(r); }
         let mut ctl: Vec<CtlEntry> = Vec::new();
+        // the crew band (Bub, the bots in one strip, the rooms as chips): above the list and never scrolled with it, so forty projects cannot bury it
+        let mut crew: Vec<AnyElement> = Vec::new();
         for ((bname, mood, note, _, bid, bsel), rig) in uber_data.iter().zip(uber_rigs.iter()) {
             let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
             ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
             let bid2 = bid.clone();
-            rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_3().px_3().py(px(10.)).border_b_1().border_color(c("line")).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+            crew.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_2().px_3().h(px(44.)).border_l_2().border_color(if *bsel { c("accent") } else { transparent_black().into() }).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
                 .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
-                .child(art::cat(rig.clone(), mood, 56., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
-                .child(div().flex().flex_col().min_w_0().line_height(crate::scale::tpx(22.)).child(div().text_size(crate::scale::tpx(16.)).overflow_hidden().whitespace_nowrap().child(bname.clone()))
-                    .child(div().flex().gap_2().items_center().child(div().text_size(crate::scale::tpx(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
+                .child(art::cat(rig.clone(), mood, 36., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
+                .child(div().flex_shrink_0().text_size(crate::scale::tpx(14.)).whitespace_nowrap().child(bname.clone()))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(note_color).child(trs(note)))
+                .children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))).into_any_element());
+        }
+        {
+            // the bots: one strip of cats (a bot's name and what it does under the pointer; a red mark on one that waits or failed), then +
+            let mut strip: Vec<AnyElement> = Vec::new();
+            for ((bname, mood, note, _, bid, bsel), rig) in bot_data.iter().zip(bot_rigs.iter()) {
+                ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
+                let bid2 = bid.clone();
+                let wants = matches!(mood.as_str(), "wait" | "error"); let busy = matches!(mood.as_str(), "work" | "talk");
+                /* i18n-ok: a name and a note already translated */ let tip = if note.is_empty() { bname.clone() } else { format!("{bname} · {}", trs(note)) };
+                strip.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).relative().flex_shrink_0().size(px(32.)).flex().items_center().justify_center().cursor_pointer()
+                    .border_b_2().border_color(if *bsel { c("accent") } else if wants { c("bad") } else if busy { c("accent") } else { transparent_black().into() })
+                    .when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                    .tooltip(crate::keys::tip_raw(&tip, "", light))
+                    .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
+                    .when_some(row_menus.get(bid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
+                    .child(art::cat(rig.clone(), mood, 26., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
+                    .children(wants.then(|| div().absolute().top(px(2.)).right(px(2.)).size(px(6.)).bg(c("bad"))))
+                    .children(marks.get(bid).map(|_| div().absolute().bottom(px(3.)).right(px(2.)).size(px(5.)).rounded_full().bg(c("dim")))).into_any_element());
+            }
+            /* i18n-ok: ui: ids the drivers press */ ctl.push(CtlEntry { id: "ui:New bot".into(), label: "New bot".into(), ctl: Ctl::Node("bot-new".into(), String::new()) });
+            /* i18n-ok: a ui: id the drivers press */ strip.push(with_rect(div().id("ui:New bot"), || "ui:New bot".to_string()).flex_shrink_0().size(px(32.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("New bot", "", light))
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot-new".into(), String::new())); cx.notify(); })).child(ic(light, "plus", 14., "dim")).into_any_element());
+            crew.push(div().id("crew-bots").flex().flex_wrap().items_center().px(px(6.)).children(strip).into_any_element());
+            // the rooms: chips (#name and its members), wrapping, three lines at most (the rest scroll within the band), then +
+            let mut chips: Vec<AnyElement> = Vec::new();
+            for r in self.data["rooms"].as_array().into_iter().flatten() {
+                let (rid, rname, sel) = (string(r, "id"), string(r, "name"), r["sel"].as_bool().unwrap_or(false));
+                ctl.push(CtlEntry { id: format!("room:{rname}"), label: rname.clone(), ctl: Ctl::Node("room".into(), rid.clone()) });
+                let rid2 = rid.clone();
+                chips.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex_shrink_0().max_w(px(150.)).h(px(22.)).px(px(5.)).flex().items_center().cursor_pointer().text_size(crate::scale::tpx(12.))
+                    .border_b_1().border_color(if sel { c("accent") } else { transparent_black().into() }).when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+                    /* i18n-ok: a room name and a count */ .tooltip(crate::keys::tip_raw(&format!("#{rname} · {}", r["members"]), "", light))
+                    .on_click(cx.listener(move |this, _, _, cx| this.go("room", rid2.clone(), cx)))
+                    .when_some(row_menus.get(&rid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
+                    .child(div().text_color(c("faint")).child("#")).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(if sel { c("text") } else { c("dim") }).child(rname.clone()))
+                    .children(crate::screens::badge::machine_mark(light, &r["mark"], false, &rid)).into_any_element());
+            }
+            /* i18n-ok: ui: ids the drivers press */ ctl.push(CtlEntry { id: "ui:New room".into(), label: "New room".into(), ctl: Ctl::Node("room-new".into(), String::new()) });
+            /* i18n-ok: a ui: id the drivers press */ chips.push(with_rect(div().id("ui:New room"), || "ui:New room".to_string()).flex_shrink_0().h(px(22.)).px(px(4.)).flex().items_center().gap_1().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("faint")).hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("New room", "", light))
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("room-new".into(), String::new())); cx.notify(); })).child(ic(light, "plus", 14., "dim")).into_any_element());
+            crew.push(div().id("crew-rooms").flex().flex_wrap().items_center().px(px(7.)).pb(px(6.)).max_h(px(3. * 22. + 6.)).overflow_y_scroll().children(chips).into_any_element());
+        }
+        if let Some((line, bad)) = home_away_line(&self.data["home"]) {
+            rows.push(div().id("home-away-row").px_3().py_1().border_b_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(11.)).text_color(if bad { c("bad") } else { c("dim") }).child(line).into_any_element());
         }
         let new_here = crate::keys::new_target(&self.data, &self.selected, self.project_page.as_deref());
         // the hub's sections (Needs you, Pinned, Active, groups, Quiet: screens/sections.rs); an older hub sends projects and the Active view
@@ -687,39 +785,10 @@ impl Backplane {
                 .child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(tf(if open { "gpui.b.older.open" } else { "gpui.b.older" }, &[("n", n.into())]))
                 .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("side-older".into(), String::new())); cx.notify(); })).into_any_element());
         }
-        /* i18n-ok: compared below; drawn through trs */ for name in ["BOTS", "ROOMS"] {
-            /* i18n-ok: ui: ids */ let (plus_id, plus_action) = if name == "BOTS" { ("ui:New bot", "bot-new") } else { ("ui:New room", "room-new") };
-            ctl.push(CtlEntry { id: plus_id.into(), label: plus_id.trim_start_matches("ui:").into(), ctl: Ctl::Node(plus_action.into(), String::new()) });
-            rows.push(div().flex().justify_between().px_3().pt_4().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(name))
-                .child(with_rect(div().id(plus_id), || plus_id.to_string()).cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(plus_action.into(), String::new())); cx.notify(); })).child(ic(light, "plus", 16., "dim"))).into_any_element());
-            if name == "BOTS" {
-                for ((bname, mood, note, _, bid, bsel), rig) in bot_data.iter().zip(bot_rigs.iter()) {
-                    let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
-                    ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
-                    let bid2 = bid.clone();
-                    rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_2().px_3().py(px(3.)).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-                        .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
-                        .when_some(row_menus.get(bid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
-                        .child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
-                        .child(div().flex().flex_col().min_w_0().line_height(crate::scale::tpx(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
-                            .child(div().flex().gap_2().items_center().child(div().text_size(crate::scale::tpx(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
-                }
-            } else {
-                for r in self.data["rooms"].as_array().into_iter().flatten() {
-                    let (rid, rname, sel) = (string(r, "id"), string(r, "name"), r["sel"].as_bool().unwrap_or(false));
-                    ctl.push(CtlEntry { id: format!("room:{rname}"), label: rname.clone(), ctl: Ctl::Node("room".into(), rid.clone()) });
-                    let rid2 = rid.clone();
-                    rows.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex().items_center().gap_2().px_3().py_1().cursor_pointer().when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-                        .on_click(cx.listener(move |this, _, _, cx| this.go("room", rid2.clone(), cx)))
-                        .when_some(row_menus.get(&rid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
-                        .child(div().text_color(c("faint")).child("#")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(rname.clone()))
-                        .children(crate::screens::badge::machine_mark(light, &r["mark"], false, &rid))
-                        .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("{}", r["members"]))).into_any_element());
-                }
-            }
-        }
         self.screens.parts.side_ctl = ctl;
-        /* i18n-ok: a key context */ div().id("sidebar").size_full().overflow_y_scroll().track_focus(&self.screens.side_focus).key_context("Sidebar").children(rows).into_any_element()
+        /* i18n-ok: a key context */ div().id("sidebar").size_full().flex().flex_col().track_focus(&self.screens.side_focus).key_context("Sidebar")
+            .child(div().id("crew").flex_none().flex().flex_col().border_b_1().border_color(c("line")).children(crew))
+            .child(div().id("sidebar-list").flex_1().min_h_0().overflow_y_scroll().pb_3().children(rows)).into_any_element()
     }
     /// The viewer's page, a part of the window (part.rs): a board or schematic is drawn again only when the page itself changed, not for
     /// a hover in the sidebar or the caret's blink.
@@ -731,11 +800,16 @@ impl Backplane {
         let update = if self.screens.kicad.is_some() { crate::screens::kicad_update::view(self, cx) } else { None };
         self.screens.plots[0].loading.begin_frame(self.data["thread"]["id"].as_str().unwrap_or(""));
         let review_panel = crate::screens::mgmt::review_panel(self, cx);
-        let thread = &self.data["thread"];
-        let editor = self.kicad_for(thread, cx);
-        let solid = self.screens.active_solid().cloned();
-        let (pv, split) = self.screens.plots.views();
-        let el = crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, pv, split, solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref(), update, review_panel, &self.screens.mgmt.checks);
+        let docked = crate::screens::viewer::is_tiled(&self.data["thread"]["viewer"]);
+        let el = if docked {
+            crate::screens::tiles::page(self, cx, light, review_panel)
+        } else {
+            let thread = &self.data["thread"];
+            let editor = self.kicad_for(thread, cx);
+            let solid = self.screens.active_solid().cloned();
+            let (pv, split) = self.screens.plots.views();
+            crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, pv, split, solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref(), update, review_panel, &self.screens.mgmt.checks, &self.screens.tile_menu)
+        };
         { let rows = &self.data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
         // full screen: the editor alone, without the management panels' strip under it
         let el = if crate::screens::viewer::KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed) { el }
@@ -795,9 +869,15 @@ impl Render for Backplane {
         for page in self.screens.retired_solids.drain(..) { page.update(cx, |p, _| p.release(window)); }
         let back = self.local.viewer_backdrop(self.light()); back.make_current();
         if let Some(s) = self.screens.active_solid().cloned() { let (part, split) = (crate::screens::plotview::probed_part(self), self.data["thread"]["viewer"]["open"] == "split"); s.update(cx, |p, _| { p.set_backdrop(back); p.set_probe(&part); p.names_probe = !split; }); }
+        if crate::screens::viewer::is_tiled(&self.data["thread"]["viewer"]) {
+            let part = crate::screens::plotview::probed_part(self);
+            for page in self.screens.tile_solids() {
+                page.update(cx, |p, _| { p.set_backdrop(back); p.set_probe(&part); p.collect(window); });
+            }
+        }
         for (slot, page) in &self.screens.solids {
             if page.read(cx).atlas_images() > 0 {
-                let shown = self.screens.solid_slot.as_ref().is_some_and(|active| active == slot)
+                let shown = self.screens.plots.watches(slot) || self.screens.solid_slot.as_ref().is_some_and(|active| active == slot)
                     && crate::screens::viewer::shows_solid(&self.data["thread"]);
                 page.update(cx, |p, _| { if !shown { p.put_away(); } p.collect(window); });
             }
@@ -834,17 +914,24 @@ impl Render for Backplane {
         if crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, false, viewer_open).0 { self.screens.side_force = false; } // room again: "anyway" is over
         let (side_shown, thread_least, pane_least, share) = crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, self.screens.side_force, viewer_open);
         // the embedded editor at full size: the sidebar folds and the thread gives all its room (screens/viewer.rs pane)
-        let kedit = viewer_open && self.screens.kicad.is_some() && self.screens.kicad_window.is_none() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d"));
+        let docked = crate::screens::viewer::is_tiled(&thread["viewer"]);
+        let kedit = !docked && viewer_open && self.screens.kicad.is_some() && self.screens.kicad_window.is_none() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d"));
         // full screen: the editor and its strip are the whole window (no top bar, sidebar, thread, rail or pane bar)
         if !kedit { self.screens.kicad_screen = false; } // the editor left the pane: the next Edit starts in the pane, not over the window
         let kscreen = self.screens.kicad_screen && kedit;
-        let kfull = kscreen || (self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")));
+        let kfull = kscreen || (!docked && self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")));
         crate::screens::viewer::KICAD_SCREEN.store(kscreen, std::sync::atomic::Ordering::Relaxed);
         // whether the page holds the embedded editor this frame (popped out: its own window does), from this frame's state: macOS hides
         // KiCad's frame by it when the pane is not drawn (#1199: the viewer closed, the PCB Editor stayed on screen)
         if let Some(p) = self.screens.kicad.clone() {
-            let in_page = self.screens.kicad_window.is_some() || (self.kicad_for(thread, cx).is_some() && crate::screens::viewer::holds_editor(thread));
-            if p.read(cx).in_page != in_page { p.update(cx, |p, _| p.in_page = in_page); }
+            let mine = self.kicad_for(thread, cx).is_some();
+            let in_page = self.screens.kicad_window.is_some() || (!docked && mine && crate::screens::viewer::holds_editor(thread));
+            // #1345: off screen because the person moved away (another thread or design, or the viewer closed or on another page): the hub
+            // hears it once settled (KicadPane::set_in_page), so the idle close and the cap can apply to it; a sheet over the pane is not this
+            // ("thread": another thread than the one the pane was last on screen in, the same project's included; "viewer": the same thread)
+            let tid = thread["id"].as_str().unwrap_or("");
+            if p.read(cx).in_page != in_page { p.update(cx, |p, cx| p.set_in_page(in_page, if mine && p.page_thread == tid { "viewer" } else { "thread" }, cx)); } // i18n-ok: wire words
+            if in_page && p.read(cx).page_thread != tid { let t = tid.to_string(); p.update(cx, |p, _| p.page_thread = t); }
         }
         // Follow agent in KiCad: the hub learns whether this thread's page holds KiCad and which frame it shows (viewer.state, on change)
         let kshown = match self.screens.kicad.clone() { Some(p) if p.read(cx).in_page => (true, p.read(cx).tab()), _ => (false, String::new()) };
@@ -926,7 +1013,8 @@ impl Render for Backplane {
         // infinite context (the hub's bots/recall/progress.rs): the context chip draws the memory's bar and its words instead of the session's context
         let memory = self.data["memory"].clone(); let mem_on = memory.is_object();
         let (tok, ctx) = if mem_on { (crate::i18n::trs(&string(&memory, "line")), crate::i18n::trs(&string(&memory, "short"))) } else { (string(&self.data, "tokChip"), ctx) };
-        let (combo_avail, tok_words) = crate::screens::combo::split(if mem_on && bar_w > 0. { bar_w - crate::screens::combo::MEM_BAR } else { bar_w }, &thread["combo"], &tok, &ctx);
+        let plan_chip_w = if crate::screens::planmode::parse(&thread["planMode"]).is_some() { 92. } else { 0. };
+        let (combo_avail, tok_words) = crate::screens::combo::split(if bar_w > 0. { (bar_w - if mem_on { crate::screens::combo::MEM_BAR } else { 0. } - plan_chip_w).max(0.) } else { 0. }, &thread["combo"], &tok, &ctx);
         // the thread's header (screens/head.rs): its state and tools beside the name in the top bar when it has the room, else a row of their own
         // a project's page over a thread: the header is the page's (its project's name), not the thread's
         // a swarm's page over the thread its viewer is drawn for: the page is what is open, so that thread has no header
@@ -954,6 +1042,8 @@ impl Render for Backplane {
         let active_kind = if thread["diff"].is_object() { "diff".to_owned() } else { crate::screens::viewer::active_kind(&thread["viewer"], self.screens.rail_pending.as_deref()) };
         // the rail's Simulation entry (the hub's word, in a window that can hold KiCad)
         let can_embed = crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread);
+        let dock_editor_active = self.dock_editor_active(thread, can_embed, cx);
+        self.screens.palette.editor_active = dock_editor_active;
         let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], can_embed).is_some();
         let rows = rail_rows(&thread["viewer"], sim_rail);
         // when the local embedded KiCad pane is on show in this thread, light the rail from its wanted frame (`KicadPane::tab()`,
@@ -999,7 +1089,7 @@ impl Render for Backplane {
             let icon_resolved = art::icon_name(row.icon);
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(px(label_size))
-                .border_l_2().border_color(gpui::transparent_black())
+                .border_l_2().border_color(if row.present { gpui::Rgba { a: 0.6, ..c("accent") } } else { gpui::transparent_black().into() })
                 .when(active, |d| d.bg(c("raise")).border_color(c("accent")))
                 .text_color(c(if active { "text" } else if disabled { "rail-disabled" } else { "dim" }))
                 .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else if disabled { "rail-disabled-icon" } else { "dim" })).child(div().max_w_full().when(ellipsis, |d| d.whitespace_nowrap().overflow_hidden().text_ellipsis()).child(label));
@@ -1026,15 +1116,29 @@ impl Render for Backplane {
                         key: letter.into(), keycap_drawn: cap_drawn, keycap_eligible: letter.chars().count() == 1,
                     });
                 }
+                let layout = &thread["viewer"]["layout"];
+                let add_beside = !is_tool && id != "split" && layout["focus"].is_string()
+                    && !dock_editor_active;
+                let mut tooltip = crate::keys::tip_text(&trs(row.label), &hint);
+                if add_beside {
+                    tooltip.push('\n');
+                    tooltip.push_str(&crate::i18n::t("viewer.tile.rail.add"));
+                    let kind = id.to_owned();
+                    button = button.on_mouse_up(MouseButton::Middle, cx.listener(move |this, _, _, cx| {
+                        crate::screens::tile_menu::rail_add(this, &kind, cx);
+                        cx.stop_propagation();
+                    }));
+                }
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
-                    .tooltip(crate::keys::tip(row.label, &hint, light)).children(cap_el);
+                    .tooltip(crate::keys::tip_raw(&tooltip, "", light)).children(cap_el);
                 let action = match id {
                     "terminal" => Ctl::ToggleTerminal, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
                     "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),
                 };
                 ctl.push(CtlEntry { id: format!("rail:{}", row.label), label: row.label.into(), ctl: action });
                 let id = id.to_owned();
-                button = button.on_click(cx.listener(move |this, _, window, cx| match id.as_str() {
+                button = button.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| match id.as_str() {
+                    kind if add_beside && event.modifiers().shift => crate::screens::tile_menu::rail_add(this, kind, cx),
                     "terminal" => this.term_toggle(window, cx), "commands" => this.palette_open(cx),
                     "simulation" => this.open_simulation(cx), "diff" => this.rail_press("diff", "", cx),
                     kind => this.rail_press("view-kind", kind, cx),
@@ -1092,11 +1196,12 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ for (id, label, c) in crate::screens::bots::controls(&self.data).into_iter().chain(crate::screens::swarm::controls(&self.data)) { ctl.push(CtlEntry { id, label, ctl: c }); }
         /* i18n-ok: registered controls the e2e drivers press */ if has_thread { ctl.push(CtlEntry { id: "ui:Thread menu".into(), label: "Thread actions".into(), ctl: Ctl::ThreadMenu }); }
         /* i18n-ok: registered controls the e2e drivers press */ if has_thread { ctl.push(CtlEntry { id: "ui:Model".into(), label: "Model".into(), ctl: Ctl::ModelChip }); }
+        /* i18n-ok: registered controls the e2e drivers press */ if has_thread && crate::screens::planmode::parse(&thread["planMode"]).is_some() { ctl.push(CtlEntry { id: "ui:Plan mode".into(), label: "Plan".into(), ctl: Ctl::None }); }
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) { for (id, label) in [("@device", "This device"), ("@hubs", "Hubs"), ("@accounts", "Accounts")] { ctl.push(CtlEntry { id: format!("set-nav:{id}"), label: label.into(), ctl: Ctl::SettingsPage(id.into()) }); } }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         /* i18n-ok: registered controls the e2e drivers press */ if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
         // Settings > CAD's Install KiCad buttons (Install KiCad, Install, Cancel, Try again): `set:<action>`
-        /* i18n-ok: registered controls the e2e drivers press */ for b in crate::screens::settings::parse(&self.data["settings"]).into_iter().flat_map(|r| r.buttons).filter(|b| b.action.starts_with("kicad-install")) { ctl.push(CtlEntry { id: format!("set:{}", b.action), label: b.label, ctl: Ctl::Node(b.action, b.value) }); }
+        /* i18n-ok: registered controls the e2e drivers press */ for b in crate::screens::settings::parse(&self.data["settings"]).into_iter().flat_map(|r| r.buttons).filter(|b| b.action.starts_with("kicad-install") || b.action == "device-share-revoke") { ctl.push(CtlEntry { id: format!("set:{}", b.action), label: b.label, ctl: Ctl::Node(b.action, b.value) }); }
         /* i18n-ok: registered controls the e2e drivers press */ if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Context".into(), label: "Context".into(), ctl: Ctl::ToggleContext });
@@ -1113,7 +1218,27 @@ impl Render for Backplane {
         let connected = self.status == "Connected";
         if !self.screens.img_poll && self.screens.images.loading() { self.screens.img_poll = true; crate::screens::timeline::poll(window, cx); }
 
-        let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")),self.picker_keys(),cx)
+        // a key typed in Backplane (any window of the app, before its bindings and actions: Enter, Backspace, Ctrl+V in the composer are
+        // actions, which an element's key listener never sees): a hand-in to KiCad still waiting for its frame is dropped, the person is
+        // typing here (kicad_pane::key_turns_to_backplane). KiCad's own keys never come here. Registered once, for the app's life.
+        static KEY_WATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !KEY_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let weak = cx.entity().downgrade();
+            cx.intercept_keystrokes(move |ev, _, cx| {
+                let key = ev.keystroke.unparse();
+                if let Ok(mut l) = crate::viewers::kicad_pane::LAST_KEY.lock() { *l = Some((key.clone(), std::time::Instant::now())); }
+                let _ = weak.update(cx, |this, cx| if let Some(p) = this.screens.kicad.clone() { p.update(cx, |p, _| p.typed_in_backplane(&key)); });
+            }).detach();
+        }
+        // a key typed in Backplane (and, below, a press on the window's root): noted, so a KiCad install's reopen hands KiCad the keyboard
+        // only if the person did nothing since their Install press (kicad_update::turned_since). Not seen: presses on surfaces that occlude
+        // (Settings, the palette, menus, the lightbox) and in a popped-out KiCad window; keys are seen everywhere. Registered once
+        static ACT_WATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !ACT_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let weak = cx.entity().downgrade();
+            cx.intercept_keystrokes(move |_, _, cx| { let _ = weak.update(cx, |this, _| crate::screens::kicad_update::person_acted(this)); }).detach();
+        }
+        let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")).capture_any_mouse_down(cx.listener(|this, _, _, _| crate::screens::kicad_update::person_acted(this))),self.picker_keys(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(crate::scale::tpx(13.)).font_family(self.local.font.clone()).line_height(crate::scale::tpx(20.))
             .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus)).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.side_flip(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| if !this.palette_close(cx) { this.palette_open_find(cx) })).on_action(cx.listener(|this, _: &crate::FindInThreadKey, _, cx| this.find_open(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // the dev build strip, only while a build is being made or waits to relaunch
@@ -1144,6 +1269,7 @@ impl Render for Backplane {
                     // a thread in review mode says so by its name too (#1305); the bar over the message box says why and switches it
                     .when(head_thread && thread["review"]["on"] == true, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("review-mark").flex().items_center().gap(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("warn"))
                         .tooltip(crate::keys::tip("Review mode: the design files are read-only for this thread", "", light)).child(ic(light, "search", 12., "warn")).child(trs("Read-only"))))
+                    .children(head_thread.then(|| crate::screens::planmode::top_mark(light, thread)).flatten())
                     .when(head_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").relative().min_w_0().flex().font_weight(FontWeight::BOLD).child(crate::screens::head::measure(cx, self.screens.head.title.clone())).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(thread, "title")))
                         // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu
                         .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::title_items(&this.data); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
@@ -1170,6 +1296,8 @@ impl Render for Backplane {
                     // linked machines: All, this one, each other one (the hub filters the list below)
                     .children(crate::screens::machines::switch(cx, light, &self.data["machines"], &mut ctl))
                     .child(self.screens.parts.el(Backplane::sidebar_part, StyleRefinement::default().flex_1().min_h_0(), cx))
+                    // this app beside its hub: a newer build waiting (Restart to update), or the two versions apart (selfupdate.rs)
+                    .children(crate::selfupdate::notice(cx, light))
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(crate::i18n::trs(&self.status)))
                     // held Ctrl: the short legend over the sidebar's foot (0.14's keys-legend)
                     .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(crate::screens::hints::legend(cx, light, &self.local))))
@@ -1182,15 +1310,19 @@ impl Render for Backplane {
                     .when(has_home && !page_list, |d| d.child(div().id("home").track_scroll(&self.screens.home_scroll).overflow_y_scroll().flex_1().min_h_0().flex().flex_col().items_center().child(div().w_full().flex_none().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
                     .when(!has_home, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
-                    .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("bad")).child(crate::i18n::trs(&self.error))))
+                    .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().flex().flex_wrap().items_center().gap_2()
+                        .child(div().text_color(c("bad")).child(crate::i18n::trs(&self.error)))
+                        .children(crate::screens::provider_notice::error_action(cx, light, &self.error))))
                     .when(!self.note.is_empty(), |d| d.child(div().px_5().py_2().text_color(c("dim")).child(crate::i18n::trs(&self.note))))
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("rule")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
+                        .children(crate::screens::provider_notice::view(cx, light, &self.data["noProvider"], self.data["tour"].is_object() || (self.project_page.is_none() && thread["mark"].is_object())))
                         .children(crate::screens::review::view(cx, light, &thread["review"]))
+                        .children(crate::screens::planmode::bar(cx, light, thread))
                         .children(crate::screens::order::view(cx, light, &thread["order"]))
                         // #1304: the agent has not answered the person's mid-turn message (screens/unanswered.rs)
                         .children(crate::screens::unanswered::view(cx, light, &thread["unanswered"]))
-                        .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"]))
+                        .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"], &self.screens.plan_expanded, self.screens.plan_revising.as_deref()))
                         .children(crate::screens::voice::pending_view(cx, light, &self.screens.voice, &self.selected.clone()))
                         .children(self.screens.voice.views.get(&self.selected).cloned().and_then(|v| crate::screens::voice::view(cx, light, &v, self.screens.voice.level, self.screens.voice.fix.clone().as_ref())))
                         .children(crate::screens::sidebox::btw(cx, light, &thread["btw"]))
@@ -1199,11 +1331,13 @@ impl Render for Backplane {
                         .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
                         // the messages waiting for the agent (screens/queue.rs)
                         .children(crate::screens::queue::strip(cx, light, thread, &self.screens.unsent.rows(thread["id"].as_str().unwrap_or(""))))
-                        .child(div().id("composer-box").relative().child(canvas({ let at = self.screens.box_at.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
+                        .child(div().id("composer-box").relative().child(canvas({ let at = self.screens.box_at.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).border_1().border_color(c(crate::screens::planmode::composer_border(thread))).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
                         // another machine's thread: where an agent sent from here runs
                         .children(if self.project_page.is_some() { None } else { crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)) })
                         // a project's page: what the hub said when it would not do what the page asked (a New thread refused), one line by the box
-                        .children((self.project_page.is_some() && !self.screens.projects.refused.is_empty()).then(|| div().id("page-error").text_size(crate::scale::tpx(11.)).text_color(c("bad")).child(self.screens.projects.refused.clone())))
+                        .children((self.project_page.is_some() && !self.screens.projects.refused.is_empty()).then(|| div().id("page-error").flex().flex_wrap().items_center().gap_2()
+                            .child(div().text_size(crate::scale::tpx(11.)).text_color(c("bad")).child(crate::i18n::trs(&self.screens.projects.refused)))
+                            .children(crate::screens::provider_notice::error_action(cx, light, &self.screens.projects.refused))))
                         // text a page's Send could not deliver while the box held new text: offered back, never merged (Restore puts it in the box, what was there is kept to restore)
                         .children(self.screens.projects.restore.clone().map(|t| { let preview: String = t.chars().take(60).collect();
                             /* i18n-ok: a ctl id the drivers press */ with_rect(div().id("restore-unsent"), || "ui:restore unsent".to_string()).flex().items_center().gap(px(6.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
@@ -1233,6 +1367,7 @@ impl Render for Backplane {
                             .child(crate::screens::bar::fit(with_rect(crate::screens::combo::chip(cx, light, thread, combo_avail, (&crate::keys::hint(&self.local, "models"), &crate::keys::hint(&self.local, "account")), &self.screens.pick.chip, self.screens.picker_open), || "ui:Model".to_string()))
                                 // held Ctrl: the menu's key over the chip's end (0.14's "Ctrl M"), so the chip keeps its width
                                 .when(self.screens.held == crate::keys::Held::Threads, |d| d.relative().child(div().absolute().right(px(4.)).top_0().bottom_0().flex().items_center().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "models")).iter().map(|k| crate::screens::hints::cap(light, k, false))))))
+                            .children(crate::screens::planmode::chip(cx, light, thread, &crate::keys::hint(&self.local, "plan-mode")))
                             // (the Draw button is gone for now: screens/pad.rs stays, to come back redone)
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).min_w_0().overflow_hidden().cursor_pointer().tooltip(crate::keys::tip("Tokens, cost and context: the thread's numbers", "", light)).on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).relative().flex().items_center().gap_2().when(self.screens.ctx_open, |d| d.border_color(c("accent"))).child(canvas({ let at = self.screens.ctx_chip.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).child(ic(light, "gauge", 14., if self.screens.ctx_open { "accent" } else { "dim" }))
                                 .children(mem_on.then(|| crate::screens::combo::mem_bar(light, &memory)))
@@ -1242,7 +1377,8 @@ impl Render for Backplane {
                             .children(crate::screens::voice::always_pill(cx, light, &self.screens.voice))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("dictate"), || "ui:Dictate".to_string())).flex_shrink_0().cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_down(cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
-                            .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(if crate::screens::voice::flashing(&self.screens.voice) { "ok" } else { "accent" })).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&crate::screens::sidebox::send_label(thread))).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))
+                            .child({ let (lbl, bg) = crate::screens::planmode::send_button(thread, crate::screens::voice::flashing(&self.screens.voice));
+                                crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(bg)).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&lbl)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx))) }))))
                     .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b)))
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data, side_shown))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
@@ -1259,9 +1395,12 @@ impl Render for Backplane {
             .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
             // the one-time notice that the hub no longer pushes on its own (#1171)
             .children({ let n = self.screens.gp_notice.clone(); crate::screens::tmnotice::gp_strip(cx, n.as_ref(), light) })
+            // downloads from the hub (screens/dlbar.rs)
+            .children({ let l = self.screens.downloads.list.clone(); crate::screens::dlbar::strip(cx, &l, light) })
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
             .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs,self.screens.offers.on_home.as_deref()))
+            .children(crate::screens::thread_context::view(&self.screens.thread_context, cx, light, window.viewport_size()))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
             .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
             .children({ let title = crate::screens::badge::from_machine(&self.data["thread"]["mark"], &string(&self.data["thread"], "title")); crate::screens::term::view(cx, window, light, &self.local, &title, &self.screens.term) })
@@ -1378,10 +1517,11 @@ mod tests {
     #[test]
     fn rail_rows_follow_hub_order_content_and_empty_list() {
         let viewer = json!({"rail":[
-            {"id":"files","label":"Project files","icon":"folder","group":"work","state":"on","key":"f"},
+            {"id":"files","label":"Project files","icon":"folder","group":"work","state":"on","key":"f","present":true},
             {"id":"board","label":"Board","icon":"cpu","group":"design","state":"disabled","key":"b","why":"No board"}]});
         let rows = rail_rows(&viewer, false);
         assert_eq!(rows.len(), 2);
+        assert!(rows[0].present && !rows[1].present);
         assert_eq!((rows[0].id, rows[0].label, rows[0].state), ("files", "Project files", "on"));
         assert_eq!((rows[1].icon, rows[1].group, rows[1].key, rows[1].state, rows[1].why), ("cpu", "design", "b", "disabled", "No board"));
         assert!(rail_rows(&json!({"rail":[]}), true).is_empty());
@@ -1526,5 +1666,83 @@ mod tests {
         assert_eq!(inv[2]["disabled"], true);
         assert_eq!(inv[2]["tooltip"], "No schematic");
         assert_eq!(inv[2]["palette_label"], "");
+    }
+}
+
+/// Status line for `shown.home` (docs/PHONE-DATA.md, The home) when the home machine is away or a home move is in flight/failed.
+/// Returns `(text, is_error)`. None when the home is online and idle (or absent on older hubs).
+pub(crate) fn home_away_line(home: &Value) -> Option<(String, bool)> {
+    if !home.is_object() { return None; }
+    if let Some(mv) = home.get("moving").filter(|m| m.is_object()) {
+        let state = mv["state"].as_str().unwrap_or("");
+        if state == "moving" {
+            let to = mv["to"].as_str().unwrap_or("");
+            let step = mv["step"].as_str().unwrap_or("");
+            let s = if !step.is_empty() {
+                crate::i18n::tf("home.moving.step", &[("to", to.into()), ("step", step.into())])
+            } else {
+                crate::i18n::tf("home.moving", &[("to", to.into())])
+            };
+            return Some((s, false));
+        }
+        if state == "failed" {
+            let note = mv["note"].as_str().unwrap_or("");
+            let s = if !note.is_empty() {
+                crate::i18n::tf("home.move.failed.note", &[("note", note.into())])
+            } else {
+                crate::i18n::tr("home.move.failed").to_string()
+            };
+            return Some((s, true));
+        }
+    }
+    if home["online"].as_bool() != Some(false) { return None; }
+    let name = home["name"].as_str().filter(|s| !s.is_empty()).unwrap_or("home");
+    let time = home["awaySince"].as_i64().filter(|&n| n > 0).map(|ms| {
+        let (h, m) = crate::plat::local_hm(ms);
+        format!("{h:02}:{m:02}")
+    });
+    let q = home["queuedCount"].as_u64().unwrap_or(0);
+    let s = match (time.as_deref(), q > 0) {
+        (Some(tm), true) => crate::i18n::tf("home.away.since.queued", &[("name", name.into()), ("time", tm.into()), ("n", q.into())]),
+        (Some(tm), false) => crate::i18n::tf("home.away.since", &[("name", name.into()), ("time", tm.into())]),
+        (None, true) => crate::i18n::tf("home.away.queued", &[("name", name.into()), ("n", q.into())]),
+        (None, false) => crate::i18n::tf("home.away", &[("name", name.into())]),
+    };
+    Some((s, false))
+}
+
+#[cfg(test)]
+mod home_tests {
+    use super::home_away_line;
+    use serde_json::{json, Value};
+
+    #[test]
+    fn home_away_line_formats_offline_queued_and_moving_states() {
+        assert_eq!(home_away_line(&Value::Null), None);
+        assert_eq!(home_away_line(&json!({"kind":"local","name":"desk","online":true,"queuedCount":0})), None);
+        let (away_txt, away_err) = home_away_line(&json!({"kind":"peer","name":"desktop","online":false,"awaySince":50520000,"queuedCount":3})).unwrap();
+        assert!(!away_err);
+        /* i18n-ok: test */ assert!(away_txt.starts_with("Home (desktop) is away since ") && away_txt.ends_with(" \u{b7} 3 queued"), "{away_txt}");
+        let mv = home_away_line(&json!({"kind":"peer","name":"desktop","online":true,"moving":{"to":"laptop","state":"moving","step":"copying"}}));
+        /* i18n-ok: test */ assert_eq!(mv, Some(("Moving home to laptop: copying".into(), false)));
+        let fail = home_away_line(&json!({"kind":"peer","name":"desktop","online":true,"moving":{"to":"laptop","state":"failed","note":"disk full"}}));
+        /* i18n-ok: test */ assert_eq!(fail, Some(("Home move failed: disk full".into(), true)));
+    }
+
+    #[test]
+    fn card_refs_excludes_inline_model_cards_and_keeps_others() {
+        let refs = json!([
+            {"word": "&antigravity/gemini-4-neon", "kind": "model", "id": "", "label": "Gemini 4 Neon"},
+            {"word": "&claude/unmatched", "kind": "model", "id": "", "label": "Unmatched"},
+            {"word": "@designer", "kind": "bot", "id": "h|b1", "label": "Designer"},
+            {"word": ">fix-bug", "kind": "thread", "id": "h|t1", "label": "Fix bug"}
+        ]);
+        let inline: std::collections::HashSet<String> = ["&antigravity/gemini-4-neon".to_string()].into_iter().collect();
+        let kept = super::card_refs(&refs, &inline);
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept[0]["word"], "&claude/unmatched");
+        assert_eq!(kept[1]["kind"], "bot");
+        assert_eq!(kept[2]["kind"], "thread");
+        assert!(super::card_refs(&json!([{"word":"&claude/opus","kind":"model","id":"","label":"Opus"}]), &["&claude/opus".to_string()].into_iter().collect()).is_empty());
     }
 }

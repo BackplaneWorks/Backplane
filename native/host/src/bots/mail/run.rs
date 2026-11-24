@@ -67,6 +67,12 @@ impl Bots {
         if !cs.is_empty() && self.hub.commit_many(&cs).await.is_err() { eprintln!("mail: routing could not be committed"); return (t, vec![]) }
         (t, st.outs)
     }
+    /// The minute tick: an owner's queue with nothing live or held starts its next input (one the run cap kept waiting, Ctx::run_capped).
+    pub async fn queues_due(self: &Arc<Self>) {
+        if crate::copy::on() { return }
+        let outs = self.decide(&[], |c| { let mut st = Step::none(); for (bot, conv) in c.queues() { st.outs.push(RouteOut::RunNext { bot, conv }) } st }).await;
+        self.perform(outs).await
+    }
     /// Mail.route for a header just filed
     pub async fn route_body(self: &Arc<Self>, body: Body) {
         let outs = self.decide(&[], |c| c.route(&body)).await; self.perform(outs).await;

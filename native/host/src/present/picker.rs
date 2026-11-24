@@ -131,11 +131,18 @@ pub fn folders(drafts: &Value, home: &str, roots: &[(&str, &str)]) -> Value {
     folders_in(CACHE.get_or_init(Default::default), drafts, home, roots)
 }
 fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]) -> Value {
-    let text = drafts["@proj.text"].as_str().unwrap_or("").to_string();
+    use crate::commands::clone::{self as cl, view as cv};
+    // Clone from git (commands/clone/view.rs): the clone under way, else the repository step; the destination step is drawn below, from the folders
+    if !drafts["@proj.job"].as_str().unwrap_or("").is_empty() { return cv::job_step(drafts, home) }
+    let clone_mode = drafts["@proj.mode"].as_str() == Some("clone");
+    if clone_mode && drafts["@proj.clone"].as_str().unwrap_or("").is_empty() { return cv::repo_step(drafts, home) }
+    let mut text = drafts["@proj.text"].as_str().unwrap_or("").to_string();
+    // the destination step opened with no folder yet (/project <address>): where it goes by default
+    if text.is_empty() { if let Some(r) = cl::parse(drafts["@proj.clone"].as_str().unwrap_or("")) { text = cl::tilde(&cl::default_dest(&cl::default_parent(home), &r, home).to_string_lossy(), home); } }
     // a Git repository's address typed instead of a folder: one row, Clone, which then asks where (the same steps as Clone it here)
     if drafts["@proj.clone"].as_str().unwrap_or("").is_empty() {
         if let Some(origin) = repo_typed(&text) {
-            return json!({"text": text, "hint": "Clones the repository and adds it as a project", "error": "", "more": 0, "cut": false,
+            return json!({"mode": "folder", "tabs": cv::tabs(false), "text": text, "hint": "Clones the repository and adds it as a project", "error": "", "more": 0, "cut": false,
                 "items": [{"label": format!("Clone {origin}"), "action": "proj-clone", "value": origin, "kind": "add"}]});
         }
     }
@@ -158,12 +165,20 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
     let clone = drafts["@proj.clone"].as_str().unwrap_or("");
     if blocked.is_some() {
     } else if !clone.is_empty() {
-        if Path::new(whole).exists() {
-            if crate::mirror::origin_of_root(whole) == clone { items.push(json!({"label": format!("Add {} (already a clone of {clone})", t(whole)), "action": "proj-add", "value": whole, "kind": "add"})) }
-            else { items.push(json!({"label": format!("{} is there and holds something else: pick another folder", t(whole)), "action": "", "value": "", "kind": "note"})) }
-        } else if name_ok(&part) && Path::new(&dir).is_dir() {
-            items.push(json!({"label": format!("Clone {clone} into {}", t(&format!("{dir}{part}"))), "action": "proj-clone-go", "value": format!("{clone}\u{1f}{dir}{part}"), "kind": "add"}));
+        // the folder typed, or (the field on a folder: "~/x/") the repository's own name in it; a folder that holds something is refused,
+        // unless it is this repository's clone already (added as it is)
+        let repo = cl::parse(clone);
+        let (shown, origin, rname) = repo.as_ref().map(|r| (cl::shown(r), r.origin.clone(), r.name.clone())).unwrap_or_else(|| (clone.to_string(), clone.to_string(), String::new()));
+        let name = if part.is_empty() { rname } else { part.clone() };
+        if cl::name_ok(&name) && Path::new(&dir).is_dir() {
+            let target = format!("{dir}{name}");
+            match cl::dest_state(Path::new(&target), &origin, home) {
+                cl::Dest::Busy(why) => items.push(json!({"label": why, "action": "", "value": "", "kind": "note", "tone": "bad"})),
+                cl::Dest::Same => items.push(json!({"label": format!("Add {} (already a clone of {shown})", t(&target)), "action": "proj-clone-go", "value": format!("{clone}\u{1f}{target}"), "kind": "add"})),
+                _ => items.push(json!({"label": format!("Clone {shown} into {}", t(&target)), "action": "proj-clone-go", "value": format!("{clone}\u{1f}{target}"), "kind": "add"})),
+            }
         }
+        items.push(cv::dest_header(drafts).1);
     } else if Path::new(whole).is_dir() {
         if is_root(whole) { items.push(json!({"label": format!("{} is a project already", t(whole)), "action": "", "value": "", "kind": "note"})) }
         else { items.push(json!({"label": format!("Add {}", t(whole)), "action": "proj-add", "value": whole, "kind": "add"})) }
@@ -187,9 +202,11 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
     // `@proj.err`: why the dialog was opened on this folder (/project found it not empty), until the field changes
     let said = drafts["@proj.err"].as_str().unwrap_or("");
     let error = if let Some(w) = blocked { w } else if !Path::new(&dir).is_dir() { format!("{} is not a folder", t(&dir)) } else { said.to_string() };
-    let hint = if clone.is_empty() { "Path of a folder, e.g. ~/projects/board, or a Git repository's address to clone it".to_string() } else { format!("Where to clone {clone}") };
+    let hint = if clone.is_empty() { "Path of a folder, e.g. ~/projects/board, or a Git repository's address to clone it".to_string() } else { "Where to clone it: a folder, and the new folder's name".to_string() };
     // `more`: the folders that match past the rows sent (typing narrows them); `cut`: the folder holds more entries than are read, so there may be others
-    json!({"text": text, "hint": hint, "error": error, "items": items, "more": more, "cut": cut})
+    let mut out = json!({"mode": if clone.is_empty() { "folder" } else { "clone" }, "tabs": cv::tabs(!clone.is_empty()), "text": text, "hint": hint, "error": error, "items": items, "more": more, "cut": cut});
+    if !clone.is_empty() { out["repo"] = cv::dest_header(drafts).0; out["signin"] = cv::signin(drafts); }
+    out
 }
 
 #[cfg(test)]
@@ -217,10 +234,14 @@ mod tests {
         let home = d("clone"); let h = home.to_str().unwrap();
         let c = |t: &str| folders(&json!({"@proj.open": "1", "@proj.text": t, "@proj.clone": "github.com/o/r"}), h, &[]);
         let f = c("~/r"); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-clone-go"), format!("github.com/o/r\u{1f}{h}/r").as_str()));
-        assert_eq!(f["hint"], "Where to clone github.com/o/r");
+        assert_eq!((f["repo"]["label"].as_str(), f["mode"].as_str()), (Some("o/r"), Some("clone")), "GitHub's owner/repo");
+        assert_eq!(f["items"][1]["kind"], "toggle", "the first thread, on by default"); assert_eq!(f["items"][1]["on"], true);
+        let f = c("~/"); assert_eq!(f["items"][0]["value"].as_str().unwrap(), format!("github.com/o/r\u{1f}{h}/r"), "on a folder: the repository's own name in it");
+        std::fs::create_dir_all(home.join("empty")).unwrap();
+        let f = c("~/empty"); assert_eq!(f["items"][0]["action"], "proj-clone-go", "an empty folder is cloned into");
         let f = c("~/alpha"); assert_eq!((f["items"][0]["kind"].as_str(), f["items"][0]["action"].as_str()), (Some("note"), Some("")), "a folder that is there and is not that repository");
         std::fs::create_dir_all(home.join("beta/.git")).unwrap(); std::fs::write(home.join("beta/.git/config"), "[remote \"origin\"]\n\turl = git@github.com:o/r.git\n").unwrap();
-        let f = c("~/beta"); assert_eq!(f["items"][0]["action"], "proj-add", "already a clone of it: added as it is");
+        let f = c("~/beta"); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["label"].as_str().unwrap().starts_with("Add ")), (Some("proj-clone-go"), true), "already a clone of it: added as it is");
         let _ = std::fs::remove_dir_all(&home);
     }
     #[test] fn a_listing_is_read_once_until_the_folder_changes_and_links_to_folders_count() {

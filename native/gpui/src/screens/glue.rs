@@ -261,7 +261,9 @@ impl Backplane {
         let owner = thread["id"].as_str().unwrap_or("");
         let open = super::viewer::is_open(thread);
         self.screens.plots.sync(owner, open, thread["viewer"]["open"] == "split");
+        self.screens.plots.sync_tiles(&thread["viewer"]);
         self.sync_solid_slot();
+        self.sync_tile_solids(cx);
         self.draft_from_hub(cx);
         // the pressed rail kind gives way when the hub marks it (or after PRESS_WAIT): a streamed picture arriving first does not flicker it back
         if let Some(p) = self.screens.rail_pending.clone() {
@@ -283,6 +285,72 @@ impl Backplane {
         let open = super::settings::is_open(self);
         if open != self.screens.settings_was_open { self.screens.settings_was_open = open; if open { self.screens.focus_settings = true; } else { self.want_focus = true; } }
     }
+    pub(crate) fn dock_watch(&mut self, watch: &Value, cx: &mut Context<Self>) {
+        if self.screens.plots.bind_watch(watch) {
+            if watch["pending"] != true {
+                let keys = self.screens.plots.tiles.values().flat_map(|tile| tile.keys.iter().cloned()).collect::<Vec<_>>();
+                self.screens.plot.retain_keys(&keys);
+            }
+            self.sync_tile_solids(cx);
+            cx.notify();
+        }
+    }
+
+    fn sync_tile_solids(&mut self, cx: &mut Context<Self>) {
+        let screens = &mut self.screens;
+        let wanted: std::collections::HashMap<_, _> = screens.plots.tiles.values().filter_map(|tile| {
+            let key = tile.keys.iter().find(|k| crate::viewers::solid::is_solid_key(k))?;
+            Some((tile.slot, key.clone()))
+        }).collect();
+        screens.tile_pages.retain(|slot, (key, page)| {
+            if wanted.get(slot) == Some(key) { return true; }
+            screens.retired_solids.push(page.clone());
+            false
+        });
+        for (slot, key) in wanted {
+            if self.screens.tile_pages.contains_key(&slot) { continue; }
+            let Some(source) = self.screens.solids.get(&key).cloned() else { continue };
+            let back = self.local.viewer_backdrop(self.light());
+            let page = cx.new(|cx| {
+                let mut page = crate::viewers::solid::SolidPage::for_source(&source, cx);
+                page.set_backdrop(back);
+                page
+            });
+            self.subscribe_solid(&page, slot, cx);
+            cx.observe(&page, move |this, observed, cx| {
+                if this.screens.tile_pages.get(&slot).is_some_and(|(_, page)| page == &observed) {
+                    this.screens.parts.notify(Backplane::viewer_part, cx);
+                }
+            }).detach();
+            self.screens.tile_pages.insert(slot, (key, page));
+        }
+    }
+
+    fn subscribe_solid(&self, page: &Entity<crate::viewers::solid::SolidPage>, slot: usize, cx: &mut Context<Self>) {
+        // the page's Retry: routed through the presenter's `"retry"` action (preserves Split, board/sheet and far `on`); throttled by 1 s client cooldown, error stays until next frame
+        cx.subscribe(page, move |this, sender, ev: &crate::viewers::solid::SolidEvent, cx| match ev {
+            crate::viewers::solid::SolidEvent::Retry(_) => {
+                let now = std::time::Instant::now();
+                if !super::panestate::retry_ready(this.screens.plots[slot].last_retry, now) { return }
+                if slot >= 3 {
+                    let Some(tile) = this.screens.plots.tile_for_slot(slot) else { return };
+                    if this.data["thread"]["viewer"]["layout"]["focus"] != tile
+                        && this.tx.try_send(Command::Action("layout-focus".into(), serde_json::json!({"tile":tile}).to_string())).is_err() { return; }
+                }
+                if this.tx.try_send(Command::Action("view".into(), "retry".into())).is_ok() {
+                    this.screens.plots[slot].last_retry = Some(now);
+                    sender.update(cx, |p, cx| p.retry_sent(cx));
+                }
+            }
+            // zoomed in on a STEP: its solids there meshed finer by the hub, the model replaced when they are
+            // "Load it anyway": a model the hub refused for its size, read past the limit
+            crate::viewers::solid::SolidEvent::LoadBig(key) => { let _ = this.tx.try_send(Command::Rpc("kicad.big".into(), super::settings::Secret(serde_json::json!({"key": key})), "big")); }
+            crate::viewers::solid::SolidEvent::Refine(key, at, r) => { let _ = this.tx.try_send(Command::Rpc("kicad.refine".into(), super::settings::Secret(serde_json::json!({"key": key, "at": at, "r": r})), "refine")); }
+            // a part clicked on the board's model: the board's probe, lit on the schematic and the board as a tap there is
+            crate::viewers::solid::SolidEvent::Pick(r) => super::plotview::probe_part(this, r),
+        }).detach();
+    }
+
     fn sync_solid_slot(&mut self) {
         let thread = &self.data["thread"];
         let viewer = &thread["viewer"];
@@ -299,6 +367,8 @@ impl Backplane {
     pub(crate) fn plot_received(&mut self, bytes: Vec<u8>, cx: &mut Context<Self>) {
         let key = crate::viewers::solid::peek_key(&bytes);
         if let Some(k) = &key { eprintln!("GPUI_LOG {}", serde_json::json!({"plot_frame":{"key":k,"bytes":bytes.len()}})); }
+        if !self.screens.plots.tiles.is_empty()
+            && !key.as_deref().is_some_and(|k| self.screens.plots.watches(k)) { return; }
         if !key.as_deref().is_some_and(crate::viewers::solid::is_solid_key) {
             if let Err(e) = self.screens.plot.receive(&bytes) { eprintln!("GPUI_LOG {{\"plot\":\"{e}\"}}"); }
             return;
@@ -308,38 +378,29 @@ impl Backplane {
         let slot = key.unwrap();
         self.screens.solid_order.retain(|key| key != &slot);
         self.screens.solid_order.push_back(slot.clone());
-        if self.screens.solid_order.len() > 2 {
-            if let Some(i) = self.screens.solid_order.iter().position(|key| Some(key) != self.screens.solid_slot.as_ref()) {
+        while self.screens.solid_order.len() > 2 {
+            if let Some(i) = self.screens.solid_order.iter().position(|key| Some(key) != self.screens.solid_slot.as_ref() && !self.screens.plots.watches(key)) {
                 let old = self.screens.solid_order.remove(i).unwrap();
                 if let Some(page) = self.screens.solids.remove(&old) { self.screens.retired_solids.push(page); }
-            }
+            } else { break; }
         }
         if !self.screens.solids.contains_key(&slot) {
             let page = cx.new(crate::viewers::solid::SolidPage::new);
             let back = self.local.viewer_backdrop(self.light()); page.update(cx, |p, _| p.set_backdrop(back));
-            // the page's Retry: routed through the presenter's `"retry"` action (preserves Split, board/sheet and far `on`); throttled by 1 s client cooldown, error stays until next frame
-            cx.subscribe(&page, |this, sender, ev: &crate::viewers::solid::SolidEvent, cx| match ev {
-                crate::viewers::solid::SolidEvent::Retry(_) => {
-                    let now = std::time::Instant::now();
-                    if !super::panestate::retry_ready(this.screens.plots[0].last_retry, now) { return }
-                    if this.tx.try_send(Command::Action("view".into(), "retry".into())).is_ok() {
-                        this.screens.plots[0].last_retry = Some(now);
-                        sender.update(cx, |p, cx| p.retry_sent(cx));
-                    }
-                }
-                // zoomed in on a STEP: its solids there meshed finer by the hub, the model replaced when they are
-                crate::viewers::solid::SolidEvent::Refine(key, at, r) => { let _ = this.tx.try_send(Command::Rpc("kicad.refine".into(), super::settings::Secret(serde_json::json!({"key": key, "at": at, "r": r})), "refine")); }
-                // a part clicked on the board's model: the board's probe, lit on the schematic and the board as a tap there is
-                crate::viewers::solid::SolidEvent::Pick(r) => super::plotview::probe_part(this, r),
-            }).detach();
+            self.subscribe_solid(&page, 0, cx);
             self.screens.solids.insert(slot.clone(), page);
+            self.sync_tile_solids(cx);
         }
         self.screens.solids[&slot].update(cx, |p, _| { p.accept(bytes); });
         cx.notify();
     }
     /// The Browser page exists while the Browser kind is open (one per thread, polling only while shown); the owner is `browser_owner` (the bot's id on a bot's screen, else the thread).
     pub(crate) fn browser_page(&mut self, cx: &mut Context<Self>) {
-        let open = self.data["thread"]["viewer"]["open"].as_str() == Some("browser") || (self.data["bot"]["kind"] == "bot" && self.data["bot"]["tab"] == "browser");
+        let viewer = &self.data["thread"]["viewer"];
+        let docked_browser = crate::screens::viewer::is_tiled(viewer) && viewer["tiles"].as_object().is_some_and(|tiles|
+            tiles.iter().any(|(id, tile)| tile["kind"] == "browser"
+                && viewer["layout"]["maximized"].as_str().is_none_or(|max| max == id)));
+        let open = docked_browser || viewer["open"].as_str() == Some("browser") || (self.data["bot"]["kind"] == "bot" && self.data["bot"]["tab"] == "browser");
         let owner = browser_owner(&self.data, &self.selected);
         if let Some((o, page)) = &self.screens.browser { if *o != owner || !open { let page = page.clone(); page.update(cx, |p, cx| p.set_visible(false, cx)); if *o != owner { self.screens.browser = None; } } }
         if !open || owner.is_empty() { return; }
@@ -352,7 +413,12 @@ impl Backplane {
         }
         let light = self.light();
         let start = start_page(&self.data);
-        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| { p.set_start(&start, cx); p.set_light(light, cx); p.set_visible(true, cx) }); }
+        let header_owner = (self.data["bot"]["kind"] != "bot").then(|| cx.weak_entity());
+        if let Some((_, page)) = &self.screens.browser { page.update(cx, |p, cx| {
+            p.header_owner = header_owner.clone();
+            #[cfg(feature = "cef")]
+            if let Some(c) = &p.cef { c.update(cx, |cef, _| cef.header_owner = header_owner); }
+            p.set_start(&start, cx); p.set_light(light, cx); p.set_visible(true, cx) }); }
     }
 
 }

@@ -41,9 +41,17 @@ pub fn main(args: &[String]) -> i32 {
     let s = |k: &str| spec[k].as_str().unwrap_or("").to_string();
     let off: Vec<String> = spec["disabled_tools"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect()).unwrap_or_default();
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Shell, s("command"));
+    if id.starts_with("project-") {
+        c.env_clear();
+        for name in ["HOME", "USERPROFILE", "SYSTEMROOT", "TEMP", "TMP", "TMPDIR", "APPDATA", "LOCALAPPDATA"] {
+            if let Some(value) = std::env::var_os(name) { c.env(name, value); }
+        }
+    }
     c.args(spec["args"].as_array().into_iter().flatten().filter_map(Value::as_str));
     for kv in spec["env"].as_array().into_iter().flatten() { if let (Some(k), Some(v)) = (kv[0].as_str(), kv[1].as_str()) { c.env(k, v); } }
-    c.env_remove("BACKPLANE_MCP_URL"); c.env_remove(super::gen::CODEX_URL_VAR);
+    for name in ["BACKPLANE_MCP_URL", super::gen::CODEX_URL_VAR, "BACKPLANE_PI_MCP", "BACKPLANE_OMP_MCP"] {
+        c.env_remove(name);
+    }
     let cwd = s("cwd"); if !cwd.is_empty() { c.current_dir(&cwd); }
     c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     let mut child = match c.spawn() { Ok(ch) => ch, Err(e) => {

@@ -2,9 +2,15 @@
 # The phones' fold labels against test/mobile/fold_labels.json (the table the hub's test holds present/thread.rs to). Swift on the Mac; Android's is a Gradle unit test.
 # usage: scripts/mobile/fold-check.sh       (needs the ssh wrapper build/gpui/mac-ssh of the main checkout, or M=<ssh command>)
 set -eu
-ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; M=${M:-$MAIN/build/gpui/mac-ssh}; D=bp-fold-check
-$M hs-mac-mini "mkdir -p $D"
-RSYNC_RSH=$M rsync -a $ROOT/mobile/ios/Backplane/DataModels.swift $ROOT/mobile/ios/Backplane/Copyable.swift $ROOT/mobile/ios/Backplane/DataFold.swift $ROOT/test/mobile/fold_labels.json hs-mac-mini:$D/
+ROOT=$(cd "$(dirname "$0")/../.." && pwd); MAIN=${MAIN:-$(dirname "$(git -C "$(dirname "$0")" rev-parse --path-format=absolute --git-common-dir)")}; M=${M:-$MAIN/build/gpui/mac-ssh}; [ -x "$M" ] || M=ssh; D=bp-fold-check
+# DataModels.swift names types of these other pure (Foundation-only) files: they compile with it, nothing of the app's UI or socket does.
+# The sidebar's sections (DataSections.swift) sit beside their SwiftUI views, so stubs.swift stands in for the one type DataModels decodes.
+SRC="DataModels Copyable DataFold TermModels Outbox ThreadGroups Tr TrCatalog"
+$M hs-mac-mini "rm -rf $D && mkdir -p $D"; trap '$M hs-mac-mini "rm -rf $D"' EXIT
+RSYNC_RSH=$M rsync -a $(for f in $SRC; do for d in Backplane Shared; do [ -f "$ROOT/mobile/ios/$d/$f.swift" ] && printf '%s ' "$ROOT/mobile/ios/$d/$f.swift"; done; done) $ROOT/test/mobile/fold_labels.json $ROOT/test/mobile/thought_lines.json hs-mac-mini:$D/
+$M hs-mac-mini "cd $D && cat > stubs.swift" <<'SW'
+struct DSections: Decodable {}   // DataSections.swift's: DataModels only decodes it, the check never reads it
+SW
 $M hs-mac-mini "cd $D && cat > main.swift" <<'SW'
 import Foundation
 struct Row: Decodable { var step: Bool?; var name: String; var text: String }
@@ -25,6 +31,9 @@ let rows = DataFold.rows([t("1"), t("2"), u, t("3")], running: true)
 if rows.map(\.id) != ["fold:1", "u", "fold:3"] { print("rows", rows.map(\.id)); bad += 1 }
 if case .fold(let f) = rows[0], f.live { print("an earlier run is not live"); bad += 1 }
 if case .fold(let f) = rows[2], !f.live { print("the last run of a running turn is live"); bad += 1 }
+// a shut thought's line (#1325), held to the desktop's table
+struct Line: Decodable { var text: String; var line: String }
+for l in try JSONDecoder().decode([Line].self, from: Data(contentsOf: URL(fileURLWithPath: "thought_lines.json"))) where DataFold.thoughtLine(l.text) != l.line { print("thought want \(l.line) got \(DataFold.thoughtLine(l.text))"); bad += 1 }
 print("\(cases.count) labels, \(bad) wrong"); exit(bad == 0 ? 0 : 1)
 SW
-$M hs-mac-mini "cd $D && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc -o fold DataModels.swift Copyable.swift DataFold.swift main.swift 2>&1 | grep -v warning | head -20; ./fold"
+$M hs-mac-mini "cd $D && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcrun swiftc -o fold $(for f in $SRC; do printf '%s.swift ' "$f"; done)stubs.swift main.swift 2>&1 | grep -E 'error' | head -20; ./fold"

@@ -111,12 +111,26 @@ impl Agents {
         }
     }
 
-    /// machine_list: this machine and the linked ones, each with its projects (ids for thread_launch)
+    /// machine_list: this machine and the linked ones, each with its projects (ids for thread_launch) and version/commit
     pub async fn tool_machines(self: &Arc<Self>, _thread: &str) -> (bool, Value) {
-        let mut out = vec![json!({"name":"this machine","here":true,"projects":self.local_projects().await})];
+        let mut out = vec![json!({
+            "name": "this machine",
+            "here": true,
+            "version": self.hub.cfg.version,
+            "commit": self.hub.cfg.commit,
+            "features": crate::net::peerver::PEER_FEATURES,
+            "projects": self.local_projects().await,
+        })];
         for (id, name, url) in self.hub.far_machines() {
             let r = self.hub.far_call(&id, "machine_list", "machine_list", &json!({})).await;
-            out.push(machine_row(&id, &name, &url, r));
+            if let Ok((true, ref b)) = r {
+                crate::net::peerver::record_json(&self.hub.cfg.home, &id, b);
+            }
+            let mut row = machine_row(&id, &name, &url, r);
+            if row.get("version").is_none() {
+                crate::net::peerver::enrich_json(&self.hub.cfg.home, &self.hub.cfg.version, &id, &mut row);
+            }
+            out.push(row);
         }
         (true, json!({"machines":out}))
     }
@@ -135,9 +149,14 @@ impl Agents {
     /// thread_list for a thread elsewhere: every project's threads, or the one `project` names
     async fn list_for_far(&self, a: &Value) -> (bool, Value) {
         let want = { let p = sv(a, "project").trim(); if p.is_empty() { None } else { let w = self.world().await; match w.project_find(p) { Some(id) => Some(id), None => return fail(&format!("no project {p} on this machine (machine_list shows them)")) } } };
-        let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(_, t)| !t.deleted && !t.project.is_empty() && want.as_ref().map_or(true, |p| &t.project == p)).map(|(k, _)| k.clone()).collect() };
+        let room = self.mailroom();
+        let mut ids: Vec<String> = { let m = self.hub.model().await; m.threads.iter().filter(|(k, t)| !t.deleted && !crate::state::is_mail_run_id(k) && !t.project.is_empty() && want.as_ref().map_or(true, |p| &t.project == p)).map(|(k, _)| k.clone()).collect() };
         ids.sort();
-        let mut out = vec![]; for id in ids { if let Some(j) = self.thread_json(&id).await { out.push(j) } }
+        let mut out = vec![];
+        for id in ids {
+            if let Some(m) = &room { if m.hidden("", &id).await { continue } }
+            if let Some(j) = self.thread_json(&id).await { out.push(j) }
+        }
         (true, json!({"threads":out}))
     }
 
@@ -152,8 +171,29 @@ impl Agents {
             "thread_settle" => self.tool_settle(from, a).await,
             "thread_launch" => self.tool_launch(from, a).await,
             "thread_list" => self.list_for_far(a).await,
-            "machine_list" => (true, json!({"projects":self.local_projects().await})),
+            "machine_list" => (true, json!({
+                "version": self.hub.cfg.version,
+                "commit": self.hub.cfg.commit,
+                "features": crate::net::peerver::PEER_FEATURES,
+                "projects": self.local_projects().await,
+            })),
             "launch_report" => self.far_report(link, from, a).await,
+            "lock_acquire" => {
+                let mut args = a.clone();
+                if !args["holder"].as_str().is_some_and(|h| h.starts_with("pid:")) {
+                    args["holder"] = json!(format!("pid:remote-{link}-{}", from.replace('~', "-")));
+                }
+                let r = self.lock_http("acquire", &args).await;
+                (r.get("error").is_none(), r)
+            }
+            "lock_release" => {
+                let mut args = a.clone();
+                if !args["holder"].as_str().is_some_and(|h| h.starts_with("pid:")) {
+                    args["holder"] = json!(format!("pid:remote-{link}-{}", from.replace('~', "-")));
+                }
+                let r = self.lock_http("release", &args).await;
+                (r.get("error").is_none(), r)
+            }
             _ => fail("not something this machine shares"),
         }
     }
@@ -188,7 +228,13 @@ impl Agents {
 /// Backplane (`older`, with why, so it is not called away); or away.
 pub fn machine_row(id: &str, name: &str, url: &str, r: Result<(bool, Value), String>) -> Value {
     match r {
-        Ok((true, b)) => json!({"link":id,"name":name,"url":url,"away":false,"projects":b["projects"]}),
+        Ok((true, b)) => {
+            let mut row = json!({"link":id,"name":name,"url":url,"away":false,"projects":b["projects"]});
+            if let Some(v) = b["version"].as_str().filter(|s| !s.is_empty()) { row["version"] = json!(v); }
+            if let Some(c) = b["commit"].as_str().filter(|s| !s.is_empty()) { row["commit"] = json!(c); }
+            if b["features"].is_array() { row["features"] = b["features"].clone(); }
+            row
+        }
         Err(e) if e.starts_with(crate::net::rpc::OLDER) => json!({"link":id,"name":name,"url":url,"away":false,"older":true,"why":e,"projects":[]}),
         _ => json!({"link":id,"name":name,"url":url,"away":true,"projects":[]}),
     }

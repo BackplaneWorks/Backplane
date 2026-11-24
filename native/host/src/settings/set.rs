@@ -8,6 +8,11 @@ use std::sync::Arc;
 
 pub const ACCOUNT_GATE: &str = "This thread uses a named account. Use updated Backplane web or desktop to continue; your draft is preserved.";
 
+static FAVORITES_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> = std::sync::OnceLock::new();
+fn favorites_lock() -> &'static tokio::sync::Mutex<()> {
+    FAVORITES_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 pub struct SettingSet { pub agents: Option<Arc<crate::agents::Agents>> }
 impl RpcHandler for SettingSet {
     fn methods(&self) -> &'static [&'static str] { &["setting.set"] }
@@ -20,16 +25,83 @@ impl RpcHandler for SettingSet {
             if key == crate::push::QUIET && !(value.is_empty() || value == "off" || crate::push::window(value).is_some()) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"quiet hours are HH:MM-HH:MM, or off"})] }
             if key == crate::push::QUIET_URGENT && !matches!(value, "" | "on" | "off") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"urgent is on or off"})] }
             if key == super::browser_start::KEY && !super::browser_start::storable(value) { return vec![json!({"t":"reply","id":id,"ok":false,"error":super::browser_start::BAD})] }
+            if key == super::models::FAVORITES_KEY && !super::models::favorites_value_ok(value) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"invalid models.favorites"})] }
             if key.starts_with("peer.own.") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that setting is the hub's own"})] }
             // a zone is only right once its rule is known: person.tz goes through zone.set (settings/zone.rs), which looks the rule up and refuses a name that is not a zone
             if key == "person.tz" { if let Some(z) = hub.rpc_for("zone.set") { return z.call(hub, _who, id, "zone.set", &json!({"zone": value})).await } }
             if telemetry::reserved(key) { return vec![telemetry::legacy(hub, id, key, value).await] }
+            let info = super::models::info_value();
+            if key == "agent.model" && !value.is_empty() {
+                let cur_prov = hub.setting("agent.provider").await.unwrap_or_default();
+                let eff_prov = if cur_prov.is_empty() { "claude" } else { cur_prov.as_str() };
+                if !super::models::model_compatible(eff_prov, value, Some(&info)) {
+                    return vec![json!({"t":"reply","id":id,"ok":false,"error":format!("model {value} is not compatible with provider {eff_prov}")})];
+                }
+            }
+            let _fav_guard = if key == super::models::FAVORITES_KEY { Some(favorites_lock().lock().await) } else { None };
             let at = now_ms() / 1000;
             let mut batch = vec![json!({"$":"SettingSet","key":key,"value":value,"at":at})];
+            if key == "agent.provider" {
+                let prev_prov = hub.setting("agent.provider").await.unwrap_or_default();
+                let cur_model = hub.setting("agent.model").await.unwrap_or_default();
+                let prev_norm = if prev_prov.is_empty() { "claude" } else { prev_prov.as_str() };
+                let next_norm = if value.is_empty() { "claude" } else { value };
+                if !cur_model.is_empty() && (next_norm != prev_norm || !super::models::model_compatible(next_norm, &cur_model, Some(&info))) {
+                    batch.push(json!({"$":"SettingSet","key":"agent.model","value":"","at":at}));
+                }
+            } else if key == "text.provider" {
+                let prev_prov = hub.setting("text.provider").await.unwrap_or_default();
+                let cur_model = hub.setting("text.model").await.unwrap_or_default();
+                let prev_norm = if prev_prov.is_empty() { "claude" } else { prev_prov.as_str() };
+                let next_norm = if value.is_empty() { "claude" } else { value };
+                if !cur_model.is_empty() && (next_norm != prev_norm || !super::models::model_compatible(next_norm, &cur_model, Some(&info))) {
+                    batch.push(json!({"$":"SettingSet","key":"text.model","value":"","at":at}));
+                }
+            } else if key == "fallback.add.provider" {
+                let prev_prov = hub.setting("fallback.add.provider").await.unwrap_or_default();
+                let cur_model = hub.setting("fallback.add.model").await.unwrap_or_default();
+                if !cur_model.is_empty() && cur_model != "default" && (value != prev_prov || !super::models::model_compatible(value, &cur_model, Some(&info))) {
+                    batch.push(json!({"$":"SettingSet","key":"fallback.add.model","value":"default","at":at}));
+                }
+            }
             // a write to either fallback setting closes the open settings proposals in the same batch (Proposal.invalidate)
             if let Some(a) = &self.agents { let open: Vec<String> = a.world().await.asks.iter().filter(|(_, k)| k.tool == super::proposal::TOOL).map(|(i, _)| i.clone()).collect(); let extra = super::proposal::invalidate(&batch.clone(), &open, at); batch.extend(extra); batch = super::proposal::with_pending(a, batch, at).await; }
             match hub.commit_many(&batch).await {
-                Ok(_) => { if key == super::autopush::KEY { super::autopush::changed(hub).await } vec![json!({"t":"reply","id":id,"ok":true})] }
+                Ok(_) => {
+                    if key == super::autopush::KEY { super::autopush::changed(hub).await }
+                    if crate::net::settings_sync::is_shared(key) { crate::net::settings_sync::push_now(hub.clone()) }
+                    vec![json!({"t":"reply","id":id,"ok":true})]
+                }
+                Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})],
+            }
+        })
+    }
+}
+
+/// Toggle or set a favorite `(provider, model)` entry in `models.favorites` and sync across connected devices.
+pub struct ModelsFavoriteRpc;
+impl RpcHandler for ModelsFavoriteRpc {
+    fn methods(&self) -> &'static [&'static str] { &["models.favorite"] }
+    fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
+        Box::pin(async move {
+            let provider = p.get("provider").and_then(Value::as_str).unwrap_or("");
+            let model = p.get("model").and_then(Value::as_str).unwrap_or("");
+            let on = p.get("on").and_then(Value::as_bool);
+            let _fav_guard = favorites_lock().lock().await;
+            let cur = hub.setting(super::models::FAVORITES_KEY).await.unwrap_or_default();
+            let (next, starred, keys) = match super::models::toggle_favorite(&cur, provider, model, on) {
+                Ok(v) => v,
+                Err(why) => return vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
+            };
+            if !super::models::favorites_value_ok(&next) {
+                return vec![json!({"t":"reply","id":id,"ok":false,"error":"invalid models.favorites"})];
+            }
+            let at = now_ms() / 1000;
+            match hub.commit_many(&[json!({"$":"SettingSet","key":super::models::FAVORITES_KEY,"value":next,"at":at})]).await {
+                Ok(_) => {
+                    crate::net::settings_sync::push_now(hub.clone());
+                    vec![json!({"t":"reply","id":id,"ok":true,"result":{"starred":starred,"favorites":keys}})]
+                }
                 Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":format!("{e:#}")})],
             }
         })
@@ -44,7 +116,7 @@ mod tests {
         Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap()
     }
     async fn call(hub: &Arc<Hub>, m: &'static str, p: Value) -> Value {
-        hub.register_rpc(Arc::new(SettingSet { agents: None })); hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
+        hub.register_rpc(Arc::new(SettingSet { agents: None })); hub.register_rpc(Arc::new(ModelsFavoriteRpc)); hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
         let h = hub.rpc_for(m).unwrap(); h.call(hub, &Caller { gen: "1".into(), client: 1 }, &json!(5), m, &p).await.remove(0)
     }
     // the tour's Skip: the app sends setting.set onboard.done=1 (and onboard.uber=1); it must be answered, logged and still there after a restart
@@ -98,5 +170,69 @@ mod tests {
         assert_eq!(call(&hub, "setting.set", json!({"key":"launch.input.t9","value":""})).await["ok"], true);
         assert!(std::fs::read_to_string(home.join("events.jsonl")).unwrap().contains("\"key\":\"launch.input.t9\",\"value\":\"\""), "an empty write is logged");
         let _ = rx.try_recv(); let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test(flavor = "multi_thread")] async fn provider_change_clears_stale_model_and_incompatible_agent_model_is_refused() {
+        let home = crate::plat::tmp::dir("set-prov-model");
+        let hub = start(&home).await;
+        assert_eq!(call(&hub, "setting.set", json!({"key":"agent.provider","value":"claude"})).await["ok"], true);
+        assert_eq!(call(&hub, "setting.set", json!({"key":"agent.model","value":"opus"})).await["ok"], true);
+        assert_eq!(hub.setting("agent.model").await.as_deref(), Some("opus"));
+
+        // Switching agent.provider to codex clears agent.model atomically
+        assert_eq!(call(&hub, "setting.set", json!({"key":"agent.provider","value":"codex"})).await["ok"], true);
+        assert_eq!(hub.setting("agent.provider").await.as_deref(), Some("codex"));
+        assert_eq!(hub.setting("agent.model").await, None);
+
+        // Trying to set a Claude model while agent.provider is codex is refused
+        let bad = call(&hub, "setting.set", json!({"key":"agent.model","value":"opus"})).await;
+        assert_eq!(bad["ok"], false, "{bad}");
+        assert!(bad["error"].as_str().unwrap_or("").contains("not compatible"), "{bad}");
+        assert_eq!(hub.setting("agent.model").await, None);
+
+        // Switching text.provider clears stale text.model
+        assert_eq!(call(&hub, "setting.set", json!({"key":"text.provider","value":"claude"})).await["ok"], true);
+        assert_eq!(call(&hub, "setting.set", json!({"key":"text.model","value":"haiku"})).await["ok"], true);
+        assert_eq!(call(&hub, "setting.set", json!({"key":"text.provider","value":"codex"})).await["ok"], true);
+        assert_eq!(hub.setting("text.model").await, None);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    #[tokio::test(flavor = "multi_thread")] async fn models_favorite_toggles_persists_across_restart_and_validates() {
+        let home = crate::plat::tmp::dir("set-favs");
+        let hub = start(&home).await;
+
+        assert_eq!(call(&hub, "setting.set", json!({"key":"models.favorites","value":"not-json"})).await["ok"], false);
+        assert_eq!(call(&hub, "models.favorite", json!({"provider":"","model":"opus"})).await["ok"], false);
+
+        let r1 = call(&hub, "models.favorite", json!({"provider":"@Claude","model":"opus"})).await;
+        assert_eq!(r1["ok"], true);
+        assert_eq!(r1["result"], json!({"starred":true,"favorites":["claude/opus"]}));
+
+        let r2 = call(&hub, "models.favorite", json!({"provider":"codex","model":"gpt-6","on":true})).await;
+        assert_eq!(r2["ok"], true);
+        assert_eq!(r2["result"], json!({"starred":true,"favorites":["claude/opus","codex/gpt-6"]}));
+        assert_eq!(hub.setting("models.favorites").await.as_deref(), Some(r#"["claude/opus","codex/gpt-6"]"#));
+
+        drop(hub);
+        let again = start(&home).await;
+        assert_eq!(again.setting("models.favorites").await.as_deref(), Some(r#"["claude/opus","codex/gpt-6"]"#));
+
+        let r3 = call(&again, "models.favorite", json!({"provider":"claude","model":"opus"})).await;
+        assert_eq!(r3["result"], json!({"starred":false,"favorites":["codex/gpt-6"]}));
+        let r4 = call(&again, "models.favorite", json!({"provider":"codex","model":"gpt-6","on":false})).await;
+        assert_eq!(r4["result"], json!({"starred":false,"favorites":[]}));
+        assert_eq!(again.setting("models.favorites").await, None);
+
+        // Concurrent toggles serialize without overwriting each other
+        let (c1, c2) = tokio::join!(
+            call(&again, "models.favorite", json!({"provider":"claude","model":"opus","on":true})),
+            call(&again, "models.favorite", json!({"provider":"codex","model":"gpt-6","on":true})),
+        );
+        assert_eq!(c1["ok"], true);
+        assert_eq!(c2["ok"], true);
+        let saved = crate::settings::models::parse_favorite_keys(&again.setting("models.favorites").await.unwrap_or_default());
+        assert_eq!(saved.len(), 2, "{saved:?}");
+        assert!(saved.contains(&"claude/opus".to_string()) && saved.contains(&"codex/gpt-6".to_string()), "{saved:?}");
     }
 }

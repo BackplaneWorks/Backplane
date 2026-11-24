@@ -381,33 +381,42 @@ fn prune(dir: &std::path::Path, keep: usize) {
     for (_, p) in es.into_iter().skip(keep) { let _ = std::fs::remove_dir_all(p); }
 }
 
+fn media_err(status: &'static str, msg: &str) -> HttpReply {
+    HttpReply {
+        status,
+        ctype: "text/plain; charset=utf-8".into(),
+        extra: format!("Cache-Control: private, no-store\r\n{}", crate::files::serve::MEDIA_SECURITY_HEADERS),
+        body: msg.as_bytes().to_vec(),
+    }
+}
+
 /// GET /bots/<id>/tasks/shot?run=<run>&n=<n> (or &f=<file>): a picture of a task run (a pause's, or a step's), only from that bot's own tasks folder; the
 /// bot, run and file names are plain (no / or ..). None: not this route. The hub already checked the pairing token.
 pub async fn tasks_http(hub: &Arc<Hub>, req: &Req) -> Option<HttpReply> {
     let route = req.route(); let rest = route.strip_prefix("/bots/")?;
     if let Some(owner) = rest.strip_suffix("/screen.jpg") { return Some(screen(hub, owner).await) }
     let bot = rest.strip_suffix("/tasks/shot")?;
-    let nf = || Some(HttpReply::text("404 Not Found", "no such picture"));
+    let nf = || Some(media_err("404 Not Found", "no such picture"));
     let (run, f) = (crate::files::fm::from_uri(&req.param("run")), crate::files::fm::from_uri(&req.param("f")));
     let file = if f.is_empty() { teach::pause_file(req.param("n").parse().unwrap_or(0)) } else { f };
     if !teach::part_ok(bot, false) || !teach::run_ok(&run) || !teach::file_ok(&file) { return nf() }
     let path = crate::bots::relocate::root(&hub.cfg.home).join(bot).join(teach::run_dir(&run)).join(&file);
     match tokio::task::spawn_blocking(move || { let m = std::fs::metadata(&path).ok()?; if m.len() > 8 << 20 { return None } std::fs::read(&path).ok() }).await.ok().flatten() {
-        Some(b) => Some(HttpReply::ok(if file.ends_with(".png") { "image/png" } else { "image/jpeg" }, b)), None => nf(),
+        Some(b) => Some(HttpReply { status: "200 OK", ctype: (if file.ends_with(".png") { "image/png" } else { "image/jpeg" }).into(), extra: format!("Cache-Control: private, no-cache\r\n{}", crate::files::serve::MEDIA_SECURITY_HEADERS), body: b }), None => nf(),
     }
 }
 /// GET /bots/<id>/screen.jpg: the page's newest browser frame as the helper wrote it (`<home>/shots/<owner>.jpg`; an owner's file name keeps [A-Za-z0-9_-], the
 /// rest becomes '_'), never cached. The Browser tab of every client shows it, a new one announced by `{"t":"shot","bot":<owner>,"n":N}`. 404 "no screen yet".
 async fn screen(hub: &Arc<Hub>, owner: &str) -> HttpReply {
-    if !teach::part_ok(owner, false) { return HttpReply::text("404 Not Found", "no such bot") }
+    if !teach::part_ok(owner, false) { return media_err("404 Not Found", "no such bot") }
     let file: String = owner.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
     let path = hub.cfg.home.join("shots").join(format!("{file}.jpg"));
     // this request is the viewer's lease (no request, no frames); the first one waits briefly for the frame the lease makes
     if let Some(b) = super::browser::get(hub) { b.watch(owner).await; }
     for _ in 0..20 { if path.exists() { break } tokio::time::sleep(std::time::Duration::from_millis(100)).await; }
     match tokio::task::spawn_blocking(move || { let m = std::fs::metadata(&path).ok()?; if m.len() > 8 << 20 { return None } std::fs::read(&path).ok() }).await.ok().flatten() {
-        Some(b) => HttpReply { status: "200 OK", ctype: "image/jpeg".into(), extra: "Cache-Control: no-store\r\n".into(), body: b },
-        None => HttpReply::text("404 Not Found", "no screen yet"),
+        Some(b) => HttpReply { status: "200 OK", ctype: "image/jpeg".into(), extra: format!("Cache-Control: private, no-store\r\n{}", crate::files::serve::MEDIA_SECURITY_HEADERS), body: b },
+        None => media_err("404 Not Found", "no screen yet"),
     }
 }
 /// The one "/bots" route this lane serves. The bots lane's own `/bots` handler replaces this one and must call `tasks_http` first.

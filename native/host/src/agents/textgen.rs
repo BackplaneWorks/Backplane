@@ -29,13 +29,14 @@ pub fn pick(provider: &str, model: &str) -> (&'static str, String) {
     (p, if !m.is_empty() && (family.is_empty() || family == p) { m.to_string() } else { light.to_string() })
 }
 /// OneShot.claude / OneShot.codex: the arguments after the program.
-pub fn args(provider: &str, model: &str, system: &str) -> Vec<String> {
+pub fn args(provider: &str, model: &str, system: &str) -> Vec<String> { args_for(provider, model, system, cfg!(windows)) }
+pub fn args_for(provider: &str, model: &str, system: &str, windows: bool) -> Vec<String> {
     let mut v: Vec<String> = vec![];
     if provider == "codex" {
         // a bare `low`, not `"low"`: Codex reads a -c value that is no TOML as the string, and a `"` would not reach a Codex started through Git's sh on Windows (proc::carries)
         v.extend(["exec", "--json", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "-c", "model_reasoning_effort=low"].map(String::from));
         if !model.is_empty() { v.push("-m".into()); v.push(model.into()) }
-        v.push(system.into());
+        v.push(if windows { "-".into() } else { system.into() });
     } else {
         v.push("-p".into());
         if !model.is_empty() { v.push("--model".into()); v.push(model.into()) }
@@ -140,9 +141,15 @@ impl Agents {
         if provider != "claude" && provider != "codex" { return Err(format!("{provider} one-shots are not wired")) }
         let prog = match &via.program { Some(p) => p.clone(), None => self.cli.resolve(provider)? };
         let mut a = via.args.clone(); a.extend(args(provider, model, system));
-        let p = proc::spawn(&prog, &a, &self.hub.cfg.home, self.cli.dir(), &via.env).map_err(|e| format!("could not start {provider}: {e}"))?;
+        let mut keep = vec![];
+        if cfg!(windows) && provider == "claude" {
+            let rdir = proc::run_dir(&self.hub.cfg.home);
+            if let Ok(Some(f)) = super::rules::system_prompt_to_run_file(&mut a, &rdir, &format!("oneshot-{}.system.md", proc::unique())) { keep.push(f); }
+        }
+        let p = proc::spawn_holding(&prog, &a, &self.hub.cfg.home, self.cli.dir(), &via.env, keep).map_err(|e| format!("could not start {provider}: {e}"))?;
         let (pid, mut lines, input_tx, exit) = (p.pid, p.lines, p.input, p.exit);
-        let _ = input_tx.try_send(input.to_string()); drop(input_tx); // the text on stdin, then it closes
+        let stdin_body = if cfg!(windows) && provider == "codex" && !system.is_empty() { format!("{system}\n\n{input}") } else { input.to_string() };
+        let _ = input_tx.try_send(stdin_body); drop(input_tx); // the text on stdin, then it closes
         let read = async { let mut out = String::new(); while let Some(l) = lines.recv().await { if out.len() + l.len() > OUT_CAP { break } out.push_str(&l); out.push('\n') } out };
         let out = match tokio::time::timeout(TIMEOUT, read).await { Ok(o) => o, Err(_) => { proc::terminate(pid, Duration::from_secs(1)); return Err("no answer in 60 s".into()) } };
         let _ = tokio::time::timeout(Duration::from_secs(5), exit).await; proc::terminate(pid, Duration::from_millis(100));
@@ -311,7 +318,8 @@ mod tests {
     }
     #[test] fn the_arguments_keep_the_model_tool_free_and_sessionless() {
         let c = args("claude", "haiku", "SYS"); assert_eq!(c[0], "-p"); assert!(c.windows(2).any(|w| w == ["--tools", ""]) && c.contains(&"--no-session-persistence".to_string()) && c.windows(2).any(|w| w == ["--system-prompt", "SYS"]));
-        let x = args("codex", "", "SYS"); assert_eq!(x.last().unwrap(), "SYS"); assert!(x.contains(&"--ephemeral".to_string()) && !x.contains(&"-m".to_string()));
+        let x = args_for("codex", "", "SYS", false); assert_eq!(x.last().unwrap(), "SYS"); assert!(x.contains(&"--ephemeral".to_string()) && !x.contains(&"-m".to_string()));
+        let xw = args_for("codex", "", "SYS", true); assert_eq!(xw.last().unwrap(), "-");
     }
     #[test] fn a_written_title_is_one_plain_line() {
         assert_eq!(title_clean("  \"Fix the Haiku titler.\"\nmore"), "Fix the Haiku titler"); assert_eq!(title_clean("## Title: **Auto-settle merged threads**"), "Auto-settle merged threads");

@@ -7,6 +7,7 @@ Requests are in screen points (the harness's and the window list's unit); the re
     {"op": "chord", "combo": "cmd+a"}            {"op": "text", "text": "abc"}
     {"op": "click", "x": 10, "y": 20}            {"op": "drag", "x0":.., "y0":.., "x1":.., "y1":.., "seconds": 0.6}
     {"op": "move", "x": 10, "y": 20}             {"op": "png", "path": "/abs/out.png"}
+    {"op": "press", "x": 10, "y": 20, "button": 3, "seconds": 0.3}   (a held click; button 1 left, 3 right)
     {"op": "size"}                               {"op": "quit"}
 Each answer is {"ok": true, ...} or {"ok": false, "error": "..."}.
 """
@@ -45,6 +46,9 @@ def serve(path, client, scale):
                     client.click(px(r['x']), px(r['y']), r.get('button', 1))
                 elif op == 'move':
                     client.move(px(r['x']), px(r['y']))
+                elif op == 'press':  # a held click: move, button down, hold `seconds`, up (button 1 left, 3 right)
+                    b = r.get('button', 1)
+                    client.move(px(r['x']), px(r['y'])); time.sleep(0.05); client.button(True, b); time.sleep(float(r.get('seconds', 0.3))); client.button(False, b)
                 elif op == 'drag':
                     client.drag(px(r['x0']), px(r['y0']), px(r['x1']), px(r['y1']), seconds=r.get('seconds', 0.6))
                 elif op == 'png':

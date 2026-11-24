@@ -2,6 +2,7 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore virtual module injected by web/build.ts
 import { CATALOGS } from "virtual:i18n";
+import { interpolate } from "./i18n-format";
 
 let currentLocale = detectLocale();
 const localeListeners = new Set<(locale: string) => void>();
@@ -54,13 +55,8 @@ export function getLocale(): string {
 
 export function t(key: string, fallback?: string, vars?: Record<string, string | number>): string {
   const cat = CATALOGS[currentLocale] || CATALOGS.en || {};
-  let text = cat[key] ?? CATALOGS.en?.[key] ?? fallback ?? key;
-  if (vars) {
-    for (const [k, v] of Object.entries(vars)) {
-      text = text.replaceAll(`{${k}}`, String(v));
-    }
-  }
-  return text;
+  const text = cat[key] ?? CATALOGS.en?.[key] ?? fallback ?? key;
+  return interpolate(text, vars);
 }
 
 export function trs(english: string): string {

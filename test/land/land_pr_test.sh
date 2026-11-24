@@ -2,8 +2,12 @@
 # scripts/land.sh against a local bare origin and a stand-in gh (fake-gh): the gate before the push, the branch and PR, the wait for a review (exit 3), the merge once it is
 # approved (without a new gate while the tree is the tested one), the dry merge, a main that moved, a failing gate, --resume with no PR. No network, no GitHub.
 set -u
+# run from inside a land (its gate), the outer land's private copy must not leak into the lands this test starts
+unset LAND_COPY LAND_HERE LAND_TEST LAND_WIN_TEST GH_TOKEN
 HERE=$(cd "$(dirname "$0")" && pwd); ROOT=$(cd "$HERE/../.." && pwd)
 T=$(mktemp -d "${TMPDIR:-/tmp}/land-test.XXXXXX"); trap '[ -n "${KEEP:-}" ] || rm -rf "$T"' EXIT
+# the land runs' own temporary folder (their private copies, land-run.*, are looked for here alone), and the post-merge log
+export TMPDIR=$T/tmp LAND_POSTMERGE_LOG=$T/pm/postmerge.log; mkdir -p "$TMPDIR"
 export ORIGIN=$T/origin.git FAKE=$T/fake LAND_GH=$HERE/fake-gh LAND_REPO=x/y LAND_POLL_S=0 LAND_MIN_FREE_GB=0
 # the Windows gate's lock: no hub answers (a closed loopback port), so scripts/bp-lock.sh takes a flock in $T/locks
 export BACKPLANE_LOCK_URL=http://127.0.0.1:9 BACKPLANE_LOCK_HOME=$T/nohub BACKPLANE_LOCK_DIR=$T/locks; mkdir -p "$T/locks"
@@ -13,6 +17,8 @@ export LAND_WIN_STATE=$T/state LAND_WIN_EST_MIN=0 LAND_WIN_MARGIN_MIN=0
 # a stand-in az for every case (never the real one): each VM's power in $T/power.<vm> (running unless said), every call logged to $AZLOG;
 # bp-winbuild's public address is 203.0.113.7, and this machine's 198.51.100.1
 export AZLOG=$T/azlog LAND_WIN_AZ=$T/azf LAND_WIN_MYIP=198.51.100.1 POWER=$T/power
+# never a real VM from here: ssh is a stand-in that reaches nothing unless a case gives its own, and the post-merge gate is off unless a case turns it on
+printf '#!/bin/sh\nexit 255\n' > "$T/nossh"; chmod +x "$T/nossh"; export LAND_WIN_SSH=$T/nossh LAND_POSTMERGE=off
 cat > "$T/azf" <<'EOS'
 #!/bin/sh
 n=; a="$*"; while [ $# -gt 0 ]; do [ "$1" = -n ] && n=$2; shift; done
@@ -33,7 +39,7 @@ g() { git -C "$W" "$@"; }
 export GIT_AUTHOR_NAME=i2cjak GIT_AUTHOR_EMAIL=build@amemb.com GIT_COMMITTER_NAME=i2cjak GIT_COMMITTER_EMAIL=build@amemb.com
 git init -q --bare -b main "$ORIGIN"
 W=$T/main; git clone -q "$ORIGIN" "$W" 2>/dev/null; g checkout -q -b main 2>/dev/null
-mkdir -p "$W/scripts"; cp "$ROOT/scripts/land.sh" "$ROOT/scripts/land-windows.sh" "$ROOT/scripts/bp-lock.sh" "$W/scripts/"; printf '#!/bin/sh\nexit 0\n' > "$W/scripts/check-author.sh"; chmod +x "$W/scripts/"*.sh
+mkdir -p "$W/scripts"; cp "$ROOT/scripts/land.sh" "$ROOT/scripts/land-windows.sh" "$ROOT/scripts/bp-lock.sh" "$ROOT/scripts/hub-outside-files.py" "$ROOT/scripts/land-gate.sh" "$ROOT/scripts/i18n-gate.sh" "$W/scripts/"; printf '#!/bin/sh\nexit 0\n' > "$W/scripts/check-author.sh"; chmod +x "$W/scripts/"*.sh
 echo base > "$W/f"; g add -A; g commit -qm base; g push -q origin main
 LANE=$T/lane; g worktree add -q -b lane "$LANE" 2>/dev/null; W=$LANE
 echo one > "$LANE/doc"; g add -A; g commit -qm "docs: one"
@@ -46,7 +52,7 @@ LAND_TEST=false land > "$T/o1"; rc=$?; [ $rc != 0 ] && ! git --git-dir="$ORIGIN"
 land --resume > "$T/o2"; rc=$?; [ $rc != 0 ] && grep -q "no open pull request" "$T/o2"; ok $? "--resume with no PR is refused"
 # 3. gate green, PR blocked on review: exit 3 and the line
 land > "$T/o3"; rc=$?; [ $rc = 3 ] && grep -q "PR #101 open, gate green on $(g rev-parse --short HEAD), waiting for an approving review" "$T/o3" && [ "$(wc -l < "$GATES")" = 1 ] && [ ! -f "$FAKE/merges" ]; ok $? "blocked on review: exit 3, the PR and the sha named, one gate, nothing merged (rc $rc)"
-grep -q "Windows gate skipped: nothing the hub's Windows tests build from or read changed" "$T/o3" && [ ! -s "$WINS" ]; ok $? "no host change: the Windows gate is skipped, and said"
+! grep -q -i "windows" "$T/o3" && [ ! -s "$WINS" ]; ok $? "no Windows gate at a merge: none run, none mentioned"
 [ "$(git --git-dir="$ORIGIN" rev-parse refs/heads/lane)" = "$(g rev-parse HEAD)" ]; ok $? "the gated branch is on origin"
 # 4. rerunning while still blocked does not gate again and opens no second PR
 land > "$T/o4"; rc=$?; [ $rc = 3 ] && [ "$(wc -l < "$GATES")" = 1 ] && [ "$(cat "$FAKE/next")" = 101 ]; ok $? "rerun while blocked: exit 3, no new gate, no second PR"
@@ -78,7 +84,7 @@ land > "$T/o11b"; ! grep -q "older than origin/main's" "$T/o11b"; ok $? "a land.
 ! grep -n 'push.*refs/heads/main\|push origin HEAD:main\|push.*HEAD:main' "$ROOT/scripts/land.sh" | grep -v '^[0-9]*:#'; ok $? "land.sh has no push to main"
 # 13. an edit of land.sh while a land runs (here from its gate) changes nothing in that run: it ends as it would have, not on a syntax error
 echo three > "$LANE/doc3"; g add -A; g commit -qm "docs: three"
-LAND_TEST="printf '\n( ((\n' >> $LANE/scripts/land.sh" land > "$T/o13"; rc=$?; g checkout -q scripts/land.sh
+LAND_TEST="printf '\n( ((\n' >> $LANE/scripts/land.sh; git -C $LANE update-index --skip-worktree scripts/land.sh" land > "$T/o13"; rc=$?; g update-index --no-skip-worktree scripts/land.sh; g checkout -q scripts/land.sh
 [ $rc = 3 ] && ! grep -qi "syntax error" "$T/o13" && grep -q "waiting for an approving review\|blocked by a rule" "$T/o13"; ok $? "land.sh edited under a running land: the run is unchanged (rc $rc)"
 ! ls "${TMPDIR:-/tmp}"/land-run.* >/dev/null 2>&1; ok $? "the private copy is removed"
 # 14. a token that is not i2cjak's on GitHub: no pull request is opened or merged
@@ -87,106 +93,103 @@ echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; nm=$(wc -l < "$
 # 15. a lane commit not made as i2cjak <build@amemb.com> is refused, with the fix
 echo five > "$LANE/doc5"; g add -A; GIT_AUTHOR_EMAIL=x@y.org g commit -qm "docs: five"
 land > "$T/o15"; rc=$?; [ $rc != 0 ] && grep -q "not made as i2cjak <build@amemb.com>" "$T/o15" && grep -q "reset-author" "$T/o15"; ok $? "a commit by another identity is refused, with the fix (rc $rc)"
-# 16. main moves between the gate and the merge while the PR still reads mergeable: no merge of a tree the gate never ran (#1374); it rebases, gates
-#     again on the new main and merges that
+# 16. main moves during the gate: the merge phase (in the land lock) rebases onto it and merges that head, with no second gate (the PR's own
+#     changes passed it; main is main: main-build.sh watches it)
 g reset -q --hard HEAD~1; git -C "$LANE" fetch -q origin main; g rebase -q origin/main; echo six > "$LANE/doc6"; g add -A; g commit -qm "docs: six"
 echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; rm -f "$T/moved"; before=$(wc -l < "$GATES")
 LAND_TEST="echo gate >> $GATES; [ -f $T/moved ] || { touch $T/moved; git -C $M pull -q origin main 2>/dev/null; echo m2 > $M/m2; git -C $M add -A; git -C $M commit -qm 'main moved during the gate'; git -C $M push -q origin main; }" land > "$T/o16"; rc=$?
 mover=$(git -C "$M" rev-parse HEAD)
-[ $rc = 0 ] && [ "$(wc -l < "$GATES")" = $((before + 2)) ] && grep -q "main moved after the gate" "$T/o16" && git --git-dir="$ORIGIN" merge-base --is-ancestor "$mover" main; ok $? "main moved after the gate: gated again on the new main, then merged; the moved commit is kept (rc $rc)"
+[ $rc = 0 ] && [ "$(wc -l < "$GATES")" = $((before + 1)) ] && git --git-dir="$ORIGIN" merge-base --is-ancestor "$mover" main && grep -q "the land lock was held [0-9]*s for the merge" "$T/o16"; ok $? "main moved during the gate: rebased onto it in the land lock, merged with no second gate; the moved commit is kept (rc $rc)"
 g reset -q --hard HEAD~1; rm -f "$FAKE/mergestate" "$FAKE/review"
 pushed() { [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" = "$(g rev-parse HEAD)" ]; }
-# 16. a host change: a failing Windows gate pushes nothing
-mkdir -p "$LANE/native/host"; echo a > "$LANE/native/host/x.rs"; g add -A; g commit -qm "host: a"
-before=$(wc -l < "$GATES"); LAND_WIN_TEST="echo win >> $WINS; exit 1" land > "$T/o16"; rc=$?
-[ $rc = 1 ] && grep -q "the Windows gate did not pass" "$T/o16" && ! pushed && [ "$(wc -l < "$WINS")" = 1 ] && [ "$(wc -l < "$GATES")" = $((before + 1)) ]; ok $? "the Windows gate fails: nothing pushed, after the Linux gate (rc $rc)"
-# 17. it passes: run under the bp-win-gate lock, which is released after; the tree is recorded and the time said
-LAND_WIN_TEST="if flock -n $WINLOCK true; then echo free >> $T/lockseen; else echo held >> $T/lockseen; fi; echo win >> $WINS" land > "$T/o17"; rc=$?
-[ $rc = 3 ] && [ "$(cat "$T/lockseen")" = held ] && flock -n "$WINLOCK" true && pushed && grep -q "Windows gate passed: [0-9]*m[0-9]*s" "$T/o17" && [ "$(wc -l < "$WINS")" = 2 ]; ok $? "the Windows gate passes under bp-win-gate, the lock released after, its time said, then pushed (rc $rc)"
-# 18. the same tree is not tested on Windows twice
-land > "$T/o18"; rc=$?; [ $rc = 3 ] && [ "$(wc -l < "$WINS")" = 2 ] && grep -q "Windows tests already passed on this tree" "$T/o18"; ok $? "a passing tree is not tested on Windows again (rc $rc)"
-# 19. neither VM up: held with one line naming each VM and why, exit 4, nothing pushed (the real land-windows.sh, stand-ins for ssh and az)
-printf '#!/bin/sh\nexit 255\n' > "$T/ssh"; printf '#!/bin/sh\ncase "$*" in *get-instance-view*) echo PowerState/deallocated;; *) echo "az: start refused" >&2; exit 1;; esac\n' > "$T/az"; chmod +x "$T/ssh" "$T/az"
-echo b > "$LANE/native/host/x.rs"; g commit -qam "host: b"
-( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/ssh LAND_WIN_AZ=$T/az land ) > "$T/o19"; rc=$?
-[ $rc = 4 ] && grep -q "^land: HELD: the Windows gate could not run, so nothing is pushed or merged. Tried bp-win: deallocated, and az vm start failed; bp-winbuild: deallocated, and az vm start failed." "$T/o19" && ! pushed && [ "$(wc -l < "$WINS")" = 2 ]; ok $? "no VM up: held, the line names each VM and why, nothing pushed (rc $rc)"
-# 19b. a gate whose measured time would cross both VMs' daily auto-shutdowns is not started: held, each named
-mkdir -p "$T/state"; echo 1500 > "$T/state/bp-win.minutes"; echo 1500 > "$T/state/bp-winbuild.minutes"
-( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/ssh LAND_WIN_AZ=$T/az land ) > "$T/o19b"; rc=$?; rm -f "$T/state/"*.minutes
-[ $rc = 4 ] && grep -q "Tried bp-win: a gate now would cross its 07:00 UTC auto-shutdown (it needs about 1500 min with the margin, [0-9]* min are left); bp-winbuild: a gate now would cross its [0-9][0-9]:00 UTC auto-shutdown" "$T/o19b" && ! pushed; ok $? "a gate that would cross both shutdowns: not started, held, each named (rc $rc)"
-# 20. LAND_WINDOWS=skip: no Windows gate, said, and noted in the PR body
-LAND_WINDOWS=skip land > "$T/o20"; rc=$?; n=$(cat "$FAKE/pr.lane")
-[ $rc = 3 ] && grep -q "LAND_WINDOWS=skip: the Windows gate is NOT run" "$T/o20" && grep -q "Windows gate skipped (LAND_WINDOWS=skip)" "$FAKE/body.$n" && [ "$(wc -l < "$WINS")" = 2 ] && pushed; ok $? "LAND_WINDOWS=skip: no gate, said, noted in PR #$n's body (rc $rc)"
-LAND_WINDOWS=yes land > "$T/o20b"; rc=$?; [ $rc = 1 ] && grep -q "only LAND_WINDOWS=skip" "$T/o20b"; ok $? "another LAND_WINDOWS value is refused (rc $rc)"
-# 21. the verdict of the real land-windows.sh (a stand-in ssh: the tree goes by git push into $T/vm.git, the run prints nextest's ending):
-# a failure listed in scripts/land-windows-known.txt does not hold a landing, another does
-cp "$ROOT/scripts/land-windows-known.txt" "$LANE/scripts/"; g add -A; g commit -qm "known list"; git init -q --bare "$T/vm.git"
-cat > "$T/vmssh" <<'EOS'
-#!/bin/sh
-# the stand-in VM: every call logged to $VMLOG as "<host> <what>"; the run logs which owner locks are held while it runs
-while [ $# -gt 1 ]; do case "$1" in -o|-i) shift 2;; *) break;; esac; done; h=$1; shift   # the options, then the host
-v=$h; case "$h" in bpadmin@203.0.113.7|bp-winbuild-vnet) v=bp-winbuild;; esac; [ "$(cat "$POWER.$v" 2>/dev/null)" != deallocated ] || exit 255   # a deallocated VM answers nothing
-lk() { if flock -n "$BACKPLANE_LOCK_DIR/bp-$1.lock" true 2>/dev/null; then echo free; else echo held; fi; }
-case "$*" in *receive-pack*) exec git receive-pack "$VMREPO";; 'exit 0') exit 0;; *EncodedCommand*) echo "$h sweep" >> "$VMLOG"; for a; do :; done; w=tmp; printf '%s' "${a##* }" | base64 -d 2>/dev/null | iconv -f utf-16le -t utf-8 2>/dev/null | grep -q 'rd /s /q' && w=all; echo "$h $w" >> "$SWEEPS"; echo "sweep: stopped 0; C:\bp\gate\tmp removed"; exit 0;; esac
-grep -q "nextest run" || exit 0   # preparing: nothing to do
-echo "$h run bp-win-ui=$(lk bp-win-ui) winbuild-vm=$(lk winbuild-vm)" >> "$VMLOG"
-[ -z "${VMSLEEP:-}" ] || exec sleep "$VMSLEEP"
-printf '        PASS [   1.0s] (1/3) backplane-hub::bin/backplane-hub a::ok\n     Summary [  2.0s] 3 tests run: 1 passed, 2 failed\n'
-for t in $VMFAIL; do printf '  TRY 2 FAIL [   1.0s] (2/3) backplane-hub::bin/backplane-hub %s\n' "$t"; done
-[ -z "$VMFAIL" ]
-EOS
-chmod +x "$T/vmssh"; export VMREPO=$T/vm.git VMLOG=$T/vmlog VMFAIL= SWEEPS=$T/sweeps
-known1=$(sed 's/#.*//' "$ROOT/scripts/land-windows-known.txt" | awk 'NF && $1 != "flaky" { print $1; exit }')
-echo c > "$LANE/native/host/x.rs"; g commit -qam "host: c"
-( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh VMFAIL="$known1" land ) > "$T/o21"; rc=$?
-[ $rc = 3 ] && grep -q "known Windows failures" "$T/o21" && grep -q "PASSED on bp-win" "$T/o21" && pushed && [ "$(git --git-dir="$T/vm.git" rev-parse refs/heads/gate)" = "$(g rev-parse HEAD)" ]; ok $? "a known Windows failure does not hold the landing; the tree reached the VM by push (rc $rc)"
-echo d > "$LANE/native/host/x.rs"; g commit -qam "host: d"
-( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh VMFAIL="$known1 a::new_fault" land ) > "$T/o21b"; rc=$?
-[ $rc = 1 ] && grep -q "not known to:" "$T/o21b" && grep -q "^    a::new_fault" "$T/o21b" && ! pushed; ok $? "a new Windows failure holds it: named, nothing pushed (rc $rc)"
-vm() { ( unset LAND_WIN_TEST; LAND_WIN_SSH=$T/vmssh land ) ; }
-step() { echo "$1" > "$LANE/native/host/x.rs"; g commit -qam "host: $1"; : > "$VMLOG"; : > "$SWEEPS"; }
-# 22. one owner per VM: bp-win only when the gate takes bp-win-ui, held for the whole run and released after; swept before and after
-step e; vm > "$T/o22"; rc=$?
-[ $rc = 3 ] && [ "$(cat "$VMLOG")" = "bp-win sweep
-bp-win run bp-win-ui=held winbuild-vm=free
-bp-win sweep" ] && flock -n "$T/locks/bp-bp-win-ui.lock" true && pushed; ok $? "bp-win runs it holding bp-win-ui, released after; swept before and after (rc $rc)"
-# 22b. bp-win keeps nothing of the gate: its sweeps before and after the run remove all of C:\bp\gate (what any earlier gate left too)
-[ "$(cat "$SWEEPS")" = "bp-win all
-bp-win all" ]; ok $? "bp-win: all of C:\\bp\\gate removed before and after the run"
-: > "$SWEEPS"
-# 23. bp-win-ui held by the UI tests: straight to bp-winbuild under winbuild-vm; bp-win is not touched
-step f; ( flock 9; exec sleep 60 ) 9>"$T/locks/bp-bp-win-ui.lock" & ui=$!; sleep 0.3
-: > "$AZLOG"; vm > "$T/o23"; rc=$?; kill $ui 2>/dev/null; wait $ui 2>/dev/null; cp "$AZLOG" "$T/az23"; cp "$SWEEPS" "$T/sw23"
-[ $rc = 3 ] && ! grep -q '^bp-win ' "$VMLOG" && grep -q '^bpadmin@203.0.113.7 run bp-win-ui=held winbuild-vm=held$' "$VMLOG" && grep -q "bp-win: bp-win-ui is held" "$T/o23" && grep -q "PASSED on bp-winbuild" "$T/o23" && pushed; ok $? "bp-win-ui held: bp-winbuild under winbuild-vm, bp-win untouched (rc $rc)"
-# 24. bp-win's measured time would cross its shutdown: bp-winbuild runs it
-step g; mkdir -p "$T/state"; echo 1500 > "$T/state/bp-win.minutes"; vm > "$T/o24"; rc=$?; rm -f "$T/state/bp-win.minutes"
-[ $rc = 3 ] && ! grep -q '^bp-win ' "$VMLOG" && grep -q '^bpadmin@203.0.113.7 run' "$VMLOG" && grep -q "bp-win: a gate now would cross its 07:00 UTC auto-shutdown" "$T/o24" && [ -s "$T/state/bp-winbuild.minutes" ]; ok $? "bp-win would cross its 07:00 UTC shutdown: bp-winbuild runs it, its time recorded (rc $rc)"
-# 25. a failing run is swept after too
-step h; VMFAIL=a::new_fault vm > "$T/o25"; rc=$?
-[ $rc = 1 ] && [ "$(grep -c '^bp-win sweep' "$VMLOG")" = 2 ] && ! pushed; ok $? "a failed run: swept before and after, nothing pushed (rc $rc)"
-# 26. a run cut off at its bound is swept, and the next VM tried; neither finishing holds the landing
-step i; LAND_WIN_RUN_MAX_S=2 VMSLEEP=30 vm > "$T/o26"; rc=$?
-[ $rc = 4 ] && [ "$(cat "$VMLOG")" = "bp-win sweep
-bp-win run bp-win-ui=held winbuild-vm=free
-bp-win sweep
-bpadmin@203.0.113.7 sweep
-bpadmin@203.0.113.7 run bp-win-ui=free winbuild-vm=held
-bpadmin@203.0.113.7 sweep" ] && grep -q "bp-win: the run was cut off after" "$T/o26" && ! pushed; ok $? "cut off at its bound: swept, the next VM tried, held (rc $rc)"
-# 27. a gate terminated mid-run (TERM) sweeps the VM on its way out; nothing pushed
-step j; ( VMSLEEP=30 vm > "$T/o27" ) & lp=$!
-for _ in $(seq 100); do grep -q ' run ' "$VMLOG" && break; sleep 0.1; done
-# the gate's own process among this run's descendants (never a match over every process: another lane's gate may run here)
-desc() { for c in $(pgrep -P "$1"); do echo "$c"; desc "$c"; done; }
-for p in $(desc $lp); do [ "$(ps -o args= -p "$p")" = "sh $LANE/scripts/land-windows.sh --vm bp-win" ] && kill -TERM "$p"; done; wait $lp; rc=$?
-[ $rc != 0 ] && [ "$(tail -n 1 "$VMLOG")" = "bp-win sweep" ] && [ "$(grep -c sweep "$VMLOG")" = 2 ] && ! pushed && flock -n "$T/locks/bp-bp-win-ui.lock" true; ok $? "terminated mid-run: the VM is swept, bp-win-ui released, nothing pushed (rc $rc)"
-grep -q '^bpadmin@203.0.113.7 tmp$' "$T/sw23" && ! grep -q ' all$' "$T/sw23"; ok $? "bp-winbuild keeps its repository and target dir: only C:\\bp\\gate\\tmp is swept"
-# 28. bp-winbuild straight through Azure: ssh opened to this machine's address alone for the run, closed after; a running VM is left running
-grep -q -x 'network public-ip show -g BP-WIN-RG -n bp-winbuild-gate-ip' "$T/az23" && grep -q 'network nsg rule create -g BP-WIN-RG --nsg-name bp-winbuild-gate-nsg -n land-gate-ssh .*--destination-port-ranges 22 --source-address-prefixes 198.51.100.1/32' "$T/az23" \
-  && [ "$(tail -n 1 "$T/az23")" = "network nsg rule delete -g BP-WIN-RG --nsg-name bp-winbuild-gate-nsg -n land-gate-ssh" ] && ! grep -q 'vm start\|vm deallocate' "$T/az23"; ok $? "bp-winbuild through Azure: port 22 opened to this machine alone for the run, closed after, no tailnet"
-# 29. bp-winbuild deallocated (its daily shutdown): started, reached directly, run, deallocated again, the rule closed; no key asked for
-step k; echo deallocated > "$POWER.bp-winbuild"; ( flock 9; exec sleep 60 ) 9>"$T/locks/bp-bp-win-ui.lock" & ui=$!; sleep 0.3
-: > "$AZLOG"; LAND_WIN_START_S=30 vm > "$T/o29"; rc=$?; kill $ui 2>/dev/null; wait $ui 2>/dev/null
-[ $rc = 3 ] && grep -q '^bpadmin@203.0.113.7 run' "$VMLOG" && grep -q "bp-winbuild is deallocated: starting it" "$T/o29" && grep -q "bp-winbuild: deallocated (the gate started it)" "$T/o29" \
-  && [ "$(grep -c -x 'vm start -g BP-WIN-RG -n bp-winbuild\|vm deallocate -g BP-WIN-RG -n bp-winbuild --no-wait\|network nsg rule delete -g BP-WIN-RG --nsg-name bp-winbuild-gate-nsg -n land-gate-ssh' "$AZLOG")" = 3 ] \
-  && [ "$(cat "$POWER.bp-winbuild")" = deallocated ] && pushed; ok $? "deallocated: started, run directly, deallocated after, rule closed (rc $rc)"
+# 17. no Windows gate at a merge: a host PR merges on the gate alone (LAND_WIN_TEST, set above, is never run)
+echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; g fetch -q origin main; g reset -q --hard origin/main; : > "$WINS"
+mkdir -p "$LANE/native/host/src"; echo 'fn a() {}' > "$LANE/native/host/src/a.rs"; g add -A; g commit -qm "host: a"
+land > "$T/o17"; rc=$?; [ $rc = 0 ] && [ ! -s "$WINS" ] && grep -q "landed lane" "$T/o17" && ! grep -q -i "windows gate" "$T/o17"; ok $? "a host PR merges without any Windows gate (rc $rc)"
+# 18-22. the real gate (scripts/land-gate.sh) with a stand-in cargo: what each PR compiles and tests
+printf '#!/bin/sh\necho "$(basename "$PWD") $*" >> %s\ncase "$*" in *FAILME*) exit 1;; esac\n[ -f "$PWD/FAIL" ] && exit 1\nexit 0\n' "$T/cargolog" > "$T/cargo"; chmod +x "$T/cargo"
+printf '#!/bin/sh\necho "wincheck $1" >> %s\n[ -f "$PWD/WINFAIL" ] && exit 1\nexit 0\n' "$T/cargolog" > "$T/wincheck"; chmod +x "$T/wincheck"
+gland() { : > "$T/cargolog"; (cd "$LANE" && LAND_GATE_CARGO=$T/cargo LAND_GATE_WINCHECK=$T/wincheck sh -c 'unset LAND_TEST; sh scripts/land.sh' 2>&1); }
+mkdir -p "$LANE/docs" "$LANE/mobile" "$LANE/web/src"; echo d > "$LANE/docs/x.md"; echo m > "$LANE/mobile/m.kt"; echo w > "$LANE/web/src/a.ts"; echo s > "$LANE/scripts/s.sh"; g add -A; g commit -qm "docs, mobile, web sources, scripts"
+gland > "$T/o18"; rc=$?; [ $rc = 0 ] && [ ! -s "$T/cargolog" ] && grep -q "nothing to compile: the PR touches no crate" "$T/o18" && grep -q "gate passed in [0-9]*s" "$T/o18"; ok $? "docs/mobile/web sources/scripts: nothing compiled, landed (rc $rc)"
+echo 'fn b() {}' > "$LANE/native/host/src/b.rs"; g add -A; g commit -qm "host: b"
+gland > "$T/o19"; rc=$?; [ $rc = 0 ] && [ "$(cut -d' ' -f1-3 "$T/cargolog" | tr '\n' '|')" = "host check --all-targets|host test --locked|wincheck host|" ] && grep -q -- "-- --skip e2e" "$T/cargolog" && grep -q "gate: passed in .*host: cargo check --all-targets [0-9]*s, host: unit tests [0-9]*s, host: Windows check [0-9]*s" "$T/o19"; ok $? "a host PR: cargo check, the unit tests (no e2e) and the Windows cross-compile check of the host alone, timed (rc $rc)"
+mkdir -p "$LANE/web/dist"; echo '<html>1' > "$LANE/web/dist/index.html"; printf '%s\n' 'macro_rules! asset { ($p:literal) => { include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../web/dist/", $p)) } }' > "$LANE/native/host/src/webingress.rs"; g add -A; g commit -qm "host: embeds web/dist"; gland > /dev/null
+echo '<html>2' > "$LANE/web/dist/index.html"; g commit -qam "web/dist only"
+gland > "$T/o20"; rc=$?; [ $rc = 0 ] && [ ! -s "$T/cargolog" ] && grep -q "host: web/dist only: every file it names is there; no build" "$T/o20"; ok $? "a web/dist-only PR builds nothing (the hub embeds web/dist), and lands (rc $rc)"
+mkdir -p "$LANE/native/gpui/src"; echo 'fn g() {}' > "$LANE/native/gpui/src/g.rs"; g add -A; g commit -qm "gpui: g"
+gland > "$T/o21"; rc=$?; [ $rc = 0 ] && [ "$(cut -d' ' -f1 "$T/cargolog" | sort -u | tr '\n' ' ')" = "gpui wincheck " ] && grep -q -x "wincheck gpui" "$T/cargolog"; ok $? "a gpui PR: the gpui crate alone, its Windows check too (rc $rc)"
+touch "$LANE/native/host/FAIL"; echo 'fn c() {}' > "$LANE/native/host/src/c.rs"; g add -A; g commit -qm "host: c, failing"; before=$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)
+gland > "$T/o22"; rc=$?; [ $rc != 0 ] && grep -q "gate: FAILED" "$T/o22" && grep -q "the gate failed (above); nothing pushed" "$T/o22" && [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" = "$before" ]; ok $? "a failing check: the gate fails, nothing pushed (rc $rc)"
+# 23. a Windows-only compile error (the cross-compile check fails, Linux is fine) stops the landing
+rm -f "$LANE/native/host/FAIL"; touch "$LANE/WINFAIL"; echo 'fn d() {}' > "$LANE/native/host/src/d.rs"; g add -A; g commit -qm "host: d, Windows-only error"; before=$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)
+gland > "$T/o23"; rc=$?; [ $rc != 0 ] && grep -q "host: Windows cross-compile check: FAILED" "$T/o23" && [ "$(git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/lane)" = "$before" ]; ok $? "a Windows-only compile error fails the gate, nothing pushed (rc $rc)"
+# 24. i18n/*.msg changed, the generated catalog not made again: the gate names the stale file and its generator; made again, it lands
+rm -f "$LANE/WINFAIL"; mkdir -p "$LANE/i18n" "$LANE/mobile/android/app/src/main/java/dev/backplane/mobile"
+printf 'import pathlib\nr = pathlib.Path(__file__).resolve().parent.parent\n(r / "mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt").write_text("// " + (r / "i18n/en.msg").read_text())\n' > "$LANE/scripts/i18n-android.py"
+echo 'a.b = A' > "$LANE/i18n/en.msg"; (cd "$LANE" && python3 scripts/i18n-android.py); g add -A; g commit -qm "i18n: a.b, its catalog"; gland > /dev/null
+echo 'a.c = C' >> "$LANE/i18n/en.msg"; g commit -qam "i18n: a.c, no catalog"
+gland > "$T/o24"; rc=$?; [ $rc != 0 ] && grep -q "i18n: FAILED: mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt is stale ([0-9]* lines differ): run python3 scripts/i18n-android.py and commit it" "$T/o24"; ok $? "a .msg change without its catalog fails the gate, naming the generator (rc $rc)"
+(cd "$LANE" && python3 scripts/i18n-android.py); g commit -qam "i18n: catalog"
+gland > "$T/o24b"; rc=$?; [ $rc = 0 ] && grep -q "i18n: the catalogs are what i18n/\*.msg makes" "$T/o24b"; ok $? "the catalog made again: the gate passes and it lands (rc $rc)"
+# 30. the gate outside the land lock, the merge inside it (held for seconds), lanes gating side by side
+echo CLEAN > "$FAKE/mergestate"; echo APPROVED > "$FAKE/review"; export FAKE_LOCKFILE=$T/locks/bp-land.lock; : > "$FAKE/mergelock"
+nl() { git -C "$T/main" fetch -q origin main; git -C "$T/main" worktree add -q -b "$1" "$T/l-$1" origin/main 2>/dev/null; echo "x $1" > "$T/l-$1/$2"; git -C "$T/l-$1" add -A; git -C "$T/l-$1" commit -qm "$1: $2"; }
+lland() { (cd "$T/l-$1" && sh scripts/land.sh 2>&1); }
+nl p1 docs/p1.md; : > "$T/gl"
+LAND_TEST="if flock -n $T/locks/bp-land.lock true; then echo gate-lock-free; else echo gate-lock-held; fi >> $T/gl" lland p1 > "$T/o30"; rc=$?
+[ $rc = 0 ] && [ "$(cat "$T/gl")" = gate-lock-free ] && [ "$(cat "$FAKE/mergelock")" = held ] && flock -n "$T/locks/bp-land.lock" true && grep -q "the land lock was held [0-9]*s for the merge" "$T/o30"; ok $? "the gate holds no lock; the merge holds the land lock, released after (rc $rc)"
+# 31. two lanes gate at once (each gate 2 s), then merge one after the other: both land
+nl p2 docs/p2.md; nl p3 docs/p3.md; : > "$T/gt"
+G2="echo start >> $T/gt; sleep 2; echo end >> $T/gt"
+( LAND_TEST="$G2" lland p2 > "$T/o31a" ) & a=$!; ( LAND_TEST="$G2" lland p3 > "$T/o31b" ) & b=$!; wait $a; ra=$?; wait $b; rb=$?
+[ $ra = 0 ] && [ $rb = 0 ] && [ "$(head -n 2 "$T/gt" | tr '\n' ' ')" = "start start " ] && git --git-dir="$ORIGIN" cat-file -e main:docs/p2.md && git --git-dir="$ORIGIN" cat-file -e main:docs/p3.md; ok $? "two lanes gate at the same time and both merge, serialized in the lock ($ra $rb)"
+# 32. main moves during a gate in a way that conflicts: the rebase in the lock stops with a line, the lock is released, nothing is pushed
+nl p4 docs/shared.md; nl p5 docs/shared.md
+LAND_TEST="[ -f $T/p4done ] || { touch $T/p4done; (cd $T/l-p4 && LAND_TEST=true sh scripts/land.sh >/dev/null 2>&1); }" lland p5 > "$T/o32"; rc=$?
+[ $rc != 0 ] && grep -q "p5 conflicts with main .* (in the land lock): resolve it" "$T/o32" && ! git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/p5 >/dev/null && flock -n "$T/locks/bp-land.lock" true; ok $? "a conflict found in the lock: a clear line, the lock released, nothing pushed (rc $rc)"
+# 33. GitHub refuses the merge once (main moved in that instant): rebased and merged again inside the lock, no second gate
+nl p6 docs/p6.md; touch "$FAKE/refuse-once"; : > "$T/g33"
+LAND_TEST="echo g >> $T/g33" lland p6 > "$T/o33"; rc=$?
+[ $rc = 0 ] && grep -q "GitHub refused the merge of PR #[0-9]* (main moved?): rebasing again, in the lock" "$T/o33" && [ "$(wc -l < "$T/g33")" = 1 ] && git --git-dir="$ORIGIN" cat-file -e main:docs/p6.md; ok $? "GitHub refused once: rebased and merged in the lock, one gate (rc $rc)"
+# 34. the old way, wrapped in bp-lock.sh land: no deadlock, it lands, and says the wrapper is not needed
+nl p7 docs/p7.md
+(cd "$T/l-p7" && LAND_TEST=true sh scripts/bp-lock.sh land -- sh scripts/land.sh) > "$T/o34" 2>&1; rc=$?
+[ $rc = 0 ] && grep -q "already inside the land lock" "$T/o34" && git --git-dir="$ORIGIN" cat-file -e main:docs/p7.md; ok $? "wrapped in bp-lock.sh land: no deadlock, landed, told to drop the wrapper (rc $rc)"
+# 35. a commit made in the worktree while it gated: the merge phase refuses it (only what the gate passed lands)
+nl p8 docs/p8.md
+LAND_TEST="echo more > $T/l-p8/docs/p8b.md; git -C $T/l-p8 add -A; git -C $T/l-p8 commit -qm 'p8: after the gate'" lland p8 > "$T/o35"; rc=$?
+[ $rc != 0 ] && grep -q "p8 changed since the gate" "$T/o35" && ! git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/p8 >/dev/null; ok $? "a commit made during the gate is refused, nothing pushed (rc $rc)"
+# 36. main takes an i18n change while a lane gates (its catalogs made before): the rebase in the land lock merges cleanly, the catalogs are made
+# again there, found stale, and nothing is pushed
+nl p9 docs/p9.md
+LAND_TEST="git -C $T/main pull -q origin main && echo 'a.z = Z' >> $T/main/i18n/en.msg && git -C $T/main commit -qam 'main: a.z, no catalog' && git -C $T/main push -q origin HEAD:main" lland p9 > "$T/o36"; rc=$?
+[ $rc != 0 ] && grep -q "i18n catalogs are stale" "$T/o36" && ! git --git-dir="$ORIGIN" rev-parse -q --verify refs/heads/p9 >/dev/null && flock -n "$T/locks/bp-land.lock" true; ok $? "an i18n change main took during the gate: the catalogs made again in the lock, stale, nothing pushed (rc $rc)"
+# 37. main gains a catalog key, the PR adds another: the .msg files merge, the generated Msg.kt (one line here) conflicts; land.sh makes it again
+# from the merged .msg, the rebase goes on, and it lands with both keys. 38. a conflict in a .msg itself still stops it.
+M=$T/main; git -C "$M" pull -q origin main
+printf 'import pathlib\nr = pathlib.Path(__file__).resolve().parent.parent\nt = (r / "i18n/en.msg").read_text().split()\n(r / "mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt").write_text("// " + " ".join(t) + "\\n")\n' > "$M/scripts/i18n-android.py"
+printf 'k1.a = A\nk2.a = A\nk3.a = A\nk4.a = A\nk5.a = A\nk6.a = A\nk7.a = A\nk8.a = A\n' > "$M/i18n/en.msg"; (cd "$M" && python3 scripts/i18n-android.py)
+git -C "$M" add -A; git -C "$M" commit -qm "main: one-line catalog"; git -C "$M" push -q origin HEAD:main
+nl p10 docs/p10.md; sed -i 's/^k8.a = A$/&\nk9.pr = P/' "$T/l-p10/i18n/en.msg"; (cd "$T/l-p10" && python3 scripts/i18n-android.py); git -C "$T/l-p10" commit -qam "p10: k9.pr"
+nl p11 docs/p11.md; sed -i 's/^k1.a = A$/k0.main = M\n&/' "$T/l-p11/i18n/en.msg"; (cd "$T/l-p11" && python3 scripts/i18n-android.py); git -C "$T/l-p11" commit -qam "p11: k0.main"
+(cd "$T/l-p11" && LAND_TEST=true sh scripts/land.sh) > /dev/null 2>&1
+LAND_TEST=true lland p10 > "$T/o37"; rc=$?
+cat=$(git --git-dir="$ORIGIN" show main:mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt)
+[ $rc = 0 ] && grep -q "conflicted only in generated catalogs (mobile/android/app/src/main/java/dev/backplane/mobile/Msg.kt): made again" "$T/o37" \
+  && case "$cat" in *k0.main*k9.pr*) true;; *) false;; esac; ok $? "main and the PR each add a key: Msg.kt conflicts alone, made again from the merged .msg, landed with both (rc $rc)"
+nl p12 docs/p12.md; sed -i 's/^k5.a = A$/k5.a = PR/' "$T/l-p12/i18n/en.msg"; (cd "$T/l-p12" && python3 scripts/i18n-android.py); git -C "$T/l-p12" commit -qam "p12: k5"
+nl p13 docs/p13.md; sed -i 's/^k5.a = A$/k5.a = MAIN/' "$T/l-p13/i18n/en.msg"; (cd "$T/l-p13" && python3 scripts/i18n-android.py); git -C "$T/l-p13" commit -qam "p13: k5"
+(cd "$T/l-p13" && LAND_TEST=true sh scripts/land.sh) > /dev/null 2>&1; h12=$(git -C "$T/l-p12" rev-parse HEAD)
+LAND_TEST=true lland p12 > "$T/o38"; rc=$?
+[ $rc != 0 ] && grep -q "p12 conflicts with main" "$T/o38" && [ "$(git -C "$T/l-p12" rev-parse HEAD)" = "$h12" ] && [ -z "$(git -C "$T/l-p12" status --porcelain)" ]; ok $? "a conflict in a .msg itself: stopped as before, the branch as it was (rc $rc)"
+# 39. git push and fetch run with i2cjak's GH_TOKEN (the active gh account is another one); the gate (LAND_TEST) never sees it
+HK=$(git -C "$T/main" rev-parse --path-format=absolute --git-common-dir)/hooks; mkdir -p "$HK"
+printf '#!/bin/sh\necho "${GH_TOKEN:-none}" >> %s\n' "$T/pushtok" > "$HK/pre-push"; chmod +x "$HK/pre-push"; : > "$T/pushtok"; : > "$T/gatetok"
+nl p14 docs/p14.md
+LAND_TEST="echo \"\${GH_TOKEN:-none}\" >> $T/gatetok" lland p14 > "$T/o39"; rc=$?; rm -f "$HK/pre-push"
+[ $rc = 0 ] && [ -s "$T/pushtok" ] && [ "$(sort -u "$T/pushtok")" = fake-token ] && [ "$(cat "$T/gatetok")" = none ] && ! grep -q fake-token "$T/o39"; ok $? "git push gets i2cjak's GH_TOKEN, the gate gets none, it is never printed (rc $rc)"
+! grep -n -E '(^|[^a-z_])git (fetch|push)[^#]*origin' "$ROOT/scripts/land.sh" | grep -v -E '^[0-9]+:\s*#|gitr '; ok $? "every git fetch/push against origin goes through gitr (i2cjak's token)"
+grep -q 'not running git' "$ROOT/scripts/land.sh" && (export FAKE_NOLOGIN=1; gh_prog=$LAND_GH; eval "$(grep '^gitr()' "$ROOT/scripts/land.sh")"; ! gitr --version >/dev/null 2>&1); ok $? "gitr runs no git when i2cjak's token cannot be read"
+unset FAKE_LOCKFILE
 [ $fails = 0 ] && echo "land_pr_test: all passed" || { echo "land_pr_test: $fails failed"; exit 1; }

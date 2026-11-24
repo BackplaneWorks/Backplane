@@ -1,6 +1,6 @@
 //! What `systemd-run --user --scope` takes on this machine, probed once (std only: the hub's memscope.rs and kicad checks, the window's
 //! launcher and the guard include this file). Older systemd rejects properties it does not know ("Unknown assignment: OOMPolicy=continue":
-//! OOMPolicy came in 243, ManagedOOMPreference in 248), and some machines have no user manager at all (a container, WSL, a non-systemd
+//! OOMPolicy came in 243 for services but a scope takes it only from 253 or a late 252 point release, ManagedOOMPreference in 248), and some machines have no user manager at all (a container, WSL, a non-systemd
 //! distro, a login without a user bus). A scope is made only with the properties a real scope here accepted; where none can be made, things
 //! start unscoped, with one log line, never an error. `BACKPLANE_NO_SCOPE` turns scopes off by hand. `BACKPLANE_SYSTEMD_RUN` names the
 //! systemd-run to use (tests: a stand-in that rejects a property, or one that is missing).
@@ -18,12 +18,19 @@ pub fn program() -> String { std::env::var("BACKPLANE_SYSTEMD_RUN").ok().filter(
 #[derive(Clone, Debug, PartialEq)]
 pub struct Support { pub ok: bool, pub why: String, pub version: Option<u32>, pub props: Vec<String> }
 
-/// The first systemd version that could take a property in a transient scope (None: any we would run on): only to skip a probe that cannot
-/// pass; the probe decides. OOMPolicy came in 243 for services, and a scope takes it later (249 refuses it, 252 takes it: measured).
+/// The first systemd version that could take a property in a transient scope (None: any we would run on). Below it the property is left out
+/// without a try; from it on the probe decides, because a version cannot: OOMPolicy came in 243 for services, but systemd-run took it for a
+/// scope only from 253 upstream, and from a 252 point release (Debian 12's 252.39 takes it, 252.0 and 252.1 do not; no 249, 250 or 251 release
+/// does, Ubuntu 22.04's 249.11 refuses it: measured, #1312). ManagedOOMPreference came in 248 for every unit type. Deliberate trade: on stable
+/// releases this changes no outcome, only how many probe scopes run; a 249-251 build with a distribution's own backport would lose OOMPolicy.
 pub fn since(prop: &str) -> Option<u32> {
     match prop.split('=').next().unwrap_or("") {
-        "OOMPolicy" => Some(243), "ManagedOOMPreference" => Some(248), "MemorySwapMax" => Some(232), "MemoryMax" => Some(231), _ => None,
+        "OOMPolicy" => Some(252), "ManagedOOMPreference" => Some(248), "MemorySwapMax" => Some(232), "MemoryMax" => Some(231), _ => None,
     }
+}
+/// Those of `wanted` this systemd's version could take in a scope (all of them when the version is unknown): what the probe tries.
+pub fn could_take(version: Option<u32>, wanted: &[String]) -> Vec<String> {
+    wanted.iter().filter(|p| version.zip(since(p)).map_or(true, |(v, s)| v >= s)).cloned().collect()
 }
 /// "systemd 249 (249.11-0ubuntu3.12)" -> 249.
 pub fn parse_version(out: &str) -> Option<u32> {
@@ -57,8 +64,9 @@ fn try_scope(mk: Mk, prog: &str, base: &[String], props: &[String]) -> Result<()
     }
 }
 
-/// Probe once: can a scope be made (with `base`, e.g. `--slice=...`), and which of `wanted` does it take. All of them at once first (one run
-/// where systemd is current); when that fails, the scope alone, then each property the version should know, alone.
+/// Probe once: can a scope be made (with `base`, e.g. `--slice=...`), and which of `wanted` does it take. Every one this version could take
+/// at once first (`could_take`: one run on a current systemd, and on 249 one run without OOMPolicy); when systemd-run still refuses (an
+/// "Unknown assignment" from a build without the property), the scope alone, then each of those properties alone.
 pub fn probe(mk: Mk, base: &[String], wanted: &[String]) -> Support {
     if !cfg!(target_os = "linux") { return Support { ok: false, why: "not Linux".into(), version: None, props: vec![] } }
     if std::env::var_os("BACKPLANE_NO_SCOPE").is_some() { return Support { ok: false, why: "BACKPLANE_NO_SCOPE is set".into(), version: None, props: vec![] } }
@@ -70,9 +78,11 @@ pub fn probe_in(mk: Mk, prog: &str, bus: bool, base: &[String], wanted: &[String
     let version = mk(prog).arg("--version").stdin(Stdio::null()).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).and_then(|o| parse_version(&String::from_utf8_lossy(&o.stdout)));
     if version.is_none() && mk(prog).arg("--version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().is_err() { return no("no systemd-run", None) }
     if !bus { return no("no user session bus", version) }
-    if try_scope(mk, prog, base, wanted).is_ok() { return Support { ok: true, why: String::new(), version, props: wanted.to_vec() } }
-    if let Err(e) = try_scope(mk, prog, base, &[]) { return no(&format!("no user systemd answers ({e})"), version) }
-    let props = wanted.iter().filter(|p| version.zip(since(p)).map_or(true, |(v, s)| v >= s)).filter(|p| try_scope(mk, prog, base, std::slice::from_ref(p)).is_ok()).cloned().collect();
+    let able = could_take(version, wanted);
+    let all = try_scope(mk, prog, base, &able);
+    if all.is_ok() { return Support { ok: true, why: String::new(), version, props: able } }
+    if let Err(e) = if able.is_empty() { all } else { try_scope(mk, prog, base, &[]) } { return no(&format!("no user systemd answers ({e})"), version) }
+    let props = able.into_iter().filter(|p| try_scope(mk, prog, base, std::slice::from_ref(p)).is_ok()).collect();
     Support { ok: true, why: String::new(), version, props }
 }
 /// `probe`'s answer for the log: "systemd 245; without OOMPolicy=continue".
@@ -116,9 +126,22 @@ mod tests {
         assert_eq!(parse_version("systemd 249 (249.11-0ubuntu3.12)\n+PAM +AUDIT"), Some(249));
         assert_eq!(parse_version("systemd 239 (239-58.el8)"), Some(239));
         assert_eq!(parse_version("garbage"), None);
-        assert_eq!(since("OOMPolicy=continue"), Some(243)); assert_eq!(since("ManagedOOMPreference=none"), Some(248));
+        assert_eq!(since("OOMPolicy=continue"), Some(252)); assert_eq!(since("ManagedOOMPreference=none"), Some(248));
         assert!(scope_failure("Unknown assignment: OOMPolicy=continue\nFailed to start transient scope unit: Invalid argument"));
         assert!(scope_failure("Failed to create bus connection: No such file or directory"));
+        assert!(scope_failure("Unknown assignment: OOMPolicy=continue"), "systemd 249's whole answer (#1312)");
         assert!(!scope_failure("Error: claude: not logged in")); assert!(!scope_failure("Failed to parse board: line 3"), "a kicad-cli error is not a scope's");
+    }
+    /// What each version is asked for in a scope (#1312): 249 never OOMPolicy (Ubuntu 22.04 refuses it), 252 on up are tried and the probe
+    /// decides; ManagedOOMPreference from 248; a version not read: everything is tried.
+    #[test] fn what_each_systemd_version_is_asked_for() {
+        let want: Vec<String> = ["MemoryMax=40%", "MemorySwapMax=1G", "OOMPolicy=continue", "ManagedOOMPreference=none"].iter().map(|s| s.to_string()).collect();
+        let without_oom: Vec<String> = want.iter().filter(|p| !p.starts_with("OOMPolicy")).cloned().collect();
+        assert_eq!(could_take(Some(249), &want), without_oom);
+        assert_eq!(could_take(Some(251), &want), without_oom);
+        for v in [252, 253, 255] { assert_eq!(could_take(Some(v), &want), want, "systemd {v}") }
+        assert_eq!(could_take(Some(247), &want), w(&["MemoryMax=40%", "MemorySwapMax=1G"]));
+        assert_eq!(could_take(None, &want), want);
+        fn w(v: &[&str]) -> Vec<String> { v.iter().map(|s| s.to_string()).collect() }
     }
 }

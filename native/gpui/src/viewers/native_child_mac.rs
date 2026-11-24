@@ -120,6 +120,19 @@ pub fn pointer_global() -> Option<(f64, f64)> {
 /// Seconds since the last left or right mouse press anywhere, by the window server's count (kCGEventSourceStateCombinedSessionState):
 /// a press in KiCad's own window, which the client never hears of, counts too
 pub fn secs_since_press() -> f64 { unsafe { CGEventSourceSecondsSinceLastEventType(0, 1).min(CGEventSourceSecondsSinceLastEventType(0, 3)) } }
+/// Backplane itself is the active app (macOS 14+ cooperative activation: only the active app may hand activation to another).
+pub fn self_active() -> bool { unsafe { send_bool(app(), c"isActive") } }
+/// The window on top at the pointer, across every app (NSWindow windowNumberAtPoint:belowWindowWithWindowNumber:, the pointer from
+/// NSEvent mouseLocation, both in the screen's bottom-left points), 0 when none: whether a press over the pane hit KiCad's frame or a
+/// window lying over that area (another app's, a sheet of ours) (#1198)
+pub fn window_at_pointer() -> u64 {
+    unsafe {
+        let loc: unsafe extern "C" fn(*mut c_void, *mut c_void) -> CgPoint = std::mem::transmute(objc_msgSend as *const ());
+        let p = loc(class(c"NSEvent"), sel(c"mouseLocation")); // i18n-ok: an Objective-C class name
+        let at: unsafe extern "C" fn(*mut c_void, *mut c_void, CgPoint, isize) -> isize = std::mem::transmute(objc_msgSend as *const ());
+        at(class(c"NSWindow"), sel(c"windowNumberAtPoint:belowWindowWithWindowNumber:"), p, 0).max(0) as u64 // i18n-ok: an Objective-C class name
+    }
+}
 /// A mouse button is down (anywhere): a press on our window brings it in front of KiCad's frame before we hear of it, if we ever do.
 pub fn mouse_down() -> bool { unsafe { send_usize(class(c"NSEvent"), c"pressedMouseButtons") != 0 } } // i18n-ok: an Objective-C class name
 /// For a log line: the on-screen normal windows front to back as (number, whose), ours `u`, the frame `f`, KiCad's other windows `k`,
@@ -205,7 +218,36 @@ unsafe fn send_activate_self(a: *mut c_void) {
     if responds(a, sel(c"respondsToSelector:"), sel(c"activate")) { send0(a, c"activate"); }
     else { let f: unsafe extern "C" fn(*mut c_void, *mut c_void, bool) = std::mem::transmute(objc_msgSend as *const ()); f(a, sel(c"activateIgnoringOtherApps:"), true); }
 }
-pub fn hand_back(w: u64) { focus(w) }
+/// The keyboard back to Backplane after a reserved chord from KiCad (Cmd+K, the escape chord; the only callers). macOS 14+ honours our
+/// activate only with the active app's consent, which KiCad gives when it hands a reserved chord over (fork, #1399): whether it took is
+/// said 50 ms on (`kicad_mac_focus_taken`), and once more after one retry 50 ms later when it did not (the consent and the chord can
+/// land in either order). The retry is only for that refused case, KiCad still the active app: never once the person moved on (we are
+/// hidden: Cmd+H replayed as HideApp; another app in front: Cmd+Tab; a new press anywhere since), and never once a hand-in or another
+/// focus of ours has happened since (the yield generation; Cmd+H and Cmd+Q, HideApp and Quit, move it too: no retry once the person
+/// hid or quit Backplane). Nothing at all when the window is no longer ours (closed).
+pub fn hand_back(w: u64) {
+    focus(w);
+    if ns_window(w).is_null() { return }
+    hand_back_check(w, 0, YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst), std::time::Instant::now());
+}
+fn hand_back_check(w: u64, attempt: u8, yield_gen: u64, since: std::time::Instant) {
+    extern "C" fn check(ctx: *mut c_void) {
+        let (w, attempt, yield_gen, since) = *unsafe { Box::from_raw(ctx as *mut (u64, u8, u64, std::time::Instant)) };
+        let taken = unsafe { send_bool(app(), c"isActive") };
+        let hidden = unsafe { send_bool(app(), c"isHidden") };
+        let kicad_active = app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed));
+        let pressed_since = secs_since_press() < since.elapsed().as_secs_f64();
+        let unchanged = YIELD_GEN.load(std::sync::atomic::Ordering::SeqCst) == yield_gen;
+        let retry = crate::viewers::kicad_pane::hand_back_retry(attempt, taken, unchanged, hidden, kicad_active, pressed_since);
+        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus_taken": {"taken": taken, "attempt": attempt, "retry": retry, "moved_since": !unchanged, "hidden": hidden, "kicad_active": kicad_active, "pressed_since": pressed_since}}));
+        if retry {
+            unsafe { send_activate_self(app()); let nw = ns_window(w); if !nw.is_null() { send0(nw, c"makeKeyWindow"); } }
+            hand_back_check(w, attempt + 1, yield_gen, since);
+        }
+    }
+    let ctx = Box::into_raw(Box::new((w, attempt, yield_gen, since))) as *mut c_void;
+    unsafe { dispatch_after_f(dispatch_time(0, 50_000_000), std::ptr::addr_of!(_dispatch_main_q) as *const c_void, ctx, check); }
+}
 /// Consent for KiCad to activate itself (macOS 14+), without activating it: the hub's ShowFrame{focus} then has KiCad take the keyboard
 /// onto its canvas (TakeFocusForClick). Activating KiCad from here first put wx's focus on a toolbar field, and ShowFrame{focus} leaves a
 /// focus already inside the frame where it is: the canvas never had the keys (client runs 9, 10).
@@ -254,6 +296,7 @@ pub fn yield_to(w: u64) {
 }
 pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
 pub fn note_pane_keys(_kicad: bool) {}
+pub fn note_pane_on_screen(_top: u64, _child: u64, _on: bool) {}
 pub fn shield(_container: u64, _on: bool) {}
 pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
 pub fn backplane_press_ms_ago() -> u64 { u64::MAX }
@@ -271,6 +314,8 @@ static KICAD_PID: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::n
 fn app_active(pid: i64) -> bool { if pid <= 0 { return false } let a = running_app(pid); !a.is_null() && unsafe { send_bool(a, c"isActive") } }
 /// KiCad has the keyboard: its app is the active one.
 pub fn has_focus(_container: u64) -> bool { app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed)) }
+/// Strict live focus check for placement decisions (same as `has_focus` on macOS).
+pub fn has_live_focus(container: u64) -> bool { has_focus(container) }
 /// The app `pid` is the active one (an accessory app is active while it holds the keyboard, though it never owns the menu bar).
 pub fn focus_in_pid(pid: u32) -> bool { app_active(pid as i64) }
 pub fn button_over(_w: u64) -> Option<bool> { None }

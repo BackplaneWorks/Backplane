@@ -211,3 +211,54 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
     std::fs::remove_dir_all(&e.dir).unwrap();
     assert_eq!(r.resolve(&tok, 1, "/x"), "", "pairing_resolve's catch returns nothing");
 }
+
+// ---- the docking layouts follow the registry's own liveness and every retirement
+fn keep_layout(home: &Path, device: &str) {
+    let store = crate::data::layout::global(home);
+    let mut e = crate::data::layout::Entry::default();
+    // a layout of two tiles (a one-tile layout is the page, and is not kept)
+    let tile = |id: &str, kind: &str| json!({"type":"tile","id":id,"kind":kind,"source":"","explicit":false});
+    let two = json!({"version":1,"root":{"type":"split","id":"s1","axis":"row","ratio":0.5,"a":tile("t1","board"),"b":tile("t2","gerbers")},"focus":"t1","maximized":null});
+    e.drafts.insert("@view.layout:t".into(), json!(two.to_string()));
+    e.rev = 1;
+    store.put(device, "t", e);
+    store.flush();
+}
+fn has_layout(home: &Path, device: &str) -> bool { crate::data::layout::global(home).entry(device, "t").is_some() }
+
+#[test] fn device_ids_use_the_registrys_own_revoked_rule() {
+    let e = Env::new("ids-truthy"); let r = e.reg();
+    let mut ids = vec![];
+    for n in 0..4 { let inv = r.create(&routes()); ids.push(r.enroll("t", inv["code"].as_str().unwrap(), &format!("P{n}"))["id"].as_str().unwrap().to_string()); }
+    assert_eq!(r.device_ids().len(), 4);
+    // the file is read back by the next hub: `"yes"`, `1`, `true` are all revoked (never narrower than the JS rule); `false`, `0`, `""`, null are not
+    let file = e.dir.join("devices-v1.json");
+    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    let marks = [json!("yes"), json!(1), json!(true), json!(0)];
+    for (d, m) in v["devices"].as_array_mut().unwrap().iter_mut().zip(marks) { d["revoked"] = m; }
+    std::fs::write(&file, v.to_string()).unwrap();
+    let again = e.reg();
+    assert_eq!(again.device_ids(), vec![ids[3].clone()], "only the device whose `revoked` is 0 is live");
+}
+#[test] fn a_retired_device_loses_its_layouts_on_every_path_and_a_disconnect_keeps_them() {
+    let e = Env::new("retire-layouts"); let r = e.reg();
+    let pair = |n: &str| { let inv = r.create(&routes()); let d = r.enroll("t", inv["code"].as_str().unwrap(), n); (d["id"].as_str().unwrap().to_string(), d["token"].as_str().unwrap().to_string(), inv["id"].as_str().unwrap().to_string()) };
+    let (a, ta, _) = pair("A"); let (b, tb, inv_b) = pair("B"); let (c, _, _) = pair("C");
+    for d in [&a, &b, &c] { keep_layout(&e.dir, d); }
+    // a disconnect keeps the layout (the person comes back)
+    r.resolve(&ta, 1, "/ws"); r.forget(1);
+    assert!(has_layout(&e.dir, &a));
+    // revoke(device), a browser's logout (it is `revoke`), and the revoke of a used invitation (which retires its device without `revoke`): a device with no connection too
+    r.resolve(&tb, 2, "/ws");
+    assert_eq!(r.uninvite(&inv_b)["ok"], true);
+    assert!(!has_layout(&e.dir, &b), "the used invitation's device is retired: its layouts go");
+    assert_eq!(r.revoke(&a)["ok"], true);
+    assert!(!has_layout(&e.dir, &a) && has_layout(&e.dir, &c), "only the retired device's");
+    // ... and from the FILE: a store reopened from it holds nothing of them
+    let reopened = crate::data::layout::Store::open(Some(e.dir.join("viewer-layouts.json")));
+    assert!(reopened.entry(&a, "t").is_none() && reopened.entry(&b, "t").is_none() && reopened.entry(&c, "t").is_some());
+    // an unused invitation has no device; a machine invitation retires none
+    let open_inv = r.create(&routes());
+    assert_eq!(r.uninvite(open_inv["id"].as_str().unwrap())["ok"], true);
+    assert!(has_layout(&e.dir, &c));
+}

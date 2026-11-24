@@ -148,8 +148,42 @@ pub fn act(req: &Req) -> Option<ActOut> {
         // the project menu's Remove (the client asks twice) and a thread's New subthread (`<parent>|<project>`: the new thread is selected as New thread's is)
         // the machine picker's Clone it here (present/screen.rs `picker`): this hub clones the remote and adds it (net/registry.rs `project.clone`)
         // it opens the folder picker on ~/Documents/<repo> to confirm (or change) the folder; the picker's Clone row sends `proj-clone-go` `<origin>\u{1f}<folder>`
-        "proj-clone" => { if v.is_empty() { return None } let name = v.rsplit('/').next().unwrap_or("project"); a.set("@proj.open", "1"); a.set("@proj.text", &format!("~/Documents/{name}")); a.set("@proj.clone", v); a.set("@proj.err", ""); a.set("@menu", ""); }
-        "proj-clone-go" => { let (origin, path) = v.split_once('\u{1f}')?; a.rpc("project.clone", json!({"origin": origin, "path": path})); a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.clone", ""); a.set("@proj.err", ""); }
+        "proj-clone" => {
+            if v.is_empty() { return None }
+            let home = crate::plat::dirs::home_or_empty();
+            let dest = crate::commands::clone::parse(v).map(|r| crate::commands::clone::default_dest(&crate::commands::clone::default_parent(&home), &r, &home).to_string_lossy().into_owned())
+                .unwrap_or_else(|| format!("{home}/Documents/{}", v.rsplit('/').next().unwrap_or("project")));
+            a.set("@proj.open", "1"); a.set("@proj.mode", "clone"); a.set("@proj.text", &crate::commands::clone::tilde(&dest, &home)); a.set("@proj.clone", v); a.set("@proj.job", ""); a.set("@proj.err", ""); a.set("@menu", "");
+        }
+        // Clone (commands/clone): the job is named here so the dialog follows it at once; `@proj.first`: /project's first message for its thread
+        "proj-clone-go" => {
+            let (repo, path) = v.split_once('\u{1f}')?;
+            let id = crate::commands::clone::new_id();
+            a.rpc("clone.start", json!({"id": id, "repo": repo, "dest": path, "thread": draft(r.session, "@proj.nothread").is_empty(), "text": draft(r.session, "@proj.first")}));
+            a.set("@proj.job", &id); a.set("@proj.signin", ""); a.set("@proj.err", "");
+        }
+        "proj-clone-cancel" if !v.is_empty() => a.rpc("clone.cancel", json!({"id": v})),
+        // Try again: the same clone as a new job (its spec is the hub's)
+        "proj-clone-retry" if !v.is_empty() => {
+            let j = crate::commands::clone::job(v)?; let id = crate::commands::clone::new_id();
+            let mut p = j.spec.clone(); p["id"] = json!(id); p["dest"] = json!(j.dest); p["parent"] = json!(""); p["name"] = json!("");
+            a.rpc("clone.start", p); a.set("@proj.job", &id); a.set("@proj.signin", "");
+        }
+        // Back: from a clone that ended to its destination step (`v`: the job), or from the destination step to the repository step
+        "proj-clone-back" => {
+            if let Some(j) = crate::commands::clone::job(v).filter(|_| !v.is_empty()) {
+                a.set("@proj.job", ""); a.set("@proj.clone", j.spec["repo"].as_str().unwrap_or("")); a.set("@proj.text", &crate::commands::clone::tilde(&j.dest, &crate::plat::dirs::home_or_empty()));
+            } else if !draft(r.session, "@proj.job").is_empty() { a.set("@proj.job", ""); }
+            else { let repo = draft(r.session, "@proj.clone").to_string(); a.set("@proj.clone", ""); a.set("@proj.text", &repo); }
+            a.set("@proj.mode", "clone"); a.set("@proj.err", "");
+        }
+        "proj-clone-thread" => a.set("@proj.nothread", if v == "off" { "1" } else { "" }),
+        // Sign in to GitHub: gh's device sign-in on this hub's machine; its code is drawn in the dialog (`signin`), the person enters it on any device
+        "proj-gh-signin" => { a.rpc("clone.signin", json!({"restart": true})); a.set("@proj.signin", "1"); }
+        "proj-mode" => {
+            let clone = v == "clone";
+            a.set("@proj.mode", if clone { "clone" } else { "" }); a.set("@proj.text", if clone { "" } else { "~/" }); a.set("@proj.clone", ""); a.set("@proj.job", ""); a.set("@proj.err", ""); a.set("@proj.signin", "");
+        }
         // Link with… (a project with no remote): this project shows as one with the other (`project.link.<id>` = the other's key, present/merged.rs); "" unlinks
         "proj-link" => { let (id, key) = v.split_once('|')?; if id.is_empty() { return None } a.rpc("setting.set", json!({"key": format!("project.link.{id}"), "value": key})); a.set("@menu", ""); }
         "proj-remove" => { if v.is_empty() { return None } a.rpc("project.remove", json!({"project": v})); a.set("@menu", ""); a.set("@del", ""); }
@@ -182,12 +216,22 @@ pub fn act(req: &Req) -> Option<ActOut> {
         }
         // Add project: the folder picker (present/picker.rs draws it from `@proj.open`, `@proj.text`). Typing and going into a folder set the text;
         // Add and Create send the request that makes the project (and its first thread, which the reply selects: Made.want).
-        "picker-open" => { a.set("@proj.open", "1"); a.set("@proj.text", "~/"); a.set("@proj.err", ""); a.set("@proj.clone", ""); a.set("@menu", "") }
+        // a clone still running when the dialog was closed: it opens on that clone again
+        "picker-open" => {
+            let running = crate::commands::clone::job(draft(r.session, "@proj.job")).map_or(false, |j| j.state == crate::commands::clone::State::Running);
+            a.set("@proj.open", "1"); a.set("@menu", "");
+            if !running { a.set("@proj.text", "~/"); a.set("@proj.err", ""); a.set("@proj.clone", ""); a.set("@proj.mode", ""); a.set("@proj.job", ""); a.set("@proj.signin", ""); a.set("@proj.first", ""); }
+        }
         // /project on a folder that holds something (its reply's `exists`): the dialog opens on that folder, its Add row adding it as it is, the reason above it
         "proj-exists" if !v.is_empty() => { a.set("@proj.open", "1"); a.set("@proj.text", v.trim_end_matches('/')); a.set("@proj.err", &crate::commands::fs::not_empty(v)); a.set("@proj.clone", ""); a.set("@menu", "") }
         "picker-type" => { a.set("@proj.text", v); a.set("@proj.err", "") }
         "proj-cd" => { let t = if v.ends_with('/') { v.to_string() } else { format!("{v}/") }; a.set("@proj.text", &t); a.set("@proj.err", "") }
-        "proj-close" => { a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.err", ""); a.set("@proj.clone", "") }
+        // closed while a clone runs: the clone goes on (Add project opens on it again); `@proj.job` is kept for that
+        "proj-close" => {
+            let running = crate::commands::clone::job(draft(r.session, "@proj.job")).map_or(false, |j| j.state == crate::commands::clone::State::Running);
+            a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.err", ""); a.set("@proj.clone", ""); a.set("@proj.mode", ""); a.set("@proj.signin", ""); a.set("@proj.first", ""); a.set("@proj.nothread", "");
+            if !running { a.set("@proj.job", ""); }
+        }
         "proj-add" | "proj-new" if !v.trim().is_empty() => {
             let rid = a.rid.to_string();
             let at = format!("{}|{}", r.session["info"]["local.machine"].as_str().unwrap_or(""), r.session["info"]["local.generation"].as_str().unwrap_or(""));
@@ -236,6 +280,23 @@ mod tests {
         assert!(run("row-reparent", "t2", &sess).is_none() && run("row-reparent", "t2|t2", &sess).is_none() && run("row-reparent", "|t1", &sess).is_none(), "a move needs a thread and another parent");
     }
     // Add project: open, type, go in, add; the add sends project.add with the path and arms the want for the first thread; close clears
+    // Clone from git: the tabs switch the field; Clone names the job and sends clone.start with the thread choice and /project's first message
+    #[test] fn the_clone_actions_switch_mode_start_the_job_and_go_back() {
+        let _parent = crate::commands::clone::test_parent(true);
+        let run = |action: &str, value: &str, session: &Value| act(&Req { hub: "h", session, sel: "", action, value, title_of: &|_| String::new() }).unwrap();
+        let sess = json!({"rid": 3, "drafts": {"@proj.open": "1"}, "info": {}});
+        let d = run("proj-mode", "clone", &sess).session_patch["drafts"].clone(); assert_eq!((d["@proj.mode"].as_str(), d["@proj.text"].as_str()), (Some("clone"), Some("")));
+        let d = run("proj-mode", "folder", &sess).session_patch["drafts"].clone(); assert_eq!((d["@proj.mode"].as_str(), d["@proj.text"].as_str()), (Some(""), Some("~/")));
+        let d = run("proj-clone", "o/kit", &sess).session_patch["drafts"].clone(); assert_eq!((d["@proj.clone"].as_str(), d["@proj.mode"].as_str()), (Some("o/kit"), Some("clone")));
+        assert!(d["@proj.text"].as_str().unwrap().ends_with("/kit"), "{d}");
+        let s2 = json!({"rid": 3, "drafts": {"@proj.open": "1", "@proj.clone": "o/kit", "@proj.nothread": "1", "@proj.first": "go"}, "info": {}});
+        let o = run("proj-clone-go", "o/kit\u{1f}/h/kit", &s2); let job = o.session_patch["drafts"]["@proj.job"].as_str().unwrap().to_string(); assert!(job.starts_with('c'));
+        let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(sent["m"], "clone.start"); assert_eq!(sent["p"], json!({"id": job, "repo": "o/kit", "dest": "/h/kit", "thread": false, "text": "go"}));
+        let d = run("proj-clone-back", "", &s2).session_patch["drafts"].clone(); assert_eq!((d["@proj.clone"].as_str(), d["@proj.text"].as_str()), (Some(""), Some("o/kit")), "back to the repository step");
+        assert_eq!(run("proj-clone-thread", "on", &s2).session_patch["drafts"]["@proj.nothread"], "");
+        let o = run("proj-gh-signin", "", &s2); assert!(o.cmds[0]["text"].as_str().unwrap().contains("clone.signin"));
+    }
     #[test] fn the_folder_picker_actions_set_the_text_and_add_sends_the_request() {
         let sess = json!({"rid": 3, "drafts": {}, "info": {"local.machine": "m", "local.generation": "g"}});
         let run = |action: &str, value: &str, session: &Value| act(&Req { hub: "h", session, sel: "", action, value, title_of: &|_| String::new() }).unwrap();
@@ -326,8 +387,13 @@ mod tests {
         let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{"@runon.p1":"L~p9"},"info":{}}), sel: "", action: "new-thread", value: "p1", title_of: &t }).unwrap();
         let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap(); assert_eq!((sent["m"].as_str(), sent["p"]["project"].as_str()), (Some("thread.create"), Some("L~p9")));
         // Clone it here opens the folder picker on ~/Documents/<repo> to confirm it
+        let _parent = crate::commands::clone::test_parent(true); // the default folder: no other test's clone has set the folder used last
+        // act() reads the machine's real home: ~/Documents/<repo> where it has a Documents folder, else ~/<repo>; a Board already there takes the next name
+        let home = crate::plat::dirs::home_or_empty(); let parent = if std::path::Path::new(&home).join("Documents").is_dir() { format!("{home}/Documents") } else { home.clone() };
+        let docs_board = crate::commands::clone::tilde(&crate::commands::clone::default_dest(&parent, &crate::commands::clone::parse("github.com/o/Board").unwrap(), &home).to_string_lossy(), &home);
+        assert!(docs_board.ends_with("/Board") || docs_board.contains("/Board-"), "{docs_board}");
         let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{}}), sel: "", action: "proj-clone", value: "github.com/o/Board", title_of: &t }).unwrap();
-        assert_eq!((o.session_patch["drafts"]["@proj.open"].as_str(), o.session_patch["drafts"]["@proj.text"].as_str(), o.session_patch["drafts"]["@proj.clone"].as_str()), (Some("1"), Some("~/Documents/Board"), Some("github.com/o/Board")));
+        assert_eq!((o.session_patch["drafts"]["@proj.open"].as_str(), o.session_patch["drafts"]["@proj.text"].as_str(), o.session_patch["drafts"]["@proj.clone"].as_str()), (Some("1"), Some(docs_board.as_str()), Some("github.com/o/Board")));
         assert!(o.cmds.is_empty(), "nothing is cloned before the folder is confirmed");
     }
 }

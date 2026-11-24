@@ -93,10 +93,7 @@ impl Echo {
 
 /// The settings dialog's own state (the hub keeps the page; this keeps the list the left nav shows and what is typed in its search).
 #[derive(Default)]
-pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, /** page -> the labels of its rows, one a line (the hub's `words`): what the search finds besides titles */ pub words: HashMap<String, String>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool, /** the Hubs page of this device */ pub hubs: bool }
-/// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
-const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "git", "notifications", "agents", "mcp", "writing"], &["cad", "mouse", "browser", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
-pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
+pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, /** page -> its group's name (the hub's `group`) */ pub groups: HashMap<String, String>, /** page -> each of its rows' label and note (the hub's `words` and `notes`): what the search finds besides titles */ pub finds: HashMap<String, Vec<(String, String)>>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool, /** the Hubs page of this device */ pub hubs: bool }
 /// How the dialog fits a window of `w` x `h` px: the margin around it, the page list's width, and whether a row's controls go under its words
 /// (a narrow page has no room beside them). The page list and the rows each scroll on their own, so nothing is out of reach on a short window.
 /// `rows` is the width the rows are laid out in (the page less its side margins, `gutter` each); each row decides from it whether its controls
@@ -188,7 +185,8 @@ fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowr
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
     match page { "appearance" => "sun", "threads" => "message-square", "git" => "git-branch", "notifications" => "bell", "agents" => "cpu", "mcp" => "plug", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
-        "devices" => "link", "network" => "globe", "browser" => "globe", "voice" => "mic", "keys" => "code", "timezone" => "clock", "rules" => "circle-check", "usage" => "gauge", "about" => "book", "privacy" => "file-text", _ => "settings" }
+        "devices" => "link", "network" => "globe", "browser" => "external-link", "voice" => "mic", "keys" => "code", "timezone" => "clock", "rules" => "circle-check", "usage" => "gauge", "about" => "book", "privacy" => "file-text",
+        "machines" => "terminal", "mouse" => "zoom-in", "setup" => "wrench", "developer" => "flask-conical", "@device" => "settings", "@hubs" => "globe", "@accounts" => "user", _ => "settings" }
 }
 /// The hub shows its page menu (rows that are each one `settings-page` button naming a page) or one page (its first row is the way back).
 #[derive(Debug, PartialEq)]
@@ -199,16 +197,60 @@ pub fn shown(rows: &[Row]) -> Shown {
     if rows.first().map_or(false, |r| r.buttons.iter().any(|b| b.action == "settings-page" && b.value.is_empty())) { return Shown::Page; }
     Shown::Other
 }
-/// The nav list: the menu's pages in group order (stable within a group).
-pub fn nav_order(items: &[(String, String)]) -> Vec<(String, String)> { let mut v = items.to_vec(); v.sort_by_key(|(p, _)| group_of(p)); v }
 /// Whether a nav title matches what is typed in the search (an empty search matches all).
 pub fn nav_matches(title: &str, q: &str) -> bool { let q = q.trim().to_lowercase(); q.is_empty() || title.to_lowercase().contains(&q) }
-/// The hub's menu rows' `words` by page (older hubs send none: the search then matches titles only).
-pub fn menu_words(rows: &Value) -> HashMap<String, String> {
-    rows.as_array().into_iter().flatten().filter_map(|r| { let b = r["buttons"].as_array()?.iter().find(|b| b["action"] == "settings-page" && b["value"].as_str().map_or(false, |v| !v.is_empty()))?; Some((b["value"].as_str()?.to_string(), r["words"].as_str()?.to_string())) }).collect()
+fn menu_page(r: &Value) -> Option<String> { r["buttons"].as_array()?.iter().find(|b| b["action"] == "settings-page" && b["value"].as_str().map_or(false, |v| !v.is_empty()))?["value"].as_str().map(str::to_string) }
+/// The hub's menu rows' `group` by page (older hubs send none: the nav is then one list).
+pub fn menu_groups(rows: &Value) -> HashMap<String, String> {
+    rows.as_array().into_iter().flatten().filter_map(|r| Some((menu_page(r)?, r["group"].as_str().filter(|g| !g.is_empty())?.to_string()))).collect()
 }
-/// Whether a page holds a setting whose name matches the search: any of its rows' labels (the hub's `words`), as written or as this language shows it.
-pub fn words_match(words: &str, q: &str) -> bool { let q = q.trim().to_lowercase(); !q.is_empty() && words.lines().any(|l| l.to_lowercase().contains(&q) || trs(l).to_lowercase().contains(&q)) }
+/// What each page holds, by page: its rows' labels (the hub's `words`, one a line) each with its note (the same line of `notes`; older hubs
+/// send no notes, and none at all: the search then matches titles only).
+pub fn menu_finds(rows: &Value) -> HashMap<String, Vec<(String, String)>> {
+    rows.as_array().into_iter().flatten().filter_map(|r| { let words = r["words"].as_str()?; let mut notes = r["notes"].as_str().unwrap_or("").split('\n');
+        Some((menu_page(r)?, words.split('\n').map(|w| (w.to_string(), notes.next().unwrap_or("").to_string())).filter(|(w, _)| !w.is_empty()).collect())) }).collect()
+}
+/// The settings of a page the search finds: the labels of the rows whose label or note holds what is typed, as written or as this language
+/// shows it, each once and in the page's order. Nothing for an empty search.
+pub fn hits(finds: &[(String, String)], q: &str) -> Vec<String> {
+    let q = q.trim().to_lowercase(); if q.is_empty() { return vec![] }
+    let has = |t: &str| !t.is_empty() && (t.to_lowercase().contains(&q) || trs(t).to_lowercase().contains(&q));
+    let mut out: Vec<String> = Vec::new();
+    for (l, n) in finds { if (has(l) || has(n)) && !out.contains(l) { out.push(l.clone()); } }
+    out
+}
+/// The most found settings named under a page in the nav (the rest are on the page).
+pub const HITS_SHOWN: usize = 3;
+/// A line of the nav: a group's name, or a page (`id`: a hub page, or `@device`, `@hubs`, `@accounts` for the three that are this app's) with
+/// the settings the search found on it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum NavLine { Head(String), Item { id: String, title: String, hits: Vec<String> } }
+/// The nav as drawn: this device's pages, then the hub's in the hub's order under its group names, Accounts leading the group that holds
+/// Agents. A search keeps the pages whose title matches or that hold a matching setting, and a group's name only while one of its pages shows.
+/// `device`: the labels and notes of this device's page. A hub that names no groups (an older one, or none) lists its pages under "All devices (hub)".
+pub fn nav_lines(nav: &[(String, String)], groups: &HashMap<String, String>, finds: &HashMap<String, Vec<(String, String)>>, device: &[(String, String)], q: &str) -> Vec<NavLine> {
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ const HUB: &str = "All devices (hub)";
+    let mut out: Vec<NavLine> = Vec::new(); let mut last = String::new();
+    let mut put = |head: &str, id: &str, title: &str, pairs: &[(String, String)]| {
+        let found = hits(pairs, q);
+        if !(nav_matches(title, q) || nav_matches(&trs(title), q) || !found.is_empty()) { return }
+        if last != head { last = head.to_string(); out.push(NavLine::Head(head.to_string())); }
+        out.push(NavLine::Item { id: id.to_string(), title: title.to_string(), hits: found });
+    };
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ { put("This device", "@device", "This device", device); put("This device", "@hubs", "Hubs", &[]); }
+    let with_agents = nav.iter().any(|(p, _)| p == "agents" && groups.contains_key(p));
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if !with_agents { put(HUB, "@accounts", "Accounts", &[]); }
+    for (page, title) in nav {
+        let head = groups.get(page).map_or(HUB, String::as_str);
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if with_agents && page == "agents" { put(head, "@accounts", "Accounts", &[]); }
+        put(head, page, title, finds.get(page).map_or(&[][..], Vec::as_slice));
+    }
+    out
+}
+/// The page Enter in the search opens: the first one found.
+pub fn first_found(lines: &[NavLine]) -> Option<&str> { lines.iter().find_map(|l| match l { NavLine::Item { id, .. } => Some(id.as_str()), _ => None }) }
+/// What the search looks through on this device's page.
+pub fn device_finds(rows: &[Row]) -> Vec<(String, String)> { rows.iter().filter(|r| !r.label.is_empty()).map(|r| (r.label.clone(), r.note.clone())).collect() }
 
 pub struct FieldSlot { pub input: Entity<Composer>, pub vault: bool, pub hub: String, echo: Echo, pending: Option<String>, timer: bool }
 
@@ -259,13 +301,20 @@ fn sync_nav(this: &mut Backplane, rows: &[Row], cx: &mut Context<Backplane>) {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         input.update(cx, |i, _| { i.set_placeholder(&trs("Search")); });
         cx.observe(&input, |this, input, cx| { this.screens.settings_ui.q = input.read(cx).content.to_string(); cx.notify(); }).detach();
+        // Enter opens the first page found
+        cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) {
+            let ui = &this.screens.settings_ui; if ui.q.trim().is_empty() { return }
+            let lines = nav_lines(if this.data["settings"].is_object() { &ui.nav } else { &[] }, &ui.groups, &ui.finds, &device_finds(&device_rows(&this.local)), &ui.q);
+            if let Some(id) = first_found(&lines).map(str::to_string) { open_nav(this, &id, cx); }
+        }).detach();
+        // a rig's shot of the search (`BACKPLANE_GPUI_SETTINGS_Q`): the box opens holding it
+        if let Some(q) = std::env::var("BACKPLANE_GPUI_SETTINGS_Q").ok().filter(|q| !q.is_empty()) { input.update(cx, |i, cx| i.set(q, cx)); }
         this.screens.settings_ui.search = Some(input);
     }
     if let Shown::Menu(items) = shown(rows) {
-        let nav = nav_order(&items);
-        let words = menu_words(&this.data["settings"]["rows"]);
+        let (groups, finds) = (menu_groups(&this.data["settings"]["rows"]), menu_finds(&this.data["settings"]["rows"]));
         let ui = &mut this.screens.settings_ui;
-        ui.nav = nav; ui.words = words;
+        ui.nav = items; ui.groups = groups; ui.finds = finds;
         if !ui.auto { ui.auto = true; if let Some((p, _)) = ui.nav.first().cloned() { ui.page = p.clone(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p)); } }
     }
 }
@@ -294,6 +343,14 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
 pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.page = p.to_string(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
     // Usage opens with each account's limit bars over the totals: the hub's accounts read again (and each signed-in account's usage, at most every 5 minutes)
     if p == "usage" { super::accounts::list(this); super::accounts::refresh_usage(this); } }
+/// A page of the nav, chosen: one of this app's three, or the hub's.
+pub fn open_nav(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
+    if !id.starts_with('@') { go_page(this, id); cx.notify(); return }
+    flush_fields(this);
+    let ui = &mut this.screens.settings_ui; ui.device = id == "@device"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts";
+    if id == "@accounts" { super::accounts::open_page(this, cx); }
+    cx.notify();
+}
 pub fn flush_fields(this: &mut Backplane) {
     let names: Vec<String> = this.screens.fields.iter().filter(|(_, s)| !s.vault && s.pending.is_some()).map(|(n, _)| n.clone()).collect();
     for n in names {
@@ -493,7 +550,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
 
 /// A row's button pressed: the client's own actions here, a vault Save straight to the hub, anything else the view action it names.
 pub fn on_press(this: &mut Backplane, b2: &Btn, cx: &mut Context<Backplane>) {
-    if super::onboard::press(this, b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(b2) { save_vault(this, b2, cx); } else { let _ = this.tx.try_send(press(b2)); } cx.notify();
+    if super::onboard::press(this, b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "update-check" { this.app_check(cx); } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(b2) { save_vault(this, b2, cx); } else { let _ = this.tx.try_send(press(b2)); } cx.notify();
 }
 
 /// The dialog while the hub has settings open; None when it has not: a title bar with a close ×, the pages on the left (search above, an icon and a
@@ -516,8 +573,22 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let on_hubs = ui.hubs && !on_acct;
     let on_device = (ui.device || !hub_on) && !on_acct && !on_hubs;
     let c = |n: &str| theme::color(light, n);
-    let rows = parse(settings);
+    let mut rows = parse(settings);
     let on_page = hub_on && !on_device && !on_acct && !on_hubs && matches!(shown(&rows), Shown::Page);
+    // Network and About: resolve active page from the rendered title as well as ui.page so directly opened pages show this device's app row too
+    if on_page {
+        let title = rows.first().map(|r| r.label.as_str()).unwrap_or("");
+        /* i18n-ok: page titles from hub */
+        let active_page = ui.nav.iter().find(|(_, t)| *t == title).map(|(p, _)| p.as_str())
+            .or_else(|| if title == "Network and updates" { Some("network") } else if title == "About" { Some("about") } else { None })
+            .unwrap_or(ui.page.as_str());
+        if active_page == "network" || active_page == "about" {
+            if let Some(r) = crate::selfupdate::row(local, active_page) {
+                let at = crate::selfupdate::row_at(&rows.iter().map(|r| r.label.as_str()).collect::<Vec<_>>());
+                rows.insert(at, r);
+            }
+        }
+    }
     let skip = if on_page { 1 } else { 0 };
     let dev_rows = device_rows(local);
     let hub_rows = super::hubpick::rows_on(hub_list, on_home);
@@ -528,33 +599,31 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     // the left nav
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
     if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
-    {
-        let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(crate::scale::tpx(13.));
-        let item = if on_device { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(div().px_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("This device").to_uppercase()))
-            /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(item.child(nav_icon_el(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" })))).child(nav_title("This device")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = false; cx.notify(); })));
-        let hubs_item = div().id("set-nav-hubs").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(crate::scale::tpx(13.));
-        let hubs_item = if on_hubs { hubs_item.bg(c("raise")) } else { hubs_item.hover(|s| s.bg(c("panel"))) };
-        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ nav = nav.child(hubs_item.child(nav_icon_el(crate::art::icon("globe", 16., c(if on_hubs { "text" } else { "dim" })))).child(nav_title("Hubs")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = true; cx.notify(); })));
-        let acct_item = div().id("set-nav-accounts").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(crate::scale::tpx(13.));
-        let acct_item = if on_acct { acct_item.bg(c("raise")) } else { acct_item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("All devices (hub)").to_uppercase()))
-            /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(acct_item.child(nav_icon_el(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" })))).child(nav_title("Accounts")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
-        if !hub_on { nav = nav.child(div().px_3().pt_2().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("The hub's other settings open here when it serves them."))); }
-    }
-    let mut last = usize::MAX;
+    let lines = nav_lines(if hub_on { &ui.nav } else { &[] }, &ui.groups, &ui.finds, &device_finds(&dev_rows), &ui.q);
     let title_now = rows.first().map(|r| r.label.clone()).unwrap_or_default();
-    for (n, (page, t_nav)) in ui.nav.iter().enumerate().filter(|(_, (p, t))| hub_on && (nav_matches(t, &ui.q) || ui.words.get(p).map_or(false, |w| words_match(w, &ui.q)))) {
-        let title = t_nav;
-        let g = group_of(page);
-        if last != usize::MAX && g != last { nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))); }
-        last = g;
-        let (p2, on) = (page.clone(), !on_device && !on_acct && !on_hubs && if on_page { title_now == *t_nav } else { *page == ui.page });
-        let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(crate::scale::tpx(13.));
-        let item = if on { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(item.child(nav_icon_el(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" })))).child(nav_title(title))
-            .on_click(cx.listener(move |this, _, _, cx| { go_page(this, &p2); cx.notify(); })));
+    if lines.is_empty() { nav = nav.child(div().px_3().py_2().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Nothing matches"))); }
+    for (n, line) in lines.iter().enumerate() {
+        match line {
+            NavLine::Head(h) => nav = nav.child(div().px_3().pt(px(if n == 0 { 2. } else { 14. })).pb(px(4.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(h).to_uppercase())),
+            NavLine::Item { id, title, hits } => {
+                let on = match id.as_str() { "@device" => on_device, "@hubs" => on_hubs, "@accounts" => on_acct, page => !on_device && !on_acct && !on_hubs && if on_page { title_now == *title } else { page == ui.page } };
+                let el_id = match id.as_str() { "@device" => "set-nav-device".to_string(), "@hubs" => "set-nav-hubs".to_string(), "@accounts" => "set-nav-accounts".to_string(), p => format!("set-nav-{p}") };
+                let item = div().id(SharedString::from(el_id)).flex().items_center().gap_3().px_3().py(px(5.)).cursor_pointer().text_size(crate::scale::tpx(13.)).border_l_2().border_color(c(if on { "accent" } else { "bg" }));
+                let item = if on { item.bg(c("raise")) } else { item.text_color(c("text")).hover(|s| s.bg(c("panel"))) };
+                let to = id.clone();
+                nav = nav.child(item.child(nav_icon_el(crate::art::icon(nav_icon(id), 16., c(if on { "accent" } else { "dim" })))).child(nav_title(title))
+                    .on_click(cx.listener(move |this, _, _, cx| open_nav(this, &to, cx))));
+                // what the search found on the page, named under it (the first few; the page has them all)
+                for (k, h) in hits.iter().take(HITS_SHOWN).enumerate() {
+                    let to = id.clone();
+                    nav = nav.child(div().id(SharedString::from(format!("set-hit-{n}-{k}"))).pl(px(43.)).pr_3().py(px(2.)).cursor_pointer().text_size(crate::scale::tpx(11.)).text_color(c("dim")).hover(|s| s.text_color(c("text")))
+                        .child(trs(h)).on_click(cx.listener(move |this, _, _, cx| open_nav(this, &to, cx))));
+                }
+                if hits.len() > HITS_SHOWN { nav = nav.child(div().pl(px(43.)).pr_3().pb(px(2.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(tf("gpui.settings.more", &[("n", (hits.len() - HITS_SHOWN).into())]))); }
+            }
+        }
     }
+    if !hub_on && ui.q.trim().is_empty() { nav = nav.child(div().px_3().pt_2().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("The hub's other settings open here when it serves them."))); }
     /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let title = if on_hubs { "Hubs".to_string() } else if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
     let dialog = div().id("settings-dialog").occlude().flex().flex_col().w(px(1040.)).max_w_full().h(px(760.)).max_h_full().border_1().border_color(c("line")).bg(c("bg")).overflow_hidden().on_mouse_down_out(cx.listener(|this, _, _, cx| close(this, cx)))
         .child(div().h(crate::scale::tpx(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
@@ -729,25 +798,53 @@ mod tests {
         assert!(f.on_hub("changed on another device", "x"), "a real change from elsewhere");
     }
     fn row(label: &str, page: &str) -> Row { Row { label: label.into(), note: String::new(), buttons: if page.is_empty() { vec![] } else { vec![Btn { label: format!("{label} ›"), action: "settings-page".into(), value: page.into(), on: false }] }, fields: vec![], qr: vec![], qrnote: String::new(), local: false, tone: String::new(), ..Default::default() } }
-    #[test] fn the_pages_menu_is_told_from_a_page_and_the_nav_keeps_group_order() {
+    #[test] fn the_pages_menu_is_told_from_a_page_and_the_nav_keeps_the_hubs_order() {
         let menu = vec![row("Usage", "usage"), row("Appearance", "appearance"), row("Voice", "voice"), row("Agents", "agents")];
-        match shown(&menu) { Shown::Menu(items) => { let nav = nav_order(&items); assert_eq!(nav.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["appearance", "agents", "voice", "usage"], "grouped, stable inside a group"); } s => panic!("{s:?}") }
+        match shown(&menu) { Shown::Menu(items) => assert_eq!(items.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["usage", "appearance", "voice", "agents"], "the hub's order: the client sorts nothing"), s => panic!("{s:?}") }
         let mut back = row("‹ Settings", ""); back.buttons.push(Btn { label: "‹ Settings".into(), action: "settings-page".into(), value: String::new(), on: false });
         assert_eq!(shown(&[back, row("Theme", "")]), Shown::Page);
         assert_eq!(shown(&[row("Theme", ""), row("Language", "")]), Shown::Other);
         assert_eq!(shown(&[]), Shown::Other);
     }
-    #[test] fn the_search_finds_a_page_by_a_setting_it_holds() {
-        let words = "Theme\nThread list\nGroup projects";
-        assert!(words_match(words, "group") && words_match(words, " Group Projects ") && words_match(words, "thread"));
-        let m = menu_words(&serde_json::json!([{"label":"Appearance","words":words,"buttons":[{"action":"settings-page","value":"appearance"}]},{"label":"Voice","buttons":[{"action":"settings-page","value":"voice"}]}]));
-        assert_eq!(m.len(), 1); assert_eq!(m["appearance"], words);
-        assert!(!words_match(words, "voice") && !words_match(words, "") && !words_match("", "group"), "an empty search is the titles' to match");
+    fn menu_json() -> Value { serde_json::json!([
+        {"label":"Appearance","group":"General","words":"Theme\nThread list\nGroup projects","notes":"The window and the web page.\n\nOn: projects with nothing going on lately are grouped by their git owner.","buttons":[{"action":"settings-page","value":"appearance"}]},
+        {"label":"Agents","group":"Agents and tools","words":"Default agent","buttons":[{"action":"settings-page","value":"agents"}]},
+        {"label":"Devices","group":"Connect","words":"Add a device\nWeb UI\nBrowser access\nWeb address","notes":"Makes a link.\n\nPair a browser over HTTPS on your tailnet.\n","buttons":[{"action":"settings-page","value":"devices"}]},
+        {"label":"Voice","buttons":[{"action":"settings-page","value":"voice"}]}]) }
+    fn lines_for(q: &str) -> Vec<NavLine> {
+        let m = menu_json(); let nav: Vec<(String, String)> = m.as_array().unwrap().iter().map(|r| (r["buttons"][0]["value"].as_str().unwrap().to_string(), r["label"].as_str().unwrap().to_string())).collect();
+        nav_lines(&nav, &menu_groups(&m), &menu_finds(&m), &[("Font".to_string(), "The typeface of the interface and the thread.".to_string())], q)
+    }
+    fn heads(l: &[NavLine]) -> Vec<&str> { l.iter().filter_map(|x| match x { NavLine::Head(h) => Some(h.as_str()), _ => None }).collect() }
+    fn ids(l: &[NavLine]) -> Vec<&str> { l.iter().filter_map(|x| match x { NavLine::Item { id, .. } => Some(id.as_str()), _ => None }).collect() }
+    #[test] fn the_search_finds_a_page_by_a_setting_it_holds_or_what_its_note_says() {
+        let m = menu_finds(&menu_json());
+        assert_eq!(m.len(), 3, "a page with no words is found by its title only"); assert_eq!(m["appearance"][0], ("Theme".to_string(), "The window and the web page.".to_string())); assert_eq!(m["agents"], [("Default agent".to_string(), String::new())], "an older hub sends no notes");
+        let a = &m["appearance"];
+        assert_eq!(hits(a, "group"), ["Group projects"]); assert_eq!(hits(a, " Group Projects "), ["Group projects"]); assert_eq!(hits(a, "thread"), ["Thread list"]);
+        assert_eq!(hits(a, "git owner"), ["Group projects"], "found by its note"); assert_eq!(hits(a, "web page"), ["Theme"]);
+        assert!(hits(a, "voice").is_empty() && hits(a, "").is_empty() && hits(&[], "group").is_empty(), "an empty search is the titles' to match");
+    }
+    #[test] fn the_nav_draws_the_hubs_groups_and_a_search_keeps_only_what_it_found() {
+        let all = lines_for("");
+        assert_eq!(heads(&all), ["This device", "General", "Agents and tools", "Connect", "All devices (hub)"], "a page the hub put in no group goes under the hub's own name");
+        assert_eq!(ids(&all), ["@device", "@hubs", "appearance", "@accounts", "agents", "devices", "voice"], "Accounts leads the group that holds Agents");
+        assert!(all.iter().all(|l| !matches!(l, NavLine::Item { hits, .. } if !hits.is_empty())), "nothing is named under a page while nothing is typed");
+        let fw = lines_for("tailnet");
+        assert_eq!(fw, [NavLine::Head("Connect".into()), NavLine::Item { id: "devices".into(), title: "Devices".into(), hits: vec!["Browser access".into()] }]);
+        assert_eq!(first_found(&fw), Some("devices"), "Enter opens it");
+        assert_eq!(ids(&lines_for("web")), ["appearance", "devices"]); assert_eq!(ids(&lines_for("font")), ["@device"], "this device's own settings are found too");
+        assert_eq!(ids(&lines_for("acc")), ["@accounts", "devices"]); assert_eq!(ids(&lines_for("VOICE")), ["voice"], "a title, in any case");
+        assert!(lines_for("zzz").is_empty() && first_found(&lines_for("zzz")).is_none());
+        // a hub that names no groups (an older one): one list under the hub's name, Accounts first
+        let nav = vec![("appearance".to_string(), "Appearance".to_string()), ("agents".to_string(), "Agents".to_string())];
+        let old = nav_lines(&nav, &HashMap::new(), &HashMap::new(), &[], "");
+        assert_eq!(heads(&old), ["This device", "All devices (hub)"]); assert_eq!(ids(&old), ["@device", "@hubs", "@accounts", "appearance", "agents"]);
+        assert_eq!(ids(&nav_lines(&[], &HashMap::new(), &HashMap::new(), &[], "")), ["@device", "@hubs", "@accounts"], "no hub pages: this app's three");
     }
     #[test] fn every_page_has_an_icon_in_the_set_and_the_search_filters_titles_by_substring() {
-        let icons: Vec<String> = ["sun", "message-square", "bell", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "circle-check", "gauge", "book", "file-text", "settings", "search", "x", "plug", "git-branch"].iter().map(|s| s.to_string()).collect();
-        for g in GROUPS { for p in g { assert!(icons.contains(&nav_icon(p).to_string()), "{p}"); } }
+        let set: Value = serde_json::from_str(include_str!("../../../../assets/icons.json")).unwrap();
+        for p in ["appearance", "threads", "notifications", "timezone", "agents", "writing", "keys", "mcp", "voice", "rules", "usage", "git", "cad", "browser", "mouse", "ordering", "devices", "machines", "network", "setup", "privacy", "about", "developer", "@device", "@hubs", "@accounts", "zzz"] { assert!(set.get(nav_icon(p)).is_some(), "{p}: {}", nav_icon(p)); }
         assert!(nav_matches("Appearance", "") && nav_matches("Appearance", " ear") && nav_matches("Appearance", "APP") && !nav_matches("Appearance", "zzz"));
-        assert_eq!(group_of("zzz"), GROUPS.len());
     }
 }

@@ -145,9 +145,15 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     var boardPick by remember(thread.id) { mutableStateOf("") }
     var sheetPick by remember(thread.id, boardPick) { mutableStateOf("") }
     val board = files?.board(boardPick)
-    // the panels under the drawing (BOM, Checks, Lifecycle, Fab) are of the board on show: the hub's `project` of its row
+    // the panels under the drawing (BOM, Checks, Lifecycle, Fab, Plan) are of the board or file link on show
     val root = files?.root.orEmpty()
-    val panelsOf = board?.let { b -> b.project.ifEmpty { b.pcb.ifEmpty { root } } } ?: root
+    val targetPath = target?.path?.takeIf { target?.tab == tab }
+    val panelsOf = PlanFloorplannerModel.resolveMgmtProject(
+        targetPath,
+        board?.let { PlanBoardRef(it.value, it.pcb, it.sch, it.project) },
+        files?.boards.orEmpty().map { PlanBoardRef(it.value, it.pcb, it.sch, it.project) },
+        root,
+    )
     DisposableEffect(thread.id) { DataClient.viewerThread = thread.id; onDispose { DataClient.stopWatch(thread.id); DataClient.lightRefs = emptyList() } }
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.android_viewer_title(thread.title.ifEmpty { Msg.thread_new }), back)
@@ -200,12 +206,41 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
                 // the management panels (BOM, Checks, Lifecycle, Fab) beside the drawing: tabs under it, a panel over its lower part (DataMgmt.kt)
-                "Board" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard) }; MgmtHost(panelsOf, root) }
+                "Board" -> {
+                    var hasPanels by remember(root) { mutableStateOf(false) }
+                    var mgmtOpen by remember(root) { mutableStateOf("") }
+                    Box(Modifier.fillMaxSize()) {
+                        Column(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f)) {
+                                PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard)
+                            }
+                            if (hasPanels && mgmtOpen != "plan") Spacer(Modifier.height(44.dp))
+                        }
+                        MgmtHost(panelsOf, root, Modifier.align(Alignment.BottomCenter)) { has, op ->
+                            hasPanels = has
+                            mgmtOpen = op
+                        }
+                    }
+                }
                 "Schematic" -> Column(Modifier.fillMaxSize()) {
                     // the sheet on show: the one picked, else the board's top sheet; its sheets come with it (the hub's `sheets`, read from `tree`)
                     val schPath = target?.path?.takeIf { target?.tab == "Schematic" } ?: sheetPick.ifEmpty { board?.sch.orEmpty() }
                     if (DataClient.sheets.size > 1) SheetPicker(DataClient.sheets, schPath) { sheetPick = if (it == DataClient.sheets.first().file) "" else it; target = null; DataClient.lightRefs = emptyList() }
-                    Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", schPath, files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch, tree = board?.sch.orEmpty()) }; MgmtHost(panelsOf, root) }
+                    var hasPanels by remember(root) { mutableStateOf(false) }
+                    var mgmtOpen by remember(root) { mutableStateOf("") }
+                    Box(Modifier.weight(1f).fillMaxWidth()) {
+                        Column(Modifier.fillMaxSize()) {
+                            Box(Modifier.weight(1f)) {
+                                PlotTab(thread, "schematic", schPath, files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch, tree = board?.sch.orEmpty())
+                            }
+                            if (hasPanels && mgmtOpen != "plan") Spacer(Modifier.height(44.dp))
+                        }
+                        MgmtHost(panelsOf, root, Modifier.align(Alignment.BottomCenter)) { has, op ->
+                            hasPanels = has
+                            mgmtOpen = op
+                        }
+                    }
+                }
                 "3D" -> PlotTab(thread, "3d", board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null, Msg.android_viewer_noboard)
                 "Gerbers" -> PlotTab(thread, "gerbers", "", true, Msg.gpui_panestate_empty_gerbers)
                 "Split" -> SplitTab(thread, files, board)
@@ -589,7 +624,10 @@ private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () 
     androidx.activity.compose.BackHandler(onBack = close)
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            DMono("‹ " + path.substringAfterLast('/'), dcs.primary, 13, Modifier.clickable(onClick = close).testTag("preview.back"), bold = true)
+            DMono("‹ " + path.substringAfterLast('/'), dcs.primary, 13, Modifier.weight(1f).clickable(onClick = close).testTag("preview.back"), bold = true)
+            // the file itself, to keep or open in another app (docs/file-links.md: the Files tab's Download, `/files/get`)
+            val ctx = androidx.compose.ui.platform.LocalContext.current
+            DBtn(Msg.android_download_button, false, modifier = Modifier.testTag("preview.download")) { Downloads.project(ctx, thread.id, path) }
         }
         DLine()
         val b = bytes
@@ -597,8 +635,7 @@ private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () 
             failed -> DMono(Msg.android_file_bad, dcs.error, 12, Modifier.padding(16.dp))
             b == null -> CircularProgressIndicator(Modifier.padding(24.dp))
             ext(path) in imageExt -> {
-                val bmp = remember(b) { BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
-                if (bmp != null) Image(bmp, null, Modifier.fillMaxSize().padding(8.dp).testTag("preview.image"), contentScale = ContentScale.Fit) else DMono(Msg.android_file_noimage, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp))
+                AnimatedPic(b, Modifier.fillMaxSize().padding(8.dp).testTag("preview.image"), contentScale = ContentScale.Fit)
             }
             ext(path) == "pdf" -> PdfPreview(b)
             ext(path) in textExt || b.size < 200_000 && b.none { it.toInt() == 0 } -> {

@@ -178,24 +178,50 @@ pub fn tokio_cmd_in<S: AsRef<OsStr>>(kind: Kind, program: S, wrap: Option<Vec<St
 }
 /// A probe of a KiCad (`--version`, `api-server --describe`): its settings go to a throwaway folder (`KICAD_CONFIG_HOME`), never the
 /// person's. KiCad loads (and migrates, or creates) its settings even for `--version`: measured Nov 16 on stock 10.0.8, Linux created
-/// ~/.config/kicad/10.0 when absent and rewrote an older kicad_common.json, macOS rewrote a current one on every call; with the variable
-/// set it prints the same version and touches nothing of the person's. The folder goes when the guard is dropped (after the probe ran).
-/// Our own runtime's probes too: they would share the 10.99 folder with the person's sessions.
+/// ~/.config/kicad/10.0 when absent and rewrote an older kicad_common.json, macOS rewrote a current one on every call; the isolated
+/// `KICAD_CONFIG_HOME` / `KICAD_CACHE_HOME` / `KICAD_DOCUMENTS_HOME` folders protect the person's settings across all releases (including
+/// stock 9.0/10.0, whose CLI exit path saves settings without checking `KICAD_INHIBIT_SETTINGS_WRITES`). The throwaway folder goes when
+/// the guard is dropped after the probe finishes.
+///
+/// `ProbeHome::new` also pre-seeds `<ver>/kicad_common.json` with a non-empty `api.interpreter_path` and `api.enable_server: false`,
+/// and `env()` sets `KICAD_INHIBIT_SETTINGS_WRITES=1`: Backplane `bp.6`-`bp.13.2` and stock KiCad skip `PYTHON_MANAGER::FindPythonInterpreter()`
+/// (which runs `wxExecute("which -a python3", wxEXEC_SYNC)` and hung probes on macOS, #1160) and `ReloadPlugins()`, and builds honoring
+/// `KICAD_INHIBIT_SETTINGS_WRITES` skip settings writeback too.
 pub struct ProbeHome(std::path::PathBuf);
 impl ProbeHome {
     pub fn new() -> Self {
         static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let n = N.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let d = std::env::temp_dir().join(format!("bp-kicad-probe-{}-{n}", std::process::id()));
-        let _ = std::fs::create_dir_all(&d);
+        if let Err(e) = std::fs::create_dir_all(&d) {
+            eprintln!("kicad: could not create probe home {}: {e}", d.display());
+            return ProbeHome(d);
+        }
+        for (ver, schema) in [("10.99", 7u32), ("10.0", 6), ("9.0", 3), ("8.0", 3)] {
+            let sub = d.join(ver);
+            if let Err(e) = std::fs::create_dir_all(&sub) {
+                eprintln!("kicad: could not create probe settings folder {}: {e}", sub.display());
+                continue;
+            }
+            let file = sub.join("kicad_common.json");
+            let body = format!(r#"{{"api":{{"enable_server":false,"interpreter_path":"/nonexistent/bp-probe-python"}},"meta":{{"filename":"kicad_common.json","version":{schema}}}}}"#);
+            if let Err(e) = std::fs::write(&file, body) {
+                eprintln!("kicad: could not seed probe settings {}: {e}", file.display());
+            }
+        }
         ProbeHome(d)
     }
     pub fn path(&self) -> &std::path::Path { &self.0 }
     /// What a probed KiCad is given: its settings (`KICAD_CONFIG_HOME`), and the cache and documents folders KiCad makes at every start
     /// (PATHS::EnsureUserPathsExist: `~/.cache/kicad/<ver>`, `~/.local/share/kicad/<ver>`, macOS and Windows `Documents/KiCad/<ver>`),
-    /// all in this throwaway folder: a probe leaves nothing in the person's home (#1204).
-    pub fn env(&self) -> [(&'static str, std::path::PathBuf); 3] {
-        [("KICAD_CONFIG_HOME", self.0.clone()), ("KICAD_CACHE_HOME", self.0.join("cache")), ("KICAD_DOCUMENTS_HOME", self.0.join("documents"))]
+    /// all in this throwaway folder, plus `KICAD_INHIBIT_SETTINGS_WRITES=1`: a probe leaves nothing in the person's home (#1204).
+    pub fn env(&self) -> [(&'static str, std::ffi::OsString); 4] {
+        [
+            ("KICAD_CONFIG_HOME", self.0.as_os_str().to_os_string()),
+            ("KICAD_CACHE_HOME", self.0.join("cache").into_os_string()),
+            ("KICAD_DOCUMENTS_HOME", self.0.join("documents").into_os_string()),
+            ("KICAD_INHIBIT_SETTINGS_WRITES", std::ffi::OsString::from("1")),
+        ]
     }
 }
 impl Drop for ProbeHome { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.0); } }
@@ -205,29 +231,245 @@ pub fn kicad_probe<S: AsRef<OsStr>>(cli: S) -> (std::process::Command, ProbeHome
 }
 /// How long a KiCad probe may run. A `--version` takes a few seconds; on macOS (#1160) some never exit: KiCad's start-up runs Python to
 /// find its interpreter (PYTHON_MANAGER::FindPythonInterpreter → wxExecute) and misses that child's exit, so the probe waits forever,
-/// ignoring SIGTERM, and they piled up under the hub (42 in two hours). Past this it is killed (SIGKILL) and reaped.
+/// ignoring SIGTERM, and they piled up under the hub (42 in two hours). Past this its process group is killed (SIGKILL) and reaped.
 #[allow(dead_code)] // bp-plot includes this file
-pub const PROBE_LIMIT: std::time::Duration = std::time::Duration::from_secs(20);
-/// Run a probe `c` (stdin and stderr on /dev/null, stdout captured) for at most `limit`: its output when it exited in time; None when it
-/// could not start or ran over (then it is killed and reaped, and the hub's log says so). Its stdout is read on a thread of its own, so a
-/// grandchild still holding the pipe after the kill never holds the caller.
+pub const PROBE_LIMIT: std::time::Duration = std::time::Duration::from_secs(15);
+
 #[allow(dead_code)] // bp-plot includes this file
-pub fn probe_output(mut c: std::process::Command, limit: std::time::Duration) -> Option<std::process::Output> {
-    use std::io::Read;
-    let mut child = c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
-    let mut out = child.stdout.take()?;
+#[derive(Debug)]
+pub enum ProbeError {
+    Spawn(std::io::Error),
+    Timeout,
+}
+
+#[allow(dead_code)] // bp-plot includes this file
+fn drain_pipe<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> std::sync::mpsc::Receiver<Vec<u8>> {
     let (tx, rx) = std::sync::mpsc::channel();
-    std::thread::spawn(move || { let mut b = vec![]; let _ = out.read_to_end(&mut b); let _ = tx.send(b); });
-    let end = std::time::Instant::now() + limit;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => { let stdout = rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap_or_default(); return Some(std::process::Output { status, stdout, stderr: vec![] }) }
-            Ok(None) if std::time::Instant::now() < end => std::thread::sleep(std::time::Duration::from_millis(25)),
-            _ => { let pid = child.id(); let _ = child.kill(); let _ = child.wait();
-                eprintln!("kicad: a probe ({:?} {:?}, pid {pid}) ran over {} s and was killed", c.get_program(), c.get_args().collect::<Vec<_>>(), limit.as_secs());
-                return None }
+    std::thread::spawn(move || {
+        let mut b = vec![];
+        if let Some(mut r) = pipe { let _ = r.read_to_end(&mut b); }
+        let _ = tx.send(b);
+    });
+    rx
+}
+
+#[allow(dead_code)] // bp-plot includes this file
+fn poll_pipe(slot: &mut Option<Vec<u8>>, rx: &std::sync::mpsc::Receiver<Vec<u8>>) {
+    if slot.is_none() {
+        match rx.try_recv() {
+            Ok(b) => *slot = Some(b),
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => *slot = Some(vec![]),
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
         }
     }
+}
+
+#[allow(dead_code)] // bp-plot includes this file
+#[cfg(unix)]
+fn kill_and_reap_group(
+    child: &mut std::process::Child,
+    pid: u32,
+    stdout_done: &mut Option<Vec<u8>>,
+    stderr_done: &mut Option<Vec<u8>>,
+    rx_out: &std::sync::mpsc::Receiver<Vec<u8>>,
+    rx_err: &std::sync::mpsc::Receiver<Vec<u8>>,
+    cleanup_deadline: Option<std::time::Instant>,
+) {
+    use crate::plat::proc::ChildWait;
+    if crate::plat::proc::poll_child_nowait(pid) == ChildWait::NotChild {
+        let _ = child.wait();
+        return;
+    }
+    crate::plat::proc::kill_group(pid, crate::plat::proc::TERM);
+    crate::plat::proc::kill(pid, crate::plat::proc::TERM);
+    let mut grace = std::time::Instant::now() + std::time::Duration::from_millis(200);
+    if let Some(dl) = cleanup_deadline {
+        grace = grace.min(dl);
+    }
+    while std::time::Instant::now() < grace {
+        poll_pipe(stdout_done, rx_out);
+        poll_pipe(stderr_done, rx_err);
+        match crate::plat::proc::poll_child_nowait(pid) {
+            ChildWait::Exited if stdout_done.is_some() && stderr_done.is_some() => break,
+            ChildWait::NotChild => break,
+            _ => {
+                let step = std::time::Duration::from_millis(20).min(grace.saturating_duration_since(std::time::Instant::now()));
+                if !step.is_zero() {
+                    std::thread::sleep(step);
+                }
+            }
+        }
+    }
+    if crate::plat::proc::poll_child_nowait(pid) != ChildWait::NotChild {
+        crate::plat::proc::kill_group(pid, crate::plat::proc::KILL);
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+}
+
+#[allow(dead_code)] // bp-plot includes this file
+#[cfg(not(unix))]
+fn kill_and_reap_group(
+    child: &mut std::process::Child,
+    pid: u32,
+    _stdout_done: &mut Option<Vec<u8>>,
+    _stderr_done: &mut Option<Vec<u8>>,
+    _rx_out: &std::sync::mpsc::Receiver<Vec<u8>>,
+    _rx_err: &std::sync::mpsc::Receiver<Vec<u8>>,
+    _cleanup_deadline: Option<std::time::Instant>,
+) {
+    crate::plat::proc::kill_group(pid, crate::plat::proc::KILL);
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// Run a probe `c` in its own process group/job (stdin on /dev/null, stdout and stderr captured) until `end`, capping any post-timeout
+/// `SIGTERM` grace to `cleanup_deadline` when provided: returns `Ok(Output)` when BOTH the child exited and stdout/stderr reached EOF by
+/// `end`, `Err(ProbeError::Spawn(_))` when it could not start or poll failed, or `Err(ProbeError::Timeout)` when it or a descendant ran past
+/// `end` (then the entire process group/job is killed and the child is reaped before returning). On Unix, the child is polled non-reapingly
+/// via `WNOWAIT` until both pipes close or cleanup finishes, keeping its PID/PGID reserved so `kill_group` never signals a recycled PID.
+#[allow(dead_code)] // bp-plot includes this file
+pub fn probe_output_until(
+    mut c: std::process::Command,
+    end: std::time::Instant,
+    cleanup_deadline: Option<std::time::Instant>,
+    log_limit: std::time::Duration,
+) -> Result<std::process::Output, ProbeError> {
+    if std::time::Instant::now() >= end {
+        return Err(ProbeError::Timeout);
+    }
+    crate::plat::proc::own_group(&mut c);
+    c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    let mut tries = 0u32;
+    let mut child = loop {
+        if std::time::Instant::now() >= end {
+            return Err(ProbeError::Timeout);
+        }
+        match c.spawn() {
+            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && tries < 40 => {
+                let Some(rem) = end.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero()) else {
+                    return Err(ProbeError::Timeout);
+                };
+                tries += 1;
+                std::thread::sleep(std::time::Duration::from_millis(25).min(rem));
+            }
+            Err(e) => return Err(ProbeError::Spawn(e)),
+            Ok(ch) => break ch,
+        }
+    };
+    let pid = child.id();
+    // Best-effort Job Object assignment on Windows (std::process::Command does not expose the primary thread handle for CREATE_SUSPENDED,
+    // matching the rest of plat/windows.rs); timeout cleanup also falls back to child.kill().
+    crate::plat::proc::adopt(pid, false);
+    let rx_out = drain_pipe(child.stdout.take());
+    let rx_err = drain_pipe(child.stderr.take());
+    let mut stdout_done: Option<Vec<u8>> = None;
+    let mut stderr_done: Option<Vec<u8>> = None;
+    let timeout_err = |child: &mut std::process::Child, stdout_done: &mut Option<Vec<u8>>, stderr_done: &mut Option<Vec<u8>>| -> Result<std::process::Output, ProbeError> {
+        kill_and_reap_group(child, pid, stdout_done, stderr_done, &rx_out, &rx_err, cleanup_deadline);
+        eprintln!("kicad: a probe ({:?} {:?}, pid {pid}) ran over {} s and was killed", c.get_program(), c.get_args().collect::<Vec<_>>(), log_limit.as_secs());
+        Err(ProbeError::Timeout)
+    };
+
+    #[cfg(unix)]
+    {
+        use crate::plat::proc::ChildWait;
+        loop {
+            if std::time::Instant::now() >= end {
+                return timeout_err(&mut child, &mut stdout_done, &mut stderr_done);
+            }
+            poll_pipe(&mut stdout_done, &rx_out);
+            poll_pipe(&mut stderr_done, &rx_err);
+            match crate::plat::proc::poll_child_nowait(pid) {
+                ChildWait::Exited if stdout_done.is_some() && stderr_done.is_some() => {
+                    if std::time::Instant::now() >= end {
+                        return timeout_err(&mut child, &mut stdout_done, &mut stderr_done);
+                    }
+                    return match child.wait() {
+                        Ok(status) => Ok(std::process::Output {
+                            status,
+                            stdout: stdout_done.unwrap_or_default(),
+                            stderr: stderr_done.unwrap_or_default(),
+                        }),
+                        Err(e) => Err(ProbeError::Spawn(e)),
+                    };
+                }
+                ChildWait::NotChild => {
+                    if std::time::Instant::now() >= end {
+                        return timeout_err(&mut child, &mut stdout_done, &mut stderr_done);
+                    }
+                    return match child.wait() {
+                        Ok(status) => Ok(std::process::Output {
+                            status,
+                            stdout: stdout_done.unwrap_or_default(),
+                            stderr: stderr_done.unwrap_or_default(),
+                        }),
+                        Err(e) => Err(ProbeError::Spawn(e)),
+                    };
+                }
+                ChildWait::Running | ChildWait::Exited => {
+                    if let Some(rem) = end.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero()) {
+                        std::thread::sleep(std::time::Duration::from_millis(10).min(rem));
+                    } else {
+                        return timeout_err(&mut child, &mut stdout_done, &mut stderr_done);
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    {
+        let mut exited: Option<std::process::ExitStatus> = None;
+        loop {
+            if std::time::Instant::now() >= end {
+                return timeout_err(&mut child, &mut stdout_done, &mut stderr_done);
+            }
+            poll_pipe(&mut stdout_done, &rx_out);
+            poll_pipe(&mut stderr_done, &rx_err);
+            if exited.is_none() {
+                match child.try_wait() {
+                    Ok(Some(st)) => exited = Some(st),
+                    Ok(None) => {}
+                    Err(e) => {
+                        kill_and_reap_group(&mut child, pid, &mut stdout_done, &mut stderr_done, &rx_out, &rx_err, cleanup_deadline);
+                        return Err(ProbeError::Spawn(e));
+                    }
+                }
+            }
+            if let (Some(status), Some(stdout), Some(stderr)) = (exited, stdout_done.as_ref(), stderr_done.as_ref()) {
+                if std::time::Instant::now() >= end {
+                    return timeout_err(&mut child, &mut stdout_done, &mut stderr_done);
+                }
+                return Ok(std::process::Output { status, stdout: stdout.clone(), stderr: stderr.clone() });
+            }
+            if let Some(rem) = end.checked_duration_since(std::time::Instant::now()).filter(|d| !d.is_zero()) {
+                std::thread::sleep(std::time::Duration::from_millis(10).min(rem));
+            } else {
+                return timeout_err(&mut child, &mut stdout_done, &mut stderr_done);
+            }
+        }
+    }
+}
+
+/// Run a probe `c` in its own process group/job (stdin on /dev/null, stdout and stderr captured) for at most `limit`:
+/// returns `Ok(Output)` when BOTH the child exited and stdout/stderr reached EOF within `limit`, `Err(ProbeError::Spawn(_))` when it
+/// could not start or poll failed, or `Err(ProbeError::Timeout)` when either the child or any pipe-holding descendant ran past `limit`
+/// (then the entire process group/job is killed, the child is always reaped before returning, and the hub's log says so).
+#[allow(dead_code)] // bp-plot includes this file
+pub fn probe_output_result(c: std::process::Command, limit: std::time::Duration) -> Result<std::process::Output, ProbeError> {
+    probe_output_until(c, std::time::Instant::now() + limit, None, limit)
+}
+
+#[cfg(all(test, unix))]
+#[allow(dead_code)] // bp-plot includes this file
+pub(crate) fn is_live_non_zombie(pid: &str) -> bool { tests::is_live_non_zombie(pid) }
+
+/// Run a probe `c` (stdin on /dev/null, stdout/stderr captured) for at most `limit`: `Some(output)` when it exited in time, None when
+/// it could not start or ran over (then its process group is killed and the child is reaped).
+#[allow(dead_code)] // bp-plot includes this file
+pub fn probe_output(c: std::process::Command, limit: std::time::Duration) -> Option<std::process::Output> {
+    probe_output_result(c, limit).ok()
 }
 /// `kicad_probe` as a tokio command.
 #[allow(dead_code)] // bp-plot includes this file
@@ -441,6 +683,94 @@ mod tests {
         assert!(out.matches("chld=DFL").count() == 2 && out.matches("blocked=0 waited=true").count() == 2, "std and tokio children: {out}");
     }
 
+    /// Non-test source lines up to the first inline `#[cfg(test)] mod <name> {` module (forward declarations such as `#[cfg(test)] mod tests;` stay).
+    fn non_test_code(text: &str) -> String {
+        fn is_cfg_test(t: &str) -> bool {
+            let Some(rest) = t.strip_prefix("#[cfg(") else { return false };
+            let Some((args, _)) = rest.split_once(")]") else { return false };
+            // Strip balanced `not(...)` clauses so `#[cfg(not(test))]` and `#[cfg(all(not(test), unix))]` stay production code.
+            let mut filtered = String::with_capacity(args.len());
+            let b = args.as_bytes();
+            let mut i = 0;
+            while i < b.len() {
+                if b[i..].starts_with(b"not(") {
+                    let mut depth = 1usize;
+                    let mut j = i + 4;
+                    while j < b.len() && depth > 0 {
+                        if b[j] == b'(' { depth += 1; } else if b[j] == b')' { depth -= 1; }
+                        j += 1;
+                    }
+                    i = j;
+                } else {
+                    let ch = args[i..].chars().next().unwrap();
+                    filtered.push(ch);
+                    i += ch.len_utf8();
+                }
+            }
+            filtered.split(|c: char| !c.is_ascii_alphanumeric() && c != '_').any(|w| w == "test")
+        }
+        fn starts_mod(rest: &str) -> Option<&str> {
+            let mut item = rest.trim_start();
+            while item.starts_with("#[") {
+                let Some((_, after)) = item.split_once(']') else { return None };
+                item = after.trim_start();
+            }
+            let s = item.strip_prefix("pub").map(|r| {
+                let r = r.trim_start();
+                if r.starts_with('(') { r.split_once(')').map_or(r, |x| x.1).trim_start() } else { r }
+            }).unwrap_or(item).trim_start();
+            s.strip_prefix("mod ")
+        }
+        fn inline_mod_at(lines: &[&str], idx: usize, same_line: &str) -> bool {
+            let first = if same_line.is_empty() {
+                let mut k = idx + 1;
+                while k < lines.len() {
+                    let s = lines[k].trim();
+                    if s.is_empty() || s.starts_with("//") || s.starts_with("#[") { k += 1; } else { break; }
+                }
+                if k >= lines.len() { return false }
+                (k, lines[k].trim())
+            } else {
+                (idx, same_line)
+            };
+            let Some(after) = starts_mod(first.1) else { return false };
+            if let Some((name, _)) = after.split_once('{') {
+                return !name.contains(';') && !name.trim().is_empty();
+            }
+            if after.contains(';') { return false }
+            let mut k = first.0 + 1;
+            while k < lines.len() {
+                let s = lines[k].trim();
+                if s.is_empty() || s.starts_with("//") { k += 1; continue }
+                return s.starts_with('{');
+            }
+            false
+        }
+        let lines: Vec<&str> = text.lines().collect();
+        let mut out = String::new();
+        for (i, &l) in lines.iter().enumerate() {
+            let t = l.trim();
+            if is_cfg_test(t) {
+                if let Some((_, after)) = l.split_once(")]") {
+                    if inline_mod_at(&lines, i, after.trim()) { break }
+                }
+            }
+            out.push_str(l);
+            out.push('\n');
+        }
+        out
+    }
+
+    #[test] fn non_test_code_keeps_code_after_forward_test_mod_declarations() {
+        let s = "fn a() {}\n#[cfg(test)] mod tests;\n#[cfg(test)] mod laws;\n#[cfg(not(test))] mod prod { Command::new(\"git\"); }\n#[cfg(all(not(test), unix))] mod prod2 { Command::new(\"sh\"); }\nfn b() { Command::new(\"git\"); }\n#[cfg(test)]\n#[allow(dead_code)]\nmod inline_tests\n{\n    fn t() { Command::new(\"x\"); }\n}\n";
+        let got = non_test_code(s);
+        assert!(got.contains("fn b()"), "must keep code after `#[cfg(test)] mod tests;`: {got}");
+        assert!(got.contains("mod prod"), "must keep #[cfg(not(test))] production module: {got}");
+        assert!(got.contains("mod prod2"), "must keep #[cfg(all(not(test), unix))] production module: {got}");
+        assert!(!got.contains("inline_tests"), "must stop at inline test module with intervening attrs / next-line brace: {got}");
+        assert!(non_test_code("#[cfg(test)] pub(crate) mod t { fn x() {} }\n").is_empty());
+    }
+
     /// The gate is the only way to make a process: no other non-test `Command::new` anywhere under src/ (src/bin has its own crates' helpers).
     #[test] fn every_child_process_is_made_through_proc() {
         fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { if p.file_name().map_or(false, |n| n == "bin") { continue } walk(&p, out) } else if p.extension().map_or(false, |x| x == "rs") { out.push(p) } } }
@@ -450,9 +780,8 @@ mod tests {
             if f.ends_with("proc.rs") { continue }
             let text = std::fs::read_to_string(&f).unwrap();
             let name = f.to_string_lossy().replace('\\', "/");
-            if name.ends_with("tests.rs") || name.contains("/tests/") { continue }
-            // everything after the first #[cfg(test)] line is test code
-            let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
+            if name.ends_with("tests.rs") || name.ends_with("copy_gate.rs") || name.ends_with("copy_outs.rs") || name.contains("/tests/") { continue }
+            let code = non_test_code(&text);
             for (i, l) in code.lines().enumerate() { if l.contains("Command::new(") && !l.trim_start().starts_with("//") { bad.push(format!("{}:{}", name, i + 1)) } }
         }
         assert!(bad.is_empty(), "build children with crate::proc::{{tokio_cmd, std_cmd}}: {bad:?}");
@@ -463,21 +792,236 @@ mod tests {
     #[test] fn every_outbound_socket_is_on_the_allowlist() {
         // presenter.rs: loopback to our own policy child; kicad/nng.rs: the KiCad unix socket; net/tailnet.rs: `hello_with` returns at once on a copy;
         // agents/mcp_stdio.rs: the `--mcp-stdio` bridge an agent starts, loopback only (`endpoint` refuses any other host) to the hub's own MCP server;
-        // net/alwayson/tunnel.rs: `run_local`, 127.0.0.1 only, to this hub's own untrusted door for calls that came over the reverse link (never started on a copy)
-        const ALLOWED: [&str; 5] = ["presenter.rs", "kicad/nng.rs", "net/tailnet.rs", "agents/mcp_stdio.rs", "net/alwayson/tunnel.rs"];
+        // net/alwayson/tunnel.rs: `run_local`, 127.0.0.1 only, to this hub's own untrusted door for calls that came over the reverse link (never started on a copy);
+        // net/webprovision.rs: `system_proxy_identity` reads peer_cred() on /run/tailscale/tailscaled.sock (sends no bytes; returns PermissionDenied immediately on a copy);
+        // net/peerws.rs: `start` and `connect_outbound` return at once on a copy, never opening an outbound socket
+        const ALLOWED: [&str; 7] = ["presenter.rs", "kicad/nng.rs", "net/tailnet.rs", "agents/mcp_stdio.rs", "net/alwayson/tunnel.rs", "net/webprovision.rs", "net/peerws.rs"];
         fn walk(d: &std::path::Path, out: &mut Vec<std::path::PathBuf>) { for e in std::fs::read_dir(d).unwrap().flatten() { let p = e.path(); if p.is_dir() { if p.file_name().map_or(false, |n| n == "bin") { continue } walk(&p, out) } else if p.extension().map_or(false, |x| x == "rs") { out.push(p) } } }
         let mut files = vec![]; walk(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut files);
         let mut bad = vec![];
         for f in files {
             let name = f.to_string_lossy().replace('\\', "/");
-            if name.ends_with("tests.rs") || name.ends_with("e2e.rs") || name.contains("/tests/") || ALLOWED.iter().any(|a| name.ends_with(a)) { continue }
+            if name.ends_with("tests.rs") || name.ends_with("e2e.rs") || name.ends_with("copy_gate.rs") || name.ends_with("copy_outs.rs") || name.contains("/tests/") || ALLOWED.iter().any(|a| name.ends_with(a)) { continue }
             let text = std::fs::read_to_string(&f).unwrap();
-            let code = text.split("\n#[cfg(test)]").next().unwrap_or(&text);
+            let code = non_test_code(&text);
             for (i, l) in code.lines().enumerate() {
                 let l = l.trim_start(); if l.starts_with("//") { continue }
                 if ["TcpStream::connect", "UdpSocket", "TcpSocket", "connect_async", "UnixStream::connect"].iter().any(|k| l.contains(k)) { bad.push(format!("{name}:{}", i + 1)) }
             }
         }
         assert!(bad.is_empty(), "an outbound socket outside the allowlist (add it to proc.rs's list with a copy-guard): {bad:?}");
+    }
+
+    #[test]
+    fn probe_home_seeds_python_interpreter_and_inhibits_writes() {
+        let h = ProbeHome::new();
+        let root = h.path().to_path_buf();
+        for (ver, schema) in [("10.99", 7u64), ("10.0", 6), ("9.0", 3), ("8.0", 3)] {
+            let raw = std::fs::read_to_string(root.join(ver).join("kicad_common.json")).unwrap();
+            let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+            assert_eq!(v["api"]["enable_server"], serde_json::json!(false), "{ver}");
+            assert!(v["api"]["interpreter_path"].as_str().is_some_and(|s| !s.is_empty()), "{ver}");
+            assert_eq!(v["meta"]["filename"], "kicad_common.json", "{ver}");
+            assert_eq!(v["meta"]["version"], serde_json::json!(schema), "{ver}");
+        }
+        let env = h.env();
+        assert!(env.iter().any(|(k, v)| *k == "KICAD_CONFIG_HOME" && *v == root.as_os_str()));
+        assert!(env.iter().any(|(k, v)| *k == "KICAD_CACHE_HOME" && *v == root.join("cache").as_os_str()));
+        assert!(env.iter().any(|(k, v)| *k == "KICAD_DOCUMENTS_HOME" && *v == root.join("documents").as_os_str()));
+        assert!(env.iter().any(|(k, v)| *k == "KICAD_INHIBIT_SETTINGS_WRITES" && v == "1"));
+        drop(h);
+        assert!(!root.exists(), "ProbeHome drop removes throwaway folder");
+    }
+
+    #[cfg(unix)]
+    fn warm_script(cli: &std::path::Path) {
+        let t = std::time::Instant::now();
+        loop {
+            match std::process::Command::new(cli).arg("--bp-test-noop").status() {
+                Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) && t.elapsed() < std::time::Duration::from_secs(30) => {
+                    std::thread::sleep(std::time::Duration::from_millis(25));
+                }
+                _ => break,
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn pid_signal_ok(pid: &str) -> bool {
+        std::process::Command::new("kill")
+            .args(["-0", pid])
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    }
+
+    #[cfg(unix)]
+    pub(super) fn is_live_non_zombie(pid: &str) -> bool {
+        if !pid_signal_ok(pid) { return false; }
+        #[cfg(target_os = "linux")]
+        if let Ok(stat) = std::fs::read_to_string(format!("/proc/{pid}/stat")) {
+            if let Some((_, rest)) = stat.rsplit_once(')') {
+                if rest.trim_start().starts_with('Z') { return false; }
+            }
+        }
+        #[cfg(target_os = "macos")]
+        if let Ok(o) = std::process::Command::new("ps").args(["-o", "state=", "-p", pid]).output() {
+            if String::from_utf8_lossy(&o.stdout).trim().starts_with('Z') { return false; }
+        }
+        true
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_output_result_captures_stdout_and_stderr() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::plat::tmp::dir("probe-out");
+        let cli = d.join("kicad-cli");
+        std::fs::write(&cli, "#!/bin/sh\necho out-line\necho err-line >&2\n").unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // Do not pre-warm here so probe_output_result's built-in ETXTBSY retry is exercised directly.
+        let mut c = std_cmd(Kind::Local, &cli);
+        c.arg("--version");
+        let out = probe_output_result(c, std::time::Duration::from_secs(5)).expect("ok");
+        assert!(out.status.success());
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "out-line");
+        assert_eq!(String::from_utf8_lossy(&out.stderr).trim(), "err-line");
+
+        let missing = std_cmd(Kind::Local, d.join("missing-kicad-cli"));
+        assert!(matches!(probe_output_result(missing, std::time::Duration::from_secs(2)), Err(ProbeError::Spawn(_))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_output_kills_sigterm_ignoring_process_group_and_reaps_child() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::plat::tmp::dir("probe-kill-grp");
+        let (cli, parent_pid_file, gc_pid_file) = (d.join("kicad-cli"), d.join("parent.pid"), d.join("gc.pid"));
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = \"--bp-test-noop\" ] && exit 0\ntrap '' TERM\nsh -c \"trap '' TERM; echo \\$\\$ > '{}'; exec sleep 60\" &\nwhile [ ! -s '{}' ]; do sleep 0.01; done\necho $$ > '{}'\nexec sleep 60\n",
+                gc_pid_file.display(),
+                gc_pid_file.display(),
+                parent_pid_file.display(),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        warm_script(&cli);
+
+        let mut c = std_cmd(Kind::Local, &cli);
+        c.arg("--version");
+        let at = std::time::Instant::now();
+        let res = probe_output_result(c, std::time::Duration::from_secs(2));
+        assert!(matches!(res, Err(ProbeError::Timeout)), "{res:?}");
+        assert!(at.elapsed() < std::time::Duration::from_secs(10), "bounded: {:?}", at.elapsed());
+
+        let ppid = std::fs::read_to_string(&parent_pid_file).unwrap().trim().to_string();
+        let gpid = std::fs::read_to_string(&gc_pid_file).unwrap().trim().to_string();
+        assert!(!ppid.is_empty() && !gpid.is_empty(), "ppid={ppid:?} gpid={gpid:?}");
+        assert!(!pid_signal_ok(&ppid), "direct child pid {ppid} was synchronously killed and reaped");
+        let gc_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while is_live_non_zombie(&gpid) && std::time::Instant::now() < gc_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!is_live_non_zombie(&gpid), "grandchild pid {gpid} in the probe's process group was terminated");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_output_kills_descendant_holding_pipes_after_leader_exits() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::plat::tmp::dir("probe-pipe-hold");
+        let (cli, parent_pid_file, gc_pid_file) = (d.join("kicad-cli"), d.join("parent.pid"), d.join("gc.pid"));
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = \"--bp-test-noop\" ] && exit 0\nsh -c \"trap '' TERM; echo \\$\\$ > '{}'; exec sleep 60\" &\nwhile [ ! -s '{}' ]; do sleep 0.01; done\necho $$ > '{}'\necho 10.99.0\nexit 0\n",
+                gc_pid_file.display(),
+                gc_pid_file.display(),
+                parent_pid_file.display(),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        warm_script(&cli);
+
+        let mut c = std_cmd(Kind::Local, &cli);
+        c.arg("--version");
+        let at = std::time::Instant::now();
+        let res = probe_output_result(c, std::time::Duration::from_secs(2));
+        assert!(matches!(res, Err(ProbeError::Timeout)), "descendant holding stdout pipe must time out cleanly: {res:?}");
+        assert!(at.elapsed() < std::time::Duration::from_secs(10), "bounded: {:?}", at.elapsed());
+
+        let ppid = std::fs::read_to_string(&parent_pid_file).unwrap().trim().to_string();
+        let gpid = std::fs::read_to_string(&gc_pid_file).unwrap().trim().to_string();
+        assert!(!ppid.is_empty() && !gpid.is_empty(), "ppid={ppid:?} gpid={gpid:?}");
+        assert!(!pid_signal_ok(&ppid), "direct leader pid {ppid} was reaped after cleanup");
+        let gc_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while is_live_non_zombie(&gpid) && std::time::Instant::now() < gc_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!is_live_non_zombie(&gpid), "pipe-holding descendant pid {gpid} was killed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_output_kills_stubborn_grandchild_when_leader_exits_on_sigterm() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::plat::tmp::dir("probe-leader-term");
+        let (cli, parent_pid_file, gc_pid_file) = (d.join("kicad-cli"), d.join("parent.pid"), d.join("gc.pid"));
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\n[ \"$1\" = \"--bp-test-noop\" ] && exit 0\nsh -c \"trap '' TERM; echo \\$\\$ > '{}'; exec sleep 60\" &\nwhile [ ! -s '{}' ]; do sleep 0.01; done\necho $$ > '{}'\nexec sleep 60\n",
+                gc_pid_file.display(),
+                gc_pid_file.display(),
+                parent_pid_file.display(),
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        warm_script(&cli);
+
+        let mut c = std_cmd(Kind::Local, &cli);
+        c.arg("--version");
+        let res = probe_output_result(c, std::time::Duration::from_secs(2));
+        assert!(matches!(res, Err(ProbeError::Timeout)), "{res:?}");
+
+        let ppid = std::fs::read_to_string(&parent_pid_file).unwrap().trim().to_string();
+        let gpid = std::fs::read_to_string(&gc_pid_file).unwrap().trim().to_string();
+        assert!(!ppid.is_empty() && !gpid.is_empty(), "ppid={ppid:?} gpid={gpid:?}");
+        assert!(!pid_signal_ok(&ppid), "direct leader pid {ppid} was reaped");
+        let gc_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        while is_live_non_zombie(&gpid) && std::time::Instant::now() < gc_deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(!is_live_non_zombie(&gpid), "SIGKILL still swept grandchild pid {gpid} after leader exited on SIGTERM");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn probe_output_until_enforces_deadline_before_spawn_and_completion() {
+        use std::os::unix::fs::PermissionsExt;
+        let d = crate::plat::tmp::dir("probe-dl");
+        let (early_cli, marker, late_cli) = (d.join("early"), d.join("ran"), d.join("late"));
+        std::fs::write(&early_cli, format!("#!/bin/sh\n: > '{}'\necho ok\n", marker.display())).unwrap();
+        std::fs::set_permissions(&early_cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let expired = std::time::Instant::now();
+        let res_expired = probe_output_until(std_cmd(Kind::Local, &early_cli), expired, Some(expired), std::time::Duration::from_secs(1));
+        assert!(matches!(res_expired, Err(ProbeError::Timeout)), "{res_expired:?}");
+        assert!(!marker.exists(), "probe must not execute after deadline");
+
+        std::fs::write(&late_cli, "#!/bin/sh\n[ \"$1\" = \"--bp-test-noop\" ] && exit 0\nsleep 0.12\necho late\n").unwrap();
+        std::fs::set_permissions(&late_cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        warm_script(&late_cli);
+
+        let mut c = std_cmd(Kind::Local, &late_cli);
+        c.arg("--version");
+        let end = std::time::Instant::now() + std::time::Duration::from_millis(25);
+        let res_late = probe_output_until(c, end, Some(end), std::time::Duration::from_millis(25));
+        assert!(matches!(res_late, Err(ProbeError::Timeout)), "late completion must time out: {res_late:?}");
     }
 }

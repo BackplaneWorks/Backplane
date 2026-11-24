@@ -13,6 +13,17 @@ const T1: &str = "t1700000001-2";
 
 /// a folder per call: helpers shared by several tests (`deliveries`) ask by the same name, and tests run side by side
 fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("ag-{name}")) }
+/// The pids a stand-in writes to `files` (two of them), polled until each parses, bounded by `within`; on timeout it says what it waited for and what it last read.
+async fn wait_pids(files: &[PathBuf; 2], within: Duration, what: &str) -> (u32, u32) {
+    let end = Instant::now() + within;
+    loop {
+        let raw: Vec<String> = files.iter().map(|f| std::fs::read_to_string(f).unwrap_or_default()).collect();
+        let pids: Vec<u32> = raw.iter().map(|r| r.trim().parse().unwrap_or(0)).collect();
+        if pids.iter().all(|p| *p > 0) { return (pids[0], pids[1]) }
+        assert!(Instant::now() < end, "{what}: pids never appeared in {} and {} within {within:?} (last read {:?} and {:?})", files[0].display(), files[1].display(), raw[0], raw[1]);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
 fn script(d: &Path, name: &str, body: &str) { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
 /// The JS test fleet's stand-in (test/tools/perf_standin.ts) with the settings the recordings used.
 fn perf_standin(d: &Path, secs: u32) { script(d, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS={secs} FAKE_LOG=/dev/null\n"), 1)); }
@@ -321,11 +332,13 @@ fn renames(ev: &[Value]) -> Vec<String> { ev.iter().filter(|e| is(e, "ThreadRena
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn shutdown_leaves_no_process_behind() {
-    let sd = dir("s-bin"); script(&sd, "claude", "#!/bin/sh\nsleep 600 &\necho $! > \"$0.kid\"\necho $$ > \"$0.pid\"\nwait\n");
+    // the stand-in writes each pid whole and renames it in: a pid file that exists is complete
+    let sd = dir("s-bin"); script(&sd, "claude", "#!/bin/sh\nsleep 600 &\necho $! > \"$0.kid.tmp\" && mv \"$0.kid.tmp\" \"$0.kid\"\necho $$ > \"$0.pid.tmp\" && mv \"$0.pid.tmp\" \"$0.pid\"\nwait\n");
     let (hub, ag, _h, _w) = start("s", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await; tokio::time::sleep(Duration::from_millis(600)).await;
-    let rd = |f: &str| std::fs::read_to_string(sd.join(f)).unwrap().trim().parse::<u32>().unwrap();
-    let (pid, kid) = (rd("claude.pid"), rd("claude.kid")); assert!(proc::alive(pid) && proc::alive(kid));
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await;
+    // polled until both pids parse, bounded (a fixed wait loses to a loaded machine)
+    let (pid, kid) = wait_pids(&[sd.join("claude.pid"), sd.join("claude.kid")], Duration::from_secs(20), "the stand-in agent and its child").await;
+    assert!(proc::alive(pid) && proc::alive(kid));
     ag.shutdown();
     for _ in 0..80 { if !proc::alive(pid) && !proc::alive(kid) { break } tokio::time::sleep(Duration::from_millis(100)).await }
     assert!(!proc::alive(pid), "the agent outlived shutdown"); assert!(!proc::alive(kid), "the agent's child outlived shutdown");
@@ -431,13 +444,59 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
     assert_eq!(carried(&ev).into_iter().map(|c| c.0).collect::<Vec<_>>(), vec![tid(0)]);
     assert_eq!(waiting(&ev), Vec::<String>::new()); ag.shutdown();
 }
+fn codex_carry_args_ok(argv: &[&str], stdin: &str, windows: bool) -> bool {
+    if windows {
+        argv.len() >= 6
+            && argv[0] == "exec"
+            && argv[1] == "-p"
+            && argv[2].strip_prefix("bp-").is_some_and(|s| !s.is_empty())
+            && argv[3] == "resume"
+            && argv[4] == "S-cut"
+            && argv.last() == Some(&"-")
+            && !argv.iter().any(|a| a.contains(world::CARRY_TEXT))
+            && stdin.contains(world::CARRY_TEXT)
+    } else {
+        argv.len() >= 4
+            && argv[..3] == ["exec", "resume", "S-cut"]
+            && argv.last().is_some_and(|a| a.contains(world::CARRY_TEXT))
+            && stdin.is_empty()
+    }
+}
+fn codex_argv_runs(argv: &str) -> Vec<String> {
+    let mut runs = Vec::<String>::new();
+    for l in argv.lines() {
+        if l.starts_with("exec ") && l.contains("--json") {
+            runs.push(l.to_string());
+        } else if let Some(cur) = runs.last_mut() {
+            cur.push('\n');
+            cur.push_str(l);
+        }
+    }
+    runs
+}
+fn codex_exec_line_ok(inv: &str, rest: &str, prompt: &str, windows: bool) -> bool {
+    let inv = inv.trim_end();
+    if windows {
+        inv.strip_prefix("exec -p bp-")
+            .and_then(|s| s.split_once(' '))
+            .is_some_and(|(prof, tail)| !prof.is_empty() && tail.starts_with(rest) && tail.ends_with(" -") && !tail.ends_with(&format!(" {prompt}")))
+    } else {
+        inv.starts_with(&format!("exec {rest}")) && inv.ends_with(&format!(" {prompt}"))
+    }
+}
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_carries_a_codex_thread_on_in_its_own_session() {
-    let sd = dir("cx-bin"); let args = sd.join("args");
-    script(&sd, "codex", &format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > {}\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n", crate::plat::fs::script_path(&args)));
+    let sd = dir("cx-bin"); let args = sd.join("args"); let stdin = sd.join("stdin");
+    script(&sd, "codex", &format!("#!/bin/sh\nfor x in \"$@\"; do last=\"$x\"; done\nprintf '%s\\0' \"$@\" > \"{}\"\nif [ \"$last\" = \"-\" ]; then cat > \"{}\"; fi\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n", crate::plat::fs::script_path(&args), crate::plat::fs::script_path(&stdin)));
     let (hub, ag, _h, _w) = start("cx", |w| { let l = cut_log(w, 1).replace("\"provider\":\"claude\"", "\"provider\":\"codex\""); l + &format!("{{\"$\":\"SessionSet\",\"id\":\"{T1}\",\"session\":\"S-cut\",\"at\":1700000120}}\n") }, |_| Cli::standin(&sd)).await;
-    let ev = until(&hub, 0, 10, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let ev = until(&hub, 0, 60, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert_eq!(carried(&ev).len(), 1, "{ev:?}");
-    let a = std::fs::read_to_string(&args).unwrap(); assert!(a.starts_with("exec\nresume\nS-cut\n") && a.contains(world::CARRY_TEXT), "{a}"); ag.shutdown();
+    assert!(ev.iter().any(|e| turn_is(e, "completed")), "carried Codex turn did not complete in 60s: {ev:?}");
+    let raw = std::fs::read(&args).unwrap();
+    let trimmed = raw.strip_suffix(&[0]).unwrap_or(&raw);
+    let argv: Vec<String> = if trimmed.is_empty() { vec![] } else { trimmed.split(|&b| b == 0).map(|s| String::from_utf8_lossy(s).into_owned()).collect() };
+    let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let stdin_text = std::fs::read_to_string(&stdin).unwrap_or_default();
+    assert!(codex_carry_args_ok(&argv_refs, &stdin_text, cfg!(windows)), "argv={argv:?} stdin={stdin_text:?}"); ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_restart_carries_on_at_most_a_burst_at_once() {
     let sd = dir("cb-bin"); script(&sd, "claude", DEAF);
@@ -686,28 +745,34 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     let note = ev.iter().find(|e| is(e, "ActivityLogged") && e["kind"] == "restart").unwrap(); assert!(note["summary"].as_str().unwrap().ends_with("Its request to use Bash was not answered: \u{201C}make all\u{201D}"));
     ag.shutdown();
 }
-#[tokio::test(flavor = "multi_thread")] async fn the_agent_is_started_with_the_arguments_and_prompt_the_js_hub_gives_it() {
+#[tokio::test(flavor = "multi_thread")] async fn the_agent_is_started_with_the_golden_arguments_and_prompt() {
     use crate::plat::fs::PermissionsExt;
     let sd = dir("a-bin"); let argfile = sd.join("argv.json");
     // a stand-in that writes its own argv as JSON, then behaves as a Claude that answers once
-    std::fs::write(sd.join("claude"), format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > {a}.tmp\nmv {a}.tmp {a}\nread l\nsleep 600\n", a = crate::plat::fs::script_path(&argfile))).unwrap();
+    let a = crate::plat::fs::script_path(&argfile).replace('\'', "'\\''");
+    std::fs::write(sd.join("claude"), format!("#!/bin/sh\nprintf '%s\\0' \"$@\" > '{a}.tmp'\nmv '{a}.tmp' '{a}'\nread l\nsleep 30\n")).unwrap();
     std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
-    let (hub, ag, home, work) = {
+    let (hub, ag, home, work, fc_fix) = {
         let home = dir("a-home"); let work = dir("a-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
         let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let host = host::HostInfo { home: home.to_path_buf(), fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve-current".into(), kicad: prompt::Kicad { status: "stock".into(), cli: "/home/h/.local/bin/kicad-cli".into(), version: "10.0.7".into(), ..Default::default() },
             models: json!({"claude":["fable","opus","sonnet","haiku"],"codex":["gpt-6.1-sol","gpt-6-astra","gpt-6.1-terra","gpt-6-sol","gpt-6-luna","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"]}), ..Default::default() };
-        let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); (hub, ag, home, work)
+        let fc_fix = host.fc.clone();
+        let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); (hub, ag, home, work, fc_fix)
     };
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
     for _ in 0..100 { if argfile.exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
-    let got: Vec<String> = { let raw = std::fs::read_to_string(&argfile).unwrap(); let mut v: Vec<String> = raw.split('\0').map(str::to_string).collect(); v.pop(); v };
+    let mut got: Vec<String> = { let raw = std::fs::read_to_string(&argfile).unwrap(); let mut v: Vec<String> = raw.split('\0').map(str::to_string).collect(); v.pop(); v };
+    if cfg!(windows) {
+        if let Some(i) = got.iter().position(|a| a == "--append-system-prompt-file") { got[i] = "--append-system-prompt".into(); if i + 1 < got.len() { got[i + 1] = std::fs::read_to_string(&got[i + 1]).unwrap() } }
+        if let Some(i) = got.iter().position(|a| a == "--settings") { if i + 1 < got.len() && !got[i + 1].trim_start().starts_with('{') { got[i + 1] = std::fs::read_to_string(&got[i + 1]).unwrap() } }
+    }
     let want: Vec<String> = serde_json::from_str(include_str!("../../../../test/agents/fixtures/argv-default.json")).unwrap();
     assert_eq!(got.len(), want.len());
     // the FreeCAD the hub tells about is the one it finds on this machine (PATH first): told as the fixture's, wherever it is installed here
-    let told = crate::files::kicad::stepglb::told_freecad(&home, "/home/h/.local/bin/freecadcmd");
-    let fc_dir = told.rsplit_once('/').map(|d| d.0.to_string()).unwrap_or_default();
-    let norm = |v: &[String]| v.iter().map(|x| { let x = if fc_dir.is_empty() || fc_dir == "/home/h/.local/bin" { x.clone() } else { x.replace(&format!("{fc_dir}/freecad"), "/home/h/.local/bin/freecad") };
+    let told = crate::files::kicad::stepglb::told_freecad(&home, &fc_fix);
+    let (fc_gui, fc_fix_gui) = (prompt::mech_gui(&told), prompt::mech_gui(&fc_fix));
+    let norm = |v: &[String]| v.iter().map(|x| { let x = x.replace(&told, "<freecadcmd>").replace(&fc_fix, "<freecadcmd>").replace(&fc_gui, "<freecad>").replace(&fc_fix_gui, "<freecad>");
         let x = x.replace(&home.join("attachments").to_string_lossy().to_string(), "<home>/attachments").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/home/attachments", "<home>/attachments");
         let x = x.replace(&work.to_string_lossy().to_string(), "<root>").replace("/home/h/Documents/i2cjak/backplane-gpui/build/gpui/results/agents/argv2/work/fixroot", "<root>");
         if x.contains("/mcp/") { let (a, b) = x.split_once("/mcp/").unwrap(); let _ = a; format!("mcp:{}", b.split('?').next().unwrap().split('.').next().unwrap()) } else { x } }).collect::<Vec<_>>();
@@ -777,7 +842,7 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     for (k, v) in [("GIT_CONFIG_GLOBAL", "/dev/null"), ("GIT_CONFIG_NOSYSTEM", "1"), ("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")] { std::env::set_var(k, v) } // hermetic: no host git identity, config or hooks
     let sd = dir("st-bin"); script(&sd, "claude", PLAYER);
     std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/agents/fixtures/replay-steps.ndjson")).unwrap();
-    let home = dir("st-home"); let work = dir("st-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
+    let home = dir("st-home"); let work = crate::plat::tmp::canonical("ag-st-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
     std::fs::write(work.join("b.kicad_pcb"), "(kicad_pcb (version 20240108))\n").unwrap();
     let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let host = host::HostInfo { home: home.to_path_buf(), ..Default::default() };
@@ -790,15 +855,29 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     let ev = until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() == 2 && ev.iter().filter(|e| e["tone"] == "step").count() == 2).await; tokio::time::sleep(Duration::from_millis(800)).await;
     let ev = { let e2 = log_from(&hub, from).await; if e2.len() > ev.len() { e2 } else { ev } };
     let js_root = "/home/h/Documents/i2cjak/bp-agents-scratch/modes/work-steps/fixroot"; let me = work.to_string_lossy().to_string();
-    // which git dir holds the steps is compared above; here the JS hub's (history.git, as it had no #1163) and ours are the same "<gitdir>"
-    let f = |v: &[Value], r: &str| core(v, T1).iter().map(|e| norm_digits(&norm_steps(&norm(e), &[r]).replace("<root>/.backplane/history.git", "<gitdir>").replace("<root>/.git", "<gitdir>"))).collect::<Vec<_>>();
+    let mut me_roots = crate::plat::fs::path_forms(&me);
+    if cfg!(windows) {
+        if let Some(n) = work.file_name().and_then(|s| s.to_str()) { me_roots.push(format!("/tmp/{n}")); }
+    }
     // the step Acts carry the commit, the previous commit, the git dir and top, and the files changed
     let steps: Vec<Value> = ev.iter().filter(|e| e["tone"] == "step").cloned().collect(); assert_eq!(steps.len(), 2, "{steps:?}");
     let rec = |i: usize| -> Value { let sm = steps[i]["summary"].as_str().unwrap_or(""); serde_json::from_str(sm).unwrap_or_else(|e| panic!("step {i}: the capture did not record a JSON step ({e}); its summary was: {sm:?}")) };
     assert_eq!(rec(0)["w"], "start"); assert_eq!(rec(0)["f"], json!(["A\tb.kicad_pcb"])); assert_eq!(rec(0)["p"], ""); assert_eq!(rec(1)["p"], rec(0)["c"]); assert_eq!(rec(1)["f"], json!(["M\tb.kicad_pcb"]));
     // the folder was in no repository: the turn made it one first (#1163, snapguard.rs), so the steps are its .git's, not .backplane/history.git
-    assert_eq!(rec(0)["g"], format!("{me}/.git")); assert_eq!(rec(0)["t"], me);
-    let (g, w) = (f(&ev, &me), f(&lines_of(include_str!("../../../../test/agents/fixtures/js-steps.jsonl")), js_root));
+    let (g0, t0) = (rec(0)["g"].as_str().unwrap_or("").to_string(), rec(0)["t"].as_str().unwrap_or("").to_string());
+    if cfg!(windows) {
+        assert!(me_roots.iter().any(|r| g0.eq_ignore_ascii_case(&format!("{r}/.git"))), "g={g0:?} roots={me_roots:?}");
+        assert!(me_roots.iter().any(|r| t0.eq_ignore_ascii_case(r)), "t={t0:?} roots={me_roots:?}");
+        if let Some(gr) = g0.strip_suffix("/.git") { if !me_roots.iter().any(|r| r == gr) { me_roots.push(gr.to_string()); } }
+        if !me_roots.iter().any(|r| r == &t0) { me_roots.push(t0.clone()); }
+    } else {
+        assert_eq!(g0, format!("{me}/.git")); assert_eq!(t0, me);
+    }
+    me_roots.sort_by(|a, b| b.len().cmp(&a.len()));
+    // which git dir holds the steps is compared above; here the JS hub's (history.git, as it had no #1163) and ours are the same "<gitdir>"
+    let f = |v: &[Value], roots: &[&str]| core(v, T1).iter().map(|e| norm_digits(&norm_steps(&norm(e), roots).replace("<root>/.backplane/history.git", "<gitdir>").replace("<root>/.git", "<gitdir>"))).collect::<Vec<_>>();
+    let me_refs: Vec<&str> = me_roots.iter().map(String::as_str).collect();
+    let (g, w) = (f(&ev, &me_refs), f(&lines_of(include_str!("../../../../test/agents/fixtures/js-steps.jsonl")), &[js_root]));
     // the Acts land when the background capture ends, so their place among the turn's events varies: compare the rest in order, and the Acts as a set
     let (gs, ws): (Vec<_>, Vec<_>) = (g.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>(), w.iter().filter(|x| !x.contains("\"tone\":\"step\"")).collect::<Vec<_>>());
     assert_eq!(gs, ws); let (mut a, mut b): (Vec<_>, Vec<_>) = (g.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect(), w.iter().filter(|x| x.contains("\"tone\":\"step\"")).collect()); a.sort(); b.sort(); assert_eq!(a, b);
@@ -899,6 +978,50 @@ async fn recovered_when(extra: &str, state: &str, done: Option<fn(&[Value]) -> b
     assert!(ev.iter().any(|e| is(e, "ModesSet") && e["id"] == T1 && e["interaction"] == "default" && e["runtime"] == "full-access"), "back to its own mode: {ev:?}");
     ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn plan_ask_answers_handle_implement_revise_and_dismiss() {
+    let sd = dir("planask-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("planask", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    hub.commit_many(&[
+        json!({"$":"ModesSet","id":T1,"runtime":"full-access","interaction":"default","model":"","at":1700000050}),
+        json!({"$":"AskOpened","id":"qp1","thread":T1,"kind":"plan","tool":"ExitPlanMode","detail":"## Plan\n1. Step one","options":"","at":1700000051}),
+        json!({"$":"SettingSet","key":"plan.ask.once.qp1","value":"1","at":1700000051}),
+        json!({"$":"AskOpened","id":"qp2","thread":T1,"kind":"plan","tool":"ExitPlanMode","detail":"## Plan 2","options":"","at":1700000052}),
+        json!({"$":"AskOpened","id":"qp3","thread":T1,"kind":"plan","tool":"ExitPlanMode","detail":"## Plan 3","options":"","at":1700000053}),
+        json!({"$":"AskOpened","id":"qp4","thread":"t-missing","kind":"plan","tool":"ExitPlanMode","detail":"## Plan 4","options":"","at":1700000054}),
+    ]).await.unwrap();
+    // sync agents world to committed asks before calling ask.answer
+    let _ = ag.world().await;
+    // empty feedback is refused without closing the ask
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp1","answer":"revise:   "})).await["ok"], false);
+    assert!(ag.world().await.asks.contains_key("qp1"));
+
+    // failed delivery keeps the plan ask open and retryable
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp4","answer":"implement"})).await["ok"], false);
+    assert!(ag.world().await.asks.contains_key("qp4"));
+
+    // revise delivers revision prompt, restores plan interaction and one-turn scope, and clears ask.once flag
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp1","answer":"revise:Use LDO instead"})).await["ok"], true);
+    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"].as_str().unwrap_or("").contains("Use LDO instead"))).await;
+    assert!(ev.iter().any(|e| is(e, "ModesSet") && e["id"] == T1 && e["interaction"] == "plan"));
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("plan.once.{T1}") && e["value"] == "1"));
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == "plan.ask.once.qp1" && e["value"] == ""));
+
+    // dismiss closes ask cleanly with an activity note
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp2","answer":"dismiss"})).await["ok"], true);
+    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"] == "Proposed plan dismissed")).await;
+    assert!(ev.iter().any(|e| is(e, "AskClosed") && e["id"] == "qp2"));
+
+    // implement switches interaction to default, clears plan.once, marks plan.executing, and delivers Implement message
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp3","answer":"implement"})).await["ok"], true);
+    let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "Implement the proposed plan.")).await;
+    assert!(ev.iter().any(|e| is(e, "ModesSet") && e["id"] == T1 && e["interaction"] == "default"));
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("plan.once.{T1}") && e["value"] == ""));
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("plan.executing.{T1}") && e["value"] == "1"));
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn recover_leaves_idle() { let ev = recovered("", "idle").await; assert!(!ev.iter().any(|e| turn_is(e, "interrupted")) && !ev.iter().any(|e| e["kind"] == "restart")) }
 #[tokio::test(flavor = "multi_thread")] async fn recover_empty_nothing() { let sd = dir("re-bin"); perf_standin(&sd, 1); let (hub, ag, _h, _w) = start("re", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let n = len(&hub).await; tokio::time::sleep(Duration::from_millis(300)).await; assert_eq!(len(&hub).await, n); ag.shutdown() }
 
@@ -924,16 +1047,95 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::Te
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_second_codex_turn_resumes_the_session() {
     let (hub, ag, sd) = codex_start("cx2").await;
-    for t in ["one", "two"] { let from = len(&hub).await; rpc(&hub, "turn.start", json!({"thread":T1,"text":t})).await; until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(300)).await }
-    let argv = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default(); let ls: Vec<&str> = argv.lines().filter(|l| l.starts_with("exec ")).collect();
-    assert!(ls[0].starts_with("exec --json --skip-git-repo-check"), "{argv}"); assert!(ls[1].starts_with("exec resume cs-1 --json"), "{argv}");
+    for (i, t) in ["one", "two"].into_iter().enumerate() {
+        let from = len(&hub).await;
+        rpc(&hub, "turn.start", json!({"thread":T1,"text":t})).await;
+        let ev = until(&hub, from, 60, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+        assert!(ev.iter().any(|e| turn_is(e, "completed")), "codex turn {t:?} did not complete: {ev:?}");
+        let end = Instant::now() + Duration::from_secs(15);
+        while ag.stats.procs_exited.load(Relaxed) < (i + 1) as u64 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(25)).await }
+        assert_eq!(ag.stats.procs_exited.load(Relaxed), (i + 1) as u64, "codex turn {t:?} process was not reaped");
+    }
+    let argv = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default(); let ls = codex_argv_runs(&argv);
+    assert!(ls.len() >= 2 && codex_exec_line_ok(&ls[0], "--json --skip-git-repo-check", "one", cfg!(windows)) && codex_exec_line_ok(&ls[1], "resume cs-1 --json", "two", cfg!(windows)), "{argv}");
+    if cfg!(windows) {
+        let stdin = std::fs::read_to_string(sd.join("stdin.log")).unwrap_or_default();
+        assert_eq!(stdin.lines().collect::<Vec<_>>(), ["one", "two"], "windows prompts arrive on stdin: {stdin:?}");
+    }
     let ev = log_from(&hub, 0).await; let us: Vec<&Value> = ev.iter().filter(|e| is(e, "TurnUsage")).collect();
     assert_eq!(us.len(), 1, "the same totals are one turn's usage"); ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn codex_standins_read_stdin_when_prompt_arg_is_dash() {
+    async fn run_standin(mut p: proc::Proc, input: &str) -> (Vec<String>, proc::Exit) {
+        let pid = p.pid;
+        let res = tokio::time::timeout(Duration::from_secs(15), async move {
+            p.input.send(input.into()).await.unwrap();
+            drop(p.input);
+            let mut out = Vec::new();
+            while let Some(l) = p.lines.recv().await { out.push(l); }
+            let ex = p.exit.await.unwrap();
+            (out, ex)
+        }).await;
+        match res {
+            Ok(v) => v,
+            Err(_) => { proc::terminate(pid, Duration::from_millis(100)); panic!("stand-in pid {pid} timed out after 15s") }
+        }
+    }
+
+    assert!(codex_carry_args_ok(&["exec", "resume", "S-cut", "--json", world::CARRY_TEXT], "", false));
+    assert!(codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", "--json", "-"], world::CARRY_TEXT, true));
+    assert!(!codex_carry_args_ok(&["exec", "resume", "S-cut", world::CARRY_TEXT], "", true));
+    assert!(!codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", world::CARRY_TEXT], "", true));
+    assert!(!codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", "-", world::CARRY_TEXT], world::CARRY_TEXT, true));
+    assert!(!codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", "-"], "other", true));
+    assert!(!codex_carry_args_ok(&["exec", "resume", "S-cut", world::CARRY_TEXT, "tail"], "", false));
+    assert!(!codex_carry_args_ok(&["exec", "resume", "S-cut", world::CARRY_TEXT], "unexpected", false));
+    assert!(!codex_carry_args_ok(&["exec", "-p", "bp-1-0", "resume", "S-cut", world::CARRY_TEXT], "", false));
+
+    assert!(codex_exec_line_ok("exec --json --skip-git-repo-check one", "--json --skip-git-repo-check", "one", false));
+    assert!(codex_exec_line_ok("exec -p bp-1-0 --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", true));
+    assert!(codex_exec_line_ok("exec -p bp-1-1 resume cs-1 --json --skip-git-repo-check -", "resume cs-1 --json", "two", true));
+    assert!(!codex_exec_line_ok("exec -p bp-1-0 --json --skip-git-repo-check one", "--json --skip-git-repo-check", "one", true));
+    assert!(!codex_exec_line_ok("exec --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", true));
+    assert!(!codex_exec_line_ok("exec -p bp- --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", true));
+    assert!(!codex_exec_line_ok("exec -p bp-1-0 --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", false));
+    assert!(!codex_exec_line_ok("exec --json --skip-git-repo-check -", "--json --skip-git-repo-check", "one", false));
+
+    // 1. standin-codex.sh captures raw stdin (preserving intentional trailing LF) into stdin.log and echoes prompt
+    let sd = dir("cx-stdin-sh");
+    script(&sd, "codex", CODEX_STANDIN);
+    let args: Vec<String> = ["exec", "-p", "bp-1", "--json", "--skip-git-repo-check", "-"].into_iter().map(String::from).collect();
+    let p = proc::spawn(&sd.join("codex"), &args, &sd, Some(&sd), &[]).unwrap();
+    let (out, ex) = run_standin(p, "stdin prompt text\n").await;
+    assert_eq!(ex.code, Some(0), "standin-codex.sh stderr: {}", ex.stderr);
+    assert!(out.iter().any(|l| l.contains("re: stdin prompt text")), "{out:?}");
+    let argv_log = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default();
+    let stdin_log = std::fs::read_to_string(sd.join("stdin.log")).unwrap_or_default();
+    assert!(argv_log.contains("exec -p bp-1 --json --skip-git-repo-check -"), "{argv_log}");
+    assert_eq!(stdin_log, "stdin prompt text\n\n", "raw stdin (prompt trailing LF + proc framing LF) preserved: {stdin_log:?}");
+
+    // 2. failover-standin.py reads UTF-8 stdin prompt preserving internal CRLF and intentional trailing LF (stripping only proc's single framing LF)
+    let rec = dir("cx-stdin-py-rec");
+    let bin = dir("cx-stdin-py-bin");
+    let py = include_str!("../../../../test/agents/fixtures/failover-standin.py").replace("@DIR@", &crate::plat::fs::script_path(&rec));
+    script(&bin, "codex", &py);
+    let py_args: Vec<String> = ["exec", "-p", "bp-1", "resume", "cs-prev", "--json", "-"].into_iter().map(String::from).collect();
+    let p = proc::spawn(&bin.join("codex"), &py_args, &bin, Some(&bin), &[]).unwrap();
+    let prompt = "handed over — UTF-8\r\nsecond\n";
+    let (_, ex) = run_standin(p, prompt).await;
+    assert_eq!(ex.code, Some(0), "failover-standin.py stderr: {}", ex.stderr);
+    let turns: Vec<Value> = std::fs::read_to_string(rec.join("turns.jsonl")).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
+    assert_eq!(turns.len(), 1, "{turns:?}");
+    assert_eq!(turns[0]["resume"], "cs-prev");
+    assert_eq!(turns[0]["text"], prompt);
+}
 #[tokio::test(flavor = "multi_thread")] async fn a_person_message_to_a_running_codex_turn_steers_it() {
     let (hub, ag, _sd) = codex_start("cx3").await; let from = len(&hub).await;
+    // the person's message comes once "par" has streamed, inside the stand-in's 2 s (a fixed 500 ms came before it on a loaded Windows VM)
+    let d0 = ag.stats.deltas.load(Relaxed);
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow first"})).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    let end = Instant::now() + Duration::from_secs(60); while ag.stats.deltas.load(Relaxed) == d0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await }
+    assert!(ag.stats.deltas.load(Relaxed) > d0, "no text streamed");
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"second while running"})).await;
     let ev0 = log_from(&hub, from).await;
     assert!(ev0.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "second while running"), "posted at once");
@@ -990,7 +1192,8 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::Te
 #[tokio::test(flavor = "multi_thread")] async fn sigkill_helper() {
     let Ok(d) = std::env::var("BP_SIGKILL_DIR") else { return };
     let d = PathBuf::from(d); proc::set_owner(&d.to_string_lossy());
-    let sh = d.join("agent"); script(&d, "agent", "#!/bin/sh\nsleep 300 &\necho $! > \"$(dirname \"$0\")/grandchild\"\necho $$ > \"$(dirname \"$0\")/child\"\nsleep 300\n");
+    // each pid written whole and renamed in: a pid file that exists is complete
+    let sh = d.join("agent"); script(&d, "agent", "#!/bin/sh\nsleep 300 &\nd=$(dirname \"$0\")\necho $! > \"$d/grandchild.tmp\" && mv \"$d/grandchild.tmp\" \"$d/grandchild\"\necho $$ > \"$d/child.tmp\" && mv \"$d/child.tmp\" \"$d/child\"\nsleep 300\n");
     let p = proc::spawn(&sh, &[], &d, None, &[]).unwrap(); let _keep = p;
     std::fs::write(d.join("ready"), "1").unwrap(); tokio::time::sleep(Duration::from_secs(600)).await;
 }
@@ -999,10 +1202,10 @@ async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::Te
 #[tokio::test(flavor = "multi_thread")] async fn a_killed_hub_leaves_no_agent_behind() {
     let d = dir("kill"); let exe = std::env::current_exe().unwrap();
     let mut h = std::process::Command::new(exe).args(["agents::tests::sigkill_helper", "--exact", "--nocapture", "--test-threads=1"]).env("BP_SIGKILL_DIR", &d).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
-    let end = Instant::now() + Duration::from_secs(20); while !d.join("grandchild").exists() || !d.join("child").exists() { assert!(Instant::now() < end, "helper did not start"); tokio::time::sleep(Duration::from_millis(50)).await }
+    // polled until both pids parse, bounded; then the old settle before the kill
+    let (child, grand) = wait_pids(&[d.join("child"), d.join("grandchild")], Duration::from_secs(20), "the helper's agent and its background sleep").await;
     tokio::time::sleep(Duration::from_millis(200)).await;
-    let rd = |n: &str| -> u32 { std::fs::read_to_string(d.join(n)).unwrap().trim().parse().unwrap() };
-    let (child, grand) = (rd("child"), rd("grandchild")); assert!(proc::alive(child) && proc::alive(grand));
+    assert!(proc::alive(child) && proc::alive(grand));
     crate::plat::proc::kill(h.id(), crate::plat::proc::KILL); let _ = h.wait();
     let end = Instant::now() + Duration::from_secs(5); while proc::alive(child) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(50)).await }
     assert!(!proc::alive(child), "the agent dies with its hub (PDEATHSIG on Linux, the reaper watcher elsewhere)");
@@ -1766,8 +1969,21 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let person = PathBuf::from(std::env::var("BP_SBS_PERSON").unwrap()); let live = PathBuf::from(std::env::var("BP_SBS_LIVE").unwrap());
     let rec = person.join("rec"); let _ = std::fs::create_dir_all(&rec);
     let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
-    let wrapped = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\nprintf '%s\\n' \"$@\" > {rec}/argv; env > {rec}/env; pwd > {rec}/cwd\n", rec = crate::plat::fs::script_path(&rec)), 1);
+    let rec_s = crate::plat::fs::script_path(&rec);
+    let rec_paths = if cfg!(windows) {
+        // Resolve MSYS-translated HOME and pwd back to native Windows paths inside the same MSYS runtime that produced them.
+        format!(
+            "env > \"{rec_s}/env\"; h=; cr=$(printf '\\r'); while IFS= read -r l || [ -n \"$l\" ]; do case \"$l\" in HOME=*) h=${{l#HOME=}}; h=${{h%\"$cr\"}}; break;; esac; done < \"{rec_s}/env\"; if [ -n \"$h\" ]; then cygpath -aw -- \"$h\" > \"{rec_s}/home\"; fi; cygpath -aw -- \"$(pwd)\" > \"{rec_s}/cwd\""
+        )
+    } else {
+        format!("env > \"{rec_s}/env\"; pwd > \"{rec_s}/cwd\"")
+    };
+    let wrapped = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=\"{rec_s}/starts\"\nprintf '%s\\n' \"$@\" > \"{rec_s}/argv\"; {rec_paths}\n"), 1);
     script(&bin, "claude", &wrapped);
+    // the person's claude is this stand-in, whatever the machine has installed: the parent puts its folder first on the hub's PATH, which `person_dirs`
+    // searches before the person's login shell's (a Boat box's has a real, logged-out /usr/local/bin/claude). Checked with the hub's own lookup before any turn, so a real CLI never runs
+    let found = person::person_dirs(&person).into_iter().map(|d| d.join("claude")).find(|p| p.is_file());
+    assert_eq!(found.as_deref(), Some(bin.join("claude").as_path()), "the person's claude must be the test's stand-in, never a real CLI");
     let sd = dir("sbs-bin"); perf_standin(&sd, 1); // the hub's own stand-in: a PersonTurn must never use it, nor an Agent turn the person's
     let rows = vec![work::row("w-open-run", "watching", "a build", "run", "sleep 99", "123:456", 0), work::row("w-open-pid", "watching", "a pid", "pid", "999999", "-", 0)];
     let old_ride = format!("{{\"$\":\"SettingSet\",\"key\":\"ride.{T1}\",\"value\":\"copied mail\",\"at\":1700000006}}\n");
@@ -1798,16 +2014,26 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     assert!(!argv.iter().any(|a| a == "--resume"), "no copied session is resumed: {argv:?}");
     let pm = argv.iter().position(|a| a == "--permission-mode").map(|i| argv[i + 1].clone()).unwrap(); assert_eq!(pm, "default", "approval-required, whatever the copied thread said");
     assert!(argv.iter().any(|a| a == "--permission-prompt-tool"), "approvals reach the person: {argv:?}");
-    let env = read("env"); assert!(env.lines().any(|l| l == format!("HOME={}", person.display())), "the person's HOME"); assert!(!env.lines().any(|l| l.starts_with("BACKPLANE_")), "no BACKPLANE_* reaches the agent:\n{env}");
-    assert_eq!(crate::plat::fs::canonicalize(read("cwd").trim()).unwrap(), crate::plat::fs::canonicalize(&work).unwrap());
+    let env = read("env");
+    if cfg!(windows) {
+        assert!(env.lines().any(|l| l.starts_with("HOME=")), "the person's HOME in:\n{env}");
+        let home_raw = read("home");
+        assert_eq!(crate::plat::fs::canonicalize(home_raw.trim()).unwrap_or_else(|e| panic!("canonicalize HOME {home_raw:?} failed: {e}\nenv:\n{env}")), crate::plat::fs::canonicalize(&person).unwrap(), "the person's HOME");
+    } else {
+        assert!(env.lines().any(|l| l == format!("HOME={}", person.display())), "the person's HOME");
+    }
+    assert!(!env.lines().any(|l| l.starts_with("BACKPLANE_")), "no BACKPLANE_* reaches the agent:\n{env}");
+    let cwd_raw = read("cwd");
+    assert_eq!(crate::plat::fs::canonicalize(cwd_raw.trim()).unwrap_or_else(|e| panic!("canonicalize cwd {cwd_raw:?} failed: {e}")), crate::plat::fs::canonicalize(&work).unwrap());
     assert_eq!(std::fs::read_to_string(rec.join("starts")).unwrap().matches("START").count(), 1, "exactly the person's stand-in ran");
     // (4) the one-shot helpers keep Kind::Agent, refused on a copy (proc.rs tests)
     ag.shutdown();
 }
 #[test] fn side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards() {
-    // the child gets a clean PATH below: `person_dirs` puts the hub's own PATH first, so a real `claude` on the machine's PATH (~/.local/bin) would be run instead of the person's stand-in
+    // the child's PATH is the person's stand-in folder, then a clean system one: `person_dirs` searches the hub's own PATH first, then the person's login
+    // shell's, so without it a real `claude` on the machine (~/.local/bin, or /usr/local/bin from the login shell) would run instead of the stand-in
     let me = std::env::current_exe().unwrap(); let person = dir("sbs-person"); let live_d = dir("sbs-live"); let live = live_d.join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
-    let o = std::process::Command::new(me).args(["agents::tests::sbs_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("PATH", "/usr/bin:/bin").env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_PROBE", "1").env("BP_SBS_PERSON", &person).env("BP_SBS_LIVE", &live).env_remove("BACKPLANE_AGENTS").output().unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::sbs_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("PATH", std::env::join_paths([person.join(".local/bin"), "/usr/bin".into(), "/bin".into()]).unwrap()).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_PROBE", "1").env("BP_SBS_PERSON", &person).env("BP_SBS_LIVE", &live).env_remove("BACKPLANE_AGENTS").output().unwrap();
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
@@ -1857,6 +2083,10 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     let person = PathBuf::from(std::env::var("BP_SBS_PERSON").unwrap()); let rec = person.join("rec"); std::fs::create_dir_all(&rec).unwrap();
     let bin = person.join(".local/bin"); std::fs::create_dir_all(&bin).unwrap();
     script(&bin, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG={rec}/starts\n", rec = crate::plat::fs::script_path(&rec)), 1));
+    // the person's claude is this stand-in, whatever the machine has installed: the parent puts its folder first on the hub's PATH, which `person_dirs`
+    // searches before the person's login shell's (a Boat box's has a real, logged-out /usr/local/bin/claude). Checked with the hub's own lookup before any turn, so a real CLI never runs
+    let found = person::person_dirs(&person).into_iter().map(|d| d.join("claude")).find(|p| p.is_file());
+    assert_eq!(found.as_deref(), Some(bin.join("claude").as_path()), "the person's claude must be the test's stand-in, never a real CLI");
     let sd = dir("sbr-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("sbr", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let _bots = crate::bots::start(hub.clone(), ag.clone()).await;
     let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let bot = r["bot"].as_str().expect("a bot").to_string();
@@ -1869,8 +2099,10 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     ag.shutdown();
 }
 #[test] fn a_routine_run_in_side_by_side_reaches_no_real_agent() {
-    let me = std::env::current_exe().unwrap(); let person = dir("sbr-person"); let live_d = dir("sbr-live"); let live = live_d.join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
-    let o = std::process::Command::new(me).args(["agents::tests::sbs_routine_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_ROUTINE", "1").env("BP_SBS_PERSON", &person).env_remove("BACKPLANE_AGENTS").output().unwrap();
+    // the person's stand-in folder first on the child's PATH (see side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards): a real `claude` is never the person's
+    let me = std::env::current_exe().unwrap(); let person = dir("sbr-person");
+    let path = std::env::join_paths(std::iter::once(person.join(".local/bin")).chain(std::env::var_os("PATH").map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).unwrap_or_default())).unwrap(); let live_d = dir("sbr-live"); let live = live_d.join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
+    let o = std::process::Command::new(me).args(["agents::tests::sbs_routine_probe", "--exact", "--nocapture", "--test-threads=1"]).env("PATH", &path).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_ROUTINE", "1").env("BP_SBS_PERSON", &person).env_remove("BACKPLANE_AGENTS").output().unwrap();
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_routine_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
@@ -1889,7 +2121,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
 }
 async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note() {
     let sd = dir("sk-bin"); let rec = sd.join("in.jsonl"); let inner = sd.join("standin.sh"); std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
-    script(&sd, "claude", &format!("#!/bin/sh\ntee -a {} | sh {}\n", crate::plat::fs::script_path(&rec), crate::plat::fs::script_path(&inner)));
+    script(&sd, "claude", &format!("#!/bin/sh\ntee -a '{}' | sh '{}'\n", crate::plat::fs::script_path(&rec).replace('\'', "'\\''"), crate::plat::fs::script_path(&inner).replace('\'', "'\\''")));
     let uh = dir("sk-userhome"); // a fake user: a Claude skill, a Codex-only skill
     for (rel, name) in [(".claude/skills/unslop-zq", "unslop-zq"), (".agents/skills/codexonly-zq", "codexonly-zq")] { std::fs::create_dir_all(uh.join(rel)).unwrap(); std::fs::write(uh.join(rel).join("SKILL.md"), format!("---\nname: {name}\ndescription: d\n---\nbody")).unwrap(); }
     let home = dir("sk-home"); let work = dir("sk-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
@@ -1900,7 +2132,8 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     let got = std::fs::read_to_string(&rec).unwrap(); let line = got.lines().find(|l| l.contains("zqskill")).expect("the user line"); let v: Value = serde_json::from_str(line).unwrap();
     let text = v["message"]["content"].as_str().map(str::to_string).or_else(|| v["message"]["content"][0]["text"].as_str().map(str::to_string)).expect("text");
     assert!(text.contains("zqskill run /unslop-zq and $codexonly-zq"), "{text}");
-    assert!(text.contains(&format!("read \"{}/.agents/skills/codexonly-zq/SKILL.md\"", uh.display())) && !text.contains("unslop-zq/SKILL.md"), "{text}");
+    let tsl = crate::plat::tmp::sl(&text);
+    assert!(tsl.contains(&format!("read \"{}/.agents/skills/codexonly-zq/SKILL.md\"", crate::plat::tmp::sl(uh.to_string_lossy()))) && !tsl.contains("unslop-zq/SKILL.md"), "{text}");
     ag.shutdown();
 }
 // one test, not two: two hubs of the host kind at once disturb the process-wide account grants other tests hold
@@ -1908,16 +2141,16 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_or_a_file_note().await;
     // stand-ins that do what the real agents do with the note: open the SKILL.md named in it and answer with its secret word
     // (\\* and not \\?: macOS's sed has no \? in a basic expression, and the stand-in then never found the file)
-    let find = r#"p=$(printf '%s' "$X" | sed -n 's/.*read \\*"\([^"\\]*SKILL.md\)\\*".*/\1/p' | head -1); w=$(sed -n 's/^SECRET=//p' "$p" 2>/dev/null | head -1)"#;
+    let find = r#"p=$(printf '%s' "$X" | sed -n 's/.*read \\*"\(.*SKILL\.md\)\\*".*/\1/p' | head -1 | tr -s '\\' '/'); w=$(sed -n 's/^SECRET=//p' "$p" 2>/dev/null | head -1)"#;
     let uh = dir("sc-userhome"); // the skill sits where the other provider's agent does not load it itself, so the turn text must hand over the file
-    for rel in [".agents/skills/zqwhale", ".claude/skills/zqwhale"] { let d = uh.join(rel); std::fs::create_dir_all(&d).unwrap(); std::fs::write(d.join("SKILL.md"), "---\nname: zqwhale\ndescription: d\n---\nSECRET=PURPLE-OTTER-77\n").unwrap(); }
+    for rel in [".agents/skills/zqwhale", ".claude/skills/zqwhale"] { let d = uh.join(rel); std::fs::create_dir_all(&d).unwrap(); std::fs::write(d.join("SKILL.md"), "---\nname: zqwhale\ndescription: d\nprovider: \"*\"\n---\nSECRET=PURPLE-OTTER-77\n").unwrap(); }
     std::fs::remove_dir_all(uh.join(".claude/skills/zqwhale")).unwrap(); // placeholder: each provider below gets only the foreign copy
     for provider in ["claude", "codex"] {
         let (keep, drop) = if provider == "claude" { (".agents/skills/zqwhale", ".claude/skills/zqwhale") } else { (".claude/skills/zqwhale", ".agents/skills/zqwhale") };
-        let _ = std::fs::remove_dir_all(uh.join(drop)); std::fs::create_dir_all(uh.join(keep)).unwrap(); std::fs::write(uh.join(keep).join("SKILL.md"), "---\nname: zqwhale\ndescription: d\n---\nSECRET=PURPLE-OTTER-77\n").unwrap();
+        let _ = std::fs::remove_dir_all(uh.join(drop)); std::fs::create_dir_all(uh.join(keep)).unwrap(); std::fs::write(uh.join(keep).join("SKILL.md"), "---\nname: zqwhale\ndescription: d\nprovider: \"*\"\n---\nSECRET=PURPLE-OTTER-77\n").unwrap();
         let sd = dir(&format!("sc-bin-{provider}"));
         if provider == "claude" { script(&sd, "claude", &format!("#!/bin/sh\nwhile IFS= read -r X; do case \"$X\" in *'\"type\":\"user\"'*) {find}; printf '%s\\n' '{{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"s1\",\"cwd\":\"/tmp\",\"tools\":[],\"model\":\"fake\",\"permissionMode\":\"default\"}}'; printf '%s\\n' '{{\"type\":\"assistant\",\"message\":{{\"id\":\"m1\",\"role\":\"assistant\",\"content\":[{{\"type\":\"text\",\"text\":\"The skill says '\"$w\"'\"}}],\"usage\":{{\"input_tokens\":1}}}},\"session_id\":\"s1\"}}'; printf '%s\\n' '{{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"result\":\"done\",\"session_id\":\"s1\"}}';; esac; done\n")) }
-        else { script(&sd, "codex", &format!("#!/bin/sh\ncase \"$1\" in --version) echo codex-cli 0.0.0; exit 0;; esac\nfor a in \"$@\"; do X=\"$a\"; done\n{find}\necho '{{\"type\":\"thread.started\",\"thread_id\":\"cs-1\"}}'\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"id\":\"i\",\"type\":\"agent_message\",\"text\":\"The skill says %s\"}}}}\\n' \"$w\"\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n")) }
+        else { script(&sd, "codex", &format!("#!/bin/sh\ncase \"$1\" in --version) echo codex-cli 0.0.0; exit 0;; esac\nfor a in \"$@\"; do X=\"$a\"; done\n[ \"$X\" = \"-\" ] && X=$(cat)\n{find}\necho '{{\"type\":\"thread.started\",\"thread_id\":\"cs-1\"}}'\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"id\":\"i\",\"type\":\"agent_message\",\"text\":\"The skill says %s\"}}}}\\n' \"$w\"\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n")) }
         let home = dir(&format!("sc-home-{provider}")); let work = dir(&format!("sc-work-{provider}"));
         let log = if provider == "codex" { codex_log(&work) } else { base_log(&work, 1, "") }; std::fs::write(home.join("events.jsonl"), log).unwrap();
         let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
@@ -1971,20 +2204,47 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
 
 /// A desktop of the new protocol answering the hub's push for `T1`: what it does with the token (`applied`: it answered `view-show`; `refuse`: its reason) and the report it then makes.
 fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, refuse: Option<&'static str>, report: Value) -> tokio::task::JoinHandle<()> {
+    desktop_with_response(hub, client, applied, refuse, report, None, None)
+}
+
+// The mixed-outcome case records the refusal before letting the other desktop apply the token.
+fn desktop_with_response(
+    hub: &std::sync::Arc<crate::hub::Hub>,
+    client: u64,
+    applied: bool,
+    refuse: Option<&'static str>,
+    report: Value,
+    refusal_recorded: Option<tokio::sync::oneshot::Sender<()>>,
+    wait_for_refusal: Option<tokio::sync::oneshot::Receiver<()>>,
+) -> tokio::task::JoinHandle<()> {
     let mut c = hub.attach(hub.fresh_client());
     tokio::spawn(async move {
         while let Some(o) = c.recv().await {
-            if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 {
-                let tok = f["token"].as_str().expect("the push carries a token").to_string();
-                if let Some(why) = refuse { crate::present::viewer::test_refuse(&tok, client, why) }
-                if applied { crate::present::viewer::test_applied(&tok, client) }
-                if !report.is_null() { crate::files::kicad::watch::viewer_report_from(client, T1, report.clone()) }
-                break } }
+            let crate::hub::Out::Value(f) = o else { continue };
+            if f["t"] != "view" || f["thread"] != T1 { continue }
+            let token = f["token"].as_str().expect("the push carries a token");
+            if let Some(why) = refuse {
+                crate::present::viewer::test_refuse(token, client, why);
+            }
+            if let Some(recorded) = refusal_recorded {
+                recorded.send(()).expect("the applying desktop is listening");
+            }
+            if let Some(recorded) = wait_for_refusal {
+                recorded.await.expect("the refusing desktop recorded its answer");
+            }
+            if applied {
+                crate::present::viewer::test_applied(token, client);
+            }
+            if !report.is_null() {
+                crate::files::kicad::watch::viewer_report_from(client, T1, report);
+            }
+            break;
         }
     })
 }
 
 #[tokio::test(flavor = "multi_thread")] async fn viewer_show_answers_with_what_the_viewer_then_shows() {
+    let _shows = crate::present::viewer::shows_shared(); // the process's show table (present::viewer::SHOWS_TEST_LOCK)
     let sd = dir("vs-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("vs", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
     let cwd = ag.world().await.cwd(T1); std::fs::create_dir_all(std::path::Path::new(&cwd).join("mech")).unwrap(); std::fs::write(std::path::Path::new(&cwd).join("mech/a.step"), "ISO-10303-21;").unwrap();
@@ -2010,8 +2270,9 @@ fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, re
     let r = show("mech", "mech/a.step").await;
     assert_eq!(tool_text(&r)["settled"], false, "no session applied this token: {r}");
     // two desktops with different outcomes: one applied and shows it, the other's dialog refused: the agent is told the reason, with settled as observed
-    let refusing = desktop(&hub, 12, false, Some("KiCad has a dialog open"), Value::Null);
-    let applying = desktop(&hub, 11, true, None, json!({"open": "mech", "part": "mech/a.step", "key": "", "report": 2}));
+    let (refused, refusal_recorded) = tokio::sync::oneshot::channel();
+    let refusing = desktop_with_response(&hub, 12, false, Some("KiCad has a dialog open"), Value::Null, Some(refused), None);
+    let applying = desktop_with_response(&hub, 11, true, None, json!({"open": "mech", "part": "mech/a.step", "key": "", "report": 2}), None, Some(refusal_recorded));
     let started = std::time::Instant::now();
     let r = show("mech", "mech/a.step").await; refusing.await.unwrap(); applying.await.unwrap();
     assert!(started.elapsed() < std::time::Duration::from_millis(2500), "a refusal does not wait out the time");
@@ -2037,18 +2298,33 @@ fn desktop(hub: &std::sync::Arc<crate::hub::Hub>, client: u64, applied: bool, re
 }
 
 /// The report, the reporting client and its counter are one snapshot: two clients reporting interleaved never give A's picture with B's id.
+/// Deterministic on every platform: the writers and the reader start together at a barrier, the writers keep reporting until the reader has seen what it
+/// needs (so every observation is made while they write), and the reader waits for enough observations of BOTH clients with a deadline that fails loudly.
+/// (`viewer_snapshot` of a thread nobody has reported yet is (0, 0, null): that is why the reader counts only snapshots with a counter.)
 #[test] fn a_viewer_report_and_its_client_are_one_snapshot() {
     use crate::files::kicad::watch::{viewer_report_from, viewer_snapshot};
-    let writers: Vec<_> = [21u64, 22].into_iter().map(|c| std::thread::spawn(move || { for _ in 0..20000 { viewer_report_from(c, "tsnap", json!({"who": c})); } })).collect();
-    let mut seen = 0;
-    for _ in 0..40000 {
+    use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Barrier};
+    let stop = Arc::new(AtomicBool::new(false));
+    let start = Arc::new(Barrier::new(3));
+    let writers: Vec<_> = [21u64, 22].into_iter().map(|c| { let (stop, start) = (stop.clone(), start.clone()); std::thread::spawn(move || {
+        start.wait();
+        let mut n = 0u64;
+        while !stop.load(Ordering::Relaxed) { viewer_report_from(c, "tsnap", json!({"who": c, "n": n})); n += 1; }
+    }) }).collect();
+    start.wait();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let (mut seen, mut saw) = (0u64, [false, false]);
+    let mut problem = None;
+    while !(seen >= 5000 && saw[0] && saw[1]) {
+        if std::time::Instant::now() > deadline { problem = Some(format!("not enough observations in 30 s: {seen} snapshots, both clients seen: {saw:?}")); break }
         let (n, client, state) = viewer_snapshot("tsnap");
-        if n == 0 { continue }
-        assert_eq!(state["who"].as_u64(), Some(client), "a picture is paired with the client that made it (report {n})");
-        seen += 1;
+        if n == 0 { std::thread::yield_now(); continue }
+        if state["who"].as_u64() != Some(client) { problem = Some(format!("a picture is paired with another client (report {n}): client {client}, picture of {}", state["who"])); break }
+        seen += 1; saw[(client == 22) as usize] = true;
     }
+    stop.store(true, Ordering::Relaxed);
     for w in writers { w.join().unwrap(); }
-    assert!(seen > 0);
+    if let Some(p) = problem { panic!("{p}") }
 }
 
 // ---- Settle: the thread's turn and everything it owns stop, and nothing starts it again ----
@@ -2244,26 +2520,36 @@ const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_bots_message_and_a_report_restart_a_running_codex_turn_at_once() {
     let (hub, ag, sd) = codex_start("cxcut").await; let from = len(&hub).await;
-    // the stand-in streams "par", then waits 2 s: the message must come inside that wait, once the text has streamed (a fixed 500 ms was
-    // before the first text on a loaded Windows runner, where the turn's snapshot and the process start take longer: nothing had streamed to keep)
+    // the stand-in streams "par", then waits 60 s ("hang"): the message must come once the text has streamed, not before
+    // (a fixed wait could race process start on a loaded Windows runner before anything had streamed to keep)
     let streamed = |d0: u64| { let ag = ag.clone(); async move { let end = Instant::now() + Duration::from_secs(60); while ag.stats.deltas.load(Relaxed) == d0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(10)).await } assert!(ag.stats.deltas.load(Relaxed) > d0, "no text streamed") } };
     let d0 = ag.stats.deltas.load(Relaxed);
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow first"})).await; streamed(d0).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang first"})).await; streamed(d0).await;
     ag.deliver_as("user", T1, "m-bot-2", "a bot says stop", Some(("bot:b1".into(), "bot".into(), String::new())), vec![]).await.unwrap();
     let ev = log_from(&hub, from).await;
     assert!(!ev.iter().any(|e| is(e, "SettingSet") && e["key"] == format!("ride.{T1}") && !e["value"].as_str().unwrap_or("").is_empty()), "nothing waits as a ride");
     assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "steered at once");
     assert!(ev.iter().any(|e| is(e, "MessageFrom") && e["msg"] == "m-bot-2"), "who sent it is kept");
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["msg"].as_str().map_or(false, |m| m.ends_with(":before"))), "what had streamed is kept");
-    until(&hub, from, 20, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    let ev1 = until(&hub, from, 60, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev1.iter().any(|e| turn_is(e, "completed")), "first steered turn did not complete: {ev1:?}");
+    let end = Instant::now() + Duration::from_secs(15);
+    while ag.stats.procs_exited.load(Relaxed) < 1 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(25)).await }
+    assert_eq!(ag.stats.procs_exited.load(Relaxed), 1, "first steered turn's completed process was not reaped");
     let from2 = len(&hub).await;
     let d0 = ag.stats.deltas.load(Relaxed);
-    rpc(&hub, "turn.start", json!({"thread":T1,"text":"slow second"})).await; streamed(d0).await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang second"})).await; streamed(d0).await;
     ag.wake_ride(T1, "rep-2", "a launched thread reported").await.unwrap();
     let ev = log_from(&hub, from2).await;
     assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "steer"), "a report steers too: {ev:?}");
-    let mut argv = String::new(); for _ in 0..50 { argv = std::fs::read_to_string(sd.join("argv.log")).unwrap_or_default(); if argv.contains("a launched thread reported") { break } tokio::time::sleep(Duration::from_millis(100)).await }
-    assert!(argv.contains("a launched thread reported"), "the turn started again with it");
+    let prompt_log = sd.join(if cfg!(windows) { "stdin.log" } else { "argv.log" });
+    let mut logged = String::new();
+    for _ in 0..100 {
+        logged = std::fs::read_to_string(&prompt_log).unwrap_or_default();
+        if logged.contains("a launched thread reported") { break }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert!(logged.contains("a launched thread reported"), "the turn started again with it ({}: {logged:?})", prompt_log.display());
     assert_eq!(ag.stats.procs_spawned.load(Relaxed), 4); ag.shutdown();
 }
 
@@ -2386,5 +2672,82 @@ impl mailroom::Mailroom for ChatRoom {
     let p = posted.iter().find(|e| e["text"].as_str().unwrap_or("").contains("Route the reset")).unwrap();
     let (words, m) = crate::voice::mark::split(p["text"].as_str().unwrap()); assert_eq!(words, "zqshort Route the reset to PA0."); assert_eq!(m.unwrap().stt, "parakeet-v2");
     let t = posted.iter().find(|e| e["text"].as_str().unwrap_or("").contains("typed this one")).unwrap(); assert!(crate::voice::mark::split(t["text"].as_str().unwrap()).1.is_none());
+    ag.shutdown();
+}
+
+/// Windows 32K CreateProcess limit workaround: a 200K-character handoff + 20K instructions stays completely off Codex's
+/// argv on Windows (profile TOML + stdin `-`), passes `check_cmdline` and `plan`, carries the full 200K handoff verbatim
+/// on stdin, and cleans up the private profile file when the turn ends.
+#[test] fn a_200k_codex_handoff_stays_off_argv_on_windows_and_keeps_full_context() {
+    use crate::agents::providers::{codex::CodexDriver, Driver, TurnIn};
+    let d = dir("cx200k-win");
+    let codex_home = d.join("codex-home");
+    let full_handoff = format!(
+        "[Backplane] This thread was worked on with claude until now; you (codex) take it over.\n\nUser: Early secret CANARY_EARLY_XK99.\n\n{}\n\n[End of the handed-over context.]\n\nWhat was the early secret?",
+        "filler_word ".repeat(17_000)
+    );
+    assert!(full_handoff.len() > 200_000, "handoff is >200K chars ({})", full_handoff.len());
+    let long_instructions = "You are running in Backplane.\n".repeat(700);
+    let a = TurnIn {
+        thread: "t-200k".into(), cwd: d.to_string_lossy().into(), home: d.to_string_lossy().into(),
+        model: "gpt-5.4".into(), session: String::new(), runtime: "full-access".into(),
+        effort: "high".into(), think: true, text: full_handoff.clone(), prompt: long_instructions.clone(),
+        mcp_url: "http://127.0.0.1:41231/mcp/t-200k.1?k=SECRETKEY".into(),
+        pcbparts_url: crate::mcpx::gen::PCBPARTS.into(),
+        codex_home: codex_home.to_string_lossy().into(),
+        ..Default::default()
+    };
+    let mut drv = CodexDriver::for_windows();
+    drv.prepare(&a).unwrap();
+    let argv = drv.argv(&a);
+    let stdin_lines = drv.start(&a);
+    // 1. Argv is tiny (< 500 chars), uses -p <profile> and `-` for stdin, never puts instructions, MCP key, or handoff on argv
+    let cmd_len = proc::cmdline_len(Path::new("C:\\Users\\x\\codex.exe"), &[], &argv);
+    assert!(cmd_len < 500, "codex argv must stay tiny on Windows, got {cmd_len} chars: {argv:?}");
+    assert_eq!(argv.last().map(String::as_str), Some("-"), "{argv:?}");
+    let prof = argv.windows(2).find(|w| w[0] == "-p").map(|w| w[1].clone()).expect("profile flag set");
+    assert!(!argv.iter().any(|x| x.contains("developer_instructions") || x.contains("CANARY_EARLY_XK99") || x.contains("SECRETKEY")), "{argv:?}");
+    assert!(proc::check_cmdline(Path::new("C:\\Users\\x\\codex.exe"), &[], &argv, true).is_ok());
+    // 2. Full 200K handoff goes over stdin verbatim (nothing trimmed or summarized)
+    assert_eq!(stdin_lines.len(), 1);
+    assert_eq!(stdin_lines[0], full_handoff);
+    // 3. Profile file carries full instructions and MCP URL (without secret key), and is deleted on Drop
+    let prof_path = codex_home.join(format!("{prof}.config.toml"));
+    let toml = std::fs::read_to_string(&prof_path).unwrap();
+    assert!(toml.contains("developer_instructions =") && toml.contains("You are running in Backplane."));
+    assert!(toml.contains("mcp_servers.backplane.url = \"http://127.0.0.1:41231/mcp/t-200k.1\"") && !toml.contains("SECRETKEY"));
+    drop(drv);
+    assert!(!prof_path.exists(), "profile config file removed when turn ends");
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn zero_provider_turn_start_refuses_cleanly_and_homemove_replay_bypasses_guard() {
+    let sd = dir("np-ag-bin");
+    perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("np-ag", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    let mut about = serde_json::Map::new();
+    for (agent, _) in crate::present::keys::AGENTS {
+        about.insert((*agent).to_string(), json!({"cli": ""}));
+    }
+    let _guard = crate::settings::provider_notice::override_for_test(&hub, true, json!({"probed": true, "about": about}));
+    let from = len(&hub).await;
+
+    let r = rpc(&hub, "turn.start", json!({"thread": T1, "text": "hello"})).await;
+    assert_eq!(r["ok"], false, "{r}");
+    assert_eq!(r["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+    assert_eq!(r["error"], crate::settings::provider_notice::SEND_GUARD_ERROR);
+
+    let btw = rpc(&hub, "thread.btw", json!({"thread": T1, "q": "why?"})).await;
+    assert_eq!(btw["ok"], false, "{btw}");
+    assert_eq!(btw["errorCode"], crate::settings::provider_notice::SEND_GUARD_CODE);
+
+    let ev = log_from(&hub, from).await;
+    assert!(ev.is_empty(), "refused turn.start and thread.btw must leave zero log events, got {ev:?}");
+
+    let h_turn = hub.rpc_for("turn.start").unwrap();
+    let replay_caller = Caller { gen: "home".into(), client: 1 };
+    let rr = h_turn.call(&hub, &replay_caller, &json!(8), "turn.start", &json!({"thread": T1, "text": "replayed prompt", "msg": "hm-replay"})).await;
+    assert_eq!(rr[0]["ok"], true, "home-move replay must not be blocked by send guard: {:?}", rr);
+    let posted = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["msg"] == "hm-replay")).await;
+    assert!(posted.iter().any(|e| is(e, "MessagePosted") && e["msg"] == "hm-replay"));
     ag.shutdown();
 }

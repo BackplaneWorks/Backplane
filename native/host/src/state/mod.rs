@@ -95,6 +95,9 @@ pub struct State {
     pub snooze_until: HashMap<String, u64>,
     /// ModesSet: a thread's permission mode when it is not the default ("approval-required", "auto-accept-edits", "auto"); absent: full access
     pub runtime: HashMap<String, String>,
+    /// ModesSet: a thread's interaction mode when it is not default ("plan"); absent: default
+    #[serde(default)]
+    pub interaction: HashMap<String, String>,
     /// AskOpened/AskClosed: the open asks' content, oldest first: (id, thread, kind, tool, detail, options). Bounded by the asks that are open.
     pub ask_data: Vec<(String, String, String, String, String, String)>,
     /// ThreadOrdered/ProjectOrdered: manual order keys (hex) per thread id, and per "project:<id>" for a project's place; (pinned key, active key)
@@ -142,6 +145,13 @@ fn blank_gone(k: &str) -> bool {
     ["told.", "rule.", "board.", "launch.input.", "fallback.input.", "voice.e.", "voice.l.", "turn.live."].iter().any(|p| k.starts_with(p))
 }
 
+/// Whether a thread id (local or mirrored `<link>~<id>`) has the id shape of an internal mailroom run (`run<digit>...`, `run-...`) or private coordination lane (`mailcoord-...`).
+pub fn is_mail_run_id(thread: &str) -> bool {
+    let local = thread.rsplit_once('~').map_or(thread, |(_, r)| r);
+    local.starts_with("mailcoord-")
+        || local.strip_prefix("run").is_some_and(|rest| rest.starts_with('-') || rest.as_bytes().first().is_some_and(u8::is_ascii_digit))
+}
+
 impl State {
     pub fn new() -> State { State::default() }
     /// Uber.is: the uberbot of this machine
@@ -151,13 +161,9 @@ impl State {
         let owner = self.settings.get(&format!("mail.private.owner.{thread}")).map(|s| s.as_str()).unwrap_or("");
         !owner.is_empty() && self.uber_is(owner) && thread.starts_with(&format!("mailcoord-{owner}-"))
     }
-    /// Run.is: a private thread, or a mail run the person's setting or triage makes visible work of a bot (Runs.keep hides these from the sidebar)
+    /// Run.is: an internal mailroom run or private coordination lane (never shown in user-facing project lists, sidebar, or search).
     pub fn run_hidden(&self, thread: &str) -> bool {
-        if self.private_thread(thread) { return true }
-        match self.runs.get(thread) {
-            Some(bot) => self.settings.get("mail.on").map_or(false, |v| v == "on") || (self.uber_is(bot) && self.bot_threads.get(bot).map_or(false, |t| !t.is_empty())),
-            None => false,
-        }
+        self.private_thread(thread) || self.runs.contains_key(thread) || is_mail_run_id(thread)
     }
     /// BotSet's thread: a task delegated by a bot's thread is not hidden under it
     pub fn bot_threads_has(&self, thread: &str) -> bool { self.bot_threads.values().any(|t| t == thread) }
@@ -204,6 +210,7 @@ impl State {
                 let th = s(e, "thread")?; let st = Turn::parse(s(e, "state")?).unwrap_or(Turn::Idle); let at = n(e, "at")?;
                 self.todos_turn(st, th, at);
                 self.settings.remove(&format!("turn.live.{th}")); // a turn's running numbers are its own: one that began or ended has none yet
+                if st != Turn::Running { self.settings.remove(&format!("plan.executing.{th}")); }
                 let t = self.thread_mut(th); t.activity = t.activity.max(at); t.turn = st;
             }
             "PendingChanged" => { let th = s(e, "thread")?; let c = n(e, "count")?; self.thread_mut(th).pending = c; }
@@ -232,9 +239,10 @@ impl State {
             "SessionSet" => { let id = s(e, "id")?; let se = s(e, "session")?.to_string();
                 if self.threads.get(id).map_or(true, |t| t.session != se) { self.ext.sess.entry(id.into()).or_default().began = e.get("at").and_then(Value::as_u64).unwrap_or(0) }
                 self.thread_mut(id).session = se; }
-            "ModesSet" => { let id = s(e, "id")?; let m = s(e, "model")?.to_string(); let rt = s(e, "runtime")?.to_string(); s(e, "interaction")?; self.thread_mut(id).model = m;
+            "ModesSet" => { let id = s(e, "id")?; let m = s(e, "model")?.to_string(); let rt = s(e, "runtime")?.to_string(); let im = s(e, "interaction")?.to_string(); self.thread_mut(id).model = m;
                 // the permission mode (Thread.runtime): only a mode other than the default is kept, so the map is bounded by the threads that changed it
-                if matches!(rt.as_str(), "approval-required" | "auto-accept-edits" | "auto") { self.runtime.insert(id.to_string(), rt); } else { self.runtime.remove(id); } }
+                if matches!(rt.as_str(), "approval-required" | "auto-accept-edits" | "auto") { self.runtime.insert(id.to_string(), rt); } else { self.runtime.remove(id); }
+                if im == "plan" { self.interaction.insert(id.to_string(), im); } else { self.interaction.remove(id); } }
             "ThreadMerged" => {
                 let id = s(e, "id")?; let url = s(e, "url")?.to_string(); let at = n(e, "at")?;
                 let t = self.thread_mut(id); t.override_ = Override::ForcedSettled; t.settled_at = at; t.pinned = false;

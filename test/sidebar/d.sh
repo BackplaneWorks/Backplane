@@ -1,5 +1,5 @@
 # Source this: functions that drive the sidebar rig with real X input.
-R=$HOME/.cache/bp-tmp/sb; . $R/env; export DISPLAY=$DISP; XI=$(git rev-parse --show-toplevel 2>/dev/null)/test/cef/xinput.py; [ -f "$XI" ] || XI=${WT:-.}/test/cef/xinput.py
+R=${RIG:-$HOME/.cache/bp-tmp/sb}; . $R/env; export DISPLAY=$DISP; XI=$(git rev-parse --show-toplevel 2>/dev/null)/test/cef/xinput.py; [ -f "$XI" ] || XI=${WT:-.}/test/cef/xinput.py
 SH=${SH:-$(git rev-parse --show-toplevel 2>/dev/null)/build/gpui/shots/sidebar}; mkdir -p $SH
 # the centre of a control's rect in the latest controls metric (exit 1 when absent)
 at() { python3 -I -c '

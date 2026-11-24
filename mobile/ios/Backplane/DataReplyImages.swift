@@ -12,8 +12,8 @@ struct DReplyOpen: Identifiable { let entry: String; let all: [String]; let star
 
 /// Pictures read through the hub, decoded: small copies for the thread, whole ones for the viewer.
 @MainActor enum DReplyStore {
-    static let thumbs = NSCache<NSString, UIImage>()
-    static let fulls: NSCache<NSString, UIImage> = { let c = NSCache<NSString, UIImage>(); c.countLimit = 6; return c }()
+    static let thumbs = NSCache<NSString, DDecodedImage>()
+    static let fulls: NSCache<NSString, DDecodedImage> = { let c = NSCache<NSString, DDecodedImage>(); c.countLimit = 6; return c }()
     /// The longest side a thread's copy is decoded at (points x screen scale are well under it).
     static let thumbSide: CGFloat = 1400
     static func bytes(_ pic: DReplyPic) async -> Data? {
@@ -25,25 +25,18 @@ struct DReplyOpen: Identifiable { let entry: String; let all: [String]; let star
         #endif
         return await DataClient.shared.replyImage(entry: pic.entry, path: pic.path)
     }
-    static func thumb(_ pic: DReplyPic) async -> UIImage? {
+    static func thumb(_ pic: DReplyPic) async -> DDecodedImage? {
         if let i = thumbs.object(forKey: pic.id as NSString) { return i }
         guard let d = await bytes(pic) else { return nil }
         let side = thumbSide
-        guard let i = await Task.detached(priority: .userInitiated, operation: { downsample(d, side: side) }).value else { return nil }
+        guard let i = await Task.detached(priority: .userInitiated, operation: { DDecodedImage.decode(d, maxPixelSize: side) }).value else { return nil }
         thumbs.setObject(i, forKey: pic.id as NSString); return i
     }
-    static func full(_ pic: DReplyPic) async -> (UIImage, Data)? {
+    static func full(_ pic: DReplyPic) async -> (DDecodedImage, Data)? {
         guard let d = await bytes(pic) else { return nil }
         if let i = fulls.object(forKey: pic.id as NSString) { return (i, d) }
-        guard let i = await Task.detached(priority: .userInitiated, operation: { UIImage(data: d)?.preparingForDisplay() }).value else { return nil }
+        guard let i = await Task.detached(priority: .userInitiated, operation: { DDecodedImage.decode(d) }).value else { return nil }
         fulls.setObject(i, forKey: pic.id as NSString); return (i, d)
-    }
-    nonisolated static func downsample(_ d: Data, side: CGFloat) -> UIImage? {
-        guard let src = CGImageSourceCreateWithData(d as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
-              let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, [kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceCreateThumbnailWithTransform: true,
-                                                                  kCGImageSourceShouldCacheImmediately: true, kCGImageSourceThumbnailMaxPixelSize: side] as CFDictionary)
-        else { return UIImage(data: d) }
-        return UIImage(cgImage: cg)
     }
 }
 
@@ -63,16 +56,18 @@ struct DReplyTile: View {
     let pic: DReplyPic
     let carousel: Bool
     let tap: () -> Void
-    @State private var image: UIImage?
+    @State private var decoded: DDecodedImage?
     @State private var failed = false
     private var name: String { ReplyImages.name(pic.path) }
     var body: some View {
         Group {
-            if let image {
+            if let decoded {
                 if carousel {
-                    Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: .infinity, maxHeight: .infinity).background(BackplaneDesign.panel).dbox()
+                    DPictureView(image: decoded.image, animated: decoded.animated, contentMode: .fit)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).background(BackplaneDesign.panel).dbox()
                 } else {
-                    Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: min(image.size.width, 520), maxHeight: 360).dbox()
+                    DPictureView(image: decoded.image, animated: decoded.animated, contentMode: .fit)
+                        .frame(maxWidth: min(decoded.image.size.width, 520), maxHeight: 360).dbox()
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
@@ -89,15 +84,15 @@ struct DReplyTile: View {
         }
         .contentShape(Rectangle())
         .onTapGesture { tap() }
-        .dImageMenu(image)
+        .dImageMenu(decoded?.image)
         .task(id: pic) {
             failed = false
-            if let i = await DReplyStore.thumb(pic) { image = i } else { failed = true }
+            if let i = await DReplyStore.thumb(pic) { decoded = i } else { failed = true }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(name)
         .accessibilityAddTraits(.isButton)
-        .accessibilityIdentifier(image != nil ? "reply.image" : failed ? "reply.image.unavailable" : "reply.image.loading")
+        .accessibilityIdentifier(decoded != nil ? "reply.image" : failed ? "reply.image.unavailable" : "reply.image.loading")
     }
 }
 
@@ -146,7 +141,7 @@ struct DReplyViewer: View {
     let close: () -> Void
     @State private var at = 0
     @State private var drop: CGFloat = 0
-    @State private var shown: [Int: (UIImage, Data)] = [:]
+    @State private var shown: [Int: (DDecodedImage, Data)] = [:]
     @State private var note = ""
     init(open: DReplyOpen, close: @escaping () -> Void) { self.open = open; self.close = close; _at = State(initialValue: open.start) }
     var body: some View {
@@ -182,7 +177,7 @@ struct DReplyViewer: View {
             VStack(spacing: 10) {
                 if !note.isEmpty { Text(Tr.t(note)).dmono(12).foregroundStyle(.white).padding(.horizontal, 12).padding(.vertical, 8).background(.black.opacity(0.7)) }
                 if let s = shown[at] {
-                    HStack(spacing: 28) { DImageActions(image: s.0, data: s.1, note: { say($0) }) }
+                    HStack(spacing: 28) { DImageActions(image: s.0.image, data: s.1, note: { say($0) }) }
                         .labelStyle(.iconOnly).font(.title2).foregroundStyle(.white)
                         .padding(.horizontal, 16).padding(.vertical, 8).background(.black.opacity(0.45))
                         .padding(.bottom, 8)
@@ -204,13 +199,13 @@ private struct DReplyPage: View {
     let active: Bool
     @Binding var drop: CGFloat
     let leave: () -> Void
-    let loaded: ((UIImage, Data)) -> Void
-    @State private var image: UIImage?
+    let loaded: ((DDecodedImage, Data)) -> Void
+    @State private var decoded: DDecodedImage?
     @State private var failed = false
     var body: some View {
         ZStack {
-            if let image {
-                DZoom(image: image, active: active) { y, ended, vy in
+            if let decoded {
+                DZoom(decoded: decoded, active: active) { y, ended, vy in
                     if !ended { drop = max(0, y) }
                     else if y > 120 || vy > 900 { leave() }
                     else { withAnimation(.spring(duration: 0.25)) { drop = 0 } }
@@ -225,7 +220,7 @@ private struct DReplyPage: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task(id: pic) {
-            if let r = await DReplyStore.full(pic) { image = r.0; loaded(r) } else { failed = true }
+            if let r = await DReplyStore.full(pic) { decoded = r.0; loaded(r) } else { failed = true }
         }
     }
 }
@@ -233,20 +228,23 @@ private struct DReplyPage: View {
 /// UIKit's zooming scroll view around one picture: pinch, pan when zoomed, double tap in and out. At fitted size a downward pan reports
 /// itself (`drag`: distance, ended, speed) so the viewer can be swiped away; sideways pans go to the pages.
 private struct DZoom: UIViewRepresentable {
-    let image: UIImage
+    let decoded: DDecodedImage
     let active: Bool
     let drag: (CGFloat, Bool, CGFloat) -> Void
-    func makeUIView(context: Context) -> DZoomView { let v = DZoomView(); v.set(image); v.drag = drag; return v }
+    func makeUIView(context: Context) -> DZoomView { let v = DZoomView(); v.set(decoded); v.setActive(active); v.drag = drag; return v }
     func updateUIView(_ v: DZoomView, context: Context) {
-        if v.image !== image { v.set(image) }
+        if v.decoded !== decoded { v.set(decoded) }
+        v.setActive(active)
         v.drag = drag
         if !active { v.fit(animated: false) } // a page left behind is fitted again when it is next shown
     }
+    static func dismantleUIView(_ v: DZoomView, coordinator: ()) { v.setActive(false) }
 }
 
 final class DZoomView: UIScrollView, UIScrollViewDelegate {
-    private let pic = UIImageView()
-    private(set) var image: UIImage?
+    private let pic = DAnimatedUIImageView()
+    private(set) var decoded: DDecodedImage?
+    private var image: UIImage? { decoded?.image }
     var drag: ((CGFloat, Bool, CGFloat) -> Void)?
     private var laidOut: CGSize = .zero
     private lazy var down = UIPanGestureRecognizer(target: self, action: #selector(pan(_:)))
@@ -263,12 +261,14 @@ final class DZoomView: UIScrollView, UIScrollViewDelegate {
         isAccessibilityElement = true; accessibilityIdentifier = "reply.viewer.page"; accessibilityTraits = .image
     }
     required init?(coder: NSCoder) { fatalError() }
-    func set(_ i: UIImage) {
+    func set(_ d: DDecodedImage) {
         zoomScale = 1; pic.transform = .identity
-        image = i; pic.image = i; laidOut = .zero
+        decoded = d; laidOut = .zero
+        if let anim = d.animated { pic.set(animated: anim) } else { pic.set(staticImage: d.image) }
         accessibilityLabel = nil
         setNeedsLayout()
     }
+    func setActive(_ active: Bool) { pic.isPlaybackEnabled = active }
     private var fitted: Bool { zoomScale <= minimumZoomScale * 1.01 }
     override func layoutSubviews() {
         super.layoutSubviews()

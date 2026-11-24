@@ -4,6 +4,7 @@
 #   scripts/hub-watchdog.sh check       one look; what the timer runs
 #   scripts/hub-watchdog.sh status      what it last saw, and whether the timer is on
 #   scripts/hub-watchdog.sh install     write the user units and turn the timer on
+#   scripts/hub-watchdog.sh ensure      the same, only when the units are not this script's or the timer is not running (fresh-watch.sh, each start)
 #   scripts/hub-watchdog.sh uninstall   turn it off and remove the units
 # What a check does: /hello on the hub, and the watcher's process.
 #   A hub still starting is left to its guard, for WATCHDOG_BOOT seconds. A person's `fresh.sh stop` is respected.
@@ -16,14 +17,14 @@
 #   Every action goes to $D/watchdog.log.
 # Env: FRESH_DIR, FRESH_PORT, GPUI_DEV_DIR, FRESH_TAILNET_PORT, DISPLAY (as fresh.sh), WATCHDOG_TRIES (3), WATCHDOG_BOOT (900 s), WATCHDOG_WAIT (120 s for a restart to answer), WATCHDOG_BACKOFF (120 s),
 #      WATCHDOG_BACKOFF_MAX (3600 s), WATCHDOG_CALM (600 s of health before the backoff resets), WATCHDOG_WATCHER (0: do not look after fresh-watch.sh),
-#      WATCHDOG_STUCK (300 s: a check lock taken this long is logged).
+#      WATCHDOG_STUCK (300 s: a check lock taken this long is logged), WATCHDOG_SYSTEMCTL (systemctl; tests stub it).
 set -u
 unset BACKPLANE_AGENT_OWNER   # the hub reaps what carries its mark: nothing started from here may
 HERE=$(cd "$(dirname "$0")" && pwd)
 D=${FRESH_DIR:-$HOME/.backplane-gpui-fresh}; PORT=${FRESH_PORT:-3797}; DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}
 TRIES=${WATCHDOG_TRIES:-3}; BOOT=${WATCHDOG_BOOT:-900}; WAIT=${WATCHDOG_WAIT:-120}; BACK=${WATCHDOG_BACKOFF:-120}; BACKMAX=${WATCHDOG_BACKOFF_MAX:-3600}; CALM=${WATCHDOG_CALM:-600}; WATCHER=${WATCHDOG_WATCHER:-1}
 FRESH=${WATCHDOG_FRESH:-$HERE/fresh.sh}; CUT=${WATCHDOG_CUT:-$HERE/dev-cut.sh}; WATCH=${WATCHDOG_WATCH:-$HERE/fresh-watch.sh}
-STUCK=${WATCHDOG_STUCK:-300}; ST=$D/.watchdog; LOCK=$ST/run.lock; LOG=$D/watchdog.log; UNITS=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+STUCK=${WATCHDOG_STUCK:-300}; SYSCTL=${WATCHDOG_SYSTEMCTL:-systemctl}; ST=$D/.watchdog; LOCK=$ST/run.lock; LOG=$D/watchdog.log; UNITS=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG"; }
 get() { cat "$ST/$1" 2>/dev/null || echo "${2:-0}"; }
 put() { printf '%s\n' "$2" > "$ST/$1"; }
@@ -140,12 +141,20 @@ check() {
   if restart_hub; then put fails 0; else log "still down; next try after the backoff"; fi
 }
 
+render() { sed -e "s|@SCRIPT@|$HERE/hub-watchdog.sh|g" -e "s|@TAILNET@|${FRESH_TAILNET_PORT:-8451}|g" -e "s|@DISPLAY@|${DISPLAY:-:0}|g" -e "s|@MEM@|${FRESH_MEM:-20G}|g" "$HERE/systemd/backplane-hub-watchdog.$1"; }
+install_units() { mkdir -p "$UNITS" && for u in service timer; do render "$u" > "$UNITS/backplane-hub-watchdog.$u" || return 1; done && $SYSCTL --user daemon-reload && $SYSCTL --user enable --now backplane-hub-watchdog.timer; }
 case "${1:-}" in
   check) check;;
   status) mkdir -p "$ST"; echo "fails: $(get fails), restarts in a row: $(get step), next no sooner than: $( [ "$(get after)" -gt "$(now)" ] && date -d "@$(get after)" || echo now)"; systemctl --user is-active backplane-hub-watchdog.timer 2>/dev/null; tail -5 "$LOG" 2>/dev/null;;
-  install) mkdir -p "$UNITS"
-    for u in service timer; do sed -e "s|@SCRIPT@|$HERE/hub-watchdog.sh|g" -e "s|@TAILNET@|${FRESH_TAILNET_PORT:-8451}|g" -e "s|@DISPLAY@|${DISPLAY:-:0}|g" -e "s|@MEM@|${FRESH_MEM:-20G}|g" "$HERE/systemd/backplane-hub-watchdog.$u" > "$UNITS/backplane-hub-watchdog.$u"; done
-    systemctl --user daemon-reload && systemctl --user enable --now backplane-hub-watchdog.timer && { mkdir -p "$ST"; put said-ok 0; log "installed: a check every 30 s ($HERE/hub-watchdog.sh)"; echo "the watchdog is on: log in $LOG"; };;
+  install) install_units && { mkdir -p "$ST"; put said-ok 0; log "installed: a check every 30 s ($HERE/hub-watchdog.sh)"; echo "the watchdog is on: log in $LOG"; };;
+  # what fresh-watch.sh runs at each start: units that are not this script's own (Nov 18 17:47 the timer was overwritten with `systemctl show` text, no
+  # OnBootSec/OnUnitInactiveSec; systemd refused it, "Timer unit lacks value setting", and for two days nothing brought a dead watcher back) or a timer
+  # that is not running are written and started again, and said in the log. Nothing to do: silent.
+  ensure) why=
+    for u in service timer; do render "$u" | cmp -s - "$UNITS/backplane-hub-watchdog.$u" || why="${why}$u differs from $HERE/systemd/; "; done
+    $SYSCTL --user is-active --quiet backplane-hub-watchdog.timer || why="${why}timer not active; "
+    [ -n "$why" ] || exit 0
+    if install_units; then log "repaired: ${why% }"; echo "watchdog repaired: ${why% }"; else log "repair failed: ${why% }"; echo "watchdog repair failed: ${why% }" >&2; exit 1; fi;;
   uninstall) systemctl --user disable --now backplane-hub-watchdog.timer; log "uninstalled"; rm -f "${UNITS:?}/backplane-hub-watchdog.service" "${UNITS:?}/backplane-hub-watchdog.timer"; systemctl --user daemon-reload; echo "the watchdog is off";;
   *) sed -n 2,14p "$0"; exit 2;;
 esac

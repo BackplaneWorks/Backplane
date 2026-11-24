@@ -2,15 +2,20 @@
 // Bottom-anchored conversation, right-aligned user bubble with Copy · Reply · time,
 // left-aligned plain assistant reply with Finished time · Copy · Reply,
 // hidden routine git/system notes, load-on-scroll pagination, asks, #1309 review bar, #1311 unanswered notice.
-import { t } from "./i18n";
+import { t, trs } from "./i18n";
 import { renderMarkdown } from "./md";
+import type { NoProviderNotice } from "./provider-notice";
 import type { ThreadItem } from "./sidebar";
+import { splitUserModelRefs, type MessageRef } from "./user-refs";
 
 export interface EntryTool { name: string; summary?: string; state?: string; }
 export interface EntryAsk {
   id: string;
   state: "open" | "answered";
   question: string;
+  kind?: string;
+  head?: string | null;
+  revise?: boolean;
   options?: Array<{ id: string; label: string }>;
   answered?: string;
 }
@@ -22,15 +27,18 @@ export interface EntryAttachment {
 }
 export interface EntryItem {
   id: string;
+  h?: string;
   kind: string;
   text: string;
   at: number;
   clientId?: string;
   live?: boolean;
+  queued?: boolean;
   agentOnly?: boolean;
   tool?: EntryTool;
   ask?: EntryAsk;
   replyTo?: { id: string; quote: string };
+  refs?: MessageRef[];
   images?: string[];
   attachments?: EntryAttachment[];
 }
@@ -48,7 +56,10 @@ export interface ChatCallbacks {
   onToggleReview: (nextOn: boolean) => void;
   onUnansweredAction: (action: string, value: string) => void;
   onReplyEntry: (entry: EntryItem) => void;
-  onLoadImage: (entryId: string, path: string) => Promise<{ mime: string; data: string } | null>;
+  onOpenAccounts?: () => void;
+  /** a reply's quote: go to the message it answers, reading older pages until it is loaded */
+  onGoToEntry?: (entryId: string) => void;
+  onLoadImage: (entryId: string, path: string) => Promise<{ url?: string; mime?: string; data?: string } | null>;
 }
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -89,6 +100,72 @@ function formatDuration(deltaMs: number): string {
   return s > 0 ? `${m}m ${s}s` : `${m}m`;
 }
 
+function renderUserBody(text: string, refs?: MessageRef[]): DocumentFragment {
+  const frag = document.createDocumentFragment();
+  const segs = splitUserModelRefs(text, refs);
+  const modelLbl = t("native.thread.model", "Model").toLowerCase();
+  for (const seg of segs) {
+    if (seg.kind === "text") {
+      frag.appendChild(document.createTextNode(seg.text));
+      continue;
+    }
+    const chip = document.createElement("span");
+    chip.className = "bp-ref-chip bp-ref-model";
+    chip.title = seg.word;
+    chip.setAttribute("data-ref-word", seg.word);
+
+    const sigil = document.createElement("span");
+    sigil.className = "bp-ref-sigil";
+    sigil.textContent = "&";
+
+    const label = document.createElement("span");
+    label.className = "bp-ref-label";
+    label.textContent = seg.label;
+
+    const kind = document.createElement("span");
+    kind.className = "bp-ref-kind";
+    kind.textContent = modelLbl;
+
+    chip.append(sigil, label, kind);
+    frag.appendChild(chip);
+  }
+  return frag;
+}
+
+function attachTimelineCopyHandler(scrollEl: HTMLElement): void {
+  scrollEl.addEventListener("copy", (e) => {
+    const sel = typeof window !== "undefined" ? window.getSelection() : null;
+    if (!sel || sel.rangeCount === 0 || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    if (!scrollEl.contains(range.commonAncestorContainer)) return;
+    const ancestor = range.commonAncestorContainer;
+    const el = ancestor.nodeType === Node.ELEMENT_NODE ? (ancestor as Element) : ancestor.parentElement;
+    const singleChip = el?.closest(".bp-ref-chip[data-ref-word]");
+    const singleWord = singleChip?.getAttribute("data-ref-word");
+    let textOut: string;
+    if (singleWord) {
+      textOut = singleWord;
+    } else {
+      const frag = range.cloneContents();
+      const chips = frag.querySelectorAll(".bp-ref-chip[data-ref-word]");
+      if (chips.length === 0) return;
+      for (const chip of chips) {
+        const raw = chip.getAttribute("data-ref-word") || chip.textContent || "";
+        chip.replaceWith(document.createTextNode(raw));
+      }
+      const entries = frag.querySelectorAll(".bp-entry");
+      for (let i = 1; i < entries.length; i++) {
+        entries[i].before(document.createTextNode("\n"));
+      }
+      textOut = frag.textContent ?? "";
+    }
+    if (e.clipboardData) {
+      e.preventDefault();
+      e.clipboardData.setData("text/plain", textOut);
+    }
+  });
+}
+
 function isHiddenSystemNote(e: EntryItem): boolean {
   if (e.agentOnly) return true;
   // Match desktop GPUI: routine git snapshot/repo-init notes are not drawn in the chat timeline.
@@ -117,10 +194,14 @@ export class ChatView {
   private loadingOlder = false;
   private review: ReviewBar | null = null;
   private unanswered: UnansweredNotice | null = null;
+  private noProvider: NoProviderNotice | null = null;
   private btwNote: { q: string; a: string } | null = null;
   private liveNodes = new Map<string, HTMLElement>();
   private imageCache = new Map<string, string>();
   private pinnedToBottom = true;
+  private planExpanded = new Set<string>();
+  private planRevisingId = "";
+  private planReviseDrafts = new Map<string, string>();
 
   constructor(container: HTMLElement, cb: ChatCallbacks) {
     this.cb = cb;
@@ -170,6 +251,7 @@ export class ChatView {
     this.listEl = document.createElement("div");
     this.listEl.className = "bp-timeline-list";
 
+    attachTimelineCopyHandler(this.scrollEl);
     this.scrollEl.append(this.olderBtn, this.listEl);
     container.append(this.bannerEl, this.scrollEl);
   }
@@ -183,11 +265,14 @@ export class ChatView {
     this.unanswered = null;
     this.btwNote = null;
     this.liveNodes.clear();
+    this.planExpanded.clear();
+    this.planRevisingId = "";
+    this.planReviseDrafts.clear();
     this.renderBanners();
     this.olderBtn.classList.add("bp-hidden");
     const el = document.createElement("div");
     el.className = "bp-empty-state";
-    el.textContent = "Loading messages…";
+    el.textContent = t("web.chat.loading", "Loading messages…");
     this.listEl.replaceChildren(el);
   }
 
@@ -200,6 +285,9 @@ export class ChatView {
     this.unanswered = null;
     this.btwNote = null;
     this.liveNodes.clear();
+    this.planExpanded.clear();
+    this.planRevisingId = "";
+    this.planReviseDrafts.clear();
     this.renderBanners();
     this.olderBtn.classList.add("bp-hidden");
     const box = document.createElement("div");
@@ -236,6 +324,11 @@ export class ChatView {
     review: ReviewBar | null,
     unanswered: UnansweredNotice | null,
   ): void {
+    if ((this.thread?.id ?? "") !== (thread?.id ?? "")) {
+      this.planExpanded.clear();
+      this.planRevisingId = "";
+      this.planReviseDrafts.clear();
+    }
     this.thread = thread;
     this.entries = entries.filter((e) => !isHiddenSystemNote(e));
     this.hasMore = hasMore;
@@ -259,6 +352,11 @@ export class ChatView {
 
   public setUnanswered(unanswered: UnansweredNotice | null): void {
     this.unanswered = unanswered;
+    this.renderBanners();
+  }
+
+  public setNoProvider(noProvider: NoProviderNotice | null): void {
+    this.noProvider = noProvider;
     this.renderBanners();
   }
 
@@ -292,6 +390,18 @@ export class ChatView {
     if (idx >= 0) this.entries[idx] = entry;
     else this.entries.push(entry);
     this.renderEntries(atBottom);
+  }
+
+  /** Scroll to a message (a reply's quote) and flash it; false when it is not loaded. */
+  public goTo(entryId: string): boolean {
+    const el = this.scrollEl.querySelector<HTMLElement>(`[data-entry-id="${CSS.escape(entryId)}"]`);
+    if (!el) return false;
+    el.scrollIntoView({ block: "center", behavior: "smooth" });
+    el.classList.remove("bp-entry-flash");
+    void el.offsetWidth;
+    el.classList.add("bp-entry-flash");
+    window.setTimeout(() => el.classList.remove("bp-entry-flash"), 1200);
+    return true;
   }
 
   public removeEntry(entryId: string): void {
@@ -334,12 +444,39 @@ export class ChatView {
 
   private renderBanners(): void {
     const frag = document.createDocumentFragment();
+    if (this.noProvider && !(this.thread?.id.includes("~"))) {
+      const card = document.createElement("div");
+      card.className = "bp-banner bp-no-provider";
+      card.setAttribute("data-testid", "no-provider-banner");
+      const body = document.createElement("div");
+      body.className = "bp-no-provider-body";
+      const h = document.createElement("strong");
+      h.textContent = trs(this.noProvider.head);
+      body.appendChild(h);
+      if (this.noProvider.text) {
+        const p = document.createElement("span");
+        p.className = "bp-dim";
+        p.textContent = trs(this.noProvider.text);
+        body.appendChild(p);
+      }
+      const acts = document.createElement("div");
+      acts.className = "bp-banner-actions";
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "primary";
+      btn.setAttribute("data-testid", "no-provider-accounts-btn");
+      btn.textContent = trs(this.noProvider.button);
+      btn.addEventListener("click", () => this.cb.onOpenAccounts?.());
+      acts.appendChild(btn);
+      card.append(body, acts);
+      frag.appendChild(card);
+    }
     if (this.review && (this.review.text || this.review.button)) {
       const bar = document.createElement("div");
       bar.className = "bp-banner bp-review-bar";
       bar.setAttribute("data-testid", "review-bar");
       const txt = document.createElement("span");
-      txt.textContent = this.review.text || "Review mode";
+      txt.textContent = this.review.text || t("web.chat.review.mode", "Review mode");
       bar.appendChild(txt);
       if (this.review.button) {
         const btn = document.createElement("button");
@@ -428,36 +565,79 @@ export class ChatView {
     replyBtn.type = "button";
     replyBtn.className = "bp-entry-act";
     const replySpan = document.createElement("span");
-    replySpan.textContent = "Reply";
+    replySpan.textContent = t("reply.action", "Reply");
     replyBtn.append(
       makeTinyIcon(["M9 17l-5-5 5-5", "M20 18v-2a4 4 0 0 0-4-4H4"]),
       replySpan,
     );
     replyBtn.addEventListener("click", () => this.cb.onReplyEntry(entry));
+    // not yet on the hub (still sending, or streaming): nothing a reply could name
+    const replyable = !entry.live && !entry.id.startsWith("local-") && !entry.id.startsWith("live:");
 
     const timeEl = document.createElement("span");
     timeEl.className = "bp-entry-time";
     const ts = formatTime24(entry.at);
     if (isUser) {
       timeEl.textContent = ts;
-      foot.append(copyBtn, replyBtn, timeEl);
+      foot.append(copyBtn, ...(replyable ? [replyBtn] : []), timeEl);
     } else {
       const dur = prevUserAt && entry.at ? formatDuration(toMs(entry.at) - toMs(prevUserAt)) : "";
-      const finished = ts ? (dur ? `Finished ${ts} · ${dur}` : `Finished ${ts}`) : "";
-      timeEl.textContent = entry.live ? "Streaming…" : finished;
-      foot.append(timeEl, copyBtn, replyBtn);
+      const finished = ts
+        ? (dur
+            ? t("web.chat.finished.dur", "Finished {time} · {dur}", { time: ts, dur })
+            : t("web.chat.finished", "Finished {time}", { time: ts }))
+        : "";
+      timeEl.textContent = entry.live ? t("web.chat.streaming", "Streaming…") : finished;
+      foot.append(timeEl, copyBtn, ...(replyable ? [replyBtn] : []));
     }
     return foot;
   }
 
+  /** Close any open inline Plan Revise drawer and return focus to its Revise trigger. */
+  public closePlanRevise(): boolean {
+    const prev = this.planRevisingId;
+    if (!prev) return false;
+    this.planRevisingId = "";
+    const top = this.scrollEl.scrollTop;
+    this.renderEntries(false);
+    this.scrollEl.scrollTop = top;
+    const revBtn = this.listEl.querySelector<HTMLButtonElement>(
+      `[data-testid="ask-${CSS.escape(prev)}"] [data-testid="plan-revise"]`,
+    );
+    revBtn?.focus();
+    return true;
+  }
+
   private renderEntries(scrollToBottom: boolean): void {
+    let savedRevise: {
+      askId: string;
+      start: number | null;
+      end: number | null;
+      dir: "forward" | "backward" | "none" | null;
+    } | null = null;
+    const active = typeof document !== "undefined" ? document.activeElement : null;
+    if (
+      active instanceof HTMLTextAreaElement &&
+      active.classList.contains("bp-plan-revise-input") &&
+      this.listEl.contains(active) &&
+      this.planRevisingId
+    ) {
+      this.planReviseDrafts.set(this.planRevisingId, active.value);
+      savedRevise = {
+        askId: this.planRevisingId,
+        start: active.selectionStart,
+        end: active.selectionEnd,
+        dir: active.selectionDirection,
+      };
+    }
+
     this.olderBtn.classList.toggle("bp-hidden", !this.hasMore);
     this.liveNodes.clear();
     const frag = document.createDocumentFragment();
     if (!this.thread) {
       const empty = document.createElement("div");
       empty.className = "bp-empty-state";
-      empty.textContent = "Choose a project thread on the left to begin.";
+      empty.textContent = t("web.chat.choose", "Choose a project thread on the left to begin.");
       frag.appendChild(empty);
       this.listEl.replaceChildren(frag);
       return;
@@ -465,7 +645,7 @@ export class ChatView {
     if (this.entries.length === 0) {
       const empty = document.createElement("div");
       empty.className = "bp-empty-state";
-      empty.textContent = "No messages yet. Type below to start a turn.";
+      empty.textContent = t("web.chat.empty", "No messages yet. Type below to start a turn.");
       frag.appendChild(empty);
       this.listEl.replaceChildren(frag);
       return;
@@ -497,6 +677,11 @@ export class ChatView {
 
       if (entry.kind === "ask" && entry.ask) {
         const ask = entry.ask;
+        if (ask.kind === "plan") {
+          row.appendChild(this.renderPlanAsk(ask));
+          frag.appendChild(row);
+          continue;
+        }
         const card = document.createElement("div");
         card.className = "bp-ask-card";
         card.setAttribute("data-testid", `ask-${ask.id}`);
@@ -519,11 +704,11 @@ export class ChatView {
             const inp = document.createElement("input");
             inp.type = "text";
             inp.className = "bp-input";
-            inp.placeholder = "Type answer…";
+            inp.placeholder = t("web.chat.answer.placeholder", "Type answer…");
             const send = document.createElement("button");
             send.type = "button";
             send.className = "primary";
-            send.textContent = "Answer";
+            send.textContent = t("web.chat.answer.btn", "Answer");
             send.addEventListener("click", () => {
               if (inp.value.trim()) this.cb.onAnswerAsk(ask.id, inp.value.trim());
             });
@@ -533,7 +718,7 @@ export class ChatView {
         } else {
           const ans = document.createElement("div");
           ans.className = "bp-ask-answered";
-          ans.textContent = `Answered: ${ask.answered ?? ""}`;
+          ans.textContent = t("web.chat.answered", "Answered: {answer}", { answer: ask.answered ?? "" });
           card.appendChild(ans);
         }
         row.appendChild(card);
@@ -550,15 +735,26 @@ export class ChatView {
       if (entry.replyTo?.quote) {
         const rq = document.createElement("div");
         rq.className = "bp-reply-quote";
-        rq.textContent = `↩ ${t("gpui.b.in.reply.to", "In reply to:")} ${entry.replyTo.quote}`;
+        rq.textContent = t("gpui.b.in.reply.to", "↩ In reply to: {quote}", { quote: entry.replyTo.quote });
+        // a tap goes to the message it answers (when it is loaded)
+        const to = entry.replyTo.id;
+        rq.setAttribute("role", "button");
+        rq.tabIndex = 0;
+        rq.setAttribute("data-testid", "entry-reply-quote");
+        const go = () => { if (this.cb.onGoToEntry) this.cb.onGoToEntry(to); else this.goTo(to); };
+        rq.addEventListener("click", go);
+        rq.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } });
         row.appendChild(rq);
       }
 
       if (hasBody || entry.live) {
         const body = document.createElement("div");
         body.className = "bp-entry-body";
-        if (entry.kind === "user") body.textContent = entry.text;
-        else body.appendChild(renderMarkdown(entry.text || ""));
+        if (entry.kind === "user") {
+          body.appendChild(renderUserBody(entry.text || "", entry.refs));
+        } else {
+          body.appendChild(renderMarkdown(entry.text || ""));
+        }
         if (entry.live) this.liveNodes.set(entry.id, body);
         row.appendChild(body);
       }
@@ -596,7 +792,8 @@ export class ChatView {
           else {
             void this.cb.onLoadImage(entry.id, p).then((res) => {
               if (!res) return;
-              const url = `data:${res.mime};base64,${res.data}`;
+              const url = res.url ?? (res.mime && res.data ? `data:${res.mime};base64,${res.data}` : "");
+              if (!url) return;
               this.imageCache.set(cacheKey, url);
               img.src = url;
             });
@@ -610,6 +807,230 @@ export class ChatView {
       frag.appendChild(row);
     }
     this.listEl.replaceChildren(frag);
-    if (scrollToBottom) this.scrollToBottom();
+    if (savedRevise && this.planRevisingId === savedRevise.askId) {
+      const nextInp = this.listEl.querySelector<HTMLTextAreaElement>(
+        `[data-testid="ask-${CSS.escape(savedRevise.askId)}"] .bp-plan-revise-input`,
+      );
+      if (nextInp) {
+        nextInp.focus({ preventScroll: true });
+        if (savedRevise.start !== null && savedRevise.end !== null) {
+          nextInp.setSelectionRange(savedRevise.start, savedRevise.end, savedRevise.dir ?? undefined);
+        }
+      }
+    }
+    if (scrollToBottom && !savedRevise) this.scrollToBottom();
+  }
+
+  private renderPlanAsk(ask: EntryAsk): HTMLElement {
+    const expanded = this.planExpanded.has(ask.id);
+    const revising = ask.state === "open" && this.planRevisingId === ask.id;
+
+    const card = document.createElement("div");
+    card.className = "bp-ask-card bp-ask-plan";
+    card.setAttribute("data-testid", `ask-${ask.id}`);
+
+    const head = document.createElement("div");
+    head.className = "bp-plan-head";
+    const icon = makeTinyIcon([
+      "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z",
+      "M14 2v6h6",
+      "M16 13H8",
+      "M16 17H8",
+      "M10 9H8",
+    ]);
+    icon.classList.add("bp-plan-head-ic");
+    const title = document.createElement("span");
+    title.className = "bp-plan-title";
+    title.textContent = !ask.head || ask.head === "Proposed plan"
+      ? t("ask.plan", "Proposed plan")
+      : trs(ask.head);
+    head.append(icon, title);
+
+    if (ask.state === "open") {
+      const badge = document.createElement("span");
+      badge.className = "bp-plan-badge";
+      badge.textContent = t("gpui.ask.plan.ready", "Ready for review");
+      head.appendChild(badge);
+    }
+
+    const spacer = document.createElement("span");
+    spacer.className = "bp-mgmt-flex1";
+    head.appendChild(spacer);
+
+    if (ask.question) {
+      const copyBtn = document.createElement("button");
+      copyBtn.type = "button";
+      copyBtn.className = "bp-plan-head-btn";
+      const copyText = t("common.copy", "Copy");
+      const copyLbl = document.createElement("span");
+      copyLbl.textContent = copyText;
+      copyBtn.append(
+        makeTinyIcon(["M9 9h11v11H9z", "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"]),
+        copyLbl,
+      );
+      copyBtn.addEventListener("click", () => {
+        navigator.clipboard?.writeText(ask.question).then(() => {
+          copyBtn.classList.add("copied");
+          copyLbl.textContent = t("web.clone.copied", "Copied");
+          window.setTimeout(() => {
+            copyBtn.classList.remove("copied");
+            copyLbl.textContent = copyText;
+          }, 1200);
+        }).catch(() => {});
+      });
+      head.appendChild(copyBtn);
+    }
+
+    const expBtn = document.createElement("button");
+    expBtn.type = "button";
+    expBtn.className = "bp-plan-head-btn";
+    expBtn.setAttribute("data-testid", "plan-expand");
+    expBtn.textContent = expanded
+      ? t("gpui.c.term.collapse", "Collapse")
+      : t("gpui.c.term.expand", "Expand");
+    expBtn.addEventListener("click", () => {
+      if (this.planExpanded.has(ask.id)) this.planExpanded.delete(ask.id);
+      else this.planExpanded.add(ask.id);
+      const top = this.scrollEl.scrollTop;
+      this.renderEntries(false);
+      this.scrollEl.scrollTop = top;
+    });
+    head.appendChild(expBtn);
+    card.appendChild(head);
+
+    const body = document.createElement("div");
+    body.className = "bp-plan-body" + (expanded ? " is-expanded" : "");
+    body.setAttribute("data-testid", "plan-body");
+    body.appendChild(renderMarkdown(ask.question || ""));
+    card.appendChild(body);
+
+    if (ask.state === "open") {
+      const actions = document.createElement("div");
+      actions.className = "bp-plan-actions";
+
+      const implOpt = ask.options?.find((o) => o.id === "implement" || o.id.endsWith("|implement"));
+      const implBtn = document.createElement("button");
+      implBtn.type = "button";
+      implBtn.className = "primary";
+      implBtn.setAttribute("data-testid", "plan-implement");
+      implBtn.textContent = implOpt?.label && implOpt.label !== "Implement"
+        ? trs(implOpt.label)
+        : t("approval.implement", "Implement");
+      implBtn.addEventListener("click", () => {
+        this.planRevisingId = "";
+        this.planReviseDrafts.delete(ask.id);
+        this.cb.onAnswerAsk(ask.id, implOpt?.id ?? "implement");
+      });
+      actions.appendChild(implBtn);
+
+      if (ask.revise !== false) {
+        const revBtn = document.createElement("button");
+        revBtn.type = "button";
+        revBtn.className = "bp-plan-revise-btn" + (revising ? " active" : "");
+        revBtn.setAttribute("data-testid", "plan-revise");
+        revBtn.append(
+          makeTinyIcon([
+            "M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7",
+            "M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z",
+          ]),
+          document.createTextNode(t("gpui.ask.plan.revise", "Revise")),
+        );
+        revBtn.addEventListener("click", () => {
+          const opening = this.planRevisingId !== ask.id;
+          this.planRevisingId = opening ? ask.id : "";
+          const top = this.scrollEl.scrollTop;
+          this.renderEntries(false);
+          this.scrollEl.scrollTop = top;
+          if (opening) {
+            const inp = this.listEl.querySelector<HTMLTextAreaElement>(
+              `[data-testid="ask-${CSS.escape(ask.id)}"] .bp-plan-revise-input`,
+            );
+            inp?.focus();
+          }
+        });
+        actions.appendChild(revBtn);
+      }
+
+      const dismissOpt = ask.options?.find((o) => o.id === "dismiss" || o.id.endsWith("|dismiss"));
+      const disBtn = document.createElement("button");
+      disBtn.type = "button";
+      disBtn.className = "bp-plan-dismiss-btn";
+      disBtn.setAttribute("data-testid", "plan-dismiss");
+      disBtn.textContent = dismissOpt?.label && dismissOpt.label !== "Dismiss"
+        ? trs(dismissOpt.label)
+        : t("approval.dismiss", "Dismiss");
+      disBtn.addEventListener("click", () => {
+        this.planRevisingId = "";
+        this.planReviseDrafts.delete(ask.id);
+        this.cb.onAnswerAsk(ask.id, dismissOpt?.id ?? "dismiss");
+      });
+      actions.appendChild(disBtn);
+      card.appendChild(actions);
+
+      if (revising) {
+        const drawer = document.createElement("div");
+        drawer.className = "bp-plan-revise";
+        drawer.setAttribute("data-testid", "plan-revise-drawer");
+
+        const inp = document.createElement("textarea");
+        inp.rows = 2;
+        inp.className = "bp-input bp-plan-revise-input";
+        inp.placeholder = t("gpui.ask.plan.reviseph", "What should change in the plan?");
+        inp.value = this.planReviseDrafts.get(ask.id) ?? "";
+
+        const sendBtn = document.createElement("button");
+        sendBtn.type = "button";
+        sendBtn.className = "bp-plan-revise-send";
+        sendBtn.setAttribute("data-testid", "plan-revise-send");
+        sendBtn.textContent = t("gpui.ask.plan.sendrev", "Send revision");
+        sendBtn.disabled = inp.value.trim().length === 0;
+
+        const submitRevision = () => {
+          const val = inp.value.trim();
+          if (!val) return;
+          this.planRevisingId = "";
+          this.planReviseDrafts.delete(ask.id);
+          this.cb.onAnswerAsk(ask.id, `revise:${val}`);
+        };
+        const closeDrawer = () => {
+          this.closePlanRevise();
+        };
+
+        drawer.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            closeDrawer();
+          }
+        });
+        inp.addEventListener("input", () => {
+          this.planReviseDrafts.set(ask.id, inp.value);
+          sendBtn.disabled = inp.value.trim().length === 0;
+        });
+        inp.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submitRevision();
+          }
+        });
+        sendBtn.addEventListener("click", submitRevision);
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "bp-btn-ghost";
+        cancelBtn.textContent = t("common.cancel", "Cancel");
+        cancelBtn.addEventListener("click", closeDrawer);
+
+        drawer.append(inp, sendBtn, cancelBtn);
+        card.appendChild(drawer);
+      }
+    } else {
+      const ans = document.createElement("div");
+      ans.className = "bp-ask-answered";
+      ans.textContent = t("web.chat.answered", "Answered: {answer}", { answer: ask.answered ?? "" });
+      card.appendChild(ans);
+    }
+
+    return card;
   }
 }

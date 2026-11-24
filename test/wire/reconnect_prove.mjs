@@ -3,8 +3,9 @@
 // reference client = every log/changes item from join on. `first` joins while AGENTS threads stream, holds N log+changes items
 // (live-frame items are NOT log lines and are not counted), drops. A new socket resumes with since=N&origin=<first's origin>.
 // Verdicts: (1) strict: first[0..N) + resume vs reference, element by element, naming every difference by kind;
-//           (2) normalised the way Change.wire does (a SettingSet launch.input.* / fallback.input.* value travels blank on the live wire
-//               and whole in the log): must be identical, same order, same length;
+//           (2) normalised to the wire form Hub::wire_item makes (native/host/src/hub.rs: a SettingSet wire_blank names, push.book,
+//               launch.input.*, fallback.input.*, ride.*, travels with its value blank, Device* events as kind and time; the log keeps them
+//               whole): must be identical, same order, same length;
 //           (3) the reference, normalised, equals events.jsonl line for line.
 import {mkdirSync,rmSync,writeFileSync,readFileSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,client,sleep} from '../perf/lib.mjs';
@@ -37,7 +38,11 @@ const fileLen=()=>readFileSync(root+'/home/events.jsonl','utf8').trimEnd().split
  while(Date.now()-t0<120000){const n=fileLen();if(n!==last){last=n;since=Date.now()}
   if(Date.now()-since>3000&&refLog.length===n&&held+got.length===n&&held+got2.length+firstLive===n)break;
   if(Date.now()-since>3000&&refLog.length===n&&held+got.length===n)break;await sleep(250)}}
-const norm=x=>{x=JSON.parse(JSON.stringify(x));if(x.$==='SettingSet'&&typeof x.key==='string'&&(x.key.startsWith('launch.input.')||x.key.startsWith('fallback.input.')))x.value='';return JSON.stringify(x)};
+// the wire's form of a log line, as Hub::wire_item makes it (native/host/src/hub.rs): device events carry only their kind and time, and a setting
+// wire_blank names (push.book, launch.input.*, fallback.input.*, ride.*) travels with its value blank
+const wireBlank=k=>k==='push.book'||k.startsWith('launch.input.')||k.startsWith('fallback.input.')||k.startsWith('ride.');
+const wireAt=a=>Number.isInteger(a)&&a>=0?a:0; // serde's as_u64().unwrap_or(0)
+const norm=x=>{x=JSON.parse(JSON.stringify(x));if(['DeviceRegistered','DeviceDropped','DevicePrefs'].includes(x.$))x={$:x.$,at:wireAt(x.at)};else if(x.$==='SettingSet'&&typeof x.key==='string'&&wireBlank(x.key))x={$:'SettingSet',key:x.key,value:'',at:wireAt(x.at)};return JSON.stringify(x)};
 const key=x=>JSON.stringify(x);
 const joined=[...firstLog.slice(0,held),...got];
 const kind=o=>o.$+(o.key?':'+o.key.replace(/[0-9a-z-]+$/,'<id>'):'');
@@ -51,7 +56,13 @@ const j2=[...firstLog.slice(0,held),...got2];const have2=new Set(j2.map(norm));c
 const missingStrict=refLog.filter(x=>!new Set(joined.map(key)).has(key(x)));
 const out={bin,agents,held,firstLiveItems:firstLive,firstOrigin,resumeOrigin,resumeSince,refItems:refLog.length,joinedItems:joined.length,eventsJsonlLines:lines.length,
  strictDifferences:strictDiff.length,strictByKind:kinds,strictAbsent:missingStrict.length,strictAbsentKinds:[...new Set(missingStrict.map(kind))],
- normalisedIdentical:normEq,faultyClient:{sinceUsed:wrongSince,liveItemsCountedIn:firstLive,absentLines:absent2.length,absentPositions:absent2.map(a=>a[0]).slice(0,40),absentKinds:[...new Set(absent2.map(a=>kind(a[1])))]},referenceEqualsFile:fileEq,duplicates:joined.length-new Set(joined.map(key)).size};
+ normalisedIdentical:normEq,faultyClient:{sinceUsed:wrongSince,liveItemsCountedIn:firstLive,absentLines:absent2.length,absentPositions:absent2.map(a=>a[0]).slice(0,40),absentKinds:[...new Set(absent2.map(a=>kind(a[1])))]},referenceEqualsFile:fileEq,
+ // items the resume delivered twice: repeats in the joined stream beyond the reference's own (blanked settings written in the same second are identical lines on the wire)
+ duplicates:(()=>{const c=new Map();for(const x of refLog){const k=key(x);c.set(k,(c.get(k)||0)-1)}for(const x of joined){const k=key(x);c.set(k,(c.get(k)||0)+1)}let d=0;for(const v of c.values())if(v>0)d+=v;return d})(),
+ // what differs, so a FAIL says why: the first lines where the file and the reference disagree, and the kinds that repeat (in the joined stream and in the reference)
+ fileDiffs:Array.from({length:Math.max(lines.length,refLog.length)},(_,i)=>[i,lines[i],refLog[i]]).filter(([i,l,r])=>l===undefined||r===undefined||norm(JSON.parse(l))!==norm(r)).slice(0,5).map(([i,l,r])=>({at:i,file:l===undefined?null:norm(JSON.parse(l)).slice(0,300),wire:r===undefined?null:JSON.stringify(r).slice(0,300)})), // the file in its wire form: no value the wire hides
+ duplicateKinds:(()=>{const seen=new Set(),d={};for(const x of joined){const k=key(x);if(seen.has(k))d[kind(x)]=(d[kind(x)]||0)+1;seen.add(k)}return d})(),
+ referenceDuplicates:refLog.length-new Set(refLog.map(key)).size};
 console.log(JSON.stringify(out,null,1));if(outFile)writeFileSync(outFile,JSON.stringify(out,null,1));
 const checks={'first+resume has every log line once, in order (normalised)':normEq&&joined.length===refLog.length&&joined.length===lines.length,
  'no duplicates':out.duplicates===0,'reference equals events.jsonl line for line, through the end of the run':fileEq,

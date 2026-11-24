@@ -1,8 +1,54 @@
 import Foundation
 import SwiftUI
+import zlib
 import CryptoKit
 import UIKit
 import UserNotifications
+
+/// Per-socket RFC 1951 raw DEFLATE stream decoder (`zlib` with windowBits = -15 and `Z_SYNC_FLUSH`).
+private final class RawInflater {
+    private var stream = z_stream()
+    private var active = false
+    init?() {
+        guard inflateInit2_(&stream, -15, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else { return nil }
+        self.active = true
+    }
+    deinit {
+        if active { inflateEnd(&stream) }
+    }
+    func feed(_ data: Data, maxBytes: Int = 16 << 20) throws -> Data {
+        guard active else { throw DError(code: "DEFLATE", message: "Stream closed") }
+        var out = Data()
+        out.reserveCapacity(min(data.count * 3, maxBytes))
+        let chunkCap = 16384
+        var buf = [UInt8](repeating: 0, count: chunkCap)
+        try data.withUnsafeBytes { raw in
+            guard let base = raw.bindMemory(to: UInt8.self).baseAddress else { return }
+            stream.next_in = UnsafeMutablePointer(mutating: base)
+            stream.avail_in = uInt(data.count)
+            while true {
+                let st: Int32 = buf.withUnsafeMutableBufferPointer { dst in
+                    stream.next_out = dst.baseAddress
+                    stream.avail_out = uInt(chunkCap)
+                    return inflate(&stream, Z_SYNC_FLUSH)
+                }
+                let produced = chunkCap - Int(stream.avail_out)
+                if produced > 0 {
+                    if out.count + produced > maxBytes { throw DError(code: "DEFLATE", message: "Inflated frame exceeds limit") }
+                    out.append(contentsOf: buf[0..<produced])
+                }
+                if st == Z_DATA_ERROR || st == Z_MEM_ERROR || st == Z_NEED_DICT || st == Z_STREAM_ERROR {
+                    throw DError(code: "DEFLATE", message: "Corrupt deflate frame (\(st))")
+                }
+                if st == Z_STREAM_END {
+                    throw DError(code: "DEFLATE", message: "Unexpected deflate stream end")
+                }
+                if stream.avail_in == 0 && produced < chunkCap { break }
+            }
+        }
+        return out
+    }
+}
 
 // The phone's whole link to a hub, docs/PHONE-DATA.md (data/1): one WebSocket of plain JSON data, typed values in, typed values out, a disk cache
 // that paints at launch, deltas for the lists and the open thread only. No server-drawn views, no bridge, no engine.
@@ -13,6 +59,12 @@ final class DataClient {
     var pendingThread: String?
     /// `/project` alone in a composer: the home screen opens its Add project sheet.
     var openAddProject = false
+    /// `/project <address>` in a composer (the hub's kind "clone"): the Add project sheet opens on Clone from git with this repository, and `text` goes to clone.start
+    var pendingClone: (repo: String, text: String)?
+    /// Clone from git (feature clone, docs/CLONE.md): each job as its last `clone` push said, the sign-in's last word, and a count of `clone.repos` pushes (the list was read again)
+    private(set) var cloneJobs: [String: DCloneJob] = [:]
+    private(set) var cloneSignin: DCloneSignin?
+    private(set) var cloneReposGen = 0
     /// Just paired: once the hub's bots are in, its uberbot's chat opens (phones have no setup; docs/ALWAYS-ON.md, D9).
     private var uberAfterPair = false
     /// a tapped link the hub resolved (DataLinks.swift): the root screen opens it; a link that opens nothing leaves a short note
@@ -30,7 +82,13 @@ final class DataClient {
     enum Conn: String { case offline, connecting, online }
 
     // what is shown
-    private(set) var conn: Conn = .offline
+    private(set) var conn: Conn = .offline { didSet { restartStrip() } }
+    // the hub's restarts (feature `restarting`, HubRestart): what the connection strip shows, kept current by one timer
+    private(set) var restartLine: HubRestart.Line = .usual
+    @ObservationIgnored private var restarting: HubRestart.Note?   // the last hub.restarting since the last hello
+    @ObservationIgnored private var hubBack: HubRestart.Note?      // hello.hubBack, as this connection joined
+    @ObservationIgnored private var backShown = ""                  // the hubBack `at` already shown: once each
+    @ObservationIgnored private var restartTimer: Task<Void, Never>?
     private(set) var needsRepair = false { didSet { if needsRepair { logPair("screen", "re-pair") } } }
     private(set) var failure = ""
     private(set) var projects: [DProject] = []
@@ -74,6 +132,8 @@ final class DataClient {
     private(set) var features: Set<String> = []
     // hello `notice`, newer from /hub/status: the banner
     private(set) var notice = HubNotice()
+    // the designated home machine for Bub and shared state (docs/PHONE-DATA.md, The home)
+    private(set) var home: DHome?
     // a 0.14 home coming across (hello `migrating`, then `migrating` frames): the hub's card, until one of its buttons answers it (Migration.swift)
     private(set) var migration = DMigration()
     /// the card is open over the screen (a tap on its banner)
@@ -86,6 +146,9 @@ final class DataClient {
     private(set) var telemetryNotice: DTelemetryNotice?
     /// the notice's Settings link: the root view opens Settings and sets it back
     var openSettings = false
+    /// Hub notice when zero AI providers / accounts are configured or signed in (`hello.noProvider` / `info["provider.notice"]`)
+    private(set) var noProvider: DNoProvider?
+    var openAccounts = false
     var canSendImages: Bool { features.contains("images") }
     // the composer's own commands (hello.commands): the hub's table; none of them is ever a message
     struct Word: Equatable { let word, label, desc: String }
@@ -107,6 +170,16 @@ final class DataClient {
     /// text put back into a thread's draft from outside the composer (Edit, a refusal): the open composer reads `drafts` again when `rev` moves
     struct DraftBack: Equatable { var thread = ""; var rev = 0 }
     private(set) var draftBack = DraftBack()
+    /// Reply on a message (feature `reply`): per thread, the message the composer's strip answers; `replyFocus` moves when one is picked, so the box takes the keyboard
+    private(set) var replying: [String: DReplyRef] = [:]
+    struct ReplyFocus: Equatable { var thread = ""; var rev = 0 }
+    private(set) var replyFocus = ReplyFocus()
+    // Project management panels (BOM, Checks, Lifecycle, Plan, Fab) watched via mgmt.watch & info pushes
+    private(set) var mgmt: [String: Data] = [:]
+    private(set) var mgmtRev: Int = 0
+    private(set) var mgmtDigest: String = ""
+    private(set) var mgmtProject: String = ""
+    @ObservationIgnored private var mgmtAsked: String = ""
 
     // a tapped notification: the thread to open and the approval to land on. The views follow these
     var pushThread = ""
@@ -129,6 +202,12 @@ final class DataClient {
     var hubName: String { link.flatMap { Pairing.key($0) } ?? "" }
 
     @ObservationIgnored private var task: URLSessionWebSocketTask?
+    @ObservationIgnored private var inflater: RawInflater?
+    @ObservationIgnored private var shellHashes: [String: String] = [:]
+    @ObservationIgnored private var threadHashes: [String: [String: String]] = [:]
+    @ObservationIgnored private var threadIds: [String: [String]] = [:]
+    @ObservationIgnored private var subEntriesById: [String: DEntry] = [:]
+    @ObservationIgnored private var subEntryIds: [String] = []
     @ObservationIgnored private var gen = 0
     @ObservationIgnored private var nextId = 1
     @ObservationIgnored private var calls: [Int: CheckedContinuation<Data, Error>] = [:]
@@ -242,9 +321,13 @@ final class DataClient {
     }
     private func reset(clearDisk: Bool = false) {
         saveTask?.cancel()
-        notice = HubNotice(); star = nil; telemetryNotice = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
+        shellHashes = [:]; threadHashes = [:]; threadIds = [:]; subEntriesById = [:]; subEntryIds = []
+        restarting = nil; hubBack = nil; restartStrip()
+        home = nil
+        notice = HubNotice(); star = nil; telemetryNotice = nil; noProvider = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
+        mgmt = [:]; mgmtDigest = ""; mgmtProject = ""; mgmtAsked = ""; mgmtRev += 1
         if clearDisk, let k = link.flatMap({ Pairing.key($0) }) { try? FileManager.default.removeItem(at: Self.cacheURL(for: k)) }
     }
 
@@ -258,7 +341,7 @@ final class DataClient {
     // MARK: connection
     func connect() {
         guard let link, let base = Pairing.socket(link), var c = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return }
-        c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: "data", value: "1"), URLQueryItem(name: "enc", value: "json")]
+        c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: "data", value: "1"), URLQueryItem(name: "enc", value: "json"), URLQueryItem(name: "z", value: "deflate")]
         guard let url = c.url else { return }
         close()
         gen += 1
@@ -282,9 +365,11 @@ final class DataClient {
         gen += 1
         watchdog?.cancel(); reconnectTask?.cancel()
         task?.cancel(with: .goingAway, reason: nil); task = nil
+        inflater = nil
         for (_, k) in calls { k.resume(throwing: DError(code: "OFFLINE", message: "Offline")) }
         calls = [:]
         listSub = 0; threadSub = 0
+        mgmtAsked = ""
         terms.disconnected()
     }
     // the app came back to the front: a socket that died while suspended is replaced at once
@@ -301,7 +386,15 @@ final class DataClient {
                     self.heard = Date()
                     switch m {
                     case .string(let s): self.handle(Data(s.utf8), g)
-                    case .data(let d): if PlotStore.isPlot(d) { self.plots.receive(d) } else { self.handle(d, g) }
+                    case .data(let d):
+                        let raw: Data
+                        if let inf = self.inflater {
+                            do { raw = try inf.feed(d) }
+                            catch { self.lost(g, "deflate"); return }
+                        } else {
+                            raw = d
+                        }
+                        if PlotStore.isPlot(raw) { self.plots.receive(raw) } else { self.handle(raw, g) }
                     @unknown default: break
                     }
                     self.receive(t, g)
@@ -328,6 +421,20 @@ final class DataClient {
             try? await Task.sleep(for: .seconds(wait))
             guard !Task.isCancelled else { return }
             self?.connect()
+        }
+    }
+
+    /// The strip's line now, and the one timer for when it changes next (HubRestart.next).
+    private func restartStrip() {
+        let now = Date(), online = conn == .online
+        let l = HubRestart.line(restarting: restarting, back: hubBack, online: online, now: now)
+        if l != restartLine { restartLine = l }
+        restartTimer?.cancel(); restartTimer = nil
+        guard let at = HubRestart.next(restarting: restarting, back: hubBack, online: online, now: now) else { return }
+        restartTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(at.timeIntervalSince(now)))
+            guard !Task.isCancelled else { return }
+            self?.restartStrip()
         }
     }
 
@@ -417,14 +524,19 @@ final class DataClient {
         switch t {
         case "hello":
             guard (o["proto"] as? String)?.hasPrefix("data/") == true else { failure = "This hub does not speak the phone data protocol (update it)."; lost(g, failure); return }
+            inflater = (o["z"] as? String) == "deflate" ? RawInflater() : nil
             features = Set((o["features"] as? [String]) ?? [])
+            home = WireJSON.decode(o["home"], as: DHome.self)
             notice = HubRescue.notice(o["notice"] as? [String: Any])
             heardMigration(o["migrating"])
             commands = ((o["commands"] as? [[String: Any]]) ?? []).map { Word(word: $0["word"] as? String ?? "", label: $0["label"] as? String ?? "", desc: $0["desc"] as? String ?? "") }
+            restarting = nil
+            if let b = HubRestart.back(o["hubBack"]), b.at != backShown { backShown = b.at; hubBack = HubRestart.Note(text: b.text, heard: Date()) } else { hubBack = nil }
             conn = .online; failure = ""; backoff = 0.25; plots.reset(); voice.connected()
             if !onHome { downSince = nil }
             Task { await self.synchronise(g) }
             heardOffer(o["hubOffer"] as? String ?? "")
+            noProvider = DNoProvider.of(o["noProvider"])
         case "reply":
             guard let id = o["id"] as? Int ?? (o["id"] as? Double).map(Int.init), let k = calls.removeValue(forKey: id) else { return }
             if o["ok"] as? Bool == true {
@@ -438,19 +550,41 @@ final class DataClient {
         // a schematic's sheets (kicad/watch.rs `sheets`): the newest tree only (`gen` only grows)
         case "sheets": let g = Int64(o["gen"] as? String ?? "") ?? 0; if g >= sheetsGen { sheetsGen = g; sheets = DSheet.rows(o["rows"] as? String ?? "") }
         case "star": star = DStarOffer.of(o["offer"])
+        case "hub.restarting": if let t = HubRestart.restarting(o) { restarting = HubRestart.Note(text: t, heard: Date()); restartStrip() }
         case "telemetry.notice": telemetryNotice = DTelemetryNotice.of(o["notice"])
         case "migrating": heardMigration(o)
-        case "info": if let v = (o["info"] as? [String: Any])?["hub.offer"] as? String { heardOffer(v) }
+        case "info":
+            if let info = o["info"] as? [String: Any] {
+                if let v = info["hub.offer"] as? String { heardOffer(v) }
+                if info.keys.contains("provider.notice") { noProvider = DNoProvider.of(info["provider.notice"]) }
+                heardMgmt(info)
+            }
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
         default: break
         }
     }
 
-    func call<T: Decodable>(_ m: String, _ p: [String: Any] = [:], as: T.Type = T.self) async throws -> T {
+    private func heardMgmt(_ info: [String: Any]) {
+        let keys = info.keys.filter { $0.hasPrefix("mgmt.") || $0.hasPrefix("kicad.checks.") || $0.hasPrefix("review.") }
+        guard !keys.isEmpty else { return }
+        var next = mgmt
+        for k in keys {
+            if let s = info[k] as? String {
+                if s.isEmpty { next.removeValue(forKey: k) }
+                else { next[k] = Data(s.utf8) }
+            } else if let obj = info[k] as? [String: Any], let data = WireJSON.data(obj) {
+                next[k] = data
+            }
+        }
+        mgmt = next
+        mgmtRev += 1
+    }
+
+    private func callRaw(_ m: String, _ p: [String: Any] = [:]) async throws -> Data {
         guard conn != .offline, let task else { throw DError(code: "OFFLINE", message: "Offline") }
         let id = nextId; nextId += 1
         guard let msg = WireJSON.data(["id": id, "m": m, "p": p]) else { throw DError(code: "BAD_PARAMS", message: "Not JSON: \(m)") }
-        let data: Data = try await withCheckedThrowingContinuation { k in
+        return try await withCheckedThrowingContinuation { k in
             calls[id] = k
             task.send(.string(String(decoding: msg, as: UTF8.self))) { [weak self] e in
                 if let e { Task { @MainActor in self?.calls.removeValue(forKey: id)?.resume(throwing: e) } }
@@ -460,17 +594,43 @@ final class DataClient {
                 self?.calls.removeValue(forKey: id)?.resume(throwing: DError(code: "TIMEOUT", message: "The hub did not answer"))
             }
         }
+    }
+
+    func call<T: Decodable>(_ m: String, _ p: [String: Any] = [:], as: T.Type = T.self) async throws -> T {
+        let data = try await callRaw(m, p)
         return try JSONDecoder().decode(T.self, from: data)
     }
 
     // MARK: sync
     private func synchronise(_ g: Int) async {
         do {
-            let s: DSubReply = try await call("subscribe", ["topic": "lists"]); guard g == gen else { return }; listSub = s.sub
-            Task { await self.flushOutbox(g) }
-            async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
-            _ = try await (p, t, h)
-            await loadSections()   // the sidebar's sections (feature sections): the list draws them once they come
+            if has("shell") && machine.isEmpty {
+                let r: DShellSyncReply = try await call("shell.sync", ["have": shellHashes, "settled": 25])
+                guard g == gen else { return }
+                listSub = r.sub
+                Task { await self.flushOutbox(g) }
+                flushLists()
+                let removed = Set(r.removed ?? [])
+                let changedPids = Set((r.projects ?? []).map(\.id))
+                if !removed.isEmpty || !changedPids.isEmpty {
+                    projects = (projects.filter { !removed.contains($0.id) && !changedPids.contains($0.id) } + (r.projects ?? [])).sorted { $0.updatedAt > $1.updatedAt }
+                    threads = (threads.filter { !removed.contains($0.project) && !changedPids.contains($0.project) } + (r.threads ?? [])).sorted { $0.updatedAt > $1.updatedAt }
+                } else if let gotThreads = r.threads, !gotThreads.isEmpty {
+                    var byId = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
+                    for t in gotThreads { byId[t.id] = t }
+                    threads = Array(byId.values).sorted { $0.updatedAt > $1.updatedAt }
+                }
+                if let s = r.sections { sections = s.sections; groupsTo = s.groupsTo }
+                if let h = r.h { shellHashes = h }
+                listsLoaded = true; scheduleSave()
+                await loadHistory()
+            } else {
+                let s: DSubReply = try await call("subscribe", ["topic": "lists"]); guard g == gen else { return }; listSub = s.sub
+                Task { await self.flushOutbox(g) }
+                async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
+                _ = try await (p, t, h)
+                await loadSections()   // the sidebar's sections (feature sections): the list draws them once they come
+            }
             await loadBots()
             await loadSwarms()
             await voice.resync()
@@ -479,7 +639,10 @@ final class DataClient {
             await loadStar()
             await loadTelemetryNotice()
             terms.resync()
-            if let open { try await subscribeThread(open, g); await refreshThread(open) }
+            if let open {
+                if has("open") { await openThreadBundled(open, g) }
+                else { try await subscribeThread(open, g); await refreshThread(open) }
+            }
             if let r = subOpen { subSub = 0; await readSub(r, g) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
@@ -497,6 +660,11 @@ final class DataClient {
         UserDefaults.standard.set(Array(sectionsOpen), forKey: "data.sections.open"); Task { await loadSections() }
     }
     func sidebarAct(_ action: String, _ value: String) async { _ = try? await call("sidebar.act", ["action": action, "value": value]) as DEmpty; await loadSections() }
+    /// A section row's snooze or wake by the hub's own value (the row's `snooze` option or `wake`: "<thread>|1h", "|tomorrow", "|1w", "|off").
+    func snoozeRow(_ value: String) async { await sidebarAct("row-snooze", value) }
+    /// A project's page opened here: a visit, so the bench (Recent) follows this phone too. The hub writes it at most once in ten minutes; an
+    /// older hub refuses the action, which changes nothing.
+    func visitProject(_ key: String) async { guard has("sections"), !key.isEmpty else { return }; _ = try? await call("sidebar.act", ["action": "project-page", "value": key]) as DEmpty }
     /// A section row's menu item for a thread of this hub (the hub's `menu`: pin, unpin, settle, unsettle, archive): `thread.act`, then the sections as the hub has them now.
     func sectionThreadAct(_ id: String, _ action: String) async { await threadAct(id, action); await loadSections() }
     func projectPage(_ key: String, done: Bool, older: Bool = false) async -> DProjectPage? {
@@ -566,6 +734,8 @@ final class DataClient {
         }
     }
     func loadLocks() async { guard has("work"), let r: DLocks = try? await call("locks.list") else { return }; locks = r.locks }
+    /// Move the designated home (Bub and shared state) onto this hub (`home.move {to:"back"}`).
+    func moveHomeHere() async { _ = try? await call("home.move", ["to": "back"], as: DEmpty.self) }
     private func loadWork(_ id: String) async { guard has("work"), let r: DWorkReply = try? await call("thread.work", ["thread": id]) else { return }; work[id] = r.subs }
     // a row's button; what it changes comes back as a push
     func workAct(_ id: String, _ row: DWorkRow) { Task { _ = try? await call("work.act", ["thread": id, "act": row.act ?? "", "value": row.value ?? ""], as: DEmpty.self) } }
@@ -640,12 +810,40 @@ final class DataClient {
         guard conn == .online else { return }
         let g = gen
         if has("push") { Task { _ = try? await self.call("push.seen", ["thread": id], as: DEmpty.self); await self.syncPush() } }
-        // the subscribe and the newest page go out back to back on the one socket (it keeps their order): no round trip between them
-        Task {
-            async let sub: Void? = try? await self.subscribeThread(id, g)
-            await refreshThread(id)
-            _ = await sub
+        if has("open") {
+            Task { await self.openThreadBundled(id, g) }
+        } else {
+            // the subscribe and the newest page go out back to back on the one socket (it keeps their order): no round trip between them
+            Task {
+                async let sub: Void? = try? await self.subscribeThread(id, g)
+                await refreshThread(id)
+                _ = await sub
+            }
         }
+    }
+    private func openThreadBundled(_ id: String, _ g: Int) async {
+        var have: [String: String] = threadHashes[id] ?? [:]
+        for e in entries[id] ?? [] where !e.h.isEmpty { have[e.id] = e.h }
+        guard let r: DThreadOpenReply = try? await call("thread.open", ["thread": id, "limit": 40, "have": have]) else { return }
+        if g != gen || open != id {
+            if r.sub != 0 { _ = try? await call("unsubscribe", ["sub": r.sub], as: DEmpty.self) }
+            return
+        }
+        if r.sub != 0 { threadSub = r.sub }
+        var byId = Dictionary(uniqueKeysWithValues: (entries[id] ?? []).map { ($0.id, $0) })
+        for e in r.entries { byId[e.id] = e }
+        let ids = r.ids ?? threadIds[id] ?? r.entries.map(\.id)
+        threadIds[id] = ids
+        let fresh = ids.compactMap { byId[$0] }
+        let pending = (entries[id] ?? []).filter { $0.sending || $0.failed }
+        entries[id] = fresh + pending.filter { p in !fresh.contains { $0.clientId != nil && $0.clientId == p.clientId } }
+        if r.hasNext { older[id] = r.next }
+        loadedThreads.insert(id)
+        if let t = r.thread { upsert(t) }
+        if let w = r.work { work[id] = w.subs }
+        if let q = r.queue { queues[id] = q.rows.isEmpty ? nil : q.rows }
+        if let h = r.h { threadHashes[id] = h }
+        scheduleSave()
     }
 
     // MARK: cache-first: what the list shows is read ahead, so opening it paints from memory
@@ -683,14 +881,16 @@ final class DataClient {
         let g = gen; Task { await readSub(r, g) }
     }
     private func readSub(_ r: DSubRoute, _ g: Int) async {
-        guard let s: DSubReply = try? await call("subscribe", ["topic": "sub", "thread": r.thread, "key": r.key]) else { return }
+        guard let s: DSubReply = try? await call("subscribe", ["topic": "sub", "thread": r.thread, "key": r.key, "parts": 1]) else { return }
         guard g == gen, subOpen == r else { _ = try? await call("unsubscribe", ["sub": s.sub], as: DEmpty.self); return }
         subSub = s.sub
         guard let v: DSubViewReply = try? await call("thread.sub", ["thread": r.thread, "key": r.key]), subOpen == r else { return }
         subView = v.view; subGone = v.view == nil
+        subEntriesById = Dictionary(uniqueKeysWithValues: (v.view?.entries ?? []).map { ($0.id, $0) })
+        subEntryIds = (v.view?.entries ?? []).map(\.id)
     }
     func closeSub() {
-        subOpen = nil; subView = nil; subGone = false
+        subOpen = nil; subView = nil; subGone = false; subEntriesById = [:]; subEntryIds = []
         let s = subSub; subSub = 0
         if s != 0, conn == .online { Task { _ = try? await call("unsubscribe", ["sub": s], as: DEmpty.self) } }
     }
@@ -733,6 +933,9 @@ final class DataClient {
         guard let k = o["k"] as? String else { return }
         if k == "btw", let th = o["thread"] as? String, let q = o["q"] as? String, btw[th]?.q == q { btw[th] = Btw(q: q, a: o["a"] as? String ?? ""); return }
         if k == "term" { terms.push(o); return }
+        if k == "clone" { if let j = WireJSON.decode(o["clone"], as: DCloneJob.self), !j.id.isEmpty { cloneJobs[j.id] = j }; return }
+        if k == "clone.repos" { cloneReposGen += 1; return }
+        if k == "clone.signin" { if let s = WireJSON.decode(o["signin"], as: DCloneSignin.self) { cloneSignin = s }; return }
         if k == "bots" { Task { await loadBots() }; return } // the bots or the home moved: read them again (an open uberbot chat follows it)
         if k == "secret" { let th = o["thread"] as? String ?? ""; Task { await refreshSecretAsks(th) }; return }
         // a null (`"subs":null` when a thread's work ends) or any non-JSON value decodes to nil instead of raising
@@ -752,12 +955,27 @@ final class DataClient {
         case "work":
             if let tid = o["thread"] as? String { work[tid] = decode("subs", DWork.self) }
         case "sub":
-            if let tid = o["thread"] as? String, let key = o["key"] as? String, subOpen == DSubRoute(thread: tid, key: key), let v = decode("view", DSubView.self) { subView = v; subGone = false }
+            if let tid = o["thread"] as? String, let key = o["key"] as? String, subOpen == DSubRoute(thread: tid, key: key), let v = decode("view", DSubView.self) {
+                subView = v; subGone = false
+                subEntriesById = Dictionary(uniqueKeysWithValues: v.entries.map { ($0.id, $0) })
+                subEntryIds = v.entries.map(\.id)
+            }
+        case "sub.d":
+            if let tid = o["thread"] as? String, let key = o["key"] as? String, subOpen == DSubRoute(thread: tid, key: key) {
+                if let es = decode("entries", [DEntry].self) { for e in es { subEntriesById[e.id] = e } }
+                if let ids = o["ids"] as? [String] { subEntryIds = ids }
+                if var base = decode("head", DSubView.self) ?? subView {
+                    base.entries = subEntryIds.compactMap { subEntriesById[$0] }
+                    subView = base; subGone = false
+                }
+            }
         case "queue":
             // the strip's rows changed with no line in the log (a message on its way to another machine): ask again
             if let tid = o["thread"] as? String { Task { await self.loadQueue(tid) } }
         case "locks":
             locks = decode("locks", [DLock].self) ?? []
+        case "home":
+            home = decode("home", DHome.self)
         case "text":
             if let tid = o["thread"] as? String, let eid = o["entry"] as? String, let add = o["append"] as? String,
                var l = entries[tid], let i = l.firstIndex(where: { $0.id == eid }) {
@@ -833,35 +1051,45 @@ final class DataClient {
     /// A message: message.send at once, whatever the thread is doing (the hub puts it into a running turn). With the socket down, or while older
     /// unsent ones wait, it goes to the outbox instead (a message with pictures is not kept there: it stays in the conversation with Retry).
     /// `voice`: dictated (what the hub tells the agent of it, voice/mark.rs). The message's client id.
-    @discardableResult func send(_ tid: String, _ text: String, images: [Data] = [], voice: [String: Any]? = nil) -> String {
+    /// `reply`: the message this one answers (the composer's strip, feature `reply`); the strip is dropped once it is sent.
+    @discardableResult func send(_ tid: String, _ text: String, images: [Data] = [], voice: [String: Any]? = nil, reply: DReplyRef? = nil) -> String {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty || !images.isEmpty else { return "" }
         let cid = UUID().uuidString
-        queueError[tid] = nil
+        let rp = reply.flatMap { has("reply") && !text.isEmpty ? ReplyDraft.param($0) : nil }
+        queueError[tid] = nil; replying[tid] = nil
         if images.isEmpty && (conn != .online || !outbox.isEmpty) {
-            outbox.push(thread: tid, text: text, clientId: cid); saveOutbox()
+            outbox.push(thread: tid, text: text, clientId: cid, replyTo: rp); saveOutbox()
             setDraft(tid, "")
             if conn == .online { let g = gen; Task { await flushOutbox(g) } }
             return cid
         }
         var local = DEntry(id: "local:" + cid, kind: "user", text: text, at: Int(Date().timeIntervalSince1970 * 1000), clientId: cid)
-        local.sending = true; local.localImages = images; local.voice = voice.map(DVoiceMark.init)
+        local.sending = true; local.localImages = images; local.voice = voice.map(DVoiceMark.init); local.replyParam = rp
+        if let r = reply, rp != nil { let c = ReplyDraft.chip(r); local.replyTo = DReplyTo(id: c.id, quote: c.quote) }
         entries[tid, default: []].append(local)
         setDraft(tid, "")
-        Task { await deliver(tid, text, cid, images, voice: voice) }
+        Task { await deliver(tid, text, cid, images, voice: voice, reply: rp) }
         return cid
     }
+    /// Reply on a message (feature `reply`): the composer's strip shows it until the send or its ×.
+    func startReply(_ tid: String, _ r: DReplyRef) { replying[tid] = r; replyFocus = ReplyFocus(thread: tid, rev: replyFocus.rev + 1) }
+    func dropReply(_ tid: String) { replying[tid] = nil }
     func retry(_ tid: String, _ entry: DEntry) {
         guard let cid = entry.clientId, var l = entries[tid], let i = l.firstIndex(where: { $0.id == entry.id }) else { return }
         l[i].failed = false; l[i].sending = true; entries[tid] = l
-        Task { await deliver(tid, entry.text, cid, entry.localImages) }
+        Task { await deliver(tid, entry.text, cid, entry.localImages, reply: entry.replyParam) }
     }
-    private func deliver(_ tid: String, _ text: String, _ cid: String, _ images: [Data], voice: [String: Any]? = nil) async {
+    private func deliver(_ tid: String, _ text: String, _ cid: String, _ images: [Data], voice: [String: Any]? = nil, reply: [String: String]? = nil) async {
         do {
             var p: [String: Any] = ["thread": tid, "text": text, "clientId": cid]
             if let voice { p["voice"] = voice }
+            if let reply { p["replyTo"] = reply }
             if !images.isEmpty {
-                p["attachments"] = images.enumerated().map { ["name": "photo-\($0.offset + 1).jpg", "mime": "image/jpeg", "data": $0.element.base64EncodedString()] }
+                p["attachments"] = images.enumerated().map {
+                    let gif = AnimatedImage.isGIF($0.element)
+                    return ["name": gif ? "image-\($0.offset + 1).gif" : "photo-\($0.offset + 1).jpg", "mime": gif ? "image/gif" : "image/jpeg", "data": $0.element.base64EncodedString()]
+                }
             }
             let r: DEntryReply = try await call("message.send", p)
             // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
@@ -872,9 +1100,9 @@ final class DataClient {
             if images.isEmpty, var l = entries[tid], let i = l.firstIndex(where: { $0.clientId == cid }) {
                 l.remove(at: i); entries[tid] = l
                 // the socket went: into the outbox, sent again (same clientId, posted once) when connected
-                if Self.socketGone(error) { outbox.push(thread: tid, text: text, clientId: cid); saveOutbox() }
-                // the hub said no: its words, and the text back into the draft
-                else { refused(tid, text, error) }
+                if Self.socketGone(error) { outbox.push(thread: tid, text: text, clientId: cid, replyTo: reply); saveOutbox() }
+                // the hub said no: its words, and the text back into the draft (and what it answered back over it)
+                else { refused(tid, text, error, reply: reply) }
                 return
             }
             if var l = entries[tid], let i = l.firstIndex(where: { $0.clientId == cid }) { l[i].sending = false; l[i].failed = true; entries[tid] = l }
@@ -882,9 +1110,10 @@ final class DataClient {
     }
     /// The call never got the hub's answer (no socket, cut, or no reply): not a refusal, so the message is kept and sent again.
     nonisolated static func socketGone(_ e: Error) -> Bool { guard let d = e as? DError else { return true }; return d.code == "OFFLINE" || d.code == "TIMEOUT" }
-    private func refused(_ tid: String, _ text: String, _ error: Error) {
+    private func refused(_ tid: String, _ text: String, _ error: Error, reply: [String: String]? = nil) {
         queueError[tid] = (error as? DError)?.message ?? error.localizedDescription
         backToDraft(tid, text)
+        if let r = reply, let id = r["id"], let t = r["text"], replying[tid] == nil { replying[tid] = DReplyRef(id: id, text: t, role: (entries[tid] ?? []).first { $0.id == id }?.kind ?? "assistant") }
     }
     private func backToDraft(_ tid: String, _ text: String) {
         setDraft(tid, Outbox.draft(drafts[tid] ?? "", adding: text))
@@ -919,14 +1148,16 @@ final class DataClient {
         flushing = true; defer { flushing = false }
         while g == gen, conn == .online, let it = outbox.next {
             do {
-                let r: DEntryReply = try await call("message.send", ["thread": it.thread, "text": it.text, "clientId": it.clientId])
+                var p: [String: Any] = ["thread": it.thread, "text": it.text, "clientId": it.clientId]
+                if let r = it.replyTo { p["replyTo"] = r }
+                let r: DEntryReply = try await call("message.send", p)
                 outbox.sent(it.clientId); saveOutbox()
                 put(r.entry, in: it.thread)
                 await loadQueue(it.thread)
             } catch {
                 if Self.socketGone(error) { return }
                 outbox.sent(it.clientId); saveOutbox()
-                refused(it.thread, it.text, error)
+                refused(it.thread, it.text, error, reply: it.replyTo)
             }
         }
     }
@@ -947,22 +1178,44 @@ final class DataClient {
 
     // MARK: pictures
     nonisolated(unsafe) static let attachmentCache = NSCache<NSString, NSData>()
+    private func blobBytes(_ path: String) async -> Data? {
+        guard path.hasPrefix("/blob/"), let link, let u = Pairing.http(link, path: path, token: false) else { return nil }
+        var req = URLRequest(url: u)
+        if let w = Pairing.socket(link),
+           let tok = URLComponents(url: w, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "token" })?.value,
+           !tok.isEmpty {
+            req.setValue("Bearer \(tok)", forHTTPHeaderField: "Authorization")
+        }
+        guard let (d, r) = try? await URLSession.shared.data(for: req), (r as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+        return d
+    }
     /// An image a reply names (feature replyImages): the hub's snapshot of it (`message.image`), so it reads the same over the relay as on the tailnet.
     func replyImage(entry: String, path: String) async -> Data? {
         let key = "mi:" + entry + "\n" + path
         if let d = Self.attachmentCache.object(forKey: key as NSString) { return d as Data }
-        guard let r: DAttachmentData = try? await call("message.image", ["entry": entry, "path": path]), let d = Data(base64Encoded: r.data) else { return nil }
+        var params: [String: Any] = ["entry": entry, "path": path]
+        if has("blobs") { params["metaOnly"] = true }
+        guard let r: DAttachmentData = try? await call("message.image", params) else { return nil }
+        let fetched: Data?
+        if !r.blob.isEmpty { fetched = await blobBytes(r.blob) } else { fetched = nil }
+        guard let d = fetched ?? (r.data.isEmpty ? nil : Data(base64Encoded: r.data)) else { return nil }
         Self.attachmentCache.setObject(d as NSData, forKey: key as NSString)
         return d
     }
     func attachmentData(_ id: String) async -> Data? {
         if let d = Self.attachmentCache.object(forKey: id as NSString) { return d as Data }
-        guard let r: DAttachmentData = try? await call("attachment.get", ["id": id]), let d = Data(base64Encoded: r.data) else { return nil }
+        var params: [String: Any] = ["id": id]
+        if has("blobs") { params["metaOnly"] = true }
+        guard let r: DAttachmentData = try? await call("attachment.get", params) else { return nil }
+        let fetched: Data?
+        if !r.blob.isEmpty { fetched = await blobBytes(r.blob) } else { fetched = nil }
+        guard let d = fetched ?? (r.data.isEmpty ? nil : Data(base64Encoded: r.data)) else { return nil }
         Self.attachmentCache.setObject(d as NSData, forKey: id as NSString)
         return d
     }
-    // a picture chosen or pasted: the longest side at most 2048 px, JPEG at 0.8 (about a megabyte at most; the hub takes 8 MB)
+    // a picture chosen or pasted: GIFs under 8 MB stay raw to preserve animation; others are capped at 2048 px JPEG at 0.8
     nonisolated static func prepared(_ data: Data) -> Data? {
+        if AnimatedImage.isGIF(data) && data.count <= AnimatedImage.maxUploadBytes { return data }
         guard let image = UIImage(data: data) else { return nil }
         let longest = max(image.size.width, image.size.height) * image.scale
         let factor = longest > 2048 ? 2048 / longest : 1
@@ -1000,6 +1253,13 @@ final class DataClient {
         upsert(r.thread)
         return r.thread
     }
+    /// A clone.* answer that is a job (start, status, cancel, retry): kept as the pushes are, so a push and an answer land in one place.
+    func cloneJob(_ m: String, _ p: [String: Any]) async throws -> DCloneJob {
+        let j: DCloneJob = try await call(m, p)
+        if !j.id.isEmpty, Clone.follow(cloneJobs[j.id], j, id: j.id) == j { cloneJobs[j.id] = j }
+        return j
+    }
+    func cloneSignIn(restart: Bool = true) async throws { let s: DCloneSignin = try await call("clone.signin", restart ? ["restart": true] : [:]); cloneSignin = s }
     func dirs(_ path: String?) async throws -> DDirs { try await call("dirs.list", path.map { ["path": $0] } ?? [:]) }
     func setDraft(_ tid: String, _ text: String) {
         voice.typed(tid, old: drafts[tid] ?? "", new: text)
@@ -1012,7 +1272,7 @@ final class DataClient {
     }
 
     // MARK: the composer's own commands (feature commands): the hub runs them, the draft stays until it said yes
-    struct CommandResult: Decodable { let kind: String; var q: String?; var name: String?; var text: String?; var thread: String?; var path: String?; var error: String?; var note: String? }
+    struct CommandResult: Decodable { let kind: String; var q: String?; var a: String?; var name: String?; var text: String?; var thread: String?; var path: String?; var error: String?; var note: String?; var repo: String? }
     private struct SecretAsks: Decodable { let asks: [SecretAsk] }
     /// The command this draft is, by the hub's own rule (session/composer.rs command_is): the word alone, or followed by a space or a new line.
     func commandOf(_ draft: String) -> Word? {
@@ -1027,7 +1287,7 @@ final class DataClient {
     func runCommand(_ tid: String, _ text: String) async throws -> CommandResult {
         // `exists`: this app offers Add existing on a folder /project found not empty (the answer's kind "exists")
         let r: CommandResult = try await call("composer.run", ["thread": tid, "text": text, "exists": true])
-        if r.kind == "btw" { btw[tid] = Btw(q: r.q ?? "", a: "Thinking…") }
+        if r.kind == "btw" { btw[tid] = Btw(q: r.q ?? "", a: (r.a?.isEmpty == false ? r.a! : "Thinking…")) }
         return r
     }
     func closeBtw(_ tid: String) { btw[tid] = nil }
@@ -1083,6 +1343,90 @@ final class DataClient {
         let r: DThreadOpt = try await call("thread.pick", ["thread": id, "action": action, "value": value])
         if let t = r.thread { upsert(t) }
     }
+    func setPlanMode(_ id: String, target: DPlanMode.Target) async throws {
+        let cur = threads.first(where: { $0.id == id })?.planMode
+        switch target {
+        case .off:
+            if cur?.interaction == "plan" {
+                try await pick(id, action: "interaction", value: "default")
+            }
+            let r: DThreadOpt = try await call("thread.planonce", ["thread": id, "on": false])
+            if let t = r.thread { upsert(t) }
+        case .once:
+            if cur?.interaction == "plan" {
+                try await pick(id, action: "interaction", value: "default")
+            }
+            let r: DThreadOpt = try await call("thread.planonce", ["thread": id, "on": true])
+            if let t = r.thread { upsert(t) }
+        case .always:
+            if cur?.once == true {
+                let r: DThreadOpt = try await call("thread.planonce", ["thread": id, "on": false])
+                if let t = r.thread { upsert(t) }
+            }
+            try await pick(id, action: "interaction", value: "plan")
+        }
+    }
+    func mgmtRaw(_ id: String) -> Data? {
+        guard !mgmtDigest.isEmpty else { return nil }
+        return mgmt["mgmt.\(id).\(mgmtDigest)"]
+    }
+    func mgmtWatch(_ project: String) async {
+        guard !project.isEmpty else { return }
+        if project != mgmtAsked { mgmtAsked = project; mgmtDigest = ""; mgmtProject = "" }
+        guard let raw = try? await callRaw("mgmt.watch", ["project": project]),
+              let o = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any],
+              let d = o["digest"] as? String, !d.isEmpty, project == mgmtAsked else { return }
+        var next = mgmt
+        if let state = o["state"] as? [String: Any], let sd = WireJSON.data(state) {
+            next["mgmt.state.\(d)"] = sd
+        }
+        if let dataObj = o["data"] as? [String: Any] {
+            for (k, v) in dataObj {
+                if let vo = v as? [String: Any], let vd = WireJSON.data(vo) {
+                    next["mgmt.\(k).\(d)"] = vd
+                }
+            }
+        }
+        mgmt = next
+        mgmtDigest = d
+        mgmtProject = (o["project"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? project
+        mgmtRev += 1
+    }
+    func planGet(_ pro: String, board: Bool = true) async throws -> Data {
+        let target = pro.isEmpty ? mgmtProject : pro
+        return try await callRaw("plan.get", ["pro": target, "board": board])
+    }
+    func planApprove(_ pro: String, layer: String, ids: [String], approve: Bool) async throws {
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.approve", ["pro": target, "layer": layer, "ids": ids, "approve": approve], as: DEmpty.self)
+    }
+    func planUpdate(_ pro: String, ops: [[String: Any]], base: Int?) async throws -> Int? {
+        let target = pro.isEmpty ? mgmtProject : pro
+        var p: [String: Any] = ["pro": target, "ops": ops]
+        if let base { p["base"] = base }
+        let raw = try await callRaw("plan.update", p)
+        if let o = (try? JSONSerialization.jsonObject(with: raw)) as? [String: Any] {
+            if let r = o["revision"] as? Int { return r }
+            if let res = o["result"] as? [String: Any], let r = res["revision"] as? Int { return r }
+        }
+        return nil
+    }
+    func planVerify(_ pro: String) async throws {
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.verify", ["pro": target], as: DEmpty.self)
+    }
+    func planStop(_ pro: String) async throws {
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.stop", ["pro": target], as: DEmpty.self)
+    }
+    func planEnable(_ pro: String, on: Bool) async throws {
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.enable", ["pro": target, "on": on], as: DEmpty.self)
+    }
+    func planFocus(_ pro: String, id: String) async throws {
+        let target = pro.isEmpty ? mgmtProject : pro
+        _ = try await call("plan.focus", ["pro": target, "id": id], as: DEmpty.self)
+    }
     func mentions(_ q: String, kind: String) async -> [DMention] {
         ((try? await call("mentions.list", ["q": q, "kind": kind, "limit": 8]) as DMentions)?.items) ?? []
     }
@@ -1116,6 +1460,13 @@ final class DataClient {
     func swarmAct(_ room: String, _ action: String, _ extra: [String: Any] = [:]) async throws {
         _ = try await call("swarm.act", extra.merging(["room": room, "action": action]) { _, b in b }, as: DEmpty.self)
         await loadSwarms()
+    }
+    /// A swarm need's button (DataSwarmNeed): `swarm.act` with its parameters (Swarm.press), then the sections and swarms again; where the reply sends
+    /// the person (an account's sign-in, a thread) is returned. Throws the hub's refusal.
+    func swarmNeedAct(_ p: [String: String]) async throws -> SwarmOpen? {
+        let r: DSwarmActReply = try await call("swarm.act", p)
+        await loadSections(); await loadSwarms()
+        return Swarm.opened(r.open, room: p["room"] ?? "")
     }
     func swarmCreate(_ p: [String: Any]) async throws -> String {
         let r: DSwarmCreated = try await call("swarm.create", p)

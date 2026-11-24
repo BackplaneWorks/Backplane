@@ -125,6 +125,43 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
     let r = signed(&b, &a, &l, body).await;
     assert_eq!(r.code, 403, "{}", r.body);
 }
+#[tokio::test]
+async fn proxy_gateway_errors_mark_the_home_away_until_the_hub_answers() {
+    use std::sync::atomic::{AtomicU16, Ordering};
+    let code = Arc::new(AtomicU16::new(502));
+    let reply_code = code.clone();
+    let extra: Extra = Arc::new(move |_, req| {
+        let code = reply_code.load(Ordering::Relaxed);
+        Box::pin(async move {
+            let status = match code {
+                502 => "502 Bad Gateway", 503 => "503 Service Unavailable", 504 => "504 Gateway Timeout",
+                _ => "501 Not Implemented",
+            };
+            (req.route() == "/far/rpc").then(|| HttpReply::text(status, "upstream response"))
+        })
+    });
+    let a = node_extra("home-proxy-a", false, false, Some(extra)).await;
+    let (b, _) = side("home-proxy-b", false, false).await;
+    let link = link(&a, &b, true).await;
+    b.hub.commit(&json!({"$":"SettingSet","key":"home.at","value":json!({"link":link}).to_string(),"at":1})).await.unwrap();
+    let mut since = None;
+    for unavailable in [502, 503, 504] {
+        code.store(unavailable, Ordering::Relaxed);
+        crate::mirror::ask_origins(&b.hub, &link).await;
+        let home = crate::net::home::now(&b.hub).await;
+        assert_eq!(home["online"], false);
+        assert_eq!(home["canMoveHere"], false);
+        let at = home["awaySince"].as_u64().expect("the outage has a start");
+        assert_eq!(*since.get_or_insert(at), at);
+    }
+    code.store(501, Ordering::Relaxed);
+    crate::mirror::ask_origins(&b.hub, &link).await;
+    let home = crate::net::home::now(&b.hub).await;
+    assert_eq!(home["online"], true);
+    assert_eq!(home["canMoveHere"], true);
+    assert!(home.get("awaySince").is_none());
+}
+
 #[tokio::test] async fn far_a_hub_on_a_copy_takes_no_far_rpc() {
     let (a, fa) = side("ra8", true, false).await;
     let p = PReq { method: "POST".into(), target: "/far/rpc".into(), headers: vec![], body: b"{}".to_vec(), trusted: false, own_device: false , peer: String::new()};
@@ -143,6 +180,56 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
     let r = lk.post(&l, json!({"m":"owner.mail","p":{}}).to_string()).await.expect("sent");
     assert_eq!(r, (503, "bots are not running".to_string()), "signed, owner-only, and it reached the owner.mail branch");
 }
+#[tokio::test]
+async fn uber_sync_replicates_both_ways_and_retries_without_duplicate_ops() {
+    struct Idle;
+    impl crate::bots::Inbox for Idle {
+        fn deliver<'a>(&'a self, _: &'a str, _: &'a str, _: &'a str, _: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { Box::pin(async { Ok(()) }) }
+        fn stop<'a>(&'a self, _: &'a str) -> Fut<'a, ()> { Box::pin(async {}) }
+        fn ride<'a>(&'a self, _: &'a str, _: &'a str, _: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async { Ok(()) }) }
+        fn note<'a>(&'a self, _: &'a str, _: &'a str, _: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async { Ok(()) }) }
+    }
+    let (a, _) = side("uba", false, false).await;
+    let (b, _) = side("ubb", false, false).await;
+    let link = link(&a, &b, false).await;
+    let denied = signed(&b, &a, &link, json!({"m":"uber.sync","p":{"uid":"u"}})).await;
+    assert_eq!(denied.code, 403);
+    for (node, mid, term) in [(&a, "ma", 1), (&b, "mb", 2)] {
+        node.hub.commit_many(&[
+            json!({"$":"SettingSet","key":format!("peer.own.{link}"),"value":"approved","at":1}),
+            json!({"$":"SettingSet","key":"machine.id","value":mid,"at":1}),
+            json!({"$":"UberSet","bot":"bub","uid":"u","at":1}),
+            json!({"$":"UberOp","uid":"u","origin":mid,"n":1,"stamp":format!("000000000{term}.000000.{mid}"),
+                "op":crate::bots::uber::b_lease(mid, term),"at":1}),
+        ]).await.unwrap();
+    }
+    let ba = crate::bots::Bots::start_with(a.hub.clone(), Arc::new(Idle)).await;
+    let bb = crate::bots::Bots::start_with(b.hub.clone(), Arc::new(Idle)).await;
+    let mut peer = None;
+    assert_eq!(crate::bots::ubsync::sync_with(&b.hub, &link, &mut peer).await.unwrap(), 1);
+    assert_eq!(ba.world().await.lease(), ("mb".into(), 2));
+    assert_eq!(bb.world().await.lease(), ("mb".into(), 2));
+    let lengths = (a.hub.store.len(), b.hub.store.len());
+    assert_eq!(crate::bots::ubsync::sync_with(&b.hub, &link, &mut None).await.unwrap(), 0);
+    assert_eq!((a.hub.store.len(), b.hub.store.len()), lengths);
+    let finish = json!({"m":"home.finish","p":{"leaseTerm":3,"revive":[
+        {"$":"BotSet","id":"bub","name":"Bub","at":1},
+        {"$":"UberSet","bot":"bub","uid":"u","at":1}
+    ]}});
+    for id in 0..2 {
+        let mut request = finish.clone();
+        request["id"] = json!(id);
+        let response = signed(&b, &a, &link, request).await;
+        let result: Value = serde_json::from_str(&response.body).unwrap();
+        assert_eq!(result["ok"], true, "{result}");
+    }
+    let world = ba.world().await;
+    assert_eq!(world.uber_bot(), "bub");
+    assert_eq!(world.lease(), ("ma".into(), 3));
+    assert_eq!(world.vv("u", "ma"), 2, "retrying finish keeps the same lease op");
+
+}
+
 #[test] fn far_params_name_the_machine_and_come_back_local() {
     let p = json!({"thread":"m1~t7","title":"x","project":"m1~p","other":"m1~z"});
     assert_eq!(far::params_link(&p), "m1");
@@ -302,7 +389,7 @@ impl RpcHandler for Viewer {
     call(2, "two", "m2").await;
     // the phones' path (data/1 asks and waits): held the same way, answered at once
     let r = rb.ask(&b.hub, 1, &json!(3), "turn.start", &json!({"thread": th, "text": "three", "msg": "m3"})).await.expect("a thread elsewhere is the router's");
-    assert_eq!(r["result"]["held"], true, "{r}");
+    assert_eq!(r["result"], json!({"held":true,"state":"queued"}), "{r}");
     let mut tag = String::new();
     for _ in 0..100 { tag = out.rows(&th, farsend::now_ms()).first().map(|r| r["tag"].as_str().unwrap_or("").to_string()).unwrap_or_default(); if tag == "Unsent" { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
     assert_eq!(tag, "Unsent", "its machine is down: the strip says so");

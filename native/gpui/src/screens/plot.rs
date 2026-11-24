@@ -3,7 +3,41 @@
 //! plot applied) or the chunk itself `{l layer, c colour, a alpha, m mode, w width, d varints}`; applying it is `Plot.apply`, so
 //! `held` mirrors what the hub thinks this connection holds. Nothing is decided here: which chunks, their order, colour and
 //! opacity come from the hub. Pure; decoded chunks are capsules (strokes) and fan triangles (fills), in micrometres.
-use std::{collections::BTreeMap, sync::Arc};
+use std::{collections::{BTreeMap, HashMap, VecDeque}, sync::{Arc, Mutex, OnceLock}};
+
+const MAX_CHUNK_CACHE: usize = 2048;
+
+#[derive(Default)]
+struct ChunkCache {
+    map: HashMap<String, Arc<Chunk>>,
+    order: VecDeque<String>,
+}
+
+fn chunk_cache() -> &'static Mutex<ChunkCache> {
+    static CACHE: OnceLock<Mutex<ChunkCache>> = OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+fn cache_chunk(hash: &str, chunk: &Arc<Chunk>) {
+    if hash.len() != 16 { return; }
+    let mut g = chunk_cache().lock().unwrap();
+    if !g.map.contains_key(hash) {
+        g.order.push_back(hash.to_string());
+        while g.order.len() > MAX_CHUNK_CACHE {
+            if let Some(old) = g.order.pop_front() { g.map.remove(&old); }
+        }
+    }
+    g.map.insert(hash.to_string(), chunk.clone());
+}
+
+fn get_cached_chunk(hash: &str) -> Option<Arc<Chunk>> {
+    chunk_cache().lock().unwrap().map.get(hash).cloned()
+}
+
+/// Persistent 16-hex chunk hashes held across board switches (`keptChunks` on `kicad.watch`).
+pub fn kept_chunk_hashes() -> Vec<String> {
+    chunk_cache().lock().unwrap().map.keys().cloned().collect()
+}
 
 /// A CBOR value as far as plots use it (no tags: a frame's dictionary words are plain keys 1 and 31 for "t" and "key").
 #[derive(Clone, Debug, PartialEq)]
@@ -152,10 +186,18 @@ pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edg
 #[derive(Default)]
 /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ pub struct Store { pub sheets: Vec<Sheet>, /** each sheet file's references (Hier.refs), for "C39 is on the sheet ..." */ pub sheet_refs: Vec<(String, Vec<String>)>, held: std::collections::HashMap<String, Vec<Arc<Chunk>>>, held_key: String, pub frame: Option<Frame>, pub frames: std::collections::HashMap<String, Frame>, /** source keys currently waiting on a Retry with their start time (cleared only by a frame for that exact key, or after 15 s) */ pub retrying: std::collections::HashMap<String, std::time::Instant> }
 
-const MAX_SOURCES: usize = 6;
+const MAX_SOURCES: usize = 16;
 
 impl Store {
     pub fn reset(&mut self) { self.held.clear(); self.held_key.clear(); self.frame = None; self.frames.clear(); self.retrying.clear(); }
+    /// Drop sources the acknowledged watch set no longer streams, including their delta bases.
+    pub fn retain_keys(&mut self, keys: &[String]) {
+        self.frames.retain(|key, _| keys.contains(key));
+        self.held.retain(|key, _| keys.contains(key));
+        self.retrying.retain(|key, _| keys.contains(key));
+        if !self.held.contains_key(&self.held_key) { self.held_key.clear(); }
+        if self.frame.as_ref().is_some_and(|frame| !keys.contains(&frame.key)) { self.frame = None; }
+    }
     fn fail(&mut self, key: String, fam: String, why: &str, retryable: Option<bool>) {
         self.retrying.remove(&key);
         self.held.remove(&key); if self.held_key == key { self.held_key.clear(); }
@@ -189,7 +231,15 @@ impl Store {
         for r in refs {
             match r {
                 C::U(k) if !stale_base && *k >= 0 && (*k as usize) < held.len() => cs.push(held[*k as usize].clone()),
-                C::Map(_) => cs.push(Arc::new(Chunk::decode(r))),
+                C::Text(h) => match get_cached_chunk(h) {
+                    Some(c) => cs.push(c),
+                    /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ None => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view.", Some(true)); return Err("missing cached chunk hash"); }
+                },
+                C::Map(_) => {
+                    let ch = Arc::new(Chunk::decode(r));
+                    if let Some(h) = r.get("h").and_then(C::text) { cache_chunk(h, &ch); }
+                    cs.push(ch);
+                }
                 /* i18n-ok: kept in English in the frame; viewer.rs draws it through trs */ _ => { self.fail(key, fam, "Invalid geometry reference. Retry to reload this view.", Some(true)); return Err("invalid geometry reference"); }
             }
         }

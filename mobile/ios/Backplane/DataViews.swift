@@ -65,10 +65,12 @@ struct DataRoot: View {
         .fullScreenCover(item: Binding(get: { client.terms.fullscreen }, set: { client.terms.fullscreen = $0 })) { TermFullView(client: client, route: $0) }
         .onChange(of: client.pendingThread, initial: true) { _, id in if let id { path.append(id); client.pendingThread = nil } }
         .onChange(of: client.linkTarget) { _, t in if let t { follow(t); client.linkTarget = nil } }
+        .overlay(alignment: .bottom) { DDownloadStrip() }
         .overlay(alignment: .bottom) { DLinkNote(client: client) }
         .onOpenURL { route($0) }
         // the telemetry notice's Settings link: Settings over what is open
         .onChange(of: client.openSettings) { _, v in if v { path.append(DPage(name: "settings")); client.openSettings = false } }
+        .onChange(of: client.openAccounts, initial: true) { _, v in if v { path.append(DPage(name: "settings")); path.append(DPage(name: "accounts")); client.openAccounts = false } }
         .onChange(of: client.pushThread, initial: true) { _, t in if !t.isEmpty { var p = NavigationPath(); p.append(t); path = p; client.pushThread = "" } }
         // an alert that a sign-in expired: Settings, Accounts, that account, its sign-in started
         .onChange(of: client.pushAccount, initial: true) { _, a in if !a.isEmpty { var p = NavigationPath(); p.append(DPage(name: "settings")); p.append(DPage(name: "accounts")); p.append(DAccountRoute(id: a, start: true)); path = p; client.pushAccount = "" } }
@@ -83,6 +85,9 @@ struct DataRoot: View {
         case .thread: path.append(t.id)
         case .file: path.append(DViewerRoute(id: t.id, file: t.path, line: t.line))
         case .project: path = NavigationPath(); client.focusProject = t.id
+        case .settings:
+            path.append(DPage(name: "settings"))
+            if t.id == "accounts" { path.append(DPage(name: "accounts")) }
         case .room:
             Task {
                 if !client.rooms.contains(where: { $0.id == t.id }) { await client.loadBots() }
@@ -98,7 +103,9 @@ struct DataRoot: View {
         // (a thread link from outside: the hub says which thread it is, so `desktop~t9` and a link id both open the one on that machine)
         if url.host == "thread" { client.openLink(url, thread: "") }
         else if url.host == "google" { return }   // the end of a Google sign-in (GoogleLoop): not a pairing link
-        else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } } else { client.opened(url) }
+        else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } }
+        else if url.host == "settings" { if url.pathComponents.dropFirst().first == "accounts" { client.openAccounts = true } else { client.openSettings = true } }
+        else { client.opened(url) }
     }
     // a picture from another app (Open in / Share, Files): a copy in the app's Inbox, or a file it may read for a moment
     private func take(_ url: URL) {
@@ -137,6 +144,15 @@ struct DataThreadsView: View {
     @State private var flash = ""   // the project a link just opened
 
     @State private var newSwarm: String?        // a project id: the New swarm sheet
+    // the home's tabs (HomeModel.swift), over a hub with sections: Inbox first, every time the app opens
+    @State private var tab: HomeTab = .inbox
+    @State private var searching = false
+    @FocusState private var searchFocus: Bool
+    private var sectioned: Bool { client.has("sections") && !client.sections.isEmpty }
+    private var bub: DBot? { client.bots.first { $0.uber && !$0.thread.isEmpty } }
+    private var inboxSections: [DSection] { client.sections.filter { Home.tab(section: $0.id, kind: $0.kind) == .inbox } }
+    private var benchSections: [DSection] { client.sections.filter { Home.tab(section: $0.id, kind: $0.kind) == .bench && !($0.id == "active" && $0.rows.isEmpty) } }
+    private var needsCount: Int { client.sections.first { $0.id == "needs" }?.count ?? 0 }
     /// the threads a project's list leaves out: bots' and, on a hub with swarms, the swarms' members (the swarm's row stands for them)
     private var botThreads: Set<String> {
         let b = Set(client.bots.map(\.thread))
@@ -154,21 +170,30 @@ struct DataThreadsView: View {
             DataTelemetryBanner(client: client)
             DataStarBanner(client: client)
             DataAlertsBanner(client: client)
-            if client.conn != .online { DataConnectionBanner(client: client) }
-            HStack(spacing: 8) {
-                if client.has("search") {
-                    TextField(Tr.t("Search projects and threads"), text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .padding(.horizontal, 10).frame(height: 36).dbox().accessibilityIdentifier("data.search")
-                } else { Spacer() }
-                Button { addingProject = true } label: { Image(systemName: "plus").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }
-                    .accessibilityLabel(Tr.t("Add project")).accessibilityIdentifier("data.project.add")
-            }.padding(.horizontal, 10).padding(.vertical, 8)
+            DataNoProviderBanner(client: client)
+            if client.restartLine != .none { DataConnectionBanner(client: client) }
+            // the tabs keep the list's whole height: Search is a button of the bar, its field here only while it is used; Add project is on the Bench
+            if !sectioned || searching {
+                HStack(spacing: 8) {
+                    if client.has("search") {
+                        TextField(Tr.t("Search projects and threads"), text: $query).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                            .focused($searchFocus).padding(.horizontal, 10).frame(height: 40).dbox().accessibilityIdentifier("data.search")
+                    } else { Spacer() }
+                    if sectioned {
+                        Button { query = ""; searching = false; searchFocus = false } label: { Image(systemName: "xmark").frame(width: 44, height: 40).foregroundStyle(BackplaneDesign.dim) }
+                            .accessibilityLabel(Tr.t("Cancel")).accessibilityIdentifier("data.search.cancel")
+                    } else {
+                        Button { addingProject = true } label: { Image(systemName: "plus").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }
+                            .accessibilityLabel(Tr.t("Add project")).accessibilityIdentifier("data.project.add")
+                    }
+                }.padding(.horizontal, 10).padding(.vertical, 8)
+            }
             DataMachineChips(client: client)
             DLine()
-            if !client.locks.isEmpty && !(client.has("sections") && !client.sections.isEmpty) { DataLocksStrip(client: client, path: $path) } // (the sections leave the hub's locks out: backend work)
+            if !client.locks.isEmpty && !sectioned { DataLocksStrip(client: client, path: $path) } // (the sections leave the hub's locks out: backend work)
             if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 DataSearchResults(client: client, query: query, open: { path.append($0) }, openAt: { path.append($0) })
-            } else { list }
+            } else if sectioned { tabs } else { list }
         }
         .background(BackplaneDesign.panel)
         .navigationBarTitleDisplayMode(.inline)
@@ -186,10 +211,20 @@ struct DataThreadsView: View {
                         BrandMark(size: 20, conn: client.conn == .online)
                         Text(client.hubName.isEmpty ? "Backplane" : client.hubName).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1).truncationMode(.middle)
                         Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(BackplaneDesign.dim)
-                    }.frame(maxWidth: 230, alignment: .leading) // a long hub name is cut, never pushing the Settings gear into the bar's More menu (iOS 26 folds both there)
+                    }.frame(maxWidth: sectioned ? 150 : 230, alignment: .leading) // a long hub name is cut, never pushing the bar's buttons into its More menu (iOS 26 folds them there)
                 }.accessibilityIdentifier("data.hub")
             }.dflat()
-            ToolbarItem(placement: .topBarTrailing) {
+            ToolbarItemGroup(placement: .topBarTrailing) {
+                // Bub is one press from every tab: its cat in the bar
+                if sectioned, let b = bub {
+                    Button { path.append(b.thread) } label: {
+                        if client.has("cats") { DBotCat(client: client, look: b.look, color: b.color, size: 28) } else { Text(verbatim: "@").dmono(16, bold: true).foregroundStyle(BackplaneDesign.accent) }
+                    }.accessibilityLabel(b.name).accessibilityIdentifier("data.home.bub")
+                }
+                if sectioned && client.has("search") {
+                    Button { searching = true; searchFocus = true } label: { Image(systemName: "magnifyingglass").foregroundStyle(BackplaneDesign.dim) }
+                        .accessibilityLabel(Tr.t("Search")).accessibilityIdentifier("data.home.search")
+                }
                 Button { path.append(DPage(name: "settings")) } label: { Image(systemName: "gearshape").foregroundStyle(BackplaneDesign.dim) }
                     .accessibilityLabel(Tr.t("Settings")).accessibilityIdentifier("data.settings")
             }.dflat()
@@ -201,6 +236,7 @@ struct DataThreadsView: View {
         .navigationDestination(for: DSwarmRoute.self) { DataSwarmView(client: client, route: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
+            else if !r.file.isEmpty { DataViewerView(client: client, thread: DThread.stub(id: r.id, title: (r.file as NSString).lastPathComponent), openFile: r.file, line: r.line) }
             else { DLoading(text: Tr.t(client.conn == .online ? "Loading the thread…" : "Connecting to the hub…")) } // never a blank page while the thread list comes
         }
         .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if let sub = DSettingsPage(rawValue: p.name) { DataSettingsPageView(client: client, page: sub) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else if p.name == "mcp" { DataMcpView(client: client) } else { DataImprovementsView(client: client) } }
@@ -258,16 +294,10 @@ struct DataThreadsView: View {
     }
     private var listBody: some View {
         List {
-            if client.projects.isEmpty && client.listsLoaded {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text(Tr.t("No projects yet")).dmono(14, bold: true)
-                    Text(Tr.t("A project is a folder on your hub's computer. Add one to start a thread.")).dmono(12).foregroundStyle(BackplaneDesign.dim)
-                    Button(Tr.t("Add a project")) { addingProject = true }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.project.add.empty")
-                }.padding(14).dataRow()
-            }
-            ForEach(client.bots.filter { $0.uber && !$0.thread.isEmpty }) { b in botRow(b) }
-            // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
-            if client.has("sections") && !client.sections.isEmpty { sectionRows } else {
+            noProjects
+            bubRows
+            awayRow
+            // an older hub, with no sections: every project with its threads
             ForEach(client.projects) { p in
                 projectHeader(p)
                 if !shut.contains(p.id) {
@@ -292,66 +322,168 @@ struct DataThreadsView: View {
                     }
                 }
             }
-            } // (no sections)
-            // Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
-            if client.history.count > 0 {
-                let open = client.historyOpen
-                Button { client.setHistory(open: !open) } label: {
-                    HStack(spacing: 8) {
-                        Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
-                        Text(Tr.t(ThreadGroups.historyTitle(client.history.count)).uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(minLength: 0)
-                    }.padding(.leading, 10).frame(height: 40).contentShape(Rectangle())
-                }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history")
-                ForEach(ThreadGroups.history(live: client.history.live, rows: client.history.threads, open: open)) { threadRow($0) }
-                if open && client.history.next != nil {
-                    Button { Task { await client.loadHistory(more: true) } } label: { Text(Tr.t("More")).dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
-                        .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history.more")
-                }
-            }
-            let bots = client.bots.filter { !$0.uber && !$0.thread.isEmpty }
-            if !bots.isEmpty { DHeading(text: Tr.t("Bots")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow(); ForEach(bots) { botRow($0) } }
-            if !client.rooms.isEmpty {
-                DHeading(text: Tr.t("Rooms")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow()
-                ForEach(client.rooms) { r in
-                    Button { path.append(r) } label: { sideRow("#", r.name, "room", r.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.room." + r.id)
-                        // Delete room (a long press on a room the hub offers it for): asked first, then `room.delete`
-                        .contextMenu { if r.delete { Button(Tr.t("Delete room"), systemImage: "trash", role: .destructive) { roomDelete = r } } }
-                }
-            }
+            historyRows
+            crewRows
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .refreshable { await client.refresh() }
     }
 
-    /// The hub's sections, in its order: a section's head, then its threads (Needs you) or its projects, each with its visible threads under it.
-    @ViewBuilder private var sectionRows: some View {
-        ForEach(client.sections.filter { $0.kind != "bub" && !($0.id == "active" && $0.rows.isEmpty) }) { s in
-            DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
-                .contextMenu { if s.rename { Button(Tr.t("Rename group"), systemImage: "pencil") { groupTitle = s.title; renamingGroup = s.group } } }
-            if s.kind == "threads" {
-                // Needs you: the title has the row (no project name), and a stop says so by its dot; an ask keeps its red word
+    // MARK: the home's tabs (a hub with sections): Inbox, Crew, Bench
+
+    /// The three tabs, the system's own bar under them. Inbox carries how many wait on the person.
+    private var tabs: some View {
+        TabView(selection: $tab) {
+            inboxList.tabItem { Label(Tr.t("Inbox"), systemImage: "tray") }.tag(HomeTab.inbox).badge(needsCount)
+            crewList.tabItem { Label(Tr.t("Crew"), systemImage: "person.2") }.tag(HomeTab.crew)
+            benchList.tabItem { Label(Tr.t("Bench"), systemImage: "square.grid.2x2") }.tag(HomeTab.bench)
+        }
+        .toolbarBackground(BackplaneDesign.panel, for: .tabBar).toolbarBackground(.visible, for: .tabBar)
+        #if DEBUG
+        // a check without hands: BACKPLANE_TAB opens on a tab (inbox, crew, bench)
+        .task { if let t = ProcessInfo.processInfo.environment["BACKPLANE_TAB"], let h = HomeTab(rawValue: t) { tab = h } }
+        #endif
+        // a project link: the Bench, and its page
+        .onChange(of: client.focusProject, initial: true) { _, id in
+            guard !id.isEmpty else { return }
+            client.focusProject = ""; tab = .bench
+            if let r = client.sections.flatMap(\.rows).first(where: { $0.isProject && $0.id == id }) { path.append(DProjectRoute(key: r.key, title: r.title)) }
+        }
+    }
+    /// Inbox: Needs you, Running and Snoozed as the hub lists them. A row swipes left to snooze and right to settle. With nothing to need the
+    /// person and nothing running it says so, and offers Bub and the projects the person was in last.
+    private var inboxList: some View {
+        List {
+            awayRow
+            if !inboxSections.contains(where: { $0.id != "snoozed" }) { allClear }
+            ForEach(inboxSections) { s in
+                DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
+                ForEach(s.rows) { r in inboxRow(r) }
+            }
+        }
+        .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+        .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.inbox")
+    }
+    @ViewBuilder private func inboxRow(_ r: DSecRow) -> some View {
+        // a swarm that waits on the person opens the swarm's page
+        if let room = r.swarmRoom, let n = r.need { DataSwarmNeedRow(client: client, r: r, need: n, room: room, openRoom: { path.append(DSwarmRoute(id: room, name: r.title)) }, openThread: { path.append($0) }).dataRow() }
+        else if let room = r.swarmRoom { DataSectionThread(r: r, showProject: true) { _ in path.append(DSwarmRoute(id: room, name: r.title)) }.dataRow() }
+        else { DataSectionThread(r: r, showProject: true) { path.append($0) }.farHide(r, client).rowSwipes(r, client).dataRow() }
+    }
+    @ViewBuilder private var allClear: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark").font(.system(size: 14, weight: .bold)).foregroundStyle(BackplaneDesign.ok)
+                Text(Tr.t("All clear")).dmono(16, bold: true).foregroundStyle(BackplaneDesign.text)
+            }
+            Text(Tr.t("Nothing needs you and nothing is running.")).dmono(12).foregroundStyle(BackplaneDesign.dim)
+            HStack(spacing: 8) {
+                if let b = bub { Button(Tr.t("Talk to Bub")) { path.append(b.thread) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.inbox.bub") }
+                Button(Tr.t("Open Bench")) { tab = .bench }.buttonStyle(DButton()).accessibilityIdentifier("data.inbox.bench")
+            }.padding(.top, 4)
+        }.padding(.horizontal, 14).padding(.vertical, 18).frame(maxWidth: .infinity, alignment: .leading).dataRow().accessibilityIdentifier("data.inbox.clear")
+        // the projects the person was in last (the hub's Pinned, then Recent): three, a thumb away
+        let jump = Array(benchSections.filter { $0.id == "pinned" || $0.id == "active" }.flatMap(\.rows).prefix(3))
+        if !jump.isEmpty {
+            DHeading(text: Tr.t("Jump back in")).padding(.leading, 14).padding(.top, 10).padding(.bottom, 4).dataRow()
+            ForEach(jump) { r in projectRow(r, tall: true) }
+        }
+    }
+    /// Crew: Bub, the bots and the rooms, then the old chats with no project.
+    private var crewList: some View {
+        List {
+            bubRows
+            awayRow
+            crewRows
+            historyRows
+        }
+        .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+        .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.crew")
+    }
+    /// Bench: the projects as the hub sections them. Pinned and Recent (the ones the person was in last) are tall rows on top; the groups, All
+    /// projects and Quiet are folds under them, so no one scrolls through every project to reach a board.
+    private var benchList: some View {
+        List {
+            noProjects
+            Button { addingProject = true } label: {
+                HStack(spacing: 8) { Image(systemName: "plus").font(.system(size: 13)).frame(width: 20); Text(Tr.t("Add project")).dmono(13); Spacer(minLength: 0) }
+                    .foregroundStyle(BackplaneDesign.accent).padding(.leading, 14).padding(.trailing, 12).frame(minHeight: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.project.add")
+            ForEach(benchSections) { s in
+                DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
+                    .contextMenu { if s.rename { Button(Tr.t("Rename group"), systemImage: "pencil") { groupTitle = s.title; renamingGroup = s.group } } }
                 ForEach(s.rows) { r in
-                    // a swarm that waits on the person opens the swarm's page
-                    if let room = r.swarmRoom { DataSectionThread(r: r) { _ in path.append(DSwarmRoute(id: room, name: r.title)) }.dataRow() }
-                    else { DataSectionThread(r: r, quiet: r.want == "failed" || r.want == "stopped") { path.append($0) }.farHide(r, client).dataRow() }
-                }
-            } else {
-                ForEach(s.rows) { r in
-                    Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet" || s.id == "archived") { Task { await client.sidebarAct(r.fold, r.key) } } }
-                        .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
-                        .contextMenu { if !r.menu.isEmpty { sectionMenu(r) } else {
-                            Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
-                            if let p = client.projects.first(where: { $0.id == r.id }) { Button(Tr.t("Badge"), systemImage: "paintpalette") { badgeProject = p } }
-                            if client.has("swarm") { Button(Tr.ios_swarm_new_in(project: r.title), systemImage: "circle.hexagongrid") { newSwarm = r.id } }
-                            ForEach(client.groupsTo, id: \.value) { g in Button(Tr.gpui_sections_move_to(group: g.label)) { Task { await client.sidebarAct("group-move", r.key + "\u{1f}" + g.value) } } }
-                        } }
+                    projectRow(r, faded: s.id == "quiet" || s.id == "archived", tall: s.id == "pinned" || s.id == "active")
                     // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
                     if client.has("swarm") && !r.folded { ForEach(Swarm.listed(client.swarms, project: r.id).filter { x in !(client.sections.first { $0.id == "needs" }?.rows.contains { $0.swarmRoom == x.id } ?? false) }) { x in DataSwarmRow(row: x) { path.append(DSwarmRoute(id: x.id, name: x.name)) }.dataRow() } }
-                    ForEach(r.threads) { t in DataSectionThread(r: t, indent: 34) { path.append($0) }.farHide(t, client).dataRow() }
+                    ForEach(r.threads) { t in DataSectionThread(r: t, indent: 36) { path.append($0) }.farHide(t, client).rowSwipes(t, client).dataRow() }
                 }
             }
         }
+        .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+        .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.bench")
     }
+    /// A project row of the Bench (and of the Inbox's Jump back in): a press opens its page, a long press its menu.
+    private func projectRow(_ r: DSecRow, faded: Bool = false, tall: Bool = false) -> some View {
+        Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: faded, tall: tall) { Task { await client.sidebarAct(r.fold, r.key) } } }
+            .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
+            .contextMenu { if !r.menu.isEmpty { sectionMenu(r) } else {
+                Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
+                if let p = client.projects.first(where: { $0.id == r.id }) { Button(Tr.t("Badge"), systemImage: "paintpalette") { badgeProject = p } }
+                if client.has("swarm") { Button(Tr.ios_swarm_new_in(project: r.title), systemImage: "circle.hexagongrid") { newSwarm = r.id } }
+                ForEach(client.groupsTo, id: \.value) { g in Button(Tr.gpui_sections_move_to(group: g.label)) { Task { await client.sidebarAct("group-move", r.key + "\u{1f}" + g.value) } } }
+            } }
+    }
+
+    // MARK: rows both the tabs and an older hub's one list draw
+
+    @ViewBuilder private var noProjects: some View {
+        if client.projects.isEmpty && client.listsLoaded {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(Tr.t("No projects yet")).dmono(14, bold: true)
+                Text(Tr.t("A project is a folder on your hub's computer. Add one to start a thread.")).dmono(12).foregroundStyle(BackplaneDesign.dim)
+                Button(Tr.t("Add a project")) { addingProject = true }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("data.project.add.empty")
+            }.padding(14).dataRow()
+        }
+    }
+    @ViewBuilder private var bubRows: some View { ForEach(client.bots.filter { $0.uber && !$0.thread.isEmpty }) { b in botRow(b) } }
+    @ViewBuilder private var awayRow: some View {
+        if let away = client.home?.awayLine() {
+            Text(away.text).dmono(11).foregroundStyle(away.isError ? BackplaneDesign.bad : BackplaneDesign.dim)
+                .padding(.horizontal, 12).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading)
+                .background(BackplaneDesign.panel).dataRow().accessibilityIdentifier("data.home.away")
+        }
+    }
+    /// Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
+    @ViewBuilder private var historyRows: some View {
+        if client.history.count > 0 {
+            let open = client.historyOpen
+            Button { client.setHistory(open: !open) } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
+                    Text(Tr.t(ThreadGroups.historyTitle(client.history.count)).uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1); Spacer(minLength: 0)
+                }.padding(.leading, 10).frame(height: 44).contentShape(Rectangle())
+            }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history")
+            ForEach(ThreadGroups.history(live: client.history.live, rows: client.history.threads, open: open)) { threadRow($0) }
+            if open && client.history.next != nil {
+                Button { Task { await client.loadHistory(more: true) } } label: { Text(Tr.t("More")).dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
+                    .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history.more")
+            }
+        }
+    }
+    @ViewBuilder private var crewRows: some View {
+        let bots = client.bots.filter { !$0.uber && !$0.thread.isEmpty }
+        if !bots.isEmpty { DHeading(text: Tr.t("Bots")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow(); ForEach(bots) { botRow($0) } }
+        if !client.rooms.isEmpty {
+            DHeading(text: Tr.t("Rooms")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow()
+            ForEach(client.rooms) { r in
+                Button { path.append(r) } label: { sideRow("#", r.name, "room", r.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.room." + r.id)
+                    // Delete room (a long press on a room the hub offers it for): asked first, then `room.delete`
+                    .contextMenu { if r.delete { Button(Tr.t("Delete room"), systemImage: "trash", role: .destructive) { roomDelete = r } } }
+            }
+        }
+    }
+
     /// A project row's long press: the hub's menu (SectionMenu.swift), Move to group a submenu of the other groups and New group…; Remove asks
     /// first (the project leaves Backplane's list, its folder and files stay).
     @ViewBuilder private func sectionMenu(_ r: DSecRow) -> some View {
@@ -382,7 +514,7 @@ struct DataThreadsView: View {
             Text(b.name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer()
             if let m = b.mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
             Text(Tr.t(!b.note.isEmpty ? b.note : b.uber ? "uberbot" : "bot")).dmono(11).foregroundStyle(BackplaneDesign.faint)
-        }.padding(.horizontal, 12).padding(.vertical, b.uber ? 4 : 2).frame(minHeight: 40).contentShape(Rectangle())
+        }.padding(.horizontal, 12).padding(.vertical, b.uber ? 4 : 2).frame(minHeight: 48).contentShape(Rectangle())
     }
     private func sideRow(_ sigil: String, _ name: String, _ detail: String, _ mark: DMark? = nil) -> some View {
         HStack(spacing: 8) {
@@ -390,7 +522,7 @@ struct DataThreadsView: View {
             Text(name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer()
             if let m = mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
             Text(Tr.t(detail)).dmono(11).foregroundStyle(BackplaneDesign.faint)
-        }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle())
+        }.padding(.horizontal, 12).frame(minHeight: 48).contentShape(Rectangle())
     }
     private func botRow(_ b: DBot) -> some View {
         Button { path.append(b.thread) } label: {
@@ -471,6 +603,15 @@ struct DataConnectionBanner: View {
     let client: DataClient
     var body: some View {
         VStack(spacing: 0) {
+            // the hub's words around a restart (HubRestart) in place of the usual look
+            if case .note(let text) = client.restartLine {
+                HStack(spacing: 8) {
+                    DDot(color: BackplaneDesign.warn, size: 8)
+                    Text(Tr.t(text)).dmono(12).lineLimit(2).accessibilityIdentifier("data.connection.restart")
+                    Spacer()
+                    NavigationLink(value: DPage(name: "hub")) { Text(Tr.t("Hub")) }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("conn.hub")
+                }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.raised)
+            } else {
             HStack(spacing: 8) {
                 DDot(color: client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8)
                 VStack(alignment: .leading, spacing: 2) {
@@ -481,6 +622,7 @@ struct DataConnectionBanner: View {
                 NavigationLink(value: DPage(name: "hub")) { Text(Tr.t("Hub")) }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("conn.hub")
                 if client.conn == .offline { Button(Tr.t("Retry")) { client.connect() }.dmono(12, bold: true).foregroundStyle(BackplaneDesign.accent) }
             }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.raised)
+            }
             DLine()
         }.accessibilityIdentifier("data.connection.banner")
     }
@@ -549,37 +691,56 @@ struct DataNewProjectSheet: View {
     @State private var path = ""
     @State private var error = ""
     @State private var busy = false
+    // Clone from git (feature clone): the second way in, its form kept while the sheet is open
+    @State private var cloning = false
+    @State private var clone = CloneForm()
 
-    private func row(_ name: String, _ icon: String, _ to: String) -> some View {
-        Button { Task { await go(to) } } label: {
-            HStack(spacing: 10) { Image(systemName: icon).font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim).frame(width: 18); Text(name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer() }
-                .padding(.horizontal, 14).frame(minHeight: 40).contentShape(Rectangle())
-        }.buttonStyle(.plain).dataRow()
-    }
+    private func row(_ name: String, _ icon: String, _ to: String) -> some View { DataDirRow(name: name, icon: icon) { Task { await go(to) } } }
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 0) {
-                TextField(Tr.t("Folder on the hub's computer"), text: $path).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
-                    .padding(.horizontal, 10).frame(height: 40).dbox().padding(12).accessibilityIdentifier("data.project.path")
-                if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 12).padding(.bottom, 8) }
-                DLine()
-                List {
-                    if let d = dirs {
-                        if d.parent != d.path { row("..", "arrow.up.left", d.parent) }
-                        ForEach(d.dirs, id: \.self) { n in row(n, "folder", d.path.hasSuffix("/") ? d.path + n : d.path + "/" + n) }
-                    }
-                }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+                if client.has("clone") { DataProjectModes(clone: $cloning) }
+                if cloning && client.has("clone") { DataCloneView(client: client, form: clone, finish: finish) } else { folder }
             }
             .background(BackplaneDesign.panel)
             .dataBar(Tr.t("Add project"), back: false)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button(Tr.t("Cancel")) { dismiss() }.dmono(13) }.dflat()
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(Tr.t("Add")) { Task { await add() } }.dmono(13, bold: true).disabled(busy || path.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.project.add.confirm")
+                    if cloning && client.has("clone") {
+                        if clone.job == nil { Button(Tr.t("Clone")) { Task { await clone.start(client) } }.dmono(13, bold: true).disabled(!clone.canStart).accessibilityIdentifier("data.clone.go") }
+                    } else {
+                        Button(Tr.t("Add")) { Task { await add() } }.dmono(13, bold: true).disabled(busy || path.trimmingCharacters(in: .whitespaces).isEmpty).accessibilityIdentifier("data.project.add.confirm")
+                    }
                 }.dflat()
             }
             .task { await go(nil) }
+            // `/project <address>`: open on Clone from git with that repository and the message after it
+            .onAppear { if let c = client.pendingClone { client.pendingClone = nil; cloning = true; clone.repoText = c.repo; clone.text = c.text } }
         }.dataSheet()
+    }
+    // a done clone: its thread, else its project, else just close
+    private func finish(_ a: Clone.After) {
+        switch a {
+        case .thread(let t): client.pendingThread = t
+        case .project(let p): client.focusProject = p
+        case .stay, .dismiss: break
+        }
+        dismiss()
+    }
+    private var folder: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            TextField(Tr.t("Folder on the hub's computer"), text: $path).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .padding(.horizontal, 10).frame(height: 40).dbox().padding(12).accessibilityIdentifier("data.project.path")
+            if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 12).padding(.bottom, 8) }
+            DLine()
+            List {
+                if let d = dirs {
+                    if d.parent != d.path { row("..", "arrow.up.left", d.parent) }
+                    ForEach(d.dirs, id: \.self) { n in row(n, "folder", d.path.hasSuffix("/") ? d.path + n : d.path + "/" + n) }
+                }
+            }.listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
+        }
     }
     private func go(_ p: String?) async {
         do { let d = try await client.dirs(p); dirs = d; path = d.path; error = "" } catch { self.error = error.localizedDescription }
@@ -740,6 +901,7 @@ struct DataThreadView: View {
     @State private var reviewing = false
     @State private var buy: DBuy?          // Buy it, when the hub offers it for this thread
     @State private var buying = false
+    @State private var contextOpen = false
     @State private var finding = false     // Search in thread
     @State private var findGo: String?     // the message to go to (Search in thread, the find bar, a search hit), read older pages until it is held
     @State private var mark: String?       // the message marked there, until the find bar closes
@@ -786,7 +948,7 @@ struct DataThreadView: View {
             DataTelemetryBanner(client: client)
             DataStarBanner(client: client)
             DataAlertsBanner(client: client)
-            if client.conn != .online { DataConnectionBanner(client: client) }
+            if client.restartLine != .none { DataConnectionBanner(client: client) }
             stateStrip
             if let m = thread?.mark { Text(dAway(Tr.ios_machine_on(machine: m.name), m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 3).accessibilityIdentifier("data.thread.machine") }
             if findOpen { findBar }
@@ -804,7 +966,9 @@ struct DataThreadView: View {
                         }
                         ForEach(DataFold.rows(list, running: working)) { r in
                             switch r {
-                            case .entry(let e): DataEntryRow(client: client, thread: id, entry: e, goTo: { mark = $0; findGo = $0 })
+                            // a thought: folded to its first line, opened with a tap, kept open or shut as a run of tool calls is
+                            case .entry(let e) where e.folds: DataThoughtRow(client: client, thread: id, entry: e, open: Binding(get: { openRuns.contains(e.id) }, set: { if $0 { openRuns.insert(e.id) } else { openRuns.remove(e.id) } })).id(e.id)
+                            case .entry(let e): DataEntryRow(client: client, thread: id, entry: e, goTo: { mark = $0; findGo = $0 }, reply: { client.startReply(id, $0) })
                                 // the message a find or a search hit went to
                                 .background { if mark == e.id { Rectangle().fill(BackplaneDesign.accent.opacity(0.12)).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }.padding(-4).accessibilityElement().accessibilityLabel(Tr.k("ios.thread.marked")).accessibilityIdentifier("data.thread.marked") } }
                                 .id(e.id)
@@ -834,6 +998,7 @@ struct DataThreadView: View {
                     findGo = nil
                 }
             }
+            if !id.contains("~") { DataNoProviderBanner(client: client) }
             if let review { DataReviewBar(bar: review, enabled: !reviewing) { press(review) } }
             if let order { DataOrderCard(order: order) }
             if let m = thread?.mark { Text(dAway(Tr.t(m.runs), m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.top, 4).accessibilityIdentifier("data.thread.runs") }
@@ -851,6 +1016,8 @@ struct DataThreadView: View {
         // Edit in the strip, or a refusal: the text is back in the draft
         // (the caret goes to its end; negative revs, so they never meet dictation's)
         .onChange(of: client.draftBack) { _, b in if b.thread == id { text = client.drafts[id] ?? ""; caret = (text.utf16.count, -b.rev) } }
+        // Reply picked on a message: the box takes the keyboard
+        .onChange(of: client.replyFocus) { _, f in if f.thread == id { DispatchQueue.main.async { ComposerHandle.view?.becomeFirstResponder() } } }
         .onChange(of: client.voice.caret.rev) { _, rev in
             // the hub's dictation wrote this thread's draft: show it and put the caret where it said
             let c = client.voice.caret
@@ -863,6 +1030,7 @@ struct DataThreadView: View {
         // the review bar (#1305): asked again when the thread's entries or turn change (a review starts with a turn; a press anywhere logs a line)
         .task(id: "r|\(list.count)|\(thread?.state ?? "")|\(client.conn == .online)") { if client.has("reviewmode") { if let r = try? await client.review(id) { review = r } } else { review = nil } }
         .task(id: "\(thread?.state ?? "")|\(client.conn == .online)") { if client.conn == .online, thread?.state != "working" { buy = await client.buyOf(id) } }
+        .sheet(isPresented: $contextOpen) { DThreadContext(client: client, thread: id) }
         .background(BackplaneDesign.background)
         .dataBar(thread?.title.isEmpty == false ? thread!.title : Tr.t("Thread"))
         // Run in terminal in this chat (a project's thread, a bot's chat, the uberbot's): its own shell (term.new {chat})
@@ -884,6 +1052,7 @@ struct DataThreadView: View {
                         // the find bar when the hub has `find`; else the older sheet of hits
                         if client.has("find") { Button(Tr.k("ios.find.bar"), systemImage: "magnifyingglass") { findOpen = true; findFocus = true } }
                         else if client.has("search") { Button(Tr.t("Search in thread"), systemImage: "magnifyingglass") { finding = true } }
+                        if client.has("threadContext") { Button(Tr.t("Context & Prompt"), systemImage: "doc.text.magnifyingglass") { contextOpen = true } }
                         DataThreadActions(client: client, thread: t, renaming: $renaming, deleting: $deleting)
                     } label: { Image(systemName: "ellipsis").foregroundStyle(BackplaneDesign.dim) }
                         .accessibilityLabel(Tr.t("Thread actions")).accessibilityIdentifier("data.thread.more")
@@ -953,12 +1122,50 @@ struct DataThreadView: View {
         }
     }
 
+    private func planPhaseLabel(_ pm: DPlanMode) -> String {
+        switch pm.phase {
+        case "armed": return pm.scope == "once" ? Tr.k("gpui.planmode.chip.once") : Tr.k("gpui.mgmt.plan.tab")
+        case "planning": return Tr.k("gpui.planmode.top.planning")
+        case "pending": return Tr.k("gpui.planmode.chip.review")
+        case "executing": return Tr.k("gpui.planmode.chip.building")
+        default: return Tr.k("gpui.mgmt.plan.tab")
+        }
+    }
+
+    private func planBannerText(_ pm: DPlanMode) -> String {
+        switch pm.phase {
+        case "armed": return pm.scope == "once" ? Tr.k("gpui.planmode.bar.once") : Tr.k("gpui.planmode.bar.always")
+        case "planning": return Tr.k("gpui.planmode.bar.planning")
+        case "pending": return Tr.k("gpui.planmode.bar.pending")
+        case "executing": return Tr.k("gpui.planmode.bar.executing")
+        default: return ""
+        }
+    }
+
+    private func planModeTint(_ pm: DPlanMode?) -> Color {
+        guard let pm else { return BackplaneDesign.accent }
+        switch pm.phase {
+        case "armed", "planning", "pending": return PhaseColor.input
+        case "executing": return BackplaneDesign.ok
+        default: return BackplaneDesign.accent
+        }
+    }
+
     // the desktop's strip under the bar: STATE, then the tools a thread always has
     private var stateStrip: some View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 DHeading(text: Tr.t("State"))
                 if let t = thread { DStatusDot(thread: t, size: 6); Text(Tr.t(dStatusWord(t))).dmono(11).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("data.thread.state") }
+                if let pm = DPlanMode.effective(for: thread), pm.isActive {
+                    let ptint = planModeTint(pm)
+                    Text(planPhaseLabel(pm))
+                        .dmono(10, bold: true)
+                        .foregroundStyle(ptint)
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .overlay(Rectangle().strokeBorder(ptint, lineWidth: 1))
+                        .accessibilityIdentifier("data.thread.planmode")
+                }
                 Spacer()
                 if let t = thread, client.has("actions") {
                     strip(Tr.t(t.pinned ? "Unpin" : "Pin"), on: t.pinned) { Task { await client.threadAct(id, t.pinned ? "unpin" : "pin") } }
@@ -972,10 +1179,55 @@ struct DataThreadView: View {
         Button(action: run) { Text(label).dmono(11).foregroundStyle(on ? BackplaneDesign.accent : BackplaneDesign.dim).padding(.horizontal, 10).frame(maxHeight: .infinity).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.line).frame(width: 1) }.contentShape(Rectangle()) }.buttonStyle(.plain)
     }
 
+    private func planModeBanner(_ pm: DPlanMode) -> some View {
+        let ptint = planModeTint(pm)
+        return VStack(spacing: 0) {
+            HStack(spacing: 6) {
+                Rectangle().fill(ptint).frame(width: 2, height: 14)
+                Text(planBannerText(pm))
+                    .dmono(10.5)
+                    .foregroundStyle(ptint)
+                    .lineLimit(2)
+                Spacer(minLength: 4)
+                if pm.phase == "armed" || pm.phase == "planning" {
+                    let isOnce = pm.scope == "once"
+                    Button {
+                        Task { try? await client.setPlanMode(id, target: isOnce ? .always : .once) }
+                    } label: {
+                        Text(Tr.k(isOnce ? "gpui.planmode.scope.always" : "gpui.planmode.scope.once"))
+                            .dmono(10, bold: true)
+                            .foregroundStyle(ptint)
+                            .padding(.horizontal, 6).frame(minHeight: 22)
+                            .overlay(Rectangle().strokeBorder(ptint.opacity(0.6), lineWidth: 1))
+                    }.buttonStyle(.plain)
+                    Button {
+                        Task { try? await client.setPlanMode(id, target: .off) }
+                    } label: {
+                        Text(Tr.k("settings.lang.off"))
+                            .dmono(10)
+                            .foregroundStyle(BackplaneDesign.dim)
+                            .padding(.horizontal, 6).frame(minHeight: 22)
+                            .overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+                    }.buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 6)
+            .background(BackplaneDesign.panel)
+            DLine()
+        }
+    }
+
     // the desktop's composer: the box in accent, under it the model chip, attach and Send
     private var composer: some View {
-        VStack(spacing: 0) {
+        let pm = DPlanMode.effective(for: thread)
+        let planActive = pm?.isActive == true
+        let borderColor = planModeTint(pm)
+        let planPrimary = pm.map { ["armed", "planning", "pending"].contains($0.phase) } ?? false
+        return VStack(spacing: 0) {
             DLine()
+            if let pm, pm.isActive {
+                planModeBanner(pm)
+            }
             VStack(alignment: .leading, spacing: 8) {
                 if !notice.isEmpty { Text(Tr.t(notice)).dmono(12).foregroundStyle(BackplaneDesign.warn).accessibilityIdentifier("data.images.notice") }
                 if let dir = existing {
@@ -995,11 +1247,12 @@ struct DataThreadView: View {
                         }
                     }.accessibilityIdentifier("data.pending.images")
                 }
+                if let r = client.replying[id] { replyStrip(r) }
                 UIKitField(text: text, placeholder: Tr.t("Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw"), editable: true,
                            onChange: { text = $0; client.setDraft(id, $0) },
                            onSend: { send() }, onPasteImages: { imgs in add(imgs.compactMap { $0.jpegData(compressionQuality: 0.95) }) },
                            font: UIFontMetrics(forTextStyle: .body).scaledFont(for: Mono.uiFont(size: 14)), caret: caret)
-                    .padding(.horizontal, 10).padding(.vertical, 9).frame(minHeight: 44, alignment: .topLeading).dbox(BackplaneDesign.accent)
+                    .padding(.horizontal, 10).padding(.vertical, 9).frame(minHeight: 44, alignment: .topLeading).dbox(borderColor)
                     .accessibilityLabel(Tr.t("Message"))
                 if let m = thread?.memory { MemoryBar(m: m) }
                 HStack(spacing: 6) {
@@ -1007,6 +1260,34 @@ struct DataThreadView: View {
                         Button { modelSheet = true } label: { Text(chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
                             .buttonStyle(.plain).accessibilityLabel(Tr.ios_model_label(model: chip)).accessibilityIdentifier("data.thread.model")
                     } else { Spacer(minLength: 0) }
+                    if client.has("plan"), let pm {
+                        let pcol = planActive ? borderColor : BackplaneDesign.dim
+                        Button {
+                            let nxt = DPlanMode.nextCycle(for: pm)
+                            Task { try? await client.setPlanMode(id, target: nxt) }
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: planActive ? "list.bullet.rectangle.fill" : "list.bullet.rectangle")
+                                    .font(.system(size: 13))
+                                    .foregroundStyle(pcol)
+                                Text(planActive ? planPhaseLabel(pm) : Tr.k("gpui.mgmt.plan.tab"))
+                                    .dmono(11, bold: planActive)
+                                    .foregroundStyle(pcol)
+                                    .lineLimit(1)
+                            }
+                            .padding(.horizontal, 8)
+                            .frame(minHeight: 40)
+                            .dbox(planActive ? borderColor : BackplaneDesign.line, fill: BackplaneDesign.panel)
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button(Tr.k("settings.lang.off")) { Task { try? await client.setPlanMode(id, target: .off) } }
+                            Button(Tr.k("gpui.planmode.scope.once")) { Task { try? await client.setPlanMode(id, target: .once) } }
+                            Button(Tr.k("gpui.planmode.scope.always")) { Task { try? await client.setPlanMode(id, target: .always) } }
+                        }
+                        .accessibilityLabel(Tr.k("gpui.planmode.tip"))
+                        .accessibilityIdentifier("data.composer.plan")
+                    }
                     if client.has("voice"), client.voice.always || client.voice.alwaysWanted {
                         // always on: one tap stops it, the same to listen again
                         let (what, stops) = client.voice.always ? (client.voice.alwaysPaused.isEmpty ? "Listening" : "Paused", true) : ("Always on", false)
@@ -1047,13 +1328,28 @@ struct DataThreadView: View {
                     if working && blank {
                         Button(Tr.t("Stop")) { Task { await client.interrupt(id) } }.buttonStyle(DButton(danger: true)).accessibilityLabel(Tr.t("Stop")).accessibilityIdentifier("thread.send")
                     } else {
-                        Button(Tr.t(client.commandOf(text)?.label ?? "Send")) { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
+                        let sendLbl = client.commandOf(text)?.label ?? (planPrimary ? Tr.k("gpui.mgmt.plan.tab") : Tr.t("Send"))
+                        Button(client.commandOf(text) != nil ? Tr.t(sendLbl) : sendLbl) { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
                     }
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 8)
         }
         .background(BackplaneDesign.background)
+    }
+    // Reply's strip over the box (the desktop's `reply-strip`): who wrote it and its first line, a tap goes to it, × drops it
+    private func replyStrip(_ r: DReplyRef) -> some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(BackplaneDesign.accent).frame(width: 2)
+            Button { mark = r.id; findGo = r.id } label: {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(Tr.t(ReplyDraft.who(r))).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent)
+                    Text(Tr.gpui_b_replying_to(line: ReplyDraft.firstLine(r.text))).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.tail)
+                }.frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("data.reply.strip")
+            Button { client.dropReply(id) } label: { Image(systemName: "xmark").font(.system(size: 11, weight: .bold)).foregroundStyle(BackplaneDesign.dim).frame(width: 32, height: 32) }
+                .buttonStyle(.plain).accessibilityLabel(Tr.t("Cancel reply")).accessibilityIdentifier("data.reply.drop")
+        }.fixedSize(horizontal: false, vertical: true).padding(.trailing, 2).dbox(fill: BackplaneDesign.panel)
     }
     @State private var holdStarted = false
     private func micPress() {
@@ -1079,6 +1375,8 @@ struct DataThreadView: View {
                 case "intent": notice = "Intent saved"; text = ""; client.setDraft(id, "")
                 // /project: alone, the Add project sheet; made, its first thread opens; a folder that holds something, Add existing under the reason
                 case "project": text = ""; client.setDraft(id, ""); client.openAddProject = true
+                // /project <address>: Add project opens on Clone from git with it, the rest of the line as the first thread's first message
+                case "clone": text = ""; client.setDraft(id, ""); client.pendingClone = (r.repo ?? "", r.text ?? ""); client.openAddProject = true
                 case "made": text = ""; client.setDraft(id, ""); notice = r.note ?? ""; if let th = r.thread, !th.isEmpty { client.pendingThread = th }
                 case "exists": notice = r.error ?? ""; existing = r.path
                 default: text = ""; client.setDraft(id, "")
@@ -1093,7 +1391,7 @@ struct DataThreadView: View {
         let images = pending
         text = ""; pending = []; atEnd = true
         // a dictated draft goes marked as spoken (the agent is told; edited when typed in)
-        client.send(id, t, images: images, voice: images.isEmpty ? client.voice.dictated(id) : nil)
+        client.send(id, t, images: images, voice: images.isEmpty ? client.voice.dictated(id) : nil, reply: client.replying[id])
         client.voice.sent(id, draft: "")
     }
     // pictures chosen or pasted: shrunk off the main thread, at most four to a message
@@ -1139,7 +1437,14 @@ struct DataQueueStrip: View {
                     }
                 }.accessibilityElement(children: .contain).accessibilityIdentifier("queue.row")
             }
-            if let e = client.queueError[thread] { Text(Tr.t(e)).dmono(11).foregroundStyle(BackplaneDesign.bad).accessibilityIdentifier("queue.error") }
+            if let e = client.queueError[thread] {
+                HStack(spacing: 8) {
+                    Text(Tr.t(e)).dmono(11).foregroundStyle(BackplaneDesign.bad).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("queue.error")
+                    if DNoProvider.isSendError(e) {
+                        Button(Tr.t("Open Settings → Accounts")) { client.openAccounts = true }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("queue.error.accounts")
+                    }
+                }
+            }
         }
         .padding(.horizontal, 14).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel)
         .overlay(alignment: .top) { DLine() }
@@ -1209,6 +1514,33 @@ struct DataFoldRow: View {
     }
 }
 
+/// A thought the agent sent (data/1 `folds`, #1325): shut, its first line beside a chevron, as Settings' Show thinking says ("folded"); a tap opens the
+/// whole of it as Markdown, selectable, and shuts it again. The desktop's screens/thought.rs.
+struct DataThoughtRow: View {
+    let client: DataClient
+    let thread: String
+    let entry: DEntry
+    @Binding var open: Bool
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Button { open.toggle() } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint).frame(width: 12)
+                    Text(Tr.t(entry.label.isEmpty ? "thinking" : entry.label)).dmono(12, bold: true).foregroundStyle(BackplaneDesign.faint)
+                    if !open { Text(DataFold.thoughtLine(entry.text)).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }
+                    Spacer(minLength: 0)
+                }.padding(.vertical, 3).frame(minHeight: 32).contentShape(Rectangle())
+            }
+            .buttonStyle(.plain).accessibilityLabel(Tr.t("thinking") + ": " + DataFold.thoughtLine(entry.text)).accessibilityValue(Tr.t(open ? "open" : "shut")).accessibilityIdentifier("data.thought." + entry.id)
+            if open {
+                DataMarkdown(text: entry.text, thread: thread, entry: entry.id, images: [], copy: Copyable.list(entry.copy, hubHasCopy: client.has("copy")))
+                    .opacity(0.85).padding(.leading, 10).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.line).frame(width: 1) }.padding(.leading, 6)
+                    .accessibilityIdentifier("data.thought.body")
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .contain).accessibilityIdentifier("data.entry.thought")
+    }
+}
+
 struct DataToolRow: View {
     let entry: DEntry
     @State private var whole = false
@@ -1252,8 +1584,19 @@ struct DataEntryRow: View {
     let thread: String
     let entry: DEntry
     var goTo: (String) -> Void = { _ in }   // a reply's chip: to the message it answers
+    var reply: (DReplyRef) -> Void = { _ in }   // Reply on this message (feature `reply`): the composer's strip
     @State private var restoring: DRestore?   // Restore to before this, pressed: its confirm is up
 
+    /// The message a Reply here answers, when the hub takes replies
+    private var replyRef: DReplyRef? { client.has("reply") ? ReplyDraft.of(id: entry.id, kind: entry.kind, text: entry.text, live: entry.live) : nil }
+    // long-press: Reply and Copy (the desktop's two under a message)
+    @ViewBuilder private var replyMenu: some View {
+        if let r = replyRef { Button(Tr.t("Reply"), systemImage: "arrowshape.turn.up.left") { reply(r) }.accessibilityIdentifier("data.entry.reply.menu") }
+        if !entry.text.isEmpty { Button(Tr.t("Copy"), systemImage: "doc.on.doc") { UIPasteboard.general.string = entry.text } }
+    }
+    private var replyButton: some View {
+        Group { if let r = replyRef { Button(Tr.t("Reply")) { reply(r) }.dmono(11).foregroundStyle(BackplaneDesign.faint).buttonStyle(.plain).accessibilityIdentifier("data.entry.reply") } }
+    }
     var body: some View {
         switch entry.kind {
         case "user":
@@ -1268,8 +1611,8 @@ struct DataEntryRow: View {
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
                         if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
                     }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised)
-                    // long-press: Restore to before this, when the hub has the snapshot before the turn this message started
-                    .contextMenu { if let r = entry.restore { Button(Tr.t("Restore to before this"), systemImage: "clock.arrow.circlepath") { restoring = r }.accessibilityIdentifier("data.entry.restore") } }
+                    // long-press: Reply, Copy, and Restore to before this when the hub has the snapshot before the turn this message started
+                    .contextMenu { replyMenu; if let r = entry.restore { Button(Tr.t("Restore to before this"), systemImage: "clock.arrow.circlepath") { restoring = r }.accessibilityIdentifier("data.entry.restore") } }
                     .confirmationDialog(Tr.t("Restore the project to before this message?"), isPresented: Binding(get: { restoring != nil }, set: { if !$0 { restoring = nil } }), titleVisibility: .visible, presenting: restoring) { r in
                         Button(Tr.t("Restore"), role: .destructive) { Task { await client.restore(thread, r) } }
                         Button(Tr.t("Cancel"), role: .cancel) {}
@@ -1286,17 +1629,18 @@ struct DataEntryRow: View {
                         }
                         if entry.sending { Text(Tr.t("Sending…")).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                         else if entry.failed { Button(Tr.t("Not sent · Retry")) { client.retry(thread, entry) }.dmono(11).foregroundStyle(BackplaneDesign.bad) }
-                        else { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                        else { replyButton; Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
                     }
                 }
-            }.padding(.vertical, 4).accessibilityIdentifier("data.entry.user")
+            }.padding(.vertical, 4).modifier(DReplySwipe(ref: replyRef, reply: reply)).accessibilityIdentifier("data.entry.user")
         case "assistant":
             VStack(alignment: .leading, spacing: 4) {
                 DataMarkdown(text: entry.text, thread: thread, entry: entry.id, images: entry.live ? [] : entry.images, copy: Copyable.list(entry.copy, hubHasCopy: client.has("copy")))
                 // the pictures the reply names (the hub lists them as attachments); tap for the full size
                 ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) }
-                if !entry.live { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
-            }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).accessibilityElement(children: .contain).accessibilityIdentifier("data.entry.assistant")
+                if !entry.live { HStack(spacing: 8) { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint); replyButton } }
+            }.padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle()).contextMenu { replyMenu }.modifier(DReplySwipe(ref: replyRef, reply: reply))
+            .accessibilityElement(children: .contain).accessibilityIdentifier("data.entry.assistant")
         case "tool", "step":
             DataToolRow(entry: entry).accessibilityIdentifier("data.entry.tool")
         case "ask":
@@ -1314,6 +1658,25 @@ struct DataEntryRow: View {
             // a notice's code (an error naming a command to run, a path): copy buttons, and Run in terminal for a command
             DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(entry.copy, hubHasCopy: client.has("copy")), text: entry.text))
         }
+    }
+}
+
+/// Reply by a swipe right, as messaging apps do: the arrow shows as the message is pulled; let go past it, Reply (ReplyDraft.swipe). The list still scrolls.
+struct DReplySwipe: ViewModifier {
+    let ref: DReplyRef?
+    let reply: (DReplyRef) -> Void
+    @State private var pull: CGFloat = 0
+    func body(content: Content) -> some View {
+        content.offset(x: pull).overlay(alignment: .leading) {
+            if pull > 0 { Image(systemName: "arrowshape.turn.up.left").font(.system(size: 14)).foregroundStyle(pull >= 60 ? BackplaneDesign.accent : BackplaneDesign.faint).opacity(min(1, pull / 60)).offset(x: pull / 2 - 14) }
+        }
+        .simultaneousGesture(DragGesture(minimumDistance: 20).onChanged { g in
+            guard ref != nil, g.translation.width > 0, abs(g.translation.height) < g.translation.width / 2 else { if pull != 0 { pull = 0 }; return }
+            pull = min(80, g.translation.width)
+        }.onEnded { g in
+            if let r = ref, ReplyDraft.swipe(dx: g.translation.width, dy: g.translation.height) { UIImpactFeedbackGenerator(style: .light).impactOccurred(); reply(r) }
+            withAnimation(.easeOut(duration: 0.15)) { pull = 0 }
+        })
     }
 }
 
@@ -1351,29 +1714,143 @@ struct DataAskCard: View {
     let thread: String
     let entry: DEntry
     @State private var answer = ""
+    @State private var revising = false
+    @State private var revision = ""
+    @State private var expanded = false
+    @State private var copied = false
+
+    private var isPlan: Bool { entry.ask?.kind == "plan" }
+
     var body: some View {
         let ask = entry.ask
+        let accent = ask?.isOpen == true ? (isPlan ? PhaseColor.input : BackplaneDesign.bad) : BackplaneDesign.line
         VStack(alignment: .leading, spacing: 8) {
-            DHeading(text: Tr.t(ask?.isOpen == true ? "Asks" : "Asked"))
-            Text(ask?.question ?? entry.text).dmono(13).foregroundStyle(BackplaneDesign.text).textSelection(.enabled)
-            if ask?.isOpen == true {
-                if (ask?.options ?? []).isEmpty {
-                    HStack(spacing: 6) {
-                        TextField(Tr.t("Your answer"), text: $answer).dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
-                        Button(Tr.t("Send")) { Task { await client.answer(thread, ask: ask!.id, option: answer) } }.buttonStyle(DButton(primary: true)).disabled(answer.isEmpty)
-                    }
-                } else {
-                    VStack(alignment: .leading, spacing: 6) { ForEach(ask!.options) { o in
-                        Button { Task { await client.answer(thread, ask: ask!.id, option: o.id) } } label: { Text(Tr.t(o.label)).frame(maxWidth: .infinity, alignment: .leading) }
-                            .buttonStyle(DButton(primary: o.id == "accept", danger: o.id == "deny" || o.id == "decline"))
-                            .accessibilityIdentifier("data.ask." + o.id)
-                    } }
-                }
-            } else if let a = ask?.answered { Text(Tr.ios_ask_answered(answer: Tr.t(a))).dmono(12).foregroundStyle(BackplaneDesign.dim) }
+            if isPlan {
+                planBody(ask: ask)
+            } else {
+                standardBody(ask: ask)
+            }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .dbox(ask?.isOpen == true ? BackplaneDesign.bad : BackplaneDesign.line, fill: BackplaneDesign.panel)
+        .dbox(accent, fill: BackplaneDesign.panel)
+        .overlay(alignment: .leading) {
+            if isPlan && ask?.isOpen == true {
+                Rectangle().fill(PhaseColor.input).frame(width: 3)
+            }
+        }
         .accessibilityIdentifier("data.entry.ask")
+    }
+
+    @ViewBuilder
+    private func standardBody(ask: DAsk?) -> some View {
+        DHeading(text: Tr.t(ask?.isOpen == true ? "Asks" : "Asked"))
+        Text(ask?.question ?? entry.text).dmono(13).foregroundStyle(BackplaneDesign.text).textSelection(.enabled)
+        if ask?.isOpen == true {
+            if (ask?.options ?? []).isEmpty {
+                HStack(spacing: 6) {
+                    TextField(Tr.t("Your answer"), text: $answer).dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
+                    Button(Tr.t("Send")) { Task { await client.answer(thread, ask: ask!.id, option: answer) } }.buttonStyle(DButton(primary: true)).disabled(answer.isEmpty)
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 6) { ForEach(ask!.options) { o in
+                    Button { Task { await client.answer(thread, ask: ask!.id, option: o.id) } } label: { Text(Tr.t(o.label)).frame(maxWidth: .infinity, alignment: .leading) }
+                        .buttonStyle(DButton(primary: o.id == "accept" || o.id == "implement", danger: o.id == "deny" || o.id == "decline"))
+                        .accessibilityIdentifier("data.ask." + o.id)
+                } }
+            }
+        } else if let a = ask?.answered { Text(Tr.ios_ask_answered(answer: Tr.t(a))).dmono(12).foregroundStyle(BackplaneDesign.dim) }
+    }
+
+    @ViewBuilder
+    private func planBody(ask: DAsk?) -> some View {
+        let content = ask?.question ?? entry.text
+        HStack(spacing: 6) {
+            Text(Tr.t((ask?.head.isEmpty == false ? ask!.head : "Proposed plan")))
+                .dmono(12, bold: true)
+                .foregroundStyle(BackplaneDesign.text)
+            if ask?.isOpen == true {
+                Text(Tr.k("gpui.ask.plan.ready"))
+                    .dmono(10, bold: true)
+                    .foregroundStyle(PhaseColor.input)
+                    .padding(.horizontal, 5).padding(.vertical, 1)
+                    .overlay(Rectangle().strokeBorder(PhaseColor.input.opacity(0.65), lineWidth: 1))
+            }
+            Spacer(minLength: 4)
+            Button(Tr.k(copied ? "mobile.plan.copied" : "common.copy")) {
+                UIPasteboard.general.string = content
+                copied = true
+                Task { try? await Task.sleep(for: .seconds(1.5)); copied = false }
+            }
+            .buttonStyle(DButton(compact: true))
+            .accessibilityIdentifier("data.ask.copy")
+            Button(Tr.k(expanded ? "gpui.mgmt.plan.compact" : "gpui.mgmt.plan.expand")) {
+                expanded.toggle()
+            }
+            .buttonStyle(DButton(compact: true))
+            .accessibilityIdentifier("data.ask.expand")
+        }
+
+        Group {
+            if expanded {
+                DataMarkdown(text: content, thread: thread, entry: entry.id, images: [], copy: [])
+                    .padding(10)
+            } else {
+                ScrollView {
+                    DataMarkdown(text: content, thread: thread, entry: entry.id, images: [], copy: [])
+                        .padding(10)
+                }
+                .frame(maxHeight: 260)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .dbox(fill: BackplaneDesign.background)
+
+        if ask?.isOpen == true {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6) {
+                    ForEach(ask!.options) { o in
+                        let isPrimary = o.id == "accept" || o.id == "implement"
+                        Button {
+                            Task { await client.answer(thread, ask: ask!.id, option: o.id) }
+                        } label: {
+                            Text(Tr.t(o.label))
+                        }
+                        .buttonStyle(DButton(primary: isPrimary, compact: false))
+                        .accessibilityIdentifier("data.ask." + o.id)
+                    }
+                    if ask?.revise == true {
+                        Button(Tr.k("gpui.ask.plan.revise")) {
+                            revising.toggle()
+                        }
+                        .buttonStyle(DButton(primary: revising, compact: false))
+                        .accessibilityIdentifier("data.ask.revise")
+                    }
+                }
+            }
+            if ask?.revise == true && revising {
+                VStack(alignment: .leading, spacing: 6) {
+                    TextField(Tr.k("gpui.ask.plan.reviseph"), text: $revision)
+                        .dmono(13).padding(.horizontal, 10).frame(height: 40).dbox()
+                    HStack(spacing: 6) {
+                        Button(Tr.k("gpui.ask.plan.sendrev")) {
+                            let fb = revision.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !fb.isEmpty else { return }
+                            revising = false; revision = ""
+                            Task { await client.answer(thread, ask: ask!.id, option: "revise:" + fb) }
+                        }
+                        .buttonStyle(DButton(primary: true, compact: true))
+                        .disabled(revision.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        Button(Tr.k("common.cancel")) {
+                            revising = false; revision = ""
+                        }
+                        .buttonStyle(DButton(compact: true))
+                    }
+                }
+                .padding(.top, 2)
+            }
+        } else if let a = ask?.answered {
+            Text(Tr.ios_ask_answered(answer: Tr.t(a))).dmono(12).foregroundStyle(BackplaneDesign.dim)
+        }
     }
 }
 
@@ -1493,20 +1970,26 @@ struct DataUpdateSection: View {
 struct DataAttachmentImage: View {
     let client: DataClient
     let attachment: DAttachment
-    @State private var image: UIImage?
+    @State private var decoded: DDecodedImage?
     @State private var data: Data?
     @State private var failed = false
     @State private var full = false
     var body: some View {
         Group {
-            if let image { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(image, data: data) }
+            if let decoded {
+                DPictureView(image: decoded.image, animated: decoded.animated, contentMode: .fit)
+                    .frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(decoded.image, data: data)
+            }
             else if failed { Label(attachment.name, systemImage: "photo").font(.footnote).foregroundStyle(.secondary) }
             else { ProgressView().frame(width: 80, height: 80) }
         }
         .task(id: attachment.id) {
-            if let d = await client.attachmentData(attachment.id), let u = UIImage(data: d) { image = u; data = d } else { failed = true }
+            if let d = await client.attachmentData(attachment.id),
+               let dec = await Task.detached(priority: .userInitiated, operation: { DDecodedImage.decode(d, maxPixelSize: 1400) }).value {
+                decoded = dec; data = d
+            } else { failed = true }
         }
-        .fullScreenCover(isPresented: $full) { if let image { DImageFull(image: image, data: data) { full = false } } }
+        .fullScreenCover(isPresented: $full) { if let decoded { DImageFull(image: decoded.image, data: data, animated: decoded.animated) { full = false } } }
         .accessibilityIdentifier("data.entry.image")
     }
 }
@@ -1514,12 +1997,25 @@ struct DataAttachmentImage: View {
 // a picture this phone just sent, from its own copy until the hub has it: tap for the full size, long press to save or share
 struct DataLocalImage: View {
     let data: Data
+    @State private var decoded: DDecodedImage?
     @State private var full = false
     var body: some View {
-        if let u = UIImage(data: data) {
-            Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(u, data: data)
-                .fullScreenCover(isPresented: $full) { DImageFull(image: u, data: data) { full = false } }
-                .accessibilityIdentifier("data.entry.image")
+        Group {
+            if let decoded {
+                DPictureView(image: decoded.image, animated: decoded.animated, contentMode: .fit)
+                    .frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(decoded.image, data: data)
+                    .fullScreenCover(isPresented: $full) { DImageFull(image: decoded.image, data: data, animated: decoded.animated) { full = false } }
+                    .accessibilityIdentifier("data.entry.image")
+            } else if let u = UIImage(data: data) {
+                Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(u, data: data)
+                    .fullScreenCover(isPresented: $full) { DImageFull(image: u, data: data) { full = false } }
+                    .accessibilityIdentifier("data.entry.image")
+            }
+        }
+        .task(id: data) {
+            if AnimatedImage.isGIF(data) {
+                decoded = await Task.detached(priority: .userInitiated, operation: { DDecodedImage.decode(data, maxPixelSize: 1400) }).value
+            }
         }
     }
 }
@@ -1536,6 +2032,24 @@ struct DataReviewBar: View {
         }
         .padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(bar.on ? BackplaneDesign.warn : BackplaneDesign.line, lineWidth: 1))
         .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("thread.review")
+    }
+}
+
+/// Proactive banner shown when the hub has zero AI providers configured or signed in.
+struct DataNoProviderBanner: View {
+    let client: DataClient
+    var body: some View {
+        if let n = client.noProvider {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(Tr.t(n.head)).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text).accessibilityIdentifier("provider.notice.head")
+                if !n.text.isEmpty { Text(Tr.t(n.text)).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("provider.notice.text") }
+                Button(n.button.isEmpty ? Tr.t("Open Settings → Accounts") : Tr.t(n.button)) { client.openAccounts = true }
+                    .buttonStyle(DButton(primary: true, compact: true)).accessibilityIdentifier("provider.notice.button")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 10).padding(.vertical, 8).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.warn, lineWidth: 1))
+            .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("provider.notice")
+        }
     }
 }
 
@@ -1612,5 +2126,153 @@ struct MemoryBar: View {
             Text(Tr.t(m.line)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
             Text(Tr.t(m.status)).dmono(11).foregroundStyle(m.state == "held" ? BackplaneDesign.warn : BackplaneDesign.faint).lineLimit(1)
         }.accessibilityElement(children: .combine).accessibilityIdentifier("data.thread.memory")
+    }
+}
+
+private struct DThreadContext: View {
+    struct Snapshot: Decodable {
+        struct Instruction: Decodable { let path: String; let bytes: Int; let estimated_tokens: Int; let status: String; let preview: String; let note: String }
+        struct Skill: Decodable { let name: String; let description: String; let scope: String; let status: String; let path: String; let source: String; let provider: String; let model: String }
+        struct Server: Decodable { let name: String; let command: String; let args: [String]; let url: String; let cwd: String; let status: String }
+        struct Config: Decodable { let path: String; let sha256: String; let state: String; let error: String; let servers: [Server] }
+        struct Sections: Decodable { let base: String; let instructions: String; let skills: String }
+        let cwd: String
+        let instructions: [Instruction]
+        let skills: [Skill]
+        let mcp: [Config]
+        let sections: Sections
+        let prompt: String
+    }
+
+    let client: DataClient
+    let thread: String
+    @Environment(\.dismiss) private var dismiss
+    @State private var data: Snapshot?
+    @State private var selected = 0
+    @State private var busy = false
+    @State private var problem = ""
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                Picker(Tr.t("Context & Prompt"), selection: $selected) {
+                    Text(Tr.t("Instructions")).tag(0)
+                    Text(Tr.t("Prompt")).tag(1)
+                    Text(Tr.t("Skills")).tag(2)
+                    Text(Tr.t("MCPs")).tag(3)
+                }
+                .pickerStyle(.segmented)
+                .padding()
+                if busy { ProgressView().padding(.bottom, 8) }
+                if !problem.isEmpty { Text(problem).foregroundStyle(.red).padding() }
+                if let data {
+                    List {
+                        switch selected {
+                        case 0:
+                            if data.instructions.isEmpty { Text(Tr.t("No project instructions found.")) }
+                            ForEach(data.instructions, id: \.path) { item in
+                                DisclosureGroup {
+                                    code(item.preview)
+                                    if !item.note.isEmpty { Text(item.note).font(.caption).foregroundStyle(.secondary) }
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 4) {
+                                        summary(URL(fileURLWithPath: item.path).lastPathComponent, item.status)
+                                        Text(item.path).font(.caption).foregroundStyle(.secondary)
+                                        Text(Tr.thread_context_size(bytes: String(item.bytes), tokens: String(item.estimated_tokens))).font(.caption2).foregroundStyle(.secondary)
+                                    }
+                                }
+                            }
+                        case 1:
+                            Text(Tr.t("Backplane’s launch prompt. Native files are loaded by the provider.")).foregroundStyle(.secondary)
+                            Button(Tr.t("Copy prompt"), systemImage: "doc.on.doc") { UIPasteboard.general.string = data.prompt }
+                            promptSection("Backplane", data.sections.base)
+                            promptSection("Injected project instructions", data.sections.instructions)
+                            promptSection("Available skills index", data.sections.skills)
+                        case 2:
+                            ForEach(["Project", "User", "Bundled"], id: \.self) { scope in
+                                let items = data.skills.filter { $0.scope == scope }
+                                if !items.isEmpty {
+                                    Section(Tr.t(scope)) {
+                                        ForEach(items, id: \.path) { item in
+                                            VStack(alignment: .leading, spacing: 5) {
+                                                summary(item.name, item.status)
+                                                Text(item.description).font(.subheadline)
+                                                Text([item.source, item.provider, item.model].filter { !$0.isEmpty }.joined(separator: " · ")).font(.caption).foregroundStyle(.secondary)
+                                                Text(item.path).font(.caption2).foregroundStyle(.secondary).textSelection(.enabled)
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        default:
+                            if data.mcp.isEmpty { Text(Tr.t("No project MCP configurations found.")) }
+                            ForEach(data.mcp, id: \.path) { config in
+                                Section {
+                                    ForEach(config.servers, id: \.name) { server in
+                                        VStack(alignment: .leading, spacing: 6) {
+                                            summary(server.name, server.status)
+                                            code(server.url.isEmpty ? ([server.command] + server.args).map { String(reflecting: $0) }.joined(separator: " ") : server.url)
+                                            if !server.cwd.isEmpty { Text(server.cwd).font(.caption2).foregroundStyle(.secondary) }
+                                        }
+                                    }
+                                    if !config.error.isEmpty { Text(config.error).font(.caption).foregroundStyle(.red) }
+                                    if let action = action(for: config.state) {
+                                        Button(Tr.t(action.label)) { Task { await load(action: action.id, config: config) } }.disabled(busy)
+                                    }
+                                } header: {
+                                    Text(config.path).textCase(nil)
+                                }
+                            }
+                        }
+                    }
+                    .listStyle(.insetGrouped)
+                } else { Spacer() }
+            }
+            .navigationTitle(Tr.t("Context & Prompt"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) { Button(Tr.t("Close")) { dismiss() } }
+                ToolbarItem(placement: .primaryAction) { Button { Task { await load() } } label: { Image(systemName: "arrow.clockwise") }.accessibilityLabel(Tr.t("Refresh")).disabled(busy) }
+            }
+            .task { await load() }
+        }
+    }
+
+    private func summary(_ title: String, _ status: String) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(title).font(.subheadline.weight(.semibold))
+            Spacer(minLength: 8)
+            Text(Tr.t(status)).font(.caption.weight(.medium))
+                .foregroundStyle(status == "Native" || status == "Enabled" ? BackplaneDesign.accent : Color(uiColor: .secondaryLabel))
+        }
+    }
+
+    private func code(_ text: String) -> some View {
+        Text(verbatim: text).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+    }
+
+    @ViewBuilder private func promptSection(_ label: String, _ text: String) -> some View {
+        if !text.isEmpty { Section(Tr.t(label)) { code(text) } }
+    }
+
+    private func action(for state: String) -> (id: String, label: String)? {
+        switch state {
+        case "Untrusted": ("trust", "Trust and enable")
+        case "Enabled": ("disable", "Disable")
+        case "Disabled": ("enable", "Enable")
+        default: nil
+        }
+    }
+
+    @MainActor private func load(action: String? = nil, config: Snapshot.Config? = nil) async {
+        guard !busy else { return }
+        busy = true
+        problem = ""
+        defer { busy = false }
+        do {
+            if let action, let config {
+                data = try await client.call("thread.context.mcp", ["thread": thread, "action": action, "path": config.path, "sha256": config.sha256])
+            } else { data = try await client.call("thread.context", ["thread": thread]) }
+        } catch { problem = error.localizedDescription }
     }
 }

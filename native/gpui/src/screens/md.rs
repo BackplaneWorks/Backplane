@@ -98,16 +98,63 @@ fn design_word(rest: &str) -> bool {
 }
 /// Where the whole words of `words` sit in `s`, as byte ranges in order: a word starts after a space or an opening bracket or quote, and ends at the end, a space or punctuation.
 pub fn word_ranges(s: &str, words: &[String]) -> Vec<(usize, usize)> {
-    let opens = |c: char| c.is_whitespace() || matches!(c, '(' | '[' | '"' | '\'');
+    let opens = |c: char| c.is_whitespace() || matches!(c, '(' | '[' | '"' | '\'' | '`');
     let mut out: Vec<(usize, usize)> = vec![]; let mut at = 0;
     while at < s.len() {
         let hit = words.iter().filter(|w| !w.is_empty()).filter_map(|w| { let mut from = at;
             while let Some(i) = s[from..].find(w.as_str()) { let i = from + i; let end = i + w.len();
                 let before = i == 0 || s[..i].ends_with(opens);
-                let after = s[end..].chars().next().map_or(true, |c| !(c.is_alphanumeric() || matches!(c, '-' | '_' | '/' | ':' | '+')) && !(c == '.' && s[end + 1..].chars().next().map_or(false, |d| d.is_alphanumeric())));
-                if before && after { return Some((i, end)) } from = i + 1; }
+                let after = s[end..].chars().next().map_or(true, |c| {
+                    !(c.is_alphanumeric() || matches!(c, '-' | '_' | '/' | '+' | '['))
+                        && !(c == '.' && s[end + c.len_utf8()..].chars().next().map_or(false, |d| d.is_alphanumeric()))
+                        && !(c == ':' && s[end + c.len_utf8()..].chars().next().map_or(false, |d| d.is_alphanumeric() || matches!(d, '-' | '_' | '/')))
+                });
+                if before && after { return Some((i, end)) } from = i + s[i..].chars().next().map_or(1, char::len_utf8); }
             None }).min_by_key(|(i, e)| (*i, std::cmp::Reverse(*e)));
         match hit { Some((i, e)) => { out.push((i, e)); at = e; } None => break }
+    }
+    out
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ModelChip { pub word: String, pub label: String }
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum UserSeg { Span(Span), Model(ModelChip) }
+
+/// A person's message cut into styled text runs (`linkify` + `chips` for non-model references) and inline `ModelChip`s for resolved `&provider/model` mentions.
+/// Preserves every character of `text` in order (`Span.text` and `ModelChip.word` concatenate to `text`).
+pub fn user_segments(text: &str, other_refs: &[String], models: &[ModelChip]) -> Vec<UserSeg> {
+    let linked = linkify(text);
+    if models.is_empty() {
+        return chips(linked, other_refs).into_iter().map(UserSeg::Span).collect();
+    }
+    let model_words: Vec<String> = models.iter().map(|m| m.word.clone()).collect();
+    let mut out = Vec::new();
+    for s in linked {
+        if s.style != Style::default() {
+            out.push(UserSeg::Span(s));
+            continue;
+        }
+        let mut at = 0;
+        for (i, e) in word_ranges(&s.text, &model_words) {
+            if i > at {
+                let pre = vec![Span { text: s.text[at..i].to_string(), style: Style::default() }];
+                out.extend(chips(pre, other_refs).into_iter().map(UserSeg::Span));
+            }
+            let matched = &s.text[i..e];
+            if let Some(m) = models.iter().find(|m| m.word == matched) {
+                out.push(UserSeg::Model(m.clone()));
+            } else {
+                let fallback = vec![Span { text: matched.to_string(), style: Style::default() }];
+                out.extend(chips(fallback, other_refs).into_iter().map(UserSeg::Span));
+            }
+            at = e;
+        }
+        if at < s.text.len() {
+            let tail = vec![Span { text: s.text[at..].to_string(), style: Style::default() }];
+            out.extend(chips(tail, other_refs).into_iter().map(UserSeg::Span));
+        }
     }
     out
 }
@@ -465,5 +512,21 @@ mod link_tests {
         assert!(links("x.rs main.c version 1.2 .kicad_pcb").is_empty(), "{:?}", links("x.rs main.c version 1.2 .kicad_pcb"));
     }
     #[test] fn the_spans_keep_every_character() { let t = "a https://x.io/p, b /tmp/q é"; assert_eq!(linkify(t).iter().map(|s| s.text.as_str()).collect::<String>(), t); }
+    #[test] fn user_segments_embed_models_inline_and_keep_exact_text() {
+        let m1 = ModelChip { word: "&antigravity/gemini-4-neon".into(), label: "Gemini 4 Neon".into() };
+        let m2 = ModelChip { word: "&claude/claude-fable-5-2[1m]".into(), label: "Fable 5.2 (1M)".into() };
+        let m3 = ModelChip { word: "&claude/opus".into(), label: "Opus".into() };
+        let m4 = ModelChip { word: "&claude/opus[1m]".into(), label: "Opus (1M)".into() };
+        let txt = "swarm with &antigravity/gemini-4-neon, &claude/claude-fable-5-2[1m] and &antigravity/gemini-4-neon, plus @bot, &claude/opus[1m], Use &claude/opus: &provider/model, https://x.io?a=1&claude/opus";
+        let segs = user_segments(txt, &["@bot".into()], &[m1.clone(), m2.clone(), m3.clone(), m4.clone()]);
+        let reconstructed: String = segs.iter().map(|s| match s { UserSeg::Span(sp) => sp.text.as_str(), UserSeg::Model(m) => m.word.as_str() }).collect();
+        assert_eq!(reconstructed, txt);
+        let model_hits: Vec<&str> = segs.iter().filter_map(|s| match s { UserSeg::Model(m) => Some(m.label.as_str()), _ => None }).collect();
+        assert_eq!(model_hits, ["Gemini 4 Neon", "Fable 5.2 (1M)", "Gemini 4 Neon", "Opus (1M)", "Opus"]);
+        assert!(segs.iter().any(|s| matches!(s, UserSeg::Span(sp) if sp.text == "@bot" && sp.style.code)));
+        assert!(segs.iter().any(|s| matches!(s, UserSeg::Span(sp) if sp.text == "https://x.io?a=1&claude/opus" && sp.style.link.is_some())));
+        let tag_ref = ModelChip { word: "&opencode/llama3".into(), label: "Llama 3".into() };
+        assert!(!user_segments("try &opencode/llama3:8b", &[], &[tag_ref]).iter().any(|s| matches!(s, UserSeg::Model(_))));
+    }
 }
 

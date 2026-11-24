@@ -4,7 +4,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** One message this phone could not hand to its hub: the socket was down. `hub` is the pairing key it was written to. */
-data class OItem(val hub: String, val thread: String, val text: String, val clientId: String)
+/** `replyTo`: the message it answers, as `message.send` takes it (`{id, text}`, feature `reply`); null for a plain message (and in an older outbox file). */
+data class OItem(val hub: String, val thread: String, val text: String, val clientId: String, val replyTo: Map<String, String>? = null)
 
 /**
  * The phone's outbox (docs/PHONE-DATA.md, `thread.queue`): messages written while the data socket was down, kept on disk, drawn in the
@@ -13,8 +14,8 @@ data class OItem(val hub: String, val thread: String, val text: String, val clie
  * A value: every change answers a new Outbox. (iOS: Outbox.swift.)
  */
 class Outbox(val items: List<OItem> = emptyList()) {
-    fun push(hub: String, thread: String, text: String, clientId: String): Outbox =
-        if (items.any { it.clientId == clientId }) this else Outbox(items + OItem(hub, thread, text, clientId))
+    fun push(hub: String, thread: String, text: String, clientId: String, replyTo: Map<String, String>? = null): Outbox =
+        if (items.any { it.clientId == clientId }) this else Outbox(items + OItem(hub, thread, text, clientId, replyTo))
     fun remove(clientId: String): Outbox = Outbox(items.filter { it.clientId != clientId })
     /** the hub answered ok: it is posted */
     fun sent(clientId: String): Outbox = remove(clientId)
@@ -26,7 +27,7 @@ class Outbox(val items: List<OItem> = emptyList()) {
     fun rows(hub: String, thread: String): List<QRow> = items.filter { it.hub == hub && it.thread == thread }.map {
         QRow(it.clientId, "Unsent", it.text.lineSequence().firstOrNull { l -> l.isNotBlank() }?.trim() ?: "", listOf(QButton("Edit", EDIT, it.clientId), QButton("Remove", REMOVE, it.clientId)))
     }
-    fun encode(): String = JSONObject().put("v", 1).put("items", JSONArray(items.map { JSONObject().put("hub", it.hub).put("thread", it.thread).put("text", it.text).put("clientId", it.clientId) })).toString()
+    fun encode(): String = JSONObject().put("v", 1).put("items", JSONArray(items.map { JSONObject().put("hub", it.hub).put("thread", it.thread).put("text", it.text).put("clientId", it.clientId).also { o -> it.replyTo?.let { r -> o.put("replyTo", JSONObject(r)) } } })).toString()
     override fun equals(other: Any?) = other is Outbox && other.items == items
     override fun hashCode() = items.hashCode()
 
@@ -40,7 +41,8 @@ class Outbox(val items: List<OItem> = emptyList()) {
             val a = runCatching { JSONObject(s).optJSONArray("items") }.getOrNull() ?: return Outbox()
             return Outbox((0 until a.length()).mapNotNull { a.optJSONObject(it) }.mapNotNull { o ->
                 val cid = o.optString("clientId"); val t = o.optString("thread")
-                if (cid.isEmpty() || t.isEmpty()) null else OItem(o.optString("hub"), t, o.optString("text"), cid)
+                val r = o.optJSONObject("replyTo")?.let { j -> mapOf("id" to j.optString("id"), "text" to j.optString("text")).takeIf { m -> m.values.all { v -> v.isNotEmpty() } } }
+                if (cid.isEmpty() || t.isEmpty()) null else OItem(o.optString("hub"), t, o.optString("text"), cid, r)
             })
         }
     }

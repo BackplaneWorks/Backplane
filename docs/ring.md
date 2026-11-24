@@ -81,7 +81,7 @@ protocol version 1.
    stopped on before the note reached Pebble: one said in the last 3 days,
    tried fewer than 5 times.
 
-## The Ring page (Settings → Ring)
+## The Ring page (Settings → Voice → Ring on the desktop)
 
 - **Setup**:
   - Set up (`ring.setup`) makes Pebble as a sub-bot of the uberbot, its
@@ -135,7 +135,7 @@ change, so in the Pebble app only the URL changes, followed by Send test event.
 
 ## Setting up the phone
 
-1. Settings → Ring → Set up.
+1. Settings → Voice → Ring → Set up (on a phone: Settings → Ring).
 2. Pebble app → Index 01 Settings → Webhook → Hold & talk:
    - **URL**: Copy URL.
    - **Header**: name `Authorization`, value from Copy header (`Bearer …`).

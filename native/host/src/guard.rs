@@ -37,10 +37,9 @@ pub fn carry_wait() -> u64 { std::env::var("BACKPLANE_CARRY_WAIT").ok().and_then
 
 fn dir() -> Option<PathBuf> { HOME.get().map(|h| h.join("guard")) }
 fn now_s() -> u64 { crate::hub::now_ms() / 1000 }
-/// Seconds on the clock the watch's timers run on (tokio's, `Instant`): it stops while the machine sleeps, as they do. The wall clock does not, so a
-/// last good check stored as wall time looked minutes or hours old the moment a Mac woke (a DarkWake every 15 minutes or so, for 2 s, is enough for
-/// the guard to ask and too short for the next check to run): every part "hung" at once, and six such wakes in a row ended a well hub.
-fn mono_s() -> u64 { static T0: OnceLock<std::time::Instant> = OnceLock::new(); T0.get_or_init(std::time::Instant::now).elapsed().as_secs() }
+/// Seconds on the machine's suspend-excluding awake clock (pauses while macOS/Linux/Windows sleeps).
+/// Wall time (and `Instant` on Windows) advances through sleep, so wall-clock timestamps marked `writer`/`model`/`agents` hung on wake (#1607, #1497).
+fn mono_s() -> u64 { crate::plat::hub::awake_s() }
 /// Small files beside and renamed: the guard never reads half. A full disk loses the note, nothing else.
 fn put(name: &str, text: &str) { if let Some(d) = dir() { let _ = crate::ckpt::write_atomic(&d.join(name), &[text.as_bytes()]); } }
 
@@ -170,7 +169,7 @@ pub fn status(home: &Path) -> Value {
     let lines = std::fs::read_to_string(g.join("incidents.jsonl")).unwrap_or_default();
     let all: Vec<Value> = lines.lines().filter_map(|l| serde_json::from_str(l).ok()).collect();
     let (_, h) = health();
-    json!({"guard": st, "incidents": all[all.len().saturating_sub(5)..], "hub": h, "guarded": supervised()})
+    json!({"guard": st, "incidents": all[all.len().saturating_sub(5)..], "hub": h, "guarded": supervised(), "watcher": crate::restarting::watcher(home)})
 }
 /// Why the hub was last restarted, when something went wrong in the last hour: for the uberbot's turn.
 pub fn last_why(home: &Path) -> String {
@@ -179,8 +178,9 @@ pub fn last_why(home: &Path) -> String {
     format!("{}: {}", last["what"].as_str().unwrap_or(""), last["did"].as_str().unwrap_or(""))
 }
 /// The newest incident still open: a record that `clears` an alert (the guard's "Disk has room again") closes it, and is no news itself.
-fn open_incident(s: &Value) -> Value {
-    let mut cleared: Vec<&str> = vec![];
+fn open_incident(s: &Value) -> Value { open_incident_for(s, &[]) }
+fn open_incident_for(s: &Value, skip: &[&str]) -> Value {
+    let mut cleared: Vec<&str> = skip.to_vec();
     for i in s["incidents"].as_array().map(|a| a.as_slice()).unwrap_or(&[]).iter().rev() {
         if let Some(c) = i["clears"].as_str() { cleared.push(c); continue }
         if cleared.contains(&i["what"].as_str().unwrap_or("")) { continue }
@@ -191,13 +191,14 @@ fn open_incident(s: &Value) -> Value {
 /// What a client shows about the hub, and when: `text` empty means all is well.
 pub fn notice(s: &Value) -> Value {
     let safe = s["hub"]["safe"] == true; let degraded = s["hub"]["degraded"].as_array().map_or(0, Vec::len) > 0;
-    let last = open_incident(s);
+    let last = open_incident_for(s, &["Hub is down"]);
     let fresh = last["at"].as_u64().map_or(false, |at| now_s().saturating_sub(at) < 3600);
     let text = if safe { format!("Safe mode: agents, routines and bots are paused. {}", last["why"].as_str().unwrap_or("")) }
         else if degraded { format!("Hub is running without {}.", s["hub"]["degraded"].as_array().map_or(String::new(), |a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))) }
         else if fresh { format!("{}: {}", last["what"].as_str().unwrap_or(""), last["did"].as_str().unwrap_or("")) }
+        else if s["watcher"] == false { crate::restarting::NO_WATCHER.to_string() }
         else { String::new() };
-    json!({"text": text.trim(), "tone": if safe || degraded { "warn" } else { "info" }, "actions": s["guard"]["actions"]})
+    json!({"text": text.trim(), "tone": if safe || degraded || (text == crate::restarting::NO_WATCHER) { "warn" } else { "info" }, "actions": s["guard"]["actions"]})
 }
 
 /// `/hub/status` and `/hub/control`. Control writes the guard a request and waits for its answer; it needs nothing from the views, the presenter or the agents, so it works when they do not.
@@ -322,6 +323,20 @@ mod tests {
     #[test] fn a_stale_check_names_what_stopped() {
         assert!(hung_at(&[("writer", 1000), ("model", 950)], 1000).is_empty());
         assert_eq!(hung_at(&[("writer", 1000), ("agents", 800)], 1000), vec!["agents"]);
+        assert!(hung_at(&[("writer", 1000)], 1000 + WATCH_STALE_S).is_empty());
+        assert_eq!(hung_at(&[("writer", 1000)], 1000 + WATCH_STALE_S + 1), vec!["writer"]);
+    }
+    #[tokio::test] async fn watch_timestamps_use_monotonic_clock_not_wall_epoch() {
+        assert!(mono_s() < 86_400, "mono_s must stay relative to awake runtime, not Unix epoch time");
+        watch("test-mono-clock", || Box::pin(async {}));
+        tokio::task::yield_now().await;
+        let ts = WATCHED.lock().unwrap_or_else(|e| e.into_inner()).iter()
+            .find(|(n, _)| *n == "test-mono-clock")
+            .map(|(_, t)| t.load(Relaxed))
+            .expect("watch registered entry");
+        assert!(ts < 86_400 && ts <= mono_s(), "stored watch timestamp {ts} must use mono_s");
+        assert!(!hung().iter().any(|n| n == "test-mono-clock"));
+        WATCHED.lock().unwrap_or_else(|e| e.into_inner()).retain(|(n, _)| *n != "test-mono-clock");
     }
     #[tokio::test] async fn a_step_that_panics_or_hangs_costs_only_itself() {
         assert_eq!(step("ok", 5, async { 7 }).await, Some(7));
@@ -329,6 +344,11 @@ mod tests {
         assert_eq!(step("slow", 0, async { tokio::time::sleep(Duration::from_secs(30)).await; 1 }).await, None);
         let d = degraded_list(); assert!(d.iter().any(|(w, y)| w == "boom" && y.contains("panicked")), "{d:?}"); assert!(d.iter().any(|(w, y)| w == "slow" && y.contains("no answer")));
         assert_eq!(step_now("ok2", || 1), Some(1)); assert_eq!(step_now("boom2", || -> i32 { panic!("y") }), None);
+    }
+    #[test] fn a_missing_auto_update_watcher_is_said() {
+        let n = notice(&json!({"hub": {"safe": false, "degraded": []}, "incidents": [], "guard": {}, "watcher": false}));
+        assert_eq!((n["text"].as_str(), n["tone"].as_str()), (Some(crate::restarting::NO_WATCHER), Some("warn")));
+        for w in [json!(true), Value::Null] { assert_eq!(notice(&json!({"hub": {"safe": false, "degraded": []}, "incidents": [], "guard": {}, "watcher": w}))["text"], "", "{w}"); }
     }
     #[test] fn a_notice_says_nothing_when_all_is_well() {
         assert_eq!(notice(&json!({"hub": {"safe": false, "degraded": []}, "incidents": [], "guard": {}}))["text"], "");
@@ -345,5 +365,13 @@ mod tests {
         let crash = json!({"at": now_s() - 30, "what": "Hub crashed", "why": "x", "did": "restarted"});
         assert!(with(vec![crash.clone(), full.clone(), room.clone()]).starts_with("Hub crashed"), "an earlier incident it did not clear still shows");
         assert!(with(vec![full.clone(), room, full]).starts_with("Disk nearly full"), "full again: told again");
+    }
+    #[test] fn a_running_hub_never_shows_a_stale_hub_is_down_notice() {
+        let down = json!({"at": now_s() - 30, "what": "Hub is down", "why": "port held", "did": "answering on its port for a restart, and trying again by itself"});
+        let full = json!({"at": now_s() - 60, "what": "Disk nearly full", "why": "7.1 GB free", "did": "free space on this disk"});
+        let calm = json!({"hub": {"safe": false, "degraded": []}, "guard": {}});
+        let with = |i: Vec<Value>| { let mut c = calm.clone(); c["incidents"] = json!(i); notice(&c)["text"].as_str().unwrap().to_string() };
+        assert_eq!(with(vec![down.clone()]), "", "an uncleared Hub is down incident is suppressed while the hub is running");
+        assert!(with(vec![full, down]).starts_with("Disk nearly full"), "an earlier open incident underneath still shows");
     }
 }

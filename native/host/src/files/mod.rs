@@ -4,6 +4,7 @@ pub mod dir;
 pub mod export10;
 pub mod attach;
 pub mod attach_http;
+pub mod blob;
 pub mod fm;
 pub mod imgroutes;
 pub mod mimg;
@@ -16,6 +17,7 @@ pub mod reviewask;
 pub mod misc;
 pub mod rv;
 pub mod serve;
+pub mod share;
 pub mod threadpath;
 pub mod webimg;
 #[path = "../kicad/mod.rs"]
@@ -31,6 +33,7 @@ pub fn start(hub: Arc<Hub>) {
     watch_dir::start(hub.clone());
     hub.register_http(Arc::new(Img));
     hub.register_http(Arc::new(webimg::WebImg));
+    hub.register_http(Arc::new(blob::BlobHttp));
     hub.register_http(Arc::new(Downloads));
     hub.register_rpc(Arc::new(Files));
     hub.register_rpc(Arc::new(GitRpc));
@@ -39,6 +42,7 @@ pub fn start(hub: Arc<Hub>) {
     hub.register_rpc(Arc::new(export10::Export10));
     kicad::start(&hub);
     imgroutes::start(&hub);
+    share::start(&hub);
 }
 
 /// ThreadPath.of for the read model (threadpath.rs): the folder of a thread or `project-home-<id>`, None when it does not resolve.
@@ -76,29 +80,35 @@ impl HttpHandler for Downloads {
     fn routes(&self) -> &'static [&'static str] { &["/files/get", "/files/zip", "/view/get", "/view/ver", "/view/git"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, req: &'a Req) -> Fut<'a, HttpReply> {
         Box::pin(async move {
+            let err = |status: &'static str, msg: &str| HttpReply {
+                status,
+                ctype: "text/plain; charset=utf-8".into(),
+                extra: format!("Cache-Control: private, no-store\r\n{}", serve::MEDIA_SECURITY_HEADERS),
+                body: msg.as_bytes().to_vec(),
+            };
             let thread = fm::from_uri(&req.param("thread"));
-            if req.route().starts_with("/files/") && !fm::files_safe(&fm::from_uri(&req.param("path"))) { return HttpReply::text("400 Bad Request", "that path is not in this project") }
+            if req.route().starts_with("/files/") && !fm::files_safe(&fm::from_uri(&req.param("path"))) { return err("400 Bad Request", "that path is not in this project") }
             if root_of(hub, &thread).await.is_none() {
                 // /view/*: Hub.bot.view's refusal; /files/*: FilesHttp.root
-                return if req.route().starts_with("/view/") { HttpReply::text("403 Forbidden", "not a thread of this machine, or not a file the viewers read") } else { HttpReply::text("404 Not Found", "no such thread") };
+                return if req.route().starts_with("/view/") { err("403 Forbidden", "not a thread of this machine, or not a file the viewers read") } else { err("404 Not Found", "no such thread") };
             }
             if req.route() == "/files/get" {
                 let (root, rel) = (root_of(hub, &thread).await.unwrap(), fm::from_uri(&req.param("path")));
                 return match tokio::task::spawn_blocking(move || ops::read(&root, &rel).map(|b| (b, rel))).await {
-                    Ok(Ok((b, rel))) => HttpReply { status: "200 OK", ctype: "application/octet-stream".into(), extra: format!("Content-Disposition: attachment; filename=\"{}\"\r\nX-Content-Type-Options: nosniff\r\n", fm::last(&rel).replace(['"', '\r', '\n', '\\'], "_")), body: b },
-                    Ok(Err(e)) => HttpReply::text("404 Not Found", &e),
-                    Err(_) => HttpReply::text("500 Internal Server Error", "cannot read file"),
+                    Ok(Ok((b, rel))) => HttpReply { status: "200 OK", ctype: "application/octet-stream".into(), extra: format!("Cache-Control: private, no-store\r\nContent-Disposition: attachment; filename=\"{}\"\r\n{}", fm::last(&rel).replace(['"', '\r', '\n', '\\'], "_"), serve::MEDIA_SECURITY_HEADERS), body: b },
+                    Ok(Err(e)) => err("404 Not Found", &e),
+                    Err(_) => err("500 Internal Server Error", "cannot read file"),
                 };
             }
             if req.route() == "/files/zip" {
                 let (root, rel) = (root_of(hub, &thread).await.unwrap(), fm::from_uri(&req.param("path")));
                 return match tokio::task::spawn_blocking(move || ops::zip_dir(&root, &rel).map(|b| (b, rel))).await {
-                    Ok(Ok((b, rel))) => HttpReply { status: "200 OK", ctype: "application/zip".into(), extra: format!("Content-Disposition: attachment; filename=\"{}.zip\"\r\nX-Content-Type-Options: nosniff\r\n", { let n = fm::last(&rel); if n.is_empty() { "project" } else { n } }.replace(['"', '\r', '\n', '\\'], "_")), body: b },
-                    Ok(Err(e)) => HttpReply::text("404 Not Found", &e),
-                    Err(_) => HttpReply::text("500 Internal Server Error", "cannot zip"),
+                    Ok(Ok((b, rel))) => HttpReply { status: "200 OK", ctype: "application/zip".into(), extra: format!("Cache-Control: private, no-store\r\nContent-Disposition: attachment; filename=\"{}.zip\"\r\n{}", { let n = fm::last(&rel); if n.is_empty() { "project" } else { n } }.replace(['"', '\r', '\n', '\\'], "_"), serve::MEDIA_SECURITY_HEADERS), body: b },
+                    Ok(Err(e)) => err("404 Not Found", &e),
+                    Err(_) => err("500 Internal Server Error", "cannot zip"),
                 };
             }
-            HttpReply::text("501 Not Implemented", "this route is not served by this hub")
+            err("501 Not Implemented", "this route is not served by this hub")
         })
     }
 }

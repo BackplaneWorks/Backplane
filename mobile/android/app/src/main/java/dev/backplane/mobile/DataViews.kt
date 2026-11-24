@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -24,6 +25,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -55,6 +57,7 @@ internal val dok @Composable get() = Color(if (dlight) 0xFF1C8550 else 0xFF58C28
 internal val dwarn @Composable get() = Color(if (dlight) 0xFF9A6700 else 0xFFE3B341)
 internal val dfaint @Composable get() = Color(if (dlight) 0xFF72777F else 0xFF5C6473)
 internal val dview @Composable get() = Color(if (dlight) 0xFFF5F4EF else 0xFF08090B)
+internal val dinput @Composable get() = Color(if (dlight) 0xFF7446D0 else 0xFFB48CFF)
 // a thread's activity, one colour each (native/gpui/src/ui.rs `side_thread`): green working; red wanting the person or failed; grey otherwise
 @Composable internal fun dStateColor(s: String) = when (s) { "working" -> dok; "asking", "failed" -> dcs.error; else -> dfaint }
 /** A row's dot as the desktop's sidebar draws it (gpui siderow.rs `dot_of`): the hub's word for the thread (`status`) picks the colour and the shape; finished is the
@@ -98,16 +101,20 @@ internal fun dAgo(ms: Long): String {
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
-private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String, val from: Page? = null) : Page; data class Swarm(val room: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; object Mcp : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
+private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String, val from: Page? = null) : Page; data class Swarm(val room: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; data class Folders(val clone: CloneAsk? = null) : Page; data class New(val project: String) : Page; object Accounts : Page; object Mcp : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
 
 @Composable
 fun DataRoot() {
     var page by remember { mutableStateOf<Page>(DataClient.openFromIntent?.let { if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it) } ?: Page.Home) }
     // an expired sign-in's alert: that account, its sign-in started
     LaunchedEffect(DataClient.openAccount) { DataClient.openAccount?.let { page = Page.Account(it, true); DataClient.openAccount = null } }
+    LaunchedEffect(DataClient.openAccounts) { if (DataClient.openAccounts) { DataClient.openAccounts = false; page = Page.Accounts } }
+    LaunchedEffect(DataClient.openSettings) { if (DataClient.openSettings) { DataClient.openSettings = false; page = Page.Settings } }
     LaunchedEffect(DataClient.openFromIntent) { DataClient.openFromIntent?.let { page = if (DataClient.openViewerTab != null) Page.Viewer(it) else Page.Thread(it); DataClient.openFromIntent = null } }
     // a link the hub resolved (DataLinks.kt): its screen
-    LaunchedEffect(DataClient.openAddProject) { if (DataClient.openAddProject) { DataClient.openAddProject = false; page = Page.Folders } }
+    LaunchedEffect(DataClient.openAddProject) { if (DataClient.openAddProject) { DataClient.openAddProject = false; page = Page.Folders() } }
+    // /project <address>: Add project on Clone from git with it
+    LaunchedEffect(Clones.ask) { Clones.ask?.let { page = Page.Folders(it); Clones.ask = null } }
     LaunchedEffect(DataClient.linkTarget) {
         val t = DataClient.linkTarget ?: return@LaunchedEffect
         DataClient.linkTarget = null
@@ -115,6 +122,7 @@ fun DataRoot() {
             LinkTarget.Kind.THREAD -> page = Page.Thread(t.id)
             LinkTarget.Kind.FILE -> page = Page.Viewer(t.id, t.path, t.line)
             LinkTarget.Kind.PROJECT -> { DataClient.focusProject = t.id; page = Page.Home }
+            LinkTarget.Kind.SETTINGS -> page = if (t.id == "accounts") Page.Accounts else Page.Settings
             LinkTarget.Kind.ROOM -> {
                 if (Swarms.on() && !Swarms.isSwarm(t.id)) Swarms.load()
                 if (Swarms.isSwarm(t.id)) { page = Page.Swarm(t.id); return@LaunchedEffect }   // a swarm's page is its room's
@@ -126,10 +134,13 @@ fun DataRoot() {
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
-            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
+            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, Msg.palette_terminal) { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
-            is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
+            is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }
+                val viewerThread = DataClient.threads.firstOrNull { it.id == p.id }
+                    ?: if (p.file.isNotEmpty()) DThread(id = p.id, project = "", title = p.file.substringAfterLast('/'), state = "idle", updatedAt = 0L, pinned = false, settled = false, archived = false, provider = "", model = "", preview = "", waiting = 0) else null
+                viewerThread?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
             is Page.Thread -> { BackHandler { page = p.from ?: Page.Home }; CompositionLocalProvider(LocalOpenSub provides { k -> page = Page.Sub(p.id, k) }) { ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }, { page = Page.Settings }) { page = p.from ?: Page.Home } } }
@@ -141,10 +152,11 @@ fun DataRoot() {
             is Page.Account -> { BackHandler { page = Page.Accounts }; key(p) { AccountScreen(p.id, p.start, { page = Page.Accounts }) { page = Page.Account(it, false) } } } // each opening its own screen: an alert's tap reads the account afresh and starts the sign-in
             is Page.Hub -> { BackHandler { page = p.from }; HubScreen { page = p.from } }
             Page.Improve -> { BackHandler { page = Page.Settings }; ImproveScreen { page = Page.Settings } }
-            Page.Folders -> { BackHandler { page = Page.Home }; FolderScreen({ page = Page.Home }) { page = Page.New(it) } }
+            is Page.Folders -> { BackHandler { page = Page.Home }; key(p) { FolderScreen(p.clone, { page = Page.Home }, { page = Page.New(it) }) { t -> page = if (t != null) Page.Thread(t) else Page.Home } } }
             is Page.New -> { BackHandler { page = Page.Home }; NewThreadScreen(p.project, { page = Page.Home }) { page = Page.Thread(it) } }
         } }
         DataClient.askLink?.let { AskPair(it) }
+        DownloadStrip()
         LinkNote()
     }
 }
@@ -175,15 +187,25 @@ internal fun DBar(title: String, back: (() -> Unit)?, titleMenu: (@Composable Co
 private fun ConnBanner(hub: () -> Unit, settings: () -> Unit) {
     MigrateBanner()
     HubBanner(hub)
+    DataClient.home?.awayLine()?.let { (line, isErr) ->
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("home.away"), verticalAlignment = Alignment.CenterVertically) {
+            DMono(line, if (isErr) dcs.error else dcs.onSurfaceVariant, 12, Modifier.weight(1f))
+        }
+    }
     TelemetryBanner(settings)
     StarBanner()
     AlertsBanner()
-    if (DataClient.conn == DataClient.Conn.ONLINE) return
-    Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        DDot(if (DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8); Spacer(Modifier.width(8.dp))
-        DMono(if (DataClient.conn == DataClient.Conn.CONNECTING) Msg.android_conn_connecting(DataClient.hubName) else Msg.android_conn_offline, dcs.onSurface, 12, Modifier.weight(1f))
-        Spacer(Modifier.width(8.dp))
-        DMono(Msg.android_hub, dcs.primary, 12, Modifier.testTag("conn.hub").clickable(onClick = hub).padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
+    // the hub's restart (RestartStrip.kt) says itself here in place of the usual look: while it is away, and its crash note as we join
+    val online = DataClient.conn == DataClient.Conn.ONLINE
+    val restart = DataClient.restartText
+    if (online && restart == null) return
+    Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("conn.strip"), verticalAlignment = Alignment.CenterVertically) {
+        DDot(if (online) dcs.primary else if (restart != null || DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8); Spacer(Modifier.width(8.dp))
+        DMono(restart?.let { Tr.t(it) } ?: if (DataClient.conn == DataClient.Conn.CONNECTING) Msg.android_conn_connecting(DataClient.hubName) else Msg.android_conn_offline, dcs.onSurface, 12, Modifier.weight(1f))
+        if (!online) {
+            Spacer(Modifier.width(8.dp))
+            DMono(Msg.android_hub, dcs.primary, 12, Modifier.testTag("conn.hub").clickable(onClick = hub).padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
+        }
     }
 }
 
@@ -276,11 +298,11 @@ internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: Strin
 }
 
 @Composable
-internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modifier: Modifier = Modifier, danger: Boolean = false, onClick: () -> Unit) {
+internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modifier: Modifier = Modifier, danger: Boolean = false, small: Boolean = false, onClick: () -> Unit) {
     val bg = if (primary && enabled) dcs.primary else dcs.surfaceContainerHigh
     val fg = if (primary && enabled) dcs.onPrimary else if (!enabled) dfaint else if (danger) dcs.error else dcs.onSurface
-    Box(modifier.background(bg).border(BorderStroke(1.dp, if (primary && enabled) dcs.primary else dcs.outlineVariant)).clickable(enabled = enabled, onClick = onClick).heightIn(min = 40.dp).padding(horizontal = 14.dp), contentAlignment = Alignment.CenterStart) {
-        Text(label, color = fg, fontFamily = BpMono, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    Box(modifier.background(bg).border(BorderStroke(1.dp, if (primary && enabled) dcs.primary else dcs.outlineVariant)).clickable(enabled = enabled, onClick = onClick).heightIn(min = if (small) 28.dp else 40.dp).padding(horizontal = if (small) 8.dp else 14.dp), contentAlignment = Alignment.CenterStart) {
+        Text(label, color = fg, fontFamily = BpMono, fontSize = if (small) 11.sp else 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
     }
 }
 
@@ -292,11 +314,15 @@ internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier,
     }
 }
 
-// ---- home: the sidebar, projects with their threads
+private enum class HomeTab { INBOX, CREW, BENCH }
+
+// ---- home: mobile-native Inbox | Crew | Bench tabs (with persistent top-bar Bub + global Search)
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
+    var tab by remember { mutableStateOf(HomeTab.INBOX) }
     var projMenu by remember { mutableStateOf<DProject?>(null) }
     var botDelete by remember { mutableStateOf<DataClient.Bot?>(null) }
     var roomDelete by remember { mutableStateOf<DataClient.Room?>(null) }
@@ -318,9 +344,13 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var flash by remember { mutableStateOf("") }
     val rowOf = remember { mutableMapOf<String, Int>() }   // a project's header row in the list
-    // a project link: its group opens, the list scrolls to it and its row is marked for a moment
+    val sectioned = DataClient.has("sections") && DataClient.sections.isNotEmpty()
+    val partition = remember(DataClient.sections) { partitionSections(DataClient.sections) }
+    val uberBot = DataClient.bots.firstOrNull { it.uber && it.thread.isNotEmpty() }
+    // a project link: switch to Bench (or open its group on older hubs)
     LaunchedEffect(DataClient.focusProject, DataClient.projects.size) {
         val id = DataClient.focusProject; if (id.isEmpty() || DataClient.projects.none { it.id == id }) return@LaunchedEffect
+        if (sectioned) { tab = HomeTab.BENCH }
         shut = shut - id; prefs.edit().putStringSet("projects.shut", shut).apply(); flash = id; DataClient.focusProject = ""
         kotlinx.coroutines.delay(150)
         rowOf[id]?.let { listState.animateScrollToItem(it) }
@@ -332,16 +362,236 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             DropdownMenuItem({ Text(Msg.android_hub_add, fontFamily = BpMono) }, { dismiss(); DataClient.pairingError = ""; DataClient.adding = true }, Modifier.testTag("home.hub.add"))
             if (termsOn()) DropdownMenuItem({ Text(Msg.android_terminals, fontFamily = BpMono) }, { dismiss(); termsOpen(null) }, Modifier.testTag("home.hub.terms"))
         }) {
+            // Persistent 1-tap Bub quick-jump in the top bar across every tab
+            if (sectioned && uberBot != null) {
+                IconButton(onClick = { open(uberBot.thread) }, modifier = Modifier.testTag("home.bub.quick")) {
+                    if (DataClient.has("cats")) BotCat(uberBot.look, uberBot.color, 26.dp)
+                    else DMono("@", dcs.primary, 15, bold = true)
+                }
+            }
+            if (sectioned && DataClient.has("search")) {
+                IconButton(onClick = { searchOpen = !searchOpen; if (!searchOpen) q = "" }, modifier = Modifier.testTag("home.search.toggle")) {
+                    Icon(if (searchOpen) Icons.Default.Close else Icons.Default.Search, if (searchOpen) Msg.common_close else Msg.common_search, tint = if (searchOpen) dcs.primary else dcs.onSurfaceVariant)
+                }
+            }
             IconButton(onClick = settings, modifier = Modifier.testTag("home.settings")) { Icon(Icons.Default.Settings, Msg.palette_settings, tint = dcs.onSurfaceVariant) }
         }
         ConnBanner(hub, settings)
+        NoProviderBanner { DataClient.openAccounts = true }
+        if (sectioned) {
+            val searchFocus = remember { androidx.compose.ui.focus.FocusRequester() }
+            LaunchedEffect(searchOpen) { if (searchOpen) runCatching { searchFocus.requestFocus() } }
+            if (searchOpen && DataClient.has("search")) {
+                Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) { DField(q, { q = it }, Msg.android_search_hint, Modifier.focusRequester(searchFocus).testTag("home.searchfield")) }
+                    IconButton(onClick = { q = ""; searchOpen = false }, modifier = Modifier.testTag("home.search.close")) { Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant) }
+                }
+                DLine()
+                if (q.isNotBlank()) {
+                    Box(Modifier.weight(1f)) { SearchResults(q, open) }
+                }
+            }
+            if (!searchOpen || q.isBlank()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    when (tab) {
+                        HomeTab.INBOX -> {
+                            LazyColumn(Modifier.fillMaxSize().testTag("home.list")) {
+                                item("inbox.machines") { MachineChips() }
+                                if (partition.inboxEmpty) {
+                                    item("inbox.clear") {
+                                        InboxAllClearCard(
+                                            bub = uberBot,
+                                            quickProjects = partition.quickJumpProjects(3),
+                                            openBub = open,
+                                            openProject = { secPage = it },
+                                            openBench = { tab = HomeTab.BENCH },
+                                        )
+                                    }
+                                    // keep Snoozed reachable underneath All clear when items are snoozed
+                                    inboxItems(partition.inbox.filter { it.id == "snoozed" }, open, openSwarm)
+                                } else {
+                                    inboxItems(partition.inbox, open, openSwarm)
+                                }
+                            }
+                        }
+                        HomeTab.CREW -> {
+                            val bots = DataClient.bots.filter { !it.uber && it.thread.isNotEmpty() }
+                            val rooms = DataClient.rooms
+                            LazyColumn(Modifier.fillMaxSize().testTag("home.crew")) {
+                                uberBot?.let { b ->
+                                    item("crew.bub") {
+                                        Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .background(dcs.surface, RectangleShape)
+                                                    .border(BorderStroke(1.dp, dcs.primary.copy(alpha = 0.45f)), RectangleShape)
+                                                    .clickable { open(b.thread) }
+                                                    .padding(horizontal = 14.dp, vertical = 12.dp)
+                                                    .testTag("crew.bub"),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                if (DataClient.has("cats")) BotCat(b.look, b.color, 52.dp)
+                                                else Box(Modifier.size(44.dp).background(dcs.primary.copy(alpha = 0.14f), RectangleShape), contentAlignment = Alignment.Center) { DMono("@", dcs.primary, 18, bold = true) }
+                                                Spacer(Modifier.width(12.dp))
+                                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                    DMono(b.name, dcs.onSurface, 16, bold = true)
+                                                    DMono(onMachine(b.note.ifEmpty { Msg.android_kind_uberbot }, b.mark), dcs.onSurfaceVariant, 11)
+                                                }
+                                                Icon(Icons.Default.ChevronRight, null, tint = dcs.primary, modifier = Modifier.size(18.dp))
+                                            }
+                                        }
+                                    }
+                                }
+                                if (bots.isNotEmpty()) {
+                                    item("crew.bots.head") { DMono(Msg.plane_heading_bots.uppercase(), dcs.onSurfaceVariant, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 8.dp, bottom = 4.dp), bold = true) }
+                                    items(bots, key = { "cb:${it.id}" }) { b ->
+                                        Column(Modifier.fillMaxWidth()) {
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 56.dp)
+                                                    .combinedClickable(onClick = { open(b.thread) }, onLongClick = if (b.delete) ({ botDelete = b }) else null)
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                                    .testTag("side.@${b.name}"),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                if (DataClient.has("cats")) BotCat(b.look, b.color, 34.dp)
+                                                else DMono("@", dcs.primary, 14, bold = true)
+                                                Spacer(Modifier.width(12.dp))
+                                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                    DMono(b.name, dcs.onSurface, 14)
+                                                    DMono(onMachine(b.note.ifEmpty { Msg.android_kind_bot }, b.mark), dcs.onSurfaceVariant, 11)
+                                                }
+                                                Icon(Icons.Default.ChevronRight, null, tint = dfaint, modifier = Modifier.size(16.dp))
+                                            }
+                                            DLine()
+                                        }
+                                    }
+                                }
+                                if (rooms.isNotEmpty()) {
+                                    item("crew.rooms.head") { DMono(Msg.plane_heading_rooms.uppercase(), dcs.onSurfaceVariant, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 14.dp, bottom = 4.dp), bold = true) }
+                                    items(rooms, key = { "cr:${it.id}" }) { r ->
+                                        Column(Modifier.fillMaxWidth()) {
+                                            Row(
+                                                Modifier
+                                                    .fillMaxWidth()
+                                                    .heightIn(min = 56.dp)
+                                                    .combinedClickable(onClick = { openRoom(r) }, onLongClick = if (r.delete) ({ roomDelete = r }) else null)
+                                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                                                    .testTag("side.#${r.name}"),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                Box(Modifier.size(32.dp).background(dcs.surfaceContainerHigh, RectangleShape).border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape), contentAlignment = Alignment.Center) {
+                                                    DMono("#", dcs.primary, 14, bold = true)
+                                                }
+                                                Spacer(Modifier.width(12.dp))
+                                                Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                    DMono(r.name, dcs.onSurface, 14)
+                                                    DMono(onMachine(Msg.android_kind_room, r.mark), dcs.onSurfaceVariant, 11)
+                                                }
+                                                Icon(Icons.Default.ChevronRight, null, tint = dfaint, modifier = Modifier.size(16.dp))
+                                            }
+                                            DLine()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        HomeTab.BENCH -> {
+                            val hist = DataClient.history
+                            Column(Modifier.fillMaxSize()) {
+                                Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    if (DataClient.has("search") && !searchOpen) {
+                                        Row(
+                                            Modifier
+                                                .weight(1f)
+                                                .heightIn(min = 40.dp)
+                                                .background(dview, RectangleShape)
+                                                .border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape)
+                                                .clickable { searchOpen = true }
+                                                .padding(horizontal = 10.dp)
+                                                .testTag("home.bench.search"),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        ) {
+                                            Icon(Icons.Default.Search, null, tint = dfaint, modifier = Modifier.size(16.dp))
+                                            DMono(Msg.android_search_hint, dfaint, 13)
+                                        }
+                                    } else Spacer(Modifier.weight(1f))
+                                    IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, Msg.sidebar_add_project, tint = dcs.onSurfaceVariant) }
+                                }
+                                MachineChips()
+                                DLine()
+                                LazyColumn(Modifier.fillMaxSize().testTag("home.bench"), state = listState) {
+                                    if (partition.bench.isEmpty() && DataClient.projects.isEmpty()) {
+                                        item("bench.empty") {
+                                            Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                                                Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
+                                                if (DataClient.listsLoaded) { Spacer(Modifier.height(12.dp)); DBtn(Msg.android_project_add, true, true, onClick = addProject) }
+                                            }
+                                        }
+                                    } else {
+                                        benchItems(partition.bench, open, { secPage = it }, { secMenu = it }, { secRename = it }, openSwarm)
+                                    }
+                                    if (hist.count > 0) {
+                                        item("history") {
+                                            Row(Modifier.fillMaxWidth().height(44.dp).clickable { DataClient.showHistory(!DataClient.historyOpen) }.padding(start = 12.dp).testTag("home.history"), verticalAlignment = Alignment.CenterVertically) {
+                                                Icon(if (DataClient.historyOpen) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
+                                                DMono(hist.title.uppercase(), dcs.onSurfaceVariant, 11, Modifier.weight(1f))
+                                            }
+                                        }
+                                        items(hist.shown(DataClient.historyOpen), key = { "h:${it.id}" }) { t -> ThreadRow(t, { open(t.id) }) }
+                                        if (DataClient.historyOpen && hist.next != null) item("history.more") {
+                                            val more = rememberCoroutineScope()
+                                            Row(Modifier.fillMaxWidth().height(36.dp).clickable { more.launch { DataClient.loadHistory(more = true) } }.padding(start = 34.dp).testTag("home.history.more"), verticalAlignment = Alignment.CenterVertically) { DMono(Msg.common_more, dfaint, 11) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            DLine()
+            NavigationBar(containerColor = dcs.surfaceVariant, tonalElevation = 0.dp, modifier = Modifier.testTag("home.tabs")) {
+                NavigationBarItem(
+                    selected = tab == HomeTab.INBOX,
+                    onClick = { tab = HomeTab.INBOX; searchOpen = false; q = "" },
+                    icon = {
+                        BadgedBox(badge = { if (partition.needsCount > 0) Badge(containerColor = dcs.error, contentColor = dcs.onError) { DMono("${partition.needsCount}", dcs.onError, 10, bold = true) } }) {
+                            Icon(Icons.Default.Inbox, Msg.mobile_tab_inbox)
+                        }
+                    },
+                    label = { DMono(Msg.mobile_tab_inbox, if (tab == HomeTab.INBOX) dcs.primary else dcs.onSurfaceVariant, 11, bold = tab == HomeTab.INBOX) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = dcs.primary, unselectedIconColor = dcs.onSurfaceVariant, indicatorColor = dcs.primary.copy(alpha = 0.14f)),
+                    modifier = Modifier.testTag("home.tab.inbox"),
+                )
+                NavigationBarItem(
+                    selected = tab == HomeTab.CREW,
+                    onClick = { tab = HomeTab.CREW; searchOpen = false; q = "" },
+                    icon = { Icon(Icons.Default.Groups, Msg.mobile_tab_crew) },
+                    label = { DMono(Msg.mobile_tab_crew, if (tab == HomeTab.CREW) dcs.primary else dcs.onSurfaceVariant, 11, bold = tab == HomeTab.CREW) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = dcs.primary, unselectedIconColor = dcs.onSurfaceVariant, indicatorColor = dcs.primary.copy(alpha = 0.14f)),
+                    modifier = Modifier.testTag("home.tab.crew"),
+                )
+                NavigationBarItem(
+                    selected = tab == HomeTab.BENCH,
+                    onClick = { tab = HomeTab.BENCH; searchOpen = false; q = "" },
+                    icon = { Icon(Icons.Default.DeveloperBoard, Msg.mobile_tab_bench) },
+                    label = { DMono(Msg.mobile_tab_bench, if (tab == HomeTab.BENCH) dcs.primary else dcs.onSurfaceVariant, 11, bold = tab == HomeTab.BENCH) },
+                    colors = NavigationBarItemDefaults.colors(selectedIconColor = dcs.primary, unselectedIconColor = dcs.onSurfaceVariant, indicatorColor = dcs.primary.copy(alpha = 0.14f)),
+                    modifier = Modifier.testTag("home.tab.bench"),
+                )
+            }
+        } else {
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (DataClient.has("search")) Box(Modifier.weight(1f)) { DField(q, { q = it }, Msg.android_search_hint, Modifier.testTag("home.searchfield")) } else Spacer(Modifier.weight(1f))
             IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, Msg.sidebar_add_project, tint = dcs.onSurfaceVariant) }
         }
         MachineChips()
         DLine()
-        if (DataClient.locks.isNotEmpty() && !(DataClient.has("sections") && DataClient.sections.isNotEmpty())) LocksStrip(open) // (the sections leave the hub's locks out: backend work)
+        if (DataClient.locks.isNotEmpty()) LocksStrip(open)
         if (q.isNotBlank() && DataClient.has("search")) { SearchResults(q, open); return@Column }
         val botThreads = DataClient.bots.map { it.thread }.toSet()
         val projects = DataClient.projects; val swarmsOn = Swarms.on()
@@ -349,10 +599,9 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         val threads = DataClient.threads.filter { !it.archived && it.id !in botThreads && !it.history && !(swarmsOn && it.swarm.isNotEmpty()) }
         val hist = DataClient.history
         if (projects.isEmpty() && threads.isEmpty() && hist.count == 0) {
-            // no project yet: Bub (and what the hub's sections hold, Needs you) still lead the list; the empty state and Add a project come under them
+            // no project yet: Bub still leads the list; the empty state and Add a project come under it
             LazyColumn(Modifier.fillMaxSize().testTag("home.list")) {
                 items(DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark), lead = botCat(b)) { open(b.thread) } }
-                if (DataClient.has("sections") && DataClient.sections.isNotEmpty()) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it }, openSwarm)
                 item("empty") {
                     Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
@@ -364,10 +613,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             val uber = DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }
             items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(b.note.ifEmpty { Msg.android_kind_uberbot }, b.mark), lead = botCat(b)) { open(b.thread) } }
             var at = uber.size; rowOf.clear()
-            // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
-            val sectioned = DataClient.has("sections") && DataClient.sections.isNotEmpty()
-            if (sectioned) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it }, openSwarm)
-            if (!sectioned) for (p in projects) {
+            for (p in projects) {
                 val closed = p.id in shut
                 rowOf[p.id] = at; at += 1
                 val sw = if (swarmsOn) SwarmUi.live(Swarms.all, p.id) else emptyList()
@@ -417,7 +663,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 }
             }
             val known = projects.map { it.id }.toSet()
-            if (!sectioned) items(threads.filter { it.project !in known }, key = { "t:${it.id}" }) { t -> ThreadRow(t, { open(t.id) }) }
+            items(threads.filter { it.project !in known }, key = { "t:${it.id}" }) { t -> ThreadRow(t, { open(t.id) }) }
             // Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
             if (hist.count > 0) {
                 item("history") {
@@ -438,6 +684,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             if (DataClient.rooms.isNotEmpty()) { item("rooms") { DMono(Msg.plane_heading_rooms, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
                 items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, onMachine(Msg.android_kind_room, r.mark), onLong = if (r.delete) ({ roomDelete = r }) else null) { openRoom(r) } } }
         }
+        } // end !sectioned
         // Delete bot (a long press on a bot the hub offers it for): asked first, then `bot.delete`
         botDelete?.let { b -> BotDeleteDialog(b) { botDelete = null } }
         // Delete room (a long press on a room the hub offers it for): asked first, then `room.delete`
@@ -547,11 +794,46 @@ private fun LocksStrip(open: (String) -> Unit) {
     }
 }
 
+private fun planPhaseLabel(pm: DPlanMode): String = when (pm.phase) {
+    "armed" -> if (pm.scope == "once") Msg.gpui_planmode_chip_once else Msg.gpui_mgmt_plan_tab
+    "planning" -> Msg.gpui_planmode_top_planning
+    "pending" -> Msg.gpui_planmode_chip_review
+    "executing" -> Msg.gpui_planmode_chip_building
+    else -> Msg.gpui_mgmt_plan_tab
+}
+
+private fun planBannerText(pm: DPlanMode): String = when (pm.phase) {
+    "armed" -> if (pm.scope == "once") Msg.gpui_planmode_bar_once else Msg.gpui_planmode_bar_always
+    "planning" -> Msg.gpui_planmode_bar_planning
+    "pending" -> Msg.gpui_planmode_bar_pending
+    "executing" -> Msg.gpui_planmode_bar_executing
+    else -> ""
+}
+
+@Composable
+private fun planModeTint(pm: DPlanMode?): Color = when (pm?.phase) {
+    "armed", "planning", "pending" -> dinput
+    "executing" -> dok
+    else -> dcs.primary
+}
+
 @Composable
 private fun StateStrip(t: DThread) {
+    val pm = effectivePlanMode(t)
     Column(Modifier.background(dcs.surfaceVariant)) {
         Row(Modifier.fillMaxWidth().height(32.dp).padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             DMono(Msg.android_state_head, dfaint); Spacer(Modifier.width(8.dp)); StatusDot(t, 6); Spacer(Modifier.width(6.dp)); DMono(statusLabel(dStatusWord(t)), dcs.onSurface, modifier = Modifier.testTag("thread.state"))
+            if (pm != null && pm.isActive) {
+                val ptint = planModeTint(pm)
+                Spacer(Modifier.width(8.dp))
+                DMono(
+                    planPhaseLabel(pm),
+                    ptint,
+                    10,
+                    Modifier.border(BorderStroke(1.dp, ptint)).padding(horizontal = 5.dp, vertical = 1.dp).testTag("thread.planmode"),
+                    bold = true,
+                )
+            }
             Spacer(Modifier.weight(1f))
             if (DataClient.has("actions")) {
                 StripCell(if (t.pinned) Msg.menu_unpin else Msg.menu_pin, t.pinned) { DataClient.threadAct(t.id, if (t.pinned) "unpin" else "pin") }
@@ -573,6 +855,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
     CompositionLocalProvider(LocalChatTerm provides ct) { ThreadBody(id, viewer, hub, go, settings, back, ct) }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (String) -> Unit, settings: () -> Unit, back: () -> Unit, chatTerm: ChatTerm?) {
     val scope = rememberCoroutineScope()
@@ -679,7 +962,8 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             items(rows, key = { it.id }) { r ->
                 Box(Modifier.background(if (found == r.id) dcs.primary.copy(alpha = .16f) else Color.Transparent)) {
                 when (r) {
-                    is DRow.Entry -> EntryRow(id, r.entry) { jump(it, true) }
+                    // a thought: folded to its first line, opened with a tap, kept open or shut as a run of tool calls is
+                    is DRow.Entry -> if (r.entry.folds) ThoughtRow(id, r.entry, r.entry.id in openRuns) { openRuns = if (r.entry.id in openRuns) openRuns - r.entry.id else openRuns + r.entry.id } else EntryRow(id, r.entry, goTo = { jump(it, true) }, reply = { DataClient.startReply(id, it) })
                     is DRow.Fold -> FoldRow(r.fold, r.fold.id in openRuns) { openRuns = if (r.fold.id in openRuns) openRuns - r.fold.id else openRuns + r.fold.id }
                 }
                 }
@@ -688,6 +972,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             if (thread?.state == "working") item("working") { WorkingRow() }
         }
         DLine()
+        if (!id.contains('~')) NoProviderBanner { DataClient.openAccounts = true }
         review?.let { r -> ReviewBar(r, !reviewing) { if (!reviewing) { reviewing = true; scope.launch { try { review = DataClient.reviewSet(id, r.value) } catch (e: Exception) { notice = e.message ?: "" } finally { reviewing = false } } } } }
         order?.let { OrderCard(it) }
         MentionPopup(draft) { put(it) }
@@ -699,15 +984,82 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             if (notice.isNotEmpty()) DMono(Tr.t(notice), dwarn, 12)
             existing?.let { dir -> DBtn(Msg.android_hub_cmd_project_existing, false, true, Modifier.testTag("thread.project.existing")) { scope.launch { try { DataClient.addProject(dir); existing = null; notice = ""; put("") } catch (e: Exception) { notice = e.message ?: Msg.android_failed_generic } } } }
             thread?.mark?.let { m -> DMono(Tr.t(m.runs) + if (m.away) " · " + Msg.android_away else "", dfaint, 11, Modifier.testTag("thread.runs")) }
-            DataClient.sendError[id]?.let { DMono(Tr.t(it), dcs.error, 12, Modifier.testTag("thread.refused")) }
+            DataClient.sendError[id]?.let {
+                DMono(Tr.t(it), dcs.error, 12, Modifier.testTag("thread.refused"))
+                if (DNoProvider.isSendError(it)) DBtn(Msg.provider_notice_button, false, true, Modifier.testTag("thread.refused.accounts")) { DataClient.openAccounts = true }
+            }
             if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) { Pic(b, 64) }; }
             }
             if (dictate) VoiceStrip(id)
-            DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.testTag("thread.composer"), 6, dcs.primary)
+            // Reply on a message: the strip over the box (who wrote it, its first line; a tap goes to it, × drops it), and the box takes the keyboard
+            val replyBox = remember { androidx.compose.ui.focus.FocusRequester() }
+            val replyAt = DataClient.replyFocus; LaunchedEffect(replyAt) { if (replyAt > 0 && id in DataClient.replying) runCatching { replyBox.requestFocus() } }
+            DataClient.replying[id]?.let { r -> ReplyStrip(r, go = { jump(r.id, true) }) { DataClient.dropReply(id) } }
+            val planMode = effectivePlanMode(thread)
+            val planActive = planMode?.isActive == true
+            val planTint = planModeTint(planMode)
+            val planPrimary = planMode?.phase in setOf("armed", "planning", "pending")
+            var planMenu by remember { mutableStateOf(false) }
+            if (planMode != null && planActive) {
+                Row(
+                    Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, planTint.copy(alpha = 0.45f))).padding(horizontal = 8.dp, vertical = 5.dp).testTag("thread.plan.banner"),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Box(Modifier.width(2.dp).height(14.dp).background(planTint))
+                    DMono(planBannerText(planMode), planTint, 10, Modifier.weight(1f), lines = 2)
+                    if (planMode.phase == "armed" || planMode.phase == "planning") {
+                        val isOnce = planMode.scope == "once"
+                        DMono(
+                            if (isOnce) Msg.gpui_planmode_scope_always else Msg.gpui_planmode_scope_once,
+                            planTint,
+                            10,
+                            Modifier.border(BorderStroke(1.dp, planTint.copy(alpha = 0.6f))).clickable {
+                                scope.launch { runCatching { DataClient.setPlanMode(id, if (isOnce) PlanModeTarget.ALWAYS else PlanModeTarget.ONCE) } }
+                            }.padding(horizontal = 6.dp, vertical = 2.dp),
+                            bold = true,
+                        )
+                        DMono(
+                            Msg.settings_lang_off,
+                            dcs.onSurfaceVariant,
+                            10,
+                            Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).clickable {
+                                scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.OFF) } }
+                            }.padding(horizontal = 6.dp, vertical = 2.dp),
+                        )
+                    }
+                }
+            }
+            DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.focusRequester(replyBox).testTag("thread.composer"), 6, if (planActive) planTint else dcs.primary)
             thread?.memory?.let { MemoryBar(it) }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { Msg.common_default }}" }, "thread.model", Modifier.weight(1f)) { models = true } else Spacer(Modifier.weight(1f))
+                if (DataClient.has("plan") && planMode != null) {
+                    val pcol = if (planActive) planTint else dcs.onSurfaceVariant
+                    Box(
+                        Modifier.height(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (planActive) planTint else dcs.outlineVariant))
+                            .combinedClickable(
+                                onClick = {
+                                    val nxt = nextPlanModeCycle(planMode)
+                                    scope.launch { runCatching { DataClient.setPlanMode(id, nxt) } }
+                                },
+                                onLongClick = { planMenu = true },
+                            )
+                            .padding(horizontal = 8.dp).testTag("thread.plan.toggle"),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Icon(Icons.Default.Checklist, Msg.gpui_planmode_tip, tint = pcol, modifier = Modifier.size(16.dp))
+                            DMono(if (planActive) planPhaseLabel(planMode) else Msg.gpui_mgmt_plan_tab, pcol, 10, bold = planActive)
+                        }
+                        DropdownMenu(planMenu, { planMenu = false }) {
+                            DropdownMenuItem({ Text(Msg.settings_lang_off, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.OFF) } } })
+                            DropdownMenuItem({ Text(Msg.gpui_planmode_scope_once, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.ONCE) } } })
+                            DropdownMenuItem({ Text(Msg.gpui_planmode_scope_always, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.ALWAYS) } } })
+                        }
+                    }
+                }
                 Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) attachMenu = true else notice = Msg.android_pictures_old }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.AttachFile, Msg.composer_attach, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     DropdownMenu(attachMenu, { attachMenu = false }) {
@@ -725,11 +1077,11 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                 }
                 val blank = draft.isBlank() && pending.isEmpty()
                 if (running && blank) DBtn(Msg.composer_stop, false, modifier = Modifier.testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
-                else DBtn(word?.label?.let(Tr::t) ?: Msg.composer_send, true, !blank, Modifier.testTag("thread.send")) {
+                else DBtn(word?.label?.let(Tr::t) ?: (if (planPrimary) Msg.gpui_mgmt_plan_tab else Msg.composer_send), true, !blank, Modifier.testTag("thread.send")) {
                     notice = ""; existing = null
                     // sent: the keyboard goes away, so the reply has the screen (a tap on the box brings it back)
                     // (focus first: the keyboard's word in progress is committed before the box empties, never after it)
-                    if (word == null) { val text = draft; focus.clearFocus(); val spoken = if (dictate && pending.isEmpty()) DataVoice.dictated(id) else null; if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList(), voice = spoken); pending.clear(); stick = true }
+                    if (word == null) { val text = draft; focus.clearFocus(); val spoken = if (dictate && pending.isEmpty()) DataVoice.dictated(id) else null; if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList(), voice = spoken, reply = DataClient.replying[id]); pending.clear(); stick = true }
                     // a command of the composer: the hub runs it; a refusal leaves the draft and says why
                     else { val text = draft.trim(); scope.launch { try {
                         val r = DataClient.runCommand(id, text)
@@ -739,6 +1091,8 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                             "intent" -> { notice = Msg.intent_saved; put("") }
                             // /project: alone, the Add project screen; made, its first thread opens; a folder that holds something, Add existing under the reason
                             "project" -> { put(""); DataClient.openAddProject = true }
+                            // /project <repository address> [message]: Add project's Clone from git on it, the message kept for its first thread
+                            "clone" -> { put(""); Clones.ask = CloneAsk(r.optString("repo"), r.optString("text")) }
                             "made" -> { put(""); notice = r.optString("note"); r.optString("thread").takeIf { it.isNotEmpty() }?.let { DataClient.linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it) } }
                             "exists" -> { notice = r.optString("error"); existing = r.optString("path") }
                             else -> put("")
@@ -759,6 +1113,23 @@ private fun FoldRow(f: DFold, open: Boolean, toggle: () -> Unit) {
             DMono(Tr.t(f.label), dcs.onSurfaceVariant, 12)
         }
         if (open) f.items.forEach { ToolRow(it) }
+    }
+}
+
+/** A thought the agent sent (data/1 `folds`, #1325): shut, its first line beside a chevron, as Settings' Show thinking says ("folded"); a tap opens the
+ *  whole of it as Markdown and shuts it again. The desktop's screens/thought.rs. */
+@Composable
+private fun ThoughtRow(tid: String, e: DEntry, open: Boolean, toggle: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 2.dp).testTag("thought.${e.id}")) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 32.dp).clickable(onClick = toggle).testTag("thought.head.${e.id}"), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, if (open) Msg.common_hide else Msg.common_show, tint = dfaint, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp))
+            Text(Tr.t(e.label.ifEmpty { "thinking" }), color = dfaint, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+            if (!open) { Spacer(Modifier.width(8.dp)); Text(DataFold.thoughtLine(e.text), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f)) }
+        }
+        if (open) Row(Modifier.padding(start = 6.dp, top = 2.dp, bottom = 4.dp).height(IntrinsicSize.Min)) {
+            Box(Modifier.width(1.dp).fillMaxHeight().background(dcs.outlineVariant)); Spacer(Modifier.width(10.dp))
+            Box(Modifier.alpha(.85f).testTag("thought.body.${e.id}")) { MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy"), false)) }
+        }
     }
 }
 
@@ -822,21 +1193,60 @@ private fun SecretBox(tid: String, name0: String, asked: DataClient.SecretAsk?, 
     }
 }
 
+/** Reply's strip over the composer (the desktop's `reply-strip`): who wrote the message and its first line; a tap goes to it, × drops the reply. */
+@Composable
+private fun ReplyStrip(r: DReplyRef, go: () -> Unit, drop: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("thread.reply.strip"), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.width(2.dp).fillMaxHeight().background(dcs.primary))
+        Column(Modifier.weight(1f).clickable(onClick = go).padding(horizontal = 8.dp, vertical = 4.dp)) {
+            DMono(if (ReplyDraft.mine(r)) Msg.secret_you else Msg.model_col_agent, dcs.primary, 11, bold = true)
+            DMono(Msg.gpui_b_replying_to(ReplyDraft.firstLine(r.text)), dcs.onSurfaceVariant, 11, lines = 1)
+        }
+        IconButton(onClick = drop, modifier = Modifier.size(36.dp).testTag("thread.reply.drop")) { Icon(Icons.Default.Close, Msg.reply_cancel, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
+    }
+}
+
+/** Reply by a swipe right, as messaging apps do: the message follows the finger, the arrow shows; let go past it (ReplyDraft.swipe), Reply. The list still scrolls. */
+@Composable
+private fun Modifier.replySwipe(r: DReplyRef?, reply: (DReplyRef) -> Unit): Modifier {
+    if (r == null) return this
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val haptic = androidx.compose.ui.platform.LocalHapticFeedback.current
+    var pull by remember(r.id) { mutableStateOf(0f) }
+    return this.pointerInput(r.id) {
+        detectHorizontalDragGestures(onDragEnd = { if (ReplyDraft.swipe(with(density) { pull.toDp().value }, 0f)) { haptic.performHapticFeedback(androidx.compose.ui.hapticfeedback.HapticFeedbackType.LongPress); reply(r) }; pull = 0f },
+            onDragCancel = { pull = 0f }) { ch, dx -> val n = (pull + dx).coerceIn(0f, with(density) { 80.dp.toPx() }); if (n != pull || n > 0f) ch.consume(); pull = n }
+    }.offset { androidx.compose.ui.unit.IntOffset(pull.toInt(), 0) }
+}
+
+/** Long-press on a message: Reply and Copy (the desktop's two under a message), then whatever else it has. */
+@Composable
+private fun ReplyMenuItems(e: DEntry, r: DReplyRef?, close: () -> Unit, reply: (DReplyRef) -> Unit) {
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    r?.let { DropdownMenuItem({ Text(Msg.reply_action, fontFamily = BpMono) }, { close(); reply(it) }, Modifier.testTag("thread.entry.reply.menu"), leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, null) }) }
+    if (e.text.isNotEmpty()) DropdownMenuItem({ Text(Msg.common_copy, fontFamily = BpMono) }, { close(); clip.setText(androidx.compose.ui.text.AnnotatedString(e.text)) }, Modifier.testTag("thread.entry.copy"), leadingIcon = { Icon(Icons.Default.ContentCopy, null) })
+}
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
+private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply: (DReplyRef) -> Unit = {}) {
+    val rr = if (DataClient.has("reply")) ReplyDraft.of(e.id, e.kind, e.text, e.live) else null
+    val replyLink: @Composable () -> Unit = { rr?.let { DMono(Msg.reply_action, dfaint, 11, Modifier.clickable { reply(it) }.testTag("thread.entry.reply")) } }
     when (e.kind) {
-        "user" -> Column(Modifier.fillMaxWidth().padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
+        "user" -> Column(Modifier.fillMaxWidth().replySwipe(rr, reply).padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
             // a reply: what it answers, a tap goes there
             e.replyTo?.let { r -> DMono(Msg.gpui_b_in_reply_to(r.quote), dfaint, modifier = Modifier.clickable { goTo(r.id) }.padding(bottom = 3.dp).testTag("thread.entry.replyto")) }
             e.localImages.forEach { Pic(it, 160); Spacer(Modifier.height(4.dp)) }
             e.attachments.filter { e.localImages.isEmpty() }.forEach { PicById(it.id, 160); Spacer(Modifier.height(4.dp)) }
-            // long-press: Restore to before this, when the hub has the snapshot before the turn this message started; asked first, with the snapshot's info
+            // long-press: Reply, Copy, and Restore to before this when the hub has the snapshot before the turn this message started (asked first, with the snapshot's info)
             var menu by remember { mutableStateOf(false) }; var asking by remember { mutableStateOf(false) }
-            val press = if (e.restore != null) Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }) else Modifier
+            val press = if (e.restore != null || rr != null) Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }) else Modifier
             if (e.text.isNotEmpty()) Box(press.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) {
                 LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19)
-                DropdownMenu(menu, { menu = false }) { DropdownMenuItem({ Text(Msg.thread_restore_action, fontFamily = BpMono) }, { menu = false; asking = true }, Modifier.testTag("thread.entry.restore")) }
+                DropdownMenu(menu, { menu = false }) {
+                    ReplyMenuItems(e, rr, { menu = false }, reply)
+                    if (e.restore != null) DropdownMenuItem({ Text(Msg.thread_restore_action, fontFamily = BpMono) }, { menu = false; asking = true }, Modifier.testTag("thread.entry.restore"))
+                }
             }
             e.restore?.takeIf { asking }?.let { r ->
                 AlertDialog(onDismissRequest = { asking = false }, title = { Text(Msg.thread_restore_ask) },
@@ -855,14 +1265,20 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
                 }
                 if (e.sending) DMono(Msg.thread_sending, dfaint)
                 else if (e.failed) DMono(Msg.android_send_retry, dcs.error, modifier = Modifier.clickable { DataClient.retry(tid, e) })
-                else DMono(dStamp(e.at), dfaint)
+                else { replyLink(); DMono(dStamp(e.at), dfaint) }
             }
         }
-        "assistant" -> Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
+        "assistant" -> Column(Modifier.fillMaxWidth().replySwipe(rr, reply).padding(horizontal = 14.dp, vertical = 6.dp)) {
             MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy"), e.live))
-            // the pictures the reply names (the hub lists them as attachments), tap for the full size
+            // the pictures the reply names (the hub lists them as attachments or `images`), tap for the full size
             e.attachments.forEach { Spacer(Modifier.height(6.dp)); PicById(it.id, 240, zoom = true) }
-            if (!e.live) DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 4.dp))
+            e.images.forEach { Spacer(Modifier.height(6.dp)); PicByReply(e.id, it, 240) }
+            // the footer: the time, Reply; a long-press on it (the text keeps its own selection) is Reply and Copy
+            if (!e.live) { var menu by remember { mutableStateOf(false) }
+                Row(Modifier.padding(top = 4.dp).combinedClickable(onClick = {}, onLongClick = { if (rr != null) menu = true }), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    DMono(dStamp(e.at), dfaint); replyLink()
+                    DropdownMenu(menu, { menu = false }) { ReplyMenuItems(e, rr, { menu = false }, reply) }
+                } }
         }
         "tool", "step" -> Box(Modifier.padding(horizontal = 12.dp)) { ToolRow(e) }
         "ask" -> AskCard(tid, e)
@@ -902,7 +1318,96 @@ private fun HandoffCard(tid: String, e: DEntry) {
 private fun AskCard(tid: String, e: DEntry) {
     val a = e.ask
     var answer by remember(e.id) { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (a?.open == true) dcs.error else dcs.outlineVariant)).padding(12.dp).testTag("ask.card")) {
+    var revising by remember(e.id) { mutableStateOf(false) }
+    var revision by remember(e.id) { mutableStateOf("") }
+    var expanded by remember(e.id) { mutableStateOf(false) }
+    var copied by remember(e.id) { mutableStateOf(false) }
+    val clip = androidx.compose.ui.platform.LocalClipboardManager.current
+    val scope = rememberCoroutineScope()
+    val isPlan = a?.kind == "plan"
+    val border = if (a?.open == true) (if (isPlan) dinput else dcs.error) else dcs.outlineVariant
+
+    if (a != null && isPlan) {
+        val content = a.question.ifEmpty { e.text }
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
+                .background(dcs.surfaceVariant).border(BorderStroke(1.dp, border))
+                .height(IntrinsicSize.Min).testTag("ask.card"),
+        ) {
+            if (a.open) Box(Modifier.width(3.dp).fillMaxHeight().background(dinput))
+            Column(Modifier.weight(1f).padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    DMono(if (a.head.isNotEmpty()) Tr.t(a.head) else Msg.ask_plan, dcs.onSurface, 12, bold = true)
+                    if (a.open) {
+                        DMono(
+                            Msg.gpui_ask_plan_ready,
+                            dinput,
+                            10,
+                            Modifier.border(BorderStroke(1.dp, dinput.copy(alpha = 0.65f))).padding(horizontal = 5.dp, vertical = 1.dp),
+                            bold = true,
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    DBtn(if (copied) Msg.mobile_plan_copied else Msg.common_copy, false, small = true, modifier = Modifier.testTag("ask.copy")) {
+                        clip.setText(androidx.compose.ui.text.AnnotatedString(content))
+                        copied = true
+                        scope.launch { kotlinx.coroutines.delay(1500); copied = false }
+                    }
+                    DBtn(if (expanded) Msg.gpui_mgmt_plan_compact else Msg.gpui_mgmt_plan_expand, false, small = true, modifier = Modifier.testTag("ask.expand")) {
+                        expanded = !expanded
+                    }
+                }
+                Box(
+                    Modifier.fillMaxWidth()
+                        .then(if (expanded) Modifier else Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()))
+                        .background(dcs.background)
+                        .border(BorderStroke(1.dp, dcs.outlineVariant))
+                        .padding(10.dp),
+                ) {
+                    MdText(content, thread = tid, copy = CopyLookup(null))
+                }
+                if (a.open) {
+                    Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        a.options.forEach { o ->
+                            val primary = o.id == "accept" || o.id == "implement"
+                            DBtn(Tr.t(o.label), primary, true, Modifier.testTag("ask.opt.${o.id}"), small = false) {
+                                DataClient.answer(tid, a.id, o.id)
+                            }
+                        }
+                        if (a.revise) {
+                            DBtn(Msg.gpui_ask_plan_revise, revising, true, Modifier.testTag("ask.opt.revise"), small = false) {
+                                revising = !revising
+                            }
+                        }
+                    }
+                    if (a.revise && revising) {
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            DField(revision, { revision = it }, Msg.gpui_ask_plan_reviseph, Modifier.testTag("ask.revise.input"), lines = 3)
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                DBtn(Msg.gpui_ask_plan_sendrev, true, revision.isNotBlank(), Modifier.testTag("ask.revise.send"), small = true) {
+                                    val fb = revision.trim()
+                                    if (fb.isNotEmpty()) {
+                                        revising = false
+                                        revision = ""
+                                        DataClient.answer(tid, a.id, "revise:$fb")
+                                    }
+                                }
+                                DBtn(Msg.common_cancel, false, true, small = true) {
+                                    revising = false
+                                    revision = ""
+                                }
+                            }
+                        }
+                    }
+                } else if (a.answered != null) {
+                    DMono(Msg.android_ask_answered(a.options.firstOrNull { it.id == a.answered }?.label?.let(Tr::t) ?: a.answered))
+                }
+            }
+        }
+        return
+    }
+
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, border)).padding(12.dp).testTag("ask.card")) {
         DMono(if (a?.open == true) Msg.android_ask_open else Msg.android_ask_done, dfaint, 11)
         Text(a?.question ?: e.text, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, modifier = Modifier.padding(vertical = 6.dp))
         if (a != null && a.open) {
@@ -910,7 +1415,7 @@ private fun AskCard(tid: String, e: DEntry) {
                 Box(Modifier.weight(1f)) { DField(answer, { answer = it }, Msg.android_ask_answer, Modifier.testTag("ask.answer")) }
                 DBtn(Msg.composer_send, true, answer.isNotBlank()) { DataClient.answer(tid, a.id, answer) }
             } else Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                a.options.forEach { o -> DBtn(Tr.t(o.label), o.id == "accept", true, Modifier.fillMaxWidth().testTag("ask.opt.${o.id}"), danger = o.id == "deny" || o.id == "decline") { DataClient.answer(tid, a.id, o.id) } }
+                a.options.forEach { o -> DBtn(Tr.t(o.label), o.id == "accept" || o.id == "implement", true, Modifier.fillMaxWidth().testTag("ask.opt.${o.id}"), danger = o.id == "deny" || o.id == "decline") { DataClient.answer(tid, a.id, o.id) } }
             }
         } else if (a?.answered != null) DMono(Msg.android_ask_answered(a.options.firstOrNull { it.id == a.answered }?.label?.let(Tr::t) ?: a.answered))
     }
@@ -994,6 +1499,20 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             DLine()
             if (DataVoice.available) VoiceSettings()
             if (DataDevices.available) { DevicesSettings(); DLine() }
+            DataClient.home?.let { h ->
+                DMono(Msg.home_machine, dfaint)
+                val whereText = when (h.kind) {
+                    "local" -> "${h.name.ifEmpty { "This machine" }} (this machine)"
+                    "boat" -> "${h.name.ifEmpty { "Boat" }} (Boat)"
+                    else -> h.name.ifEmpty { "Linked machine" }
+                }
+                DMono(whereText, dcs.onSurface, 13)
+                h.awayLine()?.let { (line, isErr) -> DMono(line, if (isErr) dcs.error else dcs.onSurfaceVariant, 12) }
+                if (h.canMoveHere) {
+                    DBtn(Msg.home_move_here, true, modifier = Modifier.testTag("settings.home.move")) { DataClient.moveHomeHere() }
+                }
+                DLine()
+            }
             if (DataMachines.available) { MachinesSettings(); DLine() }
             if (DataNotify.available) { NotifySettings(); DLine() }
             if (DataBrowserStart.available) { BrowserStartSettings(); DLine() }
@@ -1087,25 +1606,41 @@ private fun UpdateSection() {
     }
 }
 
+/** Add project: Open folder (a folder on the hub's machine) or, when the hub has it (feature "clone"), Clone from git. */
 @Composable
-private fun FolderScreen(back: () -> Unit, added: (String) -> Unit) {
+private fun FolderScreen(ask: CloneAsk?, back: () -> Unit, added: (String) -> Unit, cloned: (String?) -> Unit) {
     val scope = rememberCoroutineScope()
-    var path by remember { mutableStateOf<String?>(null) }
+    val can = DataClient.has("clone")
+    // on Clone from git when /project named a repository, or while a clone this phone started runs
+    var clone by remember { mutableStateOf(can && (ask != null || Clones.jobs[Clones.following]?.running == true)) }
+    var err by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxSize()) {
+        DBar(Msg.android_project_add, back)
+        if (can) ModeSwitch(clone) { clone = it }
+        if (can && clone) Box(Modifier.weight(1f)) { CloneBody(ask, cloned) }
+        else Box(Modifier.weight(1f)) {
+            FolderBrowser(null, Msg.android_folder_use, "folders.use", err) { cur -> scope.launch { try { added(DataClient.addProject(cur).id) } catch (e: Exception) { err = e.message ?: "" } } }
+        }
+    }
+}
+/** The hub machine's folders (dirs.list) from [start] (null: the hub's own start), and a button that takes the one shown. */
+@Composable
+internal fun FolderBrowser(start: String?, label: String, tag: String, refusal: String = "", use: (String) -> Unit) {
+    var path by remember { mutableStateOf(start) }
     var cur by remember { mutableStateOf("") }
     var parent by remember { mutableStateOf<String?>(null) }
     var dirs by remember { mutableStateOf<List<String>>(emptyList()) }
     var err by remember { mutableStateOf("") }
     LaunchedEffect(path) { try { val (p, par, d) = DataClient.dirs(path); cur = p; parent = par; dirs = d; err = "" } catch (e: Exception) { err = e.message ?: "" } }
     Column(Modifier.fillMaxSize()) {
-        DBar(Msg.android_project_add, back)
         DMono(cur, dcs.onSurface, 12, Modifier.padding(12.dp))
-        if (err.isNotEmpty()) Text(Tr.t(err), color = dcs.error, modifier = Modifier.padding(horizontal = 12.dp))
+        err.ifEmpty { refusal }.takeIf { it.isNotEmpty() }?.let { Text(Tr.t(it), color = dcs.error, modifier = Modifier.padding(horizontal = 12.dp)) }
         LazyColumn(Modifier.weight(1f)) {
             if (parent != null) item { FolderRow("..") { path = parent } }
             items(dirs) { d -> FolderRow(d) { path = cur.trimEnd('/') + "/" + d } }
         }
         DLine()
-        Box(Modifier.padding(12.dp)) { DBtn(Msg.android_folder_use, true, cur.isNotEmpty(), Modifier.testTag("folders.use")) { scope.launch { try { added(DataClient.addProject(cur).id) } catch (e: Exception) { err = e.message ?: "" } } } }
+        Box(Modifier.padding(12.dp)) { DBtn(label, true, cur.isNotEmpty(), Modifier.testTag(tag)) { use(cur) } }
     }
 }
 @Composable private fun FolderRow(name: String, onClick: () -> Unit) {
@@ -1155,22 +1690,30 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
 }
 
 @Composable private fun Pic(b: ByteArray, size: Int) {
-    val bmp = remember(b) { android.graphics.BitmapFactory.decodeByteArray(b, 0, b.size)?.asImageBitmap() }
-    if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.heightIn(max = size.dp).widthIn(max = (size * 1.5).toInt().dp).border(BorderStroke(1.dp, dcs.outlineVariant)), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+    AnimatedPic(b, Modifier.heightIn(max = size.dp).widthIn(max = (size * 1.5).toInt().dp).border(BorderStroke(1.dp, dcs.outlineVariant)), maxSidePx = 1400)
+}
+@Composable private fun PicZoomable(bytes: ByteArray, size: Int, zoom: Boolean) {
+    var full by remember(bytes) { mutableStateOf(false) }
+    Box(if (zoom) Modifier.clickable { full = true }.testTag("thread.image") else Modifier) { Pic(bytes, size) }
+    if (full) androidx.compose.ui.window.Dialog(onDismissRequest = { full = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black).clickable { full = false }, contentAlignment = Alignment.Center) {
+            AnimatedPic(bytes, Modifier.fillMaxSize())
+        }
+    }
 }
 @Composable private fun PicById(id: String, size: Int, zoom: Boolean = false) {
     var b by remember(id) { mutableStateOf<ByteArray?>(null) }
-    var full by remember(id) { mutableStateOf(false) }
     LaunchedEffect(id) { b = DataClient.picture(id) }
     val bytes = b
     if (bytes == null) { Box(Modifier.size(size.dp, (size / 2).dp).background(dcs.surfaceVariant)); return }
-    Box(if (zoom) Modifier.clickable { full = true }.testTag("thread.image") else Modifier) { Pic(bytes, size) }
-    if (full) androidx.compose.ui.window.Dialog(onDismissRequest = { full = false }, properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
-        val bmp = remember(bytes) { android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap() }
-        Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Color.Black).clickable { full = false }, contentAlignment = Alignment.Center) {
-            if (bmp != null) androidx.compose.foundation.Image(bmp, null, Modifier.fillMaxSize(), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
-        }
-    }
+    PicZoomable(bytes, size, zoom)
+}
+@Composable private fun PicByReply(entry: String, path: String, size: Int) {
+    var b by remember(entry, path) { mutableStateOf<ByteArray?>(null) }
+    LaunchedEffect(entry, path) { b = DataClient.replyImage(entry, path) }
+    val bytes = b
+    if (bytes == null) { Box(Modifier.size(size.dp, (size / 2).dp).background(dcs.surfaceVariant)); return }
+    PicZoomable(bytes, size, zoom = true)
 }
 
 // ---- improvements (the same as iOS's): a GitHub issue draft opens in the browser, or the text starts a thread on the hub
@@ -1223,6 +1766,18 @@ internal fun ReviewBar(r: DReviewBar, enabled: Boolean, press: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         DMono(Tr.t(r.text), if (r.on) dcs.onSurface else dcs.onSurfaceVariant, 12, Modifier.weight(1f).testTag("thread.review.text"), lines = 3)
         DBtn(Tr.t(r.button), false, enabled, Modifier.testTag("thread.review.button")) { press() }
+    }
+}
+
+/** Proactive banner shown when the hub has zero AI providers configured or signed in. */
+@Composable
+internal fun NoProviderBanner(onOpenAccounts: () -> Unit) {
+    val n = DataClient.noProvider ?: return
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).border(BorderStroke(1.dp, dwarn)).background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 8.dp).testTag("provider.notice"),
+        verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        DMono(Tr.t(n.head), dcs.onSurface, 12, bold = true)
+        if (n.text.isNotEmpty()) DMono(Tr.t(n.text), dcs.onSurfaceVariant, 11, lines = 3)
+        DBtn(if (n.button.isNotEmpty()) Tr.t(n.button) else Msg.provider_notice_button, true, modifier = Modifier.testTag("provider.notice.button")) { onOpenAccounts() }
     }
 }
 

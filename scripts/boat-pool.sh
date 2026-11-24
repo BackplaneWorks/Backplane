@@ -5,6 +5,8 @@
 #   scripts/boat-pool.sh stop            stop every pool box now (the disk is kept 14 days; the next job resumes it)
 #   scripts/boat-pool.sh base            (re)build the snapshot every box starts from: a sandbox with NO environment (no logins, no tokens), scripts/boat-base.sh on it
 #   scripts/boat-pool.sh delete          delete every pool box (not the snapshot)
+#   scripts/boat-pool.sh clean-agents    remove the agent CLIs jobs installed in the home of every running pool box now (each job also does, first);
+#                                        Boat's own (/opt/ascii-agent, /usr/local/bin/{claude,codex,opencode,pi,cursor-agent}) stay, named in a warning
 set -u
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-boat.sh"
 d=$(bo_dir); mkdir -p "$d"
@@ -21,6 +23,14 @@ print("disk %.0f%% (%.0f/%.0fG, target %.0fG, sccache %.0fG) at %s%s" % (j["pct"
 live() { case "$1" in ready|idle|running|provisioned|starting|cloning) return 0;; esac; return 1; }
 leased() { ( flock -n 9 ) 9> "$d/boat.$1" && return 1; return 0; }
 case "${1:-status}" in
+  clean-agents) bad=0   # a box a job holds is skipped (that job cleaned it first); exit 1 when one could not be cleaned
+      while read -r n id st; do live "$st" || continue
+        if leased "$n"; then echo "bp-build-$n ($id): in use: skipped (its job cleaned it first)"; continue; fi
+        out=$(exec 9> "$d/boat.$n"; flock -n 9 || { echo "taken by a job just now: skipped"; exit 0; }
+          bo_b exec "$id" --json --timeout 120 -- bash -c "$(cat "$HERE/boat-agents-clean.sh")" 2>/dev/null | bo_py 'import sys,json
+d=json.load(sys.stdin); sys.stdout.write((d.get("stderr") or "") + "exit %s" % d.get("exitCode"))')
+        echo "bp-build-$n ($id): ${out:-no answer}"; case "$out" in *"exit 0"|*skipped) ;; *) bad=1;; esac
+      done < <(boxes); exit $bad ;;
   status) now=$(date +%s); boxes | while read -r n id st; do
       l=$(cat "$d/boat.$n.last" 2>/dev/null || echo 0); s="idle $(( now - l ))s"; leased "$n" && s="in use"
       echo "bp-build-$n $id $st ($s) $(bo_b usage "$id" --json 2>/dev/null | bo_py 'import sys,json;j=json.load(sys.stdin);print("%ds, $%.3f" % (j["seconds"], j["dollars"]))' 2>/dev/null) $(disk "$n")"; done ;;
@@ -36,8 +46,8 @@ case "${1:-status}" in
   delete) boxes | while read -r n id st; do bo_b delete "$id" --yes > /dev/null 2>&1 && echo "deleted bp-build-$n"; done ;;
   base) # a clean source box: no environment, so no logins of the person's are on it, then the snapshot
       src=$(bo_b new --name bp-build-base-src --environment bp-build --no-env --type default --ttl 3000 --json 2>&1 | tail -1 | bo_py 'import sys,json;print(json.load(sys.stdin)["id"])') || exit 1
-      bo_b scp "$HERE/boat-base.sh" "$src:/home/user/boat-base.sh" > /dev/null 2>&1
-      python3 -I "$HERE/boat-run.py" "$src" bash -c "'BP_BOAT_RUST=$(rustc --version | awk '{print $2}') bash /home/user/boat-base.sh 2>&1 | tail -3'" || exit 1
+      bo_b scp "$HERE/boat-base.sh" "$src:/home/user/boat-base.sh" > /dev/null 2>&1; bo_b scp "$HERE/lib-winmingw.sh" "$src:/home/user/lib-winmingw.sh" > /dev/null 2>&1
+      python3 -I "$HERE/boat-run.py" "$src" bash -c "'set -o pipefail; BP_BOAT_RUST=$(rustc --version | awk '{print $2}') bash /home/user/boat-base.sh 2>&1 | tail -3'" || { bo_b delete "$src" --yes > /dev/null 2>&1; echo "boat-pool: the base build failed (above): no snapshot taken" >&2; exit 1; }
       bo_b snapshot "$src" "${BP_BOAT_BASE:-bp-build-base}" && bo_b delete "$src" --yes > /dev/null 2>&1 ;;
   *) sed -n '2,8p' "$0"; exit 2 ;;
 esac

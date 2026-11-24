@@ -45,11 +45,11 @@ pub fn thread_json(id: &str, st: &State, project: &str, mark: &Value, preview: &
 /// One of a linked machine's projects as a row of its own (not one with a project here): counts of what this machine holds, its mark, and where a new thread starts.
 pub fn project_json(id: &str, st: &State, mark: &Value, un: &Unified, machine: &str) -> Option<Value> {
     let p = st.projects.get(id).filter(|p| !p.removed)?;
-    let ts: Vec<_> = st.threads.values().filter(|t| t.project == id && !t.deleted).collect();
+    let ts: Vec<_> = st.threads.iter().filter(|(tid, t)| t.project == id && !t.deleted && !st.run_hidden(tid)).map(|(_, t)| t).collect();
     let live: Vec<_> = ts.iter().filter(|t| !t.archived).collect();
     let settled = live.iter().filter(|t| super::shelf_flags(t).1).count();
     let updated = ts.iter().map(|t| t.activity.max(t.created)).max().unwrap_or(p.created);
-    let waiting = st.asks.values().filter(|(th, open)| *open && st.threads.get(th).map_or(false, |t| t.project == id)).count();
+    let waiting = st.asks.values().filter(|(th, open)| *open && !st.run_hidden(th) && st.threads.get(th).map_or(false, |t| t.project == id && !t.deleted)).count();
     let pick = setting(st, &format!("project.pick.{id}"));
     let color = crate::present::badge::color_eff(setting(st, &format!("project.color.{id}")), pick, id).to_string();
     Some(json!({"id":id,"title":p.title,"root":p.root,"origin":"","threadCount":live.len(),"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
@@ -70,9 +70,9 @@ pub fn partners(far: &Far, pick: &str, join: &HashMap<String, String>) -> HashMa
     for (m, st) in shown_far(far, pick) {
         for (fid, lid) in join {
             if !st.projects.get(fid).map_or(false, |p| !p.removed) { continue }
-            let ts: Vec<_> = st.threads.values().filter(|t| t.project == *fid && !t.deleted).collect();
+            let ts: Vec<_> = st.threads.iter().filter(|(tid, t)| t.project == *fid && !t.deleted && !st.run_hidden(tid)).map(|(_, t)| t).collect();
             let live: Vec<_> = ts.iter().filter(|t| !t.archived).collect();
-            let waiting = st.asks.values().filter(|(th, open)| *open && st.threads.get(th).map_or(false, |t| t.project == *fid)).count() as u64;
+            let waiting = st.asks.values().filter(|(th, open)| *open && !st.run_hidden(th) && st.threads.get(th).map_or(false, |t| t.project == *fid && !t.deleted)).count() as u64;
             out.entry(lid.clone()).or_default().push(Partner { machine: m.clone(), id: fid.clone(), count: live.len() as u64, settled: live.iter().filter(|t| super::shelf_flags(t).1).count() as u64,
                 updated: ms(ts.iter().map(|t| t.activity.max(t.created)).max().unwrap_or(0)), waiting });
         }
@@ -146,7 +146,7 @@ pub fn thread_keys(far: &Far, pick: &str, join: &HashMap<String, String>, projec
     let mut out = vec![];
     for (_, st) in shown_far(far, pick) {
         for (id, t) in &st.threads {
-            if t.deleted || t.archived != archived || t.project == crate::sidebar::SCRATCH { continue }
+            if t.deleted || st.run_hidden(id) || t.archived != archived || t.project == crate::sidebar::SCRATCH { continue }
             let shown = project_shown(&t.project, join);
             if !project.is_empty() && shown != project && t.project != project { continue }
             let (_, settled, at) = super::shelf_flags(t);
@@ -276,5 +276,26 @@ mod tests {
         assert_eq!(on_link(json!({"kind":"board"}), "L~t1")["on"], "L"); assert_eq!(on_link(json!({"kind":"board"}), "t1"), json!({"kind":"board"}));
         assert_eq!(listing_of(&json!({"fmEntries":"d\t0\tsrc"})), "d\t0\tsrc"); assert_eq!(listing_of(&json!({"listing":"f\t3\ta"})), "f\t3\ta"); assert_eq!(listing_of(&json!({})), "");
         assert_eq!(board_files("/r", "b/x.kicad_pcb")["sch"], "/r/b/x.kicad_sch"); assert_eq!(board_files("/r", "")["pcb"], "");
+    }
+    #[test] fn linked_mailroom_runs_are_hidden_from_phone_lists_and_counts() {
+        let mut d = desk();
+        for e in [
+            json!({"$":"ThreadCreated","id":"L~run1794092771-1","project":"L~p1","title":"Bub: Launch: one","at":99}),
+            json!({"$":"AskOpened","id":"a-run1","thread":"L~run1794092771-1","kind":"question","at":99}),
+            json!({"$":"ThreadCreated","id":"L~mailcoord-b1-turn1","project":"L~p2","title":"Bub: private coordination","at":99}),
+            json!({"$":"AskOpened","id":"a-run2","thread":"L~mailcoord-b1-turn1","kind":"question","at":99}),
+        ] { d.apply(&e); }
+        let far = vec![("desktop".to_string(), &d)];
+        let mut join = HashMap::new(); join.insert("L~p1".to_string(), "p1".to_string());
+        let ids: Vec<String> = thread_keys(&far, "", &join, "", false, None).into_iter().map(|x| x.1).collect();
+        assert!(!ids.iter().any(|id| id.contains("run1794") || id.contains("mailcoord-")), "no mailroom runs in thread_keys: {ids:?}");
+        let m = marks(); let e = HashMap::new(); let un = Unified { far: &join, marks: &m, here: "laptop", rows: &e };
+        let rows = project_rows(&far, "", &join, &un);
+        assert_eq!(rows[0].2["threadCount"], 1, "mailroom runs excluded from linked project threadCount");
+        assert_eq!(rows[0].2["waiting"], 0, "mailroom run asks excluded from linked project waiting");
+        let ps = partners(&far, "", &join);
+        assert_eq!(ps["p1"][0].count, 2, "mailroom runs excluded from partner counts");
+        assert_eq!(ps["p1"][0].waiting, 0, "mailroom run asks excluded from partner waiting");
+        assert_eq!(ps["p1"][0].updated, 40_000, "mailroom runs do not bump partner updatedAt");
     }
 }

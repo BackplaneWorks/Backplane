@@ -15,6 +15,43 @@ pub const BEARER_VAR: &str = "BACKPLANE_MCP_BEARER_TOKEN";
 pub fn split_key(url: &str) -> (&str, &str) { match url.split_once("?k=") { Some((u, k)) => (u, k), None => (url, "") } }
 /// What Codex's env carries for the thread's MCP key (nothing when the url has none).
 pub fn bearer_env(url: &str) -> Vec<(String, String)> { let k = split_key(url).1; if k.is_empty() { vec![] } else { vec![(BEARER_VAR.to_string(), k.to_string())] } }
+/// Codex profile TOML (`$CODEX_HOME/<profile>.config.toml`): carries `developer_instructions`, reasoning settings,
+/// and all MCP server configs off the command line so argv stays tiny on every OS (never hits Windows' 32K limit).
+pub fn profile_toml(a: &ArgsIn) -> String {
+    let mut lines: Vec<String> = vec![];
+    if ["low", "medium", "high", "xhigh"].contains(&a.effort) { lines.push(format!("model_reasoning_effort = {}", Value::String(a.effort.into()))); }
+    if a.think { lines.push("model_reasoning_summary = \"detailed\"".into()); }
+    // the key is not in argv or the config file (F-009): the bare endpoint here, the key in the env var Codex sends as `Authorization: Bearer` (`bearer_env`)
+    lines.push(format!("mcp_servers.backplane.url = {}", Value::String(split_key(a.mcp_url).0.into())));
+    lines.push(format!("mcp_servers.backplane.bearer_token_env_var = \"{BEARER_VAR}\""));
+    if !a.pcbparts.is_empty() { lines.push(format!("mcp_servers.pcbparts.url = {}", Value::String(a.pcbparts.into()))); }
+    let mut i = 0;
+    while i < a.extra.len() {
+        if a.extra[i] == "-c" && i + 1 < a.extra.len() {
+            if let Some((k, v)) = a.extra[i + 1].split_once('=') { lines.push(format!("{k} = {v}")); }
+            i += 2;
+        } else { i += 1; }
+    }
+    if !a.prompt.is_empty() { lines.push(format!("developer_instructions = {}", Value::String(a.prompt.into()))); }
+    lines.join("\n") + "\n"
+}
+/// Codex.args with a profile file (`-p <profile>`) and stdin prompt (`-`): keeps instructions, MCP configs, and the
+/// prompt/handoff completely off argv. Any non-`-c` extra flags stay on argv.
+pub fn args_with_profile(a: &ArgsIn, profile: &str) -> Vec<String> {
+    let mut v: Vec<String> = vec!["exec".into()];
+    if !profile.is_empty() { v.push("-p".into()); v.push(profile.into()); }
+    if a.session.is_empty() { v.extend(["--json".into(), "--skip-git-repo-check".into()]); }
+    else { v.extend(["resume".into(), a.session.into(), "--json".into(), "--skip-git-repo-check".into()]); }
+    v.extend(sandbox(a.runtime));
+    if !a.model.is_empty() { v.push("-m".into()); v.push(a.model.into()) }
+    for i in a.images { v.push("--image".into()); v.push(i.clone()) }
+    let mut i = 0;
+    while i < a.extra.len() {
+        if a.extra[i] == "-c" && i + 1 < a.extra.len() { i += 2; }
+        else { v.push(a.extra[i].clone()); i += 1; }
+    }
+    v.push("-".into()); v
+}
 /// Codex.args: head (fresh or resume), sandbox, model, effort, summaries, images, the MCP servers, the instructions, the text.
 pub fn args(a: &ArgsIn) -> Vec<String> {
     let mut v: Vec<String> = if a.session.is_empty() { vec!["exec".into(), "--json".into(), "--skip-git-repo-check".into()] } else { vec!["exec".into(), "resume".into(), a.session.into(), "--json".into(), "--skip-git-repo-check".into()] };
@@ -137,8 +174,34 @@ pub fn ride_read(v: &str) -> Vec<(String, String)> {
     serde_json::from_str::<Value>(v).ok().and_then(|j| j.as_array().map(|a| a.iter().map(|x| (s(x, "id").to_string(), s(x, "text").to_string())).collect())).unwrap_or_default()
 }
 pub fn ride_show(xs: &[(String, String)]) -> String { if xs.is_empty() { String::new() } else { Value::Array(xs.iter().map(|(i, t)| json!({"id":i,"text":t})).collect()).to_string() } }
-/// Ride.add: once (a message already there is not added again).
-pub fn ride_add(v: &str, id: &str, text: &str) -> String { let mut xs = ride_read(v); if !xs.iter().any(|(i, _)| i == id) { xs.push((id.into(), text.into())) } ride_show(&xs) }
+/// Ride.add: once (a message already there is not added again). The mailroom's `told:` notes (bots/mail/escalate.rs `private_tell`: "your private mailroom just told
+/// the person this") fold into ONE waiting entry, the newest's id: they start no turn, so before Nov 20 they waited until the person wrote and arrived 110 and 41 at a time.
+pub fn ride_add(v: &str, id: &str, text: &str) -> String {
+    let mut xs = ride_read(v); if xs.iter().any(|(i, _)| i == id) { return ride_show(&xs) }
+    if !id.starts_with("told:") { xs.push((id.into(), text.into())); return ride_show(&xs) }
+    let (mut earlier, mut told) = (0, vec![]);
+    for t in xs.iter().filter(|(i, _)| i.starts_with("told:")).map(|(_, t)| t.as_str()).chain([text]) { let (n, mut ys) = told_items(t); earlier += n; told.append(&mut ys) }
+    xs.retain(|(i, _)| !i.starts_with("told:"));
+    let text = if told.len() == 1 && earlier == 0 { text.to_string() } else { told_fold(earlier, &told) };
+    xs.push((id.into(), text)); ride_show(&xs)
+}
+const TOLD_HEAD: &str = "[Backplane] Your private mailroom told the person these in your conversation since your last turn. They are on screen there, and no phone alert went out: only your notify_person reaches their phone, so call it if they must know now. Do not repeat them otherwise, take them into account. If you have nothing to add, end with an empty reply.";
+const TOLD_KEEP: usize = 8;
+/// a told note's earlier count and told text(s): a single note's body after its first blank line, a folded note's items
+fn told_items(t: &str) -> (usize, Vec<String>) {
+    let Some(r) = t.strip_prefix(TOLD_HEAD) else { return (0, vec![t.split_once("\n\n").map_or(t, |(_, b)| b).trim().to_string()]) };
+    let mut n = 0; let mut out = vec![];
+    for x in r.split("\n\n- ").map(str::trim) {
+        if let Some(c) = x.strip_prefix("(and ").and_then(|c| c.split(' ').next()).and_then(|c| c.parse::<usize>().ok()) { n = c } else if !x.is_empty() { out.push(x.to_string()) }
+    }
+    (n, out)
+}
+fn told_fold(earlier: usize, xs: &[String]) -> String {
+    let skip = xs.len().saturating_sub(TOLD_KEEP); let one = |x: &String| x.chars().take(600).collect::<String>().replace("\n\n", "\n");
+    let more = if earlier + skip > 0 { format!("\n\n- (and {} earlier, in your conversation)", earlier + skip) } else { String::new() };
+    format!("{TOLD_HEAD}{more}\n\n{}", xs[skip..].iter().map(|x| format!("- {}", one(x))).collect::<Vec<_>>().join("\n\n"))
+}
+
 pub fn ride_input(v: &str) -> String { ride_read(v).into_iter().map(|(_, t)| t).collect::<Vec<_>>().join("\n\n") }
 pub fn ride_block(v: &str) -> String {
     format!("[Backplane] Incoming messages, sent to you while this turn ran. Each is shown to you once; take them into account now:\n\n{}", ride_read(v).into_iter().map(|(_, t)| t).collect::<Vec<_>>().join("\n\n---\n\n"))
@@ -167,6 +230,11 @@ mod tests {
         assert!(v.windows(2).any(|w| w == ["-s", "workspace-write"])); assert!(v.windows(2).any(|w| w == ["-m", "m"])); assert!(v.windows(2).any(|w| w == ["--image", "/i.png"]));
         assert!(v.contains(&"developer_instructions=\"P\\\"q\"".to_string())); assert!(v.contains(&"mcp_servers.backplane.url=\"http://u\"".to_string()));
         let b = args(&ArgsIn { session: "S", runtime: "full-access", ..a }); assert_eq!(&b[..5], ["exec", "resume", "S", "--json", "--skip-git-repo-check"]); assert!(b.contains(&"--dangerously-bypass-approvals-and-sandbox".to_string()));
+        // Windows profile mode: instructions and MCP config live in the profile TOML, prompt on stdin (`-`)
+        let vp = args_with_profile(&a, "bp-1"); assert_eq!(&vp[..5], ["exec", "-p", "bp-1", "--json", "--skip-git-repo-check"]); assert_eq!(vp.last().unwrap(), "-");
+        assert!(!vp.iter().any(|x| x.contains("developer_instructions") || x.contains("mcp_servers") || x == "hi"), "{vp:?}");
+        let bp = args_with_profile(&ArgsIn { session: "S", runtime: "full-access", ..a }, "bp-2"); assert_eq!(&bp[..7], ["exec", "-p", "bp-2", "resume", "S", "--json", "--skip-git-repo-check"]);
+        let toml = profile_toml(&a); assert!(toml.contains("developer_instructions = \"P\\\"q\"") && toml.contains("mcp_servers.backplane.url = \"http://u\"") && toml.contains("model_reasoning_effort = \"high\""));
     }
     #[test] fn a_turn_in_codex_shapes() {
         let mut c = Cx::new("t1"); c.running = true;
@@ -207,6 +275,17 @@ mod tests {
 mod laws {
     use super::*;
     #[test] fn ride_kept() { assert_eq!(ride_input(&ride_add("", "m1", "hi")), "hi") }
+    #[test] fn the_mailrooms_told_notes_wait_as_one_entry_however_many_come() {
+        let note = |i: usize| format!("[Backplane] Your private mailroom just told the person this in your conversation (key k{i}). It is on screen.\n\nLanded on main: PR #{i}.");
+        let mut v = ride_add("", "m1", "a person's message");
+        for i in 0..41 { v = ride_add(&v, &format!("told:tell:{i}"), &note(i)) }
+        let xs = ride_read(&v); assert_eq!(xs.len(), 2, "the person's message and one told entry: {xs:?}");
+        assert_eq!(xs[1].0, "told:tell:40", "the newest's id");
+        assert!(xs[1].1.starts_with(TOLD_HEAD) && xs[1].1.contains("Landed on main: PR #40.") && xs[1].1.contains("PR #33.") && !xs[1].1.contains("PR #32."), "{}", xs[1].1);
+        assert!(xs[1].1.contains("(and 33 earlier, in your conversation)"), "{}", xs[1].1);
+        let one = ride_add("", "told:tell:x", &note(7)); assert_eq!(ride_read(&one)[0].1, note(7), "a single note is kept as it came");
+        assert_eq!(ride_add(&v, "told:tell:40", "again"), v, "once per id");
+    }
     #[test] fn ride_taken_empties() { let d = ride_done("t1", &ride_add("", "m1", "hi"), "into the running turn", 6); assert_eq!(d[0]["key"], "ride.t1"); assert_eq!(d[0]["value"], "") }
     #[test] fn ride_carries_block() { assert!(ride_block(&ride_add("", "m1", "hi")).contains("hi")) }
     #[test] fn codex_error_notice_kind() { let mut c = Cx::new("t"); let fx = c.codex_line(&json!({"type":"error","message":"x"}), "codex", "", 1); assert_eq!(fx.events[0]["kind"], "provider"); assert_eq!(fx.events[0]["tone"], "info"); assert!(fx.events.iter().all(|e| e["$"] == "ActivityLogged"), "codex_error_notice_no_effects") }

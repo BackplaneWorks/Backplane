@@ -3,9 +3,15 @@
 #   scripts/cargo-q test --offline          from native/host or native/gpui, in your own worktree, instead of bare cargo
 # Every lane runs its tests and builds this way, so a few heavy builds run at once; when every slot is taken it queues locally, and a test/build/check/clippy/doc goes to a Boat box only after a long wait or with memory low (scripts/lib-boat.sh, BP_NO_BOAT=1 forces local); the queue is said on stderr. An explicit -j/--jobs is kept.
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-buildslot.sh"
+# a Windows-target command on a Boat box (scripts/windows-check.sh's, offloaded): the box's own llvm-mingw and target (scripts/lib-winmingw.sh)
+case " $* " in *" --target x86_64-pc-windows-gnu "*|*" --target=x86_64-pc-windows-gnu "*) [ -z "${BP_ON_BOAT:-}" ] || { . "$HERE/lib-winmingw.sh"; win_mingw_env || exit 2; };; esac
 if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: queued behind ${1:-other} local builds (building locally when one ends)" >&2; }
   # every slot taken: a build or test that gives the same result anywhere may run on a Boat box, but only after a long wait or with memory low (lib-buildslot.sh bq_offload_now; BP_NO_BOAT=1 forces local)
-  bo_cargo_ok "$@" && bo_ready && export BQ_OFFLOAD=1; bq_run waiting "$0" "$@"; exit $?; fi
+  bo_cargo_ok "$@" && bo_ready && export BQ_OFFLOAD=1
+  # no local slot at all (BUILD_SLOTS=0: the gate) and this command cannot go to a Boat box (--no-run, --target-dir, ... or Boat down): it would
+  # wait forever; say so instead
+  [ "$(bq_slots)" != 0 ] || [ -n "${BQ_OFFLOAD:-}" ] || [ -n "${BQ_MAIN:-}" ] || { echo "cargo-q: BUILD_SLOTS=0 and this command cannot run on a Boat box ($(bo_ready && echo "its arguments: --no-run, --target-dir, --config, a path outside the worktree" || echo "Boat is down or off")): not waiting forever" >&2; exit 2; }
+  bq_run waiting "$0" "$@"; exit $?; fi
 # started by bq_run under a Boat lease: run there, with the same exit code and the same artifacts in the same places
 if [ -n "${BP_BOAT_IDX:-}" ]; then bo_cargo "$@"; rc=$?; [ "$rc" = 98 ] && exit 98; exit "$rc"; fi
 bq_cc

@@ -119,8 +119,11 @@ fn origin(f: &str, k: &str, r: &str) -> (String, String, String) { (f.into(), k.
     assert!(!bots.mail_tool(&lane, "tell_person", &json!({"text":"t","key":"k","x":"y"})).await.0);
     assert!(!bots.mail_tool(&lane, "tell_person", &json!({"text":"The report is in.","key":"ev-1"})).await.0, "no kind, no material: refused"); settle(&bots).await;
     let ask = "The report needs your answer: ship it to the Mac mini first?";
-    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you"})).await.0); settle(&bots).await;
-    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you"})).await.0, "said again: no second post"); settle(&bots).await;
+    assert!(!bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you"})).await.0, "no ref: refused"); settle(&bots).await;
+    assert!(!bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you","ref":"ask:q-tell-1"})).await.0, "no such open ask: refused"); settle(&bots).await;
+    hub.commit(&json!({"$":"AskOpened","id":"q-tell-1","thread":th,"kind":"question","tool":"AskUserQuestion","detail":"Ship it to the Mac mini first?","options":"","at":now_s()})).await.unwrap();
+    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1","kind":"needs_you","ref":"ask:q-tell-1"})).await.0); settle(&bots).await;
+    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":ask,"key":"ev-1b","kind":"needs_you","ref":"ask:q-tell-1"})).await.0, "said again, another key, the same ask: no second post"); settle(&bots).await;
     let posted: Vec<Value> = log(&hub).into_iter().filter(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["role"] == "assistant").collect(); assert_eq!(posted.len(), 1, "{posted:?}"); assert_eq!(posted[0]["text"], ask);
     assert!(rec.notes.lock().unwrap().iter().any(|r| r.0 == chat && r.1.starts_with("told:")), "the owner's agent hears what was said");
     assert!(!rec.rides.lock().unwrap().iter().any(|r| r.1.starts_with("told:")), "a tell is a note alone: it starts no turn in the person's conversation");
@@ -327,7 +330,7 @@ fn triage_view(ev: &[Value]) -> Vec<String> {
     let (hub, bots, _r, bub, chat) = uber("prompt").await; let ada = rpc(&hub, "bots.create", json!({"name":"ada","persona":"dry and brief"})).await["bot"].as_str().unwrap().to_string();
     until(&hub, |l| l.iter().filter(|e| e["$"] == "WorktreeSet").count() == 2).await;
     let at = bots.world().await.bot(&ada).unwrap().thread.clone();
-    let p = bots.bot_prompt(&at).await; assert!(p.contains("# You are ada, a Backplane bot") && p.contains("dry and brief") && p.contains(&format!("/bots/{ada})")), "{p}"); assert!(!p.contains("You are the uberbot"));
+    let p = bots.bot_prompt(&at).await; assert!(p.contains("# You are ada, a Backplane bot") && p.contains("dry and brief") && crate::plat::tmp::sl(&p).contains(&format!("/bots/{ada})")), "{p}"); assert!(!p.contains("You are the uberbot"));
     assert!(p.contains("A room pauses after 12 messages in a row") && p.contains("in their time zone, which is "), "{p}"); // the zone itself is the host's, or whatever TZ another test of this process set
     let u = bots.bot_prompt(&chat).await; assert!(u.contains("# You are the uberbot") && u.contains("<recent_private_triage_assessments>"), "{u}");
     assert_eq!(bots.bot_prompt("t-plain").await, "", "a plain thread has no bot part");
@@ -389,6 +392,8 @@ fn shown_lines(hub: &Arc<Hub>, chat: &str) -> Vec<String> {
 async fn due_now(hub: &Arc<Hub>, bots: &Arc<Bots>, bub: &str) { hub.commit(&json!({"$":"SettingSet","key":crate::bots::mail::done::due_key(bub),"value":"1","at":now_s()})).await.unwrap(); bots.done_tick().await; settle(bots).await }
 /// the gate's batch is due now (its 30 minutes are over): the tick sends it
 async fn tell_now(hub: &Arc<Hub>, bots: &Arc<Bots>, bub: &str) { hub.commit(&json!({"$":"SettingSet","key":crate::bots::mail::gate::due_key(bub),"value":"1","at":now_s()})).await.unwrap(); bots.done_tick().await; settle(bots).await }
+/// GitHub's word, in a test: this ref is merged or published
+fn verified(r: &str) { let r = crate::bots::mail::gate::Ref::parse(r).unwrap(); crate::bots::mail::gate::test_verified().lock().unwrap().insert(r.key()); }
 /// the tell_person key a done lane's brief gives it
 fn lane_tell_key(rec: &Arc<Rec>, lane: &str) -> String { let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == lane).cloned().unwrap(); ride.2.split("tell_person key: ").nth(1).unwrap().lines().next().unwrap().to_string() }
 fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map(|r| r["thread"].as_str().filter(|t| t.starts_with(&format!("mailcoord-{bub}-"))).map(str::to_string)).collect() }
@@ -407,9 +412,13 @@ fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map
     let key = ride.2.split("tell_person key: ").nth(1).unwrap().lines().next().unwrap().to_string();
     running(&hub, &ls[0]).await; settle(&bots).await;
     let line = "KiCad embed landed (1a2b3c4): not in your running build yet, it needs a hub restart; then open a board and press Open in KiCad.";
-    assert!(!bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key})).await.0, "a tell names its kind"); settle(&bots).await;
-    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed"})).await.0); settle(&bots).await;
-    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed"})).await.0); settle(&bots).await;
+    let rf = "commit:BackplaneWorks/Backplane@1a2b3c4";
+    assert!(!bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"ref":rf})).await.0, "a tell names its kind"); settle(&bots).await;
+    assert!(!bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed"})).await.0, "and its ref"); settle(&bots).await;
+    assert!(!bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed","ref":rf})).await.0, "a commit GitHub does not have on main"); settle(&bots).await;
+    verified(rf);
+    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed","ref":rf})).await.0); settle(&bots).await;
+    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key,"kind":"landed","ref":rf})).await.0); settle(&bots).await;
     end(&hub, &ls[0], "completed").await; settle(&bots).await;
     assert!(shown_lines(&hub, &chat).is_empty(), "a landing waits for the batch"); tell_now(&hub, &bots, &bub).await;
     assert_eq!(shown_lines(&hub, &chat), vec![line.to_string()], "one visible line, shown although the chat's last input was the hub's");
@@ -423,7 +432,7 @@ fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map
     assert_eq!(shown_lines(&hub, &chat).len(), 1);
 }
 
-#[tokio::test] async fn two_finishes_within_a_minute_are_one_batched_line_and_a_silent_lanes_landing_digest_is_told() {
+#[tokio::test] async fn two_finishes_within_a_minute_are_one_lane_and_a_silent_lanes_digest_is_never_told() {
     let (hub, bots, rec, bub, chat) = uber("done-two").await;
     report(&bots, &chat, "t1794400000-2", "launch", &crate::agents::launch::note("t1794400000-2", "Sync-token fix", "completed", "Landed 5d6e7f8 on main.")).await;
     report(&bots, &chat, "t1794400000-3", "launch", &crate::agents::launch::note("t1794400000-3", "Scroll fixes", "completed", "Chat scrolls up without jumps.")).await; settle(&bots).await;
@@ -431,11 +440,10 @@ fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map
     due_now(&hub, &bots, &bub).await;
     let ls = lanes(&hub, &bub); assert_eq!(ls.len(), 1, "both finishes in one lane");
     let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == ls[0]).cloned().unwrap(); assert!(ride.2.contains("Sync-token fix") && ride.2.contains("Scroll fixes") && ride.2.contains("Finished (2)"));
-    // the lane says nothing and ends: the hub posts the plain digest, once
+    // the lane says nothing and ends: the hub's digest names no verified ref, so nothing is posted (Nov 20: 56 "Done: …" digests reached the person)
     running(&hub, &ls[0]).await; settle(&bots).await; end(&hub, &ls[0], "completed").await; settle(&bots).await;
     end(&hub, &ls[0], "failed").await; settle(&bots).await; tell_now(&hub, &bots, &bub).await;
-    let shown = shown_lines(&hub, &chat); assert_eq!(shown.len(), 1, "{shown:?}");
-    assert_eq!(shown[0], "Done:\n- Sync-token fix: Landed 5d6e7f8 on main. (backplane://thread/t1794400000-2)\n- Scroll fixes: Chat scrolls up without jumps. (backplane://thread/t1794400000-3)");
+    let shown = shown_lines(&hub, &chat); assert!(shown.is_empty(), "{shown:?}");
     assert!(!rec.rides.lock().unwrap().iter().any(|r| r.1.starts_with("lost:")), "a done lane is not handed over as lost");
     bots.done_tick().await; settle(&bots).await; assert_eq!(lanes(&hub, &bub).len(), 1, "nothing left to flush");
 }
@@ -497,8 +505,8 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
         report(&bots, &chat, th, "launch", &crate::agents::launch::note(th, &format!("Fix {i}"), "completed", &format!("Landed {sha} on main."))).await; settle(&bots).await;
         due_now(&hub, &bots, &bub).await; let ls = lanes(&hub, &bub); assert_eq!(ls.len(), i + 1); let lane = ls.iter().find(|l| !said.iter().any(|(x, _): &(String, String)| x == *l)).unwrap().clone();
         let key = lane_tell_key(&rec, &lane); running(&hub, &lane).await; settle(&bots).await;
-        let line = format!("Fix {i} landed on main ({sha}); it will be in your next build.");
-        let r = bots.mail_tool(&lane, "tell_person", &json!({"text":line,"key":key,"kind":"landed"})).await; assert!(r.0 && r.1["told"] == "batched", "{}", r.1);
+        let line = format!("Fix {i} landed on main ({sha}); it will be in your next build."); let rf = format!("commit:BackplaneWorks/Backplane@{sha}"); verified(&rf);
+        let r = bots.mail_tool(&lane, "tell_person", &json!({"text":line,"key":key,"kind":"landed","ref":rf})).await; assert!(r.0 && r.1["told"] == "batched", "{}", r.1);
         assert!(r.1["sends_at"].as_u64().unwrap() >= now_s() + crate::bots::mail::gate::BATCH - 5, "collected for 30 minutes");
         end(&hub, &lane, "completed").await; settle(&bots).await; said.push((lane, line));
         assert!(shown_lines(&hub, &chat).is_empty(), "collected, not sent");
@@ -510,7 +518,8 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     report(&bots, &chat, "t1794400001-4", "launch", &crate::agents::launch::note("t1794400001-4", "Fix 4", "completed", "Landed 335f784238 on main.")).await; settle(&bots).await;
     due_now(&hub, &bots, &bub).await; let lane = lanes(&hub, &bub).into_iter().find(|l| !said.iter().any(|(x, _)| x == l)).unwrap();
     let key = lane_tell_key(&rec, &lane); running(&hub, &lane).await; settle(&bots).await;
-    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"Fix 4 landed on main (335f784238).","key":key,"kind":"landed"})).await;
+    verified("commit:BackplaneWorks/Backplane@335f784238");
+    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"Fix 4 landed on main (335f784238).","key":key,"kind":"landed","ref":"commit:BackplaneWorks/Backplane@335f784238"})).await;
     assert!(r.0 && r.1["told"] == "batched" && r.1["sends_at"].as_u64().unwrap() >= now_s() + crate::bots::mail::gate::BATCH - 5, "{}", r.1);
     bots.done_tick().await; settle(&bots).await; assert_eq!(shown_lines(&hub, &chat).len(), 1, "never several in a row");
 }
@@ -519,13 +528,105 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     let (hub, bots, rec, bub, chat) = uber("gate-needs").await;
     report(&bots, &chat, "t1794400002-1", "launch", &crate::agents::launch::note("t1794400002-1", "Lead: KiCad", "completed", "Landed 9dfb99ed5 on main; the licence choice is yours to make.")).await; settle(&bots).await;
     due_now(&hub, &bots, &bub).await; let lane = lanes(&hub, &bub)[0].clone(); let key = lane_tell_key(&rec, &lane); running(&hub, &lane).await; settle(&bots).await;
-    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":"PR #1406 landed on main (9dfb99ed5).","key":format!("{key}-a"),"kind":"landed"})).await.0);
+    verified("pr:BackplaneWorks/Backplane#1406");
+    assert!(bots.mail_tool(&lane, "tell_person", &json!({"text":"PR #1406 landed on main (9dfb99ed5).","key":format!("{key}-a"),"kind":"landed","ref":"BackplaneWorks/Backplane#1406"})).await.0);
+    for q in ["q-lic", "q-priv"] { hub.commit(&json!({"$":"AskOpened","id":q,"thread":"t1794400002-1","kind":"question","tool":"AskUserQuestion","detail":"x","options":"","at":now_s()})).await.unwrap(); }
     assert!(shown_lines(&hub, &chat).is_empty());
-    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"KiCad bp.13.x licence: GPL-only or keep the extra notices? Your call.","key":format!("{key}-b"),"kind":"needs_you"})).await;
+    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"KiCad bp.13.x licence: GPL-only or keep the extra notices? Your call.","key":format!("{key}-b"),"kind":"needs_you","ref":"ask:q-lic"})).await;
     assert!(r.0 && r.1["told"] == "now", "{}", r.1); settle(&bots).await;
     let shown = shown_lines(&hub, &chat); assert_eq!(shown.len(), 1, "{shown:?}");
     assert!(shown[0].starts_with("- KiCad bp.13.x licence") && shown[0].contains("PR #1406 landed"), "the ask first, the landing with it: {}", shown[0]);
-    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"Approve the Mac mini privacy prompt?","key":format!("{key}-c"),"kind":"needs_you"})).await;
+    let r = bots.mail_tool(&lane, "tell_person", &json!({"text":"Approve the Mac mini privacy prompt?","key":format!("{key}-c"),"kind":"needs_you","ref":"ask:q-priv"})).await;
     assert!(r.0 && r.1["told"] == "batched", "a second ask within a minute waits: {}", r.1); settle(&bots).await;
     assert_eq!(shown_lines(&hub, &chat).len(), 1);
+}
+
+#[tokio::test] async fn a_missing_git_ask_is_the_persons_and_never_starts_mailroom_work() {
+    // bare gate on a stock Ubuntu (no git, a44963adbc): every turn opened an Install Git ask (agents/snapguard.rs). The person's thread's ask went to the
+    // uberbot as mail; its run's own ask became a private lane; the lane's own ask was filed as new mail, which started a run, whose ask... 4966 turns in
+    // twenty minutes, the hub at 5.4 GB. The ask is the person's (the thread shows it, Install Git answers it): the mailroom starts nothing for it.
+    let git = crate::agents::snapguard::GIT_TOOL;
+    let (hub, bots, _r, bub, _) = uber("gitask").await;
+    hub.commit(&json!({"$":"ThreadCreated","id":"tg","project":"","title":"Board","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    hub.commit(&json!({"$":"AskOpened","id":"ag","thread":"tg","kind":"input","tool":git,"detail":"Not started: git is not installed","options":"Install Git\nNot now","at":2})).await.unwrap();
+    settle(&bots).await;
+    assert!(runs(&hub).is_empty(), "the person's Install Git ask starts no run: {:?}", runs(&hub));
+    // a run's and a lane's own Install Git ask: no lane, no new mail, no new run
+    routine(&hub, &bub, "r1").await; until(&hub, |l| l.iter().any(|e| e["$"] == "RunSet")).await; settle(&bots).await;
+    let run = runs(&hub)[0]["thread"].as_str().unwrap().to_string();
+    hub.commit(&json!({"$":"AskOpened","id":"ar","thread":run,"kind":"input","tool":git,"detail":"Not started: git is not installed","options":"Install Git\nNot now","at":3})).await.unwrap();
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), 1, "a run's own Install Git ask opens no private lane");
+    turn(&hub, &run, "completed").await; until(&hub, |l| l.iter().filter(|e| e["$"] == "RunSet").count() == 2).await; settle(&bots).await;
+    let lane = runs(&hub)[1]["thread"].as_str().unwrap().to_string(); assert!(lane.starts_with(&format!("mailcoord-{bub}-")), "{lane}");
+    let mails = log(&hub).iter().filter(|e| e["$"] == "MailPosted").count();
+    hub.commit(&json!({"$":"AskOpened","id":"al","thread":lane,"kind":"input","tool":git,"detail":"Not started: git is not installed","options":"Install Git\nNot now","at":4})).await.unwrap();
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), 2, "a lane's own Install Git ask starts no run");
+    assert_eq!(log(&hub).iter().filter(|e| e["$"] == "MailPosted").count(), mails, "and files no mail");
+    // any other ask of the person's thread still reaches the uberbot
+    hub.commit(&json!({"$":"AskOpened","id":"ab","thread":"tg","tool":"Bash","detail":"rm x","at":5})).await.unwrap();
+    settle(&bots).await;
+    assert!(log(&hub).iter().filter(|e| e["$"] == "MailPosted").count() > mails, "a Bash ask is still mail for the uberbot");
+}
+
+#[tokio::test] async fn an_ask_raised_inside_the_mailroom_is_never_mail_whatever_its_tool() {
+    // the Install Git loop's shape with any ask: a lane's ask filed as mail started a run, whose ask started a lane... Mail is the person's
+    // message or a report meant for the person; an ask of a lane, a run or a bot's own thread stays where it was raised.
+    let (hub, bots, _r, bub, _) = uber("askloop").await;
+    routine(&hub, &bub, "r1").await; until(&hub, |l| l.iter().any(|e| e["$"] == "RunSet")).await; settle(&bots).await;
+    let run = runs(&hub)[0]["thread"].as_str().unwrap().to_string();
+    turn(&hub, &run, "completed").await; until(&hub, |l| l.iter().filter(|e| e["$"] == "RunSet").count() == 2).await; settle(&bots).await;
+    let lane = runs(&hub)[1]["thread"].as_str().unwrap().to_string(); assert!(lane.starts_with(&format!("mailcoord-{bub}-")), "{lane}");
+    let mails = |hub: &Arc<Hub>| log(hub).iter().filter(|e| e["$"] == "MailPosted").count(); let m0 = mails(&hub);
+    hub.commit(&json!({"$":"AskOpened","id":"al","thread":lane,"kind":"approval","tool":"Bash","detail":"rm x","at":3})).await.unwrap();
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), 2, "a lane's own Bash ask starts no run: {:?}", runs(&hub));
+    assert_eq!(mails(&hub), m0, "and files no mail");
+    // another bot's own thread: its ask stays there too
+    let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let ada = r["bot"].as_str().unwrap().to_string();
+    let ada_th = bots.world().await.bot(&ada).unwrap().thread.clone();
+    hub.commit(&json!({"$":"AskOpened","id":"aa","thread":ada_th,"kind":"approval","tool":"Bash","detail":"rm y","at":4})).await.unwrap();
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), 2, "a bot's own ask starts no run"); assert_eq!(mails(&hub), m0, "and files no mail");
+}
+
+#[tokio::test] async fn the_mailroom_starts_at_most_its_cap_of_runs_a_minute_and_keeps_the_rest_queued() {
+    // the loop breaker: whatever the shape of a new loop, a bot's mailroom starts at most RUN_CAP runs in a minute; the rest of the mail waits, filed
+    let cap = crate::bots::mail::route::RUN_CAP;
+    let (hub, bots, _r, bub, _) = uber("cap").await;
+    let n = cap + 5;
+    // each routine is a conversation of its own (an owner runs one input of a conversation at a time), so each could start a run
+    for i in 0..n { routine(&hub, &bub, &format!("r{i}")).await }
+    settle(&bots).await;
+    assert_eq!(runs(&hub).len(), cap, "{n} conversations' inputs in a minute: {cap} runs");
+    let w = (now_s() / 60).to_string(); let tripped = setting_of(&hub, &format!("mail.capped.{bub}"));
+    assert!(tripped == w || tripped == (now_s() / 60 - 1).to_string(), "the trip is recorded once, for its minute: {tripped}");
+    assert_eq!(log(&hub).iter().filter(|e| e["$"] == "SettingSet" && e["key"] == format!("mail.capped.{bub}")).count(), 1, "once a minute");
+    let queued: usize = bots.world().await.settings.iter().filter(|(k, _)| k.starts_with("triage.queue.")).map(|(_, v)| serde_json::from_str::<Vec<String>>(v).map_or(0, |q| q.len())).sum();
+    assert_eq!(queued, n - cap, "the mail over the cap waits in the owner's queues, none lost");
+    bots.queues_due().await; settle(&bots).await;
+    if now_s() / 60 == w.parse::<u64>().unwrap() { assert_eq!(runs(&hub).len(), cap, "within the same minute the tick starts nothing more") }
+}
+
+#[tokio::test] async fn a_launch_report_mailroom_run_is_not_assigned_to_the_project() {
+    let (hub, bots, _r, bub, _) = uber("launch-proj").await;
+    hub.commit_many(&[
+        json!({"$":"ProjectCreated","id":"p1","title":"Thermostat","root":"/tmp/p1","at":1}),
+        json!({"$":"ThreadCreated","id":"tw","project":"p1","title":"Fix sensor","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}),
+    ]).await.unwrap();
+    // File a launch-origin mail from tw to Bub (same path as a launched thread reporting back)
+    let w = bots.world().await;
+    let o = crate::bots::mail::Origin::new("thread:tw", "launch", "");
+    bots.file_operational(&w, 10, &o, &format!("bot:{bub}"), "Sensor fixed and tested.", "t:tw:lr-1", "act", vec![]).await.unwrap();
+    drop(w);
+    until(&hub, |l| l.iter().any(|e| e["$"] == "RunSet")).await;
+    settle(&bots).await;
+    let l = log(&hub);
+    let conv = l.iter().find(|e| e["$"] == "ConvSet" && e["subject"] == "Launch: Fix sensor").expect("ConvSet for launch");
+    assert_eq!(conv["project"], "p1", "conversation keeps project context for mail_list/escalation");
+    let run_id = runs(&hub)[0]["thread"].as_str().unwrap().to_string();
+    assert!(crate::state::is_mail_run_id(&run_id), "run id shape: {run_id}");
+    let tc = l.iter().find(|e| e["$"] == "ThreadCreated" && e["id"] == run_id.as_str()).expect("ThreadCreated for run");
+    assert_eq!(tc["project"], "", "new mailroom run must not be assigned to a user project");
 }

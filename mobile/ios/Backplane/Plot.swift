@@ -374,6 +374,10 @@ final class PlotStore {
     // A plot for another key came late for a view that was left and is dropped; one that comes before the answer waits for it.
     @ObservationIgnored private var accept: Set<String>? = []
     @ObservationIgnored private var parked: [(key: String, o: [String: Any]?, f: PlotFrame?)] = []
+    /// Content-addressed 2D chunk cache (`keptChunks`) surviving board/tab switches.
+    @ObservationIgnored private var chunkCache: [String: PlotChunk] = [:]
+    @ObservationIgnored private var chunkOrder: [String] = []
+    func keptChunkHashes() -> [String] { chunkOrder }
     /// This view's cached model (MeshDisk), drawn once the hub names its key among the view's
     @ObservationIgnored private var disk: [String: Any]?
     /// The latest watch (`begin`): only its answer opens the gate
@@ -520,6 +524,9 @@ final class PlotStore {
             var fresh = Set<Int>()
             // new chunks decode side by side
             let objs = refs.enumerated().compactMap { i, r in (r as? [String: Any]).map { (i, $0) } }
+            let hashes: [(Int, String)] = objs.compactMap { i, obj in
+                (obj["h"] as? String).flatMap { $0.isEmpty ? nil : (i, $0) }
+            }
             let decoded = UnsafeMutableBufferPointer<PlotChunk?>.allocate(capacity: objs.count)
             decoded.initialize(repeating: nil)
             DispatchQueue.concurrentPerform(iterations: objs.count) { k in decoded[k] = PlotChunk.decode(objs[k].1) }
@@ -531,8 +538,23 @@ final class PlotStore {
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard gen == self.generation else { return }
+                    for (i, h) in hashes {
+                        if let ch = cs[i] {
+                            if self.chunkCache[h] != nil { self.chunkOrder.removeAll { $0 == h } }
+                            self.chunkCache[h] = ch
+                            self.chunkOrder.append(h)
+                            while self.chunkOrder.count > 1024 {
+                                let oldest = self.chunkOrder.removeFirst()
+                                self.chunkCache.removeValue(forKey: oldest)
+                            }
+                        }
+                    }
                     for (i, r) in refs.enumerated() {
-                        if let k = r as? Int, k >= 0, k < self.held.count { cs[i] = self.held[k] }
+                        if let k = r as? Int, k >= 0, k < self.held.count {
+                            cs[i] = self.held[k]
+                        } else if let h = r as? String, let cached = self.chunkCache[h] {
+                            cs[i] = cached
+                        }
                     }
                     guard cs.allSatisfy({ $0 != nil }) else {
                         self.held = []

@@ -117,6 +117,57 @@ pub fn pin_button_as(cx: &mut Context<Backplane>, light: bool, t: &Value, group:
         .into_any_element()
 }
 
+/// A row's status label (the hub's `label` and `tone`): a short word in its tone's colour, filled when it asks the person (Approve, Input,
+/// Sign in), outlined otherwise. Read at a glance where a 6 px dot was not. `None` for a row with nothing to say.
+pub struct Pill { text: String, token: &'static str, filled: bool, light: bool }
+pub fn pill(light: bool, t: &Value) -> Option<Pill> {
+    let text = string(t, "label"); if text.is_empty() { return None }
+    let token = pill_token(t["tone"].as_str().unwrap_or(""));
+    Some(Pill { filled: t["word"] == "needs", text, token, light })
+}
+/// The colour token of a label's tone.
+pub fn pill_token(tone: &str) -> &'static str { match tone { "bad" => "bad", "run" => "accent", "wait" => "waiting", "ok" => "ok", _ => "dim" } }
+pub trait PillEl { fn clone_el(&self) -> Option<AnyElement>; }
+impl PillEl for Option<Pill> {
+    fn clone_el(&self) -> Option<AnyElement> {
+        let p = self.as_ref()?; let col = theme::color(p.light, p.token);
+        Some(div().flex_shrink_0().h(px(15.)).px(px(4.)).flex().items_center().text_size(crate::scale::tpx(10.)).line_height(px(13.)).border_1().border_color(col)
+            .when(p.filled, |d| d.bg(col).text_color(theme::color(p.light, "bg"))).when(!p.filled, |d| d.text_color(col))
+            .child(crate::i18n::trs(&p.text)).into_any_element())
+    }
+}
+/// Snooze, under the pointer: a clock that opens the hub's spans (`snooze`: 1 hour, Tomorrow, 1 week); on a snoozed row (`wake`) it wakes it in
+/// one press. None for a row that can do neither.
+pub fn snooze_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> Option<AnyElement> {
+    let (wake, opts) = (string(t, "wake"), t["snooze"].as_array().cloned().unwrap_or_default());
+    if wake.is_empty() && opts.is_empty() { return None }
+    let c = |n: &str| theme::color(light, n);
+    let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or("").to_string();
+    /* i18n-ok: the menu's words, drawn through trs */ let tip = crate::i18n::trs(if wake.is_empty() { "Snooze" } else { "Wake" });
+    Some(crate::ui::with_rect(div().id(SharedString::from(format!("snooze-{id}"))), move || format!("snooze:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
+        .invisible().group_hover(group, |s| s.visible()).hover(|s| s.bg(c("line")))
+        .tooltip(crate::keys::tip(&tip, "", light))
+        .child(crate::art::icon(if wake.is_empty() { "clock" } else { "bell" }, 12., c("dim")))
+        .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
+            if !wake.is_empty() { let _ = this.tx.try_send(Command::Action("row-snooze".into(), wake.clone())); cx.notify(); return }
+            /* i18n-ok: menu labels, drawn through trs */ let items = opts.iter().map(|o| crate::screens::ctxmenu::Item { label: format!("Snooze {}", string(o, "label").to_lowercase()), action: "row-snooze".into(), value: string(o, "value"), confirm: false, note: String::new() }).collect();
+            this.ctx_open(e.position(), items, cx); }))
+        .into_any_element())
+}
+
+/// Settle in one press: a check on a row the hub says can be settled (`settle`: its id), shown under the pointer. None for any other row.
+pub fn settle_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> Option<AnyElement> {
+    let value = string(t, "settle"); if value.is_empty() { return None }
+    let c = |n: &str| theme::color(light, n);
+    let raw = value.rsplit('|').next().unwrap_or("").to_string();
+    Some(crate::ui::with_rect(div().id(SharedString::from(format!("settle-{value}"))), move || format!("settle:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
+        .invisible().group_hover(group, |s| s.visible()).hover(|s| s.bg(c("line")))
+        /* i18n-ok: the context menu's word, drawn through trs */ .tooltip(crate::keys::tip(&crate::i18n::trs("Settle"), "", light))
+        .child(crate::art::icon("check", 12., c("dim")))
+        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("row-settle".into(), value.clone())); cx.stop_propagation(); cx.notify(); }))
+        .into_any_element())
+}
+
 pub fn strip_projects(data: &Value) -> Vec<(String, String, &Value)> {
     data["projects"].as_array().into_iter().flatten().map(|p| { let id = string(p, "id"); (id.rsplit('|').next().unwrap_or("").to_string(), string(p, "title"), p) }).filter(|(id, _, _)| !id.is_empty()).collect()
 }

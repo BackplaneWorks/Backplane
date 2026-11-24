@@ -11,12 +11,40 @@ pub struct Opts { pub home: PathBuf, pub port: u16, pub host: String, pub builds
 struct Times { probe: u64, misses: u32, stable: u64, stall: u64, boot: u64, floor: u64, warn: u64 }
 fn env(n: &str, d: u64) -> u64 { std::env::var(n).ok().and_then(|v| v.parse().ok()).unwrap_or(d) }
 
-struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, swept: Vec<String>, sweep: Option<(Child, Instant)>, down: Vec<String>, down_before: Vec<String> }
+struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, swept: Vec<String>, sweep: Option<(Child, Instant)>, down: Vec<String>, down_before: Vec<String>, /** the hub before this start ended badly (a crash, a hang): it tells its clients so (BACKPLANE_PREV_END) */ crashed: bool, lock: File, rescue_state: plan::RescueState, _guard_lock: Option<File> }
 
 /// What a request changed.
 enum Move { Nothing, Restart, Exit }
 
 pub fn say(line: &str) { eprintln!("guard: {line}"); }
+
+fn wait_dead(pid: u32, wait: Duration) -> bool {
+    let end = Instant::now() + wait;
+    loop {
+        if !sys::alive(pid) { return true }
+        if Instant::now() >= end { return false }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn end_pid(pid: u32, term_wait: Duration, abort_wait: Duration, kill_wait: Duration) -> bool {
+    if pid <= 1 || pid == std::process::id() { return false }
+    if pid > i32::MAX as u32 { return false }
+    sys::term(pid);
+    if wait_dead(pid, term_wait) { return true }
+    sys::abort(pid);
+    if wait_dead(pid, abort_wait) { return true }
+    sys::kill(pid);
+    wait_dead(pid, kill_wait)
+}
+
+fn clear_down_alert(rescue_state: &mut plan::RescueState, d: &Dir, build: &str) -> bool {
+    if rescue_state.leave() || d.open_alert("Hub is down") {
+        d.clear("Hub is back", &format!("running {}", Guard::short(build)), "Hub is down", build);
+        return true;
+    }
+    false
+}
 
 impl Guard {
     fn dir_of(&self, id: &str) -> PathBuf { match &self.b { Some(b) => b.dir(id), None => PathBuf::from(id) } }
@@ -143,15 +171,25 @@ impl Guard {
         OpenOptions::new().create(true).append(true).open(l).map_or(Stdio::null(), Stdio::from)
     }
 
+    fn owns_lock(&self) -> bool { sys::same_file(&self.lock, &self.d.path("lock")) }
+
+    fn quit_replaced(&mut self, c: Option<&mut Child>) -> ! {
+        say("guard lock was removed or replaced; stopping");
+        if let Some(c) = c { sys::stop_child(c, 10_000); }
+        std::process::exit(0)
+    }
+
     /// A hub of this home still holding hub.lock while this guard holds the guard lock is an orphan: its guard was killed. The pid comes from the lock it holds.
     fn end_orphan(&self) {
+        if !self.owns_lock() { return }
         let lock = self.o.home.join("hub.lock");
         let Ok(f) = File::open(&lock) else { return };
         if f.try_lock().is_ok() { let _ = f.unlock(); return }
         let Some(pid) = fs::read_to_string(&lock).ok().and_then(|s| s.split_whitespace().next().and_then(|p| p.parse::<u32>().ok())) else { return };
         say(&format!("a hub (pid {pid}) from before this guard still holds {}: ending it", self.o.home.display()));
-        sys::term(pid); for _ in 0..100 { if !sys::alive(pid) { return } std::thread::sleep(Duration::from_millis(100)); }
-        sys::abort(pid); std::thread::sleep(Duration::from_millis(500));
+        if !end_pid(pid, Duration::from_secs(10), Duration::from_secs(3), Duration::from_secs(2)) {
+            say(&format!("orphan hub (pid {pid}) did not exit"));
+        }
     }
 
     fn port_free(&self) -> bool { std::net::TcpListener::bind(self.addr()).is_ok() }
@@ -164,7 +202,7 @@ impl Guard {
         let _ = fs::remove_file(self.d.path("phase"));
         let mut c = Command::new(&exe);
         c.args(["--home", &self.o.home.to_string_lossy(), "--port", &self.o.port.to_string(), "--host", &self.o.host]).args(&self.o.hub_args)
-            .env_remove("BACKPLANE_AGENT_OWNER").env("BACKPLANE_GUARD", "1").env("BACKPLANE_BUILD", &self.build).stdin(Stdio::null()).stdout(self.open_log()).stderr(self.open_log());
+            .env_remove("BACKPLANE_AGENT_OWNER").env("BACKPLANE_GUARD", "1").env("BACKPLANE_BUILD", &self.build).env("BACKPLANE_PREV_END", if self.crashed { "crash" } else { "" }).stdin(Stdio::null()).stdout(self.open_log()).stderr(self.open_log());
         // a turn the crash cut should not start again on a hub that is about to crash: the hub waits for this many seconds of life before it carries on
         c.env("BACKPLANE_CARRY_WAIT", if self.hist.iter().any(|f| now().saturating_sub(f.at) < self.t.window) { self.tm.stable.to_string() } else { "0".into() });
         if self.mode == Mode::Safe { c.env("BACKPLANE_SAFE", "1").env("BACKPLANE_SAFE_SKIP", self.skip.join(",")); } else { c.env_remove("BACKPLANE_SAFE").env_remove("BACKPLANE_SAFE_SKIP"); }
@@ -223,7 +261,7 @@ impl Guard {
                 self.probation = Some(self.build.clone()); self.down_before = self.down.clone(); self.set_aside_checkpoints(); self.build = b; self.mode = Mode::Normal; self.answer(&id, true, "updating");
             }
         }
-        self.hist.clear(); self.why.clear();
+        self.hist.clear(); self.why.clear(); self.rescue_state.leave();
         std::thread::sleep(Duration::from_millis(600)); // the hub's route is reading the answer
         Move::Restart
     }
@@ -243,17 +281,20 @@ impl Guard {
 
     /// Start the hub and stay with it until it ends.
     fn one_run(&mut self) -> End {
+        if !self.owns_lock() { self.quit_replaced(None) }
         self.stable = false; self.hub_pid = 0; self.set("starting");
         let mut child = match self.spawn() { Ok(c) => c, Err(e) => return e };
         self.hub_pid = child.id(); self.pin(); self.publish();
-        let (t0, mut ready_at, mut misses, mut last_probe, mut last_said) = (Instant::now(), None::<Instant>, 0u32, Instant::now(), String::new());
-        // the start's progress on the clock the hub's own timers run on (`Instant`, stopped while the machine sleeps): the phase file's age by the wall
-        // clock counts a night's sleep as a stall ("start stalled for 1054 s" at the first wake after 17 minutes asleep)
-        let (mut phase_seen, mut phase_at) = (None::<std::time::SystemTime>, t0);
+        let (t0, mut ready_at, mut misses, mut last_probe, mut last_said) = (Instant::now(), None::<u64>, 0u32, Instant::now(), String::new());
+        let start_awake = sys::awake_s();
+        // the start's progress on the suspend-excluding awake clock (`sys::awake_s`): both the phase file's age by the wall clock
+        // and Windows QPC/`Instant` count a night's sleep as a stall ("start stalled for 904 s" at the first wake after sleep, #1607 / #1497)
+        let (mut phase_seen, mut phase_at) = (None::<std::time::SystemTime>, start_awake);
         let mut clock = plan::SleepClock::new();
         loop {
-            if clock.tick(std::time::SystemTime::now(), Instant::now()) { misses = 0; say("the machine slept; health checks start counting again"); }
+            if clock.tick(std::time::SystemTime::now(), sys::awake_s()) { misses = 0; say("the machine slept; health checks start counting again"); }
             if sys::stop_asked() { self.quit(Some(&mut child)) }
+            if !self.owns_lock() { self.quit_replaced(Some(&mut child)) }
             match child.try_wait() {
                 Ok(Some(s)) => { self.hub_pid = 0; return self.classify(s) }
                 Ok(None) => {}
@@ -269,6 +310,7 @@ impl Guard {
             if last_probe.elapsed().as_secs() >= self.tm.probe {
                 last_probe = Instant::now(); self.watch_space();
                 let (answered, well, said, control) = self.probe();
+                if clock.tick(std::time::SystemTime::now(), sys::awake_s()) { misses = 0; say("the machine slept; health checks start counting again"); }
                 if well {
                     let down: Vec<String> = serde_json::from_str::<Value>(&said).ok().and_then(|v| v["degraded"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())).unwrap_or_default();
                     // on probation, a part the build before had running and this one has not is the update failing: a start step panicked or ran out of time
@@ -284,21 +326,30 @@ impl Guard {
                         let why = self.wrong_build(&said).unwrap_or_default(); say(&format!("{} is not the build it was staged as: {why}; ending it", Self::short(&self.build)));
                         sys::stop_child(&mut child, 10_000); self.hub_pid = 0; return End::Failed(why)
                     }
-                    None if well => { ready_at = Some(Instant::now()); say(&format!("{} answers, {} ms after its start", Self::short(&self.build), t0.elapsed().as_millis())); self.set(if self.mode == Mode::Safe { "safe" } else { "running" }); if control && !self.has_control(&self.build) { let mut c = self.d.lines("control"); c.push(self.build.clone()); let from = c.len().saturating_sub(32); let _ = self.d.put("control", &(c[from..].join("\n") + "\n")); } }
+                    None if well => {
+                        ready_at = Some(sys::awake_s());
+                        say(&format!("{} answers, {} ms after its start", Self::short(&self.build), t0.elapsed().as_millis()));
+                        self.set(if self.mode == Mode::Safe { "safe" } else { "running" });
+                        clear_down_alert(&mut self.rescue_state, &self.d, &self.build);
+                        if control && !self.has_control(&self.build) { let mut c = self.d.lines("control"); c.push(self.build.clone()); let from = c.len().saturating_sub(32); let _ = self.d.put("control", &(c[from..].join("\n") + "\n")); }
+                    }
                     None => {
+                        let now_awake = sys::awake_s();
                         let m = fs::metadata(self.d.path("phase")).ok().and_then(|m| m.modified().ok());
-                        if m.is_some() && m != phase_seen { phase_seen = m; phase_at = Instant::now(); }
-                        let quiet = phase_at.elapsed().as_secs();
-                        if quiet >= self.tm.stall || t0.elapsed().as_secs() >= self.tm.boot { let ph = self.d.text("phase"); return self.kill_hung(&mut child, &format!("start stalled for {quiet} s at {}", if ph.trim().is_empty() { "its first step" } else { ph.trim() })) }
+                        if m.is_some() && m != phase_seen { phase_seen = m; phase_at = now_awake; }
+                        let quiet = now_awake.saturating_sub(phase_at);
+                        if quiet >= self.tm.stall || now_awake.saturating_sub(start_awake) >= self.tm.boot { let ph = self.d.text("phase"); return self.kill_hung(&mut child, &format!("start stalled for {quiet} s at {}", if ph.trim().is_empty() { "its first step" } else { ph.trim() })) }
                     }
                     Some(at) => {
-                        if well || answered { misses = 0 } else if clock.waking(Instant::now()) { say(&format!("health check failed just after a wake, not counted: {}", said.chars().take(160).collect::<String>())) } else { misses += 1; last_said = said.clone(); say(&format!("health check {misses} of {} failed: {}", self.tm.misses, said.chars().take(160).collect::<String>())) }
+                        let now_awake = sys::awake_s();
+                        if well || answered { misses = 0 } else if clock.waking(now_awake) { say(&format!("health check failed just after a wake, not counted: {}", said.chars().take(160).collect::<String>())) } else { misses += 1; last_said = said.clone(); say(&format!("health check {misses} of {} failed: {}", self.tm.misses, said.chars().take(160).collect::<String>())) }
                         if misses >= self.tm.misses { let why = format!("stopped answering: {}", last_said.chars().take(160).collect::<String>()); return self.kill_hung(&mut child, &why) }
                         // the clock that proves a build starts when its folds and any migration are over: a crash at the end of a long fold or import is the
                         // start failing, while a long import itself is not (plan::holds_proof)
-                        let busy = plan::holds_proof(&serde_json::from_str::<Value>(&said).unwrap_or(Value::Null));
-                        if busy { ready_at = Some(Instant::now()); }
-                        if !busy && !self.stable && at.elapsed().as_secs() >= self.tm.stable { self.stable = true; self.d.add_good(&self.build); self.pin(); say(&format!("{} started cleanly", Self::short(&self.build))); if self.probation.take().is_some() { if let Some(b) = &self.b { b.publish(&self.build); } } self.publish(); }
+                        let body = serde_json::from_str::<Value>(&said).unwrap_or(Value::Null);
+                        let busy = plan::holds_proof(&body);
+                        if busy { ready_at = Some(now_awake); }
+                        if plan::proven(well, &body, self.stable, now_awake.saturating_sub(at), self.tm.stable) { self.stable = true; self.d.add_good(&self.build); self.pin(); say(&format!("{} started cleanly", Self::short(&self.build))); if self.probation.take().is_some() { if let Some(b) = &self.b { b.publish(&self.build); } } self.publish(); }
                     }
                 }
             }
@@ -328,6 +379,7 @@ impl Guard {
         let t = Instant::now();
         while t.elapsed().as_secs() < secs {
             if sys::stop_asked() { self.quit(None) }
+            if !self.owns_lock() { self.quit_replaced(None) }
             if let Some(r) = self.d.take_request() { match self.request(r) { Move::Restart => return true, Move::Exit => self.quit(None), Move::Nothing => {} } }
             std::thread::sleep(Duration::from_millis(200));
         }
@@ -359,6 +411,8 @@ impl Guard {
         loop {
             let end = self.one_run();
             if sys::stop_asked() { self.quit(None) }
+            if !self.owns_lock() { self.quit_replaced(None) }
+            self.crashed = matches!(end, End::Failed(_));
             self.fold_failure(&end);
             let (good, bad) = (self.d.good(), self.bad());
             let b = self.build.clone();
@@ -380,7 +434,9 @@ impl Guard {
                     self.set_aside_checkpoints(); self.build = build; self.mode = Mode::Safe;
                 }
                 Next::Rescue { after, why } => {
-                    if self.state != "rescue" { self.alert("Hub is down", &why, "answering on its port for a restart, and trying again by itself"); }
+                    if self.rescue_state.enter() {
+                        self.alert("Hub is down", &why, "answering on its port for a restart, and trying again by itself");
+                    }
                     self.rescue(after, &why);
                 }
             }
@@ -454,13 +510,28 @@ pub fn run(o: Opts) -> i32 {
     let _ = d.put("launch.json", &json!({"home": o.home, "port": o.port, "host": o.host, "builds": o.builds, "log": o.log, "pidfile": o.pidfile, "mem": o.mem, "default": o.default_home, "hubArgs": o.hub_args,
         "env": std::env::vars().filter(|(k, _)| k.starts_with("BACKPLANE_GUARD_") || ["BACKPLANE_HTTPS_PORT", "BACKPLANE_NO_UPDATE", "BACKPLANE_AGENTS", "BACKPLANE_COPY", "BACKPLANE_SIDE_BY_SIDE"].contains(&k.as_str())).map(|(k, v)| (k, Value::String(v))).collect::<serde_json::Map<_, _>>()}).to_string());
     let b = o.builds.clone().map(Builds);
+    let _guard_lock = match o.builds.as_ref() {
+        Some(p) => {
+            let r = crate::appkeep::try_with_state_lock(p, || -> std::io::Result<std::fs::File> {
+                let f = OpenOptions::new().create(true).write(true).truncate(false).open(p.join(".guard.lock"))?;
+                f.lock_shared()?;
+                Ok(f)
+            }).and_then(|inner| inner);
+            match r {
+                Ok(f) => Some(f),
+                Err(e) => { say(&format!("cannot lock {}: {e}", p.display())); return 1 }
+            }
+        }
+        None => None,
+    };
     let mut build = o.build.clone();
     if build.is_empty() { build = b.as_ref().map_or(String::new(), Builds::current); }
     let bad = b.as_ref().map_or(vec![], Builds::bad);
     let t = Tuning { tries: env("BACKPLANE_GUARD_TRIES", 3) as usize, window: env("BACKPLANE_GUARD_WINDOW", 600), pause: env("BACKPLANE_GUARD_PAUSE", 1), machine_pause: env("BACKPLANE_GUARD_MACHINE_PAUSE", 5), rescue_retry: env("BACKPLANE_GUARD_RESCUE_RETRY", 120) };
     let tm = Times { probe: env("BACKPLANE_GUARD_PROBE", 5), misses: env("BACKPLANE_GUARD_MISSES", 6) as u32, stable: env("BACKPLANE_GUARD_STABLE", 60), stall: env("BACKPLANE_GUARD_STALL", 300), boot: env("BACKPLANE_GUARD_BOOT", 900), floor: env("BACKPLANE_GUARD_MIN_FREE", 1 << 30), warn: env("BACKPLANE_DISK_WARN_GB", 75).saturating_mul(1_000_000_000) };
     let mode = if o.safe { Mode::Safe } else { Mode::Normal };
-    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, swept: vec![], sweep: None, down: vec![], down_before: vec![], o };
+    let rescue_state = plan::RescueState { active: d.open_alert("Hub is down") };
+    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, swept: vec![], sweep: None, down: vec![], down_before: vec![], crashed: false, lock, rescue_state, _guard_lock, o };
     // a build already marked bad is not started: the newest one that is not
     if bad.contains(&g.build) { if let Some(to) = g.rollback_to() { say(&format!("{} is marked bad: starting {to}", g.build)); g.build = to; } }
     g.pin(); g.go()
@@ -499,5 +570,55 @@ mod tests {
         assert!(!allowed(&h, &d, &req("/hub/control", "POST", hs(sig, ts), body), &seen), "a replay");
         d.put("peers.json", r#"{"peers":[]}"#).unwrap(); let ts2 = now() + 1; let sig2 = format!("sha256={}", http::hmac(&[0xab, 0xcd], format!("{ts2}.{body}").as_bytes()));
         assert!(!allowed(&h, &d, &req("/hub/control", "POST", hs(sig2, ts2), body), &seen), "a link that is no longer the owner's");
+    }
+    #[test] fn lock_ownership_detects_removed_or_replaced_lock_file() {
+        let (_h, d) = home("lock-own");
+        let p = d.path("lock");
+        let lock = OpenOptions::new().create(true).write(true).truncate(false).open(&p).unwrap();
+        lock.try_lock().unwrap();
+        assert!(sys::same_file(&lock, &p));
+        let aside = d.path("lock.old");
+        fs::rename(&p, &aside).unwrap();
+        assert!(!sys::same_file(&lock, &p), "missing lock path is no longer owned");
+        let replacement = OpenOptions::new().create(true).write(true).truncate(false).open(&p).unwrap();
+        drop(replacement);
+        assert!(!sys::same_file(&lock, &p), "recreated lock path is a different file");
+    }
+    #[test] fn rescue_recovery_clears_open_hub_is_down_incident() {
+        let (_h, d) = home("rescue-clear");
+        d.incident("Hub is down", "port held", "answering on its port for a restart, and trying again by itself", "v0.16.4");
+        assert!(d.open_alert("Hub is down"));
+        let mut rescue = plan::RescueState { active: d.open_alert("Hub is down") };
+        assert!(!rescue.enter(), "restarted guard sees open rescue alert and stays silent on retries");
+        assert!(clear_down_alert(&mut rescue, &d, "v0.16.4"));
+        assert!(!rescue.active);
+        assert!(!d.open_alert("Hub is down"));
+        assert!(!clear_down_alert(&mut rescue, &d, "v0.16.4"), "second recovery call does not write a duplicate clear");
+    }
+    #[cfg(unix)] #[test] fn end_pid_escalates_to_sigkill_when_term_and_abort_are_ignored() {
+        for bad in [0, 1, std::process::id(), (i32::MAX as u32) + 1, u32::MAX] {
+            assert!(!end_pid(bad, Duration::from_millis(10), Duration::from_millis(10), Duration::from_millis(10)), "must refuse pid {bad}");
+        }
+        let dir = crate::tmp::dir("end-pid");
+        let marker = dir.join("ready");
+        let mut child = Command::new("sh")
+            .args(["-c", r#"trap '' TERM ABRT; printf ready > "$1"; exec sleep 30"#, "sh"])
+            .arg(&marker)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !marker.exists() {
+            assert!(Instant::now() < deadline, "child never armed signal traps");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let pid = child.id();
+        let reaper = std::thread::spawn(move || child.wait().unwrap());
+        let dead = end_pid(pid, Duration::from_millis(150), Duration::from_millis(150), Duration::from_secs(2));
+        let status = reaper.join().unwrap();
+        assert!(dead, "end_pid must finish once SIGKILL reaps the child");
+        assert_eq!(sys::signal_of(&status), Some(libc::SIGKILL));
     }
 }

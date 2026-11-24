@@ -54,8 +54,26 @@ pub fn claude_args(a: &ArgsIn) -> Vec<String> {
     if a.think { v.push(s("--thinking-display")); v.push(s("summarized")); }
     for d in a.plugins { v.push(s("--plugin-dir")); v.push(s(d)); }
     v.push(s("--settings")); v.push(super::speed::claude_settings(a.speed));
+    v.push(s("--strict-mcp-config"));
     v.push(s("--mcp-config")); v.push(if a.mcp_json.is_empty() { mcp_config(a.mcp_url) } else { a.mcp_json.to_string() });
     v
+}
+/// Moves `--append-system-prompt <text>` to `--append-system-prompt-file <private file>` (0700 dir, 0600 file,
+/// removed when the process ends) so variable-size instructions never sit on argv on any OS.
+pub fn prompt_to_run_file(args: &mut [String], dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
+    flag_to_run_file(args, "--append-system-prompt", "--append-system-prompt-file", dir, name)
+}
+/// Moves `--system-prompt <text>` to `--system-prompt-file <private file>` (for one-shot Claude calls).
+pub fn system_prompt_to_run_file(args: &mut [String], dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
+    flag_to_run_file(args, "--system-prompt", "--system-prompt-file", dir, name)
+}
+fn flag_to_run_file(args: &mut [String], flag: &str, file_flag: &str, dir: &std::path::Path, name: &str) -> std::io::Result<Option<super::proc::RunFile>> {
+    let Some(i) = args.iter().position(|a| a == flag) else { return Ok(None) };
+    if i + 1 >= args.len() { return Ok(None) }
+    let dir = std::path::absolute(dir)?;
+    let f = super::proc::RunFile::private(&dir, name, &args[i + 1])?;
+    args[i] = file_flag.into(); args[i + 1] = f.path().to_string_lossy().into_owned();
+    Ok(Some(f))
 }
 /// Windows: the system prompt goes to Claude in a file (`--append-system-prompt-file`). A command line there holds 32767 characters,
 /// npm's `claude.cmd` (cmd.exe) 8191 and Git's sh keeps 8186 of a quoted argument, while the prompt is 13 to 20 thousand; and a batch
@@ -253,12 +271,12 @@ mod tests {
     #[test] fn modes_map_to_claudes_permission_flags() {
         assert_eq!(permission("full-access", "default"), "bypassPermissions"); assert_eq!(permission("approval-required", "default"), "default"); assert_eq!(permission("full-access", "plan"), "plan");
         let mk = |m: &'static str, s: &'static str, r: &'static str| ArgsIn { model: m, session: s, runtime: r, interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &[], mcp_url: "http://u", mcp_json: "", disallowed: &[], speed: "" };
-        let a = claude_args(&mk("opus", "S", "full-access")); assert!(!a.contains(&"--permission-prompt-tool".to_string())); assert_eq!(&a[a.len() - 8..a.len() - 4], ["--model", "opus", "--resume", "S"]);
-        assert_eq!(&a[a.len() - 4..a.len() - 2], ["--settings", r#"{"fastMode":false}"#], "Normal says fast mode off, whatever the person's own settings saved");
-        let mut f = mk("opus", "", "full-access"); f.speed = "fast"; let fa = claude_args(&f); assert_eq!(fa[fa.len() - 3], r#"{"fastMode":true}"#);
+        let a = claude_args(&mk("opus", "S", "full-access")); assert!(!a.contains(&"--permission-prompt-tool".to_string())); assert_eq!(&a[a.len() - 9..a.len() - 5], ["--model", "opus", "--resume", "S"]);
+        assert_eq!(&a[a.len() - 5..a.len() - 3], ["--settings", r#"{"fastMode":false}"#], "Normal says fast mode off, whatever the person's own settings saved");
+        let mut f = mk("opus", "", "full-access"); f.speed = "fast"; let fa = claude_args(&f); assert_eq!(fa[fa.len() - 4], r#"{"fastMode":true}"#);
         assert!(claude_args(&mk("", "", "auto")).contains(&"--permission-prompt-tool".to_string()));
         let mut x = mk("", "", "full-access"); let dirs = vec!["/k".to_string(), "/h/attachments".to_string()]; x.dirs = &dirs; x.effort = "high"; x.think = true; x.plugins = &dirs[..1];
-        let a = claude_args(&x); assert_eq!(&a[a.len() - 14..a.len() - 4], ["--add-dir", "/k", "--add-dir", "/h/attachments", "--effort", "high", "--thinking-display", "summarized", "--plugin-dir", "/k"]); assert_eq!(a[a.len() - 2], "--mcp-config");
+        let a = claude_args(&x); assert_eq!(&a[a.len() - 15..a.len() - 5], ["--add-dir", "/k", "--add-dir", "/h/attachments", "--effort", "high", "--thinking-display", "summarized", "--plugin-dir", "/k"]); assert_eq!(a[a.len() - 2], "--mcp-config");
     }
     #[test] fn the_restart_note_reads_the_person_zone() {
         assert_eq!(clock("", 0), "00:00"); assert_eq!(clock("UTC", 3600 * 5 + 60 * 7), "05:07");

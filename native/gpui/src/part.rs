@@ -25,6 +25,12 @@ impl Render for Part {
 #[derive(Default)]
 pub struct Parts { views: Vec<(Draw, Entity<Part>)>, pub side_ctl: Vec<CtlEntry>, pub rows_ctl: Vec<CtlEntry>, ticking: Vec<usize> }
 impl Parts {
+    pub fn notify(&self, draw: Draw, cx: &mut Context<Backplane>) {
+        if let Some((_, view)) = self.views.iter().find(|(d, _)| *d as usize == draw as usize) {
+            view.update(cx, |_, cx| cx.notify());
+        }
+    }
+
     /// The part drawing `draw`, as an element whose root is laid out with `style` (the part's own root element fills it).
     pub fn el(&mut self, draw: Draw, style: StyleRefinement, cx: &mut Context<Backplane>) -> AnyElement {
         let view = match self.views.iter().find(|(d, _)| *d as usize == draw as usize) {

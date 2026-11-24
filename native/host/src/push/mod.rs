@@ -86,12 +86,15 @@ pub async fn alert(hub: &Arc<Hub>, thread: &str, kind: &str, key: &str, body: &s
 /// - the uberbot's own thread: its notify_person, its own ask and its reminders order their own push, and a tell_person from its back office is private-lane output
 ///   (its ride tells it no phone alert went out);
 /// - a reminder: `Source::reminder` orders the ones that may push (the person's, the uberbot's), and no other bot's;
-/// - a note on another bot's thread: a bot's notify_person reaches the uberbot as mail, which decides.
+/// - a note on another bot's thread: a bot's notify_person reaches the uberbot as mail, which decides;
+/// - a live swarm member's done or fail: its swarm's row stands for it.
 /// A room's post is no thread's record: at most the room reads unread.
 pub fn alert_may(w: &World, thread: &str, kind: &str) -> bool {
     if thread.is_empty() || kind.is_empty() || kind == "reminder" { return false }
     if w.mail.run_of(thread).is_some() || w.private_is(thread) || thread.starts_with("mailcoord-") { return false }
     if w.chat_is(thread) { return false }
+    // a swarm member's own ends: its swarm's row in Needs you says what it wants, in one line (present/swarm_need.rs), and its starter hears of it
+    if kind != "ask" && w.rooms.values().any(|r| !r.deleted && r.swarm() && !r.ended() && r.members.iter().any(|m| m.strip_prefix("thread:") == Some(thread))) { return false }
     !(kind == "note" && w.bots.values().any(|b| !b.deleted && b.thread == thread))
 }
 /// What a client may not write (`setting.set`).

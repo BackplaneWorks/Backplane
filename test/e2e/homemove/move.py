@@ -33,6 +33,9 @@ def start(name):
                BACKPLANE_BOTS_DIR=os.path.join(home, "botsdir"), BACKPLANE_UBER_GRACE="600", BACKPLANE_MOVE_PAUSE_MS=os.environ.get("BACKPLANE_MOVE_PAUSE_MS", ""), HOME=os.path.join(WORK, f"home-{name}"))
     for k in ("DISPLAY", "WAYLAND_DISPLAY", "BACKPLANE_URL", "BACKPLANE_HOOK_URL", "BACKPLANE_HTTPS_PORT"):
         env.pop(k, None)
+    if name == "B":
+        # The stable webhook name can differ from the URL peers use for RPC.
+        env["BACKPLANE_HOOK_URL"] = f"http://localhost:{PORTS[name]}"
     os.makedirs(env["HOME"], exist_ok=True)
     log = open(os.path.join(WORK, f"{name}.log"), "a")
     procs[name] = subprocess.Popen([BIN, "--home", home, "--port", str(PORTS[name]), "--host", "127.0.0.1", "--no-tailscale", "--foreground", "--headless"],
@@ -94,6 +97,17 @@ def uber(hub):
         if e.get("$") == "UberSet":
             u = e.get("bot", "")
     return u
+
+
+def lease(hub):
+    current = {}
+    for event in events(hub):
+        if event.get("$") != "UberOp":
+            continue
+        op = json.loads(event["op"])
+        if op.get("k") == "lease" and op["term"] > current.get("term", 0):
+            current = op
+    return current
 
 
 def live_bots(hub):
@@ -174,12 +188,15 @@ def main():
     done = wait(lambda: (lambda s: s if s.get("state") in ("done", "failed") else None)(rpc(A, "home.status")), 180)
     check("the move is done", (done or {}).get("state") == "done", json.dumps(done))
     check("B's uberbot is Bub (same id)", uber(B) == bub)
+    first_lease = lease(B)
+    check("B holds the lease after the move", first_lease.get("holder") == setting(B, "machine.id"))
     check("B has Bub, Calendar", {"Bub", "Calendar"} <= {b.get("name") for b in live_bots(B).values()})
     check("A has no bots and no uberbot", not live_bots(A) and uber(A) == "")
     check("B holds Bub's memory", any(e.get("$") == "MemorySaved" and e.get("bot") == bub for e in events(B)))
     check("B holds the phone's push registration", any(e.get("$") == "DeviceRegistered" and e.get("token") == "ab" * 32 for e in events(B)))
     s = Socket(A, phone); hello = s.hello(); s.close()
     offer = json.loads(hello.get("hubOffer") or "{}")
+    check("A knows the remote home's id without waiting for mesh discovery", bool(hello.get("home", {}).get("id")))
     check("the phone's hello on A offers B, same credential", offer.get("credential") == "same" and offer.get("url", "").endswith(str(PORTS["B"])), json.dumps(offer))
     s = Socket(B, phone); hb = s.hello(); s.close()
     check("the phone's own token opens B", hb.get("t") == "hello", str(hb)[:120])
@@ -191,11 +208,26 @@ def main():
     A = start("A")
     wait(lambda: rpc(A, "home.status") and True, 10)
 
-    # and back
+    stop("B")
+    def home_is_away():
+        socket = Socket(A, phone)
+        try:
+            home = socket.hello().get("home", {})
+            return home.get("online") is False and home.get("awaySince") and home.get("canMoveHere") is False
+        finally:
+            socket.close()
+
+    check("A reports B offline and disables the move", bool(wait(home_is_away, 40)))
+    B = start("B")
+
+    # and back after the front door has restarted
     r = rpc(A, "home.move", {"to": "back"})
     check("home.move back starts", r.get("started") is True, json.dumps(r)[:200])
     back = wait(lambda: uber(A) == bub and uber(B) == "", 180)
     check("Bub is A's uberbot again, B has none", bool(back))
+    returned_lease = lease(A)
+    check("the return advances the lease to A", returned_lease.get("holder") == setting(A, "machine.id")
+          and returned_lease.get("term", 0) > first_lease.get("term", 0))
     check("A has Bub and Calendar again", {"Bub", "Calendar"} <= {b.get("name") for b in live_bots(A).values()})
     n_mem = sum(1 for e in events(A) if e.get("$") == "MemorySaved" and e.get("bot") == bub)
     check("no line came back twice (one memory)", n_mem == 1, str(n_mem))

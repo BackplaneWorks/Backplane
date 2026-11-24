@@ -67,11 +67,25 @@ pub fn succeeds_within(mut c: std::process::Command, limit: std::time::Duration)
         }
     }
 }
-/// Whether the revision `id` of the repository at `git_dir` holds the file `rel` (a read of the object store, nothing is checked out), within `PROBE_DEADLINE`.
-pub fn version_has_file(git_dir: &str, id: &str, rel: &str) -> bool {
+/// One overall time budget for the object-store probes of a restore or a commit: each probe gets at most `PROBE_DEADLINE` and no more than what is left, and
+/// once it is spent every remaining probe counts as unresolved without starting git.
+pub struct ProbeBudget { end: std::time::Instant }
+/// The whole budget of one restore or one commit's version checks.
+pub const PROBE_BUDGET: std::time::Duration = std::time::Duration::from_secs(4);
+impl ProbeBudget {
+    pub fn new(total: std::time::Duration) -> Self { ProbeBudget { end: std::time::Instant::now() + total } }
+    /// Run `c` within what is left of the budget (and `PROBE_DEADLINE`): whether it exited 0.
+    pub fn run(&self, c: std::process::Command) -> bool {
+        let left = self.end.saturating_duration_since(std::time::Instant::now());
+        if left.is_zero() { return false }
+        succeeds_within(c, left.min(PROBE_DEADLINE))
+    }
+}
+/// Whether the revision `id` of the repository at `git_dir` holds the file `rel` (a read of the object store, nothing is checked out), within the budget.
+pub fn version_has_file_in(budget: &ProbeBudget, git_dir: &str, id: &str, rel: &str) -> bool {
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "git");
     c.args(["--git-dir", git_dir, "cat-file", "-e", &format!("{id}:{rel}")]);
-    succeeds_within(c, PROBE_DEADLINE)
+    budget.run(c)
 }
 pub fn hist_git(g: &str, c: &str, top: &str, rel: &str) -> String { format!("git\t{g}\t{c}\t{}\t{top}/{rel}", bj::len(top)) }
 /// Hist.rebase: another live file in the same commit as version p; abs itself when p is live
@@ -182,16 +196,26 @@ async fn checks_inputs(cli: &str, out: &str, dir: &str, home: &str, trigger: &st
         ("gate", J::Str(if ok { checks::gate_all(&fs, &tasks, &runs, &cfg.gate) } else { WAIT_OK.into() })), ("line", J::Str(checks::line(&fs))), ("tasks", tasks_json(&tasks)),
         ("pending", J::Str(if ok { String::new() } else { hash })), ("pendrun", J::Str(if ok { String::new() } else { cmds }))])
 }
+fn prep_ok(commit: &str, ls: &[String]) -> bool {
+    !at(ls, 0).is_empty() && !at(ls, 1).is_empty() && (commit.is_empty() || !at(ls, 2).is_empty())
+}
+fn release_prep_ok(ls: &[String]) -> bool {
+    [0, 1, 2, 3, 4, 7, 8, 9, 10].into_iter().all(|i| !at(ls, i).is_empty())
+}
 /// Rvc.check.run: the project in DIR (COMMIT "" its files as they are; else that commit, taken out with git archive into a folder of its own and removed after)
 async fn check_run(cli: &str, dir: &str, commit: &str, home: &str, trigger: &str) -> J {
     let r = sh_ro(PREP, &[dir, commit], "/").await;
     if r.code != 0 { return err(or(bj::trim(&r.out), "could not take out that commit")) }
     let ls = lines(&r.out);
     let (tmp, d, root) = (at(&ls, 0), at(&ls, 1), at(&ls, 2));
+    if !prep_ok(commit, &ls) {
+        if !tmp.is_empty() { let _ = std::fs::remove_dir_all(tmp); }
+        return err("could not prepare check snapshot")
+    }
     let f = project::read(d);
     let why = bound(root, &f).await;
     let o = if why.is_empty() { checks_inputs(cli, tmp, d, home, trigger, &f).await } else { err(why) };
-    proc_ro("rm", &["-rf", tmp], "/", &[]).await;
+    if !tmp.is_empty() { let _ = std::fs::remove_dir_all(tmp); }
     o
 }
 /// How far back the log is read for a question still open. The read model keeps no asks; a question older than this (a restart closes them) is only asked twice.
@@ -231,6 +255,10 @@ pub fn checks_answer(home: &str, ask: &str, answer: &str) -> bool {
     true
 }
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
+fn iso_utc(at: u64) -> String {
+    let tm = crate::plat::time::local_tm("", at);
+    format!("{:04}-{:02}-{:02}T{:02}:{:02}:{:02}Z", tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min, at % 60)
+}
 /// RvJob.checks.k
 fn checks_report(thread: &str, o: &J) -> Value {
     json!({"report":{"thread":thread,"page":"checks","md":o.get_str("md",""),"err":o.get_str("err",""),"gate":o.get_str("gate",""),"checklistGate":o.get_bool("checklistGate",false),"otherGates":o.get_str("otherGates",""),"line":o.get_str("line",""),
@@ -276,9 +304,8 @@ async fn publish_stage(ls: &[String], tag: &str, sch: &str) -> J {
     let lst = sh(REL_FILES, &[stage], "/").await;
     if lst.code != 0 { return err(release::command_error("list release outputs", lst.code, &lst.out)) }
     let files: Vec<String> = bj::trim(&lst.out).split('\n').filter(|x| !bj::trim(x).is_empty()).map(str::to_string).collect();
-    let when = proc("date", &["-u", "+%Y-%m-%dT%H:%M:%SZ"], "/", &[]).await;
-    if when.code != 0 { return err(release::command_error("release timestamp", when.code, &when.out)) }
-    let written = std::fs::write(format!("{stage}/notes.md"), &notes).is_ok() & std::fs::write(format!("{stage}/manifest.json"), release::manifest(tag, c, bj::trim(&when.out), &files)).is_ok();
+    let when = iso_utc(now_s());
+    let written = std::fs::write(format!("{stage}/notes.md"), &notes).is_ok() & std::fs::write(format!("{stage}/manifest.json"), release::manifest(tag, c, &when, &files)).is_ok();
     if !written { return err("release metadata could not be written; no outputs published, retry the same tag") }
     let done = sh(REL_COMMIT, &[stage, fin, gd, tag, c], "/").await;
     if done.code != 0 { return err(release::command_error("publish output directory", done.code, &done.out)) }
@@ -286,21 +313,28 @@ async fn publish_stage(ls: &[String], tag: &str, sch: &str) -> J {
 }
 /// Rvr.in: the outputs built from the snapshot into a private staging folder; both it and the snapshot go, and the lock with them
 async fn release_in(ls: &[String], tag: &str, cli: &str) -> J {
+    let (t, stage, lock) = (at(ls, 0), at(ls, 8), at(ls, 9));
+    if !release_prep_ok(ls) {
+        if !t.is_empty() { let _ = std::fs::remove_dir_all(t); }
+        if !stage.is_empty() { let _ = std::fs::remove_dir_all(stage); }
+        if !lock.is_empty() { let _ = std::fs::remove_dir(lock); }
+        return err("could not prepare release snapshot")
+    }
     let f = project::read(at(ls, 1));
-    let stage = at(ls, 8);
     let steps = release::plan_at(&release::defaults(), stage, cli, &f.pcb, &f.sch);
-    let why = bound(&format!("{}/src", at(ls, 0)), &f).await;
-    let made = proc("mkdir", &["-p", &format!("{stage}/gerbers")], "/", &[]).await;
+    let why = bound(&format!("{t}/src"), &f).await;
+    let made = std::fs::create_dir_all(format!("{stage}/gerbers"));
     let o = if !why.is_empty() { err(why) }
-        else if made.code != 0 { err(release::command_error("create export directory", made.code, &made.out)) }
+        else if let Err(e) = made { err(format!("create export directory failed: {e}")) }
         else if steps.is_empty() { err("no supported design files or export steps; no outputs published") }
         else {
             let mut e = String::new();
             for s in &steps { e = export_step(&s.argv, &format!("{} ({})", s.label, s.id)).await; if !e.is_empty() { break } }
             if e.is_empty() { publish_stage(ls, tag, &f.sch).await } else { err(format!("{e}; no outputs published, retry the same tag")) }
         };
-    proc("rm", &["-rf", at(ls, 0), stage], "/", &[]).await;
-    proc("rmdir", &[at(ls, 9)], "/", &[]).await;
+    if !t.is_empty() { let _ = std::fs::remove_dir_all(t); }
+    if !stage.is_empty() { let _ = std::fs::remove_dir_all(stage); }
+    if !lock.is_empty() { let _ = std::fs::remove_dir(lock); }
     o
 }
 /// Rvr.child.at: the project in DIR at TAG, taken out with git archive; the tool's outputs, notes and a manifest into DIR/.backplane/releases/TAG
@@ -430,6 +464,17 @@ impl RpcHandler for Rv {
 
 #[cfg(test)]
 mod tests {
+    /// One overall budget for a restore's probes: a probe is cut off at what is left, and once it is spent no probe starts.
+    #[test] fn the_probe_budget_is_one_for_all_the_probes_of_a_restore() {
+        let slow = || { if cfg!(windows) { let mut c = std::process::Command::new("cmd"); c.args(["/C", "ping -n 6 127.0.0.1 >nul"]); c } else { let mut c = std::process::Command::new("sleep"); c.arg("5"); c } };
+        let b = super::ProbeBudget::new(std::time::Duration::from_millis(400));
+        let start = std::time::Instant::now();
+        assert!(!b.run(slow()), "the first probe is cut off at the budget");
+        let first = start.elapsed();
+        assert!(!b.run(slow()) && !b.run(slow()), "once spent, no probe starts");
+        assert!(start.elapsed() < first + std::time::Duration::from_millis(300), "the others cost nothing: eight two-sided tiles cannot wait 32 s ({:?})", start.elapsed());
+        assert!(first < std::time::Duration::from_secs(2));
+    }
     use super::*;
     fn tmp(n: &str) -> crate::plat::tmp::TempStr { crate::plat::tmp::dir_str(&format!("rv-{n}")) }
     #[test] fn versions_rebase_on_their_commit() {
@@ -521,7 +566,12 @@ mod tests {
         std::fs::write(format!("{d}/b.kicad_sch"), format!("(kicad_sch {}{})", sym("R1", "2k"), sym("R2", "2k"))).unwrap(); g(&["add", "."]); g(&["commit", "-qm", "two"]);
         std::fs::write(format!("{bin}/gh"), "#!/bin/sh\nprintf '%s\\n' \"$@\" > \"$0.args\"\necho https://example.invalid/releases/v2\n").unwrap();
         use crate::plat::fs::PermissionsExt; std::fs::set_permissions(format!("{bin}/gh"), std::fs::Permissions::from_mode(0o755)).unwrap();
-        std::env::set_var("PATH", format!("{bin}:{}", std::env::var("PATH").unwrap()));
+        struct PathGuard(Option<std::ffi::OsString>);
+        impl Drop for PathGuard { fn drop(&mut self) { match self.0.take() { Some(p) => std::env::set_var("PATH", p), None => std::env::remove_var("PATH") } } }
+        let old_path = std::env::var_os("PATH");
+        let joined = std::env::join_paths(std::iter::once(std::path::PathBuf::from(&*bin)).chain(std::env::split_paths(old_path.as_deref().unwrap_or(std::ffi::OsStr::new(""))))).unwrap();
+        let _path_guard = PathGuard(old_path);
+        std::env::set_var("PATH", joined);
         let r = release_job(&cli, "t", &d, "v2", true, false, &home).await; assert_eq!(r["report"]["err"], "", "{r}");
         let md = r["report"]["md"].as_str().unwrap(); assert!(md.contains("Changes since v1.") && md.contains("## BOM changes") && md.contains("| R1 | changed | value: 1k | value: 2k |") && md.ends_with("Published: https://example.invalid/releases/v2"), "{md}");
         let tag = g(&["rev-parse", "refs/tags/v2"]); assert!(g(&["ls-remote", "--tags", "origin"]).contains(&tag));
@@ -541,5 +591,24 @@ mod tests {
         assert_eq!(proc("git", &["tag"], &d, &[]).await.out, "");
         let r = release_job("/nonexistent/kicad-cli", "t", &d, "v1", false, true, &home).await; assert!(r["report"]["err"].as_str().unwrap().starts_with("No release: checks could not complete: erc: check command failed"), "{r}");
         let r = release_job(&cli, "t", &d, "v1", false, true, &home).await; assert_eq!(r["report"]["err"], "", "{r}");
+    }
+    #[test] fn iso_utc_formats_rfc3339() {
+        assert_eq!(iso_utc(0), "1970-01-01T00:00:00Z");
+        assert_eq!(iso_utc(1_709_251_199), "2024-02-29T23:59:59Z");
+        assert_eq!(iso_utc(1_791_763_200), "2026-10-12T00:00:00Z");
+    }
+    #[test] fn incomplete_snapshot_records_are_refused() {
+        let s = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        assert!(prep_ok("", &s(&["/t", "/d"])));
+        assert!(prep_ok("abc123", &s(&["/t", "/d", "/r"])));
+        assert!(!prep_ok("", &s(&["", "/d"])));
+        assert!(!prep_ok("", &s(&["/t", ""])));
+        assert!(!prep_ok("abc123", &s(&["/t", "/d", ""])));
+        assert!(release_prep_ok(&s(&["t", "src", "gd", "top", "c", "", "", "fin", "stage", "lock", "obj"])));
+        for miss in [0usize, 1, 2, 3, 4, 7, 8, 9, 10] {
+            let mut row = s(&["t", "src", "gd", "top", "c", "prev", "pc", "fin", "stage", "lock", "obj"]);
+            row[miss].clear();
+            assert!(!release_prep_ok(&row), "missing field {miss} must be refused");
+        }
     }
 }

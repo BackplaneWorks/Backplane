@@ -251,8 +251,9 @@ pub fn read_frame(b: &[u8]) -> Option<Vec<(String, Item)>> {
     Some(out)
 }
 #[derive(Debug, PartialEq)]
-pub enum SolidFrame { Model(String, Mesh), /// why there is no model (the hub's `none`) and its `retryable` flag, the previous model stays
-    Note(String, String, Option<bool>), Bad(String),
+pub enum SolidFrame { Model(String, Mesh), /// why there is no model (the hub's `none`), its `retryable` flag and its `big` one (refused for its
+    /// size, so the page offers "Load it anyway"); the previous model stays
+    Note(String, String, Option<bool>, bool), Bad(String),
     /// the parts of the model start again: `of` instances will come
     Parts(String, u32),
     /// one part model at its instances (placed), and how many instances have now come
@@ -284,7 +285,7 @@ pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
     if !is_solid_key(&key) { return None }
     if let Some(Item::Text(why)) = get("none") {
         let retryable = match get("retryable") { Some(Item::Bool(b)) => Some(*b), _ => None };
-        return Some(SolidFrame::Note(key, why.clone(), retryable))
+        return Some(SolidFrame::Note(key, why.clone(), retryable, matches!(get("big"), Some(Item::Bool(true)))))
     }
     if let Some(Item::Text(text)) = get("stage") {
         let ms = |k: &str| match get(k) { Some(Item::Int(v)) if *v > 0 => *v as u64, _ => 0 };
@@ -486,7 +487,7 @@ impl Scene {
                 self.key = key; self.parts.clear(); self.done = 0; self.of = of; *reset = true; Ok(true)
             }
             SolidFrame::Part(key, m, done) => { if key != self.key { return Ok(false) } self.parts.push(Arc::new(m)); self.done = done.min(self.of.max(done)); Ok(true) }
-            SolidFrame::Note(key, why, retryable) => { if key != self.key { *self = Scene { key: key.clone(), ..Default::default() } } Err(SolidFrame::Note(key, why, retryable)) }
+            SolidFrame::Note(key, why, retryable, big) => { if key != self.key { *self = Scene { key: key.clone(), ..Default::default() } } Err(SolidFrame::Note(key, why, retryable, big)) }
             other => Err(other),
         }
     }
@@ -603,7 +604,8 @@ pub fn stage_line(text: &str, secs: u64, about_ms: u64) -> String {
 }
 /// What the page asks of the window: the model of this source made again (its Retry, after the hub could not make it).
 /// `Refine`: the person zoomed in on a STEP: its solids near `at` (the model's millimetres) within `r`, meshed finer (kicad.refine).
-pub enum SolidEvent { Retry(String), Refine(String, [f32; 3], f32), /** a click on a board's model: the reference of the part under it, "" the board or nothing */ Pick(String) }
+/// `LoadBig`: the person asked for a model the hub refused for its size, read past the limit (kicad.big).
+pub enum SolidEvent { Retry(String), Refine(String, [f32; 3], f32), LoadBig(String), /** a click on a board's model: the reference of the part under it, "" the board or nothing */ Pick(String) }
 impl EventEmitter<SolidEvent> for SolidPage {}
 /// Whether a source's model can be refined: a STEP's (the Mech tab's parts; a board's model is made at its finest already).
 pub fn refinable(key: &str) -> bool {
@@ -717,6 +719,28 @@ impl SolidCore {
         self.floor = self.latest + 1;
         self.refined.clear();
     }
+    fn mirror_layers(&mut self, source: &Self, panel_wh: (f32, f32)) -> bool {
+        let changed = match (&self.mesh, &source.mesh) {
+            (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+            (None, None) => false,
+            _ => true,
+        };
+        if changed || self.key != source.key {
+            let board = match (&self.mesh, &source.mesh) {
+                (Some(a), Some(b)) => match (&a.board, &b.board) {
+                    (Some(a), Some(b)) => !Arc::ptr_eq(a, b),
+                    (None, None) => false,
+                    _ => true,
+                },
+                _ => true,
+            };
+            self.apply_scene(source.key.clone(), source.mesh.clone(), board, false,
+                source.born.len(), source.parts.0, source.parts.1, panel_wh);
+            self.born.clone_from(&source.born);
+        }
+        changed
+    }
+
     fn apply_scene(&mut self, key: String, mesh: Option<Arc<Layers>>, board: bool, reset: bool, groups: usize, done: u32, of: u32, panel_wh: (f32, f32)) -> SceneResult {
         if key != self.key { self.switch_source_reset(); }
         // a model brought back stays until the hub's stream of it has caught up (no parts going and fading in again)
@@ -835,6 +859,9 @@ impl SolidCore {
     }
 }
 pub struct SolidPage {
+    source_rev: u64,
+    seen_source: Option<u64>,
+    source_subscription: Option<Subscription>,
     /// the button now held down, whose release ends the drag (the table decides what it does)
     press_btn: Option<MouseButton>,
     /** where the left button went down, until the pointer leaves it by 4 px (a click picks the part under it) */ press: Option<Point<Pixels>>,
@@ -846,8 +873,8 @@ pub struct SolidPage {
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
     /** what the hub said it is doing for a model (Stage), shown with its time running; whether a second's tick is running for it */ stage: Option<Stage>, ticking: bool,
     /** the share of DRAFT_PIXELS a picture in motion gets, from how long the last ones took (draft_scale) */ draft_scale: f32,
-    /** the hub could not make this source's model (its Note): the page offers Retry when retryable */ failed: bool, retryable: Option<bool>, /** last Retry press time (1 s client cooldown) */ last_retry: Option<std::time::Instant>,
-    pub note: String, /** room (px) the page's floating tools leave free at its top right, for the viewer pane's controls */ pub reserve: f32, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */,
+    /** the hub could not make this source's model (its Note): the page offers Retry when retryable */ failed: bool, retryable: Option<bool>, /** refused for its size: the page offers "Load it anyway" */ big: bool, /** last Retry press time (1 s client cooldown) */ last_retry: Option<std::time::Instant>,
+    pub note: String, /** the canvas supplies its own controls in Split */ pub inline_controls: bool, worker: Worker, size: Arc<Mutex<[f32; 5]>> /* panel width, height, scale factor, origin x, y (logical px) */,
     /** runs in normal clients too (one relaxed atomic per qualifying paint); measures the GPUI paint callback with non-zero bounds, not GPU presentation */
     painted: Arc<AtomicU64>, painted_gen: Arc<AtomicU64>, pub stats: Stats,
 }
@@ -859,10 +886,34 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { press_btn: None, press: None, names_probe: true, core: SolidCore::new(), drag: None, fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, failed: false, retryable: None, last_retry: None, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { source_rev: 0, seen_source: None, source_subscription: None, press_btn: None, press: None, names_probe: true, core: SolidCore::new(), drag: None, fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, failed: false, retryable: None, big: false, last_retry: None, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ inline_controls: true, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), painted: Arc::new(AtomicU64::new(0)), painted_gen: Arc::new(AtomicU64::new(0)), stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
+    /// Each tile renders the source worker's decoded layers at its own size and camera.
+    pub fn for_source(source: &Entity<Self>, cx: &mut Context<Self>) -> Self {
+        let mut page = Self::new(cx);
+        page.source_subscription = Some(cx.observe(source, |tile, source, cx| tile.copy_source(&source, cx)));
+        page.copy_source(source, cx);
+        page
+    }
+
+    fn copy_source(&mut self, source: &Entity<Self>, cx: &mut Context<Self>) {
+        let src = source.read(cx);
+        if self.seen_source == Some(src.source_rev) { return; }
+        self.seen_source = Some(src.source_rev);
+        let [w, h, ..] = *self.size.lock().unwrap();
+        let changed = self.core.mirror_layers(&src.core, (w, h));
+        self.failed = src.failed;
+        self.retryable = src.retryable;
+        self.big = src.big;
+        self.note.clone_from(&src.note);
+        let stage = src.stage.clone();
+        if self.stage != stage { self.set_stage(stage, cx); }
+        if changed { self.ask_render(self.drag.is_some()); }
+        cx.notify();
+    }
+
     pub fn set_backdrop(&mut self, back: raster::Backdrop) { if self.core.back != back { self.core.back = back; self.core.bump_view(); self.ask_render(false); } }
     /// The part the hub's probe names ("" none): drawn lit on a board's model, the picture made again when it changes.
     pub fn set_probe(&mut self, r: &str) { if self.core.probe != r { self.core.probe = r.to_string(); self.core.bump_view(); self.ask_render(false); } }
@@ -937,6 +988,7 @@ impl SolidPage {
         if peek_key(&bytes).map_or(false, |k| is_solid_key(&k)) { self.worker.submit_frame(bytes); None } else { Some(bytes) }
     }
     fn apply(&mut self, msg: Msg, cx: &mut Context<Self>) {
+        if !matches!(&msg, Msg::Image { .. }) { self.source_rev = self.source_rev.wrapping_add(1); }
         match msg {
             Msg::Scene { key, mesh, board, reset, groups, done, of } => {
                 let [pw, ph, _, _, _] = *self.size.lock().unwrap();
@@ -946,20 +998,21 @@ impl SolidPage {
                     self.stage = None;
                     stage_cleared = true;
                 }
-                if res.clear_failed { self.failed = false; self.retryable = None; }
+                if res.clear_failed { self.failed = false; self.retryable = None; self.big = false; }
                 if res.clear_note { self.note.clear(); }
                 if res.should_render { self.ask_render(self.drag.is_some()); }
                 if res.notify || stage_cleared { cx.notify(); }
             }
             Msg::Mesh(SolidFrame::Model(..) | SolidFrame::Parts(..) | SolidFrame::Part(..)) => {} // the worker makes these a Scene
-            Msg::Mesh(SolidFrame::Note(key, why, retryable)) => { // why there is no model; the same source's previous model stays shown
+            Msg::Mesh(SolidFrame::Note(key, why, retryable, big)) => { // why there is no model; the same source's previous model stays shown
                 self.core.apply_note(key);
                 self.stage = None;
                 self.failed = !why.is_empty() && !crate::screens::panestate::is_empty_none(&why);
                 self.retryable = retryable;
+                self.big = self.failed && big;
                 self.note = if self.core.mesh.is_some() { format!("{why}{PREVIOUS_SHOWN}") } else { why }; cx.notify();
             }
-            Msg::Mesh(SolidFrame::Bad(e)) => { self.failed = true; self.retryable = Some(true); self.note = e; self.set_stage(None, cx); }
+            Msg::Mesh(SolidFrame::Bad(e)) => { self.failed = true; self.retryable = Some(true); self.big = false; self.note = e; self.set_stage(None, cx); }
             Msg::Mesh(SolidFrame::Stage(key, text, ms, about)) => {
                 if key == self.core.key && !text.is_empty() { self.failed = false; }
                 if text.is_empty() && self.stage.as_ref().is_some_and(|s| s.key != key) { return } // another source's end: not this one's stage
@@ -1066,6 +1119,25 @@ impl SolidPage {
                 if !crate::screens::panestate::retry_ready(this.last_retry, std::time::Instant::now()) { return }
                 let k = this.core.key.clone(); cx.emit(SolidEvent::Retry(k));
             }))
+    }
+    /// "Load it anyway", for a model the hub refused for its size: it is read past the limit (kicad.big); the page says so until the hub's
+    /// own stage comes (bounded at 15 s, as a Retry).
+    fn load_big_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        div().id("solid-load-big").px_2().py_1().text_size(crate::scale::tpx(12.)).border_1().border_color(rgb(0x3a4456)).child(trs("Load it anyway"))
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).cursor_pointer().hover(|d| d.bg(rgba(0x2a3548ee)))
+            .on_click(cx.listener(|this, _, _, cx| {
+                if this.core.key.is_empty() { return }
+                let k = this.core.key.clone(); this.big = false;
+                /* i18n-ok: stage_line draws through trs */ this.set_stage(Some(Stage { key: k.clone(), text: "Loading it anyway…".into(), since: std::time::Instant::now(), about: 0, retrying: true }), cx);
+                cx.emit(SolidEvent::LoadBig(k)); cx.notify();
+            }))
+    }
+    /// What the page offers under a failed model's note: "Load it anyway" for one refused for its size, else Retry when retryable.
+    fn failed_action(&self, st_retry: bool, cx: &mut Context<Self>) -> Option<AnyElement> {
+        if self.core.key.is_empty() || !self.failed { return None }
+        if self.big { return Some(self.load_big_button(cx).into_any_element()) }
+        st_retry.then(|| self.retry_button(cx).into_any_element())
     }
     /// Snap view: the picture on screen as a PNG in `dir` (never over a file); the path, or why not.
     pub fn snap(&mut self, dir: &std::path::Path) -> Result<std::path::PathBuf, String> {
@@ -1187,18 +1259,19 @@ impl Render for SolidPage {
             _ if making_other || (self.core.image.is_none() && !stage.is_empty()) => div().id("solid-stage").size_full().child(crate::screens::panestate::view_on_backdrop(self.core.back, &crate::screens::panestate::PaneState::loading(stage.clone()), None)).into_any_element(),
             Some(i) => img(i.clone()).size_full().object_fit(ObjectFit::Fill).into_any_element(),
             None => {
-                let st = crate::screens::panestate::classify_solid_note(&self.note, self.failed && !self.core.key.is_empty(), self.retryable);
-                let retry = st.retry.then(|| self.retry_button(cx).into_any_element());
-                crate::screens::panestate::view_on_backdrop(self.core.back, &st, retry)
+                let mut st = crate::screens::panestate::classify_solid_note(&self.note, self.failed && !self.core.key.is_empty(), self.retryable);
+                let action = self.failed_action(st.retry, cx);
+                if self.big && action.is_some() { st.retry = true; st.next = trs("Loading it may take a while and a lot of memory."); }
+                crate::screens::panestate::view_on_backdrop(self.core.back, &st, action)
             }
         };
-        let tools = (self.core.mesh.is_some() && !making_other).then(|| {
-            self.view_controls(cx).absolute().top(px(TOOL_TOP)).left_2().right(px(8. + self.reserve))
+        let tools = (self.inline_controls && self.core.mesh.is_some() && !making_other).then(|| {
+            self.view_controls(cx).absolute().top(px(TOOL_TOP)).left_2().right_2()
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
             .when(self.core.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(note_words(&self.note))
-                .when(self.failed && self.retryable.unwrap_or_else(|| crate::screens::panestate::is_retryable_none(&self.note)) && !self.core.key.is_empty(), |d| d.child(self.retry_button(cx)))))
+                .children(self.failed_action(self.retryable.unwrap_or_else(|| crate::screens::panestate::is_retryable_none(&self.note)), cx))))
             .when(self.core.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { trs(&self.parts_progress()) } else { stage.clone() })))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| this.mouse_down(e, window, cx)))
             .on_mouse_down(crate::mousecfg::BUTTONS[1], cx.listener(|this, e: &MouseDownEvent, window, cx| this.mouse_down(e, window, cx)))
@@ -1454,9 +1527,11 @@ mod tests {
         let mut f = vec![0xa3]; text(&mut f, "key"); text(&mut f, "2|board"); text(&mut f, "n"); f.push(12); text(&mut f, "mesh"); f.push(0x59); f.extend((bytes.len() as u16).to_be_bytes()); f.extend(&bytes);
         match parse_frame(&f) { Some(SolidFrame::Model(k, m)) => { assert_eq!(k, "2|board"); assert_eq!(m.tris.len(), 12) } other => panic!("{other:?}") }
         let mut n = vec![0xa2]; text(&mut n, "key"); text(&mut n, "3|board"); text(&mut n, "none"); text(&mut n, "no model for this board");
-        assert_eq!(parse_frame(&n), Some(SolidFrame::Note("3|board".into(), "no model for this board".into(), None)));
+        assert_eq!(parse_frame(&n), Some(SolidFrame::Note("3|board".into(), "no model for this board".into(), None, false)));
         let mut nr = vec![0xa3]; text(&mut nr, "key"); text(&mut nr, "3|board"); text(&mut nr, "none"); text(&mut nr, "boom"); text(&mut nr, "retryable"); nr.push(0xf5);
-        assert_eq!(parse_frame(&nr), Some(SolidFrame::Note("3|board".into(), "boom".into(), Some(true))));
+        assert_eq!(parse_frame(&nr), Some(SolidFrame::Note("3|board".into(), "boom".into(), Some(true), false)));
+        let mut nb = vec![0xa4]; text(&mut nb, "key"); text(&mut nb, "2|board"); text(&mut nb, "none"); text(&mut nb, "too big"); text(&mut nb, "retryable"); nb.push(0xf4); text(&mut nb, "big"); nb.push(0xf5);
+        assert_eq!(parse_frame(&nb), Some(SolidFrame::Note("2|board".into(), "too big".into(), Some(false), true)), "a model refused for its size offers Load it anyway");
         let mut other = f.clone(); other[6] = b'1'; assert!(parse_frame(&other).is_none());
         assert!(parse_frame(&[0xff, 0x00]).is_none());
         // a tag wraps ONE value: tag 6 over the map's text key must not eat the next item
@@ -1819,6 +1894,28 @@ mod tests {
         // 4. Late image for A is rejected even with a fresh ticket.
         assert!(!core.apply_image(2, board.into(), rev, dummy_img(w, h), w, h));
         assert!(core.image.is_none());
+    }
+    #[test]
+    fn tiles_share_streamed_layers_and_keep_independent_orbits() {
+        let mut source = super::SolidCore::new();
+        let mut left = super::SolidCore::new();
+        let mut right = super::SolidCore::new();
+        let size = (400., 300.);
+        source.apply_scene("2|project|".into(), Some(dummy_layers()), true, true, 0, 0, 0, size);
+        assert!(left.mirror_layers(&source, size));
+        assert!(right.mirror_layers(&source, size));
+        assert!(std::sync::Arc::ptr_eq(left.mesh.as_ref().unwrap(), right.mesh.as_ref().unwrap()));
+        left.cam.as_mut().unwrap().orbit(32., 8.);
+        left.touched = true;
+        let eyes = (left.cam.unwrap().eye(), right.cam.unwrap().eye());
+        assert_ne!(eyes.0, eyes.1);
+        assert!(!left.mirror_layers(&source, size));
+        source.apply_scene("2|project|".into(), Some(dummy_layers()), false, false, 1, 1, 2, size);
+        assert!(left.mirror_layers(&source, size));
+        assert!(right.mirror_layers(&source, size));
+        assert_eq!((left.cam.unwrap().eye(), right.cam.unwrap().eye()), eyes);
+        assert_eq!(left.parts, (1,2));
+        assert!(std::sync::Arc::ptr_eq(left.mesh.as_ref().unwrap(), source.mesh.as_ref().unwrap()));
     }
     #[test] fn kept_cache_restores_image_only_when_viewport_size_matches() {
         let board = "2|/proj|";

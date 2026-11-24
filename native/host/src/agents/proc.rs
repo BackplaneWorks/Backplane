@@ -239,6 +239,33 @@ fn is_standin(program: &Path, dir: &Path) -> bool {
     match (crate::plat::fs::canonicalize(program), crate::plat::fs::canonicalize(dir)) { (Ok(p), Ok(d)) => p.starts_with(d), _ => false }
 }
 
+/// The Windows CreateProcessW lpCommandLine limit (32,767 UTF-16 code units including NUL) and our safe guard below it.
+pub const WIN_CMDLINE_LIMIT: usize = 32_767;
+pub const WIN_CMDLINE_GUARD: usize = 28_000;
+/// Estimates the CreateProcessW command-line length in UTF-16 code units (program + pre + args, with quoting and spaces).
+pub fn cmdline_len(program: &Path, pre: &[String], args: &[String]) -> usize {
+    let one = |s: &str| {
+        let u16s = s.encode_utf16().count();
+        let quotes = s.chars().filter(|&c| c == '"').count();
+        let needs_quote = s.is_empty() || s.chars().any(|c| c.is_whitespace() || c == '"');
+        u16s + quotes + if needs_quote { 2 } else { 0 }
+    };
+    let mut total = one(&program.to_string_lossy());
+    for a in pre.iter().chain(args.iter()) { total += 1 + one(a); }
+    total
+}
+/// Measures the final command line before spawning on every OS. Logs if it nears Windows' 32K limit; on Windows, refuses before CreateProcess.
+pub fn check_cmdline(program: &Path, pre: &[String], args: &[String], windows: bool) -> Result<usize, String> {
+    let len = cmdline_len(program, pre, args);
+    if len > WIN_CMDLINE_GUARD {
+        eprintln!("agents: command line for {} is {len} chars (Windows guard {WIN_CMDLINE_GUARD}, limit {WIN_CMDLINE_LIMIT})", program.display());
+        if windows {
+            return Err(format!("command line for {} is {len} characters, past the safe Windows limit ({WIN_CMDLINE_GUARD} of {WIN_CMDLINE_LIMIT}); move instructions or prompt off argv", program.display()));
+        }
+    }
+    Ok(len)
+}
+
 /// A file an agent reads when it starts, holding what must not be on its command line (Claude's MCP config on Windows: it can hold tokens).
 /// Private (the folder 0700 and the file 0600 on Unix; on Windows under the hub's home in the person's profile, which only they, SYSTEM and
 /// administrators may read), never logged, and removed when the process it was made for ends (it is held by the process's waiter).
@@ -250,6 +277,15 @@ impl RunFile {
         #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))?; }
         let f = dir.join(name); let _ = std::fs::remove_file(&f);
         let r = RunFile(f.clone()); // removed again if the write fails
+        std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&f)?.write_all(text.as_bytes())?;
+        Ok(r)
+    }
+    /// Like [`private`], but does not change permissions on an existing directory (e.g. a user's `~/.codex`).
+    pub fn private_in(dir: &Path, name: &str, text: &str) -> std::io::Result<RunFile> {
+        use crate::plat::fs::{DirBuilderExt, OpenOptionsExt}; use std::io::Write;
+        if !dir.exists() { std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir)?; }
+        let f = dir.join(name); let _ = std::fs::remove_file(&f);
+        let r = RunFile(f.clone());
         std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&f)?.write_all(text.as_bytes())?;
         Ok(r)
     }
@@ -339,7 +375,20 @@ mod reaper {
             #[cfg(test)] c.args(["agents::tests::reaper_child", "--exact", "--nocapture", "--test-threads=1"]).env("BP_REAPER_CHILD", "1"); // a test binary takes no such flag: its watcher is a test that only runs as that child
             c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
             crate::plat::proc::own_group(&mut c);
-            match c.spawn() { Ok(mut ch) => { *g = ch.stdin.take(); std::thread::spawn(move || { let _ = ch.wait(); }); } Err(_) => return false }
+            struct Reap(Option<std::process::Child>);
+            impl Drop for Reap { fn drop(&mut self) { if let Some(mut c) = self.0.take() { let _ = c.kill(); let _ = c.wait(); } } }
+            match c.spawn() {
+                Ok(mut ch) => {
+                    let stdin = ch.stdin.take();
+                    let mut guard = Reap(Some(ch));
+                    if std::thread::Builder::new().name("agent-reaper-wait".into()).spawn(move || { if let Some(mut c) = guard.0.take() { let _ = c.wait(); } }).is_ok() {
+                        *g = stdin;
+                    } else {
+                        return false;
+                    }
+                }
+                Err(_) => return false,
+            }
         }
         let ok = g.as_mut().map_or(false, |w| w.write_all(line.as_bytes()).and_then(|_| w.flush()).is_ok());
         if !ok { *g = None }
@@ -414,6 +463,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     let standin = extra_path.is_some_and(|d| is_standin(program, d) && crate::plat::helper("bp-sh").is_some());
     let api_vars = no_api_key(program, extra_path.is_some()); // by the CLI asked for, before an npm shim or bp-sh stands in for it; test hubs only
     let (program, pre) = plan_for(program, &args, cfg!(windows), &|| find_in(search_dirs(), "node", true), standin).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
+    check_cmdline(&program, &pre, &args, cfg!(windows)).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidInput, e))?;
     // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
     // a launch that fails for its scope (an older systemd, no user manager) starts again unscoped (memscope::spawn), never failing the agent
     let make = |wrap: Option<Vec<String>>| {
@@ -789,9 +839,11 @@ mod tests {
         assert_eq!(serde_json::from_str::<serde_json::Value>(&std::fs::read_to_string(f.path()).unwrap()).unwrap()["mcpServers"]["backplane"]["url"], url, "Claude reads the same config from the file");
         let mut lines: Vec<(&str, Vec<String>)> = vec![("claude", ca)];
         for p in ["codex", "grok", "muse", "opencode", "pi", "omp"] {
-            let mut made = providers::driver(p).unwrap_or_else(|| panic!("{p}")); let _ = made.driver.prepare(&a);
-            let mut v = made.driver.argv(&a);
-            if p == "pi" { let i = v.iter().position(|x| x == "--append-system-prompt").unwrap(); v[i + 1] = providers::pi::prompt_arg(&home.join("pi"), &a.thread, &prompt, true) }
+            let mut made = providers::driver(p).unwrap_or_else(|| panic!("{p}"));
+            if p == "codex" { made.driver = Box::new(providers::codex::CodexDriver::for_windows()); }
+            if p == "pi" { made.driver = Box::new(providers::pi::PiDriver::for_windows()); }
+            made.driver.prepare(&a).unwrap_or_else(|e| panic!("{p} prepare: {e}"));
+            let v = made.driver.argv(&a);
             lines.push((made.cli, v));
         }
         for (cli, v) in &lines {
@@ -802,13 +854,90 @@ mod tests {
                 assert!(prog == target || (prog == node && pre == vec![target.to_string_lossy().into_owned()]), "{cli}: {prog:?} {pre:?}");
             }
             let own = d.join(format!("own-{cli}.cmd")); std::fs::write(&own, "@echo off\r\nbun \"%~dp0\\s.ts\" %*\r\n").unwrap();
-            match (*cli, plan(&own, v, true, &n)) {
-                ("codex", r) => assert!(r.unwrap_err().contains("batch launcher"), "codex through a launcher of its own is refused with why"),
-                (_, r) => { r.unwrap_or_else(|e| panic!("{cli}: {e}"));
-                    let win: Vec<String> = v.iter().map(|x| x.replace(&*d.to_string_lossy(), "C:\\Users\\x")).collect(); // this test's folders as Windows has them (a `/` path is Unix's)
-                    for l in [Launcher::Batch, Launcher::Sh] { carries(l, &win).unwrap_or_else(|e| panic!("{cli} through {l:?}: {e}")) } }
-            }
+            plan(&own, v, true, &n).unwrap_or_else(|e| panic!("{cli}: {e}"));
+            let win: Vec<String> = v.iter().map(|x| x.replace(&*d.to_string_lossy(), "C:\\Users\\x")).collect(); // this test's folders as Windows has them (a `/` path is Unix's)
+            for l in [Launcher::Batch, Launcher::Sh] { carries(l, &win).unwrap_or_else(|e| panic!("{cli} through {l:?}: {e}")) }
+            check_cmdline(&own, &[], &win, true).unwrap_or_else(|e| panic!("{cli} cmdline guard: {e}"));
         }
+        // Guard refuses oversized command lines before CreateProcess on Windows
+        let huge = vec!["x".repeat(WIN_CMDLINE_GUARD + 100)];
+        assert!(check_cmdline(&d.join("codex.exe"), &[], &huge, true).is_err(), "oversized argv refused on Windows");
+        assert!(check_cmdline(&d.join("codex"), &[], &huge, false).is_ok(), "non-Windows logs and allows");
+    }
+    /// Every provider (claude, codex, antigravity CLI & pinned, grok, muse, opencode, pi, omp) and one-shot runner
+    /// stays far below Windows' 32,767-char CreateProcess limit even with a 200K-char handoff and 40K system prompt,
+    /// preserves the full context intact, and cleans up every private per-turn RunFile on exit.
+    #[test] fn all_providers_stay_off_argv_for_200k_handoff_on_windows() {
+        use crate::agents::{providers::{self, Driver}, rules, textgen};
+        let d = dir("argv-200k-all"); let home = d.join("home"); std::fs::create_dir_all(&home).unwrap();
+        let prompt = format!("SYS_CANARY_START\n{}\nSYS_CANARY_END", "System rule line for Backplane.\n".repeat(1300));
+        let text = format!("HANDOFF_CANARY_START\n{}\nHANDOFF_CANARY_END", "Conversation turn detail line.\n".repeat(6600));
+        assert!(prompt.len() > 40_000 && text.len() > 200_000, "prompt={} text={}", prompt.len(), text.len());
+        let url = "http://127.0.0.1:41231/mcp/t1.1?k=SECRETTOKEN";
+        let mcp = crate::mcpx::svc::Launch { claude: rules::mcp_config(url), acp: serde_json::json!([{"name":"backplane","type":"http","url":url,"headers":[]}]), ..Default::default() };
+        let a = providers::TurnIn { thread: "t1".into(), cwd: d.to_string_lossy().into(), home: home.to_string_lossy().into(), model: "m".into(), session: "s-1".into(), runtime: "auto".into(), interaction: "default".into(), effort: "high".into(), think: true,
+            text: text.clone(), images: vec![], prompt: prompt.clone(), mcp_url: url.into(), pcbparts_url: crate::mcpx::gen::PCBPARTS.into(), gen: "1".into(), settings: vec![], mcp, codex_home: d.join("codex-home").to_string_lossy().into(), ..Default::default() };
+        let check = |name: &str, prog: &str, argv: &[String]| {
+            let len = check_cmdline(Path::new(prog), &[], argv, true).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(len < 2000, "{name}: argv unexpectedly long ({len} chars): {argv:?}");
+            assert!(!argv.iter().any(|x| x.contains("SYS_CANARY_START") || x.contains("HANDOFF_CANARY_START") || x.contains("SECRETTOKEN")), "{name}: variable/secret content leaked onto argv");
+        };
+        // 1. Claude (live session + one-shot)
+        let dirs = vec!["C:\\Users\\x\\kistack".to_string()];
+        let mut ca = rules::claude_args(&rules::ArgsIn { model: "opus", session: "s", runtime: "auto", interaction: "default", prompt: &prompt, dirs: &dirs, effort: "high", think: true, plugins: &dirs, mcp_url: url, mcp_json: &a.mcp.claude, disallowed: &[], speed: "" });
+        let rdir = run_dir(&home);
+        let cf_mcp = rules::mcp_to_file(&mut ca, &rdir, "c.mcp.json").unwrap().unwrap();
+        let cf_prompt = rules::prompt_to_run_file(&mut ca, &rdir, "c.prompt.md").unwrap().unwrap();
+        let cf_set = rules::json_to_file(&mut ca, "--settings", &rdir, "c.settings.json").unwrap().unwrap();
+        check("claude", "C:\\Users\\x\\claude.exe", &ca);
+        assert_eq!(std::fs::read_to_string(cf_prompt.path()).unwrap(), prompt, "claude prompt intact");
+        let (p1, p2, p3) = (cf_mcp.path().to_path_buf(), cf_prompt.path().to_path_buf(), cf_set.path().to_path_buf());
+        drop((cf_mcp, cf_prompt, cf_set));
+        assert!(!p1.exists() && !p2.exists() && !p3.exists(), "claude run files removed on drop");
+        let mut os_c = textgen::args_for("claude", "haiku", &prompt, true);
+        let os_cf = rules::system_prompt_to_run_file(&mut os_c, &rdir, "os.system.md").unwrap().unwrap();
+        check("claude-oneshot", "C:\\Users\\x\\claude.exe", &os_c);
+        assert_eq!(std::fs::read_to_string(os_cf.path()).unwrap(), prompt);
+        let osp = os_cf.path().to_path_buf(); drop(os_cf); assert!(!osp.exists());
+        // 2. Codex (turn + one-shot)
+        let mut cx = providers::codex::CodexDriver::for_windows();
+        cx.prepare(&a).unwrap();
+        let cx_argv = cx.argv(&a);
+        check("codex", "C:\\Users\\x\\codex.exe", &cx_argv);
+        assert_eq!(cx.start(&a), vec![text.clone()], "codex full 200K handoff on stdin");
+        let cx_files = cx.take_files(); assert_eq!(cx_files.len(), 1);
+        let cx_p = cx_files[0].path().to_path_buf();
+        assert!(std::fs::read_to_string(&cx_p).unwrap().contains("SYS_CANARY_START"));
+        drop(cx_files); assert!(!cx_p.exists(), "codex profile file removed on exit");
+        let os_x = textgen::args_for("codex", "gpt-5-nano", &prompt, true);
+        check("codex-oneshot", "C:\\Users\\x\\codex.exe", &os_x);
+        assert_eq!(os_x.last().map(String::as_str), Some("-"));
+        // 3. Pi (private RunFile cleaned up on exit + full 200K handoff via RPC stdin)
+        let mut pi = providers::pi::PiDriver::for_windows();
+        pi.prepare(&a).unwrap();
+        let pi_argv = pi.argv(&a);
+        check("pi", "C:\\Users\\x\\pi.exe", &pi_argv);
+        let pi_files = pi.take_files(); assert_eq!(pi_files.len(), 1);
+        let pi_p = pi_files[0].path().to_path_buf();
+        assert_eq!(std::fs::read_to_string(&pi_p).unwrap(), prompt, "pi prompt intact in private RunFile");
+        drop(pi_files); assert!(!pi_p.exists(), "pi prompt file removed on exit");
+        // 4. Oh My Pi (private 0700 launch folder + full 200K handoff via RPC stdin)
+        let mut omp = providers::omp::OmpDriver::new();
+        omp.prepare(&a).unwrap();
+        check("omp", "C:\\Users\\x\\omp.exe", &omp.argv(&a));
+        // 5. Grok, Muse, OpenCode (short fixed argv; full prompt + 200K handoff over ACP/MSP stdin)
+        for p in ["grok", "muse", "opencode"] {
+            let mut m = providers::driver(p).unwrap();
+            m.driver.prepare(&a).unwrap();
+            check(p, &format!("C:\\Users\\x\\{p}.exe"), &m.driver.argv(&a));
+        }
+        // 6. Antigravity (both agy CLI mode and pinned agy_acp_server mode)
+        let agy_cli_argv = providers::agy_cli::args(&a, &[]);
+        check("antigravity-cli", "C:\\Users\\x\\agy.exe", &agy_cli_argv);
+        let agy_in = providers::agy_cli::input(&a);
+        assert!(agy_in.contains("HANDOFF_CANARY_START") && agy_in.contains("HANDOFF_CANARY_END"), "agy CLI keeps full 200K handoff on stdin");
+        let agy_pinned_argv = providers::agy::args(&providers::agy::root(&a.home), &format!("{}/secrets/api.env", a.home), "", "", "", "");
+        check("antigravity-pinned", "C:\\Users\\x\\sh.exe", &agy_pinned_argv);
     }
     /// A real run through npm's own claude.cmd and its sh shim on Windows: the argv the agent logs is the argv the hub gave it, with the MCP config
     /// read from its file. Uses node as the agent (a copy named claude.exe); skipped where there is none.

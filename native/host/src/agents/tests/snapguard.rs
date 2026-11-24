@@ -329,3 +329,153 @@ done
     assert_eq!(ag.world().await.setting(&sg::review_key(T1)), "");
     ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn write_guard_bounds_stalled_snapshot_so_begin_commit_never_hangs() {
+    let bin = dir("sg-wg-bin"); script(&bin, "claude", HOLDER);
+    let (hub, ag, _home, work) = start("sg-wg-tmo", |w| {
+        std::fs::write(w.join("board.kicad_pcb"), board(10)).unwrap();
+        std::fs::write(w.join("board.kicad_pro"), "{}").unwrap();
+        base_log(w, 1, "")
+    }, |_| Cli::standin(&bin)).await;
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":"edit the board, hold"})).await["ok"], true);
+    wait_file(&work.join("seen.log")).await;
+    let top = sn::top_of(&work.to_string_lossy()).await.unwrap();
+    let b = work.join("board.kicad_pcb").to_string_lossy().into_owned();
+    let lock = sn::repo_lock(&top).await;
+    let t0 = Instant::now();
+    let err = ag.write_guard_within(T1, &b, Duration::from_millis(250)).await.unwrap_err();
+    assert!(t0.elapsed() < Duration::from_secs(3), "write_guard_within must bound stalled snapshot, took {:?}", t0.elapsed());
+    assert!(err.contains("timed out"), "unexpected error: {err}");
+    assert!(!ag.turn_guard(T1).unwrap().wrote, "wrote flag must stay false after timed-out write_guard");
+    drop(lock);
+    ag.write_guard_within(T1, &b, Duration::from_secs(10)).await.expect("write_guard succeeds once lock is released");
+    assert!(ag.turn_guard(T1).unwrap().wrote);
+    std::fs::write(work.join("go"), "").unwrap();
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await;
+    ag.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn await_detached_keeps_repo_lock_held_until_in_flight_work_finishes() {
+    let top = crate::plat::tmp::short_dir_str("sg-lock");
+    let top_s = top.to_string();
+    let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+    let release = Arc::new(tokio::sync::Notify::new());
+    let release_task = release.clone();
+    // Acquire repo_lock inside the detached future and hold it past the caller timeout.
+    let res = Agents::await_detached(Duration::from_millis(80), async move {
+        let _guard = sn::repo_lock(&top_s).await;
+        let _ = done_tx.send(());
+        release_task.notified().await;
+    }).await;
+    assert!(res.is_err(), "caller must time out cleanly");
+    done_rx.await.unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), sn::repo_lock(&top)).await.is_err(),
+        "repo_lock must stay held by the in-flight detached task after caller timeout"
+    );
+    release.notify_one();
+    tokio::time::timeout(Duration::from_secs(2), sn::repo_lock(&top))
+        .await
+        .expect("repo_lock must become available once in-flight task finishes");
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn timed_out_late_guard_never_overwrites_next_turns_guard() {
+    let bin = dir("sg-late-bin"); script(&bin, "claude", HOLDER);
+    let (hub, ag, _home, work) = start("sg-late-tmo", |w| {
+        std::fs::write(w.join("board.kicad_pcb"), board(5)).unwrap();
+        std::fs::write(w.join("board.kicad_pro"), "{}").unwrap();
+        base_log(w, 1, "")
+    }, |_| Cli::standin(&bin)).await;
+    // Start & finish turn 1 quickly so repo exists.
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await["ok"], true);
+    until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(ag.turn_guard(T1).is_none());
+
+    // Hold repo_lock so the late-guard path (`None` turn_guard) times out while its detached task awaits the lock.
+    let top = sn::top_of(&work.to_string_lossy()).await.unwrap();
+    let lock = sn::repo_lock(&top).await;
+    let b = work.join("board.kicad_pcb").to_string_lossy().into_owned();
+    let err = ag.write_guard_within(T1, &b, Duration::from_millis(120)).await.unwrap_err();
+    assert!(err.contains("timed out"), "{err}");
+
+    // Install a newer turn's guard, then release lock so the stale detached snapshot completes.
+    let sentinel = super::super::snapguard::TurnGuard { top: top.clone(), turn: 99, reference: "refs/backplane/new-turn".into(), review: true, wrote: false, ..Default::default() };
+    ag.turn_guards.lock().unwrap().insert(T1.into(), sentinel.clone());
+    drop(lock);
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    let after = ag.turn_guard(T1).unwrap();
+    assert_eq!(after.turn, 99, "late timed-out guard must never overwrite next turn's turn number");
+    assert_eq!(after.reference, "refs/backplane/new-turn");
+    assert!(!after.wrote && after.review);
+    ag.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn design_record_note_bounds_stalled_repo_lock_so_save_never_hangs() {
+    let bin = dir("sg-des-bin"); script(&bin, "claude", DOER);
+    let (hub, ag, _home, work) = start("sg-des-tmo", |w| {
+        std::fs::write(w.join("board.kicad_pcb"), board(4)).unwrap();
+        std::fs::write(w.join("board.kicad_pro"), "{}").unwrap();
+        git_out(w, &["init", "-q", "-b", "main"]);
+        git_out(w, &["config", "user.name", "t"]);
+        git_out(w, &["config", "user.email", "t@t"]);
+        git_out(w, &["add", "."]);
+        git_out(w, &["commit", "-qm", "init"]);
+        base_log(w, 1, "")
+    }, |_| Cli::standin(&bin)).await;
+
+    std::fs::write(work.join("board.kicad_pcb"), board(6)).unwrap();
+    let top = sn::top_of(&work.to_string_lossy()).await.unwrap();
+    let lock = sn::repo_lock(&top).await;
+    let from = len(&hub).await;
+    let t0 = Instant::now();
+    ag.design_record_note_within(T1, "save", "", Duration::from_millis(200)).await;
+    assert!(t0.elapsed() < Duration::from_secs(3), "design_record_note_within must bound stalled repo_lock, took {:?}", t0.elapsed());
+
+    let ev = log_from(&hub, from).await;
+    assert!(
+        ev.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.contains("did not finish within"))),
+        "expected timeout ActivityLogged warning, got: {ev:?}"
+    );
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), sn::repo_lock(&top)).await.is_err(),
+        "repo_lock must still be held"
+    );
+
+    drop(lock);
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let ev2 = log_from(&hub, from).await;
+            let committed_ev = ev2.iter().any(|e| is(e, "ActivityLogged") && e["summary"].as_str().is_some_and(|s| s.contains("Committed 1 design file to main")));
+            if committed_ev && git_out(&work, &["log", "-1", "--format=%s"]).contains("design:") { break }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }).await.expect("detached design commit must finish and report completion once lock is released");
+    tokio::time::timeout(Duration::from_secs(2), sn::repo_lock(&top))
+        .await
+        .expect("repo_lock must become available once detached commit finishes");
+    ag.shutdown();
+}
+
+#[cfg(unix)]
+#[tokio::test(flavor = "multi_thread")] async fn repo_lock_canonicalizes_symlink_and_real_path() {
+    let d = crate::plat::tmp::short_dir("sg-canon-lock");
+    let real = d.path().join("real");
+    let link = d.path().join("link");
+    std::fs::create_dir_all(&real).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    let link_s = link.to_string_lossy().into_owned();
+    let real_s = real.to_string_lossy().into_owned();
+    let g = sn::repo_lock(&link_s).await;
+    assert!(
+        tokio::time::timeout(Duration::from_millis(80), sn::repo_lock(&real_s)).await.is_err(),
+        "symlink and canonical path must contend on the same repo_lock mutex"
+    );
+    drop(g);
+    tokio::time::timeout(Duration::from_secs(2), sn::repo_lock(&real_s))
+        .await
+        .expect("canonical path must acquire repo_lock once symlink holder drops");
+}

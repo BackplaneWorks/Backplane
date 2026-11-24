@@ -59,7 +59,7 @@ pub fn response_for(status: &str, ctype: &str, extra: &str, body: &[u8]) -> Vec<
     let names: Vec<String> = extra.lines().filter_map(|l| l.split_once(':').map(|(k, _)| k.trim().to_ascii_lowercase())).collect();
     let mut head = format!("HTTP/1.1 {status}\r\n");
     if !names.contains(&"content-type".to_string()) { head.push_str(&format!("Content-Type: {ctype}\r\n")); }
-    head.push_str(&format!("Content-Length: {}\r\n", body.len()));
+    if !status.starts_with("304 ") && status != "304" { head.push_str(&format!("Content-Length: {}\r\n", body.len())); }
     if !names.contains(&"cache-control".to_string()) { head.push_str("Cache-Control: no-cache\r\n"); }
     head.push_str("Connection: close\r\n");
     for l in extra.split("\r\n").filter(|l| !l.is_empty() && !l.to_ascii_lowercase().starts_with("content-length")) { head.push_str(l); head.push_str("\r\n"); }
@@ -121,6 +121,15 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         if r.status.starts_with('2') { s.shutdown().await.ok(); } else { drain_refused(&mut s, len.unwrap()).await; }
         return Ok(());
     }
+    // a project's file, and a share's: streamed off the disk, ranged (files/share.rs); never held whole in memory
+    if req.route() == "/file" || req.route() == "/files/get" || req.route().starts_with("/s/") {
+        let shared = req.route().starts_with("/s/");
+        if !shared && !hub.auth.allowed(&req) { s.write_all(&crate::files::share::refusal("401 Unauthorized", "this Backplane needs its pairing token")).await.ok(); s.shutdown().await.ok(); return Ok(()) }
+        let h = hub.arc();
+        let r = if shared { crate::files::share::serve_share(&h, &mut s, crate::files::share::Who::Share, &req.peer.map(|p| p.ip().to_string()).unwrap_or_default(), &req).await } else if req.route() == "/file" { crate::files::share::serve_file(&h, &mut s, crate::files::share::Who::Native, &req).await } else { crate::files::share::serve_files_get(&h, &mut s, crate::files::share::Who::Native, &req).await };
+        if r.is_ok() { s.shutdown().await.ok(); }
+        return Ok(());
+    }
     if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {
         // no Content-Length and no Transfer-Encoding is an empty body; chunked is refused
         let len = if req.header("content-length").trim().is_empty() && req.header("transfer-encoding").is_empty() { Some(0) } else { req.header("content-length").trim().parse::<usize>().ok() };
@@ -161,7 +170,7 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         other => match hub.http_for(other) {
             // DEFAULT-DENY: the credential is checked here for every route unless its handler says `own_auth`
             Some(h) if h.own_auth() || hub.auth.allowed(&req) => { let r = h.call_with(&hub.arc(), &req, hub.fresh_client()).await; response_for(r.status, &r.ctype, &r.extra, &r.body) }
-            Some(_) => response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token"),
+            Some(_) => response_for("401 Unauthorized", "text/plain; charset=utf-8", &format!("Cache-Control: private, no-store\r\n{}", crate::files::serve::MEDIA_SECURITY_HEADERS), b"this Backplane needs its pairing token"),
             None => response("404 Not Found", "text/plain; charset=utf-8", "", b"not found"),
         },
     };
@@ -194,13 +203,16 @@ pub fn live_notice_every(seen: &(String, usize), thread: &str, len: usize, since
 
 /// A view stream with no credential of its own (tests, no pairing registry installed). Fails closed once one is.
 pub async fn socket(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool) -> Result<()> {
-    socket_inner(hub, s, cbor_wanted, String::new(), false).await
+    socket_inner(hub, s, cbor_wanted, String::new(), false, None).await
 }
 /// `token` is the credential the /ws upgrade presented (`Auth::credential`).
-pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token: String, local_view_socket: bool) -> Result<()> {
+/// `z`: the frame codec the request asked for and this hub has (wire/z.rs), None for frames as they are.
+pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token: String, local_view_socket: bool, z: Option<&'static str>) -> Result<()> {
     let mut cfg = WebSocketConfig::default(); cfg.max_message_size = Some(524288); cfg.max_frame_size = Some(524288);
-    let (mut tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
-    let (mut conn, greeting) = hub.connect(cbor_wanted);
+    let (tx, mut rx) = tokio_tungstenite::accept_async_with_config(s, Some(cfg)).await?.split();
+    let mut tx = z::ZSink::new(tx, z);
+    let (mut conn, mut greeting) = hub.connect(cbor_wanted);
+    if let (Some(c), Some(o)) = (z, greeting.as_object_mut()) { o.insert("z".into(), json!(c)); }
     conn.local_view_socket = local_view_socket;
     let mut outbox = hub.attach(conn.client);
     struct Detach(Arc<Hub>, u64); impl Drop for Detach { fn drop(&mut self) { self.0.detach(self.1) } }
@@ -208,6 +220,7 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token:
     // attached first, then admitted: a revoke after this point finds the outbox and closes the stream; before it, the credential no longer holds
     if !hub.admit_blocking(conn.client, token.clone()).await { return Ok(()) }
     tx.send(pack(&conn, &greeting)).await?;
+    tx.arm(); // the greeting went as it is: what follows is compressed (when a codec was chosen)
     if let Some(info) = hub.view_info_frame() { tx.send(pack(&conn, &info)).await?; }
     let mut changes = hub.changed.subscribe();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
@@ -354,12 +367,15 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
         }
     };
     let mut s = s;
+    if req.route() == "/far/ws" && req.header("upgrade").eq_ignore_ascii_case("websocket") {
+        return crate::net::peerws::accept(hub, s, req, head_len).await;
+    }
     if req.route() == "/ws" && req.header("upgrade").eq_ignore_ascii_case("websocket") {
         if !hub.auth.allowed(&req) {
             let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
             s.write_all(&response("401 Unauthorized", "text/plain; charset=utf-8", "", b"this Backplane needs its pairing token")).await?; s.shutdown().await.ok(); return Ok(());
         }
-        if req.param("data") == "1" { return crate::data::socket(hub, s, req.param("enc") == "json", Auth::credential(&req), req.header("host").to_string()).await } // the phone data API (docs/PHONE-DATA.md)
+        if req.param("data") == "1" { return crate::data::socket(hub, s, req.param("enc") == "json", Auth::credential(&req), req.header("host").to_string(), z::choose(&req.param("z"))).await } // the phone data API (docs/PHONE-DATA.md)
         let (view, mobile) = (req.param("view") == "1", req.param("mobile") == "1");
         // BACKPLANE_WS_DEBUG=1: what the client offers on the upgrade (does it ask for permessage-deflate?), once per connection, to stderr
         if std::env::var("BACKPLANE_WS_DEBUG").map_or(false, |v| v == "1") { eprintln!("ws upgrade: extensions={:?} user-agent={:?}", req.header("sec-websocket-extensions"), req.header("user-agent")) }
@@ -371,7 +387,7 @@ pub async fn serve_with(hub: Arc<Hub>, s: TcpStream, trusted: bool) -> Result<()
             s.write_all(&response("400 Bad Request", "text/plain; charset=utf-8", "", b"this hub serves renderer mobile only")).await?; s.shutdown().await.ok(); return Ok(());
         }
         let local = local_view_socket(req.peer.is_some_and(|p| p.ip().is_loopback()), &req.headers);
-        return socket_inner(hub, s, req.param("enc") == "cbor", Auth::credential(&req), local).await;
+        return socket_inner(hub, s, req.param("enc") == "cbor", Auth::credential(&req), local, z::choose(&req.param("z"))).await;
     }
     let mut sink = vec![0u8; head_len]; s.read_exact(&mut sink).await?;
     http(&hub, s, req).await
@@ -382,3 +398,4 @@ pub fn rejected(e: &str) -> ErrorResponse { let mut r = ErrorResponse::new(Some(
 
 #[cfg(test)]
 mod tests;
+pub mod z;

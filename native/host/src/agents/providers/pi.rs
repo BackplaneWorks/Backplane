@@ -225,8 +225,11 @@ pub fn line(a: &mut Acp, t: &Turn, o: &Value) -> Out {
 }
 
 /// The driver of one Pi turn.
-pub struct PiDriver { acp: Acp, turn: Turn }
-impl PiDriver { pub fn new() -> PiDriver { PiDriver { acp: Acp::default(), turn: Turn::default() } } }
+pub struct PiDriver { acp: Acp, turn: Turn, windows: bool, prompt_path: Option<String>, prompt_file: Option<crate::agents::proc::RunFile> }
+impl PiDriver {
+    pub fn new() -> PiDriver { PiDriver { acp: Acp::default(), turn: Turn::default(), windows: cfg!(windows), prompt_path: None, prompt_file: None } }
+    pub fn for_windows() -> PiDriver { PiDriver { windows: true, ..Self::new() } }
+}
 impl Default for PiDriver { fn default() -> Self { Self::new() } }
 
 /// PiRun.args: `pi --mode rpc` with its session, Backplane's extension and the instructions; the model ("provider/id") and thinking level are flags.
@@ -254,16 +257,34 @@ impl Driver for PiDriver {
     fn install_hint(&self) -> Option<String> { Some("Install Pi (https://pi.dev), then sign in: run `pi` and use /login.".into()) }
     /// Proto.gone
     fn exit_why(&self, _code: i32) -> Option<String> { Some("pi exited before the turn ended (is it signed in? run `pi` and use /login)".into()) }
+    /// On Windows, writes the instructions to a private 0600 file inside a 0700 run dir (removed when the process exits via `take_files`),
+    /// so long prompts never enter argv or risk CreateProcess's 32K limit. Linux/macOS unchanged.
+    fn prepare(&mut self, a: &TurnIn) -> Result<(), String> {
+        if !self.windows { return Ok(()) }
+        let dir = crate::agents::proc::run_dir(std::path::Path::new(&a.home));
+        let name = format!("pi-{}-{}.prompt.md", safe(&a.thread), crate::agents::proc::unique());
+        let file = crate::agents::proc::RunFile::private(&dir, &name, &a.prompt).map_err(|e| format!("could not write Pi prompt file: {e}"))?;
+        self.prompt_path = Some(file.path().to_string_lossy().into_owned());
+        self.prompt_file = Some(file);
+        Ok(())
+    }
     /// The extension is written before each turn (`<home>/pi/backplane.js`), as PiRun.go does.
     fn argv(&self, a: &TurnIn) -> Vec<String> {
         let dir = std::path::Path::new(&a.home).join("pi");
         let _ = write_atomic(&dir, "backplane.js", EXT);
-        // Windows: the instructions go as a file (pi's --append-system-prompt takes text or a path): no launcher there carries their newlines (proc.rs `carries`)
-        let mut v = args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &prompt_arg(&dir, &a.thread, &a.prompt, cfg!(windows)), &a.model, &a.effort);
+        let prompt = match &self.prompt_path {
+            Some(p) => p.clone(),
+            None => prompt_arg(&dir, &a.thread, &a.prompt, self.windows),
+        };
+        let mut v = args(&session(&a.session, &a.thread, &a.gen), &dir.join("backplane.js").to_string_lossy(), &prompt, &a.model, &a.effort);
         v.extend(kistack_arg(&a.home)); v
     }
     /// BACKPLANE_PI_MCP and BACKPLANE_PI_MODE: what Backplane's extension reads.
-    fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_PCBPARTS".into(), a.pcbparts_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())] }
+    fn env(&self, a: &TurnIn) -> Vec<(String, String)> {
+        let mut env = vec![("BACKPLANE_PI_MCP".into(), a.mcp_url.clone()), ("BACKPLANE_PI_PCBPARTS".into(), a.pcbparts_url.clone()), ("BACKPLANE_PI_MODE".into(), mode(&a.runtime).into())];
+        env.extend(crate::mcpx::gen::extension_env(&a.mcp.acp, "BACKPLANE_PI_SERVERS"));
+        env
+    }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.turn = Turn { text: a.text.clone(), session: a.session.clone(), ask: asks(&a.runtime) }; self.acp = Acp::default(); vec![init()]
     }
@@ -274,6 +295,7 @@ impl Driver for PiDriver {
     fn ask_info(&self, request: &Value) -> Option<AskInfo> { dl::ask_info(request) }
     fn answer(&mut self, request: &Value, answer: &str) -> Vec<String> { vec![dl::reply(request, answer)] }
     fn ends_on_turn_end(&self) -> bool { true }
+    fn take_files(&mut self) -> Vec<crate::agents::proc::RunFile> { self.prompt_file.take().into_iter().collect() }
 }
 
 pub fn driver(provider: &str) -> Option<Made> { if provider == "pi" { Some(Made { cli: "pi", driver: Box::new(PiDriver::new()) }) } else { None } }
@@ -325,14 +347,17 @@ mod tests {
         let d = PiDriver::new(); let mut a = ti("approval-required"); a.model = "anthropic/claude-x".into(); a.effort = "high".into();
         let dir = crate::plat::tmp::uncreated("pi-argv"); a.home = dir.to_string_lossy().into();
         let v = d.argv(&a);
-        assert_eq!(v, vec!["--mode", "rpc", "--session-id", "bp-t1-9-0", "-e", &format!("{}/pi/backplane.js", a.home), "--append-system-prompt", "P", "--model", "anthropic/claude-x", "--thinking", "high"]);
+        let ext = dir.join("pi").join("backplane.js").to_string_lossy().into_owned();
+        let prompt = if cfg!(windows) { dir.join("pi").join("t1.prompt.md").to_string_lossy().into_owned() } else { "P".into() };
+        assert_eq!(v, vec!["--mode", "rpc", "--session-id", "bp-t1-9-0", "-e", &ext, "--append-system-prompt", &prompt, "--model", "anthropic/claude-x", "--thinking", "high"]);
         assert_eq!(std::fs::read_to_string(dir.join("pi/backplane.js")).unwrap(), EXT);
+        if cfg!(windows) { assert_eq!(std::fs::read_to_string(dir.join("pi/t1.prompt.md")).unwrap(), "P"); }
         assert_eq!(d.env(&a), vec![("BACKPLANE_PI_MCP".to_string(), a.mcp_url.clone()), ("BACKPLANE_PI_PCBPARTS".into(), a.pcbparts_url.clone()), ("BACKPLANE_PI_MODE".into(), "ask".into())]);
         a.model = "default".into(); a.effort = "".into(); a.session = "sess-1".into();
         assert_eq!(d.argv(&a)[3], "sess-1"); assert_eq!(d.argv(&a).len(), 8);
     }
     // the file is generated from pi by test/agents/prov-pi/gen_ext.py (its source, the Bend hub, is gone: this file is the source now, with pcbparts added); its bytes are pinned
-    #[test] fn the_extension_is_pi_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "83f96d0c0cb7d68d42bd9e0a8948ae5077b3554d62bcb8c53b6465bea0756c42") }
+    #[test] fn the_extension_is_pi_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "e8fcfc311e8ff453d7db88e4f9122cbaec8adebc0b3f64eb7481fbf8cd2fc405") }
 
     #[test] fn a_turn_streams_a_reply_and_ends() {
         let mut d = PiDriver::new(); assert_eq!(d.start(&ti("full-access")), vec![r#"{"id":"1","type":"get_state"}"#]);

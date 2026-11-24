@@ -64,18 +64,20 @@ pub fn toggle(this: &mut Backplane, cx: &mut Context<Backplane>) {
 
 /// Escape while the Layers panel is open shuts it (main.rs's ClosePopup). True when it took the key.
 pub fn escape(this: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
-    if !this.screens.plots[0].layers_open { return false }
-    this.screens.plots[0].layers_open = false; cx.notify(); true
+    let layout = &this.data["thread"]["viewer"]["layout"];
+    let slot = layout["focus"].as_str().and_then(|id| this.screens.plots.tile_slot(id)).filter(|_| crate::screens::viewer::is_tiled(&this.data["thread"]["viewer"])).unwrap_or(0);
+    if !this.screens.plots[slot].layers_open { return false }
+    this.screens.plots[slot].layers_open = false; cx.notify(); true
 }
 /// The open Layers panel: absolute over the canvas (the button row keeps its height, so the canvas never jumps), its own scroll past `max_h`.
-pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool, cap: f32, scroll: &ScrollHandle) -> Option<AnyElement> {
+pub fn panel_el(cx: &mut Context<Backplane>, slot: usize, light: bool, s: &Strip, open: bool, cap: f32, scroll: &ScrollHandle) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     if !open || s.rows.is_empty() { return None; }
     // a cap of 0: as tall as the pane lets it be before it scrolls
     let mh: Length = if cap > 0. { px(cap).into() } else { relative(0.96).into() };
     let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(mh).overflow_y_scroll().track_scroll(scroll).flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude()
         // a press outside shuts it (presses inside keep it open, so several layers can be turned in a row); Escape shuts it too (`escape`)
-        .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plots[0].layers_open = false; crate::screens::popover::shut("layers"); cx.notify(); }));
+        .on_mouse_down_out(cx.listener(move |this, _, _, cx| { this.screens.plots[slot].layers_open = false; crate::screens::popover::shut("layers"); cx.notify(); }));
     if s.modes {
         let present = s.present;
         /* i18n-ok: drawn through trs */ panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {

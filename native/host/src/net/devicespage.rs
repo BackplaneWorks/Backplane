@@ -9,7 +9,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// The drafts a state may carry (anything else in it is dropped).
-const KEYS: &[&str] = &["@invite", "@pair.url", "@lan.err"];
+const KEYS: &[&str] = &["@invite", "@pair.url", "@lan.err", "@share.err"];
 /// A state string back as a session (`{"drafts": {...}}`): only the page's own drafts, strings of a bounded size.
 pub fn session_of(state: &str) -> Value {
     let v: Value = serde_json::from_str(state).unwrap_or(Value::Null);
@@ -24,7 +24,7 @@ fn state_of(session: &Value) -> String {
 }
 /// The page for a session: `{rows, state}`.
 pub fn page(session: &Value) -> Value {
-    let info = json!({"devices": super::start::routes().map_or(Value::Null, |r| r.devices())});
+    let info = json!({"devices": super::start::routes().map_or(Value::Null, |r| r.devices()), "shares": crate::files::share::listed_now()});
     let rows = crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::settings::devices(st, session, &info))).unwrap_or_default();
     json!({"rows": rows, "state": state_of(session)})
 }
@@ -48,6 +48,11 @@ fn browser_rows(list: &Value, current_id: &str) -> Value {
 }
 
 async fn browser_action(hub: &Hub, action: &str, value: &str) -> Result<(), &'static str> {
+    #[cfg(target_os = "linux")]
+    if action == "device-web-setup" {
+        return super::listener::webprovision::request_setup(&hub.cfg.home, value);
+    }
+    if action == "device-web-setup" { return Err("web setup unavailable on this system"); }
     let reg = super::start::registry(&hub.cfg.home).ok_or("registry unavailable")?;
     if action == "device-web-access" {
         if !matches!(value, "0" | "1") { return Err("invalid access setting") }
@@ -73,7 +78,7 @@ impl RpcHandler for DevicesPage {
                 let action = s("action");
                 if !action.starts_with("device-") { return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown action"})] }
                 let (a, v) = (action.clone(), s("value"));
-                if matches!(a.as_str(), "device-web-access" | "device-web-approve" | "device-web-deny") {
+                if matches!(a.as_str(), "device-web-setup" | "device-web-access" | "device-web-approve" | "device-web-deny") {
                     let result = browser_action(hub, &a, &v).await;
                     return vec![match result {
                         Ok(()) => { let mut reply = page(&session); reply["t"] = json!("reply"); reply["id"] = id.clone(); reply["ok"] = json!(true); reply }

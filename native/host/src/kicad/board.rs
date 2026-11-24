@@ -152,7 +152,7 @@ fn pad(out: &mut Vec<Item>, x: &Sx, key: String, sig: u32, pl: &Place, ctx: &str
     if let Some(k) = hole { out.push(Item { key: k, sig, layer: 24, prim: Prim::Circ { c, r: drill / 2.0, w: 0.0, fill: true }, info }) }
 }
 /// Fp.place: 10.99 writes the footprint origin and angle as a TRS transform; its presence is authoritative.
-fn fp_place(x: &Sx) -> Place {
+pub fn fp_place(x: &Sx) -> Place {
     let tr = x.get("transform");
     if tr.name().is_empty() { let a = x.get("at"); Place::new(a.f(0), a.f(1), rad(a.f(2))) }
     else { let t = tr.get("translate"); Place::new(t.f(0), t.f(1), rad(fl::num(tr.attr("rotate")))) }

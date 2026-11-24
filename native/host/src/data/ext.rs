@@ -21,7 +21,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines", "history", "devices", "find", "notifysettings", "ring"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines", "history", "devices", "find", "notifysettings", "ring", "threadContext"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -61,12 +61,17 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let setting = |k: &str| crate::statehost::policies().and_then(|x| x.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default();
     let pick = |k: &str, dflt: String| if p.get(k).is_some() { s(p, k).to_string() } else if th.is_empty() { dflt } else { s(&now, k).to_string() };
     let provider = pick("provider", { let d = crate::settings::models::default_now(&setting("agent.provider"), &setting("accounts.inventory")); if d.is_empty() { "claude".into() } else { d } });
-    let model = pick("model", if p.get("provider").is_some() { String::new() } else { setting("agent.model") });
+    let raw_model = pick("model", if p.get("provider").is_some() { String::new() } else { setting("agent.model") });
     // a thread's own account's catalog (the one the desktop's picker lists) over the hub's detected list
     let info: Value = serde_json::from_str(&crate::settings::models::info()).unwrap_or(Value::Null);
     let info = if !th.is_empty() && p.get("provider").is_none() { crate::statehost::policies().and_then(|x| x.with_state(|st| crate::present::keys::info_for_thread(st, th, &info))).unwrap_or(info) } else { info };
+    let model = crate::settings::models::sanitize_model(&provider, &raw_model, info.is_object().then_some(&info));
     let models: Value = serde_json::from_str(&crate::settings::models::all_of(&info)).unwrap_or(Value::Null);
     let mut out = picker_sections_of(&info, &models, &provider, &model, &pick("effort", String::new()), &pick("speed", String::new()), &pick("runtime", "approval-required".into()));
+    let raw_favs = hub.setting(crate::settings::models::FAVORITES_KEY).await.unwrap_or_default();
+    out["favorites"] = json!(crate::settings::models::favorite_rows(&info, &raw_favs, &provider, &model));
+    out["favoriteKeys"] = json!(crate::settings::models::parse_favorite_keys(&raw_favs));
+    out["agents"] = crate::present::keys::picker_agents(info.is_object().then_some(&info));
     // a thread's: its account and what that has left, the one chip's words as the desktop draws it (a new thread has no account yet)
     if !th.is_empty() && p.get("provider").is_none() {
         let (extra, combo) = crate::statehost::policies().and_then(|x| x.with_state(|st| { let n = crate::hub::now_ms() / 1000; (crate::present::keys::account_sections(st, th, n), crate::present::keys::combo_of(st, th, n)) })).unwrap_or_default();
@@ -116,6 +121,7 @@ fn pick_request(action: &str, th: &str, value: &str) -> (&'static str, Value) {
         "speed" => ("thread.speed", json!({"thread":th,"speed":value})),
         "provider" => ("thread.provider", json!({"thread":th,"provider":value})),
         "runtime" => ("thread.modes", json!({"thread":th,"runtime":value})),
+        "interaction" => ("thread.modes", json!({"thread":th,"interaction":value})),
         _ => ("thread.modes", json!({"thread":th,"model":value})),
     }
 }
@@ -237,11 +243,19 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "thread.picker" => picker(hub, p).await,
+        "models.favorite" => rpc(hub, c, "models.favorite", p.clone()).await.map(result),
+        "thread.planonce" => {
+            let th = s(p, "thread"); if !known_any(hub, &*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
+            match rpc(hub, c, "thread.planonce", json!({"thread":th,"on":p["on"] == true})).await {
+                Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})),
+                Err(e) => Err(e),
+            }
+        }
         "thread.pick" => {
             // this hub's thread or a linked machine's (its picks go there: `rpc`, net/far.rs METHODS; its account is chosen on its own machine, the router says so)
             let (th, value) = (s(p, "thread"), s(p, "value")); if !known_any(hub, &*hub.model().await, th) { return Some(Err(err("unknown thread"))) }
             let r = match s(p, "action") {
-                a @ ("model" | "effort" | "speed" | "provider" | "runtime") => { let (m, q) = pick_request(a, th, value); rpc(hub, c, m, q).await }
+                a @ ("model" | "effort" | "speed" | "provider" | "runtime" | "interaction") => { let (m, q) = pick_request(a, th, value); rpc(hub, c, m, q).await }
                 // the account the thread runs on: the desktop's accounts.select, as the binding is now
                 "account" => {
                     let (profile, epoch) = value.split_once('\u{1f}').map_or((value, 0), |(a, b)| (a, b.parse::<u64>().unwrap_or(0)));
@@ -250,12 +264,13 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
                     rpc(hub, c, "accounts.select", json!({"thread":th,"profile":profile,"epoch":epoch,"expected":expected})).await
                 }
                 "usage" => return Some(Err(err("usage rows are to read"))),
-                _ => return Some(Err(err("action: model, effort, provider, runtime or account"))),
+                _ => return Some(Err(err("action: model, effort, speed, provider, runtime, interaction or account"))),
             };
             match r { Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})), Err(e) => Err(e) }
         }
         "mentions.list" => mentions(hub, p).await,
-        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "viewer.follow" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p, is_browser).await?,
+        "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "viewer.rail" | "viewer.follow" | "viewer.layout" | "viewer.layout.act" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p, is_browser).await?,
+        "thread.context" | "thread.context.mcp" => rpc(hub, c, m, p.clone()).await.map(result),
         "thread.again" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) } rpc(hub, c, "thread.again", json!({"thread":th})).await.map(|_| json!({})) }
         "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" | "voice.always" => voice(hub, c, m, p).await,
         "machines.page" | "machines.page.act" | "devices.page" | "devices.page.act" | "notify.page" | "notify.page.act" | "ring.list" | "ring.get" | "ring.search" | "ring.hear" | "ring.send" | "ring.setup" | "ring.page" | "ring.page.act" | "mcp.page" | "mcp.page.act" | "browser.page" | "browser.page.act" => {
@@ -265,7 +280,11 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
         "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(hub, s(p, "thread")).await})),
         // feature "subview": one subagent's own timeline (present/panels.rs `sub_view`), opened from its fold row's `tool.sub` or its Subagents row's `key`
         "thread.sub" => { let (th, k) = (s(p, "thread"), s(p, "key")); if th.is_empty() || k.is_empty() { return Some(Err(err("thread and key"))) }
-            Ok(json!({"thread":th,"key":k,"view":hub.sub_view_for(th, k).await})) }
+            let view = hub.sub_view_for(th, k).await;
+            // `have`: by parts, as a `parts:1` subscription pushes them (data/open.rs `sub_parts`)
+            if let Some(h) = p.get("have").and_then(Value::as_object) { let mut held: HashMap<String, String> = h.iter().filter_map(|(k, v)| Some((k.clone(), v.as_str()?.to_string()))).collect();
+                return Some(Ok(super::open::sub_parts(th, k, &view, &mut held))) }
+            Ok(json!({"thread":th,"key":k,"view":view})) }
         // feature "queue": what waits for the agent, the desktop's strip over the composer (session/composer.rs `queue_json`): `thread.queue {thread}` → `{rows, more}`;
         // `queue.act {thread, action, value}` → `{}` presses a row's button as the row names it (q-steer, q-remove, q-up, q-resume); q-edit takes the message out of the queue
         // and answers `{text}`, for the app to put back into the draft
@@ -301,9 +320,16 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
         "order.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
             rpc(hub, c, "order.buy", json!({"thread":th})).await.map(|r| json!({"thread":r["thread"]})) }
         // feature "fabprofile": the project's fab profile (fab/mod.rs Fab.view), the same the desktop and the agents' fab_profile read; `action` get, pick or seen
-        // feature "plan": the routing plan's person-side calls (plan/mod.rs): approve or reject items, a layer or all, stop routing, focus an item
-        "plan.approve" | "plan.stop" | "plan.focus" => { if s(p, "pro").is_empty() && s(p, "path").is_empty() { return Some(Err(err("pro (the project's .kicad_pro)"))) }
-            rpc(hub, c, m, p.clone()).await.map(|r| json!({"result": r["result"]})) }
+        // feature "plan": the routing plan's person-side calls (plan/mod.rs): approve, steer/update, stop routing, verify, focus an item, read board geometry, or toggle plan-before-routing
+        "plan.approve" | "plan.update" | "plan.stop" | "plan.verify" | "plan.focus" | "plan.get" | "plan.enable" => {
+            if m != "plan.enable" && s(p, "pro").is_empty() && s(p, "path").is_empty() {
+                return Some(Err(err("pro (the project's .kicad_pro)")))
+            }
+            match if is_browser { sanitize_browser_plan_params(hub, m, p).await } else { Ok(p.clone()) } {
+                Ok(q) => rpc(hub, c, m, q).await.map(|r| json!({"result": r["result"]})),
+                Err(e) => Err(e),
+            }
+        }
         // feature "mgmt": the management panels (docs/MANAGEMENT.md) and the design checks, the same calls the desktop makes; a BOM edit from the
         // phone is the person's, as the desktop's (kicad/bomedit.rs)
         "mgmt.watch" | "mgmt.panel" | "mgmt.bom.edit" | "mgmt.bom.alts" | "mgmt.life.part" | "kicad.checks.watch" | "kicad.checks.list" | "kicad.checks.run" | "kicad.checks.focus" | "kicad.checks.fix" => {
@@ -379,6 +405,16 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
 async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Value> {
     let (th, act) = (s(p, "thread"), s(p, "action"));
     if !known_any(hub, &*hub.model().await, th) { return Err(err("unknown thread")) }
+    if act == "fork" {
+        let source = thread_now(hub, th).await?;
+        let reply = rpc(hub, c, "thread.fork", json!({"thread":th})).await?;
+        let id = reply["thread"].as_str().filter(|s| !s.is_empty()).ok_or_else(|| err("no thread was made"))?;
+        if machines::is_far(id) {
+            let g = hub.model().await;
+            return Ok(json!({"thread":far_made(hub, &g, id, s(&source, "project"), &format!("Fork: {}", s(&source, "title")))}));
+        }
+        return thread_now(hub, id).await.map(|t| json!({"thread":t}));
+    }
     if act == "rename" {
         if s(p, "title").trim().is_empty() { return Err(err("title")) }
         rpc(hub, c, "thread.rename", json!({"thread":th,"title":s(p, "title")})).await?;
@@ -389,7 +425,7 @@ async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Va
     } else if THREAD_ACTS.contains(&act) {
         rpc(hub, c, &format!("thread.{act}"), json!({"thread":th})).await?;
         if act == "delete" { return Ok(json!({})) }
-    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, reparent or rename")) }
+    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, reparent, rename or fork")) }
     thread_now(hub, th).await.map(|t| json!({"thread":t}))
 }
 
@@ -397,7 +433,7 @@ async fn search(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let q = s(p, "q").trim().to_lowercase(); let lim = limit_of(p, 30, 100); let arch = p["archived"] == true;
     if q.is_empty() { return Ok(json!({"threads":[],"projects":[]})) }
     let g = hub.model().await; let asks = open_ask_counts(hub);
-    let mut ts: Vec<(u64, String)> = g.threads.iter().filter(|(_, t)| !t.deleted && (arch || !t.archived) && (contains(&t.title, &q) || (t.project != crate::sidebar::SCRATCH && g.projects.get(&t.project).map_or(false, |x| contains(&x.title, &q))))).map(|(i, t)| (ms(t.activity.max(t.created)), i.clone())).collect();
+    let mut ts: Vec<(u64, String)> = g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i) && (arch || !t.archived) && (contains(&t.title, &q) || (t.project != crate::sidebar::SCRATCH && g.projects.get(&t.project).map_or(false, |x| contains(&x.title, &q))))).map(|(i, t)| (ms(t.activity.max(t.created)), i.clone())).collect();
     ts.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1))); ts.truncate(lim);
     let threads: Vec<Value> = ts.iter().filter_map(|(_, i)| thread_json(hub, &g, i, &asks)).collect();
     let mut ps: Vec<(u64, String)> = g.projects.iter().filter(|(_, x)| !x.removed && (contains(&x.title, &q) || contains(&x.root, &q))).map(|(i, _)| (0, i.clone())).collect(); ps.truncate(lim);
@@ -441,8 +477,8 @@ async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     if want(">") || want("%") {
         let g = hub.model().await;
         if want(">") {
-            let mut seen: HashMap<String, usize> = HashMap::new(); for t in g.threads.values().filter(|t| !t.deleted) { *seen.entry(slug(&t.title)).or_default() += 1 }
-            let mut ts: Vec<_> = g.threads.iter().filter(|(_, t)| !t.deleted && !t.archived && !slug(&t.title).is_empty()).collect(); ts.sort_by(|a, b| b.1.activity.cmp(&a.1.activity));
+            let mut seen: HashMap<String, usize> = HashMap::new(); for (i, t) in g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i)) { *seen.entry(slug(&t.title)).or_default() += 1 }
+            let mut ts: Vec<_> = g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i) && !t.archived && !slug(&t.title).is_empty()).collect(); ts.sort_by(|a, b| b.1.activity.cmp(&a.1.activity));
             for (i, t) in ts.into_iter().take(200) { let w = slug(&t.title); let w = if seen.get(&w).copied().unwrap_or(0) > 1 { format!("{w}-{}", i.rsplit('-').next().unwrap_or("")) } else { w };
                 push(">", i, &t.title, g.projects.get(&t.project).map_or("", |x| x.title.as_str()), format!(">{w}")) }
         }
@@ -473,7 +509,7 @@ pub fn project_card(card: &Value) -> Value {
     json!({"goal": card["goal"].as_str().unwrap_or(""), "boards": boards})
 }
 // ---- viewers, files, browser (each the hub's own request, for the folder of the thread) ----
-async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {
+pub(super) async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {
     // a thread of a linked machine: the folder over there (its mirror holds the project's root and the thread's worktree)
     if let Some((_, root)) = machines::far_root(hub, thread) { return Ok(root) }
     crate::files::root_of(hub, thread).await.map(|p| p.to_string_lossy().into_owned()).ok_or_else(|| err("that thread has no folder"))
@@ -489,6 +525,8 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
     let th = s(p, "thread");
     Some(async {
         match m {
+            // the docking layout for this device (data/layout.rs, feature `layout`)
+            "viewer.layout" | "viewer.layout.act" => super::layout::call(hub, c, m, p).await,
             "viewer.files" if machines::is_far(th) => { let (_, root) = machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
                 let r = result(rpc(hub, c, "boards.list", json!({"thread":th})).await?); let mut v = machines::board_files(&root, s(&r, "board_default"));
                 let list: Vec<String> = r["board_list"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
@@ -501,7 +539,11 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                 let list = crate::files::kicad::boards::pick(&crate::files::kicad::boards::find(std::path::Path::new(&root)), &bd);
                 let has_gerbers = crate::files::kicad::gerber::has_gerbers(std::path::Path::new(&root));
                 Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch,"boards":machines::board_rows(&root, &list, &bd),"hasGerbers":has_gerbers})) }
+            "viewer.watch" if s(p, "kind") == "layout" => super::layout::watch(hub, c, p).await,
             "viewer.watch" => {
+                // a watch of one source lets this connection's layout set go (the hub's `kicad.watch.set` is released by `leave`): the connection stops holding it only
+                // once the hub's handler has answered this watch, so an invalid request changes nothing
+                let leaving = super::layout::global(&hub.cfg.home).held(c.client).is_some();
                 // the design's folder, as viewer.files answers it: a hardware thread working in a code worktree has no board there
                 let raw_kind = s(p, "kind"); let raw_path = s(p, "path");
                 if raw_kind == "gerbers" && machines::is_far(th) { return Err(err("Gerbers of a project on another machine are not shown yet")) }
@@ -519,11 +561,14 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                 let mut q = machines::on_link(json!({"kind":kind,"root":root,"path":path}), th);
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() }
+                if p.get("keptChunks").is_some_and(Value::is_array) { q["keptChunks"] = p["keptChunks"].clone() }
                 if p["force"] == true { q["force"] = json!(true) }
+                if leaving { q["leave"] = json!(true) }
                 // Split of a board picked in the viewer (`viewer.files` → `boards`, a row's `pcb`): its file and the schematic beside it are the panes' sources
                 let board = s(p, "board"); if kind == "split" && !board.is_empty() { if !board.starts_with(&format!("{root}/")) || board.split('/').any(|x| x == "..") || board.contains('\0') { return Err(err("that board is not in this project")) } q["board"] = json!(board); }
                 q["fresh"] = json!(true); // a phone holds only what `kept` names after a switch: models and parts come again (kicad/watch.rs `forget`) // the model the phone has cached (plot::mesh_id, hex): not sent again
                 let r = result(rpc(hub, c, "kicad.watch", q).await?);
+                if leaving { super::layout::global(&hub.cfg.home).hold(c.client, None) }
                 Ok(json!({"root":root,"keys":r.get("keys").cloned().unwrap_or(json!([]))})) // the plots this view shows: a phone drops what comes late for the one it left
             }
             "viewer.rail" => {
@@ -608,7 +653,7 @@ pub(crate) fn browser_requests(th: &str, p: &Value) -> Result<Vec<Value>, String
 }
 /// Frames the hub pushes to this connection that a phone's viewer reads: a plot (binary CBOR, or JSON for "none") and a browser frame's announcement.
 pub fn wants_raw(b: &[u8]) -> bool { b.len() > 7 && (0xA0..=0xB7).contains(&b[0]) && b[1] == 1 && b[2..7] == [0x64, b'p', b'l', b'o', b't'] }
-pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice" | "star" | "migrating") || (s(v, "t") == "d" && s(v, "k") == "btw") }
+pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "voice" | "star" | "migrating" | "hub.restarting" | "layout") || (s(v, "t") == "d" && s(v, "k") == "btw") }
 
 /// `composer.run {thread, text}`: the draft is one of `hello.commands`, run the way the desktop runs it (session/composer.rs). The answer's `kind` says what became of it: `btw` (a side
 /// question, its answer comes as a push `{t:"d",k:"btw",thread,q,a}` to this socket only), `give`, `secret` (the app opens its masked box for `name`; `secret.set` saves), `intent`, or
@@ -616,16 +661,35 @@ pub fn wants_value(v: &Value) -> bool { matches!(s(v, "t"), "plot" | "shot" | "v
 async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Value> {
     use crate::session::composer::{btw_answer, intent_edit, word_of, Word, BTW_EMPTY};
     let (th, text) = (s(p, "thread"), s(p, "text"));
-    if !known_thread(&*hub.model().await, th) { return Err(err("unknown thread")) }
+    if !known_any(hub, &*hub.model().await, th) { return Err(err("unknown thread")) }
     match word_of(text) {
         None => Err(err("not a command of the composer")),
         Some(Word::Btw(q)) if q.is_empty() => Err(err(BTW_EMPTY)),
         Some(Word::Btw(q)) => {
+            if machines::is_far(th) {
+                let r = rpc(hub, c, "thread.btw", json!({"thread": th, "q": q})).await?;
+                let a = btw_answer(r["result"]["btw"].as_str().unwrap_or(""));
+                let (h, client, thread, asked, ans) = (hub.clone(), c.client, th.to_string(), q.clone(), a.clone());
+                tokio::spawn(async move {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                    h.push(client, json!({"t":"d","k":"btw","thread":thread,"q":asked,"a":ans}));
+                });
+                return Ok(json!({"kind":"btw","q":q,"a":a}));
+            }
+            if let Some(why) = crate::settings::provider_notice::send_guard(hub).await {
+                return Err(super::no_provider_err(why));
+            }
             let (h, client, thread, asked) = (hub.clone(), c.client, th.to_string(), q.clone());
             tokio::spawn(async move { // the model may take a minute: this socket keeps answering meanwhile
-                let who = crate::api::Caller { gen: String::new(), client: 0 };
+                // Fresh non-attached client id so thread.btw keeps client > 0 checks without taking the attached desktop reply path.
+                let who = crate::api::Caller { gen: String::new(), client: h.fresh_client() };
                 let r = match h.rpc_for("thread.btw") { Some(x) => x.call(&h, &who, &json!(0), "thread.btw", &json!({"thread":thread,"q":asked})).await.into_iter().next().unwrap_or(Value::Null), None => Value::Null };
-                h.push(client, json!({"t":"d","k":"btw","thread":thread,"q":asked,"a":btw_answer(r["result"]["btw"].as_str().unwrap_or(""))}));
+                let a = if r["ok"] == true {
+                    btw_answer(r["result"]["btw"].as_str().unwrap_or(""))
+                } else {
+                    r["error"].as_str().filter(|e| !e.is_empty()).map(str::to_string).unwrap_or_else(|| btw_answer(""))
+                };
+                h.push(client, json!({"t":"d","k":"btw","thread":thread,"q":asked,"a":a}));
             });
             Ok(json!({"kind":"btw","q":q}))
         }
@@ -634,6 +698,11 @@ async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, 
         Some(Word::Settle) => rpc(hub, c, "thread.settle", json!({"thread":th})).await.map(|_| json!({"kind":"settle"})),
         Some(Word::Intent(b)) if b.is_empty() => { let card = crate::settings::fab::look(hub, th).await; Ok(json!({"kind":"edit","text":intent_edit(card["intent"].as_str().unwrap_or(""))})) }
         Some(Word::Intent(b)) => rpc(hub, c, "fab.intent", json!({"thread":th,"text":b})).await.map(|_| json!({"kind":"intent"})),
+        // a repository's address: the app opens its Clone from git on it (`clone.dest` says where it goes), the rest kept as the first message
+        Some(Word::Project(rest)) if crate::session::composer::clone_args(&rest).is_some() => {
+            let (repo, first) = crate::session::composer::clone_args(&rest).unwrap_or_default();
+            Ok(json!({"kind":"clone","repo":repo,"text":first}))
+        }
         Some(Word::Project(rest)) => match crate::session::composer::project_args(&rest) {
             Err(e) => Err(err(e)),
             Ok(None) => Ok(json!({"kind":"project"})), // the app opens its Add project screen
@@ -642,6 +711,7 @@ async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, 
             Ok(Some((path, first))) => {
                 let r = hub.request_here(c, &json!({"id":0,"m":"project.new","p":{"path":path,"empty":true,"text":first}})).await.into_iter().find(|v| v["t"] == "reply").unwrap_or(Value::Null);
                 if r["ok"] == true { return Ok(json!({"kind":"made","thread":r["thread"],"note":r["note"].as_str().unwrap_or("")})) }
+                if r.get("errorCode").is_some() { return Err(super::err_from_rpc(&r)) }
                 let why = r["error"].as_str().unwrap_or("The project could not be made.").to_string();
                 match r["result"]["exists"].as_str() { Some(d) if p["exists"] == true => Ok(json!({"kind":"exists","path":d,"error":why})), _ => Err(err(why)) }
             }
@@ -695,6 +765,101 @@ async fn review(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Resu
     }.await)
 }
 
+fn too_wide_plan_root(p: &std::path::Path) -> bool {
+    let home = crate::plat::fs::canonicalize(std::path::Path::new(&crate::plat::dirs::home_or_empty())).ok();
+    p.parent().is_none() || home.as_ref().map_or(false, |h| h == p)
+}
+
+fn check_plan_sidecar(roots: &[std::path::PathBuf], real_home: &std::path::Path, sidecar: &std::path::Path) -> Result<(), &'static str> {
+    if let Ok(md) = std::fs::symlink_metadata(sidecar) {
+        if md.file_type().is_symlink() {
+            return Err("that routing plan is not shared");
+        }
+        let real_sidecar = crate::plat::fs::canonicalize(sidecar).map_err(|_| "that routing plan is not shared")?;
+        if real_sidecar.starts_with(real_home) || !roots.iter().any(|r| real_sidecar.starts_with(r)) {
+            return Err("that routing plan is not shared");
+        }
+    }
+    Ok(())
+}
+
+fn check_browser_plan_path(roots: &[std::path::PathBuf], home: &std::path::Path, raw: &str) -> Result<(std::path::PathBuf, std::path::PathBuf), &'static str> {
+    let full = crate::files::share::local_path(raw).ok_or("that path is not in a project")?;
+    if std::fs::symlink_metadata(&full).is_ok_and(|md| md.file_type().is_symlink()) {
+        return Err("that path is not shared");
+    }
+    let real = crate::plat::fs::canonicalize(&full).map_err(|_| "no such file or project")?;
+    let real_home = crate::plat::fs::canonicalize(home).unwrap_or_else(|_| home.to_path_buf());
+    if real.starts_with(&real_home) || !roots.iter().any(|r| real.starts_with(r)) {
+        return Err("that path is not in a project");
+    }
+    let pcb_raw = if real.extension().and_then(|e| e.to_str()) == Some("kicad_pcb") {
+        real.to_string_lossy().into_owned()
+    } else {
+        let dir = if real.is_dir() { real.as_path() } else { real.parent().unwrap_or(real.as_path()) };
+        crate::files::kicad::project::read(&dir.to_string_lossy()).pcb
+    };
+    if pcb_raw.is_empty() {
+        return Err("no KiCad board in this project");
+    }
+    let pcb_path = std::path::Path::new(&pcb_raw);
+    if std::fs::symlink_metadata(pcb_path).is_ok_and(|md| md.file_type().is_symlink()) {
+        return Err("that board is not shared");
+    }
+    let real_pcb = crate::plat::fs::canonicalize(pcb_path).map_err(|_| "no such board")?;
+    if real_pcb.starts_with(&real_home) || !roots.iter().any(|r| real_pcb.starts_with(r)) {
+        return Err("that board is not in a project");
+    }
+    if !real_pcb.parent().map_or(false, |p| roots.iter().any(|r| p.starts_with(r))) {
+        return Err("that board is not in a project");
+    }
+    check_plan_sidecar(roots, &real_home, &pcb_path.with_extension("kicad_plan"))?;
+    check_plan_sidecar(roots, &real_home, &real_pcb.with_extension("kicad_plan"))?;
+    Ok((real, real_pcb))
+}
+
+async fn sanitize_browser_plan_params(hub: &Arc<Hub>, m: &str, p: &Value) -> Result<Value, Value> {
+    let raw = if !s(p, "pro").is_empty() { s(p, "pro") } else { s(p, "path") };
+    if raw.is_empty() {
+        if m == "plan.enable" {
+            return Ok(p.clone());
+        }
+        return Err(err("pro (the project's .kicad_pro)"));
+    }
+    let roots = {
+        let g = hub.model().await;
+        let mut raw_roots: Vec<String> = Vec::new();
+        for proj in g.projects.values().filter(|pr| !pr.removed && !pr.root.is_empty()) {
+            raw_roots.push(proj.root.clone());
+            raw_roots.push(crate::files::kicad::canonical::design_root(&proj.root));
+        }
+        for t in g.threads.values().filter(|t| !t.deleted && !t.worktree.is_empty()) {
+            raw_roots.push(crate::files::kicad::canonical::design_root(&t.worktree));
+        }
+        let mut out = Vec::new();
+        for r in raw_roots {
+            if let Ok(c) = crate::plat::fs::canonicalize(std::path::Path::new(&r)) {
+                if c.is_dir() && !out.contains(&c) && !too_wide_plan_root(&c) {
+                    out.push(c);
+                }
+            }
+        }
+        out
+    };
+    let (real, real_pcb) = check_browser_plan_path(&roots, &hub.cfg.home, raw).map_err(err)?;
+    let mut q = p.clone();
+    if let Some(o) = q.as_object_mut() {
+        o.remove("pro");
+        o.remove("path");
+        if matches!(m, "plan.focus" | "plan.enable") && real.extension().and_then(|e| e.to_str()) != Some("kicad_pcb") {
+            o.insert("pro".into(), json!(real.to_string_lossy()));
+        } else {
+            o.insert("path".into(), json!(real_pcb.to_string_lossy()));
+        }
+    }
+    Ok(q)
+}
+
 #[cfg(test)]
 mod pick_tests {
     use super::*;
@@ -707,5 +872,50 @@ mod pick_tests {
             let (_, q) = pick_request(a, "t9", "v"); assert_eq!((q["thread"].as_str(), crate::net::far::params_link(&q)), (Some("t9"), String::new()), "{a}");
         }
         assert!(!crate::net::far::may("accounts.select"), "a far thread's account is chosen on its own machine: the router refuses it");
+    }
+
+    #[test] fn browser_plan_path_is_confined_to_authorized_projects() {
+        let base_guard = crate::plat::tmp::dir("ext-plan");
+        let base = base_guard.path();
+        let home = base.join("home");
+        let proj = base.join("proj");
+        let outside = base.join("outside");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::create_dir_all(&proj).unwrap();
+        std::fs::create_dir_all(&outside).unwrap();
+
+        let pro = proj.join("demo.kicad_pro");
+        let pcb = proj.join("demo.kicad_pcb");
+        let out_pcb = outside.join("secret.kicad_pcb");
+        std::fs::write(&pro, "{}").unwrap();
+        std::fs::write(&pcb, "(kicad_pcb)").unwrap();
+        std::fs::write(&out_pcb, "(kicad_pcb)").unwrap();
+
+        let roots = vec![crate::plat::fs::canonicalize(&proj).unwrap()];
+        assert!(check_browser_plan_path(&roots, &home, pro.to_str().unwrap()).is_ok());
+        assert!(check_browser_plan_path(&roots, &home, pcb.to_str().unwrap()).is_ok());
+        assert!(check_browser_plan_path(&roots, &home, out_pcb.to_str().unwrap()).is_err());
+        assert!(check_browser_plan_path(&roots, &home, &format!("{}/../outside/secret.kicad_pcb", proj.display())).is_err());
+        assert!(check_browser_plan_path(&roots, &home, home.to_str().unwrap()).is_err());
+
+        #[cfg(unix)]
+        {
+            let sidecar = proj.join("demo.kicad_plan");
+            let outside_plan = outside.join("evil.kicad_plan");
+            std::fs::write(&outside_plan, "{}").unwrap();
+            std::os::unix::fs::symlink(&outside_plan, &sidecar).unwrap();
+            assert!(check_browser_plan_path(&roots, &home, pro.to_str().unwrap()).is_err());
+
+            // Symlinked .kicad_pcb alias inside project with malicious .kicad_plan beside it is also rejected
+            let sub = proj.join("sub");
+            std::fs::create_dir_all(&sub).unwrap();
+            let sub_pro = sub.join("alias.kicad_pro");
+            let sub_pcb = sub.join("alias.kicad_pcb");
+            let sub_sidecar = sub.join("alias.kicad_plan");
+            std::fs::write(&sub_pro, "{}").unwrap();
+            std::os::unix::fs::symlink(&pcb, &sub_pcb).unwrap();
+            std::os::unix::fs::symlink(&outside_plan, &sub_sidecar).unwrap();
+            assert!(check_browser_plan_path(&roots, &home, sub_pro.to_str().unwrap()).is_err());
+        }
     }
 }

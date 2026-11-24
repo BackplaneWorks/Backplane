@@ -46,16 +46,22 @@ pub fn raw_sig(der: &[u8]) -> Option<[u8; 64]> {
     }
     Some(out)
 }
+/// Write `input` to `c`'s stdin and wait for stdout; kill and reap on write failure so no `<defunct>` child leaks (#1607).
+fn pipe_and_wait(c: &mut std::process::Command, input: &[u8], missing: &str, fail: &str) -> Result<Vec<u8>, String> {
+    let mut ch = c.spawn().map_err(|_| missing.to_string())?;
+    let wrote = ch.stdin.take().ok_or_else(|| "no stdin".to_string()).and_then(|mut s| s.write_all(input).map_err(|e| e.to_string()));
+    if let Err(e) = wrote { let _ = ch.kill(); let _ = ch.wait(); return Err(e) }
+    let o = ch.wait_with_output().map_err(|e| e.to_string())?;
+    if !o.status.success() { return Err(fail.into()) }
+    Ok(o.stdout)
+}
 /// The provider token.
 pub fn token(key: &Path, kid: &str, team: &str, now: u64) -> Result<String, String> {
     let msg = format!("{}.{}", b64(json!({"alg":"ES256","kid":kid}).to_string().as_bytes()), b64(json!({"iss":team,"iat":now}).to_string().as_bytes()));
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "openssl");
     c.args(["dgst", "-sha256", "-sign"]).arg(key).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null());
-    let mut ch = c.spawn().map_err(|_| "openssl is missing".to_string())?;
-    ch.stdin.take().ok_or("no stdin")?.write_all(msg.as_bytes()).map_err(|e| e.to_string())?;
-    let o = ch.wait_with_output().map_err(|e| e.to_string())?;
-    if !o.status.success() { return Err("could not sign with push.apns.key".into()) }
-    Ok(format!("{msg}.{}", b64(&raw_sig(&o.stdout).ok_or("the signature did not parse")?)))
+    let sig = pipe_and_wait(&mut c, msg.as_bytes(), "openssl is missing", "could not sign with push.apns.key")?;
+    Ok(format!("{msg}.{}", b64(&raw_sig(&sig).ok_or("the signature did not parse")?)))
 }
 pub fn curl_config(url: &str, jwt: &str, topic: &str, f: &Frame, body: &Path, out: &Path) -> String {
     let mut c = format!("url = \"{url}\"\nheader = \"authorization: bearer {jwt}\"\nheader = \"apns-topic: {topic}\"\nheader = \"apns-push-type: {}\"\nheader = \"apns-priority: {}\"\n", f.push_type, f.priority);
@@ -166,4 +172,35 @@ pub async fn explain(hub: &Arc<Hub>, why: &str) -> String {
 pub fn undelivered_tell(why: &str) -> String {
     let fix = if why.starts_with("the APNs key file") { " Apple lets you download a key only once, so make a new APNs key at developer.apple.com (Certificates, IDs & Profiles, Keys), then ask me to point push.apns.key and push.apns.keyid at the new .p8. No restart needed." } else { "" };
     format!("**Phone alerts aren't reaching your phone:** {why}. Replies still show here and in the app while it is open, but nothing pops up on the phone until this is fixed.{fix}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_pipe_reaps_child_and_missing_key_errors() {
+        assert!(token(Path::new("/nonexistent/key.p8"), "kid", "team", 1).is_err());
+
+        #[cfg(unix)]
+        {
+            let tmp = crate::plat::tmp::dir("apns-reap");
+            let pid_file = tmp.path().join("pid");
+            let mut cmd = crate::proc::std_cmd(crate::proc::Kind::Local, "/bin/sh");
+            cmd.args([
+                "-c",
+                "echo $$ > \"$1\" && exec 0<&- && exit 1",
+                "sh",
+                pid_file.to_str().unwrap(),
+            ])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null());
+            let big = vec![b'x'; 256 * 1024];
+            let err = pipe_and_wait(&mut cmd, &big, "missing stdin", "failed").unwrap_err();
+            assert_ne!(err, "failed", "expected stdin write error before exit status");
+            let pid: u32 = std::fs::read_to_string(&pid_file).unwrap().trim().parse().unwrap();
+            assert!(!crate::plat::proc::alive(pid), "failed write child {pid} stayed unreaped");
+        }
+    }
 }

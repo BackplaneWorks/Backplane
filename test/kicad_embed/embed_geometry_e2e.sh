@@ -14,6 +14,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ "${2:-}" != "" ] && HUB_BIN=$2
 [ "${3:-}" != "" ] && OUT=$(mkdir -p "$3" && cd "$3" && pwd)
 discover_bins; discover_kicad; init_isolated_dirs
+unset KICAD_CONFIG_HOME
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 VER=$("$KICAD_CLI" --version 2>/dev/null | tr -d '\r' | tail -1); SV=$(echo "$VER" | cut -d. -f1-2)
 D="$XDG_CONFIG_HOME/kicad/$SV"; mkdir -p "$D"
@@ -76,11 +77,30 @@ PY
 check "G1 the hub removed only the out-of-range geometry before the editor started, and kept a backup" "${G1%% *}" "${G1#* }"
 
 # G2: the embedded editor opened, then closed by Ctrl+W (KiCad saves its settings as a frame closes)
-pcb_frame() { python3 "$DRIVER_PY" list-windows --match "PCB Editor" 2>/dev/null | python3 -c 'import json,sys; ws=[w for w in json.load(sys.stdin) if w.get("shown") and w["w"]>300]; print(ws[0]["xid"], ws[0]["root_x"], ws[0]["root_y"], ws[0]["w"], ws[0]["h"]) if ws else print("")'; }
-read -r F FX FY FW FH <<<"$(pcb_frame)"
-[ -n "${F:-}" ] && python3 "$XINPUT_PY" click $((FX + FW / 2)) $((FY + FH - 120)); sleep 0.8
-python3 "$XINPUT_PY" chord ctrl w
-for _ in $(seq 40); do [ -z "$(pcb_frame)" ] && break; sleep 0.25; done; sleep 2
+pcb_frame() {
+  local raw
+  raw=$(python3 "$DRIVER_PY" list-windows --match "PCB Editor") || return 1
+  python3 -c 'import json,sys; ws=[w for w in json.load(sys.stdin) if w.get("shown") and w["w"]>300]; print(ws[0]["xid"], ws[0]["root_x"], ws[0]["root_y"], ws[0]["w"], ws[0]["h"]) if ws else print("")' <<<"$raw"
+}
+xid_gone() {
+  local raw
+  raw=$(python3 "$DRIVER_PY" list-windows --all) || return 1
+  python3 -c 'import json,sys; x=sys.argv[1]; cp=int(sys.argv[2]); ws=json.load(sys.stdin); sys.exit(0 if any(w.get("pid")==cp for w in ws) and not any(w.get("xid")==x for w in ws) else 1)' "$1" "$2" <<<"$raw"
+}
+PCB_CLOSED=0
+PCB_CLOSE_WHY="PCB Editor did not close after Ctrl+W"
+if PCB_INFO=$(pcb_frame) && [ -n "$PCB_INFO" ]; then
+  read -r F FX FY FW FH <<<"$PCB_INFO"
+  python3 "$XINPUT_PY" click $((FX + FW / 2)) $((FY + FH - 120)); sleep 0.8
+  python3 "$XINPUT_PY" chord ctrl w
+  for _ in $(seq 40); do
+    if xid_gone "$F" "$CP"; then PCB_CLOSED=1; break; fi
+    sleep 0.25
+  done
+  sleep 2
+else
+  PCB_CLOSE_WHY="PCB Editor frame was not found before Ctrl+W"
+fi
 # then the session ended as a person's ends (the client, then the hub, stopped): KiCad writes its settings files as it exits
 kill "$CP" 2>/dev/null || true; wait "$CP" 2>/dev/null || true
 HG=${OWN_GROUPS[${#OWN_GROUPS[@]}-1]}; kill -TERM -- "-$HG" 2>/dev/null || true
@@ -98,7 +118,12 @@ diff = {k: (ka.get(k), kb.get(k)) for k in set(ka) | set(kb) if ka.get(k) != kb.
 print("1 unchanged" if not diff else "0 " + ", ".join(f"{k}: {x} -> {str(y)[:40]}" for k, (x, y) in sorted(diff.items())))
 PY
 )
-if [ "${GEOM_EXPECT_FORK_FIX:-0}" = 1 ]; then
+EXPECT_FORK_FIX=${GEOM_EXPECT_FORK_FIX:-}
+if [ -z "$EXPECT_FORK_FIX" ]; then
+  EXPECT_FORK_FIX=$(python3 -c 'import re, sys; m = re.search(r"-bp\.(\d+)(?:\.(\d+))?", sys.argv[1]); print(1 if m and (int(m.group(1)), int(m.group(2) or 0)) >= (13, 2) else 0)' "$VER")
+fi
+if [ "$EXPECT_FORK_FIX" = 1 ]; then
+  [ "$PCB_CLOSED" = 1 ] || G2="0 $PCB_CLOSE_WHY"
   check "G2 the embedded editor's close left pcbnew.json's stock window geometry and panel sizes as they were" "${G2%% *}" "${G2#* }"
 else
   echo "INFO G2 (runtime $VER, no fork fix expected): the embedded editor's close wrote: ${G2#* }"

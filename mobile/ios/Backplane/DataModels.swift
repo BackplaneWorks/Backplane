@@ -35,16 +35,64 @@ struct DTool: Codable, Equatable {
 struct DAsk: Codable, Equatable {
     var id: String
     var state: String   // open | answered
+    var kind: String = ""
+    var head: String = ""
     var question: String
     var options: [DOption]
     var answered: String?
+    var revise: Bool = false
     var isOpen: Bool { state == "open" }
-    enum CodingKeys: String, CodingKey { case id, state, question, options, answered }
+    enum CodingKeys: String, CodingKey { case id, state, kind, head, question, options, answered, revise }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        id = c.str(.id); state = c.str(.state); question = c.str(.question)
+        id = c.str(.id); state = c.str(.state); kind = c.str(.kind); head = c.str(.head); question = c.str(.question)
         options = (try? c.decode([DOption].self, forKey: .options)) ?? []
         answered = try? c.decode(String.self, forKey: .answered)
+        revise = c.bool(.revise)
+    }
+}
+
+struct DPlanMode: Codable, Equatable, Hashable {
+    var phase: String = "off"       // off | armed | planning | pending | executing
+    var interaction: String = "default"
+    var once: Bool = false
+    var scope: String = "off"       // off | once | always
+    var label: String = ""
+    var pending: Bool = false
+    var executing: Bool = false
+
+    enum Target: String, CaseIterable, Equatable {
+        case off, once, always
+    }
+
+    var isActive: Bool { !phase.isEmpty && phase != "off" }
+
+    static func effective(for thread: DThread?) -> DPlanMode? {
+        guard let thread else { return nil }
+        if let m = thread.planMode { return m }
+        if thread.provider == "claude" { return DPlanMode() }
+        return nil
+    }
+
+    static func nextCycle(for mode: DPlanMode) -> Target {
+        switch mode.phase {
+        case "off", "": return .once
+        case "armed", "planning": return mode.scope == "once" ? .always : .off
+        default: return .off
+        }
+    }
+
+    enum CodingKeys: String, CodingKey { case phase, interaction, once, scope, label, pending, executing }
+    init(phase: String = "off", interaction: String = "default", once: Bool = false, scope: String = "off", label: String = "", pending: Bool = false, executing: Bool = false) {
+        self.phase = phase; self.interaction = interaction; self.once = once; self.scope = scope; self.label = label; self.pending = pending; self.executing = executing
+    }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        let ph = c.str(.phase); phase = ph.isEmpty ? "off" : ph
+        let ia = c.str(.interaction); interaction = ia.isEmpty ? "default" : ia
+        once = c.bool(.once)
+        let sc = c.str(.scope); scope = sc.isEmpty ? "off" : sc
+        label = c.str(.label); pending = c.bool(.pending); executing = c.bool(.executing)
     }
 }
 
@@ -64,6 +112,7 @@ struct DEntry: Codable, Equatable, Identifiable {
     var at: Int
     var label: String = ""   // a design step: what changed; a note: its name
     var tone: String = ""    // a note: error, info…
+    var folds = false        // a note that is a thought (data/1 `folds`): drawn folded to its first line, a tap opens the whole of it
     var clientId: String?
     var replaces: String?   // the final entry that ends a stream names the live entry it replaces
     var live: Bool
@@ -78,17 +127,21 @@ struct DEntry: Codable, Equatable, Identifiable {
     var voice: DVoiceMark?   // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
     var restore: DRestore?   // the person's message: the snapshot before the turn it started (data/1 `restore`): Restore to before this
     var copy: [DCopyPiece]?   // what to copy in it, as the hub lists it (`copy: [{text, cmd}]`, md/copy.rs); nil: the phone's own rules (Copyable)
+    var h: String = ""        // content hash for thread.open / sub.d resume (docs/PHONE-DATA.md, Phase 1)
+    var queued = false        // queued for an away home machine (docs/PHONE-DATA.md, The home)
+    var files: [DFileLink] = []   // the files a reply names that the hub serves (feature fileLinks): a tap on one downloads it (FileFetch.swift, DataDownloads.swift)
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore }
+    var replyParam: [String: String]?   // the `replyTo {id, text}` a message this phone is sending carries (feature `reply`), for Retry
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h, queued, files }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        id = c.str(.id); kind = c.str(.kind); text = c.str(.text); at = c.int(.at); label = c.str(.label); tone = c.str(.tone)
+        id = c.str(.id); kind = c.str(.kind); text = c.str(.text); at = c.int(.at); label = c.str(.label); tone = c.str(.tone); folds = c.bool(.folds)
         clientId = try? c.decode(String.self, forKey: .clientId)
         replaces = try? c.decode(String.self, forKey: .replaces)
         live = c.bool(.live)
@@ -103,6 +156,9 @@ struct DEntry: Codable, Equatable, Identifiable {
         copy = try? c.decode([DCopyPiece].self, forKey: .copy)
         voice = try? c.decode(DVoiceMark.self, forKey: .voice)
         restore = try? c.decode(DRestore.self, forKey: .restore)
+        h = c.str(.h)
+        queued = c.bool(.queued)
+        files = ((try? c.decode([DFileLink].self, forKey: .files)) ?? []).filter { !$0.path.isEmpty }
     }
 }
 
@@ -214,13 +270,23 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var mark: DMark?     // the machine it runs on when it is another one; nil for this hub's own
     var swarm: String    // the swarm (its room) this thread is a member of, "" for none (feature swarm): left out of its project's list
     var memory: DMemory? // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); nil for a thread without it
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory }
+    var planMode: DPlanMode? = nil
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory, planMode }
+    init(id: String, project: String = "", title: String = "", state: String = "idle", updatedAt: Int = 0, pinned: Bool = false, pinOrder: Int = 0, settled: Bool = false, settledAt: Int = 0, archived: Bool = false, provider: String = "", model: String = "", effort: String = "", runtime: String = "", chip: String = "", preview: String = "", waiting: Int = 0, parent: String = "", history: Bool = false, status: String = "", mark: DMark? = nil, swarm: String = "", memory: DMemory? = nil, planMode: DPlanMode? = nil) {
+        self.id = id; self.project = project; self.title = title; self.state = state; self.updatedAt = updatedAt
+        self.pinned = pinned; self.pinOrder = pinOrder; self.settled = settled; self.settledAt = settledAt; self.archived = archived
+        self.provider = provider; self.model = model; self.effort = effort; self.runtime = runtime; self.chip = chip
+        self.preview = preview; self.waiting = waiting; self.parent = parent; self.history = history; self.status = status
+        self.mark = mark; self.swarm = swarm; self.memory = memory; self.planMode = planMode
+    }
+    static func stub(id: String, title: String) -> DThread { DThread(id: id, title: title) }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); pinOrder = c.int(.pinOrder); settled = c.bool(.settled); settledAt = c.int(.settledAt); archived = c.bool(.archived)
         provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status); mark = try? c.decode(DMark.self, forKey: .mark); swarm = c.str(.swarm)
         memory = try? c.decode(DMemory.self, forKey: .memory)
+        planMode = try? c.decode(DPlanMode.self, forKey: .planMode)
     }
 }
 /// A thread's memory progress, every word the hub's: the bar is `done` of `total`, `state` caught | behind | held.
@@ -259,9 +325,9 @@ struct DEmpty: Decodable { init(from d: Decoder) throws {} }
 /// One project an improvement may go to (`improvements.projects`): `short` names the linked machine it is on, "" for the hub's own.
 struct DImpProject: Decodable, Identifiable { var id: String; var title: String; var root: String; var machine: String; var short: String }
 struct DImpProjects: Decodable { var project: String; var projects: [DImpProject] }
-struct DAttachmentData: Decodable { var mime: String; var data: String
-    enum CodingKeys: String, CodingKey { case mime, data }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); mime = c.str(.mime); data = c.str(.data) } }
+struct DAttachmentData: Decodable { var mime: String; var data: String; var blob: String
+    enum CodingKeys: String, CodingKey { case mime, data, blob }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); mime = c.str(.mime); data = c.str(.data); blob = c.str(.blob) } }
 
 /// `thread.queue` → `{rows, more}`; `queue.act` → `{}`, or `{text}` from q-edit / o-edit (rows: Outbox.swift `DQueueRow`)
 struct DQueueReply: Decodable {
@@ -458,6 +524,82 @@ struct DSubView: Decodable, Equatable {
 }
 struct DSubViewReply: Decodable { let view: DSubView? }
 struct DSubRoute: Hashable { let thread: String; let key: String }
+/// The designated home machine for Bub and shared state (docs/PHONE-DATA.md, The home).
+struct DHomeMoving: Decodable, Equatable {
+    let to: String
+    let state: String
+    let step: String?
+    let note: String?
+}
+struct DHome: Decodable, Equatable {
+    let kind: String
+    let id: String
+    let name: String
+    let online: Bool
+    let awaySince: Int64?
+    let queuedCount: Int
+    let canMoveHere: Bool
+    let moving: DHomeMoving?
+    enum CodingKeys: String, CodingKey { case kind, id, name, online, awaySince, queuedCount, canMoveHere, moving }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        kind = c.str(.kind); id = c.str(.id); name = c.str(.name)
+        online = (try? c.decode(Bool.self, forKey: .online)) ?? true
+        awaySince = try? c.decode(Int64.self, forKey: .awaySince)
+        queuedCount = (try? c.decode(Int.self, forKey: .queuedCount)) ?? 0
+        canMoveHere = (try? c.decode(Bool.self, forKey: .canMoveHere)) ?? false
+        moving = try? c.decode(DHomeMoving.self, forKey: .moving)
+    }
+    func awayLine() -> (text: String, isError: Bool)? {
+        if let mv = moving {
+            if mv.state == "moving" {
+                let step = mv.step ?? ""
+                return (step.isEmpty ? Tr.home_moving(to: mv.to) : Tr.home_moving_step(to: mv.to, step: step), false)
+            }
+            if mv.state == "failed" {
+                let note = mv.note ?? ""
+                return (note.isEmpty ? Tr.k("home.move.failed") : Tr.home_move_failed_note(note: note), true)
+            }
+        }
+        guard !online else { return nil }
+        let n = name.isEmpty ? "home" : name
+        let time: String? = awaySince.flatMap { ms -> String? in
+            guard ms > 0 else { return nil }
+            let fmt = DateFormatter(); fmt.timeZone = .current; fmt.dateFormat = "HH:mm"
+            return fmt.string(from: Date(timeIntervalSince1970: Double(ms) / 1000.0))
+        }
+        switch (time, queuedCount > 0) {
+        case (let tm?, true): return (Tr.home_away_since_queued(name: n, time: tm, n: String(queuedCount)), false)
+        case (let tm?, false): return (Tr.home_away_since(name: n, time: tm), false)
+        case (nil, true): return (Tr.home_away_queued(name: n, n: String(queuedCount)), false)
+        case (nil, false): return (Tr.home_away(name: n), false)
+        }
+    }
+}
+struct DThreadOpenReply: Decodable {
+    let sub: Int
+    let thread: DThread?
+    let ids: [String]?
+    let entries: [DEntry]
+    let hasNext: Bool
+    let next: String?
+    let work: DWorkReply?
+    let queue: DQueueReply?
+    let h: [String: String]?
+    enum CodingKeys: String, CodingKey { case sub, thread, ids, entries, next, work, queue, h }
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        sub = (try? c.decode(Int.self, forKey: .sub)) ?? 0
+        thread = try? c.decode(DThread.self, forKey: .thread)
+        ids = try? c.decode([String].self, forKey: .ids)
+        entries = (try? c.decode([DEntry].self, forKey: .entries)) ?? []
+        hasNext = c.contains(.next)
+        next = try? c.decode(String.self, forKey: .next)
+        work = try? c.decode(DWorkReply.self, forKey: .work)
+        queue = try? c.decode(DQueueReply.self, forKey: .queue)
+        h = try? c.decode([String: String].self, forKey: .h)
+    }
+}
 /// A long result shows three lines until tapped (the desktop's subview.rs `result_lines`).
 func dSubResultLines(_ text: String, open: Bool) -> (String, Bool) {
     let ls = text.components(separatedBy: "\n"); if open || ls.count <= 3 { return (text, false) }
@@ -509,3 +651,24 @@ struct DTelemetryNotice: Codable, Equatable {
     }
 }
 struct DTelemetryNoticeReply: Decodable { var notice: DTelemetryNotice? }
+
+/// Hub notice shown when zero AI providers / accounts are configured or signed in.
+struct DNoProvider: Equatable {
+    let reason: String, head: String, text: String, button: String, url: String
+    static func of(_ v: Any?) -> DNoProvider? {
+        var obj = v as? [String: Any]
+        if obj == nil, let s = v as? String, !s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           let d = s.data(using: .utf8) {
+            obj = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
+        }
+        guard let o = obj, let head = (o["head"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !head.isEmpty else { return nil }
+        return DNoProvider(
+            reason: o["reason"] as? String ?? "",
+            head: head,
+            text: o["text"] as? String ?? "",
+            button: o["button"] as? String ?? "",
+            url: o["url"] as? String ?? "backplane://settings/accounts"
+        )
+    }
+    static func isSendError(_ msg: String) -> Bool { msg.hasPrefix("No AI provider connected yet.") }
+}

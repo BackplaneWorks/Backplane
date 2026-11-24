@@ -13,7 +13,7 @@
 use cef::{rc::Rc as _, *};
 pub use cef::{CefStringList, ImplFileDialogCallback, KeyEvent};
 use super::downloads::{bring_to_downloads, safe_name, unique_path};
-use std::{path::{Path, PathBuf}, sync::{atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering}, Arc, Mutex, OnceLock}};
+use std::{path::{Path, PathBuf}, sync::{atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, Ordering}, Arc, Mutex, OnceLock}};
 
 /// The CEF version the `cef` crate in Cargo.toml was generated for; the runtime directory is `<cache>/backplane/cef-runtime/<VERSION>`.
 pub const VERSION: &str = "154.0.34";
@@ -23,7 +23,7 @@ pub enum Cur { Default, Hand, IBeam, Cross, Wait, Help, Move, ResizeH, ResizeV, 
 
 pub struct Frame { pub w: u32, pub h: u32, pub bgra: Vec<u8> }
 #[derive(Default)]
-pub struct State { pub frame: Option<Frame>, pub fresh: bool, pub got_focus: bool, pub person: bool, pub keys: Vec<(String, KeyEvent)>, pub took_focus: bool, pub url: String, pub title: String, pub loading: bool, pub back: bool, pub forward: bool, pub popups: Vec<String>, pub popup_tabs: Vec<Arc<Tab>>, pub dialogs: Vec<Dialog>, pub download: String, pub closed: bool, pub load_error: String }
+pub struct State { pub frame: Option<Frame>, pub fresh: bool, pub got_focus_seq: u64, pub click_seq: u64, pub key_seq: u64, pub keys: Vec<(String, KeyEvent)>, pub took_focus_seq: u64, pub url: String, pub title: String, pub loading: bool, pub back: bool, pub forward: bool, pub popups: Vec<String>, pub popup_tabs: Vec<Arc<Tab>>, pub dialogs: Vec<Dialog>, pub download: String, pub closed: bool, pub load_error: String }
 /// A file dialog CEF asked for (OSR has none of its own): the page shows gpui's picker and answers through `cb`.
 pub struct Dialog { pub save: bool, pub multiple: bool, pub folder: bool, pub title: String, pub cb: FileDialogCallback }
 unsafe impl Send for Dialog {}
@@ -39,6 +39,7 @@ pub struct Tab {
     w: AtomicU32, h: AtomicU32, scale_milli: AtomicU32,
     wake: async_channel::Sender<()>,
     hidden: AtomicBool,
+    pub focus_id: u64,
     pub id: AtomicI32,
     /// how many frames CEF has painted (the e2e's frame rate)
     pub paints: std::sync::atomic::AtomicU64,
@@ -125,16 +126,18 @@ wrap_life_span_handler! {
             false as _
         }
         fn on_after_created(&self, b: Option<&mut Browser>) { if let Some(b) = b { eprintln!("GPUI_LOG {{\"cef_created\":{},\"windowed\":{}}}", b.identifier(), self.tab.host.is_some()); if let Some(h) = b.host() {
-                if self.tab.host.is_some() { let w = handle_u64(h.window_handle()); eprintln!("GPUI_LOG {{\"cef_native\":{w}}}"); self.tab.native.store(w, Ordering::Relaxed); } else { h.was_hidden(false as _); h.was_resized(); h.invalidate(PaintElementType::default()); } } self.tab.id.store(b.identifier(), Ordering::Relaxed); *self.tab.browser.lock().unwrap() = Some(B(b.clone())); let _ = self.tab.wake.try_send(()); } }
+                if self.tab.host.is_some() { let w = handle_u64(h.window_handle()); eprintln!("GPUI_LOG {{\"cef_native\":{w}}}"); if w != 0 { if self.tab.frame == 0 { native::register_press_wake(w, self.tab.wake.clone()); } native::watch_native(w); } self.tab.native.store(w, Ordering::Relaxed); } else { h.was_hidden(false as _); h.was_resized(); h.invalidate(PaintElementType::default()); } } self.tab.id.store(b.identifier(), Ordering::Relaxed); *self.tab.browser.lock().unwrap() = Some(B(b.clone())); let _ = self.tab.wake.try_send(()); } }
         /// windowed: true, so only the browser's own window goes (false sends the OS close to its top-level window, which is the client's window)
         /// (and it closes by its native window going: then CEF destroys the browser and calls on_before_close)
         fn do_close(&self, _b: Option<&mut Browser>) -> ::std::os::raw::c_int {
             // X11: CEF closes its own window (WM_DELETE_WINDOW to itself); Windows and macOS: CEF would close the top-level window (WM_CLOSE,
             // performClose:), which is the client's, so the browser's own window or view goes instead (CEF then destroys the browser)
             if self.tab.host.is_none() || cfg!(target_os = "linux") { return false as _ }
-            native::close(self.tab.native()); true as _
+            let w = self.tab.native();
+            native::unwatch_native(w);
+            native::close(w); true as _
         }
-        fn on_before_close(&self, _b: Option<&mut Browser>) { *self.tab.browser.lock().unwrap() = None; if self.tab.frame != 0 { native::destroy(self.tab.frame); }  self.tab.st.lock().unwrap().closed = true; let _ = self.tab.wake.try_send(()); }
+        fn on_before_close(&self, _b: Option<&mut Browser>) { *self.tab.browser.lock().unwrap() = None; let w = self.tab.native(); if w != 0 { native::unwatch_native(w); } if self.tab.frame != 0 { native::destroy(self.tab.frame); }  self.tab.st.lock().unwrap().closed = true; let _ = self.tab.wake.try_send(()); }
     }
 }
 wrap_dialog_handler! {
@@ -181,15 +184,45 @@ wrap_focus_handler! {
     struct FocusH { tab: Arc<Tab> }
     impl FocusHandler {
         /// windowed: the person clicked into the page (Chromium has the keyboard now); the page gives it gpui's focus too
-        fn on_got_focus(&self, _b: Option<&mut Browser>) { if self.tab.host.is_some() { self.tab.st.lock().unwrap().got_focus = true; let _ = self.tab.wake.try_send(()); } }
+        /// (and when it got it on the person's press in the page: their click, though CEF did not ask on_set_focus first; it does not when it
+        /// counts the browser focused already, as after a yank that moved only the X focus away: with a KiCad pane, a click in the page then
+        /// came here alone and the keyboard was taken back)
+        fn on_got_focus(&self, _b: Option<&mut Browser>) { if self.tab.host.is_some() {
+            let outer = self.tab.outer();
+            let event_seq = super::cef_focus::next_focus_seq();
+            let click_seq = super::cef_focus::callback_click_seq(
+                true,
+                super::cef_focus::FocusCallback::GotFocus,
+                super::cef_focus::FocusSourceKind::System,
+                event_seq,
+                || native::pressed_in(outer, super::cef_focus::FocusCallback::GotFocus),
+                || native::button_down(outer),
+            );
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_got_focus": {"clicked": click_seq.is_some()}})); }
+            let mut st = self.tab.st.lock().unwrap();
+            st.got_focus_seq = st.got_focus_seq.max(event_seq);
+            if let Some(pseq) = click_seq { st.click_seq = st.click_seq.max(pseq); }
+            drop(st);
+            let _ = self.tab.wake.try_send(()); } }
         /// Tab past the page's last element: the keyboard goes back to the client
         /// a click into the page (the system moving the keyboard there) is the person's, unlike our own SetFocus calls
         fn on_set_focus(&self, _b: Option<&mut Browser>, source: FocusSource) -> ::std::os::raw::c_int {
-            // (with a mouse button down: a window manager that focuses what is under the pointer moves it there too, and that is nobody's click)
-            if self.tab.host.is_some() && source == FocusSource::SYSTEM && native::button_down() { self.tab.st.lock().unwrap().person = true; let _ = self.tab.wake.try_send(()); }
+            let outer = self.tab.outer();
+            let src = if source == FocusSource::SYSTEM { super::cef_focus::FocusSourceKind::System } else { super::cef_focus::FocusSourceKind::Navigation };
+            let event_seq = super::cef_focus::next_focus_seq();
+            let click_seq = super::cef_focus::callback_click_seq(
+                self.tab.host.is_some(),
+                super::cef_focus::FocusCallback::SetFocus,
+                src,
+                event_seq,
+                || native::pressed_in(outer, super::cef_focus::FocusCallback::SetFocus),
+                || native::button_down(outer),
+            );
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", serde_json::json!({"cef_set_focus": {"system": source == FocusSource::SYSTEM, "clicked": click_seq.is_some()}})); }
+            if let Some(pseq) = click_seq { let mut st = self.tab.st.lock().unwrap(); st.click_seq = st.click_seq.max(pseq); drop(st); let _ = self.tab.wake.try_send(()); }
             false as _
         }
-        fn on_take_focus(&self, _b: Option<&mut Browser>, _next: ::std::os::raw::c_int) { if self.tab.host.is_some() { self.tab.st.lock().unwrap().took_focus = true; let _ = self.tab.wake.try_send(()); } }
+        fn on_take_focus(&self, _b: Option<&mut Browser>, _next: ::std::os::raw::c_int) { if self.tab.host.is_some() { let seq = super::cef_focus::next_focus_seq(); let mut st = self.tab.st.lock().unwrap(); st.took_focus_seq = st.took_focus_seq.max(seq); drop(st); let _ = self.tab.wake.try_send(()); } }
     }
 }
 #[cfg(target_os = "linux")] type OsKey<'a> = Option<&'a mut sys::XEvent>;
@@ -204,7 +237,7 @@ wrap_keyboard_handler! {
             let (Some(e), true) = (e, self.tab.host.is_some()) else { return false as _ };
             if e.type_ != KeyEventType::RAWKEYDOWN { return false as _ }
             if self.tab.reinject.load(Ordering::Relaxed) > 0 { self.tab.reinject.fetch_sub(1, Ordering::Relaxed); return false as _ }
-            self.tab.st.lock().unwrap().person = true; let _ = self.tab.wake.try_send(()); // a key the person pressed in the page
+            { let seq = super::cef_focus::next_focus_seq(); let mut st = self.tab.st.lock().unwrap(); st.key_seq = st.key_seq.max(seq); } let _ = self.tab.wake.try_send(()); // a key the person pressed in the page
             let Some(ks) = client_key(e.windows_key_code, e.modifiers) else { return false as _ };
             self.tab.st.lock().unwrap().keys.push((ks, e.clone())); let _ = self.tab.wake.try_send(()); true as _
         }
@@ -444,7 +477,10 @@ impl Tab {
     }
     /// A tab whose browser CEF makes itself (a popup): the state and handlers only.
     pub fn detached(url: &str, w: u32, h: u32, scale: f32, wake: async_channel::Sender<()>, host: Option<native::Host>) -> Arc<Tab> {
-        Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), id: AtomicI32::new(0), paints: Default::default(), resize_at: Mutex::new(None), resize_done: Arc::new(Mutex::new(-1.0)), placed_size: Mutex::new((0, 0)), frame: host.and_then(native::container).map_or(0, |c| match c { native::Host::X11(id) => id as u64, _ => 0 }), host, native: Default::default(), reinject: AtomicU32::new(0) })
+        static NEXT_TAB_ID: AtomicU64 = AtomicU64::new(1);
+        let frame = host.and_then(native::container).map_or(0, |c| match c { native::Host::X11(id) => id as u64, _ => 0 });
+        if frame != 0 { native::register_press_wake(frame, wake.clone()); }
+        Arc::new(Tab { st: Mutex::new(State { url: url.into(), ..Default::default() }), browser: Mutex::new(None), cursor: Mutex::new(Cur::Default), w: w.max(1).into(), h: h.max(1).into(), scale_milli: ((scale * 1000.0) as u32).into(), wake, hidden: AtomicBool::new(false), focus_id: NEXT_TAB_ID.fetch_add(1, Ordering::Relaxed), id: AtomicI32::new(0), paints: Default::default(), resize_at: Mutex::new(None), resize_done: Arc::new(Mutex::new(-1.0)), placed_size: Mutex::new((0, 0)), frame, host, native: Default::default(), reinject: AtomicU32::new(0) })
     }
     /// The browser, taken out of its lock before CEF is called: on macOS CEF runs callbacks on this thread inside the call (`on_before_close` takes
     /// the same lock), so holding it across the call deadlocked the window on closing a tab (test/browser/browser_e2e.py, macos-latest).
@@ -532,8 +568,27 @@ impl Tab {
     }
     /// windowed: the keyboard to the page (`on`) or back to the client's window
     pub fn give_keyboard(&self, on: bool) {
-        self.focus(on);
-        if on { native::focus_child(self.native()) } else if let Some(h) = self.host { native::focus_host(h) }
+        if on {
+            self.focus(true);
+            native::focus_child(self.native());
+        } else {
+            let target = self.outer();
+            native::clear_press(target);
+            if target != 0 && let Some(h) = self.host { native::focus_host(h, target); }
+            self.focus(false);
+        }
+    }
+    /// windowed: returns keyboard focus from this tab to the host while preserving press records strictly newer than `max_clear_seq`
+    pub fn yank_keyboard_up_to(&self, max_clear_seq: u64) {
+        let target = self.outer();
+        native::clear_press_up_to(target, max_clear_seq);
+        if target != 0 && let Some(h) = self.host { native::focus_host(h, target); }
+        self.focus(false);
+    }
+    /// windowed: clears CEF/press focus up to `max_clear_seq` for a non-active tab without changing GPUI focus or focusing the host window
+    pub fn release_cef_focus_up_to(&self, max_clear_seq: u64) {
+        self.focus(false);
+        native::clear_press_up_to(self.outer(), max_clear_seq);
     }
     /// windowed: a key the client did not want goes to the page after all (on_pre_key_event lets it through this time)
     pub fn reinject(&self, e: &KeyEvent) {

@@ -76,6 +76,16 @@ impl Imp {
         Self { open: false, draft: Draft::default(), loaded: false, inputs: None, ctx: Value::Null, projects: vec![], note: String::new(), busy: false, hidden: false, xid: None, rec: None, rec_text: String::new(),
             next: HashMap::new(), seq: 0, dir: drafts_path.with_file_name("gpui-improvements"), scope, target, diag: String::new(), url: String::new(), review_open: false, flushing: false, syncing: false, shot: None, auto_shot: false, origin: (String::new(), String::new()), evidence_ok: false, previewed: false, focus_pending: false, runtime: None, modes_sent: false, picks: vec![], pick_seq: 0, picked: false, find_q: None }
     }
+    /// Retarget improvements uploads and local drafts folder when switching hubs in-process.
+    pub fn retarget(&mut self, drafts_path: &Path, target: Option<super::attach::Target>) {
+        self.scope = target.as_ref().map_or("offline".to_string(), |t| t.addr.clone());
+        self.dir = drafts_path.with_file_name("gpui-improvements");
+        self.target = target;
+        self.loaded = false;
+        self.projects.clear();
+        self.picks.clear();
+        self.next.clear();
+    }
     fn file(&self, name: &str) -> PathBuf { self.dir.join(name) }
     /// The panel's own folder, private to this user.
     fn ensure_dir(&self) -> bool {

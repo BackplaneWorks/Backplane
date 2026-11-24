@@ -23,5 +23,12 @@ check(kinds("visit https://example.com/a_(b)). ok") == ["https://example.com/a_(
 check(kinds("(backplane://thread/lab~t9)") == ["backplane://thread/lab~t9|backplane://thread/lab~t9"], "backplane link")
 check(kinds("backplane://conv/room%3Aabc") == ["backplane://conv/room%3Aabc|backplane://conv/room%3Aabc"], "conv link")
 check(dPathFrom(dPathURL("a b/c.rs:5")!) == "a b/c.rs:5", "path url round trip")
+check(dFileURLPath("file:///home/user/proj/docs/Parts%20List.pdf") == "/home/user/proj/docs/Parts List.pdf", "file url spaces")
+check(dFileURLPath("file://localhost/home/user/proj/docs/Spec%20Sheet.pdf#page=2") == "/home/user/proj/docs/Spec Sheet.pdf", "file url localhost + page fragment")
+check(dFileURLPath("file:///home/user/proj/src/main.rs#L40-L50") == "/home/user/proj/src/main.rs#L40-L50", "file url line anchor")
+check(dPathFrom(URL(string: "file:///home/user/proj/docs/Parts%20List.pdf")!) == "/home/user/proj/docs/Parts List.pdf", "dPathFrom file URL")
+check(dPathFrom(dLinkURL("file:///home/user/proj/docs/My%20Doc%20(Final).pdf")!) == "/home/user/proj/docs/My Doc (Final).pdf", "dLinkURL file:// with parens")
+check(dPathFrom(dLinkURL("<file:///home/user/proj/docs/Parts List.pdf>")!) == "/home/user/proj/docs/Parts List.pdf", "dLinkURL angle-bracket file:// with space")
+check(kinds("see file:///home/user/proj/docs/Parts%20List.pdf now") == ["path:/home/user/proj/docs/Parts List.pdf|file:///home/user/proj/docs/Parts%20List.pdf"], "bare file:// in text \(kinds("see file:///home/user/proj/docs/Parts%20List.pdf now"))")
 if failed == 0 { print("link grammar: ok") }
 exit(failed == 0 ? 0 : 1)

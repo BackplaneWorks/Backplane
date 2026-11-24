@@ -2,7 +2,7 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
 
 - `build.rs`: gpui's Windows step (`mod windows`) is behind the build host's cfg, so a Windows client built on Linux had no shader bytes to include and no manifest. `mod windows_cross` runs instead when the host is not Windows: for a target without debug assertions it copies `windows-shaders/shaders_bytes.rs` into `OUT_DIR`, refusing it unless its first line is the FNV-1a 64 of every `src/platform/windows/*.hlsl`; with `windows-manifest` it embeds the manifest through embed-resource (llvm-rc for -msvc, windres for -gnu*).
 - `Cargo.toml`: `embed-resource` is a build dependency on every host, not only Windows.
-- `src/platform/mac/platform.rs`: `GPUIApplication` answers Chromium's `isHandlingSendEvent` / `setHandlingSendEvent:` (CrAppControlProtocol) and keeps that flag set inside `-sendEvent:`, as CEF's own applications do, so the embedded Chromium of the Browser tab (feature `cef`) runs inside gpui's NSApplication.
+- `src/platform/mac/platform.rs`: `GPUIApplication` answers Chromium's `isHandlingSendEvent` / `setHandlingSendEvent:` (CrAppControlProtocol) and keeps that flag set inside `-sendEvent:`, as CEF's own applications do, so the embedded Chromium of the Browser tab (feature `cef`) runs inside gpui's NSApplication; also exposes `set_mac_mouse_down_observer` (`src/platform.rs`) so `-sendEvent:` notifies embedded CEF on mouse-down events before AppKit routes them to child views.
 - Linux clipboard writes every form an item has (`src/platform/linux/clipboard_offer.rs`, used by `x11/clipboard.rs` `set_item` and `wayland/clipboard.rs`): upstream offered
   every item as text only, so a copied picture was an empty string (the client's Copy image gave nothing to paste). A picture goes as `image/png` (transcoded from JPEG,
   WebP, GIF, BMP, TIFF or SVG) and in its own format, its strings as text. No `text/uri-list` of a picture's file: snap Firefox took it over the image and
@@ -16,7 +16,12 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
   frame last drawn, a hitbox's visible bounds and those of every hitbox drawn after it over them): the windowed Browser tab places Chromium's native window over its pane
   and hides it under anything gpui draws on top (`viewers/cef_page.rs`).
 - `src/platform/linux/x11/window.rs`: `X11Window` gives its window id as a raw window handle (upstream: `unimplemented!()`), the parent of Chromium's window.
-- `src/platform/linux/x11/client.rs`: a `FocusOut` with detail `Inferior` (the keyboard went to a child window of ours, the Browser tab's Chromium) leaves the window active.
+- `src/platform/linux/x11/client.rs`: a `FocusOut` with detail `Inferior` (the keyboard went to a child window of ours: the Browser tab's Chromium, or the
+  window's key proxy below) leaves the window active.
+- `src/platform/linux/x11/client.rs`: each window gets a key proxy (`key_proxy`: an InputOnly 1x1 child outside the window, selecting only key events, named in the
+  window's `_BACKPLANE_KEY_PROXY` property), and a key it reads is the window's own (`from_key_proxy`). With the X focus on the window itself, core X gives a key
+  to the window under the pointer when that is inside it, so a native child (the embedded KiCad pane) took keys typed with the pointer resting over it; the client
+  focuses the proxy instead while the keyboard is Backplane's (`viewers/native_child.rs`). A key never propagates above the focus window: the proxy must read it.
 
 - `src/platform/windows/directx_renderer.rs`: the DirectComposition target is not topmost (`CreateTargetForHwnd(hwnd, false)`), so child windows (the Browser tab's
   Chromium) are composited above gpui's drawing; topmost, DWM put gpui's visual over them and the page could not be seen.
@@ -53,3 +58,4 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
 - `src/window.rs`: `DispatchEventResult` is `pub` (was `pub(crate)`), so the client's test-mode `pointer` script step can call the public
   `Window::dispatch_event` with a mouse move, down and up at a control's rect (scripted e2e only; no behaviour change).
 - `src/audit.rs`, hooks in window.rs, elements/text.rs, elements/div.rs: the layout audit (records painted text, named divs, opaque quads; off unless enabled), for the size-matrix e2e.
+- `src/window.rs` & `src/view.rs`: added `Window::try_current_view()` and updated `Window::request_animation_frame()` and `Window::use_asset()` to fall back to `window.refresh()` when called outside a rendered view (e.g., from an `on_next_frame` callback where `rendered_entity_stack` is empty), matching `request_animation_frame`'s doc contract instead of panicking in `current_view()`. Wrapped `Entity<V>::request_layout` in `window.with_rendered_view` so `view.render` sees its view ID like `AnyView::request_layout`.

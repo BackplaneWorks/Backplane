@@ -167,6 +167,14 @@ pub fn settle(c: &Cursor, rows: &[Section], own: &Cursor) -> Cursor {
     if let Some(m) = rows.iter().find(|s| s.action == "model").and_then(|s| s.choices.first()) { n.col = 1; n.set(1, &m.value, own); }
     n
 }
+/// The model a cursor applies: its own when the provider lists it (or lists none yet), else the provider's default ("").
+pub fn model_applied(c: &Cursor, rows: &[Section]) -> String {
+    if c.model.is_empty() { return String::new() }
+    match rows.iter().find(|s| s.action == "model") {
+        Some(s) if !s.choices.is_empty() && !s.choices.iter().any(|ch| ch.value == c.model) => String::new(),
+        _ => c.model.clone(),
+    }
+}
 /// The effort a cursor applies: the one lit (an effort the model does not take is the agent's default; none when it takes none).
 pub fn effort_applied(c: &Cursor, rows: &[Section]) -> String { lit(&steps(&levels(rows, &c.model)), &c.effort).unwrap_or_else(|| c.effort.clone()) }
 /// The requests that apply a cursor against the thread's own: another agent is one switch carrying the model and any new effort, the same agent asks for what changed, nothing changed asks for nothing.
@@ -193,19 +201,160 @@ pub fn cap(col: usize, here: usize, n: usize) -> &'static str {
 
 /// What the menu keeps between frames: the search box, the scroll of the model list, the cursor once a key moved it (with its thread: a cursor moved on another thread is not this one's);
 /// where the chip and its row were last drawn (the menu floats from them, and a press on the chip is not a press outside the menu) and the height the open menu holds (screens/combo.rs `hold`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct PendingFav { pub want: bool, pub seq: u64, pub acked: bool, pub acked_pictures: u8 }
+
 #[derive(Default)]
 pub struct Pick { pub search: Option<Entity<Composer>>, pub q: String, pub scroll: ScrollHandle, pub ascroll: ScrollHandle, pub cur: Option<(String, Cursor)>,
     pub row: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub chip: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub held: std::rc::Rc<std::cell::Cell<[f32; 3]>>,
     /// the speed dial: where its knob was drawn, the scroll not yet a detent, and whether the press now down has dragged it (then its click is not a click)
     pub dial: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>, pub wheel: std::rc::Rc<std::cell::Cell<f32>>, pub dragged: std::rc::Rc<std::cell::Cell<bool>>,
     /// the knob is held down (its own record: not every platform's pointer says which button a move carries)
-    pub held_dial: std::rc::Rc<std::cell::Cell<bool>> }
+    pub held_dial: std::rc::Rc<std::cell::Cell<bool>>,
+    /// optimistic pending favorite toggles (`"provider/model" -> PendingFav`) awaiting hub confirmation
+    pub fav_pending: std::collections::BTreeMap<String, PendingFav>,
+    pub fav_seq: u64,
+    pub fav_inflight: std::collections::VecDeque<(String, u64)>,
+    pub fav_migrate_keys: Vec<(String, u64)>,
+    pub fav_migrated: bool }
 
 /// The provider in force (the marked choice of the provider section), "" when the hub lists none.
 pub fn provider_of(sections: &[Section]) -> String {
     sections.iter().find(|s| s.action == "provider").and_then(|s| s.choices.iter().find(|c| c.on)).map(|c| c.value.clone()).unwrap_or_default()
 }
-pub fn fav_key(provider: &str, value: &str) -> String { format!("{provider}/{value}") }
+pub fn norm_fav_pair_opt(provider: &str, model: &str) -> Option<(String, String)> {
+    if provider.chars().any(char::is_control) || model.chars().any(char::is_control) {
+        return None;
+    }
+    let p = bare(provider.trim()).trim().to_ascii_lowercase();
+    let m = model.trim();
+    if p.is_empty() || m.is_empty() || p.contains('/') || p.chars().any(char::is_whitespace) {
+        return None;
+    }
+    if p.len() + 1 + m.len() > 200 {
+        return None;
+    }
+    Some((p, m.to_string()))
+}
+pub fn norm_fav_key(provider: &str, model: &str) -> String {
+    format!("{}/{}", bare(provider.trim()).trim().to_ascii_lowercase(), model.trim())
+}
+pub fn norm_fav_str(key: &str) -> String {
+    match key.split_once('/') { Some((p, m)) => norm_fav_key(p, m), None => key.trim().to_string() }
+}
+pub fn fav_key(provider: &str, value: &str) -> String { norm_fav_key(provider, value) }
+
+/// Legacy GPUI `local.favs` entries ready to migrate once when hub `picker.favorites` arrives empty.
+pub fn legacy_favs_to_migrate(thread: &Value, local_favs: &[String], migrated: bool) -> Option<Vec<String>> {
+    if migrated || local_favs.is_empty() {
+        return None;
+    }
+    let arr = thread["picker"]["favorites"].as_array()?;
+    if !arr.is_empty() {
+        return None;
+    }
+    let mut out: Vec<String> = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for raw in local_favs {
+        let Some((p, m)) = raw.split_once('/').and_then(|(p, m)| norm_fav_pair_opt(p, m)) else { continue };
+        let k = format!("{p}/{m}");
+        if seen.insert(k.clone()) {
+            out.push(k);
+            let encoded_len = serde_json::to_string(&out).map_or(usize::MAX, |s| s.len());
+            if encoded_len > 4096 {
+                out.pop();
+                break;
+            }
+            if out.len() >= 64 {
+                break;
+            }
+        }
+    }
+    (!out.is_empty()).then_some(out)
+}
+
+/// Effective favorite model keys (`"provider/model"`), preferring hub's `thread.picker.favorites` over local fallback, with optimistic `pending` applied.
+pub fn favorites_of(thread: &Value, local_fallback: &[String], pending: &std::collections::BTreeMap<String, PendingFav>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    fn push_unique(out: &mut Vec<String>, k: String) {
+        if !k.is_empty() && k.contains('/') && !out.iter().any(|x| x == &k) { out.push(k); }
+    }
+    if let Some(arr) = thread["picker"]["favorites"].as_array() {
+        for v in arr { if let Some(s) = v.as_str() { push_unique(&mut out, norm_fav_str(s)); } }
+    } else {
+        for s in local_fallback { push_unique(&mut out, norm_fav_str(s)); }
+    }
+    for (k, p) in pending {
+        let nk = norm_fav_str(k);
+        if p.want { push_unique(&mut out, nk); } else { out.retain(|x| x != &nk); }
+    }
+    out
+}
+
+/// Drop pending optimistic favorite toggles once the hub's `thread.picker.favorites` matches them or after acked pictures settle.
+pub fn reconcile_fav_pending(thread: &Value, pending: &mut std::collections::BTreeMap<String, PendingFav>) {
+    if let Some(arr) = thread["picker"]["favorites"].as_array() {
+        let hub: Vec<String> = arr.iter().filter_map(Value::as_str).map(norm_fav_str).collect();
+        pending.retain(|k, p| {
+            let nk = norm_fav_str(k);
+            if hub.iter().any(|x| x == &nk) == p.want {
+                return false;
+            }
+            if p.acked {
+                p.acked_pictures = p.acked_pictures.saturating_add(1);
+                if p.acked_pictures >= 2 {
+                    return false;
+                }
+            }
+            true
+        });
+    } else {
+        pending.retain(|_, p| !p.acked);
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct FavoriteItem { pub key: String, pub provider: String, pub model: String, pub label: String, pub note: String, pub on: bool, pub ok: bool, pub why: String }
+
+/// Resolve persisted favorite keys against `thread["picker"]` and `thread["pickerAgents"]`, filtered by search query `q`.
+pub fn favorite_items(thread: &Value, favs: &[String], q: &str) -> Vec<FavoriteItem> {
+    let mine = parse(&thread["picker"]);
+    let own = Cursor::own(&mine);
+    let own_prov = bare(&own.provider).to_ascii_lowercase();
+    let words: Vec<String> = q.trim().to_lowercase().split_whitespace().map(str::to_string).collect();
+    let agents = &thread["pickerAgents"];
+    let mut out = Vec::new();
+    for raw in favs {
+        let nk = norm_fav_str(raw);
+        let Some((p, m)) = nk.split_once('/') else { continue };
+        let (p, m) = (p.to_string(), m.to_string());
+        if p.is_empty() || m.is_empty() { continue }
+        let (mut ok, mut why) = if let Some(a) = agents.get(&p).filter(|a| a.is_object()) {
+            (a["ok"].as_bool().unwrap_or(true), string(a, "why"))
+        } else {
+            let row = mine.iter().find(|s| s.action == "provider").and_then(|s| s.choices.iter().find(|c| bare(&c.value) == p));
+            row.map_or((true, String::new()), |c| (c.ok, if c.ok { String::new() } else { c.note.clone() }))
+        };
+        let in_own = p == own_prov;
+        let listed: Vec<Choice> = if in_own {
+            mine.iter().find(|s| s.action == "model").map(|s| s.choices.clone()).unwrap_or_default()
+        } else {
+            choices(&agents[&p]["models"])
+        };
+        let has_catalog = listed.iter().any(|c| !c.value.is_empty());
+        let choice = listed.into_iter().find(|c| c.value == m);
+        if ok && has_catalog && choice.is_none() {
+            ok = false;
+            /* i18n-ok: fallback reason for missing model */ why = "not available on this machine".into();
+        }
+        let label = choice.as_ref().map(|c| c.label.clone()).filter(|s| !s.is_empty()).unwrap_or_else(|| m.clone());
+        let note = choice.as_ref().map(|c| c.note.clone()).unwrap_or_default();
+        /* i18n-ok: search haystack */ let hay = format!("{p} {m} {label} {note}").to_lowercase();
+        if !words.iter().all(|w| hay.contains(w.as_str())) { continue }
+        out.push(FavoriteItem { key: nk, on: in_own && own.model == m, provider: p, model: m, label, note, ok, why });
+    }
+    out
+}
 
 /// How the menu lays out in the room it has: three columns when wide, the agents narrow beside the model list over the effort when less, one column at a time
 /// (agent, then model, then effort, a back control in each head) when narrower still. Everything scales with the person's text size, and nothing is taller
@@ -240,7 +389,7 @@ pub fn arrange(sections: &[Section], provider: &str, q: &str, favs: &[String], k
     let out = sections.iter().map(|s| {
         if s.action != "model" { return s.clone() }
         let mut ch: Vec<Choice> = s.choices.iter().filter(|c| { let hay = format!("{} {}", c.value, c.note).to_lowercase(); words.iter().all(|w| hay.contains(w.as_str())) }).cloned().collect();
-        ch.sort_by_key(|c| !favs.iter().any(|f| *f == fav_key(provider, &c.value))); // stable: the rest keep the hub's order
+        ch.sort_by_key(|c| { let key = fav_key(provider, &c.value); !favs.iter().any(|f| norm_fav_str(f) == key) }); // stable: the rest keep the hub's order
         if ch.len() > CAP { hidden = ch.len() - CAP; let kept = ch.iter().skip(CAP).find(|c| c.value == keep).cloned(); ch.truncate(CAP); ch.extend(kept); }
         Section { choices: ch, ..s.clone() }
     }).collect();
@@ -252,8 +401,9 @@ pub fn shown(thread: &Value, pick: &Pick, favs: &[String]) -> Option<Shown> {
     let mine = parse(&thread["picker"]);
     if mine.is_empty() { return None }
     let own = Cursor::own(&mine); let id = string(thread, "id");
-    let cur = pick.cur.as_ref().filter(|(t, _)| *t == id).map_or_else(|| own.clone(), |(_, c)| c.clone());
+    let mut cur = pick.cur.as_ref().filter(|(t, _)| *t == id).map_or_else(|| own.clone(), |(_, c)| c.clone());
     let all = for_provider(&thread["picker"], &thread["pickerAgents"], &cur.provider);
+    cur.model = model_applied(&cur, &all);
     let (rows, hidden) = arrange(&all, &cur.provider, &pick.q, favs, &cur.model);
     Some(Shown { own, cur, all, rows, hidden })
 }
@@ -266,7 +416,7 @@ pub fn mark(provider: &str) -> (u32, &'static str) {
 pub fn logo(provider: &str) -> AnyElement {
     let provider = match bare(provider) { "agy" => "antigravity", p => p };
     let (rgb_, letter) = mark(provider);
-    if let Some(segs) = crate::art::mark_path(provider) { return crate::art::mark(segs, 16., rgb_).into_any_element(); }
+    if let Some(m) = crate::art::mark_info(provider) { return crate::art::mark(m, 16., rgb_).into_any_element(); }
     div().w(px(16.)).h(px(16.)).flex_shrink_0().flex().items_center().justify_center().bg(rgb(rgb_)).text_color(rgb(0xffffff)).text_size(crate::scale::tpx(10.)).font_weight(FontWeight::BOLD).child(letter).into_any_element()
 }
 
@@ -285,13 +435,46 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     if !open { return None; }
     let c = |n: &str| theme::color(light, n);
     let z = |v: f32| px(v * f.s);
-    let Shown { cur, own, rows, hidden, .. } = shown(thread, pick, favs)?;
+    let eff_favs = favorites_of(thread, favs, &pick.fav_pending);
+    let fav_items = favorite_items(thread, &eff_favs, &pick.q);
+    let Shown { cur, own, rows, hidden, .. } = shown(thread, pick, &eff_favs)?;
     let provider = cur.provider.clone();
     let drill = f.mode == Mode::Drill;
     // a column's head: its title (cut short, never over its keys), its keys; in a one-column menu a back control to the column before
     let plan_row = plan_once_row(cx, light, thread); // built before `head` borrows cx
     let nc = ncols(&rows, &cur.model);
     let speed_body = speed_dial(cx, light, &rows, &cur, &own, pick, f); // so is the dial
+    let fav_strip = (!fav_items.is_empty()).then(|| {
+        let mut chips = div().id("picker-fav-chips").max_h(px(110. * f.s)).overflow_y_scroll().px_3().pb_2().flex().flex_wrap().gap(z(6.));
+        for (fi, item) in fav_items.iter().enumerate() {
+            let (fp, fm, ok) = (item.provider.clone(), item.model.clone(), item.ok);
+            let (fp2, fm2) = (fp.clone(), fm.clone());
+            let mut tip_lines = vec![format!("{} · {}", item.provider, crate::i18n::trs(&item.label))];
+            if !item.note.is_empty() { tip_lines.push(crate::i18n::trs(&item.note)); }
+            if !item.ok && !item.why.is_empty() { tip_lines.push(crate::i18n::trs(&item.why)); }
+            let main_btn = div().id(SharedString::from(format!("pick-fav-{fi}"))).flex().items_center().gap_2().px_2().py(px(3. * f.s))
+                .when(ok, |d| d.cursor_pointer()).when(!ok, |d| d.opacity(0.55))
+                .when(item.on, |d| d.child(div().text_color(c("accent")).child("✓")))
+                .child(logo(&item.provider))
+                .child(div().max_w(px(190. * f.s)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(if item.on { c("accent") } else { c("text") }).child(crate::i18n::trs(&item.label)))
+                .tooltip(tip_of(tip_lines.join("\n"), light))
+                .when(ok, |d| d.on_click(cx.listener(move |this, _, _, cx| this.picker_pick_favorite(&fp, &fm, cx))));
+            let star_btn = div().id(SharedString::from(format!("pick-fav-star-{fi}"))).px(px(6. * f.s)).py(px(3. * f.s)).cursor_pointer()
+                .border_l_1().border_color(if item.on { c("accent") } else { c("line") })
+                .text_color(c("accent")).hover(|s| s.bg(c("raise")))
+                .tooltip(tip_of(crate::i18n::trs("Remove from favorites"), light))
+                .child("★")
+                .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.picker_toggle_fav(&fp2, &fm2, cx); }));
+            chips = chips.child(div().flex().items_center().border_1().border_color(if item.on { c("accent") } else { c("line") })
+                .bg(if item.on { c("raise") } else { c("panel") }).hover(|st| st.bg(c("raise")))
+                .child(main_btn).child(star_btn));
+        }
+        div().id("picker-favorites").w_full().min_w_0().flex().flex_col().border_b_1().border_color(c("line"))
+            .child(div().px_3().pt_2().pb_1().flex().items_center().gap_1().text_size(z(11.))
+                .child(div().text_color(c("accent")).child("★"))
+                /* i18n-ok: section title, drawn through trs */ .child(div().text_color(c("faint")).child(crate::i18n::trs("Favorites").to_uppercase())))
+            .child(chips)
+    });
     let head = |col: usize, title: &str| {
         let back = (drill && col > 0).then(|| div().id(SharedString::from(format!("pick-back-{col}"))).flex_shrink_0().pr_2().cursor_pointer().text_color(c("dim")).child("‹")
             .on_click(cx.listener(move |this, _, _, cx| this.picker_go(col - 1, cx))));
@@ -326,7 +509,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     for (ci, ch) in models.iter().enumerate() {
         let value = ch.value.clone();
         let fav = fav_key(&provider, &ch.value);
-        let starred = favs.iter().any(|f| *f == fav);
+        let starred = eff_favs.iter().any(|f| *f == fav);
         let here = ch.value == cur.model;
         let full = if ch.note.is_empty() { crate::i18n::trs(&ch.label) } else { format!("{}\n{}", crate::i18n::trs(&ch.label), crate::i18n::trs(&ch.note)) };
         let mut row = div().flex().items_center().hover(|st| st.bg(c("raise"))).when(here, |d| d.bg(c("raise")))
@@ -338,10 +521,13 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
                 .tooltip(tip_of(full, light))
                 .on_click(cx.listener(move |this, _, _, cx| { this.picker_press(1, &value, cx); if drill { this.picker_go(2, cx) } })));
         if !ch.value.is_empty() {
-            let f2 = fav.clone();
-            row = row.child(div().id(SharedString::from(format!("fav-{ci}"))).flex_shrink_0().px_2().py_1().cursor_pointer().text_color(if starred { c("accent") } else { c("faint") })
+            let (fp, fm) = (provider.clone(), ch.value.clone());
+            /* i18n-ok: star tip drawn through trs */ let tip = crate::i18n::trs(if starred { "Remove from favorites" } else { "Add to favorites" });
+            row = row.child(div().id(SharedString::from(format!("fav-{ci}"))).flex_shrink_0().px_2().py_1().cursor_pointer()
+                .text_color(if starred { c("accent") } else { c("faint") }).when(!starred, |d| d.hover(|s| s.text_color(c("text"))))
+                .tooltip(tip_of(tip, light))
                 .child(if starred { "★" } else { "☆" })
-                .on_click(cx.listener(move |this, _, _, cx| { this.local_press("fav", &f2, cx); })));
+                .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); this.picker_toggle_fav(&fp, &fm, cx); })));
         }
         list = list.child(row);
     }
@@ -381,7 +567,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
     // as tall as the agent column in every mode (one column at a time too): stepping from column to column or a shorter list leaves the menu's height as it is;
     // "Plan first, this turn only" under the columns, in every mode
     let body = body.id("picker").w_full().min_w_0().min_h(px(agents_h)).text_size(z(12.));
-    Some(div().w_full().min_w_0().flex().flex_col().child(body).children(plan_row.map(|r| div().pt_2().border_t_1().border_color(c("line")).child(r)).into_iter()).into_any_element())
+    Some(div().w_full().min_w_0().flex().flex_col().children(fav_strip).child(body).children(plan_row.map(|r| div().pt_2().border_t_1().border_color(c("line")).child(r)).into_iter()).into_any_element())
 }
 
 /// The speed dial under the effort meter: the knob, and beside it each detent's name and cost (a press picks it); the one in force lit. With Normal only
@@ -451,18 +637,37 @@ fn speed_dial(cx: &mut Context<Backplane>, light: bool, rows: &[Section], cur: &
 }
 fn detent_at_value(values: &[String], v: &str) -> usize { values.iter().position(|x| x == v).unwrap_or(0) }
 
-/// "Plan first, this turn only" (a Claude thread): its plan mode for the next turn, then the thread goes back on its own (the hub's thread.planonce);
-/// lit while set. A press flips it.
+/// "Plan first, this turn only" / Plan mode selector (a Claude thread): `1 turn`, `Always`, or `Off` synced with `thread.planMode`.
 fn plan_once_row(cx: &mut Context<Backplane>, light: bool, thread: &Value) -> Option<AnyElement> {
     if thread["claude"] != true { return None }
     let c = |n: &str| theme::color(light, n);
     let on = thread["planOnce"] == true;
+    let always = thread["planMode"]["interaction"] == "plan" && !on;
+    let mode_chip = |id: &'static str, lbl: String, lit: bool| div().id(id).px(px(6.)).py(px(1.)).text_size(crate::scale::tpx(10.)).border_1()
+        .border_color(c(if lit { "input" } else { "line" }))
+        .bg(c(if lit { "raise" } else { "panel" }))
+        .text_color(c(if lit { "input" } else { "dim" }))
+        .hover(|s| s.bg(c("raise")).text_color(c("text")))
+        .child(lbl);
     Some(crate::ui::with_rect(div().id("pick-plan-once"), || "pick:plan-once".to_string()).mx_3().mb_2().px_2().py_1().flex().items_center().gap_2().cursor_pointer().border_1()
-        .border_color(c(if on { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
-        .child(div().w(px(12.)).text_color(c("accent")).child(if on { "\u{2713}" } else { "" }))
+        .border_color(c(if on || always { "input" } else { "line" })).hover(|s| s.bg(c("raise")))
+        .child(div().w(px(12.)).text_color(c("input")).child(if on || always { "\u{2713}" } else { "" }))
         .child(div().flex_1().min_w_0().flex().flex_col()
-            .child(div().text_size(crate::scale::tpx(12.)).text_color(c(if on { "accent" } else { "text" })).child(crate::i18n::trs("Plan first, this turn only")))
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c(if on || always { "input" } else { "text" })).child(crate::i18n::trs("Plan first, this turn only")))
             .child(div().text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(crate::i18n::trs("Claude proposes a plan and waits for Implement; the thread goes back to its own mode after."))))
+        .child(mode_chip("pick-plan-always", crate::i18n::trs("Always"), always).on_click(cx.listener(move |this, _, _, cx| {
+            let th = this.selected.clone(); if th.is_empty() { return }
+            let target = if always { "default" } else { "plan" };
+            let _ = this.tx.try_send(crate::hub::Command::Rpc("thread.modes".into(), super::settings::Secret(serde_json::json!({"thread": th, "interaction": target})), "planmode"));
+            cx.stop_propagation();
+            cx.notify();
+        })))
+        .when(on || always, |d| d.child(mode_chip("pick-plan-off", crate::i18n::trs("Off"), false).on_click(cx.listener(move |this, _, _, cx| {
+            let th = this.selected.clone(); if th.is_empty() { return }
+            let _ = this.tx.try_send(crate::hub::Command::Rpc("thread.modes".into(), super::settings::Secret(serde_json::json!({"thread": th, "interaction": "default"})), "planmode"));
+            cx.stop_propagation();
+            cx.notify();
+        }))))
         .on_click(cx.listener(move |this, _, _, cx| {
             let th = this.selected.clone(); if th.is_empty() { return }
             let _ = this.tx.try_send(crate::hub::Command::Rpc("thread.planonce".into(), super::settings::Secret(serde_json::json!({"thread": th, "on": !on})), "planonce"));
@@ -506,7 +711,95 @@ impl Backplane {
     }
     /// The speed the cursor is on now (the dial's handlers read it as it is, not as it was drawn).
     fn picker_cur_speed(&self) -> String { self.picker_shown().map(|s| s.cur.speed).unwrap_or_default() }
-    fn picker_shown(&self) -> Option<Shown> { shown(&self.data["thread"], &self.screens.pick, &self.local.favs) }
+    pub(crate) fn picker_favs(&self) -> Vec<String> { favorites_of(&self.data["thread"], &self.local.favs, &self.screens.pick.fav_pending) }
+    fn picker_shown(&self) -> Option<Shown> { let favs = self.picker_favs(); shown(&self.data["thread"], &self.screens.pick, &favs) }
+    pub(crate) fn picker_toggle_fav(&mut self, provider: &str, model: &str, cx: &mut Context<Self>) {
+        let Some((b, m)) = norm_fav_pair_opt(provider, model) else { return };
+        let key = format!("{b}/{m}");
+        let next = !self.picker_favs().iter().any(|f| f == &key);
+        self.screens.pick.fav_seq = self.screens.pick.fav_seq.saturating_add(1);
+        let seq = self.screens.pick.fav_seq;
+        self.screens.pick.fav_pending.insert(key.clone(), PendingFav { want: next, seq, acked: false, acked_pictures: 0 });
+        self.screens.pick.fav_inflight.push_back((key, seq));
+        let _ = self.tx.try_send(Command::Rpc("models.favorite".into(), super::settings::Secret(serde_json::json!({"provider": b, "model": m, "on": next})), "models-fav"));
+        cx.notify();
+    }
+    pub(crate) fn picker_pick_favorite(&mut self, provider: &str, model: &str, cx: &mut Context<Self>) {
+        let Some(s) = self.picker_shown() else { return };
+        let b = bare(provider);
+        let p = format!("@{b}");
+        let all = for_provider(&self.data["thread"]["picker"], &self.data["thread"]["pickerAgents"], &p);
+        if !agent_ok(&all, &p) { return }
+        let mut c = s.cur.clone();
+        c.provider = p;
+        c.model = model.to_string();
+        c.col = 1;
+        self.picker_apply(c.clone(), &all, &s.own);
+        self.picker_store(c);
+        cx.notify();
+    }
+    pub(crate) fn picker_fav_replied(&mut self, ok: bool, why: &str, cx: &mut Context<Self>) {
+        let entry = self.screens.pick.fav_inflight.pop_front();
+        if !ok {
+            if let Some((key, seq)) = entry {
+                if self.screens.pick.fav_pending.get(&key).is_some_and(|p| p.seq == seq) {
+                    self.screens.pick.fav_pending.remove(&key);
+                }
+            } else {
+                self.screens.pick.fav_pending.clear();
+            }
+            if !why.is_empty() { self.error = why.to_string(); }
+        } else if let Some((key, seq)) = entry {
+            if self.data["thread"]["picker"]["favorites"].is_array() {
+                if let Some(p) = self.screens.pick.fav_pending.get_mut(&key).filter(|p| p.seq == seq) {
+                    p.acked = true;
+                }
+            } else if self.screens.pick.fav_pending.get(&key).is_some_and(|p| p.seq == seq) {
+                self.screens.pick.fav_pending.remove(&key);
+            }
+        }
+        cx.notify();
+    }
+    pub(crate) fn picker_migrate_local_favs(&mut self) {
+        if self.screens.pick.fav_migrated || self.local.favs.is_empty() { return }
+        let Some(arr) = self.data["thread"]["picker"]["favorites"].as_array() else { return };
+        self.screens.pick.fav_migrated = true;
+        if !arr.is_empty() { return }
+        let Some(keys) = legacy_favs_to_migrate(&self.data["thread"], &self.local.favs, false) else { return };
+        let Ok(val) = serde_json::to_string(&keys) else { return };
+        self.screens.pick.fav_migrate_keys.clear();
+        for k in keys {
+            self.screens.pick.fav_seq = self.screens.pick.fav_seq.saturating_add(1);
+            let seq = self.screens.pick.fav_seq;
+            self.screens.pick.fav_pending.insert(k.clone(), PendingFav { want: true, seq, acked: false, acked_pictures: 0 });
+            self.screens.pick.fav_migrate_keys.push((k, seq));
+        }
+        let _ = self.tx.try_send(Command::Rpc("setting.set".into(), super::settings::Secret(serde_json::json!({"key": "models.favorites", "value": val})), "models-fav-migrate"));
+    }
+    pub(crate) fn picker_fav_migrate_replied(&mut self, ok: bool, _why: &str, cx: &mut Context<Self>) {
+        let keys = std::mem::take(&mut self.screens.pick.fav_migrate_keys);
+        if ok {
+            self.local.favs.clear();
+            self.local.save();
+            let has_arr = self.data["thread"]["picker"]["favorites"].is_array();
+            for (k, seq) in keys {
+                if has_arr {
+                    if let Some(p) = self.screens.pick.fav_pending.get_mut(&k).filter(|p| p.seq == seq) {
+                        p.acked = true;
+                    }
+                } else if self.screens.pick.fav_pending.get(&k).is_some_and(|p| p.seq == seq) {
+                    self.screens.pick.fav_pending.remove(&k);
+                }
+            }
+        } else {
+            for (k, seq) in keys {
+                if self.screens.pick.fav_pending.get(&k).is_some_and(|p| p.seq == seq) {
+                    self.screens.pick.fav_pending.remove(&k);
+                }
+            }
+        }
+        cx.notify();
+    }
     fn picker_store(&mut self, c: Cursor) { self.screens.pick.cur = Some((string(&self.data["thread"], "id"), c)); self.picker_reveal(); }
     /// Scroll the cursor's model into view.
     fn picker_reveal(&mut self) {
@@ -555,6 +848,7 @@ impl Backplane {
     /// Apply a cursor: an agent that cannot be used here is only shown (its column says why), never switched to.
     fn picker_apply(&self, mut c: Cursor, all: &[Section], own: &Cursor) {
         if !agent_ok(all, &c.provider) { return }
+        c.model = model_applied(&c, all);
         c.effort = effort_applied(&c, all);
         c.speed = speed_applied(&c, all);
         for cmd in plan(&c, own) { let _ = self.tx.try_send(cmd); }
@@ -740,5 +1034,75 @@ mod tests {
         let far = Cursor { provider: "@codex".into(), model: "gpt".into(), ..c };
         assert_eq!(acts(plan(&far, &own)), [pair("provider", "codex\u{1f}gpt"), pair("speed", "fast")]);
         assert_eq!(cap(3, 3, 4), "←→"); assert_eq!(cap(0, 3, 4), "Tab"); assert_eq!(cap(3, 1, 3), "", "no keycap for a dial Tab cannot reach");
+    }
+    #[test] fn switching_provider_or_applying_cursor_never_sends_stale_model_across_providers() {
+        let (p, a) = fixture(); let s = parse(&p); let own = Cursor::own(&s);
+        let mut c = own.clone();
+        c.set(0, "@codex", &own);
+        assert_eq!(c.provider, "@codex");
+        assert_eq!(c.model, "", "switching provider clears previous provider's model");
+        assert_eq!(acts(plan(&c, &own)), [pair("provider", "codex\u{1f}")]);
+
+        let codex_rows = for_provider(&p, &a, "@codex");
+        let stale = Cursor { col: 0, provider: "@codex".into(), model: "opus".into(), effort: "high".into(), speed: String::new() };
+        assert_eq!(model_applied(&stale, &codex_rows), "", "stale claude model is cleared for codex");
+        let valid = Cursor { model: "gpt".into(), ..stale };
+        assert_eq!(model_applied(&valid, &codex_rows), "gpt");
+    }
+    #[test] fn favorites_merge_reconcile_resolve_across_providers_and_filter() {
+        assert_eq!(norm_fav_key("@Claude", "opus"), "claude/opus");
+        assert_eq!(norm_fav_str(" @Codex/gpt "), "codex/gpt");
+        assert_eq!(norm_fav_pair_opt("@Claude", "opus"), Some(("claude".into(), "opus".into())));
+        assert_eq!(norm_fav_pair_opt("cl aude", "opus"), None);
+        assert_eq!(norm_fav_pair_opt("claude", "opus\n"), None);
+
+        let (mut p, a) = fixture();
+        p["favorites"] = serde_json::json!(["claude/sonnet", "codex/gpt"]);
+        let thread = serde_json::json!({"id":"t1","picker":p,"pickerAgents":a});
+        let mut pending = std::collections::BTreeMap::new();
+        pending.insert("claude/opus".into(), PendingFav { want: true, seq: 1, acked: false, acked_pictures: 0 });
+        pending.insert("claude/sonnet".into(), PendingFav { want: false, seq: 2, acked: false, acked_pictures: 0 });
+        let eff = favorites_of(&thread, &["claude/haiku".into()], &pending);
+        assert_eq!(eff, vec!["codex/gpt", "claude/opus"]);
+
+        // Reconcile drops pending entries once the hub picture reflects them
+        let mut thread_after = thread.clone();
+        thread_after["picker"]["favorites"] = serde_json::json!(["codex/gpt", "claude/opus"]);
+        reconcile_fav_pending(&thread_after, &mut pending);
+        assert!(pending.is_empty(), "{pending:?}");
+
+        // Acked pending entry drops after 2 mismatched pictures (e.g. remote device overwrote) or when favorites array is absent
+        pending.insert("claude/opus".into(), PendingFav { want: true, seq: 3, acked: true, acked_pictures: 0 });
+        reconcile_fav_pending(&thread, &mut pending);
+        assert_eq!(pending.get("claude/opus").map(|x| x.acked_pictures), Some(1));
+        reconcile_fav_pending(&thread, &mut pending);
+        assert!(pending.is_empty(), "{pending:?}");
+
+        // Fallback to local favs when hub picture lacks favorites, and drop acked pending without favorites array
+        let no_hub = serde_json::json!({"id":"t1","picker":{"provider":"claude","providers":[]},"pickerAgents":{}});
+        pending.insert("claude/haiku".into(), PendingFav { want: true, seq: 4, acked: true, acked_pictures: 0 });
+        pending.insert("claude/opus".into(), PendingFav { want: true, seq: 5, acked: false, acked_pictures: 0 });
+        reconcile_fav_pending(&no_hub, &mut pending);
+        assert!(!pending.contains_key("claude/haiku") && pending.contains_key("claude/opus"));
+        pending.clear();
+        assert_eq!(favorites_of(&no_hub, &["@Claude/opus".into()], &pending), vec!["claude/opus"]);
+
+        // Legacy local.favs migration runs only when hub favorites array is present and empty
+        let mut empty_hub = thread.clone();
+        empty_hub["picker"]["favorites"] = serde_json::json!([]);
+        assert_eq!(legacy_favs_to_migrate(&empty_hub, &["@Claude/opus".into(), "bad key/x".into(), "claude/opus".into()], false), Some(vec!["claude/opus".into()]));
+        assert_eq!(legacy_favs_to_migrate(&thread, &["claude/opus".into()], false), None);
+        assert_eq!(legacy_favs_to_migrate(&empty_hub, &["claude/opus".into()], true), None);
+
+        // Resolve favorite items across providers, marking active, missing-from-catalog, and unavailable agents, and filtering by search
+        let items = favorite_items(&thread, &["claude/opus".into(), "claude/retired".into(), "codex/gpt".into(), "grok/grok-4".into()], "");
+        assert_eq!(items.len(), 4);
+        assert!(items[0].on && items[0].ok && items[0].note == "Opus 5.5 · claude-opus-5-5");
+        assert!(!items[1].ok && items[1].why == "not available on this machine");
+        assert!(!items[2].on && items[2].ok && items[2].note == "GPT · fast");
+        assert!(!items[3].ok && items[3].why == "not installed on this machine");
+        let filtered = favorite_items(&thread, &["claude/opus".into(), "codex/gpt".into()], "fast");
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].key, "codex/gpt");
     }
 }

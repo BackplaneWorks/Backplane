@@ -15,7 +15,7 @@
 # the job gets only the variables bo_env allows (build knobs, never a name that looks like a credential), and only `git ls-files` sources are copied (no .git, no home).
 # Env: BP_NO_BOAT, BP_BOAT_POOL (boxes, default 2), BP_BOAT_TYPE (small|default|large|xlarge; default large), BP_BOAT_IDLE (seconds idle before the box is stopped, default 300),
 #      BP_BOAT_COOLDOWN (seconds without offloading after boat itself failed, default 300), BP_BOAT_PASS (extra variable names to forward), BP_BOAT_BASE (snapshot name),
-#      BP_BOAT_DISK_HIGH / BP_BOAT_DISK_LOW (the disk guard's marks, default 80 / 70 %, scripts/boat-disk.py).
+#      BP_BOAT_DISK_HIGH / BP_BOAT_DISK_LOW (the disk guard's marks, default 70 / 55 %, scripts/boat-disk.py).
 BO_HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 bo_dir() { echo "${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks}"; }
 bo_say() { echo "boat: $*" >&2; }
@@ -86,10 +86,10 @@ bo_sync() { local id=$1 root=$2 job=$3 lf rc=0
   fi
   rm -f "$lf"; [ "$rc" = 0 ] && bo_guard "$id"; return "$rc"; }
 
-# bo_guard ID: before the job, keep the box's disk from filling (scripts/boat-disk.py: over BP_BOAT_DISK_HIGH % (80) the oldest build output goes until under BP_BOAT_DISK_LOW % (70));
+# bo_guard ID: before the job, keep the box's disk from filling (scripts/boat-disk.py: stale incremental state >1d always goes, and over BP_BOAT_DISK_HIGH % (70) the oldest build output goes until under BP_BOAT_DISK_LOW % (55));
 # what it removed goes to BUILD_LOCK_DIR/boat.log and stderr. A guard that fails does not stop the job.
 bo_guard() { local id=$1 out
-  out=$(bo_b exec "$id" --json --timeout 900 "python3 -I ~/ws/src/scripts/boat-disk.py guard --high ${BP_BOAT_DISK_HIGH:-80} --low ${BP_BOAT_DISK_LOW:-70}" 2>/dev/null | bo_out)
+  out=$(bo_b exec "$id" --json --timeout 900 "python3 -I ~/ws/src/scripts/boat-disk.py guard --high ${BP_BOAT_DISK_HIGH:-70} --low ${BP_BOAT_DISK_LOW:-55}" 2>/dev/null | bo_out)
   [ -n "$out" ] || return 0
   printf '%s\n' "$out" | sed "s/^/$(date +%T) $id /" >> "$(bo_dir)/boat.log"
   printf '%s\n' "$out" | head -1 | sed 's/^boat-disk: //' | while read -r l; do bo_say "disk on $id: $l"; done; }
@@ -97,7 +97,10 @@ bo_guard() { local id=$1 out
 # bo_run ID JOB CWD BODY: write the job script (the allowed env, cd CWD, BODY) to the box and run it; stdout and stderr are the command's, the exit code is its own
 bo_run() { local id=$1 job=$2 cwd=$3 body=$4 s
   s=$({ echo '#!/bin/bash'; echo 'export PATH="$HOME/.cargo/bin:/usr/local/cargo/bin:$HOME/.bun/bin:/usr/local/bin:$PATH" BP_NO_BOAT=1 BP_ON_BOAT=1 BP_JOB=$HOME/.bpjobs/'"$job"
-             bo_env; printf 'cd ~/ws/src/%q || exit 96\n' "$cwd"; printf '%s\n' "$body"; })
+             bo_env
+             # agent CLIs a job installed in the home go (scripts/boat-agents-clean.sh; Boat's own stay, warned about): one that cannot go makes the box unusable (98)
+             echo '[ ! -f ~/ws/src/scripts/boat-agents-clean.sh ] || bash ~/ws/src/scripts/boat-agents-clean.sh || exit 98'
+             printf 'cd ~/ws/src/%q || exit 96\n' "$cwd"; printf '%s\n' "$body"; })
   bo_b exec "$id" --timeout 60 "echo $(printf '%s\n' "$s" | base64 -w0) | base64 -d > ~/.bpjobs/$job/run.sh" > /dev/null || return 98
   python3 -I "$BO_HERE/boat-run.py" "$id" bash "/home/user/.bpjobs/$job/run.sh" & BO_PID=$!
   trap 'kill -TERM "$BO_PID" 2>/dev/null; wait "$BO_PID" 2>/dev/null; exit 143' TERM HUP; trap 'kill -INT "$BO_PID" 2>/dev/null; wait "$BO_PID" 2>/dev/null; exit 130' INT

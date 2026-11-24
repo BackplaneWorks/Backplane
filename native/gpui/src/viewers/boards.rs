@@ -72,7 +72,7 @@ pub fn editor_follows(picked: &str, age: std::time::Duration, editing: bool, all
 pub fn edit_due(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some((picked, at)) = this.screens.plots[0].boards.edit_next.clone() else { return };
     match editor_follows(&picked, at.elapsed(), this.screens.kicad.is_some(), &list(&this.data["thread"]["viewer"])) {
-        Some(true) => { this.screens.plots[0].boards.edit_next = None; this.kicad_view(cx); this.kicad_edit(cx); }
+        Some(true) => { this.screens.plots[0].boards.edit_next = None; this.kicad_view(cx); crate::viewers::kicad_pane::as_deferred_open(|| this.kicad_edit(cx)); }
         Some(false) => { this.screens.plots[0].boards.edit_next = None; }
         None => {}
     }

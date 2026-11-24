@@ -60,12 +60,12 @@ pub fn save(path: &Path, p: &Place) {
     if ok { let _ = std::fs::rename(tmp, path); }
 }
 
-enum Msg { View(Value, Value), Window(HashMap<String, RowPlace>, bool), Flush(mpsc::Sender<()>) }
+enum Msg { View(Value, Value), Window(HashMap<String, RowPlace>, bool), Flush(mpsc::Sender<()>), Retarget(PathBuf, Place, mpsc::Sender<()>) }
 
 /// The background writer: a note is cheap, the file is written after DEBOUNCE of quiet.
 struct Writer { tx: Mutex<mpsc::Sender<Msg>> }
 impl Writer {
-    fn start(path: PathBuf, mut place: Place) -> Self {
+    fn start(mut path: PathBuf, mut place: Place) -> Self {
         let (tx, rx) = mpsc::channel::<Msg>();
         std::thread::Builder::new().name("place".into()).spawn(move || {
             let mut dirty = false;
@@ -74,6 +74,11 @@ impl Writer {
                     Ok(Msg::View(t, s)) => { let s = kept_session(&s); if t != place.target || s != place.session { place.target = t; place.session = s; dirty = true; } }
                     Ok(Msg::Window(o, b)) => { if o != place.offsets || b != place.sidebar { place.offsets = o; place.sidebar = b; dirty = true; } }
                     Ok(Msg::Flush(ack)) => { if dirty { save(&path, &place); dirty = false; } let _ = ack.send(()); }
+                    Ok(Msg::Retarget(next_path, next_place, ack)) => {
+                        if dirty { save(&path, &place); dirty = false; }
+                        path = next_path; place = next_place;
+                        let _ = ack.send(());
+                    }
                     Err(mpsc::RecvTimeoutError::Timeout) => { if dirty { save(&path, &place); dirty = false; } }
                     Err(mpsc::RecvTimeoutError::Disconnected) => return,
                 }
@@ -83,6 +88,10 @@ impl Writer {
     }
     fn send(&self, m: Msg) -> bool { self.tx.lock().map_or(false, |t| t.send(m).is_ok()) }
     fn flush(&self) { let (a, r) = mpsc::channel(); if self.send(Msg::Flush(a)) { let _ = r.recv_timeout(Duration::from_secs(1)); } }
+    fn retarget(&self, next_path: PathBuf, next_place: Place) {
+        let (a, r) = mpsc::channel();
+        if self.send(Msg::Retarget(next_path, next_place, a)) { let _ = r.recv_timeout(Duration::from_secs(1)); }
+    }
 }
 
 /// A file kept beside the hub's credential. A paired hub's credential is `hubs/<key>.token`, shared folder: its files carry the hub's key
@@ -112,6 +121,15 @@ pub fn open(config: &Config) {
         if let Ok(mut w) = SAVED_WINDOW.lock() { *w = Some((p.offsets.clone(), p.sidebar)); }
     }
     let _ = WRITER.set(Writer::start(path, saved.unwrap_or_default()));
+}
+/// Switch the place writer to another hub's credential folder (in-process hub switch): flushes the old hub's place
+/// first so hub B's thread ids are never written into hub A's `gpui-place.json`.
+pub fn retarget(token_file: &Path) {
+    let path = beside_credential(token_file, "gpui-place.json");
+    let saved = load(&path);
+    if let Ok(mut v) = SAVED_VIEW.lock() { *v = saved.as_ref().map(|p| (p.target.clone(), p.session.clone())); }
+    if let Ok(mut w) = SAVED_WINDOW.lock() { *w = saved.as_ref().map(|p| (p.offsets.clone(), p.sidebar)); }
+    if let Some(w) = WRITER.get() { w.retarget(path, saved.unwrap_or_default()); }
 }
 /// The hub worker's first view: the target and session to open with.
 pub fn take_view() -> Option<(Value, Value)> { SAVED_VIEW.lock().ok()?.take() }
@@ -211,6 +229,19 @@ mod tests {
         assert!(!f.exists(), "written before the debounce");
         w.flush(); let p = load(&f).unwrap(); assert_eq!(p.target["id"], "t19"); assert_eq!(p.session, json!({"sel": "t19"}));
         w.send(Msg::Window(place().offsets, false)); w.flush(); let p = load(&f).unwrap(); assert_eq!(p.offsets["t1"], ("m7".to_string(), 12.5)); assert!(!p.sidebar);
+        drop(w);
+    }
+    #[test] fn retarget_flushes_old_hub_and_isolates_new_hub_place() {
+        let fa = file("retarget-a");
+        let fb = fa.with_file_name("retarget-b.json");
+        let w = Writer::start(fa.to_path_buf(), Place::default());
+        w.send(Msg::View(json!({"kind": "thread", "id": "tA"}), json!({"sel": "tA"})));
+        w.retarget(fb.clone(), Place::default());
+        assert_eq!(load(&fa).unwrap().target["id"], "tA", "old hub place flushed before switch");
+        w.send(Msg::View(json!({"kind": "thread", "id": "tB"}), json!({"sel": "tB"})));
+        w.flush();
+        assert_eq!(load(&fa).unwrap().target["id"], "tA", "hub B place never overwrites hub A");
+        assert_eq!(load(&fb).unwrap().target["id"], "tB");
         drop(w);
     }
 }
