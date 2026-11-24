@@ -79,14 +79,16 @@ data class DSecRow(val id: String, val title: String, val word: String, val say:
     /** snooze duration choices (`row-snooze`), wake value (`<id>|off` on snoozed rows), and one-swipe settle id */
     val snooze: List<DSnoozeOpt> = emptyList(), val wake: String = "", val settle: String = "",
     /** hardware indicators for Bench project rows (present/sections.rs `hasBoard`/`hasSchematic`) */
-    val hasBoard: Boolean = false, val hasSchematic: Boolean = false) {
+    val hasBoard: Boolean = false, val hasSchematic: Boolean = false,
+    /** thread provider id (e.g. claude, codex, antigravity) */
+    val provider: String = "") {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
             list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"), DMenuItem.list(o.optJSONArray("menu")),
             o.optString("fold"), o.optBoolean("folded"), o.optInt("under"), o.optInt("needsCount"), o.optInt("rest"), DNeed.of(o.optJSONObject("need")),
             o.optString("label"), o.optString("tone"), DSnoozeOpt.list(o.optJSONArray("snooze")), o.optString("wake"), o.optString("settle"),
-            o.optBoolean("hasBoard"), o.optBoolean("hasSchematic"))
+            o.optBoolean("hasBoard"), o.optBoolean("hasSchematic"), o.optString("provider"))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
     /** a chevron on the row: something is under it, or it is folded (an older hub sends no fold) */
@@ -342,6 +344,10 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
+                            if (r.provider.isNotEmpty()) {
+                                ProviderMark(r.provider, 12.dp)
+                                Spacer(Modifier.width(6.dp))
+                            }
                             Text(
                                 r.title,
                                 color = dcs.onSurface,
@@ -689,10 +695,12 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             var card by remember(pr.id) { mutableStateOf<DataClient.ProjectCard?>(null) }
             var whole by remember(pr.id) { mutableStateOf(false) }
             LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.projectCard(pr.id) }.onSuccess { card = it } }
-            card?.takeIf { it.goal.isNotEmpty() || it.boards.isNotEmpty() }?.let { c ->
+            card?.takeIf { it.goal.isNotEmpty() || it.boards.isNotEmpty() || it.leadDays > 0 || it.estimateWarnings.isNotEmpty() }?.let { c ->
                 Column(Modifier.fillMaxWidth().background(dcs.surface).clickable(enabled = c.goal.isNotEmpty()) { whole = !whole }.padding(horizontal = 12.dp, vertical = 8.dp).testTag("project.page.card")) {
                     if (c.goal.isNotEmpty()) DMono(c.goal, dcs.onSurface, 12, lines = if (whole) 20 else 2)
                     if (c.boards.isNotEmpty()) DMono(Msg.android_viewer_boards.uppercase() + "  " + c.boards.joinToString(" · "), dcs.onSurfaceVariant, 10, Modifier.padding(top = if (c.goal.isNotEmpty()) 4.dp else 0.dp), lines = 2)
+                    if (c.leadDays > 0) DMono(Msg.order_lead_days(c.leadDays), dcs.onSurfaceVariant, 11, Modifier.padding(top = 4.dp).testTag("project.page.lead"))
+                    if (c.estimateWarnings.isNotEmpty()) DMono(Msg.order_estimate_warnings(c.estimateWarnings), dwarn, 11, Modifier.padding(top = 4.dp).testTag("project.page.warnings"), lines = 4)
                 }
                 DLine()
             }

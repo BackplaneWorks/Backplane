@@ -123,7 +123,9 @@ struct DataPickerSheet: View {
     }
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 6) {
+                let activePv = picker?.sections.first(where: { $0.action == "provider" })?.choices.first(where: { $0.on })?.value ?? ProviderMarks.providerOfChip(picker?.chip ?? "")
+                if !activePv.isEmpty { ProviderMark(provider: activePv, size: 14) }
                 Text(picker?.chip ?? " ").dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).accessibilityIdentifier("data.picker.chip")
                 Spacer()
                 Button(Tr.t("Done")) { dismiss() }.dmono(13, bold: true).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("data.picker.done")
@@ -140,6 +142,7 @@ struct DataPickerSheet: View {
                             Button { press(s, c) } label: {
                                 HStack(spacing: 8) {
                                     Text(c.on ? "✓" : "").dmono(13).foregroundStyle(BackplaneDesign.accent).frame(width: 16)
+                                    if s.action == "provider" { ProviderMark(provider: c.value, size: 16) }
                                     VStack(alignment: .leading, spacing: 1) {
                                         Text(Tr.t(c.label)).dmono(13).foregroundStyle(c.ok ? BackplaneDesign.text : BackplaneDesign.faint)
                                         if !c.ok, !c.why.isEmpty { Text(Tr.t(c.why)).dmono(11).foregroundStyle(BackplaneDesign.faint) }

@@ -311,12 +311,24 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
         "thread.buy" if s(p, "thread").is_empty() && !s(p, "project").is_empty() => {
             let card = rpc(hub, c, "fab.look", json!({"project":s(p, "project")})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
             let b = &card["buy"];
-            Ok(json!({"buy": if b.is_object() { json!({"label":b["label"],"tip":b["tip"],"thread":b["value"]}) } else { Value::Null }})) }
+            Ok(json!({"buy": if b.is_object() {
+                let mut out = json!({"label":b["label"],"tip":b["tip"],"thread":b["value"]});
+                let lead = b["lead_days"].as_u64().unwrap_or(0);
+                if lead > 0 { out["lead_days"] = json!(lead); }
+                if let Some(w) = b["estimate_warnings"].as_str().filter(|w| !w.is_empty()) { out["estimate_warnings"] = json!(w); }
+                out
+            } else { Value::Null }})) }
         "thread.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
             let card = rpc(hub, c, "fab.look", json!({"thread":th})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
             let sess = crate::present::ready::keep(&card).unwrap_or(json!({}));
             let b = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::ready::header(st, th, &sess))).flatten();
-            Ok(json!({"buy": b.map_or(Value::Null, |b| json!({"label":b["label"],"tip":b["tip"]}))})) }
+            Ok(json!({"buy": b.map_or(Value::Null, |b| {
+                let mut out = json!({"label":b["label"],"tip":b["tip"]});
+                let lead = b["lead_days"].as_u64().unwrap_or(0);
+                if lead > 0 { out["lead_days"] = json!(lead); }
+                if let Some(w) = b["estimate_warnings"].as_str().filter(|w| !w.is_empty()) { out["estimate_warnings"] = json!(w); }
+                out
+            })})) }
         "order.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
             rpc(hub, c, "order.buy", json!({"thread":th})).await.map(|r| json!({"thread":r["thread"]})) }
         // feature "fabprofile": the project's fab profile (fab/mod.rs Fab.view), the same the desktop and the agents' fab_profile read; `action` get, pick or seen
@@ -506,7 +518,11 @@ pub fn notify_of(e: &Value) -> Value { json!({"kind":e["kind"],"thread":e["threa
 pub fn project_card(card: &Value) -> Value {
     let boards: Vec<String> = card["board_files"].as_array().into_iter().flatten().filter_map(Value::as_str)
         .map(|f| f.rsplit('/').next().unwrap_or(f).trim_end_matches(".kicad_pcb").to_string()).filter(|n| !n.is_empty()).collect();
-    json!({"goal": card["goal"].as_str().unwrap_or(""), "boards": boards})
+    let mut out = json!({"goal": card["goal"].as_str().unwrap_or(""), "boards": boards});
+    let lead = card["lead_days"].as_u64().unwrap_or(0);
+    if lead > 0 { out["lead_days"] = json!(lead); }
+    if let Some(w) = card["estimate_warnings"].as_str().filter(|w| !w.is_empty()) { out["estimate_warnings"] = json!(w); }
+    out
 }
 // ---- viewers, files, browser (each the hub's own request, for the folder of the thread) ----
 pub(super) async fn root_of(hub: &Arc<Hub>, thread: &str) -> Result<String, Value> {

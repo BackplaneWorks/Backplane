@@ -6,7 +6,7 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Card { pub name: String, pub steps: Vec<(String, String)>, pub line: String, pub waiting: bool, pub total: String, pub customs: String, pub pay: String, pub label: String, pub requote: bool }
+pub struct Card { pub name: String, pub steps: Vec<(String, String)>, pub line: String, pub waiting: bool, pub total: String, pub customs: String, pub pay: String, pub label: String, pub requote: bool, pub lead_days: u64, pub estimate_warnings: String }
 
 pub fn parse(order: &Value) -> Option<Card> {
     if !order.is_object() { return None; }
@@ -16,6 +16,8 @@ pub fn parse(order: &Value) -> Option<Card> {
         line: string(order, "line"), waiting: order["waiting"].as_bool().unwrap_or(false),
         total: string(order, "total"), customs: string(order, "customs"),
         pay: string(order, "pay"), label: string(order, "label"), requote: order["requote"].as_bool().unwrap_or(false),
+        lead_days: order["lead_days"].as_u64().unwrap_or(0),
+        estimate_warnings: string(order, "estimate_warnings"),
     })
 }
 
@@ -44,6 +46,13 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, order: &Value) -> Option<A
     if !card.total.is_empty() {
         col = col.child(div().flex().flex_col().gap_1().child(div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(14.)).child(card.total.clone()))
             .children((!card.customs.is_empty()).then(|| div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&card.customs)))));
+    }
+    if card.lead_days > 0 {
+        col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(tf("order.lead.days", &[("days", card.lead_days.into())])));
+    }
+    if !card.estimate_warnings.is_empty() {
+        col = col.child(div().px_2().py_1().border_l_2().border_color(c("warn")).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("warn"))
+            .child(tf("order.estimate.warnings", &[("warnings", card.estimate_warnings.as_str().into())])));
     }
     if payable(&card) {
         let link = card.pay.clone();
@@ -76,6 +85,10 @@ mod tests {
             "line":"Quoted. Buy now to place the order.","waiting":false,"total":"$27.20","customs":"Includes import VAT and duties: nothing to pay on delivery.","pay":"http://127.0.0.1:3871/q/q_1?t=x","label":"Buy now · $27.20"}"#).unwrap();
         let c = parse(&v).unwrap();
         assert_eq!(c.steps[1], ("Quote".into(), "on".into())); assert_eq!(c.total, "$27.20"); assert!(payable(&c));
+        assert_eq!(c.lead_days, 0); assert_eq!(c.estimate_warnings, "");
+        let mut v_extra = v.clone(); v_extra["lead_days"] = serde_json::json!(9); v_extra["estimate_warnings"] = serde_json::json!("thin board");
+        let c_extra = parse(&v_extra).unwrap();
+        assert_eq!(c_extra.lead_days, 9); assert_eq!(c_extra.estimate_warnings, "thin board");
         let mut v2 = v.clone(); v2["pay"] = "".into(); assert!(!payable(&parse(&v2).unwrap()), "no link, no button");
         v2["pay"] = "javascript:alert(1)".into(); assert!(!payable(&parse(&v2).unwrap()), "only http(s) opens");
     }

@@ -988,25 +988,30 @@ object DataClient {
         return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Hit(it.optString("msg"), it.optString("role"), it.optString("text"), it.optLong("at").let { t -> if (t in 1 until 100_000_000_000) t * 1000 else t }) } // an older hub said seconds
     }
     // Buy it (feature buy): the desktop header's button for this thread (the hub's words), null when there is nothing to buy; a press makes the buy thread, which the app opens
-    data class Buy(val label: String, val tip: String, val thread: String = "")
+    data class Buy(val label: String, val tip: String, val thread: String = "", val leadDays: Int = 0, val estimateWarnings: String = "")
     /** Buy it on a project's page: the hub's button for the project, naming the thread it buys from (`thread.buy {project}`); null when there is nothing to buy. */
     /** The top of a project's page (feature "projectcard"): its goal and its boards by name; null from a hub without it. */
-    data class ProjectCard(val goal: String, val boards: List<String>)
+    data class ProjectCard(val goal: String, val boards: List<String>, val leadDays: Int = 0, val estimateWarnings: String = "")
     suspend fun projectCard(project: String): ProjectCard? {
         if (!has("projectcard")) return null
         val o = call("project.card", JSONObject().put("project", project))
-        return ProjectCard(o.optString("goal"), o.optJSONArray("boards")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().filter { it.isNotEmpty() })
+        return ProjectCard(
+            o.optString("goal"),
+            o.optJSONArray("boards")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().filter { it.isNotEmpty() },
+            o.optInt("lead_days", 0).coerceAtLeast(0),
+            o.optString("estimate_warnings"),
+        )
     }
     suspend fun buyOfProject(project: String): Buy? {
         if (!has("buy")) return null
         val o = call("thread.buy", JSONObject().put("project", project)).optJSONObject("buy") ?: return null
         val th = o.optString("thread"); if (th.isEmpty()) return null
-        return Buy(o.optString("label").ifEmpty { "Buy it" }, o.optString("tip"), th)
+        return Buy(o.optString("label").ifEmpty { "Buy it" }, o.optString("tip"), th, o.optInt("lead_days", 0).coerceAtLeast(0), o.optString("estimate_warnings"))
     }
     suspend fun buyOf(tid: String): Buy? {
         if (!has("buy")) return null
         val o = call("thread.buy", JSONObject().put("thread", tid)).optJSONObject("buy") ?: return null
-        return Buy(o.optString("label").ifEmpty { "Buy it" }, o.optString("tip"))
+        return Buy(o.optString("label").ifEmpty { "Buy it" }, o.optString("tip"), "", o.optInt("lead_days", 0).coerceAtLeast(0), o.optString("estimate_warnings"))
     }
     suspend fun buy(tid: String): String = call("order.buy", JSONObject().put("thread", tid)).optString("thread")
     // what waits for the agent (feature queue): the desktop's strip over the composer, rows and buttons as the hub has them; read again on the thread's pushes and after a send
@@ -1027,11 +1032,22 @@ object DataClient {
     }
     // a buy thread's Order card (feature order): the hub's, drawn as it says; null for any other thread
     data class OrderStep(val label: String, val mark: String)
-    data class Order(val name: String, val steps: List<OrderStep>, val line: String, val waiting: Boolean, val total: String, val customs: String, val pay: String, val label: String)
+    data class Order(val name: String, val steps: List<OrderStep>, val line: String, val waiting: Boolean, val total: String, val customs: String, val pay: String, val label: String, val leadDays: Int = 0, val estimateWarnings: String = "") {
+        companion object {
+            fun of(o: JSONObject): Order {
+                val st = o.optJSONArray("steps")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { OrderStep(it.optString("label"), it.optString("mark")) } } ?: emptyList()
+                val warns = o.optString("estimate_warnings").ifEmpty {
+                    o.optJSONArray("warnings")?.let { a ->
+                        (0 until a.length()).mapNotNull { a.optString(it).trim().takeIf(String::isNotEmpty) }.distinct().joinToString("; ")
+                    } ?: ""
+                }
+                return Order(o.optString("name"), st, o.optString("line"), o.optBoolean("waiting"), o.optString("total"), o.optString("customs"), o.optString("pay"), o.optString("label"), o.optInt("lead_days", 0).coerceAtLeast(0), warns)
+            }
+        }
+    }
     suspend fun order(tid: String): Order? {
         val o = call("thread.order", JSONObject().put("thread", tid)).optJSONObject("order") ?: return null
-        val st = o.optJSONArray("steps")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { OrderStep(it.optString("label"), it.optString("mark")) } } ?: emptyList()
-        return Order(o.optString("name"), st, o.optString("line"), o.optBoolean("waiting"), o.optString("total"), o.optString("customs"), o.optString("pay"), o.optString("label"))
+        return Order.of(o)
     }
     // the review bar (feature reviewmode, #1305): the hub's, drawn as it says; null while the thread is no review. The button is the same `thread.review` with `on`
     suspend fun review(tid: String): DReviewBar? = DReviewBar.of(call("thread.review", JSONObject().put("thread", tid)).optJSONObject("review"))

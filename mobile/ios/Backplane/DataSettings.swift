@@ -6,7 +6,7 @@ import SwiftUI
 
 /// A page under Settings (DPage name); Accounts & Usage and Improvements are pages of their own ("accounts", "improvements").
 enum DSettingsPage: String, CaseIterable {
-    case hubs = "settings.hubs", agents = "settings.agents", machines = "settings.machines", notifications = "settings.notifications",
+    case hubs = "settings.hubs", agents = "settings.agents", ring = "settings.ring", machines = "settings.machines", notifications = "settings.notifications",
          appearance = "settings.appearance", updates = "settings.updates", browser = "settings.browser"
 }
 
@@ -33,6 +33,7 @@ struct DataSettingsView: View {
         top.append(DSettingsGroup(id: "settings.hubs", icon: "server.rack", title: Tr.t("Hubs"), page: DPage(name: DSettingsPage.hubs.rawValue)))
         var work: [DSettingsGroup] = []
         if client.has("mcpsettings") || client.has("voice") || client.has("cats") || client.bots.contains(where: { $0.delete }) { work.append(DSettingsGroup(id: "settings.agents", icon: "cpu", title: Tr.t("Agents"), page: DPage(name: DSettingsPage.agents.rawValue))) }
+        if client.has("ring") { work.append(DSettingsGroup(id: "settings.ring", icon: "waveform.circle", title: Tr.t("Ring"), page: DPage(name: DSettingsPage.ring.rawValue))) }
         if client.has("browserstart") { work.append(DSettingsGroup(id: "settings.browser", icon: "globe", title: Tr.t("Browser"), page: DPage(name: DSettingsPage.browser.rawValue))) }
         if client.has("machines") || client.has("devices") { work.append(DSettingsGroup(id: "settings.machines", icon: "desktopcomputer", title: Tr.t("Machines & devices"), page: DPage(name: DSettingsPage.machines.rawValue))) }
         let phone = [DSettingsGroup(id: "settings.notifications", icon: "bell", title: Tr.t("Notifications"), page: DPage(name: DSettingsPage.notifications.rawValue)),
@@ -55,7 +56,10 @@ struct DataSettingsView: View {
             e(Tr.t("Updates"), updates), e(Tr.t("Improvements"), "improvements"),
         ]
         if client.has("notifysettings") { all.append(e(Tr.t("Notifications"), notify)) }
-        if client.has("ring") { all.append(e(Tr.t("Ring"), notify)) }
+        if client.has("ring") {
+            let ring = DSettingsPage.ring.rawValue
+            all += [e(Tr.t("Ring"), ring), e(Tr.t("Pebble Index ring"), ring), e(Tr.t("Recordings"), ring)]
+        }
         if client.has("cats") { all += [e(Tr.t("Your uberbot"), agents), e(Tr.t("Name"), agents), e(Tr.t("Colour"), agents), e(Tr.t("Cat"), agents)] }
         if client.bots.contains(where: { $0.delete }) { all += [e(Tr.k("bots.settings.head"), agents), e(Tr.t("Delete bot"), agents)] }
         if client.has("mcpsettings") { all.append(e(Tr.t("MCP servers"), agents)) }
@@ -193,6 +197,7 @@ struct DataSettingsPageView: View {
         switch page {
         case .hubs: Tr.t("Hubs")
         case .agents: Tr.t("Agents")
+        case .ring: Tr.t("Ring")
         case .machines: Tr.t("Machines & devices")
         case .notifications: Tr.t("Notifications")
         case .appearance: Tr.t("Appearance")
@@ -212,6 +217,7 @@ struct DataSettingsPageView: View {
                     DataBotsSection(client: client)
                     if client.has("mcpsettings") { NavigationLink(value: DPage(name: "mcp")) { Text(Tr.t("MCP servers")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.mcp") }
                     if client.has("voice") { if client.has("mcpsettings") { DLine() }; DataVoiceSection(client: client) }
+                case .ring: DataRingSection(client: client)
                 case .machines:
                     if let h = client.home {
                         VStack(alignment: .leading, spacing: 6) {
@@ -237,6 +243,7 @@ struct DataSettingsPageView: View {
         }
         .background(BackplaneDesign.background)
         .dataBar(title)
+        .refreshable { if page == .ring { await client.ring.load() } }
         .confirmationDialog(Tr.ios_hub_forget_ask(hub: forgetKey ?? Tr.t("this hub")), isPresented: Binding(get: { forgetKey != nil }, set: { if !$0 { forgetKey = nil } }), titleVisibility: .visible) {
             Button(Tr.t("Forget"), role: .destructive) { if let k = forgetKey { client.forgetHub(k) }; forgetKey = nil }
         } message: { Text(Tr.t("This phone's saved copy of its threads is removed. Pair again to come back.")) }
@@ -261,7 +268,6 @@ struct DataSettingsPageView: View {
         // an older hub has no Notifications page: its quiet hours and urgent switch are drawn here
         if client.has("push") && !client.has("notifysettings") { DLine(); DataQuietSection(client: client) }
         if client.has("notifysettings") { DLine(); DataNotifySection(client: client) }
-        if client.has("ring") { DLine(); DataRingSection(client: client) }
     }
     @ViewBuilder private var hubs: some View {
         let keys = client.links.compactMap { Pairing.key($0) }

@@ -618,6 +618,10 @@ pub fn buy_button(card: &Value) -> Option<(String, String, String)> {
     if b["action"] != "fab-buy" || label.is_empty() || thread.is_empty() { return None }
     Some((label, string(b, "tip"), thread))
 }
+/// Estimate lead time and warnings from `fab.look` (`lead_days`, `estimate_warnings`).
+pub fn fab_estimate_meta(card: &Value) -> (u64, String) {
+    (card["lead_days"].as_u64().unwrap_or(0), string(card, "estimate_warnings"))
+}
 /// The page's "N commits not pushed" from the hub's card (`unpushed`: the main checkout's commits its upstream lacks), None when there are none.
 pub fn unpushed(card: &Value) -> Option<(u64, String)> {
     let n = card["unpushed"]["count"].as_u64().unwrap_or(0);
@@ -731,6 +735,19 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Rpc("project.push".into(), super::settings::Secret(serde_json::json!({"project": pid2.clone()})), "project-push")); cx.notify(); })));
     }
     out.push(bar.into_any_element());
+    if loaded && buy_button(&card).is_some() {
+        let (lead_days, warns) = fab_estimate_meta(&card);
+        if lead_days > 0 || !warns.is_empty() {
+            let mut meta = div().flex().flex_col().gap_1().pb_2();
+            if lead_days > 0 {
+                meta = meta.child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(crate::i18n::tf("order.lead.days", &[("days", lead_days.into())])));
+            }
+            if !warns.is_empty() {
+                meta = meta.child(div().px_2().py_1().border_l_2().border_color(c("warn")).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("warn")).child(crate::i18n::tf("order.estimate.warnings", &[("warnings", warns.as_str().into())])));
+            }
+            out.push(meta.into_any_element());
+        }
+    }
     // threads: the hub's lists for this project (running, needs you, recent, Done (n)), every machine's threads
     let lists = super::sections::page_lists(cx, light, data, pid, ctl);
     let listed = lists.is_some();
@@ -1016,8 +1033,10 @@ mod home_tests {
         assert_eq!(intent_lines("# Goal\n\nA lamp.\n\n# Parts\n\n- LED board\n* Shade\n## Notes"), vec![("h", "Goal".into()), ("p", "A lamp.".into()), ("h", "Parts".into()), ("li", "LED board".into()), ("li", "Shade".into()), ("h", "Notes".into())]);
     }
     #[test] fn the_pages_buy_it_is_the_hubs_button_and_names_the_thread_as_the_window_selects_it() {
-        let card: Value = serde_json::from_str(r#"{"buy":{"icon":"shopping-cart","label":"Buy it · from $5","tip":"Ready to order · A","action":"fab-buy","value":"t2"}}"#).unwrap();
+        let card: Value = serde_json::from_str(r#"{"buy":{"icon":"shopping-cart","label":"Buy it · from $5","tip":"Ready to order · A","action":"fab-buy","value":"t2"},"lead_days":9,"estimate_warnings":"thin board"}"#).unwrap();
         assert_eq!(buy_button(&card), Some(("Buy it · from $5".to_string(), "Ready to order · A".to_string(), "t2".to_string())));
+        assert_eq!(fab_estimate_meta(&card), (9, "thin board".to_string()));
+        assert_eq!(fab_estimate_meta(&serde_json::json!({})), (0, String::new()));
         assert_eq!(buy_button(&serde_json::json!({})), None, "the hub offers none: no button");
         assert_eq!(buy_button(&serde_json::json!({"buy":{"label":"Buy it","action":"fab-buy","value":""}})), None, "no thread to buy from");
         let p = serde_json::json!({"id":"http://h:1|p1"}); let rows = [serde_json::json!({"id":"http://h:1|t2"})]; let rows: Vec<&Value> = rows.iter().collect();

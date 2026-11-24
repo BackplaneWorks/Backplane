@@ -5073,3 +5073,5 @@ provider.notice.senderr = Aún no hay ningún proveedor de IA conectado. Abre Co
 provider.notice.senderr.remote = No hay ningún proveedor de IA conectado en {machine}. Abre Configuración → Cuentas en {machine} para conectar Claude, Codex, Antigravity u otro proveedor.
 web.settings.providers = Proveedores de IA
 web.settings.providers.browser = Conecta un proveedor en la aplicación de escritorio o móvil de Backplane en Configuración → Cuentas.
+order.lead.days = {days, plural, one {Plazo estimado: 1 día} other {Plazo estimado: {days} días}}
+order.estimate.warnings = Aviso: {warnings}

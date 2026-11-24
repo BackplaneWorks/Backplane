@@ -109,7 +109,8 @@ fn mark_of(p: &MergedProject, machine: &str) -> Value {
 fn qid(hub: &str, id: &str) -> String { if hub.is_empty() { id.to_string() } else { format!("{hub}|{id}") } }
 fn thread_row(hub: &str, now: u64, p: &MergedProject, f: &Th) -> Value {
     let t = f.t; let off = t.src.is_none();
-    json!({"id":qid(hub,&t.id),"title":if t.title.is_empty() { "New thread" } else { t.title.as_str() },"word":f.word,"say":say(f.word),"want":want(t,f.word),
+    let provider = t.src.and_then(|s| s.threads.get(&t.id)).map_or("", |x| x.provider.as_str());
+    json!({"id":qid(hub,&t.id),"title":if t.title.is_empty() { "New thread" } else { t.title.as_str() },"provider":provider,"word":f.word,"say":say(f.word),"want":want(t,f.word),
         "status":dot_word(f.word),"state":turn_word(f.word),"depth":0,"children":0,"expanded":false,"agents":"",
         "ago":crate::sidebar::ago(now,t.activity),"activity":t.activity,"pinned":t.pinned,"machine":t.machine,"mark":mark_of(p,&t.machine),
         "project":p.name,"projectKey":p.key,"off":off,"nav":if off { String::new() } else { qid(hub,&t.id) },
@@ -538,7 +539,7 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
           let mt = MergedThread { machine: machine.clone(), id: id.clone(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(s), status: String::new() };
           let w = want(&mt, "needs");
           let mark = if machine.is_empty() { Value::Null } else { crate::mirror::mark_of(&machine, false) };
-          needs.push((if w == "approval" { 0 } else { 1 }, t.activity, json!({"id":qid(c.hub,id),"title":t.title,"word":"needs","say":say("needs"),"want":w,"status":"blocked","state":"idle","depth":0,"children":0,"expanded":false,"agents":"",
+          needs.push((if w == "approval" { 0 } else { 1 }, t.activity, json!({"id":qid(c.hub,id),"title":t.title,"provider":t.provider,"word":"needs","say":say("needs"),"want":w,"status":"blocked","state":"idle","depth":0,"children":0,"expanded":false,"agents":"",
               "ago":crate::sidebar::ago(c.now,t.activity),"activity":t.activity,"pinned":t.pinned,"machine":machine,"mark":mark,"project":place,"projectKey":"","off":false,"nav":qid(c.hub,id)})));
       } } }
     needs.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));

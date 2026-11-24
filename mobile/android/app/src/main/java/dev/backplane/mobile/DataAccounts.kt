@@ -71,7 +71,11 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
                 DMono(Tr.t(p.optString("note")), dcs.onSurfaceVariant, 11, lines = 3)
             } else {
                 p.optJSONArray("providers").objects().forEach { pv ->
-                    DMono(Tr.t(pv.optString("title")).uppercase(), dfaint)
+                    val pid = pv.optString("provider")
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (ProviderMarks.spec(pid) != null) ProviderMark(pid, 13.dp)
+                        DMono(Tr.t(pv.optString("title")).uppercase(), dfaint)
+                    }
                     val accounts = pv.optJSONArray("accounts").objects()
                     if (accounts.isEmpty()) DMono(Msg.android_accounts_none, dfaint, 12)
                     accounts.forEach { a -> AccountRow(a) { open(a.optString("id")) } }
@@ -142,6 +146,8 @@ private fun PersonCard(e: JSONObject, open: (String) -> Unit) {
             Column(Modifier.fillMaxWidth().then(if (profile.isNotEmpty()) Modifier.clickable { open(profile) }.testTag("accounts.login.$profile") else Modifier),
                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    val pv = l.optString("provider")
+                    if (ProviderMarks.spec(pv) != null) ProviderMark(pv, 13.dp)
                     DMono(what, dcs.onSurfaceVariant, 11, modifier = Modifier.weight(1f, fill = false))
                     if (l.optBoolean("default")) DMono(Tr.t("Used for new threads"), dcs.onSurfaceVariant, 10, modifier = Modifier.background(dcs.surface).padding(horizontal = 5.dp, vertical = 1.dp))
                     Spacer(Modifier.weight(1f))
