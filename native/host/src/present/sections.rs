@@ -326,29 +326,86 @@ fn pinned_at(st: &State, key: &str) -> u64 { num(st, &format!("sidebar.pin.{key}
 /// When the person folded a project row (`sidebar.fold.<key>`), 0 for open.
 pub fn folded_at(st: &State, key: &str) -> u64 { num(st, &format!("sidebar.fold.{key}")) }
 
+struct SwarmEntry { row: Value, word: &'static str, settled: bool, activity: u64 }
+
+fn swarm_menu(hub: &str, room: &str, state: &str, word: &str, settled: bool, asking: bool) -> Value {
+    let mut items = vec![];
+    if !settled && word != "running" && !asking {
+        items.push(json!({"id":"settle","label":"Settle","action":"swarm-settle","value":qid(hub, room)}));
+    }
+    if state == "paused" {
+        items.push(json!({"id":"resume","label":"Resume","action":"swarm-need","value":format!("{room}\u{1f}resume\u{1f}")}));
+    } else if state == "active" {
+        items.push(json!({"id":"pause","label":"Pause","action":"swarm-need","value":format!("{room}\u{1f}pause\u{1f}")}));
+    }
+    items.push(json!({"id":"stop","label":"Stop swarm","action":"swarm-need","value":format!("{room}\u{1f}stop\u{1f}"),"confirm":true}));
+    json!(items)
+}
+
 /// A project's live swarms (docs/SWARM.md) as rows, every copy's: `sidebar::swarm_rows`' shape (the clients' swarm rows draw it) with the sections'
 /// fields: `kind` "swarm", `word` (`sidebar::live_swarms`; `needs` too when a member waits on the person), `want`, `title`, `project`, its machine.
-fn swarms_of(p: &MergedProject, c: &Ctx) -> Vec<(Value, &'static str)> {
+fn swarms_of(p: &MergedProject, c: &Ctx) -> Vec<SwarmEntry> {
     let mut states: Vec<&State> = p.threads.iter().filter_map(|t| t.src).collect();
     if let Some((s, _)) = &p.settings_of { states.push(s); }
     states.dedup_by(|a, b| std::ptr::eq(*a, *b));
     let mut seen: Vec<*const State> = vec![]; let mut out = vec![];
-    let open = HashSet::new(); let o = crate::sidebar::Opts { hub: c.hub, now: c.now, selected: "", open: &open, older_open: false, query: "" };
     for s in states {
         if seen.contains(&(s as *const State)) { continue } seen.push(s as *const State);
         let live = crate::sidebar::live_swarms(s);
         for (machine, pid) in p.ids.iter().filter(|(_, pid)| s.projects.contains_key(pid.as_str())) {
-            for mut r in crate::sidebar::swarm_rows(s, &o, pid) {
-                let room = text_of(&r, "nav").trim_start_matches("@room:").to_string();
-                let Some(l) = live.iter().find(|l| l.id == room) else { continue };
+            let mut rooms: Vec<(&String, &crate::state::RoomNav)> = s.rooms_nav.iter().filter(|(_, r)| r.swarm_live() && r.project == *pid).collect();
+            rooms.sort_by(|a, b| b.1.created.cmp(&a.1.created).then(b.0.cmp(a.0)));
+            for (room, nav) in rooms {
+                let Some(l) = live.iter().find(|l| l.id == *room) else { continue };
                 let word = l.word;
-                // what it wants, in one line, with its actions (swarm_need.rs): `say` is that line, so a client that draws only `say` shows why too
-                r["kind"] = json!("swarm"); r["word"] = json!(word); r["title"] = json!(l.title); r["say"] = json!(l.need.as_ref().map_or_else(|| say(word).to_string(), |n| n.line.clone()));
-                r["need"] = l.need.as_ref().map_or(Value::Null, |n| n.json(&if c.hub.is_empty() { String::new() } else { format!("{}|", c.hub) }, &room));
-                r["want"] = json!(match l.need.as_ref().map(|n| n.why) { Some("sign-in") => "sign-in", Some("failed") => "failed", Some(_) => "question", None => "" });
-                r["status"] = json!(dot_word(word)); r["machine"] = json!(machine); r["mark"] = mark_of(p, machine);
-                r["project"] = json!(p.name); r["projectKey"] = json!(p.key); r["off"] = json!(false); r["activity"] = json!(l.activity);
-                out.push((r, word));
+                let state_str = if nav.state.is_empty() { "active" } else { nav.state.as_str() };
+                let want_str = match l.need.as_ref().map(|n| n.why) { Some("sign-in") => "sign-in", Some("failed") => "failed", Some(_) => "question", None => "" };
+                let (label, tone) = badge(word, want_str);
+                let settle = if machine.is_empty() && !l.settled && word != "running" && !l.asking { qid(c.hub, room) } else { String::new() };
+                let menu = if machine.is_empty() { swarm_menu(c.hub, room, state_str, word, l.settled, l.asking) } else { json!([]) };
+                let r = json!({
+                    "id": qid(c.hub, room), "name": nav.name, "state": state_str, "members": nav.threads.len(),
+                    "working": l.working, "monitoring": l.monitoring, "settled": l.settled,
+                    "ago": crate::sidebar::ago(c.now, nav.last), "nav": format!("@room:{room}"),
+                    "kind": "swarm", "word": word, "title": l.title,
+                    "say": l.need.as_ref().map_or_else(|| say(word).to_string(), |n| n.line.clone()),
+                    "need": l.need.as_ref().map_or(Value::Null, |n| n.json(&if c.hub.is_empty() { String::new() } else { format!("{}|", c.hub) }, room)),
+                    "want": want_str, "label": label, "tone": tone, "status": dot_word(word),
+                    "settle": settle, "menu": menu,
+                    "machine": machine, "mark": mark_of(p, machine),
+                    "project": p.name, "projectKey": p.key, "off": false, "activity": l.activity
+                });
+                out.push(SwarmEntry { row: r, word, settled: l.settled, activity: l.activity });
+            }
+        }
+    }
+    out
+}
+
+/// Finished (`done` / `stopped`) swarms of a project for Project Page `Done` and Ctrl+K (`jump`), newest first.
+fn ended_swarms_of(p: &MergedProject, c: &Ctx) -> Vec<Value> {
+    let mut states: Vec<&State> = p.threads.iter().filter_map(|t| t.src).collect();
+    if let Some((s, _)) = &p.settings_of { states.push(s); }
+    states.dedup_by(|a, b| std::ptr::eq(*a, *b));
+    let mut seen: Vec<*const State> = vec![]; let mut out = vec![];
+    for s in states {
+        if seen.contains(&(s as *const State)) { continue } seen.push(s as *const State);
+        for (machine, pid) in p.ids.iter().filter(|(_, pid)| s.projects.contains_key(pid.as_str())) {
+            let mut rooms: Vec<(&String, &crate::state::RoomNav)> = s.rooms_nav.iter().filter(|(_, r)| r.swarm() && !r.swarm_live() && r.project == *pid).collect();
+            rooms.sort_by(|a, b| b.1.last.cmp(&a.1.last).then(b.0.cmp(a.0)));
+            for (room, nav) in rooms {
+                let done = nav.state == "done";
+                let (word, say_w, label, tone, status) = if done { ("done", "Done", "Done", "ok", "finished") } else { ("idle", "Stopped", "Stopped", "", "inactive") };
+                out.push(json!({
+                    "id": qid(c.hub, room), "name": nav.name, "state": nav.state, "members": nav.threads.len(),
+                    "working": 0, "monitoring": false, "settled": true,
+                    "ago": crate::sidebar::ago(c.now, nav.last), "nav": format!("@room:{room}"),
+                    "kind": "swarm", "word": word, "title": nav.name, "say": say_w,
+                    "need": Value::Null, "want": "", "label": label, "tone": tone, "status": status,
+                    "settle": "", "menu": [],
+                    "machine": machine, "mark": mark_of(p, machine),
+                    "project": p.name, "projectKey": p.key, "off": false, "activity": nav.last
+                }));
             }
         }
     }
@@ -393,20 +450,29 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     // every thread: the pins, then the newest first (`ths`' order), at most PAGE (the rest are on its page), folded away by its chevron
     // (`sidebar.fold.<key>`) unless the thread on show is one of them
     let folded = every && q.is_empty() && folded_at(st, &p.key) > 0 && !shown.iter().any(|f| on_show(f));
-    let under = shown.len().min(if every { PAGE } else { UNDER });
-    let rows: Vec<Value> = if folded { vec![] } else { shown.iter().take(under).map(|f| thread_row(c.hub, c.now, p, f)).collect() };
+    let under_threads = shown.len().min(if every { PAGE } else { UNDER });
+    let rows: Vec<Value> = if folded { vec![] } else { shown.iter().take(under_threads).map(|f| thread_row(c.hub, c.now, p, f)).collect() };
     r["id"] = json!(qid(c.hub, &pid_of(p)));
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
     r["threads"] = json!(rows); r["more"] = json!(ths.len().saturating_sub(rows.len()));
     // no count of the threads it does not list: a bare number on the row read as noise (the person, 2026-11-15); they are on its page
     r["rest"] = json!(0);
-    // its live swarms, above its threads (a swarm that needs the person is in Needs you, not repeated here)
+    // its live swarms (a swarm that needs the person is in Needs you, not repeated here; collapsed projects only keep running swarms; stale 0-working swarms stay off the sidebar)
     let sw = swarms_of(p, c);
-    r["running"] = json!(running + sw.iter().filter(|x| x.1 == "running").count());
-    r["needsCount"] = json!(needs + sw.iter().filter(|x| x.1 != "running").count());
-    // a running swarm is a row of Running while only what needs attention is listed; with every thread listed it stays under its project
-    let live: Vec<Value> = if every { sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect() } else { vec![] };
+    r["running"] = json!(running + sw.iter().filter(|x| !x.settled && x.word == "running").count());
+    r["needsCount"] = json!(needs + sw.iter().filter(|x| !x.settled && matches!(x.word, "needs" | "failed")).count());
+    let sw_unfolded: Vec<&SwarmEntry> = sw.iter().filter(|x| !x.settled && (x.word == "running" || (x.word == "idle" && c.now.saturating_sub(x.activity) < crate::sidebar::SWARM_STALE))).collect();
+    let live: Vec<Value> = if !q.is_empty() {
+        sw.iter().filter(|x| !x.settled && (hit(&p.name, q) || hit(text_of(&x.row, "title"), q))).map(|x| x.row.clone()).collect()
+    } else if !every {
+        vec![]
+    } else if folded {
+        sw.iter().filter(|x| !x.settled && x.word == "running").map(|x| x.row.clone()).collect()
+    } else {
+        sw_unfolded.iter().map(|x| x.row.clone()).collect()
+    };
+    let under = under_threads + if every { sw_unfolded.len() } else { 0 };
     r["hasBoard"] = json!(p.here.is_some() && hardware(&p.folder)); r["hasSchematic"] = r["hasBoard"].clone();
 
     // no fold while only what needs attention is listed (an older client draws a chevron only for a `fold` action with rows to hide: none);
@@ -457,9 +523,9 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
         needs.push((rank, f.t.activity, r));
     } }
     // a live swarm that waits on the person (a guard paused it, a member asks) or whose member failed: in Needs you, opening its page
-    for p in rows { for (r, w) in swarms_of(p, c) { if w == "running" { continue }
-        if !c.query.is_empty() && !hit(text_of(&r, "title"), c.query) && !hit(&p.name, c.query) { continue }
-        let at = r["activity"].as_u64().unwrap_or(0); needs.push((if w == "needs" { 1 } else { 2 }, at, r)); } }
+    for p in rows { for x in swarms_of(p, c) { if x.settled || !matches!(x.word, "needs" | "failed") { continue }
+        if !c.query.is_empty() && !hit(text_of(&x.row, "title"), c.query) && !hit(&p.name, c.query) { continue }
+        needs.push((if x.word == "needs" { 1 } else { 2 }, x.activity, x.row)); } }
     // an ask outside every project (a bot's chat, a room's run, a scratch chat; a linked machine's too) is in Needs you like any other (a swarm's member is
     // not: its swarm's row says what it asks, swarm_need.rs)
     { let listed: HashSet<&str> = rows.iter().flat_map(|p| p.threads.iter().map(|t| t.id.as_str())).collect();
@@ -486,9 +552,9 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
                 if !c.query.is_empty() && !hit(&f.t.title, c.query) && !hit(&p.name, c.query) { continue }
                 running.push((f.t.activity, thread_row(c.hub, c.now, p, f)));
             }
-            for (r, w) in swarms_of(p, c) { if w != "running" { continue }
-                if !c.query.is_empty() && !hit(text_of(&r, "title"), c.query) && !hit(&p.name, c.query) { continue }
-                running.push((r["activity"].as_u64().unwrap_or(0), r)); }
+            for x in swarms_of(p, c) { if x.settled || x.word != "running" { continue }
+                if !c.query.is_empty() && !hit(text_of(&x.row, "title"), c.query) && !hit(&p.name, c.query) { continue }
+                running.push((x.activity, x.row)); }
         }
         running.sort_by(|a, b| b.0.cmp(&a.0));
         if !running.is_empty() { out.push(json!({"id":"running","kind":"threads","title":"Running","count":running.len(),"rows":running.into_iter().map(|x| x.1).collect::<Vec<_>>()})); }
@@ -511,11 +577,11 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
     let all = Groups::of(st, rows);
     let held = rows.iter().zip(&facts_of).find(|(_, ths)| ths.iter().any(|f| f.t.id == c.selected)).map(|(p, _)| p.key.clone()).unwrap_or_default();
     for (p, ths) in rows.iter().zip(&facts_of) {
-        if !c.query.is_empty() && !hit(&p.name, c.query) && !ths.iter().any(|f| crate::sidebar::word_hit(&f.t.title, c.query)) { continue }
         let gid = all.of_project(st, p);
         let row = project_row(st, c, p, ths, &gid, &all);
+        if !c.query.is_empty() && !hit(&p.name, c.query) && !ths.iter().any(|f| crate::sidebar::word_hit(&f.t.title, c.query)) && row["swarms"].as_array().map_or(true, |a| a.is_empty()) { continue }
         let pin = pinned_at(st, &p.key);
-        let shows = ths.iter().any(|f| f.show && !f.kid && !snoozed(f, c.now)) || row["swarms"].as_array().map_or(false, |a| !a.is_empty()) || row["needsCount"].as_u64().unwrap_or(0) > 0;
+        let shows = ths.iter().any(|f| f.show && !f.kid && !snoozed(f, c.now)) || row["swarms"].as_array().map_or(false, |a| !a.is_empty()) || row["running"].as_u64().unwrap_or(0) > 0 || row["needsCount"].as_u64().unwrap_or(0) > 0;
         if pin > 0 { pinned.push((pin, row)); continue }
         // made quiet: in Quiet at once, until something new happens in it (its asks are in Needs you all the same; the section opens by
         // itself while the open thread is listed under it, `fold_section`)
@@ -556,7 +622,13 @@ pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: b
     let Some(p) = rows.iter().find(|p| p.key == key) else { return Value::Null };
     let ths: Vec<Th> = p.threads.iter().map(|t| facts(st, p, t, c.now)).filter(listed).collect();
     let (mut running, mut needs, mut recent, mut done) = (vec![], vec![], vec![], vec![]);
-    for (r, w) in swarms_of(p, c) { if w == "running" { running.push(r) } else { needs.push(r) } } // its live swarms, as on the sidebar
+    for x in swarms_of(p, c) {
+        if x.settled { done.push(x.row) }
+        else if x.word == "running" { running.push(x.row) }
+        else if matches!(x.word, "needs" | "failed") { needs.push(x.row) }
+        else { recent.push(x.row) }
+    }
+    done.extend(ended_swarms_of(p, c));
     for f in &ths {
         let r = thread_row(c.hub, c.now, p, f);
         if f.needs { needs.push(r) } else if matches!(f.word, "running" | "monitoring" | "limit") { running.push(r) }
@@ -589,8 +661,14 @@ pub fn jump(rows: &[MergedProject], c: &Ctx) -> Value {
     for p in rows {
         let machines: Vec<String> = p.machines.iter().filter_map(|m| m["short"].as_str().map(String::from)).collect();
         v.push((2, p.last_activity, json!({"kind":"project","label":p.name,"place":machines.join(" · "),"action":"project-page","value":p.key,"pid":pid_of(p)})));
-        // its live swarms: a jump opens the swarm's page (its room)
-        for (r, w) in swarms_of(p, c) { v.push((if w == "running" { 1 } else { 0 }, r["activity"].as_u64().unwrap_or(0), json!({"kind":"swarm","label":r["title"],"place":p.name,"action":"room","value":qid(c.hub, text_of(&r, "nav").trim_start_matches("@room:")),"word":w,"status":r["status"],"want":r["want"]}))); }
+        // its swarms (live, settled, and ended): a jump opens the swarm's page (its room)
+        for x in swarms_of(p, c) {
+            let rank = if !x.settled && matches!(x.word, "needs" | "failed") { 0 } else if !x.settled && x.word == "running" { 1 } else { 3 };
+            v.push((rank, x.activity, json!({"kind":"swarm","label":x.row["title"],"place":p.name,"action":"room","value":qid(c.hub, text_of(&x.row, "nav").trim_start_matches("@room:")),"word":x.word,"status":x.row["status"],"want":x.row["want"]})));
+        }
+        for r in ended_swarms_of(p, c) {
+            v.push((3, r["activity"].as_u64().unwrap_or(0), json!({"kind":"swarm","label":r["title"],"place":p.name,"action":"room","value":qid(c.hub, text_of(&r, "nav").trim_start_matches("@room:")),"word":r["word"],"status":r["status"],"want":r["want"]})));
+        }
         for t in &p.threads {
             let f = facts(&State::new(), p, t, c.now); if !listed(&f) { continue } // (a thread hidden here is still found)
             let place = match &t.src { Some(_) if t.machine.is_empty() => p.name.clone(), _ => format!("{} · {}", p.name, crate::mirror::short_name(&t.machine)) };
@@ -621,6 +699,12 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
             let id = value.rsplit_once('|').map_or(value, |(_, r)| r);
             if !crate::net::far::is(id) || !rows.iter().any(|p| p.threads.iter().any(|t| t.id == id && !t.machine.is_empty())) { return None }
             Some(Act { sets: vec![(format!("sidebar.hide.{id}"), now.to_string())], ..none() })
+        }
+        // settle an idle/paused swarm out of the sidebar (`sidebar.swarm.settled.<room>`): a newer post, active turn, or open ask brings it back
+        "swarm-settle" => {
+            let room = value.rsplit_once('|').map_or(value, |(_, r)| r);
+            let r = st.rooms_nav.get(room).filter(|r| r.swarm_live())?;
+            Some(Act { sets: vec![(format!("sidebar.swarm.settled.{room}"), now.max(r.last).to_string())], ..none() })
         }
         // a project row's chevron: fold its threads away, or unfold them (kept per project in the hub, so every client and restart agrees)
         "project-fold" => { if !known(value) { return None } let on = folded_at(st, value) > 0; Some(Act { sets: vec![(format!("sidebar.fold.{value}"), if on { String::new() } else { now.max(1).to_string() })], ..none() }) }

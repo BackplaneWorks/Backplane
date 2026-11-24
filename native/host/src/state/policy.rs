@@ -17,7 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
     "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant.",
-    "order.enabled", "order.estimates", "account.thread.", "allowance.", "sidebar.pin.", "sidebar.visit.", "sidebar.fold.", "sidebar.keys.moved.", "sidebar.archived.", "sidebar.group.", "sidebar.hide.", "sidebar.looked.", "sidebar.cut.", "auth.wait.", "carry.wait.", "room.need.", "room.member.", "accounts.inventory", "fork.", "usage.", "effort.", "speed.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
+    "order.enabled", "order.estimates", "account.thread.", "allowance.", "sidebar.pin.", "sidebar.visit.", "sidebar.fold.", "sidebar.keys.moved.", "sidebar.archived.", "sidebar.group.", "sidebar.hide.", "sidebar.looked.", "sidebar.cut.", "sidebar.swarm.", "auth.wait.", "carry.wait.", "room.need.", "room.member.", "accounts.inventory", "fork.", "usage.", "effort.", "speed.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
 // A thread screen must see its refusal gate's configuration even in the lean copy. Exact global keys keep their values;
 // per-thread keys keep only presence, never the possibly large body. stopped./failed. remain outside this allowlist.
 const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "agent.thinking", "permissions.default"];
@@ -268,7 +268,7 @@ mod tests {
         for k in ["tz.rule.Europe/Helsinki", "tz.rule.Pacific/Auckland"] { assert!(lean_keeps(k), "{k}: the thread view reads the person's zone rule, without it every time stamp is dropped"); }
         for k in ["allowance.claude", "allowance.codex", "accounts.inventory"] { assert!(lean_keeps(k), "{k}: the composer's limits chip reads it"); }
         for k in ["rule.r1", "board.b1"] { assert!(lean_keeps(k), "{k}: Settings, Rules and task board lists it"); }
-        for k in ["room.need.r1", "room.member.r1.thread:t1"] { assert!(lean_keeps(k), "{k}: a swarm's Needs you row says why from it (present/swarm_need.rs)"); }
+        for k in ["room.need.r1", "room.member.r1.thread:t1", "sidebar.swarm.settled.r1"] { assert!(lean_keeps(k), "{k}: a swarm's Needs you row and settle mark (present/swarm_need.rs, sidebar.rs)"); }
         assert!(lean_keeps("models.favorites"), "the thread view and data/1 picker read favorite models from it");
         assert!(lean_keeps("plan.routing"), "Settings › CAD draws the Plan before routing switch from it");
         assert!(lean_keeps("halt.t1.oom5-1"), "the thread view draws a halt card from it");

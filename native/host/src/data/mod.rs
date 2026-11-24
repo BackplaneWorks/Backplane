@@ -627,7 +627,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
                 return Ok(json!({}))
             }
             // `project-page` <key>: the person opened a project's page on this client, a visit (the bench orders by it; at most one write in ten minutes)
-            if !matches!(a, "project-pin" | "project-fold" | "thread-hide" | "group-rename" | "group-move" | "project-archive" | "project-page") { return Err(err("no such action")) }
+            if !matches!(a, "project-pin" | "project-fold" | "thread-hide" | "swarm-settle" | "group-rename" | "group-move" | "project-archive" | "project-page") { return Err(err("no such action")) }
             let Some(pol) = crate::statehost::policies() else { return Err(err("state is starting")) };
             let now = crate::hub::now_ms() / 1000;
             let sets = pol.with_state(|st| crate::present::merged::merged_of(st, hub.mirrors(), |rows| crate::present::sections::act(st, &rows, a, v, &json!({}), now).map(|x| x.sets))).flatten().ok_or_else(|| err("unknown project or group"))?;

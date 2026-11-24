@@ -692,3 +692,106 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     // its time passed: back where it was
     let mut e3 = evs.clone(); e3.push(snz("t1", NOW - 1)); assert_eq!(ids(&view(&one(&e3), &none)), ["needs", "running", "active"]);
 }
+
+#[test] fn collapsed_stale_and_settled_swarms_respect_sidebar_visibility_and_stay_in_history() {
+    let room = |id: &str, state: &str, reason: &str, at: u64| json!({"$":"RoomSet","id":id,"name":format!("Swarm {id}"),"members":"thread:a\nthread:b","kind":"swarm","project":"p1","state":state,"reason":reason,"at":at});
+    // 1. Collapsed project + 0-working idle swarm (even when attention_only is off): hidden from sidebar, running==0, needsCount==0
+    let mut evs = vec![
+        pc("p1", "Backplane", "/n/bp", NOW - 100),
+        tc("a", "p1", NOW - 40), tc("b", "p1", NOW - 35),
+        set(ATTENTION, "off", NOW - 10),
+        room("r_idle", "", "", NOW - 30),
+    ];
+    let s_tmp = st(&evs);
+    let key = merged_projects(&s_tmp, &[], &|_| false, &|_| String::new(), "desk", &[])[0].key.clone();
+    evs.push(set(&format!("sidebar.fold.{key}"), &(NOW - 5).to_string(), NOW - 5));
+    let s = st(&evs);
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    let bp = &sec(&v, "active")["rows"][0];
+    assert_eq!(bp["folded"], true);
+    assert!(bp["swarms"].as_array().unwrap().is_empty(), "collapsed project hides 0-working idle swarm: {bp}");
+    assert_eq!((bp["running"].as_u64(), bp["needsCount"].as_u64()), (Some(0), Some(0)));
+    assert!(sec(&v, "running").is_null() && sec(&v, "needs").is_null());
+
+    // 2. Collapsed project + working > 0 swarm: shown under collapsed project and counted as running
+    let mut evs_work = evs.clone();
+    evs_work.push(turn("a", "running", NOW - 1));
+    let s_work = st(&evs_work);
+    let rows_work = merged_projects(&s_work, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v_work = build(&s_work, &rows_work, &Value::Null, &ctx(&HashSet::new()));
+    let bp_work = &sec(&v_work, "active")["rows"][0];
+    assert_eq!(bp_work["swarms"].as_array().unwrap().len(), 1);
+    assert!(bp_work["running"].as_u64().unwrap() >= 1);
+
+    // 3. Collapsed project + needs swarm (open approval on a member): shown in Needs you and needsCount==1
+    let mut evs_ask = evs.clone();
+    evs_ask.push(ask("q1", "a", "approval"));
+    let s_ask = st(&evs_ask);
+    let rows_ask = merged_projects(&s_ask, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v_ask = build(&s_ask, &rows_ask, &Value::Null, &ctx(&HashSet::new()));
+    assert_eq!(sec(&v_ask, "needs")["rows"][0]["nav"], "@room:r_idle");
+    assert_eq!(sec(&v_ask, "active")["rows"][0]["needsCount"], 1);
+
+    // 4. Stale (> 24h) 0-working swarm: hidden from sidebar even when expanded, NOT in Running/Needs you, still in Project Page Recent and Ctrl+K
+    let stale_at = NOW - crate::sidebar::SWARM_STALE - 60;
+    let s_stale = st(&[
+        pc("p1", "Backplane", "/n/bp", NOW - 100),
+        tc("a", "p1", NOW - 40), tc("b", "p1", NOW - 35),
+        set(ATTENTION, "off", NOW - 10),
+        room("r_old", "", "", stale_at),
+    ]);
+    let rows_stale = merged_projects(&s_stale, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v_stale = build(&s_stale, &rows_stale, &Value::Null, &ctx(&HashSet::new()));
+    let bp_stale = &sec(&v_stale, "active")["rows"][0];
+    assert!(bp_stale["swarms"].as_array().unwrap().is_empty(), "stale 0-working swarm hidden even when expanded");
+    assert!(sec(&v_stale, "running").is_null() && sec(&v_stale, "needs").is_null());
+    let pg_stale = page(&s_stale, &rows_stale, &rows_stale[0].key, &ctx(&HashSet::new()), true);
+    assert!(titles(&pg_stale["sections"][2]).contains(&"Swarm r_old".to_string()), "stale live swarm remains on Project Page Recent: {:?}", pg_stale["sections"][2]);
+    assert!(jump(&rows_stale, &ctx(&HashSet::new())).as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_old"));
+
+    // 5. swarm-settle action dismisses paused/idle swarm to Project Page Done and keeps it in Ctrl+K; newer post resurfaces it
+    let mut paused_evs = vec![
+        pc("p1", "Backplane", "/n/bp", NOW - 100),
+        tc("a", "p1", NOW - 40), tc("b", "p1", NOW - 35),
+        set(ATTENTION, "off", NOW - 10),
+        room("r_pause", "paused", "circular", NOW - 30),
+    ];
+    let s_paused = st(&paused_evs);
+    let rows_paused = merged_projects(&s_paused, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let a = act(&s_paused, &rows_paused, "swarm-settle", "h|r_pause", &json!({}), NOW).unwrap();
+    assert_eq!(a.sets, vec![("sidebar.swarm.settled.r_pause".to_string(), NOW.to_string())]);
+    for (k, val) in &a.sets { paused_evs.push(set(k, val, NOW)); }
+    let s_settled = st(&paused_evs);
+    let rows_settled = merged_projects(&s_settled, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v_settled = build(&s_settled, &rows_settled, &Value::Null, &ctx(&HashSet::new()));
+    assert!(sec(&v_settled, "needs").is_null(), "settled swarm leaves Needs you");
+    assert!(sec(&v_settled, "active")["rows"][0]["swarms"].as_array().unwrap().is_empty());
+    let pg_settled = page(&s_settled, &rows_settled, &rows_settled[0].key, &ctx(&HashSet::new()), true);
+    assert_eq!(titles(&pg_settled["sections"][3]), ["Swarm r_pause"], "settled swarm moves to Project Page Done");
+    assert!(jump(&rows_settled, &ctx(&HashSet::new())).as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_pause"));
+    // Newer post after settle brings it back
+    paused_evs.push(json!({"$":"RoomPosted","id":"p2","room":"r_pause","from":"opus","text":"new","hop":1,"at":NOW + 10}));
+    let s_resurf = st(&paused_evs);
+    let rows_resurf = merged_projects(&s_resurf, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v_resurf = build(&s_resurf, &rows_resurf, &Value::Null, &ctx(&HashSet::new()));
+    assert_eq!(sec(&v_resurf, "needs")["rows"][0]["nav"], "@room:r_pause");
+
+    // 6. Finished (done / stopped) swarm is hidden from sidebar and appears in Project Page Done and Ctrl+K
+    let s_done = st(&[
+        pc("p1", "Backplane", "/n/bp", NOW - 100),
+        tc("a", "p1", NOW - 40), tc("b", "p1", NOW - 35),
+        set(ATTENTION, "off", NOW - 10),
+        room("r_done", "done", "", NOW - 20),
+        room("r_stop", "stopped", "person", NOW - 25),
+    ]);
+    let rows_done = merged_projects(&s_done, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v_done = build(&s_done, &rows_done, &Value::Null, &ctx(&HashSet::new()));
+    assert!(sec(&v_done, "active")["rows"][0]["swarms"].as_array().unwrap().is_empty());
+    let pg_done = page(&s_done, &rows_done, &rows_done[0].key, &ctx(&HashSet::new()), true);
+    let done_titles = titles(&pg_done["sections"][3]);
+    assert!(done_titles.contains(&"Swarm r_done".to_string()) && done_titles.contains(&"Swarm r_stop".to_string()), "{done_titles:?}");
+    let jmp = jump(&rows_done, &ctx(&HashSet::new()));
+    assert!(jmp.as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_done"));
+    assert!(jmp.as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["value"] == "h|r_stop"));
+}

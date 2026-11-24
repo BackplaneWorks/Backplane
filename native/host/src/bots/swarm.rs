@@ -294,13 +294,29 @@ impl Bots {
         for r in rooms {
             let mut all_idle = true; let mut infos = vec![];
             for th in r.threads() {
-                let info = self.inbox.info(&th).await; if info.as_ref().map_or(true, |i| i.word() != "idle" && i.word() != "removed") { all_idle = false }
+                let info = self.inbox.info(&th).await;
+                if info.as_ref().map_or(false, |i| matches!(i.word(), "working" | "monitoring" | "waiting")) { all_idle = false }
                 infos.push((th.clone(), info));
                 if r.paused() { continue }
                 let due = self.swarm.due.lock().unwrap().contains_key(&(r.id.clone(), th.clone())); if !due { self.give_later(&r.id, &[th.clone()], &[], now).await }
             }
             self.members_failed(&r, &infos, now).await;
-            if r.paused() { continue }
+            if r.paused() {
+                let w = self.world().await; let Some(cur) = w.room(&r.id).cloned() else { continue };
+                if cur.paused() && !cur.ended() && all_idle && now.saturating_sub(cur.last) >= crate::sidebar::SWARM_STALE {
+                    let all_claims = claims(&w, &cur.id);
+                    let evs = vec![
+                        cur.set_ev(now, |x| { x.state = "stopped".into(); x.reason = "idle".into() }),
+                        need_ev(&cur.id, &with_pause(&need_rec(&w, &cur.id), None), now),
+                        self.guard_post(&cur.id, "Idle for 24 hours: swarm ended automatically.", &[], true, now),
+                    ];
+                    if self.hub.commit_many(&w.also(now, evs)).await.is_ok() {
+                        drop(w);
+                        self.release_later(all_claims, now);
+                    }
+                }
+                continue
+            }
             let w = self.world().await; let Some(cur) = w.room(&r.id).cloned() else { continue }; if cur.paused() { continue }
             let used = w.room_used.get(&r.id).copied().unwrap_or_default();
             let why = if cur.budget.hit(&used).is_some() { Some("budget") } else if all_idle && now.saturating_sub(cur.last) >= LIMITS.idle && self.swarm.due.lock().unwrap().keys().all(|k| k.0 != r.id) { Some("idle") } else { None };

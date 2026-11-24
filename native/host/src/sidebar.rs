@@ -203,31 +203,63 @@ fn kids_hidden<'a>(st: &'a State) -> HashSet<&'a str> {
     // a swarm's members (docs/SWARM.md): the swarm is one row of its project, its threads open from its page
     k.extend(st.swarm_of.keys().map(String::as_str)); k
 }
+/// A swarm idle for 24 hours settles out of the sidebar and auto-ends when paused (`bots/life.rs` `IDLE`).
+pub const SWARM_STALE: u64 = 24 * 3600;
+
+/// Members of a swarm whose turn is running now (or waiting on restart carry).
+pub fn swarm_working(st: &State, r: &crate::state::RoomNav) -> usize {
+    r.threads.iter().filter(|t| st.threads.get(t.as_str()).map_or(false, |x| {
+        x.turn == Turn::Running || (x.turn == Turn::Interrupted && st.settings.get(&format!("carry.wait.{t}")).map_or(false, |v| v == "1"))
+    })).count()
+}
+/// Whether any member of the swarm owns running background/watched/delegated work.
+pub fn swarm_monitoring(st: &State, r: &crate::state::RoomNav) -> bool {
+    r.threads.iter().any(|t| crate::state::visible::owns_work(st, t))
+}
+/// When the person settled a swarm (`sidebar.swarm.settled.<room>`), 0 for never.
+pub fn swarm_settled_at(st: &State, id: &str) -> u64 {
+    st.settings.get(&format!("sidebar.swarm.settled.{id}")).and_then(|v| v.parse().ok()).unwrap_or(0)
+}
+/// Whether a swarm was settled by the person and has had no newer activity, active work, or open ask since.
+pub fn swarm_settled(st: &State, id: &str, r: &crate::state::RoomNav) -> bool {
+    let at = swarm_settled_at(st, id);
+    at > 0 && at >= r.last && swarm_working(st, r) == 0 && !swarm_monitoring(st, r) && !r.threads.iter().any(|t| crate::state::visible::wants_person(st, t))
+}
+
 /// A live swarm as the sidebar's sections place it (lane J, present/sections.rs): one row under its project, opened by `nav`. `need`: what it wants of the
 /// person, in one line with its actions (present/swarm_need.rs), when anything.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SwarmRow { pub id: String, pub project: String, pub title: String, pub word: &'static str, pub activity: u64, pub nav: String, pub need: Option<crate::present::swarm_need::Need> }
+pub struct SwarmRow { pub id: String, pub project: String, pub title: String, pub word: &'static str, pub activity: u64, pub nav: String, pub need: Option<crate::present::swarm_need::Need>, pub working: usize, pub monitoring: bool, pub asking: bool, pub settled: bool }
 /// The live swarms (active or paused), newest first. `word` in the sections' words: `needs` when it waits on the person (a guard paused it and the pause is
-/// theirs, a member asks or needs their sign-in), `failed` when a member's last turn failed for another reason, else `running` (a swarm the person paused, and a
-/// bot's swarm whose routine pause its starter handles, included). A swarm's member threads are in `State::swarm_of`: they are no row of their own.
+/// theirs, a member asks or needs their sign-in), `failed` when a member's last turn failed for another reason, `running` when not paused and at least one
+/// member is working or monitoring owned work, else `idle` (paused by person/starter, settled, or 0 working). A swarm's member threads are in `State::swarm_of`: they are no row of their own.
 pub fn live_swarms(st: &State) -> Vec<SwarmRow> {
     let mut v: Vec<SwarmRow> = st.rooms_nav.iter().filter(|(_, r)| r.swarm_live()).map(|(id, r)| {
-        let rec: Value = st.settings.get(&crate::present::swarm_need::key(id)).and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
-        let names: Vec<String> = r.threads.iter().map(|t| st.settings.get(&format!("room.member.{id}.thread:{t}")).and_then(|s| serde_json::from_str::<Value>(s).ok()).and_then(|m| m["name"].as_str().map(str::to_string)).unwrap_or_else(|| "peer".into())).collect();
-        let ms: Vec<crate::present::swarm_need::Member> = r.threads.iter().zip(&names).map(|(t, n)| { let th = st.threads.get(t.as_str());
-            crate::present::swarm_need::Member { thread: t, name: n, provider: th.map_or("", |x| x.provider.as_str()), failed: th.map_or(false, |x| x.turn == Turn::Failed), asking: crate::state::visible::wants_person(st, t) } }).collect();
-        let need = crate::present::swarm_need::of(&r.state, &r.reason, &rec, &ms);
-        let word = match need.as_ref().map(|n| n.why) { Some("failed") => "failed", Some(_) => "needs", None => "running" };
-        SwarmRow { id: id.clone(), project: r.project.clone(), title: r.name.clone(), word, activity: r.last, nav: format!("@room:{id}"), need } }).collect();
+        let working = swarm_working(st, r);
+        let monitoring = swarm_monitoring(st, r);
+        let asking = r.threads.iter().any(|t| crate::state::visible::wants_person(st, t));
+        let settled = swarm_settled(st, id, r);
+        let need = if settled { None } else {
+            let rec: Value = st.settings.get(&crate::present::swarm_need::key(id)).and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
+            let names: Vec<String> = r.threads.iter().map(|t| st.settings.get(&format!("room.member.{id}.thread:{t}")).and_then(|s| serde_json::from_str::<Value>(s).ok()).and_then(|m| m["name"].as_str().map(str::to_string)).unwrap_or_else(|| "peer".into())).collect();
+            let ms: Vec<crate::present::swarm_need::Member> = r.threads.iter().zip(&names).map(|(t, n)| { let th = st.threads.get(t.as_str());
+                crate::present::swarm_need::Member { thread: t, name: n, provider: th.map_or("", |x| x.provider.as_str()), failed: th.map_or(false, |x| x.turn == Turn::Failed), asking: crate::state::visible::wants_person(st, t) } }).collect();
+            crate::present::swarm_need::of(&r.state, &r.reason, &rec, &ms)
+        };
+        let active = r.state != "paused" && (working > 0 || monitoring);
+        let word = if settled { "idle" } else {
+            match need.as_ref().map(|n| n.why) { Some("failed") => "failed", Some(_) => "needs", None if active => "running", None => "idle" }
+        };
+        SwarmRow { id: id.clone(), project: r.project.clone(), title: r.name.clone(), word, activity: r.last, nav: format!("@room:{id}"), need, working, monitoring, asking, settled } }).collect();
     v.sort_by(|a, b| b.activity.cmp(&a.activity).then(a.id.cmp(&b.id))); v
 }
-/// A project's swarms as sidebar rows, newest first: the live ones only (active or paused; one that is over leaves, as a settled thread does).
+/// A project's swarms as sidebar rows, newest first: the live unsettled ones only (active or paused; one that is over or settled leaves).
 /// `working`: members whose turn runs now. A row opens the swarm's room page (`@room:<id>`).
 pub fn swarm_rows(st: &State, o: &Opts, pid: &str) -> Vec<Value> {
-    let mut v: Vec<(&String, &crate::state::RoomNav)> = st.rooms_nav.iter().filter(|(_, r)| r.swarm_live() && r.project == pid).collect();
+    let mut v: Vec<(&String, &crate::state::RoomNav)> = st.rooms_nav.iter().filter(|(id, r)| r.swarm_live() && r.project == pid && !swarm_settled(st, id, r)).collect();
     v.sort_by(|a, b| b.1.created.cmp(&a.1.created).then(b.0.cmp(a.0)));
-    v.into_iter().map(|(id, r)| { let working = r.threads.iter().filter(|t| st.threads.get(t.as_str()).map_or(false, |x| x.turn == Turn::Running)).count();
-        json!({"id":q(o, id),"name":r.name,"state":if r.state.is_empty() { "active" } else { r.state.as_str() },"members":r.threads.len(),"working":working,"ago":ago(o.now, r.last),"nav":format!("@room:{id}")}) }).collect()
+    v.into_iter().map(|(id, r)| { let working = swarm_working(st, r); let monitoring = swarm_monitoring(st, r);
+        json!({"id":q(o, id),"name":r.name,"state":if r.state.is_empty() { "active" } else { r.state.as_str() },"members":r.threads.len(),"working":working,"monitoring":monitoring,"ago":ago(o.now, r.last),"nav":format!("@room:{id}")}) }).collect()
 }
 
 struct Shelves<'a> { pinned: Vec<&'a str>, active: Vec<&'a str>, settled: Vec<&'a str>, hidden: Vec<&'a str>, snoozed: Vec<&'a str> }
@@ -578,12 +610,21 @@ mod tests {
     fn tc(id: &str, at: u64) -> String { format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":{at}}}"#) }
     #[test] fn live_swarms_are_one_row_each_and_a_guard_pause_needs_the_person() {
         let room = |id: &str, state: &str, reason: &str| format!(r#"{{"$":"RoomSet","id":"{id}","name":"S {id}","members":"thread:a\nthread:b","kind":"swarm","project":"p1","state":"{state}","reason":"{reason}","at":20}}"#);
-        let s = fold(&[PC, &tc("a", 11), &tc("b", 12), &room("r1", "", ""), &room("r2", "paused", "circular"), &room("r3", "paused", "person"), &room("r4", "done", "")]);
+        let turn_a = r#"{"$":"TurnChanged","thread":"a","state":"running","at":15}"#;
+        let s = fold(&[PC, &tc("a", 11), &tc("b", 12), turn_a, &room("r1", "", ""), &room("r2", "paused", "circular"), &room("r3", "paused", "person"), &room("r4", "done", "")]);
         let rows = live_swarms(&s); let w: Vec<(&str, &str)> = rows.iter().map(|r| (r.id.as_str(), r.word)).collect();
         assert_eq!(w.len(), 3, "a swarm that is over is no row: {w:?}");
-        assert!(w.contains(&("r1", "running")) && w.contains(&("r2", "needs")) && w.contains(&("r3", "running")), "{w:?}");
+        assert!(w.contains(&("r1", "running")) && w.contains(&("r2", "needs")) && w.contains(&("r3", "idle")), "{w:?}");
         assert_eq!(rows[0].nav, format!("@room:{}", rows[0].id));
         assert!(s.swarm_of.contains_key("a") && s.swarm_of.contains_key("b"), "the members are marked: no rows of their own");
+        // active with 0 working and no monitoring work is idle; monitoring keeps it running; settled marks settled=true and word=idle
+        let s_idle = fold(&[PC, &tc("a", 11), &tc("b", 12), &room("r1", "", "")]);
+        assert_eq!(live_swarms(&s_idle)[0].word, "idle", "0 working active swarm is idle");
+        let s_mon = fold(&[PC, &tc("a", 11), &tc("b", 12), r#"{"$":"SettingSet","key":"bg.a","value":"b1\twatching\t\t\tshell","at":15}"#, &room("r1", "", "")]);
+        assert_eq!(live_swarms(&s_mon)[0].word, "running", "monitoring member keeps swarm running");
+        let s_set = fold(&[PC, &tc("a", 11), &tc("b", 12), &room("r2", "paused", "circular"), r#"{"$":"SettingSet","key":"sidebar.swarm.settled.r2","value":"20","at":25}"#]);
+        let row = &live_swarms(&s_set)[0];
+        assert!(row.settled && row.word == "idle" && row.need.is_none());
     }
     fn opts<'a>(open: &'a HashSet<String>, now: u64) -> Opts<'a> { Opts { hub: "h", now, selected: "", open, older_open: false, query: "" } }
 
