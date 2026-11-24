@@ -124,8 +124,8 @@ impl Agents {
     /// `turn_guard_start`; `person`: the person's own message started this turn (they can answer a mass-deletion ask).
     pub async fn turn_guard_start_by(self: &Arc<Self>, th: &str, cwd: &str, text: Option<&str>, person: bool) -> Result<(), String> {
         if crate::copy::on() || cwd.is_empty() { return Ok(()) }
-        // a bot's own thread works in its own folder (bots/rpc.rs makes it a repository), not a project: never blocked for git, never snapshotted
-        if self.world().await.bot_of.contains_key(th) { return Ok(()) }
+        // a bot's own thread or a project-free Quick Chat works in its own folder, never blocked for git, never snapshotted
+        { let w = self.world().await; if w.bot_of.contains_key(th) || w.threads.get(th).is_some_and(|t| t.project == crate::sidebar::CHATS) { return Ok(()) } }
         if !git_runs().await { self.git_missing(th).await; return Err(GIT_MISSING.into()) }
         self.close_git_asks(th).await; // installed meanwhile (setup, or this ask's own press): the ask is done
         self.guard_begin(th, cwd, text, true).await;

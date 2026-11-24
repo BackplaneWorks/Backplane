@@ -8,7 +8,7 @@ use tokio_tungstenite::connect_async;
 
 struct Fake(Arc<Hub>);
 impl RpcHandler for Fake {
-    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set", "thread.review", "thread.snooze"] }
+    fn methods(&self) -> &'static [&'static str] { &["project.add", "project.new", "thread.create", "thread.move_project", "thread.modes", "thread.effort", "thread.provider", "ask.answer", "turn.interrupt", "thread.pin", "thread.rename", "thread.detach", "setting.set", "thread.review", "thread.snooze"] }
     fn call<'a>(&'a self, h: &'a Arc<Hub>, _w: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let _ = &self.0; let at = now_ms() / 1000;
@@ -16,6 +16,7 @@ impl RpcHandler for Fake {
             match m {
                 "project.add" => { let root = s(p, "path"); h.commit(&json!({"$":"ProjectCreated","id":format!("p{n}"),"title":root.rsplit('/').next().unwrap_or(""),"root":root,"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 "thread.create" => { let t = format!("t{n}"); h.commit(&json!({"$":"ThreadCreated","id":t,"project":s(p,"project"),"title":if s(p,"title").is_empty(){"New thread"}else{s(p,"title")},"env":if s(p,"env").is_empty(){"(setting)"}else{s(p,"env")},"branch":"","worktree":"","provider":"claude","model":"","at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true,"thread":t})] }
+                "thread.move_project" => { h.commit(&json!({"$":"ThreadProjectSet","id":s(p,"thread"),"project":s(p,"project"),"at":at})).await.unwrap(); vec![json!({"t":"reply","id":id,"ok":true})] }
                 // /project's request: a folder named "full" holds something, any other is made with its first thread
                 "project.new" => if s(p, "path") == "full" { vec![json!({"t":"reply","id":id,"ok":false,"error":"/h/full is there and is not empty.","result":{"error":"/h/full is there and is not empty.","exists":"/h/full"}})] }
                     else { assert_eq!(p["empty"], true); vec![json!({"t":"reply","id":id,"ok":true,"thread":format!("made-{}", s(p, "text").len())})] },
@@ -69,10 +70,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider", "projecthome", "ringnotes"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider", "projecthome", "ringnotes", "chats"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider", "projecthome", "ringnotes"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider", "projecthome", "ringnotes", "chats"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -918,7 +919,7 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
     assert_eq!(r["result"]["mode"], "viewer");
     let expected_local = serde_json::to_value(rail(RailInput {
         board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers,
-        simulation: false, altium: src.altium, page: "files", diff: false, present: &[],
+        simulation: false, altium: src.altium, page: "files", diff: false, no_project: false, present: &[],
     })).unwrap();
     assert_eq!(r["result"]["rail"], expected_local);
     assert_eq!(r["result"]["has"], json!({"board": src.board, "schematic": src.schematic, "mech": src.mech, "gerbers": src.gerbers}));
@@ -933,7 +934,7 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
     assert_eq!(rd["ok"], true);
     let expected_diff = serde_json::to_value(rail(RailInput {
         board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers,
-        simulation: false, altium: src.altium, page: "files", diff: true, present: &[],
+        simulation: false, altium: src.altium, page: "files", diff: true, no_project: false, present: &[],
     })).unwrap();
     assert_eq!(rd["result"]["rail"], expected_diff);
 
@@ -943,7 +944,7 @@ async fn viewer_rail_returns_hub_rail_for_local_and_far_threads() {
     assert_eq!(rf["result"]["mode"], "viewer");
     let expected_far = serde_json::to_value(rail(RailInput {
         board: true, schematic: true, mech: true, gerbers: false,
-        simulation: false, altium: false, page: "board", diff: false, present: &[],
+        simulation: false, altium: false, page: "board", diff: false, no_project: false, present: &[],
     })).unwrap();
     assert_eq!(rf["result"]["rail"], expected_far);
     assert_eq!(rf["result"]["has"], json!({"board": true, "schematic": true, "mech": true, "gerbers": false}));
@@ -1700,4 +1701,57 @@ fn probed_models(installed: &[&str]) -> Value {
     assert_eq!(r4["result"]["kind"], "none", "{r4}");
     let r5 = ask(&mut ws, 5, "link.resolve", json!({"url": format!("file://{}/secret.pdf", outside.to_string_lossy()), "thread": "bot_th"})).await;
     assert_eq!(r5["result"]["kind"], "none", "{r5}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn quick_chats_over_data_create_list_rail_and_move_to_project() {
+    let (_h, port) = up("chats-data").await;
+    let mut ws = open(port, "&enc=json").await;
+    let hello = next(&mut ws).await;
+    assert!(hello["features"].as_array().unwrap().contains(&json!("chats")), "{hello}");
+
+    // Scratch remains closed
+    let sr = ask(&mut ws, 1, "thread.create", json!({"project":"scratch","text":"hi"})).await;
+    assert_eq!(sr["error"], super::SCRATCH_CLOSED);
+
+    // Quick chat creation over data/1
+    let r = ask(&mut ws, 2, "thread.create", json!({"project":"chats"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let cid = r["result"]["thread"]["id"].as_str().unwrap().to_string();
+    assert_eq!((r["result"]["thread"]["project"].as_str(), r["result"]["thread"]["chat"].as_bool(), r["result"]["thread"]["history"].as_bool(), r["result"]["thread"]["title"].as_str()),
+        (Some("chats"), Some(true), Some(false), Some("New chat")));
+
+    // Excluded from projects.list and mentions.list(%), included in threads.list and chats.list
+    let ps = ask(&mut ws, 3, "projects.list", json!({})).await;
+    assert!(!ps["result"]["projects"].as_array().unwrap().iter().any(|p| p["id"] == "chats"));
+    let mp = ask(&mut ws, 17, "mentions.list", json!({"kind":"%"})).await;
+    assert!(!mp["result"]["items"].as_array().unwrap().iter().any(|x| x["id"] == "chats"));
+    let mt = ask(&mut ws, 18, "mentions.list", json!({"kind":">","q":"New"})).await;
+    assert!(mt["result"]["items"].as_array().unwrap().iter().any(|x| x["id"] == cid && x["detail"] == "Chats"));
+    let ts = ask(&mut ws, 4, "threads.list", json!({})).await;
+    assert!(ts["result"]["threads"].as_array().unwrap().iter().any(|t| t["id"] == cid));
+    let cs = ask(&mut ws, 5, "chats.list", json!({})).await;
+    assert_eq!(cs["result"]["count"], 1);
+    assert_eq!(cs["result"]["threads"][0]["id"], cid);
+    assert_eq!(ask(&mut ws, 6, "chats.list", json!({"q":"new"})).await["result"]["threads"].as_array().unwrap().len(), 1);
+    assert_eq!(ask(&mut ws, 7, "chats.list", json!({"q":"nomatch"})).await["result"]["threads"].as_array().unwrap().len(), 0);
+    assert_eq!(ask(&mut ws, 8, "chats.list", json!({"settled":true})).await["result"]["threads"].as_array().unwrap().len(), 0);
+
+    // viewer.rail for a quick chat exposes only non-project tools
+    let vr = ask(&mut ws, 10, "viewer.rail", json!({"thread": &cid, "page": "files"})).await;
+    assert_eq!(vr["ok"], true, "{vr}");
+    let rids: Vec<_> = vr["result"]["rail"].as_array().unwrap().iter().map(|x| x["id"].as_str().unwrap()).collect();
+    assert_eq!(rids, ["files", "browser", "terminal", "commands"]);
+
+    // thread.move_project moves the chat into p1
+    let mv = ask(&mut ws, 11, "thread.move_project", json!({"thread": &cid, "project": "p1"})).await;
+    assert_eq!(mv["ok"], true, "{mv}");
+    assert_eq!((mv["result"]["thread"]["project"].as_str(), mv["result"]["thread"]["chat"].as_bool()), (Some("p1"), Some(false)));
+    assert_eq!(ask(&mut ws, 12, "chats.list", json!({})).await["result"]["count"], 0);
+
+    // sidebar.act "row-move-project" works too
+    let r2 = ask(&mut ws, 14, "thread.create", json!({"project":"chats","title":"Second"})).await;
+    let cid2 = r2["result"]["thread"]["id"].as_str().unwrap().to_string();
+    let act = ask(&mut ws, 15, "sidebar.act", json!({"action":"row-move-project","value":format!("{cid2}\u{1f}p1")})).await;
+    assert_eq!(act["ok"], true, "{act}");
+    assert_eq!(ask(&mut ws, 16, "chats.list", json!({})).await["result"]["count"], 0);
 }

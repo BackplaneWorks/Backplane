@@ -886,8 +886,8 @@ impl Actor {
         let mut ev: Vec<Value> = vec![];
         let takes_ride = !ride.is_empty() && (codex || sbs || !was_running);
         if takes_ride { ev.extend(codex::ride_done(&th, &ride, "with a new turn", now)) } // Ride.post: an idle thread starts with the mail still waiting
-        let first_title = if t.title == "New thread" && person && role == "user" && origin.is_none() { Some(rules::title_of(&text)).filter(|x| !x.is_empty()) } else { None }; // Title.out: the first line now, a model's title after
-        if t.title == "New thread" { ev.push(json!({"$":"ThreadRenamed","id":th,"title":rules::title_of(&text),"at":now})) }
+        let first_title = if matches!(t.title.as_str(), "New thread" | "New chat") && person && role == "user" && origin.is_none() { Some(rules::title_of(&text)).filter(|x| !x.is_empty()) } else { None }; // Title.out: the first line now, a model's title after
+        if matches!(t.title.as_str(), "New thread" | "New chat") { ev.push(json!({"$":"ThreadRenamed","id":th,"title":rules::title_of(&text),"at":now})) }
         // Steer.change: a message into a streaming reply posts what streamed, up to its last line break, ahead of it
         let head = rules::steer_head(&self.live);
         if !head.is_empty() {

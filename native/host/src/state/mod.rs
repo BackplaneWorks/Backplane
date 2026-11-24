@@ -122,7 +122,7 @@ const KNOWN: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadCreated", "T
     "TodosSet", "UsageSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
     "MemorySaved", "MemoryForgot", "SpaceSet", "PeerSet", "BotWoke", "SpacePageSet", "WorkSet", "UberSet", "UberOp", "ThreadLaunched", "WakeSet", "WakeDropped",
     "LockChanged", "RoutinePlan", "RoutineSlot", "RoutineDone", "Reminded", "TaskSet", "TaskDeleted", "MessageFrom", "ConvSet", "MailPosted", "MailMarked", "MailTagged",
-    "RunSet", "CharterSet", "DecisionLogged", "TurnUsage", "DeployAsked", "DeployBuilt", "ThreadParentSet", "ThreadWoke", "TodosChanged", "DevicePrefs", "PushOrdered", "PushSent", "PushCleared"];
+    "RunSet", "CharterSet", "DecisionLogged", "TurnUsage", "DeployAsked", "DeployBuilt", "ThreadParentSet", "ThreadWoke", "TodosChanged", "DevicePrefs", "PushOrdered", "PushSent", "PushCleared", "ThreadProjectSet"];
 
 /// Link.from: the sender in a link id "t:<from>:<n>" ("" for any other id): the second ':'-field when the first is "t" and a third follows
 fn link_from(id: &str) -> &str {
@@ -201,6 +201,11 @@ impl State {
                     branch: s(e, "branch")?.into(), worktree: s(e, "worktree")?.into(), provider: s(e, "provider")?.into(), model: s(e, "model")?.into(), session: String::new(), deleted: false });
             }
             "ThreadRenamed" => { let id = s(e, "id")?; let t = s(e, "title")?.to_string(); self.thread_mut(id).title = t; }
+            "ThreadProjectSet" => {
+                let id = s(e, "id")?; let p = s(e, "project")?.to_string();
+                let t = self.thread_mut(id);
+                t.project = p; t.worktree_mode = false; t.branch.clear(); t.worktree.clear();
+            }
             "MessagePosted" => {
                 let th = s(e, "thread")?; let id = s(e, "msg")?; let role = s(e, "role")?; let at = n(e, "at")?; let text = s(e, "text")?;
                 if role == "user" { let t = self.thread_mut(th); t.activity = at; t.unsettled_at = at; }

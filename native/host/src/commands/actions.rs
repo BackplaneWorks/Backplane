@@ -103,6 +103,13 @@ pub fn act(req: &Req) -> Option<ActOut> {
             if th.is_empty() || parent.is_empty() || th == parent { return None }
             a.rpc("thread.reparent", json!({"thread": th, "parent": parent})); a.set("@del", ""); a.set("@menu", "");
         }
+        // promote a Quick Chat into an existing project (`<thread>\u{1f}<project>`, thread.move_project)
+        "row-move-project" => {
+            let Some((raw_th, project)) = v.split_once('\u{1f}') else { return None };
+            let th = raw_th.rsplit_once('|').map_or(raw_th, |(_, r)| r);
+            if th.is_empty() || project.is_empty() { return None }
+            a.rpc("thread.move_project", json!({"thread": th, "project": project})); a.set("@del", ""); a.set("@menu", "");
+        }
         // the project's menu: Rename opens the same rename box a thread's does, on the project (rename-save sends project.rename)
         "proj-rename" => {
             if v.is_empty() { return None }
@@ -202,6 +209,13 @@ pub fn act(req: &Req) -> Option<ActOut> {
         "run-on" => { let (p, to) = v.split_once('|')?; if p.is_empty() { return None } a.set(&format!("@runon.{p}"), to); a.set("@menu", ""); }
         "new-thread" => {
             if v.is_empty() { return None } // no project named: the new-bot form, the helper's
+            if v == crate::sidebar::CHATS {
+                let rid = a.rid.to_string();
+                let at = format!("{}|{}", r.session["info"]["local.machine"].as_str().unwrap_or(""), r.session["info"]["local.generation"].as_str().unwrap_or(""));
+                a.set("@del", ""); a.set("@menu", ""); a.set("@want.viewer", ""); a.set("@want.new", &rid); a.set("@want.new.at", &at);
+                a.rpc("thread.create", json!({"project": crate::sidebar::CHATS, "title": "New chat"}));
+                return Some(a.out())
+            }
             // `<target>\u{1f}<picked>`: the window says which machine the person picked; a target on any other machine is refused, never made there
             let (v, picked) = v.split_once('\u{1f}').unwrap_or((v, ""));
             let chosen = draft(r.session, &format!("@runon.{v}")).to_string(); let v = if chosen.is_empty() { v } else { chosen.as_str() };

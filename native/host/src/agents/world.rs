@@ -86,7 +86,7 @@ impl World {
 
     pub fn apply(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 41] = ["WorktreeSkipped", "ThreadSettled", "ThreadUnsettled", "ThreadWoke", "LockChanged", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
+        const READ: &[&str] = &["WorktreeSkipped", "ThreadSettled", "ThreadUnsettled", "ThreadWoke", "LockChanged", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "TurnQueued", "QueueTaken", "QueueRemoved", "QueueTakenOne", "ThreadParentSet", "ProjectRemoved", "ThreadLaunched", "TaskDelegated", "TaskStateSet", "TaskDelivered", "WorkSet", "AskOpened", "AskClosed", "ThreadRenamed", "ThreadProjectSet", "ProjectCreated", "ThreadCreated", "WorktreeSet", "ProviderSet", "ModesSet", "SessionSet", "TurnChanged", "MessagePosted", "ActivityLogged", "UsageSet", "SettingSet", "TurnUsage", "ThreadArchived", "ThreadDeleted", "ThreadForked", "QueueTaken", "TurnQueued", "ThreadWoke"];
         if !READ.contains(&t) { return }
         let Ok(v) = serde_json::from_str::<Value>(line) else { return };
         let g = |k: &str| v.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -121,6 +121,7 @@ impl World {
             "ModesSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.runtime = g("runtime"); x.interaction = g("interaction"); x.model = g("model") },
             "SessionSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.session = g("session") },
             "ThreadRenamed" => if let Some(x) = self.threads.get_mut(&g("id")) { x.title = g("title") },
+            "ThreadProjectSet" => if let Some(x) = self.threads.get_mut(&g("id")) { x.project = g("project"); x.env = "local".into(); x.branch.clear(); x.worktree.clear(); x.wt_skipped = false; x.session.clear(); },
             "AskOpened" => { self.asks.insert(g("id"), Ask { thread: g("thread"), kind: g("kind"), tool: g("tool"), detail: g("detail"), options: g("options") }); }
             "AskClosed" => if let Some(a) = self.asks.remove(&g("id")) { if a.kind == "approval" && g("answer") == "session" { self.sessions.insert((a.thread, a.tool)); } },
             // an archive is read as a manual settle (state/mod.rs says why); what the thread held goes as before, until it is brought back
@@ -274,5 +275,19 @@ mod tests {
         w.apply(r#"{"$":"BotSet","id":"bub","name":"Bub","thread":"t","look":1,"persona":"","at":2}"#);
         w.apply(r#"{"$":"WorktreeSet","id":"t","branch":"","worktree":"/elsewhere/lanes/bub","at":3}"#);
         assert_eq!(w.cwd("t"), home.join("bots").join("bub").to_string_lossy()); assert!(home.join("bots/bub").is_dir());
+    }
+    #[test] fn thread_project_set_moves_chat_and_clears_worktree_and_session() {
+        let mut w = World::default();
+        for l in [
+            r#"{"$":"ProjectCreated","id":"p1","title":"P","root":"/r","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"c1","project":"chats","title":"Quick","env":"local","branch":"","worktree":"/home/u/chats/c1","provider":"claude","model":"","at":2}"#,
+            r#"{"$":"SessionSet","id":"c1","session":"S1","at":3}"#,
+        ] { w.apply(l); }
+        assert_eq!(w.cwd("c1"), "/home/u/chats/c1");
+        w.apply(r#"{"$":"ThreadProjectSet","id":"c1","project":"p1","at":4}"#);
+        assert_eq!(w.threads["c1"].project, "p1");
+        assert_eq!(w.threads["c1"].worktree, "");
+        assert_eq!(w.threads["c1"].session, "");
+        assert_eq!(w.cwd("c1"), "/r");
     }
 }

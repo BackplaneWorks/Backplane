@@ -146,7 +146,7 @@ pub fn thread_keys(far: &Far, pick: &str, join: &HashMap<String, String>, projec
     let mut out = vec![];
     for (_, st) in shown_far(far, pick) {
         for (id, t) in &st.threads {
-            if t.deleted || st.run_hidden(id) || t.archived != archived || t.project == crate::sidebar::SCRATCH { continue }
+            if t.deleted || st.run_hidden(id) || t.archived != archived || t.project == crate::sidebar::SCRATCH || crate::sidebar::is_chats(&t.project) { continue }
             let shown = project_shown(&t.project, join);
             if !project.is_empty() && shown != project && t.project != project { continue }
             let (_, settled, at) = super::shelf_flags(t);
@@ -165,7 +165,7 @@ pub fn project_rows(far: &Far, pick: &str, join: &HashMap<String, String>, un: &
     for (m, st) in shown_far(far, pick) {
         let mark = un.marks.get(m).cloned().unwrap_or_else(|| crate::mirror::mark_of(m, false));
         for id in st.projects.keys() {
-            if id == crate::sidebar::SCRATCH || join.contains_key(id) { continue }
+            if id == crate::sidebar::SCRATCH || crate::sidebar::is_chats(id) || join.contains_key(id) { continue }
             // (a copy in no merged row waits for its machine's origin, present/merged.rs: not listed until it is known)
             if !un.rows.is_empty() && !un.rows.contains_key(id) { continue }
             if let Some(v) = project_json(id, st, &mark, un, m) { out.push((v["updatedAt"].as_u64().unwrap_or(0), id.clone(), v)) }

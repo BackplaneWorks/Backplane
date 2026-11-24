@@ -9,6 +9,7 @@ pub struct RailInput<'a> {
     pub gerbers: bool,
     pub simulation: bool,
     pub altium: bool,
+    pub no_project: bool,
     pub page: &'a str,
     pub diff: bool,
     /// Page kinds currently present anywhere in the thread's viewer layout (each entry gets
@@ -18,7 +19,7 @@ pub struct RailInput<'a> {
 
 pub fn rail(input: RailInput<'_>) -> Value {
     let mut entries = Vec::new();
-    let page = if input.diff { "diff" } else { input.page };
+    let page = if input.diff && !input.no_project { "diff" } else { input.page };
     let mut add = |id, label, icon, group, key, why: Option<&str>| {
         let state = if page == id { "on" } else if why.is_some() { "disabled" } else { "off" };
         let present = state == "on" || input.present.contains(&id);
@@ -26,17 +27,21 @@ pub fn rail(input: RailInput<'_>) -> Value {
         if let Some(why) = why.filter(|_| page != id) { entry["why"] = json!(why); }
         entries.push(entry);
     };
-    let no_board = (!input.board).then_some("No board in this project");
-    add("board", "Board", "circuit-board", "design", "b", no_board);
-    add("schematic", "Schematic", "cpu", "design", "s", (!input.schematic).then_some("No schematic in this project"));
-    add("3d", "3D", "box", "design", "3", no_board);
-    if input.gerbers || page == "gerbers" { add("gerbers", "Gerbers", "layers", "design", "g", None); }
-    if input.simulation && input.schematic && !input.altium { add("simulation", "Simulation", "gauge", "design", "i", None); }
-    add("split", "Split", "layout-panel-left", "layout", "v", (!(input.board && input.schematic)).then_some("Split needs a board and a schematic"));
-    add("mech", "Mech", "wrench", "layout", "m", (!input.mech).then_some("No mechanical parts in this project"));
+    if !input.no_project {
+        let no_board = (!input.board).then_some("No board in this project");
+        add("board", "Board", "circuit-board", "design", "b", no_board);
+        add("schematic", "Schematic", "cpu", "design", "s", (!input.schematic).then_some("No schematic in this project"));
+        add("3d", "3D", "box", "design", "3", no_board);
+        if input.gerbers || page == "gerbers" { add("gerbers", "Gerbers", "layers", "design", "g", None); }
+        if input.simulation && input.schematic && !input.altium { add("simulation", "Simulation", "gauge", "design", "i", None); }
+        add("split", "Split", "layout-panel-left", "layout", "v", (!(input.board && input.schematic)).then_some("Split needs a board and a schematic"));
+        add("mech", "Mech", "wrench", "layout", "m", (!input.mech).then_some("No mechanical parts in this project"));
+    }
     add("files", "Files", "folder", "work", "f", None);
-    add("diff", "Diff", "diff", "work", "d", None);
-    add("review", "Review", "circle-check", "work", "r", None);
+    if !input.no_project {
+        add("diff", "Diff", "diff", "work", "d", None);
+        add("review", "Review", "circle-check", "work", "r", None);
+    }
     add("browser", "Browser", "globe", "work", "w", None);
     add("terminal", "Terminal", "terminal", "tools", "`", None);
     add("commands", "Commands", "search", "tools", "", None);
@@ -94,5 +99,16 @@ mod tests {
                 }
             }
         }}}}
+    }
+
+    #[test]
+    fn no_project_rail_drops_design_diff_and_review() {
+        let rows = rail(RailInput {
+            board: true, schematic: true, mech: true, gerbers: true, simulation: true,
+            altium: false, page: "files", diff: true, no_project: true, present: &[],
+        });
+        let ids: Vec<_> = rows.as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids, ["files", "browser", "terminal", "commands"]);
+        assert_eq!(rows[0]["state"], "on");
     }
 }

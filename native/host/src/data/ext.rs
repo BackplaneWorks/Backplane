@@ -21,7 +21,7 @@
 //! through (never for a turn's end or an ask by themselves: native/host/src/push), and `{"k":"clear","keys","badge"}` when one is dealt with.
 use super::*;
 
-pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines", "history", "devices", "find", "notifysettings", "ring", "threadContext"];
+pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines", "history", "devices", "find", "notifysettings", "ring", "threadContext", "chats"];
 
 const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
 
@@ -190,6 +190,16 @@ async fn accounts(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Va
 pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool) -> Option<Result<Value, Value>> {
     Some(match m {
         "thread.act" => thread_act(hub, c, p).await,
+        "thread.move_project" => {
+            let (th, proj) = (s(p, "thread"), s(p, "project"));
+            if th.is_empty() || proj.is_empty() { Err(err("thread and project")) } else {
+                match rpc(hub, c, "thread.move_project", json!({"thread":th,"project":proj})).await {
+                    Ok(_) => thread_now(hub, th).await.map(|t| json!({"thread":t})),
+                    Err(e) => Err(e),
+                }
+            }
+        }
+        "chats.list" => chats(hub, p).await,
         "device.register" | "device.drop" | "device.prefs" | "push.seen" => rpc(hub, c, m, p.clone()).await.map(|_| json!({})),
         "push.state" => rpc(hub, c, m, p.clone()).await.map(|r| r["result"].clone()),
         "push.prefs" => {
@@ -446,10 +456,13 @@ async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Va
         // under another thread of its project; the hub's own check refuses a cycle, another project or a dead parent
         if s(p, "parent").is_empty() { return Err(err("parent")) }
         rpc(hub, c, "thread.reparent", json!({"thread":th,"parent":s(p, "parent")})).await?;
+    } else if act == "move_project" {
+        if s(p, "project").is_empty() { return Err(err("project")) }
+        rpc(hub, c, "thread.move_project", json!({"thread":th,"project":s(p, "project")})).await?;
     } else if THREAD_ACTS.contains(&act) {
         rpc(hub, c, &format!("thread.{act}"), json!({"thread":th})).await?;
         if act == "delete" { return Ok(json!({})) }
-    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, reparent, rename or fork")) }
+    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, reparent, rename, fork or move_project")) }
     thread_now(hub, th).await.map(|t| json!({"thread":t}))
 }
 
@@ -457,7 +470,7 @@ async fn search(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let q = s(p, "q").trim().to_lowercase(); let lim = limit_of(p, 30, 100); let arch = p["archived"] == true;
     if q.is_empty() { return Ok(json!({"threads":[],"projects":[]})) }
     let g = hub.model().await; let asks = open_ask_counts(hub);
-    let mut ts: Vec<(u64, String)> = g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i) && (arch || !t.archived) && (contains(&t.title, &q) || (t.project != crate::sidebar::SCRATCH && g.projects.get(&t.project).map_or(false, |x| contains(&x.title, &q))))).map(|(i, t)| (ms(t.activity.max(t.created)), i.clone())).collect();
+    let mut ts: Vec<(u64, String)> = g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i) && (arch || !t.archived) && (contains(&t.title, &q) || (t.project != crate::sidebar::SCRATCH && !crate::sidebar::is_chats(&t.project) && g.projects.get(&t.project).map_or(false, |x| contains(&x.title, &q))))).map(|(i, t)| (ms(t.activity.max(t.created)), i.clone())).collect();
     ts.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1))); ts.truncate(lim);
     let threads: Vec<Value> = ts.iter().filter_map(|(_, i)| thread_json(hub, &g, i, &asks)).collect();
     let mut ps: Vec<(u64, String)> = g.projects.iter().filter(|(_, x)| !x.removed && (contains(&x.title, &q) || contains(&x.root, &q))).map(|(i, _)| (0, i.clone())).collect(); ps.truncate(lim);
@@ -489,6 +502,21 @@ async fn history(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     Ok(json!({"live":live,"threads":threads,"next":next,"count":count}))
 }
 
+/// `chats.list {q?, settled?, limit?=50, before?}` → `{threads, next, count}`: project-free quick chats (`project == "chats"`).
+async fn chats(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
+    let (q, lim) = (s(p, "q").trim().to_string(), limit_of(p, 50, 200));
+    let want = p.get("settled").and_then(Value::as_bool);
+    let g = hub.model().await; let asks = open_ask_counts(hub);
+    let count = g.threads.iter().filter(|(i, t)| crate::sidebar::is_chats(&t.project) && !t.deleted && !t.archived && !run_hidden(i)).count();
+    let rows: Vec<(u64, String, Value)> = g.threads.iter()
+        .filter(|(i, t)| crate::sidebar::is_chats(&t.project) && !t.deleted && !t.archived && !run_hidden(i))
+        .filter(|(i, t)| (q.is_empty() || crate::sidebar::word_hit(&t.title, &q)) && want.map_or(true, |w| flags_of(i).1 == w))
+        .filter_map(|(i, _)| thread_json(hub, &g, i, &asks).map(|v| (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v)))
+        .collect();
+    let (threads, next) = page_of(rows, lim, s(p, "before"));
+    Ok(json!({"threads":threads,"next":next,"count":count}))
+}
+
 async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let q = s(p, "q").trim().to_lowercase(); let kind = s(p, "kind"); let lim = limit_of(p, 12, 50);
     let want = |k: &str| kind.is_empty() || kind == k;
@@ -504,9 +532,9 @@ async fn mentions(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
             let mut seen: HashMap<String, usize> = HashMap::new(); for (i, t) in g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i)) { *seen.entry(slug(&t.title)).or_default() += 1 }
             let mut ts: Vec<_> = g.threads.iter().filter(|(i, t)| !t.deleted && !run_hidden(i) && !t.archived && !slug(&t.title).is_empty()).collect(); ts.sort_by(|a, b| b.1.activity.cmp(&a.1.activity));
             for (i, t) in ts.into_iter().take(200) { let w = slug(&t.title); let w = if seen.get(&w).copied().unwrap_or(0) > 1 { format!("{w}-{}", i.rsplit('-').next().unwrap_or("")) } else { w };
-                push(">", i, &t.title, g.projects.get(&t.project).map_or("", |x| x.title.as_str()), format!(">{w}")) }
+                push(">", i, &t.title, if crate::sidebar::is_chats(&t.project) { crate::sidebar::CHATS_TITLE } else { g.projects.get(&t.project).map_or("", |x| x.title.as_str()) }, format!(">{w}")) }
         }
-        if want("%") { for (i, x) in g.projects.iter().filter(|(i, x)| !x.removed && i.as_str() != crate::sidebar::SCRATCH) { push("%", i, &x.title, &x.root, format!("%{}", slug(&x.title))) } }
+        if want("%") { for (i, x) in g.projects.iter().filter(|(i, x)| !x.removed && i.as_str() != crate::sidebar::SCRATCH && !crate::sidebar::is_chats(i)) { push("%", i, &x.title, &x.root, format!("%{}", slug(&x.title))) } }
     }
     if want("&") {
         let all: Value = serde_json::from_str(&crate::settings::models::all()).unwrap_or(json!({}));
@@ -626,14 +654,19 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                 let (mut items, has) = if machines::is_far(th) {
                     machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
                     (
-                        rail(RailInput { board: true, schematic: true, mech: true, gerbers: false, simulation: false, altium: false, page, diff, present: &[] }),
+                        rail(RailInput { board: true, schematic: true, mech: true, gerbers: false, simulation: false, altium: false, page, diff, no_project: false, present: &[] }),
                         json!({"board": true, "schematic": true, "mech": true, "gerbers": false}),
+                    )
+                } else if hub.model().await.threads.get(th).is_some_and(|t| crate::sidebar::is_chats(&t.project)) {
+                    (
+                        rail(RailInput { board: false, schematic: false, mech: false, gerbers: false, simulation: false, altium: false, page, diff: false, no_project: true, present: &[] }),
+                        json!({"board": false, "schematic": false, "mech": false, "gerbers": false}),
                     )
                 } else {
                     let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?);
                     let src = crate::present::viewer::rail_sources(&root);
                     (
-                        rail(RailInput { board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers, simulation: false, altium: src.altium, page, diff, present: &[] }),
+                        rail(RailInput { board: src.board, schematic: src.schematic, mech: src.mech, gerbers: src.gerbers, simulation: false, altium: src.altium, page, diff, no_project: false, present: &[] }),
                         json!({"board": src.board, "schematic": src.schematic, "mech": src.mech, "gerbers": src.gerbers}),
                     )
                 };

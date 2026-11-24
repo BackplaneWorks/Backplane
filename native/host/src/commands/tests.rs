@@ -757,3 +757,58 @@ async fn ask_on(h: &Arc<Hub>, c: &mut crate::hub::Conn, m: &str, p: Value) -> (V
     assert_eq!(e[0]["provider"], "codex");
     assert_eq!(e[0]["model"], "", "fork of persisted codex+opus clears model");
 }
+
+#[tokio::test] async fn quick_chats_create_without_git_and_move_to_project() {
+    let h = hub("quick-chats").await;
+    let dest = tmp("qc-dest");
+    let dead = tmp("qc-dead");
+    h.commit(&json!({"$":"ProjectCreated","id":"pdest","title":"Dest","root":dest.to_str().unwrap(),"at":10})).await.unwrap();
+    h.commit(&json!({"$":"ProjectCreated","id":"prem","title":"Dead","root":dead.to_str().unwrap(),"at":11})).await.unwrap();
+    h.commit(&json!({"$":"ProjectRemoved","id":"prem","at":12})).await.unwrap();
+
+    // thread.create {project:"chats"} makes a folder under <home>/chats/<id> with no .git and default title "New chat"
+    let (e, r) = ask(&h, "thread.create", json!({"project":"chats"})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let cid = r["thread"].as_str().unwrap().to_string();
+    assert_eq!(e[0]["$"], "ThreadCreated");
+    assert_eq!(e[0]["project"], "chats");
+    assert_eq!(e[0]["title"], "New chat");
+    assert_eq!(e[0]["env"], "local");
+    let wt = e[0]["worktree"].as_str().unwrap();
+    assert!(std::path::Path::new(wt).is_dir(), "chat folder created: {wt}");
+    assert!(!std::path::Path::new(wt).join(".git").exists(), "quick chat has no git repo");
+    h.commit_many(&e).await.unwrap();
+
+    // Forking a quick chat keeps it in "chats" with its own gitless folder
+    let (fe, fr) = ask(&h, "thread.fork", json!({"thread": &cid})).await;
+    assert_eq!(fr["ok"], true, "{fr}");
+    assert_eq!(fe[0]["project"], "chats");
+    let fwt = fe[0]["worktree"].as_str().unwrap();
+    assert!(std::path::Path::new(fwt).is_dir() && !std::path::Path::new(fwt).join(".git").exists());
+
+    // Refusals: non-chat thread, missing/removed/sentinel target, running chat
+    assert_eq!(ask(&h, "thread.move_project", json!({"thread":"t1","project":"pdest"})).await.1["ok"], false);
+    for bad in ["nope", "prem", "scratch", "chats"] {
+        assert_eq!(ask(&h, "thread.move_project", json!({"thread": &cid, "project": bad})).await.1["ok"], false, "target {bad}");
+    }
+    h.commit(&json!({"$":"TurnChanged","thread": &cid,"state":"running","at":20})).await.unwrap();
+    assert_eq!(ask(&h, "thread.move_project", json!({"thread": &cid, "project": "pdest"})).await.1["ok"], false);
+    h.commit(&json!({"$":"TurnChanged","thread": &cid,"state":"completed","at":21})).await.unwrap();
+    h.commit(&json!({"$":"MessagePosted","thread": &cid,"msg":"m1","role":"user","text":"quick question","at":22})).await.unwrap();
+
+    // Valid move emits ThreadProjectSet + queued handoff + ActivityLogged
+    let (me, mr) = ask(&h, "thread.move_project", json!({"thread": &cid, "project": "pdest"})).await;
+    assert_eq!(mr["ok"], true, "{mr}");
+    assert!(me.iter().any(|x| x["$"] == "ThreadProjectSet" && x["id"] == cid && x["project"] == "pdest"), "{me:?}");
+    assert!(me.iter().any(|x| x["$"] == "TurnQueued" && x["thread"] == cid && x["msg"].as_str().unwrap_or("").starts_with("handoff:move:")), "{me:?}");
+    assert!(me.iter().any(|x| x["$"] == "ActivityLogged" && x["thread"] == cid), "{me:?}");
+
+    // Client actions: new-thread "chats" and row-move-project
+    let new_out = super::actions::act(&super::actions::Req { hub: "h", session: &json!({"rid":1}), sel: "", action: "new-thread", value: "chats", title_of: &|_| String::new() }).unwrap();
+    let req: Value = serde_json::from_str(new_out.cmds[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((req["m"].as_str(), &req["p"]), (Some("thread.create"), &json!({"project":"chats","title":"New chat"})));
+
+    let mv_out = super::actions::act(&super::actions::Req { hub: "h", session: &json!({"rid":2}), sel: "", action: "row-move-project", value: &format!("{cid}\u{1f}pdest"), title_of: &|_| String::new() }).unwrap();
+    let mv_req: Value = serde_json::from_str(mv_out.cmds[0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!((mv_req["m"].as_str(), &mv_req["p"]), (Some("thread.move_project"), &json!({"thread": cid, "project": "pdest"})));
+}

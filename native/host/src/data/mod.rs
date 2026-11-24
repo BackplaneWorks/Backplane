@@ -24,7 +24,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider", "projecthome", "ringnotes"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages", "cats", "projectcard", "termChat", "copy", "reviewmode", "rail", "gerbers", "follow", "unanswered", "browserstart", "restarting", "fileLinks", "layout", "clone", "reply", "deflate", "open", "shell", "home", "fork", "blobs", "keptChunks", "threadContext", "noProvider", "projecthome", "ringnotes", "chats"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -167,7 +167,7 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     // the picker's title says it all)
     let chip = combo["short"].as_str().filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, &effort));
     let mut row = json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"pinOrder":pin_order,"settled":settled,"settledAt":settled_at,"archived":t.archived,
-        "provider":t.provider,"model":model,"effort":effort,"speed":setting_of(&format!("speed.{id}")),"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH,"swarm":swarm,
+        "provider":t.provider,"model":model,"effort":effort,"speed":setting_of(&format!("speed.{id}")),"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH,"chat":t.project == crate::sidebar::CHATS,"swarm":swarm,
         // infinite context (bots/recall/progress.rs): how far its memory is written, the composer's bar; null for a thread without it
         "memory":crate::bots::recall::progress::shown(&hub.cfg.home, id).unwrap_or(Value::Null)});
     if !plan_mode.is_null() && plan_mode["phase"] != "off" { row["planMode"] = plan_mode; }
@@ -179,7 +179,7 @@ fn run_hidden(thread: &str) -> bool {
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && !run_hidden(i) && flags_of(i).1).count();
-    if id == crate::sidebar::SCRATCH { return None } // Conversation history (`history.list`), not a project to start a thread in
+    if id == crate::sidebar::SCRATCH || crate::sidebar::is_chats(id) { return None } // Conversation history (`history.list`) or Quick chats, not a project to start a thread in
     let p = m.projects.get(id).filter(|p| !p.removed)?;
     let ts: Vec<_> = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !run_hidden(i)).collect();
     let count = ts.iter().filter(|(_, t)| !t.archived).count();
@@ -609,7 +609,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
             pol.with_state(|st| crate::present::merged::merged_of(st, hub.mirrors(), |rows| {
                 let c = crate::present::sections::Ctx { hub: "", now, query: &q, open: &open, selected: "" };
                 let mut v = json!({"sections": crate::present::sections::build(st, &rows, &Value::Null, &c), "groupsTo": crate::present::sections::move_targets(st, &rows)});
-                if p["jump"] == true { v["jump"] = crate::present::sections::jump(&rows, &c); }
+                if p["jump"] == true { v["jump"] = crate::present::sections::jump(st, &rows, &c); }
                 if !key.is_empty() { v["page"] = crate::present::sections::page(st, &rows, &key, &c, done); }
                 v
             })).ok_or_else(|| err("state is starting"))
@@ -624,6 +624,13 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
                 if th.is_empty() || !matches!(span, "1h" | "tomorrow" | "1w" | "off") { return Err(err("value: <thread>|1h, tomorrow, 1w or off")) }
                 if !hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }
                 rpc(hub, c, "thread.snooze", json!({"thread":th,"for":span})).await?;
+                return Ok(json!({}))
+            }
+            if a == "row-move-project" {
+                let (raw_th, proj) = v.split_once('\u{1f}').unwrap_or(("", ""));
+                let th = raw_th.rsplit('|').next().unwrap_or(raw_th);
+                if th.is_empty() || proj.is_empty() { return Err(err("value: <thread>\u{1f}<project>")) }
+                rpc(hub, c, "thread.move_project", json!({"thread":th,"project":proj})).await?;
                 return Ok(json!({}))
             }
             // `project-page` <key>: the person opened a project's page on this client, a visit (the bench orders by it; at most one write in ten minutes)
@@ -700,6 +707,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
             if has_text && far_proj { q["preflightSend"] = json!(true); }
             if !s(p, "env").is_empty() { if !matches!(s(p, "env"), "auto" | "worktree" | "local") { return Err(err("env: auto, worktree or local")) } q["env"] = p["env"].clone() }
             for k in ["title", "provider", "model"] { if !s(p, k).is_empty() { q[k] = p[k].clone() } }
+            if project == crate::sidebar::CHATS && s(p, "title").is_empty() { q["title"] = json!("New chat"); }
             let r = rpc(hub, c, "thread.create", q).await?;
             let id = r["thread"].as_str().unwrap_or("").to_string(); if id.is_empty() { return Err(err("no thread was made")) }
             let far = machines::is_far(&id);
@@ -787,7 +795,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
         let opened = if s(&e, "$") == "AskClosed" { ask_opened(hub, s(&e, "id")) } else { None };
-        let th = if matches!(s(&e, "$"), "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadMerged" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ProviderSet" | "ModesSet" | "ThreadDeleted") { s(&e, "id") } else if let Some(o) = &opened { s(o, "thread") } else { s(&e, "thread") }.to_string();
+        let th = if matches!(s(&e, "$"), "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadMerged" | "ThreadArchived" | "ThreadPinned" | "ThreadForked" | "ThreadProjectSet" | "ProviderSet" | "ModesSet" | "ThreadDeleted") { s(&e, "id") } else if let Some(o) = &opened { s(o, "thread") } else { s(&e, "thread") }.to_string();
         let mut entry: Option<Value> = None;
         // a subagent's view moves with its own log line, and with its thread's background rows and turn
         if s(&e, "$") == "ActivityLogged" { if let Some(of) = th.strip_prefix("@sub:") { for (sub, k) in subs.sub_views(of, Some(s(&e, "tone"))) { if !viewed.contains(&(sub, of.to_string(), k.clone())) { viewed.push((sub, of.to_string(), k)) } } } }

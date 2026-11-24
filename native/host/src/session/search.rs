@@ -53,7 +53,7 @@ async fn live(hub: &Arc<Hub>) -> (HashMap<String, (String, String)>, HashMap<Str
         .unwrap_or_else(|| meta.keys().filter(|i| crate::state::is_mail_run_id(i)).cloned().collect());
     (meta, projects, activity, hidden)
 }
-fn place(projects: &HashMap<String, String>, pid: &str) -> String { if pid == crate::sidebar::SCRATCH { crate::sidebar::NO_PROJECT.to_string() } else { projects.get(pid).cloned().unwrap_or_default() } }
+fn place(projects: &HashMap<String, String>, pid: &str) -> String { if pid == crate::sidebar::SCRATCH { crate::sidebar::NO_PROJECT.to_string() } else if pid == crate::sidebar::CHATS { crate::sidebar::CHATS_TITLE.to_string() } else { projects.get(pid).cloned().unwrap_or_default() } }
 
 /// The search across every live thread (or one, `thread`), from the index (index.rs): newest first, `limit` hits at most, at most 3 a thread
 /// across threads; `more` when it stopped at the limit.

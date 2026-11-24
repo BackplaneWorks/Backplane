@@ -1278,10 +1278,13 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
                 t.kind.as_str()
             }
         }).collect();
+        let no_project = st.threads.get(sel).is_some_and(|t| t.project == crate::sidebar::CHATS);
         let input = rail::RailInput {
-            board: sources.board, schematic: sources.schematic, mech: sources.mech || v["mech"]["parts"].as_array().is_some_and(|p| !p.is_empty()),
-            gerbers: v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
-            simulation: v["simFrame"].is_string(), altium: sources.altium, page, diff: pages::diff_on(session, sel),
+            board: !no_project && sources.board, schematic: !no_project && sources.schematic,
+            mech: !no_project && (sources.mech || v["mech"]["parts"].as_array().is_some_and(|p| !p.is_empty())),
+            gerbers: !no_project && v["hasGerbers"].as_bool().unwrap_or(sources.gerbers),
+            simulation: !no_project && v["simFrame"].is_string(), altium: !no_project && sources.altium,
+            no_project, page, diff: !no_project && pages::diff_on(session, sel),
             present: &present,
         };
         let has = json!({"board":input.board, "schematic":input.schematic, "mech":input.mech, "gerbers":input.gerbers});

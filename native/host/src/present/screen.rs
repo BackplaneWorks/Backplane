@@ -796,12 +796,13 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     if !thread.is_empty() { let hold: &State=far.iter().map(|(_,f)|*f).find(|f|thread.contains('~') && f.threads.contains_key(thread)).unwrap_or(st); crate::session::pages::dv_sync(&crate::session::dispatch::StateFacts(hold),hub,&mut session,&mut cmds); }
     // Fab.sync for every request on a thread, view.open included: the window opens a thread with view.open (no select action), and the card
     // (Buy it in the header) comes only from fab.look. fab_tail asks only when where the thread stands changed since the last ask (@fab.at).
-    if !thread.is_empty() { crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds); }
+    let is_chat = !thread.is_empty() && st.threads.get(thread).is_some_and(|t| t.project == sidebar::CHATS);
+    if !thread.is_empty() && !is_chat { crate::session::dispatch::fab_tail(&crate::session::dispatch::StateFacts(st),hub,&mut session,&mut cmds); }
     // A thread is drawn only when the async session seam supplied a native window and indexed page.
     // Composer fields are drawn from the same adopted draft that the action dispatcher patches.
     // a thread of a linked machine is drawn from that machine's display state (its page and window come from the mirror)
     let tst: &State=far.iter().map(|(_,f)|*f).find(|f|thread.contains('~') && f.threads.contains_key(thread)).unwrap_or(st);
-    if !thread.is_empty() { super::viewer::sync_gerbers(tst,hub,&mut session,&mut cmds); }
+    if !thread.is_empty() && !is_chat { super::viewer::sync_gerbers(tst,hub,&mut session,&mut cmds); }
     if thread.contains('~') && std::ptr::eq(tst,st) { return refused("thread.far-unknown") }
     // A remembered layout comes back by itself: only on a client that says it can draw tiles (`tiles` in its request), once per session and thread, onto a
     // thread of this machine with nothing open in this session; any other client, or a session with a page open, is never changed.
@@ -875,7 +876,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // For now an explicitly opened thread in a folded Older project is unported. The recent list
     // already offers only visible projects; forcing an excluded project needs the filter exception port.
     // (a removed project's thread still draws, with no row for it)
-    if mode!="active" && !selected_project.is_empty() && selected_project!=sidebar::SCRATCH && !ids.contains(&selected_project) && st.projects.get(selected_project).map_or(false,|p|!p.removed) { return refused("sidebar.selected-project-hidden") }
+    if mode!="active" && !selected_project.is_empty() && selected_project!=sidebar::SCRATCH && selected_project!=sidebar::CHATS && !ids.contains(&selected_project) && st.projects.get(selected_project).map_or(false,|p|!p.removed) { return refused("sidebar.selected-project-hidden") }
     let ids: Vec<&str>=if mode=="active" { vec![] } else { ids };
     let (mut indices,projects_page)=ns.slice_ids(&ids,"projects","",project_limit,selected_project);
     indices.sort_unstable(); // Mob.native.keep_projects keeps source order, including the selected exception.
@@ -947,7 +948,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
       let c=super::sections::Ctx{ hub,now:opts.now,query:&query,open:&open,selected:side_sel };
       let bub=shown["bots"].as_array().and_then(|b|b.iter().find(|r|r["uber"]==json!(true))).cloned().unwrap_or(Value::Null);
       shown["sections"]=super::sections::build(st,&rows,&bub,&c);
-      shown["jump"]=super::sections::jump(&rows,&c);
+      shown["jump"]=super::sections::jump(st,&rows,&c);
       shown["groupsTo"]=super::sections::move_targets(st,&rows);
       let key=text(&session["drafts"],"@ppage");
       if !key.is_empty() { shown["projectPage"]=super::sections::page(st,&rows,key,&c,open.contains("page-done")); } }

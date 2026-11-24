@@ -210,7 +210,7 @@ pub fn read(st: &State, w: &World, rooms: &[RoomNews], now: u64, idle: bool) -> 
         };
         all.push(Row { kind: "swarm", id: s.id.clone(), title: s.title.clone(), sub, state, at: s.activity });
     }
-    let mut projects: Vec<(&String, &Project)> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != "scratch").collect(); projects.sort_by(|a, b| b.1.created.cmp(&a.1.created).then(a.0.cmp(b.0)));
+    let mut projects: Vec<(&String, &Project)> = st.projects.iter().filter(|(id, p)| !p.removed && id.as_str() != "scratch" && id.as_str() != crate::sidebar::CHATS).collect(); projects.sort_by(|a, b| b.1.created.cmp(&a.1.created).then(a.0.cmp(b.0)));
     for (pid, p) in projects {
         for id in live_threads(st, pid, now, &hidden) {
             let (state, t) = (c.state(id), c.thread(id));

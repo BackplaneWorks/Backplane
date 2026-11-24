@@ -130,7 +130,7 @@ pub fn look(st: &State, id: &str, now: u64) -> Vec<Value> {
 }
 /// A visit is written at most once in ten minutes for a project (`sidebar.visit.<project id>`): the bench orders by it, and a log line for
 /// every thread opened would be noise.
-pub fn visit_due(st: &State, project: &str, now: u64) -> bool { !project.is_empty() && project != "scratch" /* sidebar::SCRATCH: the chats with no project */ && num(st, &format!("sidebar.visit.{project}")) + 600 <= now }
+pub fn visit_due(st: &State, project: &str, now: u64) -> bool { !project.is_empty() && project != "scratch" && project != "chats" /* sidebar::SCRATCH / CHATS: the chats with no project */ && num(st, &format!("sidebar.visit.{project}")) + 600 <= now }
 /// Events a viewer's view.open of a thread adds for the bench (state/policy.rs `read`): the person was in its project now.
 pub fn visit(st: &State, id: &str, now: u64) -> Vec<Value> {
     let Some(t) = st.threads.get(id) else { return vec![] };

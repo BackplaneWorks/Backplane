@@ -84,7 +84,7 @@ pub fn fld<'a>(line: &'a str, key: &str) -> &'a str {
 /// Events about one thread, by the field that names it.
 fn thread_key(t: &str) -> Option<&'static str> {
     Some(match t {
-        "ThreadCreated" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadArchived" | "ThreadPinned" | "ThreadSnoozed" | "ThreadOrdered" | "WorktreeSet" | "WorktreeRemoved"
+        "ThreadCreated" | "ThreadRenamed" | "ThreadProjectSet" | "ThreadSettled" | "ThreadUnsettled" | "ThreadArchived" | "ThreadPinned" | "ThreadSnoozed" | "ThreadOrdered" | "WorktreeSet" | "WorktreeRemoved"
         | "WorktreeSkipped" | "SessionSet" | "ModesSet" | "ProviderSet" | "ThreadMerged" | "ThreadParentSet" | "ThreadLaunched" | "ThreadForked" => "id",
         "MessagePosted" | "ActivityLogged" | "MessageFrom" | "TodosSet" | "TodosChanged" => "thread",
         _ => return None,

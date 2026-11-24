@@ -154,6 +154,7 @@ impl Model {
             "ThreadCreated" => { self.threads.insert(t(&e.id), ThreadMeta { project: t(&e.project), title: t(&e.title), env: t(&e.env), branch: t(&e.branch), worktree: t(&e.worktree),
                 provider: t(&e.provider), model: t(&e.model), turn: "idle".into(), created: e.at.unwrap_or(0), activity: e.at.unwrap_or(0), ..Default::default() }); return }
             "ThreadRenamed" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.title = t(&e.title) } return }
+            "ThreadProjectSet" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.project = t(&e.project); th.env = "local".into(); th.branch.clear(); th.worktree.clear(); } return }
             "TurnChanged" => { if let Some(th) = self.threads.get_mut(&t(&e.thread)) { th.turn = t(&e.state); th.activity = e.at.unwrap_or(th.activity) } return }
             "PendingChanged" => { if let Some(th) = self.threads.get_mut(&t(&e.thread)) { th.pending = e.count.unwrap_or(0) } return }
             "SessionSet" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.session = t(&e.session) } return }
