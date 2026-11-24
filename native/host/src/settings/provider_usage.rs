@@ -174,11 +174,17 @@ async fn rpc(cmd: &Path, args: &[&str], reqs: &[Value], limit: Duration) -> Resu
     let _ = child.start_kill(); let _ = child.wait().await;
     r
 }
+/// Whether the person's agy has a sign-in on record: its token file, which agy 1.5 writes at sign-in whether the token itself stays there or moves to the
+/// OS keyring (then the file keeps its metadata). `standin`: stand-in CLIs (`BACKPLANE_AGENTS`, tests), which are not the person's agy: their answer is always taken.
+pub fn agy_signed_in(standin: bool, home: &Path) -> bool { standin || crate::agents::providers::agy_cli::token_file(home).exists() }
 /// One provider's reading now (None: its CLI is not on this machine). `home`: the Backplane home (Antigravity's pinned agent lives there).
 pub async fn read(cli: &Cli, home: &str, provider: &str, now: u64) -> Option<Value> {
     let prog = cli.resolve(cli_of(provider)).ok()?;
     Some(match provider {
         "antigravity" if crate::agents::providers::agy::pinned(home) => json!({"provider":provider,"state":"unreported","at":0,"attempted_at":now,"source":"none","reason":"usage not reported by Backplane's pinned Antigravity agent","windows":[]}),
+        // agy signed out: `agy -p` starts Google's sign-in in the person's browser ("Print mode: not authenticated ... triggering interactive OAuth"), so a look
+        // every five minutes opened a browser tab on a machine where agy is installed and never used. Without a sign-in on record it is not asked.
+        "antigravity" if !agy_signed_in(cli.test_mode(), &std::path::PathBuf::from(crate::plat::dirs::home_or_empty())) => json!({"provider":provider,"state":"unreported","at":0,"attempted_at":now,"source":"none","reason":"Antigravity is not signed in","windows":[]}),
         "antigravity" => reading(provider, "agy-quota", match run_unset(&prog, &["-p", "/quota"], Duration::from_secs(45), &crate::agents::providers::agy_cli::storage_unset_here(&std::path::PathBuf::from(crate::plat::dirs::home_or_empty()))).await {
             Some((0, o, _)) => Ok((agy_quota(&o), String::new())),
             Some((2, o, e)) => Err(format!("Antigravity has no account quota to show ({})", { let l = last_line(&format!("{o}\n{e}")); if l.is_empty() { "an API key is in use".into() } else { l } })),
@@ -330,6 +336,13 @@ mod tests {
     use super::*;
     // what agy 1.5.12 printed for `agy -p /quota` (Nov 19)
     const AGY: &str = "Gemini Models\tWeekly Limit Remaining\t94%\t2026-11-25T21:50:30Z\nGemini Models\tFive Hour Limit Remaining\t90%\t2026-11-20T00:58:05Z\nClaude and GPT models\tWeekly Limit Remaining\t100%\t2026-11-26T21:20:45Z\nClaude and GPT models\tFive Hour Limit Remaining\t0%\t2026-11-20T02:20:45Z\n";
+    #[test] fn a_signed_out_agy_is_not_asked_for_its_quota() {
+        let home = crate::plat::tmp::dir("pu-agy-signin");
+        assert!(!agy_signed_in(false, &home), "no token file: never signed in, so agy would open the browser to sign in");
+        let f = crate::agents::providers::agy_cli::token_file(&home); std::fs::create_dir_all(f.parent().unwrap()).unwrap(); std::fs::write(&f, "{}").unwrap();
+        assert!(agy_signed_in(false, &home), "a token file (even the keyring store's metadata): signed in");
+        assert!(agy_signed_in(true, Path::new("/nowhere")), "a stand-in agy is always asked");
+    }
     #[test] fn antigravity_quota_lines_are_windows_per_model_family() {
         let w = agy_quota(AGY);
         assert_eq!(w.len(), 4);
