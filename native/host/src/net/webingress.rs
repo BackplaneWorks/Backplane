@@ -43,6 +43,12 @@ mod tests {
     use super::*;
 
     #[test]
+    fn a_ring_recording_is_a_protected_asset_by_its_own_id_only() {
+        assert!(super::is_protected_asset("/ring/audio/n0123456789abcdef") && super::is_protected_asset("/ring/audio/n0123456789abcdef.m4a"));
+        for no in ["/ring/audio/", "/ring/audio/../x", "/ring/audio/n0123456789ABCDEF", "/ring/audio/n0123456789abcdef/x", "/ring/hook", "/ring"] { assert!(!super::is_protected_asset(no), "{no}"); }
+        assert!(super::SECURITY_HEADERS.contains("media-src 'self'"), "the page may play a recording from its own origin, and from nowhere else");
+    }
+    #[test]
     fn terminal_lazy_assets_require_paired_session() {
         for path in ["/assets/terminal.js", "/assets/xterm.css"] {
             assert!(static_asset(path, false).is_none(), "{path} must require pairing");
@@ -367,7 +373,7 @@ mod tests {
 const SECURITY_HEADERS: &str = concat!(
     "Cache-Control: private, no-store\r\n",
     "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; ",
-    "img-src 'self' blob: data:; font-src 'self'; worker-src 'self'; connect-src 'self'; ",
+    "img-src 'self' blob: data:; media-src 'self'; font-src 'self'; worker-src 'self'; connect-src 'self'; ",
     "object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\r\n",
     "X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n",
 );
@@ -613,7 +619,8 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             );
             for line in result.extra.lines() {
                 let lower = line.to_ascii_lowercase();
-                if lower.starts_with("content-disposition:") || (is_blob && lower.starts_with("etag:")) {
+                let is_ring = req.route().starts_with("/ring/audio/");
+                if lower.starts_with("content-disposition:") || (is_blob && lower.starts_with("etag:")) || (is_ring && (lower.starts_with("accept-ranges:") || lower.starts_with("content-range:"))) {
                     headers.push_str(line.trim_end());
                     headers.push_str("\r\n");
                 }
@@ -680,6 +687,8 @@ fn is_browser_ws_target(target: &str) -> bool {
 fn is_protected_asset(path: &str) -> bool {
     matches!(path, "/files/get" | "/message-image") ||
         path.strip_prefix("/blob/").is_some_and(|h| h.len() == 64 && h.bytes().all(|b| matches!(b, b'0'..=b'9' | b'a'..=b'f'))) ||
+        // a ring recording (Settings › Ring): its handler still wants the link's own key (bots/ring.rs `RingAudio`)
+        path.strip_prefix("/ring/audio/").is_some_and(|id| crate::voice::ringbox::id_ok(id.trim_end_matches(".m4a"))) ||
         path.strip_prefix("/bots/").and_then(|p| p.strip_suffix("/screen.jpg"))
             .is_some_and(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'))
 }

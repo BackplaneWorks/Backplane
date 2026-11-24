@@ -246,6 +246,8 @@ impl RpcHandler for RingRpc {
                     if m == "ring.search" { if let Some(q) = p.get("q").and_then(Value::as_str) { *QUERY.lock().unwrap() = q.chars().take(200).collect(); } b.ring_publish().await; }
                     let (q, base) = (gs(p, "q").to_string(), base(hub).await);
                     let v = blocking(move || { let all = ringbox::list(&home); let key = ringbox::link_key(&home); let f = ringbox::search(&all, &q); json!({"total": all.len(), "notes": f.iter().take(200).map(|n| ringbox::summary(n, &base, &key)).collect::<Vec<_>>()}) }).await.unwrap_or(Value::Null);
+                    // `busy`: the note being heard now ("" for none), as the desktop's page has it from the `ring.busy` info
+                    let mut v = v; if v.is_object() { v["busy"] = json!(hub.info_now()["ring.busy"].as_str().unwrap_or("")); }
                     ok(v)
                 }
                 "ring.get" => { let i = gs(p, "note").to_string(); match blocking(move || ringbox::load(&home, &i)).await.flatten() { Some(n) => ok(json!({"note": n})), None => no("no such ring note".into()) } }
@@ -258,6 +260,18 @@ impl RpcHandler for RingRpc {
     }
 }
 
+/// One `Range: bytes=a-b` (or `a-`, or `-n` for the last n) over `len` bytes: the first and last byte to send. None: no range asked, or one this does
+/// not read (several ranges, another unit: the whole is sent, as HTTP allows). Err: a range outside the bytes.
+pub fn byte_range(header: &str, len: usize) -> Option<Result<(usize, usize), ()>> {
+    let spec = header.trim().strip_prefix("bytes=")?; if spec.contains(',') { return None }
+    let (a, b) = spec.split_once('-')?; let (a, b) = (a.trim(), b.trim());
+    if len == 0 { return Some(Err(())) }
+    if a.is_empty() { let n: usize = b.parse().ok()?; if n == 0 { return Some(Err(())) } return Some(Ok((len.saturating_sub(n), len - 1))) }
+    let from: usize = a.parse().ok()?; if from >= len { return Some(Err(())) }
+    let to = if b.is_empty() { len - 1 } else { b.parse::<usize>().ok()?.min(len - 1) };
+    if to < from { return None }
+    Some(Ok((from, to)))
+}
 /// `GET /ring/audio/<id>?k=<its link's key>`: one recording, to whoever holds its link (a browser or a phone's player cannot send the hub's token).
 pub struct RingAudio;
 impl HttpHandler for RingAudio {
@@ -270,7 +284,15 @@ impl HttpHandler for RingAudio {
             let home = hub.cfg.home.clone();
             let got = blocking(move || { if !ringbox::cap_ok(&ringbox::link_key(&home), &id, &k) { return None } ringbox::audio_path(&home, &id).and_then(|p| std::fs::read(p).ok()).map(|b| (id, b)) }).await.flatten();
             match got {
-                Some((id, b)) => HttpReply { status: "200 OK", ctype: "audio/mp4".into(), extra: format!("Cache-Control: private, max-age=3600\r\nContent-Disposition: inline; filename=\"{id}.m4a\"\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n"), body: b },
+                Some((id, b)) => {
+                    let head = format!("Cache-Control: private, max-age=3600\r\nAccept-Ranges: bytes\r\nContent-Disposition: inline; filename=\"{id}.m4a\"\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n");
+                    // a player that asks for a part (Safari plays nothing it cannot ask in parts) gets that part
+                    match byte_range(req.header("range"), b.len()) {
+                        Some(Ok((from, to))) => HttpReply { status: "206 Partial Content", ctype: "audio/mp4".into(), extra: format!("{head}Content-Range: bytes {from}-{to}/{}\r\n", b.len()), body: b[from..=to].to_vec() },
+                        Some(Err(())) => HttpReply { status: "416 Range Not Satisfiable", ctype: "text/plain; charset=utf-8".into(), extra: format!("Content-Range: bytes */{}\r\n", b.len()), body: vec![] },
+                        None => HttpReply { status: "200 OK", ctype: "audio/mp4".into(), extra: head, body: b },
+                    }
+                }
                 None => HttpReply::text("404 Not Found", "no such recording"),
             }
         })

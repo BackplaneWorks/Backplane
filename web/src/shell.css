@@ -2861,3 +2861,210 @@ button.primary.bp-send-btn.is-plan-exec {
   border-top: 1px solid var(--rule);
   overflow-y: auto;
 }
+
+/* Project Home: the page a project's name opens (project-home.ts). It covers the thread and its composer. */
+.bp-center.bp-home-open > :not(.bp-project-home) { display: none !important; }
+.bp-project-home {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  background: var(--bg);
+}
+.bp-home-inner {
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 20px 24px 40px;
+  display: flex;
+  flex-direction: column;
+}
+.bp-home-head { display: flex; flex-direction: column; gap: 3px; }
+.bp-home-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+.bp-home-root {
+  font-size: 12px;
+  color: var(--dim);
+  font-family: var(--mono);
+  overflow-wrap: anywhere;
+}
+.bp-home-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 4px;
+}
+button.primary.bp-home-new {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  font-size: 12px;
+}
+.bp-home-new-plus { font-size: 15px; line-height: 1; }
+.bp-home-section {
+  margin: 0;
+  padding: 18px 0 5px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+}
+.bp-home-empty {
+  padding: 9px 0;
+  font-size: 12px;
+  color: var(--dim);
+}
+.bp-home-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  padding: 3px 8px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+}
+button.bp-home-row { cursor: pointer; }
+button.bp-home-row:hover { background: var(--raise); }
+button.bp-home-row:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.bp-home-thread { min-height: 30px; font-size: 13px; }
+.bp-home-row-main {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bp-home-row-dim { color: var(--dim); flex-shrink: 0; }
+.bp-home-row-accent { color: var(--accent); flex-shrink: 0; }
+.bp-home-row-faint {
+  color: var(--faint);
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.bp-home-intent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 0;
+  font-size: 13px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.bp-home-intent-h { padding-top: 4px; font-weight: 700; }
+.bp-home-intent-li { display: flex; gap: 8px; }
+.bp-home-bullet { color: var(--dim); flex-shrink: 0; }
+.bp-home-order { display: flex; flex-direction: column; }
+.bp-home-order-note {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--dim);
+}
+.bp-home-order-note.warn {
+  color: var(--warn);
+  border-left: 2px solid var(--warn);
+  background: color-mix(in srgb, var(--warn) 8%, var(--panel));
+}
+.bp-home-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--bad);
+  background: color-mix(in srgb, var(--bad) 8%, var(--panel));
+  font-size: 12px;
+}
+.bp-proj-chev {
+  flex-shrink: 0;
+  width: 14px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--faint);
+  font-size: 10px;
+  line-height: 1;
+  cursor: pointer;
+}
+.bp-proj-chev:hover:not(:disabled) { color: var(--text); }
+.bp-proj-chev:disabled { cursor: default; opacity: 0.4; }
+.bp-proj-head.active { background: var(--raise); box-shadow: inset 2px 0 0 var(--accent); }
+.bp-proj-head.active .bp-proj-toggle { color: var(--accent); }
+
+/* Settings › Ring: the ring's voice notes (settings.ts renderRingPage). */
+.bp-ring-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0 10px;
+}
+.bp-ring-search-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--text);
+  font-size: 12px;
+}
+.bp-ring-search-input:focus { outline: 0; border-color: var(--accent); }
+.bp-ring-count {
+  padding: 0 0 6px;
+  border-bottom: 1px solid var(--rule);
+  font-size: 12px;
+  color: var(--dim);
+}
+.bp-ring-note {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+}
+.bp-ring-note.bad { box-shadow: inset 2px 0 0 var(--bad); padding-left: 10px; }
+.bp-ring-note-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.bp-ring-words {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.bp-ring-words.bp-dim { color: var(--dim); }
+.bp-ring-acts {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 2px;
+}
+.bp-ring-audio { height: 28px; max-width: 100%; }
+
+@media (max-width: 640px) {
+  .bp-home-inner { padding: 14px 14px 32px; }
+  .bp-home-row-faint { display: none; }
+  .bp-home-thread .bp-home-row-faint { display: inline; }
+  .bp-ring-search { flex-wrap: wrap; }
+}

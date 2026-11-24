@@ -4935,6 +4935,29 @@ web.settings.providers	AI providers	AI プロバイダー	Proveedores de IA
 web.settings.providers.browser	Connect a provider in the Backplane desktop or mobile app under Settings → Accounts.	Backplane のデスクトップまたはモバイルアプリの設定 → アカウントからプロバイダーを接続してください。	Conecta un proveedor en la aplicación de escritorio o móvil de Backplane en Configuración → Cuentas.
 order.lead.days	{days, plural, one {Est. lead time: 1 day} other {Est. lead time: {days} days}}	{days, plural, one {目安納期: 1日} other {目安納期: {days}日}}	{days, plural, one {Plazo estimado: 1 día} other {Plazo estimado: {days} días}}
 order.estimate.warnings	Warning: {warnings}	警告: {warnings}	Aviso: {warnings}
+web.home.open	Open project home	プロジェクトホームを開く	Abrir la página del proyecto
+web.home.fold	Hide threads	スレッドを隠す	Ocultar hilos
+web.home.unfold	Show threads	スレッドを表示	Mostrar hilos
+web.home.loading	Loading project…	プロジェクトを読み込み中…	Cargando el proyecto…
+web.home.error	Could not load this project.	このプロジェクトを読み込めませんでした。	No se pudo cargar este proyecto.
+web.home.lead	Lead time: {n} days	リードタイム: {n} 日	Plazo de entrega: {n} días
+web.home.lead.one	Lead time: 1 day	リードタイム: 1 日	Plazo de entrega: 1 día
+web.ring.unavailable	This hub does not show ring notes to a browser yet. Update it, or open Settings › Ring in the desktop app.	このハブはまだブラウザーにリングのメモを表示しません。ハブを更新するか、デスクトップアプリの設定 › リングを開いてください。	Este hub aún no muestra las notas del anillo en un navegador. Actualízalo o abre Configuración › Anillo en la aplicación de escritorio.
+web.ring.loading	Loading recordings…	録音を読み込み中…	Cargando grabaciones…
+web.ring.error	Could not load recordings.	録音を読み込めませんでした。	No se pudieron cargar las grabaciones.
+web.ring.count	{n} recordings	録音 {n} 件	{n} grabaciones
+web.ring.count.one	1 recording	録音 1 件	1 grabación
+web.ring.found	{found} of {total} have “{q}”.	{total} 件中 {found} 件に「{q}」があります。	{found} de {total} contienen “{q}”.
+web.ring.not.heard	Not heard	未認識	Sin transcribir
+web.ring.app.words	The Pebble app's words	Pebble アプリの文字起こし	Las palabras de la aplicación Pebble
+web.ring.heard.by	Heard by {model}	{model} が認識	Transcrito por {model}
+web.ring.heard.by.sure	Heard by {model}, {conf}% sure	{model} が認識、確度 {conf}%	Transcrito por {model}, {conf}% de certeza
+web.ring.state.sent	given to Pebble	Pebble に渡しました	entregada a Pebble
+web.ring.state.new	waiting to be heard	認識待ち	en espera de transcripción
+web.ring.state.heard	waiting to go to Pebble	Pebble への受け渡し待ち	en espera de entrega a Pebble
+web.ring.state.failed	not given to Pebble	Pebble に渡せませんでした	no entregada a Pebble
+web.ring.state.busy	being heard now	認識中	transcribiéndose ahora
+web.ring.no.words	(no words)	(言葉なし)	(sin palabras)
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7924,4 +7947,19 @@ order.estimate.warnings	Warning: {warnings}	警告: {warnings}	Aviso: {warnings}
 
     /// order.estimate.warnings = Warning: {warnings}
     static func order_estimate_warnings(warnings: String) -> String { f("order.estimate.warnings", ["warnings": warnings]) }
+
+    /// web.home.lead = Lead time: {n} days
+    static func web_home_lead(n: String) -> String { f("web.home.lead", ["n": n]) }
+
+    /// web.ring.count = {n} recordings
+    static func web_ring_count(n: String) -> String { f("web.ring.count", ["n": n]) }
+
+    /// web.ring.found = {found} of {total} have “{q}”.
+    static func web_ring_found(found: String, total: String, q: String) -> String { f("web.ring.found", ["found": found, "total": total, "q": q]) }
+
+    /// web.ring.heard.by = Heard by {model}
+    static func web_ring_heard_by(model: String) -> String { f("web.ring.heard.by", ["model": model]) }
+
+    /// web.ring.heard.by.sure = Heard by {model}, {conf}% sure
+    static func web_ring_heard_by_sure(model: String, conf: String) -> String { f("web.ring.heard.by.sure", ["model": model, "conf": conf]) }
 }

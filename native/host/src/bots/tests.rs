@@ -1580,6 +1580,13 @@ fn ring_form(words: &str, audio: &[u8], at: u64) -> Vec<u8> {
     let play = l["notes"][1]["play"].as_str().unwrap().to_string(); let path = &play[play.find("/ring/audio/").unwrap()..];
     let get = |p: &str| { let hub = hub.clone(); let p = p.to_string(); async move { let h = hub.http_for(&p).unwrap(); let r = crate::auth::Req::new("GET", &p, vec![]); let a = h.call(&hub, &r).await; (a.status.to_string(), a.body) } };
     assert_eq!(get(path).await, ("200 OK".to_string(), audio.to_vec())); assert_eq!(get(&format!("/ring/audio/{id}?k=00")).await.0, "404 Not Found");
+    // a player asks in parts (Safari plays nothing else): that part, and where it lies; the list says which note is being heard (none now)
+    { let h = hub.http_for(path).unwrap(); let r = crate::auth::Req::new("GET", path, vec![("Range".to_string(), "bytes=4-7".to_string())]); let a = h.call(&hub, &r).await;
+      assert_eq!((a.status, a.body.as_slice()), ("206 Partial Content", &audio[4..8])); assert!(a.extra.contains(&format!("Content-Range: bytes 4-7/{}", audio.len())) && a.extra.contains("Accept-Ranges: bytes"), "{}", a.extra); }
+    use crate::bots::ring::byte_range as br;
+    assert_eq!((br("", 10), br("bytes=0-", 10), br("bytes=2-99", 10), br("bytes=-3", 10)), (None, Some(Ok((0, 9))), Some(Ok((2, 9))), Some(Ok((7, 9)))));
+    assert_eq!((br("bytes=10-", 10), br("bytes=-0", 10), br("bytes=0-1,4-5", 10), br("lines=0-1", 10), br("bytes=5-2", 10), br("bytes=0-", 0)), (Some(Err(())), Some(Err(())), None, None, None, Some(Err(()))));
+    assert_eq!(l["busy"], "", "{l}");
     assert_eq!(rpc(&hub, "ring.hear", json!({"note":"../x"})).await["ok"], false);
     // the phones' page: the same rows, the test event's time, a search typed on the phone, and a press the phone does itself refused here
     let pg = rpc(&hub, "ring.page", json!({})).await; let rows = pg["rows"].as_array().unwrap().clone();

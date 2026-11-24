@@ -65,7 +65,7 @@ describe("Web Settings model", () => {
   test("defines clean grouped pages with valid group references", () => {
     const groupIds = new Set(SETTINGS_GROUPS.map((g) => g.id));
     expect(SETTINGS_GROUPS.map((g) => g.label)).toEqual(["General", "Agents and tools", "Connect"]);
-    expect(SETTINGS_PAGES.map((p) => p.id)).toEqual(["appearance", "providers", "devices", "home"]);
+    expect(SETTINGS_PAGES.map((p) => p.id)).toEqual(["appearance", "providers", "ring", "devices", "home"]);
     for (const p of SETTINGS_PAGES) {
       expect(groupIds.has(p.group)).toBe(true);
     }
@@ -73,7 +73,7 @@ describe("Web Settings model", () => {
 
   test("filterSettingsNav returns all pages with no hits when query is empty", () => {
     const res = filterSettingsNav(SETTINGS_PAGES, SAMPLE_ITEMS, "   ");
-    expect(res.map((m) => m.page.id)).toEqual(["appearance", "providers", "devices", "home"]);
+    expect(res.map((m) => m.page.id)).toEqual(["appearance", "providers", "ring", "devices", "home"]);
     expect(res.every((m) => m.hits.length === 0)).toBe(true);
   });
 

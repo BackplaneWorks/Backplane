@@ -10,7 +10,10 @@ import { onLocaleChange, setLocale, t } from "./i18n";
 import { signOut } from "./logout";
 import { MgmtStrip } from "./mgmt";
 import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
+import { ProjectHomeView, type HomeThreadRow } from "./project-home";
+import { parseProjectHome, rawProjectId } from "./project-home-model";
 import { isLocalNoProviderError, parseNoProvider, type NoProviderNotice } from "./provider-notice";
+import { parseRingList } from "./ring-model";
 import { RailView, type RailEntry } from "./rail";
 import { needAfter, needPress } from "./swarm-need";
 import { SettingsModal, type SettingsRow } from "./settings";
@@ -86,6 +89,17 @@ function stateDotClass(th: ThreadItem | null): string {
   if (s === "finished") return "bp-dot-done";
   if (s === "waiting" || s === "asking" || s === "blocked" || s === "failed" || (th.waiting ?? 0) > 0) return "bp-dot-need";
   return "bp-dot-idle";
+}
+
+/** A thread's age as the sidebar writes it: now, 5m, 3h, 2d. */
+function ageText(ts: number): string {
+  if (!ts) return "";
+  const ms = ts < 10_000_000_000 ? ts * 1000 : ts;
+  const sec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
+  if (sec < 60) return "now";
+  if (sec < 3600) return `${Math.floor(sec / 60)}m`;
+  if (sec < 86400) return `${Math.floor(sec / 3600)}h`;
+  return `${Math.floor(sec / 86400)}d`;
 }
 
 function hasForKind(has: RailHas | undefined, kind: string): boolean {
@@ -346,15 +360,91 @@ function mountApp(): void {
     }
   }
 
+  // Project Home: the page a project's name opens (feature `projecthome`); it covers the thread and its composer until a thread is opened
+  let homeProjectId = "";
+  let homeGen = 0;
+  const projectHome = new ProjectHomeView(centerEl, {
+    onNewThread: (projectId) => { void createThread(projectId); },
+    onOpenThread: (id) => { void openThread(id); },
+    onOpenViewer: (threadId, kind) => {
+      void openThread(threadId).then(() => {
+        if (selectedThreadId === threadId) openViewer(kind);
+      });
+    },
+    onRetry: (projectId) => { void openProjectHome(projectId); },
+  });
+
+  function closeProjectHome(): void {
+    if (!homeProjectId) return;
+    homeProjectId = "";
+    homeGen++;
+    centerEl.classList.remove("bp-home-open");
+    projectHome.hide();
+    sidebar.setSelectedProject("");
+    updateHeader();
+  }
+
+  /** A project by the id the hub's requests take: a section row's id may carry its place before a `|`. */
+  function projectOf(projectId: string): ProjectItem | undefined {
+    return projects.find((p) => p.id === projectId) ?? projects.find((p) => rawProjectId(p.id) === projectId);
+  }
+
+  /** The home's thread rows: the hub's own list for the project, in its order. */
+  async function loadHomeThreads(projectId: string, gen: number): Promise<void> {
+    try {
+      const res = await hub.rpc<{ threads?: ThreadItem[] }>("threads.list", { project: projectId, limit: 50, archived: false });
+      if (gen !== homeGen || homeProjectId !== projectId) return;
+      const rows: HomeThreadRow[] = (res.threads ?? []).filter((th) => !th.swarm).map((th) => ({
+        id: th.id,
+        title: th.title,
+        dot: stateDotClass(th),
+        status: th.status || th.state || "",
+        age: ageText(th.updatedAt),
+        settled: th.settled,
+      }));
+      projectHome.setThreads(rows);
+    } catch {
+      if (gen === homeGen && homeProjectId === projectId) projectHome.setThreads([]);
+    }
+  }
+
+  /** Opens a project's home. False: this hub has no home to show (an older hub), and the caller does what it did before. */
+  function openProjectHome(projectId: string): boolean {
+    if (!projectId || !hub.hasFeature("projecthome")) return false;
+    voice.cancel();
+    composer.closeModelPicker();
+    homeProjectId = projectId;
+    const gen = ++homeGen;
+    const proj = projectOf(projectId);
+    centerEl.classList.add("bp-home-open");
+    sidebarEl.classList.remove("bp-sidebar-open");
+    projectHome.show({ id: projectId, title: proj?.title ?? projectId });
+    sidebar.setSelectedProject(projectId);
+    updateHeader();
+    void loadHomeThreads(projectId, gen);
+    void hub.rpc("project.home", { project: projectId })
+      .then((res) => {
+        if (gen === homeGen && homeProjectId === projectId) projectHome.setData(parseProjectHome(res));
+      })
+      .catch((e) => {
+        if (gen !== homeGen || homeProjectId !== projectId) return;
+        projectHome.setError(e instanceof Error && e.message ? e.message : t("web.home.error", "Could not load this project."));
+      });
+    return true;
+  }
+
   const sidebar = new SidebarView(sidebarEl, {
     onSelectThread: (id) => {
       if (id === selectedThreadId && threadSubId !== null) {
+        closeProjectHome();
         sidebarEl.classList.remove("bp-sidebar-open");
         return;
       }
       void openThread(id);
     },
     onNewThread: (projectId) => { void createThread(projectId); },
+    onOpenProject: (projectId) => openProjectHome(rawProjectId(projectId)),
+    canOpenProject: () => hub.hasFeature("projecthome"),
     onSelectBot: (bot) => { void openThread(bot.thread); },
     onQuickOpenViewer: (projectId, kind) => {
       const existing = threads.find((th) => th.project === projectId && !th.archived && !th.swarm);
@@ -748,6 +838,10 @@ function mountApp(): void {
       } catch { /* ignore */ }
       applyEffectiveLocale();
     },
+    hasRing: () => hub.hasFeature("ringnotes"),
+    onRingList: async (q) => parseRingList(await hub.rpc("ring.list", { q })),
+    onRingHear: async (note, engine) => { await hub.rpc("ring.hear", { note, engine }); },
+    onOpenThread: (id) => { void openThread(id); },
     onLogout: () => signOut(() => {
       hub.disconnect();
       window.location.replace("/");
@@ -899,8 +993,12 @@ function mountApp(): void {
   });
 
   function updateHeader(): void {
-    const th = threads.find((x) => x.id === selectedThreadId) ?? null;
-    const proj = th ? projects.find((p) => p.id === th.project) : undefined;
+    // a project's home is on show: the bar names the project and offers nothing of a thread
+    const th = homeProjectId ? null : threads.find((x) => x.id === selectedThreadId) ?? null;
+    const proj = homeProjectId
+      ? projectOf(homeProjectId) ?? { id: homeProjectId, title: homeProjectId }
+      : th ? projectOf(th.project) : undefined;
+    if (homeProjectId && proj) projectHome.setTitle(proj.title);
     projCrumb.textContent = proj?.title ?? "";
     sep1.classList.toggle("bp-hidden", !proj);
     sep2.classList.toggle("bp-hidden", !th);
@@ -1081,6 +1179,7 @@ function mountApp(): void {
       sidebar.setData(projects, threads, bots, rooms);
       sidebar.setSections(list, bots, rooms);
       updateHeader();
+      if (homeProjectId) void loadHomeThreads(homeProjectId, homeGen);
       return true;
     } catch {
       return false;
@@ -1212,7 +1311,8 @@ function mountApp(): void {
     }
 
     if (targetId && ((sections && hasSectionThreadId(sections, targetId)) || threads.some((x) => x.id === targetId))) {
-      await openThread(targetId);
+      // a reconnect while a project's home is on show: the thread under it is opened again, the home stays
+      await openThread(targetId, homeProjectId !== "");
     } else {
       selectedThreadId = "";
       railItems = [];
@@ -1220,9 +1320,12 @@ function mountApp(): void {
       composer.setState(false, false);
       updateHeader();
     }
+    // still on show (nothing else was opened meanwhile): what it says is read again
+    if (homeProjectId) openProjectHome(homeProjectId);
   }
 
-  async function openThread(threadId: string): Promise<void> {
+  async function openThread(threadId: string, keepHome = false): Promise<void> {
+    if (!keepHome) closeProjectHome();
     if (selectedThreadId && selectedThreadId !== threadId) {
       voice.cancel();
       const held = chat.getEntries();
@@ -1635,6 +1738,7 @@ function mountApp(): void {
     composer.refreshLocale();
     rail.render();
     settings.refreshLocale();
+    projectHome.refreshLocale();
     addProject.refreshLocale();
   });
 

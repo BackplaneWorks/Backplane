@@ -101,6 +101,7 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "models.list"
         | "plan.get"
         | "project.card"
+        | "project.home"
         | "projects.list"
         | "review.list"
         | "review.page"
@@ -179,10 +180,11 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         // Initiates an order or checkout.
         "order.buy"
         | "thread.buy" => Denied,
-        // Native ring transport setup and delivery.
+        // The ring's recordings: listed and found (their words, where each went, the link that plays one), and heard again.
+        "ring.list" => Passive,
+        "ring.hear" => Activity,
+        // Native ring transport setup and delivery: the webhook's token (on `ring.page`), a note's raw form, sending to the bot, the desktop's own search.
         "ring.get"
-        | "ring.hear"
-        | "ring.list"
         | "ring.page"
         | "ring.page.act"
         | "ring.search"
@@ -223,6 +225,11 @@ mod tests {
         assert_eq!(policy("models.favorite", &json!({"provider":"claude","model":"opus"})), Policy::Activity);
         assert!(!allowed("composer.run", &json!({"text":"/secret example"})));
         assert!(allowed("composer.run", &json!({"text":"/settle"})));
+        // the ring's recordings are read and heard again; its webhook, token and delivery stay native
+        assert_eq!(policy("ring.list", &json!({"q":"sam"})), Policy::Passive);
+        assert_eq!(policy("ring.hear", &json!({"note":"n1","engine":"local"})), Policy::Activity);
+        for m in ["ring.page", "ring.page.act", "ring.setup", "ring.send", "ring.get", "ring.search"] { assert_eq!(policy(m, &Value::Null), Policy::Denied, "{m}"); }
+        assert_eq!(policy("project.home", &json!({"project":"p1"})), Policy::Passive);
         assert_eq!(policy("devices.page", &Value::Null), Policy::Devices);
         assert_eq!(policy("devices.page.act", &Value::Null), Policy::Denied);
     }

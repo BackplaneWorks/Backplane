@@ -3,7 +3,7 @@
 
 export type WebThemePref = "auto" | "dark" | "light";
 export type WebLocalePref = "auto" | "en" | "es" | "ja";
-export type SettingsPageId = "appearance" | "providers" | "devices" | "home";
+export type SettingsPageId = "appearance" | "providers" | "ring" | "devices" | "home";
 export type SettingsGroupId = "general" | "ai" | "connect";
 
 export interface SettingsGroupMeta {
@@ -16,7 +16,7 @@ export interface SettingsPageMeta {
   group: SettingsGroupId;
   title: string;
   subtitle: string;
-  icon: "sun" | "cpu" | "link" | "globe";
+  icon: "sun" | "cpu" | "mic" | "link" | "globe";
   keywords: string[];
 }
 
@@ -56,6 +56,14 @@ export const SETTINGS_PAGES: readonly SettingsPageMeta[] = [
     subtitle: "Account sign-ins live in the desktop or mobile app.",
     icon: "cpu",
     keywords: ["accounts", "claude", "codex", "antigravity", "grok", "openai", "anthropic", "signin", "login", "model"],
+  },
+  {
+    id: "ring",
+    group: "ai",
+    title: "Ring",
+    subtitle: "Voice notes from your Pebble ring. Its webhook is set up in the desktop or mobile app.",
+    icon: "mic",
+    keywords: ["pebble", "index", "voice", "note", "notes", "recording", "recordings", "play", "hear", "transcribe", "search"],
   },
   {
     id: "devices",
