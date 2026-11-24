@@ -120,8 +120,183 @@ pub async fn find(status: &str, port: u16, extra: &str) -> Value {
 }
 pub async fn status_json() -> String {
     if crate::copy::on() { return String::new() }
-    match tokio::time::timeout(std::time::Duration::from_secs(10), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["status", "--json"]).stderr(std::process::Stdio::null()).kill_on_drop(true).output()).await {
+    match tokio::time::timeout(std::time::Duration::from_secs(10), crate::proc::tokio_cmd(crate::proc::Kind::Net, tailscale_program()).args(["status", "--json"]).stderr(std::process::Stdio::null()).kill_on_drop(true).output()).await {
         Ok(Ok(o)) if o.status.success() => String::from_utf8_lossy(&o.stdout).into_owned(), _ => String::new() }
+}
+
+fn join_windows_path(dir: &str, suffix: &str) -> std::path::PathBuf {
+    let trimmed = dir.trim_end_matches(['\\', '/']);
+    std::path::PathBuf::from(format!(r"{trimmed}\{suffix}"))
+}
+
+/// Locate the Tailscale CLI on Linux, macOS (App Store / standalone app and Homebrew/CLI), or Windows.
+pub fn resolve_tailscale_in(
+    os: &str,
+    path_env: Option<&str>,
+    program_files: Option<&str>,
+    program_files_x86: Option<&str>,
+    home_dir: Option<&str>,
+    has_macos_brew_socket: bool,
+    is_executable: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    match os {
+        "linux" => {
+            candidates.push("/usr/bin/tailscale".into());
+            candidates.push("/usr/local/bin/tailscale".into());
+            if let Some(path) = path_env {
+                for dir in path.split(':').filter(|d| !d.is_empty()) {
+                    candidates.push(std::path::Path::new(dir).join("tailscale"));
+                }
+            }
+        }
+        "macos" => {
+            let mut app_candidates = vec![std::path::PathBuf::from(
+                "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+            )];
+            if let Some(home) = home_dir.map(str::trim).filter(|h| !h.is_empty()) {
+                app_candidates.push(
+                    std::path::Path::new(home.trim_end_matches('/'))
+                        .join("Applications/Tailscale.app/Contents/MacOS/Tailscale"),
+                );
+            }
+            let mut cli_candidates = Vec::new();
+            if let Some(path) = path_env {
+                for dir in path.split(':').filter(|d| !d.is_empty()) {
+                    cli_candidates.push(std::path::Path::new(dir).join("tailscale"));
+                }
+            }
+            cli_candidates.push("/opt/homebrew/bin/tailscale".into());
+            cli_candidates.push("/usr/local/bin/tailscale".into());
+            if has_macos_brew_socket {
+                candidates.extend(cli_candidates);
+                candidates.extend(app_candidates);
+            } else {
+                candidates.extend(app_candidates);
+                candidates.extend(cli_candidates);
+            }
+        }
+        "windows" => {
+            if let Some(pf) = program_files.map(str::trim).filter(|s| !s.is_empty()) {
+                candidates.push(join_windows_path(pf, r"Tailscale\tailscale.exe"));
+            }
+            candidates.push(std::path::PathBuf::from(r"C:\Program Files\Tailscale\tailscale.exe"));
+            if let Some(pf86) = program_files_x86.map(str::trim).filter(|s| !s.is_empty()) {
+                candidates.push(join_windows_path(pf86, r"Tailscale\tailscale.exe"));
+            }
+            if let Some(path) = path_env {
+                for dir in path.split(';').filter(|d| !d.is_empty()) {
+                    candidates.push(join_windows_path(dir, "tailscale.exe"));
+                }
+            }
+        }
+        _ => {
+            if let Some(path) = path_env {
+                for dir in std::env::split_paths(path) {
+                    candidates.push(dir.join("tailscale"));
+                }
+            }
+        }
+    }
+    candidates.into_iter().find(|p| is_executable(p))
+}
+
+/// Locate the system curl executable for HTTPS probe verification.
+pub fn resolve_curl_in(
+    os: &str,
+    path_env: Option<&str>,
+    system_root: Option<&str>,
+    is_executable: impl Fn(&std::path::Path) -> bool,
+) -> Option<std::path::PathBuf> {
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    match os {
+        "linux" => {
+            candidates.push("/usr/bin/curl".into());
+            candidates.push("/bin/curl".into());
+            if let Some(path) = path_env {
+                for dir in path.split(':').filter(|d| !d.is_empty()) {
+                    candidates.push(std::path::Path::new(dir).join("curl"));
+                }
+            }
+        }
+        "macos" => {
+            candidates.push("/usr/bin/curl".into());
+            if let Some(path) = path_env {
+                for dir in path.split(':').filter(|d| !d.is_empty()) {
+                    candidates.push(std::path::Path::new(dir).join("curl"));
+                }
+            }
+        }
+        "windows" => {
+            let root = system_root
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .unwrap_or(r"C:\Windows");
+            candidates.push(join_windows_path(root, r"System32\curl.exe"));
+            if let Some(path) = path_env {
+                for dir in path.split(';').filter(|d| !d.is_empty()) {
+                    candidates.push(join_windows_path(dir, "curl.exe"));
+                }
+            }
+        }
+        _ => {
+            if let Some(path) = path_env {
+                for dir in std::env::split_paths(path) {
+                    candidates.push(dir.join("curl"));
+                }
+            }
+        }
+    }
+    candidates.into_iter().find(|p| is_executable(p))
+}
+
+pub fn macos_has_brew_socket() -> bool {
+    #[cfg(unix)]
+    {
+        use crate::plat::fs::FileTypeExt;
+        std::fs::metadata("/var/run/tailscaled.socket").is_ok_and(|m| m.file_type().is_socket())
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+fn is_runnable(path: &std::path::Path) -> bool {
+    std::fs::metadata(path).is_ok_and(|m| crate::plat::fs::runnable(&m))
+}
+
+pub fn tailscale_cli() -> Option<std::path::PathBuf> {
+    let path_env = std::env::var("PATH").ok();
+    let pf = std::env::var("ProgramFiles").ok();
+    let pf86 = std::env::var("ProgramFiles(x86)").ok();
+    let home = std::env::var("HOME").ok();
+    resolve_tailscale_in(
+        std::env::consts::OS,
+        path_env.as_deref(),
+        pf.as_deref(),
+        pf86.as_deref(),
+        home.as_deref(),
+        macos_has_brew_socket(),
+        is_runnable,
+    )
+}
+
+pub fn tailscale_program() -> std::ffi::OsString {
+    tailscale_cli()
+        .map(|p| p.into_os_string())
+        .unwrap_or_else(|| std::ffi::OsString::from("tailscale"))
+}
+
+pub fn curl_cli() -> Option<std::path::PathBuf> {
+    let path_env = std::env::var("PATH").ok();
+    let system_root = std::env::var("SystemRoot").ok();
+    resolve_curl_in(
+        std::env::consts::OS,
+        path_env.as_deref(),
+        system_root.as_deref(),
+        is_runnable,
+    )
 }
 
 #[cfg(test)]
@@ -207,5 +382,105 @@ mod tests {
     #[test] fn tailnet_serve_law_fixture() {
         let j = r#"{"Web":{"a.ts.net:443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3773"}}},"a.ts.net:8443":{"Handlers":{"/":{"Proxy":"http://127.0.0.1:3787"}}}}}"#;
         assert_eq!(serve(j, "3787"), "https://a.ts.net:8443");
+    }
+
+    #[test] fn resolve_tailscale_and_curl_across_platforms() {
+        use std::path::Path;
+        let has = |targets: &[&str]| {
+            let set: Vec<String> = targets.iter().map(|s| (*s).to_string()).collect();
+            move |p: &Path| set.iter().any(|t| t == p.to_string_lossy().as_ref())
+        };
+        assert_eq!(
+            resolve_tailscale_in("linux", Some("/opt/bin"), None, None, None, false, has(&["/usr/bin/tailscale"])),
+            Some(Path::new("/usr/bin/tailscale").to_path_buf())
+        );
+        assert_eq!(
+            resolve_tailscale_in("linux", Some("/opt/bin"), None, None, None, false, has(&["/opt/bin/tailscale"])),
+            Some(Path::new("/opt/bin/tailscale").to_path_buf())
+        );
+        // macOS App Store / standalone app preferred when no brew socket
+        assert_eq!(
+            resolve_tailscale_in(
+                "macos",
+                Some("/opt/homebrew/bin:/usr/local/bin"),
+                None,
+                None,
+                Some("/Users/alex"),
+                false,
+                has(&["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/opt/homebrew/bin/tailscale"])
+            ),
+            Some(Path::new("/Applications/Tailscale.app/Contents/MacOS/Tailscale").to_path_buf())
+        );
+        // macOS Homebrew CLI preferred when brew socket is active
+        assert_eq!(
+            resolve_tailscale_in(
+                "macos",
+                Some("/opt/homebrew/bin:/usr/local/bin"),
+                None,
+                None,
+                Some("/Users/alex"),
+                true,
+                has(&["/Applications/Tailscale.app/Contents/MacOS/Tailscale", "/opt/homebrew/bin/tailscale"])
+            ),
+            Some(Path::new("/opt/homebrew/bin/tailscale").to_path_buf())
+        );
+        assert_eq!(
+            resolve_tailscale_in(
+                "macos",
+                None,
+                None,
+                None,
+                Some("/Users/alex"),
+                false,
+                has(&["/Users/alex/Applications/Tailscale.app/Contents/MacOS/Tailscale"])
+            ),
+            Some(Path::new("/Users/alex/Applications/Tailscale.app/Contents/MacOS/Tailscale").to_path_buf())
+        );
+        // Windows ProgramFiles and PATH
+        assert_eq!(
+            resolve_tailscale_in(
+                "windows",
+                Some(r"C:\Tools"),
+                Some(r"D:\Programs"),
+                None,
+                None,
+                false,
+                has(&[r"D:\Programs\Tailscale\tailscale.exe", r"C:\Tools\tailscale.exe"])
+            ),
+            Some(Path::new(r"D:\Programs\Tailscale\tailscale.exe").to_path_buf())
+        );
+        assert_eq!(
+            resolve_tailscale_in(
+                "windows",
+                Some(r"C:\Tools"),
+                None,
+                None,
+                None,
+                false,
+                has(&[r"C:\Program Files\Tailscale\tailscale.exe"])
+            ),
+            Some(Path::new(r"C:\Program Files\Tailscale\tailscale.exe").to_path_buf())
+        );
+        assert_eq!(
+            resolve_tailscale_in("windows", Some(r"C:\Tools"), None, None, None, false, has(&[r"C:\Tools\tailscale.exe"])),
+            Some(Path::new(r"C:\Tools\tailscale.exe").to_path_buf())
+        );
+
+        assert_eq!(
+            resolve_curl_in("linux", None, None, has(&["/usr/bin/curl"])),
+            Some(Path::new("/usr/bin/curl").to_path_buf())
+        );
+        assert_eq!(
+            resolve_curl_in("macos", None, None, has(&["/usr/bin/curl"])),
+            Some(Path::new("/usr/bin/curl").to_path_buf())
+        );
+        assert_eq!(
+            resolve_curl_in("windows", Some(r"C:\Tools"), Some(r"C:\Windows"), has(&[r"C:\Windows\System32\curl.exe"])),
+            Some(Path::new(r"C:\Windows\System32\curl.exe").to_path_buf())
+        );
+        assert_eq!(
+            resolve_curl_in("windows", Some(r"C:\Tools"), Some(r"C:\Windows"), has(&[r"C:\Tools\curl.exe"])),
+            Some(Path::new(r"C:\Tools\curl.exe").to_path_buf())
+        );
     }
 }

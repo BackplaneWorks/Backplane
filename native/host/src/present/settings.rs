@@ -330,16 +330,17 @@ fn web_ui(st: &State, info: &Value) -> Vec<Value> {
     let status: Value = info["web.status"].as_str().and_then(|v| serde_json::from_str(v).ok()).unwrap_or(Value::Null);
     let enabled = set(st, "web.enabled", "") == "1";
     let mut rows = Vec::new();
-    let reason = status["reason"].as_str().unwrap_or(if cfg!(target_os = "linux") { "Browser access requires a verified Tailscale HTTPS connection." } else { "This release supports browser access on Linux hubs only." });
+    let reason = status["reason"].as_str().unwrap_or("Browser access requires a verified Tailscale HTTPS connection.");
     let available = status["available"] == true;
     let buttons = if enabled || available || status["canEnable"] == true {
         vec![btn(if enabled { "Turn off" } else { "Turn on" }, "device-web-access", if enabled { "0" } else { "1" }, false)]
     } else { vec![] };
     rows.push(row("Browser access", if available { "Pair a browser over HTTPS on your tailnet. A paired browser can use the terminal." } else { reason }, buttons));
     if status["operatorRequired"] == true {
-        let command = r#"sudo tailscale set --operator="$(id -un)""#;
+        let command = status["operatorCommand"].as_str().unwrap_or(r#"sudo tailscale set --operator="$(id -un)""#);
+        let note = status["operatorNote"].as_str().unwrap_or("This user can manage Tailscale on this computer without sudo.");
         rows.push(row("Run once in your terminal", command, vec![btn("Copy", "copy", command, false)]));
-        rows.push(row("Operator permission", "This user can manage Tailscale on this computer without sudo.", vec![]));
+        rows.push(row("Operator permission", note, vec![]));
     }
     if enabled && !available {
         if let Some(command) = status["command"].as_str() {
@@ -1285,6 +1286,16 @@ mod tests {
         assert_eq!(grant["buttons"][0]["action"], "copy");
         assert_eq!(grant["buttons"][0]["value"], grant["note"]);
         assert_eq!(by(&rows,"Set up private HTTPS forwarding")["buttons"][0]["value"], "/usr/bin/tailscale serve");
+
+        let win_status = json!({
+            "operatorRequired": true,
+            "operatorCommand": r#""C:\Program Files\Tailscale\tailscale.exe" serve --bg --https=8443 http://127.0.0.1:49231"#,
+            "operatorNote": "Run this command once in an Administrator terminal to set up HTTPS forwarding.",
+            "command": r#""C:\Program Files\Tailscale\tailscale.exe" serve --bg --https=8443 http://127.0.0.1:49231"#
+        });
+        let win_rows = pg_rows("web", &[("web.enabled", "1")], json!({}), json!({"web.status": win_status.to_string()}));
+        assert_eq!(by(&win_rows, "Run once in your terminal")["note"], win_status["operatorCommand"]);
+        assert_eq!(by(&win_rows, "Operator permission")["note"], win_status["operatorNote"]);
     }
     #[test] fn web_ui_shows_only_the_active_address() {
         let address = "https://bp.example.ts.net";
@@ -1295,7 +1306,9 @@ mod tests {
         assert_eq!(link["note"], address);
         assert_eq!(link["qr"], json!(crate::net::qr::text(address).lines().collect::<Vec<_>>()));
         let unavailable = pg_rows("web", &[], json!({}), json!({}));
-        assert_eq!(by(&unavailable, "Browser access")["buttons"][0]["value"], "1", "the switch is there whatever the hub knows of its web status");
+        let switch = by(&unavailable, "Browser access");
+        assert_eq!(switch["buttons"][0]["value"], "1", "the switch is there whatever the hub knows of its web status");
+        assert!(!switch["note"].as_str().unwrap_or("").contains("Linux"), "all platforms support browser access");
     }
     #[test] fn devices_an_invitation_shows_the_chosen_address_link_qr_code_and_expiry() {
         let r = dev_rows(json!({"@invite": invite3(false)}), json!({"devices": [], "invitations": [], "lan": [], "host": "127.0.0.1"}));
