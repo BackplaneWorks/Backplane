@@ -86,6 +86,21 @@ pub fn sign_in_url(value: &str, provider: &str) -> String {
     value.to_string()
 }
 
+/// Checks a pasted Claude `CODE#STATE` against the attempt's sign-in link; returns `""` when it may be forwarded to the CLI.
+/// Claude Code 2.1.331+ prints shortened sign-in links with no `state=` query parameter (#1656): when `state` is absent, skip the
+/// local state comparison and let the Claude CLI validate its own OAuth state.
+fn claude_code_error(url: &str, code: &str) -> &'static str {
+    let parts: Vec<&str> = code.trim().split('#').collect();
+    if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() {
+        return "Paste the complete authentication code from Claude's sign-in page, including # and everything after it. API keys and setup-tokens cannot complete this sign-in.";
+    }
+    let state = query_pairs(url).into_iter().find(|(k, _)| k == "state").map(|(_, v)| v).unwrap_or_default();
+    if !state.is_empty() && parts[1] != state {
+        return "That code belongs to a different sign-in attempt. Open this attempt's provider sign-in link and copy its new authentication code.";
+    }
+    ""
+}
+
 /// A provider CLI's spawn, again for a moment when exec says ETXTBSY: a CLI written just before it runs (an update in place, a test's stand-in) is "busy" while any
 /// fork made in that instant still holds the writer's descriptor, until that fork execs or exits. Under load other threads fork all the time, and the sign-in
 /// failed with "could not start" (accounts_io tests in parallel: 3 of 24 runs before, 0 of 88 after, one ETXTBSY retry seen).
@@ -863,10 +878,8 @@ impl Accounts {
                 let (att, tx) = { let g = self.inner.lock().unwrap(); (g.attempts.iter().find(|a| a.id == aid).cloned(), g.cmds.get(aid).cloned()) };
                 let ok = att.as_ref().map_or(false, |a| g_job_is(&self.inner, &pid, aid) && a.state == "waiting" && now_ms() < a.expires_at) && p.provider == "claude" && code.len() <= 4096 && !code.contains(['\r', '\n', '\0']);
                 if !ok { return Err(None) }
-                let att = att.unwrap(); let parts: Vec<&str> = code.trim().split('#').collect();
-                let state = query_pairs(&att.url).into_iter().find(|(k, _)| k == "state").map(|(_, v)| v).unwrap_or_default();
-                let error = if parts.len() != 2 || parts[0].is_empty() || parts[1].is_empty() { "Paste the complete authentication code from Claude's sign-in page, including # and everything after it. API keys and setup-tokens cannot complete this sign-in." }
-                    else if state.is_empty() || parts[1] != state { "That code belongs to a different sign-in attempt. Open this attempt's provider sign-in link and copy its new authentication code." } else { "" };
+                let att = att.unwrap();
+                let error = claude_code_error(&att.url, code);
                 if !error.is_empty() { { let mut g = self.inner.lock().unwrap(); if let Some(a) = g.attempts.iter_mut().find(|a| a.id == aid) { a.message = error.into() } g.revision += 1; } let mut s = self.snapshot(); s["error"] = json!(error); return Ok(s) }
                 { let mut g = self.inner.lock().unwrap(); if let Some(a) = g.attempts.iter_mut().find(|a| a.id == aid) { a.message.clear() } g.revision += 1; }
                 // Claude validates its own OAuth state and code; no callback is fetched here
@@ -1624,6 +1637,7 @@ for l in sys.stdin:
 
     #[test] fn sign_in_links_are_https_on_the_providers_hosts_without_credentials() {
         assert!(!sign_in_url("https://claude.com/cai/oauth/authorize?code=true&state=s", "claude").is_empty());
+        assert!(!sign_in_url("https://claude.ai/oauth/authorize?z-oxvJ9x8y7z", "claude").is_empty());
         assert_eq!(sign_in_url("https://claude.com/cai/oauth/authorize?code=abc&state=s", "claude"), "", "an OAuth code is not the code-entry flag");
         for bad in ["http://claude.ai/x", "https://evil.example/x", "https://claude.ai.evil.com/x", "https://user:pw@claude.ai/x", "https://claude.ai:8443/x", "https://claude.ai/x?access_token=1", "https://claude.ai/x y", "https://auth.openai.com/x"] { assert_eq!(sign_in_url(bad, "claude"), "", "{bad}") }
         assert!(!sign_in_url("https://auth.openai.com/codex/device", "codex").is_empty()); assert_eq!(sign_in_url("https://claude.ai/x", "codex"), "");
@@ -1758,6 +1772,62 @@ for l in sys.stdin:
         let s = a.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!((prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("disconnected"), json!(4)));
         assert!(std::fs::read_dir(&store).unwrap().flatten().all(|e| !e.path().is_dir()), "the store is forgotten");
         std::env::remove_var("ANTHROPIC_API_KEY"); let _ = std::fs::remove_dir_all(&h);
+    }
+    #[test] fn claude_code_validation_checks_state_when_present_and_skips_when_absent() {
+        let long_url = "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123";
+        assert_eq!(claude_code_error(long_url, "CODE#STATE123"), "");
+        assert_eq!(claude_code_error(long_url, " CODE#STATE123 "), "");
+        assert!(claude_code_error(long_url, "CODE#OTHER").starts_with("That code belongs to a different sign-in attempt"));
+        for bad in ["justacode", "CODE#", "#STATE123", "A#B#C", ""] {
+            assert!(claude_code_error(long_url, bad).starts_with("Paste the complete authentication code"), "{bad}");
+        }
+
+        let short_url = "https://claude.ai/oauth/authorize?z-oxvJ9x8y7z";
+        assert_eq!(claude_code_error(short_url, "CODE#STATE123"), "");
+        assert_eq!(claude_code_error(short_url, "CODE#OTHER"), "");
+        for bad in ["justacode", "CODE#", "#STATE123", "A#B#C", ""] {
+            assert!(claude_code_error(short_url, bad).starts_with("Paste the complete authentication code"), "{bad}");
+        }
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_claude_sign_in_with_a_short_link_without_state_forwards_the_code_to_the_cli() {
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (h, sd) = dirs("cl-short");
+        let short_url = "https://claude.ai/oauth/authorize?z-oxvJ9x8y7z";
+        let claude_short = CLAUDE.replace(
+            "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123",
+            short_url,
+        );
+        assert_ne!(claude_short, CLAUDE);
+        std::fs::write(sd.join("claude"), claude_short).unwrap();
+        std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let a = mgr(&h, &sd);
+        let id = add(&a, "claude", "Work").await;
+        assert_eq!(a.request(&json!({"op":"login","profile":id,"mode":"device"})).await["error"], "");
+        let s = until(&a, |s| s["attempts"][0]["state"] == "waiting").await;
+        let aid = s["attempts"][0]["id"].as_str().unwrap().to_string();
+        assert_eq!(s["attempts"][0]["url"], short_url);
+
+        let r = a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"justacode"})).await;
+        assert!(r["error"].as_str().unwrap().starts_with("Paste the complete authentication code"));
+
+        // Mismatched state cannot be detected locally without state= in the URL, so it is forwarded to the CLI, which rejects it.
+        assert_eq!(a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"CODE#WRONG"})).await["error"], "");
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["id"] == aid.as_str() && t["state"] == "failed")).await;
+        let msg = s["attempts"].as_array().unwrap().iter().find(|t| t["id"] == aid.as_str()).unwrap()["message"].as_str().unwrap();
+        assert!(msg.starts_with("Claude did not accept that authentication code."), "{msg}");
+
+        // Second attempt with the valid CODE#STATE completes sign-in.
+        assert_eq!(a.request(&json!({"op":"login","profile":id,"mode":"device"})).await["error"], "");
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["profile"] == id.as_str() && t["state"] == "waiting")).await;
+        let att2 = s["attempts"].as_array().unwrap().iter().rev().find(|t| t["profile"] == id.as_str() && t["state"] == "waiting").unwrap();
+        let aid2 = att2["id"].as_str().unwrap().to_string();
+        assert_eq!(att2["url"], short_url);
+        assert_eq!(a.request(&json!({"op":"respond","profile":id,"attempt":aid2,"code":"CODE#STATE123"})).await["error"], "");
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["id"] == aid2.as_str() && t["state"] == "done")).await;
+        let p = prof(&s, &id);
+        assert_eq!((p["state"].clone(), p["identity"]["email"].clone()), (json!("connected"), json!("a@example.com")), "{p}");
+        let _ = std::fs::remove_dir_all(&h);
     }
 
     // ---- sync accounts ----
