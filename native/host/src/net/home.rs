@@ -67,9 +67,10 @@ pub async fn read(hub: &Arc<Hub>) -> Facts {
     let home_id = at["mid"].as_str().filter(|id| !id.is_empty()).map(str::to_string)
         .or_else(|| bots.as_ref().and_then(|b| b.mid_known(&link))).unwrap_or_default();
     let queued = if link.is_empty() { 0 } else { crate::net::farsend::global().map_or(0, |o| o.items().iter().filter(|h| h.link == link).count()) };
+    let now = crate::hub::now_ms() / 1000;
     // the machine coming home says so in `home.moving`; the one sending has the job (net/homemove.rs `home.status`)
     let here: Value = serde_json::from_str(&hub.setting("home.moving").await.unwrap_or_default()).unwrap_or(Value::Null);
-    let moving = if here.is_object() { here } else { crate::net::homemove::job() };
+    let moving = crate::net::homemove::active_move(&here, now).unwrap_or_else(|| crate::net::homemove::job_at(now));
     Facts { away_since: if link.is_empty() { None } else { hub.mirrors().away_since(&link) }, at, boat_link: boat["link"].as_str().unwrap_or("").to_string(),
         me_id, me_name: NAME.get_or_init(crate::net::botnet::name).await.clone(), home_id, queued, moving }
 }

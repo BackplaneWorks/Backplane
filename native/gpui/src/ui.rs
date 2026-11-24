@@ -680,7 +680,24 @@ impl Backplane {
             crew.push(div().id("crew-rooms").flex().flex_wrap().items_center().px(px(7.)).pb(px(6.)).max_h(px(3. * 22. + 6.)).overflow_y_scroll().children(chips).into_any_element());
         }
         if let Some((line, bad)) = home_away_line(&self.data["home"]) {
-            rows.push(div().id("home-away-row").px_3().py_1().border_b_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(11.)).text_color(if bad { c("bad") } else { c("dim") }).child(line).into_any_element());
+            let dismissible = home_move_dismissible(&self.data["home"]);
+            let mut row = div().id("home-away-row").px_3().py_1().border_b_1().border_color(c("line")).bg(c("panel"))
+                .flex().items_center().gap_1()
+                .text_size(crate::scale::tpx(11.)).text_color(if bad { c("bad") } else { c("dim") })
+                .child(div().flex_1().min_w_0().child(line));
+            if dismissible {
+                row = row.child(
+                    /* i18n-ok: a ui: id the drivers press */ with_rect(div().id("home-away-dismiss"), || "ui:Dismiss home move".to_string())
+                        .flex_shrink_0().px_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise")))
+                        .tooltip(crate::keys::tip_raw(&crate::i18n::t("approval.dismiss"), "", light))
+                        .on_click(cx.listener(|this, _, _, cx| {
+                            let _ = this.tx.try_send(home_move_dismiss_cmd());
+                            cx.notify();
+                        }))
+                        .child("×"),
+                );
+            }
+            rows.push(row.into_any_element());
         }
         let new_here = crate::keys::new_target(&self.data, &self.selected, self.project_page.as_deref());
         // the hub's sections (Needs you, Pinned, Active, groups, Quiet: screens/sections.rs); an older hub sends projects and the Active view
@@ -1715,9 +1732,20 @@ pub(crate) fn home_away_line(home: &Value) -> Option<(String, bool)> {
     Some((s, false))
 }
 
+/// Whether the sidebar home status banner represents a failed move that the user can dismiss.
+pub(crate) fn home_move_dismissible(home: &Value) -> bool {
+    home.get("moving").and_then(|m| m["state"].as_str()) == Some("failed")
+}
+
+/// Command sent when the user dismisses a failed home-move banner.
+pub(crate) fn home_move_dismiss_cmd() -> Command {
+    Command::Rpc("home.move.dismiss".into(), crate::screens::settings::Secret(serde_json::json!({})), "home-move-dismiss")
+}
+
 #[cfg(test)]
 mod home_tests {
-    use super::home_away_line;
+    use super::{home_away_line, home_move_dismiss_cmd, home_move_dismissible};
+    use crate::hub::Command;
     use serde_json::{json, Value};
 
     #[test]
@@ -1731,6 +1759,22 @@ mod home_tests {
         /* i18n-ok: test */ assert_eq!(mv, Some(("Moving home to laptop: copying".into(), false)));
         let fail = home_away_line(&json!({"kind":"peer","name":"desktop","online":true,"moving":{"to":"laptop","state":"failed","note":"disk full"}}));
         /* i18n-ok: test */ assert_eq!(fail, Some(("Home move failed: disk full".into(), true)));
+    }
+
+    #[test]
+    fn home_move_dismiss_only_applies_to_failed_moves() {
+        assert!(!home_move_dismissible(&Value::Null));
+        assert!(!home_move_dismissible(&json!({"kind":"local","name":"desk","online":true})));
+        assert!(!home_move_dismissible(&json!({"kind":"peer","name":"desk","online":false})));
+        assert!(!home_move_dismissible(&json!({"kind":"peer","name":"desk","online":true,"moving":{"to":"laptop","state":"moving","step":"copying"}})));
+        assert!(home_move_dismissible(&json!({"kind":"peer","name":"desk","online":true,"moving":{"to":"laptop","state":"failed","note":"that machine is away"}})));
+        match home_move_dismiss_cmd() {
+            Command::Rpc(method, _, tag) => {
+                assert_eq!(method, "home.move.dismiss");
+                assert_eq!(tag, "home-move-dismiss");
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
     }
 
     #[test]

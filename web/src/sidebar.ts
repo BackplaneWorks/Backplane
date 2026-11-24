@@ -183,6 +183,54 @@ export interface SidebarCallbacks {
   onNewChat?: () => void;
   /** A chat row's Move to project…: the app asks which project. */
   onMoveToProject?: (threadId: string) => void;
+  /** Dismiss a failed home move banner (`home.move.dismiss`). */
+  onDismissHomeMove?: () => void;
+}
+
+export interface HomeBannerState {
+  text: string;
+  isError: boolean;
+  dismissible: boolean;
+}
+
+/** Pure presentation state for the sidebar home status banner. */
+export function homeBannerState(home: HomeInfo | null): HomeBannerState | null {
+  if (!home) return null;
+  if (home.moving?.state === "moving") {
+    const text = home.moving.step
+      ? t("home.moving.step", "Moving home to {to}: {step}").replace("{to}", home.moving.to).replace("{step}", home.moving.step)
+      : t("home.moving", "Moving home to {to}…").replace("{to}", home.moving.to);
+    return { text, isError: false, dismissible: false };
+  }
+  if (home.moving?.state === "failed") {
+    const text = home.moving.note
+      ? t("home.move.failed.note", "Home move failed: {note}").replace("{note}", home.moving.note)
+      : t("home.move.failed", "Home move failed");
+    return { text, isError: true, dismissible: true };
+  }
+  if (!home.online) {
+    const name = home.name || "home";
+    let time = "";
+    if (home.awaySince && home.awaySince > 0) {
+      const d = new Date(home.awaySince);
+      time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
+    let text = "";
+    if (time && home.queuedCount > 0) {
+      text = t("home.away.since.queued", "Home ({name}) is away since {time} · {n} queued")
+        .replace("{name}", name).replace("{time}", time).replace("{n}", String(home.queuedCount));
+    } else if (time) {
+      text = t("home.away.since", "Home ({name}) is away since {time}")
+        .replace("{name}", name).replace("{time}", time);
+    } else if (home.queuedCount > 0) {
+      text = t("home.away.queued", "Home ({name}) is away · {n} queued")
+        .replace("{name}", name).replace("{n}", String(home.queuedCount));
+    } else {
+      text = t("home.away", "Home ({name}) is away").replace("{name}", name);
+    }
+    return { text, isError: false, dismissible: false };
+  }
+  return null;
 }
 
 /** Whether a swarm row under a project should be shown in the sidebar. */
@@ -461,9 +509,6 @@ export class SidebarView {
     this.homeBanner = document.createElement("div");
     this.homeBanner.className = "bp-side-home bp-hidden";
     this.homeBanner.setAttribute("data-testid", "home-away-banner");
-    this.homeBanner.style.padding = "6px 10px";
-    this.homeBanner.style.fontSize = "11px";
-    this.homeBanner.style.borderBottom = "1px solid var(--line, #2a2a2a)";
 
     // Sticky Crew band: Bub + Bots strip + Rooms strip (never scrolls away)
     this.crewEl = document.createElement("div");
@@ -486,50 +531,30 @@ export class SidebarView {
   }
 
   public setHome(home: HomeInfo | null): void {
-    if (!home) {
-      this.homeBanner.classList.add("bp-hidden");
-      this.homeBanner.textContent = "";
+    const st = homeBannerState(home);
+    if (!st) {
+      this.homeBanner.className = "bp-side-home bp-hidden";
+      this.homeBanner.replaceChildren();
       return;
     }
-    let text = "";
-    let isErr = false;
-    if (home.moving?.state === "moving") {
-      text = home.moving.step
-        ? t("home.moving.step", "Moving home to {to}: {step}").replace("{to}", home.moving.to).replace("{step}", home.moving.step)
-        : t("home.moving", "Moving home to {to}…").replace("{to}", home.moving.to);
-    } else if (home.moving?.state === "failed") {
-      text = home.moving.note
-        ? t("home.move.failed.note", "Home move failed: {note}").replace("{note}", home.moving.note)
-        : t("home.move.failed", "Home move failed");
-      isErr = true;
-    } else if (!home.online) {
-      const name = home.name || "home";
-      let time = "";
-      if (home.awaySince && home.awaySince > 0) {
-        const d = new Date(home.awaySince);
-        time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-      }
-      if (time && home.queuedCount > 0) {
-        text = t("home.away.since.queued", "Home ({name}) is away since {time} · {n} queued")
-          .replace("{name}", name).replace("{time}", time).replace("{n}", String(home.queuedCount));
-      } else if (time) {
-        text = t("home.away.since", "Home ({name}) is away since {time}")
-          .replace("{name}", name).replace("{time}", time);
-      } else if (home.queuedCount > 0) {
-        text = t("home.away.queued", "Home ({name}) is away · {n} queued")
-          .replace("{name}", name).replace("{n}", String(home.queuedCount));
-      } else {
-        text = t("home.away", "Home ({name}) is away").replace("{name}", name);
-      }
+    this.homeBanner.className = st.isError ? "bp-side-home bp-bad" : "bp-side-home bp-dim";
+    const textEl = document.createElement("span");
+    textEl.className = "bp-side-home-text";
+    textEl.textContent = st.text;
+    if (!st.dismissible) {
+      this.homeBanner.replaceChildren(textEl);
+      return;
     }
-    if (!text) {
-      this.homeBanner.classList.add("bp-hidden");
-      this.homeBanner.textContent = "";
-    } else {
-      this.homeBanner.textContent = text;
-      this.homeBanner.className = isErr ? "bp-side-home bp-bad" : "bp-side-home bp-dim";
-      this.homeBanner.classList.remove("bp-hidden");
-    }
+    const dismissBtn = document.createElement("button");
+    dismissBtn.type = "button";
+    dismissBtn.className = "icon bp-side-home-dismiss";
+    dismissBtn.textContent = "×";
+    dismissBtn.setAttribute("data-testid", "home-move-dismiss");
+    const label = t("approval.dismiss", "Dismiss");
+    dismissBtn.title = label;
+    dismissBtn.setAttribute("aria-label", label);
+    dismissBtn.addEventListener("click", () => this.cb.onDismissHomeMove?.());
+    this.homeBanner.replaceChildren(textEl, dismissBtn);
   }
 
   public setHostName(name: string): void {

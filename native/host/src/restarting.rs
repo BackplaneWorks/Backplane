@@ -66,13 +66,19 @@ pub fn announce() {
 /// What runs on SIGTERM, SIGINT, SIGHUP (and Ctrl+C on Windows): the clients told, then the KiCad sessions ended.
 pub fn on_exit() { announce(); crate::files::kicad::embed::shutdown_all(); }
 
+/// Whether `/proc/<pid>/cmdline` bytes belong to `fresh-watch.sh`.
+pub fn cmdline_is_watcher(cmdline: &[u8]) -> bool {
+    const NEEDLE: &[u8] = b"fresh-watch";
+    cmdline.windows(NEEDLE.len()).any(|w| w == NEEDLE)
+}
+
 /// Whether the auto-update watcher (scripts/fresh-watch.sh) runs for this home: None when the home is not a fresh one (`<dir>/.fresh` beside `<dir>/home`), else
 /// whether the pid in `<dir>/watch.pid` is alive and (where /proc says) a fresh-watch.sh. Nov 20: a watcher gone for a day left the person's app on one build, unsaid.
 pub fn watcher(home: &std::path::Path) -> Option<bool> {
     let d = home.parent()?; if !d.join(".fresh").exists() { return None }
     let pid: u32 = std::fs::read_to_string(d.join("watch.pid")).ok().and_then(|p| p.trim().parse().ok()).unwrap_or(0);
     if pid <= 1 || !crate::plat::proc::alive(pid) { return Some(false) }
-    Some(std::fs::read(format!("/proc/{pid}/cmdline")).map_or(true, |c| c.windows(10).any(|w| w == b"fresh-watch")))
+    Some(std::fs::read(format!("/proc/{pid}/cmdline")).map_or(true, |c| cmdline_is_watcher(&c)))
 }
 /// The words for a missing watcher (guard::notice).
 pub const NO_WATCHER: &str = "Auto-update watcher not running: new builds will not reach this app";
@@ -96,6 +102,14 @@ pub const NO_WATCHER: &str = "Auto-update watcher not running: new builds will n
         std::fs::write(t.join("watch.pid"), "999999999\n").unwrap(); assert_eq!(watcher(&home), Some(false), "a pid that is gone");
         std::fs::write(t.join("watch.pid"), format!("{}\n", std::process::id())).unwrap();
         assert_eq!(watcher(&home), Some(!std::path::Path::new("/proc/self/cmdline").exists()), "alive, but not a fresh-watch.sh where /proc can tell");
+    }
+    #[test] fn cmdline_matches_fresh_watch_bytes() {
+        assert!(cmdline_is_watcher(b"/bin/bash\0/home/user/Backplane/scripts/fresh-watch.sh\0"));
+        assert!(cmdline_is_watcher(b"bash\0scripts/fresh-watch.sh\0--dir\0/home/user/.backplane-gpui-fresh\0"));
+        assert!(cmdline_is_watcher(b"fresh-watch"));
+        assert!(!cmdline_is_watcher(b""));
+        assert!(!cmdline_is_watcher(b"fresh-watc"));
+        assert!(!cmdline_is_watcher(b"/usr/bin/backplane-hub\0--home\0/home/user\0"));
     }
     #[test] fn only_a_crash_is_said_after_the_start() {
         let b: Value = serde_json::from_str(&back("crash", 5)).unwrap();

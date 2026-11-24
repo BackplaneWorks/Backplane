@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 237355,
+  "totalAssetGzipBytes": 237496,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -347,7 +347,7 @@
   "i18nSubsetSha256": "ad3083cc73511c7876092934bbfa1a26823b509f16985a9cf924cf2136eff864",
   "inputs": {
     "web/src/addproject.ts": "06a7ff3e13cd78d993ebca7f638d5d623da06c0099186ad534bae8f184dbe44f",
-    "web/src/app.ts": "266280ec582ff9db7a0800134c813cf5a62f7f6962a0d4083b1e636a639d4cad",
+    "web/src/app.ts": "bdcd9cb1bc3517282752c8b6757802e5c1a43077e675a32cff83b2d6c777a38d",
     "web/src/chat.ts": "639e3af0791aedcde788c1a76aee6ea07cf96f5749d6a3564898c2beb8bd7337",
     "web/src/clone-model.ts": "d265df49436e14f415bbeb2a271ffa3552f9163be62bdc0158cecc10c3cdae45",
     "web/src/composer.ts": "63a5e9d7acfd321007c0a18880ee0ba055506335fcf4808154febc2b380f91a8",
@@ -373,8 +373,8 @@
     "web/src/ring-model.ts": "66368ffe8996138d4e73f041e50ac4fa573cf20ee59571af5fd1f320e29a895d",
     "web/src/settings-model.ts": "2f8f64cc93ee54c1bf45d918d8568eec2457970db7b3c43e926b2b4c45dcd5f6",
     "web/src/settings.ts": "8d4c24f554ba9c7ba4c4a96098fe25eea68b91f41489aee4d2b01b616f41f507",
-    "web/src/shell.css": "0fc26ae8ba27a25dff78a10523e89880db122cd9b1ccbcd972b6457df1eafcd8",
-    "web/src/sidebar.ts": "ee2e10c0fdde6e1f2807e72199bce3a85379244fc550acedd4f35b76c1369fc4",
+    "web/src/shell.css": "15c189efe5a2ed0b2e85bee37b3439ec9f2a60f462fbc5e8665721580ccd1e60",
+    "web/src/sidebar.ts": "857243b9136fcae26a7d30e2e7d406eb3fc25c2c081238ad5175636f72c5412d",
     "web/src/swarm-need.ts": "503bbf5ffe0389f068847571c792321b0ad5c8d26a18c73b8e41c0a8989e227f",
     "web/src/thread-context.ts": "b9fbd5b3ef0b1357b5a4444a1e9a0ac0606afe1c8a5377c4777752e918af0ac2",
     "web/src/user-refs.ts": "56bcf0dc116d5f14260606f07cf9af9becbbd7cbb102dc9e0687a4ea5f894011",
@@ -411,9 +411,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 439731,
-      "gzipBytes": 123684,
-      "sha256": "7d68d5f26a82d1143218aa7c226e3ab5db7ba0221a0a134af296ee467509d547"
+      "bytes": 440245,
+      "gzipBytes": 123764,
+      "sha256": "f82de1e9fd0ebc95f4cc4fef3c97b3f476b4e451d2bd235167042d52a30c0590"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -436,9 +436,9 @@
       "sha256": "1667d584f1306cc34069c62ca91e4aa78a1286d0875d1f12657817aa1a70a475"
     },
     "assets/style.css": {
-      "bytes": 100512,
-      "gzipBytes": 16547,
-      "sha256": "7d61c5023e532d5b8ac18015e107b26b6d2bcaa455a8e5f669c0c7fede529b80"
+      "bytes": 101058,
+      "gzipBytes": 16608,
+      "sha256": "5e580f41510a298f1e422b9b4d20cb99313c9ca23566f00db92ecdd719f1f316"
     },
     "assets/terminal.js": {
       "bytes": 296616,
