@@ -10,6 +10,8 @@ use std::{cell::RefCell, ops::Range, rc::Rc};
 /// Everything the pointer needs about the blocks drawn this frame; rebuilt on every render, the selection survives.
 pub struct Registry {
     pub blocks: Vec<Info>, pub dragging: bool, pub entry: usize,
+    /// Monotonic counter incremented on every mouse-down so a delayed single-click copy cancels when a second click arrives.
+    pub click_seq: u64,
     /// The entry being drawn and how many blocks it has had so far: a block's identity is (entry id, index in entry).
     entry_id: String, idx: usize,
     /// The selection as the person made it, by identity; `sel` is that resolved to this frame's ordinals.
@@ -26,13 +28,13 @@ pub struct Registry {
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
-pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: usize, pub links: Vec<(Range<usize>, Link)>, pub layout: Option<BlockLayout> }
+pub struct Info { pub text: String, pub entry: usize, pub id: String, pub idx: usize, pub links: Vec<(Range<usize>, Link)>, pub copy_spans: Vec<(Range<usize>, String, SharedString)>, pub layout: Option<BlockLayout> }
 pub type Reg = Rc<RefCell<Registry>>;
 /// The viewer page's code blocks' Copy places are numbered from here (`copy:1000`...), the thread's rows' from 0: each part may draw without the other.
 pub const VIEWER_COPIES: usize = 1000;
 
 impl Default for Registry {
-    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0, hover: String::new(), design: Default::default(), app: None } }
+    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, click_seq: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0, hover: String::new(), design: Default::default(), app: None } }
 }
 
 impl Registry {
@@ -125,6 +127,7 @@ impl Registry {
         Some(Pos { block: i, off })
     }
     pub fn link_at(&self, pos: Pos) -> Option<&Link> { self.blocks.get(pos.block)?.links.iter().find(|(r, _)| r.contains(&pos.off)).map(|(_, l)| l) }
+    pub fn copy_span_at(&self, pos: Pos) -> Option<(String, SharedString)> { self.blocks.get(pos.block)?.copy_spans.iter().find(|(r, _, _)| r.contains(&pos.off)).map(|(_, t, id)| (t.clone(), id.clone())) }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -174,18 +177,22 @@ impl SelText {
         let mut at = 0usize; let mut links = Vec::new();
         for s in &spans { if let Some(l) = &s.style.link { links.push((at..at + s.text.len(), l.clone())); } at += s.text.len(); }
         let entry = r.entry; let (id, idx) = (r.entry_id.clone(), r.next_idx());
-        r.blocks.push(Info { text: md::plain(&spans), entry, id: id.clone(), idx, links, layout: None });
-        drop(r);
-        let mut chips = Vec::new(); let mut at = 0usize;
+        let mut chips = Vec::new(); let mut copy_spans = Vec::new(); let mut at = 0usize;
         for s in &spans {
-            // every code span copies (the hub's `copy` says what it is; a command also gets Run in terminal), its button shown on hover
-            if (s.style.copy.is_some() || s.style.code) && !s.text.trim().is_empty() {
+            // every code span and bare file-path link copies (the hub's `copy` says what it is; a command also gets Run in terminal), its button shown on hover
+            let is_file = s.style.link.as_ref().is_some_and(|l| l.file);
+            if (s.style.copy.is_some() || s.style.code || is_file) && !s.text.trim().is_empty() {
                 let k = s.style.copy;
                 let cid = SharedString::from(format!("ic-{id}-{idx}-{at}"));
+                if s.style.link.is_none() && (s.style.copy.is_some() || s.style.code) {
+                    copy_spans.push((at..at + s.text.len(), s.text.clone(), cid.clone()));
+                }
                 chips.push(Chip { range: at..at + s.text.len(), text: s.text.clone().into(), cmd: k == Some(md::CopyAs::Cmd), id: cid, el: None, hot: vec![], shown: false });
             }
             at += s.text.len();
         }
+        r.blocks.push(Info { text: md::plain(&spans), entry, id: id.clone(), idx, links, copy_spans, layout: None });
+        drop(r);
         let shaded = if kind == Kind::Code { Vec::new() } else { shaded(&spans) };
         Self { spans, kind, light, reg: reg.clone(), id, idx, styled: None, tokens: Vec::new(), chips, shaded }
     }
@@ -660,7 +667,7 @@ impl FlowText {
         }
         let entry = r.entry;
         let (id, idx) = (r.entry_id.clone(), r.next_idx());
-        r.blocks.push(Info { text: raw_text.to_string(), entry, id: id.clone(), idx, links, layout: None });
+        r.blocks.push(Info { text: raw_text.to_string(), entry, id: id.clone(), idx, links, copy_spans: vec![], layout: None });
         drop(r);
         let hard_lines = split_hard_lines(&segs);
         Self { raw_text: raw_text.to_string(), hard_lines, light, reg: reg.clone(), id, idx, shaded, measured: Rc::new(RefCell::new(None)), layout: None }
@@ -1055,16 +1062,21 @@ pub fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, 
 #[derive(Default)]
 pub struct ParseCache { items: std::collections::HashMap<String, (u64, Rc<Vec<Block>>)> }
 const PARSE_KEEP: usize = 400;
-fn fingerprint(text: &str, nodes: &[Value]) -> u64 {
+fn fingerprint(text: &str, nodes: &[Value], extra: u64) -> u64 {
     use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new(); text.hash(&mut h); nodes.len().hash(&mut h); h.finish()
+    let mut h = std::collections::hash_map::DefaultHasher::new(); text.hash(&mut h); nodes.len().hash(&mut h); extra.hash(&mut h); h.finish()
 }
 impl ParseCache {
     pub fn get(&mut self, id: &str, text: &str, nodes: &[Value]) -> Rc<Vec<Block>> {
-        let f = fingerprint(text, nodes);
+        self.get_with(id, text, nodes, 0, |_| {})
+    }
+    pub fn get_with(&mut self, id: &str, text: &str, nodes: &[Value], extra: u64, post: impl FnOnce(&mut Vec<Block>)) -> Rc<Vec<Block>> {
+        let f = fingerprint(text, nodes, extra);
         if let Some((g, b)) = self.items.get(id) { if *g == f { return b.clone(); } }
         if self.items.len() >= PARSE_KEEP { self.items.clear(); }
-        let b = Rc::new(md::parse(nodes));
+        let mut parsed = md::parse(nodes);
+        post(&mut parsed);
+        let b = Rc::new(parsed);
         self.items.insert(id.to_string(), (f, b.clone()));
         b
     }
@@ -1265,8 +1277,11 @@ impl Backplane {
         for (i, bounds) in &r.copies { out.push((format!("copy:{i}"), String::new(), *bounds)); }
         out
     }
+    /// Whether a delayed single-click copy should fire after the double-click window passes.
+    fn should_delayed_copy(seq_then: u64, seq_now: u64, collapsed: bool) -> bool { seq_then == seq_now && collapsed }
     fn timeline_pos(&self, p: Point<Pixels>) -> Option<Pos> { self.screens.reg.borrow().hit(p) }
     pub(crate) fn timeline_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        { let mut r = self.screens.reg.borrow_mut(); r.click_seq = r.click_seq.wrapping_add(1); }
         let Some(pos) = self.timeline_pos(e.position) else { return };
         if e.button == MouseButton::Right {
             // a selection's Copy first, then a link's own items
@@ -1307,6 +1322,23 @@ impl Backplane {
             // the row the link was pressed in: its `files` decide (the same path may be a link in another row too)
             let entry = pos.and_then(|p| self.screens.reg.borrow().blocks.get(p.block).map(|b| b.id.clone())).unwrap_or_default();
             self.open_link_in(&l, &entry, cx);
+        } else if collapsed && e.click_count == 1 {
+            let (seq, span) = { let r = self.screens.reg.borrow(); (r.click_seq, pos.and_then(|p| r.copy_span_at(p))) };
+            if let Some((text, cid)) = span {
+                let w = window.window_handle();
+                cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(std::time::Duration::from_millis(240)).await;
+                    let _ = w.update(cx, |_, window, cx| {
+                        let _ = this.update(cx, |this, cx| {
+                            let r = this.screens.reg.borrow();
+                            if Self::should_delayed_copy(seq, r.click_seq, r.sel.collapsed()) {
+                                drop(r);
+                                super::copyable::copy(&cid, &text, window, cx);
+                            }
+                        });
+                    });
+                }).detach();
+            }
         }
         self.timeline_selection_made(window, cx);
         cx.notify();
@@ -1452,7 +1484,7 @@ mod tests {
         assert!(bubble_full_width("add these", &serde_json::json!([{"image": true, "url": "/a.png", "path": "a.png"}, {"image": true, "url": "/b.png", "path": "b.png"}])));
         assert!(!bubble_full_width("add these", &serde_json::json!([{"label": "notes.txt", "path": "notes.txt"}])));
     }
-    fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], layout: None } }
+    fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], copy_spans: vec![], layout: None } }
     fn frame(r: &mut Registry, blocks: &[(&str, usize, &str)]) { r.begin(); for (id, idx, t) in blocks { r.blocks.push(info(id, *idx, t)); } r.resolve(); }
     #[test] fn a_code_span_is_shaded_by_paint_under_the_selection_not_by_its_run() {
         // the person selected a list item over an inline command and saw no highlight on the command: its run's own background covered it
@@ -1481,7 +1513,7 @@ mod tests {
     }
     #[test] fn the_root_and_the_rows_part_forget_only_their_own_blocks() {
         // the rows' part may reuse its last frame while the root draws again (part.rs): the root's frame keeps the rows' blocks, and the other way round
-        let outside = |t: &str| Info { text: t.into(), entry: 0, id: String::new(), idx: 0, links: vec![], layout: None };
+        let outside = |t: &str| Info { text: t.into(), entry: 0, id: String::new(), idx: 0, links: vec![], copy_spans: vec![], layout: None };
         let mut r = Registry::default(); r.begin();
         r.blocks.push(outside("review")); r.blocks.push(info("e1", 0, "one")); r.blocks.push(info("e2", 0, "two"));
         r.begin_outside(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["one", "two"]);
@@ -1552,5 +1584,46 @@ mod tests {
         assert!(!flow_needs_rebuild(Some(300.), 180., 1, 500.), "single unwrapped line stays valid when wider");
         assert!(flow_needs_rebuild(Some(614.), 250., 1, 200.), "narrower bounds trigger wrap rebuild");
         assert!(flow_needs_rebuild(Some(300.), 290., 2, 420.), "wider bounds trigger unwrap rebuild for multi-line flow");
+    }
+
+    #[test] fn inline_code_and_file_links_get_in_place_copy_chips_while_only_non_link_code_copies_on_click() {
+        let reg: Reg = Default::default();
+        reg.borrow_mut().enter(0, "m1");
+        let spans = vec![
+            Span { text: "Check ".into(), style: md::Style::default() },
+            Span { text: "EPC2306".into(), style: md::Style { code: true, copy: Some(md::CopyAs::Id), ..Default::default() } },
+            Span { text: " and ".into(), style: md::Style::default() },
+            Span { text: "docs/architecture.md".into(), style: md::Style { code: true, copy: Some(md::CopyAs::Path), link: Some(md::Link { href: "docs/architecture.md".into(), file: true }), ..Default::default() } },
+            Span { text: " or ".into(), style: md::Style::default() },
+            Span { text: "/etc/hosts".into(), style: md::Style { link: Some(md::Link { href: "/etc/hosts".into(), file: true }), ..Default::default() } },
+            Span { text: " via ".into(), style: md::Style::default() },
+            Span { text: "https://example.com".into(), style: md::Style { link: Some(md::Link { href: "https://example.com".into(), file: false }), ..Default::default() } },
+        ];
+        let st = SelText::new(&reg, spans, Kind::Body, false);
+        assert_eq!(st.chips.iter().map(|c| c.text.as_ref()).collect::<Vec<_>>(), ["EPC2306", "docs/architecture.md", "/etc/hosts"]);
+        let r = reg.borrow();
+        let code_at = r.blocks[0].text.find("EPC2306").unwrap() + 1;
+        let path_at = r.blocks[0].text.find("docs/architecture.md").unwrap() + 1;
+        assert_eq!(r.copy_span_at(Pos { block: 0, off: code_at }).map(|(t, _)| t), Some("EPC2306".to_string()));
+        assert_eq!(r.copy_span_at(Pos { block: 0, off: path_at }), None, "file links open on click and copy via their hover button");
+    }
+
+    #[test] fn parse_cache_get_with_caches_post_transform_and_invalidates_on_extra_change() {
+        let mut c = ParseCache::default();
+        let n: Vec<Value> = serde_json::from_str(r#"[{"tag":"p","kids":[{"text":"@alice"}]}]"#).unwrap();
+        let mut runs = 0usize;
+        let a = c.get_with("post-1", "@alice", &n, 11, |_| runs += 1);
+        let b = c.get_with("post-1", "@alice", &n, 11, |_| runs += 1);
+        assert!(Rc::ptr_eq(&a, &b));
+        assert_eq!(runs, 1);
+        let d = c.get_with("post-1", "@alice", &n, 22, |_| runs += 1);
+        assert!(!Rc::ptr_eq(&a, &d));
+        assert_eq!(runs, 2);
+    }
+
+    #[test] fn delayed_copy_cancels_when_click_seq_or_selection_changes() {
+        assert!(crate::Backplane::should_delayed_copy(5, 5, true));
+        assert!(!crate::Backplane::should_delayed_copy(5, 6, true));
+        assert!(!crate::Backplane::should_delayed_copy(5, 5, false));
     }
 }

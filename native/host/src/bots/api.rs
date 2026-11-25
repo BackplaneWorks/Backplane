@@ -188,10 +188,11 @@ pub fn rows_of(w: &super::world::World, uber: &str, mark: &Value) -> (Vec<Value>
     rooms.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     (bots.into_iter().map(|x| x.2).collect(), rooms.into_iter().map(|x| x.2).collect())
 }
-/// A post as a room's page shows it, with its code to copy (md/copy.rs: `copy`, [{text, cmd}]) when it has any.
+/// A post as a room's page shows it, with its Markdown blocks and code to copy (md/copy.rs: `copy`, [{text, cmd}]) when it has any.
 fn post_json(p: &Value, from: &str, now: u64) -> Value {
-    let mut o = json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you"});
-    let c = crate::md::copy::spans(p["text"].as_str().unwrap_or("")); if !c.is_empty() { o["copy"] = json!(c) }
+    let txt = p["text"].as_str().unwrap_or("");
+    let mut o = json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you","blocks":crate::present::thread::md_blocks(txt)});
+    let c = crate::md::copy::spans(txt); if !c.is_empty() { o["copy"] = json!(c) }
     o
 }
 /// MBots.room.view for a room here (MBots.room.view.loc): `{kind:"room", id, name, title, members, posts:[{id, from, text, ago, mine}], ephemeral, closed, keep}`
@@ -295,5 +296,12 @@ mod far_tests {
         assert_eq!(far_page(&w, "L~bub", "hooks", 100, 0, true, &mark).unwrap()["tab"], "chat", "a tab the mirror does not hold opens Chat");
         assert!(far_page(&w, "L~nobody", "chat", 100, 0, false, &mark).is_none());
         assert_eq!(w.room_lines["L~r9"], vec![9], "a post is found again by its place in the mirror");
+    }
+    #[test] fn post_json_includes_markdown_blocks_and_preserves_copy() {
+        let p = json!({"id": "p1", "text": "Use `EPC2306` and:\n```bash\ncargo test\n```", "at": 1000});
+        let o = post_json(&p, "Bub", 2000);
+        assert!(o["copy"].is_array());
+        let b = o["blocks"].to_string();
+        assert!(b.contains(r#""tag":"code""#) && b.contains("EPC2306") && b.contains(r#""tag":"pre""#) && b.contains("cargo test"), "{b}");
     }
 }

@@ -291,3 +291,20 @@ fn line(b: &Value) -> String { b["room"]["need"]["line"].as_str().unwrap_or("").
     let g = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
     assert!(g["room"]["need"].is_null());
 }
+
+#[tokio::test] async fn swarm_board_includes_markdown_blocks_for_posts_and_preserves_copy() {
+    let (hub, bots, peers) = hub_of("board-blocks").await;
+    let (ok, r) = bots.tool_call("t-boss", "swarm_create", &json!({"topic":"blocks","members":[{"provider":"claude"},{"provider":"codex"}]})).await; assert!(ok, "{r}");
+    let room = r["room"].as_str().unwrap().to_string();
+    let a = peers.launched.lock().unwrap()[0]["_id"].as_str().unwrap().to_string();
+    post(&bots, &a, json!({"room":room,"text":"Check `EPC2306` in `docs/architecture.md`:\n```bash\necho ok\n```"})).await;
+    let board = bots.board(&room, "", 50, false).await.unwrap();
+    let posts = board["posts"].as_array().unwrap();
+    let p = posts.iter().find(|p| p["text"].as_str().unwrap_or("").contains("EPC2306")).unwrap();
+    assert!(p["copy"].is_array(), "{p}");
+    let b = p["blocks"].to_string();
+    assert!(b.contains(r#""tag":"code""#) && b.contains("EPC2306") && b.contains(r#""tag":"pre""#), "{b}");
+    let agent_board = bots.board(&room, "", 50, true).await.unwrap();
+    let ap = agent_board["posts"].as_array().unwrap().iter().find(|p| p["text"].as_str().unwrap_or("").contains("EPC2306")).unwrap();
+    assert!(ap.get("blocks").is_none() && ap.get("copy").is_none());
+}

@@ -109,7 +109,7 @@ func dMdBlocks(_ src: String) -> [DMdBlock] {
 
 // MARK: inline
 
-private struct Fmt { var bold = false, italic = false, strike = false, link: URL? = nil }
+private struct Fmt { var bold = false, italic = false, strike = false, link: URL? = nil, showLink = true }
 
 private func find(_ s: [Character], _ tok: [Character], from: Int) -> Int? {
     guard from >= 0, !tok.isEmpty, s.count >= tok.count else { return nil }
@@ -118,7 +118,7 @@ private func find(_ s: [Character], _ tok: [Character], from: Int) -> Int? {
     return nil
 }
 
-private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout AttributedString, _ depth: Int) {
+private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout AttributedString, _ depth: Int, _ textColor: Color) {
     func put(_ t: String, _ f: Fmt, code: Bool = false) {
         var a = AttributedString(t)
         let sz = code ? size - 0.5 : size
@@ -129,7 +129,11 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
         } else { a.font = Font.mono(size: sz, weight: f.bold ? .bold : .regular) }
         if f.strike { a.strikethroughStyle = .single }
         if code { a.backgroundColor = BackplaneDesign.raised }
-        if let u = f.link { a.link = u; a.foregroundColor = BackplaneDesign.accent; a.underlineStyle = .single }
+        if let u = f.link {
+            a.link = u
+            if f.showLink { a.foregroundColor = BackplaneDesign.accent; a.underlineStyle = .single }
+            else { a.foregroundColor = textColor }
+        }
         out.append(a)
     }
     var i = 0; var plain = ""
@@ -144,9 +148,17 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
             if let e = find(s, tick, from: i + n) {
                 flush(); var inner = String(s[(i + n)..<e]); if inner.hasPrefix(" "), inner.hasSuffix(" "), !inner.trimmed.isEmpty { inner = inner.trimmed }
                 var g = f
-                if let p = dFileURLPath(inner), let u = dPathURL(p) { g.link = u }
-                else if dIsPathText(inner), let u = dPathURL(inner) { g.link = u }
-                put(inner, g, code: true); i = e + n; continue
+                if f.link == nil {
+                    if let p = dFileURLPath(inner), let u = dPathURL(p) {
+                        g.link = u; g.showLink = true
+                    } else if dIsPathText(inner), let u = dPathURL(inner) {
+                        g.link = u; g.showLink = true
+                    } else if let u = Copyable.copyURL(inner) {
+                        g.link = u; g.showLink = false
+                    }
+                }
+                put(inner, g, code: true)
+                i = e + n; continue
             }
             plain += String(tick); i += n; continue
         }
@@ -160,21 +172,21 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
                 if end > 0 {
                     let rawDest = String(s[(close + 2)..<end])
                     let label = Array(s[(st + 1)..<close])
-                    flush(); var g = f; g.link = dLinkURL(rawDest)
-                    if c == "!" { let u = rawDest.trimmed; put(label.isEmpty ? u : String(label), g) } else { inl(label, g, size, &out, depth + 1) }
+                    flush(); var g = f; g.link = dLinkURL(rawDest); g.showLink = true
+                    if c == "!" { let u = rawDest.trimmed; put(label.isEmpty ? u : String(label), g) } else { inl(label, g, size, &out, depth + 1, textColor) }
                     i = end + 1; continue
                 }
             }
         }
-        if let (e, u) = dWebLink(s, i) { flush(); var g = f; g.link = u; put(String(s[i..<e]), g); i = e; continue }
+        if let (e, u) = dWebLink(s, i) { flush(); var g = f; g.link = u; g.showLink = true; put(String(s[i..<e]), g); i = e; continue }
         if c == "*" || c == "_", i + 2 < s.count, s[i + 1] == c, !s[i + 2].isWhitespace, c == "*" || i == 0 || !(s[i - 1].isLetter || s[i - 1].isNumber) {
             let tok = [c, c]; var e = find(s, tok, from: i + 2)
             while let x = e, x > 0, s[x - 1].isWhitespace { e = find(s, tok, from: x + 2) }
             while let x = e, x + 2 < s.count, s[x + 2] == c { e = x + 1 }
-            if let x = e, x > i + 2 { flush(); var g = f; g.bold = true; inl(Array(s[(i + 2)..<x]), g, size, &out, depth + 1); i = x + 2; continue }
+            if let x = e, x > i + 2 { flush(); var g = f; g.bold = true; inl(Array(s[(i + 2)..<x]), g, size, &out, depth + 1, textColor); i = x + 2; continue }
         }
         if c == "~", i + 2 < s.count, s[i + 1] == "~", !s[i + 2].isWhitespace, let x = find(s, ["~", "~"], from: i + 2), x > i + 2 {
-            flush(); var g = f; g.strike = true; inl(Array(s[(i + 2)..<x]), g, size, &out, depth + 1); i = x + 2; continue
+            flush(); var g = f; g.strike = true; inl(Array(s[(i + 2)..<x]), g, size, &out, depth + 1, textColor); i = x + 2; continue
         }
         if c == "*" || c == "_", i + 1 < s.count, !s[i + 1].isWhitespace, s[i + 1] != c, c == "*" || i == 0 || !(s[i - 1].isLetter || s[i - 1].isNumber) {
             var j = i + 1; var e = -1
@@ -187,19 +199,19 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
                 }
                 j += 1
             }
-            if e > i + 1 { flush(); var g = f; g.italic = true; inl(Array(s[(i + 1)..<e]), g, size, &out, depth + 1); i = e + 1; continue }
+            if e > i + 1 { flush(); var g = f; g.italic = true; inl(Array(s[(i + 1)..<e]), g, size, &out, depth + 1, textColor); i = e + 1; continue }
         }
         // emails, phone numbers and file paths in running text
-        if let (e, u) = dAutoLink(s, i) { flush(); var g = f; g.link = u; put(String(s[i..<e]), g); i = e; continue }
+        if let (e, u) = dAutoLink(s, i) { flush(); var g = f; g.link = u; g.showLink = true; put(String(s[i..<e]), g); i = e; continue }
         plain.append(c); i += 1
     }
     flush()
 }
 
-func dMdInline(_ text: String, size: CGFloat, bold: Bool = false) -> AttributedString {
-    let key = "\(size)|\(bold)|" + text
+func dMdInline(_ text: String, size: CGFloat, bold: Bool = false, textColor: Color = BackplaneDesign.text, toneKey: String = "text") -> AttributedString {
+    let key = "\(size)|\(bold)|\(toneKey)|" + text
     if let c = DMdCache.inline.object(forKey: key as NSString) { return c.v }
-    var out = AttributedString(); inl(Array(text), Fmt(bold: bold), size, &out, 0)
+    var out = AttributedString(); inl(Array(text), Fmt(bold: bold), size, &out, 0, textColor)
     DMdCache.inline.setObject(Box(out), forKey: key as NSString); return out
 }
 
@@ -228,15 +240,30 @@ struct DataMarkdown: View {
     var images: [String] = []
     /// what to copy, as the hub listed it (`copy: [{text, cmd}]`); nil: the same rules decide here (Copyable)
     var copy: [DCopyPiece]? = nil
+    var textColor: Color = BackplaneDesign.text
+    var toneKey = "text"
+    var baseSize: CGFloat = 13
     @State private var viewer: DReplyOpen?
+    @Environment(\.runInTerminal) private var runInTerminal
     var body: some View {
         let layout = dMdLayout(text, images: images)
         let blocks = dMdBlocks(layout.text)
         let (entry, all) = (entry, images)
         let show: (String) -> Void = { viewer = DReplyOpen(entry: entry, all: all, start: ReplyImages.start($0, in: all)) }
         let pics = images.isEmpty ? nil : DMdPicPlan(blocks: blocks, entry: entry, layout: layout, open: show)
-        DMdBlocks(blocks: blocks, pics: pics, copy: copy)
+        DMdBlocks(blocks: blocks, pics: pics, copy: copy, textColor: textColor, toneKey: toneKey, baseSize: baseSize)
             .environment(\.openURL, OpenURLAction { url in
+                if let copyText = Copyable.copyFrom(url) {
+                    UIPasteboard.general.string = Copyable.exact(copyText)
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                    UIAccessibility.post(notification: .announcement, argument: Tr.t("Copied"))
+                    DataClient.shared.say(Tr.t("Copied"))
+                    return .handled
+                }
+                if let cmd = Copyable.runFrom(url) {
+                    runInTerminal?(cmd)
+                    return .handled
+                }
                 if let p = dPathFrom(url), images.contains(p) { show(p); return .handled }
                 return dMdOpen(url, thread: thread)
             })
@@ -294,7 +321,11 @@ private struct DMdBlocks: View {
     let blocks: [DMdBlock]
     var pics: DMdPicPlan? = nil
     var copy: [DCopyPiece]? = nil
+    var textColor: Color = BackplaneDesign.text
+    var toneKey = "text"
+    var baseSize: CGFloat = 13
     @ScaledMetric(relativeTo: .footnote) private var body13: CGFloat = 13
+    private var fontSize: CGFloat { body13 * baseSize / 13 }
     private func head(_ n: Int) -> CGFloat { n <= 1 ? 18 : n == 2 ? 16 : n == 3 ? 14 : 13 }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -309,21 +340,19 @@ private struct DMdBlocks: View {
     @ViewBuilder private func block(_ b: DMdBlock) -> some View {
         switch b {
         case .p(let s):
-            Text(dMdInline(s, size: body13)).foregroundStyle(BackplaneDesign.text).lineSpacing(3).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-            DCopyPieces(pieces: Copyable.inlinePieces(s, hub: copy))
-        case .h(let n, let s): Text(dMdInline(s, size: head(n) * body13 / 13, bold: true)).foregroundStyle(BackplaneDesign.text).padding(.top, 4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            Text(dMdInline(s, size: fontSize, textColor: textColor, toneKey: toneKey)).foregroundStyle(textColor).lineSpacing(3).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        case .h(let n, let s): Text(dMdInline(s, size: head(n) * fontSize / 13, bold: true, textColor: textColor, toneKey: toneKey)).foregroundStyle(textColor).padding(.top, 4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
         case .li(let depth, let marker, let task, let s):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if task >= 0 {
                     ZStack { Rectangle().fill(task == 1 ? BackplaneDesign.accent : Color.clear); Rectangle().strokeBorder(task == 1 ? BackplaneDesign.accent : BackplaneDesign.dim, lineWidth: 1)
                         if task == 1 { Text("✓").font(.system(size: 9, weight: .bold)).foregroundStyle(BackplaneDesign.onAccent) } }
                         .frame(width: 13, height: 13).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                } else { Text(marker).dmono(13).foregroundStyle(BackplaneDesign.dim).frame(minWidth: 16, alignment: .leading) }
-                Text(dMdInline(s, size: body13)).foregroundStyle(task == 1 ? BackplaneDesign.dim : BackplaneDesign.text).strikethrough(task == 1).lineSpacing(3).textSelection(.enabled)
+                } else { Text(marker).dmono(baseSize).foregroundStyle(BackplaneDesign.dim).frame(minWidth: 16, alignment: .leading) }
+                Text(dMdInline(s, size: fontSize, textColor: textColor, toneKey: toneKey)).foregroundStyle(task == 1 ? BackplaneDesign.dim : textColor).strikethrough(task == 1).lineSpacing(3).textSelection(.enabled)
             }.padding(.leading, CGFloat(depth) * 14).frame(maxWidth: .infinity, alignment: .leading)
-            DCopyPieces(pieces: Copyable.inlinePieces(s, hub: copy)).padding(.leading, CGFloat(depth) * 14 + 22)
         case .code(let lang, let s): DMdCode(lang: lang, text: s, cmd: Copyable.blockCmd(s, lang: lang, hub: copy))
-        case .quote(let inner): HStack(alignment: .top, spacing: 10) { Rectangle().fill(BackplaneDesign.dim).frame(width: 2); DMdBlocks(blocks: inner, copy: copy) }.fixedSize(horizontal: false, vertical: true)
+        case .quote(let inner): HStack(alignment: .top, spacing: 10) { Rectangle().fill(BackplaneDesign.dim).frame(width: 2); DMdBlocks(blocks: inner, copy: copy, textColor: textColor, toneKey: toneKey, baseSize: baseSize) }.fixedSize(horizontal: false, vertical: true)
         case .table(let head, let aligns, let rows): DMdTable(head: head, aligns: aligns, rows: rows, size: body13 - 1)
         // a local path's image is the reply's own (drawn by the plan, through the hub); a web address is fetched here
         case .image(let alt, let url): if pics != nil && !url.hasPrefix("http") { EmptyView() } else { DMdImage(alt: alt, url: url) }

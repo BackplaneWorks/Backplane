@@ -101,25 +101,6 @@ fun CopyValue(shown: @Composable RowScope.() -> Unit, text: String, modifier: Mo
     Row(modifier, verticalAlignment = Alignment.CenterVertically) { shown(); Spacer(Modifier.width(4.dp)); CopyButton(text, tag = tag, size = 14) }
 }
 
-/** The pieces of a plain text to copy as the hub lists them (a room's post, a notice): each one's first line in code type with its copy button, and Run in
- *  terminal beside a command when the chat on screen has a terminal. */
-@Composable
-fun CopyPieces(pieces: List<CopyPiece>, tag: String = "copy.piece", modifier: Modifier = Modifier) {
-    if (pieces.isEmpty()) return
-    val run = LocalChatTerm.current?.takeIf { DataClient.has("termChat") }
-    Column(modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-        pieces.take(16).forEachIndexed { i, p ->
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(Copy.shown(p.text), Modifier.weight(1f, fill = false).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 6.dp, vertical = 2.dp),
-                    color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Spacer(Modifier.width(4.dp))
-                CopyButton(p.text, tag = "$tag.$i.copy")
-                if (p.cmd && run != null) RunButton(p.text, run::run, tag = "$tag.$i.run")
-            }
-        }
-    }
-}
-
 // ---- the chat's terminal (feature termChat): each chat page says which shell it is
 
 /** The chat on screen's shell: its key for `term.new {chat}` (a thread's id, a room's `room:<id>`), and how to show it. Provided by a chat's page. */

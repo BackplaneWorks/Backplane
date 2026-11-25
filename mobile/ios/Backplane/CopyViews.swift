@@ -79,31 +79,6 @@ struct DRunButton: View {
     }
 }
 
-/// The pieces of a text to copy (a room's post, a notice, a reply's inline code): each one's first line in code type, its copy button, and
-/// Run in terminal beside a command.
-struct DCopyPieces: View {
-    let pieces: [DCopyPiece]
-    var body: some View {
-        if !pieces.isEmpty {
-            VStack(alignment: .leading, spacing: 2) {
-                ForEach(Array(pieces.enumerated()), id: \.offset) { _, p in
-                    HStack(spacing: 2) {
-                        Text(verbatim: firstLine(p.text)).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).truncationMode(.tail)
-                            .padding(.horizontal, 6).padding(.vertical, 3).background(BackplaneDesign.panel)
-                        Spacer(minLength: 4)
-                        if p.cmd { DRunButton(cmd: p.text) }
-                        DCopyButton(text: p.text)
-                    }.accessibilityElement(children: .contain).accessibilityIdentifier("copy.piece")
-                }
-            }
-        }
-    }
-    private func firstLine(_ s: String) -> String {
-        let l = s.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false)
-        return l.count > 1 ? String(l[0]) + " …" : s
-    }
-}
-
 /// A value shown to be copied (a Settings row's note that is a path, an id, a link): the note and its copy button.
 struct DCopyValue: View {
     let shown: String

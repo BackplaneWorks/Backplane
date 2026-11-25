@@ -33,9 +33,9 @@ def open_surface(ctl):
 if want('F23'):
     for name, ctl, marker, _, msg in SURFACES:
         opened = open_surface(ctl); shot('f23-%s-open' % name)
-        # the inline command: its button in a timeline is `copy:ic-...`; a room's code pieces are `copy:talk-...` / `copy:post-...`
-        k_in, r_in = probe_like('copy:ic-' + msg + '-') if name != 'room' else probe_like('copy:talk-', '-0')
-        k_bl, r_bl = probe_like('copy:code-' + msg + '-') if name != 'room' else probe_like('copy:talk-', '-2')
+        # the inline command: its button in a timeline is `copy:ic-...`; a room's inline command is `copy:ic-talk-...`
+        k_in, r_in = probe_like('copy:ic-' + msg + '-') if name != 'room' else probe_like('copy:ic-talk-0-')
+        k_bl, r_bl = probe_like('copy:code-' + msg + '-') if name != 'room' else probe_like('copy:code-talk-0-')
         clip_set('before'); got_in = None
         if r_in: press(r_in); until(lambda: clip() == INLINE, 5); got_in = clip(); pause(0.3); shot('f23-%s-copied' % name)
         clip_set('before'); got_bl = None
@@ -52,7 +52,7 @@ if want('F23'):
 if want('F24'):
     for name, ctl, marker, where, msg in SURFACES:
         opened = open_surface(ctl)
-        k, r = probe_like('run:code-' + msg + '-') if name != 'room' else probe_like('run:talk-', '-2')
+        k, r = probe_like('run:code-' + msg + '-') if name != 'room' else probe_like('run:code-talk-0-')
         if r: press(r)
         pause(3.5); shot('f24-%s-typed' % name)
         found = lambda: [f for f in glob.glob(P('**', marker), recursive=True)]

@@ -148,7 +148,11 @@ function attachTimelineCopyHandler(scrollEl: HTMLElement): void {
     } else {
       const frag = range.cloneContents();
       const chips = frag.querySelectorAll(".bp-ref-chip[data-ref-word]");
-      if (chips.length === 0) return;
+      const noCopy = frag.querySelectorAll("[data-bp-no-copy]");
+      if (chips.length === 0 && noCopy.length === 0) return;
+      for (const el of noCopy) {
+        el.remove();
+      }
       for (const chip of chips) {
         const raw = chip.getAttribute("data-ref-word") || chip.textContent || "";
         chip.replaceWith(document.createTextNode(raw));

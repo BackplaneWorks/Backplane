@@ -102,7 +102,7 @@ fn took(s: u64) -> String {
 
 /// A message's Markdown as blocks. Every picture of a thread draws its page of messages again, and a posted message never changes, so the blocks of the
 /// texts drawn lately are kept (`Blocks`): rendering them was half of the hub's work for one picture of a long thread, at every streamed step and key press.
-fn md_blocks(text: &str) -> Vec<Value> {
+pub(crate) fn md_blocks(text: &str) -> Vec<Value> {
     static KEPT: std::sync::LazyLock<std::sync::Mutex<Blocks>> = std::sync::LazyLock::new(Default::default);
     let key = Blocks::key(text);
     if let Some(b) = KEPT.lock().unwrap().get(key) { return b }
@@ -446,6 +446,7 @@ pub(crate) fn plain_act(e: &Ent) -> Value {
     let mut a = json!({"id": e.id, "kind": "act", "tone": tone, "label": shown_name(&e.akind), "text": text});
     // a notice's code (an error naming a command to run, a path): the clients draw copy buttons for it (md/copy.rs)
     let copy = crate::md::copy::spans(&text); if !copy.is_empty() { a["copy"] = json!(copy) }
+    if e.role != THINK && !text.is_empty() && (!copy.is_empty() || text.contains('`')) { a["blocks"] = json!(md_blocks(&text)) }
     // a thought (Fold.think): shown folded to its first line, opened to the whole of it with a tap (the setting agent.thinking says "folded")
     if e.role == THINK && !text.is_empty() { a["folds"] = json!(true) }
     a
@@ -1109,5 +1110,14 @@ mod tests {
         let mn = got["menu"].as_array().unwrap();
         assert!(!mn.iter().any(|x| x["action"] == "diff"));
         assert!(mn.iter().any(|x| x["id"] == "move" && x["sub"][0]["value"] == "c1\u{1f}p1"), "{got}");
+    }
+    #[test] fn plain_act_emits_blocks_for_code_bearing_notices_and_preserves_copy() {
+        let e = Ent { id: "a1".into(), msg: false, role: "warn".into(), akind: "error".into(), text: "Run `git status` or see `docs/architecture.md`.".into(), at: 1 };
+        let a = plain_act(&e);
+        assert!(a["copy"].is_array());
+        let b = a["blocks"].to_string();
+        assert!(b.contains(r#""tag":"code""#) && b.contains("git status") && b.contains("docs/architecture.md"), "{b}");
+        let plain = Ent { id: "a2".into(), msg: false, role: "info".into(), akind: "note".into(), text: "plain words".into(), at: 1 };
+        assert!(plain_act(&plain).get("blocks").is_none());
     }
 }

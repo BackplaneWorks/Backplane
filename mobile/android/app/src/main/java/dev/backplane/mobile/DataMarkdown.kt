@@ -156,7 +156,7 @@ class MdPalette(val text: Color, val code: Color, val codeBg: Color, val link: C
 
 private val inlineCache = LruCache<String, AnnotatedString>(512)
 fun mdInline(s: String, p: MdPalette): AnnotatedString {
-    val key = (if (p.dark) "d" else "l") + s
+    val key = (if (p.dark) "d" else "l") + p.code.value.toString() + "\u0000" + s
     inlineCache.get(key)?.let { return it }
     return buildAnnotatedString { inl(s, p, 0) }.also { inlineCache.put(key, it) }
 }
@@ -167,7 +167,7 @@ class MdRun(val text: AnnotatedString, val pieces: List<CopyPiece>, val run: Boo
 private val runCache = LruCache<String, MdRun>(512)
 /** An inline run with a copy button after each code span [look] names (and Run in terminal after a command, with [run]). */
 fun mdInlineCopy(s: String, p: MdPalette, look: CopyLookup, run: Boolean): MdRun {
-    val key = (if (p.dark) "d" else "l") + (if (run) "r" else "-") + look.key + "\u0000" + s
+    val key = (if (p.dark) "d" else "l") + (if (run) "r" else "-") + p.code.value.toString() + "\u0000" + look.key + "\u0000" + s
     runCache.get(key)?.let { return it }
     val cx = InlCopy(look, run)
     val t = buildAnnotatedString { inl(s, p, 0, cx) }
@@ -190,7 +190,7 @@ private fun AnnotatedString.Builder.link(url: String, p: MdPalette, body: Annota
     withLink(LinkAnnotation.Clickable(url, TextLinkStyles(SpanStyle(color = p.link, textDecoration = TextDecoration.Underline))) { MdLinks.open(url) }) { body() }
 }
 
-private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int, cx: InlCopy? = null) {
+private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int, cx: InlCopy? = null, inLink: Boolean = false) {
     var i = 0
     while (i < s.length) {
         val c = s[i]
@@ -203,9 +203,23 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int, cx:
             if (e > 0) {
                 val inner = s.substring(i + n, e).trim('`').let { if (it.startsWith(" ") && it.endsWith(" ") && it.isNotBlank()) it.trim() else it }
                 val code: AnnotatedString.Builder.() -> Unit = { withStyle(SpanStyle(fontFamily = BpMono, color = p.code, background = p.codeBg, fontSize = 12.5.sp)) { append(inner) } }
-                val codeTarget = fileUrlPath(inner)?.let { pathLink(it) } ?: if (isPathText(inner)) pathLink(inner) else null
-                if (codeTarget != null) link(codeTarget, p) { code() } else code()
-                cx?.look?.inline(inner)?.let { piece -> appendInlineContent("cp${cx.pieces.size}", " "); cx.pieces.add(piece) }
+                if (inLink) {
+                    code()
+                } else {
+                    val codeTarget = fileUrlPath(inner)?.let { pathLink(it) } ?: if (isPathText(inner)) pathLink(inner) else null
+                    if (codeTarget != null) {
+                        link(codeTarget, p) { code() }
+                        cx?.let {
+                            val piece = it.look.inline(inner) ?: CopyPiece(inner, false)
+                            appendInlineContent("cp${it.pieces.size}", " "); it.pieces.add(piece)
+                        }
+                    } else {
+                        withLink(LinkAnnotation.Clickable("copy:$inner", TextLinkStyles(SpanStyle(color = p.code, background = p.codeBg))) {
+                            MdLinks.ctx?.let { c -> copyToClipboard(c, inner); DataClient.say(Msg.android_copied) }
+                        }) { code() }
+                        cx?.look?.inline(inner)?.let { piece -> appendInlineContent("cp${cx.pieces.size}", " "); cx.pieces.add(piece) }
+                    }
+                }
                 i = e + n; continue
             }
             append(tick); i += n; continue
@@ -220,7 +234,7 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int, cx:
                 if (end > 0) {
                     val url = linkTargetUrl(s.substring(close + 2, end))
                     val label = s.substring(st + 1, close)
-                    link(url, p) { if (c == '!') append(label.ifEmpty { url }) else inl(label, p, depth + 1, cx) }
+                    link(url, p) { if (c == '!') append(label.ifEmpty { url }) else inl(label, p, depth + 1, cx, true) }
                     i = end + 1; continue
                 }
             }
@@ -231,11 +245,11 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int, cx:
             val tok = "$c$c"; var e = s.indexOf(tok, i + 2)
             while (e > 0 && s[e - 1].isWhitespace()) e = s.indexOf(tok, e + 2)
             while (e > 0 && e + 2 < s.length && s[e + 2] == c) e++
-            if (e > i + 2) { withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { inl(s.substring(i + 2, e), p, depth + 1, cx) }; i = e + 2; continue }
+            if (e > i + 2) { withStyle(SpanStyle(fontWeight = FontWeight.Bold)) { inl(s.substring(i + 2, e), p, depth + 1, cx, inLink) }; i = e + 2; continue }
         }
         if (c == '~' && s.startsWith("~~", i) && i + 2 < s.length && !s[i + 2].isWhitespace()) {
             val e = s.indexOf("~~", i + 2)
-            if (e > i + 2) { withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { inl(s.substring(i + 2, e), p, depth + 1, cx) }; i = e + 2; continue }
+            if (e > i + 2) { withStyle(SpanStyle(textDecoration = TextDecoration.LineThrough)) { inl(s.substring(i + 2, e), p, depth + 1, cx, inLink) }; i = e + 2; continue }
         }
         if ((c == '*' || c == '_') && i + 1 < s.length && !s[i + 1].isWhitespace() && s[i + 1] != c && (c == '*' || i == 0 || !s[i - 1].isLetterOrDigit())) {
             var j = i + 1; var e = -1
@@ -245,11 +259,17 @@ private fun AnnotatedString.Builder.inl(s: String, p: MdPalette, depth: Int, cx:
                 if (s[j] == c) { if (j + 1 < s.length && s[j + 1] == c) { j += 2; continue }; if (!s[j - 1].isWhitespace() && (c == '*' || j + 1 == s.length || !s[j + 1].isLetterOrDigit())) { e = j; break } }
                 j++
             }
-            if (e > i + 1) { withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { inl(s.substring(i + 1, e), p, depth + 1, cx) }; i = e + 1; continue }
+            if (e > i + 1) { withStyle(SpanStyle(fontStyle = FontStyle.Italic)) { inl(s.substring(i + 1, e), p, depth + 1, cx, inLink) }; i = e + 1; continue }
         }
         // emails, phone numbers and file paths in running text
         val al = autoLink(s, i)
-        if (al != null) { val t = s.substring(i, al.end); link(al.url, p) { append(t) }; i = al.end; continue }
+        if (al != null) {
+            val t = s.substring(i, al.end); link(al.url, p) { append(t) }
+            if (cx != null && al.url.startsWith(PATH_SCHEME)) {
+                appendInlineContent("cp${cx.pieces.size}", " "); cx.pieces.add(CopyPiece(pathOf(al.url) ?: t, false))
+            }
+            i = al.end; continue
+        }
         append(c); i++
     }
 }
@@ -272,38 +292,39 @@ private fun heading(level: Int) = when (level) { 1 -> 18; 2 -> 16; 3 -> 14 else 
 
 /** A message's Markdown. `thread` lets a picture at a path on the hub's machine load. Everything in it can be selected. */
 @Composable
-fun MdText(src: String, modifier: Modifier = Modifier, thread: String? = null, copy: CopyLookup = CopyLookup(null)) {
+fun MdText(src: String, modifier: Modifier = Modifier, thread: String? = null, copy: CopyLookup = CopyLookup(null), color: Color = MaterialTheme.colorScheme.onSurface, fontSize: Int = 13) {
     val dcs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     SideEffect { MdLinks.ctx = ctx.applicationContext; MdLinks.thread = thread ?: "" }
     val dark = dcs.background.red < .5f
-    val pal = remember(dcs, dark) { MdPalette(dcs.onSurface, dcs.onSurface, dcs.surfaceContainerHigh, dcs.primary, dark) }
+    val pal = remember(dcs, dark, color) { MdPalette(color, color, dcs.surfaceContainerHigh, dcs.primary, dark) }
     val blocks = remember(src) { mdBlocks(src) }
     val chat = LocalChatTerm.current?.takeIf { DataClient.has("termChat") }
-    SelectionContainer { MdBlocks(blocks, pal, thread, modifier, copy, chat) }
+    SelectionContainer { MdBlocks(blocks, pal, thread, modifier, copy, chat, fontSize) }
 }
 
 @Composable
-private fun MdBlocks(blocks: List<MdBlock>, pal: MdPalette, tid: String?, modifier: Modifier = Modifier, copy: CopyLookup = CopyLookup(null), chat: ChatTerm? = null) {
+private fun MdBlocks(blocks: List<MdBlock>, pal: MdPalette, tid: String?, modifier: Modifier = Modifier, copy: CopyLookup = CopyLookup(null), chat: ChatTerm? = null, fontSize: Int = 13) {
     val dcs = MaterialTheme.colorScheme
+    val lh = (fontSize + 6).sp
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEachIndexed { idx, b ->
             key(idx) {
                 when (b) {
-                    is MdBlock.P -> { val r = mdInlineCopy(b.text, pal, copy, chat != null); Text(r.text, color = dcs.onSurface, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = BpMono, inlineContent = mdInlineContent(r, chat)) }
-                    is MdBlock.H -> Text(mdInline(b.text, pal), Modifier.padding(top = 4.dp), color = dcs.onSurface, fontSize = heading(b.level).sp, lineHeight = (heading(b.level) + 7).sp, fontWeight = FontWeight.Bold, fontFamily = BpMono)
+                    is MdBlock.P -> { val r = mdInlineCopy(b.text, pal, copy, chat != null); Text(r.text, color = pal.text, fontSize = fontSize.sp, lineHeight = lh, fontFamily = BpMono, inlineContent = mdInlineContent(r, chat)) }
+                    is MdBlock.H -> { val r = mdInlineCopy(b.text, pal, copy, chat != null); Text(r.text, Modifier.padding(top = 4.dp), color = pal.text, fontSize = heading(b.level).sp, lineHeight = (heading(b.level) + 7).sp, fontWeight = FontWeight.Bold, fontFamily = BpMono, inlineContent = mdInlineContent(r, chat)) }
                     is MdBlock.Li -> Row(Modifier.padding(start = (b.depth * 14).dp)) {
                         if (b.task >= 0) Box(Modifier.padding(top = 3.dp, end = 8.dp).size(13.dp).border(BorderStroke(1.dp, if (b.task == 1) dcs.primary else dcs.outline)).background(if (b.task == 1) dcs.primary else Color.Transparent), contentAlignment = Alignment.Center) {
                             if (b.task == 1) Text("✓", color = dcs.onPrimary, fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold)
-                        } else Text(b.marker, Modifier.widthIn(min = 18.dp).padding(end = 4.dp), color = dcs.onSurfaceVariant, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = BpMono)
+                        } else Text(b.marker, Modifier.widthIn(min = 18.dp).padding(end = 4.dp), color = dcs.onSurfaceVariant, fontSize = fontSize.sp, lineHeight = lh, fontFamily = BpMono)
                         val r = mdInlineCopy(b.text, pal, copy, chat != null)
-                        Text(r.text, color = if (b.task == 1) dcs.onSurfaceVariant else dcs.onSurface, fontSize = 13.sp, lineHeight = 19.sp, fontFamily = BpMono,
+                        Text(r.text, color = if (b.task == 1) dcs.onSurfaceVariant else pal.text, fontSize = fontSize.sp, lineHeight = lh, fontFamily = BpMono,
                             textDecoration = if (b.task == 1) TextDecoration.LineThrough else null, inlineContent = mdInlineContent(r, chat))
                     }
                     is MdBlock.Code -> CodeBlock(b, copy.blockCmd(b.text, b.lang), chat)
                     is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                         Box(Modifier.width(2.dp).fillMaxHeight().background(dcs.outline)); Spacer(Modifier.width(10.dp))
-                        MdBlocks(b.blocks, pal, tid, copy = copy, chat = chat)
+                        MdBlocks(b.blocks, pal, tid, copy = copy, chat = chat, fontSize = fontSize)
                     }
                     is MdBlock.Table -> TableBlock(b, pal)
                     is MdBlock.Img -> ImageBlock(b, tid)

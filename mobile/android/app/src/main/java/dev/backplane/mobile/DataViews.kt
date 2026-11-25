@@ -1319,9 +1319,8 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
             val c = if (e.tone == "error") dcs.error else dcs.onSurfaceVariant
             if (e.label.isNotEmpty()) { Text(Tr.t(e.label), color = c, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)) }
             Column(Modifier.weight(1f)) {
-                LinkText(e.text, tid, color = c, size = 12)
-                // a notice's code (an error naming a command to run, a path): its copy buttons
-                CopyPieces(CopyLookup.of(e.copy, DataClient.has("copy")).pieces(e.text), "note.copy.${e.id}")
+                if (e.text.contains('`') || !e.copy.isNullOrEmpty()) MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy")), color = c, fontSize = 12)
+                else LinkText(e.text, tid, color = c, size = 12)
             }
         }
     }
