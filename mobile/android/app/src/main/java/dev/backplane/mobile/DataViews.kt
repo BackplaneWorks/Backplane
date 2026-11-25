@@ -184,6 +184,25 @@ internal fun DBar(title: String, back: (() -> Unit)?, titleMenu: (@Composable Co
 }
 
 @Composable
+private fun BoxScope.ReconnectingPill() {
+    if (DataClient.conn == DataClient.Conn.CONNECTING && DataClient.restartText == null && (DataClient.listsLoaded || DataClient.sections.isNotEmpty() || DataClient.projects.isNotEmpty())) {
+        Row(
+            Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 10.dp)
+                .background(dcs.surfaceContainerHigh, RectangleShape)
+                .border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape)
+                .padding(horizontal = 10.dp, vertical = 5.dp)
+                .testTag("conn.reconnecting"),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            DDot(dwarn, 6); Spacer(Modifier.width(6.dp))
+            DMono(Msg.mobile_conn_reconnecting, dcs.onSurfaceVariant, 11)
+        }
+    }
+}
+
+@Composable
 private fun ConnBanner(hub: () -> Unit, settings: () -> Unit) {
     MigrateBanner()
     HubBanner(hub)
@@ -558,21 +577,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                             }
                         }
                     }
-                    if (DataClient.conn == DataClient.Conn.CONNECTING && DataClient.restartText == null && (DataClient.listsLoaded || DataClient.sections.isNotEmpty() || DataClient.projects.isNotEmpty())) {
-                        Row(
-                            Modifier
-                                .align(Alignment.BottomCenter)
-                                .padding(bottom = 10.dp)
-                                .background(dcs.surfaceContainerHigh, RectangleShape)
-                                .border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape)
-                                .padding(horizontal = 10.dp, vertical = 5.dp)
-                                .testTag("conn.reconnecting"),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            DDot(dwarn, 6); Spacer(Modifier.width(6.dp))
-                            DMono(Msg.mobile_conn_reconnecting, dcs.onSurfaceVariant, 11)
-                        }
-                    }
+                    ReconnectingPill()
                 }
             }
             DLine()
@@ -620,6 +625,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         // a swarm's members are left out of their project's list: the project shows the swarm once (feature swarm)
         val threads = DataClient.threads.filter { !it.archived && it.id !in botThreads && !it.history && !(swarmsOn && it.swarm.isNotEmpty()) }
         val hist = DataClient.history
+        Box(Modifier.weight(1f).fillMaxWidth()) {
         if (projects.isEmpty() && threads.isEmpty() && hist.count == 0) {
             // no project yet: Bub still leads the list; the empty state and Add a project come under it
             LazyColumn(Modifier.fillMaxSize().testTag("home.list")) {
@@ -705,6 +711,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 items(bots, key = { "b:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_bot, b.mark), onLong = if (b.delete) ({ botDelete = b }) else null, lead = botCat(b)) { if (b.thread.isNotEmpty()) open(b.thread) } } }
             if (DataClient.rooms.isNotEmpty()) { item("rooms") { DMono(Msg.plane_heading_rooms, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
                 items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, onMachine(Msg.android_kind_room, r.mark), onLong = if (r.delete) ({ roomDelete = r }) else null) { openRoom(r) } } }
+        }
+        ReconnectingPill()
         }
         } // end !sectioned
         // Delete bot (a long press on a bot the hub offers it for): asked first, then `bot.delete`

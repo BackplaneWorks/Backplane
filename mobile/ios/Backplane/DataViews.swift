@@ -207,23 +207,9 @@ struct DataThreadsView: View {
             if !client.locks.isEmpty && !sectioned { DataLocksStrip(client: client, path: $path) } // (the sections leave the hub's locks out: backend work)
             if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 DataSearchResults(client: client, query: query, open: { path.append($0) }, openAt: { path.append($0) })
-            } else if !client.hasCachedSidebar && client.failure.isEmpty {
+            } else if !client.hasCachedSidebar && client.failure.isEmpty && client.conn != .offline {
                 DLoading(text: Tr.t(client.conn == .online ? "Loading…" : "Connecting to the hub…"))
             } else if sectioned { tabs } else { list }
-        }
-        .overlay(alignment: .bottom) {
-            if showReconnectingPill {
-                HStack(spacing: 6) {
-                    DDot(color: BackplaneDesign.warn, size: 6)
-                    Text(Tr.k("mobile.conn.reconnecting")).dmono(11).foregroundStyle(BackplaneDesign.dim)
-                }
-                .padding(.horizontal, 10).padding(.vertical, 5)
-                .background(BackplaneDesign.raised)
-                .overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
-                .padding(.bottom, sectioned ? 58 : 14)
-                .allowsHitTesting(false)
-                .accessibilityIdentifier("data.connection.reconnecting")
-            }
         }
         .background(BackplaneDesign.panel)
         .navigationBarTitleDisplayMode(.inline)
@@ -315,6 +301,21 @@ struct DataThreadsView: View {
         }
     }
 
+    @ViewBuilder private var reconnectingPill: some View {
+        if showReconnectingPill {
+            HStack(spacing: 6) {
+                DDot(color: BackplaneDesign.warn, size: 6)
+                Text(Tr.k("mobile.conn.reconnecting")).dmono(11).foregroundStyle(BackplaneDesign.dim)
+            }
+            .padding(.horizontal, 10).padding(.vertical, 5)
+            .background(BackplaneDesign.raised)
+            .overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+            .padding(.bottom, 14)
+            .allowsHitTesting(false)
+            .accessibilityIdentifier("data.connection.reconnecting")
+        }
+    }
+
     private var list: some View {
         ScrollViewReader { proxy in listBody
             .onChange(of: client.focusProject, initial: true) { _, id in
@@ -324,6 +325,7 @@ struct DataThreadsView: View {
                 Task { try? await Task.sleep(nanoseconds: 150_000_000); withAnimation { proxy.scrollTo("project." + id, anchor: .top) }; try? await Task.sleep(nanoseconds: 2_500_000_000); if flash == id { flash = "" } }
             }
         }
+        .overlay(alignment: .bottom) { reconnectingPill }
     }
     private var listBody: some View {
         List {
@@ -396,6 +398,7 @@ struct DataThreadsView: View {
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.inbox")
+        .overlay(alignment: .bottom) { reconnectingPill }
     }
     @ViewBuilder private func inboxRow(_ r: DSecRow) -> some View {
         // a swarm that waits on the person opens the swarm's page
@@ -432,6 +435,7 @@ struct DataThreadsView: View {
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.crew")
+        .overlay(alignment: .bottom) { reconnectingPill }
     }
     /// Bench: the projects as the hub sections them. Pinned and Recent (the ones the person was in last) are tall rows on top; the groups, All
     /// projects and Quiet are folds under them, so no one scrolls through every project to reach a board.
@@ -455,6 +459,7 @@ struct DataThreadsView: View {
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.bench")
+        .overlay(alignment: .bottom) { reconnectingPill }
     }
     /// A project row of the Bench (and of the Inbox's Jump back in): a press opens its page, a long press its menu.
     private func projectRow(_ r: DSecRow, faded: Bool = false, tall: Bool = false) -> some View {
