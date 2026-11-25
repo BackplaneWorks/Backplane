@@ -15,6 +15,8 @@ pub fn private_told_key(bot: &str, key: &str) -> String { pair_key("mail.private
 fn note_key(th: &str) -> String { format!("mail.private.note.{th}") }
 fn said_key(th: &str) -> String { format!("mail.private.said.{th}") }
 fn handed_key(th: &str) -> String { format!("mail.private.handed.{th}") }
+/// Cooldown between repeated `triage-end` completion mails for the same unmanaged thread (seconds).
+pub const TRIAGE_END_COOLDOWN: u64 = 1800;
 
 /// Continuity.inbound
 fn continuity_inbound(m: &Hdr, bot: &str) -> bool { m.from != format!("bot:{bot}") && m.want == "act" && (m.to == format!("bot:{bot}") || m.to.starts_with("room:")) }
@@ -232,35 +234,91 @@ impl<'a> Ctx<'a> {
         if state == "completed" && text.trim().is_empty() { return Step::none() }
         self.operational(Origin::new(&self.w.mail_addr(th), "bot", ""), &self.w.triage_thread(), &format!("Bot report from {}:\n{text}", ref_uri("thread", th)), &format!("triage-bot:{th}:{}", self.now), "fyi", vec![])
     }
-    /// Triage.thread.end: a thread nobody manages finished: the uberbot hears it as mail it reads when it next looks (fyi: it starts no turn), and decides; its own thread is not news to it
+    /// Triage.thread.end: an unmanaged thread finished: the uberbot files it for its done/fallback pipeline, deduplicated per thread.
     pub fn triage_thread_end(&mut self, th: &str, state: &str) -> Step {
         let tt = self.w.triage_thread();
         if tt.is_empty() || th == tt || self.w.managed(th) || self.run_is(th) { return Step::none() }
-        // its words are not folded here (a big log's messages are not read): the mail names the thread, and the uberbot reads it when it matters
-        self.operational(Origin::new(&self.w.mail_addr(th), "thread", ""), &tt, &format!("Thread {state}: {}", ref_uri("thread", th)), &format!("triage-end:{th}:{}", self.now), "fyi", vec![])
+        if state == "completed" {
+            let ub = self.w.uber_bot();
+            let in_list = |key: &str| {
+                serde_json::from_str::<Value>(&self.setting(key, "[]")).ok()
+                    .and_then(|v| v.as_array().cloned())
+                    .map_or(false, |xs| xs.iter().any(|i| i["thread"].as_str() == Some(th)))
+            };
+            let last_at: u64 = self.setting(&format!("triage.end.last.{th}"), "").parse().unwrap_or(0);
+            if in_list(&super::done::batch_key(&ub))
+                || in_list(&super::done::pending_key(&ub))
+                || (last_at > 0 && self.now.saturating_sub(last_at) < TRIAGE_END_COOLDOWN)
+            {
+                return Step::none();
+            }
+        }
+        let title = self.th(th).title;
+        let uri = ref_uri("thread", th);
+        let head_line = if title.trim().is_empty() {
+            format!("Thread {state}: {uri}")
+        } else {
+            format!("Thread {state}: {} ({uri})", title.trim())
+        };
+        let reply = self.f.last.get(th).map(|l| l.0.trim()).unwrap_or("");
+        let text = if reply.is_empty() {
+            head_line
+        } else {
+            format!("{head_line}\n{}", take_chars(reply, 2000))
+        };
+        let op = self.operational(Origin::new(&self.w.mail_addr(th), "thread", ""), &tt, &text, &format!("triage-end:{th}:{}", self.now), "fyi", vec![]);
+        if state == "completed" {
+            let cs = vec![set(format!("triage.end.last.{th}"), &self.now.to_string(), self.now)];
+            self.replay(&cs);
+            Step { cs, outs: vec![] }.cat(op)
+        } else {
+            op
+        }
     }
     pub fn run_is(&self, th: &str) -> bool { self.w.private_is(th) || self.run_of(th).filter(|r| self.runs_on(&r.bot)).is_some() }
     fn run_of_any(&self, th: &str) -> Option<Run> { self.run_of(th).filter(|r| !self.w.private_is(&r.thread)) }
 
-    /// Private.lost: a lane cut off before it told anyone hands its note to the owner's own agent, once
+    /// Private.lost: a lane cut off before it told anyone hands its note to the owner's own agent, once;
+    /// any ended private lane flushes completions that arrived while it ran into a follow-up lane.
     pub fn private_lost(&mut self, lane: &str, state: &str) -> Step {
-        if let Some(st) = self.done_lane_end(lane, state) { return st } // Done.lane.end: a done lane's digest is posted, not handed over
-        if !self.w.private_is(lane) || !(state == "interrupted" || state == "failed") { return Step::none() }
-        let note = self.setting(&note_key(lane), ""); let target = self.w.triage_thread();
-        if note.is_empty() || !self.setting(&said_key(lane), "").is_empty() || !self.setting(&handed_key(lane), "").is_empty() || target.is_empty() { return Step::none() }
-        let cs = vec![set(handed_key(lane), &self.now.to_string(), self.now)]; self.replay(&cs);
-        let text = format!("[Backplane] Your private mailroom lane {lane} was cut off (provider limit, failure or restart) before it finished, so this escalation reached no one. Assess it yourself now: told_check first, tell the person only what is material and new, and keep source approvals pending.\n\n{note}");
-        Step { cs, outs: vec![RouteOut::Ride { thread: target, id: format!("lost:{lane}"), text }] }
+        if !self.w.private_is(lane) || !["completed", "failed", "interrupted"].contains(&state) { return Step::none() }
+        let bot = self.w.private_owner(lane);
+        let mut st = if let Some(s) = self.done_lane_end(lane, state) {
+            s // Done.lane.end: a done lane's digest is handled here, not handed over
+        } else if state == "interrupted" || state == "failed" {
+            let note = self.setting(&note_key(lane), ""); let target = self.w.triage_thread();
+            if note.is_empty() || !self.setting(&said_key(lane), "").is_empty() || !self.setting(&handed_key(lane), "").is_empty() || target.is_empty() {
+                Step::none()
+            } else {
+                let cs = vec![set(handed_key(lane), &self.now.to_string(), self.now)]; self.replay(&cs);
+                let text = format!("[Backplane] Your private mailroom lane {lane} was cut off (provider limit, failure or restart) before it finished, so this escalation reached no one. Assess it yourself now: told_check first, tell the person only what is material and new, and keep source approvals pending.\n\n{note}");
+                Step { cs, outs: vec![RouteOut::Ride { thread: target, id: format!("lost:{lane}"), text }] }
+            }
+        } else {
+            Step::none()
+        };
+        if !self.has_live_done_lane(&bot) {
+            let follow = self.done_flush_now(&bot);
+            st = st.cat(follow);
+        }
+        st
     }
     /// Private.tell: the one publication from the back office into the person's conversation, once per owner and key; the owner's own agent is told it was said
     pub fn private_tell(&mut self, thread: &str, text: &str, key: &str) -> Step {
-        let bot = self.w.private_owner(thread); let target = self.w.triage_thread();
-        if !self.setting(&private_told_key(&bot, key), "").is_empty() { return Step::none() }
+        let bot = self.w.private_owner(thread);
+        self.private_tell_as(&bot, thread, text, key)
+    }
+    /// Publication into the uberbot's conversation on behalf of `bot` (with optional back-office `lane`).
+    pub(super) fn private_tell_as(&mut self, bot: &str, lane: &str, text: &str, key: &str) -> Step {
+        let target = self.w.triage_thread();
+        if bot.is_empty() || target.is_empty() || !self.setting(&private_told_key(bot, key), "").is_empty() { return Step::none() }
         let msg = self.id("tell:"); let now = self.now; // Bot.told: `tell:` always shows in the chat
-        let mut cs = vec![json!({"$":"MessagePosted","thread":target,"msg":msg,"role":"assistant","text":text,"at":now}), json!({"$":"MessageFrom","thread":target,"msg":msg,"from":format!("thread:{thread}"),"kind":"tell-person","ref":key,"at":now}),
-            set(private_told_key(&bot, key), &msg, now), set(said_key(thread), &msg, now)];
+        let from = if lane.is_empty() { format!("bot:{bot}") } else { format!("thread:{lane}") };
+        let mut cs = vec![json!({"$":"MessagePosted","thread":target,"msg":msg,"role":"assistant","text":text,"at":now}), json!({"$":"MessageFrom","thread":target,"msg":msg,"from":from,"kind":"tell-person","ref":key,"at":now}),
+            set(private_told_key(bot, key), &msg, now)];
+        if !lane.is_empty() { cs.push(set(said_key(lane), &msg, now)); }
         if self.policy_on("needs") || self.policy_on("settled") { cs.push(self.alert_set(&target, "note", &format!("tell-{msg}"), &Self::alert_text(text, 500))) }
-        cs.extend(self.told_mark(&msg, key, text, "chat", &bot));
+        cs.extend(self.told_mark(&msg, key, text, "chat", bot));
         self.replay(&cs);
         let note = format!("[Backplane] Your private mailroom just told the person this in your conversation (key {key}). It is on screen in your conversation, and no phone alert went out: only your notify_person reaches their phone, so call it if they must know now. Do not repeat it otherwise, take it into account. If you have nothing to add, end with an empty reply.\n\n{text}");
         Step { cs, outs: vec![RouteOut::Note { thread: target, id: format!("told:{msg}"), text: note }] }

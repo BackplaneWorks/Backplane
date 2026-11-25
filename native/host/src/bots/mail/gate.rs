@@ -157,15 +157,25 @@ impl<'a> Ctx<'a> {
         let bot = self.w.private_owner(lane);
         if let Some(why) = refusal(kind, text, proof) { let p = self.report_prefs(&bot); return Err(if p.is_empty() { why } else { format!("{why}\nThe person's rules:{p}") }) }
         let rkey = proof.as_ref().map(|(r, _)| r.key()).unwrap_or_default();
-        if !self.setting(&private_told_key(&bot, &rkey), "").is_empty() || !self.setting(&private_told_key(&bot, key), "").is_empty() { return Ok((Step::none(), 0)) }
-        if items(&self.setting(&batch_key(&bot), "[]")).iter().any(|i| i["ref"] == rkey.as_str()) { return Ok((Step::none(), 0)) }
+        let ref_parsed = proof.as_ref().map(|(r, _)| r);
+        let fallback_recent = if let Some(super::gate::Ref::Thread { id }) = ref_parsed {
+            let fb_at: u64 = self.setting(&super::done::fallback_at_key(&bot, id), "").parse().unwrap_or(0);
+            fb_at > 0 && self.now.saturating_sub(fb_at) < super::done::COOLDOWN
+        } else { false };
+        if fallback_recent || !self.setting(&private_told_key(&bot, &rkey), "").is_empty() || !self.setting(&private_told_key(&bot, key), "").is_empty()
+            || items(&self.setting(&batch_key(&bot), "[]")).iter().any(|i| i["ref"] == rkey.as_str()) {
+            let clr = self.done_pending_clear(&bot, lane, ref_parsed, text);
+            if !clr.is_empty() { self.replay(&clr); return Ok((Step { cs: clr, outs: vec![] }, 0)) }
+            return Ok((Step::none(), 0))
+        }
         let urgent = Kind::parse(kind).is_some_and(Kind::urgent); let now = self.now;
         let (last, open) = (num(self.setting(&last_key(&bot), "")), num(self.setting(&due_key(&bot), "")));
         let due = if urgent { let at = now.max(last + GAP); if open > 0 { open.min(at) } else { at } } else if open > 0 { open } else { (now + BATCH).max(last + BATCH) };
         let mut xs = items(&self.setting(&batch_key(&bot), "[]"));
         xs.push(json!({"key":key,"ref":rkey,"text":text,"lane":lane,"kind":kind,"at":now}));
-        let cs = vec![set(batch_key(&bot), &jshow(json!(xs)), now), set(due_key(&bot), &due.to_string(), now),
+        let mut cs = vec![set(batch_key(&bot), &jshow(json!(xs)), now), set(due_key(&bot), &due.to_string(), now),
             set(private_told_key(&bot, key), &format!("queued:{due}"), now), set(private_told_key(&bot, &rkey), &format!("queued:{due}"), now), set(said_key(lane), &format!("queued:{key}"), now)];
+        cs.extend(self.done_pending_clear(&bot, lane, ref_parsed, text));
         self.replay(&cs);
         let st = Step { cs, outs: vec![] };
         if due <= now { let f = self.tell_flush(&bot); return Ok((st.cat(f), due)) }
