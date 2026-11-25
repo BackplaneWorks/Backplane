@@ -169,12 +169,16 @@ object DataClient {
         legacyCacheFile().delete()
         setHome(""); leaveHome(); keepOutbox(Outbox()); links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(clearDisk = true); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++
     }
+    private var sectionsJson: JSONArray? = null
+    private var groupsToJson: JSONArray? = null
+
     private fun reset(clearDisk: Boolean = false) {
         saveJob?.cancel()
         shellHashes.clear(); threadHashes.clear(); threadIds.clear(); subEntriesById.clear(); subEntryIds = emptyList()
-        Swarms.reset(); restarting = null; hubBack = null; notice = HubNotice(); star = null; telemetryNotice = null; noProvider = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
+        Swarms.reset(); restarting = null; hubBack = null; notice = HubNotice(); star = null; telemetryNotice = null; noProvider = null; migrating = null; migrateOpen = false
+        projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
+        sections = emptyList(); groupsTo = emptyList(); sectionsJson = null; groupsToJson = null; features = emptySet(); bots = emptyList(); rooms = emptyList()
         home = null
-        Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; noProvider = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null
         if (clearDisk) link?.let { Pairing.key(it) }?.let { cacheFile(it).delete() }
     }
 
@@ -395,8 +399,14 @@ object DataClient {
     private suspend fun synchronise(g: Int) {
         try {
             if (has("shell") && machine.isEmpty()) {
-                val have = JSONObject().also { h -> shellHashes.forEach { (k, v) -> h.put(k, v) } }
-                val r = call("shell.sync", JSONObject().put("have", have).put("settled", 25))
+                if (sectionsOpen.isEmpty()) sectionsOpen = prefs().getStringSet("sections.open", emptySet())?.toSet() ?: emptySet()
+                val have = JSONObject().also { h ->
+                    shellHashes.forEach { (k, v) ->
+                        if ((k == "@sections" && sections.isEmpty()) || (k.startsWith("p:") && projects.isEmpty())) return@forEach
+                        h.put(k, v)
+                    }
+                }
+                val r = call("shell.sync", JSONObject().put("have", have).put("settled", 25).put("open", openArr()))
                 if (g != gen) return
                 listSub = r.optInt("sub")
                 val removed = r.optJSONArray("removed")?.let { a -> (0 until a.length()).map { a.optString(it) }.toSet() } ?: emptySet()
@@ -415,20 +425,25 @@ object DataClient {
                     }
                 }
                 r.optJSONObject("sections")?.let { s ->
-                    sections = DSection.list(s.optJSONArray("sections"))
-                    groupsTo = DSection.groups(s.optJSONArray("groupsTo"))
-                } ?: r.optJSONArray("sections")?.let { a -> sections = DSection.list(a) }
+                    sectionsJson = s.optJSONArray("sections")
+                    groupsToJson = s.optJSONArray("groupsTo")
+                    sections = DSection.list(sectionsJson)
+                    groupsTo = DSection.groups(groupsToJson)
+                } ?: r.optJSONArray("sections")?.let { a ->
+                    sectionsJson = a
+                    sections = DSection.list(a)
+                }
                 r.optJSONObject("h")?.let { h ->
                     val next = HashMap<String, String>()
                     h.keys().forEach { k -> next[k] = h.optString(k) }
                     shellHashes = next
                 }
                 listsLoaded = true; save()
-                coroutineScope { launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { runCatching { loadTelemetryNotice() } }; launch { loadHistory() }; launch { Swarms.load() } }
+                coroutineScope { launch { runCatching { if (has("bots")) loadBots() } }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { runCatching { loadTelemetryNotice() } }; launch { loadHistory() }; launch { Swarms.load() } }
             } else {
                 listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
                 if (g != gen) return
-                coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { runCatching { loadTelemetryNotice() } }; launch { loadHistory() }; launch { Swarms.load() }; launch { loadSections() } }
+                coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { if (has("bots")) loadBots() } }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { runCatching { loadTelemetryNotice() } }; launch { loadHistory() }; launch { Swarms.load() }; launch { loadSections() } }
             }
             syncPush()
             open?.let { if (has("open")) openThreadBundled(it, g) else { subscribeThread(it, g); refreshThread(it) } }
@@ -446,7 +461,9 @@ object DataClient {
         if (!has("sections")) return
         if (sectionsOpen.isEmpty()) sectionsOpen = prefs().getStringSet("sections.open", emptySet())?.toSet() ?: emptySet()
         val r = runCatching { call("sidebar.sections", JSONObject().put("open", openArr())) }.getOrNull() ?: return
-        sections = DSection.list(r.optJSONArray("sections")); groupsTo = DSection.groups(r.optJSONArray("groupsTo"))
+        sectionsJson = r.optJSONArray("sections"); groupsToJson = r.optJSONArray("groupsTo")
+        sections = DSection.list(sectionsJson); groupsTo = DSection.groups(groupsToJson)
+        save()
     }
     fun toggleSection(t: String) { sectionsOpen = if (t in sectionsOpen) sectionsOpen - t else sectionsOpen + t; prefs().edit().putStringSet("sections.open", sectionsOpen).apply(); scope.launch { loadSections() } }
     fun sidebarAct(action: String, value: String) { scope.launch { runCatching { call("sidebar.act", JSONObject().put("action", action).put("value", value)) }; loadSections() } }
@@ -1117,6 +1134,7 @@ object DataClient {
         }
         rooms = r.optJSONArray("rooms")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optJSONObject("mark")?.optString("short") ?: "", it.optBoolean("delete")) } } ?: emptyList()
         if (uberAfterPair) bots.firstOrNull { it.uber && it.thread.isNotEmpty() }?.let { uberAfterPair = false; linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it.thread) }
+        save()
     }
     data class Post(val from: String, val text: String, val at: Long, val copy: List<CopyPiece>? = null)
     suspend fun roomPosts(room: String): List<Post> = call("room.posts", JSONObject().put("room", room).put("limit", 60)).optJSONArray("posts")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Post(it.optString("from"), it.optString("text"), it.optLong("at"), parseCopy(it.optJSONArray("copy"))) } } ?: emptyList()
@@ -1374,7 +1392,24 @@ object DataClient {
             val c = JSONObject(f.readText()); if (c.optString("hub") != hub) return
             projects = parseProjects(c.optJSONArray("projects")); threads = parseThreads(c.optJSONArray("threads"))
             val e = c.optJSONObject("entries"); entries = e?.keys()?.asSequence()?.associateWith { parseEntries(e.optJSONArray(it)) } ?: emptyMap()
-            listsLoaded = threads.isNotEmpty() || projects.isNotEmpty()
+            c.optJSONArray("features")?.let { a -> features = (0 until a.length()).mapNotNull { a.optString(it).takeIf(String::isNotEmpty) }.toSet() }
+            c.optJSONArray("sections")?.let { a -> sectionsJson = a; sections = DSection.list(a) }
+            c.optJSONArray("groupsTo")?.let { a -> groupsToJson = a; groupsTo = DSection.groups(a) }
+            c.optJSONArray("bots")?.let { a ->
+                bots = (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map {
+                    Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optString("markShort"), it.optString("note"), it.optBoolean("delete"), it.optInt("look"), it.optString("color"),
+                        it.optJSONObject("ask")?.let { ak -> Ask(ak.optString("title"), ak.optString("body"), ak.optString("yes")) } ?: Ask())
+                }
+            }
+            c.optJSONArray("rooms")?.let { a ->
+                rooms = (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optString("markShort"), it.optBoolean("delete")) }
+            }
+            c.optJSONObject("shellHashes")?.let { h ->
+                val next = HashMap<String, String>()
+                h.keys().forEach { k -> next[k] = h.optString(k) }
+                shellHashes = next
+            }
+            listsLoaded = threads.isNotEmpty() || projects.isNotEmpty() || sections.isNotEmpty()
         }
     }
     private fun save() {
@@ -1383,6 +1418,10 @@ object DataClient {
             delay(1000)
             val hub = link?.let { Pairing.key(it) } ?: return@launch
             val ps = projects; val ts = threads
+            val fs = features.sorted()
+            val sec = sectionsJson; val gto = groupsToJson
+            val bs = bots; val rs = rooms
+            val sh = HashMap(shellHashes)
             val recent = ts.take(20).map { it.id }.toSet()
             val es = entries.filterKeys { it in recent }.mapValues { (_, v) -> v.filter { !it.sending && !it.failed }.takeLast(40) }
             withContext(Dispatchers.IO) {
@@ -1390,6 +1429,11 @@ object DataClient {
                     .put("projects", JSONArray(ps.map { JSONObject().put("id", it.id).put("title", it.title).put("root", it.root).put("threadCount", it.threadCount).apply { it.settledCount?.let { n -> put("settledCount", n) } }.put("updatedAt", it.updatedAt).put("waiting", it.waiting).put("also", it.also).put("mark", markJson(it.mark)) }))
                     .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("pinOrder", it.pinOrder).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting).put("mark", markJson(it.mark)).put("swarm", it.swarm).apply { it.planMode?.let { pm -> put("planMode", planModeJson(pm)) } } }))
                     .put("entries", JSONObject().also { o -> es.forEach { (k, v) -> o.put(k, JSONArray(v.map(::J))) } })
+                    .put("features", JSONArray(fs))
+                    .apply { if (sec != null) put("sections", sec); if (gto != null) put("groupsTo", gto) }
+                    .put("bots", JSONArray(bs.map { JSONObject().put("id", it.id).put("name", it.name).put("thread", it.thread).put("uber", it.uber).put("markShort", it.mark).put("note", it.note).put("delete", it.delete).put("look", it.look).put("color", it.color).put("ask", JSONObject().put("title", it.ask.title).put("body", it.ask.body).put("yes", it.ask.yes)) }))
+                    .put("rooms", JSONArray(rs.map { JSONObject().put("id", it.id).put("name", it.name).put("markShort", it.mark).put("delete", it.delete) }))
+                    .put("shellHashes", JSONObject().also { o -> sh.forEach { (k, v) -> o.put(k, v) } })
                 runCatching { cacheFile(hub).writeText(j.toString()) }
             }
         }

@@ -83,6 +83,7 @@ final class DataClient {
 
     // what is shown
     private(set) var conn: Conn = .offline { didSet { restartStrip() } }
+    private(set) var hasAttemptedConnect = false
     // the hub's restarts (feature `restarting`, HubRestart): what the connection strip shows, kept current by one timer
     private(set) var restartLine: HubRestart.Line = .usual
     @ObservationIgnored private var restarting: HubRestart.Note?   // the last hub.restarting since the last hello
@@ -97,6 +98,7 @@ final class DataClient {
     private(set) var older: [String: String] = [:]
     private(set) var loadedThreads: Set<String> = []
     private(set) var listsLoaded = false
+    var hasCachedSidebar: Bool { listsLoaded || !sections.isEmpty || !projects.isEmpty }
     // the projects whose "Settled (N)" row is open, kept on the device; their settled threads are read from the hub when it opens (feature `settled`)
     private(set) var settledOpen = Set(UserDefaults.standard.stringArray(forKey: "data.settled.open") ?? [])
     private(set) var settledMore: [String: String] = [:]   // a project's next page of settled threads
@@ -327,6 +329,7 @@ final class DataClient {
         notice = HubNotice(); star = nil; telemetryNotice = nil; noProvider = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
+        features = []; sections = []; groupsTo = []; bots = []; rooms = []; swarms = []
         mgmt = [:]; mgmtDigest = ""; mgmtProject = ""; mgmtAsked = ""; mgmtRev += 1
         if clearDisk, let k = link.flatMap({ Pairing.key($0) }) { try? FileManager.default.removeItem(at: Self.cacheURL(for: k)) }
     }
@@ -338,8 +341,15 @@ final class DataClient {
     }
     func heardNotice(_ n: HubNotice) { notice = n }
 
+    private func syncPushChain() async {
+        await enablePush()
+        await registerPush()
+        await syncPush()
+    }
+
     // MARK: connection
     func connect() {
+        hasAttemptedConnect = true
         guard let link, let base = Pairing.socket(link), var c = URLComponents(url: base, resolvingAgainstBaseURL: false) else { return }
         c.queryItems = (c.queryItems ?? []) + [URLQueryItem(name: "data", value: "1"), URLQueryItem(name: "enc", value: "json"), URLQueryItem(name: "z", value: "deflate")]
         guard let url = c.url else { return }
@@ -605,7 +615,10 @@ final class DataClient {
     private func synchronise(_ g: Int) async {
         do {
             if has("shell") && machine.isEmpty {
-                let r: DShellSyncReply = try await call("shell.sync", ["have": shellHashes, "settled": 25])
+                var have = shellHashes
+                if sections.isEmpty { have.removeValue(forKey: "@sections") }
+                if projects.isEmpty { have = have.filter { !$0.key.hasPrefix("p:") } }
+                let r: DShellSyncReply = try await call("shell.sync", ["have": have, "settled": 25, "open": Array(sectionsOpen)])
                 guard g == gen else { return }
                 listSub = r.sub
                 Task { await self.flushOutbox(g) }
@@ -613,31 +626,38 @@ final class DataClient {
                 let removed = Set(r.removed ?? [])
                 let changedPids = Set((r.projects ?? []).map(\.id))
                 if !removed.isEmpty || !changedPids.isEmpty {
-                    projects = (projects.filter { !removed.contains($0.id) && !changedPids.contains($0.id) } + (r.projects ?? [])).sorted { $0.updatedAt > $1.updatedAt }
-                    threads = (threads.filter { !removed.contains($0.project) && !changedPids.contains($0.project) } + (r.threads ?? [])).sorted { $0.updatedAt > $1.updatedAt }
+                    let nextProjects = (projects.filter { !removed.contains($0.id) && !changedPids.contains($0.id) } + (r.projects ?? [])).sorted { $0.updatedAt > $1.updatedAt }
+                    let nextThreads = (threads.filter { !removed.contains($0.project) && !changedPids.contains($0.project) } + (r.threads ?? [])).sorted { $0.updatedAt > $1.updatedAt }
+                    if nextProjects != projects { projects = nextProjects }
+                    if nextThreads != threads { threads = nextThreads }
                 } else if let gotThreads = r.threads, !gotThreads.isEmpty {
                     var byId = Dictionary(uniqueKeysWithValues: threads.map { ($0.id, $0) })
                     for t in gotThreads { byId[t.id] = t }
-                    threads = Array(byId.values).sorted { $0.updatedAt > $1.updatedAt }
+                    let nextThreads = Array(byId.values).sorted { $0.updatedAt > $1.updatedAt }
+                    if nextThreads != threads { threads = nextThreads }
                 }
-                if let s = r.sections { sections = s.sections; groupsTo = s.groupsTo }
+                if let s = r.sections {
+                    if s.sections != sections { sections = s.sections }
+                    if s.groupsTo != groupsTo { groupsTo = s.groupsTo }
+                }
                 if let h = r.h { shellHashes = h }
                 listsLoaded = true; scheduleSave()
-                await loadHistory()
             } else {
                 let s: DSubReply = try await call("subscribe", ["topic": "lists"]); guard g == gen else { return }; listSub = s.sub
                 Task { await self.flushOutbox(g) }
-                async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
-                _ = try await (p, t, h)
-                await loadSections()   // the sidebar's sections (feature sections): the list draws them once they come
+                async let p = loadProjects(g), t = loadThreads(g), sec: Void = loadSections()
+                _ = try await (p, t, sec)
             }
-            await loadBots()
-            await loadSwarms()
-            await voice.resync()
-            await enablePush(); await registerPush(); await syncPush()
-            await loadLocks()
-            await loadStar()
-            await loadTelemetryNotice()
+            async let hist: Void = loadHistory()
+            async let botsTask: Void = loadBots()
+            async let swarmsTask: Void = loadSwarms()
+            async let voiceTask: Void = voice.resync()
+            async let pushTask: Void = syncPushChain()
+            async let locksTask: Void = loadLocks()
+            async let starTask: Void = loadStar()
+            async let telTask: Void = loadTelemetryNotice()
+            _ = await (hist, botsTask, swarmsTask, voiceTask, pushTask, locksTask, starTask, telTask)
+            guard g == gen else { return }
             terms.resync()
             if let open {
                 if has("open") { await openThreadBundled(open, g) }
@@ -653,7 +673,10 @@ final class DataClient {
     private(set) var sectionsOpen = Set(UserDefaults.standard.stringArray(forKey: "data.sections.open") ?? [])
     func loadSections() async {
         guard has("sections"), let r: DSections = try? await call("sidebar.sections", ["open": Array(sectionsOpen)]) else { return }
-        sections = r.sections; groupsTo = r.groupsTo
+        var changed = false
+        if r.sections != sections { sections = r.sections; changed = true }
+        if r.groupsTo != groupsTo { groupsTo = r.groupsTo; changed = true }
+        if changed { scheduleSave() }
     }
     func toggleSection(_ toggle: String) {
         if sectionsOpen.contains(toggle) { sectionsOpen.remove(toggle) } else { sectionsOpen.insert(toggle) }
@@ -1433,7 +1456,10 @@ final class DataClient {
     func loadBots() async {
         guard has("bots"), let r: DDirectory = try? await call("bots.list") else { return }
         if let o = open, let b = bots.first(where: { $0.thread == o }) { openBot = b }
-        bots = r.bots; rooms = r.rooms
+        var changed = false
+        if bots != r.bots { bots = r.bots; changed = true }
+        if rooms != r.rooms { rooms = r.rooms; changed = true }
+        if changed { scheduleSave() }
         if uberAfterPair, let u = bots.first(where: { $0.uber && !$0.thread.isEmpty }) { uberAfterPair = false; pendingThread = u.thread }
         // the uberbot's chat follows a home move: the same row, the same thread, now drawn from the machine that holds it
         if let o = open { if let b = bots.first(where: { $0.thread == o }) { openBot = b } else if let to = DBot.followed(o, openBot, r.bots) { openBot = nil
@@ -1448,7 +1474,7 @@ final class DataClient {
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }
 
     // MARK: swarms (feature swarm, docs/SWARM.md Client data)
-    func loadSwarms() async { guard has("swarm"), let r: DSwarmList = try? await call("swarm.list", ["project": ""]) else { return }; swarms = r.swarms }
+    func loadSwarms() async { guard has("swarm"), let r: DSwarmList = try? await call("swarm.list", ["project": ""]) else { return }; if swarms != r.swarms { swarms = r.swarms; scheduleSave() } }
     @ObservationIgnored private var swarmsDue = false
     /// a board, state or member turn changed: the list's rows again, once for a burst
     private func swarmsMoved() { guard !swarmsDue else { return }; swarmsDue = true; Task { try? await Task.sleep(nanoseconds: 400_000_000); swarmsDue = false; await loadSwarms() } }
@@ -1555,7 +1581,10 @@ final class DataClient {
     var viewing: String? { open }
 
     // MARK: cache (per-hub disk cache: paints at launch and on hub switch, replaced as soon as the hub answers)
-    private struct Cache: Codable { var hub: String; var projects: [DProject]; var threads: [DThread]; var entries: [String: [DEntry]]; var older: [String: String] }
+    private struct Cache: Codable {
+        var hub: String; var projects: [DProject]; var threads: [DThread]; var entries: [String: [DEntry]]; var older: [String: String]
+        var features: [String]?; var sections: [DSection]?; var groupsTo: [DGroupTo]?; var bots: [DBot]?; var rooms: [DRoom]?; var swarms: [DSwarmRow]?; var shellHashes: [String: String]?
+    }
     private static var legacyCacheURL: URL {
         let d = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
@@ -1571,7 +1600,10 @@ final class DataClient {
         guard let hub = link.flatMap({ Pairing.key($0) }) else { return }
         let d = (try? Data(contentsOf: Self.cacheURL(for: hub))) ?? (try? Data(contentsOf: Self.legacyCacheURL))
         guard let d, let c = try? JSONDecoder().decode(Cache.self, from: d), c.hub == hub else { return }
-        projects = c.projects; threads = c.threads; entries = c.entries; older = c.older; listsLoaded = !c.threads.isEmpty || !c.projects.isEmpty
+        projects = c.projects; threads = c.threads; entries = c.entries; older = c.older
+        features = Set(c.features ?? []); sections = c.sections ?? []; groupsTo = c.groupsTo ?? []
+        bots = c.bots ?? []; rooms = c.rooms ?? []; swarms = c.swarms ?? []; shellHashes = c.shellHashes ?? [:]
+        listsLoaded = !c.threads.isEmpty || !c.projects.isEmpty || !sections.isEmpty
     }
     private func scheduleSave() {
         saveTask?.cancel()
@@ -1582,7 +1614,10 @@ final class DataClient {
             let recent = Set(self.threads.prefix(20).map(\.id))
             var e: [String: [DEntry]] = [:]
             for (k, v) in self.entries where recent.contains(k) { e[k] = Array(v.filter { !$0.sending && !$0.failed }.suffix(40)) }
-            let c = Cache(hub: hub, projects: self.projects, threads: self.threads, entries: e, older: self.older.filter { recent.contains($0.key) })
+            let c = Cache(
+                hub: hub, projects: self.projects, threads: self.threads, entries: e, older: self.older.filter { recent.contains($0.key) },
+                features: Array(self.features).sorted(), sections: self.sections, groupsTo: self.groupsTo, bots: self.bots, rooms: self.rooms, swarms: self.swarms, shellHashes: self.shellHashes
+            )
             let url = Self.cacheURL(for: hub)
             await Task.detached(priority: .utility) { if let d = try? JSONEncoder().encode(c) { try? d.write(to: url, options: .atomic) } }.value
         }

@@ -4,7 +4,7 @@ import Foundation
 // Move to group (the other groups, then New group…), Archive, Remove project. The hub decides the items and their order; the app draws them.
 
 /// One item: `id` says what it does here, `value` what it acts on, `sub` Move to group's list; `confirm` asks first (Remove).
-struct DMenuItem: Decodable, Equatable, Identifiable {
+struct DMenuItem: Codable, Equatable, Identifiable {
     var id: String; var label: String; var action: String; var value: String; var confirm: Bool; var sub: [DMenuItem]
     enum CodingKeys: String, CodingKey { case id, label, action, value, confirm, sub }
     init(id: String, label: String, action: String = "", value: String = "", confirm: Bool = false, sub: [DMenuItem] = []) {

@@ -4474,6 +4474,7 @@ mobile.pill.waiting = Waiting
 mobile.snooze.wakes = Wakes in {time}
 mobile.bench.all = All projects
 mobile.snooze.for = Snooze for
+mobile.conn.reconnecting = Reconnecting…
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Needs you

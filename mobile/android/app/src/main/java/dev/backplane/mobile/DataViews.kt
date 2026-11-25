@@ -198,7 +198,9 @@ private fun ConnBanner(hub: () -> Unit, settings: () -> Unit) {
     // the hub's restart (RestartStrip.kt) says itself here in place of the usual look: while it is away, and its crash note as we join
     val online = DataClient.conn == DataClient.Conn.ONLINE
     val restart = DataClient.restartText
+    val hasCached = DataClient.listsLoaded || DataClient.sections.isNotEmpty() || DataClient.projects.isNotEmpty()
     if (online && restart == null) return
+    if (!online && restart == null && DataClient.conn == DataClient.Conn.CONNECTING && hasCached) return
     Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp).testTag("conn.strip"), verticalAlignment = Alignment.CenterVertically) {
         DDot(if (online) dcs.primary else if (restart != null || DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8); Spacer(Modifier.width(8.dp))
         DMono(restart?.let { Tr.t(it) } ?: if (DataClient.conn == DataClient.Conn.CONNECTING) Msg.android_conn_connecting(DataClient.hubName) else Msg.android_conn_offline, dcs.onSurface, 12, Modifier.weight(1f))
@@ -344,7 +346,6 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
     var treeOpen by remember { mutableStateOf(prefs.getStringSet("tree.open", emptySet())!!.toSet()) } // parents whose subthreads show
     val termsOpen = LocalTermsOpen.current
-    LaunchedEffect(DataClient.conn) { DataClient.refresh(); if (DataClient.conn == DataClient.Conn.ONLINE && DataClient.has("bots")) runCatching { DataClient.loadBots() } }
     val listState = androidx.compose.foundation.lazy.rememberLazyListState()
     var flash by remember { mutableStateOf("") }
     val rowOf = remember { mutableMapOf<String, Int>() }   // a project's header row in the list
@@ -555,6 +556,21 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                     }
                                 }
                             }
+                        }
+                    }
+                    if (DataClient.conn == DataClient.Conn.CONNECTING && DataClient.restartText == null && (DataClient.listsLoaded || DataClient.sections.isNotEmpty() || DataClient.projects.isNotEmpty())) {
+                        Row(
+                            Modifier
+                                .align(Alignment.BottomCenter)
+                                .padding(bottom = 10.dp)
+                                .background(dcs.surfaceContainerHigh, RectangleShape)
+                                .border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape)
+                                .padding(horizontal = 10.dp, vertical = 5.dp)
+                                .testTag("conn.reconnecting"),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            DDot(dwarn, 6); Spacer(Modifier.width(6.dp))
+                            DMono(Msg.mobile_conn_reconnecting, dcs.onSurfaceVariant, 11)
                         }
                     }
                 }

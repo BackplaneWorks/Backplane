@@ -13,6 +13,69 @@ import type { HomeInfo } from "./ws";
 /** The place of the chats that belong to no project (the hub's `sidebar::CHATS`): `thread.create {project: CHATS}` starts one. */
 export const CHATS = "chats";
 
+export const SIDEBAR_CACHE_KEY = "bp.sidebar.cache.v1";
+
+export interface SidebarCache {
+  v: 1;
+  hostName?: string;
+  sections: SidebarSection[] | null;
+  projects: ProjectItem[];
+  threads: ThreadItem[];
+  bots: BotItem[];
+  rooms: RoomItem[];
+  shellHashes: Record<string, string>;
+  openSectionFolds: string[];
+}
+
+export function loadSidebarCache(storage: Pick<Storage, "getItem"> | null | undefined): SidebarCache | null {
+  try {
+    const raw = storage?.getItem(SIDEBAR_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<SidebarCache> | null;
+    if (!parsed || parsed.v !== 1) return null;
+    const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
+    const threads = Array.isArray(parsed.threads) ? parsed.threads : [];
+    const sections = parsed.sections === null ? null : Array.isArray(parsed.sections) ? parsed.sections : null;
+    const bots = Array.isArray(parsed.bots) ? parsed.bots : [];
+    const rooms = Array.isArray(parsed.rooms) ? parsed.rooms : [];
+    const shellHashes = parsed.shellHashes && typeof parsed.shellHashes === "object" && !Array.isArray(parsed.shellHashes)
+      ? parsed.shellHashes
+      : {};
+    const openSectionFolds = Array.isArray(parsed.openSectionFolds)
+      ? parsed.openSectionFolds.filter((x): x is string => typeof x === "string")
+      : [];
+    if (projects.length === 0 && threads.length === 0 && (!sections || sections.length === 0)) return null;
+    return {
+      v: 1,
+      hostName: typeof parsed.hostName === "string" ? parsed.hostName : undefined,
+      sections,
+      projects,
+      threads,
+      bots,
+      rooms,
+      shellHashes,
+      openSectionFolds,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveSidebarCache(
+  storage: Pick<Storage, "setItem"> | null | undefined,
+  cache: Omit<SidebarCache, "v">,
+): void {
+  try {
+    storage?.setItem(SIDEBAR_CACHE_KEY, JSON.stringify({ v: 1, ...cache }));
+  } catch { /* ignore quota / private mode */ }
+}
+
+export function clearSidebarCache(storage: Pick<Storage, "removeItem"> | null | undefined): void {
+  try {
+    storage?.removeItem(SIDEBAR_CACHE_KEY);
+  } catch { /* ignore */ }
+}
+
 /** The projects a chat may move to: this hub's own, by name (a linked machine's copy, `<link>~<id>`, is not offered). */
 export function moveTargets(projects: ProjectItem[]): ProjectItem[] {
   return projects

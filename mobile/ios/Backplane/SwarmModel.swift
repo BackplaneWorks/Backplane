@@ -180,7 +180,7 @@ enum Swarm {
 
 /// One button of a need: `act` board (the swarm's page), open (the member's thread), or resume, raise, retry, move, signin (`swarm.act`).
 /// `room` and `thread` carry the hub's prefix ("<hub>|<id>") as the row's own id has it; `thread` is empty for a swarm-wide act.
-struct DSwarmNeedAct: Decodable, Equatable, Hashable, Identifiable {
+struct DSwarmNeedAct: Codable, Equatable, Hashable, Identifiable {
     var label = "", act = "", room = "", thread = ""
     var id: String { act + "\u{1f}" + thread }
     enum CodingKeys: String, CodingKey { case label, act, room, thread }
@@ -191,7 +191,7 @@ struct DSwarmNeedAct: Decodable, Equatable, Hashable, Identifiable {
     }
 }
 /// A row's `need`: null on a swarm that wants nothing; a need with no line is none.
-struct DSwarmNeed: Decodable, Equatable, Hashable {
+struct DSwarmNeed: Codable, Equatable, Hashable {
     var line = "", why = "", actions: [DSwarmNeedAct] = []
     enum CodingKeys: String, CodingKey { case line, why, actions }
     init(line: String, why: String, actions: [DSwarmNeedAct]) { self.line = line; self.why = why; self.actions = actions }

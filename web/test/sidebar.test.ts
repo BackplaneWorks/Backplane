@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 mock.module("virtual:i18n", () => ({ CATALOGS: {} }));
-const { statusPillOf, isSwarmVisibleUnderProject, moveTargets, homeBannerState, CHATS } = await import("../src/sidebar");
+const { statusPillOf, isSwarmVisibleUnderProject, moveTargets, homeBannerState, CHATS, SIDEBAR_CACHE_KEY, loadSidebarCache, saveSidebarCache, clearSidebarCache } = await import("../src/sidebar");
 
 const root = join(import.meta.dir, "..");
 const sidebarSrc = readFileSync(join(root, "src/sidebar.ts"), "utf8");
@@ -94,5 +94,39 @@ describe("SidebarView Crew / Inbox / Bench + Status Pills + Snooze", () => {
     expect(sidebarSrc).toContain('"home-move-dismiss"');
     expect(sidebarSrc).toContain("this.cb.onDismissHomeMove?.()");
     expect(appSrc).toContain('"home.move.dismiss"');
+  });
+
+  test("Sidebar cache round-trips, rejects empty/invalid entries, and clears on logout", () => {
+    const store = new Map<string, string>();
+    const storage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => { store.set(k, v); },
+      removeItem: (k: string) => { store.delete(k); },
+    };
+    expect(loadSidebarCache(storage)).toBeNull();
+    store.set(SIDEBAR_CACHE_KEY, "{bad json");
+    expect(loadSidebarCache(storage)).toBeNull();
+    store.set(SIDEBAR_CACHE_KEY, JSON.stringify({ v: 1, projects: [], threads: [], sections: [] }));
+    expect(loadSidebarCache(storage)).toBeNull();
+
+    saveSidebarCache(storage, {
+      hostName: "desk",
+      sections: [{ id: "pinned", kind: "projects", title: "Pinned", rows: [] }],
+      projects: [{ id: "p1", title: "Amp" }],
+      threads: [{ id: "t1", project: "p1", title: "Bringup", state: "idle", updatedAt: 100 }],
+      bots: [{ id: "b1", name: "Bub", thread: "tb1", uber: true }],
+      rooms: [{ id: "r1", name: "lab" }],
+      shellHashes: { "p:p1": "abc", "@sections": "def" },
+      openSectionFolds: ["sec:quiet"],
+    });
+    const loaded = loadSidebarCache(storage);
+    expect(loaded).not.toBeNull();
+    expect(loaded?.hostName).toBe("desk");
+    expect(loaded?.shellHashes).toEqual({ "p:p1": "abc", "@sections": "def" });
+    expect(loaded?.openSectionFolds).toEqual(["sec:quiet"]);
+    clearSidebarCache(storage);
+    expect(loadSidebarCache(storage)).toBeNull();
+    expect(appSrc).toContain("loadSidebarCache(");
+    expect(appSrc).toContain("clearSidebarCache(");
   });
 });

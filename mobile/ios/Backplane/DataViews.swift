@@ -155,6 +155,14 @@ struct DataThreadsView: View {
     @State private var searching = false
     @FocusState private var searchFocus: Bool
     private var sectioned: Bool { client.has("sections") && !client.sections.isEmpty }
+    private var showBanner: Bool {
+        guard client.restartLine != .none else { return false }
+        if case .note = client.restartLine { return true }
+        return !client.hasCachedSidebar || (client.conn == .offline && client.hasAttemptedConnect)
+    }
+    private var showReconnectingPill: Bool {
+        !showBanner && client.conn != .online && client.hasCachedSidebar
+    }
     private var bub: DBot? { client.bots.first { $0.uber && !$0.thread.isEmpty } }
     private var inboxSections: [DSection] { client.sections.filter { Home.tab(section: $0.id, kind: $0.kind) == .inbox } }
     private var benchSections: [DSection] { client.sections.filter { Home.tab(section: $0.id, kind: $0.kind) == .bench && !($0.id == "active" && $0.rows.isEmpty) } }
@@ -177,7 +185,7 @@ struct DataThreadsView: View {
             DataStarBanner(client: client)
             DataAlertsBanner(client: client)
             DataNoProviderBanner(client: client)
-            if client.restartLine != .none { DataConnectionBanner(client: client) }
+            if showBanner { DataConnectionBanner(client: client) }
             // the tabs keep the list's whole height: Search is a button of the bar, its field here only while it is used; Add project is on the Bench
             if !sectioned || searching {
                 HStack(spacing: 8) {
@@ -199,7 +207,23 @@ struct DataThreadsView: View {
             if !client.locks.isEmpty && !sectioned { DataLocksStrip(client: client, path: $path) } // (the sections leave the hub's locks out: backend work)
             if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 DataSearchResults(client: client, query: query, open: { path.append($0) }, openAt: { path.append($0) })
+            } else if !client.hasCachedSidebar && client.failure.isEmpty {
+                DLoading(text: Tr.t(client.conn == .online ? "Loading…" : "Connecting to the hub…"))
             } else if sectioned { tabs } else { list }
+        }
+        .overlay(alignment: .bottom) {
+            if showReconnectingPill {
+                HStack(spacing: 6) {
+                    DDot(color: BackplaneDesign.warn, size: 6)
+                    Text(Tr.k("mobile.conn.reconnecting")).dmono(11).foregroundStyle(BackplaneDesign.dim)
+                }
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(BackplaneDesign.raised)
+                .overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+                .padding(.bottom, sectioned ? 58 : 14)
+                .allowsHitTesting(false)
+                .accessibilityIdentifier("data.connection.reconnecting")
+            }
         }
         .background(BackplaneDesign.panel)
         .navigationBarTitleDisplayMode(.inline)

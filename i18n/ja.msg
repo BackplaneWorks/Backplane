@@ -4497,6 +4497,7 @@ mobile.pill.waiting = 待機中
 mobile.snooze.wakes = {time}後に再開
 mobile.bench.all = すべてのプロジェクト
 mobile.snooze.for = スヌーズする期間
+mobile.conn.reconnecting = 再接続中…
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = 対応が必要

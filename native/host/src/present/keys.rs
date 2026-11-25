@@ -207,6 +207,71 @@ pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, speed:
     json!({"model":m,"effort":e,"speed":speed,"account":if accounts { account.0 } else { "" },"email":account.1,"saved":account.2,"left":left,"tone":tone(left),
         "full":full.join(" · "),"mid":mid.join(" · "),"short":short.join(" · "),"windows":windows,"extra":extra,"note":note,"tip":tip.join("\n")})
 }
+/// Batch cache for `combo_of` across many threads of the same `State`: parses `accounts.inventory`, `allowance.<provider>`, `person_zone`, and `speed::info_now()` once per batch.
+pub struct ComboCache {
+    pub info: Value,
+    zone: super::tz::Rule,
+    now_s: u64,
+    profiles: std::collections::HashMap<String, Value>,
+    default_allowances: std::collections::HashMap<String, Value>,
+}
+
+impl ComboCache {
+    /// Builds a cache for one `State` snapshot at `now_s`.
+    pub fn new(st: &State, now_s: u64) -> Self {
+        let info = crate::agents::speed::info_now();
+        let zone = super::thread::person_zone(st).unwrap_or_else(super::tz::Rule::utc);
+        let mut profiles = std::collections::HashMap::new();
+        if let Some(raw) = st.settings.get("accounts.inventory") {
+            if let Ok(v) = serde_json::from_str::<Value>(raw) {
+                if let Some(arr) = v["profiles"].as_array() {
+                    for p in arr {
+                        if let Some(id) = p["id"].as_str() {
+                            profiles.entry(id.to_string()).or_insert_with(|| p.clone());
+                        }
+                    }
+                }
+            }
+        }
+        Self { info, zone, now_s, profiles, default_allowances: std::collections::HashMap::new() }
+    }
+
+    /// Computes the combined chip JSON for `id`, identical to `combo_of(st, id, now_s)`.
+    pub fn combo_for(&mut self, st: &State, id: &str) -> Value {
+        let Some(t) = st.threads.get(id) else { return Value::Null };
+        let model = crate::settings::models::sanitize_model(&t.provider, &t.model, self.info.is_object().then_some(&self.info));
+        let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
+        let bound = serde_json::from_str::<Value>(get(&format!("account.thread.{id}.{}", t.provider)))
+            .ok().and_then(|b| b["id"].as_str().map(str::to_string)).unwrap_or_default();
+        let snap = if bound.is_empty() {
+            if let Some(v) = self.default_allowances.get(&t.provider) {
+                v.clone()
+            } else {
+                let v: Value = serde_json::from_str(get(&format!("allowance.{}", t.provider))).unwrap_or(Value::Null);
+                self.default_allowances.insert(t.provider.clone(), v.clone());
+                v
+            }
+        } else {
+            let p = self.profiles.get(&bound).unwrap_or(&Value::Null);
+            profile_allowance(p, &t.provider)
+        };
+        let short = |s: &str| s.split('@').next().unwrap_or("").to_string();
+        let acct: (String, String, bool) = if bound.is_empty() {
+            let e = snap["email"].as_str().unwrap_or("");
+            (if e.is_empty() { "default".into() } else { short(e) }, e.to_string(), false)
+        } else {
+            let p = self.profiles.get(&bound).unwrap_or(&Value::Null);
+            let (label, email) = (p["label"].as_str().unwrap_or(""), p["identity"]["email"].as_str().unwrap_or(""));
+            let name = if label.is_empty() { short(email) } else if label.contains('@') { short(label) } else { label.to_string() };
+            (if name.is_empty() { "account".into() } else { name }, email.to_string(), true)
+        };
+        let effort = get(&format!("effort.{id}"));
+        let want = get(&format!("speed.{id}"));
+        let speed = if want.is_empty() { "" } else { crate::agents::speed::effective(&self.info, &t.provider, &model, want) };
+        combo(&snap, &t.provider, &model, effort, speed, (&acct.0, &acct.1, acct.2), &self.zone, self.now_s)
+    }
+}
+
 /// The combined chip of a thread (`combo`), from the state.
 pub fn combo_of(st: &State, id: &str, now_s: u64) -> Value {
     let Some(t) = st.threads.get(id) else { return Value::Null };
@@ -786,5 +851,21 @@ mod tests {
         assert_eq!(mv_pos + 1, del_pos, "Move to project inserted before Delete");
         assert_eq!(mn[mv_pos]["sub"][0]["value"], "c1\u{1f}p1");
         assert_eq!(mn[mv_pos]["sub"][1]["value"], "c1\u{1f}p2");
+    }
+    #[test] fn combo_cache_matches_combo_of_for_default_and_bound_accounts() {
+        let mut st = State::new();
+        for l in [
+            r#"{"$":"ProjectCreated","id":"p1","title":"P","folder":"/p","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t1","project":"p1","title":"Default","provider":"claude","model":"claude-opus-5-5","at":1}"#,
+            r#"{"$":"ThreadCreated","id":"t2","project":"p1","title":"Bound","provider":"claude","model":"claude-sonnet-4-5","at":1}"#,
+            r#"{"$":"SettingSet","key":"effort.t1","value":"high","at":2}"#,
+            r#"{"$":"SettingSet","key":"allowance.claude","value":"{\"email\":\"alex@example.com\",\"windows\":[{\"scope\":\"five_hour\",\"used_permille\":250}]}","at":2}"#,
+            r#"{"$":"SettingSet","key":"accounts.inventory","value":"{\"profiles\":[{\"id\":\"prof1\",\"provider\":\"claude\",\"label\":\"Work\",\"identity\":{\"email\":\"sam@example.com\"},\"allowance\":{\"windows\":[{\"scope\":\"seven_day\",\"used_permille\":400}]}}]}","at":2}"#,
+            r#"{"$":"SettingSet","key":"account.thread.t2.claude","value":"{\"id\":\"prof1\"}","at":2}"#,
+        ] { st.apply_line(l); }
+        let mut cache = ComboCache::new(&st, 1_700_000_000);
+        for id in ["t1", "t2"] {
+            assert_eq!(cache.combo_for(&st, id), combo_of(&st, id, 1_700_000_000), "mismatch for {id}");
+        }
     }
 }
