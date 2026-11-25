@@ -1082,6 +1082,8 @@ mod home_tests {
         assert_eq!(nav_key(&with_sections, "p1"), "sec-nav-p1");
         let legacy_only = json!({"projects": [{"id": "http://h:1|p1", "nav": "proj-nav-p1"}]});
         assert_eq!(nav_key(&legacy_only, "p1"), "proj-nav-p1");
+        let page_only = json!({"sections": [], "projectPage": {"project": {"id": "http://h:1|p1", "nav": "page-nav-p1"}}});
+        assert_eq!(nav_key(&page_only, "p1"), "page-nav-p1");
         assert_eq!(nav_key(&json!({}), "p1"), "");
     }
 }
