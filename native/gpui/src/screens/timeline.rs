@@ -1391,9 +1391,19 @@ impl Backplane {
         drop(r);
         self.row_files(&id)
     }
+    pub(crate) fn active_rows(&self) -> &[Value] {
+        if self.data["bot"]["kind"] == "room" && self.data["bot"]["swarm"].is_object() {
+            self.data["bot"]["swarm"]["posts"].as_array().map_or(&[], |r| r.as_slice())
+        } else {
+            self.data["thread"]["entries"].as_array().map_or(&[], |r| r.as_slice())
+        }
+    }
     fn row_files(&self, entry: &str) -> Value {
         if entry.is_empty() { return Value::Null }
-        self.data["thread"]["entries"].as_array().and_then(|rows| rows.iter().find(|e| e["id"].as_str() == Some(entry))).map_or(Value::Null, |e| e["files"].clone())
+        let is_swarm = self.data["bot"]["kind"] == "room" && self.data["bot"]["swarm"].is_object();
+        self.active_rows().iter().find(|e| e["id"].as_str() == Some(entry)).map_or(Value::Null, |e| {
+            if is_swarm { e["linkFiles"].clone() } else { e["files"].clone() }
+        })
     }
     /// The Download a link's menu offers (a share always; a file on another computer's hub), as (hub address, name).
     fn link_download(&self, block: usize, l: &Link) -> Option<(String, String)> {
@@ -1423,7 +1433,7 @@ impl Backplane {
         let s = self.timeline_selected();
         if !s.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(s)); }
     }
-    fn timeline_selected(&self) -> String { self.screens.reg.borrow().selected(self.data["thread"]["entries"].as_array().map_or(&[], |r| r.as_slice())) }
+    fn timeline_selected(&self) -> String { self.screens.reg.borrow().selected(self.active_rows()) }
 }
 
 /// What a selection made in the timeline does with the keyboard, so that the copy chord copies it (the chord goes where the keyboard is).

@@ -325,7 +325,7 @@ fn chip(path: &str) -> Value {
     let ext = base.rsplit('.').next().unwrap_or("").to_lowercase();
     json!({"label": label, "path": path, "image": matches!(ext.as_str(), "png" | "jpg" | "jpeg" | "gif" | "webp"), "url": format!("/img?path={}", enc(path))})
 }
-fn images(entry: &str, text: &str) -> Vec<Value> {
+pub(crate) fn images(entry: &str, text: &str) -> Vec<Value> {
     crate::files::mimg::paths(text).into_iter().map(|p| json!({"path": p, "url": format!("/message-image?entry={}&path={}", enc(entry), enc(&p))})).collect()
 }
 

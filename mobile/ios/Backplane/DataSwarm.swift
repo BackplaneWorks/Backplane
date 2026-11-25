@@ -167,11 +167,11 @@ struct DataSwarmPost: View {
         Group {
             switch look {
             case .hub:
-                Text(post.text).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 2)
+                Text(post.text).dmono(11).foregroundStyle(BackplaneDesign.faint).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 2)
             case .synthesis:
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) { DHeading(text: Tr.t("synthesis")); Text(who).dmono(11, bold: true).foregroundStyle(dSwarmColor(post.color)) }
-                    DataMarkdown(text: post.text, thread: post.thread, copy: Copyable.list(post.copy, hubHasCopy: hubHasCopy))
+                    DataMarkdown(text: post.text, thread: post.thread, entry: post.id, images: post.images, copy: Copyable.list(post.copy, hubHasCopy: hubHasCopy))
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).dbox(BackplaneDesign.accent, fill: BackplaneDesign.panel).padding(.vertical, 8)
             default:
                 HStack(alignment: .top, spacing: 8) {
@@ -183,7 +183,7 @@ struct DataSwarmPost: View {
                             Spacer(minLength: 0)
                             Text(dAgo(Swarm.ms(post.at))).dmono(10).foregroundStyle(BackplaneDesign.faint)
                         }
-                        DataMarkdown(text: post.text, thread: post.thread, copy: Copyable.list(post.copy, hubHasCopy: hubHasCopy))
+                        DataMarkdown(text: post.text, thread: post.thread, entry: post.id, images: post.images, copy: Copyable.list(post.copy, hubHasCopy: hubHasCopy))
                         if !post.files.isEmpty { files }
                         if look == .held { Text(Tr.ios_swarm_held(why: Tr.t(post.held))).dmono(10).foregroundStyle(BackplaneDesign.faint) }
                     }

@@ -12,7 +12,7 @@ class SwarmUiTest {
     private val got = JSONObject("""{"room":{"id":"r1","name":"debounce","kind":"swarm","project":"p1","goal":"a debounced encoder","state":"paused","reason":"circular","by":"t-boss","budget":{},"used":{}},
       "members":[{"member":"thread:t1","thread":"t1","name":"opus","color":"#e06c75","role":null,"provider":"claude","model":"opus","state":"working","title":"debounce · opus"},
                  {"member":"thread:t2","thread":"t2","name":"codex","color":"#61afef","role":"tester","provider":"codex","model":"","state":"removed","title":""}],
-      "posts":[{"id":"m1","from":"opus","thread":"t1","color":"#e06c75","text":"I'll take it","tags":["claim"],"reply":"","mentions":[],"files":["src/a.rs"],"guard":false,"held":"","at":10},
+      "posts":[{"id":"m1","from":"opus","thread":"t1","color":"#e06c75","text":"I'll take it","tags":["claim"],"reply":"","mentions":[],"files":["src/a.rs"],"images":["out/wave.png"],"guard":false,"held":"","at":10},
                {"id":"m2","from":"codex","thread":"t2","color":"#61afef","text":"me too","tags":["claim"],"reply":"","mentions":[],"files":["src/a.rs"],"guard":false,"held":"","at":11},
                {"id":"m3","from":"hub","thread":"","color":"","text":"The room circles: paused.","tags":[],"reply":"","mentions":[],"files":[],"guard":true,"held":"","at":12},
                {"id":"m4","from":"codex","thread":"t2","color":"#61afef","text":"still","tags":["critique"],"reply":"","mentions":[],"files":[],"guard":false,"held":"paused","at":13}],
@@ -26,6 +26,7 @@ class SwarmUiTest {
         assertEquals(listOf("m1", "m2", "m3", "m4"), b.posts.map { it.id })
         assertEquals("seconds from the hub, ms on the phone", 10_000L, b.posts[0].at); assertEquals(1_794_385_718_000L, swarmMs(1_794_385_718_000L))
         assertTrue(b.posts[2].guard); assertEquals("paused", b.posts[3].held); assertEquals(listOf("src/a.rs"), b.posts[0].files)
+        assertEquals(listOf("out/wave.png"), b.posts[0].images); assertTrue(b.posts[1].images.isEmpty())
     }
     @Test fun aClaimIsWaitingWhileAPeerHoldsItsFileAndPlainOnceDone() {
         val b = SwarmParse.board(got)

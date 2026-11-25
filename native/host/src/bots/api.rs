@@ -11,7 +11,8 @@ pub(super) fn register(hub: &Arc<Hub>, b: &Arc<Bots>) {
     let mut r = REG.lock().unwrap(); r.retain(|(_, w)| w.strong_count() > 0); r.push((Arc::as_ptr(hub) as usize, Arc::downgrade(b)));
 }
 /// the bots lane started on this hub
-pub fn of(hub: &Arc<Hub>) -> Option<Arc<Bots>> { let p = Arc::as_ptr(hub) as usize; REG.lock().unwrap().iter().find(|(k, _)| *k == p).and_then(|(_, w)| w.upgrade()) }
+pub fn of(hub: &Arc<Hub>) -> Option<Arc<Bots>> { of_ptr(hub) }
+pub(crate) fn of_ptr(hub: &Hub) -> Option<Arc<Bots>> { let p = std::ptr::from_ref(hub) as usize; REG.lock().unwrap().iter().find(|(k, _)| *k == p).and_then(|(_, w)| w.upgrade()) }
 
 /// `U.Bots.chat.of(st, id, B.Bot.thread(bot))`: the thread a bot's Chat tab shows (its own; the uberbot's is where the conversation runs now,
 /// `Ub.chat`: this machine's while it holds the lease or no other machine's thread is known).
@@ -208,8 +209,10 @@ pub async fn room_page(hub: &Arc<Hub>, room: &str, now: u64) -> Option<Value> {
     }
     let b = of(hub)?;
     let (name, members, life, swarm) = { let w = b.world().await; let r = w.room(room).filter(|r| !r.deleted)?; (r.name.clone(), super::swarm::names(&w, r).into_iter().map(|x| x.1).collect::<Vec<_>>(), (r.ephemeral, r.closed), r.swarm()) };
-    let posts: Vec<Value> = room_posts(hub, room, 200).await?.into_iter().map(|p| { let from = p["from"].as_str().unwrap_or("").to_string();
-        post_json(&p, &from, now) }).collect();
+    let posts: Vec<Value> = if swarm { vec![] } else {
+        room_posts(hub, room, 200).await?.into_iter().map(|p| { let from = p["from"].as_str().unwrap_or("").to_string();
+            post_json(&p, &from, now) }).collect()
+    };
     // Life.keep: a bots' exchange opened by its id offers Keep (a linked machine's is kept there)
     let mut pg = json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"ephemeral":life.0,"closed":life.1,"keep":life.0});
     // a swarm's room (docs/SWARM.md): its board as the swarm page draws it (members with live state and colour, posts with tags, claims) and the controls it offers
@@ -218,7 +221,25 @@ pub async fn room_page(hub: &Arc<Hub>, room: &str, now: u64) -> Option<Value> {
         let acts: Vec<Value> = match st.as_str() { "active" => vec![json!({"label":"Pause","action":"swarm-act","value":"pause"}), json!({"label":"Stop","action":"swarm-act","value":"stop"})],
             "paused" => vec![json!({"label":"Resume","action":"swarm-act","value":"resume"}), json!({"label":"Stop","action":"swarm-act","value":"stop"})], _ => vec![] };
         sw["actions"] = json!(acts); sw["ended"] = json!(st == "done" || st == "stopped");
-        for p in sw["posts"].as_array_mut().into_iter().flatten() { let at = p["at"].as_u64().unwrap_or(0); p["ago"] = json!(ago(now, at)); p["mine"] = json!(p["from"] == "you" && p["guard"] != true) }
+        let n_posts = sw["posts"].as_array().map_or(0, |a| a.len());
+        for (i, p) in sw["posts"].as_array_mut().into_iter().flatten().enumerate() {
+            let at = p["at"].as_u64().unwrap_or(0);
+            let guard = p["guard"] == true;
+            if let Some(m) = p.as_object_mut() { m.remove("images"); }
+            p["ago"] = json!(ago(now, at));
+            p["mine"] = json!(p["from"] == "you" && !guard);
+            if !guard {
+                let text = p["text"].as_str().unwrap_or("").to_string();
+                let id = p["id"].as_str().unwrap_or("").to_string();
+                if !p["blocks"].is_array() { p["blocks"] = json!(crate::present::thread::md_blocks(&text)); }
+                if i + 30 >= n_posts && crate::files::mimg::may(&text) {
+                    let imgs = crate::present::thread::images(&id, &text);
+                    if !imgs.is_empty() { p["images"] = json!(imgs); }
+                }
+                let lf = crate::files::share::linkable(&text);
+                if !lf.is_empty() { p["linkFiles"] = json!(lf); }
+            }
+        }
         pg["swarm"] = sw; } }
     Some(pg)
 }

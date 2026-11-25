@@ -47,8 +47,14 @@ pub async fn find_snapshot(hub: &Arc<Hub>, retained: Option<&Arc<AtomicUsize>>, 
         Ok(Ok(s)) => match tokio::task::spawn_blocking(move || adopt_ref(&hub2, s, &e, &p)).await { Ok(Some(s)) => s, _ => return None },
         _ => {
             if missed(entry, path) { return None }
-            match tokio::task::spawn_blocking(move || snapshot_from_log(&hub2, &e, &p)).await { Ok(Some(s)) => s, _ => { remember_miss(entry, path); return None } } } };
-    if let Some(t) = &s.thread { if hub.model().await.threads.get(t).map_or(false, |m| m.deleted) { return None } }
+            let found = tokio::task::spawn_blocking(move || find_message(&hub2, &e)).await.ok().flatten();
+            let Some((owner, text)) = found else { remember_miss(entry, path); return None };
+            if owner_deleted(hub, &owner).await || !mimg::message_allowed(&text, path) { remember_miss(entry, path); return None }
+            let (h, e, p) = (hub.cfg.home.clone(), entry.to_string(), path.to_string());
+            match tokio::task::spawn_blocking(move || mimg::snapshot(&h, &e, &p, &owner).ok()).await { Ok(Some(s)) => s, _ => { remember_miss(entry, path); return None } }
+        }
+    };
+    if let Some(owner) = &s.thread { if owner_deleted(hub, owner).await { return None } }
     Some(s)
 }
 
@@ -100,26 +106,37 @@ fn find_message(hub: &Hub, entry: &str) -> Option<(String, String)> {
     while to > floor && t0.elapsed() < SCAN_TIME {
         let from = to.saturating_sub(CHUNK * 5).max(floor);
         for l in hub.store.range(from, to).ok()?.iter().rev() {
-            if !l.contains("\"MessagePosted\"") || !l.contains(&needle) { continue }
-            let v: Value = serde_json::from_str(l).ok()?;
-            if v["$"] == "MessagePosted" && v["role"] == "assistant" && v["msg"].as_str() == Some(entry) { return Some((v["thread"].as_str().unwrap_or("").to_string(), v["text"].as_str().unwrap_or("").to_string())) }
+            if !l.contains(&needle) { continue }
+            if l.contains("\"MessagePosted\"") {
+                let v: Value = serde_json::from_str(l).ok()?;
+                if v["$"] == "MessagePosted" && v["role"] == "assistant" && v["msg"].as_str() == Some(entry) {
+                    return Some((v["thread"].as_str().unwrap_or("").to_string(), v["text"].as_str().unwrap_or("").to_string()))
+                }
+            } else if l.contains("\"RoomPosted\"") {
+                let v: Value = serde_json::from_str(l).ok()?;
+                if v["$"] == "RoomPosted" && v["guard"] != true && v["id"].as_str() == Some(entry) {
+                    let th = v["thread"].as_str().unwrap_or("");
+                    let owner = if !th.is_empty() { th.to_string() } else { format!("room:{}", v["room"].as_str().unwrap_or("")) };
+                    return Some((owner, v["text"].as_str().unwrap_or("").to_string()))
+                }
+            }
         }
         to = from;
     }
     None
 }
-fn deleted(hub: &Hub, thread: &str) -> bool { hub.model.blocking_lock().threads.get(thread).map_or(true, |t| t.deleted) }
-/// No ref: find the message in the recent log; its own text authorises the path (Img.message_allowed); a deleted thread grants nothing.
-fn snapshot_from_log(hub: &Hub, entry: &str, path: &str) -> Option<mimg::Snap> {
-    let (thread, text) = find_message(hub, entry)?;
-    if deleted(hub, &thread) || !mimg::message_allowed(&text, path) { return None }
-    mimg::snapshot(&hub.cfg.home, entry, path, &thread).ok()
+async fn owner_deleted(hub: &Hub, owner: &str) -> bool {
+    if let Some(room) = owner.strip_prefix("room:") {
+        let Some(b) = crate::bots::api::of_ptr(hub) else { return true };
+        return b.world().await.room(room).map_or(true, |r| r.deleted);
+    }
+    hub.model().await.threads.get(owner).map_or(true, |t| t.deleted)
 }
-/// A ref hub wrote names no thread: look the message up, refuse a deleted thread's, and write the thread into the ref (then it is checked without a scan).
+/// A ref hub wrote names no thread: look the message up, and write the owner (thread or room:<id>) into the ref (checked by `owner_deleted` after).
 fn adopt_ref(hub: &Hub, s: mimg::Snap, entry: &str, path: &str) -> Option<mimg::Snap> {
     if s.thread.is_some() { return Some(s) }
     match find_message(hub, entry) {
-        Some((thread, _)) => { if deleted(hub, &thread) { return None } mimg::set_thread(&hub.cfg.home, entry, path, &thread); Some(mimg::Snap { thread: Some(thread), ..s }) }
+        Some((owner, _)) => { mimg::set_thread(&hub.cfg.home, entry, path, &owner); Some(mimg::Snap { thread: Some(owner), ..s }) }
         None => Some(s), // older than the scan reaches: the ref proves a message named it; the thread cannot be checked
     }
 }
@@ -129,12 +146,21 @@ const MISS_FOR: std::time::Duration = std::time::Duration::from_secs(60);
 fn missed(entry: &str, path: &str) -> bool { MISSES.lock().unwrap().get(&(entry.to_string(), path.to_string())).map_or(false, |t| t.elapsed() < MISS_FOR) }
 fn remember_miss(entry: &str, path: &str) { let mut m = MISSES.lock().unwrap(); if m.len() >= 1024 { m.retain(|_, t| t.elapsed() < MISS_FOR); if m.len() >= 1024 { m.clear() } } m.insert((entry.to_string(), path.to_string()), std::time::Instant::now()); }
 pub fn retain_line(home: &std::path::Path, line: &str) {
-    if !line.contains("\"MessagePosted\"") || !line.contains("assistant") { return }
-    let Ok(v) = serde_json::from_str::<Value>(line) else { return };
-    if v["$"] != "MessagePosted" || v["role"] != "assistant" { return }
-    let (thread, msg, text) = (v["thread"].as_str().unwrap_or(""), v["msg"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
-    if msg.is_empty() || !mimg::may(text) { return }
-    for p in mimg::paths(text) { let _ = mimg::snapshot(home, msg, &p, thread); }
+    if line.contains("\"MessagePosted\"") && line.contains("assistant") {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+        if v["$"] != "MessagePosted" || v["role"] != "assistant" { return }
+        let (thread, msg, text) = (v["thread"].as_str().unwrap_or(""), v["msg"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
+        if msg.is_empty() || !mimg::may(text) { return }
+        for p in mimg::paths(text) { let _ = mimg::snapshot(home, msg, &p, thread); }
+    } else if line.contains("\"RoomPosted\"") {
+        let Ok(v) = serde_json::from_str::<Value>(line) else { return };
+        if v["$"] != "RoomPosted" || v["guard"] == true { return }
+        let (id, text) = (v["id"].as_str().unwrap_or(""), v["text"].as_str().unwrap_or(""));
+        if id.is_empty() || !mimg::may(text) { return }
+        let th = v["thread"].as_str().unwrap_or("");
+        let owner = if !th.is_empty() { th.to_string() } else { format!("room:{}", v["room"].as_str().unwrap_or("")) };
+        for p in mimg::paths(text) { let _ = mimg::snapshot(home, id, &p, &owner); }
+    }
 }
 
 #[cfg(test)]
@@ -227,5 +253,33 @@ mod tests {
         assert_eq!(r.status, "200 OK");
         assert_eq!(r.ctype, "image/gif");
         assert_eq!(r.body, raw, "animated GIF bytes must be served verbatim without flattening");
+    }
+
+    #[tokio::test] async fn room_post_images_are_snapshotted_and_served() {
+        let home = crate::plat::tmp::canonical("miroom");
+        let a = home.join("src/plot.png");
+        std::fs::create_dir_all(a.parent().unwrap()).unwrap();
+        std::fs::write(&a, png()).unwrap();
+        let pa = a.to_string_lossy().into_owned();
+        let ev = |v: Value| v.to_string();
+        std::fs::write(home.join("events.jsonl"), [
+            ev(json!({"$":"ProjectCreated","id":"p1","title":"p","root":"/x","at":1})),
+            ev(json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})),
+            ev(json!({"$":"RoomSet","id":"r1","name":"s","members":"thread:t1","ephemeral":false,"closed":false,"kind":"swarm","project":"p1","at":3})),
+            ev(json!({"$":"RoomPosted","id":"rp1","room":"r1","from":"opus","thread":"t1","text":format!("render {pa}"),"at":4})),
+            ev(json!({"$":"RoomPosted","id":"rp-guard","room":"r1","from":"hub","guard":true,"text":format!("guard {pa}"),"at":5})),
+        ].join("\n") + "\n").unwrap();
+        let cfg = crate::hub::Cfg { home: home.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        start(&hub);
+        std::fs::write(home.join("token"), "0123456789abcdef-test-token\n").unwrap();
+        let r = get(&hub, "0123456789abcdef-test-token", "rp1", &pa).await;
+        assert_eq!((r.status, r.body.as_slice()), ("200 OK", png().as_slice()));
+        let rg = get(&hub, "0123456789abcdef-test-token", "rp-guard", &pa).await;
+        assert_eq!(rg.status, "404 Not Found");
+        // Live commit via retain_line
+        hub.commit(&json!({"$":"RoomPosted","id":"rp2","room":"r1","from":"opus","thread":"t1","text":format!("live {pa}"),"at":6})).await.unwrap();
+        for _ in 0..100 { if mimg::lookup(&home, "rp2", &pa).is_ok() { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+        assert!(mimg::lookup(&home, "rp2", &pa).is_ok(), "live RoomPosted should snapshot");
     }
 }

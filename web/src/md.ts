@@ -1,6 +1,7 @@
 // Safe, zero-dependency Markdown -> DOM renderer (never assigns untrusted innerHTML).
-// Supports fenced code blocks (with copy button), headings, lists, blockquotes,
-// inline code, bold, italic, and safe http(s) links.
+// Supports fenced code blocks (with copy button), headings (h1-h6), hr, tables,
+// nested & task lists, blockquotes, inline code, bold, italic, strikethrough,
+// inline images, and safe http(s) links.
 import { t } from "./i18n";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -119,13 +120,40 @@ function safeUrl(raw: string): string | null {
   return null;
 }
 
+function appendStyledText(parent: HTMLElement, text: string): void {
+  const re = /(\*\*(?!\s)[^*\n]+?(?<!\s)\*\*|(?<![A-Za-z0-9_])__(?!\s)[^_\n]+?(?<!\s)__(?![A-Za-z0-9_])|~~(?!\s)[^~\n]+?(?<!\s)~~|\*(?!\s)[^*\n]+?(?<!\s)\*|(?<![A-Za-z0-9_])_(?!\s)[^_\n]+?(?<!\s)_(?![A-Za-z0-9_]))/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    if (m.index > last) appendPlainWithPaths(parent, text.slice(last, m.index));
+    const tok = m[0];
+    if (tok.startsWith("__") && tok.endsWith("__") && /^[A-Za-z0-9]+$/.test(tok.slice(2, -2))) {
+      appendPlainWithPaths(parent, tok);
+    } else if ((tok.startsWith("**") && tok.endsWith("**")) || (tok.startsWith("__") && tok.endsWith("__"))) {
+      const strong = document.createElement("strong");
+      appendInline(strong, tok.slice(2, -2));
+      parent.appendChild(strong);
+    } else if (tok.startsWith("~~") && tok.endsWith("~~")) {
+      const del = document.createElement("del");
+      appendInline(del, tok.slice(2, -2));
+      parent.appendChild(del);
+    } else {
+      const em = document.createElement("em");
+      appendInline(em, tok.slice(1, -1));
+      parent.appendChild(em);
+    }
+    last = re.lastIndex;
+  }
+  if (last < text.length) appendPlainWithPaths(parent, text.slice(last));
+}
+
 function appendInline(parent: HTMLElement, text: string): void {
-  const re = /(`[^`]+`|\*\*[^*]+\*\*|\*[^*]+\*|\[([^\]]+)\]\(([^)]+)\))/g;
+  const re = /(`[^`]+`|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\))/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     if (m.index > last) {
-      appendPlainWithPaths(parent, text.slice(last, m.index));
+      appendStyledText(parent, text.slice(last, m.index));
     }
     const tok = m[0];
     if (tok.startsWith("`") && tok.endsWith("`")) {
@@ -157,17 +185,26 @@ function appendInline(parent: HTMLElement, text: string): void {
       });
       wrap.append(code, btn);
       parent.appendChild(wrap);
-    } else if (tok.startsWith("**") && tok.endsWith("**")) {
-      const strong = document.createElement("strong");
-      appendInline(strong, tok.slice(2, -2));
-      parent.appendChild(strong);
-    } else if (tok.startsWith("*") && tok.endsWith("*")) {
-      const em = document.createElement("em");
-      appendInline(em, tok.slice(1, -1));
-      parent.appendChild(em);
+    } else if (tok.startsWith("![")) {
+      const alt = m[2] ?? "";
+      const src = m[3] ?? "";
+      if (/^\/blob\/[A-Za-z0-9._-]+$/.test(src) && !src.includes("..")) {
+        const img = document.createElement("img");
+        img.className = "bp-md-img";
+        img.alt = alt || src;
+        img.src = src;
+        parent.appendChild(img);
+      } else {
+        const span = document.createElement("code");
+        span.className = "bp-code-inline";
+        span.textContent = alt ? `${alt} (${src})` : src;
+        parent.appendChild(span);
+      }
     } else if (tok.startsWith("[")) {
-      const label = m[2] ?? "";
-      const href = safeUrl(m[3] ?? "");
+      const label = m[4] ?? "";
+      const rawUrl = m[5] ?? "";
+      const isHttp = /^https?:\/\//i.test(rawUrl);
+      const href = isHttp ? safeUrl(rawUrl) : null;
       if (href) {
         const a = document.createElement("a");
         a.href = href;
@@ -176,17 +213,98 @@ function appendInline(parent: HTMLElement, text: string): void {
         a.textContent = label;
         parent.appendChild(a);
       } else {
-        parent.appendChild(document.createTextNode(label));
+        const code = document.createElement("code");
+        code.className = "bp-code-inline";
+        code.textContent = label || rawUrl;
+        parent.appendChild(code);
       }
     }
     last = re.lastIndex;
   }
   if (last < text.length) {
-    appendPlainWithPaths(parent, text.slice(last));
+    appendStyledText(parent, text.slice(last));
   }
 }
 
-export function renderMarkdown(src: string): DocumentFragment {
+function splitTableRow(line: string): string[] {
+  let s = line.trim();
+  if (s.startsWith("|")) s = s.slice(1);
+  if (s.endsWith("|")) s = s.slice(0, -1);
+  return s.split("|").map((c) => c.trim());
+}
+
+function parseTableAlign(line: string): Array<"left" | "center" | "right" | ""> | null {
+  const cells = splitTableRow(line);
+  if (cells.length === 0) return null;
+  const aligns: Array<"left" | "center" | "right" | ""> = [];
+  for (const c of cells) {
+    if (!/^:?-{3,}:?$/.test(c)) return null;
+    if (c.startsWith(":") && c.endsWith(":")) aligns.push("center");
+    else if (c.endsWith(":")) aligns.push("right");
+    else if (c.startsWith(":")) aligns.push("left");
+    else aligns.push("");
+  }
+  return aligns;
+}
+
+const LIST_ITEM_RE = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+const HR_RE = /^\s{0,3}([-*_])(?:\s*\1){2,}\s*$/;
+
+function isBlockStarter(lines: string[], idx: number): boolean {
+  const line = lines[idx];
+  const t0 = line.trimStart();
+  if (!line.trim()) return true;
+  if (t0.startsWith("```")) return true;
+  if (/^#{1,6}\s+/.test(line)) return true;
+  if (HR_RE.test(line)) return true;
+  if (line.startsWith("> ") || line === ">") return true;
+  if (LIST_ITEM_RE.test(line)) return true;
+  if (line.includes("|") && idx + 1 < lines.length && parseTableAlign(lines[idx + 1]) !== null) return true;
+  return false;
+}
+
+function parseList(lines: string[], start: number, minIndent: number): [HTMLUListElement | HTMLOListElement, number] {
+  const first = LIST_ITEM_RE.exec(lines[start])!;
+  const ordered = /\d/.test(first[2]);
+  const list = document.createElement(ordered ? "ol" : "ul");
+  list.className = "bp-md-list";
+  let i = start;
+
+  while (i < lines.length) {
+    const m = LIST_ITEM_RE.exec(lines[i]);
+    if (!m) break;
+    const indent = m[1].length;
+    if (indent < minIndent) break;
+    if (indent > minIndent) {
+      const [sub, next] = parseList(lines, i, indent);
+      const lastLi = list.lastElementChild;
+      if (lastLi) lastLi.appendChild(sub);
+      else list.appendChild(sub);
+      i = next;
+      continue;
+    }
+    const isOrd = /\d/.test(m[2]);
+    if (isOrd !== ordered) break;
+
+    const li = document.createElement("li");
+    const task = /^\[( |x|X)\]\s+(.*)$/.exec(m[3]);
+    if (task) {
+      li.className = "bp-md-task";
+      const box = document.createElement("span");
+      box.className = "bp-md-check" + (task[1].toLowerCase() === "x" ? " checked" : "");
+      box.textContent = task[1].toLowerCase() === "x" ? "✓" : " ";
+      li.appendChild(box);
+      appendInline(li, task[2]);
+    } else {
+      appendInline(li, m[3]);
+    }
+    list.appendChild(li);
+    i++;
+  }
+  return [list, i];
+}
+
+export function renderMarkdown(src: string, depth = 0): DocumentFragment {
   const frag = document.createDocumentFragment();
   const lines = src.replace(/\r\n/g, "\n").split("\n");
   let i = 0;
@@ -244,72 +362,104 @@ export function renderMarkdown(src: string): DocumentFragment {
       continue;
     }
 
+    // Horizontal rule
+    if (HR_RE.test(line)) {
+      const hr = document.createElement("hr");
+      hr.className = "bp-md-hr";
+      frag.appendChild(hr);
+      i++;
+      continue;
+    }
+
     // Heading
-    const hm = /^(#{1,4})\s+(.+)$/.exec(line);
+    const hm = /^(#{1,6})\s+(.+)$/.exec(line);
     if (hm) {
-      const h = document.createElement(`h${Math.min(4, hm[1].length + 1)}`);
-      h.className = "bp-md-h";
+      const lvl = Math.min(6, hm[1].length + 1);
+      const h = document.createElement(`h${lvl}`);
+      h.className = `bp-md-h bp-md-h${hm[1].length}`;
       appendInline(h, hm[2]);
       frag.appendChild(h);
       i++;
       continue;
     }
 
+    // Table
+    if (line.includes("|") && i + 1 < lines.length) {
+      const aligns = parseTableAlign(lines[i + 1]);
+      if (aligns !== null) {
+        const wrap = document.createElement("div");
+        wrap.className = "bp-md-table-wrap";
+        const table = document.createElement("table");
+        table.className = "bp-md-table";
+        const thead = document.createElement("thead");
+        const htr = document.createElement("tr");
+        const headers = splitTableRow(line);
+        for (let c = 0; c < aligns.length; c++) {
+          const th = document.createElement("th");
+          if (aligns[c]) th.style.textAlign = aligns[c];
+          appendInline(th, headers[c] ?? "");
+          htr.appendChild(th);
+        }
+        thead.appendChild(htr);
+        table.appendChild(thead);
+
+        const tbody = document.createElement("tbody");
+        i += 2;
+        while (i < lines.length && lines[i].trim() !== "" && lines[i].includes("|")) {
+          const cells = splitTableRow(lines[i]);
+          const tr = document.createElement("tr");
+          for (let c = 0; c < aligns.length; c++) {
+            const td = document.createElement("td");
+            if (aligns[c]) td.style.textAlign = aligns[c];
+            appendInline(td, cells[c] ?? "");
+            tr.appendChild(td);
+          }
+          tbody.appendChild(tr);
+          i++;
+        }
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        frag.appendChild(wrap);
+        continue;
+      }
+    }
+
     // Blockquote
-    if (line.startsWith("> ")) {
+    if (line.startsWith("> ") || line === ">") {
       const bq = document.createElement("blockquote");
       bq.className = "bp-md-quote";
       const qLines: string[] = [];
-      while (i < lines.length && lines[i].startsWith("> ")) {
-        qLines.push(lines[i].slice(2));
+      while (i < lines.length && (lines[i].startsWith("> ") || lines[i] === ">")) {
+        qLines.push(lines[i] === ">" ? "" : lines[i].slice(2));
         i++;
       }
-      appendInline(bq, qLines.join("\n"));
+      if (depth >= 12) {
+        appendInline(bq, qLines.join("\n"));
+      } else {
+        bq.appendChild(renderMarkdown(qLines.join("\n"), depth + 1));
+      }
       frag.appendChild(bq);
       continue;
     }
 
-    // Unordered list
-    if (/^\s*[-*]\s+/.test(line)) {
-      const ul = document.createElement("ul");
-      ul.className = "bp-md-list";
-      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) {
-        const li = document.createElement("li");
-        appendInline(li, lines[i].replace(/^\s*[-*]\s+/, ""));
-        ul.appendChild(li);
-        i++;
-      }
-      frag.appendChild(ul);
-      continue;
-    }
-
-    // Ordered list
-    if (/^\s*\d+\.\s+/.test(line)) {
-      const ol = document.createElement("ol");
-      ol.className = "bp-md-list";
-      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
-        const li = document.createElement("li");
-        appendInline(li, lines[i].replace(/^\s*\d+\.\s+/, ""));
-        ol.appendChild(li);
-        i++;
-      }
-      frag.appendChild(ol);
+    // List (ordered, unordered, nested, or task)
+    const lm = LIST_ITEM_RE.exec(line);
+    if (lm) {
+      const [listEl, next] = parseList(lines, i, lm[1].length);
+      frag.appendChild(listEl);
+      i = next;
       continue;
     }
 
     // Paragraph (join consecutive non-special lines)
     const pLines: string[] = [];
-    while (
-      i < lines.length &&
-      lines[i].trim() !== "" &&
-      !lines[i].trimStart().startsWith("```") &&
-      !/^#{1,4}\s+/.test(lines[i]) &&
-      !lines[i].startsWith("> ") &&
-      !/^\s*[-*]\s+/.test(lines[i]) &&
-      !/^\s*\d+\.\s+/.test(lines[i])
-    ) {
+    while (i < lines.length && !isBlockStarter(lines, i)) {
       pLines.push(lines[i]);
       i++;
+    }
+    if (pLines.length === 0) {
+      // Defensive: advance on unconsumed line
+      pLines.push(lines[i++]);
     }
     const p = document.createElement("p");
     p.className = "bp-md-p";

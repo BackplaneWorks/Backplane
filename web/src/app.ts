@@ -12,6 +12,7 @@ import { MgmtStrip } from "./mgmt";
 import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
 import { ProjectHomeView, type HomeThreadRow } from "./project-home";
 import { parseProjectHome, rawProjectId } from "./project-home-model";
+import { parseSwarmBoard, SwarmView } from "./swarm";
 import { isLocalNoProviderError, parseNoProvider, type NoProviderNotice } from "./provider-notice";
 import { parseRingList } from "./ring-model";
 import { RailView, type RailEntry } from "./rail";
@@ -31,6 +32,7 @@ import {
   clearSidebarCache,
   loadSidebarCache,
   moveTargets,
+  rawThreadId,
   saveSidebarCache,
   type BotItem,
   type PlanModeInfo,
@@ -414,9 +416,59 @@ function mountApp(): void {
     }
   }
 
-  /** Opens a project's home. False: this hub has no home to show (an older hub), and the caller does what it did before. */
+  let selectedSwarmId = "";
+  const swarmView = new SwarmView(centerEl, {
+    onLoad: async (room, since) => {
+      const res = await hub.rpc("swarm.get", since ? { room, since } : { room });
+      const data = parseSwarmBoard(res);
+      if (selectedSwarmId === room) updateHeader();
+      return data;
+    },
+    onPost: async (room, text) => {
+      await hub.rpc("swarm.post", { room, text });
+    },
+    onAct: async (room, action, thread) => {
+      await hub.rpc("swarm.act", thread ? { room, action, thread } : { room, action });
+      void refreshSections();
+    },
+    onOpenThread: (id) => { void openThread(id); },
+    onLoadImage: async (entryId, path) => {
+      try {
+        const params: Record<string, unknown> = { entry: entryId, path };
+        if (hub.hasFeature("blobs")) params.metaOnly = true;
+        const res = await hub.rpc<{ mime?: string; data?: string; blob?: string }>("message.image", params);
+        if (res.blob && res.blob.startsWith("/blob/")) return { url: res.blob };
+        if (res.mime && res.data) return { mime: res.mime, data: res.data };
+      } catch { /* ignore */ }
+      return null;
+    },
+  });
+
+  function closeSwarm(): void {
+    if (!selectedSwarmId) return;
+    selectedSwarmId = "";
+    centerEl.classList.remove("bp-swarm-open");
+    swarmView.hide();
+    updateHeader();
+  }
+
+  function openSwarm(roomId: string): void {
+    const id = rawThreadId(roomId);
+    if (!id) return;
+    closeProjectHome();
+    voice.cancel();
+    composer.closeModelPicker();
+    selectedSwarmId = id;
+    centerEl.classList.add("bp-swarm-open");
+    sidebarEl.classList.remove("bp-sidebar-open");
+    sidebar.setSelected(`@room:${id}`);
+    swarmView.open(id);
+    updateHeader();
+  }
+
   function openProjectHome(projectId: string): boolean {
     if (!projectId || !hub.hasFeature("projecthome")) return false;
+    closeSwarm();
     voice.cancel();
     composer.closeModelPicker();
     homeProjectId = projectId;
@@ -485,17 +537,18 @@ function mountApp(): void {
       sidebarEl.classList.remove("bp-sidebar-open");
       sidebarEl.classList.add("bp-sidebar-collapsed");
     },
-    // a swarm need's button: swarm.act, then what its reply opens (this client has no room view or account page: those are left out)
     onNeedAct: async (a) => {
-      const go = needPress(a, false);
+      const go = needPress(a, true);
       if (!go) return;
+      if (go.kind === "board") { openSwarm(go.room); return; }
       if (go.kind === "thread") { void openThread(go.id); return; }
       if (go.kind !== "call") return;
       const next = needAfter(await hub.rpc(go.method, go.params));
       if (next?.kind === "thread") void openThread(next.id);
       void refreshSections();
     },
-    hasRoomView: false,
+    hasRoomView: true,
+    onSelectSwarm: (id) => { openSwarm(id); },
     onAddProject: () => addProject.open({ mode: "folder" }),
     onSettleSwarm: (roomId) => {
       void hub.rpc("sidebar.act", { action: "swarm-settle", value: roomId })
@@ -1078,18 +1131,23 @@ function mountApp(): void {
   });
 
   function updateHeader(): void {
-    // a project's home is on show: the bar names the project and offers nothing of a thread
-    const th = homeProjectId ? null : threads.find((x) => x.id === selectedThreadId) ?? null;
+    // a project's home or swarm board is on show: the bar names it and offers nothing of a thread
+    const sw = !homeProjectId && selectedSwarmId ? swarmView.currentRoom() : null;
+    const th = homeProjectId || selectedSwarmId ? null : threads.find((x) => x.id === selectedThreadId) ?? null;
     const proj = homeProjectId
       ? projectOf(homeProjectId) ?? { id: homeProjectId, title: homeProjectId }
-      : th ? projectOf(th.project) : undefined;
+      : sw?.project
+        ? projectOf(sw.project)
+        : th ? projectOf(th.project) : undefined;
     if (homeProjectId && proj) projectHome.setTitle(proj.title);
     // a chat that belongs to no project says so where a project's name would be
-    const chat = !homeProjectId && th?.project === CHATS;
+    const chat = !homeProjectId && !selectedSwarmId && th?.project === CHATS;
     projCrumb.textContent = chat ? t("chats.title", "Chats") : (proj?.title ?? "");
     sep1.classList.toggle("bp-hidden", !proj && !chat);
-    sep2.classList.toggle("bp-hidden", !th);
-    threadCrumb.textContent = th ? (th.title || "Untitled thread") : "";
+    sep2.classList.toggle("bp-hidden", !th && !selectedSwarmId);
+    threadCrumb.textContent = selectedSwarmId
+      ? (sw?.name || selectedSwarmId)
+      : (th ? (th.title || "Untitled thread") : "");
 
     const pm = effectivePlanMode(th);
     composer.setPlanMode(pm);
@@ -1283,6 +1341,7 @@ function mountApp(): void {
       persistSidebarCache();
       updateHeader();
       if (homeProjectId) void loadHomeThreads(homeProjectId, homeGen);
+      if (selectedSwarmId) void swarmView.refresh(true);
       return true;
     } catch {
       return false;
@@ -1446,10 +1505,12 @@ function mountApp(): void {
     }
     // still on show (nothing else was opened meanwhile): what it says is read again
     if (homeProjectId) openProjectHome(homeProjectId);
+    if (selectedSwarmId) swarmView.open(selectedSwarmId);
   }
 
   async function openThread(threadId: string, keepHome = false): Promise<void> {
     if (!keepHome) closeProjectHome();
+    closeSwarm();
     if (selectedThreadId && selectedThreadId !== threadId) {
       voice.cancel();
       const held = chat.getEntries();

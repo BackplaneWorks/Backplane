@@ -55,18 +55,18 @@ struct DSwarmMember: Decodable, Equatable, Identifiable {
 }
 struct DSwarmPost: Decodable, Equatable, Identifiable {
     var id = "", from = "", thread = "", color = "", text = "", reply = "", held = ""
-    var tags: [String] = [], mentions: [String] = [], files: [String] = []
+    var tags: [String] = [], mentions: [String] = [], files: [String] = [], images: [String] = []
     var guardPost = false
     var at = 0
     var copy: [DCopyPiece]?   // its code to copy (the hub's `copy: [{text, cmd}]`, md/copy.rs); nil: Copyable.spans of the text
-    enum CodingKeys: String, CodingKey { case id, from, thread, color, text, tags, reply, mentions, files, guardPost = "guard", held, at, copy }
-    init(id: String, from: String = "", text: String = "", tags: [String] = [], files: [String] = [], guardPost: Bool = false, held: String = "") {
-        self.id = id; self.from = from; self.text = text; self.tags = tags; self.files = files; self.guardPost = guardPost; self.held = held
+    enum CodingKeys: String, CodingKey { case id, from, thread, color, text, tags, reply, mentions, files, images, guardPost = "guard", held, at, copy }
+    init(id: String, from: String = "", text: String = "", tags: [String] = [], files: [String] = [], images: [String] = [], guardPost: Bool = false, held: String = "") {
+        self.id = id; self.from = from; self.text = text; self.tags = tags; self.files = files; self.images = images; self.guardPost = guardPost; self.held = held
     }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.s(.id); from = c.s(.from); thread = c.s(.thread); color = c.s(.color); text = c.s(.text); reply = c.s(.reply); held = c.s(.held)
-        tags = c.list(.tags); mentions = c.list(.mentions); files = c.list(.files); guardPost = c.b(.guardPost); at = c.n(.at)
+        tags = c.list(.tags); mentions = c.list(.mentions); files = c.list(.files); images = c.list(.images); guardPost = c.b(.guardPost); at = c.n(.at)
         copy = try? c.decode([DCopyPiece].self, forKey: .copy)
     }
 }
