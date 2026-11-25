@@ -1404,6 +1404,7 @@ object DataClient {
             c.optJSONArray("rooms")?.let { a ->
                 rooms = (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optString("markShort"), it.optBoolean("delete")) }
             }
+            c.optJSONArray("swarms")?.let { Swarms.restore(it) }
             c.optJSONObject("shellHashes")?.let { h ->
                 val next = HashMap<String, String>()
                 h.keys().forEach { k -> next[k] = h.optString(k) }
@@ -1412,6 +1413,7 @@ object DataClient {
             listsLoaded = threads.isNotEmpty() || projects.isNotEmpty() || sections.isNotEmpty()
         }
     }
+    internal fun scheduleSave() = save()
     private fun save() {
         saveJob?.cancel()
         saveJob = scope.launch {
@@ -1420,7 +1422,7 @@ object DataClient {
             val ps = projects; val ts = threads
             val fs = features.sorted()
             val sec = sectionsJson; val gto = groupsToJson
-            val bs = bots; val rs = rooms
+            val bs = bots; val rs = rooms; val sw = Swarms.rawJson
             val sh = HashMap(shellHashes)
             val recent = ts.take(20).map { it.id }.toSet()
             val es = entries.filterKeys { it in recent }.mapValues { (_, v) -> v.filter { !it.sending && !it.failed }.takeLast(40) }
@@ -1433,6 +1435,7 @@ object DataClient {
                     .apply { if (sec != null) put("sections", sec); if (gto != null) put("groupsTo", gto) }
                     .put("bots", JSONArray(bs.map { JSONObject().put("id", it.id).put("name", it.name).put("thread", it.thread).put("uber", it.uber).put("markShort", it.mark).put("note", it.note).put("delete", it.delete).put("look", it.look).put("color", it.color).put("ask", JSONObject().put("title", it.ask.title).put("body", it.ask.body).put("yes", it.ask.yes)) }))
                     .put("rooms", JSONArray(rs.map { JSONObject().put("id", it.id).put("name", it.name).put("markShort", it.mark).put("delete", it.delete) }))
+                    .apply { if (sw != null) put("swarms", sw) }
                     .put("shellHashes", JSONObject().also { o -> sh.forEach { (k, v) -> o.put(k, v) } })
                 runCatching { cacheFile(hub).writeText(j.toString()) }
             }

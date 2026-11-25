@@ -1526,6 +1526,27 @@ async fn viewer_layout_over_a_socket_is_per_device_pushed_and_refuses_in_code_ke
     assert!(r["result"]["h"]["@sections"].is_string(), "{r}");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn shell_sync_clamps_settled_zero_to_one() {
+    let extra = "{\"$\":\"ThreadSettled\",\"id\":\"t1\",\"manual\":true,\"at\":1700000100}\n{\"$\":\"ThreadSettled\",\"id\":\"t2\",\"manual\":true,\"at\":1700000200}\n";
+    let (h, port) = up_with("shell-settled-zero", extra).await;
+    let _policies = crate::statehost::start_unshared(h.hub.clone());
+    for _ in 0..200 {
+        let ready = crate::statehost::with_state_of(&h.hub, |st| {
+            ["t1", "t2"].iter().all(|id| st.threads.get(*id).is_some_and(|t| shelf_flags(t).1))
+        }).unwrap_or(false);
+        if ready { break }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let r = ask(&mut ws, 1, "shell.sync", json!({"settled": 0})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    let p1_settled: Vec<_> = r["result"]["threads"].as_array().unwrap().iter()
+        .filter(|t| t["project"] == "p1" && t["settled"] == true)
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(p1_settled, ["t2"], "settled: 0 must clamp to 1 newest settled thread: {r}");
+}
+
 /// The home (feature `home`): `hello.home` says where the uberbot lives as this hub sees it, and a lists subscription is told when that changes (`k:"home"`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn the_hello_says_where_the_home_is_and_a_move_of_it_is_pushed() {
     let (h, port) = up("homepush").await;

@@ -51,7 +51,7 @@ pub(super) async fn thread_open(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, p
 /// threads, only when the hash of the two together differs from the client's (`have["p:<id>"]`); `removed` names the held projects that are gone.
 pub(super) async fn shell_sync(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, p: &Value, is_browser: bool) -> Result<Value, Value> {
     let have = p.get("have").filter(|h| h.is_object()).cloned().unwrap_or(json!({}));
-    let settled_n = p["settled"].as_u64().unwrap_or(25).min(200) as usize;
+    let settled_n = p["settled"].as_u64().map_or(25, |n| (n as usize).clamp(1, 200));
     let mut projects: Vec<Value> = vec![]; let mut before = Value::Null;
     loop { // every project, a page at a time
         let mut q = json!({"limit": 200}); if !before.is_null() { q["before"] = before.clone(); }
@@ -85,7 +85,10 @@ pub(super) async fn shell_sync(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, p:
             }
         }
     };
-    if crate::statehost::policies().and_then(|pol| pol.with_state(|st| collect_local(Some(st)))).is_none() {
+    if crate::statehost::with_state_of(hub, |st| collect_local(Some(st)))
+        .or_else(|| crate::statehost::policies().and_then(|pol| pol.with_state(|st| collect_local(Some(st)))))
+        .is_none()
+    {
         collect_local(None);
     }
 

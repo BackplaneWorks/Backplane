@@ -113,10 +113,20 @@ object SwarmUi {
 object Swarms {
     var all by mutableStateOf<List<DSwarm>>(emptyList()); private set
     var ticks by mutableStateOf<Map<String, Int>>(emptyMap()); private set
+    internal var rawJson: JSONArray? = null; private set
     private var due = false
     fun on() = DataClient.has("swarm")
-    fun reset() { all = emptyList(); ticks = emptyMap() }
-    suspend fun load() { if (on()) runCatching { DataClient.call("swarm.list", JSONObject()) }.onSuccess { all = SwarmParse.list(it) } }
+    fun reset() { rawJson = null; all = emptyList(); ticks = emptyMap() }
+    internal fun restore(a: JSONArray?) { rawJson = a; all = a.objs(SwarmParse::swarm) }
+    suspend fun load() {
+        if (on()) runCatching { DataClient.call("swarm.list", JSONObject()) }.onSuccess {
+            val next = SwarmParse.list(it)
+            val changed = next != all
+            rawJson = it.optJSONArray("swarms")
+            all = next
+            if (changed) DataClient.scheduleSave()
+        }
+    }
     fun pushed(room: String) {
         ticks = ticks + (room to (ticks[room] ?: 0) + 1)
         if (due) return; due = true
