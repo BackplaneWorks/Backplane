@@ -32,6 +32,11 @@ pub async fn credentials(hub: &Arc<Hub>) -> Option<(String, String)> {
     (!token.is_empty()).then_some((url, token))
 }
 
+fn safe_reason(s: &str) -> &str {
+    let long_hex = s.split(|c: char| !c.is_ascii_hexdigit()).any(|seg| seg.len() >= 32);
+    if s.contains("://") || s.contains("/3/device/") || long_hex { "Enterprise push delivery failed" } else { s }
+}
+
 /// What the gateway's answer means: how many phones it reached, and why none was (None when the person simply has no phone registered there or unmuted).
 pub fn outcome(code: u16, body: &str) -> (u64, Option<String>) {
     match code {
@@ -43,6 +48,7 @@ pub fn outcome(code: u16, body: &str) -> (u64, Option<String>) {
             let reason = v["results"].as_array()
                 .and_then(|a| a.iter().find_map(|r| (r["status"].as_u64() != Some(200)).then(|| r["reason"].as_str().filter(|s| !s.is_empty())).flatten()))
                 .or_else(|| v["errors"].as_array().and_then(|a| a.first()).and_then(|e| e.as_str().or_else(|| e["reason"].as_str())).filter(|s| !s.is_empty()))
+                .map(safe_reason)
                 .unwrap_or("Enterprise push delivery failed");
             (0, Some(reason.to_string()))
         }
@@ -137,6 +143,8 @@ mod tests {
         assert_eq!(send(&h, &url, "t", &frame(), false).await, (0, Some("APNs unreachable".into()))); srv.join().unwrap();
         let (url, srv) = serve(200, r#"{"sent":0,"failed":2}"#);
         assert_eq!(send(&h, &url, "t", &frame(), false).await, (0, Some("Enterprise push delivery failed".into()))); srv.join().unwrap();
+        let leaked_url = format!(r#"{{"sent":0,"failed":1,"results":[{{"handle":"h1","status":502,"reason":"error for url (https://api.push.apple.com/3/device/{})"}}]}}"#, "aa".repeat(32));
+        assert_eq!(outcome(200, &leaked_url), (0, Some("Enterprise push delivery failed".into())));
     }
     #[tokio::test] async fn a_refused_sign_in_is_said_plainly() {
         let h = hub("401").await; let (url, srv) = serve(401, r#"{"error":"no"}"#);
