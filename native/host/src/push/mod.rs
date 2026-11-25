@@ -17,6 +17,7 @@
 //! thread (settings/alerts.rs decides that, as it does for the desk itself; `alert` below). Each is one order, through the same respect, book and collapsing as any other;
 //! the uberbot's own orders are unchanged.
 pub mod apns;
+pub mod enterprise;
 pub mod page;
 
 use crate::{bots::{rpc::Bots, world::{Device, Routine, World}}, hub::{now_ms, Hub}};
@@ -325,7 +326,7 @@ pub fn start_with(hub: &Arc<Hub>, bots: Arc<Bots>, carrier: Arc<dyn Carrier>) ->
     hub.register_rpc(Arc::new(PushRpc(p.clone())));
     hub.register_rpc(Arc::new(page::NotifyPage(bots.clone())));
     // said once at start, so a hub that cannot push says so in its log (never the values)
-    { let hub = hub.clone(); tokio::spawn(async move { match apns::credentials(&hub).await { Some((.., from)) => eprintln!("backplane: push: APNs configured (from {from})"), None => eprintln!("backplane: push: APNs is not configured: set push.apns.key, push.apns.keyid and push.apns.team, or write ~/.config/backplane/apns.env") } }); }
+    { let hub = hub.clone(); tokio::spawn(async move { match apns::credentials(&hub).await { Some((.., from)) => eprintln!("backplane: push: APNs configured (from {from})"), None => match enterprise::credentials(&hub).await { Some((url, _)) => eprintln!("backplane: push: Enterprise push gateway configured ({url})"), None => eprintln!("backplane: push: APNs is not configured: set push.apns.key, push.apns.keyid and push.apns.team, or write ~/.config/backplane/apns.env") } } }); }
     tokio::spawn(Worker { hub: hub.clone(), bots, carrier, book: Book::default() }.run(rx));
     p
 }
@@ -437,10 +438,12 @@ impl Worker {
         let badge = self.book.badge(self.asks());
         let frame = apns::Frame::alert(&say, badge);
         let hearing: Vec<&Device> = devices.iter().filter(|d| hears(d, through)).collect();
-        let (sent, why) = self.send(hearing.iter().copied(), &frame).await;
+        // no APNs key of this hub's own: the person's Enterprise gateway holds it (the phone registers its token there). Test doubles and the sink keep the carrier's path.
+        let gate = if std::env::var_os("BACKPLANE_PUSH_SINK").is_none() && apns::credentials(&self.hub).await.is_none() { enterprise::credentials(&self.hub).await } else { None };
+        let (sent, why) = match &gate { Some((url, token)) => enterprise::send(&self.hub, url, token, &frame, through).await, None => self.send(hearing.iter().copied(), &frame).await };
         let ev = json!({"$":"PushSent","key":say.key,"thread":say.thread,"ask":say.ask,"kind":say.reason,"title":say.title,"body":say.body,"badge":badge,"through":through,"sent":sent,"why":if sent > 0 { "" } else { why.as_deref().unwrap_or("") },"link":say.link,"at":now});
         let _ = self.hub.commit(&ev).await;
-        if !hearing.is_empty() { self.undelivered(if sent > 0 { None } else { why }, &home, now).await }
+        if !hearing.is_empty() || sent > 0 || (gate.is_some() && why.is_some()) { self.undelivered(if sent > 0 { None } else { why }, &home, now).await }
         self.save().await;
     }
     /// Push.undelivered: phones are registered and an alert reached none of them (Nov 18: the wipe took the APNs key file, and for hours every push went to no phone while
@@ -463,6 +466,9 @@ impl Worker {
         let frame = apns::Frame::clear(&keys, badge);
         // recorded first: a socket (Android, the desktop) hears the clear no later than an iOS phone does
         let _ = self.hub.commit(&json!({"$":"PushCleared","keys":keys,"badge":badge,"at":now_s()})).await;
+        if std::env::var_os("BACKPLANE_PUSH_SINK").is_none() && apns::credentials(&self.hub).await.is_none() {
+            if let Some((url, token)) = enterprise::credentials(&self.hub).await { let _ = enterprise::send(&self.hub, &url, &token, &frame, false).await; return }
+        }
         let _ = self.send(devices.iter().filter(|d| d.kind == "alert" && d.platform == "ios"), &frame).await;
     }
     fn asks(&self) -> u64 { crate::data::open_ask_total(&self.hub) }
