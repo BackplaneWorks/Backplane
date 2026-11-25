@@ -4,13 +4,14 @@ import SwiftUI
 // Active, the groups (by git owner, then folder) and Quiet. The hub decides what is in each; the app draws them as they come.
 
 /// One row of a section: a thread (kind "threads") or a project with its visible threads under it (kind "projects").
-struct DSecRow: Decodable, Identifiable, Equatable {
+struct DSecRow: Codable, Identifiable, Equatable {
     var id: String; var title: String
     // a thread's
     var word: String; var say: String; var want: String; var ago: String; var machine: String; var mark: DMark?; var project: String; var projectKey: String; var off: Bool; var nav: String; var pinned: Bool; var hide: String
     // a project's
     var kind: String
-    var key: String; var projOff: Bool; var running: Int; var needsCount: Int; var threads: [DSecRow]; var icon: String; var css: String; var dots: [DSecDot]; var more: Int
+    var key: String; var running: Int; var needsCount: Int; var threads: [DSecRow]; var icon: String; var css: String; var dots: [DSecDot]; var more: Int
+    var projOff: Bool { off }
     /// a project's threads with no row under it (finished ones, on its page): counted on its row so none seems lost
     var rest: Int = 0
     /// its menu (SectionMenu.swift), the hub's; an older hub sends none
@@ -27,17 +28,17 @@ struct DSecRow: Decodable, Identifiable, Equatable {
     var hasBoard: Bool
     /// thread provider id (e.g. claude, codex, antigravity)
     var provider: String
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under, need, label, tone, snooze, settle, wake, hasBoard, provider }
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under, need, label, badgeTone = "tone", snooze, settle, wake, hasBoard, provider }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
         mark = try? c.decode(DMark.self, forKey: .mark); project = c.str(.project); projectKey = c.str(.projectKey); off = c.bool(.off); nav = c.str(.nav); pinned = c.bool(.pinned); hide = c.str(.hide)
-        kind = c.str(.kind); key = c.str(.key); projOff = (try? c.decode(Bool.self, forKey: .off)) ?? false; running = c.int(.running); needsCount = c.int(.needsCount); threads = (try? c.decode([DSecRow].self, forKey: .threads)) ?? []
+        kind = c.str(.kind); key = c.str(.key); running = c.int(.running); needsCount = c.int(.needsCount); threads = (try? c.decode([DSecRow].self, forKey: .threads)) ?? []
         icon = c.str(.icon); css = c.str(.css); dots = (try? c.decode([DSecDot].self, forKey: .dots)) ?? []; more = c.int(.more); rest = c.int(.rest)
         menu = (try? c.decode([DMenuItem].self, forKey: .menu)) ?? []
         fold = c.str(.fold); folded = c.bool(.folded); under = c.int(.under)
         need = kind == "swarm" ? DSwarmNeed.of(c, .need) : nil
-        label = c.str(.label); badgeTone = c.str(.tone); snooze = (try? c.decode([DSnoozeOpt].self, forKey: .snooze)) ?? []; settle = c.str(.settle); wake = c.str(.wake)
+        label = c.str(.label); badgeTone = c.str(.badgeTone); snooze = (try? c.decode([DSnoozeOpt].self, forKey: .snooze)) ?? []; settle = c.str(.settle); wake = c.str(.wake)
         hasBoard = c.bool(.hasBoard); provider = c.str(.provider)
     }
     var isProject: Bool { !key.isEmpty }
@@ -48,10 +49,10 @@ struct DSecRow: Decodable, Identifiable, Equatable {
     /// the row's status, a word with its icon; nil for a thread with nothing to say
     var pill: HomePill? { isProject ? nil : Home.pill(label: label, tone: badgeTone, word: word, want: want) }
 }
-struct DSecDot: Decodable, Equatable { var short: String; var here: Bool; var dim: Bool
+struct DSecDot: Codable, Equatable { var short: String; var here: Bool; var dim: Bool
     enum CodingKeys: String, CodingKey { case short, here, dim }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); short = c.str(.short); here = c.bool(.here); dim = c.bool(.dim) } }
-struct DSection: Decodable, Identifiable, Equatable {
+struct DSection: Codable, Identifiable, Equatable {
     var id: String; var kind: String; var title: String; var count: Int; var fold: Bool; var open: Bool; var toggle: String; var group: String; var rename: Bool; var rows: [DSecRow]
     enum CodingKeys: String, CodingKey { case id, kind, title, count, fold, open, toggle, group, rename, rows }
     init(from d: Decoder) throws {
@@ -60,7 +61,7 @@ struct DSection: Decodable, Identifiable, Equatable {
         group = c.str(.group); rename = c.bool(.rename); rows = (try? c.decode([DSecRow].self, forKey: .rows)) ?? []
     }
 }
-struct DGroupTo: Decodable, Equatable { var value: String; var label: String
+struct DGroupTo: Codable, Equatable { var value: String; var label: String
     enum CodingKeys: String, CodingKey { case value, label }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); value = c.str(.value); label = c.str(.label) } }
 struct DProjectPage: Decodable, Equatable { var key: String; var sections: [DSection]

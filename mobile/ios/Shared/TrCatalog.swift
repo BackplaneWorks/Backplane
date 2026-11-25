@@ -499,6 +499,7 @@ mobile.pill.waiting	Waiting	待機中	En espera
 mobile.snooze.wakes	Wakes in {time}	{time}後に再開	Vuelve en {time}
 mobile.bench.all	All projects	すべてのプロジェクト	Todos los proyectos
 mobile.snooze.for	Snooze for	スヌーズする期間	Posponer
+mobile.conn.reconnecting	Reconnecting…	再接続中…	Reconectando…
 common.cancel	Cancel	キャンセル	Cancelar
 common.delete	Delete	削除	Eliminar
 common.save	Save	保存	Guardar

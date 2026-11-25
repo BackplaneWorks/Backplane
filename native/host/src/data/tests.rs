@@ -1502,6 +1502,30 @@ async fn viewer_layout_over_a_socket_is_per_device_pushed_and_refuses_in_code_ke
     assert_eq!(r["removed"], json!(["p2"]), "{r}"); assert!(r.get("projects").is_none(), "p1 is as held");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn threads_list_batched_matches_single_thread_json() {
+    let (h, port) = up("batched-threads").await;
+    h.commit(&json!({"$":"ThreadPinned","id":"t1","pinned":true,"at":1700000050})).await.unwrap();
+    h.commit(&json!({"$":"ModesSet","id":"t1","runtime":"full-access","interaction":"plan","model":"claude-opus-5-5","at":1700000051})).await.unwrap();
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let listed = ask(&mut ws, 1, "threads.list", json!({})).await;
+    assert_eq!(listed["ok"], true, "{listed}");
+    let g = h.hub.model().await;
+    let asks = open_ask_counts(&h.hub);
+    for row in listed["result"]["threads"].as_array().unwrap() {
+        let id = row["id"].as_str().unwrap();
+        let single = thread_json(&h.hub, &g, id, &asks).unwrap();
+        assert_eq!(row, &single, "batched threads.list row differs from thread_json for {id}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn shell_sync_forwards_open_section_folds() {
+    let (_h, port) = up("shell-open").await;
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    let r = ask(&mut ws, 1, "shell.sync", json!({"open":["sec:quiet","sec:all"]})).await;
+    assert_eq!(r["ok"], true, "{r}");
+    assert!(r["result"]["h"]["@sections"].is_string(), "{r}");
+}
+
 /// The home (feature `home`): `hello.home` says where the uberbot lives as this hub sees it, and a lists subscription is told when that changes (`k:"home"`).
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn the_hello_says_where_the_home_is_and_a_move_of_it_is_pushed() {
     let (h, port) = up("homepush").await;

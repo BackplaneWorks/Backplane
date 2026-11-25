@@ -46,12 +46,12 @@ pub(super) async fn thread_open(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, p
     Ok(Value::Object(out))
 }
 
-/// `shell.sync {have?, settled?=25}` → `{projects?, threads?, sections?, removed?, h, sub}`: the sidebar in one reply, and a `lists` subscription. Per project its active and
+/// `shell.sync {have?, settled?=25, open?}` → `{projects?, threads?, sections?, removed?, h, sub}`: the sidebar in one reply, and a `lists` subscription. Per project its active and
 /// pinned threads and its newest `settled` settled ones; an idle child (a subagent, a subthread) only with its parent listed. A project goes again, with all of its listed
 /// threads, only when the hash of the two together differs from the client's (`have["p:<id>"]`); `removed` names the held projects that are gone.
 pub(super) async fn shell_sync(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, p: &Value, is_browser: bool) -> Result<Value, Value> {
     let have = p.get("have").filter(|h| h.is_object()).cloned().unwrap_or(json!({}));
-    let settled_n = p["settled"].as_u64().unwrap_or(25).min(200);
+    let settled_n = p["settled"].as_u64().unwrap_or(25).min(200) as usize;
     let mut projects: Vec<Value> = vec![]; let mut before = Value::Null;
     loop { // every project, a page at a time
         let mut q = json!({"limit": 200}); if !before.is_null() { q["before"] = before.clone(); }
@@ -59,14 +59,67 @@ pub(super) async fn shell_sync(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, p:
         projects.extend(r["projects"].as_array().cloned().unwrap_or_default());
         before = r["next"].clone(); if before.is_null() || projects.len() > 2000 { break }
     }
-    let sections = call(hub, c, "sidebar.sections", &json!({}), is_browser).await.unwrap_or(Value::Null);
+    let mut sec_q = json!({});
+    if p.get("open").is_some_and(Value::is_array) { sec_q["open"] = p["open"].clone(); }
+    let sections = call(hub, c, "sidebar.sections", &sec_q, is_browser).await.unwrap_or(Value::Null);
     subs.next += 1; subs.subs.push((subs.next, Topic::Lists));
-    let (mut out, mut h) = (serde_json::Map::new(), serde_json::Map::new());
-    let (mut rows, mut threads, mut seen) = (vec![], vec![], HashSet::new());
+
+    let at = hub.setting("home.at").await.unwrap_or_default();
+    let farv = hub.far();
+    let moved = |id: &str, project: &str| crate::net::homemove::moved_thread(&at, id, Some(project), &|x| farv.as_ref().map_or(false, |f| f.has(x))).is_some();
+    let g = hub.model().await;
+    let asks = open_ask_counts(hub);
+
+    // Collect local active/settled thread keys per project in one state pass instead of 2xN threads.list calls.
+    let mut local_by_proj: HashMap<String, (Vec<(u64, String)>, Vec<(u64, String)>)> = HashMap::new();
+    let mut collect_local = |st: Option<&crate::state::State>| {
+        for (id, t) in &g.threads {
+            if t.deleted || t.archived || t.project == crate::sidebar::SCRATCH || crate::state::is_mail_run_id(id) || moved(id, &t.project) { continue }
+            if st.is_some_and(|s| s.run_hidden(id)) { continue }
+            let (_, settled, settled_at) = st.and_then(|s| s.threads.get(id)).map(shelf_flags).unwrap_or((false, false, 0));
+            let entry = local_by_proj.entry(t.project.clone()).or_default();
+            if settled {
+                entry.1.push((settled_at, id.clone()));
+            } else {
+                entry.0.push((ms(t.activity.max(t.created)), id.clone()));
+            }
+        }
+    };
+    if crate::statehost::policies().and_then(|pol| pol.with_state(|st| collect_local(Some(st)))).is_none() {
+        collect_local(None);
+    }
+
+    let (join, mut far_by_proj) = with_far(hub, "", |far, un, _| (un.far.clone(), machines::thread_keys_by_project(far, "", un.far, false)));
+
+    let mut per_project: Vec<(Value, String, Vec<String>)> = Vec::with_capacity(projects.len());
+    let mut all_ids: Vec<String> = Vec::new();
+    let mut all_seen: HashSet<String> = HashSet::new();
     for pr in projects {
         let id = pr["id"].as_str().unwrap_or("").to_string(); if id.is_empty() { continue }
-        let mut ts = call(hub, c, "threads.list", &json!({"project": id, "settled": false, "limit": 200}), is_browser).await.map(|r| r["threads"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
-        ts.extend(call(hub, c, "threads.list", &json!({"project": id, "settled": true, "limit": settled_n}), is_browser).await.map(|r| r["threads"].as_array().cloned().unwrap_or_default()).unwrap_or_default());
+        let (mut active, mut settled) = local_by_proj.remove(&id).unwrap_or_default();
+        if let Some((fa, fs)) = far_by_proj.remove(&id) {
+            active.extend(fa);
+            settled.extend(fs);
+        }
+        active.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        active.truncate(200);
+        settled.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        settled.truncate(settled_n);
+        let mut ids: Vec<String> = Vec::with_capacity(active.len() + settled.len());
+        for (_, tid) in active.into_iter().chain(settled.into_iter()) {
+            if all_seen.insert(tid.clone()) { all_ids.push(tid.clone()); }
+            ids.push(tid);
+        }
+        per_project.push((pr, id, ids));
+    }
+
+    let built = thread_rows_batch(hub, &g, &all_ids, &asks, &join);
+    drop(g);
+
+    let (mut out, mut h) = (serde_json::Map::new(), serde_json::Map::new());
+    let (mut rows, mut threads, mut seen) = (vec![], vec![], HashSet::new());
+    for (pr, id, ids) in per_project {
+        let mut ts: Vec<Value> = ids.iter().filter_map(|tid| built.get(tid).cloned()).collect();
         let listed: HashSet<String> = ts.iter().filter_map(|t| t["id"].as_str().map(str::to_string)).collect();
         // an idle child whose parent is not listed would stand alone among the project's threads: it comes with its parent's shelf
         ts.retain(|t| { let parent = t["parent"].as_str().unwrap_or(""); parent.is_empty() || listed.contains(parent) || t["state"] != "idle" || t["pinned"] == true });

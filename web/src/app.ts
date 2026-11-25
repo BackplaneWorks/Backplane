@@ -28,7 +28,10 @@ import { ThreadContextDialog } from "./thread-context";
 import {
   CHATS,
   SidebarView,
+  clearSidebarCache,
+  loadSidebarCache,
   moveTargets,
+  saveSidebarCache,
   type BotItem,
   type PlanModeInfo,
   type ProjectItem,
@@ -320,6 +323,7 @@ function mountApp(): void {
   let threads: ThreadItem[] = [];
   let bots: BotItem[] = [];
   let rooms: RoomItem[] = [];
+  let hostDisplayName = "";
   let favoriteModels: string[] = [];
   let railItems: RailEntry[] = [];
   let helloCommands: SlashCommand[] = [];
@@ -864,6 +868,7 @@ function mountApp(): void {
     onRingHear: async (note, engine) => { await hub.rpc("ring.hear", { note, engine }); },
     onOpenThread: (id) => { void openThread(id); },
     onLogout: () => signOut(() => {
+      try { clearSidebarCache(window.localStorage); } catch { /* ignore */ }
       hub.disconnect();
       window.location.replace("/");
     }),
@@ -1236,6 +1241,21 @@ function mountApp(): void {
     return false;
   }
 
+  function persistSidebarCache(): void {
+    try {
+      saveSidebarCache(window.localStorage, {
+        hostName: hostDisplayName || undefined,
+        sections,
+        projects,
+        threads,
+        bots,
+        rooms,
+        shellHashes,
+        openSectionFolds: Array.from(openSectionFolds),
+      });
+    } catch { /* ignore */ }
+  }
+
   function syncProjectsFromSections(list: SidebarSection[]): void {
     const out: ProjectItem[] = [];
     for (const sec of list) {
@@ -1260,6 +1280,7 @@ function mountApp(): void {
       syncProjectsFromSections(list);
       sidebar.setData(projects, threads, bots, rooms);
       sidebar.setSections(list, bots, rooms);
+      persistSidebarCache();
       updateHeader();
       if (homeProjectId) void loadHomeThreads(homeProjectId, homeGen);
       return true;
@@ -1280,23 +1301,31 @@ function mountApp(): void {
   async function loadLists(): Promise<void> {
     threadSubId = null;
 
-    if (hub.hasFeature("bots")) {
-      try {
-        const bRes = await hub.rpc<{ bots?: BotItem[]; rooms?: RoomItem[] }>("bots.list", {});
-        bots = bRes.bots ?? [];
-        rooms = bRes.rooms ?? [];
-      } catch { /* ignore */ }
-    }
+    const botsPromise = hub.hasFeature("bots")
+      ? hub.rpc<{ bots?: BotItem[]; rooms?: RoomItem[] }>("bots.list", {}).catch(() => null)
+      : Promise.resolve(null);
 
     if (hub.hasFeature("shell")) {
-      const sRes = await hub.rpc<{
-        projects?: ProjectItem[];
-        threads?: ThreadItem[];
-        sections?: SidebarSection[] | { sections?: SidebarSection[] };
-        removed?: string[];
-        h?: Record<string, string>;
-        sub?: SubId;
-      }>("shell.sync", { have: shellHashes, settled: 25 });
+      const have: Record<string, string> = {};
+      for (const [k, v] of Object.entries(shellHashes)) {
+        if ((k === "@sections" && (!sections || sections.length === 0)) || (k.startsWith("p:") && projects.length === 0)) continue;
+        have[k] = v;
+      }
+      const [bRes, sRes] = await Promise.all([
+        botsPromise,
+        hub.rpc<{
+          projects?: ProjectItem[];
+          threads?: ThreadItem[];
+          sections?: SidebarSection[] | { sections?: SidebarSection[] };
+          removed?: string[];
+          h?: Record<string, string>;
+          sub?: SubId;
+        }>("shell.sync", { have, settled: 25, open: Array.from(openSectionFolds) }),
+      ]);
+      if (bRes) {
+        bots = bRes.bots ?? [];
+        rooms = bRes.rooms ?? [];
+      }
       const removed = new Set(sRes.removed ?? []);
       const updatedPids = new Set((sRes.projects ?? []).map((p) => p.id));
       if (removed.size > 0 || updatedPids.size > 0) {
@@ -1327,13 +1356,19 @@ function mountApp(): void {
       if (sRes.h) shellHashes = sRes.h;
       sidebar.setData(projects, threads, bots, rooms);
       sidebar.setSections(sections, bots, rooms);
+      persistSidebarCache();
     } else if (hub.hasFeature("sections")) {
-      const [secRes, tRes] = await Promise.all([
+      const [bRes, secRes, tRes] = await Promise.all([
+        botsPromise,
         hub.rpc<{ sections?: SidebarSection[] }>("sidebar.sections", {
           open: Array.from(openSectionFolds),
         }).catch(() => null),
         hub.rpc<{ threads?: ThreadItem[] }>("threads.list", { limit: 200, archived: false }).catch(() => ({ threads: [] })),
       ]);
+      if (bRes) {
+        bots = bRes.bots ?? [];
+        rooms = bRes.rooms ?? [];
+      }
       threads = tRes.threads ?? [];
       if (secRes && Array.isArray(secRes.sections)) {
         let list = secRes.sections;
@@ -1361,17 +1396,24 @@ function mountApp(): void {
         sidebar.setSections(null, bots, rooms);
         sidebar.setData(projects, threads, bots, rooms);
       }
+      persistSidebarCache();
       await hub.rpc("subscribe", { topic: "lists" }).catch(() => {});
     } else {
       sections = null;
-      const [pRes, tRes] = await Promise.all([
+      const [bRes, pRes, tRes] = await Promise.all([
+        botsPromise,
         hub.rpc<{ projects?: ProjectItem[] }>("projects.list", { limit: 100 }),
         hub.rpc<{ threads?: ThreadItem[] }>("threads.list", { limit: 200, archived: false }),
       ]);
+      if (bRes) {
+        bots = bRes.bots ?? [];
+        rooms = bRes.rooms ?? [];
+      }
       projects = pRes.projects ?? [];
       threads = tRes.threads ?? [];
       sidebar.setSections(null, bots, rooms);
       sidebar.setData(projects, threads, bots, rooms);
+      persistSidebarCache();
       await hub.rpc("subscribe", { topic: "lists" }).catch(() => {});
     }
 
@@ -1831,7 +1873,10 @@ function mountApp(): void {
         applyEffectiveLocale();
       }
       if (hello.theme) applyHubTheme(hello.theme);
-      if (hello.name) sidebar.setHostName(hello.name);
+      if (hello.name) {
+        hostDisplayName = hello.name;
+        sidebar.setHostName(hello.name);
+      }
       if (Array.isArray(hello.favoriteModels)) {
         favoriteModels = hello.favoriteModels;
         composer.updateFavoriteModels(favoriteModels);
@@ -1855,6 +1900,9 @@ function mountApp(): void {
       // a clone's pushes may have been missed while the socket was down
       addProject.reconcile();
     } else {
+      if (state === "revoked") {
+        try { clearSidebarCache(window.localStorage); } catch { /* ignore */ }
+      }
       voice.cancel();
       renderConnStatus(state);
     }
@@ -1989,6 +2037,25 @@ function mountApp(): void {
       else if (mgmt.isOpen()) mgmt.closePanel();
     }
   });
+
+  try {
+    const cached = loadSidebarCache(window.localStorage);
+    if (cached) {
+      if (cached.hostName) {
+        hostDisplayName = cached.hostName;
+        sidebar.setHostName(cached.hostName);
+      }
+      projects = cached.projects;
+      threads = cached.threads;
+      bots = cached.bots;
+      rooms = cached.rooms;
+      sections = cached.sections;
+      shellHashes = cached.shellHashes;
+      for (const f of cached.openSectionFolds) openSectionFolds.add(f);
+      sidebar.setData(projects, threads, bots, rooms);
+      sidebar.setSections(sections, bots, rooms);
+    }
+  } catch { /* ignore */ }
 
   hub.connect();
 }

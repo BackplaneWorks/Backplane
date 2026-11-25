@@ -29,12 +29,18 @@ fn ms(at: u64) -> u64 { super::ms(at) }
 
 /// A linked machine's thread as the list rows have it. `project` is the id the phone files it under (this hub's project when the repository is one).
 pub fn thread_json(id: &str, st: &State, project: &str, mark: &Value, preview: &str) -> Option<Value> {
+    let signals = crate::signal::index(st);
+    thread_json_with_signals(id, st, project, mark, preview, &signals)
+}
+
+/// Same as `thread_json`, reusing a precomputed `crate::signal::index(st)` across a batch of threads.
+pub fn thread_json_with_signals(id: &str, st: &State, project: &str, mark: &Value, preview: &str, signals: &HashMap<String, u8>) -> Option<Value> {
     let t = st.threads.get(id).filter(|t| !t.deleted)?;
     let waiting = st.asks.values().filter(|(th, open)| *open && th == id).count() as u64;
     let state = if waiting > 0 { "asking" } else { match t.turn { Turn::Running => "working", Turn::Failed => "failed", _ => "idle" } };
     let (pinned, settled, settled_at) = super::shelf_flags(t);
     // the sidebar dot's word as that machine's own state gives it (signal.rs, as data/mod.rs `thread_json` does for this hub's): a turn done reads finished there too
-    let signal = crate::signal::index(st).get(id).map_or(String::new(), |n| crate::signal::display_name(st, *n, id).to_string());
+    let signal = signals.get(id).map_or(String::new(), |n| crate::signal::display_name(st, *n, id).to_string());
     let status = if !signal.is_empty() { signal.as_str() } else if waiting > 0 { "waiting" } else if t.turn == Turn::Running { "active" } else if settled { "settled" } else { "" };
     let runtime = st.runtime.get(id).cloned().unwrap_or_default();
     Some(json!({"id":id,"project":project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"settledAt":settled_at,"archived":t.archived,
@@ -152,6 +158,25 @@ pub fn thread_keys(far: &Far, pick: &str, join: &HashMap<String, String>, projec
             let (_, settled, at) = super::shelf_flags(t);
             if want.map_or(false, |w| w != settled) { continue }
             out.push((if want == Some(true) { at } else { ms(t.activity.max(t.created)) }, id.clone()));
+        }
+    }
+    out
+}
+/// Same as `thread_keys`, bucketed by project (`project_shown` and `t.project`) in one pass for both active and settled shelves.
+pub fn thread_keys_by_project(far: &Far, pick: &str, join: &HashMap<String, String>, archived: bool) -> HashMap<String, (Vec<(u64, String)>, Vec<(u64, String)>)> {
+    let mut out: HashMap<String, (Vec<(u64, String)>, Vec<(u64, String)>)> = HashMap::new();
+    for (_, st) in shown_far(far, pick) {
+        for (id, t) in &st.threads {
+            if t.deleted || st.run_hidden(id) || t.archived != archived || t.project == crate::sidebar::SCRATCH || crate::sidebar::is_chats(&t.project) { continue }
+            let shown = project_shown(&t.project, join);
+            let (_, settled, at) = super::shelf_flags(t);
+            let key = (if settled { at } else { ms(t.activity.max(t.created)) }, id.clone());
+            let push = |out: &mut HashMap<String, (Vec<(u64, String)>, Vec<(u64, String)>)>, proj: &str| {
+                let entry = out.entry(proj.to_string()).or_default();
+                if settled { entry.1.push(key.clone()); } else { entry.0.push(key.clone()); }
+            };
+            push(&mut out, &shown);
+            if t.project != shown { push(&mut out, &t.project); }
         }
     }
     out

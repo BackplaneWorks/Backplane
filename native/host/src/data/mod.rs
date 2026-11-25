@@ -30,7 +30,7 @@ const ASK_SCAN: usize = 4000;
 
 fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64) }
 /// Event times are seconds (older logs) or milliseconds.
-fn ms(at: u64) -> u64 { if at < 100_000_000_000 { at * 1000 } else { at } }
+pub(super) fn ms(at: u64) -> u64 { if at < 100_000_000_000 { at * 1000 } else { at } }
 fn clip(s: &str, n: usize) -> String { let t: String = s.chars().take(n).collect(); t.replace('\n', " ") }
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 fn err<T: ToString>(e: T) -> Value { json!(e.to_string()) }
@@ -112,7 +112,7 @@ fn open_ask_index(hub: &Hub) -> Vec<(String, String, usize)> {
 pub fn ask_thread(hub: &Hub, ask: &str) -> Option<String> { open_ask_index(hub).into_iter().find(|(a, ..)| a == ask).map(|(_, t, _)| t) }
 /// Whether `thread` currently has any open ask in the tail.
 pub fn thread_has_open_ask(hub: &Hub, thread: &str) -> bool { open_ask_index(hub).into_iter().any(|(_, t, _)| t == thread) }
-fn open_ask_counts(hub: &Hub) -> HashMap<String, u64> {
+pub(super) fn open_ask_counts(hub: &Hub) -> HashMap<String, u64> {
     let mut m = HashMap::new();
     for (_, th, _) in open_ask_index(hub) { *m.entry(th).or_insert(0) += 1 }
     m
@@ -126,7 +126,7 @@ pub(crate) fn shelf_flags(t: &crate::state::Thread) -> (bool, bool, u64) {
     let settled = crate::shelf::shelf_of(t) == crate::shelf::Shelf::Settled;
     (t.pinned, settled, if settled { ms(t.settled_at) } else { 0 })
 }
-fn flags_of(id: &str) -> (bool, bool, u64) { crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(shelf_flags))).flatten().unwrap_or((false, false, 0)) }
+pub(super) fn flags_of(id: &str) -> (bool, bool, u64) { crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(id).map(shelf_flags))).flatten().unwrap_or((false, false, 0)) }
 /// A setting of the policy state ("" when unset or the state is not up).
 fn setting_of(k: &str) -> String { crate::statehost::policies().and_then(|p| p.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default() }
 /// Why `thread.create` refuses the Scratch project: its chats are kept (Conversation history) and open as they were, but no new one starts there.
@@ -140,6 +140,87 @@ fn preview_of(hub: &Hub, m: &crate::model::Model, id: &str) -> String {
     let p = m.page(&hub.store, id, 0, 8).ok().and_then(|p| p.rows.iter().find(|r| r.kind == "msg" && !r.text.trim().is_empty()).map(|r| clip(&shown_text(&r.text), PREVIEW))).unwrap_or_default();
     let mut c = PREVIEWS.lock().unwrap(); if c.len() > 20_000 { c.clear() } c.insert(key, (tip, p.clone())); p
 }
+#[derive(Default)]
+pub(super) struct ThreadRowState {
+    pinned: bool,
+    settled: bool,
+    settled_at: u64,
+    model: String,
+    effort: String,
+    runtime: String,
+    plan_mode: Value,
+    combo_short: String,
+    status: String,
+    pin_order: u64,
+    swarm: String,
+    speed: String,
+    parent: String,
+}
+
+#[derive(Default)]
+pub(super) struct ThreadRowBatch {
+    rows: HashMap<String, ThreadRowState>,
+    models_info: Option<std::sync::Arc<Value>>,
+}
+
+impl ThreadRowBatch {
+    /// Reads per-thread policy/signal/combo state for all local `ids` under one state lock pass.
+    pub(super) fn build(hub: &Hub, ids: &[String]) -> Self {
+        let models_info = Some(crate::settings::models::info_value());
+        if ids.is_empty() {
+            return Self { rows: HashMap::new(), models_info };
+        }
+        let now_s = crate::hub::now_ms() / 1000;
+        let build_st = |st: &crate::state::State| {
+            let signals = crate::signal::index(st);
+            let mut combo = crate::present::keys::ComboCache::new(st, now_s);
+            let mut rows = HashMap::with_capacity(ids.len());
+            for id in ids {
+                if rows.contains_key(id) { continue }
+                let (pinned, settled, settled_at) = st.threads.get(id).map(shelf_flags).unwrap_or((false, false, 0));
+                let model = st.threads.get(id).map_or(String::new(), |t| t.model.clone());
+                let effort = st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default();
+                let runtime = st.runtime.get(id).cloned().unwrap_or_default();
+                let plan_mode = crate::present::keys::plan_mode(st, id);
+                let combo_v = combo.combo_for(st, id);
+                let combo_short = combo_v["short"].as_str().unwrap_or("").to_string();
+                let status = signals.get(id).map_or("", |n| crate::signal::display_name(st, *n, id)).to_string();
+                let pin_order = if pinned { crate::sidebar::pin_place(st, id) } else { 0 };
+                let swarm = st.swarm_of.get(id).cloned().unwrap_or_default();
+                let speed = st.settings.get(&format!("speed.{id}")).cloned().unwrap_or_default();
+                let parent = st.settings.get(&format!("thread.parent.{id}")).cloned().unwrap_or_default();
+                rows.insert(id.clone(), ThreadRowState { pinned, settled, settled_at, model, effort, runtime, plan_mode, combo_short, status, pin_order, swarm, speed, parent });
+            }
+            rows
+        };
+        let rows = crate::statehost::with_state_of(hub, build_st)
+            .or_else(|| crate::statehost::policies().and_then(|p| p.with_state(build_st)))
+            .unwrap_or_default();
+        Self { rows, models_info }
+    }
+}
+
+pub(super) fn thread_json_batched(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>, batch: &ThreadRowBatch) -> Option<Value> {
+    let t = m.threads.get(id).filter(|t| !t.deleted)?;
+    let waiting = asks.get(id).copied().unwrap_or(0);
+    let state = if waiting > 0 { "asking" } else { match t.turn.as_str() { "running" => "working", "failed" => "failed", _ => "idle" } };
+    let preview = preview_of(hub, m, id);
+    let st = batch.rows.get(id);
+    let (pinned, settled, settled_at) = st.map_or((false, false, 0), |s| (s.pinned, s.settled, s.settled_at));
+    let raw_model = st.filter(|s| !s.model.is_empty()).map_or_else(|| t.model.clone(), |s| s.model.clone());
+    let model = crate::settings::models::sanitize_model(&t.provider, &raw_model, batch.models_info.as_deref());
+    let effort = st.map_or("", |s| s.effort.as_str());
+    let runtime = st.map_or("", |s| s.runtime.as_str());
+    let chip = st.map(|s| s.combo_short.as_str()).filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, effort));
+    let mut row = json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"pinOrder":st.map_or(0, |s| s.pin_order),"settled":settled,"settledAt":settled_at,"archived":t.archived,
+        "provider":t.provider,"model":model,"effort":effort,"speed":st.map_or("", |s| s.speed.as_str()),"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":st.map_or("", |s| s.status.as_str()),"parent":st.map_or("", |s| s.parent.as_str()),"history":t.project == crate::sidebar::SCRATCH,"chat":t.project == crate::sidebar::CHATS,"swarm":st.map_or("", |s| s.swarm.as_str()),
+        "memory":crate::bots::recall::progress::shown(&hub.cfg.home, id).unwrap_or(Value::Null)});
+    if let Some(pm) = st.map(|s| &s.plan_mode) {
+        if !pm.is_null() && pm["phase"] != "off" { row["planMode"] = pm.clone(); }
+    }
+    Some(row)
+}
+
 fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let t = m.threads.get(id).filter(|t| !t.deleted)?;
     let waiting = asks.get(id).copied().unwrap_or(0);
@@ -173,7 +254,7 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     if !plan_mode.is_null() && plan_mode["phase"] != "off" { row["planMode"] = plan_mode; }
     Some(row)
 }
-fn run_hidden(thread: &str) -> bool {
+pub(super) fn run_hidden(thread: &str) -> bool {
     crate::state::is_mail_run_id(thread)
         || crate::statehost::policies().and_then(|p| p.with_state(|st| st.run_hidden(thread))).unwrap_or(false)
 }
@@ -192,7 +273,7 @@ fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) 
 }
 
 /// The linked machines' projects and threads next to this hub's: `f(shown machines, unified marks and join map, the pick)` (docs/PHONE-DATA.md, Your machines).
-fn with_far<R>(hub: &Hub, want: &str, f: impl FnOnce(&machines::Far, &crate::present::screen::Unified, &str) -> R) -> R {
+pub(super) fn with_far<R>(hub: &Hub, want: &str, f: impl FnOnce(&machines::Far, &crate::present::screen::Unified, &str) -> R) -> R {
     let m = hub.mirrors(); let here = m.here();
     m.shown(|far| {
         let pick = machines::pick_of(want, far);
@@ -215,6 +296,47 @@ fn merged_rows(g: &crate::model::Model, asks: &HashMap<String, u64>, far: &machi
 /// One merged project row by its id ("" pick), for a push.
 fn merged_row(hub: &Hub, g: &crate::model::Model, asks: &HashMap<String, u64>, id: &str) -> Option<Value> {
     with_far(hub, "", |far, un, _| merged_rows(g, asks, far, un).into_iter().find(|x| x.1 == id).map(|x| x.2))
+}
+/// Builds a batch of local and far thread rows, computing `signal::index` and `ComboCache` once per state.
+pub(super) fn thread_rows_batch(hub: &Hub, g: &crate::model::Model, ids: &[String], asks: &HashMap<String, u64>, join: &HashMap<String, String>) -> HashMap<String, Value> {
+    let mut local_ids: Vec<String> = Vec::new();
+    let mut far_ids: Vec<String> = Vec::new();
+    for id in ids {
+        if !id.contains('~') || g.threads.contains_key(id) {
+            local_ids.push(id.clone());
+        } else {
+            far_ids.push(id.clone());
+        }
+    }
+    let batch = ThreadRowBatch::build(hub, &local_ids);
+    let mut out = HashMap::with_capacity(ids.len());
+    for id in &local_ids {
+        if let Some(v) = thread_json_batched(hub, g, id, asks, &batch) {
+            out.insert(id.clone(), v);
+        }
+    }
+    if !far_ids.is_empty() {
+        let far = hub.far();
+        let previews: HashMap<String, String> = far_ids.iter().map(|id| {
+            let p = far.as_ref().and_then(|f| f.page(id, 0, 8))
+                .and_then(|pg| pg.rows.iter().filter(|r| r.thread == *id).find(|r| r.kind == "msg" && !r.text.trim().is_empty()).map(|r| clip(&shown_text(&r.text), PREVIEW)))
+                .unwrap_or_default();
+            (id.clone(), p)
+        }).collect();
+        hub.mirrors().shown(|fars| {
+            let mut signals: HashMap<String, HashMap<String, u8>> = HashMap::new();
+            for id in &far_ids {
+                let Some((mname, st)) = machines::holder(fars, id) else { continue };
+                let Some(t) = st.threads.get(id) else { continue };
+                let sig = signals.entry(mname.clone()).or_insert_with(|| crate::signal::index(st));
+                let preview = previews.get(id).map(String::as_str).unwrap_or("");
+                if let Some(v) = machines::thread_json_with_signals(id, st, &machines::project_shown(&t.project, join), &hub.mirrors().mark(mname), preview, sig) {
+                    out.insert(id.clone(), v);
+                }
+            }
+        });
+    }
+    out
 }
 /// A thread row of this hub or of a linked machine (`<link>~<id>`, built from its mirror: no log to read, so its preview is the mirror's last words).
 fn thread_row(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>, join: &HashMap<String, String>) -> Option<Value> {
@@ -661,8 +783,10 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
             if let Some((a, i)) = s(p, "before").split_once(':') { if let Ok(a) = a.parse::<u64>() { keyed.retain(|x| x.0 < a || (x.0 == a && x.1.as_str() > i)) } }
             let more = keyed.len() > lim; keyed.truncate(lim);
             // only the page's threads are built in full (the preview reads the log)
+            let page_ids: Vec<String> = keyed.iter().map(|(_, i)| i.clone()).collect();
+            let mut built = thread_rows_batch(hub, &g, &page_ids, &asks, &join);
             let mut items = vec![];
-            for (at, i) in &keyed { if let Some(v) = thread_row(hub, &g, i, &asks, &join) { items.push((*at, i.clone(), v)) } }
+            for (at, i) in &keyed { if let Some(v) = built.remove(i) { items.push((*at, i.clone(), v)) } }
             let next = if more { keyed.last().map(|x| json!(format!("{}:{}", x.0, x.1))).unwrap_or(Value::Null) } else { Value::Null };
             Ok(json!({"threads":items.into_iter().map(|x| x.2).collect::<Vec<_>>(),"next":next,"machines":chips})) }
         "thread.entries" => entries(hub, p).await,

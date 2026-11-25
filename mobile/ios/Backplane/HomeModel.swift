@@ -8,7 +8,7 @@ import Foundation
 enum HomeTab: String, CaseIterable { case inbox, crew, bench }
 
 /// One span a row can be snoozed for, the hub's (`snooze`): `value` goes back as it came (`sidebar.act` `row-snooze`).
-struct DSnoozeOpt: Decodable, Equatable, Identifiable {
+struct DSnoozeOpt: Codable, Equatable, Identifiable {
     var label: String; var value: String
     var id: String { value }
     enum CodingKeys: String, CodingKey { case label, value }
