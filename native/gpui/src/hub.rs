@@ -179,6 +179,12 @@ impl View {
         self.want_page=None;
         if let Some((page_id,_))=self.paging.take() {self.older_reqs.insert(page_id);}
     }
+    /// Recover from a `view.page` reply that failed, dropped a delta, or went stale before returning to newest.
+    /// Always clears `older_on`; returns a follow-up `view.page("")` request only when the same open view is still active.
+    fn finish_failed_page(&mut self, target: &Value) -> Option<Value> {
+        self.older_on=false;
+        (target==&self.target && !self.view_id.is_empty()).then(|| self.page(""))
+    }
     /// view.page: a view stays on the page it asked for, so a history page is always followed by this with cursor "", the newest again.
     fn page(&mut self, cursor:&str)->Value {
         if cursor.is_empty() {self.older_on=false;}
@@ -190,6 +196,55 @@ impl View {
 #[cfg(test)] mod older_tests { use super::*;
     fn test_config() -> Config {
         Config { hub: "ws://127.0.0.1:0".into(), token_file: PathBuf::new(), exit_after: None, script: None, swatches: false, gallery: false, fonts: false, solid_demo: None, theme: None, paired: false, unpaired: false, pair_link: None, pending: false, launched: false }
+    }
+    struct TempToken(PathBuf);
+    impl TempToken {
+        fn new(name: &str) -> Self {
+            let p = std::env::temp_dir().join(format!("bp-gpui-{name}-{}-{}", std::process::id(), millis()));
+            std::fs::write(&p, "test-token").unwrap();
+            Self(p)
+        }
+    }
+    impl Drop for TempToken { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
+    fn view_reply(req: &Value, hub_url: &str, shown: Value) -> Message {
+        let p = &req["p"];
+        let msg = json!({
+            "t": "reply",
+            "id": req["id"],
+            "ok": true,
+            "result": {
+                "version": 1,
+                "hub": hub_url,
+                "generation": "1",
+                "epoch": "e1",
+                "requestRevision": p["requestRevision"],
+                "target": p["target"],
+                "viewId": "v1",
+                "session": p["session"],
+                "shown": shown,
+            }
+        });
+        Message::Text(msg.to_string().into())
+    }
+    async fn next_req(ws: &mut tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>) -> Option<Value> {
+        while let Some(Ok(frame)) = tokio::time::timeout(Duration::from_secs(5), ws.next()).await.expect("ws read timeout") {
+            let v = match frame {
+                Message::Binary(b) => wire::decode(&b).unwrap(),
+                Message::Text(t) => serde_json::from_str(&t).unwrap(),
+                Message::Close(_) => return None,
+                _ => continue,
+            };
+            return Some(v);
+        }
+        None
+    }
+    async fn next_picture(rx: &async_channel::Receiver<Event>) -> Value {
+        loop {
+            match tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("event timeout").unwrap() {
+                Event::Picture(v, _) => return v,
+                _ => continue,
+            }
+        }
     }
     #[test] fn view_open_clears_sticky_older_state_and_tracks_paging_requests() {
         let mut v = View::fresh(&test_config());
@@ -211,6 +266,154 @@ impl View {
         assert!(!v.older_reqs.contains(&open_id));
         let after_req = v.request("view.update", json!({}));
         assert!(!v.older_reqs.contains(&after_req["id"].as_u64().unwrap()));
+    }
+    #[test] fn finish_failed_page_clears_older_on_and_guards_empty_view_id() {
+        let mut v = View::fresh(&test_config());
+        let same_target = v.target.clone();
+        v.view_id = "v1".into();
+        let _ = v.page("c1");
+        let followup = v.finish_failed_page(&same_target).expect("same target with view_id follows up with page('')");
+        assert_eq!(followup["m"], "view.page");
+        assert_eq!(followup["p"]["cursor"], "");
+        assert!(!v.older_on);
+        let upd = v.request("view.update", json!({}));
+        assert!(!v.older_reqs.contains(&upd["id"].as_u64().unwrap()));
+
+        let _ = v.page("c2");
+        assert!(v.finish_failed_page(&json!({"kind":"thread","id":"other"})).is_none());
+        assert!(!v.older_on);
+        let upd2 = v.request("view.update", json!({}));
+        assert!(!v.older_reqs.contains(&upd2["id"].as_u64().unwrap()));
+
+        v.view_id.clear();
+        let _ = v.page("c3");
+        assert!(v.finish_failed_page(&same_target).is_none());
+        assert!(!v.older_on);
+        let upd3 = v.request("view.update", json!({}));
+        assert!(!v.older_reqs.contains(&upd3["id"].as_u64().unwrap()));
+    }
+    #[test] fn session_delta_error_on_view_page_recovers_older_on_and_draws_subsequent_updates() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let tok = TempToken::new("delta-err");
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let ws_url = format!("ws://127.0.0.1:{port}");
+            let srv_hub = format!("http://127.0.0.1:{port}");
+            let server = tokio::spawn(async move {
+                let (tcp, _) = listener.accept().await.unwrap();
+                let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+                ws.send(Message::Text(json!({"t":"view","version":1,"renderer":"mobile","generation":"1","epoch":"e1"}).to_string().into())).await.unwrap();
+                let mut saw_sub = false;
+                while let Some(req) = next_req(&mut ws).await {
+                    match req["m"].as_str().unwrap_or("") {
+                        "view.open" => ws.send(view_reply(&req, &srv_hub, json!({"phase":"open"}))).await.unwrap(),
+                        "view.page" if req["p"]["cursor"] == "c1" => {
+                            ws.send(Message::Text(json!({"t":"reply","id":req["id"],"ok":true,"result":{"viewDelta":{"version":1,"token":"1","base":"missing-token","ops":[]}}}).to_string().into())).await.unwrap();
+                        }
+                        "view.page" => ws.send(view_reply(&req, &srv_hub, json!({"phase":"recovered"}))).await.unwrap(),
+                        "view.update" => {
+                            let phase = if req["p"]["session"]["sub"] == "s1" { saw_sub = true; "after_sub" } else { "after_dirty" };
+                            ws.send(view_reply(&req, &srv_hub, json!({"phase":phase}))).await.unwrap();
+                            if saw_sub { break; }
+                        }
+                        _ => {}
+                    }
+                }
+                while let Some(Ok(_)) = ws.next().await {}
+            });
+            let mut cfg = test_config();
+            cfg.hub = ws_url;
+            cfg.token_file = tok.0.clone();
+            let mut v = View::fresh(&cfg);
+            let (cmd_tx, mut cmd_rx) = mpsc::channel(32);
+            let (ev_tx, ev_rx) = async_channel::unbounded();
+            let mut queued = VecDeque::new();
+            let sess = tokio::spawn(async move { session(&cfg, &mut cmd_rx, &mut queued, &ev_tx, &mut v, None).await });
+
+            assert_eq!(next_picture(&ev_rx).await["shown"]["phase"], "open");
+            cmd_tx.send(Command::History("c1".into())).await.unwrap();
+            loop {
+                match tokio::time::timeout(Duration::from_secs(5), ev_rx.recv()).await.unwrap().unwrap() {
+                    Event::Older(c, None) if c == "c1" => break,
+                    _ => continue,
+                }
+            }
+            assert_eq!(next_picture(&ev_rx).await["shown"]["phase"], "recovered");
+            assert_eq!(next_picture(&ev_rx).await["shown"]["phase"], "after_dirty");
+            cmd_tx.send(Command::Sub("s1".into())).await.unwrap();
+            assert_eq!(next_picture(&ev_rx).await["shown"]["phase"], "after_sub");
+            drop(cmd_tx);
+            assert!(matches!(sess.await.unwrap().unwrap(), SessionEnd::Quit));
+            server.await.unwrap();
+        });
+    }
+    #[test] fn session_stale_view_page_after_view_open_does_not_flash_old_picture() {
+        let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+        rt.block_on(async {
+            let tok = TempToken::new("stale-page");
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let port = listener.local_addr().unwrap().port();
+            let ws_url = format!("ws://127.0.0.1:{port}");
+            let srv_hub = format!("http://127.0.0.1:{port}");
+            let server = tokio::spawn(async move {
+                let (tcp, _) = listener.accept().await.unwrap();
+                let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+                ws.send(Message::Text(json!({"t":"view","version":1,"renderer":"mobile","generation":"1","epoch":"e1"}).to_string().into())).await.unwrap();
+                let mut opens = 0usize;
+                let mut held_page: Option<Value> = None;
+                while let Some(req) = next_req(&mut ws).await {
+                    match req["m"].as_str().unwrap_or("") {
+                        "view.open" => {
+                            opens += 1;
+                            if opens == 1 {
+                                ws.send(view_reply(&req, &srv_hub, json!({"phase":"init"}))).await.unwrap();
+                            } else if opens == 2 {
+                                ws.send(view_reply(&req, &srv_hub, json!({"phase":"t1_open"}))).await.unwrap();
+                            } else {
+                                if let Some(page_req) = held_page.take() {
+                                    ws.send(view_reply(&page_req, &srv_hub, json!({"phase":"stale_old_page"}))).await.unwrap();
+                                }
+                                ws.send(view_reply(&req, &srv_hub, json!({"phase":"fresh_open"}))).await.unwrap();
+                            }
+                        }
+                        "view.page" if req["p"]["cursor"] == "c1" => { held_page = Some(req); }
+                        "view.update" => {
+                            let phase = if req["p"]["session"]["sub"] == "s2" { "after_sub" } else { "after_dirty" };
+                            ws.send(view_reply(&req, &srv_hub, json!({"phase":phase}))).await.unwrap();
+                            if phase == "after_sub" { break; }
+                        }
+                        _ => {}
+                    }
+                }
+                while let Some(Ok(_)) = ws.next().await {}
+            });
+            let mut cfg = test_config();
+            cfg.hub = ws_url;
+            cfg.token_file = tok.0.clone();
+            let mut v = View::fresh(&cfg);
+            let (cmd_tx, mut cmd_rx) = mpsc::channel(32);
+            let (ev_tx, ev_rx) = async_channel::unbounded();
+            let mut queued = VecDeque::new();
+            let sess = tokio::spawn(async move { session(&cfg, &mut cmd_rx, &mut queued, &ev_tx, &mut v, None).await });
+
+            assert_eq!(next_picture(&ev_rx).await["shown"]["phase"], "init");
+            cmd_tx.send(Command::Select("t1".into())).await.unwrap();
+            assert_eq!(next_picture(&ev_rx).await["shown"]["phase"], "t1_open");
+            cmd_tx.send(Command::History("c1".into())).await.unwrap();
+            tokio::task::yield_now().await;
+            cmd_tx.send(Command::Select("t1".into())).await.unwrap();
+            let p1 = next_picture(&ev_rx).await;
+            assert_ne!(p1["shown"]["phase"], "stale_old_page");
+            assert_eq!(p1["shown"]["phase"], "fresh_open");
+            let p2 = next_picture(&ev_rx).await;
+            assert_eq!(p2["shown"]["phase"], "after_dirty");
+            cmd_tx.send(Command::Sub("s2".into())).await.unwrap();
+            assert_eq!(next_picture(&ev_rx).await["shown"]["phase"], "after_sub");
+            drop(cmd_tx);
+            assert!(matches!(sess.await.unwrap().unwrap(), SessionEnd::Quit));
+            server.await.unwrap();
+        });
     }
 }
 /// The id of a direct request (not a view's): from 2^30, apart from the views' own.
@@ -478,7 +681,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
                     if x["ok"]==true {if let Some(target)=v.saved.take(){v.drawn=true;v.session["sel"]=target["id"].clone();v.target=target;v.restored=Restore::AfterList;v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}}
                     // an update for a view the hub no longer holds (it restarted, or opened another for this connection): opened again, nothing to tell
                     if x["ok"]!=true&&x["error"]["code"]=="STALE_VIEW"&&method!="view.open" {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
-                    if x["ok"]!=true {eprintln!("GPUI_LOG {}",json!({"view_refused":method,"code":x["error"]["code"],"retryable":x["error"]["retryable"]}));if let Some(cursor)=paged {v.older_on=false;let _=events.send(Event::Older(cursor,None)).await;if target==v.target&&!v.view_id.is_empty(){let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;}}let _=events.send(Event::Refused(refused_view_text(&x["error"]))).await;continue;}
+                    if x["ok"]!=true {eprintln!("GPUI_LOG {}",json!({"view_refused":method,"code":x["error"]["code"],"retryable":x["error"]["retryable"]}));if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;if let Some(request)=v.finish_failed_page(&target){sink.send(Message::Binary(wire::encode(&request).into())).await?;}}let _=events.send(Event::Refused(refused_view_text(&x["error"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
                         let c=v.controls.remove(&control).filter(|c|c.done);
@@ -499,9 +702,8 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
                                 eprintln!("GPUI_LOG {{\"delta\":{}}}",Value::String(format!("{error:#}")));
                                 v.bases.clear();v.dirty=true;
                                 if let Some(cursor)=paged {
-                                    v.older_on=false;
                                     let _=events.send(Event::Older(cursor,None)).await;
-                                    if target==v.target&&!v.view_id.is_empty(){let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;}
+                                    if let Some(request)=v.finish_failed_page(&target){sink.send(Message::Binary(wire::encode(&request).into())).await?;}
                                 }
                                 continue;
                             }
@@ -529,7 +731,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
                         v.dirty=true;
                         if let Some(cursor)=paged {
                             let _=events.send(Event::Older(cursor,None)).await;
-                            if target==v.target {let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;} else {v.older_on=false;}
+                            if let Some(request)=v.finish_failed_page(&target){sink.send(Message::Binary(wire::encode(&request).into())).await?;}
                         }
                         continue;
                     }
