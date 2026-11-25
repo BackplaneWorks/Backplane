@@ -155,6 +155,44 @@ pub fn snooze_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group:
         .into_any_element())
 }
 
+/// One hover/row action button on a sidebar thread row, in display order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowAction { Wake, Snooze, Settle, Pin, Unpin }
+
+impl RowAction {
+    /// Icon name in `art::icon` for this action.
+    pub fn icon(self) -> &'static str {
+        match self { Self::Wake => "bell", Self::Snooze => "clock", Self::Settle => "check", Self::Pin | Self::Unpin => "pin" }
+    }
+    /// Tooltip label for this action (drawn through `crate::i18n::trs` by the button builders).
+    pub fn tip(self) -> &'static str {
+        match self { Self::Wake => "Wake", Self::Snooze => "Snooze", Self::Settle => "Settle", Self::Pin => "Pin", Self::Unpin => "Unpin" } /* i18n-ok: tooltip words drawn through trs by the button builders */
+    }
+}
+
+/// Pure planner for a sidebar thread row's hover action strip: emits at most one action per slot, never duplicating Settle or Wake/Snooze.
+pub fn row_actions(t: &Value) -> Vec<RowAction> {
+    let mut out = Vec::with_capacity(3);
+    if !string(t, "wake").is_empty() { out.push(RowAction::Wake); }
+    else if t["snooze"].as_array().is_some_and(|a| !a.is_empty()) { out.push(RowAction::Snooze); }
+    if !string(t, "settle").is_empty() { out.push(RowAction::Settle); }
+    out.push(if t["pinned"].as_bool().unwrap_or(false) { RowAction::Unpin } else { RowAction::Pin });
+    out
+}
+
+/// The row's hover action strip (`Snooze`/`Wake`, `Settle`, `Pin`/`Unpin`), built once from `row_actions(t)` so no icon can appear twice.
+pub fn action_strip(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> Div {
+    let mut strip = div().flex().items_center().gap_1();
+    for act in row_actions(t) {
+        match act {
+            RowAction::Wake | RowAction::Snooze => { strip = strip.children(snooze_button(cx, light, t, group.clone())); }
+            RowAction::Settle => { strip = strip.children(settle_button(cx, light, t, group.clone())); }
+            RowAction::Pin | RowAction::Unpin => { strip = strip.child(pin_button(cx, light, t, group.clone())); }
+        }
+    }
+    strip
+}
+
 /// Settle in one press: a check on a row the hub says can be settled (`settle`: its id), shown under the pointer. None for any other row.
 pub fn settle_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> Option<AnyElement> {
     let value = string(t, "settle"); if value.is_empty() { return None }
@@ -222,5 +260,48 @@ mod tests {
         assert!(!renaming(&Value::Null, "h|t1", "thread"));
         assert_eq!(strip_projects(&d).iter().map(|x| (x.0.as_str(), x.1.as_str())).collect::<Vec<_>>(), [("p1", "P")], "the folded strip's badges: each project by its raw id");
         let mut folded = d.clone(); folded["projects"][0]["closed"] = json!(true); assert!(!rename_in_sidebar(&folded, true), "a folded project shows no row");
+    }
+    #[test] fn row_actions_never_duplicate_settle_or_icons() {
+        let snz = json!([{"label":"1 hour","value":"h|t1|1h"}]);
+        let done = json!({"id":"h|t1","snooze":snz,"settle":"h|t1","pinned":false});
+        let acts = row_actions(&done);
+        assert_eq!(acts, vec![RowAction::Snooze, RowAction::Settle, RowAction::Pin]);
+        assert_eq!(acts.iter().map(|a| a.icon()).collect::<Vec<_>>(), vec!["clock", "check", "pin"]);
+        assert_eq!(acts.iter().map(|a| a.tip()).collect::<Vec<_>>(), vec!["Snooze", "Settle", "Pin"]);
+        assert_eq!(acts.iter().filter(|a| a.icon() == "check").count(), 1);
+
+        let snoozed_pinned = json!({"id":"h|t2","wake":"h|t2|off","snooze":snz,"settle":"h|t2","pinned":true});
+        assert_eq!(row_actions(&snoozed_pinned), vec![RowAction::Wake, RowAction::Settle, RowAction::Unpin], "Wake suppresses Snooze");
+
+        let running = json!({"id":"h|t3","snooze":snz,"settle":"","pinned":false});
+        assert_eq!(row_actions(&running), vec![RowAction::Snooze, RowAction::Pin]);
+
+        let needs = json!({"id":"h|t4","snooze":[],"settle":"","pinned":false});
+        assert_eq!(row_actions(&needs), vec![RowAction::Pin]);
+
+        for has_wake in [false, true] {
+            for has_snooze in [false, true] {
+                for has_settle in [false, true] {
+                    for pinned in [false, true] {
+                        let row = json!({
+                            "id": "h|t",
+                            "wake": if has_wake { "h|t|off" } else { "" },
+                            "snooze": if has_snooze { snz.clone() } else { json!([]) },
+                            "settle": if has_settle { "h|t" } else { "" },
+                            "pinned": pinned,
+                        });
+                        let got = row_actions(&row);
+                        let mut uniq_acts = std::collections::HashSet::new();
+                        let mut uniq_icons = std::collections::HashSet::new();
+                        let mut uniq_tips = std::collections::HashSet::new();
+                        for a in &got {
+                            assert!(uniq_acts.insert(format!("{a:?}")), "duplicate action in {got:?}");
+                            assert!(uniq_icons.insert(a.icon()), "duplicate icon {} in {got:?}", a.icon());
+                            assert!(uniq_tips.insert(a.tip()), "duplicate tip {} in {got:?}", a.tip());
+                        }
+                    }
+                }
+            }
+        }
     }
 }

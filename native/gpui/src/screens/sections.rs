@@ -158,7 +158,6 @@ impl Backplane {
                         // Running lists every project's work in one place, so each row names its project (faint, after the title)
                         // (a chat's section already says what it is: no "Chats" after every title)
                         let sub = if t["chat"] == true { String::new() } else { string(&t, "project") };
-                        if t["settle"].as_str().map_or(false, |v| !v.is_empty()) { let v = string(&t, "settle"); ctl.push(CtlEntry { id: format!("settle:{}", v.rsplit('|').next().unwrap_or("")), label: "Settle".into() /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-settle".into(), v) }); }
                         rows.push(self.side_thread(cx, light, &t, "", if sub.is_empty() { " " } else { &sub }, t["off"] == true, ctl));
                     }
                 }
