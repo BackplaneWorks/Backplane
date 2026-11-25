@@ -1078,17 +1078,17 @@ fn tool_norm(v: &Value) -> Value {
     eprintln!("read took {took:?}, {said} edits went through meanwhile");
     assert!(said > 0, "the read was over before any other request ran: the room is too small to show it");
 }
-struct ToHolder { holder: Arc<Bots>, as_link: String, sent: StdMutex<Vec<String>> }
+pub(super) struct ToHolder { pub(super) holder: Arc<Bots>, pub(super) as_link: String, pub(super) sent: StdMutex<Vec<String>> }
 impl mail::owner::OwnerLink for ToHolder {
     fn post<'a>(&'a self, link: &'a str, body: String) -> Fut<'a, Option<(u16, String)>> {
         Box::pin(async move { self.sent.lock().unwrap().push(link.to_string()); if link != "linkB" { return None } let o: Value = serde_json::from_str(&body).unwrap(); Some(self.holder.owner_received(&self.as_link, &o).await) })
     }
 }
 /// Walk A's outbox until `f` holds for its pending tickets (a walk already going makes ours return at once; the clock only bounds a hang).
-async fn walk_until(b: &Arc<Bots>, f: impl Fn(&[Value]) -> bool) { for _ in 0..800 { b.owner_outbox().await; if f(&b.owner_records().await) { return } tokio::time::sleep(std::time::Duration::from_millis(25)).await } panic!("the outbox never got there") }
-struct Pair { bb: Arc<Bots>, ba: Arc<Bots>, ua: String, ubb: String, uid: String, ame: String, bme: String, hb: crate::hub::TestHub, ha: crate::hub::TestHub }
+pub(super) async fn walk_until(b: &Arc<Bots>, f: impl Fn(&[Value]) -> bool) { for _ in 0..800 { b.owner_outbox().await; if f(&b.owner_records().await) { return } tokio::time::sleep(std::time::Duration::from_millis(25)).await } panic!("the outbox never got there") }
+pub(super) struct Pair { pub(super) bb: Arc<Bots>, pub(super) ba: Arc<Bots>, pub(super) ua: String, pub(super) ubb: String, pub(super) uid: String, pub(super) ame: String, pub(super) bme: String, pub(super) hb: crate::hub::TestHub, pub(super) ha: crate::hub::TestHub }
 /// machine B holds the uberbot's conversation; machine A has a replica of it (same uid, the lease held by B) and the two know each other's links
-async fn owner_pair(tag: &str) -> Pair {
+pub(super) async fn owner_pair(tag: &str) -> Pair {
     std::env::set_var("TZ", "Etc/UTC");
     let (hb, bb, _r) = start(&format!("owner{tag}B"), "").await;
     let r = rpc(&hb, "bots.create", json!({"name":"bub","uber":true})).await; assert_eq!(r["ok"], true);

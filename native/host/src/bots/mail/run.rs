@@ -42,7 +42,7 @@ impl Bots {
         if !th.is_empty() { keys.push(format!("effort.{th}")); for p in ["claude", "codex"] { keys.push(format!("account.thread.{th}.{p}")) } }
         for k in keys { if let Some(v) = self.hub.setting(&k).await { set.insert(k, v); } }
         let m = self.hub.model().await;
-        let threads = m.threads.iter().map(|(k, t)| (k.clone(), Th { title: t.title.clone(), project: t.project.clone(), provider: t.provider.clone(), model: t.model.clone(), worktree: t.worktree.clone(), turn: t.turn.clone() })).collect();
+        let threads = m.threads.iter().map(|(k, t)| (k.clone(), Th { title: t.title.clone(), project: t.project.clone(), provider: t.provider.clone(), model: t.model.clone(), worktree: t.worktree.clone(), turn: t.turn.clone(), last_entry: t.last_entry.clone(), activity: t.activity })).collect();
         let roots = m.projects.iter().map(|(k, p)| (k.clone(), p.root.clone())).collect();
         let recent = if th.is_empty() { vec![] } else { m.page(&self.hub.store, &th, 0, 32).map(|p| p.rows.into_iter().filter(|r| r.kind == "msg" && r.thread == th).map(|r| r.text).collect()).unwrap_or_default() };
         let mut last = std::collections::HashMap::new();
@@ -79,7 +79,7 @@ impl Bots {
     }
     /// Mail.route for a header just filed
     pub async fn route_body(self: &Arc<Self>, body: Body) {
-        let report: Vec<String> = super::done::triage_end_thread(&body.mail.id).into_iter().collect();
+        let report: Vec<String> = super::done::triage_end_thread_of_hdr(&body.mail).into_iter().collect();
         let outs = self.decide(&report, |c| c.route(&body)).await; self.perform(outs).await;
         self.arm_done_timer().await;
     }

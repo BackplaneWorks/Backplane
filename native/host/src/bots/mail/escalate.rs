@@ -238,6 +238,9 @@ impl<'a> Ctx<'a> {
     pub fn triage_thread_end(&mut self, th: &str, state: &str) -> Step {
         let tt = self.w.triage_thread();
         if tt.is_empty() || th == tt || self.w.managed(th) || self.run_is(th) { return Step::none() }
+        let title = self.th(th).title;
+        let reply = self.f.last.get(th).map(|l| l.0.trim()).unwrap_or("");
+        let cur_tok = self.thread_turn_token(th);
         if state == "completed" {
             let ub = self.w.uber_bot();
             let in_list = |key: &str| {
@@ -245,30 +248,39 @@ impl<'a> Ctx<'a> {
                     .and_then(|v| v.as_array().cloned())
                     .map_or(false, |xs| xs.iter().any(|i| i["thread"].as_str() == Some(th)))
             };
-            let last_at: u64 = self.setting(&format!("triage.end.last.{th}"), "").parse().unwrap_or(0);
-            if in_list(&super::done::batch_key(&ub))
-                || in_list(&super::done::pending_key(&ub))
-                || (last_at > 0 && self.now.saturating_sub(last_at) < TRIAGE_END_COOLDOWN)
-            {
-                return Step::none();
+            if in_list(&super::done::batch_key(&ub)) || in_list(&super::done::pending_key(&ub)) {
+                return self.done_refresh_in_place(&ub, th, &title, reply);
+            }
+            let last_val = self.setting(&format!("triage.end.last.{th}"), "");
+            if !last_val.is_empty() {
+                let (last_at, last_tok) = last_val.split_once(':')
+                    .map(|(a, t)| (a.parse::<u64>().unwrap_or(0), t))
+                    .unwrap_or_else(|| (last_val.parse::<u64>().unwrap_or(0), ""));
+                let same = if !last_tok.is_empty() && !cur_tok.is_empty() {
+                    last_tok == cur_tok
+                } else {
+                    last_at > 0 && self.now.saturating_sub(last_at) < TRIAGE_END_COOLDOWN
+                };
+                if same {
+                    return Step::none();
+                }
             }
         }
-        let title = self.th(th).title;
         let uri = ref_uri("thread", th);
         let head_line = if title.trim().is_empty() {
             format!("Thread {state}: {uri}")
         } else {
             format!("Thread {state}: {} ({uri})", title.trim())
         };
-        let reply = self.f.last.get(th).map(|l| l.0.trim()).unwrap_or("");
         let text = if reply.is_empty() {
             head_line
         } else {
             format!("{head_line}\n{}", take_chars(reply, 2000))
         };
-        let op = self.operational(Origin::new(&self.w.mail_addr(th), "thread", ""), &tt, &text, &format!("triage-end:{th}:{}", self.now), "fyi", vec![]);
+        let op = self.operational(Origin::new(&self.w.mail_addr(th), "thread", ""), &tt, &text, &format!("triage-end:{th}:{}-{}", self.now, self.seq), "fyi", vec![]);
         if state == "completed" {
-            let cs = vec![set(format!("triage.end.last.{th}"), &self.now.to_string(), self.now)];
+            let val = if cur_tok.is_empty() { self.now.to_string() } else { format!("{}:{cur_tok}", self.now) };
+            let cs = vec![set(format!("triage.end.last.{th}"), &val, self.now)];
             self.replay(&cs);
             Step { cs, outs: vec![] }.cat(op)
         } else {

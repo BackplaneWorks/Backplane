@@ -34,7 +34,7 @@ impl Step {
 
 /// A thread as the hub's model knows it (the fields routing reads)
 #[derive(Clone, Debug, Default)]
-pub struct Th { pub title: String, pub project: String, pub provider: String, pub model: String, pub worktree: String, pub turn: String }
+pub struct Th { pub title: String, pub project: String, pub provider: String, pub model: String, pub worktree: String, pub turn: String, pub last_entry: String, pub activity: u64 }
 /// What the hub model gives a step: names, the threads, project roots, the coordinator's own recent messages
 #[derive(Default)]
 pub struct Facts {
