@@ -165,6 +165,7 @@ impl View {
             if self.offered.len()>64 {self.offered.clear();}
         }
         self.pending.insert(self.next,(self.revision,self.target.clone(),method.into()));
+        if method=="view.open" {self.clear_older();}
         if self.older_on {self.older_reqs.insert(self.next);if self.older_reqs.len()>256 {self.older_reqs.clear();}}
         if self.sent.len()>64 {self.sent.clear();}
         self.sent.insert(self.next,std::time::Instant::now());
@@ -173,12 +174,43 @@ impl View {
         if let Some(d)=self.session["sel"].as_str().and_then(|s|self.session["drafts"][s].as_str()).filter(|d|!d.is_empty()) {self.req_draft.insert(self.next,d.to_string());}
         json!({"id":self.next,"m":method,"p":p})
     }
+    fn clear_older(&mut self) {
+        self.older_on=false;
+        self.want_page=None;
+        if let Some((page_id,_))=self.paging.take() {self.older_reqs.insert(page_id);}
+    }
     /// view.page: a view stays on the page it asked for, so a history page is always followed by this with cursor "", the newest again.
     fn page(&mut self, cursor:&str)->Value {
         if cursor.is_empty() {self.older_on=false;}
         let request=self.request("view.page",json!({"cursor":cursor,"anchor":{"id":"","offset":0}}));
         if !cursor.is_empty() {self.paging=Some((self.next,cursor.to_string()));self.older_on=true;}
         request
+    }
+}
+#[cfg(test)] mod older_tests { use super::*;
+    fn test_config() -> Config {
+        Config { hub: "ws://127.0.0.1:0".into(), token_file: PathBuf::new(), exit_after: None, script: None, swatches: false, gallery: false, fonts: false, solid_demo: None, theme: None, paired: false, unpaired: false, pair_link: None, pending: false, launched: false }
+    }
+    #[test] fn view_open_clears_sticky_older_state_and_tracks_paging_requests() {
+        let mut v = View::fresh(&test_config());
+        let page_req = v.page("c1");
+        let page_id = page_req["id"].as_u64().unwrap();
+        assert!(v.older_on);
+        assert!(v.paging.is_some());
+        assert!(!v.older_reqs.contains(&page_id));
+        let during_req = v.request("view.update", json!({}));
+        let during_id = during_req["id"].as_u64().unwrap();
+        assert!(v.older_reqs.contains(&during_id));
+        let open_req = v.request("view.open", json!({}));
+        let open_id = open_req["id"].as_u64().unwrap();
+        assert!(!v.older_on);
+        assert!(v.paging.is_none());
+        assert!(v.want_page.is_none());
+        assert!(v.older_reqs.contains(&page_id));
+        assert!(v.older_reqs.contains(&during_id));
+        assert!(!v.older_reqs.contains(&open_id));
+        let after_req = v.request("view.update", json!({}));
+        assert!(!v.older_reqs.contains(&after_req["id"].as_u64().unwrap()));
     }
 }
 /// The id of a direct request (not a view's): from 2^30, apart from the views' own.
@@ -446,7 +478,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
                     if x["ok"]==true {if let Some(target)=v.saved.take(){v.drawn=true;v.session["sel"]=target["id"].clone();v.target=target;v.restored=Restore::AfterList;v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}}
                     // an update for a view the hub no longer holds (it restarted, or opened another for this connection): opened again, nothing to tell
                     if x["ok"]!=true&&x["error"]["code"]=="STALE_VIEW"&&method!="view.open" {if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;continue;}
-                    if x["ok"]!=true {eprintln!("GPUI_LOG {}",json!({"view_refused":method,"code":x["error"]["code"],"retryable":x["error"]["retryable"]}));if let Some(cursor)=paged {let _=events.send(Event::Older(cursor,None)).await;}let _=events.send(Event::Refused(refused_view_text(&x["error"]))).await;continue;}
+                    if x["ok"]!=true {eprintln!("GPUI_LOG {}",json!({"view_refused":method,"code":x["error"]["code"],"retryable":x["error"]["retryable"]}));if let Some(cursor)=paged {v.older_on=false;let _=events.send(Event::Older(cursor,None)).await;if target==v.target&&!v.view_id.is_empty(){let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;}}let _=events.send(Event::Refused(refused_view_text(&x["error"]))).await;continue;}
                     let mut r:Value=x["result"].take();
                     if let Some(control)=r["controlId"].as_u64() {
                         let c=v.controls.remove(&control).filter(|c|c.done);
@@ -465,7 +497,13 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
                             Ok((full,token,body))=>{v.bases.keep_for(&target,token,body);r=full;},
                             Err(error)=>{ // fail this reply and ask for the whole view next time
                                 eprintln!("GPUI_LOG {{\"delta\":{}}}",Value::String(format!("{error:#}")));
-                                v.bases.clear();v.dirty=true;continue;
+                                v.bases.clear();v.dirty=true;
+                                if let Some(cursor)=paged {
+                                    v.older_on=false;
+                                    let _=events.send(Event::Older(cursor,None)).await;
+                                    if target==v.target&&!v.view_id.is_empty(){let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;}
+                                }
+                                continue;
                             }
                         }
                     }
@@ -491,7 +529,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
                         v.dirty=true;
                         if let Some(cursor)=paged {
                             let _=events.send(Event::Older(cursor,None)).await;
-                            if target==v.target {let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;}
+                            if target==v.target {let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;} else {v.older_on=false;}
                         }
                         continue;
                     }

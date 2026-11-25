@@ -374,6 +374,8 @@ impl Backplane {
     /// parts and boards follow when the hub answers (screens::projects::ask_home).
     /// A viewer open beside it follows: it shows this project's page of the same kind, not the last thread's (projects::page_view).
     pub fn open_project(&mut self,pid:String,cx:&mut Context<Self>){screens::projects::ask_home(self,&pid);
+        let key=screens::projects::nav_key(&self.data,&pid);
+        if !key.is_empty(){self.go("project-page",key,cx);}
         let follow=screens::viewer::is_open(&self.data["thread"]).then(||screens::viewer::active_kind(&self.data["thread"]["viewer"],None)).and_then(|k|screens::projects::page_view(&self.data,Some(&pid),&self.selected,&k));
         self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();
         if let Some((t,k))=follow {self.page_viewer(t,k,cx);}}
