@@ -122,22 +122,6 @@ pub fn chip(d: Stateful<Div>, light: bool, label: String, id: impl Into<SharedSt
         .key_context("Copyable").on_action(move |_: &CopyIt, window, cx| copy(&i2, &t2, window, cx))
 }
 
-/// The pieces of a plain text to copy, as the hub lists them ({text, cmd}: a room's post, a notice): each one shown in code type (masked in
-/// streamer mode) with its copy button, and Run in terminal beside a command. None when there are none.
-pub fn pieces_with(light: bool, key: &str, list: &serde_json::Value, app: &WeakEntity<Backplane>, cx: &mut App) -> Option<Div> {
-    let c = |n: &str| theme::color(light, n);
-    let items: Vec<AnyElement> = list.as_array()?.iter().take(16).enumerate().map(|(i, k)| {
-        let (t, cmd) = (k["text"].as_str().unwrap_or("").to_string(), k["cmd"] == true); let id = format!("{key}-{i}");
-        let shown = div().px_1().font(art::mono_font()).text_size(crate::scale::tpx(11.)).text_color(c("text")).bg(c("raise")).border_1().border_color(c("line")).max_w(px(560.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
-            .child(crate::streamer::same_width(t.lines().next().unwrap_or(""), false).unwrap_or_else(|| t.lines().next().unwrap_or("").to_string()) + if t.contains('\n') { " …" } else { "" });
-        div().flex().items_center().gap_1().min_w_0()
-            .child(value(light, id.clone(), shown, t.clone(), true, cx))
-            .when(cmd, |d| d.child(run_button(light, id.clone(), t.clone(), false, app.clone(), cx))).into_any_element()
-    }).collect();
-    (!items.is_empty()).then(|| div().flex().flex_col().gap_1().py_1().children(items))
-}
-pub fn pieces(cx: &mut Context<Backplane>, light: bool, key: &str, list: &serde_json::Value) -> Option<Div> { let app = cx.entity().downgrade(); pieces_with(light, key, list, &app, cx) }
-
 /// A value shown to be copied (a path, an id, a link, a pairing code): `shown` (masked in streamer mode by the caller, or the text itself), and
 /// its copy button, which appears while the pointer is over the row or the button has the keyboard. `always`: the button stays (a touch screen's way).
 pub fn value(light: bool, id: impl Into<SharedString>, shown: impl IntoElement, text: impl Into<SharedString>, always: bool, cx: &mut App) -> Stateful<Div> {

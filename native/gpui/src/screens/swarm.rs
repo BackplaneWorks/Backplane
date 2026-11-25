@@ -1,11 +1,11 @@
 //! Swarms (docs/SWARM.md) from the hub's screen model: a project's swarm rows (`projects[].swarms`), the swarm page (a room page with
 //! `bot.swarm`: member chips, the goal and state, the controls, the add picker, the board as one feed, the post box) and the New swarm form
 //! (`newSwarm`). Every press is a view action the hub's presenter maps (present/swarmform.rs, `swarm-act`); nothing here decides what a swarm does.
-use super::settings::{flush_fields, Field, FieldSlot};
+use super::{md::{self, Block, Span}, settings::{flush_fields, Field, FieldSlot}};
 use crate::{hub::Command, i18n::{tf, trs}, script::{Ctl, CtlEntry}, string, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::{collections::HashMap, rc::Rc};
 
 const SEP: char = '\u{1f}';
 fn arr<'a>(v: &'a Value, k: &str) -> impl Iterator<Item = &'a Value> { v[k].as_array().into_iter().flatten() }
@@ -209,7 +209,51 @@ fn picks(cx: &mut Context<Backplane>, light: bool, id: &str, row: &Value, pa: &'
 
 struct Who { color: Option<Rgba> }
 thread_local! { /** the board's scroll, the swarm it shows and how many posts it last drew */ static BOARD: std::cell::RefCell<(ScrollHandle, String, usize)> = std::cell::RefCell::new((ScrollHandle::new(), String::new(), 0)); }
-fn post_el(light: bool, p: &Value, who: &HashMap<String, Who>, names: &HashMap<String, String>, claims: &HashMap<String, String>, app: &WeakEntity<crate::Backplane>, cx: &mut App) -> AnyElement {
+
+fn highlight_span_mentions(spans: &mut Vec<Span>, mentions: &[String], names: &HashMap<String, String>) {
+    if mentions.is_empty() { return }
+    let mut out = Vec::with_capacity(spans.len());
+    for s in spans.drain(..) {
+        if s.style.code || s.style.kbd || s.style.link.is_some() || s.style.bold { out.push(s); continue }
+        let ranges = mention_ranges(&s.text, mentions, names);
+        if ranges.is_empty() { out.push(s); continue }
+        let mut at = 0usize;
+        for r in ranges {
+            if r.start > at { out.push(Span { text: s.text[at..r.start].to_string(), style: s.style.clone() }); }
+            let mut st = s.style.clone(); st.bold = true;
+            out.push(Span { text: s.text[r.clone()].to_string(), style: st });
+            at = r.end;
+        }
+        if at < s.text.len() { out.push(Span { text: s.text[at..].to_string(), style: s.style }); }
+    }
+    *spans = out;
+}
+
+fn highlight_mentions(blocks: &mut [Block], mentions: &[String], names: &HashMap<String, String>) {
+    if mentions.is_empty() { return }
+    for b in blocks {
+        match b {
+            Block::Para(s) | Block::Heading(_, s) | Block::Quote(s) => highlight_span_mentions(s, mentions, names),
+            Block::List { items, .. } => for it in items { highlight_span_mentions(&mut it.spans, mentions, names); highlight_mentions(&mut it.sub, mentions, names); },
+            Block::Callout(_, bs) | Block::Aligned(_, bs) => highlight_mentions(bs, mentions, names),
+            Block::Details { summary, blocks, .. } => { highlight_span_mentions(summary, mentions, names); highlight_mentions(blocks, mentions, names); }
+            Block::Table { head, rows } => { for c in head { highlight_span_mentions(c, mentions, names); } for r in rows { for c in r { highlight_span_mentions(c, mentions, names); } } }
+            Block::Flow(parts, _) => for p in parts { if let md::Inline::Text(s) = p { highlight_span_mentions(s, mentions, names); } },
+            Block::Code(_, _, _) | Block::Rule | Block::Anchor(_) => {}
+        }
+    }
+}
+
+fn mentions_fingerprint(mentions: &[String], names: &HashMap<String, String>) -> u64 {
+    if mentions.is_empty() { return 0; }
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    mentions.len().hash(&mut h);
+    for m in mentions { m.hash(&mut h); names.get(m).hash(&mut h); }
+    h.finish()
+}
+
+fn post_el(cx: &mut Context<Backplane>, light: bool, idx: usize, p: &Value, who: &HashMap<String, Who>, names: &HashMap<String, String>, claims: &HashMap<String, String>, reg: &super::timeline::Reg, parsed: &mut super::timeline::ParseCache) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let text = string(p, "text");
     if p["guard"] == true {
@@ -222,26 +266,35 @@ fn post_el(light: bool, p: &Value, who: &HashMap<String, Who>, names: &HashMap<S
     let edge = col.unwrap_or(c("rule"));
     let name = if mine { trs("You") } else { string(p, "from") };
     let mentions: Vec<String> = arr(p, "mentions").filter_map(|m| m.as_str().map(str::to_string)).collect();
-    let hl = mention_ranges(&text, &mentions, names).into_iter().map(|r| (r, HighlightStyle { font_weight: Some(FontWeight::BOLD), color: Some(c("text").into()), ..Default::default() })).collect::<Vec<_>>();
-    let body = StyledText::new(text).with_highlights(hl);
+    let raw_id = string(p, "id");
+    let pid = if raw_id.is_empty() { format!("post-{idx}") } else { format!("post-{raw_id}") };
+    reg.borrow_mut().enter(idx, &pid);
+    let mhash = mentions_fingerprint(&mentions, names);
+    let blocks_rc = match p["blocks"].as_array() {
+        Some(b) if !b.is_empty() => parsed.get_with(&pid, &text, b, mhash, |bs| highlight_mentions(bs, &mentions, names)),
+        _ => {
+            let mut bs = md::plain_fallback(&text);
+            highlight_mentions(&mut bs, &mentions, names);
+            Rc::new(bs)
+        }
+    };
+    let body_els = super::timeline::blocks(cx, reg, light, &blocks_rc, &pid);
     let mut head = div().flex().items_center().gap_2().child(div().font_weight(FontWeight::BOLD).text_color(edge).child(name));
     for t in &tags { head = head.child(div().px_1().text_size(crate::scale::tpx(10.)).border_1().border_color(c("line")).text_color(c("dim")).child(trs(t))); }
     head = head.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(string(p, "ago")));
     let held = string(p, "held");
     if !held.is_empty() { head = head.child(div().text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(tf("gpui.swarm.held", &[("why", held.clone().into())]))); }
     let files: Vec<String> = arr(p, "files").filter_map(|f| f.as_str().map(str::to_string)).collect();
-    let claim = claims.get(&string(p, "id"));
+    let claim = claims.get(&raw_id);
     let files_el = (!files.is_empty()).then(|| div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_1().text_size(crate::scale::tpx(11.)).bg(c("raise")).border_1().border_color(c("line")).child(f)))
         .children(claim.filter(|s| s.as_str() == "waiting").map(|_| div().px_1().text_size(crate::scale::tpx(11.)).text_color(c("waiting")).border_1().border_color(c("waiting")).child(trs("waiting")))));
-    // the post's code (the hub's `copy`, md/copy.rs): each piece with its copy button, and Run in terminal for a command
-    let copies_el = super::copyable::pieces_with(light, &format!("post-{}", string(p, "id")), &p["copy"], app, cx);
-    let d = div().flex().flex_col().gap_1().pl_3().pr_3().py_2().border_l_2().border_color(edge).child(head).child(div().text_color(c("text")).child(body)).children(copies_el).children(files_el);
+    let d = div().flex().flex_col().gap_1().pl_3().pr_3().py_2().border_l_2().border_color(edge).child(head).child(div().flex().flex_col().gap_1().text_color(c("text")).children(body_els)).children(files_el);
     let d = if synth { d.mt_2().mb_2().border_1().border_l_4().bg(c("raise")) } else { d };
     d.when(!held.is_empty(), |d| d.opacity(0.5)).into_any_element()
 }
 
 /// The swarm page: what a room page is when the hub sends `swarm` with it.
-pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
+pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value, reg: &super::timeline::Reg, parsed: &mut super::timeline::ParseCache) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let sw = &bot["swarm"]; let room = &sw["room"];
     let ended = sw["ended"] == true;
@@ -300,16 +353,23 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let h = BOARD.with(|b| { let mut b = b.borrow_mut(); let (n, key) = (posts.len(), string(room, "id"));
         let at_end = { let (o, m) = (b.0.offset().y, b.0.max_offset().height); -o >= m - px(40.) };
         if b.1 != key || (b.2 != n && at_end) { b.0.scroll_to_bottom(); } b.1 = key; b.2 = n; b.0.clone() });
-    let mut list = div().id("swarm-board").flex_1().min_h_0().overflow_y_scroll().track_scroll(&h).flex().flex_col().gap_1().py_2();
+    let mut list = div().id("swarm-board").flex_1().min_h_0().overflow_y_scroll().track_scroll(&h).flex().flex_col().gap_1().py_2()
+        .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_down(e, w, cx)))
+        .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.timeline_down(e, w, cx)))
+        .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx)))
+        .on_mouse_up(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_up(e, w, cx)))
+        .on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_up(e, w, cx)));
     if posts.is_empty() { list = list.child(div().px_3().text_color(c("dim")).child(trs("No posts yet."))); }
-    let app = cx.entity().downgrade();
-    for p in posts { list = list.child(post_el(light, p, &who, &names, &claims, &app, cx)); }
+    for (pi, p) in posts.into_iter().enumerate() { list = list.child(post_el(cx, light, pi, p, &who, &names, &claims, reg, parsed)); }
+    let hover = reg.borrow().hover.clone();
+    let board = div().flex_1().min_h_0().relative().flex().flex_col().child(list)
+        .when(!hover.is_empty(), |d| d.child(div().absolute().left_0().bottom_0().max_w_full().px_2().py_px().bg(c("raise")).border_t_1().border_r_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).overflow_hidden().whitespace_nowrap().child(hover)));
     let foot = if ended { div().px_3().py_2().border_t_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("This swarm is over.")).into_any_element() } else {
         div().flex().gap_2().items_end().p_3().border_t_1().border_color(c("line"))
             .child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).children(fields.get("rpost").map(|s| s.input.clone())))
             .child(div().id("talk-send").px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Send")).on_click(cx.listener(|this, _, _, cx| super::bots::send_post(this, "rpost", "room-post", cx)))).into_any_element()
     };
-    div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(head).child(line).child(chips).children(picker).child(list).child(foot).into_any_element()
+    div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(head).child(line).child(chips).children(picker).child(board).child(foot).into_any_element()
 }
 
 // ---- New swarm ----

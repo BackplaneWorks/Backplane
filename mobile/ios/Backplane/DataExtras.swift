@@ -265,8 +265,7 @@ struct DataRoomView: View {
                     ForEach(posts) { p in
                         VStack(alignment: .leading, spacing: 2) {
                             Text(p.from.isEmpty ? Tr.t("you") : p.from).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent)
-                            DLinkText(text: p.text)
-                            DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(p.copy, hubHasCopy: client.has("copy")), text: p.text))
+                            DataMarkdown(text: p.text, copy: Copyable.list(p.copy, hubHasCopy: client.has("copy")))
                         }.accessibilityElement(children: .contain).accessibilityIdentifier("data.room.post")
                     }
                 }.padding()

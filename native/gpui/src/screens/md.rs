@@ -331,6 +331,68 @@ pub fn parse(nodes: &[Value]) -> Vec<Block> {
 }
 
 pub fn plain(spans: &[Span]) -> String { spans.iter().map(|s| s.text.as_str()).collect() }
+
+/// Fallback Markdown blocks when an older hub sends raw `text` without rendered `blocks` (a room post or notice):
+/// extracts fenced ```` ``` ```` blocks into `Block::Code` and inline `` `...` `` spans into code-styled `Span`s (with `linkify` on plain runs).
+pub fn plain_fallback(text: &str) -> Vec<Block> {
+    let mut blocks = Vec::new();
+    let mut para = Vec::<String>::new();
+    let flush_para = |para: &mut Vec<String>, blocks: &mut Vec<Block>| {
+        if para.is_empty() { return }
+        let joined = std::mem::take(para).join("\n");
+        let spans = fallback_inline(&joined);
+        if !spans.is_empty() { blocks.push(Block::Para(spans)); }
+    };
+    let mut lines = text.replace("\r\n", "\n").split('\n').map(str::to_string).collect::<Vec<_>>().into_iter();
+    while let Some(line) = lines.next() {
+        let t = line.trim_start();
+        if let Some(info) = t.strip_prefix("```") {
+            flush_para(&mut para, &mut blocks);
+            let lang = info.split(|c: char| c.is_whitespace() || c == ',' || c == '{').next().unwrap_or("").to_ascii_lowercase();
+            let mut code_lines = Vec::new();
+            for next in lines.by_ref() {
+                if next.trim_start().starts_with("```") { break }
+                code_lines.push(next);
+            }
+            let code = code_lines.join("\n");
+            let tokens = if matches!(lang.as_str(), "text" | "txt" | "plain" | "console" | "output") { vec![(0..code.len(), Tok::Plain)] } else { highlight(&code) };
+            let is_cmd = matches!(lang.as_str(), "sh" | "bash" | "shell" | "zsh" | "fish" | "ksh" | "shellscript" | "powershell" | "pwsh" | "ps1" | "ps" | "cmd" | "bat" | "batch" | "nu" | "nushell");
+            blocks.push(Block::Code(code, tokens, is_cmd));
+        } else if t.trim().is_empty() {
+            flush_para(&mut para, &mut blocks);
+        } else {
+            para.push(line);
+        }
+    }
+    flush_para(&mut para, &mut blocks);
+    blocks
+}
+
+fn fallback_inline(s: &str) -> Vec<Span> {
+    let mut out = Vec::new();
+    let mut rest = s;
+    while !rest.is_empty() {
+        let Some(i) = rest.find('`') else { out.extend(linkify(rest)); break };
+        if i > 0 { out.extend(linkify(&rest[..i])); }
+        let inner = &rest[i + 1..];
+        if let Some(end) = inner.find('`') {
+            let code = &inner[..end];
+            if !code.is_empty() {
+                let mut st = Style { code: true, ..Default::default() };
+                if let Some(linked) = linkify(code).into_iter().find(|sp| sp.style.link.is_some()) {
+                    if linked.text == code { st.link = linked.style.link; }
+                }
+                out.push(Span { text: code.to_string(), style: st });
+            }
+            rest = &inner[end + 1..];
+        } else {
+            out.extend(linkify(&rest[i..]));
+            break;
+        }
+    }
+    out
+}
+
 /// The text of a block as copied: one line per item or row, tabs between cells.
 pub fn block_text(b: &Block) -> String {
     match b {
@@ -527,6 +589,15 @@ mod link_tests {
         assert!(segs.iter().any(|s| matches!(s, UserSeg::Span(sp) if sp.text == "https://x.io?a=1&claude/opus" && sp.style.link.is_some())));
         let tag_ref = ModelChip { word: "&opencode/llama3".into(), label: "Llama 3".into() };
         assert!(!user_segments("try &opencode/llama3:8b", &[], &[tag_ref]).iter().any(|s| matches!(s, UserSeg::Model(_))));
+    }
+    #[test] fn plain_fallback_parses_inline_code_file_links_and_fenced_blocks() {
+        let bs = plain_fallback("See `EPC2306` and `/etc/hosts`:\n```bash\necho ok\n```\nDone.");
+        assert_eq!(bs.len(), 3);
+        let Block::Para(s) = &bs[0] else { panic!("{bs:?}") };
+        assert!(s.iter().any(|sp| sp.text == "EPC2306" && sp.style.code));
+        assert!(s.iter().any(|sp| sp.text == "/etc/hosts" && sp.style.code && sp.style.link.as_ref().is_some_and(|l| l.file)));
+        assert!(matches!(&bs[1], Block::Code(c, _, true) if c == "echo ok"));
+        assert!(matches!(&bs[2], Block::Para(sp) if plain(sp) == "Done."));
     }
 }
 

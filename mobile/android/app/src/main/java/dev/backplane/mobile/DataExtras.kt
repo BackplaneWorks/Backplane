@@ -322,7 +322,7 @@ private fun RoomBody(room: DataClient.Room, back: () -> Unit, chatTerm: ChatTerm
     Column(Modifier.fillMaxSize()) {
         DBar("#${room.name}", back) { ChatTermButton(chatTerm) }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("room.list"), contentPadding = PaddingValues(vertical = 8.dp)) {
-            items(posts.size) { i -> val p = posts[i]; Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { DMono(p.from.ifEmpty { Msg.android_you }, dcs.primary, 11, bold = true); LinkText(p.text, "", color = dcs.onSurface, size = 13); CopyPieces(CopyLookup.of(p.copy, DataClient.has("copy")).pieces(p.text), "room.copy.$i") } }
+            items(posts.size) { i -> val p = posts[i]; Column(Modifier.padding(horizontal = 12.dp, vertical = 5.dp)) { DMono(p.from.ifEmpty { Msg.android_you }, dcs.primary, 11, bold = true); MdText(p.text, copy = CopyLookup.of(p.copy, DataClient.has("copy"))) } }
         }
         DLine()
         Row(Modifier.fillMaxWidth().padding(8.dp), verticalAlignment = Alignment.Bottom) {

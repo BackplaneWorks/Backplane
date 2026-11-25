@@ -151,6 +151,32 @@ enum Copyable {
         // the hub's list decides: a span it names (with its cmd), nothing else
         return found.compactMap { f in h.first(where: { $0.text == f.text }) }
     }
+
+    static let copyScheme = "bpcopy"
+    static let runScheme = "bprun"
+
+    static func copyURL(_ text: String) -> URL? {
+        var c = URLComponents(); c.scheme = copyScheme; c.host = "v"
+        c.queryItems = [URLQueryItem(name: "t", value: exact(text))]
+        return c.url
+    }
+    static func copyFrom(_ url: URL) -> String? {
+        guard url.scheme?.lowercased() == copyScheme else { return nil }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "t" })?.value
+    }
+    static func runURL(_ cmd: String) -> URL? {
+        var c = URLComponents(); c.scheme = runScheme; c.host = "v"
+        c.queryItems = [URLQueryItem(name: "c", value: exact(cmd))]
+        return c.url
+    }
+    static func runFrom(_ url: URL) -> String? {
+        guard url.scheme?.lowercased() == runScheme else { return nil }
+        return URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first(where: { $0.name == "c" })?.value
+    }
+    static func isInlineCommand(_ text: String, hub: [DCopyPiece]?) -> Bool {
+        if let h = hub { return h.contains { $0.text == text && $0.cmd } }
+        return inlineKind(text) == "cmd"
+    }
 }
 
 enum ChatTerm {

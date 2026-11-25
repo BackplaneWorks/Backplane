@@ -275,8 +275,7 @@ private fun SwarmPost(p: DSwarmPost, claims: List<DSwarmClaim>) {
                     Spacer(Modifier.weight(1f)); DMono(dAgo(p.at), dfaint, 10)
                 }
                 if (p.guard) Text(p.text, color = dfaint, fontFamily = BpMono, fontSize = 12.sp)
-                else LinkText(p.text, p.thread, color = dcs.onSurface, size = 13)
-                if (!p.guard) CopyPieces(CopyLookup.of(p.copy, DataClient.has("copy")).pieces(p.text), "swarm.copy.${p.id}")
+                else MdText(p.text, thread = p.thread, copy = CopyLookup.of(p.copy, DataClient.has("copy")))
                 if (p.files.isNotEmpty()) {
                     val mark = SwarmUi.claim(p, claims)
                     Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {

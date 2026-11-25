@@ -68,5 +68,13 @@ check(ChatTerm.key(thread: "t1") == "t1" && ChatTerm.key(room: "r1") == "room:r1
 let d = try! JSONDecoder().decode([DCopyPiece].self, from: Data(#"[{"text":"git status","cmd":true},{"text":"/etc/hosts"}]"#.utf8))
 check(d == [P("git status", true), P("/etc/hosts", false)], "decodes the hub's pieces", d)
 
+// in-place copy and run URLs
+let cu = Copyable.copyURL("EPC2306\n")
+check(cu != nil && Copyable.copyFrom(cu!) == "EPC2306", "copyURL round-trips exact text")
+let ru = Copyable.runURL("git status\n")
+check(ru != nil && Copyable.runFrom(ru!) == "git status", "runURL round-trips exact command")
+check(Copyable.isInlineCommand("git status", hub: nil) && !Copyable.isInlineCommand("EPC2306", hub: nil), "inline command detection")
+check(Copyable.isInlineCommand("git status", hub: hub) && !Copyable.isInlineCommand("make", hub: hub), "inline command honors hub list")
+
 print("copyable: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

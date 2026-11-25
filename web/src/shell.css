@@ -873,12 +873,71 @@ button.bp-proj-quick:hover { color: var(--accent); }
 .bp-md-h { margin: 10px 0 6px; font-size: 14px; font-weight: 700; }
 .bp-md-list { margin: 4px 0 8px; padding-left: 20px; }
 .bp-md-quote { margin: 4px 0 8px; padding: 4px 10px; border-left: 2px solid var(--rule); color: var(--dim); }
+.bp-code-wrap,
+.bp-path-wrap {
+  position: relative;
+  display: inline;
+}
 .bp-code-inline {
   font-family: var(--mono);
   font-size: 12px;
   background: var(--raise);
   border: 1px solid var(--line);
   padding: 0 4px;
+  cursor: pointer;
+}
+.bp-md-path {
+  font-family: var(--mono);
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: var(--line);
+  cursor: pointer;
+}
+.bp-code-wrap:hover .bp-code-inline,
+.bp-code-wrap.is-copied .bp-code-inline {
+  border-color: var(--faint);
+}
+.bp-path-wrap:hover .bp-md-path,
+.bp-path-wrap.is-copied .bp-md-path {
+  text-decoration-color: var(--accent);
+}
+.bp-inline-copy {
+  position: absolute;
+  top: 50%;
+  left: 100%;
+  transform: translateY(-50%);
+  margin-left: 2px;
+  z-index: 5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--dim);
+  cursor: pointer;
+  user-select: none;
+  opacity: 0;
+  pointer-events: none;
+}
+.bp-code-wrap:hover .bp-inline-copy,
+.bp-code-wrap:focus-within .bp-inline-copy,
+.bp-code-wrap.is-copied .bp-inline-copy,
+.bp-path-wrap:hover .bp-inline-copy,
+.bp-path-wrap:focus-within .bp-inline-copy,
+.bp-path-wrap.is-copied .bp-inline-copy {
+  opacity: 1;
+  pointer-events: auto;
+}
+.bp-inline-copy:hover {
+  color: var(--text);
+  background: var(--raise);
+}
+.bp-inline-copy.is-copied {
+  color: var(--ok);
+  border-color: var(--ok);
 }
 .bp-code-block { margin: 8px 0; border: 1px solid var(--line); background: #0a0c0f; }
 html.light .bp-code-block { background: var(--panel); }
@@ -890,7 +949,9 @@ html.light .bp-code-block { background: var(--panel); }
   border-bottom: 1px solid var(--line);
   font-size: 11px;
   color: var(--dim);
+  user-select: none;
 }
+.bp-code-copy { user-select: none; }
 .bp-code-block pre { margin: 0; padding: 10px; overflow-x: auto; font-family: var(--mono); font-size: 12px; }
 
 /* ---- Composer (matches GPUI native-chat.png) ---- */

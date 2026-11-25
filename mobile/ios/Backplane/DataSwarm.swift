@@ -171,8 +171,7 @@ struct DataSwarmPost: View {
             case .synthesis:
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) { DHeading(text: Tr.t("synthesis")); Text(who).dmono(11, bold: true).foregroundStyle(dSwarmColor(post.color)) }
-                    DLinkText(text: post.text)
-                    DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(post.copy, hubHasCopy: hubHasCopy), text: post.text))
+                    DataMarkdown(text: post.text, thread: post.thread, copy: Copyable.list(post.copy, hubHasCopy: hubHasCopy))
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).dbox(BackplaneDesign.accent, fill: BackplaneDesign.panel).padding(.vertical, 8)
             default:
                 HStack(alignment: .top, spacing: 8) {
@@ -184,8 +183,7 @@ struct DataSwarmPost: View {
                             Spacer(minLength: 0)
                             Text(dAgo(Swarm.ms(post.at))).dmono(10).foregroundStyle(BackplaneDesign.faint)
                         }
-                        DLinkText(text: post.text)
-                        DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(post.copy, hubHasCopy: hubHasCopy), text: post.text))
+                        DataMarkdown(text: post.text, thread: post.thread, copy: Copyable.list(post.copy, hubHasCopy: hubHasCopy))
                         if !post.files.isEmpty { files }
                         if look == .held { Text(Tr.ios_swarm_held(why: Tr.t(post.held))).dmono(10).foregroundStyle(BackplaneDesign.faint) }
                     }

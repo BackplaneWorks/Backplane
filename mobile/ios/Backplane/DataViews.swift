@@ -1705,11 +1705,15 @@ struct DataEntryRow: View {
         default:
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 if !entry.label.isEmpty { Text(Tr.t(entry.label)).dmono(12, bold: true) }
-                DLinkText(text: Tr.t(entry.text), size: 12, thread: thread)
+                if entry.text.contains("`") || !(entry.copy ?? []).isEmpty {
+                    DataMarkdown(text: Tr.t(entry.text), thread: thread, copy: Copyable.list(entry.copy, hubHasCopy: client.has("copy")),
+                                 textColor: entry.tone == "error" ? BackplaneDesign.bad : BackplaneDesign.dim,
+                                 toneKey: entry.tone == "error" ? "bad" : "dim", baseSize: 12)
+                } else {
+                    DLinkText(text: Tr.t(entry.text), size: 12, thread: thread)
+                }
                 Spacer(minLength: 0)
             }.foregroundStyle(entry.tone == "error" ? BackplaneDesign.bad : BackplaneDesign.dim).padding(.vertical, 3)
-            // a notice's code (an error naming a command to run, a path): copy buttons, and Run in terminal for a command
-            DCopyPieces(pieces: Copyable.pieces(hub: Copyable.list(entry.copy, hubHasCopy: client.has("copy")), text: entry.text))
         }
     }
 }

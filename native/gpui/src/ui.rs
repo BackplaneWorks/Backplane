@@ -574,11 +574,17 @@ impl Backplane {
             // an activity: its kind faint, what it did on one line (a heredoc's first line, "…"), as 0.14's .act; an error, a warning or a restart says all of it
             _ if !text.is_empty() => {
                 let tone = string(&e, "tone"); let whole = act_whole(&tone);
-                let line = if whole { crate::i18n::trs(&text) } else { let mut l = text.lines().next().unwrap_or("").to_string(); if text.trim_end().contains('\n') { l.push_str(" …"); } l };
-                let body = div().flex_1().min_w_0().when(!whole, |d| d.overflow_hidden().whitespace_nowrap().text_ellipsis()).when(tone.contains("error") && !tone.contains("restart"), |d| d.text_color(c("bad"))).child(line);
-                let row = div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(crate::i18n::trs(&string(&e, "label")))).child(body);
-                // a notice's code (the hub's `copy`): each piece with its copy button, and Run in terminal for a command
-                match crate::screens::copyable::pieces(cx, light, &format!("act-{id}"), &e["copy"]) { Some(p) => div().w_full().flex().flex_col().child(row).child(p).into_any_element(), None => row.into_any_element() }
+                let body = match e["blocks"].as_array() {
+                    Some(b) if !b.is_empty() => {
+                        let parsed = self.screens.parsed.get(&id, &text, b);
+                        div().flex_1().min_w_0().flex().flex_col().gap_1().when(tone.contains("error") && !tone.contains("restart"), |d| d.text_color(c("bad"))).children(crate::screens::timeline::blocks(cx, &reg, light, &parsed, &format!("act-{id}")))
+                    }
+                    _ => {
+                        let line = if whole { crate::i18n::trs(&text) } else { let mut l = text.lines().next().unwrap_or("").to_string(); if text.trim_end().contains('\n') { l.push_str(" …"); } l };
+                        div().flex_1().min_w_0().when(!whole, |d| d.overflow_hidden().whitespace_nowrap().text_ellipsis()).when(tone.contains("error") && !tone.contains("restart"), |d| d.text_color(c("bad"))).child(line)
+                    }
+                };
+                div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(crate::i18n::trs(&string(&e, "label")))).child(body).into_any_element()
             }
             // a call whose summary is only its name (WebSearch, TaskUpdate...): its name alone, so an open fold shows as many rows as it counts
             _ if !string(&e, "label").is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(string(&e, "label")).into_any_element(),
@@ -965,8 +971,10 @@ impl Render for Backplane {
         let home = &self.data["projectHome"];
         let page = self.project_page.clone().filter(|p| crate::screens::projects::find(&self.data, p).is_some());
         let has_home = home.is_object() || page.is_some();
-        // the project home replaces the rows' part: what it drew last is not on screen (its controls, its text for selection)
-        if has_home { self.screens.parts.rows_ctl.clear(); self.screens.reg.borrow_mut().begin_rows(); }
+        let bot_room = matches!(self.data["bot"]["kind"].as_str(), Some("room" | "remote"));
+        // the project home or a room/remote page replaces the rows' part: what it drew last is not on screen (its controls, its text for selection)
+        if has_home || bot_room { self.screens.parts.rows_ctl.clear(); self.screens.reg.borrow_mut().begin_rows(); }
+        if bot_room { self.screens.reg.borrow_mut().app = Some(cx.entity().downgrade()); }
         // a project's page: a list, so only what is on screen is laid out and painted (Hubble_DK's README drawn whole: 135 ms a frame,
         // every hover); its controls are all listed for the drivers, drawn or not
         let page_list = if let (false, Some(p)) = (home.is_object(), page.as_ref()) {
@@ -1330,7 +1338,7 @@ impl Render for Backplane {
                     .when(page_list, |d| d.child(list(self.screens.home_list.clone(), cx.processor(|this, ix, _, cx| this.page_item(ix, cx))).flex_1().min_h_0()))
                     .when(has_home && !page_list, |d| d.child(div().id("home").track_scroll(&self.screens.home_scroll).overflow_y_scroll().flex_1().min_h_0().flex().flex_col().items_center().child(div().w_full().flex_none().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
-                    .when(!has_home, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
+                    .when(!has_home && !bot_room, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().flex().flex_wrap().items_center().gap_2()
                         .child(div().text_color(c("bad")).child(crate::i18n::trs(&self.error)))
                         .children(crate::screens::provider_notice::error_action(cx, light, &self.error))))
@@ -1400,7 +1408,7 @@ impl Render for Backplane {
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_down(cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
                             .child({ let (lbl, bg) = crate::screens::planmode::send_button(thread, crate::screens::voice::flashing(&self.screens.voice));
                                 crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(bg)).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&lbl)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx))) }))))
-                    .children(crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b)))
+                    .children({ let reg = self.screens.reg.clone(); crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b), &reg, &mut self.screens.parsed) })
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data, side_shown))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
@@ -1441,7 +1449,23 @@ impl Render for Backplane {
             .into_any_element();
         self.controls = ctl;
         // the selection's ends as ordinals of the blocks known now (the rows' part does the same when it draws)
-        { let rows = &self.data["thread"]["entries"]; self.screens.reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
+        {
+            let bot = &self.data["bot"];
+            if matches!(bot["kind"].as_str(), Some("room" | "remote")) {
+                let posts = if bot["swarm"].is_object() { bot["swarm"]["posts"].as_array() } else { bot["posts"].as_array() };
+                self.screens.reg.borrow_mut().resolve_by(|id| {
+                    posts.and_then(|ps| ps.iter().enumerate().position(|(i, p)| {
+                        let pid = p["id"].as_str().unwrap_or("");
+                        if bot["swarm"].is_object() {
+                            if pid.is_empty() { id == format!("post-{i}") } else { id == format!("post-{pid}") }
+                        } else { id == format!("talk-{i}") }
+                    }))
+                });
+            } else {
+                let rows = &self.data["thread"]["entries"];
+                self.screens.reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id))));
+            }
+        }
         if crate::perf::on() { crate::perf::built(); }
         self.render_us = t_render.elapsed().as_micros() as u64;
         el

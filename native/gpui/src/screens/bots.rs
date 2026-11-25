@@ -526,39 +526,53 @@ fn hooks_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String,
     }).collect::<Vec<_>>()).into_any_element()
 }
 
-fn talk_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value, field: &'static str, action: &'static str) -> AnyElement {
+fn talk_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value, field: &'static str, action: &'static str, reg: &super::timeline::Reg, parsed: &mut super::timeline::ParseCache) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let ps = posts(bot);
-    let mut list = div().id("posts").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap_2().p_3();
+    let mut list = div().id("posts").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().gap_2().p_3()
+        .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_down(e, w, cx)))
+        .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.timeline_down(e, w, cx)))
+        .on_mouse_move(cx.listener(|this, e, _, cx| this.timeline_move(e, cx)))
+        .on_mouse_up(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_up(e, w, cx)))
+        .on_mouse_up_out(MouseButton::Left, cx.listener(|this, e, w, cx| this.timeline_up(e, w, cx)));
     if ps.is_empty() { list = list.child(div().text_color(c("dim")).child(trs("No messages yet."))); }
+    let raw_posts: Vec<&Value> = arr(bot, "posts").collect();
     for (i, p) in ps.iter().enumerate() {
         let who = if p.mine { trs("You") } else { p.from.clone() };
-        // the post's code (the hub's `copy`): copy buttons, and Run in terminal for a command
-        let copy = super::copyable::pieces(cx, light, &format!("talk-{i}"), &arr(bot, "posts").nth(i).map_or(Value::Null, |x| x["copy"].clone()));
-        list = list.child(div().flex().flex_col().gap_1().child(div().flex().gap_2().child(div().font_weight(FontWeight::BOLD).child(who)).child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(p.ago.clone()))).child(div().child(p.text.clone())).children(copy));
+        let pid = format!("talk-{i}");
+        reg.borrow_mut().enter(i, &pid);
+        let blocks_rc = match raw_posts.get(i).and_then(|x| x["blocks"].as_array()) {
+            Some(b) if !b.is_empty() => parsed.get(&pid, &p.text, b),
+            _ => std::rc::Rc::new(super::md::plain_fallback(&p.text)),
+        };
+        let body_els = super::timeline::blocks(cx, reg, light, &blocks_rc, &pid);
+        list = list.child(div().flex().flex_col().gap_1().child(div().flex().gap_2().child(div().font_weight(FontWeight::BOLD).child(who)).child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(p.ago.clone()))).child(div().flex().flex_col().gap_1().children(body_els)));
     }
-    div().size_full().flex().flex_col().child(list)
+    let hover = reg.borrow().hover.clone();
+    let feed = div().flex_1().min_h_0().relative().flex().flex_col().child(list)
+        .when(!hover.is_empty(), |d| d.child(div().absolute().left_0().bottom_0().max_w_full().px_2().py_px().bg(c("raise")).border_t_1().border_r_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).overflow_hidden().whitespace_nowrap().child(hover)));
+    div().size_full().flex().flex_col().child(feed)
         .child(div().flex().gap_2().items_end().p_3().border_t_1().border_color(c("line"))
             .child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).children(fields.get(field).map(|s| s.input.clone())))
             .child(div().id("talk-send").px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Send")).on_click(cx.listener(move |this, _, _, cx| send_post(this, field, action, cx))))).into_any_element()
 }
 
 /// The page under a bot's tab strip, or a room's or remote bot's whole page; None for a bot's chat (the thread view) and for no bot.
-pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> Option<AnyElement> {
+pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, reg: &super::timeline::Reg, parsed: &mut super::timeline::ParseCache) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let kind = bot["kind"].as_str().unwrap_or("");
     let header = |t: String| div().h(crate::scale::tpx(36.)).flex_shrink_0().px_3().flex().items_center().border_b_1().border_color(c("line")).font_weight(FontWeight::BOLD).child(t);
     let frame = |inner: AnyElement, top: f32, header: Option<Div>| div().id("bot-page").absolute().top(px(top)).left_0().right_0().bottom_0().occlude().bg(c("bg")).flex().flex_col().children(header).child(div().id("bot-body").flex_1().min_h_0().overflow_y_scroll().child(inner)).into_any_element();
     match kind {
         // a swarm's room is the swarm page (screens::swarm)
-        "room" if bot["swarm"].is_object() => Some(super::swarm::page(cx, light, fields, bot)),
+        "room" if bot["swarm"].is_object() => Some(super::swarm::page(cx, light, fields, bot, reg, parsed)),
         "room" => {
             // a bots' exchange opened by its id: Keep this room makes it permanent (`roomPage.keep`); a closed one says so
             let keep = (bot["keep"] == true).then(|| div().ml_auto().font_weight(FontWeight::NORMAL).child(btn(cx, light, "room-keep".into(), trs("Keep this room"), false, keep_room, string(bot, "id"))));
             let closed = (bot["closed"] == true).then(|| div().px_3().py_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).border_b_1().border_color(c("line")).child(trs("This exchange between bots is over. It is kept for reference.")));
-            Some(div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))).gap_2().children(super::badge::place(light, &bot["mark"], "", "room-head")).children(keep)).children(closed).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rpost", "room-post"))).into_any_element())
+            Some(div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))).gap_2().children(super::badge::place(light, &bot["mark"], "", "room-head")).children(keep)).children(closed).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rpost", "room-post", reg, parsed))).into_any_element())
         }
-        "remote" => Some(div().id("remote-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rtext", "remote-send"))).into_any_element()),
+        "remote" => Some(div().id("remote-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rtext", "remote-send", reg, parsed))).into_any_element()),
         "bot" => {
             let tab = bot["tab"].as_str().unwrap_or("chat");
             let inner = match tab {
