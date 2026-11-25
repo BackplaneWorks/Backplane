@@ -113,6 +113,7 @@ pub fn pin_button_as(cx: &mut Context<Backplane>, light: bool, t: &Value, group:
         .when(!pinned, |d| d.invisible().group_hover(group, |s| s.visible()))
         .tooltip(crate::keys::tip(&tip, "", light))
         .child(crate::art::icon("pin", 12., c(if pinned { "dim" } else { "faint" })))
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(action.into(), value.clone())); cx.stop_propagation(); cx.notify(); }))
         .into_any_element()
 }
@@ -148,6 +149,7 @@ pub fn snooze_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group:
         .invisible().group_hover(group, |s| s.visible()).hover(|s| s.bg(c("line")))
         .tooltip(crate::keys::tip(&tip, "", light))
         .child(crate::art::icon(if wake.is_empty() { "clock" } else { "bell" }, 12., c("dim")))
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
             if !wake.is_empty() { let _ = this.tx.try_send(Command::Action("row-snooze".into(), wake.clone())); cx.notify(); return }
             /* i18n-ok: menu labels, drawn through trs */ let items = opts.iter().map(|o| crate::screens::ctxmenu::Item { label: format!("Snooze {}", string(o, "label").to_lowercase()), action: "row-snooze".into(), value: string(o, "value"), confirm: false, note: String::new() }).collect();
@@ -202,6 +204,7 @@ pub fn settle_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group:
         .invisible().group_hover(group, |s| s.visible()).hover(|s| s.bg(c("line")))
         /* i18n-ok: the context menu's word, drawn through trs */ .tooltip(crate::keys::tip(&crate::i18n::trs("Settle"), "", light))
         .child(crate::art::icon("check", 12., c("dim")))
+        .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("row-settle".into(), value.clone())); cx.stop_propagation(); cx.notify(); }))
         .into_any_element())
 }

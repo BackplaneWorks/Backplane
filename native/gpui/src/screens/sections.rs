@@ -70,7 +70,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
     let pinned = p["pinned"] == true;
     let groups = this.data["groupsTo"].clone();
     let menu = p["menu"].clone();
-    let (pid2, key2, key3, pid3) = (pid.clone(), key.clone(), key.clone(), pid.clone());
+    let (pid2, key3, pid3) = (pid.clone(), key.clone(), pid.clone());
     // the fold (the hub keeps it per project): a chevron while something is under the row or it is folded, an empty slot otherwise
     let (folded, under, needs_n) = (p["folded"] == true, p["under"].as_u64().unwrap_or(0), p["needsCount"].as_u64().unwrap_or(0));
     let fold_action = string(p, "fold");
@@ -89,7 +89,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
         .when(faded || p["off"] == true, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().h(crate::scale::tpx(30.)).text_size(crate::scale::tpx(13.))
         .border_l_2().border_color(if on_page { c("accent") } else { transparent_black().into() }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.bg(c("raise")))
         .on_hover({ let p = pid.clone(); cx.listener(move |this, on: &bool, _, _| { if *on { this.screens.side_hover = Some(p.clone()) } else if this.screens.side_hover.as_deref() == Some(p.as_str()) { this.screens.side_hover = None } }) })
-        .on_click(cx.listener(move |this, _, w, cx| { w.focus(&this.screens.side_focus); this.go("project-page", key2.clone(), cx); this.open_project(pid2.clone(), cx); }))
+        .on_click(cx.listener(move |this, _, w, cx| { w.focus(&this.screens.side_focus); this.open_project(pid2.clone(), cx); }))
         .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
             // the hub's menu (Pin, New swarm, Rename, Badge, Open folder, Move to group ›, Make quiet, Remove project); an older hub sends none
             let hub_menu = crate::screens::ctxmenu::section_items(&menu);
@@ -215,7 +215,7 @@ pub fn page_lists(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &
                 .children(pin)
                 .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id))
                 .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if string(t, "say").is_empty() { trs(&string(t, "ago")) } else { trs(&string(t, "say")) }))
-                .when(!off, |d| d.on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))).into_any_element());
+                .when(!off, |d| d.on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))).into_any_element());
         }
     }
     Some(out)

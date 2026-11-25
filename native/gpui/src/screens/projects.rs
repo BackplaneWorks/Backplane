@@ -589,6 +589,11 @@ pub fn page_view(data: &Value, page: Option<&str>, selected: &str, kind: &str) -
 pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
     data["projects"].as_array().and_then(|ps| ps.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))).or_else(|| super::sections::find(data, pid))
 }
+/// The project's section `nav` key, preferring the live sections row over a legacy `projects` entry that lacks `nav`.
+pub fn nav_key(data: &Value, pid: &str) -> String {
+    super::sections::find(data, pid).map(|p| string(p, "nav")).filter(|k| !k.is_empty())
+        .or_else(|| find(data, pid).map(|p| string(p, "nav"))).unwrap_or_default()
+}
 /// The folder's mechanical parts, assembly first: (path, name, bytes) of the `mech` artifacts, the largest file (the assembly, the one with the most parts in it) at the top.
 pub fn mech_parts(snap: &Value) -> Vec<(String, String, u64)> {
     let mut v: Vec<(String, String, u64)> = snap["artifacts"].as_array().into_iter().flatten().filter(|a| a["kind"] == "mech").map(|a| {
@@ -638,7 +643,7 @@ fn section(light: bool, label: String, right: Option<AnyElement>) -> AnyElement 
     let c = |n: &str| theme::color(light, n);
     div().flex().items_center().justify_between().pt_5().pb_1().border_b_1().border_color(c("line")).child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(label)).children(right).into_any_element()
 }
-fn action_button(cx: &mut Context<Backplane>, light: bool, id: &'static str, icon: &'static str, label: String, primary: bool) -> Stateful<Div> {
+fn action_button(cx: &mut Context<Backplane>, light: bool, id: impl Into<ElementId>, icon: &'static str, label: String, primary: bool) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
     let _ = cx;
     div().id(id).flex().items_center().gap_2().px_3().h(crate::scale::tpx(30.)).border_1().border_color(c(if primary { "accent" } else { "line" })).bg(c(if primary { "accent" } else { "raise" })).text_size(crate::scale::tpx(12.)).cursor_pointer()
@@ -706,8 +711,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
         for (label, kind, icon) in viewer_buttons(&snap) {
             let (t, id) = (top.clone(), format!("page-open-{kind}"));
             /* i18n-ok: ctl labels and ids */ ctl.push(CtlEntry { id: id.clone(), label: format!("Open {label}"), ctl: Ctl::Select(top.clone()) });
-            let sid: &'static str = Box::leak(id.into_boxed_str());
-            bar = bar.child(action_button(cx, light, sid, icon, crate::i18n::trs(label), false).on_click(cx.listener(move |this, _, window, cx| {
+            bar = bar.child(action_button(cx, light, SharedString::from(id), icon, crate::i18n::trs(label), false).on_click(cx.listener(move |this, _, window, cx| {
                 let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.view_edit = Some((raw, kind)); this.select(t.clone(), window, cx);
             })));
         }
@@ -760,7 +764,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
             ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
             out.push(crate::ui::with_rect(div().id(SharedString::from(format!("page-thread-{raw}"))), { let r = raw.clone(); move || format!("page-thread:{r}") }).flex().items_center().gap_2().px_2().h(crate::scale::tpx(30.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("raise")))
                 .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
-                .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx))).into_any_element());
+                .on_mouse_down(gpui::MouseButton::Left, cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx))).into_any_element());
         }
     }
     if !loaded { return if part == Part::Head { out } else { ctl.truncate(ctl_at); vec![] } }
@@ -1069,5 +1073,15 @@ mod home_tests {
         assert_eq!(bar(&f.job), Some(1.0));
         let noted = j(r#"{"folders":{"text":"","items":[],"job":{"id":"c2","state":"done","notes":["Found 2 KiCad projects"]}}}"#);
         assert_eq!(auto_open(&folders(&noted).unwrap(), &mut seen), None, "notes are read first");
+    }
+    #[test] fn nav_key_prefers_live_sections_over_legacy_projects_entry() {
+        let with_sections = json!({
+            "projects": [{"id": "http://h:1|p1"}],
+            "sections": [{"kind": "projects", "rows": [{"id": "http://h:1|p1", "nav": "sec-nav-p1"}]}]
+        });
+        assert_eq!(nav_key(&with_sections, "p1"), "sec-nav-p1");
+        let legacy_only = json!({"projects": [{"id": "http://h:1|p1", "nav": "proj-nav-p1"}]});
+        assert_eq!(nav_key(&legacy_only, "p1"), "proj-nav-p1");
+        assert_eq!(nav_key(&json!({}), "p1"), "");
     }
 }

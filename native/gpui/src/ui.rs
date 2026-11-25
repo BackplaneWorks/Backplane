@@ -377,6 +377,7 @@ impl Backplane {
                 let toggle = (kids > 0 && tree).then(|| {
                     let tid = id.clone();
                     with_rect(div().id(SharedString::from(format!("tree-{id}"))), { let r = raw.to_string(); move || format!("tree:{r}") }).flex_shrink_0().w(px(gutter)).h_full().pl(px(6. + depth * 14.)).flex().items_center().cursor_pointer().hover(|s| s.bg(c("line"))).child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))
+                        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
                 });
                 /* i18n-ok: a ctl label */ if kids > 0 && tree { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
@@ -397,8 +398,9 @@ impl Backplane {
                     // a row under its project: no bar and no block when open (the person, 2026-11-15); its L says where it is
                     .border_l_2().border_color(if selected && !under { c("accent") } else { transparent_black().into() })
                     .bg(if selected && !under { c("raise") } else { transparent_black().into() }).hover(|s| s.bg(c("raise"))).cursor_pointer()
-                    .on_click(cx.listener({ let (sid, off) = (id.clone(), t["off"] == true); move |this, _, window, cx| if !off { this.select(sid.clone(), window, cx) } })) // (a thread of a machine that is off: listed from the registry, nothing to open)
-                    .when(sub.is_empty(), |d| d.on_drag(DragRow { id: raw.to_string(), label: string(t, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
+                    .when(t["off"] != true && !sub.is_empty(), |d| d.on_mouse_down(gpui::MouseButton::Left, cx.listener({ let sid = id.clone(); move |this, _, window, cx| this.select(sid.clone(), window, cx) })))
+                    .when(t["off"] != true && sub.is_empty(), |d| d.on_click(cx.listener({ let sid = id.clone(); move |this, _, window, cx| this.select(sid.clone(), window, cx) })) // (a thread of a machine that is off: listed from the registry, nothing to open)
+                        .on_drag(DragRow { id: raw.to_string(), label: string(t, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
                         .drag_over::<DragRow>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) }))
                     .on_drop(cx.listener({ let target = raw.to_string(); move |this, d: &DragRow, _, cx| { let _ = this.tx.try_send(Command::Action("reorder".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
                     .on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid.to_string()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) })
@@ -1334,7 +1336,7 @@ impl Render for Backplane {
                     .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(crate::screens::hints::legend(cx, light, &self.local))))
                 // main
                 .child(div().flex_1().min_w(px(thread_least)).when(kfull, |d| d.flex_none().w(px(0.)).overflow_hidden()).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
-                    .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
+                    .children(shows_bot_overlay(has_home).then(|| crate::screens::bots::bar(cx, light, &self.data["bot"])).flatten())
                     .children(head_row)
                     .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))
                     .when(page_list, |d| d.child(list(self.screens.home_list.clone(), cx.processor(|this, ix, _, cx| this.page_item(ix, cx))).flex_1().min_h_0()))
@@ -1410,8 +1412,8 @@ impl Render for Backplane {
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_down(cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
                             .child({ let (lbl, bg) = crate::screens::planmode::send_button(thread, crate::screens::voice::flashing(&self.screens.voice));
                                 crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(bg)).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&lbl)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx))) }))))
-                    .when(has_swarm, |d| d.child(self.screens.parts.el(Backplane::swarm_part, StyleRefinement::default().absolute().inset_0(), cx)))
-                    .children({ let reg = self.screens.reg.clone(); crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b), &reg, &mut self.screens.parsed) })
+                    .when(has_swarm && shows_bot_overlay(has_home), |d| d.child(self.screens.parts.el(Backplane::swarm_part, StyleRefinement::default().absolute().inset_0(), cx)))
+                    .children(shows_bot_overlay(has_home).then(|| { let reg = self.screens.reg.clone(); crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b), &reg, &mut self.screens.parsed) }).flatten())
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data, side_shown))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
@@ -1767,6 +1769,9 @@ pub(crate) fn home_move_dismiss_cmd() -> Command {
     Command::Rpc("home.move.dismiss".into(), crate::screens::settings::Secret(serde_json::json!({})), "home-move-dismiss")
 }
 
+/// Whether the bot/swarm page and bar may cover the main column (suppressed while a project page is open).
+pub(crate) fn shows_bot_overlay(has_home: bool) -> bool { !has_home }
+
 #[cfg(test)]
 mod home_tests {
     use super::{home_away_line, home_move_dismiss_cmd, home_move_dismissible};
@@ -1817,5 +1822,11 @@ mod home_tests {
         assert_eq!(kept[1]["kind"], "bot");
         assert_eq!(kept[2]["kind"], "thread");
         assert!(super::card_refs(&json!([{"word":"&claude/opus","kind":"model","id":"","label":"Opus"}]), &["&claude/opus".to_string()].into_iter().collect()).is_empty());
+    }
+
+    #[test]
+    fn bot_overlay_does_not_occlude_open_project_page() {
+        assert!(!super::shows_bot_overlay(true));
+        assert!(super::shows_bot_overlay(false));
     }
 }
