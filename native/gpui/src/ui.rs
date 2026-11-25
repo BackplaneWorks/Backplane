@@ -833,7 +833,7 @@ impl Backplane {
             let (pv, split) = self.screens.plots.views();
             crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, pv, split, solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref(), update, review_panel, &self.screens.mgmt.checks, &self.screens.tile_menu)
         };
-        { let rows = &self.data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
+        { let rows = self.active_rows(); reg.borrow_mut().resolve_by(|id| rows.iter().position(|e| e["id"].as_str() == Some(id))); }
         // full screen: the editor alone, without the management panels' strip under it
         let el = if crate::screens::viewer::KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed) { el }
             else { crate::screens::mgmt::host(self, el, window, cx) };
@@ -971,8 +971,10 @@ impl Render for Backplane {
         let home = &self.data["projectHome"];
         let page = self.project_page.clone().filter(|p| crate::screens::projects::find(&self.data, p).is_some());
         let has_home = home.is_object() || page.is_some();
-        let bot_room = matches!(self.data["bot"]["kind"].as_str(), Some("room" | "remote"));
-        // the project home or a room/remote page replaces the rows' part: what it drew last is not on screen (its controls, its text for selection)
+        let has_swarm = self.data["bot"]["kind"] == "room" && self.data["bot"]["swarm"].is_object();
+        if !has_swarm { self.screens.swarm_list_key.clear(); self.screens.swarm_post_sigs.clear(); }
+        let bot_room = !has_swarm && matches!(self.data["bot"]["kind"].as_str(), Some("room" | "remote"));
+        // the project home or a non-swarm room/remote page replaces the rows' part: what it drew last is not on screen (its controls, its text for selection)
         if has_home || bot_room { self.screens.parts.rows_ctl.clear(); self.screens.reg.borrow_mut().begin_rows(); }
         if bot_room { self.screens.reg.borrow_mut().app = Some(cx.entity().downgrade()); }
         // a project's page: a list, so only what is on screen is laid out and painted (Hubble_DK's README drawn whole: 135 ms a frame,
@@ -1338,7 +1340,7 @@ impl Render for Backplane {
                     .when(page_list, |d| d.child(list(self.screens.home_list.clone(), cx.processor(|this, ix, _, cx| this.page_item(ix, cx))).flex_1().min_h_0()))
                     .when(has_home && !page_list, |d| d.child(div().id("home").track_scroll(&self.screens.home_scroll).overflow_y_scroll().flex_1().min_h_0().flex().flex_col().items_center().child(div().w_full().flex_none().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
-                    .when(!has_home && !bot_room, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
+                    .when(!has_home && !bot_room && !has_swarm, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
                     .when(!self.error.is_empty(), |d| d.child(div().px_5().py_2().flex().flex_wrap().items_center().gap_2()
                         .child(div().text_color(c("bad")).child(crate::i18n::trs(&self.error)))
                         .children(crate::screens::provider_notice::error_action(cx, light, &self.error))))
@@ -1408,6 +1410,7 @@ impl Render for Backplane {
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_down(cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
                             .child({ let (lbl, bg) = crate::screens::planmode::send_button(thread, crate::screens::voice::flashing(&self.screens.voice));
                                 crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(bg)).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&lbl)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx))) }))))
+                    .when(has_swarm, |d| d.child(self.screens.parts.el(Backplane::swarm_part, StyleRefinement::default().absolute().inset_0(), cx)))
                     .children({ let reg = self.screens.reg.clone(); crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b), &reg, &mut self.screens.parsed) })
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data, side_shown))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
@@ -1451,15 +1454,13 @@ impl Render for Backplane {
         // the selection's ends as ordinals of the blocks known now (the rows' part does the same when it draws)
         {
             let bot = &self.data["bot"];
-            if matches!(bot["kind"].as_str(), Some("room" | "remote")) {
-                let posts = if bot["swarm"].is_object() { bot["swarm"]["posts"].as_array() } else { bot["posts"].as_array() };
+            if has_swarm {
+                let rows = self.active_rows();
+                self.screens.reg.borrow_mut().resolve_by(|id| rows.iter().position(|e| e["id"].as_str() == Some(id)));
+            } else if matches!(bot["kind"].as_str(), Some("room" | "remote")) {
+                let posts = bot["posts"].as_array();
                 self.screens.reg.borrow_mut().resolve_by(|id| {
-                    posts.and_then(|ps| ps.iter().enumerate().position(|(i, p)| {
-                        let pid = p["id"].as_str().unwrap_or("");
-                        if bot["swarm"].is_object() {
-                            if pid.is_empty() { id == format!("post-{i}") } else { id == format!("post-{pid}") }
-                        } else { id == format!("talk-{i}") }
-                    }))
+                    posts.and_then(|ps| ps.iter().enumerate().position(|(i, _)| id == format!("talk-{i}")))
                 });
             } else {
                 let rows = &self.data["thread"]["entries"];

@@ -46,7 +46,7 @@ data class DSwarm(val id: String, val name: String, val project: String, val goa
 data class DSwarmRoom(val id: String, val name: String, val project: String, val goal: String, val state: String, val reason: String, val by: String)
 data class DSwarmMember(val member: String, val thread: String, val name: String, val color: String, val provider: String, val model: String, val role: String, val state: String, val title: String)
 data class DSwarmPost(val id: String, val from: String, val thread: String, val color: String, val text: String, val tags: List<String>, val reply: String, val mentions: List<String>,
-    val files: List<String>, val guard: Boolean, val held: String, val at: Long, val copy: List<CopyPiece>? = null)
+    val files: List<String>, val guard: Boolean, val held: String, val at: Long, val copy: List<CopyPiece>? = null, val images: List<String> = emptyList())
 data class DSwarmClaim(val post: String, val thread: String, val files: List<String>, val state: String)
 data class DSwarmBoard(val room: DSwarmRoom, val members: List<DSwarmMember>, val posts: List<DSwarmPost>, val claims: List<DSwarmClaim>)
 data class DModel(val value: String, val label: String, val ok: Boolean, val why: String)
@@ -69,7 +69,7 @@ object SwarmParse {
         return DSwarmBoard(DSwarmRoom(r.s("id"), r.s("name"), r.s("project"), r.s("goal"), r.s("state"), r.s("reason"), r.s("by")),
             o.optJSONArray("members").objs { DSwarmMember(it.s("member"), it.s("thread"), it.s("name"), it.s("color"), it.s("provider"), it.s("model"), it.s("role"), it.s("state"), it.s("title")) },
             o.optJSONArray("posts").objs { DSwarmPost(it.s("id"), it.s("from"), it.s("thread"), it.s("color"), it.s("text"), it.optJSONArray("tags").strings(), it.s("reply"), it.optJSONArray("mentions").strings(),
-                it.optJSONArray("files").strings(), it.optBoolean("guard"), if (it.opt("held") is String) it.s("held") else if (it.optBoolean("held")) "held" else "", swarmMs(it.optLong("at", 0)), parseCopy(it.optJSONArray("copy"))) },
+                it.optJSONArray("files").strings(), it.optBoolean("guard"), if (it.opt("held") is String) it.s("held") else if (it.optBoolean("held")) "held" else "", swarmMs(it.optLong("at", 0)), parseCopy(it.optJSONArray("copy")), it.optJSONArray("images").strings()) },
             o.optJSONArray("claims").objs { DSwarmClaim(it.s("post"), it.s("thread"), it.optJSONArray("files").strings(), it.s("state")) })
     }
     /** `models.list`: provider -> its models, in the hub's order. */
@@ -236,7 +236,19 @@ private fun SwarmBody(room: String, back: () -> Unit, openThread: (String) -> Un
         DLine()
         // the board, one feed, oldest first
         val list = rememberLazyListState()
-        LaunchedEffect(b.posts.size) { if (b.posts.isNotEmpty()) list.scrollToItem(b.posts.size - 1) }
+        val lastId = b.posts.lastOrNull()?.id.orEmpty()
+        var initScrolled by remember(room) { mutableStateOf(false) }
+        var prevCount by remember(room) { mutableStateOf(0) }
+        LaunchedEffect(lastId, b.posts.size) {
+            if (b.posts.isEmpty()) { prevCount = 0; return@LaunchedEffect }
+            val lastVisible = list.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: -1
+            val nearBottom = !initScrolled || lastVisible >= (prevCount - 2).coerceAtLeast(0)
+            prevCount = b.posts.size
+            if (nearBottom) {
+                initScrolled = true
+                list.scrollToItem(b.posts.size - 1)
+            }
+        }
         LazyColumn(Modifier.weight(1f).fillMaxWidth().testTag("swarm.board"), state = list, contentPadding = PaddingValues(vertical = 6.dp)) {
             if (b.posts.isEmpty()) item("none") { DMono(Msg.android_swarm_none, dfaint, 12, Modifier.padding(14.dp)) }
             items(b.posts, key = { it.id }) { p -> SwarmPost(p, b.claims) }
@@ -274,8 +286,11 @@ private fun SwarmPost(p: DSwarmPost, claims: List<DSwarmClaim>) {
                     SwarmUi.labels(p).forEach { t -> Spacer(Modifier.width(6.dp)); DMono(swarmTag(t).uppercase(), dcs.onSurfaceVariant, 9, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 4.dp, vertical = 1.dp)) }
                     Spacer(Modifier.weight(1f)); DMono(dAgo(p.at), dfaint, 10)
                 }
-                if (p.guard) Text(p.text, color = dfaint, fontFamily = BpMono, fontSize = 12.sp)
-                else MdText(p.text, thread = p.thread, copy = CopyLookup.of(p.copy, DataClient.has("copy")))
+                if (p.guard) SelectionContainer { Text(p.text, color = dfaint, fontFamily = BpMono, fontSize = 12.sp) }
+                else {
+                    MdText(p.text, thread = p.thread.ifEmpty { null }, copy = CopyLookup.of(p.copy, DataClient.has("copy")))
+                    p.images.forEach { Spacer(Modifier.height(6.dp)); PicByReply(p.id, it, 240) }
+                }
                 if (p.files.isNotEmpty()) {
                     val mark = SwarmUi.claim(p, claims)
                     Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {

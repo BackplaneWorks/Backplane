@@ -308,3 +308,35 @@ fn line(b: &Value) -> String { b["room"]["need"]["line"].as_str().unwrap_or("").
     let ap = agent_board["posts"].as_array().unwrap().iter().find(|p| p["text"].as_str().unwrap_or("").contains("EPC2306")).unwrap();
     assert!(ap.get("blocks").is_none() && ap.get("copy").is_none());
 }
+
+#[tokio::test] async fn room_page_renders_markdown_blocks_images_and_preserves_claim_files() {
+    let (hub, bots, _peers) = hub_of("room-page-md").await;
+    let (ok, r) = bots.tool_call("t-boss", "swarm_create", &json!({"topic":"md","members":[{"provider":"claude"},{"provider":"codex"}]})).await;
+    assert!(ok, "{r}");
+    let room = r["room"].as_str().unwrap().to_string();
+    let a = { let w = bots.world().await; w.room(&room).unwrap().threads()[0].clone() };
+    let img_dir = hub.hub.cfg.home.join("shots");
+    std::fs::create_dir_all(&img_dir).unwrap();
+    let img_path = img_dir.join("wave.png");
+    std::fs::write(&img_path, b"fake").unwrap();
+    let img_s = img_path.to_string_lossy().into_owned();
+    let md_text = format!("### Summary\n\n**Bold** `EPC2306` and {img_s}\n\n| A | B |\n|---|---|\n| 1 | 2 |\n");
+    let (_, cp) = post(&bots, &a, json!({"room":room,"text":md_text,"tags":["claim"],"files":["src/power.rs"]})).await;
+    assert_eq!(cp["claim"]["state"], "held");
+    let pg = crate::bots::room_page(&hub.hub, &room, now_s()).await.unwrap();
+    assert!(pg["posts"].as_array().unwrap().is_empty(), "swarm room_page skips duplicate posts array");
+    let posts = pg["swarm"]["posts"].as_array().unwrap();
+    let p = posts.iter().find(|p| p["from"] != "hub").unwrap();
+    let blocks = p["blocks"].as_array().unwrap();
+    assert!(blocks.iter().any(|b| b["tag"] == "h5"), "heading block present: {blocks:?}");
+    assert!(blocks.iter().any(|b| b["tag"] == "table"), "table block present: {blocks:?}");
+    assert_eq!(p["files"], json!(["src/power.rs"]), "claim files preserved");
+    let imgs = p["images"].as_array().unwrap();
+    assert_eq!(imgs.len(), 1);
+    assert!(imgs[0]["url"].as_str().unwrap().contains("/message-image?entry="));
+    assert!(posts.iter().all(|row| row["images"].as_array().map_or(true, |a| a.iter().all(|x| x.is_object()))), "room_page never leaves raw string images");
+    // swarm.get (board) includes string image paths for mobile/web clients
+    let b = rpc(&hub, "swarm.get", json!({"room":room})).await["result"].clone();
+    let bp = b["posts"].as_array().unwrap().iter().find(|p| p["from"] != "hub").unwrap();
+    assert_eq!(bp["images"], json!([img_s]));
+}

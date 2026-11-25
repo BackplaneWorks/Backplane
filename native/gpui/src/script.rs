@@ -696,13 +696,15 @@ impl Backplane {
             }
             // where the timeline stands: e2e reads this, a picture cannot say whether a scroll held
             Step::ScrollState(name) => {
-                let max = f32::from(self.timeline.max_offset_for_scrollbar().height);
-                let y = -(-f32::from(self.timeline.scroll_px_offset_for_scrollbar().y)).min(max);
-                let rows = self.data["thread"]["entries"].as_array().map_or(&[][..], |e| e.as_slice());
+                let is_swarm = crate::screens::swarm::over_thread(&self.data) && self.data["bot"]["swarm"].is_object();
+                let list = if is_swarm { &self.screens.swarm_list } else { &self.timeline };
+                let max = f32::from(list.max_offset_for_scrollbar().height);
+                let y = -(-f32::from(list.scroll_px_offset_for_scrollbar().y)).min(max);
+                let rows = self.active_rows();
                 let ids: std::collections::HashSet<&str> = rows.iter().filter_map(|e| e["id"].as_str()).collect();
-                let top = self.timeline.logical_scroll_top();
+                let top = list.logical_scroll_top();
                 self.m("scroll", json!({"name": name, "y": y, "max": max, "entries": rows.len(), "dups": rows.len() - ids.len(), "first": rows.first().map_or("", |e| e["id"].as_str().unwrap_or("")),
-                    "last": rows.last().map_or("", |e| e["id"].as_str().unwrap_or("")), "top": rows.get(top.item_ix).map_or("(end)", |e| e["id"].as_str().unwrap_or("")), "px": f32::from(top.offset_in_item), "more": self.data["thread"]["historyOlder"].as_str().is_some_and(|c| !c.is_empty())}));
+                    "last": rows.last().map_or("", |e| e["id"].as_str().unwrap_or("")), "top": rows.get(top.item_ix).map_or("(end)", |e| e["id"].as_str().unwrap_or("")), "px": f32::from(top.offset_in_item), "more": !is_swarm && self.data["thread"]["historyOlder"].as_str().is_some_and(|c| !c.is_empty())}));
                 self.pump(cx);
             }
             Step::Scroll(n) => {
@@ -710,6 +712,11 @@ impl Backplane {
                 // a project's page scrolls its own column
                 if !self.screens.home_list_key.is_empty() { let l = &self.screens.home_list; let top = l.logical_scroll_top(); self.m("home_scroll", json!({"item": top.item_ix, "px": f32::from(top.offset_in_item), "items": l.item_count()})); l.scroll_by(px(n)); self.ui_epoch += 1; cx.notify(); return; }
                 if self.project_page.is_some() || self.data["projectHome"].is_object() { let h = &self.screens.home_scroll; self.m("home_scroll", json!({"y": f32::from(h.offset().y), "max": f32::from(h.max_offset().height)})); let o = h.offset(); h.set_offset(point(o.x, (o.y - px(n)).min(px(0.)).max(-h.max_offset().height))); self.ui_epoch += 1; cx.notify(); return; }
+                if crate::screens::swarm::over_thread(&self.data) && self.data["bot"]["swarm"].is_object() {
+                    let at_end = self.screens.swarm_list.logical_scroll_top().item_ix >= self.screens.swarm_list.item_count();
+                    self.screens.swarm_list.scroll_by(px(n) - if at_end { self.screens.swarm_list.viewport_bounds().size.height } else { px(0.) });
+                    self.ui_epoch += 1; self.screens.parts.notify(Backplane::swarm_part, cx); cx.notify(); return;
+                }
                 // at the end the list's own top is past its last row, a screen below where the wheel starts from
                 let at_end = self.timeline.logical_scroll_top().item_ix >= self.timeline.item_count();
                 self.timeline.scroll_by(px(n) - if at_end { self.timeline.viewport_bounds().size.height } else { px(0.) }); self.ui_epoch += 1; cx.notify();

@@ -225,6 +225,7 @@ export interface SidebarCallbacks {
   canOpenProject?: () => boolean;
   onSelectBot: (bot: BotItem) => void;
   onSelectRoom?: (room: RoomItem) => void;
+  onSelectSwarm?: (roomId: string) => void;
   onNewBot?: () => void;
   onNewRoom?: () => void;
   onQuickOpenViewer?: (projectId: string, kind: "board" | "schematic") => void;
@@ -448,7 +449,7 @@ function makePinIcon(size = 11): SVGSVGElement {
   return makeSvgIcon(["M12 17v5", "M8 4h8l-1 5 3 3v2H6v-2l3-3z"], size, "bp-pin-icon");
 }
 
-function formatAge(ts: number): string {
+export function formatAge(ts: number): string {
   if (!ts) return "";
   const ms = ts < 10_000_000_000 ? ts * 1000 : ts;
   const diffSec = Math.max(0, Math.floor((Date.now() - ms) / 1000));
@@ -472,7 +473,7 @@ function moodClass(mood?: string): string {
   return "bp-mood-idle";
 }
 
-function rawThreadId(qid: string): string {
+export function rawThreadId(qid: string): string {
   const idx = qid.lastIndexOf("|");
   return idx >= 0 ? qid.slice(idx + 1) : qid;
 }
@@ -948,10 +949,17 @@ export class SidebarView {
   }
 
   private renderSectionThreadRow(row: SectionThreadRow, showTreeBranch: boolean, isInbox = false): HTMLElement {
+    const target = row.nav || row.id;
+    const isRoomNav = target.startsWith("@room:");
+    const isSelected = !this.selectedProjectId && (
+      row.id === this.selectedThreadId ||
+      rawThreadId(row.id) === this.selectedThreadId ||
+      (isRoomNav && (target === this.selectedThreadId || `@room:${rawThreadId(target.slice(6))}` === this.selectedThreadId))
+    );
     const el = document.createElement("div");
     el.className = "bp-thread-row" +
       (isInbox ? " bp-inbox-row" : "") +
-      (!this.selectedProjectId && (row.id === this.selectedThreadId || rawThreadId(row.id) === this.selectedThreadId) ? " active" : "") +
+      (isSelected ? " active" : "") +
       (row.off ? " bp-dim" : "");
     el.setAttribute("data-thread-id", row.id);
     el.setAttribute("data-testid", `thread-row-${row.id}`);
@@ -1019,9 +1027,14 @@ export class SidebarView {
       }
     }
 
-    const target = row.nav || row.id;
-    if (!row.off && target && !target.startsWith("@room:")) {
-      el.addEventListener("click", () => this.cb.onSelectThread(rawThreadId(target)));
+    if (!row.off && target) {
+      if (isRoomNav) {
+        if (this.cb.hasRoomView) {
+          el.addEventListener("click", () => this.cb.onSelectSwarm?.(rawThreadId(target.slice(6))));
+        }
+      } else {
+        el.addEventListener("click", () => this.cb.onSelectThread(rawThreadId(target)));
+      }
     }
 
     const showSnoozeBar = this.snoozeMenuRowId === row.id && Array.isArray(row.snooze) && row.snooze.length > 0;

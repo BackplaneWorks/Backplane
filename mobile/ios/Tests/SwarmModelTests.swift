@@ -18,7 +18,7 @@ let json = #"""
  "members":[{"member":"thread:t1","thread":"t1","name":"opus","color":"#3b82f6","role":"","provider":"claude","model":"opus","state":"working","title":"debounce · opus"},
             {"member":"bot1","thread":"","name":"Mochi","color":"#f97316","role":null,"provider":"","model":"","state":"bot","title":""}],
  "posts":[{"id":"p1","from":"opus","thread":"t1","color":"#3b82f6","text":"Idea: an integrator.","tags":["idea"],"reply":"","mentions":[],"files":[],"guard":false,"held":"","at":1700000000},
-          {"id":"p2","from":"gemini","thread":"t2","color":"#f97316","text":"I take it.","tags":["claim"],"files":["src/debounce.rs"],"guard":false,"held":"","at":1700000001},
+          {"id":"p2","from":"gemini","thread":"t2","color":"#f97316","text":"I take it.","tags":["claim"],"files":["src/debounce.rs"],"images":["out/plot.png"],"guard":false,"held":"","at":1700000001},
           {"id":"p3","from":"hub","thread":"","text":"The swarm paused: it went in circles.","tags":[],"guard":true,"held":"","at":1700000002},
           {"id":"p4","from":"codex","thread":"t3","text":"again the hall sensor","tags":[],"held":"circular","at":1700000003},
           {"id":"p5","from":"you","thread":"","text":"Use the integrator.","tags":["synthesis"],"at":1700000004}],
@@ -27,6 +27,7 @@ let json = #"""
 let b = try! JSONDecoder().decode(DSwarmBoard.self, from: Data(json.utf8))
 check(b.room.state == "paused" && b.room.reason == "circular" && b.room.goal == "pick a debounce", "room", b.room)
 check(b.members.count == 2 && b.members[0].thread == "t1" && b.members[1].role == "" && b.members[1].state == "bot", "members (a null role is empty)", b.members)
+check(b.posts[1].images == ["out/plot.png"] && b.posts[0].images.isEmpty, "post images decoded", b.posts[1].images)
 check(b.posts.map(\.id) == ["p1", "p2", "p3", "p4", "p5"], "posts in order", b.posts.map(\.id))
 check(b.posts.map(Swarm.look) == [.plain, .plain, .hub, .held, .synthesis], "looks", b.posts.map(Swarm.look))
 check(Swarm.labels(b.posts[4]) == [] && Swarm.labels(b.posts[0]) == ["idea"], "synthesis is drawn by its box, not a label")

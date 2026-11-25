@@ -564,8 +564,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let header = |t: String| div().h(crate::scale::tpx(36.)).flex_shrink_0().px_3().flex().items_center().border_b_1().border_color(c("line")).font_weight(FontWeight::BOLD).child(t);
     let frame = |inner: AnyElement, top: f32, header: Option<Div>| div().id("bot-page").absolute().top(px(top)).left_0().right_0().bottom_0().occlude().bg(c("bg")).flex().flex_col().children(header).child(div().id("bot-body").flex_1().min_h_0().overflow_y_scroll().child(inner)).into_any_element();
     match kind {
-        // a swarm's room is the swarm page (screens::swarm)
-        "room" if bot["swarm"].is_object() => Some(super::swarm::page(cx, light, fields, bot, reg, parsed)),
+        // a swarm's room is the cached swarm part (screens::swarm::swarm_part)
+        "room" if bot["swarm"].is_object() => None,
         "room" => {
             // a bots' exchange opened by its id: Keep this room makes it permanent (`roomPage.keep`); a closed one says so
             let keep = (bot["keep"] == true).then(|| div().ml_auto().font_weight(FontWeight::NORMAL).child(btn(cx, light, "room-keep".into(), trs("Keep this room"), false, keep_room, string(bot, "id"))));
