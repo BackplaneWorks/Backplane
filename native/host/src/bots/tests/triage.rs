@@ -841,7 +841,12 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
 
 #[tokio::test] async fn an_unmanaged_completion_with_no_other_traffic_wakes_within_window_and_falls_back_if_untold() {
     let (hub, bots, rec, bub, chat) = uber("unmanaged-fallback").await;
-    hub.commit(&json!({"$":"ThreadCreated","id":"t-case","project":"","title":"3D printable case","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    hub.commit_many(&[
+        json!({"$":"ThreadCreated","id":"t-case","project":"","title":"3D printable case","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-silent","project":"","title":"Quick chat","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-never-bad","project":"","title":"No change thread","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-never-ok","project":"","title":"Standalone PCB","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+    ]).await.unwrap();
     let t0 = now_s();
     turn_said(&hub, "t-case", "completed", "Case shells exported to case.step.\nZero interference on fit check.").await;
     until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-case:"))).await;
@@ -851,7 +856,7 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     assert!(setting_of(&hub, &crate::bots::mail::done::batch_key(&bub)).contains("t-case"));
     assert!(setting_of(&hub, &crate::bots::mail::done::pending_key(&bub)).contains("t-case"));
 
-    // Within WINDOW (no other traffic), done_tick_at spawns a mailcoord lane and gives it a full FALLBACK_AFTER window.
+    // Within WINDOW (no other traffic), done_tick_at spawns a mailcoord lane and gives it LANE_STALL_AFTER grace.
     let t_win = t0 + crate::bots::mail::done::WINDOW + 1;
     bots.done_tick_at(t_win).await;
     settle(&bots).await;
@@ -861,21 +866,26 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == lane).cloned().unwrap();
     assert!(ride.2.contains("3D printable case") && ride.2.contains("Case shells exported to case.step."), "{}", ride.2);
 
-    // While lane is still running inside its bumped FALLBACK_AFTER grace, done_tick_at does NOT race with a fallback tell.
+    // While lane is still running inside its bumped LANE_STALL_AFTER grace, done_tick_at does NOT race with a fallback tell.
     running(&hub, &lane).await;
     settle(&bots).await;
-    bots.done_tick_at(t0 + crate::bots::mail::done::FALLBACK_AFTER + 1).await;
+    bots.done_tick_at(t0 + crate::bots::mail::done::LANE_STALL_AFTER).await;
     settle(&bots).await;
-    assert!(shown_lines(&hub, &chat).is_empty(), "running lane keeps its full grace before fallback");
+    assert!(shown_lines(&hub, &chat).is_empty(), "running lane keeps its full stall grace before fallback");
+    assert_eq!(setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub)), "");
 
-    // If that mailcoord lane fails without calling tell_person, its deadline restores to t0 + FALLBACK_AFTER and fires on the next tick.
+    // If that mailcoord lane fails without calling tell_person, its deadline restores to t0 + FALLBACK_AFTER and fallback enters the 30-min tell batch.
     end(&hub, &lane, "failed").await;
     settle(&bots).await;
     let t_fb = t0 + crate::bots::mail::done::FALLBACK_AFTER + 2;
     bots.done_tick_at(t_fb).await;
     settle(&bots).await;
+    assert!(shown_lines(&hub, &chat).is_empty(), "fallback respects 30-minute tell batching and is not posted immediately");
+    assert!(setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub)).contains("Case shells exported to case.step."));
+
+    tell_now(&hub, &bots, &bub).await;
     let shown = shown_lines(&hub, &chat);
-    assert_eq!(shown.len(), 1, "fallback tell must reach chat: {shown:?}");
+    assert_eq!(shown.len(), 1, "batched fallback tell reaches chat when tell due fires: {shown:?}");
     assert!(shown[0].contains("3D printable case"), "{}", shown[0]);
     assert!(shown[0].contains("Case shells exported to case.step."), "{}", shown[0]);
     assert!(shown[0].contains("Zero interference on fit check."), "{}", shown[0]);
@@ -884,9 +894,11 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     // Subsequent ticks must not repeat the fallback tell.
     bots.done_tick_at(t_fb + 120).await;
     settle(&bots).await;
+    tell_now(&hub, &bots, &bub).await;
     assert_eq!(shown_lines(&hub, &chat).len(), 1);
 
-    // A launched recurring-lead lane that completes cleanly without telling deliberately chose silence (no Nov 20 digest spam).
+    // Cleanly completed mailcoord lane that deliberately chooses silence for BOTH triage-end and launch items NEVER triggers fallback.
+    turn_said(&hub, "t-silent", "completed", "Quick chat answer only.").await;
     report(&bots, &chat, "t-lead", "launch", &crate::agents::launch::note("t-lead", "Lead: Repo", "completed", "Round 3 status from lanes.")).await;
     settle(&bots).await;
     bots.done_tick_at(t_fb + 200).await;
@@ -896,23 +908,58 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     running(&hub, &ls2[1]).await;
     end(&hub, &ls2[1], "completed").await;
     settle(&bots).await;
-    bots.done_tick_at(t_fb + 500).await;
+    bots.done_tick_at(t_fb + 600).await;
     settle(&bots).await;
-    assert_eq!(shown_lines(&hub, &chat).len(), 1, "silent completed launch lane must not trigger fallback");
+    tell_now(&hub, &bots, &bub).await;
+    assert_eq!(shown_lines(&hub, &chat).len(), 1, "silent completed lane (both triage-end and launch) must never trigger fallback");
+
+    // A never-started pending item (lane == "") runs through gate::refusal(): no-change words are refused, real deliverable batches cleanly via private_tell_as.
+    turn_said(&hub, "t-never-bad", "completed", "Nothing landed yet; still in review.").await;
+    turn_said(&hub, "t-never-ok", "completed", "Generated Gerber files and BOM cleanly.").await;
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-never-ok:"))).await;
+    settle(&bots).await;
+    let never_t = now_s() + crate::bots::mail::done::FALLBACK_AFTER + 2;
+    // Remove done.due so done_tick_at triggers fallback directly with lane == "".
+    hub.commit(&json!({"$":"SettingSet","key":crate::bots::mail::done::due_key(&bub),"value":"","at":now_s()})).await.unwrap();
+    bots.done_tick_at(never_t).await;
+    settle(&bots).await;
+    let tell_batch = setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub));
+    assert!(!tell_batch.contains("t-never-bad"), "refusal() must reject no-change fallback: {tell_batch}");
+    assert!(tell_batch.contains("Generated Gerber files and BOM cleanly."), "valid never-started fallback enters tell.batch: {tell_batch}");
+    assert_eq!(shown_lines(&hub, &chat).len(), 1, "still waits for 30-min tell batch");
+    bots.done_tick_at(never_t + crate::bots::mail::gate::BATCH + 1).await;
+    settle(&bots).await;
+    let shown2 = shown_lines(&hub, &chat);
+    assert_eq!(shown2.len(), 2, "flushed with empty lane via private_tell_as: {shown2:?}");
+    assert!(shown2[1].contains("Generated Gerber files and BOM cleanly."), "{}", shown2[1]);
 }
 
 #[tokio::test] async fn duplicate_completions_for_the_same_thread_are_deduplicated_and_told_once() {
     let (hub, bots, rec, bub, chat) = uber("dedup-storm").await;
-    hub.commit(&json!({"$":"ThreadCreated","id":"t-storm","project":"","title":"Quick chat","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
-    hub.commit(&json!({"$":"ThreadCreated","id":"t-lead-dup","project":"","title":"Lead","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    hub.commit_many(&[
+        json!({"$":"ThreadCreated","id":"t-storm","project":"","title":"Quick chat","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-storm2","project":"","title":"Repeat refresh","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-lead-dup","project":"","title":"Lead","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+    ]).await.unwrap();
+    hub.mirrors().fold("L", &[
+        json!({"$":"ProjectCreated","id":"L~p1","title":"Remote","root":"/tmp/r","at":1}),
+        json!({"$":"ThreadCreated","id":"L~t-remote","project":"L~p1","title":"Remote deliverable","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}),
+        json!({"$":"TurnChanged","thread":"L~t-remote","state":"completed","at":3}),
+    ]);
 
-    // 6 rapid completions of the same thread produce only 1 triage-end MailPosted.
+    // 6 rapid completions of t-storm2 produce only 1 triage-end MailPosted AND refresh done.batch/pending in place with Answer 5.
     for i in 0..6 {
-        turn_said(&hub, "t-storm", "completed", &format!("Answer {i}")).await;
+        turn_said(&hub, "t-storm2", "completed", &format!("Answer {i}")).await;
         settle(&bots).await;
     }
-    let te_count = log(&hub).iter().filter(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-storm:")).count();
+    let te_count = log(&hub).iter().filter(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-storm2:")).count();
     assert_eq!(te_count, 1, "rapid turns on same thread must emit at most 1 triage-end");
+    let b0: Vec<Value> = serde_json::from_str(&setting_of(&hub, &crate::bots::mail::done::batch_key(&bub))).unwrap_or_default();
+    let s0 = b0.iter().find(|i| i["thread"] == "t-storm2").expect("t-storm2 in batch");
+    assert_eq!(s0["summary"], "Answer 5", "repeat turn inside window replaces older summary in done.batch: {b0:?}");
+    let p0: Vec<Value> = serde_json::from_str(&setting_of(&hub, &crate::bots::mail::done::pending_key(&bub))).unwrap_or_default();
+    let ps0 = p0.iter().find(|i| i["thread"] == "t-storm2").expect("t-storm2 in pending");
+    assert_eq!(ps0["summary"], "Answer 5", "repeat turn inside window replaces older preview in done.pending: {p0:?}");
 
     // Duplicate triage-end mails filed directly update the open batch entry with the newer reply (not duplicated).
     {
@@ -935,7 +982,7 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     assert!(bots.owner_records().await.is_empty(), "all duplicate, imported, and stale tickets must be claimed");
     assert!(runs(&hub).is_empty(), "imported triage-end must join done.batch, never start a triage run");
     let batch: Vec<Value> = serde_json::from_str(&setting_of(&hub, &crate::bots::mail::done::batch_key(&bub))).unwrap_or_default();
-    assert_eq!(batch.len(), 2, "one entry for t-storm and one for L~t-remote, none for stale t-old: {batch:?}");
+    assert_eq!(batch.len(), 3, "t-storm2, t-storm, L~t-remote; none for stale t-old: {batch:?}");
     let storm_item = batch.iter().find(|i| i["thread"] == "t-storm").unwrap();
     assert_eq!(storm_item["summary"], "Latest reply 3", "open batch keeps the newest reply");
 
@@ -950,11 +997,12 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
 
     bots.done_tick_at(now_s() + crate::bots::mail::done::FALLBACK_AFTER + 2).await;
     settle(&bots).await;
+    tell_now(&hub, &bots, &bub).await;
     let shown = shown_lines(&hub, &chat);
-    assert_eq!(shown.len(), 2, "one tell for t-storm and one for L~t-remote: {shown:?}");
-    assert!(shown.iter().any(|s| s.contains("t-storm")) && shown.iter().any(|s| s.contains("L~t-remote")), "{shown:?}");
+    assert_eq!(shown.len(), 1, "all 3 batched fallbacks go out together once when tell due fires: {shown:?}");
+    assert!(shown[0].contains("t-storm") && shown[0].contains("t-storm2") && shown[0].contains("L~t-remote"), "{shown:?}");
 
-    // Verify a recurring launch thread is NOT permanently muted after an earlier completion.
+    // Verify a recurring launch thread is NOT permanently muted after an earlier completion, even if a newer turn arrives while a lane is already running.
     report(&bots, &chat, "t-lead-dup", "launch", &crate::agents::launch::note("t-lead-dup", "Lead", "completed", "Landed aaa1111 on main.")).await;
     settle(&bots).await;
     bots.done_tick_at(now_s() + crate::bots::mail::done::FALLBACK_AFTER + 10).await;
@@ -963,14 +1011,294 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     assert_eq!(ls2.len(), 2);
     let k2 = lane_tell_key(&rec, &ls2[1]);
     running(&hub, &ls2[1]).await;
+    // Second launch turn arrives while ls2[1] is still running: must re-admit into done.batch and spawn a follow-up lane on end.
+    report(&bots, &chat, "t-lead-dup", "launch", &crate::agents::launch::note("t-lead-dup", "Lead", "completed", "Landed bbb2222 on main.")).await;
+    settle(&bots).await;
     verified("commit:BackplaneWorks/Backplane@aaa1111");
     assert!(bots.mail_tool(&ls2[1], "tell_person", &json!({"text":"Landed aaa1111 on main.","key":k2,"kind":"landed","ref":"commit:BackplaneWorks/Backplane@aaa1111"})).await.0);
     end(&hub, &ls2[1], "completed").await;
     settle(&bots).await;
-    // A second turn on the same launch thread later still opens a new lane (not permanently deduped).
-    report(&bots, &chat, "t-lead-dup", "launch", &crate::agents::launch::note("t-lead-dup", "Lead", "completed", "Landed bbb2222 on main.")).await;
+    assert_eq!(lanes(&hub, &bub).len(), 3, "recurring launch thread is not muted and spawns follow-up lane for newer turn");
+}
+
+#[tokio::test] async fn stall_grace_prevents_early_fallback_and_late_lane_tell_replaces_queued_fallback() {
+    let (hub, bots, rec, bub, chat) = uber("stall-replace").await;
+    hub.commit_many(&[
+        json!({"$":"ThreadCreated","id":"t-pr","project":"","title":"Ship PR fix","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-deliv","project":"","title":"Hardware BOM","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+    ]).await.unwrap();
+    turn_said(&hub, "t-pr", "completed", "Ready for release.").await;
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-pr:"))).await;
     settle(&bots).await;
-    bots.done_tick_at(now_s() + crate::bots::mail::done::FALLBACK_AFTER + 200).await;
+    let t_spawn = now_s() + crate::bots::mail::done::WINDOW + 1;
+    bots.done_tick_at(t_spawn).await;
     settle(&bots).await;
-    assert_eq!(lanes(&hub, &bub).len(), 3, "recurring launch thread is not muted for future PR landings");
+    let lane1 = lanes(&hub, &bub)[0].clone();
+    running(&hub, &lane1).await;
+    settle(&bots).await;
+
+    // Between FALLBACK_AFTER and LANE_STALL_AFTER, running lane is NOT raced by fallback.
+    bots.done_tick_at(t_spawn + crate::bots::mail::done::FALLBACK_AFTER + 30).await;
+    settle(&bots).await;
+    assert_eq!(setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub)), "");
+
+    // Once LANE_STALL_AFTER elapses, fallback enters tell.batch (still not posted immediately).
+    bots.done_tick_at(t_spawn + crate::bots::mail::done::LANE_STALL_AFTER + 5).await;
+    settle(&bots).await;
+    assert!(setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub)).contains("t-pr"));
+    assert!(shown_lines(&hub, &chat).is_empty());
+
+    // Late lane then calls tell_person with a verified PR ref: queued fallback is stripped so only the richer PR tell goes out.
+    let key1 = lane_tell_key(&rec, &lane1);
+    verified("pr:BackplaneWorks/Backplane#4242");
+    let r = bots.mail_tool(&lane1, "tell_person", &json!({
+        "text": "PR #4242 landed on main with the fix.",
+        "key": key1,
+        "kind": "landed",
+        "ref": "BackplaneWorks/Backplane#4242"
+    })).await;
+    assert!(r.0 && r.1["told"] == "batched", "{}", r.1);
+    end(&hub, &lane1, "completed").await;
+    settle(&bots).await;
+    tell_now(&hub, &bots, &bub).await;
+    let shown = shown_lines(&hub, &chat);
+    assert_eq!(shown.len(), 1, "no double-tell: {shown:?}");
+    assert!(shown[0].contains("#4242") && !shown[0].contains("Finished: Ship PR fix"), "lane PR tell replaced fallback: {shown:?}");
+
+    // Same when late lane tells with kind=completed, ref=thread:t-deliv after fallback queued into tell.batch.
+    turn_said(&hub, "t-deliv", "completed", "BOM exported to bom.csv.").await;
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-deliv:"))).await;
+    settle(&bots).await;
+    let t_spawn2 = now_s() + crate::bots::mail::done::WINDOW + 10;
+    bots.done_tick_at(t_spawn2).await;
+    settle(&bots).await;
+    let lane2 = lanes(&hub, &bub)[1].clone();
+    running(&hub, &lane2).await;
+    bots.done_tick_at(t_spawn2 + crate::bots::mail::done::LANE_STALL_AFTER + 5).await;
+    settle(&bots).await;
+    assert!(setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub)).contains("t-deliv"));
+
+    let key2 = lane_tell_key(&rec, &lane2);
+    let r2 = bots.mail_tool(&lane2, "tell_person", &json!({
+        "text": "Verified BOM CSV generated with LCSC stock check.",
+        "key": key2,
+        "kind": "completed",
+        "ref": "thread:t-deliv"
+    })).await;
+    assert!(r2.0 && r2.1["told"] == "batched", "lane completed tell replaces queued fallback: {}", r2.1);
+    end(&hub, &lane2, "completed").await;
+    settle(&bots).await;
+    tell_now(&hub, &bots, &bub).await;
+    let shown2 = shown_lines(&hub, &chat);
+    assert_eq!(shown2.len(), 2, "{shown2:?}");
+    assert!(shown2[1].contains("Verified BOM CSV generated") && !shown2[1].contains("Finished: Hardware BOM"), "{shown2:?}");
+}
+
+#[tokio::test] async fn completed_thread_is_not_permanently_muted_for_future_turns() {
+    let (hub, bots, rec, bub, chat) = uber("turn-dedup").await;
+    hub.commit_many(&[
+        json!({"$":"ThreadCreated","id":"t-multi","project":"","title":"Iterative CAD","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-legacy","project":"","title":"Legacy muted","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+    ]).await.unwrap();
+    // Simulate a legacy queued:<due> permanent marker well past its cooldown.
+    let legacy_key = crate::bots::mail::escalate::private_told_key(&bub, "thread:t-legacy");
+    hub.commit(&json!({"$":"SettingSet","key":legacy_key,"value":"queued:100","at":10})).await.unwrap();
+    turn_said(&hub, "t-legacy", "completed", "New legacy deliverable.").await;
+
+    // Turn 1 on t-multi completes -> lane tells thread:t-multi -> duplicate on same turn returns "already".
+    turn_said(&hub, "t-multi", "completed", "Revision 1 STEP exported.").await;
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-multi:"))).await;
+    settle(&bots).await;
+    due_now(&hub, &bots, &bub).await;
+    let lane1 = lanes(&hub, &bub)[0].clone();
+    let k1 = lane_tell_key(&rec, &lane1);
+    running(&hub, &lane1).await;
+    let r1 = bots.mail_tool(&lane1, "tell_person", &json!({"text":"Revision 1 STEP exported cleanly.","key":k1,"kind":"completed","ref":"thread:t-multi"})).await;
+    assert!(r1.0 && r1.1["told"] == "batched", "{}", r1.1);
+    let r1_dup = bots.mail_tool(&lane1, "tell_person", &json!({"text":"Revision 1 STEP exported cleanly.","key":format!("{k1}-2"),"kind":"completed","ref":"thread:t-multi"})).await;
+    assert!(r1_dup.0 && r1_dup.1["told"] == "already", "same turn stays deduplicated: {}", r1_dup.1);
+    // Using `key == "thread:<id>"` (S6) must not permanently mute subsequent turns.
+    let r_leg = bots.mail_tool(&lane1, "tell_person", &json!({"text":"Legacy thread finished revision 2.","key":"thread:t-legacy","kind":"completed","ref":"thread:t-legacy"})).await;
+    assert!(r_leg.0 && r_leg.1["told"] == "batched", "expired legacy queued:<due> does not mute: {}", r_leg.1);
+    end(&hub, &lane1, "completed").await;
+    settle(&bots).await;
+    tell_now(&hub, &bots, &bub).await;
+    assert_eq!(shown_lines(&hub, &chat).len(), 1);
+
+    // Immediately afterwards (inside 30-min cooldown, with no timestamp manipulation), a brand new turn
+    // with a new `last_entry` is NOT muted by `triage_thread_end`, `done_admit`, or `gate` (S3), and
+    // `key == "thread:..."` did not permanently mute t-legacy either (S6).
+    hub.commit(&json!({"$":"TurnChanged","thread":"t-multi","state":"running","at":now_s()})).await.unwrap();
+    hub.commit_many(&[
+        json!({"$":"MessagePosted","thread":"t-multi","msg":"m-turn-2","role":"assistant","text":"Revision 2 STEP exported.","at":now_s()}),
+        json!({"$":"TurnChanged","thread":"t-multi","state":"completed","at":now_s()}),
+    ]).await.unwrap();
+    hub.commit(&json!({"$":"TurnChanged","thread":"t-legacy","state":"running","at":now_s()})).await.unwrap();
+    hub.commit_many(&[
+        json!({"$":"MessagePosted","thread":"t-legacy","msg":"m-leg-2","role":"assistant","text":"Legacy revision 3 exported.","at":now_s()}),
+        json!({"$":"TurnChanged","thread":"t-legacy","state":"completed","at":now_s()}),
+    ]).await.unwrap();
+    until(&hub, |l| l.iter().filter(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-multi:")).count() >= 2).await;
+    settle(&bots).await;
+
+    due_now(&hub, &bots, &bub).await;
+    let ls2 = lanes(&hub, &bub);
+    assert_eq!(ls2.len(), 2, "new turn opens a new done lane immediately: {ls2:?}");
+    let lane2 = ls2[1].clone();
+    let k2 = lane_tell_key(&rec, &lane2);
+    running(&hub, &lane2).await;
+    let r2 = bots.mail_tool(&lane2, "tell_person", &json!({"text":"Revision 2 STEP exported cleanly.","key":k2,"kind":"completed","ref":"thread:t-multi"})).await;
+    assert!(r2.0 && r2.1["told"] == "batched", "new turn on same thread must NOT be muted: {}", r2.1);
+    let r_leg2 = bots.mail_tool(&lane2, "tell_person", &json!({"text":"Legacy revision 3 exported cleanly.","key":"thread:t-legacy","kind":"completed","ref":"thread:t-legacy"})).await;
+    assert!(r_leg2.0 && r_leg2.1["told"] == "batched", "key == rkey must not permanently mute next turn: {}", r_leg2.1);
+    end(&hub, &lane2, "completed").await;
+    settle(&bots).await;
+    tell_now(&hub, &bots, &bub).await;
+    let shown2 = shown_lines(&hub, &chat);
+    assert_eq!(shown2.len(), 2, "second turn deliverables reach chat: {shown2:?}");
+    assert!(shown2[1].contains("Revision 2 STEP") && shown2[1].contains("Legacy revision 3"), "{shown2:?}");
+}
+
+#[tokio::test] async fn held_batch_item_does_not_fall_back_before_a_lane_judges_it_and_silent_stalled_lane_cancels_fallback() {
+    let (hub, bots, _rec, bub, chat) = uber("held-b1-s1").await;
+    hub.commit_many(&[
+        json!({"$":"ThreadCreated","id":"t-first","project":"","title":"First turn","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-held","project":"","title":"Lead status","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+    ]).await.unwrap();
+
+    let t0 = now_s();
+    turn_said(&hub, "t-first", "completed", "First work done.").await;
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-first:"))).await;
+    settle(&bots).await;
+    let t_spawn = t0 + crate::bots::mail::done::WINDOW + 1;
+    bots.done_tick_at(t_spawn).await;
+    settle(&bots).await;
+    let lane1 = lanes(&hub, &bub)[0].clone();
+    running(&hub, &lane1).await;
+    settle(&bots).await;
+
+    // While lane1 is live, t-held arrives and stays in done.batch with lane == "".
+    report(&bots, &chat, "t-held", "launch", &crate::agents::launch::note("t-held", "Lead status", "completed", "Round 3 status from lanes.")).await;
+    settle(&bots).await;
+    assert!(setting_of(&hub, &crate::bots::mail::done::batch_key(&bub)).contains("t-held"));
+
+    // B1: Advancing past FALLBACK_AFTER while lane1 is live must NOT fall back t-held before a lane sees it.
+    bots.done_tick_at(t_spawn + crate::bots::mail::done::FALLBACK_AFTER + 60).await;
+    settle(&bots).await;
+    assert_eq!(setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub)), "", "t-held must not bypass done.batch into tell.batch");
+    assert!(setting_of(&hub, &crate::bots::mail::done::batch_key(&bub)).contains("t-held"), "t-held remains queued for a lane");
+
+    // S1: Once lane1 stalls past LANE_STALL_AFTER, fallback for t-first queues into tell.batch with lane == lane1
+    // (and t-held spawns lane2 to be judged by a lane instead of bypassing directly to fallback).
+    bots.done_tick_at(t_spawn + crate::bots::mail::done::LANE_STALL_AFTER + 5).await;
+    settle(&bots).await;
+    assert!(setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub)).contains("t-first"));
+    assert_eq!(lanes(&hub, &bub).len(), 2, "t-held goes to lane2 once lane1 exits grace: {:?}", lanes(&hub, &bub));
+
+    // Now lane1 ends `completed` without calling tell_person (choosing silence): its queued fallback in tell.batch must be stripped!
+    end(&hub, &lane1, "completed").await;
+    settle(&bots).await;
+    assert!(!setting_of(&hub, &crate::bots::mail::gate::batch_key(&bub)).contains("t-first"), "silent completed lane cancels its queued fallback");
+    tell_now(&hub, &bots, &bub).await;
+    assert!(shown_lines(&hub, &chat).is_empty(), "person receives nothing when stalled lane chose silence: {:?}", shown_lines(&hub, &chat));
+}
+
+#[tokio::test] async fn overlapping_turn_refresh_detaches_lane_preserves_new_turn_and_replaces_queued_tell() {
+    let (hub, bots, rec, bub, chat) = uber("overlap-s2-s4-s5").await;
+    hub.commit(&json!({"$":"ThreadCreated","id":"t-overlap","project":"","title":"Board layout","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+
+    // Turn 1 completes -> spawns lane1.
+    hub.commit(&json!({"$":"TurnChanged","thread":"t-overlap","state":"running","at":1})).await.unwrap();
+    hub.commit_many(&[
+        json!({"$":"MessagePosted","thread":"t-overlap","msg":"ov-m1","role":"assistant","text":"Turn 1 export finished.","at":2}),
+        json!({"$":"TurnChanged","thread":"t-overlap","state":"completed","at":3}),
+    ]).await.unwrap();
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-overlap:"))).await;
+    settle(&bots).await;
+    due_now(&hub, &bots, &bub).await;
+    let lane1 = lanes(&hub, &bub)[0].clone();
+    let k1 = lane_tell_key(&rec, &lane1);
+    running(&hub, &lane1).await;
+    settle(&bots).await;
+
+    // S4: While lane1 is running, Turn 2 finishes -> detaches t-overlap from lane1 into done.batch with newer content.
+    hub.commit(&json!({"$":"TurnChanged","thread":"t-overlap","state":"running","at":4})).await.unwrap();
+    hub.commit_many(&[
+        json!({"$":"MessagePosted","thread":"t-overlap","msg":"ov-m2","role":"assistant","text":"Turn 2 final revision finished.","at":5}),
+        json!({"$":"TurnChanged","thread":"t-overlap","state":"completed","at":6}),
+    ]).await.unwrap();
+    settle(&bots).await;
+    assert!(setting_of(&hub, &crate::bots::mail::done::batch_key(&bub)).contains("Turn 2 final revision"), "Turn 2 queued for follow-up lane");
+    assert!(setting_of(&hub, &crate::bots::mail::done::pending_key(&bub)).contains("t-overlap"));
+
+    // S5: lane1 (briefed on Turn 1) calls tell_person for thread:t-overlap -> MUST NOT consume Turn 2's pending entry or Turn 2's turn token!
+    let r1 = bots.mail_tool(&lane1, "tell_person", &json!({"text":"Turn 1 deliverable finished.","key":k1,"kind":"completed","ref":"thread:t-overlap"})).await;
+    assert!(r1.0 && r1.1["told"] == "batched", "{}", r1.1);
+    assert!(setting_of(&hub, &crate::bots::mail::done::pending_key(&bub)).contains("t-overlap"), "lane1 must not clear detached Turn 2 pending entry");
+
+    // lane1 ends -> follow-up lane2 spawns for Turn 2 and tells Turn 2 while Turn 1 is still waiting in tell.batch.
+    end(&hub, &lane1, "completed").await;
+    until(&hub, |l| l.iter().filter(|e| e["$"] == "RunSet" && e["thread"].as_str().unwrap_or("").starts_with(&format!("mailcoord-{bub}-"))).count() >= 2).await;
+    settle(&bots).await;
+    let lane2 = lanes(&hub, &bub)[1].clone();
+    let k2 = lane_tell_key(&rec, &lane2);
+    running(&hub, &lane2).await;
+    let r2 = bots.mail_tool(&lane2, "tell_person", &json!({"text":"Turn 2 final deliverable finished.","key":k2,"kind":"completed","ref":"thread:t-overlap"})).await;
+    assert!(r2.0 && r2.1["told"] == "batched", "S2/S5: Turn 2 must NOT be dropped as already: {}", r2.1);
+
+    end(&hub, &lane2, "completed").await;
+    settle(&bots).await;
+    tell_now(&hub, &bots, &bub).await;
+    let shown = shown_lines(&hub, &chat);
+    assert_eq!(shown.len(), 1, "one message with Turn 2 replacing Turn 1: {shown:?}");
+    assert!(shown[0].contains("Turn 2 final deliverable") && !shown[0].contains("Turn 1 deliverable"), "S2: Turn 2 replaced Turn 1 in tell.batch: {shown:?}");
+}
+
+#[tokio::test] async fn mirrored_triage_end_via_owner_received_reaches_done_batch_and_verifies_on_fallback() {
+    let super::Pair { hb, bb, ha, ba, ua, ubb, ame, .. } = super::owner_pair("mirrored-triage-end").await;
+    let link = Arc::new(super::ToHolder { holder: bb.clone(), as_link: "linkA".into(), sent: Default::default() });
+    ba.set_owner_link(link.clone());
+    // Mirror A's completed remote thread onto holder B so gate::verify recognizes L/linkA~t-remote.
+    let link_name = hb.setting(&format!("uber.link.{}.{}", bb.world().await.uid(), ame)).await.unwrap();
+    hb.mirrors().fold(&link_name, &[
+        json!({"$":"ProjectCreated","id":format!("{link_name}~p1"),"title":"CAD","root":"/tmp/cad","at":1}),
+        json!({"$":"ThreadCreated","id":format!("{link_name}~t-remote"),"project":format!("{link_name}~p1"),"title":"Remote enclosure","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}),
+        json!({"$":"TurnChanged","thread":format!("{link_name}~t-remote"),"state":"completed","at":3}),
+    ]);
+
+    let ts = now_s();
+    {
+        let w = ba.world().await;
+        let o = crate::bots::mail::Origin::new("thread:t-remote", "thread", "");
+        ba.file_operational(&w, ts, &o, &format!("bot:{ua}"), "Thread completed: Remote enclosure (backplane://thread/t-remote)\nEnclosure STEP exported cleanly.", &format!("triage-end:t-remote:{ts}"), "fyi", vec![]).await.unwrap();
+    }
+    super::walk_until(&ba, |r| r.is_empty()).await;
+    settle(&bb).await;
+
+    assert!(bb.owner_records().await.is_empty(), "holder claims imported triage-end ticket into done.batch");
+    assert!(runs(&hb).is_empty(), "imported triage-end does NOT start a full triage run");
+    let expected_th = format!("{link_name}~t-remote");
+    let batch_s = setting_of(&hb, &crate::bots::mail::done::batch_key(&ubb));
+    assert!(batch_s.contains(&expected_th), "done.batch uses mirrored thread id: {batch_s}");
+
+    // Flush batch -> lane -> crash lane -> fallback verifies mirrored thread and enters tell.batch -> flush to holder chat.
+    let chat = bb.world().await.bot(&ubb).unwrap().thread.clone();
+    bots_flush_mirrored_fallback(&hb, &bb, &ubb, ts).await;
+    let shown = shown_lines(&hb, &chat);
+    assert_eq!(shown.len(), 1, "mirrored fallback delivered to holder chat: {shown:?}");
+    assert!(shown[0].contains("Remote enclosure") && shown[0].contains(&expected_th), "{}", shown[0]);
+}
+
+async fn bots_flush_mirrored_fallback(hb: &Arc<Hub>, bb: &Arc<Bots>, ubb: &str, ts: u64) {
+    hb.commit(&json!({"$":"SettingSet","key":crate::bots::mail::done::due_key(ubb),"value":"1","at":ts})).await.unwrap();
+    bb.done_tick_at(ts + 1).await;
+    settle(bb).await;
+    let lane = lanes(hb, ubb)[0].clone();
+    running(hb, &lane).await;
+    end(hb, &lane, "failed").await;
+    settle(bb).await;
+    bb.done_tick_at(ts + crate::bots::mail::done::FALLBACK_AFTER + 2).await;
+    settle(bb).await;
+    bb.done_tick_at(ts + crate::bots::mail::done::FALLBACK_AFTER + crate::bots::mail::gate::BATCH + 10).await;
+    settle(bb).await;
 }

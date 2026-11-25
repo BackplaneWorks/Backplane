@@ -12,8 +12,10 @@ use std::sync::Arc;
 
 /// Done.window: seconds a batch stays open after its first finish
 pub const WINDOW: u64 = 60;
-/// Done.fallback: seconds after a finish is admitted (or a lane starts) before an untold completion gets a plain fallback tell
+/// Done.fallback: seconds after a finish is admitted (or a lane fails) before an untold completion gets a plain fallback tell
 pub const FALLBACK_AFTER: u64 = 120;
+/// Grace seconds while a `mailcoord` lane is actively running before fallback fires
+pub const LANE_STALL_AFTER: u64 = 300;
 /// Historical `triage-end:` mail older than this (from un-claimed backlog) is claimed and dropped without telling
 pub const TRIAGE_END_STALE_SECS: u64 = 7200;
 /// Cooldown between repeated `triage-end:` completion tells for the same thread (seconds).
@@ -25,9 +27,8 @@ pub fn pending_key(bot: &str) -> String { format!("mail.private.done.pending.{bo
 pub fn told_at_key(bot: &str, thread: &str) -> String { format!("mail.private.done.told.{bot}.{thread}") }
 pub fn fallback_at_key(bot: &str, thread: &str) -> String { format!("mail.private.done.fallback.{bot}.{thread}") }
 fn item_key(input: &str) -> String { format!("mail.private.done.item.{input}") }
-/// the plain digest a done lane owes, kept until it tells (`said`) or the hub posts it
+/// the plain digest a done lane owes, kept until it ends or tells
 pub fn lane_key(lane: &str) -> String { format!("mail.private.done.lane.{lane}") }
-fn said_key(lane: &str) -> String { format!("mail.private.said.{lane}") }
 fn handed_key(lane: &str) -> String { format!("mail.private.handed.{lane}") }
 
 /// Extract `<thread>` from `triage-end:<thread>:<ts>` or an imported `owner:[uid,origin,"triage-end:<thread>:<ts>"]`.
@@ -45,14 +46,18 @@ pub fn triage_end_thread_of_id(mail_id: &str) -> Option<String> {
 }
 /// Extract `<thread>` from a `triage-end:` mail id (local or owner-imported).
 pub fn triage_end_thread(mail_id: &str) -> Option<String> { triage_end_thread_of_id(mail_id) }
+/// Extract `<thread>` (preferring `m.from` `thread:<link>~<id>` for owner-imported mail) from a header.
+pub fn triage_end_thread_of_hdr(m: &super::Hdr) -> Option<String> {
+    let extracted = triage_end_thread(&m.id)?;
+    if m.id.starts_with("owner:") {
+        Some(m.from.strip_prefix("thread:").filter(|t| !t.is_empty()).map(str::to_string).unwrap_or(extracted))
+    } else {
+        Some(extracted)
+    }
+}
 /// Parse a `triage-end:` completed report: returns `(thread, title)` only when the status is `completed`.
 fn triage_end_completed(m: &super::Hdr, text: &str) -> Option<(String, String)> {
-    let extracted = triage_end_thread(&m.id)?;
-    let thread = if m.id.starts_with("owner:") {
-        m.from.strip_prefix("thread:").filter(|t| !t.is_empty()).map(str::to_string).unwrap_or(extracted)
-    } else {
-        extracted
-    };
+    let thread = triage_end_thread_of_hdr(m)?;
     let first = text.lines().next().filter(|l| !l.is_empty()).unwrap_or(&m.head);
     let rest = first.strip_prefix("Thread completed:")?.trim();
     let title = if rest.starts_with("backplane://") {
@@ -181,12 +186,16 @@ impl<'a> Ctx<'a> {
         let sum = first_lines(reply, 1, 200);
         let preview = first_lines(reply, 3, 300);
 
+        let turn_tok = self.thread_turn_token(&thread);
+        let live_until = self.live_done_lane_until(bot);
+        let next_due = (self.now + FALLBACK_AFTER).max(if live_until > 0 { live_until + FALLBACK_AFTER } else { 0 });
         let mut xs = items(&self.setting(&batch_key(bot), "[]"));
         let mut pend = items(&self.setting(&pending_key(bot), "[]"));
         if let Some(existing) = xs.iter_mut().find(|i| i["thread"] == thread.as_str()) {
             if let Some(o) = existing.as_object_mut() {
                 if !title.is_empty() { o.insert("title".into(), json!(title)); }
                 if !sum.is_empty() { o.insert("summary".into(), json!(sum)); }
+                if !turn_tok.is_empty() { o.insert("turn".into(), json!(turn_tok)); }
                 o.insert("at".into(), json!(self.now));
             }
             let mut pend_changed = false;
@@ -195,6 +204,7 @@ impl<'a> Ctx<'a> {
                     if let Some(o) = p.as_object_mut() {
                         if !title.is_empty() { o.insert("title".into(), json!(title)); }
                         if !preview.is_empty() { o.insert("summary".into(), json!(preview)); }
+                        if !turn_tok.is_empty() { o.insert("turn".into(), json!(turn_tok)); }
                         pend_changed = true;
                     }
                 }
@@ -207,28 +217,46 @@ impl<'a> Ctx<'a> {
             return Some(Step { cs, outs: vec![] });
         }
         if let Some(existing_p) = pend.iter_mut().find(|i| i["thread"] == thread.as_str()) {
+            let mut cs = self.owner_claim(&m.id);
+            let detach = !existing_p["lane"].as_str().unwrap_or("").is_empty()
+                && (source == "launch" || (source == "triage-end" && m.at > existing_p["at"].as_u64().unwrap_or(0)));
+            if detach {
+                if let Some(o) = existing_p.as_object_mut() {
+                    o.insert("input".into(), json!(m.id));
+                    if !title.is_empty() { o.insert("title".into(), json!(title)); }
+                    if !preview.is_empty() { o.insert("summary".into(), json!(preview)); }
+                    if !turn_tok.is_empty() { o.insert("turn".into(), json!(turn_tok)); }
+                    o.insert("at".into(), json!(self.now));
+                    o.insert("due_at".into(), json!(next_due));
+                    o.insert("lane".into(), json!(""));
+                }
+                xs.push(json!({"input":m.id,"conv":m.conv,"thread":thread,"title":title,"summary":sum,"source":source,"turn":turn_tok,"at":self.now}));
+                cs.push(set(item_key(&m.id), "batched", self.now));
+                cs.push(set(batch_key(bot), &jshow(json!(xs)), self.now));
+                cs.push(set(pending_key(bot), &jshow(json!(pend)), self.now));
+                if self.setting(&due_key(bot), "").is_empty() { cs.push(set(due_key(bot), &(self.now + WINDOW).to_string(), self.now)) }
+                self.replay(&cs);
+                return Some(Step { cs, outs: vec![] });
+            }
             let mut pend_changed = false;
             if let Some(o) = existing_p.as_object_mut() {
                 if !title.is_empty() { o.insert("title".into(), json!(title)); pend_changed = true; }
                 if !preview.is_empty() { o.insert("summary".into(), json!(preview)); pend_changed = true; }
+                if !turn_tok.is_empty() { o.insert("turn".into(), json!(turn_tok)); pend_changed = true; }
             }
-            let mut cs = self.owner_claim(&m.id);
             cs.push(set(item_key(&m.id), "dedup", self.now));
             if pend_changed { cs.push(set(pending_key(bot), &jshow(json!(pend)), self.now)); }
             self.replay(&cs);
             return Some(Step { cs, outs: vec![] });
         }
-        if source == "triage-end" {
-            let told_at: u64 = self.setting(&told_at_key(bot, &thread), "").parse().unwrap_or(0);
-            if told_at > 0 && self.now.saturating_sub(told_at) < COOLDOWN {
-                let mut cs = self.owner_claim(&m.id);
-                cs.push(set(item_key(&m.id), "dedup", self.now));
-                self.replay(&cs);
-                return Some(Step { cs, outs: vec![] });
-            }
+        if source == "triage-end" && self.told_recently(bot, &thread) {
+            let mut cs = self.owner_claim(&m.id);
+            cs.push(set(item_key(&m.id), "dedup", self.now));
+            self.replay(&cs);
+            return Some(Step { cs, outs: vec![] });
         }
-        xs.push(json!({"input":m.id,"conv":m.conv,"thread":thread,"title":title,"summary":sum,"source":source,"at":self.now}));
-        pend.push(json!({"input":m.id,"thread":thread,"title":title,"summary":preview,"source":source,"at":self.now,"due_at":self.now + FALLBACK_AFTER,"lane":""}));
+        xs.push(json!({"input":m.id,"conv":m.conv,"thread":thread,"title":title,"summary":sum,"source":source,"turn":turn_tok,"at":self.now}));
+        pend.push(json!({"input":m.id,"thread":thread,"title":title,"summary":preview,"source":source,"turn":turn_tok,"at":self.now,"due_at":next_due,"lane":""}));
         let mut cs = self.owner_claim(&m.id);
         cs.push(set(item_key(&m.id), "batched", self.now));
         cs.push(set(batch_key(bot), &jshow(json!(xs)), self.now));
@@ -236,14 +264,104 @@ impl<'a> Ctx<'a> {
         if self.setting(&due_key(bot), "").is_empty() { cs.push(set(due_key(bot), &(self.now + WINDOW).to_string(), self.now)) }
         self.replay(&cs); Some(Step { cs, outs: vec![] })
     }
-    /// Whether `bot` currently has a live done lane still running inside its grace window.
-    pub(super) fn has_live_done_lane(&self, bot: &str) -> bool {
-        !bot.is_empty() && self.w.mail.runs.values().any(|r| {
+    /// Whether `thread` was already told on its current turn (or within cooldown when no turn token is available).
+    fn told_recently(&self, bot: &str, thread: &str) -> bool {
+        let val = self.setting(&told_at_key(bot, thread), "");
+        if val.is_empty() { return false }
+        let (at, tok) = val.split_once(':')
+            .map(|(a, t)| (a.parse::<u64>().unwrap_or(0), t))
+            .unwrap_or_else(|| (val.parse::<u64>().unwrap_or(0), ""));
+        let cur_tok = self.thread_turn_token(thread);
+        if !tok.is_empty() && !cur_tok.is_empty() {
+            tok == cur_tok
+        } else {
+            at > 0 && self.now.saturating_sub(at) < COOLDOWN
+        }
+    }
+    /// Update open `done.batch` and `done.pending` entries for `thread` in place with newer completion content;
+    /// if the item was already claimed by a running lane, detach it into `done.batch` so a follow-up lane judges the new turn.
+    pub(super) fn done_refresh_in_place(&mut self, bot: &str, thread: &str, title: &str, reply: &str) -> Step {
+        if bot.is_empty() || thread.is_empty() { return Step::none() }
+        let sum = first_lines(reply, 1, 200);
+        let preview = first_lines(reply, 3, 300);
+        let turn_tok = self.thread_turn_token(thread);
+        let live_until = self.live_done_lane_until(bot);
+        let next_due = (self.now + FALLBACK_AFTER).max(if live_until > 0 { live_until + FALLBACK_AFTER } else { 0 });
+        let mut cs = vec![];
+        let mut xs = items(&self.setting(&batch_key(bot), "[]"));
+        let mut xs_changed = false;
+        for i in &mut xs {
+            if i["thread"].as_str() == Some(thread) {
+                if let Some(o) = i.as_object_mut() {
+                    if !title.trim().is_empty() { o.insert("title".into(), json!(title.trim())); }
+                    if !sum.is_empty() { o.insert("summary".into(), json!(sum)); }
+                    if !turn_tok.is_empty() { o.insert("turn".into(), json!(turn_tok)); }
+                    o.insert("at".into(), json!(self.now));
+                    xs_changed = true;
+                }
+            }
+        }
+        let mut pend = items(&self.setting(&pending_key(bot), "[]"));
+        let mut pend_changed = false;
+        let mut detached: Option<(String, String, String)> = None;
+        for p in &mut pend {
+            if p["thread"].as_str() == Some(thread) {
+                let assigned = p["lane"].as_str().unwrap_or("");
+                if !xs_changed && !assigned.is_empty() {
+                    let inp = p["input"].as_str().unwrap_or("").to_string();
+                    let src = p["source"].as_str().unwrap_or("triage-end").to_string();
+                    let cur_title = if !title.trim().is_empty() { title.trim().to_string() } else { p["title"].as_str().unwrap_or("").to_string() };
+                    if let Some(o) = p.as_object_mut() {
+                        if !title.trim().is_empty() { o.insert("title".into(), json!(title.trim())); }
+                        if !preview.is_empty() { o.insert("summary".into(), json!(preview)); }
+                        if !turn_tok.is_empty() { o.insert("turn".into(), json!(turn_tok)); }
+                        o.insert("at".into(), json!(self.now));
+                        o.insert("due_at".into(), json!(next_due));
+                        o.insert("lane".into(), json!(""));
+                        pend_changed = true;
+                    }
+                    detached = Some((inp, src, cur_title));
+                } else if let Some(o) = p.as_object_mut() {
+                    if !title.trim().is_empty() { o.insert("title".into(), json!(title.trim())); }
+                    if !preview.is_empty() { o.insert("summary".into(), json!(preview)); }
+                    if !turn_tok.is_empty() { o.insert("turn".into(), json!(turn_tok)); }
+                    pend_changed = true;
+                }
+            }
+        }
+        if let Some((inp, src, cur_title)) = detached {
+            xs.push(json!({"input":inp,"conv":"","thread":thread,"title":cur_title,"summary":sum,"source":src,"turn":turn_tok,"at":self.now}));
+            xs_changed = true;
+            if self.setting(&due_key(bot), "").is_empty() {
+                cs.push(set(due_key(bot), &(self.now + WINDOW).to_string(), self.now));
+            }
+        }
+        if xs_changed { cs.push(set(batch_key(bot), &jshow(json!(xs)), self.now)); }
+        if pend_changed { cs.push(set(pending_key(bot), &jshow(json!(pend)), self.now)); }
+        if !cs.is_empty() { self.replay(&cs); }
+        Step { cs, outs: vec![] }
+    }
+    /// Latest stall deadline across live done lanes for `bot` (0 when none is running within grace).
+    pub(super) fn live_done_lane_until(&self, bot: &str) -> u64 {
+        if bot.is_empty() { return 0 }
+        self.w.mail.runs.values().filter(|r| {
             r.live && r.bot == bot && self.w.private_is(&r.thread)
                 && !self.setting(&lane_key(&r.thread), "").is_empty()
                 && self.th(&r.thread).turn == "running"
-                && self.now.saturating_sub(r.at) < FALLBACK_AFTER
-        })
+                && self.now.saturating_sub(r.at) < LANE_STALL_AFTER
+        }).map(|r| r.at + LANE_STALL_AFTER).max().unwrap_or(0)
+    }
+    /// Whether `bot` currently has a live done lane still running inside its grace window.
+    pub(super) fn has_live_done_lane(&self, bot: &str) -> bool { self.live_done_lane_until(bot) > 0 }
+    fn pending_item_expired(&self, i: &Value, batch: &[Value], live_lane: bool) -> bool {
+        let d = i["due_at"].as_u64().unwrap_or(0);
+        if d == 0 || self.now < d { return false }
+        let lane_empty = i["lane"].as_str().unwrap_or("").is_empty();
+        let th = i["thread"].as_str().unwrap_or("");
+        if lane_empty && live_lane && !th.is_empty() && batch.iter().any(|b| b["thread"].as_str() == Some(th)) {
+            return false;
+        }
+        true
     }
     /// Done.flush: a batch whose window is over becomes one private lane (Private.spawn) that owes one tell_person
     pub fn done_flush(&mut self, bot: &str) -> Step { self.done_flush_inner(bot, false) }
@@ -273,6 +391,13 @@ impl<'a> Ctx<'a> {
                 }
             }
         }
+        let mut turns = serde_json::Map::new();
+        for i in &xs {
+            if let Some(th) = i["thread"].as_str().filter(|t| !t.is_empty()) {
+                let tok = i["turn"].as_str().filter(|t| !t.is_empty()).map(str::to_string).unwrap_or_else(|| self.thread_turn_token(th));
+                if !tok.is_empty() { turns.insert(th.to_string(), json!(tok)); }
+            }
+        }
         let id = self.id("done"); let key = format!("done:{id}");
         let build = running_build();
         let list: String = xs.iter().map(|i| format!("- {} · input {}\n", line(i), i["input"].as_str().unwrap_or(""))).collect();
@@ -281,7 +406,7 @@ impl<'a> Ctx<'a> {
         self.replay(&cs);
         let spawn = self.private_spawn(bot, &format!("done-batch:{id}"), &note);
         let lane = spawn.cs.iter().find(|e| e["$"] == "ThreadCreated").and_then(|e| e["id"].as_str()).unwrap_or("").to_string();
-        let mut own = vec![set(lane_key(&lane), &jshow(json!({"key":key,"text":digest(&xs)})), self.now)];
+        let mut own = vec![set(lane_key(&lane), &jshow(json!({"key":key,"text":digest(&xs),"turns":turns})), self.now)];
         let mut pend = items(&self.setting(&pending_key(bot), "[]"));
         if !pend.is_empty() && !lane.is_empty() {
             let mut changed = false;
@@ -292,7 +417,7 @@ impl<'a> Ctx<'a> {
                     if let Some(o) = p.as_object_mut() {
                         o.insert("lane".into(), json!(lane));
                         let old_due = o.get("due_at").and_then(Value::as_u64).unwrap_or(0);
-                        o.insert("due_at".into(), json!(old_due.max(self.now + FALLBACK_AFTER)));
+                        o.insert("due_at".into(), json!(old_due.max(self.now + LANE_STALL_AFTER)));
                         changed = true;
                     }
                 }
@@ -307,13 +432,14 @@ impl<'a> Ctx<'a> {
     pub fn done_pending_clear(&mut self, bot: &str, lane: &str, r: Option<&super::gate::Ref>, text: &str) -> Vec<Value> {
         let mut pend = items(&self.setting(&pending_key(bot), "[]"));
         if pend.is_empty() { return vec![] }
+        let is_done_lane = !lane.is_empty() && !self.setting(&lane_key(lane), "").is_empty();
         let mut cleared_threads: Vec<String> = vec![];
         let mut keep = vec![];
         let any_named = r.is_none() && pend.iter().any(|i| contains_id(text, i["thread"].as_str().unwrap_or("")));
         for i in pend.drain(..) {
             let th = i["thread"].as_str().unwrap_or("").to_string();
             let remove = match r {
-                Some(super::gate::Ref::Thread { id }) => th == id.as_str(),
+                Some(super::gate::Ref::Thread { id }) => th == id.as_str() && (!is_done_lane || i["lane"].as_str() == Some(lane)),
                 _ if any_named => !th.is_empty() && contains_id(text, &th),
                 _ => !lane.is_empty() && i["lane"].as_str() == Some(lane),
             };
@@ -323,22 +449,24 @@ impl<'a> Ctx<'a> {
                 keep.push(i);
             }
         }
-        if cleared_threads.is_empty() && keep.len() == items(&self.setting(&pending_key(bot), "[]")).len() {
+        if cleared_threads.is_empty() {
             return vec![];
         }
         let mut cs = vec![set(pending_key(bot), &jshow(json!(keep)), self.now)];
         for th in cleared_threads {
-            cs.push(set(told_at_key(bot, &th), &self.now.to_string(), self.now));
+            let tok = self.lane_turn_token(lane, &th);
+            let val = if tok.is_empty() { self.now.to_string() } else { format!("{}:{tok}", self.now) };
+            cs.push(set(told_at_key(bot, &th), &val, self.now));
         }
         cs
     }
-    /// Done.lane.end: a done lane that ended (any end) without telling has the hub settle pending state:
-    /// a cleanly completed `launch` lane that chose silence removes its `launch` entries (no Nov 20 digest noise);
-    /// `triage-end` entries (or any failed/interrupted lane's entries) restore their `at + FALLBACK_AFTER` deadline.
+    /// Done.lane.end: a done lane that ended (any end) settles its pending entries and queued fallbacks:
+    /// a cleanly completed lane removes all its remaining entries and any queued `tell.batch` fallbacks from itself (it chose silence; no fallback digest);
+    /// a failed/interrupted lane restores `at + FALLBACK_AFTER` so untold finishes recover via the gated fallback.
     pub fn done_lane_end(&mut self, lane: &str, state: &str) -> Option<Step> {
         let owed = self.setting(&lane_key(lane), ""); if owed.is_empty() { return None }
         if !["completed", "failed", "interrupted"].contains(&state) { return Some(Step::none()) }
-        if !self.setting(&said_key(lane), "").is_empty() || !self.setting(&handed_key(lane), "").is_empty() { return Some(Step::none()) }
+        if !self.setting(&handed_key(lane), "").is_empty() { return Some(Step::none()) }
         let v: Value = serde_json::from_str(&owed).unwrap_or(Value::Null); let (key, text) = (v["key"].as_str().unwrap_or("").to_string(), v["text"].as_str().unwrap_or("").to_string());
         let mut cs = vec![set(handed_key(lane), &self.now.to_string(), self.now)];
         let bot = self.w.private_owner(lane);
@@ -348,7 +476,7 @@ impl<'a> Ctx<'a> {
             let mut next_pend = vec![];
             for mut p in pend.drain(..) {
                 if p["lane"].as_str() == Some(lane) {
-                    if state == "completed" && p["source"].as_str() == Some("launch") {
+                    if state == "completed" {
                         changed = true;
                         continue;
                     }
@@ -361,6 +489,28 @@ impl<'a> Ctx<'a> {
                 next_pend.push(p);
             }
             if changed { cs.push(set(pending_key(&bot), &jshow(json!(next_pend)), self.now)); }
+        }
+        if state == "completed" {
+            let mut tb = items(&self.setting(&super::gate::batch_key(&bot), "[]"));
+            let tb_len = tb.len();
+            let mut stripped_threads: Vec<String> = vec![];
+            tb.retain(|i| {
+                let drop = i["fallback"].as_bool().unwrap_or(false) && i["lane"].as_str() == Some(lane);
+                if drop {
+                    if let Some(th) = i["thread"].as_str().filter(|t| !t.is_empty()) {
+                        let s = th.to_string();
+                        if !stripped_threads.contains(&s) { stripped_threads.push(s); }
+                    }
+                }
+                !drop
+            });
+            if tb.len() != tb_len {
+                cs.push(set(super::gate::batch_key(&bot), &jshow(json!(tb)), self.now));
+                if tb.is_empty() { cs.push(set(super::gate::due_key(&bot), "", self.now)); }
+                for th in stripped_threads {
+                    cs.push(set(fallback_at_key(&bot, &th), "", self.now));
+                }
+            }
         }
         self.replay(&cs);
         if key.is_empty() || text.is_empty() || !self.setting(&private_told_key(&bot, &key), "").is_empty() { return Some(Step { cs, outs: vec![] }) }
@@ -377,25 +527,25 @@ impl<'a> Ctx<'a> {
     pub fn done_fallback_due(&self) -> Vec<String> {
         let ub = self.w.uber_bot();
         if ub.is_empty() { return vec![] }
-        let due = items(&self.setting(&pending_key(&ub), "[]")).iter().any(|i| {
-            let d = i["due_at"].as_u64().unwrap_or(0);
-            d > 0 && self.now >= d
-        });
+        let batch = items(&self.setting(&batch_key(&ub), "[]"));
+        let live_lane = self.has_live_done_lane(&ub);
+        let due = items(&self.setting(&pending_key(&ub), "[]")).iter().any(|i| self.pending_item_expired(i, &batch, live_lane));
         if due { vec![ub] } else { vec![] }
     }
-    /// Post a plain fallback tell for any completion still untold past `FALLBACK_AFTER`.
-    pub fn done_fallback_flush(&mut self, bot: &str) -> Step {
+    /// Route any completion still untold past its deadline through `gate::refusal()` and the 30-minute tell batch.
+    pub fn done_fallback_flush(&mut self, bot: &str, verified: &std::collections::HashMap<String, Result<(), String>>) -> Step {
         if bot.is_empty() { return Step::none() }
         let pend = items(&self.setting(&pending_key(bot), "[]"));
         if pend.is_empty() { return Step::none() }
+        let batch_snap = items(&self.setting(&batch_key(bot), "[]"));
+        let live_lane = self.has_live_done_lane(bot);
         let (mut expired, mut keep) = (vec![], vec![]);
         for i in pend {
-            let d = i["due_at"].as_u64().unwrap_or(0);
-            if d > 0 && self.now >= d { expired.push(i); } else { keep.push(i); }
+            if self.pending_item_expired(&i, &batch_snap, live_lane) { expired.push(i); } else { keep.push(i); }
         }
         if expired.is_empty() { return Step::none() }
         let mut cs = vec![set(pending_key(bot), &jshow(json!(keep)), self.now)];
-        let mut batch = items(&self.setting(&batch_key(bot), "[]"));
+        let mut batch = batch_snap;
         let blen = batch.len();
         batch.retain(|b| !expired.iter().any(|e| !e["thread"].as_str().unwrap_or("").is_empty() && e["thread"] == b["thread"]));
         if batch.len() != blen {
@@ -410,26 +560,33 @@ impl<'a> Ctx<'a> {
             let source = i["source"].as_str().unwrap_or("");
             let input = i["input"].as_str().unwrap_or("");
             if thread.is_empty() { continue }
-            if source == "triage-end" {
-                let told_at: u64 = self.setting(&told_at_key(bot, thread), "").parse().unwrap_or(0);
-                if told_at > 0 && self.now.saturating_sub(told_at) < COOLDOWN { continue }
-            }
+            if source == "triage-end" && self.told_recently(bot, thread) { continue }
             let th_title = self.th(thread).title;
             let title = if !th_title.trim().is_empty() { th_title } else { i["title"].as_str().unwrap_or("").to_string() };
             let reply = self.f.last.get(thread).map(|l| l.0.as_str()).filter(|s| !s.trim().is_empty())
                 .unwrap_or_else(|| i["summary"].as_str().unwrap_or(""));
-            let preview = first_lines(reply, 3, 300);
-            if super::gate::quiet_report(&preview) { continue }
+            let check = verified.get(thread).cloned().unwrap_or_else(|| Err("thread verification unavailable".into()));
+            let proof: super::gate::Proof = Some((super::gate::Ref::Thread { id: thread.to_string() }, check));
             let text = fallback_text(&title, reply, thread);
             let fb_key = if input.is_empty() { format!("done-fallback:{thread}:{}", self.now) } else { format!("done-fallback:{input}") };
-            let told = self.private_tell_as(bot, lane, &text, &fb_key);
-            if !told.cs.is_empty() {
-                let mark = vec![
-                    set(told_at_key(bot, thread), &self.now.to_string(), self.now),
-                    set(fallback_at_key(bot, thread), &self.now.to_string(), self.now),
-                ];
-                self.replay(&mark);
-                st = st.cat(Step { cs: mark, outs: vec![] }).cat(told);
+            match self.tell_gate_as(bot, lane, &text, &fb_key, "completed", &proof, true) {
+                Ok((told, due)) if due > 0 && !told.cs.is_empty() => {
+                    let tok = self.thread_turn_token(thread);
+                    let val = if tok.is_empty() { self.now.to_string() } else { format!("{}:{tok}", self.now) };
+                    let mark = vec![
+                        set(told_at_key(bot, thread), &val, self.now),
+                        set(fallback_at_key(bot, thread), &val, self.now),
+                    ];
+                    self.replay(&mark);
+                    st = st.cat(Step { cs: mark, outs: vec![] }).cat(told);
+                }
+                Ok(_) => {}
+                Err(_) if !input.is_empty() => {
+                    let mark = vec![set(item_key(input), "refused", self.now)];
+                    self.replay(&mark);
+                    st = st.cat(Step { cs: mark, outs: vec![] });
+                }
+                Err(_) => {}
             }
         }
         st
@@ -454,10 +611,10 @@ impl Bots {
     pub async fn done_tick(self: &Arc<Self>) { self.done_tick_at(now_s()).await }
     pub async fn done_tick_at(self: &Arc<Self>, now: u64) {
         if crate::copy::on() { return }
-        let report: Vec<String> = {
+        let (report, expired_threads): (Vec<String>, Vec<(String, bool)>) = {
             let w = self.world().await;
             let ub = w.uber_bot();
-            if ub.is_empty() { vec![] } else {
+            if ub.is_empty() { (vec![], vec![]) } else {
                 let mut threads: Vec<String> = vec![];
                 for key in [pending_key(&ub), batch_key(&ub)] {
                     for i in items(&w.setting(&key, "[]")) {
@@ -467,13 +624,34 @@ impl Bots {
                         }
                     }
                 }
-                threads
+                let mut expired: Vec<(String, bool)> = vec![];
+                for i in items(&w.setting(&pending_key(&ub), "[]")) {
+                    let d = i["due_at"].as_u64().unwrap_or(0);
+                    if d > 0 && now >= d {
+                        if let Some(th) = i["thread"].as_str().filter(|t| !t.is_empty()) {
+                            if !expired.iter().any(|(x, _)| x == th) {
+                                let internal = w.private_is(th) || w.mail.run_of(th).is_some() || w.chat_is(th);
+                                expired.push((th.to_string(), internal));
+                            }
+                        }
+                    }
+                }
+                (threads, expired)
             }
         };
+        let mut verified = std::collections::HashMap::new();
+        for (th, internal) in expired_threads {
+            let res = if internal {
+                Err("it is an internal mailroom or coordinator thread".into())
+            } else {
+                super::gate::verify(&self.hub, &super::gate::Ref::Thread { id: th.clone() }, now).await
+            };
+            verified.insert(th, res);
+        }
         let outs = self.decide_at(&report, now, |c| {
             let mut st = Step::none();
             for b in c.done_due() { let s = c.done_flush(&b); st = st.cat(s); }
-            for b in c.done_fallback_due() { let s = c.done_fallback_flush(&b); st = st.cat(s); }
+            for b in c.done_fallback_due() { let s = c.done_fallback_flush(&b, &verified); st = st.cat(s); }
             for b in c.tell_due() { let s = c.tell_flush(&b); st = st.cat(s); }
             st
         }).await;

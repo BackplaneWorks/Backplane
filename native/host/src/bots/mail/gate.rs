@@ -86,8 +86,7 @@ impl Ref {
         let (repo, n) = if let Some((r, n)) = s2.split_once("/pull/") { (r, n) } else if let Some((r, n)) = s2.split_once('#') { (r, n) } else { return bad() };
         match n.trim_end_matches('/').parse::<u64>() { Ok(n) if n > 0 && repo_ok(repo) => Ok(Ref::Pr { repo: repo.into(), n }), _ => bad() }
     }
-    /// the told key: one tell per landed PR, commit, release, completed thread or ask, whatever key the lane gives.
-    /// For `Ref::Thread`, this intentionally deduplicates to one `completed` tell per thread id as a hard backstop against recurring leads spamming turns.
+    /// the told key: one tell per landed PR, commit, release, or ask; for `Ref::Thread`, dedup is scoped to the current turn / cooldown (not permanent).
     pub fn key(&self) -> String { match self { Ref::Pr { repo, n } => format!("pr:{repo}#{n}"), Ref::Commit { repo, sha } => format!("commit:{repo}@{}", take(sha, 10)), Ref::Release { repo, tag } => format!("release:{repo}@{tag}"), Ref::Thread { id } => format!("thread:{id}"), Ref::Ask { id } => format!("ask:{id}") } }
     fn fits(&self, k: Kind) -> bool { matches!((self, k), (Ref::Pr { .. } | Ref::Commit { .. }, Kind::Landed) | (Ref::Release { .. }, Kind::Release) | (Ref::Thread { .. }, Kind::Completed) | (Ref::Ask { .. }, Kind::NeedsYou)) }
     /// the text names what it is about: the PR's number, the commit's short sha, the release's tag (an ask or thread is linked by the hub, so no words are asked of it)
@@ -151,34 +150,143 @@ impl<'a> Ctx<'a> {
         ps.sort_by(|a, b| b.updated.cmp(&a.updated));
         ps.iter().take(3).map(|m| format!("\n- {}: {}", m.key, super::route::take_chars(&m.text, 400))).collect()
     }
+    /// Current turn token for a thread (`last_entry`, falling back to `act:<activity>` when present, empty for mirrored/unknown threads which fall back to cooldown).
+    pub(super) fn thread_turn_token(&self, id: &str) -> String {
+        let t = self.th(id);
+        if !t.last_entry.is_empty() { t.last_entry }
+        else if t.activity > 0 { format!("act:{}", t.activity) }
+        else { String::new() }
+    }
+    /// Turn token snapshotted on `lane` when it was spawned for `thread`, falling back to current `thread_turn_token`.
+    pub(super) fn lane_turn_token(&self, lane: &str, thread: &str) -> String {
+        if !lane.is_empty() {
+            let raw = self.setting(&super::done::lane_key(lane), "");
+            if let Ok(v) = serde_json::from_str::<Value>(&raw) {
+                if let Some(tok) = v["turns"][thread].as_str().filter(|t| !t.is_empty()) {
+                    return tok.to_string();
+                }
+            }
+        }
+        self.thread_turn_token(thread)
+    }
+    fn thread_already_told(&self, bot: &str, id: &str, rkey: &str, xs: &[Value], fallback: bool, cur_tok: &str) -> bool {
+        let same_queued = xs.iter().any(|i| {
+            if i["ref"] != rkey { return false }
+            let entry_tok = i["turn"].as_str().unwrap_or("");
+            let same_turn = entry_tok.is_empty() || cur_tok.is_empty() || entry_tok == cur_tok;
+            if !same_turn { return false }
+            fallback || !i["fallback"].as_bool().unwrap_or(false)
+        });
+        if same_queued { return true }
+        let val = self.setting(&private_told_key(bot, rkey), "");
+        if let Some(rest) = val.strip_prefix("turn:") {
+            let (at_s, tok) = rest.split_once(':').unwrap_or((rest, ""));
+            let at: u64 = at_s.parse().unwrap_or(0);
+            if !tok.is_empty() && !cur_tok.is_empty() {
+                if tok == cur_tok { return true }
+            } else if at > 0 && self.now.saturating_sub(at) < super::done::COOLDOWN {
+                return true;
+            }
+        } else if let Some(due_s) = val.strip_prefix("queued:") {
+            let due: u64 = due_s.parse().unwrap_or(0);
+            if due > 0 && self.now < due.saturating_add(super::done::COOLDOWN) { return true }
+        }
+        let has_queued_fallback = xs.iter().any(|i| i["fallback"].as_bool().unwrap_or(false) && i["thread"] == id);
+        if fallback || !has_queued_fallback {
+            let fb_val = self.setting(&super::done::fallback_at_key(bot, id), "");
+            let (fb_at, fb_tok) = fb_val.split_once(':').map(|(a, t)| (a.parse::<u64>().unwrap_or(0), t))
+                .unwrap_or_else(|| (fb_val.parse::<u64>().unwrap_or(0), ""));
+            if fb_at > 0 && self.now.saturating_sub(fb_at) < super::done::COOLDOWN {
+                if fb_tok.is_empty() || cur_tok.is_empty() || fb_tok == cur_tok {
+                    return true;
+                }
+            }
+        }
+        false
+    }
     /// Gate.tell (tell_person): a material tell, its ref verified (`proof`), joins the owner's batch; Err is the refusal, nothing posted. Ok carries when the
     /// batch goes out (0: no change, the ref was told already). The told key is the ref's, so one landing, release or ask is told once whatever key a lane gives.
     pub fn tell_gate(&mut self, lane: &str, text: &str, key: &str, kind: &str, proof: &Proof) -> Result<(Step, u64), String> {
         let bot = self.w.private_owner(lane);
-        if let Some(why) = refusal(kind, text, proof) { let p = self.report_prefs(&bot); return Err(if p.is_empty() { why } else { format!("{why}\nThe person's rules:{p}") }) }
+        self.tell_gate_as(&bot, lane, text, key, kind, proof, false)
+    }
+    /// Internal tell gate allowing a fallback tell (`fallback = true`) when `lane` may be empty; real lane tells (`fallback = false`) replace queued fallbacks.
+    pub(super) fn tell_gate_as(&mut self, bot: &str, lane: &str, text: &str, key: &str, kind: &str, proof: &Proof, fallback: bool) -> Result<(Step, u64), String> {
+        if let Some(why) = refusal(kind, text, proof) { let p = self.report_prefs(bot); return Err(if p.is_empty() { why } else { format!("{why}\nThe person's rules:{p}") }) }
         let rkey = proof.as_ref().map(|(r, _)| r.key()).unwrap_or_default();
         let ref_parsed = proof.as_ref().map(|(r, _)| r);
-        let fallback_recent = if let Some(super::gate::Ref::Thread { id }) = ref_parsed {
-            let fb_at: u64 = self.setting(&super::done::fallback_at_key(&bot, id), "").parse().unwrap_or(0);
-            fb_at > 0 && self.now.saturating_sub(fb_at) < super::done::COOLDOWN
-        } else { false };
-        if fallback_recent || !self.setting(&private_told_key(&bot, &rkey), "").is_empty() || !self.setting(&private_told_key(&bot, key), "").is_empty()
-            || items(&self.setting(&batch_key(&bot), "[]")).iter().any(|i| i["ref"] == rkey.as_str()) {
-            let clr = self.done_pending_clear(&bot, lane, ref_parsed, text);
+        let cur_tok = match ref_parsed {
+            Some(Ref::Thread { id }) => if fallback { self.thread_turn_token(id) } else { self.lane_turn_token(lane, id) },
+            _ => String::new(),
+        };
+        let mut xs = items(&self.setting(&batch_key(bot), "[]"));
+        let key_is_thread_ref = matches!(ref_parsed, Some(Ref::Thread { .. })) && (key == rkey || key.starts_with("thread:"));
+        let key_already = !key_is_thread_ref && !self.setting(&private_told_key(bot, key), "").is_empty();
+        let ref_already = match ref_parsed {
+            Some(Ref::Thread { id }) => self.thread_already_told(bot, id, &rkey, &xs, fallback, &cur_tok),
+            _ => !self.setting(&private_told_key(bot, &rkey), "").is_empty()
+                || xs.iter().any(|i| i["ref"] == rkey.as_str() && !i["fallback"].as_bool().unwrap_or(false)),
+        };
+        if key_already || ref_already {
+            let clr = if fallback { vec![] } else { self.done_pending_clear(bot, lane, ref_parsed, text) };
             if !clr.is_empty() { self.replay(&clr); return Ok((Step { cs: clr, outs: vec![] }, 0)) }
             return Ok((Step::none(), 0))
         }
-        let urgent = Kind::parse(kind).is_some_and(Kind::urgent); let now = self.now;
-        let (last, open) = (num(self.setting(&last_key(&bot), "")), num(self.setting(&due_key(&bot), "")));
+        let now = self.now;
+        let mut cs = vec![];
+        let thread_id = match ref_parsed { Some(Ref::Thread { id }) => Some(id.as_str()), _ => None };
+        let mut stripped_threads: Vec<String> = vec![];
+        xs.retain(|i| {
+            let is_fb = i["fallback"].as_bool().unwrap_or(false);
+            let older_turn = thread_id.is_some() && i["ref"] == rkey.as_str() && {
+                let entry_tok = i["turn"].as_str().unwrap_or("");
+                !entry_tok.is_empty() && !cur_tok.is_empty() && entry_tok != cur_tok
+            };
+            let matches_lane = !fallback && !lane.is_empty() && i["lane"].as_str() == Some(lane);
+            let matches_thread = !fallback && thread_id.is_some_and(|tid| i["thread"].as_str() == Some(tid));
+            if (is_fb && (matches_lane || matches_thread)) || older_turn {
+                if let Some(th) = i["thread"].as_str().filter(|t| !t.is_empty()) {
+                    let s = th.to_string();
+                    if !stripped_threads.contains(&s) { stripped_threads.push(s); }
+                }
+                false
+            } else {
+                true
+            }
+        });
+        for th in stripped_threads {
+            cs.push(set(super::done::fallback_at_key(bot, &th), "", now));
+        }
+        let urgent = Kind::parse(kind).is_some_and(Kind::urgent);
+        let (last, open) = (num(self.setting(&last_key(bot), "")), num(self.setting(&due_key(bot), "")));
         let due = if urgent { let at = now.max(last + GAP); if open > 0 { open.min(at) } else { at } } else if open > 0 { open } else { (now + BATCH).max(last + BATCH) };
-        let mut xs = items(&self.setting(&batch_key(&bot), "[]"));
-        xs.push(json!({"key":key,"ref":rkey,"text":text,"lane":lane,"kind":kind,"at":now}));
-        let mut cs = vec![set(batch_key(&bot), &jshow(json!(xs)), now), set(due_key(&bot), &due.to_string(), now),
-            set(private_told_key(&bot, key), &format!("queued:{due}"), now), set(private_told_key(&bot, &rkey), &format!("queued:{due}"), now), set(said_key(lane), &format!("queued:{key}"), now)];
-        cs.extend(self.done_pending_clear(&bot, lane, ref_parsed, text));
+        let mut entry = json!({"key":key,"ref":rkey,"text":text,"lane":lane,"kind":kind,"at":now});
+        if let Some(o) = entry.as_object_mut() {
+            if matches!(ref_parsed, Some(Ref::Thread { .. })) && !cur_tok.is_empty() {
+                o.insert("turn".into(), json!(cur_tok));
+            }
+            if fallback {
+                o.insert("fallback".into(), json!(true));
+                if let Some(Ref::Thread { id }) = ref_parsed { o.insert("thread".into(), json!(id)); }
+            }
+        }
+        xs.push(entry);
+        cs.extend([set(batch_key(bot), &jshow(json!(xs)), now), set(due_key(bot), &due.to_string(), now)]);
+        if !key_is_thread_ref {
+            cs.push(set(private_told_key(bot, key), &format!("queued:{due}"), now));
+        }
+        if !fallback {
+            let ref_val = match ref_parsed {
+                Some(Ref::Thread { .. }) => format!("turn:{now}:{cur_tok}"),
+                _ => format!("queued:{due}"),
+            };
+            cs.push(set(private_told_key(bot, &rkey), &ref_val, now));
+            if !lane.is_empty() { cs.push(set(said_key(lane), &format!("queued:{key}"), now)); }
+            cs.extend(self.done_pending_clear(bot, lane, ref_parsed, text));
+        }
         self.replay(&cs);
         let st = Step { cs, outs: vec![] };
-        if due <= now { let f = self.tell_flush(&bot); return Ok((st.cat(f), due)) }
+        if due <= now { let f = self.tell_flush(bot); return Ok((st.cat(f), due)) }
         Ok((st, due))
     }
     /// Gate.flush: a batch whose time has come is ONE message in the person's chat
@@ -186,14 +294,15 @@ impl<'a> Ctx<'a> {
         let due = num(self.setting(&due_key(bot), "")); if due == 0 || self.now < due { return Step::none() }
         let xs = items(&self.setting(&batch_key(bot), "[]"));
         let mut cs = vec![set(batch_key(bot), "[]", self.now), set(due_key(bot), "", self.now)];
-        let Some(lane) = xs.last().and_then(|i| i["lane"].as_str()).map(str::to_string) else { self.replay(&cs); return Step { cs, outs: vec![] } };
+        if xs.is_empty() { self.replay(&cs); return Step { cs, outs: vec![] } }
+        let lane = xs.iter().rev().find_map(|i| i["lane"].as_str().filter(|l| !l.is_empty())).unwrap_or("").to_string();
         cs.push(set(last_key(bot), &self.now.to_string(), self.now)); self.replay(&cs);
         let t = |i: &Value| i["text"].as_str().unwrap_or("").trim().to_string();
         // the urgent ones first
         let mut xs = xs; xs.sort_by_key(|i| i["kind"] != "needs_you");
         let text = match xs.as_slice() { [one] => t(one), _ => xs.iter().map(|i| format!("- {}", t(i).replace('\n', " "))).collect::<Vec<_>>().join("\n") };
         let key = format!("tell-batch:{}", self.id("tb"));
-        let told = self.private_tell(&lane, &text, &key);
+        let told = self.private_tell_as(bot, &lane, &text, &key);
         Step { cs, outs: vec![] }.cat(told)
     }
     /// the owner with a tell batch whose time has come
