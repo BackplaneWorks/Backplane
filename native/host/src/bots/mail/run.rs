@@ -56,12 +56,16 @@ impl Bots {
     }
     /// Decide on the world as it is, commit the step, let the world go
     pub(crate) async fn decide(self: &Arc<Self>, report: &[String], f: impl FnOnce(&mut Ctx) -> Step) -> Vec<RouteOut> { self.decide_with(report, |c| ((), f(c))).await.1 }
+    pub(crate) async fn decide_at(self: &Arc<Self>, report: &[String], now: u64, f: impl FnOnce(&mut Ctx) -> Step) -> Vec<RouteOut> { self.decide_acc_at(report, true, now, |c| ((), f(c))).await.1 }
     /// the same, for a decision that also answers its caller (a tool)
     pub(crate) async fn decide_with<T>(self: &Arc<Self>, report: &[String], f: impl FnOnce(&mut Ctx) -> (T, Step)) -> (T, Vec<RouteOut>) { self.decide_acc(report, true, f).await }
     /// `accounts`: Accounts.created binds what the step creates; a step's own after-work (Run.after) comes past it in , and a back office it makes has only its explicit binding
     async fn decide_acc<T>(self: &Arc<Self>, report: &[String], accounts: bool, f: impl FnOnce(&mut Ctx) -> (T, Step)) -> (T, Vec<RouteOut>) {
+        self.decide_acc_at(report, accounts, now_s(), f).await
+    }
+    async fn decide_acc_at<T>(self: &Arc<Self>, report: &[String], accounts: bool, now: u64, f: impl FnOnce(&mut Ctx) -> (T, Step)) -> (T, Vec<RouteOut>) {
         let w = self.world().await; let facts = self.facts(&w, report).await;
-        let (now, seq) = (now_s(), self.hub.store.len() as u64);
+        let seq = self.hub.store.len() as u64;
         let mut ctx = Ctx::new(&w, &facts, now, seq); let (t, st) = f(&mut ctx);
         let cs = if accounts { self.accounts_created(st.cs).await } else { st.cs }; // Accounts.created: a run's thread starts on the default account
         if !cs.is_empty() && self.hub.commit_many(&cs).await.is_err() { eprintln!("mail: routing could not be committed"); return (t, vec![]) }
@@ -75,9 +79,9 @@ impl Bots {
     }
     /// Mail.route for a header just filed
     pub async fn route_body(self: &Arc<Self>, body: Body) {
-        let outs = self.decide(&[], |c| c.route(&body)).await; self.perform(outs).await;
-        // Done.timer: a finish that opened the owner's batch flushes it when its window is over
-        if body.mail.kind == "launch" { let due = { let w = self.world().await; w.setting(&super::done::due_key(&w.uber_bot()), "").parse().unwrap_or(0) }; self.done_timer(due) }
+        let report: Vec<String> = super::done::triage_end_thread(&body.mail.id).into_iter().collect();
+        let outs = self.decide(&report, |c| c.route(&body)).await; self.perform(outs).await;
+        self.arm_done_timer().await;
     }
     /// Run.queue.start for RunNext
     pub async fn run_next(self: &Arc<Self>, bot: String, conv: String) { let outs = self.decide(&[], |c| c.queue_start(&bot, &conv)).await; self.perform(outs).await }
@@ -98,7 +102,21 @@ impl Bots {
     pub async fn after_steps(self: &Arc<Self>) {
         let (steps, on) = { let mut w = self.world().await; (std::mem::take(&mut w.steps), w.setting("mail.on", "off") == "on" || !w.uber_bot().is_empty()) };
         if crate::copy::on() || steps.is_empty() { return }
-        let report: Vec<String> = steps.iter().filter_map(|s| match s { StepEnd::Turn { thread, .. } | StepEnd::Fallback { thread, .. } => Some(thread.clone()), _ => None }).collect();
+        let mut report: Vec<String> = steps.iter().filter_map(|s| match s { StepEnd::Turn { thread, .. } | StepEnd::Fallback { thread, .. } => Some(thread.clone()), _ => None }).collect();
+        if on && steps.iter().any(|s| matches!(s, StepEnd::Turn { thread, .. } if thread.starts_with("mailcoord-"))) {
+            let w = self.world().await;
+            let ub = w.uber_bot();
+            if !ub.is_empty() {
+                if let Ok(serde_json::Value::Array(arr)) = serde_json::from_str::<serde_json::Value>(&w.setting(&super::done::batch_key(&ub), "[]")) {
+                    for i in arr {
+                        if let Some(th) = i["thread"].as_str().filter(|t| !t.is_empty()) {
+                            let s = th.to_string();
+                            if !report.contains(&s) { report.push(s); }
+                        }
+                    }
+                }
+            }
+        }
         let ended: Vec<String> = steps.iter().filter_map(|s| match s { StepEnd::Turn { thread, state, .. } if (state == "completed" || state == "failed") && ephemeral(thread) => Some(thread.clone()), _ => None }).collect();
         let answers: Vec<(String, String, usize)> = steps.iter().filter_map(|s| match s { StepEnd::RoomReply { thread, room, line } => Some((thread.clone(), room.clone(), *line)), _ => None }).collect();
         let (_, outs) = self.decide_acc(&report, false, |c| {
@@ -119,6 +137,7 @@ impl Bots {
             ((), st)
         }).await;
         self.perform(outs).await;
+        self.arm_done_timer().await;
         // Room.answer: the person asked in a room and the bot answered only in its own chat, where they do not look: its reply is posted in the room as the bot's own room_post
         let answers = if answers.is_empty() || self.hub.setting("room.answer").await.map_or(false, |v| v == "off") { vec![] } else { answers }; // the setting `room.answer` = off leaves replies where the bot wrote them
         for (thread, room, line) in answers {

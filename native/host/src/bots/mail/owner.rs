@@ -107,11 +107,15 @@ impl Bots {
     async fn owner_current(&self, r: &Value) -> bool { self.setting_or_empty(&pending_key(&key(r))).await == show(r) }
     fn owner_stamp(&self, w: &World, now: u64) -> String { format!("{now}:{}:{}", self.hub.store.len(), w.lease().1) }
 
-    /// Owner.records: at most sixteen pending tickets, by key
+    /// Owner.records: at most sixteen pending tickets (up to 8 newest + up to 8 oldest so neither starves)
     pub async fn owner_records(&self) -> Vec<Value> {
-        let m = self.hub.model().await; let seqs: Vec<u32> = m.settings_with_prefix("owner.mail.pending.").map(|(_, s)| s).collect(); drop(m);
+        let m = self.hub.model().await; let mut seqs: Vec<u32> = m.settings_with_prefix("owner.mail.pending.").map(|(_, s)| s).collect(); drop(m);
+        seqs.sort_unstable();
+        let mut picked: Vec<u32> = Vec::with_capacity(16);
+        for &s in seqs.iter().rev().take(8) { picked.push(s); }
+        for &s in seqs.iter().take(8) { if !picked.contains(&s) { picked.push(s); } }
         let mut out = vec![];
-        for s in seqs { if out.len() >= 16 { break }
+        for s in picked { if out.len() >= 16 { break }
             let Some(v) = self.hub.store.get(s as usize - 1).ok().and_then(|l| serde_json::from_str::<Value>(&l).ok()) else { continue };
             let Some(t) = v["value"].as_str().filter(|t| !t.is_empty()) else { continue };
             if let Ok(r) = serde_json::from_str::<Value>(t) { out.push(r) }

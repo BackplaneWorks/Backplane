@@ -777,3 +777,200 @@ const QUIET: [&str; 10] = ["Nothing landed, and your build is unchanged. PR #136
     assert_eq!(shown.len(), 1, "flushed into one message: {shown:?}");
     assert!(shown[0].starts_with(&format!("- {ask_msg}")) && shown[0].contains(fw_msg) && shown[0].contains(cad_msg), "{}", shown[0]);
 }
+
+#[tokio::test] async fn a_completion_arriving_while_a_mailcoord_turn_is_running_spawns_a_followup_turn_and_tells() {
+    let (hub, bots, rec, bub, chat) = uber("followup").await;
+    hub.commit_many(&[
+        json!({"$":"ThreadCreated","id":"t-first","project":"","title":"First task","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
+        json!({"$":"ThreadCreated","id":"t-second","project":"","title":"Case 3D design","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}),
+        json!({"$":"ThreadCreated","id":"t-ask","project":"","title":"Ask worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":3}),
+    ]).await.unwrap();
+    turn_said(&hub, "t-first", "completed", "First deliverable finished.").await;
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-first:"))).await;
+    settle(&bots).await;
+    due_now(&hub, &bots, &bub).await;
+    let ls = lanes(&hub, &bub);
+    assert_eq!(ls.len(), 1, "first completion opens lane1: {ls:?}");
+    let lane1 = ls[0].clone();
+    running(&hub, &lane1).await;
+    settle(&bots).await;
+
+    // While lane1 is running, t-second completes and t-ask opens an actionable ask.
+    turn_said(&hub, "t-second", "completed", "Exported case_top.step and case_base.step.").await;
+    hub.commit(&json!({"$":"AskOpened","id":"q-mid","thread":"t-ask","kind":"approval","tool":"Bash","detail":"confirm step","options":"","at":now_s()})).await.unwrap();
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-second:"))).await;
+    settle(&bots).await;
+    assert!(runs(&hub).iter().any(|r| r["mail"] == "triage-ask:q-mid"), "act ask starts a triage run even while mailcoord is running");
+
+    // Even if done_tick runs past WINDOW while lane1 is still active, done_due waits for lane1 to end.
+    bots.done_tick_at(now_s() + crate::bots::mail::done::WINDOW + 1).await;
+    settle(&bots).await;
+    assert_eq!(lanes(&hub, &bub).len(), 1, "t-second waits in done.batch until lane1 finishes");
+
+    // lane1 tells t-first cleanly, then ends -> follow-up lane2 starts immediately for t-second.
+    let key1 = lane_tell_key(&rec, &lane1);
+    let msg1 = "First task deliverable finished cleanly.";
+    assert!(bots.mail_tool(&lane1, "tell_person", &json!({"text":msg1,"key":key1,"kind":"completed","ref":"thread:t-first"})).await.0);
+    end(&hub, &lane1, "completed").await;
+    until(&hub, |l| l.iter().filter(|e| e["$"] == "RunSet" && e["thread"].as_str().unwrap_or("").starts_with(&format!("mailcoord-{bub}-"))).count() >= 2).await;
+    settle(&bots).await;
+    let ls2 = lanes(&hub, &bub);
+    assert_eq!(ls2.len(), 2, "follow-up lane started when lane1 ended: {ls2:?}");
+    let lane2 = ls2[1].clone();
+    let ride2 = rec.rides.lock().unwrap().iter().find(|r| r.0 == lane2).cloned().unwrap();
+    assert!(ride2.2.contains("Case 3D design") && ride2.2.contains("Exported case_top.step"), "{}", ride2.2);
+
+    running(&hub, &lane2).await;
+    settle(&bots).await;
+    let key2 = lane_tell_key(&rec, &lane2);
+    let msg2 = "Case 3D design finished (case_top.step and case_base.step exported).";
+    let res = bots.mail_tool(&lane2, "tell_person", &json!({"text":msg2,"key":key2,"kind":"completed","ref":"thread:t-second"})).await;
+    assert!(res.0, "{res:?}");
+    end(&hub, &lane2, "completed").await;
+    settle(&bots).await;
+    tell_now(&hub, &bots, &bub).await;
+    let shown = shown_lines(&hub, &chat);
+    assert_eq!(shown.len(), 1, "{shown:?}");
+    assert!(shown[0].contains(msg1) && shown[0].contains(msg2), "{shown:?}");
+
+    // Advancing past FALLBACK_AFTER must not emit any duplicate fallback tell.
+    bots.done_tick_at(now_s() + crate::bots::mail::done::FALLBACK_AFTER + 60).await;
+    settle(&bots).await;
+    assert_eq!(shown_lines(&hub, &chat).len(), 1, "no duplicate fallback after tell_person");
+}
+
+#[tokio::test] async fn an_unmanaged_completion_with_no_other_traffic_wakes_within_window_and_falls_back_if_untold() {
+    let (hub, bots, rec, bub, chat) = uber("unmanaged-fallback").await;
+    hub.commit(&json!({"$":"ThreadCreated","id":"t-case","project":"","title":"3D printable case","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    let t0 = now_s();
+    turn_said(&hub, "t-case", "completed", "Case shells exported to case.step.\nZero interference on fit check.").await;
+    until(&hub, |l| l.iter().any(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-case:"))).await;
+    settle(&bots).await;
+
+    assert!(bots.owner_records().await.is_empty(), "triage-end ticket must be claimed on admission");
+    assert!(setting_of(&hub, &crate::bots::mail::done::batch_key(&bub)).contains("t-case"));
+    assert!(setting_of(&hub, &crate::bots::mail::done::pending_key(&bub)).contains("t-case"));
+
+    // Within WINDOW (no other traffic), done_tick_at spawns a mailcoord lane and gives it a full FALLBACK_AFTER window.
+    let t_win = t0 + crate::bots::mail::done::WINDOW + 1;
+    bots.done_tick_at(t_win).await;
+    settle(&bots).await;
+    let ls = lanes(&hub, &bub);
+    assert_eq!(ls.len(), 1, "mailcoord lane spawned after WINDOW: {ls:?}");
+    let lane = ls[0].clone();
+    let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == lane).cloned().unwrap();
+    assert!(ride.2.contains("3D printable case") && ride.2.contains("Case shells exported to case.step."), "{}", ride.2);
+
+    // While lane is still running inside its bumped FALLBACK_AFTER grace, done_tick_at does NOT race with a fallback tell.
+    running(&hub, &lane).await;
+    settle(&bots).await;
+    bots.done_tick_at(t0 + crate::bots::mail::done::FALLBACK_AFTER + 1).await;
+    settle(&bots).await;
+    assert!(shown_lines(&hub, &chat).is_empty(), "running lane keeps its full grace before fallback");
+
+    // If that mailcoord lane fails without calling tell_person, its deadline restores to t0 + FALLBACK_AFTER and fires on the next tick.
+    end(&hub, &lane, "failed").await;
+    settle(&bots).await;
+    let t_fb = t0 + crate::bots::mail::done::FALLBACK_AFTER + 2;
+    bots.done_tick_at(t_fb).await;
+    settle(&bots).await;
+    let shown = shown_lines(&hub, &chat);
+    assert_eq!(shown.len(), 1, "fallback tell must reach chat: {shown:?}");
+    assert!(shown[0].contains("3D printable case"), "{}", shown[0]);
+    assert!(shown[0].contains("Case shells exported to case.step."), "{}", shown[0]);
+    assert!(shown[0].contains("Zero interference on fit check."), "{}", shown[0]);
+    assert!(shown[0].contains("backplane://thread/t-case"), "{}", shown[0]);
+
+    // Subsequent ticks must not repeat the fallback tell.
+    bots.done_tick_at(t_fb + 120).await;
+    settle(&bots).await;
+    assert_eq!(shown_lines(&hub, &chat).len(), 1);
+
+    // A launched recurring-lead lane that completes cleanly without telling deliberately chose silence (no Nov 20 digest spam).
+    report(&bots, &chat, "t-lead", "launch", &crate::agents::launch::note("t-lead", "Lead: Repo", "completed", "Round 3 status from lanes.")).await;
+    settle(&bots).await;
+    bots.done_tick_at(t_fb + 200).await;
+    settle(&bots).await;
+    let ls2 = lanes(&hub, &bub);
+    assert_eq!(ls2.len(), 2);
+    running(&hub, &ls2[1]).await;
+    end(&hub, &ls2[1], "completed").await;
+    settle(&bots).await;
+    bots.done_tick_at(t_fb + 500).await;
+    settle(&bots).await;
+    assert_eq!(shown_lines(&hub, &chat).len(), 1, "silent completed launch lane must not trigger fallback");
+}
+
+#[tokio::test] async fn duplicate_completions_for_the_same_thread_are_deduplicated_and_told_once() {
+    let (hub, bots, rec, bub, chat) = uber("dedup-storm").await;
+    hub.commit(&json!({"$":"ThreadCreated","id":"t-storm","project":"","title":"Quick chat","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    hub.commit(&json!({"$":"ThreadCreated","id":"t-lead-dup","project":"","title":"Lead","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+
+    // 6 rapid completions of the same thread produce only 1 triage-end MailPosted.
+    for i in 0..6 {
+        turn_said(&hub, "t-storm", "completed", &format!("Answer {i}")).await;
+        settle(&bots).await;
+    }
+    let te_count = log(&hub).iter().filter(|e| e["$"] == "MailPosted" && e["id"].as_str().unwrap_or("").starts_with("triage-end:t-storm:")).count();
+    assert_eq!(te_count, 1, "rapid turns on same thread must emit at most 1 triage-end");
+
+    // Duplicate triage-end mails filed directly update the open batch entry with the newer reply (not duplicated).
+    {
+        let w = bots.world().await;
+        let o = crate::bots::mail::Origin::new("thread:t-storm", "thread", "");
+        let base = now_s();
+        for i in 1..=3u64 {
+            let msg = format!("triage-end:t-storm:{}", base + i);
+            bots.file_operational(&w, base + i, &o, &format!("bot:{bub}"), &format!("Thread completed: Quick chat (backplane://thread/t-storm)\nLatest reply {i}"), &msg, "fyi", vec![]).await.unwrap();
+        }
+        // An imported owner:[uid,origin,"triage-end:..."] mail is also recognized by done_admit (no triage run).
+        let imp = format!("owner:[\"u1\",\"m2\",\"triage-end:t-remote:{}\"]", base + 4);
+        let o_imp = crate::bots::mail::Origin::new("thread:L~t-remote", "thread", "");
+        bots.file_operational(&w, base + 4, &o_imp, &format!("bot:{bub}"), "Thread completed: Remote deliverable (backplane://thread/L~t-remote)\nRemote output ready.", &imp, "fyi", vec![]).await.unwrap();
+        // Stale historical triage-end (> 2 hours old) is claimed and dropped without entering batch/pending.
+        let o_old = crate::bots::mail::Origin::new("thread:t-old", "thread", "");
+        bots.file_operational(&w, 1_700_000_100, &o_old, &format!("bot:{bub}"), "Thread completed: Old thread (backplane://thread/t-old)", "triage-end:t-old:1700000100", "fyi", vec![]).await.unwrap();
+    }
+    settle(&bots).await;
+    assert!(bots.owner_records().await.is_empty(), "all duplicate, imported, and stale tickets must be claimed");
+    assert!(runs(&hub).is_empty(), "imported triage-end must join done.batch, never start a triage run");
+    let batch: Vec<Value> = serde_json::from_str(&setting_of(&hub, &crate::bots::mail::done::batch_key(&bub))).unwrap_or_default();
+    assert_eq!(batch.len(), 2, "one entry for t-storm and one for L~t-remote, none for stale t-old: {batch:?}");
+    let storm_item = batch.iter().find(|i| i["thread"] == "t-storm").unwrap();
+    assert_eq!(storm_item["summary"], "Latest reply 3", "open batch keeps the newest reply");
+
+    let t_win = now_s() + crate::bots::mail::done::WINDOW + 1;
+    bots.done_tick_at(t_win).await;
+    settle(&bots).await;
+    assert_eq!(lanes(&hub, &bub).len(), 1, "exactly one mailcoord lane");
+    let lane = lanes(&hub, &bub)[0].clone();
+    running(&hub, &lane).await;
+    end(&hub, &lane, "failed").await;
+    settle(&bots).await;
+
+    bots.done_tick_at(now_s() + crate::bots::mail::done::FALLBACK_AFTER + 2).await;
+    settle(&bots).await;
+    let shown = shown_lines(&hub, &chat);
+    assert_eq!(shown.len(), 2, "one tell for t-storm and one for L~t-remote: {shown:?}");
+    assert!(shown.iter().any(|s| s.contains("t-storm")) && shown.iter().any(|s| s.contains("L~t-remote")), "{shown:?}");
+
+    // Verify a recurring launch thread is NOT permanently muted after an earlier completion.
+    report(&bots, &chat, "t-lead-dup", "launch", &crate::agents::launch::note("t-lead-dup", "Lead", "completed", "Landed aaa1111 on main.")).await;
+    settle(&bots).await;
+    bots.done_tick_at(now_s() + crate::bots::mail::done::FALLBACK_AFTER + 10).await;
+    settle(&bots).await;
+    let ls2 = lanes(&hub, &bub);
+    assert_eq!(ls2.len(), 2);
+    let k2 = lane_tell_key(&rec, &ls2[1]);
+    running(&hub, &ls2[1]).await;
+    verified("commit:BackplaneWorks/Backplane@aaa1111");
+    assert!(bots.mail_tool(&ls2[1], "tell_person", &json!({"text":"Landed aaa1111 on main.","key":k2,"kind":"landed","ref":"commit:BackplaneWorks/Backplane@aaa1111"})).await.0);
+    end(&hub, &ls2[1], "completed").await;
+    settle(&bots).await;
+    // A second turn on the same launch thread later still opens a new lane (not permanently deduped).
+    report(&bots, &chat, "t-lead-dup", "launch", &crate::agents::launch::note("t-lead-dup", "Lead", "completed", "Landed bbb2222 on main.")).await;
+    settle(&bots).await;
+    bots.done_tick_at(now_s() + crate::bots::mail::done::FALLBACK_AFTER + 200).await;
+    settle(&bots).await;
+    assert_eq!(lanes(&hub, &bub).len(), 3, "recurring launch thread is not muted for future PR landings");
+}
