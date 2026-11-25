@@ -1557,12 +1557,24 @@ final class DataClient {
         let env = "production"
         #endif
         _ = try? await call("device.register", ["token": t, "platform": "ios", "kind": "alert", "env": env, "bundle": Bundle.main.bundleIdentifier ?? ""], as: DEmpty.self)
-        await pushMute()
+        await pushMute() // which also tells the Enterprise gateway
     }
+    /// The same token and switch, for the person's Enterprise push gateway (when signed in there).
+    func registerEnterprise() async {
+        guard let t = pushToken else { return }
+        #if DEBUG
+        let env = "sandbox"
+        #else
+        let env = "production"
+        #endif
+        await EnterprisePush.shared.registerDevice(token: t, env: env, bundle: Bundle.main.bundleIdentifier ?? "", muted: !AppSettings.shared.alerts)
+    }
+    var apnsToken: String? { pushToken }
     /// This phone's switch: off, only what the person let through reaches it.
     func pushMute() async {
         guard has("push"), let t = pushToken else { return }
         _ = try? await call("device.prefs", ["token": t, "mute": !AppSettings.shared.alerts], as: DEmpty.self)
+        await registerEnterprise()
     }
     func setQuiet(_ spec: String) async { quiet = spec; _ = try? await call("push.prefs", ["notify.quiet": spec], as: DEmpty.self) }
     func setQuietUrgent(_ on: Bool) async { quietUrgent = on; _ = try? await call("push.prefs", ["notify.quiet.urgent": on ? "on" : "off"], as: DEmpty.self) }

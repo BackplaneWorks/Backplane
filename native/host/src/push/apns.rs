@@ -47,7 +47,7 @@ pub fn raw_sig(der: &[u8]) -> Option<[u8; 64]> {
     Some(out)
 }
 /// Write `input` to `c`'s stdin and wait for stdout; kill and reap on write failure so no `<defunct>` child leaks (#1607).
-fn pipe_and_wait(c: &mut std::process::Command, input: &[u8], missing: &str, fail: &str) -> Result<Vec<u8>, String> {
+pub(super) fn pipe_and_wait(c: &mut std::process::Command, input: &[u8], missing: &str, fail: &str) -> Result<Vec<u8>, String> {
     let mut ch = c.spawn().map_err(|_| missing.to_string())?;
     let wrote = ch.stdin.take().ok_or_else(|| "no stdin".to_string()).and_then(|mut s| s.write_all(input).map_err(|e| e.to_string()));
     if let Err(e) = wrote { let _ = ch.kill(); let _ = ch.wait(); return Err(e) }
@@ -163,6 +163,7 @@ pub async fn credentials(hub: &Arc<Hub>) -> Option<(String, String, String, &'st
 
 /// Push.undelivered.why: a send's failure as the person reads it, naming the key file when that is what is gone (never a key's contents).
 pub async fn explain(hub: &Arc<Hub>, why: &str) -> String {
+    if why.starts_with("Enterprise push") { return why.to_string() }
     if why != "APNs is not configured" { return format!("Apple refused or did not answer the alert ({why})") }
     let key = hub.setting("push.apns.key").await.unwrap_or_default();
     if !key.is_empty() && !Path::new(&key).is_file() { return format!("the APNs key file {key} is missing") }
