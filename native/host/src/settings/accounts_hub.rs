@@ -13,6 +13,30 @@ use std::sync::Arc;
 /// Accounts.public: what a client is told of the snapshot (no attempts: their links and codes are for the connection that asked).
 pub fn public(snapshot: &Value) -> String { json!({"version":1,"revision":snapshot["revision"].as_u64().unwrap_or(0),"profiles":snapshot["profiles"].clone(),"defaultLogin":snapshot["default_login"].clone(),"error":snapshot["error"].as_str().unwrap_or("")}).to_string() }
 
+fn probe_fingerprint(v: &Value) -> Value {
+    let dflt = v.get("defaultLogin").or_else(|| v.get("default_login")).filter(|x| x.is_object()).cloned().unwrap_or_else(|| json!({}));
+    let mut profs: Vec<Value> = v["profiles"].as_array().into_iter().flatten().map(|p| {
+        let ident = if p["identity"].is_object() { p["identity"].clone() } else { json!({}) };
+        json!({
+            "id": p["id"].as_str().unwrap_or(""),
+            "provider": p["provider"].as_str().unwrap_or(""),
+            "kind": p["kind"].as_str().unwrap_or(""),
+            "epoch": p["epoch"].as_u64().unwrap_or(0),
+            "state": p["state"].as_str().unwrap_or(""),
+            "identity": ident,
+        })
+    }).collect();
+    profs.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
+    json!({"defaultLogin": dflt, "profiles": profs})
+}
+/// Whether a snapshot change warrants re-probing installed CLIs/models (`models_probe::refresh_soon`):
+/// only when `defaultLogin` or profile logins/identities/states/epochs actually changed, not on routine 5-minute allowance polls.
+pub fn models_probe_needed(prev_inventory: &str, snapshot: &Value) -> bool {
+    if !snapshot["error"].as_str().unwrap_or("").is_empty() { return false }
+    let prev: Value = serde_json::from_str(prev_inventory).unwrap_or(Value::Null);
+    probe_fingerprint(&prev) != probe_fingerprint(snapshot)
+}
+
 /// Accounts.changes: the inventory when it moved, and a default whose profile is gone (only from a snapshot without an error).
 pub fn changes(get: &dyn Fn(&str) -> String, snapshot: &Value, at: u64) -> Vec<Value> {
     let value = public(snapshot);
@@ -154,7 +178,7 @@ pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: 
     if let Some(e) = allowance(&get, snapshot, at, at) { evs.push(e) }
     if !evs.is_empty() { let _ = hub.commit_many(&evs).await; }
     // a sign-in or sign-out: the CLI that did it is found again at once (one installed by hand since the last detection shows in the picker now)
-    if evs.iter().any(|e| e["key"] == "accounts.inventory") { super::models_probe::refresh_soon(hub); }
+    if evs.iter().any(|e| e["key"] == "accounts.inventory") && models_probe_needed(&get("accounts.inventory"), snapshot) { super::models_probe::refresh_soon(hub); }
     super::provider_notice::publish(hub).await;
     let inventory = public(snapshot);
     // not broadcast: the live profiles go only to clients granted account access (the `accounts` request)
@@ -409,5 +433,51 @@ mod tests {
         let s = json!({"default_allowance":{"provider":"claude","source":"claude-cli-usage","attempted_at":5,"windows":[]}});
         let e = allowance(&|_| String::new(), &s, 10, 10).unwrap(); assert_eq!(e["key"], "allowance.claude");
         assert!(allowance(&|_| s["default_allowance"].to_string(), &s, 10, 10).is_none()); assert!(allowance(&|_| String::new(), &s, 4, 4).is_none(), "an attempt from the future is not kept"); assert!(allowance(&|_| String::new(), &json!({}), 10, 10).is_none());
+    }
+    #[test] fn models_probe_runs_on_login_or_profile_changes_not_on_allowance_polls() {
+        let mk_snap = |rev: u64, dflt: Value, profiles: Value, error: &str| json!({
+            "version": 1, "revision": rev, "default_login": dflt, "profiles": profiles, "error": error
+        });
+        let p_work = |state: &str, epoch: u64, email: &str, used: f64, checked: u64, lab: &str| json!({
+            "id": "w", "provider": "claude", "kind": "", "epoch": epoch, "state": state, "label": lab,
+            "identity": {"email": email, "plan": "max"},
+            "allowance": {"state": "ok", "windows": [{"used_percent": used}]},
+            "checkedAt": checked, "catalog": [{"id": "opus"}], "message": "", "sameAsDefault": false
+        });
+        let d_known = json!({"claude": {"state": "known", "email": "a@example.com", "plan": "max"}});
+        let d_out = json!({"claude": {"state": "signed-out"}});
+
+        let base = mk_snap(10, d_known.clone(), json!([p_work("connected", 2, "a@example.com", 15.0, 100, "Work")]), "");
+        let prev = public(&base);
+
+        // Routine 5-minute default_allowance poll bumps revision only -> suppressed
+        let rev_bump = mk_snap(11, d_known.clone(), json!([p_work("connected", 2, "a@example.com", 15.0, 100, "Work")]), "");
+        assert!(!models_probe_needed(&prev, &rev_bump));
+
+        // Routine profile allowance/checkedAt/catalog/message/label/sameAsDefault updates -> suppressed
+        let mut allowance_poll = mk_snap(12, d_known.clone(), json!([p_work("connected", 2, "a@example.com", 42.0, 400, "Renamed")]), "");
+        allowance_poll["profiles"][0]["catalog"] = json!([{"id": "opus"}, {"id": "sonnet"}]);
+        allowance_poll["profiles"][0]["message"] = json!("checked");
+        allowance_poll["profiles"][0]["sameAsDefault"] = json!(true);
+        assert!(!models_probe_needed(&prev, &allowance_poll));
+
+        // Legacy inventory missing "kind" field vs snapshot with "kind": "" -> suppressed
+        let mut legacy_inv: Value = serde_json::from_str(&prev).unwrap();
+        legacy_inv["profiles"][0].as_object_mut().unwrap().remove("kind");
+        assert!(!models_probe_needed(&legacy_inv.to_string(), &rev_bump));
+
+        // Error snapshot -> suppressed
+        let err_snap = mk_snap(13, d_out.clone(), json!([]), "registry error");
+        assert!(!models_probe_needed(&prev, &err_snap));
+
+        // Real login/profile changes -> triggers refresh_soon
+        assert!(models_probe_needed(&prev, &mk_snap(14, d_out.clone(), json!([p_work("connected", 2, "a@example.com", 15.0, 100, "Work")]), "")), "default_login signed out");
+        assert!(models_probe_needed(&public(&mk_snap(14, d_out.clone(), json!([]), "")), &mk_snap(15, d_known.clone(), json!([]), "")), "default_login signed in");
+        assert!(models_probe_needed(&prev, &mk_snap(16, json!({"claude": {"state": "known", "email": "b@example.com", "plan": "max"}}), json!([p_work("connected", 2, "a@example.com", 15.0, 100, "Work")]), "")), "default_login email changed");
+        assert!(models_probe_needed(&prev, &mk_snap(17, d_known.clone(), json!([]), "")), "profile removed");
+        assert!(models_probe_needed(&prev, &mk_snap(18, d_known.clone(), json!([p_work("connected", 2, "a@example.com", 15.0, 100, "Work"), p_work("disconnected", 1, "", 0.0, 0, "Extra")]), "")), "profile added");
+        assert!(models_probe_needed(&prev, &mk_snap(19, d_known.clone(), json!([p_work("expired", 2, "a@example.com", 15.0, 100, "Work")]), "")), "profile state changed");
+        assert!(models_probe_needed(&prev, &mk_snap(20, d_known.clone(), json!([p_work("connected", 3, "a@example.com", 15.0, 100, "Work")]), "")), "profile epoch changed");
+        assert!(models_probe_needed(&prev, &mk_snap(21, d_known.clone(), json!([p_work("connected", 2, "other@example.com", 15.0, 100, "Work")]), "")), "profile identity changed");
     }
 }

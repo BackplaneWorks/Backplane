@@ -18,6 +18,10 @@ pub const STARTING: &str = "A turn is starting on this account. Try again in a m
 pub const TURN_RUNNING: &str = "A turn is running on this account. Try again when it ends.";
 /// The whole of a one-shot CLI call (`Accounts::cli`): its output and its exit.
 const CLI_LIMIT: Duration = Duration::from_secs(12);
+/// How long `claude_read` waits after closing stdin for Claude CLI to flush/exit cleanly before killing it.
+const CLAUDE_EXIT_GRACE: Duration = Duration::from_secs(15);
+/// How long `oauth_read` waits after `initialize` for Claude CLI to finish an in-flight OAuth refresh and exit cleanly.
+const CLAUDE_REFRESH_GRACE: Duration = Duration::from_secs(20);
 /// A Codex sign-in's store is looked at this often for the login Codex saved (#1162), and the login is taken once it has been there [`SAVED_GRACE`].
 const SAVED_POLL: Duration = Duration::from_secs(1);
 const SAVED_GRACE: Duration = Duration::from_secs(3);
@@ -537,35 +541,58 @@ impl Accounts {
     async fn claude_control(&self, p: Option<&Profile>, want: &str) -> Option<Value> { self.claude_read(p, want).await.ok() }
     /// The CLI's own control reply (`models`, or `usage` after `initialize`), or the plain reason there was none.
     async fn claude_read(&self, p: Option<&Profile>, want: &str) -> Result<Value, String> {
+        self.claude_read_with(p, want, Duration::from_secs(30), CLAUDE_EXIT_GRACE).await
+    }
+    async fn claude_read_with(&self, p: Option<&Profile>, want: &str, read_limit: Duration, exit_grace: Duration) -> Result<Value, String> {
         let prog = (self.resolve)("claude").map_err(|_| "The Claude CLI was not found on this machine.".to_string())?;
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
         c.args(claude_pre(p)); c.args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
         c.current_dir(&self.root); apply_env(&mut c, &self.environment(p).map_err(|_| "This account's private folder could not be verified.".to_string())?, p.is_some());
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let mut child = spawn(&mut c).await.map_err(|_| "The Claude CLI could not be started.".to_string())?;
+        let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+            crate::proc::kill_wait(child, Duration::from_secs(2)).await;
+            return Err("The Claude CLI could not be started.".to_string());
+        };
+        let mut reader = BufReader::new(stdout);
         let r = async {
-            let (mut stdin, stdout) = (child.stdin.take().ok_or_else(|| "The Claude CLI could not be started.".to_string())?, child.stdout.take().ok_or_else(|| "The Claude CLI could not be started.".to_string())?);
             let first = json!({"type":"control_request","request_id":if want == "models" { "models" } else { "init" },"request":{"subtype":"initialize"}}).to_string();
             stdin.write_all(format!("{first}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?;
-            tokio::time::timeout(Duration::from_secs(30), async {
-                let mut lines = BufReader::new(stdout).lines(); let mut total = 0usize;
-                while let Ok(Some(l)) = lines.next_line().await {
-                    total += l.len(); if total > 524288 { return Err("The Claude CLI's reply was too large.".to_string()) }
-                    let Ok(r) = serde_json::from_str::<Value>(&l) else { continue };
+            let _ = stdin.flush().await;
+            tokio::time::timeout(read_limit, async {
+                let mut line = String::new();
+                let mut total = 0usize;
+                loop {
+                    line.clear();
+                    match reader.read_line(&mut line).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            total += n;
+                            if total > 524288 { return Err("The Claude CLI's reply was too large.".to_string()) }
+                        }
+                    }
+                    let l = line.trim_end_matches(&['\r', '\n'][..]);
+                    let Ok(r) = serde_json::from_str::<Value>(l) else { continue };
                     if r["type"] != "control_response" { continue }
                     let bad = r["response"]["subtype"] == "error";
                     let why = || format!("Claude refused the request: {}", label(r["response"]["error"].as_str().unwrap_or("no reason given")));
                     match (want, r["response"]["request_id"].as_str()) {
                         ("models", Some("models")) => return if bad { Err(why()) } else { Ok(r["response"]["response"].clone()) },
-                        ("usage", Some("init")) => { if bad { return Err(why()) } let q = json!({"type":"control_request","request_id":"usage","request":{"subtype":"get_usage","skip_behaviors":true}}).to_string(); stdin.write_all(format!("{q}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?; }
+                        ("usage", Some("init")) => {
+                            if bad { return Err(why()) }
+                            let q = json!({"type":"control_request","request_id":"usage","request":{"subtype":"get_usage","skip_behaviors":true}}).to_string();
+                            stdin.write_all(format!("{q}\n").as_bytes()).await.map_err(|_| "The Claude CLI closed before answering.".to_string())?;
+                            let _ = stdin.flush().await;
+                        }
                         ("usage", Some("usage")) => return if bad { Err(why()) } else { Ok(r["response"]["response"].clone()) },
                         _ => {}
                     }
                 }
                 Err("The Claude CLI closed before reporting usage.".to_string())
-            }).await.unwrap_or_else(|_| Err("The Claude CLI did not answer within 30 seconds.".to_string()))
+            }).await.unwrap_or_else(|_| Err(format!("The Claude CLI did not answer within {} seconds.", read_limit.as_secs())))
         }.await;
-        crate::proc::kill_wait(child, Duration::from_secs(2)).await; // reaped, not dropped: one zombie per usage read on a hub that missed SIGCHLD
+        drop(stdin);
+        crate::proc::finish_or_kill_draining(child, reader, exit_grace, Duration::from_secs(2)).await; // reaped, not dropped: one zombie per usage read on a hub that missed SIGCHLD
         r
     }
     /// A test's usage request and CLI store (the real hub's are set in `open`).
@@ -590,13 +617,13 @@ impl Accounts {
         let _one = lock.lock().await;
         let mut login = cu::read_login(&dir)?;
         if !login.fresh(now_ms()) {
-            let _ = self.claude_read(p, "models").await;
+            let _ = self.claude_read_with(p, "models", Duration::from_secs(30), CLAUDE_REFRESH_GRACE).await;
             login = cu::read_login(&dir)?;
             if !login.fresh(now_ms()) { return None }
         }
         let mut r = get(login.token.clone()).await;
         if matches!(r, Ok((401, _))) {
-            let _ = self.claude_read(p, "models").await;
+            let _ = self.claude_read_with(p, "models", Duration::from_secs(30), CLAUDE_REFRESH_GRACE).await;
             if let Some(again) = cu::read_login(&dir).filter(|l| l.token != login.token && l.fresh(now_ms())) { r = get(again.token).await }
         }
         Some(match r { Ok((200, body)) if body.is_object() => Ok(body), Ok((200, _)) => Err("Claude's usage service answered with something else than usage.".into()), Ok((code, _)) => Err(cu::refusal(code)), Err(e) => Err(e) })
@@ -2297,6 +2324,98 @@ for l in sys.stdin:
         assert!(a.launch_plan(&b_id, &b_epoch.to_string(), "claude").await.unwrap_err().contains("changed"));
         assert_eq!(prof(&a.snapshot(), &b_id)["epoch"], b_epoch + 1);
 
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[cfg(unix)] #[tokio::test(flavor = "multi_thread")] async fn claude_read_waits_for_graceful_exit_and_kills_only_after_grace() {
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (h, sd) = dirs("cl-grace");
+        let marker = h.join("grace.done");
+        let timeout_marker = h.join("timeout-grace.done");
+        let pidf = h.join("hang.pid");
+        let script = format!(
+            "#!/usr/bin/env python3\nimport sys, os, json, time\nmode = os.environ.get('STANDIN_MODE', '')\nif mode == 'timeout_then_finish':\n    for _ in sys.stdin:\n        pass\n    time.sleep(0.15)\n    open({:?}, 'w').write('ok')\n    sys.exit(0)\nfor l in sys.stdin:\n    r = json.loads(l)\n    print(json.dumps({{'type':'control_response','response':{{'request_id':r.get('request_id'),'subtype':'success','response':{{'models':[{{'value':'opus'}}]}}}}}}), flush=True)\n    if mode == 'hang':\n        open({:?}, 'w').write(str(os.getpid()))\n        time.sleep(30)\n        sys.exit(0)\n# stdin closed: simulate post-initialize async work before exiting cleanly\ntime.sleep(0.25)\nprint('trailing output', flush=True)\nopen({:?}, 'w').write('ok')\n",
+            timeout_marker.to_string_lossy().as_ref(),
+            pidf.to_string_lossy().as_ref(),
+            marker.to_string_lossy().as_ref(),
+        );
+        std::fs::write(sd.join("claude"), script).unwrap();
+        std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let a = mgr(&h, &sd);
+        std::env::remove_var("STANDIN_MODE");
+        let res = a.claude_read_with(None, "models", Duration::from_secs(10), Duration::from_secs(5)).await.unwrap();
+        assert_eq!(res["models"][0]["value"], "opus");
+        assert!(marker.exists(), "claude_read should let child finish clean exit after stdin closes");
+
+        std::env::set_var("STANDIN_MODE", "hang");
+        let t0 = std::time::Instant::now();
+        let res = a.claude_read_with(None, "models", Duration::from_secs(10), Duration::from_millis(300)).await.unwrap();
+        assert_eq!(res["models"][0]["value"], "opus");
+        assert!(t0.elapsed() < Duration::from_secs(5), "hung child killed after grace: {:?}", t0.elapsed());
+        let pid: u32 = std::fs::read_to_string(&pidf).unwrap().trim().parse().unwrap();
+        let gone = std::time::Instant::now() + Duration::from_secs(5);
+        while crate::plat::proc::alive(pid) && std::time::Instant::now() < gone { tokio::time::sleep(Duration::from_millis(20)).await }
+        assert!(!crate::plat::proc::alive(pid), "hung child was killed and reaped");
+
+        std::env::set_var("STANDIN_MODE", "timeout_then_finish");
+        let err = a.claude_read_with(None, "models", Duration::from_millis(200), Duration::from_secs(5)).await.unwrap_err();
+        assert!(err.contains("did not answer"), "{err}");
+        assert!(timeout_marker.exists(), "read timeout still closes stdin and grants exit_grace");
+
+        std::env::remove_var("STANDIN_MODE");
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[cfg(unix)] #[tokio::test(flavor = "multi_thread")] async fn oauth_read_waits_for_async_token_refresh_to_finish() {
+        use super::super::claude_usage::{tests::RECORDED, Get};
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (h, sd) = dirs("oauth-refresh");
+        let script = r#"#!/usr/bin/env python3
+import sys, os, json, time
+d = os.environ.get("CLAUDE_CONFIG_DIR", "")
+for l in sys.stdin:
+    try: r = json.loads(l)
+    except Exception: continue
+    rid = r.get("request_id")
+    print(json.dumps({"type": "control_response", "response": {"request_id": rid, "subtype": "success", "response": {"models": [{"value": "opus"}]}}}), flush=True)
+if d:
+    time.sleep(0.25)
+    tok = "tok-fresh-2" if os.path.exists(os.path.join(d, "use_second")) else "tok-fresh"
+    tmp = os.path.join(d, ".credentials.json.tmp.deadbeef")
+    with open(tmp, "w") as f:
+        json.dump({"claudeAiOauth": {"accessToken": tok, "refreshToken": "r-new", "expiresAt": int((time.time() + 3600) * 1000)}}, f)
+    os.replace(tmp, os.path.join(d, ".credentials.json"))
+"#;
+        std::fs::write(sd.join("claude"), script).unwrap();
+        std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let a = mgr(&h, &sd);
+        let (w, _) = a.plant("claude", "Work", "w@example.com", Value::Null).await;
+        let dir = a.directory(&a.profile(&w).unwrap()).unwrap();
+        let creds = |tok: &str, exp: u64| std::fs::write(dir.join(".credentials.json"), json!({"claudeAiOauth":{"accessToken":tok,"refreshToken":"r-old","expiresAt":exp}}).to_string()).unwrap();
+        creds("tok-old", now_ms().saturating_sub(1000));
+        let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+        let s2 = seen.clone();
+        let get: Get = Arc::new(move |t: String| {
+            s2.lock().unwrap().push(t.clone());
+            Box::pin(async move {
+                match t.as_str() {
+                    "tok-fresh" | "tok-fresh-2" => Ok((200, serde_json::from_str::<Value>(RECORDED).unwrap())),
+                    _ => Ok((401, Value::Null)),
+                }
+            })
+        });
+        a.set_usage(get, None);
+        let u = a.claude_usage(Some(&a.profile(&w).unwrap())).await.unwrap();
+        assert_eq!(u.source, "claude-oauth-usage");
+        assert_eq!(*seen.lock().unwrap(), ["tok-fresh"]);
+        assert_eq!(super::super::claude_usage::read_login(&dir).unwrap().token, "tok-fresh");
+        assert!(!dir.join(".credentials.json.tmp.deadbeef").exists(), "no orphaned temp file");
+
+        // 401 retry path: fresh-looking token rejected -> waits for refresh -> retries with new token
+        seen.lock().unwrap().clear();
+        std::fs::write(dir.join("use_second"), "1").unwrap();
+        creds("tok-revoked", now_ms() + 3_600_000);
+        let u = a.claude_usage(Some(&a.profile(&w).unwrap())).await.unwrap();
+        assert_eq!(u.source, "claude-oauth-usage");
+        assert_eq!(*seen.lock().unwrap(), ["tok-revoked", "tok-fresh-2"]);
         let _ = std::fs::remove_dir_all(&h);
     }
 }
