@@ -12,8 +12,8 @@ impl Mode { pub fn name(self) -> &'static str { match self { Mode::Normal => "no
 pub enum End {
     /// the guard stopped it on request: not a failure
     Asked,
-    /// someone else ended it with a signal, or it left with 0: it comes back, and it does not count
-    External,
+    /// someone else ended it with a signal, or it left with 0: it comes back, and repeated external stops back off
+    External(String),
     /// the machine, not the build (exit 75: port or home lock held, disk full)
     Machine(String),
     /// a refusal that a retry cannot change (exit 78: a copy gate, a bad flag)
@@ -26,9 +26,12 @@ pub enum End {
 pub struct Tuning { pub tries: usize, pub window: u64, pub pause: u64, pub machine_pause: u64, pub rescue_retry: u64 }
 impl Default for Tuning { fn default() -> Tuning { Tuning { tries: 3, window: 600, pause: 1, machine_pause: 5, rescue_retry: 120 } } }
 
-/// One failed start or run, for counting.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum FailKind { Build, Machine, External }
+
+/// One failed or externally interrupted start/run, for counting.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Fail { pub at: u64, pub build: String, pub mode: Mode, pub machine: bool }
+pub struct Fail { pub at: u64, pub build: String, pub mode: Mode, pub kind: FailKind }
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum Next {
@@ -57,19 +60,25 @@ pub fn next(t: &Tuning, hist: &[Fail], end: &End, build: &str, mode: Mode, good:
 pub fn next_on(t: &Tuning, hist: &[Fail], end: &End, build: &str, mode: Mode, good: &[String], bad: &[String], exists: &dyn Fn(&str) -> bool, now: u64, probation: Option<&str>) -> Next {
     if let (End::Failed(_), Some(back)) = (end, probation) { if exists(back) { return Next::Fallback { from: build.into(), to: back.into() } } }
     match end {
-        End::Asked | End::External => Next::Again { after: 0 },
+        End::Asked => Next::Again { after: 0 },
+        End::External(why) => {
+            let n = recent(hist, now, t.window).filter(|f| f.kind == FailKind::External).count();
+            if n <= 1 { Next::Again { after: 0 } }
+            else if n < t.tries { Next::Again { after: t.machine_pause } }
+            else { Next::Rescue { after: t.machine_pause * 6, why: format!("stopped externally repeatedly ({why})") } }
+        }
         End::Refused(why) => Next::Rescue { after: t.rescue_retry, why: why.clone() },
         End::Machine(why) => {
-            let n = recent(hist, now, t.window).filter(|f| f.machine).count();
+            let n = recent(hist, now, t.window).filter(|f| f.kind == FailKind::Machine).count();
             if n >= t.tries { Next::Rescue { after: t.machine_pause * 6, why: why.clone() } } else { Next::Again { after: t.machine_pause } }
         }
         End::Failed(why) => {
-            let n = recent(hist, now, t.window).filter(|f| !f.machine && f.build == build && f.mode == mode).count();
+            let n = recent(hist, now, t.window).filter(|f| f.kind == FailKind::Build && f.build == build && f.mode == mode).count();
             if n < t.tries { return Next::Again { after: t.pause << (n.saturating_sub(1).min(5)) } }
             match mode {
                 Mode::Normal => {
                     // another build failed here a moment ago as well: the fault is in the home, not in a build, so no third build is tried
-                    let other = recent(hist, now, t.window).any(|f| !f.machine && f.build != build && f.mode == Mode::Normal);
+                    let other = recent(hist, now, t.window).any(|f| f.kind == FailKind::Build && f.build != build && f.mode == Mode::Normal);
                     match fallback(good, bad, build, exists) {
                         Some(to) if !other => Next::Fallback { from: build.into(), to: to.clone() },
                         _ => Next::Safe { build: build.into(), bad: None },
@@ -197,7 +206,8 @@ impl RescueState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn f(at: u64, b: &str, m: Mode) -> Fail { Fail { at, build: b.into(), mode: m, machine: false } }
+    fn f(at: u64, b: &str, m: Mode) -> Fail { Fail { at, build: b.into(), mode: m, kind: FailKind::Build } }
+    fn ext(at: u64, b: &str) -> Fail { Fail { at, build: b.into(), mode: Mode::Normal, kind: FailKind::External } }
     fn all(_: &str) -> bool { true }
     fn none(_: &str) -> bool { false }
     fn s(x: &[&str]) -> Vec<String> { x.iter().map(|y| y.to_string()).collect() }
@@ -235,10 +245,32 @@ mod tests {
         assert!(matches!(next(&T(), &h, &died(), "b", Mode::Safe, &s(&["a"]), &[], &all, 100), Next::Rescue { after: 120, .. }));
     }
     #[test] fn the_machine_failing_never_blames_a_build() {
-        let m = |at| Fail { at, build: "b".into(), mode: Mode::Normal, machine: true };
+        let m = |at| Fail { at, build: "b".into(), mode: Mode::Normal, kind: FailKind::Machine };
         let end = End::Machine("port 3797 is taken".into());
         assert_eq!(next(&T(), &[m(100)], &end, "b", Mode::Normal, &s(&["a"]), &[], &all, 100), Next::Again { after: 5 });
         match next(&T(), &[m(98), m(99), m(100)], &end, "b", Mode::Normal, &s(&["a"]), &[], &all, 100) { Next::Rescue { why, .. } => assert!(why.contains("3797")), o => panic!("{o:?}") }
+    }
+    #[test] fn a_single_external_stop_restarts_immediately_and_repeated_stops_back_off_to_rescue() {
+        let end = End::External("exit 143 (SIGTERM)".into());
+        assert_eq!(
+            next_on(&T(), &[ext(100, "nightly")], &end, "nightly", Mode::Normal, &s(&["v0.16.4"]), &[], &all, 100, Some("v0.16.4")),
+            Next::Again { after: 0 },
+            "single external stop restarts at once without triggering probation rollback"
+        );
+        assert_eq!(
+            next_on(&T(), &[ext(98, "nightly"), ext(100, "nightly")], &end, "nightly", Mode::Normal, &s(&["v0.16.4"]), &[], &all, 100, Some("v0.16.4")),
+            Next::Again { after: 5 },
+            "second external stop within window backs off"
+        );
+        match next_on(&T(), &[ext(96, "nightly"), ext(98, "nightly"), ext(100, "nightly")], &end, "nightly", Mode::Normal, &s(&["v0.16.4"]), &[], &all, 100, Some("v0.16.4")) {
+            Next::Rescue { after: 30, why } => assert!(why.contains("SIGTERM"), "{why}"),
+            other => panic!("expected Rescue after repeated external stops, got {other:?}"),
+        }
+        assert_eq!(
+            next_on(&T(), &[ext(1, "nightly"), ext(2, "nightly"), ext(1000, "nightly")], &end, "nightly", Mode::Normal, &s(&["v0.16.4"]), &[], &all, 1000, Some("v0.16.4")),
+            Next::Again { after: 0 },
+            "external stops outside window age out"
+        );
     }
     #[test] fn a_refusal_is_not_retried_at_once_and_blames_nothing() {
         assert!(matches!(next(&T(), &[], &End::Refused("a copy".into()), "b", Mode::Normal, &s(&["a"]), &[], &all, 100), Next::Rescue { .. }));
