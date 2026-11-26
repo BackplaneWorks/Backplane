@@ -85,7 +85,9 @@ pub fn sign_in_url(value: &str, provider: &str) -> String {
     let codes: Vec<&String> = pairs.iter().filter(|(k, _)| k == "code").map(|(_, v)| v).collect();
     let path = path_q.split(['?', '#']).next().unwrap_or("");
     // Claude Code's authorization link uses code=true to request its code entry flow; that boolean is not an OAuth callback's code.
-    let claude_flow = provider == "claude" && host_port == "claude.com" && path == "/cai/oauth/authorize" && codes.len() == 1 && codes[0].as_str() == "true";
+    let claude_flow = provider == "claude"
+        && matches!((host_port, path), ("claude.com", "/cai/oauth/authorize") | ("claude.ai", "/oauth/authorize"))
+        && codes.len() == 1 && codes[0].as_str() == "true";
     if !codes.is_empty() && !claude_flow { return String::new() }
     value.to_string()
 }
@@ -1106,13 +1108,13 @@ impl Accounts {
             let readers: [Box<dyn tokio::io::AsyncRead + Unpin + Send>; 2] = [Box::new(so), Box::new(se)];
             for mut r in readers { let tx = otx.clone(); tokio::spawn(async move { let mut b = [0u8; 4096]; loop { match r.read(&mut b).await { Ok(0) | Err(_) => break, Ok(n) => { if tx.send(b[..n].to_vec()).is_err() { break } } } } }); }
             drop(otx);
-            let (mut output, mut reason, mut open) = (String::new(), String::new(), true);
+            let (mut output, mut reason, mut open, mut shown) = (String::new(), String::new(), true, false);
             // what the CLI says is read for its link and for why a code was refused; no transcript is kept or sent
             let scan = scan_claude;
             let outcome: Result<bool, &str> = loop {
                 tokio::select! {
                     chunk = orx.recv(), if open => match chunk {
-                        Some(b) => { output.push_str(&String::from_utf8_lossy(&b)); if output.len() > 131072 { break Err("failed") } if let Some(u) = scan(&output, &mut reason) { if self.current(&aid).is_some() { self.set_waiting(&aid, u, String::new()); } } }
+                        Some(b) => { output.push_str(&String::from_utf8_lossy(&b)); if output.len() > 131072 { break Err("failed") } if !shown { if let Some(u) = scan(&output, &mut reason) { if self.current(&aid).is_some() { self.set_waiting(&aid, u, String::new()); shown = true } } } else { let _ = scan(&output, &mut reason); } }
                         None => open = false,
                     },
                     cmd = cmds.recv() => match cmd { Some(Cmd::Respond(code)) => { let _ = stdin.write_all(format!("{code}\n").as_bytes()).await; } Some(Cmd::Cancel) | None => { let _ = child.start_kill(); let _ = crate::proc::wait(&mut child).await; return } },
@@ -1137,7 +1139,8 @@ fn scan_claude(output: &str, reason: &mut String) -> Option<String> {
     else if ["enotfound", "econnrefused", "etimedout", "unable to connect", "fetch failed"].iter().any(|w| low.contains(w)) { *reason = "network".into() }
     let mut rest = output;
     while let Some(i) = rest.find("https://") {
-        let tail = &rest[i..]; let end = tail.find(|c: char| c.is_whitespace() || c == '\u{1b}' || c == '<' || c == '>').unwrap_or(tail.len());
+        let tail = &rest[i..];
+        let Some(end) = tail.find(|c: char| c.is_whitespace() || c == '\u{1b}' || c == '<' || c == '>') else { break };
         let u = sign_in_url(&tail[..end], "claude"); if !u.is_empty() { return Some(u) } rest = &tail[8..];
     }
     None
@@ -1674,10 +1677,23 @@ for l in sys.stdin:
 
     #[test] fn sign_in_links_are_https_on_the_providers_hosts_without_credentials() {
         assert!(!sign_in_url("https://claude.com/cai/oauth/authorize?code=true&state=s", "claude").is_empty());
+        assert!(!sign_in_url("https://claude.ai/oauth/authorize?code=true&state=s", "claude").is_empty());
         assert!(!sign_in_url("https://claude.ai/oauth/authorize?z-oxvJ9x8y7z", "claude").is_empty());
         assert_eq!(sign_in_url("https://claude.com/cai/oauth/authorize?code=abc&state=s", "claude"), "", "an OAuth code is not the code-entry flag");
+        assert_eq!(sign_in_url("https://claude.ai/oauth/authorize?code=abc&state=s", "claude"), "");
+        assert_eq!(sign_in_url("https://claude.ai/oauth/authorize?code=true&code=abc&state=s", "claude"), "");
+        assert_eq!(sign_in_url("https://claude.ai/other?code=true&state=s", "claude"), "");
         for bad in ["http://claude.ai/x", "https://evil.example/x", "https://claude.ai.evil.com/x", "https://user:pw@claude.ai/x", "https://claude.ai:8443/x", "https://claude.ai/x?access_token=1", "https://claude.ai/x y", "https://auth.openai.com/x"] { assert_eq!(sign_in_url(bad, "claude"), "", "{bad}") }
         assert!(!sign_in_url("https://auth.openai.com/codex/device", "codex").is_empty()); assert_eq!(sign_in_url("https://claude.ai/x", "codex"), "");
+    }
+    #[test] fn scan_claude_waits_for_url_delimiter_before_returning() {
+        let mut why = String::new();
+        assert_eq!(scan_claude("Visit https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STA", &mut why), None);
+        assert_eq!(scan_claude("Visit https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123\n", &mut why).as_deref(), Some("https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123"));
+        assert_eq!(scan_claude("Visit https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123 ", &mut why).as_deref(), Some("https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123"));
+        assert_eq!(scan_claude("Visit https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123\u{1b}[39m", &mut why).as_deref(), Some("https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123"));
+        assert_eq!(scan_claude("Visit https://claude.ai/oauth/authorize?code=true&client_id=x&state=STATE123\n", &mut why).as_deref(), Some("https://claude.ai/oauth/authorize?code=true&client_id=x&state=STATE123"));
+        assert_eq!(scan_claude("Visit https://claude.ai/oauth/authorize?z-oxvJ9x8y7z\n", &mut why).as_deref(), Some("https://claude.ai/oauth/authorize?z-oxvJ9x8y7z"));
     }
     /// Nov 13: the CLI's own login was person@example.com, and the same account added again was not recognised.
     #[test] fn an_added_account_is_the_cli_login_when_the_provider_names_the_same_account() {
@@ -1864,6 +1880,53 @@ for l in sys.stdin:
         let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["id"] == aid2.as_str() && t["state"] == "done")).await;
         let p = prof(&s, &id);
         assert_eq!((p["state"].clone(), p["identity"]["email"].clone()), (json!("connected"), json!("a@example.com")), "{p}");
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn second_claude_account_captures_split_chunk_url_across_login_and_setup_token() {
+        let (h, sd) = dirs("cl-split");
+        let split_claude = CLAUDE
+            .replace(
+                r#"print("Open https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123 to sign in", flush=True)"#,
+                "sys.stdout.write(\"Open https://claude.ai/oauth/authorize?code=true&client_id=x&state=STA\"); sys.stdout.flush(); time.sleep(0.15); print(\"TE123 to sign in\", flush=True)",
+            )
+            .replace(
+                r#"out(rec["prompt"])"#,
+                "p = rec[\"prompt\"]; cut = p.rfind(\"state=STA\") + len(\"state=STA\"); out(p[:cut]); time.sleep(0.15); out(p[cut:])",
+            )
+            .replace(r#""a@example.com""#, r#""second@example.com""#);
+        assert_ne!(split_claude, CLAUDE);
+        std::fs::write(sd.join("claude"), split_claude).unwrap();
+        std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let a = mgr(&h, &sd);
+        let mem = Arc::new(MemTokens::default());
+        a.set_tokens(mem.clone());
+        let (_first, _) = a.plant("claude", "First", "first@example.com", Value::Null).await;
+
+        // Second Claude account via `auth login`: split mid-state= and using claude.ai/oauth/authorize?code=true.
+        let second = add(&a, "claude", "Second").await;
+        assert_eq!(a.request(&json!({"op":"login","profile":second,"mode":"device"})).await["error"], "");
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["profile"] == second.as_str() && t["state"] == "waiting")).await;
+        let att = s["attempts"].as_array().unwrap().iter().find(|t| t["profile"] == second.as_str()).unwrap();
+        let aid = att["id"].as_str().unwrap().to_string();
+        assert_eq!(att["url"], "https://claude.ai/oauth/authorize?code=true&client_id=x&state=STATE123");
+        assert_eq!(a.request(&json!({"op":"respond","profile":second,"attempt":aid,"code":"CODE#STATE123"})).await["error"], "");
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["id"] == aid.as_str() && t["state"] == "done")).await;
+        let p2 = prof(&s, &second);
+        assert_eq!((p2["state"].clone(), p2["identity"]["email"].clone()), (json!("connected"), json!("second@example.com")), "{p2}");
+
+        // Second Claude sync account via `setup-token` PTY: split mid-state= before the trailing escape sequence.
+        let s = a.request(&json!({"op":"synctoken","profile":second})).await;
+        assert_eq!(s["error"], "", "{s}");
+        let sync_id = s["made"].as_str().unwrap().to_string();
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["profile"] == sync_id.as_str() && t["state"] == "waiting")).await;
+        let sync_att = s["attempts"].as_array().unwrap().iter().find(|t| t["profile"] == sync_id.as_str()).unwrap();
+        let sync_aid = sync_att["id"].as_str().unwrap().to_string();
+        assert!(sync_att["url"].as_str().unwrap().ends_with("&state=STATE123"), "full URL captured after split chunk: {}", sync_att["url"]);
+        assert_eq!(a.request(&json!({"op":"respond","profile":sync_id,"attempt":sync_aid,"code":"CODE#STATE123"})).await["error"], "");
+        let s = until(&a, |s| prof(s, &sync_id)["state"] == "connected").await;
+        assert!(mem.get(&sync_id).unwrap().starts_with("sk-ant-oat01-"));
+        assert_eq!(prof(&s, &sync_id)["identity"]["email"], "second@example.com");
         let _ = std::fs::remove_dir_all(&h);
     }
 
