@@ -20,7 +20,7 @@ fn default_of(snap: &Value, provider: &str) -> (String, u64) {
 fn windows(al: &Value) -> usize { al["windows"].as_array().map_or(0, |w| w.iter().filter(|w| w["used_percent"].as_f64().is_some() || w["used_permille"].as_f64().is_some()).count()) }
 
 /// People: the entries in order (the CLI's own logins first, then the added accounts as they were saved), each `{key, title, logins:[…]}`.
-/// A login: `{provider, title, kind: cli|account|sync, profile, epoch, plan, state, line, tone, hold, out, default, bars, note, also}`; `profile` "" is the CLI's own
+/// A login: `{provider, title, kind: cli|account|sync, profile, epoch, plan, org, state, line, tone, hold, out, default, bars, note, also}`; `profile` "" is the CLI's own
 /// login with no added account of it (no account page, no sign-in buttons), `also` the labels of added accounts folded into it.
 pub fn people(snap: &Value, zone: &str, now: u64) -> Vec<Value> {
     let holds = &snap["holds"];
@@ -28,12 +28,18 @@ pub fn people(snap: &Value, zone: &str, now: u64) -> Vec<Value> {
     let mut put = |key: String, title: String, login: Value| {
         let i = match entries.iter().position(|e| e.0 == key) { Some(i) => i, None => { entries.push((key, title, vec![])); entries.len() - 1 } };
         let logins = &mut entries[i].2;
-        // one login per provider and kind: the same account added twice is counted once, the one with a reading kept
-        if let Some(j) = logins.iter().position(|l| l["provider"] == login["provider"] && l["kind"] == login["kind"]) {
+        // one login per provider, kind and organization: the same account added twice is counted once, the one with a reading kept;
+        // two organizations under one email stay separate (an unknown organization still folds as before, #1657)
+        let same_org = |l: &Value| {
+            let (a, b) = (s(l, "org"), s(&login, "org"));
+            a.is_empty() || b.is_empty() || a.eq_ignore_ascii_case(b)
+        };
+        if let Some(j) = logins.iter().position(|l| l["provider"] == login["provider"] && l["kind"] == login["kind"] && same_org(l)) {
             let keep_new = login["bars"].as_array().map_or(0, Vec::len) > logins[j]["bars"].as_array().map_or(0, Vec::len)
                 || (login["state"] == "connected" && logins[j]["state"] != "connected");
             let mut also: Vec<Value> = logins[j]["also"].as_array().cloned().unwrap_or_default();
             let (gone, mut kept) = if keep_new { (logins[j].clone(), login) } else { (login, logins[j].clone()) };
+            if s(&kept, "org").is_empty() && !s(&gone, "org").is_empty() { kept["org"] = gone["org"].clone(); }
             let name = s(&gone, "label").to_string(); if !name.is_empty() && !also.contains(&json!(name)) { also.push(json!(name)) }
             kept["default"] = json!(kept["default"] == true || gone["default"] == true);
             if kept["hold"] == "" && gone["hold"] != "" { kept["hold"] = gone["hold"].clone(); kept["out"] = json!(true) }
@@ -59,7 +65,8 @@ pub fn people(snap: &Value, zone: &str, now: u64) -> Vec<Value> {
         let default = did.is_empty() || (!tid.is_empty() && did == tid && twin.map_or(false, |t| t["epoch"].as_u64().unwrap_or(0) == de));
         let note = if windows(al) > 0 { String::new() } else { let l = limit_lines(&json!({"allowance":al,"state":state}), zone, now); l.first().cloned().unwrap_or_else(|| if state == "connected" { "no usage reading yet".into() } else { String::new() }) };
         let also: Vec<Value> = twin.map(|t| s(t, "label")).filter(|l| !l.is_empty() && !l.eq_ignore_ascii_case(&email)).map(|l| vec![json!(l)]).unwrap_or_default();
-        let login = json!({"provider":pv,"title":provider_title(pv, false),"kind":"cli","profile":tid,"epoch":twin.map_or(0, |t| t["epoch"].as_u64().unwrap_or(0)),"plan":s(d, "plan"),
+        let org = { let o = s(d, "org"); if !o.is_empty() { o } else { twin.map(|t| s(&t["identity"], "org")).unwrap_or("") } };
+        let login = json!({"provider":pv,"title":provider_title(pv, false),"kind":"cli","profile":tid,"epoch":twin.map_or(0, |t| t["epoch"].as_u64().unwrap_or(0)),"plan":s(d, "plan"),"org":org,
             "state":state,"line":line,"tone":tone,"hold":hold,"out":!hold.is_empty(),"default":default,"bars":bars(al, !hold.is_empty(), zone, now),"note":note,"also":also,"label":""});
         let key = if email.is_empty() { format!("cli:{pv}") } else { email.to_lowercase() };
         put(key, if email.is_empty() { format!("{} CLI login", provider_title(pv, false)) } else { email }, login);
@@ -72,7 +79,7 @@ pub fn people(snap: &Value, zone: &str, now: u64) -> Vec<Value> {
         let (did, de) = default_of(snap, pv);
         let al = &p["allowance"];
         let note = if windows(al) > 0 { String::new() } else { limit_lines(p, zone, now).first().cloned().unwrap_or_else(|| if state == "connected" { "no usage reading yet".into() } else { String::new() }) };
-        let login = json!({"provider":pv,"title":provider_title(pv, sync),"kind":if sync { "sync" } else { "account" },"profile":id,"epoch":p["epoch"].as_u64().unwrap_or(0),"plan":s(&p["identity"], "plan"),
+        let login = json!({"provider":pv,"title":provider_title(pv, sync),"kind":if sync { "sync" } else { "account" },"profile":id,"epoch":p["epoch"].as_u64().unwrap_or(0),"plan":s(&p["identity"], "plan"),"org":s(&p["identity"], "org"),
             "state":state,"line":line,"tone":tone,"hold":hold,"out":!hold.is_empty(),"default":did == id && de == p["epoch"].as_u64().unwrap_or(0),"bars":bars(al, !hold.is_empty(), zone, now),"note":note,"also":[],"label":s(p, "label")});
         let email = email_of(p);
         let (key, title) = if email.is_empty() { (format!("id:{id}"), s(p, "label").to_string()) } else { (email.to_lowercase(), email) };
@@ -133,5 +140,43 @@ mod tests {
         let p = people(&s, "", 0);
         assert_eq!(p.len(), 1, "a signed-out CLI login with nothing known is no entry");
         assert_eq!((p[0]["key"].as_str().unwrap(), p[0]["title"].as_str().unwrap(), p[0]["logins"][0]["line"].as_str().unwrap()), ("id:n", "Spare", "not signed in"));
+    }
+    #[test] fn one_email_in_two_organizations_is_two_logins() {
+        let acct = |id: &str, label: &str, org: &str| json!({"id":id,"provider":"claude","label":label,"state":"connected","epoch":1,"identity":{"email":"person@example.com","plan":"pro","org":org}});
+        let s = json!({"profiles":[acct("a", "person@example.com", "org-1"), acct("b", "Work", "org-2"), acct("c", "Again", "ORG-1")]});
+        let p = people(&s, "", 0);
+        assert_eq!(p.len(), 1);
+        let logins = p[0]["logins"].as_array().unwrap();
+        assert_eq!(logins.len(), 2);
+        assert_eq!((logins[0]["profile"].as_str().unwrap(), logins[0]["org"].as_str().unwrap(), logins[0]["also"].clone()), ("a", "org-1", json!(["Again"])));
+        assert_eq!((logins[1]["profile"].as_str().unwrap(), logins[1]["label"].as_str().unwrap(), logins[1]["org"].as_str().unwrap(), logins[1]["also"].clone()), ("b", "Work", "org-2", json!([])));
+    }
+    #[test] fn unknown_organization_still_folds_without_collapsing_two_known_orgs() {
+        let acct = |id: &str, label: &str, org: &str| json!({"id":id,"provider":"claude","label":label,"state":"connected","epoch":1,"identity":{"email":"person@example.com","plan":"pro","org":org}});
+        let s = json!({"profiles":[acct("a", "person@example.com", ""), acct("b", "Work", "org-2")]});
+        let p = people(&s, "", 0);
+        assert_eq!(p[0]["logins"].as_array().unwrap().len(), 1, "an unknown organization still folds as before");
+        let s = json!({"profiles":[acct("a", "person@example.com", ""), acct("b", "Personal", "org-1"), acct("c", "Work", "org-2")]});
+        let p = people(&s, "", 0);
+        let logins = p[0]["logins"].as_array().unwrap();
+        assert_eq!(logins.len(), 2, "folding unknown into org-1 must not also collapse org-2");
+        assert_eq!((logins[0]["profile"].as_str().unwrap(), logins[0]["org"].as_str().unwrap()), ("a", "org-1"));
+        assert_eq!((logins[1]["profile"].as_str().unwrap(), logins[1]["org"].as_str().unwrap()), ("c", "org-2"));
+    }
+    #[test] fn cli_login_and_second_org_under_one_email_both_show() {
+        let s = json!({
+            "profiles":[
+                {"id":"a","provider":"claude","label":"Personal","state":"connected","epoch":1,"sameAsDefault":true,"identity":{"email":"person@example.com","plan":"pro","org":"org-1"}},
+                {"id":"b","provider":"claude","label":"Work","state":"connected","epoch":1,"identity":{"email":"person@example.com","plan":"pro","org":"org-2"}}
+            ],
+            "default_login":{"claude":{"state":"known","email":"person@example.com","plan":"pro","org":"org-1"}},
+            "defaults":{},"holds":{}
+        });
+        let p = people(&s, "", 0);
+        assert_eq!(p.len(), 1);
+        let logins = p[0]["logins"].as_array().unwrap();
+        assert_eq!(logins.len(), 2);
+        assert_eq!((logins[0]["kind"].as_str().unwrap(), logins[0]["profile"].as_str().unwrap(), logins[0]["org"].as_str().unwrap()), ("cli", "a", "org-1"));
+        assert_eq!((logins[1]["kind"].as_str().unwrap(), logins[1]["profile"].as_str().unwrap(), logins[1]["label"].as_str().unwrap(), logins[1]["org"].as_str().unwrap()), ("account", "b", "Work", "org-2"));
     }
 }
