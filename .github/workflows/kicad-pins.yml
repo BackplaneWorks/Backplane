@@ -60,7 +60,9 @@ jobs:
       MIN_HUB: ${{ inputs.min_hub }}
       DAYS: ${{ inputs.days }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
       - name: the published document
         run: |
           set -eu

@@ -53,7 +53,7 @@ jobs:
     if: inputs.jobs == 'probe' || inputs.jobs == 'all'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: what the runner allows
         run: |
           set +e
@@ -68,7 +68,7 @@ jobs:
           python3 -c "import Quartz; print('quartz ok')" 2>&1 | tail -1
           ls /Library/Application\ Support/com.apple.TCC/ 2>&1; sqlite3 "$HOME/Library/Application Support/com.apple.TCC/TCC.db" "select service,client,auth_value from access" 2>&1 | head -20
           node --version; python3 --version; bun --version 2>&1 | head -1
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: probe, path: out }
 
@@ -79,9 +79,11 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             native/host
@@ -140,7 +142,7 @@ jobs:
           (cd native/host && cargo build --release --bin backplane-hub) & a=$!
           (cd native/gpui && cargo build --release) & b=$!
           wait $a; ra=$?; wait $b; rb=$?; [ $ra = 0 ] && [ $rb = 0 ]
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: '3.12' }
       - name: KiCad in the pane
         env:
@@ -152,7 +154,7 @@ jobs:
           for kv in ${{ inputs.pane_env }}; do export "$kv"; done
           [ "$MAC_MODE" != front ] || export ZTRACE=1
           python test/kicad_embed/mac_pane_e2e.py "$PWD/native/gpui/target/release/backplane-gpui" "$PWD/native/host/target/release/backplane-hub" "$PWD/assets" "$RT" "$PWD/out/pane" 2>&1 | tee out/pane.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: kicad-pane, path: out }
 
@@ -165,8 +167,8 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 90
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 24 }
       - name: the release package, fetched and checked as the hub's install does
         if: inputs.kicad_via != 'driver'
@@ -193,7 +195,7 @@ jobs:
           node test/e2e/mac-kicad-install.mjs "$HUB" "$RUNNER_TEMP/ki" 2>&1 | tee out/install.txt
           R=$(grep '^RT=' out/install.txt | tail -1 | cut -d= -f2-); [ -n "$R" ]
           echo "RT=$R" >> "$GITHUB_ENV"; echo "KV=$(basename "$R")" >> "$GITHUB_ENV"
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with: { python-version: '3.12' }
       - name: agent edits, Open in KiCad, the detached-KiCad warning; checks and exports
         run: |
@@ -204,7 +206,7 @@ jobs:
           KICAD_CLI="$RT/bin/kicad-cli" node test/e2e/cad-rows.mjs "$HUB" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
           cp "$RUNNER_TEMP"/kr/*.png out/ 2>/dev/null || true; cp "$RUNNER_TEMP"/kr/hub.log out/ 2>/dev/null || true
           exit $ok
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: kicad-runtime, path: out, include-hidden-files: true }
 
@@ -214,7 +216,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: tracking lag and stacking, timer and display link
         run: |
           sw_vers; system_profiler SPDisplaysDataType | grep -iE "resolution|refresh|display type" | head
@@ -222,7 +224,7 @@ jobs:
           sh test/kicad_embed/mac/proto/run.sh "$RUNNER_TEMP/proto"
           python3 test/kicad_embed/mac/proto/analyze.py "$RUNNER_TEMP"/proto/samples.*.csv | tee "$RUNNER_TEMP/proto/summary.txt"
           head -5 "$RUNNER_TEMP"/proto/*.err || true
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: kicad-proto, path: "${{ runner.temp }}/proto/*.[ctope][sxunr][vtgr]" }
 
@@ -230,9 +232,11 @@ jobs:
     if: inputs.jobs == 'build'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             native/host
@@ -247,7 +251,7 @@ jobs:
           wait $a; ra=$?; wait $b; rb=$?; [ $ra = 0 ] && [ $rb = 0 ]
           mkdir -p dist; cp native/host/target/release/backplane-hub native/host/target/release/bp-sh native/gpui/target/release/backplane-gpui dist/
           echo "$BACKPLANE_COMMIT" > dist/COMMIT; ls -l dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with: { name: dist, path: dist }
 
   hub:
@@ -255,8 +259,8 @@ jobs:
     if: inputs.jobs == 'hub' || inputs.jobs == 'all'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with: { node-version: 24 }
       - name: install the release archive with its own installer
         env:
@@ -280,7 +284,7 @@ jobs:
           node test/e2e/cad-rows.mjs "$H" "$PWD/out/cad" 3870 2>&1 | tee out/cad-rows.txt || ok=1
           node test/e2e/settings-walk.mjs "$H" "$PWD/out/walk" 3830 2>&1 | tee out/walk.txt || ok=1
           exit $ok
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: hub-rows, path: out, include-hidden-files: true }
 
@@ -288,7 +292,7 @@ jobs:
     if: inputs.jobs == 'client' || inputs.jobs == 'all'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: install the release archive with its own installer
         env:
           GH_TOKEN: ${{ github.token }}
@@ -306,7 +310,7 @@ jobs:
         env:
           ROWS: ${{ inputs.rows }}
           RELAY: ${{ contains(inputs.rows, 'F14X') && '1' || '' }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: client-rows, path: out }
 
@@ -315,7 +319,7 @@ jobs:
     if: inputs.jobs == 'browser' || inputs.jobs == 'all'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: install the release archive with its own installer
         env:
           GH_TOKEN: ${{ github.token }}
@@ -325,7 +329,7 @@ jobs:
           set -o pipefail; mkdir -p out
           echo "installed build $(cat "$BUILD/COMMIT") (${{ inputs.archive_tag }})"; ls "$BUILD"
           python3 test/cef/agent_proof.py "$BUILD/backplane-gpui" "$BUILD/backplane-hub" "$BUILD/backplane-browser" "$BUILD/assets" "$PWD/out/browser" 2>&1 | tee out/browser.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: browser, path: out }
 
@@ -335,9 +339,11 @@ jobs:
     if: inputs.jobs == 'browser-src'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: native/gpui
           shared-key: e2e-macos-cef
@@ -364,7 +370,7 @@ jobs:
         run: |
           set -o pipefail; B="$PWD/dist"
           python3 test/cef/windowed_proof.py "$B/backplane-gpui" "$B/backplane-hub" "$B/assets" "$PWD/out/windowed" 2>&1 | tee out/windowed.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: browser-src, path: out }
 
@@ -373,9 +379,11 @@ jobs:
     if: inputs.jobs == 'client-src'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             native/host
@@ -408,7 +416,7 @@ jobs:
         env:
           ROWS: ${{ inputs.rows }}
           RELAY: ${{ contains(inputs.rows, 'F14X') && '1' || '' }}
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: client-rows, path: out }
 
@@ -417,7 +425,7 @@ jobs:
     if: inputs.jobs == 'pairing' || inputs.jobs == 'all'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: install the release archive with its own installer
         env:
           GH_TOKEN: ${{ github.token }}
@@ -438,7 +446,7 @@ jobs:
             RESTART="$M restart $W/hub 3900 $IP" EXPIRE="$M expire $W/hub 3900 $IP" \
             sh test/e2e/pairing/gpui.sh 2>&1 | tee out/pairing.txt
           rc=$?; cp -R "$W/logs" out/logs 2>/dev/null; cp "$W/hub.log" out/hub.log 2>/dev/null; exit $rc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: pairing, path: out }
   pairing-src:
@@ -446,9 +454,11 @@ jobs:
     if: inputs.jobs == 'pairing-src'
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: |
             native/host
@@ -479,6 +489,6 @@ jobs:
             RESTART="$M restart $W/hub 3900 $IP" EXPIRE="$M expire $W/hub 3900 $IP" \
             sh test/e2e/pairing/gpui.sh 2>&1 | tee out/pairing.txt
           rc=$?; cp -R "$W/logs" out/logs 2>/dev/null; cp "$W/hub.log" out/hub.log 2>/dev/null; exit $rc
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with: { name: pairing, path: out }

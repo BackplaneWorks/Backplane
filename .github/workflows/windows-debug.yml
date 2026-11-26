@@ -27,14 +27,18 @@ jobs:
     runs-on: ${{ inputs.os }}
     steps:
       - run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: native/${{ inputs.crate }}
           shared-key: windows-${{ inputs.crate }}
           save-if: false
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@893d6ee8d714b6c7dfe2bcd94e5759e9a7958a7e # v2.90.10
+        with:
+          tool: nextest
       - name: tests
         working-directory: native/${{ inputs.crate }}
         shell: bash

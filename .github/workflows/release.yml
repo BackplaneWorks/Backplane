@@ -69,21 +69,24 @@ jobs:
         run: echo 'C:\Program Files\Git\usr\bin' >> "$GITHUB_PATH"
       # a self-hosted runner keeps its checkout and each crate's target/ between runs (warm, incremental where LTO allows): checkout's git clean -ffdx
       # would delete target/, so it cleans everything else itself below. GitHub's runners clean as before.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           clean: ${{ runner.environment == 'github-hosted' }}
+          persist-credentials: false
       - name: clean all but target/ (self-hosted)
         if: runner.environment != 'github-hosted'
         run: git clean -ffdx -e native/host/target -e native/gpui/target -e native/guard/target -e native/voice/target
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
       # mold comes from a GitHub download too: two tries, then the build links without it (RUSTFLAGS set: .cargo/config's mold flag is skipped)
       - id: mold1
-        uses: rui314/setup-mold@v1
+        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
         if: runner.os == 'Linux'
         continue-on-error: true
       - id: mold2
         if: runner.os == 'Linux' && steps.mold1.outcome == 'failure'
-        uses: rui314/setup-mold@v1
+        uses: rui314/setup-mold@339e96b4ff1f3bd865856ba4cbbe8818a7acb038 # v1
         continue-on-error: true
       - if: runner.os == 'Linux' && steps.mold1.outcome == 'failure' && steps.mold2.outcome == 'failure'
         run: echo "RUSTFLAGS= " >> $GITHUB_ENV
@@ -96,7 +99,7 @@ jobs:
       # what a changed crate needs; gpui's fat-LTO link (codegen-units=1) is never cached and runs in full every time. Not on Windows: sccache 0.19 expands
       # cargo's @argfile and spawns rustc with the whole line, which for gpui (360 -L dependency= paths in cargo's per-crate build dirs) is past Windows'
       # 32K limit ("The filename or extension is too long"); there target/ alone keeps the build warm.
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         if: runner.environment == 'github-hosted'
         with:
           workspaces: |
@@ -181,19 +184,19 @@ jobs:
       # whenever it changes. scripts/licenses.sh refuses a package built with a Bun the notices do not name.
       # bun for the browser helper. Its download server has answered 504 more than once: a pinned version, kept in the Actions cache, and
       # up to three tries with a pause between, so a tag push never fails halfway on it
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.bun
           key: bun-1.4.4-${{ runner.os }}-${{ runner.arch }}
       - id: bun1
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         continue-on-error: true
         with: { bun-version: 1.4.4 }
       - if: steps.bun1.outcome == 'failure'
         run: sleep 30
       - id: bun2
         if: steps.bun1.outcome == 'failure'
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         continue-on-error: true
         with: { bun-version: 1.4.4 }
       - if: steps.bun1.outcome == 'failure' && steps.bun2.outcome == 'failure'
@@ -208,7 +211,7 @@ jobs:
       # restored here and saved at once after the mesher is built, not at the job's end: actions/cache saves only when the whole job passes, so a job failing
       # later (packaging) built OpenCascade again on every run (Windows: 61 minutes cold)
       - id: occt
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/backplane/occt-7.9.2-static-*
           key: occt-7.9.2-${{ hashFiles('scripts/build-occt.sh') }}-${{ matrix.target }}
@@ -216,7 +219,7 @@ jobs:
         env: { MACOSX_DEPLOYMENT_TARGET: "12.0" }
         run: STATIC=1 scripts/build-step2glb.sh dist/backplane-step2glb${{ runner.os == 'Windows' && '.exe' || '' }}
       - if: steps.occt.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/backplane/occt-7.9.2-static-*
           key: ${{ steps.occt.outputs.cache-primary-key }}
@@ -330,7 +333,7 @@ jobs:
           name=backplane-$TAG-${{ matrix.target }}-native.zip
           (cd $d && 7z a -tzip -r "../$name" . > /dev/null)
           echo "ARCHIVE=$name" >> $GITHUB_ENV
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: archive-${{ matrix.target }}
           path: ${{ env.ARCHIVE }}
@@ -352,19 +355,21 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: temurin
           java-version: '17'
       # Gradle itself, without depending on GitHub: services.gradle.org redirects to github.com/gradle/gradle-distributions, which answered 504 for hours
       # (2026-11-08, dry run 42469337937). The zip is cached between runs, fetched with retries from Gradle and then from mirrors, and used only if its
       # sha256 is the one pinned in gradle-wrapper.properties (distributionSha256Sum), so a mirror cannot hand over anything else. The build runs it directly.
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/bp-gradle-dist
           key: gradle-dist-${{ hashFiles('mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
-      - uses: actions/cache@v4
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: |
             ~/.gradle/caches/modules-2
@@ -423,7 +428,7 @@ jobs:
           case " $b" in *" $CERT_SHA256 "*) ;; *) echo "::error::the AAB is not signed with the release key ($CERT_SHA256)"; exit 1;; esac
           "$bt/aapt2" dump badging "$apk" | head -1
           cp "$apk" "backplane-$TAG-android.apk"; cp "$aab" "backplane-$TAG-android.aab"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: archive-android
           path: |
@@ -437,7 +442,7 @@ jobs:
           set -e
           "$GRADLE" --no-daemon -q -Pbp.appId=dev.backplane.mobile.rel -Pbp.scheme=bprel -Pbp.appName="Backplane rel" :app:assembleRelease
           cp app/build/outputs/apk/release/app-release.apk "$GITHUB_WORKSPACE/backplane-$TAG-android-sideid.apk"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: github.event_name == 'workflow_dispatch'
         with:
           name: android-sideid
@@ -455,10 +460,11 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           sparse-checkout: deploy
-      - uses: actions/download-artifact@v4
+          persist-credentials: ${{ inputs.nightly == true }}  # nightly pushes its tag with git push; tag releases and dry runs do not push
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: archive-*
           merge-multiple: true
@@ -514,7 +520,7 @@ jobs:
           done
           sha256sum backplane-$TAG-*.tar.gz backplane-$TAG-*.zip $(ls backplane-$TAG-android.apk backplane-$TAG-android.aab 2>/dev/null) install.sh | sort -k2 > SHA256SUMS
           cat SHA256SUMS
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: release-dry-run
           path: |
@@ -591,13 +597,15 @@ jobs:
       # a self-hosted Windows runner (bp-win): Git's find and sort ahead of System32's, as in build
       - if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         run: echo 'C:\Program Files\Git\usr\bin' >> "$GITHUB_PATH"
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with: { name: release-dry-run, path: rel }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: github.event.inputs.first_run != ''
         with: { name: release-dry-run, path: first, run-id: "${{ github.event.inputs.first_run }}", github-token: "${{ github.token }}" }
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         if: github.event.inputs.broken_run != ''
         with: { name: release-dry-run, path: broken, run-id: "${{ github.event.inputs.broken_run }}", github-token: "${{ github.token }}" }
       - name: display (Linux)
@@ -624,7 +632,7 @@ jobs:
           gh release download v0.14.1 --repo ${{ github.repository }} -p install.sh -p "backplane-v0.14.1-$plat.tar.gz" -D v0141
           UPD_DIR=$RUNNER_TEMP python3 -I test/update/from-014.py v0141 rel | tee from014.txt
           if [ -d broken ]; then UPD_DIR=$RUNNER_TEMP python3 -I test/update/from-014.py v0141 broken --panics | tee -a from014.txt; fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         if: always()
         with:
           name: smoke-${{ matrix.target }}
