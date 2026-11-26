@@ -88,6 +88,58 @@ impl Builds {
     pub fn mark_bad(&self, id: &str, why: &str) { crate::appkeep::mark_bad(&self.0, id, why) }
     /// The one writer of CURRENT in a guarded install: a whole file, renamed over. (Where no guard runs, the desktop app is: appkeep.rs.)
     pub fn publish(&self, id: &str) { let _ = crate::appkeep::publish(&self.0, id); }
+    /// Refresh `<prefix>/backplane` from the newly proven build `id` when `<prefix>/backplane` already exists as a regular file and `id` is newer than `CURRENT` (or `CURRENT` is empty), so future restarts pick up guard fixes without downgrading.
+    pub fn refresh_guard(&self, id: &str) {
+        let _ = crate::appkeep::try_with_state_lock(&self.0, || {
+            let cur = self.current();
+            if !cur.is_empty() && !crate::appkeep::newer(id, &cur) { return }
+            let name = if cfg!(windows) { "backplane.exe" } else { "backplane" };
+            let dst = self.0.join(name);
+            let src = self.dir(id).join(name);
+            if !fs::symlink_metadata(&dst).is_ok_and(|m| m.file_type().is_file()) { return }
+            let Ok(src_meta) = fs::metadata(&src) else { return };
+            if !src_meta.is_file() { return }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if src_meta.permissions().mode() & 0o111 == 0 { return }
+            }
+            let tmp = self.0.join(format!(".{name}.{}", std::process::id()));
+            if fs::copy(&src, &tmp).is_err() {
+                let _ = fs::remove_file(&tmp);
+                return;
+            }
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                if fs::set_permissions(&tmp, fs::Permissions::from_mode(0o755)).is_err() || fs::rename(&tmp, &dst).is_err() {
+                    let _ = fs::remove_file(&tmp);
+                }
+            }
+            #[cfg(windows)]
+            {
+                if let Ok(entries) = fs::read_dir(&self.0) {
+                    for entry in entries.flatten() {
+                        let fname = entry.file_name();
+                        let s = fname.to_string_lossy();
+                        if s.starts_with(".backplane-") && s.ends_with(".exe.old") {
+                            let _ = fs::remove_file(entry.path());
+                        }
+                    }
+                }
+                let old = self.0.join(format!(".backplane-{}.exe.old", std::process::id()));
+                let _ = fs::remove_file(&old);
+                if fs::rename(&dst, &old).is_err() {
+                    let _ = fs::remove_file(&tmp);
+                    return;
+                }
+                if fs::rename(&tmp, &dst).is_err() {
+                    let _ = fs::rename(&old, &dst);
+                    let _ = fs::remove_file(&tmp);
+                }
+            }
+        });
+    }
     /// Take the mark off: the person says this build is fine.
     pub fn clear_bad(&self, id: &str) { crate::appkeep::clear_bad(&self.0, id); }
     /// Builds a running guard needs: dev-cut.sh prunes none of them, whatever the count.
@@ -143,5 +195,45 @@ mod tests {
         assert_eq!(entries, vec!["4321"]);
         b.unpin(4321);
         assert!(!b.0.join(".pins/4321").exists());
+    }
+    #[test] fn refresh_guard_updates_installed_guard_and_skips_uninstalled_or_symlinked_prefix() {
+        let name = if cfg!(windows) { "backplane.exe" } else { "backplane" };
+        let t = tmp("refresh");
+        let b = Builds(t.to_path_buf());
+        let src = b.dir("v2").join(name);
+        fs::create_dir_all(src.parent().unwrap()).unwrap();
+        fs::write(&src, b"new-guard-v2").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&src, fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        // Uninstalled prefix without <prefix>/backplane: skipped
+        b.refresh_guard("v2");
+        assert!(!t.join(name).exists());
+
+        // Installed regular guard binary when CURRENT is newer ("v3"): downgrade to "v2" is skipped
+        fs::write(t.join(name), b"guard-v3").unwrap();
+        fs::write(t.join("CURRENT"), b"v3\n").unwrap();
+        b.refresh_guard("v2");
+        assert_eq!(fs::read(t.join(name)).unwrap(), b"guard-v3");
+
+        // Installed regular guard binary when CURRENT is older ("v1"): replaced atomically with builds/v2/backplane
+        fs::write(t.join(name), b"old-guard-v1").unwrap();
+        fs::write(t.join("CURRENT"), b"v1\n").unwrap();
+        b.refresh_guard("v2");
+        assert_eq!(fs::read(t.join(name)).unwrap(), b"new-guard-v2");
+
+        // Symlinked prefix binary: left untouched
+        #[cfg(unix)]
+        {
+            let target = t.join("external-guard");
+            fs::write(&target, b"external").unwrap();
+            fs::remove_file(t.join(name)).unwrap();
+            std::os::unix::fs::symlink(&target, t.join(name)).unwrap();
+            b.refresh_guard("v2");
+            assert!(fs::symlink_metadata(t.join(name)).unwrap().file_type().is_symlink());
+            assert_eq!(fs::read(&target).unwrap(), b"external");
+        }
     }
 }

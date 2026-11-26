@@ -64,6 +64,24 @@ pub fn expected_elsewhere(home: &Path, list: &[crate::hubs::Hub]) -> Option<Path
 
 /// `<home>/hub.lock`: "<pid> <port> flock". The port of the hub the lock names.
 pub fn lock_port(text: &str) -> Option<u16> { text.split_whitespace().nth(1)?.parse().ok() }
+fn guard_running(home: &Path) -> bool {
+    let Ok(f) = std::fs::File::open(home.join("guard").join("lock")) else { return false }; /* i18n-ok: lock file path */
+    match f.try_lock() {
+        Ok(()) => { let _ = f.unlock(); false }
+        Err(std::fs::TryLockError::WouldBlock) => true,
+        Err(_) => false,
+    }
+}
+fn running_guard_port(home: &Path) -> Option<u16> {
+    if let Ok(raw) = std::fs::read_to_string(home.join("guard").join("status.json")) { /* i18n-ok: status file path */
+        if let Ok(v) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(p) = v["port"].as_u64().and_then(|n| u16::try_from(n).ok()).filter(|&p| p > 0) {
+                return Some(p);
+            }
+        }
+    }
+    std::fs::read_to_string(home.join("hub.lock")).ok().as_deref().and_then(lock_port) /* i18n-ok: lock file path */
+}
 fn answering(port: u16) -> bool {
     ureq::get(&format!("http://127.0.0.1:{port}/hello")).timeout(Duration::from_secs(2)).call().is_ok()
 }
@@ -141,10 +159,23 @@ pub fn ensure_hub(home: &Path) -> Result<(String, PathBuf)> {
     if let Some(other) = expected_elsewhere(home, &crate::hubs::load()) { bail!("{}", crate::i18n::tf("gpui.launch.elsewhere", &[("home", home.display().to_string().into()), ("other", other.display().to_string().into())])) }
     let me = std::env::current_exe()?;
     let guarded = guarded_install(&me).filter(|_| std::env::var_os("BACKPLANE_HUB_BIN").is_none());
+    let log_path = home.join("hub.log");
+    if guarded.is_some() && guard_running(home) {
+        let t0 = Instant::now();
+        while t0.elapsed() < Duration::from_secs(60) {
+            if let Some(p) = running_guard_port(home) {
+                if answering(p) && token.is_file() { return Ok((format!("http://127.0.0.1:{p}"), token)) }
+            }
+            if !guard_running(home) { break; }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        if guard_running(home) {
+            bail!("{}", crate::i18n::tf("gpui.launch.no.answer", &[("log", log_path.display().to_string().into())]))
+        }
+    }
     let bin = match &guarded { Some((g, _)) => g.clone(), None => hub_bin()? };
     let want = std::env::var("BACKPLANE_PORT").ok().and_then(|p| p.parse::<u16>().ok());
     let port = want.or_else(|| free_port(PORT_FIRST, PORT_LAST)).with_context(|| crate::i18n::trs("No free port between 3800 and 3899."))?;
-    let log_path = home.join("hub.log");
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
     // Linux: the hub in a systemd scope of its own with OOMPolicy=continue, so the kernel killing one process there (a runaway the hub started) never
     // makes systemd stop the hub with it; oomd's last pick (ManagedOOMPreference=avoid). Agents and jobs get scopes of their own (host memscope.rs).
@@ -289,5 +320,25 @@ mod tests {
     #[test] fn a_saved_choice_reads_back_and_a_damaged_file_is_none() {
         let s = Saved { home: "/h".into(), url: String::new(), token_file: String::new() };
         assert_eq!(serde_json::from_slice::<Saved>(&serde_json::to_vec(&s).unwrap()).unwrap(), s);
+    }
+    #[test] fn guard_running_and_port_detect_active_guard_lock_and_status() {
+        let d = crate::tmp::uncreated("launch-guard-lock");
+        let g = d.join("guard");
+        std::fs::create_dir_all(&g).unwrap();
+        assert!(!guard_running(&d));
+        assert_eq!(running_guard_port(&d), None);
+
+        let lock = std::fs::OpenOptions::new().create(true).write(true).truncate(false).open(g.join("lock")).unwrap();
+        lock.try_lock().unwrap();
+        assert!(guard_running(&d));
+
+        std::fs::write(d.join("hub.lock"), "111 3801 flock\n").unwrap();
+        assert_eq!(running_guard_port(&d), Some(3801));
+        std::fs::write(g.join("status.json"), r#"{"port":3802}"#).unwrap();
+        assert_eq!(running_guard_port(&d), Some(3802));
+
+        drop(lock);
+        assert!(!guard_running(&d));
+        let _ = std::fs::remove_dir_all(&d);
     }
 }

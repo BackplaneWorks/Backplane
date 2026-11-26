@@ -197,15 +197,15 @@ impl View {
     fn test_config() -> Config {
         Config { hub: "ws://127.0.0.1:0".into(), token_file: PathBuf::new(), exit_after: None, script: None, swatches: false, gallery: false, fonts: false, solid_demo: None, theme: None, paired: false, unpaired: false, pair_link: None, pending: false, launched: false }
     }
-    struct TempToken(PathBuf);
+    struct TempToken(PathBuf, crate::tmp::TempFile);
     impl TempToken {
         fn new(name: &str) -> Self {
-            let p = std::env::temp_dir().join(format!("bp-gpui-{name}-{}-{}", std::process::id(), millis()));
-            std::fs::write(&p, "test-token").unwrap();
-            Self(p)
+            let f = crate::tmp::file(&format!("gpui-{name}"), "token");
+            std::fs::write(&f, "test-token").unwrap();
+            let p = f.to_path_buf();
+            Self(p, f)
         }
     }
-    impl Drop for TempToken { fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); } }
     fn view_reply(req: &Value, hub_url: &str, shown: Value) -> Message {
         let p = &req["p"];
         let msg = json!({

@@ -122,6 +122,94 @@ use std::{path::Path, process::{Child, Command, ExitStatus}};
 pub use os::{abort, alive, awake_s, clean_signals, detach, kill, same_file, signal_of, space, stop_asked, term, watch_stop};
 pub fn free_bytes(p: &Path) -> Option<u64> { space(p).map(|s| s.0) }
 
+fn trim_end_seps(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    let t = s.trim_end_matches(['/', '\\']);
+    if t.is_empty() && !s.is_empty() { s.chars().take(1).collect() } else { t.to_string() }
+}
+
+/// Parse a Darwin `KERN_PROCARGS2` buffer (`i32 argc`, NUL-terminated `exec_path`, NUL padding, then `argc` NUL-terminated `argv` strings).
+#[allow(dead_code)]
+pub(crate) fn parse_kern_procargs2(buf: &[u8]) -> Option<Vec<String>> {
+    if buf.len() < 4 { return None }
+    let argc = i32::from_ne_bytes(buf[..4].try_into().ok()?);
+    if argc <= 0 || argc > 4096 { return None }
+    let mut pos = 4usize;
+    let nul = buf.get(pos..)?.iter().position(|&b| b == 0)?;
+    pos += nul + 1;
+    while pos < buf.len() && buf[pos] == 0 { pos += 1; }
+    let mut out = Vec::with_capacity(argc as usize);
+    for _ in 0..argc {
+        let end = buf.get(pos..)?.iter().position(|&b| b == 0)?;
+        out.push(String::from_utf8_lossy(&buf[pos..pos + end]).into_owned());
+        pos += end + 1;
+    }
+    Some(out)
+}
+
+/// Whether `args` invokes a Backplane guard (`backplane hub run ... --home <home>`).
+pub(crate) fn cmdline_is_guard_for_home(args: &[String], home: &Path) -> bool {
+    let Some(i) = (1..args.len()).find(|&i| args[i] == "hub" && args.get(i + 1).map(String::as_str) == Some("run")) else {
+        return false;
+    };
+    let bin = args[i - 1].rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
+    if !bin.starts_with("backplane") { return false }
+    let mut j = i + 2;
+    let mut found_home: Option<&str> = None;
+    while j < args.len() {
+        let a = args[j].as_str();
+        if a == "--" { break }
+        if a == "--home" {
+            let Some(v) = args.get(j + 1) else { break };
+            found_home = Some(v.as_str());
+            j += 2;
+            continue;
+        }
+        if let Some(v) = a.strip_prefix("--home=") {
+            found_home = Some(v);
+        }
+        j += 1;
+    }
+    let Some(val) = found_home else { return false };
+    if trim_end_seps(Path::new(val)) == trim_end_seps(home) { return true }
+    matches!((std::fs::canonicalize(val), std::fs::canonicalize(home)), (Ok(a), Ok(b)) if a == b)
+}
+
+#[cfg(target_os = "linux")]
+fn read_cmdline(pid: u32) -> Option<Vec<String>> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    if raw.is_empty() { return None }
+    let mut parts: Vec<String> = raw.split(|&b| b == 0).map(|s| String::from_utf8_lossy(s).into_owned()).collect();
+    if raw.last() == Some(&0) { parts.pop(); }
+    Some(parts)
+}
+
+#[cfg(target_os = "macos")]
+fn read_cmdline(pid: u32) -> Option<Vec<String>> {
+    let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid as libc::c_int];
+    let mut len: libc::size_t = 0;
+    if unsafe { libc::sysctl(mib.as_mut_ptr(), 3, std::ptr::null_mut(), &mut len, std::ptr::null_mut(), 0) } != 0 || len == 0 {
+        return None;
+    }
+    let cap = len.min(256 * 1024);
+    let mut buf = vec![0u8; cap];
+    let mut got = cap;
+    if unsafe { libc::sysctl(mib.as_mut_ptr(), 3, buf.as_mut_ptr() as *mut libc::c_void, &mut got, std::ptr::null_mut(), 0) } != 0 {
+        return None;
+    }
+    buf.truncate(got);
+    parse_kern_procargs2(&buf)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn read_cmdline(_pid: u32) -> Option<Vec<String>> { None }
+
+/// Whether `pid` is another live `backplane hub run` guard process supervising `home`.
+pub fn is_guard_for_home(pid: u32, home: &Path) -> bool {
+    if pid <= 1 || pid == std::process::id() || pid > i32::MAX as u32 { return false }
+    read_cmdline(pid).is_some_and(|args| cmdline_is_guard_for_home(&args, home))
+}
+
 /// The hub program in a build folder.
 pub fn hub_exe(dir: &Path) -> std::path::PathBuf { dir.join(if cfg!(windows) { "backplane-hub.exe" } else { "backplane-hub" }) }
 
@@ -140,4 +228,112 @@ pub fn notify(title: &str, body: &str) {
         else { let mut c = Command::new("notify-send"); c.args(["-a", "Backplane", title, body]); c };
     c.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     if let Ok(mut ch) = c.spawn() { std::thread::spawn(move || { let _ = ch.wait(); }); }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn procargs2(exec_path: &str, argv: &[&str], envp: &[&str]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(argv.len() as i32).to_ne_bytes());
+        out.extend_from_slice(exec_path.as_bytes());
+        out.extend_from_slice(&[0, 0, 0]);
+        for a in argv {
+            out.extend_from_slice(a.as_bytes());
+            out.push(0);
+        }
+        for e in envp {
+            out.extend_from_slice(e.as_bytes());
+            out.push(0);
+        }
+        out
+    }
+
+    #[test]
+    fn parse_kern_procargs2_extracts_exact_argv_and_rejects_malformed() {
+        let buf = procargs2(
+            "/Users/user/.local/share/backplane/backplane",
+            &["backplane", "hub", "run", "--home", "/Users/user/Library/Application Support/Backplane/hub", "--port", "3802"],
+            &["PATH=/usr/bin", "HOME=/Users/user"],
+        );
+        assert_eq!(
+            parse_kern_procargs2(&buf).unwrap(),
+            vec![
+                "backplane",
+                "hub",
+                "run",
+                "--home",
+                "/Users/user/Library/Application Support/Backplane/hub",
+                "--port",
+                "3802",
+            ]
+        );
+        assert_eq!(parse_kern_procargs2(&[]), None);
+        assert_eq!(parse_kern_procargs2(&[0, 0, 0, 0]), None, "zero argc");
+        assert_eq!(parse_kern_procargs2(&(-1i32).to_ne_bytes()), None, "negative argc");
+        assert_eq!(parse_kern_procargs2(&(5000i32).to_ne_bytes()), None, "huge argc");
+        let mut no_nul = (1i32).to_ne_bytes().to_vec();
+        no_nul.extend_from_slice(b"/bin/backplane");
+        assert_eq!(parse_kern_procargs2(&no_nul), None, "missing NUL after exec_path");
+        let short = procargs2("/bin/backplane", &["backplane", "hub", "run"], &[]);
+        let trunc = &short[..short.len() - 2];
+        assert_eq!(parse_kern_procargs2(trunc), None, "truncated argv");
+    }
+
+    #[test]
+    fn cmdline_is_guard_for_home_matches_exact_guard_invocations() {
+        let s = |a: &[&str]| a.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let mac_home = Path::new("/Users/user/Library/Application Support/Backplane/hub");
+        assert!(cmdline_is_guard_for_home(
+            &s(&["/Users/user/.local/share/backplane/backplane", "hub", "run", "--home", "/Users/user/Library/Application Support/Backplane/hub", "--port", "3802"]),
+            mac_home,
+        ));
+        assert!(cmdline_is_guard_for_home(
+            &s(&["systemd-run", "--user", "--scope", "-q", "--", "/opt/backplane/backplane", "hub", "run", "--home=/Users/user/Library/Application Support/Backplane/hub/", "--port", "3802"]),
+            mac_home,
+        ));
+        assert!(!cmdline_is_guard_for_home(
+            &s(&["/usr/bin/backplane", "hub", "status", "--home", "/Users/user/Library/Application Support/Backplane/hub"]),
+            mac_home,
+        ));
+        assert!(!cmdline_is_guard_for_home(
+            &s(&["/usr/bin/python3", "hub", "run", "--home", "/Users/user/Library/Application Support/Backplane/hub"]),
+            mac_home,
+        ));
+        assert!(!cmdline_is_guard_for_home(
+            &s(&["backplane", "hub", "run", "--", "--home", "/Users/user/Library/Application Support/Backplane/hub"]),
+            mac_home,
+        ));
+        assert!(!cmdline_is_guard_for_home(
+            &s(&["backplane", "hub", "run", "--home", "/tmp/other"]),
+            mac_home,
+        ));
+
+        #[cfg(unix)]
+        {
+            let d = crate::tmp::dir("sys-canon");
+            let real_home = d.join("real-home");
+            std::fs::create_dir_all(&real_home).unwrap();
+            let link_home = d.join("link-home");
+            std::os::unix::fs::symlink(&real_home, &link_home).unwrap();
+            assert!(cmdline_is_guard_for_home(
+                &s(&["backplane", "hub", "run", "--home", link_home.to_str().unwrap()]),
+                &real_home,
+            ));
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn is_guard_for_home_rejects_self_special_pids_and_non_guard_processes() {
+        let d = crate::tmp::dir("sys-live");
+        assert!(!is_guard_for_home(0, &d));
+        assert!(!is_guard_for_home(1, &d));
+        assert!(!is_guard_for_home(std::process::id(), &d));
+        let mut child = Command::new("sh").args(["-c", "sleep 10"]).spawn().unwrap();
+        assert!(!is_guard_for_home(child.id(), &d));
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }

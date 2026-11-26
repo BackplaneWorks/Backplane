@@ -27,15 +27,43 @@ fn wait_dead(pid: u32, wait: Duration) -> bool {
     }
 }
 
-fn end_pid(pid: u32, term_wait: Duration, abort_wait: Duration, kill_wait: Duration) -> bool {
+fn end_pid_if(pid: u32, term_wait: Duration, abort_wait: Duration, kill_wait: Duration, mut still_target: impl FnMut() -> bool) -> bool {
     if pid <= 1 || pid == std::process::id() { return false }
     if pid > i32::MAX as u32 { return false }
     sys::term(pid);
     if wait_dead(pid, term_wait) { return true }
+    if !still_target() { return false }
     sys::abort(pid);
     if wait_dead(pid, abort_wait) { return true }
+    if !still_target() { return false }
     sys::kill(pid);
     wait_dead(pid, kill_wait)
+}
+
+fn end_pid(pid: u32, term_wait: Duration, abort_wait: Duration, kill_wait: Duration) -> bool {
+    end_pid_if(pid, term_wait, abort_wait, kill_wait, || true)
+}
+
+fn reap_ghost_guard_pid_with(pid: Option<u32>, home: &Path, term_wait: Duration, abort_wait: Duration, kill_wait: Duration) -> bool {
+    let Some(pid) = pid else { return false };
+    if !sys::is_guard_for_home(pid, home) { return false }
+    say(&format!("stopping stale guard (pid {pid}) for {}", home.display()));
+    if !end_pid_if(pid, term_wait, abort_wait, kill_wait, || sys::is_guard_for_home(pid, home)) {
+        say(&format!("stale guard (pid {pid}) did not exit"));
+    }
+    true
+}
+
+fn reap_ghost_guard_pid(pid: Option<u32>, home: &Path) -> bool {
+    // A guard on current code handles SIGTERM by calling stop_child(child, 10_000), so wait past 10 s before escalating.
+    reap_ghost_guard_pid_with(pid, home, Duration::from_secs(12), Duration::from_secs(3), Duration::from_secs(2))
+}
+
+fn last_line_from(log: Option<&Path>, home: &Path, or: &str) -> String {
+    let fallback = home.join("hub.log");
+    let l = log.unwrap_or(&fallback);
+    let t = fs::read(l).map(|b| String::from_utf8_lossy(&b[b.len().saturating_sub(4096)..]).into_owned()).unwrap_or_default();
+    t.lines().rev().find(|x| !x.is_empty() && !x.starts_with("startup:") && !x.starts_with("guard:")).map_or(or.to_string(), |x| x.chars().take(200).collect())
 }
 
 fn clear_down_alert(rescue_state: &mut plan::RescueState, d: &Dir, build: &str) -> bool {
@@ -192,9 +220,22 @@ impl Guard {
         }
     }
 
+    fn reap_competing_guard(&self) -> bool {
+        if !self.owns_lock() { return false }
+        let Some(pid) = self.d.json("status.json")["guardPid"].as_u64().and_then(|n| u32::try_from(n).ok()) else { return false };
+        if pid == std::process::id() { return false }
+        if reap_ghost_guard_pid(Some(pid), &self.o.home) {
+            self.publish();
+            return true;
+        }
+        false
+    }
+
     fn port_free(&self) -> bool { std::net::TcpListener::bind(self.addr()).is_ok() }
 
     fn spawn(&mut self) -> Result<Child, End> {
+        if !self.owns_lock() { self.quit_replaced(None) }
+        self.reap_competing_guard();
         let dir = self.dir_of(&self.build); let exe = sys::hub_exe(&dir);
         if !exe.exists() { return Err(End::Failed(format!("no hub in {}", dir.display()))) }
         self.end_orphan(); self.ballast();
@@ -204,7 +245,7 @@ impl Guard {
         c.args(["--home", &self.o.home.to_string_lossy(), "--port", &self.o.port.to_string(), "--host", &self.o.host]).args(&self.o.hub_args)
             .env_remove("BACKPLANE_AGENT_OWNER").env("BACKPLANE_GUARD", "1").env("BACKPLANE_BUILD", &self.build).env("BACKPLANE_PREV_END", if self.crashed { "crash" } else { "" }).stdin(Stdio::null()).stdout(self.open_log()).stderr(self.open_log());
         // a turn the crash cut should not start again on a hub that is about to crash: the hub waits for this many seconds of life before it carries on
-        c.env("BACKPLANE_CARRY_WAIT", if self.hist.iter().any(|f| now().saturating_sub(f.at) < self.t.window) { self.tm.stable.to_string() } else { "0".into() });
+        c.env("BACKPLANE_CARRY_WAIT", if self.hist.iter().any(|f| f.kind != plan::FailKind::External && now().saturating_sub(f.at) < self.t.window) { self.tm.stable.to_string() } else { "0".into() });
         if self.mode == Mode::Safe { c.env("BACKPLANE_SAFE", "1").env("BACKPLANE_SAFE_SKIP", self.skip.join(",")); } else { c.env_remove("BACKPLANE_SAFE").env_remove("BACKPLANE_SAFE_SKIP"); }
         if let Some(b) = &self.b { c.env("BACKPLANE_BUILDS", &b.0); }
         if let Some(t) = self.hub_tmp() { say(&format!("the temp folder is nearly full: this hub and its agents use {}", t.display())); c.env("TMPDIR", &t).env("TMP", &t).env("TEMP", &t); }
@@ -217,7 +258,10 @@ impl Guard {
         let tail = || { let p = fs::read_to_string(self.d.path("panic.txt")).unwrap_or_default(); let ph = self.d.text("phase"); let ph = ph.trim(); let line = p.lines().next().unwrap_or("").chars().take(200).collect::<String>(); (line, ph.to_string()) };
         if let Some(sig) = sys::signal_of(&s) { let (p, ph) = tail(); let at = if ph.is_empty() { String::new() } else { format!(" during {ph}") }; return End::Failed(if p.is_empty() { format!("killed by signal {sig}{at}{}", if sig == 9 { " (out of memory, or killed)" } else { "" }) } else { p }) }
         match s.code().unwrap_or(1) {
-            0 | 129 | 130 | 143 => End::External,
+            0 => End::External("exit 0".into()),
+            129 => End::External("exit 129 (SIGHUP)".into()),
+            130 => End::External("exit 130 (SIGINT)".into()),
+            143 => End::External("exit 143 (SIGTERM)".into()),
             2 => End::Refused(self.last_line("exit 2: the hub refused its arguments")),
             MACHINE => End::Machine(self.last_line("exit 75")),
             REFUSED => End::Refused(self.last_line("exit 78")),
@@ -225,11 +269,7 @@ impl Guard {
         }
     }
     /// The hub's last words: the last line of its log that is not start-up timing.
-    fn last_line(&self, or: &str) -> String {
-        let Some(l) = &self.o.log else { return or.into() };
-        let t = fs::read(l).map(|b| String::from_utf8_lossy(&b[b.len().saturating_sub(4096)..]).into_owned()).unwrap_or_default();
-        t.lines().rev().find(|x| !x.is_empty() && !x.starts_with("startup:") && !x.starts_with("guard:")).map_or(or.to_string(), |x| x.chars().take(200).collect())
-    }
+    fn last_line(&self, or: &str) -> String { last_line_from(self.o.log.as_deref(), &self.o.home, or) }
 
     fn answer(&mut self, id: &str, ok: bool, text: &str) { self.last_req = json!({"id": id, "ok": ok, "text": text, "at": now()}); self.publish(); say(text); }
 
@@ -308,7 +348,7 @@ impl Guard {
                 }
             }
             if last_probe.elapsed().as_secs() >= self.tm.probe {
-                last_probe = Instant::now(); self.watch_space();
+                last_probe = Instant::now(); self.reap_competing_guard(); self.watch_space();
                 let (answered, well, said, control) = self.probe();
                 if clock.tick(std::time::SystemTime::now(), sys::awake_s()) { misses = 0; say("the machine slept; health checks start counting again"); }
                 if well {
@@ -329,6 +369,7 @@ impl Guard {
                     None if well => {
                         ready_at = Some(sys::awake_s());
                         say(&format!("{} answers, {} ms after its start", Self::short(&self.build), t0.elapsed().as_millis()));
+                        if self.mode == Mode::Normal { self.why.clear(); }
                         self.set(if self.mode == Mode::Safe { "safe" } else { "running" });
                         clear_down_alert(&mut self.rescue_state, &self.d, &self.build);
                         if control && !self.has_control(&self.build) { let mut c = self.d.lines("control"); c.push(self.build.clone()); let from = c.len().saturating_sub(32); let _ = self.d.put("control", &(c[from..].join("\n") + "\n")); }
@@ -349,7 +390,7 @@ impl Guard {
                         let body = serde_json::from_str::<Value>(&said).unwrap_or(Value::Null);
                         let busy = plan::holds_proof(&body);
                         if busy { ready_at = Some(now_awake); }
-                        if plan::proven(well, &body, self.stable, now_awake.saturating_sub(at), self.tm.stable) { self.stable = true; self.d.add_good(&self.build); self.pin(); say(&format!("{} started cleanly", Self::short(&self.build))); if self.probation.take().is_some() { if let Some(b) = &self.b { b.publish(&self.build); } } self.publish(); }
+                        if plan::proven(well, &body, self.stable, now_awake.saturating_sub(at), self.tm.stable) { self.stable = true; self.hist.retain(|f| f.kind != plan::FailKind::External); self.d.add_good(&self.build); self.pin(); say(&format!("{} started cleanly", Self::short(&self.build))); if self.probation.take().is_some() { if let Some(b) = &self.b { b.refresh_guard(&self.build); b.publish(&self.build); } } self.publish(); }
                     }
                 }
             }
@@ -398,8 +439,9 @@ impl Guard {
 
     fn fold_failure(&mut self, end: &End) {
         match end {
-            End::Failed(_) => self.hist.push(Fail { at: now(), build: self.build.clone(), mode: self.mode, machine: false }),
-            End::Machine(_) => self.hist.push(Fail { at: now(), build: self.build.clone(), mode: self.mode, machine: true }),
+            End::Failed(_) => self.hist.push(Fail { at: now(), build: self.build.clone(), mode: self.mode, kind: plan::FailKind::Build }),
+            End::Machine(_) => self.hist.push(Fail { at: now(), build: self.build.clone(), mode: self.mode, kind: plan::FailKind::Machine }),
+            End::External(_) => self.hist.push(Fail { at: now(), build: self.build.clone(), mode: self.mode, kind: plan::FailKind::External }),
             _ => {}
         }
         let w = self.t.window; self.hist.retain(|f| now().saturating_sub(f.at) < w);
@@ -412,16 +454,27 @@ impl Guard {
             let end = self.one_run();
             if sys::stop_asked() { self.quit(None) }
             if !self.owns_lock() { self.quit_replaced(None) }
+            if matches!(end, End::External(_) | End::Machine(_)) { self.reap_competing_guard(); }
             self.crashed = matches!(end, End::Failed(_));
             self.fold_failure(&end);
             let (good, bad) = (self.d.good(), self.bad());
             let b = self.build.clone();
             let next = { let me = &self; plan::next_on(&me.t, &me.hist, &end, &b, me.mode, &good, &bad, &|x| me.exists(x), now(), me.probation.as_deref()) };
-            let why = match &end { End::Failed(w) | End::Machine(w) | End::Refused(w) => w.clone(), _ => String::new() };
-            if !why.is_empty() { self.why = why.clone(); }
+            let why = match &end { End::Failed(w) | End::Machine(w) | End::Refused(w) | End::External(w) => w.clone(), _ => String::new() };
+            if !matches!(end, End::External(_)) && !why.is_empty() { self.why = why.clone(); }
             match next {
                 Next::Again { after } => {
-                    if !why.is_empty() { say(&format!("hub ended: {why}; trying again in {after} s")); self.set("restarting"); if self.wait(after) { continue } }
+                    if matches!(end, End::External(_)) {
+                        if after == 0 {
+                            self.why.clear();
+                            say(&format!("hub ended externally ({why}); starting again"));
+                        } else {
+                            self.why = why.clone();
+                            say(&format!("hub ended externally ({why}); trying again in {after} s"));
+                            self.set("restarting");
+                            if self.wait(after) { continue }
+                        }
+                    } else if !why.is_empty() { say(&format!("hub ended: {why}; trying again in {after} s")); self.set("restarting"); if self.wait(after) { continue } }
                 }
                 Next::Fallback { from, to } => {
                     if let Some(x) = &self.b { x.mark_bad(&from, &why); }
@@ -504,6 +557,13 @@ pub fn run(o: Opts) -> i32 {
     let d = Dir::of(&o.home); d.make();
     let lock = match OpenOptions::new().create(true).write(true).truncate(false).open(d.path("lock")) { Ok(f) => f, Err(e) => { say(&format!("cannot use {}: {e}", d.0.display())); return 1 } };
     if lock.try_lock().is_err() { say(&format!("a guard already runs for {}", o.home.display())); return 3 }
+    {
+        use std::io::Write;
+        let _ = lock.set_len(0);
+        let _ = (&lock).write_all(format!("{}\n", std::process::id()).as_bytes());
+    }
+    let prev_guard = d.json("status.json")["guardPid"].as_u64().and_then(|n| u32::try_from(n).ok());
+    reap_ghost_guard_pid(prev_guard, &o.home);
     sys::watch_stop();
     if let Some(p) = &o.pidfile { let _ = fs::write(p, format!("{}\n", std::process::id())); }
     if o.default_home { if let Some(p) = crate::store::pointer() { if let Some(dir) = p.parent() { let _ = fs::create_dir_all(dir); } let _ = fs::write(p, o.home.to_string_lossy().as_bytes()); } }
@@ -620,5 +680,114 @@ mod tests {
         let status = reaper.join().unwrap();
         assert!(dead, "end_pid must finish once SIGKILL reaps the child");
         assert_eq!(sys::signal_of(&status), Some(libc::SIGKILL));
+    }
+
+    #[test]
+    fn last_line_from_falls_back_to_home_hub_log_and_ignores_guard_startup_lines() {
+        let dir = crate::tmp::dir("last-line");
+        assert_eq!(last_line_from(None, &dir, "exit 75"), "exit 75");
+        fs::write(
+            dir.join("hub.log"),
+            "a hub already serves /home/user/hub (pid 99, port 3802)\nstartup: +5ms serving\nguard: trying again\n",
+        ).unwrap();
+        assert_eq!(
+            last_line_from(None, &dir, "exit 75"),
+            "a hub already serves /home/user/hub (pid 99, port 3802)"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reap_ghost_guard_pid_kills_blocked_signal_ghost_guard_and_spares_other_homes() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::tmp::dir("ghost-guard");
+        let target_home = dir.join("target-home");
+        let other_home = dir.join("other-home");
+        fs::create_dir_all(&target_home).unwrap();
+        fs::create_dir_all(&other_home).unwrap();
+
+        let fake_guard = dir.join("backplane");
+        fs::write(
+            &fake_guard,
+            "#!/bin/sh\ntrap '' TERM ABRT\nprintf ready > \"$6\"\nread _dummy\n",
+        ).unwrap();
+        fs::set_permissions(&fake_guard, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let target_marker = dir.join("target.ready");
+        let other_marker = dir.join("other.ready");
+        let mut target = Command::new(&fake_guard)
+            .args(["hub", "run", "--home"])
+            .arg(&target_home)
+            .args(["--marker"])
+            .arg(&target_marker)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut other = Command::new(&fake_guard)
+            .args(["hub", "run", "--home"])
+            .arg(&other_home)
+            .args(["--marker"])
+            .arg(&other_marker)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !target_marker.exists() || !other_marker.exists() {
+            assert!(Instant::now() < deadline, "fake guards never armed traps");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+
+        // Guard for a different home must not be touched
+        let _other_stdin = other.stdin.take().unwrap();
+        assert!(!reap_ghost_guard_pid(Some(other.id()), &target_home));
+        assert!(other.try_wait().unwrap().is_none(), "other home's guard must stay alive");
+
+        // Ghost guard for target_home with SIGTERM/SIGABRT blocked is recognized and reaped via SIGKILL escalation
+        let _target_stdin = target.stdin.take().unwrap();
+        let target_pid = target.id();
+        let reaper = std::thread::spawn(move || target.wait().unwrap());
+        assert!(reap_ghost_guard_pid_with(Some(target_pid), &target_home, Duration::from_millis(150), Duration::from_millis(150), Duration::from_secs(2)));
+        let status = reaper.join().unwrap();
+        assert_eq!(sys::signal_of(&status), Some(libc::SIGKILL));
+        drop(_target_stdin);
+
+        drop(_other_stdin);
+        let _ = other.kill();
+        let _ = other.wait();
+    }
+
+    #[test]
+    fn repeated_external_sigterm_backs_off_to_rescue_without_marking_build_bad() {
+        let t = Tuning::default();
+        let build = "v0.16.5-nightly.20261123.2";
+        let end = End::External("exit 143 (SIGTERM)".into());
+        let mut hist = Vec::new();
+        let mut rescue = plan::RescueState::default();
+
+        // 1st external SIGTERM: instant restart
+        hist.push(Fail { at: 100, build: build.into(), mode: Mode::Normal, kind: plan::FailKind::External });
+        assert_eq!(
+            plan::next_on(&t, &hist, &end, build, Mode::Normal, &[String::from("v0.16.4")], &[], &|_| true, 100, Some("v0.16.4")),
+            Next::Again { after: 0 }
+        );
+
+        // 2nd external SIGTERM: pause instead of tight 0ms respawn loop
+        hist.push(Fail { at: 101, build: build.into(), mode: Mode::Normal, kind: plan::FailKind::External });
+        assert_eq!(
+            plan::next_on(&t, &hist, &end, build, Mode::Normal, &[String::from("v0.16.4")], &[], &|_| true, 101, Some("v0.16.4")),
+            Next::Again { after: t.machine_pause }
+        );
+
+        // 3rd external SIGTERM: enter rescue (never Fallback / mark BAD), and RescueState alerts only once
+        hist.push(Fail { at: 106, build: build.into(), mode: Mode::Normal, kind: plan::FailKind::External });
+        let third = plan::next_on(&t, &hist, &end, build, Mode::Normal, &[String::from("v0.16.4")], &[], &|_| true, 106, Some("v0.16.4"));
+        assert!(matches!(third, Next::Rescue { after, .. } if after == t.machine_pause * 6), "{third:?}");
+        assert!(rescue.enter());
+        assert!(!rescue.enter(), "subsequent rescue cycles stay silent");
     }
 }
