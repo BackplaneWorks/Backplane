@@ -184,7 +184,7 @@ jobs:
       # whenever it changes. scripts/licenses.sh refuses a package built with a Bun the notices do not name.
       # bun for the browser helper. Its download server has answered 504 more than once: a pinned version, kept in the Actions cache, and
       # up to three tries with a pause between, so a tag push never fails halfway on it
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun
           key: bun-1.4.4-${{ runner.os }}-${{ runner.arch }}
@@ -365,11 +365,11 @@ jobs:
       # Gradle itself, without depending on GitHub: services.gradle.org redirects to github.com/gradle/gradle-distributions, which answered 504 for hours
       # (2026-11-08, dry run 42469337937). The zip is cached between runs, fetched with retries from Gradle and then from mirrors, and used only if its
       # sha256 is the one pinned in gradle-wrapper.properties (distributionSha256Sum), so a mirror cannot hand over anything else. The build runs it directly.
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/bp-gradle-dist
           key: gradle-dist-${{ hashFiles('mobile/android/gradle/wrapper/gradle-wrapper.properties') }}
-      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.gradle/caches/modules-2
