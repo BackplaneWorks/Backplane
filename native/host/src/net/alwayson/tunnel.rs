@@ -184,6 +184,10 @@ pub fn start(hub: &Arc<Hub>, links: Links, here: Arc<dyn Fn() -> Fut<'static, St
                     loop {
                         // still linked (a removed link ends its loop)
                         let Some((_, url, secret)) = links().into_iter().find(|l| l.0 == id) else { break };
+                        if crate::net::peerws::connected(&hub.cfg.home, &id) {
+                            tokio::time::sleep(Duration::from_secs(5)).await;
+                            continue;
+                        }
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
                         // this hub's own address, for the far end's reach probe; a loopback one would be the far end's own loopback (its own hub
                         // answering there), so it is never sent: a hub nobody can reach keeps polling

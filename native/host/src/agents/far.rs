@@ -121,8 +121,13 @@ impl Agents {
             "features": crate::net::peerver::PEER_FEATURES,
             "projects": self.local_projects().await,
         })];
-        for (id, name, url) in self.hub.far_machines() {
+        let peers = self.hub.far_machines();
+        let results = futures_util::future::join_all(peers.into_iter().map(|(id, name, url)| async move {
             let r = self.hub.far_call(&id, "machine_list", "machine_list", &json!({})).await;
+            (id, name, url, r)
+        }))
+        .await;
+        for (id, name, url, r) in results {
             if let Ok((true, ref b)) = r {
                 crate::net::peerver::record_json(&self.hub.cfg.home, &id, b);
             }

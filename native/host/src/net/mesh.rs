@@ -59,6 +59,12 @@ pub async fn announce(hub: &Arc<Hub>, peering: &Peering) {
         if r.code != 200 { TOLD.lock().unwrap().retain(|t| t.0 != id); } // not taken (away, or an older build): asked again at the next pass
     }
 }
+fn preserve_relay_bridge_url(cur_url: &str, new_url: &str, here_url: &str) -> bool {
+    !super::machines::loopback(new_url)
+        && !super::machines::loopback(here_url)
+        && super::machines::loopback(cur_url)
+}
+
 /// `peer.address` on the machine told: the link (signed, so the same peer id) says it is now at `url`. Taken for an approved link only, and only when
 /// that address answers /hello and is one this machine could reach (not a loopback one for a machine that is not on loopback itself).
 pub async fn address_received(sync: &Arc<FarSync>, hub: &Arc<Hub>, link: &str, p: &Value) -> HttpReply {
@@ -69,6 +75,10 @@ pub async fn address_received(sync: &Arc<FarSync>, hub: &Arc<Hub>, link: &str, p
     let here = super::botnet::url_here(peering.tailnet, &peering.host, peering.port).await;
     if let Some(why) = super::peering::refuse_loopback(&url, &here) { return HttpReply::text("403 Forbidden", why) }
     if peering.table.with(|t| t.peer(link).map_or(false, |r| r.url == url)) { return json_reply(&json!({"ok": true, "changed": false})) }
+    // Preserve an explicit local relay bridge endpoint (loopback peer URL when our own address is non-loopback, e.g. Boat over relay)
+    if peering.table.with(|t| t.peer(link).map_or(false, |r| preserve_relay_bridge_url(&r.url, &url, &here))) {
+        return json_reply(&json!({"ok": true, "changed": false}));
+    }
     if !super::peerhttp::link_up(&url).await { return HttpReply::text("409 Conflict", "that address does not answer") }
     match hub.commit(&json!({"$":"PeerSet","id":link,"name":"","url":url,"revoked":false,"at":(peering.now)()})).await {
         Ok(_) => json_reply(&json!({"ok": true, "changed": true})), Err(e) => HttpReply::text("503 Service Unavailable", &format!("{e:#}")) }
@@ -81,5 +91,24 @@ mod tests {
         let mut t = vec![];
         assert!(due(&mut t, "L", "https://a", 100) && !due(&mut t, "L", "https://a", 200) && due(&mut t, "L", "https://b", 210) && !due(&mut t, "L", "https://b", 700) && due(&mut t, "L", "https://b", 811));
         assert!(due(&mut t, "M", "https://b", 300), "each link has its own");
+    }
+
+    #[test]
+    fn preserve_relay_bridge_url_keeps_loopback_bridge_against_external_announce() {
+        assert!(preserve_relay_bridge_url(
+            "http://127.0.0.1:3799",
+            "http://desktop.example.ts.net:3797",
+            "https://over-its-reverse-link.invalid",
+        ));
+        assert!(!preserve_relay_bridge_url(
+            "http://127.0.0.1:1",
+            "http://127.0.0.1:4567",
+            "http://127.0.0.1:2",
+        ));
+        assert!(!preserve_relay_bridge_url(
+            "http://100.64.0.1:3797",
+            "http://100.64.0.2:3797",
+            "https://over-its-reverse-link.invalid",
+        ));
     }
 }
