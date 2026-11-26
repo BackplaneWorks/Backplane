@@ -89,6 +89,20 @@ pub fn shaped(ok: bool, body: &Value) -> Value {
     }
 }
 fn fail(msg: &str) -> (bool, Value) { (false, json!({"error":msg})) }
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AltiumTools { None, WriteOnly, All }
+
+/// Which Altium MCP tools a project folder gets:
+/// - Any folder with Altium files (pure Altium or mixed KiCad+Altium): all three (`altium_status`, `altium_script`, `altium_write`).
+/// - Pure KiCad folder (KiCad files, no Altium files): none (even when Altium is installed).
+/// - Empty/new folder (neither KiCad nor Altium files yet): all three when Altium is installed/running, else `altium_write` alone so any platform can create a `.PrjPcb` from scratch.
+pub fn altium_tools_for(has_altium_files: bool, has_kicad_files: bool, altium_installed: bool) -> AltiumTools {
+    if has_altium_files { AltiumTools::All }
+    else if has_kicad_files { AltiumTools::None }
+    else if altium_installed { AltiumTools::All }
+    else { AltiumTools::WriteOnly }
+}
 /// Mark one listed tool as loaded up front (`_meta["anthropic/alwaysLoad"]`: Claude Code keeps its definition in the first request instead of behind its tool search).
 pub fn always_load(tools: &mut [Value], name: &str) { if let Some(t) = tools.iter_mut().find(|t| t["name"] == name) { t["_meta"] = json!({"anthropic/alwaysLoad": true}) } }
 
@@ -213,9 +227,23 @@ impl Mcp {
         match sv(&o, "method") {
             "initialize" => { let pv = if sv(&p, "protocolVersion").is_empty() { "2025-06-18" } else { sv(&p, "protocolVersion") }; Some(result(&id, json!({"protocolVersion":pv,"capabilities":{"tools":{}},"serverInfo":{"name":"backplane","version":ag.hub.cfg.version}}))) }
             "tools/list" => { let mut tools = self.tools.clone(); tools.extend(crate::settings::order::listed(&ag, thread).await); for s in ag.tool_sets() { tools.extend(s.list(thread)) }
-                // Altium's tools only for a thread of an Altium project: a KiCad project's agents never see them
                 let cwd = ag.world().await.cwd(thread);
-                if cwd.is_empty() || !crate::files::kicad::project::altium_cached(&cwd) { tools.retain(|t| !sv(t, "name").starts_with("altium_")) }
+                let alt_tools = if cwd.is_empty() {
+                    AltiumTools::None
+                } else {
+                    let main = crate::files::kicad::canonical::main_of(&cwd);
+                    let altium_override = ag.host.altium_installed;
+                    tokio::task::spawn_blocking(move || {
+                        let cad = super::prompt::read_cad(&main);
+                        let installed = altium_override.unwrap_or_else(crate::files::altium::live::installed);
+                        altium_tools_for(cad.has_altium(), cad.has_kicad(), installed)
+                    }).await.unwrap_or(AltiumTools::None)
+                };
+                match alt_tools {
+                    AltiumTools::All => {}
+                    AltiumTools::WriteOnly => tools.retain(|t| { let n = sv(t, "name"); !n.starts_with("altium_") || n == "altium_write" }),
+                    AltiumTools::None => tools.retain(|t| !sv(t, "name").starts_with("altium_")),
+                }
                 // a thread of a project with a board or schematic has `kicad_edit` from its first request (Claude defers the other tools' definitions
                 // behind a tool search, a request of its own before the first edit)
                 if ag.has_design(thread).await { always_load(&mut tools, "kicad_edit"); always_load(&mut tools, "viewer_render");
@@ -500,6 +528,16 @@ mod tests {
             }
         });
         assert!(altium_schdoc_lint(&power_only).is_none(), "power/NC connects should not trigger wall-of-labels");
+    }
+    #[test] fn altium_tools_policy_covers_empty_kicad_altium_and_mixed_folders() {
+        assert_eq!(altium_tools_for(false, false, false), AltiumTools::WriteOnly);
+        assert_eq!(altium_tools_for(false, false, true), AltiumTools::All);
+        assert_eq!(altium_tools_for(false, true, false), AltiumTools::None);
+        assert_eq!(altium_tools_for(false, true, true), AltiumTools::None);
+        assert_eq!(altium_tools_for(true, false, false), AltiumTools::All);
+        assert_eq!(altium_tools_for(true, false, true), AltiumTools::All);
+        assert_eq!(altium_tools_for(true, true, false), AltiumTools::All);
+        assert_eq!(altium_tools_for(true, true, true), AltiumTools::All);
     }
 }
 

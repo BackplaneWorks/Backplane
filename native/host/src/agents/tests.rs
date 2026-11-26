@@ -561,6 +561,7 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
 #[tokio::test(flavor = "multi_thread")] async fn the_mcp_server_answers_as_the_js_hub_does() {
     let sd = dir("m-bin"); perf_standin(&sd, 1);
     let (_hub, ag, _h, _w) = start("m", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    std::fs::write(_w.join("board.kicad_pro"), "{}").unwrap();
     let js = |s: &str| -> Value { serde_json::from_str(s).unwrap() };
     assert_eq!(rpc_mcp(&ag, T1, "", "initialize", json!({"protocolVersion":"2025-06-18"})).await, (200, js(MCP_INIT)));
     assert_eq!(rpc_mcp(&ag, T1, "", "ping", json!({})).await, (200, js(MCP_PING)));
@@ -568,7 +569,7 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     assert_eq!(rpc_mcp(&ag, T1, "", "nope", json!({})).await, (200, json!({"jsonrpc":"2.0","id":1,"error":{"code":-32601,"message":"method not found: nope"}}))); // a request is always answered (#1287); a notification is not
     assert_eq!(rpc_mcp(&ag, T1, "", "notifications/initialized", json!({})).await.0, 202);
     let (_, l) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await; let all: Value = serde_json::from_str(mcp::TOOLS_JSON).unwrap();
-    // (this thread's project is no Altium one: Altium's tools are not listed for it)
+    // (this thread's project is a pure KiCad one: Altium's tools are not listed for it)
     let want: Vec<&Value> = all["result"]["tools"].as_array().unwrap().iter().filter(|t| mcp::IMPLEMENTED.contains(&t["name"].as_str().unwrap()) && !t["name"].as_str().unwrap().starts_with("altium_")).collect();
     let listed: Vec<&Value> = l["result"]["tools"].as_array().unwrap().iter().collect();
     assert_eq!(listed.iter().copied().filter(|t| mcp::IMPLEMENTED.contains(&t["name"].as_str().unwrap())).collect::<Vec<_>>(), want, "the definitions are the JS hub's");
@@ -641,6 +642,61 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     assert!(lib.is_file(), "{}", lib.display());
     let (ok, r) = call(json!({"schlib": {"path": "../escape.SchLib", "symbols": []}})).await;
     assert!(!ok && r["error"].as_str().unwrap().contains("outside"), "{r}");
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn empty_folder_offers_altium_tools_and_creates_prjpcb_from_scratch() {
+    let tool_names = |ag: Arc<Agents>| async move {
+        let (_, l) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await;
+        l["result"]["tools"].as_array().unwrap().iter().filter_map(|t| t["name"].as_str().map(str::to_string)).collect::<Vec<_>>()
+    };
+
+    // Case A: empty folder with altium_installed = false -> exposes altium_write so a .PrjPcb can be created from scratch
+    let sd = dir("eaw-bin"); perf_standin(&sd, 1);
+    let (_hub, ag, _h, work) = start("eaw", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    let cwd = ag.world().await.cwd(T1);
+    let names = tool_names(ag.clone()).await;
+    assert!(names.contains(&"altium_write".into()) && !names.contains(&"altium_status".into()) && !names.contains(&"altium_script".into()), "{names:?}");
+    let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name": "altium_write", "arguments": {
+        "pcblib": {"path": "lib/T.PcbLib", "footprints": [{"package": "chip", "size": "0402", "kind": "capacitor"}]},
+        "schlib": {"path": "lib/T.SchLib", "symbols": [{"name": "C", "template": "capacitor", "footprint": "CAPC1005X35N"}]},
+        "project": "SimpleTestBoard.PrjPcb"
+    }})).await;
+    assert_eq!(r["result"]["isError"], false, "{r}");
+    let body = tool_text(&r);
+    assert_eq!(body["project"]["added"], json!(["lib\\T.PcbLib", "lib\\T.SchLib"]), "{body}");
+    assert!(work.join("SimpleTestBoard.PrjPcb").is_file());
+    let prj_text = std::fs::read_to_string(work.join("SimpleTestBoard.PrjPcb")).unwrap();
+    assert_eq!(crate::files::altium::prj::documents(&prj_text), vec!["lib/T.PcbLib", "lib/T.SchLib"]);
+    let wt_cad = prompt::read_cad(&crate::files::kicad::canonical::main_of(&format!("{cwd}/.backplane/worktrees/wt")));
+    assert!(wt_cad.has_altium() && !wt_cad.has_kicad());
+    let names = tool_names(ag.clone()).await;
+    for n in ["altium_status", "altium_script", "altium_write"] { assert!(names.contains(&n.into()), "{n} listed after .PrjPcb creation: {names:?}"); }
+    assert!(ag.prompt_for(T1, &cwd).await.contains("<backplane_altium>"));
+    ag.shutdown();
+
+    // Case B: empty folder with altium_installed = true -> all 3 altium_* tools + both Altium & KiCad prompt guidance; pure KiCad hides them; mixed restores them
+    let sd2 = dir("eawi-bin"); perf_standin(&sd2, 1);
+    let home = dir("eawi-home"); let work2 = dir("eawi-work");
+    std::fs::write(home.join("events.jsonl"), base_log(&work2, 1, "")).unwrap();
+    let hub2 = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let host = host::HostInfo { home: home.to_path_buf(), altium_installed: Some(true), ..Default::default() };
+    let ag2 = Agents::start_host(hub2, Cli::standin(&sd2), host).await.unwrap();
+    let cwd2 = ag2.world().await.cwd(T1);
+    let names2 = tool_names(ag2.clone()).await;
+    for n in ["altium_status", "altium_script", "altium_write"] { assert!(names2.contains(&n.into()), "{n} listed on empty folder when Altium installed: {names2:?}"); }
+    let p2 = ag2.prompt_for(T1, &cwd2).await;
+    assert!(p2.contains("<backplane_altium>") && p2.contains("<kicad_runtime>"), "{p2}");
+
+    std::fs::write(work2.join("Board.kicad_pro"), "{}").unwrap();
+    let names2 = tool_names(ag2.clone()).await;
+    assert!(!names2.iter().any(|n| n.starts_with("altium_")), "pure KiCad hides altium_*: {names2:?}");
+    assert!(!ag2.prompt_for(T1, &cwd2).await.contains("<backplane_altium>"));
+
+    std::fs::create_dir_all(work2.join("legacy")).unwrap();
+    std::fs::write(work2.join("legacy/Old.PrjPcb"), "[Design]\r\n").unwrap();
+    let names2 = tool_names(ag2.clone()).await;
+    for n in ["altium_status", "altium_script", "altium_write"] { assert!(names2.contains(&n.into()), "{n} listed in mixed KiCad+Altium project: {names2:?}"); }
+    ag2.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn thread_tools_read_send_wait_update_and_interrupt() {
     let sd = dir("m4-bin"); perf_standin(&sd, 1);
