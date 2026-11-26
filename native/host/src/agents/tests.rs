@@ -2781,3 +2781,196 @@ impl mailroom::Mailroom for ChatRoom {
     assert_eq!(args[i + 1], kistack_dir.to_string_lossy());
     ag.shutdown();
 }
+
+#[tokio::test(flavor = "multi_thread")] async fn viewer_render_renders_mech_glb_and_stl_with_cache_and_inline_images() {
+    let _shows = crate::present::viewer::shows_shared();
+    let sd = dir("vr-mech-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("vr-mech", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    let cwd = ag.world().await.cwd(T1);
+    let mech_dir = std::path::Path::new(&cwd).join("mech");
+    std::fs::create_dir_all(&mech_dir).unwrap();
+
+    // Minimal valid binary GLB (single triangle).
+    let fs: Vec<f32> = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    let glb_bytes = crate::files::kicad::glb::tests::glb(
+        r#"{"scenes":[{"nodes":[0]}],"nodes":[{"mesh":0}],"meshes":[{"primitives":[{"attributes":{"POSITION":0}}]}],"accessors":[{"bufferView":0,"count":3,"type":"VEC3"}],"bufferViews":[{}]}"#,
+        &crate::files::kicad::glb::tests::floats(&fs),
+    );
+    let glb_path = mech_dir.join("box.glb");
+    std::fs::write(&glb_path, glb_bytes).unwrap();
+
+    let stl_path = mech_dir.join("tri.stl");
+    std::fs::write(&stl_path, b"solid t\n facet normal 0 0 1\n outer loop\n vertex 0 0 0\n vertex 2 0 0\n vertex 0 2 0\n endloop\n endfacet\nendsolid t\n").unwrap();
+
+    let (_, r1) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": glb_path, "views": ["iso", "top"], "width": 320}
+    })).await;
+    assert_eq!(r1["result"]["isError"], false, "{r1}");
+    let m1: Value = serde_json::from_str(r1["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(m1["kind"], "mech");
+    assert_eq!(m1["cached"], false);
+    assert_eq!(m1["width"], 320);
+    assert_eq!(m1["height"], 240);
+    assert_eq!(m1["images"], 2);
+    let paths1 = m1["paths"].as_array().unwrap();
+    assert_eq!(paths1.len(), 2);
+    assert_eq!(r1["result"]["content"].as_array().unwrap().len(), 3);
+    assert_eq!(r1["result"]["content"][1]["type"], "image");
+    assert_eq!(r1["result"]["content"][1]["mimeType"], "image/png");
+    for p in paths1 {
+        let bytes = std::fs::read(p.as_str().unwrap()).unwrap();
+        assert_eq!(crate::files::kicad::vrender::png_dimensions(&bytes), Some((320, 240)));
+    }
+
+    // Second identical call hits cache.
+    let (_, r2) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": glb_path, "views": ["iso", "top"], "width": 320}
+    })).await;
+    assert_eq!(r2["result"]["isError"], false, "{r2}");
+    let m2: Value = serde_json::from_str(r2["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(m2["cached"], true);
+    assert_eq!(m2["paths"], m1["paths"]);
+
+    // STL with inline: false returns metadata only.
+    let (_, r3) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": stl_path, "views": ["iso"], "width": 240, "inline": false}
+    })).await;
+    assert_eq!(r3["result"]["isError"], false, "{r3}");
+    assert_eq!(r3["result"]["content"].as_array().unwrap().len(), 1);
+    let m3: Value = serde_json::from_str(r3["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(m3["images"], 0);
+    assert_eq!(m3["width"], 240);
+    assert!(std::path::Path::new(m3["paths"][0].as_str().unwrap()).is_file());
+
+    // viewer_show with render: true shows to user AND returns rendered images.
+    let d = desktop(&hub, 21, true, None, json!({"open": "mech", "part": "mech/box.glb", "key": "", "report": 2}));
+    let (_, rs) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_show",
+        "arguments": {"path": glb_path, "kind": "mech", "render": true, "views": ["iso"], "width": 240}
+    })).await;
+    d.await.unwrap();
+    assert_eq!(rs["result"]["isError"], false, "{rs}");
+    assert_eq!(rs["result"]["content"].as_array().unwrap().len(), 2);
+    let ms: Value = serde_json::from_str(rs["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(ms["settled"], true);
+    assert_eq!(ms["images"], 1);
+
+    // tools/list advertises viewer_render with alwaysLoad when design files exist, and LOCAL_THINGS routes missing files cleanly.
+    std::fs::write(std::path::Path::new(&cwd).join("board.kicad_pcb"), "(kicad_pcb)").unwrap();
+    let (_, listed) = rpc_mcp(&ag, T1, "", "tools/list", json!({})).await;
+    let vr = listed["result"]["tools"].as_array().unwrap().iter().find(|t| t["name"] == "viewer_render").expect("viewer_render listed");
+    assert_eq!(vr["_meta"]["anthropic/alwaysLoad"], true);
+    assert!(ag.not_here("no-such-thread", "viewer_render", &json!({"path": "/nonexistent/board.kicad_pcb"})).await.is_none());
+
+    ag.shutdown();
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn viewer_render_renders_kicad_sch_pcb_and_3d_when_kicad_cli_present() {
+    let sd = dir("vr-kicad-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("vr-kicad", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    let rt = crate::files::kicad::ipc::runtime(&hub).await;
+    if rt.cli.is_empty() {
+        eprintln!("skipping kicad-cli viewer_render smoke test: no kicad-cli available");
+        ag.shutdown();
+        return;
+    }
+
+    let cwd = ag.world().await.cwd(T1);
+    let cwd_p = std::path::Path::new(&cwd);
+    let sch_path = cwd_p.join("ecc83-pp.kicad_sch");
+    let pcb_path = cwd_p.join("ecc83-pp.kicad_pcb");
+    let hier_path = cwd_p.join("complex_hierarchy.kicad_sch");
+    let sub_path = cwd_p.join("ampli_ht.kicad_sch");
+    std::fs::write(&sch_path, include_bytes!("../../../../test/files/fixtures/plot/ecc83-pp.kicad_sch")).unwrap();
+    std::fs::write(&pcb_path, include_bytes!("../../../../test/files/fixtures/plot/ecc83-pp.kicad_pcb")).unwrap();
+    std::fs::write(&hier_path, include_bytes!("../../../../test/files/fixtures/plot/complex_hierarchy.kicad_sch")).unwrap();
+    std::fs::write(&sub_path, include_bytes!("../../../../test/files/fixtures/plot/ampli_ht.kicad_sch")).unwrap();
+
+    // 1. Schematic full + cache hit
+    let (_, rs1) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": sch_path, "width": 800}
+    })).await;
+    assert_eq!(rs1["result"]["isError"], false, "{rs1}");
+    let ms1: Value = serde_json::from_str(rs1["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(ms1["kind"], "schematic");
+    assert_eq!(ms1["cached"], false);
+    assert_eq!(ms1["width"], 800);
+    assert_eq!(ms1["images"], 1);
+
+    let (_, rs_cached) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": sch_path, "width": 800}
+    })).await;
+    let ms_cached: Value = serde_json::from_str(rs_cached["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(ms_cached["cached"], true);
+
+    // 2. Schematic focus crop around R1
+    let (_, rsf) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": sch_path, "focus": "R1", "margin_mm": 8.0, "width": 600}
+    })).await;
+    assert_eq!(rsf["result"]["isError"], false, "{rsf}");
+    let msf: Value = serde_json::from_str(rsf["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(msf["focus_bbox"]["w_mm"].as_f64().unwrap() < 100.0, "{msf}");
+    assert_eq!(msf["width"], 600);
+
+    // 3. Hierarchical subsheet selection (and direct subsheet path sharing cache)
+    let (_, rsub) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": hier_path, "sheet": "ampli_ht_vertical", "width": 600}
+    })).await;
+    assert_eq!(rsub["result"]["isError"], false, "{rsub}");
+    let msub: Value = serde_json::from_str(rsub["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(msub["sheet"], "ampli_ht_vertical");
+    assert!(msub["available_sheets"].as_array().unwrap().len() >= 2);
+
+    let (_, rsub_direct) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": sub_path, "width": 600}
+    })).await;
+    assert_eq!(rsub_direct["result"]["isError"], false, "{rsub_direct}");
+    let msub_direct: Value = serde_json::from_str(rsub_direct["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(msub_direct["sheet"], "ampli_ht_vertical");
+    assert_eq!(msub_direct["cached"], true);
+    assert_eq!(msub_direct["paths"], msub["paths"]);
+
+    // Numeric page number >= 2 (--pages 2)
+    let (_, rpage2) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": hier_path, "sheet": 2, "width": 600}
+    })).await;
+    assert_eq!(rpage2["result"]["isError"], false, "{rpage2}");
+    let mp2: Value = serde_json::from_str(rpage2["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(mp2["sheet"], "2");
+    assert_eq!(mp2["images"], 1);
+
+    // 4. 2D PCB default layers + focus crop around U1
+    let (_, rp) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": pcb_path, "focus": "U1", "margin_mm": 5.0, "width": 640}
+    })).await;
+    assert_eq!(rp["result"]["isError"], false, "{rp}");
+    let mp: Value = serde_json::from_str(rp["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(mp["kind"], "pcb");
+    assert!(mp["focus_bbox"]["w_mm"].as_f64().unwrap() > 10.0, "{mp}");
+    assert_eq!(mp["width"], 640);
+    assert_eq!(mp["images"], 1);
+
+    // 5. 3D PCB render
+    let (_, r3d) = rpc_mcp(&ag, T1, "", "tools/call", json!({
+        "name": "viewer_render",
+        "arguments": {"path": pcb_path, "kind": "3d", "views": ["top", "iso"], "width": 400}
+    })).await;
+    assert_eq!(r3d["result"]["isError"], false, "{r3d}");
+    let m3d: Value = serde_json::from_str(r3d["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(m3d["kind"], "3d");
+    assert_eq!(m3d["images"], 2);
+    assert!((200..=400).contains(&m3d["width"].as_u64().unwrap()), "{m3d}");
+    assert!((150..=300).contains(&m3d["height"].as_u64().unwrap()), "{m3d}");
+
+    ag.shutdown();
+}

@@ -201,7 +201,7 @@ pub fn sch_quality_lint(stats: &SchQualityStats, symbols_added: usize, bulk_pin_
             "labels": stats.labels,
             "boxes": stats.boxes,
         },
-        "next": "Follow KiStack's kicad-schematic skill before moving on: wire passives directly to IC pins, group decoupling caps, box and label subcircuits, color related nets, run ERC, and visually inspect rendered PNGs (viewer_show / kicad-cli sch export svg -> PNG)."
+        "next": "Follow KiStack's kicad-schematic skill before moving on: wire passives directly to IC pins, group decoupling caps, box and label subcircuits, color related nets, run ERC, and visually inspect rendered PNGs (call viewer_render to inspect rendered PNGs, and viewer_show for the user)."
     }))
 }
 
