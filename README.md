@@ -32,7 +32,7 @@ Linux (x64, arm64): the same one-liner, or `backplane-v<version>-linux-<arch>-na
 
 **macOS (Apple silicon only: M1 or later, macOS 13 or later; Backplane KiCad needs macOS 15 or later).** Intel Macs aren't supported. Use the same one-liner, or download `backplane-v<version>-darwin-arm64.tar.gz`. The installer puts **Backplane.app in `~/Applications`**: open it from there, Launchpad or Spotlight. The first time it opens Documents, Desktop or Downloads, macOS asks whether Backplane may; if you said no, Backplane tells you where to allow it (System Settings → Privacy & Security → Files and Folders). Builds are **not notarized yet** (signed ad hoc): the one-liner's download opens as it is; for an archive you downloaded with a browser and unpacked by hand, if macOS refuses to open it, right-click (or Control-click) → Open → Open, or on macOS 15+ use System Settings → Privacy & Security → "Open Anyway". See [docs/install.md](docs/install.md#macos-apple-silicon).
 
-**Windows (x64, experimental).** Download `backplane-v<version>-windows-x64.zip`, extract the whole archive into a writable folder, and run `Backplane.exe`.
+**Windows (x64, experimental).** Download `backplane-v<version>-windows-x64-native.zip`, extract the whole archive into a writable folder, and run `backplane-gpui.exe` (`backplane.exe` is the hub guard). Its first run offers to install to `%LOCALAPPDATA%\Backplane` and add **Backplane** to the Start menu; after that, start Backplane from the Start menu.
 
 **Phones.** iOS installs through a TestFlight invitation; Android uses the APK on the release. Pair one in Settings → Devices → Add a device with a pairing link, QR code or short code.
 
