@@ -115,7 +115,13 @@ pub fn allowance_text(snapshot: &Value, provider: &str, model: &str, now_s: u64)
     for w in snapshot["windows"].as_array().map(Vec::as_slice).unwrap_or_default() {
         let scope = w["scope"].as_str().unwrap_or("");
         // a window naming its models binds those (a Claude model's weekly, an Antigravity family's); else every window of a provider but Claude, whose model windows are by scope
-        let applies = match binds(w, &m) { Some(b) => b, None => provider != "claude" || scope == "shared" || scope == "five_hour" || scope == "seven_day" || (scope == "opus" && m.contains("opus")) || (scope == "sonnet" && m.contains("sonnet")) };
+        let applies = match binds(w, &m) {
+            Some(b) => b,
+            None => provider != "claude"
+                || matches!(scope, "shared" | "five_hour" | "seven_day")
+                || (matches!(scope, "opus" | "seven_day_opus") && m.contains("opus"))
+                || (matches!(scope, "sonnet" | "seven_day_sonnet") && m.contains("sonnet")),
+        };
         if !applies { continue }
         let used = w["used_permille"].as_f64().or_else(|| w["used_percent"].as_f64().map(|p| p * 10.0));
         let Some(used) = used.filter(|u| (0.0..=1000.0).contains(u)) else { return String::new() };
@@ -134,11 +140,10 @@ fn allowance_of(st: &State, id: &str, provider: &str) -> Value {
     let p = serde_json::from_str::<Value>(get("accounts.inventory")).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter().find(|p| p["id"].as_str() == Some(bound.as_str())).unwrap_or(Value::Null);
     profile_allowance(&p, provider)
 }
-/// A saved account's allowance as a thread reads it: its windows' scopes in the thread's words (five_hour and seven_day are the shared pool).
+/// A saved account's allowance as a thread reads it: tagged with its provider while keeping each window's scope (e.g. five_hour vs seven_day).
 fn profile_allowance(p: &Value, provider: &str) -> Value {
     let mut a = p["allowance"].clone();
-    if a.is_object() { a["provider"] = json!(provider); let ws = a["windows"].as_array().cloned().unwrap_or_default().into_iter().map(|mut w| {
-        let sc = w["scope"].as_str().unwrap_or("").to_string(); w["scope"] = json!(match sc.as_str() { "five_hour" | "seven_day" => "shared", "seven_day_opus" => "opus", "seven_day_sonnet" => "sonnet", o => o }); w }).collect::<Vec<_>>(); a["windows"] = json!(ws) }
+    if a.is_object() { a["provider"] = json!(provider); }
     a
 }
 /// The account a thread runs on, as the combined chip names it: (short name, email, saved). A saved account is its label (an email label: its name part); the CLI's
@@ -188,7 +193,16 @@ pub fn combo(snapshot: &Value, provider: &str, model: &str, effort: &str, speed:
     let windows: Vec<Value> = if snapshot["provider"].as_str().is_some_and(|p| p != provider) { vec![] } else { snapshot["windows"].as_array().into_iter().flatten().filter_map(|w| {
         let used = w["used_permille"].as_f64().map(|p| p / 10.0).or_else(|| w["used_percent"].as_f64()).filter(|u| (0.0..=100.0).contains(u))?;
         let scope = w["scope"].as_str().unwrap_or("");
-        let label = w["label"].as_str().map(str::to_string).unwrap_or_else(|| match scope { "five_hour" => "5-hour".into(), "seven_day" | "shared" => "Weekly".into(), "seven_day_opus" | "opus" => "Opus weekly".into(), "seven_day_sonnet" | "sonnet" => "Sonnet weekly".into(), o => w["name"].as_str().unwrap_or(o).to_string() });
+        let mins = w["duration_minutes"].as_f64().or_else(|| w["window_minutes"].as_f64()).map(|m| m.round() as u64);
+        // Claude's live CLI stream reading emits both 5-hour and 7-day windows with scope "shared", distinguished by duration.
+        let label = w["label"].as_str().filter(|l| !l.is_empty()).map(str::to_string).unwrap_or_else(|| match scope {
+            "five_hour" => "5-hour".into(),
+            "shared" if mins == Some(300) => "5-hour".into(),
+            "seven_day" | "shared" => "Weekly".into(),
+            "seven_day_opus" | "opus" => "Opus weekly".into(),
+            "seven_day_sonnet" | "sonnet" => "Sonnet weekly".into(),
+            o => w["name"].as_str().unwrap_or(o).to_string(),
+        });
         let applies = match binds(w, &ml) { Some(b) => b, None => !matches!(scope, "opus" | "seven_day_opus") || ml.contains("opus") } && (!matches!(scope, "sonnet" | "seven_day_sonnet") || ml.contains("sonnet"));
         let reset = w["resets_at"].as_f64().map(|r| r as u64).filter(|r| *r > now_s);
         let l = ((100.0 - used).floor()).max(0.0) as u64;
@@ -679,6 +693,57 @@ mod tests {
             {"label":"Work","value":"w\u{1f}1","on":false,"ok":false,"why":"Sign-in expired. Sign in again in Settings, Accounts."}]));
         assert_eq!((a[1]["title"].clone(), a[1]["choices"][0]["label"].clone(), a[1]["choices"][0]["ok"].clone()), (json!("Usage"), json!("Weekly  36% left"), json!(false)));
         st.apply(&json!({"$":"ThreadCreated","id":"t2","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"grok","model":"","at":1})); assert!(account_sections(&st, "t2", 100).is_empty());
+    }
+    #[test] fn claude_five_hour_live_cli_and_stream_windows_keep_5_hour_label() {
+        let mut st = State::new();
+        st.apply(&json!({"$":"ThreadCreated","id":"t1","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"claude-opus-5-5","at":1}));
+        let live = json!({
+            "provider": "claude",
+            "source": "Claude stream",
+            "state": "ok",
+            "email": "me@home.org",
+            "windows": [
+                {"name": "5 h", "scope": "shared", "shared": true, "duration_minutes": 300, "used_permille": 100, "resets_at": 500},
+                {"name": "7 d", "scope": "shared", "shared": true, "duration_minutes": 10080, "used_permille": 370, "resets_at": 5000}
+            ]
+        });
+        st.apply(&json!({"$":"SettingSet","key":"allowance.claude","value":live.to_string(),"at":2}));
+        let c = combo_of(&st, "t1", 100);
+        assert_eq!(c["windows"][0]["label"], "5-hour");
+        assert_eq!(c["windows"][0]["left"], 90);
+        assert_eq!(c["windows"][1]["label"], "Weekly");
+        assert_eq!(c["windows"][1]["left"], 63);
+        let tip = c["tip"].as_str().unwrap();
+        assert!(tip.contains("5-hour  90% left"), "{tip}");
+        assert!(tip.contains("Weekly  63% left"), "{tip}");
+        assert_eq!(ComboCache::new(&st, 100).combo_for(&st, "t1"), c);
+
+        // Saved profile passive stream (`observe` sets scope "five_hour" with no label/duration) and float window_minutes.
+        let inv = json!({"version":1,"revision":1,"profiles":[
+            {"id":"k","provider":"claude","label":"alex@example.net","epoch":2,"state":"connected","identity":{"email":"alex@example.net"},
+             "allowance":{"state":"ok","windows":[
+                 {"scope":"five_hour","used_percent":20.0},
+                 {"scope":"shared","window_minutes":300.0,"used_percent":15.0},
+                 {"scope":"seven_day_opus","used_percent":90.0}
+             ]}}
+        ]});
+        st.apply(&json!({"$":"SettingSet","key":"accounts.inventory","value":inv.to_string(),"at":3}));
+        st.apply(&json!({"$":"SettingSet","key":"account.thread.t1.claude","value":"{\"id\":\"k\",\"epoch\":2}","at":4}));
+        let bound = combo_of(&st, "t1", 100);
+        assert_eq!(bound["windows"][0]["label"], "5-hour");
+        assert_eq!(bound["windows"][1]["label"], "5-hour");
+        assert_eq!(bound["windows"][2]["label"], "Opus weekly");
+        assert_eq!(bound["windows"][2]["applies"], true);
+        assert_eq!(bound["full"], "Opus 5.5 · auto · alex · 10% left");
+        let a = account_sections(&st, "t1", 100);
+        assert_eq!(a[1]["choices"][0]["label"], "5-hour  80% left");
+
+        // `seven_day_opus` does not bind a Sonnet thread when `profile_allowance` preserves the scope.
+        st.apply(&json!({"$":"ThreadCreated","id":"t3","project":"p","title":"T3","env":"local","branch":"","worktree":"","provider":"claude","model":"claude-sonnet-4-5","at":5}));
+        st.apply(&json!({"$":"SettingSet","key":"account.thread.t3.claude","value":"{\"id\":\"k\",\"epoch\":2}","at":6}));
+        let sonnet = combo_of(&st, "t3", 100);
+        assert_eq!(sonnet["windows"][2]["applies"], false);
+        assert_eq!(sonnet["full"], "Sonnet 4.5 · auto · alex · 80% left");
     }
     /// a choice list without the fields the helper did not have (`note`, `efforts`)
     fn strip(v: &Value) -> Value { Value::Array(v.as_array().unwrap().iter().map(|c| json!({"label":c["label"],"value":c["value"],"on":c["on"]})).collect()) }
