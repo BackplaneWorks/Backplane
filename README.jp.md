@@ -24,11 +24,11 @@ backplane
 
 ### Windows（x64、実験段階）
 
-[最新リリース](https://github.com/BackplaneWorks/Backplane/releases/latest)から `backplane-v<version>-windows-x64.zip` をダウンロードし、書き込み可能なフォルダーに全体を展開して `Backplane.exe` を開きます。`resources/` とほかの展開ファイルは隣に置いたままにしてください。ElectronアプリとBunハブのポータブル版で、WSLは不要です。シェルコマンドにはCygwinのツールが必要です。同梱されているランタイムを保持してください。ツールがない場合は、[Windowsセットアップスクリプト](scripts/setup-windows.ps1)でCygwinをインストールし、起動前にその `bin` ディレクトリを `PATH` に追加します。エージェントCLIのインストールとサインインは別途必要です。[プロバイダー設定スクリプト](scripts/install-windows-providers.ps1)でClaudeとCodexをインストールできます。
+[最新リリース](https://github.com/BackplaneWorks/Backplane/releases/latest)から `backplane-v<version>-windows-x64-native.zip` をダウンロードし、書き込み可能なフォルダーに全体を展開して `backplane-gpui.exe` を実行します（`backplane.exe` はハブのガード用実行ファイルです）。初回起動時に `%LOCALAPPDATA%\Backplane` へのインストールとスタートメニューへの **Backplane** の追加が案内され、以降はスタートメニューから起動できます（自動更新にも対応します）。シェルコマンド用に Git for Windows が必要です。エージェントCLIは別途インストールしてください。
 
 FreeCADと[Backplane KiCadランタイム](https://github.com/BackplaneWorks/Backplane_KiCad/releases)は別途インストールしてください。`BACKPLANE_FREECAD` に実際の `bin/FreeCADCmd.exe`（隣にGUI実行ファイルが必要）、`BACKPLANE_KICAD` にランタイムのルートまたは `bin/kicad-cli.exe` を指定し、Backplaneを再起動します。通常のKiCadには、必要なIPC機能の一部がありません。
 
-Windowsでは、サービスの停止・更新を管理する機能は未対応です。ウィンドウを閉じてもハブは動作し続けます。現在、WindowsのCIスモークチェックは失敗を報告してもビルドを止めないため、ZIPの公開だけではWindowsでの十分な動作確認を意味しません。
+ウィンドウを閉じてもハブは動作し続けます。停止やアンインストールの手順は[インストールガイド](docs/install.md#windows-x64-experimental)をご覧ください。
 
 セットアップ、スマートフォンとのペアリング、アンインストールは[インストールガイド](docs/install.md)をご覧ください。エージェントCLI、基板・回路図の作業にはKiCad、機械設計にはFreeCADが必要です。AntigravityはSettingsからインストールできます。
 
