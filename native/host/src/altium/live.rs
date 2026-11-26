@@ -615,6 +615,21 @@ pub async fn run_in(_s: &Session, script: &str, timeout: u32) -> Result<Ran, Str
 #[cfg_attr(windows, allow(dead_code))]
 pub const NOT_HERE: &str = "Altium Designer runs on Windows: this hub is not on Windows, so it cannot reach Altium. The viewers still draw the project's .SchDoc and .PcbDoc files.";
 
+/// Whether Altium Designer is installed or running on this machine (Windows only; cached 30 s so prompt and tools/list stay cheap).
+pub fn installed() -> bool {
+    #[cfg(windows)] {
+        static INST: std::sync::OnceLock<std::sync::Mutex<Option<(std::time::Instant, bool)>>> = std::sync::OnceLock::new();
+        let m = INST.get_or_init(Default::default);
+        if let Some((at, v)) = *m.lock().unwrap() {
+            if at.elapsed() < std::time::Duration::from_secs(30) { return v }
+        }
+        let v = win::installed();
+        *m.lock().unwrap() = Some((std::time::Instant::now(), v));
+        v
+    }
+    #[cfg(not(windows))] { false }
+}
+
 /// Altium.open: a document or project opened in the person's Altium: a running Altium opens and shows it by script (and says it
 /// did); with none running, Altium starts with it.
 pub async fn open_file(path: &str) -> Result<String, String> {
@@ -1046,6 +1061,7 @@ mod win {
         crate::proc::std_cmd(crate::proc::Kind::Local, &x2).arg(file).spawn().map_err(|e| format!("cannot start Altium: {e}"))?;
         Ok(format!("altium {file}"))
     }
+    pub(super) fn installed() -> bool { exe().is_some() || !x2_pids().is_empty() }
 
     /// A run that ended in a timeout after its script had started: it may still be running in Altium (or waiting on a window). No
     /// new script goes to Altium until it has ended (its .done is there), Altium is answering and free of windows again, or that

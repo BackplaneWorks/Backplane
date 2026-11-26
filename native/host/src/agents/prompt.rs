@@ -12,6 +12,7 @@ pub struct PromptEnv {
     /// The person turned on Plan before routing (plan/mod.rs `SETTING`).
     pub routing_plan: bool,
     pub root: String, pub pro: String, pub pcb: String, pub sch: String, pub all: String, pub altium_projects: Vec<String>,
+    pub altium_installed: bool,
     /// Where this thread's design files and code go, and the document locks (`design_words`).
     pub design: String,
     pub keys: String, pub machines: String, pub buy: bool, pub lang: String,
@@ -22,7 +23,7 @@ pub struct PromptEnv {
 }
 impl Default for PromptEnv {
     fn default() -> Self { PromptEnv { fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, kicad_ipc: true, models: String::new(), may_delegate: true, orders_on: true, routing_plan: false,
-        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), altium_projects: vec![], design: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![], kistack: None } }
+        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), altium_projects: vec![], altium_installed: false, design: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![], kistack: None } }
 }
 
 /// Prompt.runtime
@@ -145,6 +146,13 @@ pub struct CadProjects {
     pub altium: Vec<String>,
 }
 
+impl CadProjects {
+    pub fn has_altium(&self) -> bool { is_altium(&self.canonical.pro) || !self.altium.is_empty() }
+    pub fn has_kicad(&self) -> bool {
+        !self.kicad.is_empty() || self.canonical.pro.ends_with(".kicad_pro") || self.canonical.pcb.ends_with(".kicad_pcb") || self.canonical.sch.ends_with(".kicad_sch")
+    }
+}
+
 pub fn read_cad(root: &str) -> CadProjects {
     use crate::files::kicad::project;
     let canonical = project::read(root);
@@ -154,7 +162,7 @@ pub fn read_cad(root: &str) -> CadProjects {
 }
 
 pub fn altium(windows: bool) -> String {
-    let write = "New footprints (.PcbLib), symbols (.SchLib) and schematic sheets, and parts, wires, labels and power ports added to a sheet, are written with the backplane tool altium_write: a JSON spec, no Altium needed, the result read back.";
+    let write = "New projects (.PrjPcb, created when missing), footprints (.PcbLib), symbols (.SchLib) and schematic sheets, and parts, wires, labels and power ports added to a sheet, are written with the backplane tool altium_write: a JSON spec, no Altium needed, the result read back.";
     let reach = if windows { format!("{write} Everything else goes through the person's running Altium Designer with the backplane tools altium_status (what Altium has open; call it first) and altium_script (a DelphiScript run inside Altium: Emit(S) prints a line; errors come back as results). If Altium is not running, either tool starts it and waits for it (about a minute): never ask the person to open Altium. Altium's own dialogs that a recipe opens are worked by the hub (BpExpect); any other box is left for the person and named in the result's `dialogs`: say what it is, and ask the person only when your script cannot avoid it. Before either, read the bundled `altium` skill's SKILL.md completely: its recipes are tested against Altium and show how to open a project and documents by path, read and edit schematics and boards, run ERC and DRC, and save.") }
         else { format!("{write} Read the bundled `altium` skill's SKILL.md first. Altium Designer itself runs on Windows and this hub is not on Windows, so altium_script cannot reach it here: board edits, ERC and DRC need Altium on a Windows machine; say so when a change needs it.") };
     format!("<backplane_altium>Use Altium tools for .PrjPcb, .SchDoc and .PcbDoc files. The .PrjPcb lists the schematic sheets (.SchDoc) and the board (.PcbDoc); libraries are .SchLib/.PcbLib/.IntLib. These are binary files: never write them with scripts of your own or any other tool than altium_write, and never ask the person to close Altium. {reach} Address every document by its full path (never the focused document: the person may be working in another), wrap edits in PreProcess/PostProcess so the person can undo them in Altium, and save each document right after each change that matters (the ECO, placement, routing), before any other step: unsaved work is lost if a box or a closed document interrupts (Backplane's Board and Schematic viewers draw the saved files, and Backplane commits them to main at each turn's end); then show it with viewer_show. Update the board from the schematic yourself with the skill's pcb_update_from_sch.pas recipe: never ask the person to run Update PCB or redo any step a script can do; ask them only for what no script can reach, such as online part downloads. Keep each script small: inspect, change, verify by reading back. </backplane_altium>")
@@ -162,10 +170,12 @@ pub fn altium(windows: bool) -> String {
 /// Hub.prompt.base then Prompt.lang.add
 pub fn build(e: &PromptEnv) -> String {
     let canonical_altium = is_altium(&e.pro);
-    let alt = canonical_altium || !e.altium_projects.is_empty();
+    let has_altium_files = canonical_altium || !e.altium_projects.is_empty();
     let kicad_board = e.pcb.ends_with(".kicad_pcb");
     let kicad_schematic = e.sch.ends_with(".kicad_sch");
-    let has_kicad = !alt || !e.all.is_empty() || e.pro.ends_with(".kicad_pro") || kicad_board || kicad_schematic;
+    let has_kicad_files = !e.all.is_empty() || e.pro.ends_with(".kicad_pro") || kicad_board || kicad_schematic;
+    let alt = has_altium_files || (!has_kicad_files && e.altium_installed);
+    let has_kicad = !has_altium_files || has_kicad_files;
 
     let mut blocks = vec![runtime("Backplane")];
     if has_kicad { blocks.push(T::PROMPT_BOARD[0].into()); }
@@ -178,7 +188,8 @@ pub fn build(e: &PromptEnv) -> String {
         } else { String::new() };
         let files = e.altium_projects.iter().map(|p| format!("`{p}`")).collect::<Vec<_>>().join(", ");
         let files = if files.is_empty() { String::new() } else { format!(" Altium project files: {files}.") };
-        blocks.push(format!("<backplane_cad_projects>Main checkout: `{}`.{canonical}{files}{}</backplane_cad_projects>", e.root,
+        let no_prj = if has_altium_files { "" } else { " No Altium project (.PrjPcb) yet (`altium_write` creates one when missing)." };
+        blocks.push(format!("<backplane_cad_projects>Main checkout: `{}`.{canonical}{files}{no_prj}{}</backplane_cad_projects>", e.root,
             if has_kicad { " Use KiCad tools for .kicad_* files and Altium tools for .PrjPcb, .SchDoc and .PcbDoc files." } else { "" }));
     }
     if has_kicad && !canonical_altium {
@@ -244,6 +255,33 @@ pub(crate) mod tests {
         assert!(s.contains("project: `/project/boards/Board.kicad_pro`") && s.contains("`legacy/Board.PrjPcb`"));
         e.altium_projects.clear();
         assert!(!build(&e).contains("<backplane_altium>"));
+    }
+    #[test] fn empty_folder_with_altium_installed_gets_altium_and_kicad_guidance() {
+        let e = PromptEnv { root: "/project".into(), ..Default::default() };
+        let s = build(&e);
+        assert!(!s.contains("<backplane_altium>") && s.contains("<kicad_runtime>"));
+
+        let e = PromptEnv { root: "/project".into(), altium_installed: true, ..Default::default() };
+        let s = build(&e);
+        assert!(s.contains("<backplane_altium>"), "{s}");
+        assert!(s.contains(".PrjPcb, created when missing"), "{s}");
+        assert!(s.contains("<backplane_cad_projects>") && s.contains("No Altium project (.PrjPcb) yet (`altium_write` creates one when missing)."), "{s}");
+        assert!(s.contains("<backplane_kicad_board_editing>") && s.contains("<kicad_runtime>") && s.contains("<backplane_project>"), "{s}");
+
+        let e = PromptEnv { root: "/project".into(), pro: "/project/boards/Board.kicad_pro".into(), altium_installed: true, ..Default::default() };
+        let s = build(&e);
+        assert!(!s.contains("<backplane_altium>") && !s.contains("<backplane_cad_projects>"), "{s}");
+    }
+    #[test] fn cad_projects_flags_bare_kicad_pcb_and_empty_folder() {
+        let r = crate::plat::tmp::dir("cad-flags");
+        std::fs::create_dir_all(&r).unwrap();
+        let root = r.to_str().unwrap();
+        let empty = read_cad(root);
+        assert!(!empty.has_altium() && !empty.has_kicad());
+
+        std::fs::write(r.join("Bare.kicad_pcb"), "(kicad_pcb)").unwrap();
+        let bare = read_cad(root);
+        assert!(!bare.has_altium() && bare.has_kicad());
     }
     const GOLD: &str = include_str!("../../../../test/agents/fixtures/argv-default.json");
     pub fn gold() -> (String, serde_json::Value) { let a: Vec<String> = serde_json::from_str(GOLD).unwrap(); let i = a.iter().position(|x| x == "--append-system-prompt").unwrap(); (a[i + 1].clone(), serde_json::json!(a)) }

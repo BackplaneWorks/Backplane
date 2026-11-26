@@ -8,10 +8,12 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug)]
 pub struct HostInfo { pub home: PathBuf, pub user_home: String, pub fc: String, pub render: String, pub kicad: Kicad, pub models: Value, pub kistack: Option<PathBuf>, pub bundled: Option<PathBuf>,
     /// The hub resolves its selected KiCad at each turn (kicadsel.rs) instead of using `kicad`; tests' hosts keep the `kicad` they give.
-    pub live_kicad: bool }
+    pub live_kicad: bool,
+    /// Test override for whether Altium Designer is installed; `None` probes the host via `altium::live::installed()`.
+    pub altium_installed: Option<bool> }
 
 impl Default for HostInfo {
-    fn default() -> HostInfo { HostInfo { home: PathBuf::new(), user_home: "/nonexistent".into(), fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, models: json!({"claude":["fable","opus","sonnet","haiku"]}), kistack: None, bundled: None, live_kicad: false } }
+    fn default() -> HostInfo { HostInfo { home: PathBuf::new(), user_home: "/nonexistent".into(), fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, models: json!({"claude":["fable","opus","sonnet","haiku"]}), kistack: None, bundled: None, live_kicad: false, altium_installed: Some(false) } }
 }
 fn on_path(name: &str) -> Option<PathBuf> { std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(name)).find(|c| c.is_file())) }
 
@@ -26,12 +28,16 @@ impl HostInfo {
         let mut h = HostInfo { home: home.to_path_buf(), user_home: crate::plat::dirs::home().unwrap_or_else(|| "/nonexistent".into()), render: std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(), ..Default::default() };
         h.fc = std::env::var("BACKPLANE_FREECAD").ok().filter(|s| !s.is_empty()).or_else(|| on_path("freecadcmd").map(|p| p.to_string_lossy().into_owned())).unwrap_or_else(|| mac_app("FreeCAD.app/Contents/Resources/bin/freecadcmd"));
         // KiCad is not looked for here (never PATH's): each turn takes the one the hub has selected, kicad::ipc::runtime via kicadsel.rs
-        h.kicad = Kicad { status: "checking".into(), ..Default::default() }; h.live_kicad = true;
+        h.kicad = Kicad { status: "checking".into(), ..Default::default() }; h.live_kicad = true; h.altium_installed = None;
         if let Some(m) = std::env::var("BACKPLANE_MODELS").ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) { h.models = m }
         h.kistack = super::kistack::resolve(home); // KiStack's pinned skills, compiled in and written into this home (kistack.rs)
         h.bundled = super::bundled::install(home); // Backplane's own skills, in this home (bundled.rs)
         super::skills::set_env(super::skills::env_from(&h.user_home, home, h.kistack.as_deref()));
         h
+    }
+    /// Whether Altium Designer is installed or running on this machine (or overridden by a test host).
+    pub fn altium_available(&self) -> bool {
+        self.altium_installed.unwrap_or_else(crate::files::altium::live::installed)
     }
     /// Cfg.mtext: "claude (a, b); codex (c)"
     pub fn models_text(&self) -> String { self.models.as_object().map(|o| o.iter().filter(|(_, v)| v.as_array().map_or(false, |a| !a.is_empty())).map(|(k, v)| format!("{k} ({})", v.as_array().unwrap().iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", "))).collect::<Vec<_>>().join("; ")).unwrap_or_default() }
