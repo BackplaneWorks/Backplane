@@ -684,9 +684,10 @@ impl Accounts {
             if code != 0 || data["loggedIn"] != true || data["authMethod"] != "claude.ai" { return Err("Claude subscription sign-in could not be verified; Console profiles and API credentials use a different store.".into()) }
             let dir = self.directory(&p).map_err(|e| e.to_string())?;
             if data["configDirectory"].as_str().map(|d| crate::plat::fs::canonicalize(d).unwrap_or_else(|_| PathBuf::from(d))) != Some(crate::plat::fs::canonicalize(&dir).unwrap_or(dir)) { return Err(DIRECTORY_ERR.into()) }
+            let org = label(claude_org(&data).unwrap_or(""));
             identity = json!({"email":label(data["email"].as_str().unwrap_or("")),"plan":label(data["subscriptionType"].as_str().unwrap_or("")),"auth":"claude.ai",
-                "account":label(data["accountUuid"].as_str().or(data["userId"].as_str()).unwrap_or("")),"org":label(data["orgUuid"].as_str().or(data["organizationId"].as_str()).unwrap_or(""))});
-            fp_identity = json!([identity["email"], label(data["accountUuid"].as_str().or(data["userId"].as_str()).unwrap_or("")), label(data["orgUuid"].as_str().or(data["organizationId"].as_str()).unwrap_or(""))]);
+                "account":label(data["accountUuid"].as_str().or(data["userId"].as_str()).unwrap_or("")),"org":org});
+            fp_identity = json!([identity["email"], label(data["accountUuid"].as_str().or(data["userId"].as_str()).unwrap_or("")), org]);
             // the catalog is read again each hour (a model the provider adds shows without a restart), and the old one stays when the read gives none
             let ck = format!("catalog:{}", p.id);
             catalog = if p.catalog.is_empty() || now_s().saturating_sub(last_of(&self.inner, &ck)) >= 3600 {
@@ -736,8 +737,12 @@ impl Accounts {
         }
         if !fp_identity.as_array().map_or(false, |a| a.iter().any(|x| x.as_str().map_or(false, |s| !s.is_empty()))) { return Err("Provider did not report a verifiable account identity".into()) }
         let digest = fingerprint(&p.id, &fp_identity);
-        // a sync account's identity is fixed when it is made: a new token (a renewal) is the same account, and threads on it stay on it
-        if p.kind != SYNC && (new_login || (!p.fingerprint.is_empty() && p.fingerprint != digest)) { p.epoch += 1; if !new_login { catalog = vec![]; allowance = None; } }
+        let legacy_orgless = p.provider == "claude" && p.kind != SYNC
+            && !identity["org"].as_str().unwrap_or("").is_empty()
+            && p.fingerprint == fingerprint(&p.id, &json!([identity["email"], identity["account"], ""]));
+        // a sync account's identity is fixed when it is made: a new token (a renewal) is the same account, and threads on it stay on it;
+        // a Claude profile migrating from pre-#1657 (empty org) to its real orgId upgrades its fingerprint in place without retiring bindings
+        if p.kind != SYNC && (new_login || (!p.fingerprint.is_empty() && p.fingerprint != digest && !legacy_orgless)) { p.epoch += 1; if !new_login { catalog = vec![]; allowance = None; } }
         p.fingerprint = digest; p.identity = identity; p.catalog = catalog; p.allowance = allowance; p.checked_at = now_s();
         if fact == Fact::Proven { p.proven_at = now_s() }
         p.state = after(if new_login { "unchecked" } else { &p.state }, fact).into();
@@ -1313,10 +1318,11 @@ impl Accounts {
             self.inner.lock().unwrap().refresh_at.insert("default-claude".into(), now);
             match self.cli(None, "claude", &["auth", "status"]).await {
                 Ok((0, data)) if data["loggedIn"] == true && data["authMethod"] == "claude.ai" => {
-                    let who = login_of(&data["email"], &data["subscriptionType"], data["accountUuid"].as_str().or(data["userId"].as_str()), data["orgUuid"].as_str().or(data["organizationId"].as_str()));
+                    let org = claude_org(&data);
+                    let who = login_of(&data["email"], &data["subscriptionType"], data["accountUuid"].as_str().or(data["userId"].as_str()), org);
                     say("claude", who);
                     use sha2::{Digest, Sha256};
-                    let ident = hex::encode(Sha256::digest(json!([data["email"], data["accountUuid"].as_str().or(data["userId"].as_str()), data["orgUuid"].as_str().or(data["organizationId"].as_str())]).to_string().as_bytes()));
+                    let ident = hex::encode(Sha256::digest(json!([data["email"], data["accountUuid"].as_str().or(data["userId"].as_str()), org]).to_string().as_bytes()));
                     { let mut g = self.inner.lock().unwrap(); if g.default_identity != ident { g.default_allowance = None } g.default_identity = ident; }
                     match self.claude_usage(None).await {
                         Ok(u) => { let n = now_s(); let mut g = self.inner.lock().unwrap(); g.default_allowance = Some(u.allowance(n, &label(data["email"].as_str().unwrap_or("")))); g.revision += 1; }
@@ -1365,6 +1371,10 @@ impl Accounts {
             });
         }
     }
+}
+/// Organization id from `claude auth status`: `orgUuid` / `organizationId`, or `orgId` (Claude Code 2.1.330+, #1657).
+fn claude_org(data: &Value) -> Option<&str> {
+    ["orgUuid", "organizationId", "orgId"].into_iter().find_map(|k| data[k].as_str().filter(|s| !s.is_empty()))
 }
 /// A CLI login whose provider said who it is: `{state: "known", email, plan, account, org}`.
 fn login_of(email: &Value, plan: &Value, account: Option<&str>, org: Option<&str>) -> Value {
@@ -2186,6 +2196,107 @@ for l in sys.stdin:
         assert_eq!(a.request(&json!({"op":"login","profile":id})).await["error"], CHECKING);
         drop(_j); assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "", "free again");
         a.child_started(&id); assert_eq!(a.begin(&id, "refresh", true), Err(TURN_RUNNING)); a.child_ended(&id);
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[test] fn claude_org_reads_org_uuid_organization_id_and_org_id() {
+        assert_eq!(claude_org(&json!({"orgUuid":"o1"})), Some("o1"));
+        assert_eq!(claude_org(&json!({"organizationId":"o2"})), Some("o2"));
+        assert_eq!(claude_org(&json!({"orgId":"o3"})), Some("o3"));
+        assert_eq!(claude_org(&json!({"orgUuid":"o1","organizationId":"o2","orgId":"o3"})), Some("o1"));
+        assert_eq!(claude_org(&json!({"organizationId":"o2","orgId":"o3"})), Some("o2"));
+        assert_eq!(claude_org(&json!({"orgUuid":"","organizationId":"","orgId":"o3"})), Some("o3"));
+        assert_eq!(claude_org(&json!({"email":"person@example.com"})), None);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn two_claude_organizations_under_one_email_using_org_id_stay_separate_for_same_as_default_and_failover() {
+        use super::super::fallback::{hold_key, login_held, pick_untried, same_logins, tried_id};
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let saved_key = std::env::var_os("ANTHROPIC_API_KEY");
+        std::env::remove_var("ANTHROPIC_API_KEY");
+        struct KeyGuard(Option<std::ffi::OsString>);
+        impl Drop for KeyGuard {
+            fn drop(&mut self) {
+                if let Some(v) = &self.0 { std::env::set_var("ANTHROPIC_API_KEY", v); } else { std::env::remove_var("ANTHROPIC_API_KEY"); }
+            }
+        }
+        let _kg = KeyGuard(saved_key);
+
+        let (h, sd) = dirs("orgid");
+        let default_login_path = h.join("default.login");
+        let claude_orgid = CLAUDE
+            .replace(
+                "def login(): return os.path.join(d, \"login.json\")",
+                &format!("def login(): return os.path.join(d, \"login.json\") if d else {:?}", default_login_path.to_string_lossy()),
+            )
+            .replace("elif d and os.path.exists(login()):", "elif os.path.exists(login()):");
+        assert_ne!(claude_orgid, CLAUDE);
+        std::fs::write(sd.join("claude"), claude_orgid).unwrap();
+        std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        std::fs::write(&default_login_path, json!({"email":"person@example.com","subscriptionType":"pro","orgId":"org-1","orgName":"Personal Org"}).to_string()).unwrap();
+        let a = mgr(&h, &sd);
+        let a_id = add(&a, "claude", "Personal").await;
+        let b_id = add(&a, "claude", "Work").await;
+        for (pid, org_id, org_name) in [(&a_id, "org-1", "Personal Org"), (&b_id, "org-2", "Work Org")] {
+            let store = new_id();
+            a.update(pid, |p| p.store = store).unwrap();
+            let dir = a.directory(&a.profile(pid).unwrap()).unwrap();
+            std::fs::write(dir.join("login.json"), json!({"email":"person@example.com","subscriptionType":"pro","orgId":org_id,"orgName":org_name}).to_string()).unwrap();
+        }
+
+        let _ = a.request(&json!({"op":"status","profile":a_id})).await;
+        let _ = a.request(&json!({"op":"status","profile":b_id})).await;
+        a.read_defaults(now_s()).await;
+
+        let snap = a.snapshot();
+        let pa = prof(&snap, &a_id);
+        let pb = prof(&snap, &b_id);
+        assert_eq!(pa["identity"]["org"], "org-1");
+        assert_eq!(pb["identity"]["org"], "org-2");
+        assert_eq!(snap["default_login"]["claude"]["org"], "org-1");
+        assert_eq!(pa["sameAsDefault"], true);
+        assert!(pb["sameAsDefault"].is_null(), "different org under same email must not match default: {pb}");
+
+        let profiles = snap["profiles"].as_array().unwrap().clone();
+        let (a_epoch, b_epoch) = (pa["epoch"].as_u64().unwrap(), pb["epoch"].as_u64().unwrap());
+        assert_eq!(same_logins(&profiles, "claude", "", 0), vec![(a_id.clone(), a_epoch)]);
+        assert!(same_logins(&profiles, "claude", &b_id, b_epoch).is_empty());
+
+        let now = now_s();
+        let hk = hold_key("claude", "", 0);
+        let rec = json!({"scope":"claude","reset":now + 600,"at":now}).to_string();
+        let get = |k: &str| if k == hk { rec.clone() } else { String::new() };
+        assert!(login_held(&get, &profiles, "claude", &a_id, a_epoch, "", now));
+        assert!(!login_held(&get, &profiles, "claude", &b_id, b_epoch, "", now));
+        let picked = pick_untried(&profiles, &[tried_id("", 0)], &get, now, "claude", "").unwrap();
+        assert_eq!(picked["id"], b_id.as_str(), "failover must pick the other organization under the same email");
+
+        // Switching the default CLI login to org-2 clears stale default_allowance and flips sameAsDefault from A to B
+        let prev_ident = a.inner.lock().unwrap().default_identity.clone();
+        a.inner.lock().unwrap().default_allowance = Some(json!({"provider":"claude","state":"ok","at":1,"windows":[{"scope":"five_hour","used_percent":99.0}]}));
+        std::fs::write(&default_login_path, json!({"email":"person@example.com","subscriptionType":"pro","orgId":"org-2","orgName":"Work Org"}).to_string()).unwrap();
+        a.read_defaults(now_s() + 400).await;
+
+        let snap2 = a.snapshot();
+        assert_ne!(a.inner.lock().unwrap().default_identity, prev_ident);
+        assert_eq!(snap2["default_login"]["claude"]["org"], "org-2");
+        assert_ne!(snap2["default_allowance"]["at"], 1, "stale default_allowance was cleared and refreshed");
+        assert!(prof(&snap2, &a_id)["sameAsDefault"].is_null());
+        assert_eq!(prof(&snap2, &b_id)["sameAsDefault"], true);
+
+        // Migrating from pre-#1657 org-less fingerprint to real orgId keeps the profile's epoch intact
+        let legacy_fp = fingerprint(&a_id, &json!(["person@example.com", "", ""]));
+        let expected_fp = fingerprint(&a_id, &json!(["person@example.com", "", "org-1"]));
+        a.update(&a_id, |p| p.fingerprint = legacy_fp).unwrap();
+        let snap_migrated = a.request(&json!({"op":"status","profile":a_id})).await;
+        assert_eq!(prof(&snap_migrated, &a_id)["epoch"], a_epoch, "org-less to real orgId must not bump epoch");
+        assert_eq!(a.profile(&a_id).unwrap().fingerprint, expected_fp);
+
+        // Changing profile B's orgId behind its back bumps its epoch and refuses launch with the old epoch
+        let b_dir = a.directory(&a.profile(&b_id).unwrap()).unwrap();
+        std::fs::write(b_dir.join("login.json"), json!({"email":"person@example.com","subscriptionType":"pro","orgId":"org-3","orgName":"Other Org"}).to_string()).unwrap();
+        assert!(a.launch_plan(&b_id, &b_epoch.to_string(), "claude").await.unwrap_err().contains("changed"));
+        assert_eq!(prof(&a.snapshot(), &b_id)["epoch"], b_epoch + 1);
+
         let _ = std::fs::remove_dir_all(&h);
     }
 }
