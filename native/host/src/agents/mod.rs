@@ -728,6 +728,8 @@ struct Actor {
     recall_fresh: bool, steering: bool,
     /// #1304: the person's messages into the running turn the agent has not answered yet (msg, text, at), oldest first, and whether the thread says so (`unanswered.<thread>`)
     unanswered: Vec<(String, String, u64)>, unanswered_shown: bool,
+    /// #1304 `unanswered::due`: when the oldest of them was sent, and the tool calls the agent started since
+    unanswered_since: Option<Instant>, unanswered_tools: u32,
 }
 
 /// The state a line's events end the turn in.
@@ -746,7 +748,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { early: None, hist_ends: ag.ends_of(&th), hist_tx: None, person: false, pressed: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None, recall_fresh: false, steering: false, unanswered: vec![], unanswered_shown: false } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { early: None, hist_ends: ag.ends_of(&th), hist_tx: None, person: false, pressed: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None, recall_fresh: false, steering: false, unanswered: vec![], unanswered_shown: false, unanswered_since: None, unanswered_tools: 0 } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -783,7 +785,13 @@ impl Actor {
             halt::enrich(&mut ev, if prov.is_empty() { "claude" } else { &prov }, usage, now_s());
         }
         // #1304: an assistant message or the turn's end answers the person's mid-turn messages: the thread's notice goes with it
-        if !self.unanswered.is_empty() && unanswered::answers(&ev) { self.unanswered.clear(); if std::mem::take(&mut self.unanswered_shown) { ev.push(set(unanswered::key(&self.th), String::new(), now_s())) } }
+        // a tool call started past them counts toward the notice (unanswered::due): reaching TOOLS looks again now, or once after_ms is over
+        if !self.unanswered.is_empty() && !self.unanswered_shown && !unanswered::answers(&ev) {
+            let n = ev.iter().filter(|e| unanswered::is_tool(e)).count() as u32;
+            if n > 0 { let was = self.unanswered_tools; self.unanswered_tools += n;
+                if was < unanswered::TOOLS && self.unanswered_tools >= unanswered::TOOLS { let m = self.unanswered[0].0.clone(); self.unanswered_check(m, 0) } }
+        }
+        if !self.unanswered.is_empty() && unanswered::answers(&ev) { self.unanswered.clear(); self.unanswered_since = None; self.unanswered_tools = 0; if std::mem::take(&mut self.unanswered_shown) { ev.push(set(unanswered::key(&self.th), String::new(), now_s())) } }
         self.ag.stats.events.fetch_add(ev.len() as u64, Relaxed);
         if let Err(e) = self.ag.hub.commit_many(&ev).await { self.ag.stats.commit_errors.fetch_add(1, Relaxed); eprintln!("agents: {}: could not write {} events: {e:#}", self.th, ev.len()) }
     }
@@ -825,7 +833,11 @@ impl Actor {
             }
             Cmd::Unanswered { msg } => {
                 if self.unanswered.iter().any(|u| u.0 == msg) && !self.unanswered_shown && (self.cx.running || self.ag.world().await.running(&self.th)) {
-                    self.unanswered_shown = true; let v = unanswered::value(&self.unanswered); self.commit(vec![set(unanswered::key(&self.th), v, now_s())]).await }
+                    let waited = self.unanswered_since.map_or(u64::MAX, |t| t.elapsed().as_millis() as u64);
+                    match unanswered::due(waited, self.unanswered_tools, unanswered::after_ms(), unanswered::quiet_ms()) {
+                        None => { self.unanswered_shown = true; let v = unanswered::value(&self.unanswered); self.commit(vec![set(unanswered::key(&self.th), v, now_s())]).await }
+                        Some(ms) => self.unanswered_check(msg, ms),
+                    } }
             }
             Cmd::Say { text, reply } => {
                 let (now, th) = (now_s(), self.th.clone()); let msg = hub_id("say", now, self.ag.seq());
@@ -879,7 +891,7 @@ impl Actor {
             if let Some((from, kind, r)) = &origin { ev.push(json!({"$":"MessageFrom","thread":self.th,"msg":msg,"from":from,"kind":kind,"ref":r,"at":now})) }
             ev.extend(extra);
             self.commit(ev).await; self.recent.push_back(msg.clone()); if self.recent.len() > RECENT { self.recent.pop_front(); }
-            if midturn { self.unanswered_arm(&msg, &text, now); let agent = unanswered::wrap(&text); return self.steer_as(text, agent).await }
+            if midturn { let agent = unanswered::wrap(&text); return self.steer_as(text, agent).await } // the note, but no notice: the turn starts again with the message (unanswered.rs)
             return self.steer(text).await }
         self.codex = codex; self.prov = t.provider.clone(); self.model = crate::settings::models::sanitize_model_now(&t.provider, &t.model);
         let was_running = self.cx.running || t.turn == "running"; // Ride.post: a turn that starts on an idle thread takes the mail waiting for it
@@ -982,12 +994,17 @@ impl Actor {
         vec![json!({"$":"MessagePosted","thread":self.th,"msg":format!("{msg}:before"),"role":"assistant","text":kept,"at":now})]
     }
     async fn steer(&mut self, text: String) -> Result<(), String> { let agent = text.clone(); self.steer_as(text, agent).await }
-    /// #1304: the person's mid-turn message is waiting for an answer: after `unanswered::after_ms` with none, the thread says so (Cmd::Unanswered).
+    /// #1304: the person's mid-turn message (to Claude) is waiting for an answer: once `unanswered::due` says so, the thread says so (Cmd::Unanswered).
     fn unanswered_arm(&mut self, msg: &str, text: &str, at: u64) {
+        if self.unanswered.is_empty() { self.unanswered_since = Some(Instant::now()); self.unanswered_tools = 0 }
         self.unanswered.push((msg.to_string(), text.to_string(), at));
         if self.unanswered_shown { let (ag, th, v) = (self.ag.clone(), self.th.clone(), unanswered::value(&self.unanswered)); tokio::spawn(async move { let _ = ag.hub.commit_many(&[set(unanswered::key(&th), v, now_s())]).await; }); return } // already said: the newer words join it
-        let (tx, cmd, wait) = (self.ag.actor(&self.th), Cmd::Unanswered { msg: msg.to_string() }, Duration::from_millis(unanswered::after_ms()));
-        tokio::spawn(async move { tokio::time::sleep(wait).await; let _ = tx.send(cmd).await; });
+        self.unanswered_check(msg.to_string(), unanswered::quiet_ms().min(unanswered::after_ms())); // the first look; due says when the next one is
+    }
+    /// Cmd::Unanswered for `msg` after `ms`.
+    fn unanswered_check(&self, msg: String, ms: u64) {
+        let (tx, cmd) = (self.ag.actor(&self.th), Cmd::Unanswered { msg });
+        tokio::spawn(async move { tokio::time::sleep(Duration::from_millis(ms)).await; let _ = tx.send(cmd).await; });
     }
     /// `text` is what the timeline's steer row names; `agent` what the agent gets (the person's mid-turn words with the note ahead of them).
     async fn steer_as(&mut self, text: String, agent: String) -> Result<(), String> {

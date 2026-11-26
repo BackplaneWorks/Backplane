@@ -2507,7 +2507,8 @@ async fn lines_at_least(sd: &Path, n: usize) -> Vec<Value> { for _ in 0..100 { l
 /// A stand-in `claude` that records what it is sent and answers a line that says "answer-me" with an assistant message; the turn stays running.
 const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"ans-1\"}'\nwhile read l; do echo \"$l\" >> \"$D/in.log\"; case \"$l\" in *answer-me*) echo '{\"type\":\"assistant\",\"message\":{\"id\":\"msg_ans\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Here is where it stands.\"}]},\"session_id\":\"ans-1\"}';; esac; done\n";
 /// #1304: the person's mid-turn message with no assistant message after it: the thread says so (`unanswered.<thread>`, the picture's notice) once the wait is
-/// over, not before; an assistant message takes it away; a bot's message never starts the wait. The wait is shortened here (60 s in use).
+/// over, not before; an assistant message takes it away; a bot's message never starts the wait. The stand-in starts no tools: the quiet wait,
+/// `unanswered::quiet_ms` (5 s here, 300 s in use).
 #[tokio::test(flavor = "multi_thread")] async fn the_thread_says_when_the_persons_mid_turn_message_has_no_answer_and_an_answer_clears_it() {
     unanswered::set_after_ms(1500);
     let sd = dir("una-bin"); script(&sd, "claude", ANSWERS);
@@ -2521,9 +2522,11 @@ const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zq Status?","msg":"m-status"})).await;
     tokio::time::sleep(Duration::from_millis(700)).await;
     assert_eq!(shown(ag.clone()).await, "", "not before the wait is over");
-    let mut v = String::new(); for _ in 0..60 { v = shown(ag.clone()).await; if !v.is_empty() { break } tokio::time::sleep(Duration::from_millis(100)).await }
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(shown(ag.clone()).await, "", "a quiet agent (a long think, a tool still running) is not taken for one that went past it");
+    let mut v = String::new(); for _ in 0..120 { v = shown(ag.clone()).await; if !v.is_empty() { break } tokio::time::sleep(Duration::from_millis(100)).await }
     let took = t0.elapsed();
-    assert!(!v.is_empty(), "the thread says so after the wait"); assert!(took >= Duration::from_millis(1400), "{took:?}");
+    assert!(!v.is_empty(), "the thread says so after the wait"); assert!(took >= Duration::from_millis(4900), "{took:?}");
     let j: Value = serde_json::from_str(&v).unwrap(); assert_eq!(j["msgs"], json!(["m-status"])); assert_eq!(j["text"], "zq Status?");
     let p = unanswered::picture(&v, ag.world().await.running(T1)); assert_eq!(p["head"], unanswered::HEAD); assert_eq!(p["text"], "zq Status?");
     // a second message while it shows joins it; the agent's answer takes it away
@@ -2538,6 +2541,36 @@ const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\
     assert!(!log_from(&hub, from).await.iter().any(|e| is(e, "SettingSet") && e["key"] == k.as_str() && !e["value"].as_str().unwrap_or("").is_empty()), "an answer in time: no notice");
     ag.shutdown();
 }
+/// A stand-in `claude` that starts two tool calls for a line that says "go-on", and says nothing; the turn stays running.
+const GOES_ON: &str = "#!/bin/sh\necho '{\"type\":\"system\",\"subtype\":\"init\",\"session_id\":\"go-1\"}'\nwhile read l; do case \"$l\" in *go-on*) for i in 1 2; do echo '{\"type\":\"assistant\",\"message\":{\"id\":\"msg_go'$i'\",\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"tu_go'$i'\",\"name\":\"Bash\",\"input\":{\"command\":\"make\"}}]},\"session_id\":\"go-1\"}'; done;; esac; done\n";
+/// #1304: an agent that goes on with its tools past the person's mid-turn message: the thread says so once `after_ms` is over (1.5 s here),
+/// well before the quiet wait.
+#[tokio::test(flavor = "multi_thread")] async fn an_agent_that_goes_on_with_its_tools_past_the_message_is_said_so_at_after_ms() {
+    unanswered::set_after_ms(1500);
+    let sd = dir("goon-bin"); script(&sd, "claude", GOES_ON);
+    let (hub, ag, _h, _w) = start("goon", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
+    let k = unanswered::key(T1);
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zq long work"})).await;
+    let t0 = Instant::now();
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"zq Status? go-on","msg":"m-go"})).await;
+    let mut ok = false; for _ in 0..40 { if !ag.world().await.setting(&k).is_empty() { ok = true; break } tokio::time::sleep(Duration::from_millis(100)).await }
+    let took = t0.elapsed();
+    assert!(ok, "the notice shows: {:?}", log_from(&hub, 0).await.iter().filter(|e| is(e, "ActivityLogged")).collect::<Vec<_>>());
+    assert!(took >= Duration::from_millis(1400) && took < Duration::from_millis(4500), "at after_ms, not the quiet wait: {took:?}");
+    ag.shutdown();
+}
+/// #1304: a Codex-shaped turn starts again with the person's mid-turn message as its prompt: the note goes with it, the notice never shows.
+#[tokio::test(flavor = "multi_thread")] async fn a_mid_turn_message_to_codex_never_shows_the_notice() {
+    unanswered::set_after_ms(1500);
+    let (hub, ag, _sd) = codex_start("cxuna").await;
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang first"})).await;
+    let end = Instant::now() + Duration::from_secs(20); while !ag.world().await.running(T1) && Instant::now() < end { tokio::time::sleep(Duration::from_millis(25)).await }
+    rpc(&hub, "turn.start", json!({"thread":T1,"text":"hang Status?","msg":"m-cx"})).await;
+    tokio::time::sleep(Duration::from_millis(5600)).await;
+    assert!(ag.world().await.running(T1), "the restarted turn still runs");
+    assert_eq!(ag.world().await.setting(&unanswered::key(T1)), "", "no notice for a turn that started with the message");
+    ag.shutdown();
+}
 /// #1304: `thread_reply` posts the agent's words in its own thread at once, while the turn goes on, and that answers the person: the notice goes.
 #[tokio::test(flavor = "multi_thread")] async fn thread_reply_posts_in_the_thread_now_and_takes_the_notice_away() {
     unanswered::set_after_ms(1500);
@@ -2545,7 +2578,7 @@ const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\
     let (hub, ag, _h, _w) = start("reply", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zq long work"})).await; lines_at_least(&sd, 1).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zq Status?","msg":"m-st3"})).await;
-    let k = unanswered::key(T1); let mut ok = false; for _ in 0..60 { if !ag.world().await.setting(&k).is_empty() { ok = true; break } tokio::time::sleep(Duration::from_millis(100)).await } assert!(ok, "the notice shows");
+    let k = unanswered::key(T1); let mut ok = false; for _ in 0..120 { if !ag.world().await.setting(&k).is_empty() { ok = true; break } tokio::time::sleep(Duration::from_millis(100)).await } assert!(ok, "the notice shows");
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"thread_reply","arguments":{"text":"Step 3 of 25; the rest in about a minute."}})).await;
     assert_eq!(r["result"]["isError"], false, "{r}");
     let ev = log_from(&hub, 0).await;
@@ -2564,7 +2597,7 @@ const ANSWERS: &str = "#!/bin/sh\nD=$(dirname \"$0\")\necho '{\"type\":\"system\
     assert_eq!(rpc(&hub, "thread.again", json!({"thread":T1})).await["ok"], false, "nothing waits: refused");
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zq long work"})).await; lines_at_least(&sd, 1).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zq Status?","msg":"m-st2"})).await;
-    let k = unanswered::key(T1); let mut ok = false; for _ in 0..60 { if !ag.world().await.setting(&k).is_empty() { ok = true; break } tokio::time::sleep(Duration::from_millis(100)).await } assert!(ok, "the notice shows");
+    let k = unanswered::key(T1); let mut ok = false; for _ in 0..120 { if !ag.world().await.setting(&k).is_empty() { ok = true; break } tokio::time::sleep(Duration::from_millis(100)).await } assert!(ok, "the notice shows");
     let from = len(&hub).await;
     assert_eq!(rpc(&hub, "thread.again", json!({"thread":T1})).await["ok"], true);
     let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == "zq Status?")).await;
