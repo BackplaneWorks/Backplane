@@ -42,7 +42,7 @@ pub fn mech(fc: &str, render: &str) -> String {
         format!("FreeCAD GUI: `{}`. Console: `{fc}`.", mech_gui(fc))
     };
     let renderer = if render.is_empty() { String::new() } else { format!(" Optional renderer: `{render}` with `--render`.") };
-    format!("<backplane_mechanical>\nFor mechanical work, use FreeCAD in `mech/` and follow the bundled `freecad` skill.\nShow the saved STEP with `viewer_show` (kind `mech`).{renderer}\n{setup}\n</backplane_mechanical>")
+    format!("<backplane_mechanical>\nFor mechanical work, use FreeCAD in `mech/` and follow the bundled `freecad` skill.\nShow the saved STEP with `viewer_show` (kind `mech`), or render PNG views for your own inspection with `viewer_render`.{renderer}\n{setup}\n</backplane_mechanical>")
 }
 
 pub fn min_version() -> &'static str { "10.99.0-bp.4" }

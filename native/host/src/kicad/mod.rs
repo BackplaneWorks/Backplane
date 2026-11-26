@@ -50,6 +50,7 @@ pub mod altium_hook {
 }
 pub mod png;
 pub mod render;
+pub mod vrender;
 pub mod schematic;
 pub mod sexpr;
 pub mod solid;

@@ -24,6 +24,88 @@ fn inside(dir: &str, f: &str) -> String { if dir.is_empty() { f.to_string() } el
 pub fn path_of(model: &str, view: &str) -> String { inside(&inside(parent(model), "renders"), &format!("{}.{view}.png", stem(model))) }
 /// Mech.is_step
 pub fn is_step(p: &str) -> bool { let l = p.to_lowercase(); l.ends_with(".step") || l.ends_with(".stp") }
+/// Whether `p` is an STL mesh file.
+pub(crate) fn is_stl(p: &str) -> bool { p.to_ascii_lowercase().ends_with(".stl") }
+
+/// Parse binary or ASCII STL bytes into world-space triangles (solid color `0xb8bec8`).
+pub(crate) fn stl_tris(bytes: &[u8]) -> Result<Vec<glb::Tri3>, String> {
+    if bytes.len() >= 84 {
+        let n = u32::from_le_bytes([bytes[80], bytes[81], bytes[82], bytes[83]]) as usize;
+        if let Some(total) = n.checked_mul(50).and_then(|b| b.checked_add(84)) {
+            if total == bytes.len() && n > 0 {
+                if n > glb::MOST_TRIS { return Err("too many triangles in STL".into()) }
+                let mut out = Vec::with_capacity(n);
+                let rf = |s: &[u8]| f32::from_le_bytes([s[0], s[1], s[2], s[3]]);
+                for rec in bytes[84..].chunks_exact(50) {
+                    let a = [rf(&rec[12..16]), rf(&rec[16..20]), rf(&rec[20..24])];
+                    let b = [rf(&rec[24..28]), rf(&rec[28..32]), rf(&rec[32..36])];
+                    let c = [rf(&rec[36..40]), rf(&rec[40..44]), rf(&rec[44..48])];
+                    if a.iter().chain(b.iter()).chain(c.iter()).all(|v| v.is_finite()) {
+                        out.push(glb::Tri3 { a, b, c, color: 0xb8bec8 });
+                    }
+                }
+                if out.is_empty() { return Err("no renderable triangles in STL".into()) }
+                return Ok(out);
+            }
+        }
+    }
+    let text = std::str::from_utf8(bytes).map_err(|_| "invalid STL file".to_string())?;
+    let mut verts: Vec<[f32; 3]> = Vec::new();
+    for line in text.lines() {
+        let t = line.trim();
+        let tb = t.as_bytes();
+        if tb.get(..6).is_some_and(|b| b.eq_ignore_ascii_case(b"vertex"))
+            && tb.get(6).is_some_and(u8::is_ascii_whitespace)
+        {
+            let rest = std::str::from_utf8(&tb[6..]).unwrap_or("");
+            let mut it = rest.split_whitespace();
+            let (Some(xs), Some(ys), Some(zs)) = (it.next(), it.next(), it.next()) else {
+                return Err("invalid vertex in ASCII STL".into());
+            };
+            let (Ok(x), Ok(y), Ok(z)) = (xs.parse::<f32>(), ys.parse::<f32>(), zs.parse::<f32>()) else {
+                return Err("invalid vertex coordinates in ASCII STL".into());
+            };
+            if !x.is_finite() || !y.is_finite() || !z.is_finite() {
+                return Err("non-finite vertex coordinates in ASCII STL".into());
+            }
+            verts.push([x, y, z]);
+            if verts.len() / 3 > glb::MOST_TRIS {
+                return Err("too many triangles in STL".into());
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(verts.len() / 3);
+    for tri in verts.chunks_exact(3) {
+        out.push(glb::Tri3 { a: tri[0], b: tri[1], c: tri[2], color: 0xb8bec8 });
+    }
+    if out.is_empty() { return Err("no renderable triangles in STL".into()) }
+    Ok(out)
+}
+
+/// Load a STEP/STP, GLB, or STL model into Y-up triangles ready for `mesh::render`.
+pub(crate) fn load_tris(path: &str, cache: &str, tools: &[Mesher]) -> Result<Vec<glb::Tri3>, String> {
+    if is_stl(path) {
+        let meta = std::fs::metadata(path).map_err(|e| format!("could not read {path}: {e}"))?;
+        if meta.len() > MOST_FILE { return Err(format!("{path} is too big to draw here")) }
+        let bytes = std::fs::read(path).map_err(|e| format!("could not read {path}: {e}"))?;
+        let mut ts = stl_tris(&bytes)?;
+        solid::upright(&mut ts);
+        return Ok(ts);
+    }
+    let _ = std::fs::create_dir_all(cache);
+    let file = model_glb(path, cache, tools).map_err(|why| {
+        let why = if why.is_empty() { String::new() } else { format!(": {}", why.chars().take(600).collect::<String>()) };
+        format!("could not mesh {path} (a STEP or GLB file; a large STEP needs FreeCAD installed){why}")
+    })?;
+    if std::fs::metadata(&file).map_or(0, |m| m.len()) > MOST_FILE {
+        return Err(format!("{path} is too big to draw here"));
+    }
+    let mut ts = glb::tris(&std::fs::read(&file).unwrap_or_default())
+        .map_err(|_| format!("{path} has too many triangles to draw here"))?;
+    if is_step(path) { solid::upright(&mut ts) }
+    if ts.is_empty() { return Err(format!("no renderable triangles in {path}")) }
+    Ok(ts)
+}
 
 /// Parts.out: where the model's GLB is kept (a .glb is its own)
 fn glb_path(src: &str, cache: &str) -> String {

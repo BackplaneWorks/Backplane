@@ -286,6 +286,61 @@ impl Agents {
         if let Some(why) = crate::present::viewer::show_refusal_of(&token) { return (false, json!({"error": why, "shown": shown, "viewer": now.2, "settled": settled(&now)})) }
         (true, note(json!({"shown":shown,"viewer":now.2,"settled":settled(&now)})))
     }
+    /// The MCP tool `viewer_render`: render `.kicad_sch`, `.kicad_pcb` (2D or 3D), or `.step`/`.stp`/`.glb`/`.stl` to cached PNGs for agent inspection.
+    pub async fn viewer_render(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
+        let raw = a.get("path").and_then(Value::as_str).unwrap_or("").trim();
+        if raw.is_empty() { return fail("path is required") }
+        let abs = if crate::plat::fs::is_abs(raw) {
+            raw.to_string()
+        } else {
+            let cwd = self.world().await.cwd(thread);
+            if cwd.is_empty() { return fail("path must be absolute") }
+            std::path::Path::new(&cwd).join(raw).to_string_lossy().into_owned()
+        };
+        let routed = kc::route(&abs);
+        let path = if std::path::Path::new(&routed).is_file() { routed } else { abs };
+        crate::files::kicad::vrender::call(&self.hub, &path, a).await
+    }
+    /// Combined `viewer_show` + `viewer_render` when `viewer_show {render: true}` is called.
+    pub async fn viewer_show_and_render(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
+        let raw_path = a.get("path").and_then(Value::as_str).unwrap_or("");
+        let raw_kind = a.get("kind").and_then(Value::as_str).unwrap_or("");
+        let (ok, show_val) = self.viewer_show(thread, raw_path, raw_kind, true, true).await;
+        if !ok { return (false, show_val) }
+        let trimmed = raw_path.trim();
+        let abs = if crate::plat::fs::is_abs(trimmed) {
+            trimmed.to_string()
+        } else {
+            let cwd = self.world().await.cwd(thread);
+            if cwd.is_empty() { return fail("path must be absolute") }
+            std::path::Path::new(&cwd).join(trimmed).to_string_lossy().into_owned()
+        };
+        let routed = kc::route(&abs);
+        let resolved = if std::path::Path::new(&routed).is_file() { routed } else { abs };
+        let mut ra = a.clone();
+        if let Some(o) = ra.as_object_mut() {
+            if raw_kind.eq_ignore_ascii_case("board") {
+                o.insert("kind".into(), json!("pcb"));
+            }
+        }
+        match crate::files::kicad::vrender::render_inner(&self.hub, &resolved, &ra).await {
+            Ok((mut meta, inline)) => {
+                if let (Some(mo), Some(so)) = (meta.as_object_mut(), show_val.as_object()) {
+                    for (k, v) in so {
+                        mo.entry(k.clone()).or_insert_with(|| v.clone());
+                    }
+                }
+                crate::files::kicad::vrender::build_mcp_content(meta, inline)
+            }
+            Err(e) => {
+                let mut v = show_val;
+                if let Some(o) = v.as_object_mut() {
+                    o.insert("render_error".into(), json!(e));
+                }
+                (true, v)
+            }
+        }
+    }
     /// The same gate for a direct write of a board or schematic (`files_write`): Err names the holder.
     pub async fn doc_gate(&self, thread: &str, doc: &str) -> Result<(), String> {
         if crate::copy::on() || !kc::is_document(doc) { return Ok(()) }

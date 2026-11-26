@@ -51,7 +51,7 @@ pub fn altium_schdoc_lint(spec: &Value) -> Option<Value> {
     None
 }
 pub const TOOLS_JSON: &str = include_str!("../../../../test/agents/fixtures/mcp-tools.json");
-pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_reply", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_edit", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "altium_status", "altium_script", "altium_write", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
+pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_reply", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "viewer_render", "permission_prompt", "kicad_ipc", "kicad_edit", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "altium_status", "altium_script", "altium_write", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
 const MAX_PARKED_PER_THREAD: usize = 16;
@@ -218,7 +218,7 @@ impl Mcp {
                 if cwd.is_empty() || !crate::files::kicad::project::altium_cached(&cwd) { tools.retain(|t| !sv(t, "name").starts_with("altium_")) }
                 // a thread of a project with a board or schematic has `kicad_edit` from its first request (Claude defers the other tools' definitions
                 // behind a tool search, a request of its own before the first edit)
-                if ag.has_design(thread).await { always_load(&mut tools, "kicad_edit");
+                if ag.has_design(thread).await { always_load(&mut tools, "kicad_edit"); always_load(&mut tools, "viewer_render");
                     // and `kicad_sim` (kicad/ksim.rs) where the KiCad runtime simulates
                     if crate::files::kicad::ksim_tool::available(&ag).await { tools.push(crate::files::kicad::ksim_tool::def()) } }
                 Some(result(&id, json!({"tools":tools}))) }
@@ -350,7 +350,8 @@ impl Mcp {
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
             "order_review" | "order_ask" | "order_quote" | "order_status" => crate::settings::order::call(ag, thread, name, &a).await,
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
-            "viewer_show" => ag.viewer_show(thread, sv(&a, "path"), sv(&a, "kind"), true, true).await,
+            "viewer_show" => if a.get("render").and_then(Value::as_bool) == Some(true) { ag.viewer_show_and_render(thread, &a).await } else { ag.viewer_show(thread, sv(&a, "path"), sv(&a, "kind"), true, true).await },
+            "viewer_render" => ag.viewer_render(thread, &a).await,
             n if ag.tool_sets().iter().any(|s| s.owns(n)) => {
                 // a board or schematic written directly holds its document's lock, as a KiCad write does
                 let gate = if n == "files_write" { match ag.files_doc(thread, sv(&a, "path")).await { Some(doc) => ag.doc_gate(thread, &doc).await.err(), None => None } } else { None };
