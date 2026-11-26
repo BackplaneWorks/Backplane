@@ -9,6 +9,8 @@ on:
   push:
     branches: [main]
     paths: ['native/host/src/kicad/install.rs', 'native/host/src/settings/tools_install.rs', '.github/workflows/windows-install.yml']
+permissions:
+  contents: read
 jobs:
   windows-install:
     runs-on: windows-latest
@@ -17,9 +19,11 @@ jobs:
     continue-on-error: true
     steps:
       - run: git config --global core.autocrlf false
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           workspaces: native/host
           shared-key: windows-install
