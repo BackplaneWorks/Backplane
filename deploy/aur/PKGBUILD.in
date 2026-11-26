@@ -1,6 +1,8 @@
-# The AUR package backplane-bend-bin. The release workflow fills in the
-# version and the sums and publishes the result as the release's PKGBUILD;
-# copy it into the AUR repository and run `makepkg --printsrcinfo > .SRCINFO`.
+# The AUR package backplane-bend-bin: a template, filled by hand for a release (release.yml does not render or publish it).
+# It installs the release's native archives, backplane-vX.Y.Z-<target>-native.tar.gz, the ones install.sh uses and SHA256SUMS lists.
+# For a release: set the pkgver placeholder to the version without the v, and each sum placeholder to that archive's 64-character sha256 from the release's SHA256SUMS (the digest only, not the filename)
+# (SHA_LINUX_X64 is linux-x64-native, SHA_LINUX_ARM64 is linux-arm64-native), then copy the result into the AUR repository as PKGBUILD
+# and run `makepkg --printsrcinfo > .SRCINFO`. Stable releases only: a nightly's tag (vX.Y.Z-nightly.N) is not a valid pkgver.
 pkgname=backplane-bend-bin
 pkgver=@PKGVER@
 pkgrel=1
@@ -8,8 +10,7 @@ pkgdesc="Agentic hardware development, with live KiCad viewers"
 arch=(x86_64 aarch64)
 url="https://github.com/BackplaneWorks/Backplane"
 license=(MIT)
-depends=(glibc libx11)
-depends_x86_64=(glib2 nspr nss at-spi2-core dbus libcups libxcomposite libxdamage libxext libxfixes libxrandr libxi mesa expat libxcb libxkbcommon cairo pango systemd-libs alsa-lib)
+depends=(glibc libx11 glib2 nspr nss at-spi2-core dbus libcups libxcomposite libxdamage libxext libxfixes libxrandr libxi mesa expat libxcb libxkbcommon libxkbcommon-x11 cairo pango systemd-libs alsa-lib)
 optdepends=('git: thread worktrees and commits'
             'kicad: ERC, DRC, exports and the 3D viewer'
             'tailscale: reach it from your other devices')
@@ -17,24 +18,35 @@ provides=(backplane)
 conflicts=(backplane)
 # prebuilt: shipped as released
 options=(!strip !debug)
-source_x86_64=("$url/releases/download/v$pkgver/backplane-v$pkgver-linux-x64-cef.tar.gz")
-source_aarch64=("$url/releases/download/v$pkgver/backplane-v$pkgver-linux-arm64.tar.gz")
+# the archives have no top folder: unpacked by package() into /opt/backplane, not by makepkg into $srcdir
+noextract=("backplane-v$pkgver-linux-x64-native.tar.gz" "backplane-v$pkgver-linux-arm64-native.tar.gz")
+source_x86_64=("$url/releases/download/v$pkgver/backplane-v$pkgver-linux-x64-native.tar.gz")
+source_aarch64=("$url/releases/download/v$pkgver/backplane-v$pkgver-linux-arm64-native.tar.gz")
 sha256sums_x86_64=(@SHA_LINUX_X64@)
 sha256sums_aarch64=(@SHA_LINUX_ARM64@)
 
 package() {
   local plat=linux-x64
   [ "$CARCH" = aarch64 ] && plat=linux-arm64
-  cd "backplane-$plat"
   install -d "$pkgdir/opt/backplane" "$pkgdir/usr/bin"
-  cp -R . "$pkgdir/opt/backplane/"
-  # pacman updates it, not the app
-  for b in backplane backplane-serve; do
-    printf '#!/bin/sh\nBACKPLANE_NO_UPDATE=1 exec /opt/backplane/%s "$@"\n' "$b" > "$pkgdir/usr/bin/$b"
-    chmod 755 "$pkgdir/usr/bin/$b"
-  done
-  install -Dm644 backplane.desktop "$pkgdir/usr/share/applications/backplane.desktop"
-  install -Dm644 icon/backplane-desktop.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/backplane-desktop.svg"
-  install -Dm644 icon/backplane-desktop-256.png "$pkgdir/usr/share/icons/hicolor/256x256/apps/backplane-desktop.png"
-  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+  bsdtar -xf "$srcdir/backplane-v$pkgver-$plat-native.tar.gz" -C "$pkgdir/opt/backplane" --no-same-owner
+  # backplane: the guard (it starts and keeps the hub); backplane-app: the desktop app. pacman updates them, not the app
+  printf '#!/bin/sh\nBACKPLANE_NO_UPDATE=1 exec /opt/backplane/backplane "$@"\n' > "$pkgdir/usr/bin/backplane"
+  printf '#!/bin/sh\nBACKPLANE_NO_UPDATE=1 exec /opt/backplane/backplane-gpui "$@"\n' > "$pkgdir/usr/bin/backplane-app"
+  chmod 755 "$pkgdir/usr/bin/backplane" "$pkgdir/usr/bin/backplane-app"
+  cat > "$srcdir/backplane.desktop" <<'DESKTOP'
+[Desktop Entry]
+Type=Application
+Name=Backplane
+Comment=Agents for electronics and mechanical design
+Exec=backplane-app
+Icon=backplane-desktop
+Terminal=false
+Categories=Development;Electronics;
+DESKTOP
+  install -Dm644 "$srcdir/backplane.desktop" "$pkgdir/usr/share/applications/backplane.desktop"
+  local i="$pkgdir/opt/backplane/assets/icon"
+  install -Dm644 "$i/backplane-desktop.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/backplane-desktop.svg"
+  install -Dm644 "$i/backplane-desktop-256.png" "$pkgdir/usr/share/icons/hicolor/256x256/apps/backplane-desktop.png"
+  install -Dm644 "$pkgdir/opt/backplane/licenses/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

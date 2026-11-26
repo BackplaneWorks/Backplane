@@ -68,7 +68,7 @@ rm -f ~/.local/share/applications/backplane.desktop \
 rm -rf ~/Applications/Backplane.app   # macOS
 ```
 
-Tus hilos, ajustes y claves permanecen en la carpeta home (`~/.backplane/hub`, o `~/Library/Application Support/Backplane/hub` en macOS); bórrala también para empezar de cero. Una instalación mediante paquete (`.deb`, AUR) se desinstala desde su gestor de paquetes.
+Tus hilos, ajustes y claves permanecen en la carpeta home (`~/.backplane/hub`, o `~/Library/Application Support/Backplane/hub` en macOS); bórrala también para empezar de cero. Una instalación mediante paquete (el paquete de AUR) se desinstala desde su gestor de paquetes.
 
 ## Solución de problemas
 

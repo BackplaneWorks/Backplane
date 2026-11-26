@@ -67,7 +67,7 @@ rm -f ~/.local/share/applications/backplane.desktop \
 rm -rf ~/Applications/Backplane.app   # macOS
 ```
 
-Your threads, settings and keys stay in the home (`~/.backplane/hub`, or `~/Library/Application Support/Backplane/hub` on macOS); remove it too to start over. A package install (`.deb`, AUR) uninstalls through its package manager.
+Your threads, settings and keys stay in the home (`~/.backplane/hub`, or `~/Library/Application Support/Backplane/hub` on macOS); remove it too to start over. A package install (the AUR package) uninstalls through its package manager.
 
 ## Troubleshooting
 
