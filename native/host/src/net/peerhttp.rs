@@ -28,12 +28,12 @@ async fn find_with(hub: &Arc<Hub>, peering: &Peering, table: &PeerTable, status:
     if peering.routes.machines_value().get("self").is_none() { hub.set_info("machines", &tailnet::machines_json(&status, peering.port, &[]).to_string()).await; }
     let j = tailnet::find(&status, peering.port, &extra).await;
     let mut j = j;
-    let links: Vec<(String, String)> = table.with(|p| p.live().into_iter().filter(|x| p.verified(&x.id)).map(|x| (x.name, x.url)).collect());
+    let links: Vec<(String, String, String)> = table.with(|p| p.live().into_iter().filter(|x| p.verified(&x.id)).map(|x| (x.id, x.name, x.url)).collect());
     // an approved link is looked for at its own address too: a hub that listens on loopback behind `tailscale serve` (https, another port) is never at
     // `http://<tailnet ip>:<this hub's port>`, and without this the finder never lists it and its requests are refused as not the owner's
-    for (name, url) in links {
+    for (id, name, url) in links {
         let have = j["peers"].as_array().map_or(false, |a| a.iter().any(|m| super::machines::hostport(m["url"].as_str().unwrap_or("")) == super::machines::hostport(&url)));
-        if have || !link_up(&url).await { continue }
+        if have || (!super::peerws::connected(&hub.cfg.home, &id) && !link_up(&url).await) { continue }
         if let Some(a) = j["peers"].as_array_mut() { a.push(serde_json::json!({"name": name, "url": url, "version": "linked", "named": true, "same_user": true})) }
     }
     let verified: Vec<String> = table.with(|p| p.live().into_iter().filter(|x| p.verified(&x.id)).map(|x| x.url).collect());
@@ -53,10 +53,14 @@ fn missing_own(peering: &Peering, table: &PeerTable) -> bool {
     table.with(|p| p.live().into_iter().any(|r| p.verified(&r.id) && !p.sync_off(&r.name) && !super::farsync::own_link(p, &j, &r.id)))
 }
 /// Whether an approved link that the last pass did not find answers /hello at its own address now.
-async fn missing_answers(peering: &Peering, table: &PeerTable) -> bool {
+async fn missing_answers(hub: &Hub, peering: &Peering, table: &PeerTable) -> bool {
     let j = peering.routes.machines_value();
-    let urls: Vec<String> = table.with(|p| p.live().into_iter().filter(|r| p.verified(&r.id) && !p.sync_off(&r.name) && !super::farsync::own_link(p, &j, &r.id)).map(|r| r.url).collect());
-    for u in urls { if link_up(&u).await { return true } }
+    let urls: Vec<(String, String)> = table.with(|p| p.live().into_iter().filter(|r| p.verified(&r.id) && !p.sync_off(&r.name) && !super::farsync::own_link(p, &j, &r.id)).map(|r| (r.id, r.url)).collect());
+    for (id, u) in urls {
+        if super::peerws::connected(&hub.cfg.home, &id) || link_up(&u).await {
+            return true;
+        }
+    }
     false
 }
 /// How long until the next pass of the finder: every two minutes, every 15 seconds while an approved link is not found.
@@ -77,7 +81,7 @@ pub fn spawn_loops(hub: Arc<Hub>, table: Arc<PeerTable>, peering: Arc<Peering>) 
                 if (missing && !was_missing) || waited >= next_find(missing) { break }
                 // an approved link that is not found answers again (it restarted): found at once, not at the next 15 s pass, so it is the owner's own
                 // again within moments (until then every request to it is refused). Asked every 2 s for the first minute of a pass, then every 6 s.
-                if missing && (waited <= Duration::from_secs(60) || waited.as_secs() % 6 == 0) && missing_answers(&p2, &t2).await { break }
+                if missing && (waited <= Duration::from_secs(60) || waited.as_secs() % 6 == 0) && missing_answers(&hub, &p2, &t2).await { break }
             }
         }
     });

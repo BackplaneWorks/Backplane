@@ -33,7 +33,7 @@ use std::{
 use tokio::{
     io::AsyncWriteExt,
     net::TcpStream,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, watch, Semaphore},
 };
 use tokio_tungstenite::{
     tungstenite::{client::IntoClientRequest, http::HeaderValue, Message},
@@ -46,7 +46,11 @@ const TAG_VRAW: u8 = 0x02;
 const TAG_VJSON: u8 = 0x03;
 const COMPRESS_MIN: usize = 256;
 const MAX_DECODED: usize = 16 << 20; // 16 MiB cap against decompression bombs
+const MAX_RPC_BODY: usize = 256 << 10;
+const MAX_INFLIGHT_REQ: usize = 32;
 const REQ_TIMEOUT: Duration = Duration::from_secs(20);
+const IDLE_TIMEOUT: Duration = Duration::from_secs(75);
+const WRITE_TIMEOUT: Duration = Duration::from_secs(10);
 const RECONNECT_MIN: Duration = Duration::from_secs(2);
 const RECONNECT_MAX: Duration = Duration::from_secs(30);
 
@@ -138,6 +142,7 @@ pub fn decode_frame(data: &[u8]) -> Option<Frame> {
 struct PeerHandle {
     tx: mpsc::Sender<Vec<u8>>,
     pending: Arc<Mutex<HashMap<u64, oneshot::Sender<(u16, String)>>>>,
+    shutdown_tx: watch::Sender<bool>,
 }
 
 #[derive(Default)]
@@ -319,9 +324,18 @@ pub async fn accept(hub: Arc<Hub>, mut s: TcpStream, req: Req, head_len: usize) 
         reject(&mut s, head_len, "403 Forbidden", "only the owner's own machines may open /far/ws").await?;
         return Ok(());
     }
-    let ws = tokio_tungstenite::accept_async(s).await?;
+    let _ = s.set_nodelay(true);
+    let ws = tokio_tungstenite::accept_async_with_config(s, Some(ws_config())).await?;
     run_session(hub, sync, link, ws).await;
     Ok(())
+}
+
+fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+    let mut cfg = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default();
+    // Allow 16 MiB decoded/raw payloads plus the 9-byte viewer frame header.
+    cfg.max_message_size = Some(MAX_DECODED + 64);
+    cfg.max_frame_size = Some(MAX_DECODED + 64);
+    cfg
 }
 
 async fn reject(s: &mut TcpStream, head_len: usize, status: &str, body: &str) -> anyhow::Result<()> {
@@ -344,7 +358,7 @@ pub async fn connect_outbound(
     link: String,
     url: String,
 ) -> anyhow::Result<()> {
-    if crate::copy::on() {
+    if crate::copy::on() || !url.starts_with("http://") {
         return Ok(());
     }
     let secret = botnet::peer_secret(&hub.cfg.home, &link);
@@ -356,14 +370,33 @@ pub async fn connect_outbound(
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_secs());
     let sig = sign::header(&secret, now, "");
-    let mut req = ws_url.into_client_request()?;
-    req.headers_mut()
-        .insert("X-Backplane-Peer", HeaderValue::from_str(&link)?);
-    req.headers_mut()
-        .insert("X-Backplane-Timestamp", HeaderValue::from_str(&now.to_string())?);
-    req.headers_mut()
-        .insert("X-Backplane-Signature", HeaderValue::from_str(&sig)?);
-    let (ws, _) = tokio::time::timeout(Duration::from_secs(10), tokio_tungstenite::connect_async(req)).await??;
+    let req = {
+        let mut req = ws_url.into_client_request()?;
+        req.headers_mut()
+            .insert("X-Backplane-Peer", HeaderValue::from_str(&link)?);
+        req.headers_mut()
+            .insert("X-Backplane-Timestamp", HeaderValue::from_str(&now.to_string())?);
+        req.headers_mut()
+            .insert("X-Backplane-Signature", HeaderValue::from_str(&sig)?);
+        req
+    };
+    let host = req
+        .uri()
+        .host()
+        .ok_or_else(|| anyhow::anyhow!("peerws: missing host in {url}"))?
+        .trim_start_matches('[')
+        .trim_end_matches(']');
+    let port = req.uri().port_u16().unwrap_or(80);
+    let tcp = tokio::time::timeout(Duration::from_secs(10), TcpStream::connect((host, port))).await??;
+    let _ = tcp.set_nodelay(true);
+    let (ws, _) = tokio::time::timeout(
+        Duration::from_secs(10),
+        tokio_tungstenite::client_async_with_config(req, tcp, Some(ws_config())),
+    )
+    .await??;
+    if connected(&hub.cfg.home, &link) {
+        return Ok(());
+    }
     run_session(hub, sync, link, ws).await;
     Ok(())
 }
@@ -375,12 +408,18 @@ where
     let (mut sink, mut stream) = ws.split();
     let (tx, mut rx) = mpsc::channel::<Vec<u8>>(256);
     let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<(u16, String)>>>> = Default::default();
+    let (shutdown_tx, mut shutdown_rx) = watch::channel(false);
+    let req_sem = Arc::new(Semaphore::new(MAX_INFLIGHT_REQ));
+    let writer_shutdown = shutdown_tx.clone();
     let handle = Arc::new(PeerHandle {
         tx: tx.clone(),
         pending: pending.clone(),
+        shutdown_tx,
     });
     let key = (hub.cfg.home.clone(), link.clone());
-    reg().lock().unwrap().peers.insert(key.clone(), handle.clone());
+    if let Some(prev) = reg().lock().unwrap().peers.insert(key.clone(), handle.clone()) {
+        let _ = prev.shutdown_tx.send(true);
+    }
     hub.mirrors().set_away(&link, false);
     hub.mirrors().publish(&hub).await;
 
@@ -399,18 +438,36 @@ where
             tokio::select! {
                 msg = rx.recv() => match msg {
                     Some(b) => {
-                        if sink.send(Message::Binary(b)).await.is_err() { break }
+                        if !matches!(tokio::time::timeout(WRITE_TIMEOUT, sink.send(Message::Binary(b))).await, Ok(Ok(()))) { break }
                     }
                     None => break,
                 },
                 _ = ping.tick() => {
-                    if sink.send(Message::Ping(Vec::new())).await.is_err() { break }
+                    if !matches!(tokio::time::timeout(WRITE_TIMEOUT, sink.send(Message::Ping(Vec::new()))).await, Ok(Ok(()))) { break }
                 }
             }
         }
+        let _ = writer_shutdown.send(true);
     });
 
-    while let Some(Ok(msg)) = stream.next().await {
+    let mut last_rx = tokio::time::Instant::now();
+    loop {
+        let msg = tokio::select! {
+            _ = shutdown_rx.changed() => {
+                if *shutdown_rx.borrow() { break }
+                continue
+            }
+            _ = tokio::time::sleep_until(last_rx + IDLE_TIMEOUT) => {
+                break
+            }
+            next = stream.next() => match next {
+                Some(Ok(m)) => {
+                    last_rx = tokio::time::Instant::now();
+                    m
+                }
+                Some(Err(_)) | None => break,
+            }
+        };
         match msg {
             Message::Binary(data) => {
                 let Some(frame) = decode_frame(&data) else { continue };
@@ -424,8 +481,14 @@ where
                             let id = v["id"].as_u64().unwrap_or(0);
                             let path = v["path"].as_str().unwrap_or("").to_string();
                             let body = v["body"].as_str().unwrap_or("").to_string();
+                            let Ok(permit) = req_sem.clone().try_acquire_owned() else {
+                                let rep = encode_json(&json!({"k":"rep","id":id,"code":503,"body":"peer busy"}));
+                                let _ = tx.try_send(rep);
+                                continue;
+                            };
                             let (h2, s2, l2, tx2) = (hub.clone(), sync.clone(), link.clone(), tx.clone());
                             tokio::spawn(async move {
+                                let _permit = permit;
                                 let (code, resp_body) = dispatch_req(&s2, &h2, &l2, &path, body.as_bytes()).await;
                                 let rep = encode_json(&json!({"k":"rep","id":id,"code":code,"body":resp_body}));
                                 let _ = tx2.send(rep).await;
@@ -496,6 +559,9 @@ async fn dispatch_req(
     path: &str,
     body: &[u8],
 ) -> (u16, String) {
+    if body.len() > MAX_RPC_BODY {
+        return (413, "at most 256 KB".to_string());
+    }
     let reply = match path {
         "/far/rpc" => super::rpc::serve_authenticated(crate::copy::on(), sync, hub, link, body).await,
         "/far/push" => sync.push_authenticated(hub, link, body).await,
@@ -615,6 +681,13 @@ mod tests {
             }
         }
         assert!(got_delta, "A received live streamed delta from B over /far/ws");
+
+        // 3. Oversized /far/rpc payload (> 256 KB) is rejected with 413 without breaking the socket.
+        let huge = "x".repeat(MAX_RPC_BODY + 16);
+        let (code413, _) = call(&a.home, &link_id, "/far/rpc", &huge)
+            .await
+            .expect("oversized call answered 413");
+        assert_eq!(code413, 413);
 
         conn.abort();
         srv.abort();

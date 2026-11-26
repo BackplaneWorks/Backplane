@@ -51,6 +51,7 @@ impl Agents {
     pub async fn tool_read(&self, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); if !self.same_project(thread, target).await { return fail(NOT_HERE) }
         let limit = a.get("limit").and_then(|l| l.as_u64().or_else(|| l.as_str().and_then(|s| s.parse().ok()))).unwrap_or(40).min(1000) as usize;
+        let max_bytes = a.get("maxBytes").and_then(|l| l.as_u64().or_else(|| l.as_str().and_then(|s| s.parse().ok()))).unwrap_or(160 * 1024).clamp(1024, 192 * 1024) as usize;
         let mut rows: Vec<crate::model::Row> = vec![]; let mut before = 0u64;
         while rows.len() < limit {
             let page = { let m = self.hub.model().await; match m.page(&self.hub.store, target, before, 32) { Ok(p) => p, Err(_) => break } };
@@ -59,8 +60,54 @@ impl Agents {
             if oldest <= 1 || page.below == 0 { break } before = oldest;
         }
         rows.sort_by_key(|r| r.seq); rows.dedup_by_key(|r| r.seq); let skip = rows.len().saturating_sub(limit);
-        let entries: Vec<Value> = rows.into_iter().skip(skip).map(|r| if r.kind == "msg" { json!({"kind":"message","role":r.role,"text":r.text,"at":r.at}) } else { json!({"kind":"activity","tone":r.role,"tool":r.akind,"summary":r.text,"at":r.at}) }).collect();
-        (true, json!({"threadId":target,"status":self.thread_json(target).await.unwrap_or(Value::Null),"entries":entries}))
+        let status = self.thread_json(target).await.unwrap_or(Value::Null);
+        let overhead = status.to_string().len() + target.len() + 64;
+        let budget = max_bytes.saturating_sub(overhead);
+        let mut kept: Vec<Value> = vec![];
+        let mut used = 0usize;
+        let mut truncated = false;
+        let mut all_entries: Vec<Value> = rows.into_iter().skip(skip).map(|r| if r.kind == "msg" { json!({"kind":"message","role":r.role,"text":r.text,"at":r.at}) } else { json!({"kind":"activity","tone":r.role,"tool":r.akind,"summary":r.text,"at":r.at}) }).collect();
+        while let Some(mut entry) = all_entries.pop() {
+            let sz = entry.to_string().len() + 1;
+            if kept.is_empty() && sz > budget {
+                let field = if entry.get("text").and_then(Value::as_str).is_some() { "text" } else { "summary" };
+                if let Some(s) = entry.get(field).and_then(Value::as_str).map(str::to_string) {
+                    let mut lo = 0usize;
+                    let mut hi = s.len();
+                    let mut best = String::from("… [truncated]");
+                    while lo <= hi {
+                        let mid = lo + (hi - lo) / 2;
+                        let mut cut = mid;
+                        while cut > 0 && !s.is_char_boundary(cut) { cut -= 1; }
+                        let cand = format!("{}… [truncated]", &s[..cut]);
+                        entry[field] = json!(cand);
+                        if entry.to_string().len() + 1 <= budget {
+                            best = cand;
+                            lo = mid + 1;
+                        } else if mid == 0 {
+                            break;
+                        } else {
+                            hi = mid - 1;
+                        }
+                    }
+                    entry[field] = json!(best);
+                }
+                truncated = true;
+                used = entry.to_string().len() + 1;
+                kept.push(entry);
+                break;
+            }
+            if !kept.is_empty() && used + sz > budget {
+                truncated = true;
+                break;
+            }
+            used += sz;
+            kept.push(entry);
+        }
+        kept.reverse();
+        let mut out = json!({"threadId":target,"status":status,"entries":kept});
+        if truncated { out["truncated"] = json!(true); }
+        (true, out)
     }
     pub async fn tool_send(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); let text = if sv(a, "text").trim().is_empty() { sv(a, "message") } else { sv(a, "text") };

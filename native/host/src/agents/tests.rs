@@ -3060,6 +3060,68 @@ impl mailroom::Mailroom for ChatRoom {
     assert_eq!(m3d["images"], 2);
     assert!((200..=400).contains(&m3d["width"].as_u64().unwrap()), "{m3d}");
     assert!((150..=300).contains(&m3d["height"].as_u64().unwrap()), "{m3d}");
+    ag.shutdown();
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn tool_read_respects_max_bytes_and_keeps_newest_entries() {
+    let (hub, ag, _home, _work) = start("read-budget", |w| base_log(w, 1, ""), Cli::standin).await;
+    for i in 0..8 {
+        hub.commit(&json!({
+            "$": "MessagePosted",
+            "thread": T1,
+            "msg": format!("m{i}"),
+            "role": "user",
+            "text": format!("msg-{i}-{}", "x".repeat(400)),
+            "at": 10 + i as u64,
+        }))
+        .await
+        .unwrap();
+    }
+    let (ok, res) = ag
+        .tool_read(T1, &json!({"threadId": T1, "limit": 20, "maxBytes": 1200}))
+        .await;
+    assert!(ok, "{res}");
+    assert_eq!(res["truncated"], json!(true), "{res}");
+    let entries = res["entries"].as_array().unwrap();
+    assert!(!entries.is_empty() && entries.len() < 8, "len={}", entries.len());
+    assert!(entries.last().unwrap()["text"].as_str().unwrap().starts_with("msg-7-"));
+    assert!(res.to_string().len() <= 1600);
+
+    // Single huge newest entry should still be clipped within budget rather than returned unbounded.
+    hub.commit(&json!({
+        "$": "MessagePosted",
+        "thread": T1,
+        "msg": "m_huge",
+        "role": "assistant",
+        "text": "H".repeat(4000),
+        "at": 99,
+    }))
+    .await
+    .unwrap();
+    let (ok2, res2) = ag
+        .tool_read(T1, &json!({"threadId": T1, "limit": 20, "maxBytes": 1024}))
+        .await;
+    assert!(ok2, "{res2}");
+    assert_eq!(res2["truncated"], json!(true), "{res2}");
+    assert!(res2.to_string().len() <= 1024, "len={}", res2.to_string().len());
+
+    // Heavily JSON-escaped single entry (quotes/control chars) must still stay within maxBytes.
+    hub.commit(&json!({
+        "$": "MessagePosted",
+        "thread": T1,
+        "msg": "m_esc",
+        "role": "assistant",
+        "text": "\n\"".repeat(1500),
+        "at": 100,
+    }))
+    .await
+    .unwrap();
+    let (ok3, res3) = ag
+        .tool_read(T1, &json!({"threadId": T1, "limit": 20, "maxBytes": 1024}))
+        .await;
+    assert!(ok3, "{res3}");
+    assert_eq!(res3["truncated"], json!(true), "{res3}");
+    assert!(res3.to_string().len() <= 1024, "len={}", res3.to_string().len());
     ag.shutdown();
 }

@@ -77,13 +77,13 @@ pub async fn signed(home: &Path, url: &str, peer: &str, secret: &str, now: u64, 
     if !url_ok(url) || secret.is_empty() { return Resp { code: 0, body: "no secret, or not an http address".into() } }
     let target = format!("{}{path}", url_base(url));
     let sig = sign::header(secret, now, body);
-    // a linked machine this hub cannot reach, polling it (net/alwayson/tunnel.rs): the call goes back over its poll instead
-    if path != "/far/tunnel" {
-        if let Some((code, body)) = super::alwayson::tunnel::ends().call(peer, if post { "POST" } else { "GET" }, path, &headers(peer, now, &sig), if post { body } else { "" }).await { return Resp { code, body } }
-    }
     // persistent hub-to-hub binary WS (net/peerws.rs): zero curl, zero temp file, zero fsync when connected
     if post && matches!(path, "/far/rpc" | "/far/push" | "/far/log") {
         if let Some((code, body)) = super::peerws::call(home, peer, path, body).await { return Resp { code, body } }
+    }
+    // a linked machine this hub cannot reach, polling it (net/alwayson/tunnel.rs): the call goes back over its poll instead
+    if path != "/far/tunnel" {
+        if let Some((code, body)) = super::alwayson::tunnel::ends().call(peer, if post { "POST" } else { "GET" }, path, &headers(peer, now, &sig), if post { body } else { "" }).await { return Resp { code, body } }
     }
     if !post { return curl(args(None, &target), headers(peer, now, &sig)).await }
     mkdir(&home.join("secrets")); mkdir(&home.join("secrets/tmp"));
