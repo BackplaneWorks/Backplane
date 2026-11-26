@@ -1073,7 +1073,10 @@ impl Actor {
         let keep = driver.take_files();
         let spawned = if self.person { match self.person_child() { Ok(pc) => proc::spawn_person_holding(&pc, &prog, &args, std::path::Path::new(cwd), &env, keep), Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)) } } else { proc::spawn_holding(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env, keep) };
         match spawned {
-            Ok(mut p) => { self.ag.memory_watch(&th, p.pid); self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); }
+            Ok(mut p) => { self.ag.memory_watch(&th, p.pid); self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now();
+                // a fresh ledger, as a Claude spawn starts with: one a Claude process left (lifecycle mode) would let beat's Stuck end this provider's turns after 120 s of quiet thinking
+                self.cmds = cmds::Cmds::new(); self.wait.clear();
+                for l in start { let _ = p.input.try_send(l); }
                 if driver.closes_stdin() { p.input = mpsc::channel(1).0 } /* the writer ends once what was queued is written, and the process reads EOF */ self.driver = Some(driver); self.live_proc = Some(Live { input: p.input, pid: p.pid, key: String::new(), person: self.person, _busy: busy }); self.lines = Some(p.lines); self.exit = Some(p.exit) }
             Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); }
         }
