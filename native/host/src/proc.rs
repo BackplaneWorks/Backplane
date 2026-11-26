@@ -520,6 +520,49 @@ pub async fn kill_wait(mut child: tokio::process::Child, limit: std::time::Durat
     let _ = child.start_kill();
     if tokio::time::timeout(limit, wait(&mut child)).await.is_err() { kill_and_reap(child) }
 }
+/// Wait up to `grace` for `child` to exit while draining `stdout` (preventing SIGPIPE/pipe backpressure after stdin is closed),
+/// falling back to `kill_wait` if it does not exit within `grace`. Returns `true` when it exited cleanly within `grace`.
+#[allow(dead_code)] // bp-plot includes this file
+pub async fn finish_or_kill_draining<R: tokio::io::AsyncRead + Unpin>(
+    mut child: tokio::process::Child,
+    mut stdout: R,
+    grace: std::time::Duration,
+    kill_limit: std::time::Duration,
+) -> bool {
+    use tokio::io::AsyncReadExt;
+    let exited = if grace.is_zero() {
+        false
+    } else {
+        let mut wait_fut = std::pin::pin!(wait(&mut child));
+        let mut buf = [0u8; 4096];
+        let mut stdout_open = true;
+        matches!(
+            tokio::time::timeout(grace, async {
+                loop {
+                    if !stdout_open {
+                        break (&mut wait_fut).await;
+                    }
+                    tokio::select! {
+                        res = &mut wait_fut => break res,
+                        r = stdout.read(&mut buf) => {
+                            if !matches!(r, Ok(n) if n > 0) {
+                                stdout_open = false;
+                            }
+                        }
+                    }
+                }
+            })
+            .await,
+            Ok(Ok(_))
+        )
+    };
+    drop(stdout);
+    if exited {
+        return true;
+    }
+    kill_wait(child, kill_limit).await;
+    false
+}
 /// `std::process::Command::new`, gated.
 pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();
@@ -558,6 +601,38 @@ mod tests {
         let ch = tokio::process::Command::new("sleep").arg("30").spawn().unwrap(); let pid = ch.id().unwrap() as i32;
         let t = std::time::Instant::now(); kill_wait(ch, std::time::Duration::from_secs(2)).await;
         assert!(t.elapsed() < std::time::Duration::from_secs(3) && unsafe { libc::kill(pid, 0) } != 0, "killed and reaped within the limit");
+    }
+
+    #[cfg(unix)] #[tokio::test] async fn finish_or_kill_draining_lets_clean_exit_finish_and_kills_after_grace() {
+        let dir = crate::plat::tmp::dir("proc-grace");
+        let marker = dir.join("done");
+        let mut ch = tokio::process::Command::new("sh")
+            .args(["-c", &format!("cat >/dev/null; sleep 0.2; printf 'trailing\\n'; printf ok > '{}'; exit 0", marker.display())])
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = ch.id().unwrap() as i32;
+        let stdin = ch.stdin.take().unwrap();
+        let stdout = ch.stdout.take().unwrap();
+        drop(stdin);
+        assert!(finish_or_kill_draining(ch, stdout, std::time::Duration::from_secs(5), std::time::Duration::from_secs(2)).await);
+        assert!(marker.exists(), "child finished work after stdin closed");
+        assert!(unsafe { libc::kill(pid, 0) } != 0, "cleanly exited child was reaped");
+
+        let mut ch = tokio::process::Command::new("sleep")
+            .arg("30")
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let pid = ch.id().unwrap() as i32;
+        drop(ch.stdin.take());
+        let stdout = ch.stdout.take().unwrap();
+        let t = std::time::Instant::now();
+        assert!(!finish_or_kill_draining(ch, stdout, std::time::Duration::from_millis(200), std::time::Duration::from_secs(2)).await);
+        assert!(t.elapsed() < std::time::Duration::from_secs(3) && unsafe { libc::kill(pid, 0) } != 0, "hung child killed and reaped after grace");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test] fn a_test_never_runs_the_real_tailscale() {

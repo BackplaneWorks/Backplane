@@ -192,20 +192,34 @@ pub fn version_or_why(cmd: &Path, r: Option<(i32, String, String)>) -> String {
     format!("{} (--version failed: {why})", cmd.display())
 }
 /// A program fed `lines` on stdin, read until a line `done` says is the answer (or its output ends): the lines read.
-async fn ask(cmd: &Path, args: &[&str], lines: &[&str], done: fn(&str) -> bool, limit: Duration) -> String {
+/// Closes stdin and waits up to `grace` for the child to exit cleanly (draining stdout) before killing it.
+async fn ask(cmd: &Path, args: &[&str], lines: &[&str], done: fn(&str) -> bool, limit: Duration, grace: Duration) -> String {
     let mut c = proc::tokio_cmd(Kind::Agent, cmd);
     if let Some(p) = probe_path() { c.env("PATH", p); }
     c.args(args).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
     let Ok(mut child) = c.spawn() else { return String::new() };
-    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return String::new() };
+    let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else {
+        proc::kill_wait(child, Duration::from_secs(2)).await;
+        return String::new();
+    };
     let mut out = String::new();
+    let mut reader = tokio::io::BufReader::new(stdout);
     let _ = tokio::time::timeout(limit, async {
         for l in lines { if stdin.write_all(format!("{l}\n").as_bytes()).await.is_err() { return } }
         let _ = stdin.flush().await; drop(stdin);
-        let mut r = tokio::io::BufReader::new(stdout).lines();
-        while let Ok(Some(l)) = r.next_line().await { let hit = done(&l); out.push_str(&l); out.push('\n'); if hit { return } }
+        let mut line = String::new();
+        loop {
+            line.clear();
+            let Ok(n) = reader.read_line(&mut line).await else { break };
+            if n == 0 { break }
+            let trimmed = line.trim_end_matches(&['\r', '\n'][..]);
+            let hit = done(trimmed);
+            out.push_str(trimmed);
+            out.push('\n');
+            if hit { return }
+        }
     }).await;
-    let _ = child.start_kill(); let _ = child.wait().await;
+    proc::finish_or_kill_draining(child, reader, grace, Duration::from_secs(2)).await;
     out
 }
 
@@ -220,7 +234,7 @@ pub async fn detect(home: &Path) -> Found {
     let at = |n: &str| cli.resolve(n).ok();
     let claude = async { let p = at("claude")?; let v = version(&p).await;
         let out = ask(&p, &["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"], &[r#"{"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}"#],
-            |l| l.contains("\"control_response\""), Duration::from_secs(30)).await;
+            |l| l.contains("\"control_response\""), Duration::from_secs(30), Duration::from_secs(15)).await;
         let api = match super::claude_usage::default_dir() { Some(d) => super::claude_usage::api_models(&d, &super::claude_usage::curl_models()).await, None => Value::Null };
         Some((v, claude_extend(claude_listed(&out), &api))) };
     let codex = async { let p = at("codex")?; let v = version(&p).await; Some((v, std::fs::read_to_string(codex_cache_path()).unwrap_or_default())) };
@@ -228,7 +242,7 @@ pub async fn detect(home: &Path) -> Found {
     let muse = async { let p = at("muse")?; let v = version(&p).await;
         let out = ask(&p, &["serve", "--no-session-log"], &[r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"backplane","version":"1"}}}"#,
             r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#, r#"{"jsonrpc":"2.0","id":2,"method":"model/list","params":{}}"#],
-            |l| l.contains("\"id\":2"), Duration::from_secs(15)).await;
+            |l| l.contains("\"id\":2"), Duration::from_secs(15), Duration::from_secs(2)).await;
         Some((v, muse::catalog(&out))) };
     let oc = async { let p = at("opencode")?; let v = version(&p).await;
         let mut out = match run(&p, &["models"], &[], Duration::from_secs(30)).await {
@@ -372,5 +386,37 @@ mod tests {
         let f = Found { codex: Some(("codex 1".into(), r#"{"models":[{"slug":"g","visibility":"list"}]}"#.into())), claude: Some(("c 2".into(), claude_listed(CLAUDE))), ..Default::default() };
         let v: Value = serde_json::from_str(&info_of(&f)).unwrap(); assert_eq!(v["codex"], json!(["g"])); assert_eq!(v["about"]["codex"]["cli"], "codex 1"); assert_eq!(v["claude"][0], "opus");
         let i = info_of(&f); assert_eq!(cache_read(&cache_text(&i)).as_deref(), Some(i.as_str())); assert_eq!(cache_read("{}\n"), None); assert_eq!(cache_read(""), None);
+    }
+    #[cfg(unix)] #[tokio::test] async fn ask_waits_for_graceful_exit_before_killing() {
+        use crate::plat::fs::PermissionsExt as _;
+        let dir = crate::plat::tmp::dir("probe-grace");
+        let prog = dir.join("claude");
+        let marker = dir.join("refresh.done");
+        let pidf = dir.join("hang.pid");
+        let clean = format!("#!/bin/sh\nread line\necho '{{\"type\":\"control_response\",\"response\":{{\"request_id\":\"models\",\"subtype\":\"success\",\"response\":{{\"models\":[{{\"value\":\"opus\"}}]}}}}}}'\nsleep 0.25\nprintf ok > '{}'\n", marker.display());
+        std::fs::write(&prog, clean).unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = ask(&prog, &[], &["{}"], |l| l.contains("\"control_response\""), Duration::from_secs(10), Duration::from_secs(5)).await;
+        assert_eq!(claude_listed(&out).len(), 1);
+        assert!(marker.exists(), "ask should wait for clean exit after stdin closes");
+
+        let hang = format!("#!/bin/sh\necho $$ > '{}'\nread line\necho '{{\"type\":\"control_response\",\"response\":{{\"request_id\":\"models\",\"subtype\":\"success\",\"response\":{{\"models\":[{{\"value\":\"opus\"}}]}}}}}}'\nexec sleep 30\n", pidf.display());
+        std::fs::write(&prog, hang).unwrap();
+        let t0 = std::time::Instant::now();
+        let out = ask(&prog, &[], &["{}"], |l| l.contains("\"control_response\""), Duration::from_secs(10), Duration::from_millis(300)).await;
+        assert_eq!(claude_listed(&out).len(), 1);
+        assert!(t0.elapsed() < Duration::from_secs(5), "hung child killed after grace: {:?}", t0.elapsed());
+        let pid: u32 = std::fs::read_to_string(&pidf).unwrap().trim().parse().unwrap();
+        let gone = std::time::Instant::now() + Duration::from_secs(5);
+        while crate::plat::proc::alive(pid) && std::time::Instant::now() < gone { tokio::time::sleep(Duration::from_millis(20)).await }
+        assert!(!crate::plat::proc::alive(pid), "hung child was killed and reaped");
+
+        let timeout_marker = dir.join("timeout-grace.done");
+        let slow = format!("#!/bin/sh\ncat >/dev/null\nsleep 0.15\nprintf ok > '{}'\n", timeout_marker.display());
+        std::fs::write(&prog, slow).unwrap();
+        let out = ask(&prog, &[], &["{}"], |l| l.contains("\"control_response\""), Duration::from_millis(200), Duration::from_secs(5)).await;
+        assert!(out.is_empty());
+        assert!(timeout_marker.exists(), "read timeout still grants grace after stdin closes");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
