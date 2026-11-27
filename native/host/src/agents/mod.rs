@@ -1240,7 +1240,7 @@ impl Actor {
         let bound = { let raw = self.ag.hub.setting(&crate::settings::accounts::binding_key(&th, "claude")).await.unwrap_or_default(); !serde_json::from_str::<Value>(&raw).ok().map_or(String::new(), |b| b["id"].as_str().unwrap_or("").to_string()).is_empty() };
         let isolated = self.person || bound; // an account profile or the person mode runs Claude without the person's own skills and plugins
         let line = { let (text2, cwd2, host, uuid2) = (agent_text.clone(), cwd.clone(), self.ag.host.clone(), uuid.clone()); // Media.claude: images read, `$skill` mentions made real
-            tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &skills::for_model(&ss, "claude", &model), "claude", isolated) } else { text2.clone() }; let imgs = inputs::read_images(&text2); inputs::claude_line_p(&body, &imgs, &uuid2, steer) }).await.unwrap_or_default() };
+            tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &skills::for_model(&ss, "claude", &model), "claude", isolated) } else { text2.clone() }; let imgs = inputs::image_blocks(&text2); inputs::claude_line_blocks(&body, imgs, &uuid2, steer) }).await.unwrap_or_default() };
         let sent = self.live_proc.as_ref().map(|p| p.input.try_send(line));
         if matches!(sent, Some(Ok(()))) { self.cmds = self.cmds.sent(&uuid) } else { self.fail("the agent is not taking input".into(), "input", &hub_id("in", now, 0)).await }
     }
