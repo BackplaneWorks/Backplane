@@ -20,6 +20,7 @@ import glob
 import http.server
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -332,7 +333,18 @@ def main():
                 if "io.tangencylabs.solidcraft" in line or "SolidCraft" in line:
                     wid = line.strip().split()[0]
                     info = subprocess.run(["xwininfo", "-id", wid], env=denv, capture_output=True, text=True, timeout=5).stdout
-                    hits.append({"wid": wid, "line": line.strip(), "viewable": "IsViewable" in info, "info": info})
+                    geo = {}
+                    for l2 in info.splitlines():
+                        l2 = l2.strip()
+                        if l2.startswith("Absolute upper-left X:"):
+                            geo["x"] = int(l2.split(":", 1)[1].strip())
+                        elif l2.startswith("Absolute upper-left Y:"):
+                            geo["y"] = int(l2.split(":", 1)[1].strip())
+                        elif l2.startswith("Width:"):
+                            geo["w"] = int(l2.split(":", 1)[1].strip())
+                        elif l2.startswith("Height:"):
+                            geo["h"] = int(l2.split(":", 1)[1].strip())
+                    hits.append({"wid": wid, "line": line.strip(), "viewable": "IsViewable" in info, "info": info, "geo": geo})
             return hits
 
         phase_marks = {}
@@ -413,13 +425,22 @@ def main():
         time.sleep(2.5)
         key_shot("key_solidcraft_return")
 
-        # 5. Resize GPUI window via i3-msg + split pane drag, then allow 10s for any import toast auto-dismiss before idle flicker window
-        mark_phase("resize")
+        # 5. Stepped resize (15 shrink steps + 15 grow steps via i3-msg) + split-pane drag + settle + rect alignment
+        mark_phase("resize_start")
         i3sock = f"{RUN}/i3.sock"
         subprocess.run(["i3-msg", "-s", i3sock, "floating", "enable"], env=denv, check=False, timeout=5)
-        subprocess.run(["i3-msg", "-s", i3sock, "resize", "set", "1100", "720"], env=denv, check=False, timeout=5)
-        time.sleep(1.5)
+        for step in range(1, 16):
+            rw = W - step * 20
+            rh = H - step * 10
+            subprocess.run(["i3-msg", "-s", i3sock, "resize", "set", str(rw), str(rh)], env=denv, check=False, timeout=5)
+            time.sleep(0.06)
+        time.sleep(0.5)
         key_shot("key_resized")
+        for step in range(14, -1, -1):
+            rw = W - step * 20
+            rh = H - step * 10
+            subprocess.run(["i3-msg", "-s", i3sock, "resize", "set", str(rw), str(rh)], env=denv, check=False, timeout=5)
+            time.sleep(0.06)
         subprocess.run(["i3-msg", "-s", i3sock, "floating", "disable"], env=denv, check=False, timeout=5)
         time.sleep(1.5)
         if "solidcraft:pane" in rects():
@@ -428,9 +449,40 @@ def main():
             subprocess.run(["python3", XIN, "drag", str(vx), str(vy), str(vx - 80), str(vy)], env=denv, check=False, timeout=10)
             time.sleep(0.8)
             subprocess.run(["python3", XIN, "drag", str(vx - 80), str(vy), str(vx), str(vy)], env=denv, check=False, timeout=10)
+        mark_phase("resize_end")
         time.sleep(8.0)
         mark_phase("post_resize_settle")
         time.sleep(2.5)
+        pane_r = rects().get("solidcraft:pane", {})
+        cur_wins = [w for w in x11_solidcraft_windows() if w["viewable"]]
+        align_ok = False
+        shape_info = []
+        if pane_r and cur_wins and all(k in cur_wins[0]["geo"] for k in ("x", "y", "w", "h")):
+            g = cur_wins[0]["geo"]
+            rect_ok = (
+                abs(g["x"] - pane_r["x"]) <= 2
+                and abs(g["y"] - pane_r["y"]) <= 2
+                and abs(g["w"] - pane_r["w"]) <= 2
+                and abs(g["h"] - pane_r["h"]) <= 2
+            )
+            cids = [cur_wins[0]["wid"]]
+            ch = subprocess.run(["xwininfo", "-children", "-id", cur_wins[0]["wid"]], env=denv, capture_output=True, text=True, timeout=5).stdout
+            m_par = re.search(r"Parent window id:\s*(0x[0-9a-fA-F]+)", ch)
+            if m_par:
+                cids.append(m_par.group(1))
+            shape_ok = True
+            for cid in cids:
+                sh = subprocess.run(["xwininfo", "-shape", "-id", cid], env=denv, capture_output=True, text=True, timeout=5).stdout
+                shape_info.append(f"{cid}:{' '.join(sh.split())[:120]}")
+                # If a bounding shape exists, it must not stay clipped smaller than the pane rect after resize settles
+                if "No window shape" not in sh and "No bounding shape" not in sh:
+                    dims = re.findall(r"(\d+)x(\d+)\+-?\d+\+-?\d+", sh)
+                    if dims:
+                        sw, sh_h = int(dims[0][0]), int(dims[0][1])
+                        if sw < pane_r["w"] - 2 or sh_h < pane_r["h"] - 2:
+                            shape_ok = False
+            align_ok = rect_ok and shape_ok
+        log("resize_rect_alignment", align_ok, f"pane={pane_r} x11={cur_wins[0]['geo'] if cur_wins else {}} shape={shape_info}")
 
         # 6. Pop out (detach) and Bring back (reattach) via pane header buttons
         r_now = rects()
@@ -456,27 +508,77 @@ def main():
     finally:
         cleanup()
 
-    # Extract frames from video.mp4 and compute anti-flicker metrics
+    # Extract frames from video.mp4 and compute anti-flicker / resize / flash metrics
     if os.path.isfile(P("video.mp4")):
         subprocess.run(["ffmpeg", "-v", "error", "-i", P("video.mp4"), P("frames/f_%05d.png")], check=False, timeout=120)
     frames = sorted(glob.glob(P("frames/f_*.png")))
-    viewer_box = (int(W * 0.48), int(H * 0.12), int(W * 0.96), int(H * 0.92))
+    viewer_box = (int(W * 0.56), int(H * 0.12), int(W * 0.94), int(H * 0.92))
 
     def pane_img(idx):
         return Image.open(frames[idx]).convert("L").crop(viewer_box)
 
+    def full_img(idx):
+        return Image.open(frames[idx]).convert("L")
+
     def frame_diff(a, b):
         return ImageStat.Stat(ImageChops.difference(a, b)).mean[0]
 
+    # Honest post-startup black-frame check across SolidCraft-visible intervals (excludes pre-map startup)
     black_frames = []
-    if frames and "solidcraft_open" in phase_marks:
-        start_f = min(len(frames) - 1, int((phase_marks["solidcraft_open"] + 2.0) * FPS))
-        end_f = min(len(frames), int((phase_marks.get("kicad_tab", phase_marks["solidcraft_open"] + 4.0)) * FPS))
-        for i in range(start_f, end_f):
-            st = ImageStat.Stat(pane_img(i))
-            if st.mean[0] < 4.0 and st.stddev[0] < 2.0:
-                black_frames.append(i)
-    log("zero_black_frames", len(frames) > 0 and not black_frames, f"checked frames={len(frames)}, black_frames={black_frames[:10]}")
+    checked_spans = []
+    for s_key, off_s, e_key, def_dur in [
+        ("solidcraft_open", 2.0, "kicad_tab", 3.5),
+        ("solidcraft_return", 1.0, "resize_start", 2.5),
+    ]:
+        if frames and s_key in phase_marks:
+            sf = min(len(frames) - 1, max(0, int((phase_marks[s_key] + off_s) * FPS)))
+            ef = min(len(frames), int((phase_marks.get(e_key, phase_marks[s_key] + def_dur)) * FPS))
+            checked_spans.append((sf, ef))
+            for i in range(sf, ef):
+                st = ImageStat.Stat(pane_img(i))
+                if st.mean[0] < 4.0 and st.stddev[0] < 2.0:
+                    black_frames.append(i)
+    log("zero_black_frames", bool(checked_spans) and not black_frames, f"checked_spans={checked_spans} total_frames={len(frames)} black_frames={black_frames[:10]}")
+
+    # Full post-startup single-frame flash check (neighbour-agree criterion)
+    flashes = []
+    if len(frames) > 20 and "files_tab" in phase_marks:
+        s_flash = max(1, int(phase_marks["files_tab"] * FPS))
+        e_flash = len(frames) - 1
+        prev = full_img(s_flash - 1)
+        cur = full_img(s_flash)
+        for i in range(s_flash, e_flash):
+            nxt = full_img(i + 1)
+            dn = frame_diff(prev, nxt)
+            d1 = frame_diff(prev, cur)
+            d2 = frame_diff(cur, nxt)
+            if dn < 1.0 and d1 > 8.0 and d2 > 8.0:
+                flashes.append((i, round(d1, 2), round(d2, 2), round(dn, 2)))
+            prev, cur = cur, nxt
+        log("zero_single_frame_flashes", not flashes, f"checked {s_flash}..{e_flash} flashes={flashes[:10]}")
+
+    # Generate 6-panel resize_contact.png: 3 highest-diff shrink frames + 3 highest-diff grow frames inside [resize_start..resize_end]
+    if frames and "resize_start" in phase_marks and "resize_end" in phase_marks:
+        r_start = max(1, int(phase_marks["resize_start"] * FPS))
+        r_end = min(len(frames) - 1, int(phase_marks["resize_end"] * FPS))
+        if r_end - r_start >= 6:
+            mid = (r_start + r_end) // 2
+            def top3(lo, hi):
+                scored = sorted(((frame_diff(full_img(i - 1), full_img(i)), i) for i in range(lo, hi)), reverse=True)
+                picked = []
+                for _, idx in scored:
+                    if all(abs(idx - p) >= 2 for p in picked):
+                        picked.append(idx)
+                        if len(picked) == 3:
+                            break
+                return sorted(picked) if len(picked) == 3 else [lo + (hi - lo) * k // 3 for k in range(3)]
+            sample_idx = top3(r_start + 1, mid) + top3(mid, r_end)
+            tw, th = 480, 300
+            sheet = Image.new("RGB", (tw * 3, th * 2))
+            for idx_pos, f_i in enumerate(sample_idx):
+                im = Image.open(frames[f_i]).convert("RGB").resize((tw, th), Image.Resampling.BILINEAR)
+                sheet.paste(im, ((idx_pos % 3) * tw, (idx_pos // 3) * th))
+            sheet.save(P("keyframes/resize_contact.png"))
 
     oscillations = []
     if frames and "post_resize_settle" in phase_marks:
