@@ -239,6 +239,7 @@ pub(super) fn body_with_panel(
         },
         "mech" if crate::viewers::solidcraft_pane::mech_tile(v) != Some(id) => missing(light, false),
         "mech" => match &screens.solidcraft {
+            Some(pane) if pane.read(cx).popped => crate::viewers::solidcraft_pane::popped_placeholder(cx, light),
             Some(pane) => pane.clone().into_any_element(),
             _ if screens.attacher.target.is_some() => missing(light, true),
             _ => panestate::view(
