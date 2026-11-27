@@ -31,6 +31,12 @@ pub fn is_mesh(path: &str) -> bool { ends(path, MESH_EXT) }
 pub fn cli_reads(path: &str) -> bool { ends(path, &[".sc", ".solidcraft", ".step", ".stp", ".stl"]) }
 
 pub fn start(hub: &Arc<Hub>) {
+    let home = hub.cfg.home.clone();
+    crate::files::kicad::solidread::set_solidcraft_hook(Box::new(move || {
+        let cli = runtime::cli_path()?;
+        if !crate::copy::on() { let _ = embed::seed_settings(&home); }
+        Some((cli, embed::data_env(&home)))
+    }));
     runtime::start(hub);
     embed::start(hub);
 }
