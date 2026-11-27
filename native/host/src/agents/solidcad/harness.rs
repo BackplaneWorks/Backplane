@@ -100,11 +100,20 @@ pub fn resolve_paths(root: &Path, tool: &str, args: &Value) -> Value {
 pub fn written_paths(tool: &str, args: &Value) -> Vec<String> {
     let s = |v: &Value, k: &str| v.get(k).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string);
     match tool {
-        "save" | "export" => s(args, "path").into_iter().collect(),
-        "screenshot" => s(args, "path").into_iter().collect(),
+        "save" | "export" | "screenshot" => s(args, "path").into_iter().collect(),
         "execute" if matches!(class(tool, args), Class::Write) => args.get("params").and_then(|p| s(p, "path")).into_iter().collect(),
+        // a batch's steps that write: `save` and `export` as steps, and the file commands
+        "batch" => args.get("commands").and_then(Value::as_array).map(|steps| steps.iter().filter(|st| {
+            let c = st.get("command").and_then(Value::as_str).unwrap_or("");
+            matches!(c, "save" | "export" | "screenshot") || matches!(class("execute", st), Class::Write) })
+            .filter_map(|st| st.get("params").and_then(|p| s(p, "path"))).collect()).unwrap_or_default(),
         _ => vec![],
     }
+}
+/// Whether a call writes a file whatever its path (a save with none writes the design's own file).
+pub fn writes_files(tool: &str, args: &Value) -> bool {
+    matches!(class(tool, args), Class::Write) || tool == "batch" && args.get("commands").and_then(Value::as_array).map_or(false, |steps| steps.iter().any(|st| {
+        let c = st.get("command").and_then(Value::as_str).unwrap_or(""); matches!(c, "save" | "export") || matches!(class("execute", st), Class::Write) }))
 }
 
 /// What `inspect_design` and `measure {summary}` say, boiled down: the block every edit's answer carries, so the agent sees what its
@@ -257,6 +266,9 @@ mod tests {
         assert_eq!(written_paths("export", &json!({"path":"/p/a.step"})), vec!["/p/a.step"]);
         assert_eq!(written_paths("execute", &json!({"command":"file.save_as","params":{"path":"/p/a.sc"}})), vec!["/p/a.sc"]);
         assert!(written_paths("execute", &json!({"command":"solid.box","params":{"path":"/p/a.sc"}})).is_empty());
+        let b = json!({"commands":[{"command":"solid.box","params":{"length":1}},{"command":"file.save_as","params":{"path":"/p/b.sc"}},{"command":"export","params":{"path":"/p/b.step"}},{"command":"save","params":{}}]});
+        assert_eq!(written_paths("batch", &b), vec!["/p/b.sc", "/p/b.step"], "a batch's writing steps are snapshotted too");
+        assert!(writes_files("batch", &b) && writes_files("save", &json!({})) && !writes_files("batch", &json!({"commands":[{"command":"solid.box","params":{}}]})) && !writes_files("measure", &json!({})));
     }
 
     fn measured() -> Value { json!({"bodies":[

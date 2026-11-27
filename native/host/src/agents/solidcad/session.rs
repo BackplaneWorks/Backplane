@@ -38,9 +38,14 @@ pub struct Session {
     inner: tokio::sync::Mutex<Inner>,
     /// a changing call whose caller went away before the answer (the turn was interrupted): said once, to the next caller
     interrupted: StdMutex<Option<String>>,
+    /// the child's environment: SolidCraft's own folders under the hub's home (`data_env`), so nothing lands in the person's
+    pub env: Vec<(&'static str, PathBuf)>,
     /// a test's one budget for every call (None: harness::budget)
     pub fixed_budget: Option<Duration>,
 }
+
+/// The turn's snapshot of project files about to be written (`Agents::files_write_guard`): Err refuses the write.
+pub type Guard = dyn Fn(Vec<String>) -> crate::api::Fut<'static, Result<(), String>> + Send + Sync;
 
 /// Set when a changing call starts, cleared when it answers; left set when the caller is dropped mid-call.
 struct InFlight<'a> { slot: &'a StdMutex<Option<String>>, armed: bool }
@@ -49,6 +54,12 @@ impl<'a> InFlight<'a> {
     fn done(mut self) { if self.armed { *self.slot.lock().unwrap() = None } self.armed = false }
 }
 
+/// SolidCraft's settings, control tokens and recovery folder for a child of this hub: under `<home>/solidcraft`, beside the pane's
+/// (solidcraft/embed.rs), machine-local, never the person's own SolidCraft's.
+pub fn data_env(home: &Path) -> Vec<(&'static str, PathBuf)> {
+    let d = home.join("solidcraft");
+    vec![("SOLIDCRAFT_SETTINGS_DIR", d.join("settings")), ("SOLIDCRAFT_CONTROL_DIR", d.join("control")), ("XDG_DATA_HOME", d.join("data"))]
+}
 fn sha(bytes: &[u8]) -> String { use sha2::Digest; hex::encode(&sha2::Sha256::digest(bytes)[..8]) }
 fn now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 fn fail(v: Value) -> (bool, Value) { (false, v) }
@@ -56,7 +67,7 @@ fn fail(v: Value) -> (bool, Value) { (false, v) }
 fn noted(mut v: Value, notes: &[String]) -> Value { if !notes.is_empty() { v["earlier"] = json!(notes) } v }
 
 impl Session {
-    pub fn new(root: PathBuf, dir: PathBuf) -> Session { Session { root, dir, inner: Default::default(), interrupted: Default::default(), fixed_budget: None } }
+    pub fn new(root: PathBuf, dir: PathBuf) -> Session { Session { root, dir, inner: Default::default(), interrupted: Default::default(), env: vec![], fixed_budget: None } }
     fn budget(&self, tool: &str, class: Class) -> Duration { self.fixed_budget.unwrap_or_else(|| h::budget(tool, class)) }
 
     fn index_path(&self) -> PathBuf { self.dir.join("checkpoints.json") }
@@ -103,7 +114,7 @@ impl Session {
         let had = inner.client.take();
         let Some(program) = (seam.cli)() else { return Err("SolidCraft is not installed on this machine yet: open a CAD file in Backplane's viewer (viewer_show) to install it, or put solidcraft-cli on PATH.".into()) };
         let _ = std::fs::create_dir_all(&self.dir);
-        let spawn = Spawn { program, mode: want.clone(), allow: vec![self.root.clone(), self.dir.clone()] };
+        let spawn = Spawn { program, mode: want.clone(), allow: vec![self.root.clone(), self.dir.clone()], env: self.env.clone() };
         let c = Client::start(&spawn, START).await?;
         if let Some(old) = had { if old.mode != want { notes.push(match &want {
             Mode::Bridged { .. } => "SolidCraft is now open on this project: these tools act on the design in its window, and the person sees each change.".to_string(),
@@ -143,7 +154,7 @@ impl Session {
             if stalled { if let Mode::Bridged { .. } = &mode {
                 // the app goes on with the request: ask it to stop, through a server of our own (the stalled one answers nothing)
                 if let Some(program) = (seam.cli)() {
-                    if let Ok(side) = Client::start(&Spawn { program, mode: mode.clone(), allow: vec![self.root.clone()] }, START).await {
+                    if let Ok(side) = Client::start(&Spawn { program, mode: mode.clone(), allow: vec![self.root.clone()], env: self.env.clone() }, START).await {
                         let said = side.call("cancel", &json!({}), self.budget("cancel", Class::Control)).await.map(|r| client::first_text(&r)).unwrap_or_else(|e| client::say(&e));
                         rec.insert("cancel".into(), json!(said)); side.kill();
                     }
@@ -169,9 +180,9 @@ impl Session {
     }
 
     /// One upstream tool call, with everything the harness does around it.
-    pub async fn call(&self, seam: &Seam, tool: &str, args: &Value, guard: &(dyn Fn(Vec<String>) -> crate::api::Fut<'static, Result<(), String>> + Send + Sync)) -> (bool, Value) {
+    pub async fn call(&self, seam: &Seam, tool: &str, args: &Value, guard: &Guard) -> (bool, Value) {
         let args = h::resolve_paths(&self.root, tool, args); let class = h::class(tool, &args);
-        if crate::copy::on() && matches!(class, Class::Write) { return fail(json!({"error": crate::copy::HOME_ONLY})) }
+        if crate::copy::on() && h::writes_files(tool, &args) { return fail(json!({"error": crate::copy::HOME_ONLY})) }
         let mut guard_ = self.inner.lock().await; let inner = &mut *guard_; let mut notes: Vec<String> = vec![];
         if let Some(prev) = self.interrupted.lock().unwrap().take() { notes.push(format!("The earlier {}{prev} call was interrupted before it answered: it may or may not have been applied. Check the design ({}summary) before relying on it.", h::PREFIX, h::PREFIX)) }
         if let Err(e) = self.ensure(seam, inner, &mut notes).await { return fail(json!({"error": e})) }
@@ -234,7 +245,7 @@ impl Session {
     }
 
     /// `solidcraft_checkpoint`
-    pub async fn checkpoint(&self, seam: &Seam, a: &Value) -> (bool, Value) {
+    pub async fn checkpoint(&self, seam: &Seam, a: &Value, guard: &Guard) -> (bool, Value) {
         let action = a.get("action").and_then(Value::as_str).unwrap_or("list");
         let list = |s: &Session| json!(s.checkpoints().iter().rev().map(|c| json!({"id": c.id, "at": c.at, "file": c.file, "note": c.note, "bytes": c.bytes})).collect::<Vec<_>>());
         match action {
@@ -246,6 +257,7 @@ impl Session {
                 let (i, _) = Self::probe(c).await;
                 let Some(p) = i.as_ref().and_then(|i| i.get("path")).and_then(Value::as_str).map(str::to_string) else { return fail(json!({"error": format!("the design has no file yet: {}save {{path}} first, then checkpoint it", h::PREFIX)})) };
                 if i.as_ref().and_then(|i| i.get("dirty")).and_then(Value::as_bool).unwrap_or(false) && !crate::copy::on() {
+                    if Path::new(&p).starts_with(&self.root) { if let Err(why) = guard(vec![p.clone()]).await { return fail(json!({"error": why})) } }
                     match c.call("save", &json!({}), self.budget("save", Class::Write)).await { Ok(r) if !client::is_error(&r) => {}, Ok(r) => return fail(json!({"error": client::first_text(&r)})), Err(e) => return fail(json!({"error": client::say(&e)})) }
                 }
                 inner.design = Some(p.clone());
@@ -255,6 +267,9 @@ impl Session {
             }
             "restore" => {
                 let mut guard_ = self.inner.lock().await; let inner = &mut *guard_;
+                // the file a restore overwrites is a project file like any other: the turn's snapshot first
+                let target = { let all = self.checkpoints(); match a.get("id").and_then(Value::as_u64) { Some(i) => all.iter().find(|c| c.id == i).cloned(), None => all.last().cloned() } };
+                if let Some(t) = &target { if Path::new(&t.file).starts_with(&self.root) { if let Err(why) = guard(vec![t.file.clone()]).await { return fail(json!({"error": why})) } } }
                 let (ck, kept) = match self.restore_file(a.get("id").and_then(Value::as_u64)) { Ok(x) => x, Err(e) => return fail(json!({"error": e})) };
                 let mut notes = vec![];
                 if let Err(e) = self.ensure(seam, inner, &mut notes).await { return fail(json!({"error": e, "restored_file": ck.file})) }

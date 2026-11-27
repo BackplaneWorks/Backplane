@@ -15,6 +15,7 @@ pub const FILES: &[(&str, &str)] = &[
     ("skills/fab-spec/SKILL.md", include_str!("../../../../deploy/skills/fab-spec/SKILL.md")),
     ("skills/kicad-sim/SKILL.md", include_str!("../../../../deploy/skills/kicad-sim/SKILL.md")),
     ("skills/freecad/SKILL.md", include_str!("../../../../deploy/skills/freecad/SKILL.md")),
+    ("skills/solidcraft-cad/SKILL.md", include_str!("../../../../deploy/skills/solidcraft-cad/SKILL.md")),
     ("skills/kicad-ipc/SKILL.md", include_str!("../../../../deploy/skills/kicad-ipc/SKILL.md")),
     ("skills/sendcutsend/SKILL.md", include_str!("../../../../deploy/skills/sendcutsend/SKILL.md")),
     ("skills/sendcutsend/scripts/scs.py", include_str!("../../../../deploy/skills/sendcutsend/scripts/scs.py")),
@@ -118,7 +119,7 @@ mod tests {
         let t0 = std::fs::metadata(d.join("skills/sendcutsend/SKILL.md")).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20)); install(&h).unwrap();
         assert_eq!(std::fs::metadata(d.join("skills/sendcutsend/SKILL.md")).unwrap().modified().unwrap(), t0, "an unchanged file is not rewritten");
-        let l = list(&d); for name in ["backplane-buy", "manufacturing-review", "fab-spec", "kicad-sim", "freecad", "kicad-ipc", "altium", "sendcutsend"] {
+        let l = list(&d); for name in ["backplane-buy", "manufacturing-review", "fab-spec", "kicad-sim", "freecad", "solidcraft-cad", "kicad-ipc", "altium", "sendcutsend"] {
             let (_, trigger, path) = l.iter().find(|s| s.0 == name).expect(name);
             assert!(!trigger.is_empty() && Path::new(path).is_file(), "{name}");
         }

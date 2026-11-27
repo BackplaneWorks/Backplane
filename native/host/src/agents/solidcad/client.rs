@@ -14,7 +14,7 @@ impl Mode {
 
 /// What to run. `program` is `solidcraft-cli`; a test names a stand-in.
 #[derive(Clone, Debug)]
-pub struct Spawn { pub program: PathBuf, pub mode: Mode, pub allow: Vec<PathBuf> }
+pub struct Spawn { pub program: PathBuf, pub mode: Mode, pub allow: Vec<PathBuf>, pub env: Vec<(&'static str, PathBuf)> }
 
 /// The command line after the program (the token never rides here: other users can read a process list).
 pub fn args(s: &Spawn) -> Vec<String> {
@@ -58,7 +58,8 @@ impl Client {
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &s.program);
         c.args(args(s)).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped()).kill_on_drop(true);
         // never a window on the person's screen from the hub's own environment: a headless session draws on a headless GPU device
-        c.env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY");
+        c.env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").env_remove("SOLIDCRAFT_CONTROL_PORT");
+        for (k, v) in &s.env { c.env(k, v); }
         if let Mode::Bridged { token, .. } = &s.mode { c.env("SOLIDCRAFT_CONTROL_TOKEN", token); }
         let mut child = c.spawn().map_err(|e| format!("{} could not be started: {e}", s.program.display()))?;
         let (stdin, stdout, stderr) = (child.stdin.take().ok_or("no stdin")?, child.stdout.take().ok_or("no stdout")?, child.stderr.take().ok_or("no stderr")?);
