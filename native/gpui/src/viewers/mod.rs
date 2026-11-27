@@ -14,6 +14,7 @@ pub mod downloads;
 pub mod layers;
 pub mod native_child;
 pub mod kicad_pane;
+pub mod solidcraft_pane;
 pub mod raster;
 pub mod solid;
 #[cfg(target_os = "linux")]

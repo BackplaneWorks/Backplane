@@ -197,7 +197,8 @@ pub(crate) fn page(app: &mut Backplane, cx: &mut Context<Backplane>, light: bool
         let header = super::tile_menu::decorate(cx,light,thread,row,false,&app.screens.tile_menu,header);
         let body = if let Some(reason) = row["error"].as_str() {
             panestate::view(light, &PaneState::error(trs(reason),false),None)
-        } else if let Some(reason) = row["empty"].as_str() {
+        } else if kind != "mech" && row["empty"].is_string() {
+            let reason = row["empty"].as_str().unwrap_or_default();
             panestate::view(light,&PaneState::empty(trs(reason),trs(row["emptyNext"].as_str().unwrap_or_default())),None)
         } else if matches!(kind, "board" | "schematic" | "gerbers") {
             let slot = app.screens.plots.tile_slot(id);

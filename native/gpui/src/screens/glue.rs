@@ -278,6 +278,7 @@ impl Backplane {
         super::histbar::follow_focus(self);
         super::filesui::sync(self, cx);
         self.browser_page(cx);
+        self.solidcraft_sync(cx);
         // a form or a room page opened: its first field takes the keys; closed: back to the composer
         let open = super::bots::focus_target(&self.data);
         if open != self.screens.bots_open { self.screens.bots_open = open.clone(); if open.is_empty() { self.want_focus = true; } else { self.screens.focus_field = Some(open); } }
@@ -297,8 +298,16 @@ impl Backplane {
     }
 
     fn sync_tile_solids(&mut self, cx: &mut Context<Self>) {
+        let mech_tiles: std::collections::HashSet<String> = self.data["thread"]["viewer"]["tiles"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter(|(_, row)| row["kind"] == "mech")
+            .map(|(id, _)| id.clone())
+            .collect();
         let screens = &mut self.screens;
-        let wanted: std::collections::HashMap<_, _> = screens.plots.tiles.values().filter_map(|tile| {
+        let wanted: std::collections::HashMap<_, _> = screens.plots.tiles.iter().filter_map(|(id, tile)| {
+            if mech_tiles.contains(id) { return None; }
             let key = tile.keys.iter().find(|k| crate::viewers::solid::is_solid_key(k))?;
             Some((tile.slot, key.clone()))
         }).collect();
@@ -356,7 +365,7 @@ impl Backplane {
         let viewer = &thread["viewer"];
         let source = match viewer["open"].as_str() {
             Some("split") => viewer["panes"][2]["key"].as_str(),
-            Some("3d" | "mech") => viewer["key"].as_str(),
+            Some("3d") => viewer["key"].as_str(),
             _ => None,
         };
         let slot = source.filter(|s| !s.is_empty() && !thread["diff"].is_object()).map(str::to_owned);
