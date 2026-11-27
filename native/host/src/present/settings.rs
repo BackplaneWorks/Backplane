@@ -787,6 +787,7 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
     v.extend([
         row("KiCad over its API", "Lets agents edit a board in a running KiCad. Off uses the files only.", chips(&["on", "off"], set(st, "kicad.ipc", "on"), "kicad.ipc")),
         row("Plan before routing", "On: before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes a routing plan and routes only what you approve in the Plan panel beside the board. Off: agents route as you ask.", chips(&["on", "off"], onoff(crate::plan::is_on(set(st, crate::plan::SETTING, ""))), crate::plan::SETTING)),
+        row("Mech tab", "Where a mechanical part opens on the desktop: in SolidCraft, to view and edit it, or in Backplane's own 3D viewer, view only and quick. The Mech tab's header switches between them for a while.", { let cur = super::thread::mech_view(st); vec![btn("SolidCraft", "setting", "viewer.mech=solidcraft", cur == "solidcraft"), btn("Backplane's viewer", "setting", "viewer.mech=backplane", cur == "backplane")] }),
         row("Board 3D", "How a board's 3D model is made: natively, the board at once and its parts as they convert, or by kicad-cli, all at the end.", chips(&["native", "kicad-cli"], set(st, "viewer.board3d", "native"), "viewer.board3d")),
     ]);
     let key = super::design_mode::SETTING;
@@ -1538,6 +1539,15 @@ mod tests {
         assert!(r[1]["note"].as_str().unwrap().contains("10.0.7")); assert_eq!(r[1]["fields"][0]["name"], "kpath");
         let s = json!({"rid": 3, "drafts": {"@f.kpath": " /opt/kicad/bin "}}); let o = act("h", &s, "kicad-path", "").unwrap();
         assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"kicad.path","value":"/opt/kicad/bin""#));
+    }
+    /// Settings › CAD › Mech tab: SolidCraft unless Backplane's own viewer is chosen; a press sets `viewer.mech`, which the thread picture carries (`mechView`).
+    #[test] fn the_mech_tab_row_chooses_solidcraft_or_backplanes_viewer() {
+        let mech = |st: &State| cad_with(st, &json!({"drafts": {}}), &json!({}), None, None).into_iter().find(|r| r["label"] == "Mech tab").expect("the row");
+        let r = mech(&st(&[])); assert_eq!((r["buttons"][0]["label"].as_str(), r["buttons"][0]["on"].as_bool()), (Some("SolidCraft"), Some(true)));
+        assert_eq!((r["buttons"][1]["value"].as_str(), r["buttons"][1]["on"].as_bool()), (Some("viewer.mech=backplane"), Some(false)));
+        let b = st(&[("viewer.mech", "backplane")]); assert_eq!(mech(&b)["buttons"][1]["on"], true);
+        assert_eq!((super::super::thread::mech_view(&st(&[])), super::super::thread::mech_view(&b)), ("solidcraft", "backplane"));
+        let o = act("h", &json!({"rid": 3}), "setting", "viewer.mech=backplane").unwrap(); assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"viewer.mech","value":"backplane""#));
     }
     fn cad_rows(info: Value, drafts: Value, pkg: Option<&crate::files::kicad::install::Package>) -> Vec<Value> {
         let r = cad_with(&st(&[]), &json!({"drafts": drafts}), &info, pkg, None); r

@@ -5035,6 +5035,15 @@ gpui.c.solidcraft.full.tip	Expand SolidCraft to fill the window (Esc to restore)
 gpui.c.solidcraft.exit.full.tip	Restore the chat and sidebar (Esc)	チャットとサイドバーを元に戻す（Esc）	Restaura el chat y la barra lateral (Esc)
 gpui.c.solidcraft.full.cmd	SolidCraft: Full screen	SolidCraft: 全画面	SolidCraft: Pantalla completa
 gpui.c.solidcraft.exit.full.cmd	SolidCraft: Exit full screen	SolidCraft: 全画面を終了	SolidCraft: Salir de pantalla completa
+gpui.c.mech.view.native	View in Backplane	Backplane で表示	Ver en Backplane
+gpui.c.mech.view.native.tip	Show this part in Backplane's own 3D viewer (view only)	この部品を Backplane の 3D ビューアーで表示（表示のみ）	Mostrar esta pieza en el visor 3D de Backplane (solo ver)
+gpui.c.mech.view.solidcraft.tip	View and edit this part in SolidCraft	この部品を SolidCraft で表示・編集	Ver y editar esta pieza en SolidCraft
+gpui.c.solidcraft.view.native	View directly in Backplane instead	代わりに Backplane で直接表示	Ver directamente en Backplane
+gpui.c.solidcraft.native.always	Always view parts in Backplane (change it in Settings › CAD)	部品を常に Backplane で表示（設定 › CAD で変更）	Ver siempre las piezas en Backplane (se cambia en Ajustes › CAD)
+settings.cad.mech.tab	Mech tab	Mech タブ	Pestaña Mech
+settings.cad.mech.tab.note	Where a mechanical part opens on the desktop: in SolidCraft, to view and edit it, or in Backplane's own 3D viewer, view only and quick. The Mech tab's header switches between them for a while.	デスクトップで機械部品を開く場所：SolidCraft（表示と編集）または Backplane の 3D ビューアー（表示のみ、高速）。Mech タブのヘッダーでしばらくの間切り替えられます。	Dónde se abre una pieza mecánica en el escritorio: en SolidCraft, para verla y editarla, o en el visor 3D de Backplane, solo para ver y más rápido. La cabecera de la pestaña Mech cambia entre ellos por un tiempo.
+settings.cad.mech.solidcraft	SolidCraft	SolidCraft	SolidCraft
+settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Visor de Backplane
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

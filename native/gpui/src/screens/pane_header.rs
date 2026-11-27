@@ -131,6 +131,8 @@ pub enum Press {
     FocusProbe,
     ClearProbe,
     SolidCraftFull,
+    /// Mech: Backplane's own viewer (true) or SolidCraft (false) from now on in this window (viewer::set_mech_native)
+    MechView(bool),
 }
 
 impl Press {
@@ -196,6 +198,7 @@ impl Press {
                 cx.notify();
             }
             Self::SolidCraftFull => this.solidcraft_toggle_full(cx),
+            Self::MechView(native) => { super::viewer::set_mech_native(this, *native); cx.notify(); }
         }
     }
 }
@@ -298,6 +301,7 @@ fn face(light: bool, tool: &Tool, entity: &WeakEntity<Backplane>, press: &Press,
             with_rect(d, || "ui:vs board".into()).into_any_element(), // i18n-ok: physical probe ID
         Press::GerbView(_) => with_rect(d, || "ui:Open in GerbView".into()).into_any_element(), // i18n-ok: physical probe ID
         Press::SolidCraftFull => with_rect(d, || "solidcraft:full".into()).into_any_element(),
+        Press::MechView(native) => { let n = *native; with_rect(d, move || if n { "mech:native".into() } else { "mech:solidcraft".into() }).into_any_element() } // i18n-ok: physical probe ID
         _ => d.into_any_element(),
     }
 }

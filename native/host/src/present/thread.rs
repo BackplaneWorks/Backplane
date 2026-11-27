@@ -541,6 +541,8 @@ pub(crate) fn person_zone(st: &State) -> Option<Rule> {
 /// #1305: the review bar over the message box, while the thread is read-only (`review.ro.<thread>` "1": a review asked, or the person switched it on)
 /// or just after the person switched it off ("0", until their next message): what it says, its one button and the value that button sends
 /// (`thread.review {on}`); null otherwise.
+/// Settings › CAD › Mech tab: "backplane" when set so, else "solidcraft".
+pub fn mech_view(st: &State) -> &'static str { if st.settings.get("viewer.mech").map(String::as_str) == Some("backplane") { "backplane" } else { "solidcraft" } }
 pub fn review_json(st: &State, thread: &str) -> Value { crate::agents::review_mode::bar(st.settings.get(&crate::agents::review_mode::review_key(thread)).map_or("", String::as_str)) }
 
 /// Sbox.asks: the secrets the agents asked for and the person has not answered: `(name, purpose, thread)`, oldest key first.
@@ -749,6 +751,8 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("unanswered".into(), crate::agents::unanswered::picture(st.settings.get(&crate::agents::unanswered::key(thread)).map(String::as_str).unwrap_or(""), running));
     o.insert("order".into(), order_json(st, thread, running));
     o.insert("review".into(), review_json(st, thread));
+    // which viewer the desktop's Mech page uses (Settings › CAD, `viewer.mech`): "solidcraft" (the default) or "backplane", its own 3D viewer
+    o.insert("mechView".into(), json!(mech_view(st)));
     // the messages waiting for the agent, above the composer (session/composer.rs queue_json)
     let (mut queue, queued) = crate::session::composer::queue_json(st.queue.get(thread).map(Vec::as_slice).unwrap_or(&[]), running);
     // and first, a thread elsewhere's messages that have not reached its machine (net/farsend.rs: Sending, Unsent, Refused)
@@ -828,7 +832,7 @@ mod tests {
         let got = as_helper(&got);
         for (k, w) in want.as_object().unwrap() { if k == "picker" { assert_eq!(&super::super::keys::as_helper(&got[k]), w); continue } assert_eq!(got.get(k), Some(w), "key {k}"); }
         // the Allowance chip's text (keys.rs `allowance`), the one chip (`combo`), the picker's other agents (`pickerAgents`) and the header's project (`project`) are Backplane's own: the recorded helper reply has no such keys
-        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView" | "planOnce" | "planMode" | "review" | "unanswered")).count(), want.as_object().unwrap().len());
+        assert_eq!(got.as_object().unwrap().keys().filter(|k| !matches!(k.as_str(), "allowance" | "combo" | "pickerAgents" | "secretBox" | "commands" | "project" | "subView" | "planOnce" | "planMode" | "review" | "unanswered" | "mechView")).count(), want.as_object().unwrap().len());
     }
     // Diff opened on thread A leaves the session's panel on; a view of thread B (the + makes it and goes there) is accepted, not refused as an unported page
     #[test] fn a_view_of_another_thread_after_diff_on_one_is_accepted() {
