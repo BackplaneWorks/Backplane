@@ -852,6 +852,8 @@ pub struct Window {
     pub(crate) focus_lost_listeners: SubscriberSet<(), AnyObserver>,
     /// Backplane patch: called after every frame is drawn, with that frame as `rendered_frame` (native child windows follow the layout from here).
     pub(crate) frame_drawn_listeners: Rc<RefCell<Vec<Box<dyn FnMut(&mut Window, &mut App) -> bool>>>>,
+    /// Backplane patch: one-shot callbacks invoked immediately after `present()` and `flush_present()`.
+    pub(crate) frame_presented_callbacks: Rc<RefCell<Vec<Box<dyn FnOnce(&mut Window, &mut App)>>>>,
     default_prevented: bool,
     mouse_position: Point<Pixels>,
     mouse_hit_test: HitTest,
@@ -1049,6 +1051,7 @@ impl Window {
                             .update(&mut cx, |_, window, cx| {
                                 let arena_clear_needed = window.draw(cx);
                                 window.present();
+                                window.run_after_present(cx);
                                 // drop the arena elements after present to reduce latency
                                 arena_clear_needed.clear();
                             })
@@ -1236,6 +1239,7 @@ impl Window {
             focus_listeners: SubscriberSet::new(),
             focus_lost_listeners: SubscriberSet::new(),
             frame_drawn_listeners: Rc::default(),
+            frame_presented_callbacks: Rc::default(),
             default_prevented: true,
             mouse_position,
             mouse_hit_test: HitTest::default(),
@@ -1657,6 +1661,11 @@ impl Window {
         self.frame_drawn_listeners.borrow_mut().push(Box::new(listener));
     }
 
+    /// Backplane patch: run `callback` once immediately after the current frame is presented (and GPU/X11 present is flushed).
+    pub fn after_present(&self, callback: impl FnOnce(&mut Window, &mut App) + 'static) {
+        self.frame_presented_callbacks.borrow_mut().push(Box::new(callback));
+    }
+
     /// Backplane patch: in the frame last drawn, the visible bounds of the hitbox `id` (its bounds within its content mask) and the visible
     /// bounds of every hitbox inserted after it that overlaps those (what was painted over it: a popover, a menu, a dialog). None when the
     /// frame has no such hitbox (the element was not drawn).
@@ -2055,6 +2064,17 @@ impl Window {
         frame_time("present", t0);
         self.needs_present.set(false);
         profiling::finish_frame!();
+    }
+
+    fn run_after_present(&mut self, cx: &mut App) {
+        let callbacks = mem::take(&mut *self.frame_presented_callbacks.borrow_mut());
+        if callbacks.is_empty() {
+            return;
+        }
+        self.platform_window.flush_present();
+        for cb in callbacks {
+            cb(self, cx);
+        }
     }
 
     fn draw_roots(&mut self, cx: &mut App) {

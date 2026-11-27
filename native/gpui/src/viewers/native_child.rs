@@ -830,13 +830,24 @@ mod imp {
         if depth == 0 { return }
         for k in c.query_tree(w).ok().and_then(|r| r.reply().ok()).map(|t| t.children).unwrap_or_default() { keep_pixels(c, k, depth - 1); }
     }
-    pub fn place(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, last_root: &mut (i32, i32)) {
+    fn place_impl(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, shape_keep: Option<Option<&[R]>>, last_root: &mut (i32, i32)) {
         let container = container as u32;
         let show = show.map(|x| x as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let Some(r) = r.and_then(super::sane_rect) else { let _ = c.unmap_window(container); let _ = c.flush(); return };
         let (w, h) = (r.w.max(1) as u32, r.h.max(1) as u32);
         let _ = c.configure_window(container, &ConfigureWindowAux::new().x(r.x).y(r.y).width(w).height(h));
+        if let Some(keep) = shape_keep {
+            match keep {
+                Some(k) => {
+                    let rs: Vec<Rectangle> = k.iter().map(|r| Rectangle { x: r.x as i16, y: r.y as i16, width: r.w.max(0) as u16, height: r.h.max(0) as u16 }).collect();
+                    let _ = c.shape_rectangles(shape::SO::SET, shape::SK::BOUNDING, ClipOrdering::UNSORTED, container, 0, 0, &rs);
+                }
+                None => {
+                    let _ = c.shape_mask(shape::SO::SET, shape::SK::BOUNDING, container, 0, 0, x11rb::NONE);
+                }
+            }
+        }
         if let Some(t) = c.query_tree(container).ok().and_then(|q| q.reply().ok()) {
             for k in t.children {
                 if c.get_window_attributes(k).ok().and_then(|q| q.reply().ok()).map_or(false, |a| a.override_redirect) {
@@ -862,6 +873,13 @@ mod imp {
             }
         }
         let _ = c.flush();
+    }
+    pub fn place(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, last_root: &mut (i32, i32)) {
+        place_impl(container, r, show, managed, None, last_root);
+    }
+    /// Configure `container` and apply its XShape `keep` mask in the same X11 request batch before flushing.
+    pub fn place_shaped_x11(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, keep: Option<&[R]>, last_root: &mut (i32, i32)) {
+        place_impl(container, r, show, managed, Some(keep), last_root);
     }
 
     /// Re-check the container's root coordinates and `show`'s geometry (e.g. on a pure WM top-level move, or right after GTK's deferred
@@ -2898,6 +2916,17 @@ mod imp {
 }
 
 pub use imp::*;
+
+#[cfg(target_os = "linux")]
+pub fn place_shaped(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, keep: Option<&[R]>, last_root: &mut (i32, i32)) {
+    imp::place_shaped_x11(container, r, show, managed, keep, last_root);
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn place_shaped(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, keep: Option<&[R]>, last_root: &mut (i32, i32)) {
+    place(container, r, show, managed, last_root);
+    holes(container, keep);
+}
 
 #[cfg(test)]
 mod tests {
