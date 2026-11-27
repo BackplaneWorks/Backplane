@@ -305,13 +305,12 @@ def main():
                             r[item["id"]] = item
             return r
 
-        def ctrls():
-            c = {}
+        def latest_probes():
+            r = {}
             for m in metrics():
-                if m.get("event") == "controls":
-                    for item in m.get("items", []):
-                        c[item.get("id", "")] = item
-            return c
+                if m.get("event") == "probes" and isinstance(m.get("rects"), list):
+                    r = {item["id"]: item for item in m["rects"] if isinstance(item, dict) and "id" in item}
+            return r
 
         def click_rect(key):
             r = rects().get(key)
@@ -494,29 +493,51 @@ def main():
                 time.sleep(0.05)
             return samples
 
-        r_now = rects()
+        r_now = latest_probes()
         detach_rect = next((k for k in ("solidcraft:detach", "pane-tool:mech:solidcraft-pop") if k in r_now), None)
         if detach_rect and click_rect(detach_rect):
             mark_phase("detached")
             detach_samples = poll_viewable(1.5)
             time.sleep(1.0)
             key_shot("key_detached")
-            r_after_detach = rects()
-            bring_back_clicked = click_rect("solidcraft:bring_back") or click_rect("pane-tool:mech:solidcraft-pop")
+            p_detached = latest_probes()
+            pop_wins = [w for w in x11_solidcraft_windows() if w["viewable"]]
+            pop_geo = pop_wins[0]["geo"] if pop_wins else {}
+            did_popout = (
+                "solidcraft:bring_back" in p_detached
+                and "solidcraft:detach" not in p_detached
+                and pop_geo.get("w", 0) > pane_r.get("w", 0) + 100
+            )
+            # Click Bring back on SolidCraftWindow's own top-right header bar directly above the child window
+            bring_back_clicked = False
+            if all(k in pop_geo for k in ("x", "y", "w")):
+                bx = int(pop_geo["x"] + pop_geo["w"] - 48)
+                by = int(max(8, pop_geo["y"] - 16))
+                subprocess.run(["python3", XIN, "click", str(bx), str(by)], env=denv, check=False, timeout=10)
+                bring_back_clicked = True
             mark_phase("reattached")
             reattach_samples = poll_viewable(1.5)
             time.sleep(1.0)
             key_shot("key_reattached")
+            p_reattached = latest_probes()
+            re_wins = [w for w in x11_solidcraft_windows() if w["viewable"]]
+            re_geo = re_wins[0]["geo"] if re_wins else {}
             unmapped_detach = detach_samples.count(False)
             unmapped_reattach = reattach_samples.count(False)
             reattached_ok = (
-                bring_back_clicked
-                and any(w["viewable"] for w in x11_solidcraft_windows())
-                and "solidcraft:detach" in rects()
+                did_popout
+                and bring_back_clicked
+                and "solidcraft:detach" in p_reattached
+                and "solidcraft:bring_back" not in p_reattached
+                and abs(re_geo.get("w", -1) - pane_r.get("w", 0)) <= 2
                 and unmapped_detach == 0
                 and unmapped_reattach == 0
             )
-            log("solidcraft_detach_reattach", reattached_ok, f"detached_via={detach_rect} bring_back={bring_back_clicked} unmapped=(detach:{unmapped_detach}/{len(detach_samples)}, reattach:{unmapped_reattach}/{len(reattach_samples)})")
+            log(
+                "solidcraft_detach_reattach",
+                reattached_ok,
+                f"popout={did_popout} pop_w={pop_geo.get('w')} re_w={re_geo.get('w')} unmapped=(detach:{unmapped_detach}/{len(detach_samples)}, reattach:{unmapped_reattach}/{len(reattach_samples)})",
+            )
 
         # Stop recording cleanly so mp4 finalizes
         try:
