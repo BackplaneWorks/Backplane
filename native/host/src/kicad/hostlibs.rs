@@ -13,7 +13,9 @@
 //! is not inherited, so what KiCad starts (a browser, a Python) runs as it does today.
 //!
 //! Anything unexpected (another wrapper, an older glibc here, a library that does not resolve) leaves the runtime's own wrapper in use.
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
 
 /// glibc's own libraries: always the computer's in the view.
 const GLIBC: &[&str] = &["libc.so.6", "libm.so.6", "libmvec.so.1", "libresolv.so.2", "libpthread.so.0", "libdl.so.2", "librt.so.1", "libutil.so.1", "libanl.so.1", "libnsl.so.1", "libthread_db.so.1", "libBrokenLocale.so.1", "libc_malloc_debug.so.0"];
@@ -77,10 +79,46 @@ fn host_stdcxx() -> Option<PathBuf> {
     [format!("/usr/lib/{arch}/libstdc++.so.6"), format!("/lib/{arch}/libstdc++.so.6"), "/usr/lib64/libstdc++.so.6".into(), "/usr/lib/libstdc++.so.6".into()].into_iter().map(PathBuf::from).find(|p| p.is_file())
 }
 
+fn cache_map() -> &'static Mutex<HashMap<(PathBuf, PathBuf), (u64, u128, PathBuf)>> {
+    static CACHE: OnceLock<Mutex<HashMap<(PathBuf, PathBuf), (u64, u128, PathBuf)>>> = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn wrapper_stamp(root: &Path) -> Option<(u64, u128)> {
+    let meta = std::fs::metadata(root.join("bin").join("kicad")).ok()?;
+    let mtime = meta.modified().ok()?.duration_since(std::time::UNIX_EPOCH).ok()?.as_nanos();
+    Some((meta.len(), mtime))
+}
+
+/// Clear cached `gui_program` wrapper paths (e.g., when a runtime directory is reinstalled).
+pub fn clear_cache() {
+    cache_map().lock().unwrap_or_else(|e| e.into_inner()).clear();
+}
+
 /// The program to start instead of `<root>/bin/kicad`: the wrapper's copy in the view (made or refreshed here), or None to start the
 /// runtime's own. `cache`: a folder of the hub's to keep views in (one per runtime version).
 pub fn gui_program(root: &Path, cache: &Path) -> Option<PathBuf> {
     if !cfg!(target_os = "linux") || std::env::var("BACKPLANE_KICAD_HOSTLIBS").is_ok_and(|v| v == "0") { return None }
+    let key = (root.to_path_buf(), cache.to_path_buf());
+    let stamp = wrapper_stamp(root);
+    if let Some((len, mtime)) = stamp {
+        let guard = cache_map().lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((c_len, c_mtime, prog)) = guard.get(&key) {
+            if *c_len == len && *c_mtime == mtime && prog.is_file() {
+                return Some(prog.clone());
+            }
+        }
+    }
+    let res = gui_program_uncached(root, cache);
+    if let (Some(prog), Some((len, mtime))) = (&res, stamp.or_else(|| wrapper_stamp(root))) {
+        cache_map().lock().unwrap_or_else(|e| e.into_inner()).insert(key, (len, mtime, prog.clone()));
+    } else {
+        cache_map().lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+    }
+    res
+}
+
+fn gui_program_uncached(root: &Path, cache: &Path) -> Option<PathBuf> {
     let lib = root.join("lib");
     let bundled = highest_in(&lib.join("libc.so.6"), "GLIBC_2.")?; // a runtime with no glibc of its own already runs on the computer's
     let loader = host_loader()?;
@@ -140,5 +178,29 @@ mod tests {
         assert!(t.contains("root='/opt/it'\\''s/rt'\n") && t.contains("program=kicad\n") && t.contains("export KICAD_KIFACE_HOME=\"$root/bin\"\n"), "{t}");
         assert!(t.ends_with("exec '/lib64/ld-linux-x86-64.so.2' --library-path '/c/v/lib' \"$root/bin/$program.real\" \"$@\"\n"), "{t}");
         assert!(rewrap("#!/bin/sh\nexec /usr/bin/kicad \"$@\"\n", "/r", "/l", "/v").is_none(), "another wrapper is used as it is");
+    }
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn gui_program_uses_in_memory_cache_and_respects_disable_flag() {
+        if std::env::var("BACKPLANE_KICAD_HOSTLIBS").is_ok_and(|v| v == "0") { return }
+        let dir = crate::plat::tmp::dir("hostlibs-cache");
+        let root = dir.join("10.99.0-bp.test");
+        let bin = root.join("bin");
+        let cache = dir.join("cache");
+        let view = cache.join("10.99.0-bp.test");
+        let prog = view.join("kicad");
+        std::fs::create_dir_all(&bin).unwrap();
+        std::fs::create_dir_all(&view).unwrap();
+        let wrapper = bin.join("kicad");
+        std::fs::write(&wrapper, "#!/bin/sh\necho orig\n").unwrap();
+        std::fs::write(&prog, "#!/bin/sh\n").unwrap();
+        let (len, mtime) = wrapper_stamp(&root).unwrap();
+        let key = (root.clone(), cache.clone());
+        cache_map().lock().unwrap().insert(key.clone(), (len, mtime, prog.clone()));
+        assert_eq!(gui_program(&root, &cache), Some(prog));
+        // Updating the wrapper changes len/mtime so the cache entry is invalidated cleanly (misses because no bundled libc.so.6).
+        std::fs::write(&wrapper, "#!/bin/sh\necho updated-wrapper\n").unwrap();
+        assert_eq!(gui_program(&root, &cache), None);
+        assert!(!cache_map().lock().unwrap().contains_key(&key), "None must not stay cached");
     }
 }
