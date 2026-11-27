@@ -72,6 +72,16 @@ pub fn resolve_file_path(root: &str, file: &str) -> String {
     format!("{r}/{rel}")
 }
 
+/// Extract normalized project-relative path from an absolute path under `root`.
+pub fn new_part_rel(root: &str, file: &str) -> String {
+    let r = norm_path(root);
+    let f = norm_path(file);
+    f.strip_prefix(&r)
+        .map(|s| s.trim_start_matches(['/', '\\']).to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or(f)
+}
+
 /// Extract `(root, resolved_file)` for the Mech/CAD viewer from the thread and project list.
 /// Returns `None` only when no project root can be determined.
 pub fn mech_target(data: &Value, thread: &Value) -> Option<(String, String)> {
@@ -346,6 +356,8 @@ pub struct SolidCraftPane {
     at_px: Option<Bounds<Pixels>>,
     ticking: bool,
     adopt_started: Option<Instant>,
+    create_on_attach: bool,
+    awaiting_created: bool,
 }
 
 impl EventEmitter<SolidCraftEvent> for SolidCraftPane {}
@@ -384,6 +396,8 @@ impl SolidCraftPane {
             at_px: None,
             ticking: false,
             adopt_started: None,
+            create_on_attach: false,
+            awaiting_created: false,
         }
     }
 
@@ -483,11 +497,49 @@ impl SolidCraftPane {
             nc::told_reset();
         }
         self.info = info;
+        if self.info["state"].as_str() == Some("ready") {
+            if self.awaiting_created {
+                if let Some(f) = self.info["file"].as_str().filter(|s| !s.is_empty()) {
+                    let nf = norm_path(f);
+                    if nf != norm_path(&self.file) {
+                        self.file = nf.clone();
+                        self.sent_file = nf;
+                        self.awaiting_created = false;
+                    }
+                }
+            }
+            if std::mem::take(&mut self.create_on_attach) {
+                self.create_new_part(cx);
+            }
+        }
         if matches!(
             self.info["state"].as_str(),
             Some("ready" | "starting")
         ) {
             self.sync_open_file();
+        }
+        cx.notify();
+    }
+
+    pub fn create_new_part(&mut self, cx: &mut Context<Self>) {
+        match self.info["state"].as_str() {
+            Some("ready") => {
+                self.create_on_attach = false;
+                self.awaiting_created = true;
+                self.rpc(
+                    "editor.solidcraft.open",
+                    json!({"project": self.root, "create": true}),
+                );
+            }
+            Some("starting") => {
+                self.create_on_attach = true;
+            }
+            _ => {
+                self.create_on_attach = true;
+                if self.container.is_some() {
+                    self.reattach();
+                }
+            }
         }
         cx.notify();
     }
@@ -537,21 +589,29 @@ impl SolidCraftPane {
             .at_px
             .map(|b| (f32::from(b.size.width).round() as i32, f32::from(b.size.height).round() as i32))
             .unwrap_or((nc::INIT_CONTAINER_W, nc::INIT_CONTAINER_H));
-        self.sent_file = self.file.clone();
-        self.rpc(
-            "editor.solidcraft.attach",
-            json!({
-                "project": self.root,
-                "root": self.root,
-                "file": self.file,
-                "container": c,
-                "toplevel": self.toplevel,
-                "display": display,
-                "width": w.max(100),
-                "height": h.max(100),
-                "theme": if self.light { "light" } else { "dark" },
-            }),
-        );
+        let create = std::mem::take(&mut self.create_on_attach);
+        let file = if create {
+            self.awaiting_created = true;
+            String::new()
+        } else {
+            self.file.clone()
+        };
+        self.sent_file = file.clone();
+        let mut params = json!({
+            "project": self.root,
+            "root": self.root,
+            "file": file,
+            "container": c,
+            "toplevel": self.toplevel,
+            "display": display,
+            "width": w.max(100),
+            "height": h.max(100),
+            "theme": if self.light { "light" } else { "dark" },
+        });
+        if create {
+            params["create"] = json!(true);
+        }
+        self.rpc("editor.solidcraft.attach", params);
     }
 
     pub fn rehome(&mut self, new_top: u64) {
@@ -1373,7 +1433,17 @@ impl Backplane {
         }
         if let Some(p) = self.screens.solidcraft.clone() {
             if p.read(cx).matches(&v) {
+                let sync_part = p.read(cx).awaiting_created
+                    && v["state"].as_str() == Some("ready")
+                    && v["file"]
+                        .as_str()
+                        .is_some_and(|f| !f.is_empty() && norm_path(f) != norm_path(&p.read(cx).file));
+                let created_rel = sync_part
+                    .then(|| new_part_rel(&p.read(cx).root, v["file"].as_str().unwrap_or("")));
                 p.update(cx, |p, cx| p.set_info(v, cx));
+                if let Some(rel) = created_rel.filter(|r| !r.is_empty()) {
+                    let _ = self.tx.try_send(Command::Action("mech-part".into(), rel));
+                }
             }
         }
         cx.notify();
@@ -1387,6 +1457,9 @@ impl Backplane {
                 if method == "editor.solidcraft.attach" || method == "editor.solidcraft.install" {
                     let info = json!({"state": "failed", "reason": msg, "root": p.read(cx).root});
                     p.update(cx, |p, cx| p.set_info(info, cx));
+                } else if method == "editor.solidcraft.open" {
+                    p.update(cx, |p, _| p.awaiting_created = false);
+                    self.note = msg;
                 }
             }
             cx.notify();
@@ -1400,7 +1473,24 @@ impl Backplane {
         if info["state"].is_string() {
             if let Some(p) = self.screens.solidcraft.clone() {
                 if p.read(cx).matches(&info) {
-                    p.update(cx, |p, cx| p.set_info(info, cx));
+                    let created_file = (p.read(cx).awaiting_created
+                        && matches!(method.as_str(), "editor.solidcraft.open" | "editor.solidcraft.attach"))
+                    .then(|| info["file"].as_str().unwrap_or("").to_string())
+                    .filter(|f| !f.is_empty());
+                    let rel = created_file
+                        .as_deref()
+                        .map(|f| new_part_rel(&p.read(cx).root, f));
+                    p.update(cx, |p, cx| {
+                        if let Some(ref f) = created_file {
+                            p.file = norm_path(f);
+                            p.sent_file = p.file.clone();
+                            p.awaiting_created = false;
+                        }
+                        p.set_info(info, cx);
+                    });
+                    if let Some(rel) = rel.filter(|r| !r.is_empty()) {
+                        let _ = self.tx.try_send(Command::Action("mech-part".into(), rel));
+                    }
                 }
             }
         }
@@ -1440,10 +1530,13 @@ impl Backplane {
         file: String,
         cx: &mut Context<Self>,
     ) -> Entity<SolidCraftPane> {
+        let create = std::mem::take(&mut self.screens.solidcraft_create_next);
         if let Some(existing) = self.screens.solidcraft.clone() {
             let same_root = norm_path(&existing.read(cx).root) == norm_path(&root);
             if same_root {
-                if !file.is_empty() {
+                if create {
+                    existing.update(cx, |p, cx| p.create_new_part(cx));
+                } else if !file.is_empty() {
                     existing.update(cx, |p, cx| p.open_file(&file, cx));
                 }
                 return existing;
@@ -1457,6 +1550,7 @@ impl Backplane {
         let page = cx.new(move |cx| {
             let mut p = SolidCraftPane::new(cx, root, project_id, file, hub);
             p.light = light;
+            p.create_on_attach = create;
             if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() {
                 p.info = v;
             } else if let Some(rt) = infos.get("solidcraft.runtime").cloned() {
@@ -1525,6 +1619,20 @@ impl Backplane {
         if let Some(pane) = self.screens.solidcraft.clone() {
             pane.update(cx, |p, _| p.lend_focus());
         }
+    }
+
+    pub(crate) fn solidcraft_new_part(&mut self, cx: &mut Context<Self>) {
+        let on_mech = self.data["thread"]["viewer"]["open"] == "mech"
+            || (crate::screens::viewer::is_tiled(&self.data["thread"]["viewer"])
+                && mech_tile(&self.data["thread"]["viewer"]).is_some());
+        if on_mech {
+            if let Some(pane) = self.solidcraft_for(&self.data["thread"], cx) {
+                pane.update(cx, |p, cx| p.create_new_part(cx));
+                return;
+            }
+        }
+        self.screens.solidcraft_create_next = true;
+        self.rail_press("view-kind", "mech", cx);
     }
 
     pub(crate) fn solidcraft_popout(&mut self, cx: &mut Context<Self>) {
@@ -1668,6 +1776,13 @@ mod tests {
         assert_eq!(resolve_file_path("/proj/repo/", "/abs/part.sc"), "/abs/part.sc");
         assert_eq!(resolve_file_path("/proj/repo", ""), "");
         assert_eq!(resolve_file_path("", "mech/case.stl"), "mech/case.stl");
+    }
+
+    #[test]
+    fn new_part_rel_strips_project_root_cleanly() {
+        assert_eq!(new_part_rel("/proj", "/proj/mech/part-1.sc"), "mech/part-1.sc");
+        assert_eq!(new_part_rel("/proj/", "/proj/mech/part-2.sc"), "mech/part-2.sc");
+        assert_eq!(new_part_rel("/other", "/abs/part.sc"), "/abs/part.sc");
     }
 
     #[test]

@@ -276,7 +276,8 @@ impl Backplane {
                 kind => self.rail_press("view-kind", kind, cx),
             },
             Do::SolidCraft(act) => match act.as_str() {
-                "open" | "new" => self.rail_press("view-kind", "mech", cx),
+                "open" => self.rail_press("view-kind", "mech", cx),
+                "new" => self.solidcraft_new_part(cx),
                 "detach" => self.solidcraft_popout(cx),
                 "bring_back" => {
                     let h = self.screens.solidcraft_window;
@@ -453,6 +454,7 @@ mod tests {
     }
     #[test] fn solidcraft_palette_commands_follow_embed_and_runtime_state() {
         let local = items(&data(), true);
+        assert_eq!(local.iter().filter(|i| matches!(i.what, Do::SolidCraft(..))).count(), 2);
         assert!(local.iter().any(|i| i.what == Do::SolidCraft("open".into())));
         assert!(local.iter().any(|i| i.what == Do::SolidCraft("new".into())));
         let remote = items(&data(), false);
