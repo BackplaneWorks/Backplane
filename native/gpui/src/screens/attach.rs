@@ -189,12 +189,17 @@ pub fn chips(cx: &mut Context<Backplane>, light: bool, previews: &Previews, thre
     let uploading = string(thread, "uploading");
     if items.is_empty() && uploading.is_empty() { return None; }
     let mut row = div().id("att-row").max_h(px(140.)).overflow_y_scroll().flex().flex_wrap().gap_2();
+    // several pictures: each carries its number, the one the agent is told it by (Image 1, Image 2, ...: agents/inputs.rs), in the order attached
+    let pics = items.iter().filter(|it| it["image"].as_bool().unwrap_or(false)).count();
+    let mut pic_n = 0usize;
     for (i, it) in items.iter().enumerate() {
+        let is_pic = it["image"].as_bool().unwrap_or(false); if is_pic { pic_n += 1 }
+        let badge = (is_pic && pics > 1).then(|| super::timeline::number_badge(light, pic_n));
         let (label, path) = (string(it, "label"), string(it, "path"));
         let thumb = previews.get(&label).filter(|_| it["image"].as_bool().unwrap_or(false));
         let mark = match thumb {
-            Some(img) => div().size(px(64.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).child(gpui::img(ImageSource::Image(img)).id(("att-img", i)).size(px(64.)).object_fit(ObjectFit::Contain)).into_any_element(),
-            /* i18n-ok: drawn through trs */ None => div().size(px(40.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).text_size(crate::scale::tpx(10.)).text_color(c("dim")).child(crate::i18n::trs(if it["image"].as_bool().unwrap_or(false) { "IMG" } else { "FILE" })).into_any_element(),
+            Some(img) => div().relative().size(px(64.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).child(gpui::img(ImageSource::Image(img)).id(("att-img", i)).size(px(64.)).object_fit(ObjectFit::Contain)).children(badge).into_any_element(),
+            /* i18n-ok: drawn through trs */ None => div().relative().children(badge).size(px(40.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).text_size(crate::scale::tpx(10.)).text_color(c("dim")).child(crate::i18n::trs(if it["image"].as_bool().unwrap_or(false) { "IMG" } else { "FILE" })).into_any_element(),
         };
         row = row.child(div().id(("att", i)).flex().items_center().gap_2().pr_2().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.))
             .child(mark).child(div().max_w(px(180.)).overflow_hidden().whitespace_nowrap().child(label))

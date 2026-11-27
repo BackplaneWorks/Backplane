@@ -1251,7 +1251,17 @@ fn alert_of(kind: &str) -> (&'static str, &'static str) {
 
 const MAX_IMAGES: usize = 12;
 /// Images a message names: each as its picture when it has arrived, a placeholder while it loads or when it cannot.
+/// The number a picture of several carries in its corner (`n`, from 1): the order it was attached in, the agent's "Image n" (agents/inputs.rs).
+pub fn number_badge(light: bool, n: usize) -> Div {
+    let c = |k: &str| theme::color(light, k);
+    div().absolute().top(px(4.)).left(px(4.)).min_w(px(18.)).h(px(18.)).px_1().flex().items_center().justify_center().rounded(px(9.))
+        .bg(c("accent")).text_color(c("on-accent")).text_size(crate::scale::tpx(11.)).font_weight(FontWeight::BOLD).child(n.to_string())
+}
 pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Option<AnyElement> {
+    images_n(cx, light, list, key, target, imgs, false)
+}
+/// `numbered`: each picture shows its place (a message's attached pictures, when there are several).
+pub fn images_n(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images, numbered: bool) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let items = list.as_array().filter(|a| !a.is_empty())?;
     let mut row = div().flex().flex_wrap().gap_2();
@@ -1274,7 +1284,7 @@ pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str,
             Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.loading", &[("name", name.as_str().into())])).into_any_element(),
             Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(crate::i18n::tf("gpui.timeline.could.not.load", &[("name", name.as_str().into())])).into_any_element(),
         };
-        row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("img-{key}-{i}"))), || format!("img:{name}")).max_w_full().child(el));
+        row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("img-{key}-{i}"))), || format!("img:{name}")).relative().max_w_full().child(el).when(numbered, |d| d.child(number_badge(light, i + 1))));
     }
     if items.len() > MAX_IMAGES { row = row.child(div().px_2().py_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.more.images", &[("n", (items.len() - MAX_IMAGES).into())]))); }
     Some(row.into_any_element())
@@ -1293,7 +1303,8 @@ pub fn attachments(cx: &mut Context<Backplane>, light: bool, list: &Value, key: 
     let c = |n: &str| theme::color(light, n);
     let (pics, files) = split_attachments(list);
     let mut out = Vec::new();
-    if let Some(p) = images(cx, light, &Value::Array(pics), key, target, imgs) { out.push(p); }
+    let numbered = pics.len() > 1; // the agent is told them as Image 1, Image 2, ... in this order
+    if let Some(p) = images_n(cx, light, &Value::Array(pics), key, target, imgs, numbered) { out.push(p); }
     if !files.is_empty() { out.push(div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(f))).into_any_element()); }
     out
 }
