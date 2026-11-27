@@ -52,7 +52,7 @@ pub(crate) fn resolve_selector(sel: &str, tiles: &[Value], splitters: &[Value]) 
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { /** {"clipboard":"text"}: the system clipboard, for a Ctrl+V keystroke after it */ Clipboard(String), /** Escape, as the person presses it */ Escape, /** the last frame's painted text, boxes and named divs (BACKPLANE_GPUI_AUDIT=1) */ Audit(String), PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed); "link=<text>" aims at the last message link drawn whose address contains the text, a "right:" prefix presses the right button */ Pointer { id: String, shift: bool, middle: bool }, /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), /** {"tap_mm":[x,y,slot]}: a tap at a board point in millimetres (a part's position from the design file), wherever the view has put it */ TapMm(f32, f32, usize), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { /** {"clipboard":"text"}: the system clipboard, for a Ctrl+V keystroke after it */ Clipboard(String), /** Escape, as the person presses it */ Escape, /** the last frame's painted text, boxes and named divs (BACKPLANE_GPUI_AUDIT=1) */ Audit(String), PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), /** {"solidcraft":{"report":true}}: the embedded SolidCraft pane's report/actions */ SolidCraft(Value), Files(String), /** {"mgmt":"bom:set:mpn=X"}: a management panel's press or edit (screens/mgmt.rs `act`) */ Mgmt(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), /** {"press":id}: the click, not waiting for the hub to answer it (a person watching the window meanwhile: the tab-loading e2e) */ Press(String), /** {"click":id,"within":ms}: the click, retried every 250 ms until the control exists or ms runs out (a view still drawing) */ ClickWithin(String, u64), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), /** {"shot":"<name>","settle":"<kind>"?,"timeout_ms":N?}: wait until settled (if requested) and painted, emit shot-ready, wait for <BACKPLANE_GPUI_SHOT_DIR>/<name>.done */ Shot { name: String, settle: Option<String>, timeout_ms: u64 }, /** {"wait_settled":"<kind>","tag":"<tag>","timeout_ms":N?}: wait until the page settles and emit a `settled` metric with its viewer state */ WaitSettled { kind: String, tag: String, timeout_ms: u64 }, /** {"pointer":"<control id>"}: a real mouse move, down and up at the centre of the control's drawn rect, through the window's own dispatch (no registered control needed); "link=<text>" aims at the last message link drawn whose address contains the text, a "right:" prefix presses the right button */ Pointer { id: String, shift: bool, middle: bool }, /** {"drag":{"splitter":"@splitter"|id,"dx":N,"dy":N,"moves":N}}: a pointer drag on a drawn splitter, along its axis */ Drag(Value), /** {"tap_mm":[x,y,slot]}: a tap at a board point in millimetres (a part's position from the design file), wherever the view has put it */ TapMm(f32, f32, usize), Fit, Unsupported(String) }
 /// Script coordinates use physical window pixels, as do the painted control rectangles.
 #[derive(Clone, Debug)]
 pub struct Drag { to: [f32; 2], moves: usize }
@@ -74,7 +74,7 @@ impl Drag {
 
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { /** the composer's model chip: the model menu */ ModelChip, Header(String), /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, ToggleTerminal, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
+pub enum Ctl { /** the composer's model chip: the model menu */ ModelChip, Header(String), /** the composer chip's account menu, and Settings' Accounts page */ AccountMenu, AccountsPage, /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, ToggleTerminal, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** a card's button that sends the hub an action (a halt card's Resume...): `Command::Action` */ Go(String, String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool), /** the editor strip: a tab (its kind), full, popout, popin */ KicadAct(String), /** the SolidCraft pane: install, retry, detach, bring_back, close */ SolidCraftAct(String), /** a management panel's press (screens/mgmt.rs `act`) */ Mgmt(String) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -217,6 +217,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if v["cef"].is_object() { Some(Step::Cef(v["cef"].clone())) }
         else if v["browser"].is_object() { Some(Step::Browser(v["browser"].clone())) }
         else if v["kicad"].is_object() { Some(Step::Kicad(v["kicad"].clone())) }
+        else if v["solidcraft"].is_object() { Some(Step::SolidCraft(v["solidcraft"].clone())) }
         else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
         else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
         else if let Some(a) = v["zoom"].as_array() { Some(Step::Zoom(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_f64).unwrap_or(0.5) as f32)) }
@@ -380,7 +381,8 @@ impl Backplane {
                     let source = ["rel","name"].iter().find_map(|k| identity["source"][k].as_str().filter(|v| !v.is_empty())).unwrap_or("");
                     let frame = match page {
                         "board" | "schematic" | "gerbers" => self.screens.plots[match id { "sch" => 1, "pcb" => 2, _ => 0 }].presented,
-                        "3d" | "mech" => self.screens.active_solid().map_or(0, |s| s.read(cx).painted_count()),
+                        "3d" => self.screens.active_solid().map_or(0, |s| s.read(cx).painted_count()),
+                        "mech" => u64::from(self.screens.solidcraft.as_ref().is_some_and(|p| p.read(cx).child_window().is_some())),
                         _ => 0,
                     };
                     let single = id == "main" && layout["root"]["type"] == "tile" && layout["root"]["kind"] == page;
@@ -791,6 +793,68 @@ impl Backplane {
                     self.pump(cx);
                 }
             }
+            Step::SolidCraft(cmd) => { // {"solidcraft":{"report":true}} | {"wait_ready":25000} | {"open":"..."} | {"action":"..."}
+                let tag = cmd["tag"].as_str().map(String::from);
+                if let Some(ms) = cmd["wait_ready"].as_u64() {
+                    let min_lit = cmd["min_painted"].as_u64().unwrap_or(10);
+                    let t0 = Instant::now();
+                    cx.spawn(async move |this, cx| {
+                        let mut first = true;
+                        loop {
+                            let elapsed = t0.elapsed().as_millis() as u64;
+                            let step_ms = if elapsed < 500 { 25 } else { 120 };
+                            if !first { cx.background_executor().timer(Duration::from_millis(step_ms)).await; }
+                            first = false;
+                            let done = this.update(cx, |t, cx| {
+                                let mut r = match t.screens.solidcraft.clone() {
+                                    Some(p) => p.read(cx).report(),
+                                    None => json!({"ok": false, "error": "no solidcraft pane"}), // i18n-ok: scripted e2e metric
+                                };
+                                let child_ok = r["child"]["xid"].as_u64().unwrap_or(0) != 0
+                                    && r["child"]["painted"].as_u64().unwrap_or(0) >= min_lit;
+                                let ready = r["state"].as_str() == Some("ready"); // i18n-ok: wire state enum
+                                let failed = matches!(r["state"].as_str(), Some("failed" | "stopped")); // i18n-ok: wire state enum
+                                if (ready && child_ok) || failed || t0.elapsed().as_millis() as u64 >= ms {
+                                    r["wait_ms"] = json!(t0.elapsed().as_millis() as u64);
+                                    if let Some(tg) = &tag { r["tag"] = json!(tg); }
+                                    t.m("solidcraft", r);
+                                    t.pump(cx);
+                                    true
+                                } else {
+                                    false
+                                }
+                            }).unwrap_or(true);
+                            if done { break }
+                        }
+                    }).detach();
+                } else {
+                    if let Some(path) = cmd["open"].as_str() {
+                        self.solidcraft_sync(cx);
+                        if let Some(p) = self.screens.solidcraft.clone() {
+                            let path = path.to_string();
+                            p.update(cx, |p, cx| p.open_file(&path, cx));
+                        }
+                    } else if let Some(act) = cmd["action"].as_str() {
+                        match act {
+                            "attach" => self.solidcraft_sync(cx),
+                            "detach" => self.solidcraft_popout(cx),
+                            "bring_back" => {
+                                let h = self.screens.solidcraft_window;
+                                self.solidcraft_bring_back(cx);
+                                if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); }
+                            }
+                            "install" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| p.install(cx)); },
+                            "retry" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| { p.reattach(); cx.notify(); }); },
+                            "close" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| p.close_session(cx)); },
+                            _ => {}
+                        }
+                    }
+                    /* i18n-ok: scripted e2e metric */ let mut r = match self.screens.solidcraft.clone() { Some(p) => p.read(cx).report(), None => json!({"ok": false, "error": "no solidcraft pane"}) };
+                    if let Some(tg) = tag { r["tag"] = json!(tg); }
+                    self.m("solidcraft", r);
+                    self.pump(cx);
+                }
+            }
             Step::Browser(cmd) => { // {"browser":{"op":...}}: the Browser tab's page, embedded or the hub's frames (viewers/browser.rs BrowserPage::script)
                 /* i18n-ok: scripted e2e input and its metrics, not drawn */ match self.screens.browser.as_ref().map(|(_, p)| p.clone()) { Some(p) => { let r = p.update(cx, |b, cx| b.script(&cmd, cx)); self.m("browser", r); } None => self.m("browser", json!({"ok": false, "error": "no Browser page", "op": cmd["op"]})) }
                 self.pump(cx);
@@ -1144,6 +1208,17 @@ impl Backplane {
                 k => { if let Some(p) = self.screens.kicad.clone() { let k = k.to_string(); p.update(cx, |p, cx| p.show_kind_by(&k, "client script (test driver)", cx)); } } } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
                 self.ui_epoch += 1; format!("kicad {a}") } // i18n-ok: an e2e metric
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::KicadEdit(on) => { if *on { let ok = self.kicad_edit(cx); self.ui_epoch += 1; format!("kicad edit {ok}") } else { self.kicad_view(cx); self.ui_epoch += 1; "kicad view".into() } }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::SolidCraftAct(a) => {
+                match a.as_str() {
+                    "install" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| p.install(cx)); },
+                    "retry" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| { p.reattach(); cx.notify(); }); },
+                    "detach" => self.solidcraft_popout(cx),
+                    "bring_back" => { let h = self.screens.solidcraft_window; self.solidcraft_bring_back(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } }
+                    "close" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| p.close_session(cx)); },
+                    _ => {}
+                }
+                /* i18n-ok: scripted e2e metric, not drawn */ self.ui_epoch += 1; format!("solidcraft {a}")
+            }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Node(a, p) => { if a == "open-thread" { self.select_id(p.clone(), cx); return format!("view.action {a}"); } if a == "run-on" { if let Some((pj, to)) = p.split_once('|') { self.screens.projects.picked.insert(pj.to_string(), to.to_string()); } } if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" || crate::screens::tools::makes_thread(&a) { self.arm_new(); } self.go(&a, p.clone(), cx); format!("view.action {a}") }
         }
     }
@@ -1177,7 +1252,7 @@ impl Backplane {
         let th = &self.data["thread"];
         let v = &th["viewer"];
         if let Some(st) = rail_row_state(v, want) { return Some(st); }
-        if crate::screens::viewer::is_tiled(v) && matches!(want, "files" | "review" | "diff" | "browser") {
+        if crate::screens::viewer::is_tiled(v) && matches!(want, "files" | "review" | "diff" | "browser" | "mech") {
             let id = v["layout"]["focus"].as_str()?;
             let row = &v["tiles"][id];
             if row["kind"] != want || !crate::art::ctl_rects().contains_key(&format!("tile-body:{id}")) { return None; }
@@ -1230,9 +1305,7 @@ impl Backplane {
             }
             "mech" => {
                 if diff_on || open != "mech" { return None; }
-                let want_key = v["key"].as_str().unwrap_or("");
-                if want_key.is_empty() { return Some("empty"); }
-                solid_state(want_key)
+                self.screens.solidcraft.as_ref().and_then(|p| p.read(cx).settled())
             }
             "split" => {
                 if diff_on || open != "split" { return None; }

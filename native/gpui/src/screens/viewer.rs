@@ -141,14 +141,14 @@ pub fn mech_parts(viewer: &Value) -> Vec<Part> { arr(&viewer["mech"], "parts").m
 /// The 3D page may be shown only when the model it holds is the source the viewer asks for (`viewer.key`): one page serves every thread, so a
 /// switched thread or a new part waits for its own frame instead of showing the last model.
 pub fn solid_ready(want: &str, have: &str) -> bool { want.is_empty() || want == have }
-/// Whether `view` draws the 3D page for this thread (3D, Mech or Split, the pane open, no diff over it): when not, the page is put away
-/// (SolidPage::put_away: its pictures leave the GPU's atlas).
-pub fn shows_solid(thread: &Value) -> bool { is_open(thread) && !thread["diff"].is_object() && matches!(thread["viewer"]["open"].as_str(), Some("3d" | "mech" | "split")) }
+/// Whether `view` draws the 3D page for this thread (3D or Split, the pane open, no diff over it): when not, the page is put away
+/// (SolidPage::put_away: its pictures leave the GPU's atlas). Desktop Mech uses SolidCraft instead of SolidPage.
+pub fn shows_solid(thread: &Value) -> bool { is_open(thread) && !thread["diff"].is_object() && matches!(thread["viewer"]["open"].as_str(), Some("3d" | "split")) }
 
 /// An agent's viewer_show (`kind`, `path`) as the page to open and, for a model, the part on it: Some((view kind, part)). A kind the viewer has no page for is ignored.
 pub fn shown(kind: &str, path: &str) -> Option<(String, Option<String>)> {
     let l = path.to_ascii_lowercase();
-    let model = [".step", ".stp", ".glb"].iter().any(|e| l.ends_with(e));
+    let model = crate::viewers::solidcraft_pane::is_cad_file(&l);
     let k = match kind { "board" | "pcb" => "board", "schematic" | "sch" => "schematic", "3d" if model => "mech", "3d" => "3d", "mech" | "split" | "browser" | "files" | "review" | "gerbers" => kind,
         "" if l.ends_with(".kicad_pcb") || l.ends_with(".pcbdoc") => "board", "" if l.ends_with(".kicad_sch") || l.ends_with(".schdoc") => "schematic", "" if model => "mech", _ => return None };
     Some((k.to_string(), (k == "mech" && model).then(|| path.to_string())))
@@ -273,10 +273,10 @@ fn mech_header(cx: &mut Context<Backplane>, light: bool, viewer: &Value, pv: &su
 
 /// A row's icon by what it opens as.
 pub fn file_icon(kind: &str) -> &'static str {
-    match kind { "folder" => "folder", "board" => "circuit-board", "schematic" => "cpu", "3d" => "box", "image" => "image", "pdf" => "file-text", _ => "file" }
+    match kind { "folder" => "folder", "board" => "circuit-board", "schematic" => "cpu", "3d" | "mech" | "cad" => "box", "image" => "image", "pdf" => "file-text", _ => "file" }
 }
 /// A file the viewer cannot open (listed only) is drawn dim, as the web does.
-pub fn file_listed_only(kind: &str) -> bool { !matches!(kind, "folder" | "board" | "schematic" | "3d" | "image" | "pdf" | "text") }
+pub fn file_listed_only(kind: &str) -> bool { !matches!(kind, "folder" | "board" | "schematic" | "3d" | "mech" | "cad" | "image" | "pdf" | "text") }
 
 /// diff.revert.confirm (i18n/en.msg)
 /* i18n-ok: drawn through trs */ const REVERT_ASK: &str = "Put the files back as they were when this thread began? Every change shown below is undone, committed ones and new files too. Commits stay in git.";
@@ -1003,7 +1003,7 @@ pub fn editor_press(viewer: &Value) -> Option<String> {
     pressed(&active_kind(viewer, None)).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
 }
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: Option<[&mut super::plotview::PlotView; 2]>, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>, review_panel: Option<AnyElement>, checks: &super::mgmt_checks::State, tile_menu: &super::tile_menu::State) -> AnyElement {
+pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: Option<[&mut super::plotview::PlotView; 2]>, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, solidcraft: Option<&Entity<crate::viewers::solidcraft_pane::SolidCraftPane>>, update: Option<AnyElement>, review_panel: Option<AnyElement>, checks: &super::mgmt_checks::State, tile_menu: &super::tile_menu::State) -> AnyElement {
     let shared_scroll = review_panel.is_some();
     // KiCad itself in the pane (its Board, Schematic or 3D): its frames switch at once, and it stays until the hub moves the pane (kicad_pane.rs)
     let local = editor.is_some() && editor_local(thread);
@@ -1069,7 +1069,14 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         match k {
             "board" | "schematic" | "gerbers" => { let a = header(cx); plot_loading(cx, light, 0, &Value::Null, pv, true, Some(a), &super::panestate::loading_for(k, k == "gerbers"), &lk, false, None) },
             "3d" => { let h = header(cx); div().size_full().flex().flex_col().child(pane_header(light, h.identity, vec![], h.controls)).child(model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false))).into_any_element() }
-            "mech" => { let h = header(cx); div().size_full().flex().flex_col().child(mech_header(cx, light, viewer, pv, h, Vec::new())).child(model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false))).into_any_element() },
+            "mech" => {
+                let h = header(cx);
+                let body = match solidcraft {
+                    Some(sc) => div().flex_1().min_h_0().child(sc.clone()).into_any_element(),
+                    None => model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false)),
+                };
+                div().size_full().flex().flex_col().child(mech_header(cx, light, viewer, pv, h, Vec::new())).child(body).into_any_element()
+            },
             _ => {
                 let secs = pv.loading.track_now(&lk);
                 let a = if migrated { let h = header(cx); pane_header(light, h.identity, vec![], h.controls) } else { bar(light).child(div().flex_1()).child(acts(cx)).into_any_element() };
@@ -1083,28 +1090,58 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else if open == "review" && viewer["review"].is_object() { let a = header(cx); review_page(cx, reg, light, &viewer["review"], &mut pv.loading, a, review_panel) }
         else if matches!(open, "board" | "schematic") { let a = header(cx); plot_page(cx, light, open, viewer, plot, pv, a) }
         else if open == "split" { let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default(); let a = header(cx); let b = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards); let lr = pv.last_retry; split_page(cx, light, viewer, plot, split_pv.unwrap(), &mut pv.loading, lr, solid, &have, b, a) }
-        else if matches!(open, "3d" | "mech") {
-            let key_empty = string(viewer, "key").is_empty();
+        else if open == "mech" {
+            let h = header(cx);
+            let mut tools = Vec::new();
+            if let Some(sc) = solidcraft {
+                let popped = sc.read(cx).popped;
+                let c = |n: &str| theme::color(light, n);
+                let (id, label, probe) = if popped {
+                    ("solidcraft-pop", trs("Bring back"), "solidcraft:bring_back")
+                } else {
+                    ("solidcraft-pop", trs("Pop out"), "solidcraft:detach")
+                };
+                let btn_el = crate::ui::with_rect(
+                    tall(div().id(id)).px_2().text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).text_color(c("text")).cursor_pointer().hover(|s| s.bg(c("panel"))).child(label.clone()),
+                    move || probe.to_string(),
+                ).on_click(cx.listener(move |this, _, _, cx| {
+                    if popped {
+                        let w = this.screens.solidcraft_window;
+                        this.solidcraft_bring_back(cx);
+                        if let Some(w) = w { let _ = w.update(cx, |_, win, _| win.remove_window()); }
+                    } else {
+                        this.solidcraft_popout(cx);
+                    }
+                }));
+                tools.push(content(id, label, btn_el));
+            }
+            let bar = mech_header(cx, light, viewer, pv, h, tools);
+            let local = crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread);
+            let body: AnyElement = if let Some(sc) = solidcraft {
+                div().flex_1().min_h_0().child(sc.clone()).into_any_element()
+            } else if !local {
+                super::panestate::view(light, &super::panestate::PaneState::empty(trs("SolidCraft embeds only on the local machine."), String::new()), None)
+            } else {
+                let mech = &viewer["mech"];
+                let say = [string(mech, "say"), string(mech, "empty")].into_iter().find(|s| !s.is_empty()).unwrap_or_default();
+                if say == "Loading…" {
+                    let secs = pv.loading.track_now("mech:list");
+                    super::panestate::view(light, &super::panestate::PaneState::loading(super::panestate::loading_line(&trs("Loading…"), secs, 0)), None)
+                } else {
+                    super::panestate::view(light, &super::panestate::PaneState::loading(trs("Opening SolidCraft…")), None)
+                }
+            };
+            div().size_full().flex().flex_col().child(bar).child(measured_body(body)).into_any_element()
+        }
+        else if open == "3d" {
             let want = string(viewer, "key");
-            // what the page HOLDS, not what was queued for it: a big model's decode, a frame that fails or is replaced in the worker's slot
-            // the model shown before comes back at once when it is the one asked for (the page keeps one)
             if let Some(s) = solid { if !want.is_empty() && s.read(cx).shown_key() != want { s.update(cx, |p, cx| p.want(&want, cx)); } }
             let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default();
             let ready = matches!(solid, Some(_s) if solid_ready(&want, &have));
             if let Some(s) = solid {
                 if s.read(cx).inline_controls { s.update(cx, |p, cx| { p.inline_controls = false; cx.notify(); }); }
             }
-            let model: AnyElement = if open == "mech" && key_empty {
-                let mech = &viewer["mech"];
-                let say = [string(mech, "say"), string(mech, "empty")].into_iter().find(|s| !s.is_empty()).unwrap_or_default();
-                let note = string(mech, "note");
-                if say == "Loading…" {
-                    let secs = pv.loading.track_now("mech:list");
-                    super::panestate::view(light, &super::panestate::PaneState::loading(super::panestate::loading_line(&trs("Loading…"), secs, 0)), None)
-                } else {
-                    super::panestate::view(light, &super::panestate::mech_empty(&say, &note), None)
-                }
-            } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(&mut pv.loading, &format!("{open}:{want}"), &super::panestate::loading_for(open, false)) } };
+            let model: AnyElement = match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(&mut pv.loading, &format!("{open}:{want}"), &super::panestate::loading_for(open, false)) };
             let h = header(cx);
             let mut tools = Vec::new();
             if let Some(page) = solid.filter(|_| ready) {
@@ -1112,10 +1149,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
                     tools.push(button(cx, tool.id, tool.label, Press::Camera(page.downgrade(), tool.action)));
                 }
             }
-            let bar = if open == "mech" { mech_header(cx, light, viewer, pv, h, tools) } else {
-                if let Some(board) = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards) { tools.insert(0, board); }
-                pane_header(light, h.identity, tools, h.controls)
-            };
+            if let Some(board) = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards) { tools.insert(0, board); }
+            let bar = pane_header(light, h.identity, tools, h.controls);
             div().size_full().flex().flex_col().child(bar).child(measured_body(model)).into_any_element()
         }
         else if open == "browser" { match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => { let h = header(cx); pane_body_state(light, &super::panestate::PaneState::empty(trs("The browser page needs a connected hub."), String::new()), Some(pane_header(light, h.identity, vec![], h.controls)), None) } } }
@@ -1255,24 +1290,13 @@ fn resize_handle(cx: &mut Context<Backplane>) -> AnyElement {
         .into_any_element()
 }
 
-/// The watch a Mech part needs. Board, Schematic and 3D are watched by the commands of the action that opened them; a Mech part comes in after
-/// a `mech.list` reply, which carries no command, so the window asks for its model itself when the viewer's key moves. `key` is "<kind>|<root>|<path>" (kind 2 is 3D).
-pub fn watch_for(open: &str, key: &str, last: &str) -> Option<Value> {
-    if open != "mech" || key.is_empty() || key == last { return None }
-    let mut p = key.splitn(3, '|');
-    let (k, root, path) = (p.next()?, p.next()?, p.next()?);
-    let kind = match k { "0" => "board", "1" => "schematic", "2" => "3d", _ => return None };
-    Some(serde_json::json!({"kind": kind, "root": root, "path": path, "tree": ""}))
-}
+/// Desktop Mech uses embedded SolidCraft rather than `kicad.watch` solid frames.
+pub fn watch_for(_open: &str, _key: &str, _last: &str) -> Option<Value> { None }
 static WATCHED: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
+pub fn follow(_tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
     let open = thread["viewer"]["open"].as_str().unwrap_or("");
-    let key = thread["viewer"]["key"].as_str().unwrap_or("");
     let mut last = WATCHED.lock().unwrap();
-    if open != "mech" { if !last.is_empty() { last.clear(); } return }
-    if let Some(p) = watch_for(open, key, &last) {
-        if tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "watch")).is_ok() { *last = key.to_string(); }
-    }
+    if open != "mech" && !last.is_empty() { last.clear(); }
 }
 
 #[cfg(test)]
@@ -1556,7 +1580,8 @@ mod tests {
     }
     #[test] fn the_3d_page_is_put_away_when_no_page_draws_it() {
         let t = |v: &str| j(v);
-        assert!(shows_solid(&t(r#"{"viewer":{"open":"3d"}}"#)) && shows_solid(&t(r#"{"viewer":{"open":"mech"}}"#)) && shows_solid(&t(r#"{"viewer":{"open":"split"}}"#)));
+        assert!(shows_solid(&t(r#"{"viewer":{"open":"3d"}}"#)) && shows_solid(&t(r#"{"viewer":{"open":"split"}}"#)));
+        assert!(!shows_solid(&t(r#"{"viewer":{"open":"mech"}}"#)), "desktop mech uses embedded SolidCraft");
         assert!(!shows_solid(&t(r#"{"viewer":{"open":"board"}}"#)), "another page");
         assert!(!shows_solid(&t(r#"{"viewer":{"open":""}}"#)) && !shows_solid(&Value::Null), "the pane closed, or no thread");
         assert!(!shows_solid(&t(r#"{"viewer":{"open":"3d"},"diff":{}}"#)), "a diff drawn over it");
@@ -1600,9 +1625,8 @@ mod tests {
     }
     #[test] fn a_mech_part_is_watched_once_when_its_key_moves() {
         let key = "2|/p|/p/mech/board.step";
-        assert_eq!(watch_for("mech", key, "").unwrap(), serde_json::json!({"kind": "3d", "root": "/p", "path": "/p/mech/board.step", "tree": ""}));
-        assert!(watch_for("mech", key, key).is_none(), "asked once");
-        assert!(watch_for("mech", "", "").is_none() && watch_for("board", key, "").is_none() && watch_for("gerbers", "0|/p|/p/mfg/b/gerber", "").is_none(), "no key, or a page the presenter watches");
+        assert!(watch_for("mech", key, "").is_none(), "desktop mech opens in SolidCraft, not solid mesh frames");
+        assert!(watch_for("mech", "", "").is_none() && watch_for("board", key, "").is_none() && watch_for("gerbers", "0|/p|/p/mfg/b/gerber", "").is_none());
     }
     #[test] fn a_drag_makes_the_pane_as_wide_as_the_room_right_of_the_pointer_within_its_range() {
         assert_eq!(width_for(1600.0, 900.0, 71.0, 264.0), 629); assert_eq!(width_for(1600.0, 1500.0, 71.0, 264.0), crate::local::VIEWER_PX.0);
@@ -1618,6 +1642,9 @@ mod tests {
         assert_eq!(shown("gerbers", ""), Some(("gerbers".into(), None)));
         assert_eq!(shown("mech", "/p/mech/a.step"), Some(("mech".into(), Some("/p/mech/a.step".into()))));
         assert_eq!(shown("3d", "/p/mech/a.glb").map(|x| x.0), Some("mech".into()), "a model shown as 3D is Mech's part");
+        for ext in [".sc", ".solidcraft", ".iges", ".stl", ".3mf", ".obj", ".stp"] {
+            assert_eq!(shown("", &format!("/p/mech/part{ext}")).map(|x| x.0), Some("mech".into()), "{ext}");
+        }
         assert_eq!(shown("", "/p/x.kicad_sch").map(|x| x.0), Some("schematic".into()));
         assert_eq!(shown("nonsense", "/p/readme.txt"), None);
     }

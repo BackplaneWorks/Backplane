@@ -131,7 +131,7 @@ impl Backplane {
             if changed {this.send_draft(text,cx);}
         }).detach();
         cx.subscribe(&input,|this,_,event:&screens::composer::ComposerEvent,cx|this.attach_event(event,cx)).detach();
-        cx.on_app_quit(|this,_|{crate::viewers::kicad_pane::release_all();this.screens.drafts.flush();async{}}).detach();
+        cx.on_app_quit(|this,_|{crate::viewers::kicad_pane::release_all();crate::viewers::solidcraft_pane::release_all();this.screens.drafts.flush();async{}}).detach();
         // Closing the window ends the program at once (the window manager's close, Alt+F4): what must not be lost is put away first (the drafts
         // on disk, a screen recording stopped), then the process exits without gpui's teardown, which drew nothing and took a second or two
         // (the renderer's destroy before the window went, every entity's drop). The hub runs on; it sees the socket close.
@@ -157,7 +157,7 @@ impl Backplane {
         /* i18n-ok: an env name */ let mut c=std::process::Command::new(&app);c.args(crate::hubs::relaunch_with(&args,&crate::hubs::load())).env_remove("BACKPLANE_GPUI_SCRIPT");
         match c.spawn(){Ok(_)=>std::process::exit(0),Err(e)=>{self.status=crate::i18n::tf("gpui.could.not.restart",&[("why",e.to_string().into())]);false}}
     }
-    fn before_exit(&mut self) {crate::viewers::kicad_pane::release_all();self.screens.drafts.flush();drop(self.screens.imp.take_recording());}
+    fn before_exit(&mut self) {crate::viewers::kicad_pane::release_all();crate::viewers::solidcraft_pane::release_all();self.screens.drafts.flush();drop(self.screens.imp.take_recording());}
     fn receive(&mut self,event:Event,cx:&mut Context<Self>) {
         let timed=perf::on().then(||(event.name(),Instant::now()));
         if let Some(s)=hub::status_for(&event){self.status=s.into();}
@@ -178,10 +178,12 @@ impl Backplane {
             Event::Answer(id,reply) if id==screens::unsent::TAG=>{let why=if reply["ok"]==true {String::new()} else {hub::rpc_error(&reply)};self.screens.unsent.answered_out(reply["ok"]==true,&why);self.send_unsent();cx.notify();},
             Event::HubOffer(text)=>screens::hubpick::offered(self,&text,cx),
             Event::KicadEditor(digest,text)=>self.kicad_info(digest,&text,cx),
+            Event::SolidCraftEditor(digest,text)=>self.solidcraft_info(digest,&text,cx),
             Event::KicadUpdate(k,v)=>screens::kicad_update::seen(self,&k,&v,cx),
             Event::KicadReply(m,reply) if m=="kicad.install"=>screens::kicad_update::replied(self,&reply,cx),
             Event::KicadReply(m,reply) if m=="editor.kicad.capture"||m=="kicad.comment.post"=>self.kcomment_reply(&m,reply,cx),
             Event::KicadReply(m,reply)=>self.kicad_reply(m,reply,cx),
+            Event::SolidCraftReply(m,reply)=>self.solidcraft_reply(m,reply,cx),
             Event::KicadComment(text)=>self.kicad_comment(&text,cx),
             Event::KicadProgress(text)=>{if let Some(p)=self.screens.kicad.clone(){let v:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();p.update(cx,|p,cx|p.set_progress(v,cx));}},
             Event::Mgmt(key,text)=>{{let viewer=&self.data["thread"]["viewer"];let open=if viewer["open"]=="review" {viewer["review"]["tabs"].as_array().is_some_and(|tabs|tabs.iter().any(|t|t["page"]=="checks" && t["on"]==true))}else{screens::mgmt::shows(viewer["open"].as_str().unwrap_or("")) && self.screens.mgmt.peek()["open"]=="checks"};if !key.starts_with("review.clicked.") || key.strip_prefix("review.clicked.")==Some(self.screens.mgmt.digest.as_str()){screens::mgmt_checks::seen(&self.screens.mgmt.checks,&key,&text,open);}}if self.screens.mgmt.info(&key,&text){self.ui_epoch+=1;cx.notify();}},
@@ -223,7 +225,7 @@ impl Backplane {
             // the first message of a thread a page's Send made: refused, the text comes back (never merged) and the error shows; taken, it is done
             Event::Rpc("first-message",ok,why)=>{ let text=self.screens.projects.sending.take(); if !ok { self.screens.projects.refused=why; if let Some(t)=text { let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(t,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } } cx.notify(); },
             Event::Term(key,pid,b,reset,state)=>self.term_frame(&key,pid,&b,reset,state,cx),
-            Event::Hello=>{if self.to_moved_build(){return}self.hub_upd_ready=true;self.ask_hub_update(cx);self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);/* the viewer's state again on the new connection (whose page holds KiCad: Follow agent, kicad/follow.rs) */self.screens.last_state.clear();screens::plotview::report_state(self);}self.screens.unsent.live=true;self.send_unsent();},
+            Event::Hello=>{if self.to_moved_build(){return}self.hub_upd_ready=true;self.ask_hub_update(cx);self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);self.solidcraft_rejoin(cx);/* the viewer's state again on the new connection (whose page holds KiCad: Follow agent, kicad/follow.rs) */self.screens.last_state.clear();screens::plotview::report_state(self);}self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
             Event::TmNotice(v)=>self.tm_notice(&v,cx),
             Event::GpNotice(v)=>self.gp_notice(&v,cx),
@@ -239,7 +241,7 @@ impl Backplane {
             Event::Sheets(rows,refs)=>{ self.screens.plot.sheets=screens::plot::sheet_rows(&rows); self.screens.plot.sheet_refs=screens::plot::sheet_refs(&refs); cx.notify(); }
             Event::BrowserDownload(owner,id,name,error)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.take_download(&id,&name,&error,cx));}}},
             Event::BrowserTabs(owner,text)=>{if let Some((o,page))=&self.screens.browser {if *o==owner {let page=page.clone();page.update(cx,|p,cx|p.set_tabs(&text,cx));}}},
-            Event::ViewShow(thread,kind,path,frame,token)=>{self.view_show(&thread,&kind,&path,&token,cx);self.kicad_bring(&thread,&frame,cx);},
+            Event::ViewShow(thread,kind,path,frame,token)=>{self.view_show(&thread,&kind,&path,&token,cx);self.kicad_bring(&thread,&frame,cx);self.solidcraft_follow(&thread,&path,cx);},
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ eprintln!("GPUI_LOG {}",serde_json::json!({"event":"probe_lit","slot":slot,"n":m.len()})); let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }

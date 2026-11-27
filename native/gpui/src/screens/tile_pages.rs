@@ -237,6 +237,16 @@ pub(super) fn body_with_panel(
                 None,
             ),
         },
+        "mech" if crate::viewers::solidcraft_pane::mech_tile(v) != Some(id) => missing(light, false),
+        "mech" => match &screens.solidcraft {
+            Some(pane) => pane.clone().into_any_element(),
+            _ if screens.attacher.target.is_some() => missing(light, true),
+            _ => panestate::view(
+                light,
+                &PaneState::error(trs("SolidCraft needs a connected hub."), false),
+                None,
+            ),
+        },
         "simulation" => panestate::view(
             light,
             &PaneState::empty(t("viewer.tile.simulation.single"), String::new()),
@@ -357,6 +367,13 @@ pub(crate) fn settled(
             _ if screens.attacher.target.is_none() => Some("error"),
             _ => None,
         },
+        "mech" if crate::viewers::solidcraft_pane::mech_tile(v) == row["id"].as_str() => {
+            match &screens.solidcraft {
+                Some(pane) => pane.read(cx).settled(),
+                _ if screens.attacher.target.is_none() => Some("error"),
+                _ => None,
+            }
+        }
         _ => None,
     }
 }

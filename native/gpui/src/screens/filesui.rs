@@ -72,7 +72,7 @@ pub fn cur_dir(files: &Value) -> String { files["trail"].as_array().and_then(|t|
 pub fn join(dir: &str, name: &str) -> String { if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") } }
 /// The Lucide icon for a row's kind and the colour token it takes.
 pub fn glyph(kind: &str) -> (&'static str, &'static str) {
-    match kind { "folder" => ("folder", "ok"), "board" => ("circuit-board", "accent"), "schematic" => ("cpu", "accent"), "3d" => ("box", "accent"),
+    match kind { "folder" => ("folder", "ok"), "board" => ("circuit-board", "accent"), "schematic" => ("cpu", "accent"), "3d" | "mech" | "cad" => ("box", "accent"),
         "image" => ("image", "text"), "pdf" | "text" => ("file-text", "text"), _ => ("file", "dim") }
 }
 /// The context menu of a row: (id, label).
@@ -226,7 +226,13 @@ pub fn act(this: &mut Backplane, d: Do, window: Option<&mut Window>, cx: &mut Co
     this.screens.files.menu = None;
     match d {
         Do::Select(i) => { this.screens.files.sel = Some(i); if let Some(w) = window { if let Some(f) = &this.screens.files.focus { w.focus(f); } } }
-        Do::Open(i) => if let Some(r) = row(i) { if !r.action.is_empty() { let _ = this.tx.try_send(Command::Action(r.action.clone(), r.value.clone())); } else { say(this, tf("gpui.b.files.no.preview", &[("name", r.label.into())]), cx) } },
+        Do::Open(i) => if let Some(r) = row(i) {
+            if !r.action.is_empty() { let _ = this.tx.try_send(Command::Action(r.action.clone(), r.value.clone())); }
+            else if crate::viewers::solidcraft_pane::is_cad_file(&r.value) || crate::viewers::solidcraft_pane::is_cad_file(&r.label) {
+                let path = if r.value.is_empty() { join(&dir, &r.label) } else { r.value.clone() };
+                let _ = this.tx.try_send(Command::Action("view".into(), format!("mech\t{path}")));
+            } else { say(this, tf("gpui.b.files.no.preview", &[("name", r.label.into())]), cx) }
+        },
         Do::Up => { let _ = this.tx.try_send(Command::Action("fm-up".into(), String::new())); }
         Do::Back => { let _ = this.tx.try_send(Command::Action("fm".into(), String::new())); }
         Do::Download(i) => if let Some(r) = row(i) { download(this, r.down(), r.label.clone(), r.kind == "folder", cx) },
@@ -384,7 +390,7 @@ pub(super) fn files_body(cx: &mut Context<Backplane>, light: bool, files: &Value
         let r = &rows[k];
         let (ic, tok) = glyph(&r.kind);
         let on = ui.sel == Some(n);
-        let (a_open, has_open) = (n, !r.action.is_empty());
+        let (a_open, has_open) = (n, !r.action.is_empty() || crate::viewers::solidcraft_pane::is_cad_file(&r.value) || crate::viewers::solidcraft_pane::is_cad_file(&r.label));
         list = list.child(div().id(SharedString::from(format!("file-{n}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).when(on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
             .child(crate::art::icon(ic, 15., c(tok)))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(c(if has_open || r.kind == "folder" { "text" } else { "dim" })).child(r.label.clone()))

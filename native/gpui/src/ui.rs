@@ -831,9 +831,10 @@ impl Backplane {
         } else {
             let thread = &self.data["thread"];
             let editor = self.kicad_for(thread, cx);
+            let solidcraft = self.solidcraft_for(thread, cx);
             let solid = self.screens.active_solid().cloned();
             let (pv, split) = self.screens.plots.views();
-            crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, pv, split, solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref(), update, review_panel, &self.screens.mgmt.checks, &self.screens.tile_menu)
+            crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, pv, split, solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref(), solidcraft.as_ref(), update, review_panel, &self.screens.mgmt.checks, &self.screens.tile_menu)
         };
         { let rows = self.active_rows(); reg.borrow_mut().resolve_by(|id| rows.iter().position(|e| e["id"].as_str() == Some(id))); }
         // full screen: the editor alone, without the management panels' strip under it
@@ -958,6 +959,20 @@ impl Render for Backplane {
             let tid = thread["id"].as_str().unwrap_or("");
             if p.read(cx).in_page != in_page { p.update(cx, |p, cx| p.set_in_page(in_page, if mine && p.page_thread == tid { "viewer" } else { "thread" }, cx)); } // i18n-ok: wire words
             if in_page && p.read(cx).page_thread != tid { let t = tid.to_string(); p.update(cx, |p, _| p.page_thread = t); }
+        }
+        if let Some(p) = self.screens.solidcraft.clone() {
+            if p.read(cx).light != light { p.update(cx, |p, cx| p.set_light(light, cx)); }
+            let mine = self.solidcraft_for(thread, cx).is_some();
+            let showing_mech = !thread["diff"].is_object()
+                && self.project_page.is_none()
+                && self.data["bot"].is_null()
+                && if docked {
+                    crate::viewers::solidcraft_pane::mech_tile(&thread["viewer"]).is_some()
+                } else {
+                    crate::screens::viewer::pane_page(thread, false).is_some_and(|(o, _)| o == "mech")
+                };
+            let sc_in_page = self.screens.solidcraft_window.is_some() || (mine && showing_mech);
+            if p.read(cx).in_page != sc_in_page { p.update(cx, |p, cx| p.set_in_page(sc_in_page, cx)); }
         }
         // Follow agent in KiCad: the hub learns whether this thread's page holds KiCad and which frame it shows (viewer.state, on change)
         let kshown = match self.screens.kicad.clone() { Some(p) if p.read(cx).in_page => (true, p.read(cx).tab()), _ => (false, String::new()) };
@@ -1211,6 +1226,11 @@ impl Render for Backplane {
         // the viewer bar's Open in KiCad, and the Subagents panel's row buttons (Release, Cancel, Stop: `<act>-<value>`, as the rows name them)
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::viewer::is_open(thread) && crate::screens::viewer::has_design(&thread["viewer"]) { let alt = crate::screens::viewer::is_altium(&thread["viewer"]); ctl.push(CtlEntry { id: if alt { "ui:Open in Altium" } else { "ui:Open in KiCad" }.into(), label: if alt { "Open in Altium" } else { "Open in KiCad" }.into(), ctl: Ctl::Node("kicad-open".into(), crate::screens::viewer::shown_key(&thread["viewer"])) });
             /* i18n-ok: registered controls the e2e drivers press */ if crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread) { ctl.push(CtlEntry { id: "ui:Edit".into(), label: "Edit".into(), ctl: Ctl::KicadEdit(true) }); if thread["viewer"]["gerbers"] == true && thread["viewer"]["gerberFiles"].as_array().is_some_and(|a| !a.is_empty()) && crate::viewers::kicad_pane::GERBVIEW.load(std::sync::atomic::Ordering::Relaxed) { ctl.push(CtlEntry { id: "ui:Open in GerbView".into(), label: "Open in GerbView".into(), ctl: Ctl::KicadAct("gerbview".into()) }); } if self.screens.kicad.is_some() { /* i18n-ok: ctl ids the drivers press */ for (k, l) in crate::viewers::kicad_pane::TABS { ctl.push(CtlEntry { id: format!("kicad-tab:{k}"), label: (*l).into(), ctl: Ctl::KicadAct((*k).into()) }); } if self.screens.kicad.as_ref().is_some_and(|p| p.read(cx).failed()) { ctl.push(CtlEntry { id: "kicad:retry".into(), label: "Try again".into(), ctl: Ctl::KicadAct("retry".into()) }); } if self.screens.kicad.as_ref().is_some_and(|p| crate::viewers::kicad_pane::open_again(&p.read(cx).seen_info())) { ctl.push(CtlEntry { id: "kicad:open-again".into(), label: "Open the editor again".into(), ctl: Ctl::KicadAct("retry".into()) }); } for (a, l) in [("full", "Full size"), ("screen", "Full screen"), ("popout", "Pop out"), ("popin", "Pop back in")] { ctl.push(CtlEntry { id: format!("kicad:{a}"), label: l.into(), ctl: Ctl::KicadAct(a.into()) }); } } ctl.push(CtlEntry { id: "ui:View".into(), label: "View".into(), ctl: Ctl::KicadEdit(false) }); } }
+        if self.screens.solidcraft.is_some() {
+            /* i18n-ok: ctl ids for e2e drivers */ for (id, label, act) in [("solidcraft:install", "Install SolidCraft", "install"), ("solidcraft:retry", "Try again", "retry"), ("solidcraft:detach", "Pop out", "detach"), ("solidcraft:bring_back", "Bring back", "bring_back"), ("solidcraft:close", "Close", "close")] {
+                ctl.push(CtlEntry { id: id.into(), label: label.into(), ctl: Ctl::SolidCraftAct(act.into()) });
+            }
+        }
         // the management panels' tabs, dock buttons and the open panel's rows (screens/mgmt.rs)
         for (id, label, a) in crate::screens::mgmt::controls(thread, &self.screens.mgmt) { ctl.push(CtlEntry { id, label, ctl: Ctl::Mgmt(a) }); }
         // the Diff page's Commit, PR and Revert (and the Revert question's two buttons), by the ids the page draws
