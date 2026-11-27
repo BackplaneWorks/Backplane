@@ -17,6 +17,7 @@ fn open(thread: &str, pid: &str, action: &'static str, value: &str) -> Plan { Pl
 
 #[test] fn the_design_kinds_by_name() {
     for (n, k) in [("a.kicad_pcb", "board"), ("A.KICAD_SCH", "schematic"), ("x.kicad_pro", "project"), ("m.step", "model"), ("m.STP", "model"), ("m.glb", "model"),
+                   ("m.sc", "model"), ("m.solidcraft", "model"), ("m.iges", "model"), ("m.stl", "model"), ("m.3mf", "model"), ("m.obj", "model"),
                    ("b-F_Cu.gbr", "gerber"), ("b.gtl", "gerber"), ("b.drl", "gerber"), ("b.g2", "gerber"), ("notes.md", ""), ("x.rs", ""), ("g", "")] { assert_eq!(design_kind(n), k, "{n}"); }
 }
 #[test] fn a_path_is_made_absolute_from_the_link() {

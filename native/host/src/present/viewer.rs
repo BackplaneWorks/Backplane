@@ -8,7 +8,7 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn jstr(x: &str) -> String { serde_json::to_string(x).unwrap_or_else(|_| "\"\"".into()) }
 fn drawing(kind: &str) -> bool { matches!(kind, "board" | "schematic" | "3d" | "split" | "mech") }
 
-/// Mech's listing (`mech.list`, files/scripts/mech_list.sh): every STEP/STP/GLB under `<root>/mech`, four folders deep, sorted bytewise, at most 400, as paths from the root.
+/// Mech's listing (`mech.list`, files/scripts/mech_list.sh): every SolidCraft CAD/3D file under `<root>/mech`, four folders deep, sorted bytewise, at most 400, as paths from the root.
 pub fn mech_parts(root: &str) -> Vec<String> {
     fn walk(base: &std::path::Path, rel: &str, depth: usize, out: &mut Vec<String>) {
         let Ok(rd) = std::fs::read_dir(base) else { return };
@@ -16,7 +16,7 @@ pub fn mech_parts(root: &str) -> Vec<String> {
             let name = e.file_name().to_string_lossy().into_owned();
             if name.starts_with('.') { continue }
             let (r, ft) = (format!("{rel}/{name}"), e.file_type());
-            match ft { Ok(t) if t.is_dir() && depth < 3 => walk(&e.path(), &r, depth + 1, out), Ok(t) if t.is_file() => { let l = name.to_ascii_lowercase(); if [".step", ".stp", ".glb"].iter().any(|x| l.ends_with(x)) { out.push(r.trim_start_matches('/').to_string()) } }, _ => {} }
+            match ft { Ok(t) if t.is_dir() && depth < 3 => walk(&e.path(), &r, depth + 1, out), Ok(t) if t.is_file() => { if is_model(&name) { out.push(r.trim_start_matches('/').to_string()) } }, _ => {} }
         }
     }
     if root.is_empty() { return vec![] }
@@ -38,23 +38,23 @@ pub fn rel_in(root: &str, p: &str) -> String {
     let eq = |a: &str, b: &str| if cfg!(windows) { a.eq_ignore_ascii_case(b) } else { a == b };
     match q.get(..r.len()) { Some(head) if eq(head, r) && q[r.len()..].starts_with('/') => q[r.len() + 1..].to_string(), _ => p.to_string() }
 }
-/// A file Mech draws: a STEP, STP or GLB, any case.
-pub fn is_model(p: &str) -> bool { let l = p.to_ascii_lowercase(); [".step", ".stp", ".glb"].iter().any(|x| l.ends_with(x)) }
+/// A file Mech / SolidCraft draws: .step, .stp, .sc, .solidcraft, .iges, .igs, .stl, .3mf, .obj, .glb, any case.
+pub fn is_model(p: &str) -> bool { crate::files::fm::is_cad(p) }
 fn abs_of(root: &str, rel: &str) -> String { if crate::plat::fs::is_abs(rel) { rel.to_string() } else { format!("{root}/{rel}") } }
 /// viewer_show's check before it answers (the client's `shown` decides the page from the same kind and path): why this cannot be shown, None
-/// when it can. A model for Mech must be a STEP, STP or GLB file that is there; a kind the viewer has no page for is refused, never acknowledged
+/// when it can. A model for Mech must be a CAD/3D file that is there; a kind the viewer has no page for is refused, never acknowledged
 /// while another part is drawn. A relative path is from one of `roots` (the thread's design folder and its own).
 pub fn show_refusal(kind: &str, path: &str, roots: &[String]) -> Option<String> {
     let l = path.to_ascii_lowercase();
     let there = || if crate::plat::fs::is_abs(path) { std::path::Path::new(path).is_file() } else { roots.iter().any(|r| !r.is_empty() && std::path::Path::new(r).join(path).is_file()) };
     match kind {
         "mech" if path.is_empty() => None,
-        "mech" | "3d" if is_model(path) => (!there()).then(|| format!("no such file: {path} (Mech shows a STEP, STP or GLB file that exists)")),
-        "mech" => Some(format!("Mech shows STEP, STP and GLB files, not {path}")),
+        "mech" | "3d" if is_model(path) => (!there()).then(|| format!("no such file: {path} (Mech shows a CAD or 3D model file that exists)")),
+        "mech" => Some(format!("Mech shows CAD/3D files (.step, .stp, .sc, .solidcraft, .iges, .stl, .3mf, .obj, .glb), not {path}")),
         "board" | "pcb" | "schematic" | "sch" | "3d" | "split" | "browser" | "files" | "review" | "gerbers" => None,
         "" if is_model(path) => (!there()).then(|| format!("no such file: {path}")),
         "" if l.ends_with(".kicad_pcb") || l.ends_with(".kicad_sch") || l.ends_with(".pcbdoc") || l.ends_with(".schdoc") => None,
-        "" => Some(format!("the viewer has no page for {path}: give a kind (board, schematic, 3d, mech, files) or a .kicad_pcb, .kicad_sch, .step or .glb")),
+        "" => Some(format!("the viewer has no page for {path}: give a kind (board, schematic, 3d, mech, files) or a .kicad_pcb, .kicad_sch, .sc, .step or .glb")),
         k => Some(format!("unknown viewer kind {k:?} (board, schematic, 3d, mech, split, files, review)")),
     }
 }
@@ -75,7 +75,7 @@ fn parts_of(root: &str, sel: &str, chosen: &str) -> Vec<String> {
 /// The models in a `files::dir::list` listing of `mech/` (its files, not its folders), as `mech/<name>`, in byte order.
 fn parts_in_listing(t: &str) -> Vec<String> {
     let mut v: Vec<String> = t.lines().filter_map(|l| { let mut it = l.splitn(3, '\t'); let (k, _, n) = (it.next()?, it.next()?, it.next()?);
-        let low = n.to_ascii_lowercase(); (k != "d" && !n.starts_with('.') && [".step", ".stp", ".glb"].iter().any(|x| low.ends_with(x))).then(|| format!("mech/{n}")) }).collect();
+        (k != "d" && !n.starts_with('.') && is_model(n)).then(|| format!("mech/{n}")) }).collect();
     v.sort_by(|a, b| a.as_bytes().cmp(b.as_bytes())); v
 }
 fn mech_want(root: &str, ps: &[String], chosen: &str) -> (String, String) {
@@ -1011,9 +1011,16 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
     let wkind = match kind.as_str() { "board" | "schematic" | "3d" => kind.as_str(), _ => "" };
     let at = s(d, "@view.at");
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
-    drafts.insert(format!("@view:{sel}"), json!(kind)); drafts.insert(format!("@view.file:{sel}"), json!(file)); drafts.insert(format!("@files.dir:{sel}"), json!(dir));
+    // Clicking a CAD/3D file from the Files tab opens the SolidCraft/Mech pane on that part (not KiCad PCB 3D),
+    // while still emitting `kicad.watch` with `kind: "3d"` so mobile/web viewers keep working.
+    let (view_kind, view_file, mech_part) = if kind == "3d" {
+        ("mech", "", rel_in(&root, &file))
+    } else {
+        (kind.as_str(), file.as_str(), String::new())
+    };
+    drafts.insert(format!("@view:{sel}"), json!(view_kind)); drafts.insert(format!("@view.file:{sel}"), json!(view_file)); drafts.insert(format!("@files.dir:{sel}"), json!(dir));
     drafts.insert(format!("@view.gerbers:{sel}"), json!(if kind == "board" && crate::files::kicad::gerber::is_fab_file(fm::last(value)) { "1" } else { "" }));
-    drafts.insert(format!("@view.sheet:{sel}"), json!("")); drafts.insert(format!("@mech.part:{sel}"), json!(""));
+    drafts.insert(format!("@view.sheet:{sel}"), json!("")); drafts.insert(format!("@mech.part:{sel}"), json!(mech_part));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
         let on = if sel.contains('~') { format!(",\"on\":{}", jstr(sel.split('~').next().unwrap_or(""))) } else { String::new() };
@@ -3773,6 +3780,10 @@ mod tests {
         let o = run(&s1, "fm-open", "a.kicad_pcb").unwrap(); let mut s2 = s1.clone(); crate::session::patch::merge(&mut s2, &o.patch);
         let p = sent(&o.before[0]); assert_eq!((p["kind"].as_str(), p["path"].as_str()), (Some("board"), Some(join("a.kicad_pcb").as_str())), "{p}");
         let v = viewer_json(&st, &template, &s2).unwrap(); assert_eq!(v["open"], "board"); assert_eq!(v["key"], format!("0|{root}|{}", join("a.kicad_pcb")));
+        // a CAD/3D file opens in the Mech/SolidCraft viewer on that part, and watches it as "3d"
+        let o = run(&s1, "fm-open", "m.step").unwrap(); let mut sm = s1.clone(); crate::session::patch::merge(&mut sm, &o.patch);
+        let pm = sent(&o.before[0]); assert_eq!((pm["kind"].as_str(), pm["path"].as_str()), (Some("3d"), Some(join("m.step").as_str())), "{pm}");
+        let vm = viewer_json(&st, &template, &sm).unwrap(); assert_eq!(vm["open"], "mech"); assert_eq!(vm["mech"]["rel"], "m.step"); assert_eq!(vm["key"], format!("2|{root}|{}", join("m.step")));
         // an image, a PDF and a note open as a file page of the Files tab; the watch is stopped
         for (n, k) in [("pic.png", "image"), ("doc.pdf", "pdf"), ("notes.md", "text")] {
             let o = run(&s2, "fm-open", n).unwrap(); let mut s3 = s2.clone(); crate::session::patch::merge(&mut s3, &o.patch);
@@ -3798,9 +3809,9 @@ mod tests {
     #[test] fn mech_lists_models_picks_the_assembly_and_watches_the_part_as_3d() {
         let d = crate::plat::tmp::dir("mech");
         std::fs::create_dir_all(d.join("mech/sub")).unwrap();
-        for f in ["mech/bracket.step", "mech/main-assembly.stp", "mech/sub/lid.glb", "mech/notes.txt", "mech/.hidden.step"] { std::fs::write(d.join(f), "x").unwrap(); }
+        for f in ["mech/bracket.step", "mech/main-assembly.stp", "mech/sub/lid.glb", "mech/case.sc", "mech/plate.stl", "mech/notes.txt", "mech/.hidden.step"] { std::fs::write(d.join(f), "x").unwrap(); }
         let root = d.to_string_lossy().into_owned(); let ps = mech_parts(&root);
-        assert_eq!(ps, vec!["mech/bracket.step", "mech/main-assembly.stp", "mech/sub/lid.glb"]);
+        assert_eq!(ps, vec!["mech/bracket.step", "mech/case.sc", "mech/main-assembly.stp", "mech/plate.stl", "mech/sub/lid.glb"]);
         assert_eq!(mech_current(&ps, "").as_deref(), Some("mech/main-assembly.stp"), "the assembly is the default");
         assert_eq!(mech_current(&ps, "mech/sub/lid.glb").as_deref(), Some("mech/sub/lid.glb"));
         assert_eq!(mech_current(&ps, "mech/gone.step").as_deref(), Some("mech/main-assembly.stp"), "a part no longer listed falls back");
