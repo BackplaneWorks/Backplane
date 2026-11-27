@@ -1072,6 +1072,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             "mech" => {
                 let h = header(cx);
                 let body = match solidcraft {
+                    Some(sc) if sc.read(cx).popped => crate::viewers::solidcraft_pane::popped_placeholder(cx, light),
                     Some(sc) => div().flex_1().min_h_0().child(sc.clone()).into_any_element(),
                     None => model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false)),
                 };
@@ -1118,7 +1119,11 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             let bar = mech_header(cx, light, viewer, pv, h, tools);
             let local = crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread);
             let body: AnyElement = if let Some(sc) = solidcraft {
-                div().flex_1().min_h_0().child(sc.clone()).into_any_element()
+                if sc.read(cx).popped {
+                    crate::viewers::solidcraft_pane::popped_placeholder(cx, light)
+                } else {
+                    div().flex_1().min_h_0().child(sc.clone()).into_any_element()
+                }
             } else if !local {
                 super::panestate::view(light, &super::panestate::PaneState::empty(trs("SolidCraft embeds only on the local machine."), String::new()), None)
             } else {

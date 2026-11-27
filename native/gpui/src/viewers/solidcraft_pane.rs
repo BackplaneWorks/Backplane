@@ -31,7 +31,8 @@ pub const CAD_EXTS: &[&str] = &[
 /// Whether `path` has a CAD/mesh extension supported by SolidCraft (case-insensitive).
 pub fn is_cad_file(path: &str) -> bool {
     let lower = path.trim().to_ascii_lowercase();
-    CAD_EXTS.iter().any(|ext| lower.ends_with(ext))
+    let name = lower.rsplit(['/', '\\']).next().unwrap_or("");
+    CAD_EXTS.iter().any(|ext| name.len() > ext.len() && name.ends_with(ext))
 }
 
 /// Normalize path separators and strip trailing slashes for consistent matching.
@@ -217,6 +218,12 @@ pub fn pane_status(info: &Value, has_child: bool, popped: bool) -> PaneStatus {
     }
 }
 
+/// True while the pane is popped out to `SolidCraftWindow` and still on the home toplevel
+/// (before `rehome` moves it to the detached window), or when rendered on the home window.
+pub fn popped_elsewhere(popped: bool, toplevel: u64, home: u64) -> bool {
+    popped && (toplevel == 0 || toplevel == home)
+}
+
 /// Never map the X11 container until the pane is on screen, not popped out, has a valid physical rect,
 /// and has already adopted a child window — prevents black-frame flash while SolidCraft launches.
 pub fn container_visible(in_page: bool, popped: bool, has_rect: bool, has_child: bool) -> bool {
@@ -393,7 +400,11 @@ impl SolidCraftPane {
     }
 
     pub fn status(&self) -> PaneStatus {
-        pane_status(&self.info, self.child_window().is_some(), self.popped)
+        pane_status(
+            &self.info,
+            self.child_window().is_some(),
+            popped_elsewhere(self.popped, self.toplevel, self.home),
+        )
     }
 
     pub fn settled(&self) -> Option<&'static str> {
@@ -572,10 +583,10 @@ impl SolidCraftPane {
             nc::focus(self.toplevel);
             self.keys = false;
         }
+        let rect = self.last_place.map(|(_, r, _)| r);
         self.placed = None;
         self.last_place = None;
         if self.info["state"] == "ready" && !self.frames.is_empty() && self.toplevel == self.home {
-            let rect = self.last_place.map(|(_, r, _)| r);
             for old in keep(Kept {
                 toplevel: self.toplevel,
                 root: self.root.clone(),
@@ -737,6 +748,19 @@ impl SolidCraftPane {
             if self.frames.is_empty() {
                 self.frames = k.frames;
             }
+            if let (Some(r), Some(w)) = (k.rect, self.child_window()) {
+                if container_visible(
+                    self.in_page,
+                    popped_elsewhere(self.popped, self.toplevel, self.home),
+                    true,
+                    true,
+                ) {
+                    self.report_screen(k.container, true);
+                    nc::place(k.container, Some(r), Some(w), None, &mut self.last_root);
+                    self.placed = Some((Some(r), Some(w), Vec::new()));
+                    self.last_place = Some((k.container, r, Some(w)));
+                }
+            }
         } else {
             self.container = nc::container_for(top, &format!("solidcraft:{}", self.root));
         }
@@ -803,7 +827,12 @@ impl SolidCraftPane {
             }
         }
         let child = self.child_window();
-        let show_ok = container_visible(self.in_page, self.popped, at.is_some(), child.is_some());
+        let show_ok = container_visible(
+            self.in_page,
+            popped_elsewhere(self.popped, self.toplevel, self.home),
+            at.is_some(),
+            child.is_some(),
+        );
         let occluded = if let (true, Some(p)) = (show_ok, at) {
             !over.is_empty() && nc::cut(p, &over).is_empty()
         } else {
@@ -1133,6 +1162,45 @@ impl Render for SolidCraftPane {
                 .inset_0()
             })
     }
+}
+
+/// Placeholder rendered in the main window's Mech pane/tile while SolidCraft is popped out
+/// into `SolidCraftWindow`, avoiding double-mounting the same `SolidCraftPane` entity.
+pub fn popped_placeholder(cx: &mut Context<Backplane>, light: bool) -> AnyElement {
+    let c = |n: &str| crate::theme::color(light, n);
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .gap_2()
+        .items_center()
+        .justify_center()
+        .bg(c("view"))
+        .text_color(c("dim"))
+        .child(trs("SolidCraft is open in its own window."))
+        .child(
+            crate::ui::with_rect(
+                div().id("solidcraft-bring-back"),
+                || "solidcraft:bring_back".to_string(),
+            )
+            .px_3()
+            .py_1()
+            .border_1()
+            .border_color(c("line"))
+            .bg(c("raise"))
+            .text_color(c("text"))
+            .cursor_pointer()
+            .hover(|s| s.bg(c("panel")))
+            .child(trs("Bring back"))
+            .on_click(cx.listener(|this, _, _, cx| {
+                let w = this.screens.solidcraft_window;
+                this.solidcraft_bring_back(cx);
+                if let Some(w) = w {
+                    let _ = w.update(cx, |_, win, _| win.remove_window());
+                }
+            })),
+        )
+        .into_any_element()
 }
 
 /// Detached window hosting SolidCraft when popped out of the main Backplane pane.
@@ -1512,10 +1580,60 @@ mod tests {
         for ext in CAD_EXTS {
             assert!(is_cad_file(&format!("mech/part{ext}")), "{ext}");
             assert!(is_cad_file(&format!("MECH/PART{}", ext.to_ascii_uppercase())), "{ext}");
+            assert!(!is_cad_file(ext), "bare {ext} without stem should be rejected");
+            assert!(!is_cad_file(&format!("/dir/{ext}")), "dotfile /dir/{ext} without stem should be rejected");
         }
         assert!(!is_cad_file("board.kicad_pcb"));
         assert!(!is_cad_file("notes.md"));
         assert!(!is_cad_file(""));
+    }
+
+    #[test]
+    fn kept_container_preserves_last_rect_across_keep_and_take() {
+        let r = nc::R { x: 120, y: 80, w: 640, h: 480 };
+        let top = 999_001;
+        let root = "/proj/kept-rect-test";
+        let dropped = keep(Kept {
+            toplevel: top,
+            root: root.into(),
+            container: 42,
+            frames: Vec::new(),
+            rect: Some(r),
+        });
+        assert!(dropped.is_empty());
+        let taken = take_kept(top, root).expect("kept entry should be found");
+        assert_eq!(taken.container, 42);
+        assert_eq!(taken.rect, Some(r));
+        assert!(take_kept(top, root).is_none());
+    }
+
+    #[test]
+    fn popped_pane_hides_on_home_window_and_shows_in_detached_window() {
+        // Still on home window (or before attach assigns a toplevel): treated as popped elsewhere.
+        let home_popped = popped_elsewhere(true, 100, 100);
+        assert!(home_popped);
+        assert_eq!(pane_status(&json!({"state": "ready"}), true, home_popped), PaneStatus::PoppedOut);
+        assert!(!container_visible(true, home_popped, true, true));
+
+        assert!(popped_elsewhere(true, 0, 100));
+
+        // Once rehomed onto the detached SolidCraftWindow (toplevel != home): renders & maps normally.
+        let win_popped = popped_elsewhere(true, 200, 100);
+        assert!(!win_popped);
+        assert_eq!(pane_status(&json!({"state": "ready"}), true, win_popped), PaneStatus::Ready);
+        assert!(container_visible(true, win_popped, true, true));
+    }
+
+    #[test]
+    fn starting_then_file_switch_sends_single_open_when_ready() {
+        let a = "/proj/a.step";
+        let b = "/proj/b.step";
+        // While starting, clicking B updates wanted_file=B, sent_file stays A, hub_file stays A -> no open sent yet.
+        assert!(!needs_file_open(true, "starting", b, a, a));
+        // Once hub transitions to ready with hub_file=A, single doc.open B should fire.
+        assert!(needs_file_open(true, "ready", b, a, a));
+        // After sent_file is recorded as B, no duplicate open fires even before hub_file updates.
+        assert!(!needs_file_open(true, "ready", b, b, a));
     }
 
     #[test]
