@@ -448,6 +448,7 @@ sidebar.wakes.soon = まもなく再開
 sidebar.archived = アーカイブ済み
 sidebar.nothing = 実行中の作業なし
 sidebar.search.projects = プロジェクトを検索
+sidebar.search.hint = 検索…
 thread.title.placeholder = スレッド名
 # ja? sigils and their English kinds kept, as typed; A translated the words after them
 composer.placeholder = 何でも質問：@bot、>thread、%project、#room、$skill、/btw
@@ -4526,6 +4527,7 @@ sidebar.sections.new.group = 新しいグループ…
 sidebar.sections.new.group.title = 新しいグループ
 sidebar.sections.remove.ask = {project}をBackplaneから外しますか？フォルダとファイルはそのまま残ります。
 gpui.sections.running = {n, number}件実行中
+gpui.sections.done = 完了（{n, number}）
 gpui.sections.rest = {n, plural, other {ここにないスレッド#件（プロジェクトページにあります）}}
 gpui.projects.mech = 機構部品（{n}）
 gpui.open.folder = フォルダを開く

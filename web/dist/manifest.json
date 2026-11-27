@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 252088,
+  "totalAssetGzipBytes": 252327,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -172,6 +172,7 @@
     "gpui.rail.no.schematic",
     "gpui.rail.split.needs.both",
     "gpui.search.models",
+    "gpui.sections.done",
     "gpui.settings.group.agents",
     "gpui.settings.group.general",
     "gpui.swarm.latest",
@@ -242,7 +243,7 @@
     "settings.theme.light",
     "sheet.rename",
     "sidebar.add.project",
-    "sidebar.search.projects",
+    "sidebar.search.hint",
     "solidcraft.web.install.btn",
     "solidcraft.web.install.prompt",
     "solidcraft.web.installing",
@@ -369,7 +370,7 @@
     "web.settings.providers",
     "web.settings.providers.browser"
   ],
-  "i18nSubsetSha256": "bfd237a69439433685530d44091719fc2f330fa98537c96236ef18442d8f8082",
+  "i18nSubsetSha256": "edbcf89d66be77f4c4cf660ca827ffdfe55480f44cc5804c431be6f048920c97",
   "inputs": {
     "web/src/addproject.ts": "06a7ff3e13cd78d993ebca7f638d5d623da06c0099186ad534bae8f184dbe44f",
     "web/src/app.ts": "00be28d1e8a3f0d532fe5da3821e8aece412a4adfc35b423751e62e610d4e2cb",
@@ -398,8 +399,8 @@
     "web/src/ring-model.ts": "66368ffe8996138d4e73f041e50ac4fa573cf20ee59571af5fd1f320e29a895d",
     "web/src/settings-model.ts": "2f8f64cc93ee54c1bf45d918d8568eec2457970db7b3c43e926b2b4c45dcd5f6",
     "web/src/settings.ts": "8d4c24f554ba9c7ba4c4a96098fe25eea68b91f41489aee4d2b01b616f41f507",
-    "web/src/shell.css": "3975e68cf496080936a34f1e127195ee915db77af50af0458edc4e07cc509f22",
-    "web/src/sidebar.ts": "fb86edf0ec7be1d02457db13e51f45cd41506de082cd6834c36b260c030465ea",
+    "web/src/shell.css": "962fd403545e051971219822f1c1249e0e646fbc8365f304ea3f6eb6626f1925",
+    "web/src/sidebar.ts": "c59990f7b6293cf6a4a0f838ddd3fcf5365dbb6b4f2f62b388796fd21b697e69",
     "web/src/swarm-need.ts": "503bbf5ffe0389f068847571c792321b0ad5c8d26a18c73b8e41c0a8989e227f",
     "web/src/swarm.ts": "f99d85ef52ec6916f52a8be71c5b445bb6bb4b20ab44d4557c9c8d66c15d2b4f",
     "web/src/thread-context.ts": "b9fbd5b3ef0b1357b5a4444a1e9a0ac0606afe1c8a5377c4777752e918af0ac2",
@@ -438,9 +439,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 480550,
-      "gzipBytes": 136147,
-      "sha256": "caf7a0d96f4a10a5280bb51f3ddf397c94caf844f75921db400539c0daf27995"
+      "bytes": 481233,
+      "gzipBytes": 136344,
+      "sha256": "a4ed0f53647a06c988de0fec6a928de342bc957e221ac6699f6d1a0642fd3de6"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -458,14 +459,14 @@
       "sha256": "123b6a27f255d339b505c8fd83609674f0bddf9b46c0e907fce23befa96b1eec"
     },
     "assets/pair.js": {
-      "bytes": 66123,
-      "gzipBytes": 19562,
-      "sha256": "a4123e14f7eb4a4f85810871079622daf3b77965ac7a134d61804b0386f99832"
+      "bytes": 66213,
+      "gzipBytes": 19594,
+      "sha256": "1a315ccbc783876f880e81a4e64d9de813697fe71598558889af72f0da073bf7"
     },
     "assets/style.css": {
-      "bytes": 110019,
-      "gzipBytes": 18080,
-      "sha256": "85ae242c77c3b8a09abeaa90d7bb07570fadb978d81b4a0a683c9a2dedbfdef6"
+      "bytes": 110085,
+      "gzipBytes": 18090,
+      "sha256": "1c915e57d8f03846d581ad5e3cca7a3c065c3f3b727fe9c9016f66553f040892"
     },
     "assets/terminal.js": {
       "bytes": 296616,

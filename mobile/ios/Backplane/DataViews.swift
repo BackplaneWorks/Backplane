@@ -454,6 +454,18 @@ struct DataThreadsView: View {
                     // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
                     if client.has("swarm") && !r.folded { ForEach(Swarm.listed(client.swarms, project: r.id).filter { x in !(client.sections.first { $0.id == "needs" }?.rows.contains { $0.swarmRoom == x.id } ?? false) }) { x in DataSwarmRow(row: x) { path.append(DSwarmRoute(id: x.id, name: x.name)) }.dataRow() } }
                     ForEach(r.threads) { t in DataSectionThread(r: t, indent: 36) { path.append($0) }.farHide(t, client).rowSwipes(t, client).dataRow() }
+                    if !r.folded && (r.doneCount > 0 || r.doneOpen) && !r.doneToggle.isEmpty {
+                        Button { client.toggleSection(r.doneToggle) } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: r.doneOpen ? "chevron.down" : "chevron.right").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint)
+                                Text(Tr.gpui_sections_done(n: r.doneCount)).dmono(11).foregroundStyle(BackplaneDesign.faint)
+                                Spacer(minLength: 0)
+                            }.padding(.leading, 36).padding(.trailing, 12).frame(minHeight: 30).contentShape(Rectangle())
+                        }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.done." + r.key)
+                        if r.doneOpen {
+                            ForEach(r.done) { t in DataSectionThread(r: t, indent: 36) { path.append($0) }.farHide(t, client).rowSwipes(t, client).dataRow() }
+                        }
+                    }
                 }
             }
         }

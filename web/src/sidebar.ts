@@ -194,6 +194,10 @@ export interface SectionProjectRow {
   hasBoard?: boolean;
   hasSchematic?: boolean;
   threads?: SectionThreadRow[];
+  done?: SectionThreadRow[];
+  doneCount?: number;
+  doneOpen?: boolean;
+  doneToggle?: string;
   swarms?: SectionThreadRow[];
   more?: number;
   running?: number;
@@ -536,7 +540,7 @@ export class SidebarView {
     this.filterInput = document.createElement("input");
     this.filterInput.type = "search";
     this.filterInput.className = "bp-input bp-side-search";
-    const ph = t("sidebar.search.projects", "Search projects, threads…");
+    const ph = t("sidebar.search.hint", "Search…");
     this.filterInput.placeholder = ph;
     this.filterInput.setAttribute("aria-label", ph);
     this.filterInput.setAttribute("data-testid", "sidebar-filter");
@@ -688,7 +692,7 @@ export class SidebarView {
   }
 
   public refreshLocale(): void {
-    const ph = t("sidebar.search.projects", "Search projects, threads…");
+    const ph = t("sidebar.search.hint", "Search…");
     this.filterInput.placeholder = ph;
     this.filterInput.setAttribute("aria-label", ph);
     this.render();
@@ -1127,6 +1131,10 @@ export class SidebarView {
             listedThreadIds.add(th.id);
             listedThreadIds.add(rawThreadId(th.id));
           }
+          for (const th of p.done ?? []) {
+            listedThreadIds.add(th.id);
+            listedThreadIds.add(rawThreadId(th.id));
+          }
         }
       }
     }
@@ -1404,6 +1412,28 @@ export class SidebarView {
                   pinned: selectedMeta.pinned,
                   nav: selectedMeta.id,
                 }, true));
+              }
+              const doneCount = proj.doneCount ?? 0;
+              const doneOpen = Boolean(proj.doneOpen);
+              const doneToggle = proj.doneToggle ?? "";
+              if (!q && (doneCount > 0 || doneOpen) && doneToggle) {
+                const doneBtn = document.createElement("button");
+                doneBtn.type = "button";
+                doneBtn.className = "bp-settled-toggle bp-proj-done-toggle";
+                doneBtn.setAttribute("data-testid", `project-done-${proj.id}`);
+                doneBtn.textContent = `${doneOpen ? "▾" : "▸"} ${t("gpui.sections.done", "Done ({n})").replace("{n}", String(doneCount))}`;
+                doneBtn.addEventListener("click", (e) => {
+                  e.stopPropagation();
+                  this.cb.onToggleSection?.(doneToggle);
+                });
+                group.appendChild(doneBtn);
+                if (doneOpen) {
+                  for (const th of proj.done ?? []) {
+                    const row = this.renderSectionThreadRow(th, true);
+                    row.classList.add("bp-thread-settled");
+                    group.appendChild(row);
+                  }
+                }
               }
             }
 

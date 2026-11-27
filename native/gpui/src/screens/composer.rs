@@ -168,7 +168,7 @@ impl Composer {
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.redo(); }); }
     fn go(&mut self, _: &Go, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::Submit); }
     fn go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::SubmitBack); }
-    fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.newline()); }
+    fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) { if self.max_lines <= 1.0 { return; } self.edit(cx, |e| e.newline()); }
     fn palette(&mut self, _: &CharPalette, window: &mut Window, _: &mut Context<Self>) { window.show_character_palette(); }
     fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(-1)); } else { self.vertical(-1, false, cx); } }
     fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(1)); } else { self.vertical(1, false, cx); } }
@@ -306,6 +306,11 @@ fn runs_for(len: usize, base: &TextRun, marked: Option<&Range<usize>>) -> Vec<Te
 }
 
 
+/// Wrap width passed to `shape_rows`: a single-line box's placeholder never wraps onto a second line (it clips horizontally).
+pub fn wrap_width_for(max_lines: f32, empty: bool, width: Option<Pixels>) -> Option<Pixels> {
+    if empty && max_lines <= 1.0 { None } else { width }
+}
+
 impl gpui::Element for Element_ {
     type RequestLayoutState = ();
     type PrepaintState = Prepaint;
@@ -313,14 +318,15 @@ impl gpui::Element for Element_ {
     fn source_location(&self) -> Option<&'static core::panic::Location<'static>> { None }
     fn request_layout(&mut self, _: Option<&GlobalElementId>, _: Option<&gpui::InspectorElementId>, window: &mut Window, cx: &mut App) -> (LayoutId, ()) {
         let input = self.input.read(cx);
-        let text: SharedString = if input.content.is_empty() { input.shown_placeholder() } else if input.masked { mask(&input.content).into() } else { input.content.clone() };
+        let empty = input.content.is_empty();
+        let text: SharedString = if empty { input.shown_placeholder() } else if input.masked { mask(&input.content).into() } else { input.content.clone() };
         let style = window.text_style();
         let max_lines = input.max_lines;
         let (font_size, lh) = (style.font_size.to_pixels(window.rem_size()), window.line_height());
         let base = TextRun { len: text.len(), font: style.font(), color: style.color, background_color: None, underline: None, strikethrough: None };
         let layout = window.request_measured_layout(Style { size: gpui::Size { width: relative(1.).into(), height: gpui::Length::Auto }, ..Default::default() }, move |known, avail, window, _| {
             let w = known.width.or(match avail.width { gpui::AvailableSpace::Definite(w) => Some(w), _ => None });
-            let rows = shape_rows(window, &text, &base, None, font_size, w, lh, &Chips::default());
+            let rows = shape_rows(window, &text, &base, None, font_size, wrap_width_for(max_lines, empty, w), lh, &Chips::default());
             let h = rows.last().map_or(lh, |r| r.top + r.height(lh));
             size(w.unwrap_or(px(100.)), h.max(lh).min(lh * max_lines))
         });
@@ -336,7 +342,7 @@ impl gpui::Element for Element_ {
         let base = TextRun { len: text.len(), font: style.font(), color, background_color: None, underline: None, strikethrough: None };
         let marked = if empty { None } else { input.ed.marked.clone() };
         let chips = if empty || input.masked { Chips::default() } else { let a = theme::color(light, "accent"); let mut bg: gpui::Hsla = a.into(); bg.a = 0.18; Chips { words: input.chips.clone(), fg: a.into(), bg } };
-        let rows = shape_rows(window, &text, &base, marked.as_ref(), font_size, Some(bounds.size.width), lh, &chips);
+        let rows = shape_rows(window, &text, &base, marked.as_ref(), font_size, wrap_width_for(input.max_lines, empty, Some(bounds.size.width)), lh, &chips);
         let total = rows.last().map_or(lh, |r| r.top + r.height(lh));
         // keep the caret in view, but only when the text, the caret or the box changed since the last frame: otherwise a wheel scroll would be pulled back
         let head = input.ed.head();
@@ -609,5 +615,11 @@ mod tests {
         assert_eq!(ed.text(), "draft\n\n> cited\n> text\n\n");
         assert!(ed.undo());
         assert_eq!(ed.text(), "draft");
+    }
+    #[test] fn single_line_placeholder_does_not_wrap() {
+        assert_eq!(wrap_width_for(1.0, true, Some(px(120.))), None);
+        assert_eq!(wrap_width_for(1.0, false, Some(px(120.))), Some(px(120.)));
+        assert_eq!(wrap_width_for(12.0, true, Some(px(120.))), Some(px(120.)));
+        assert_eq!(wrap_width_for(1.0, true, None), None);
     }
 }

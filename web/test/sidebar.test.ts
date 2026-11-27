@@ -52,6 +52,9 @@ describe("SidebarView Crew / Inbox / Bench + Status Pills + Snooze", () => {
     expect(sidebarSrc).toContain("isSwarmVisibleUnderProject");
     expect(sidebarSrc).toContain("proj.hasBoard || proj.hasSchematic");
     expect(sidebarSrc).toContain('data-testid", "all-projects-filter"');
+    expect(sidebarSrc).toContain("bp-proj-done-toggle");
+    expect(sidebarSrc).toContain("proj.doneToggle");
+    expect(sidebarSrc).toContain('"Search…"');
   });
 
   test("isSwarmVisibleUnderProject hides idle/settled/finished swarms under collapsed projects", () => {

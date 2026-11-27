@@ -116,8 +116,15 @@ pub fn folders(data: &Value) -> Option<Folders> {
     Some(Folders { text: s("text"), hint: s("hint"), error: s("error"), items, more: f.get("more").and_then(Value::as_u64).unwrap_or(0),
         mode: s("mode"), tabs, icon: s("icon"), repo, job: f.get("job").cloned().unwrap_or(Value::Null), signin: f.get("signin").cloned().unwrap_or(Value::Null) })
 }
+pub const SEARCH_HINT: &str = "Search\u{2026}"; // i18n-ok: the hint, drawn through trs by the composer
+/// Compact single-line height of the sidebar search box (fits cleanly inside `siderow::FOLD_ROW` beside the 16 px icons).
+pub const SEARCH_BOX_H: f32 = 26.;
+
 pub fn query(data: &Value) -> String { string(&data["search"], "query") }
-/* i18n-ok: the hint, drawn through trs by the composer */ pub fn hint(data: &Value) -> String { let h = string(&data["search"], "hint"); if h.is_empty() { "Search projects".into() } else { h } }
+/* i18n-ok: the hint, drawn through trs by the composer */ pub fn hint(data: &Value) -> String {
+    let h = string(&data["search"], "hint");
+    if h.is_empty() || h == "Search projects and threads" || h == "Search projects" { SEARCH_HINT.into() } else { h }
+}
 
 pub fn search_cmd(text: &str) -> Command { Command::Action("proj-find-q".into(), text.to_string()) }
 pub fn go_cmd() -> Command { Command::Action("proj-go".into(), String::new()) }
@@ -336,7 +343,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
         }
     }
     if this.screens.projects.search.is_none() {
-        let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
+        let input = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); c.max_lines = 1.0; c });
         cx.observe(&input, |this, input, cx| {
             let text = input.read(cx).content.to_string(); let p = &mut this.screens.projects;
             if p.echo_q.as_deref() == Some(text.as_str()) { p.echo_q = None; return; }
@@ -399,7 +406,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
 /// The sidebar's search box (an empty box before the first picture).
 pub fn search_box(light: bool, p: &Projects) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(p.search.clone()).into_any_element()
+    div().flex_1().min_w_0().h(crate::scale::tpx(SEARCH_BOX_H)).flex().items_center().overflow_hidden().px_2().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(p.search.clone()).into_any_element()
 }
 
 /// The folder picker over the main area, while the hub shows `folders`: a column with the title (Esc and × on its right), the path field, the
@@ -989,7 +996,11 @@ mod tests {
     #[test] fn the_search_speaks_the_clients_actions() {
         assert!(matches!(search_cmd("ecc"), Command::Action(a, v) if a == "proj-find-q" && v == "ecc")); assert!(matches!(go_cmd(), Command::Action(a, _) if a == "proj-go"));
         assert!(matches!(open_cmd(), Command::Action(a, _) if a == "picker-open")); assert!(matches!(type_cmd("~/"), Command::Action(a, v) if a == "picker-type" && v == "~/"));
-        assert_eq!(hint(&Value::Null), "Search projects"); assert_eq!(query(&j(r#"{"search":{"query":"x"}}"#)), "x");
+        assert_eq!(hint(&Value::Null), SEARCH_HINT);
+        assert_eq!(hint(&j(r#"{"search":{"hint":"Search projects and threads"}}"#)), SEARCH_HINT);
+        assert_eq!(hint(&j(r#"{"search":{"hint":"Search projects"}}"#)), SEARCH_HINT);
+        assert!(SEARCH_BOX_H < crate::screens::siderow::FOLD_ROW && SEARCH_BOX_H <= 28.0);
+        assert_eq!(query(&j(r#"{"search":{"query":"x"}}"#)), "x");
     }
 }
 
