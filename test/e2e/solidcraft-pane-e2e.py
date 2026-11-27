@@ -484,20 +484,38 @@ def main():
             align_ok = rect_ok and shape_ok
         log("resize_rect_alignment", align_ok, f"pane={pane_r} x11={cur_wins[0]['geo'] if cur_wins else {}} shape={shape_info}")
 
-        # 6. Pop out (detach) and Bring back (reattach) via pane header buttons
+        # 6. Pop out (detach) and Bring back (reattach) via pane header buttons, polling X11 viewable continuity
+        def poll_viewable(dur_s):
+            samples = []
+            deadline = time.time() + dur_s
+            while time.time() < deadline:
+                samples.append(any(w["viewable"] for w in x11_solidcraft_windows()))
+                time.sleep(0.05)
+            return samples
+
         r_now = rects()
         detach_rect = next((k for k in ("solidcraft:detach", "pane-tool:mech:solidcraft-pop") if k in r_now), None)
         if detach_rect and click_rect(detach_rect):
             mark_phase("detached")
-            time.sleep(2.5)
+            detach_samples = poll_viewable(1.5)
+            time.sleep(1.0)
             key_shot("key_detached")
             r_after_detach = rects()
             bring_back_clicked = click_rect("solidcraft:bring_back") or click_rect("pane-tool:mech:solidcraft-pop")
             mark_phase("reattached")
-            time.sleep(2.5)
+            reattach_samples = poll_viewable(1.5)
+            time.sleep(1.0)
             key_shot("key_reattached")
-            reattached_ok = bring_back_clicked and any(w["viewable"] for w in x11_solidcraft_windows()) and "solidcraft:detach" in rects()
-            log("solidcraft_detach_reattach", reattached_ok, f"detached_via={detach_rect} bring_back_clicked={bring_back_clicked} after_detach_keys={[k for k in r_after_detach if 'solidcraft' in k]}")
+            unmapped_detach = detach_samples.count(False)
+            unmapped_reattach = reattach_samples.count(False)
+            reattached_ok = (
+                bring_back_clicked
+                and any(w["viewable"] for w in x11_solidcraft_windows())
+                and "solidcraft:detach" in rects()
+                and unmapped_detach == 0
+                and unmapped_reattach == 0
+            )
+            log("solidcraft_detach_reattach", reattached_ok, f"detached_via={detach_rect} bring_back={bring_back_clicked} unmapped=(detach:{unmapped_detach}/{len(detach_samples)}, reattach:{unmapped_reattach}/{len(reattach_samples)})")
 
         # Stop recording cleanly so mp4 finalizes
         try:
@@ -512,50 +530,84 @@ def main():
     if os.path.isfile(P("video.mp4")):
         subprocess.run(["ffmpeg", "-v", "error", "-i", P("video.mp4"), P("frames/f_%05d.png")], check=False, timeout=120)
     frames = sorted(glob.glob(P("frames/f_*.png")))
+    analyze_frames(frames, phase_marks, keyframes_dir=P("keyframes"), log=log)
+
+    report = {
+        "video": P("video.mp4"),
+        "frame_count": len(frames),
+        "phase_marks": phase_marks,
+        "checks": checks,
+    }
+    with open(P("report.json"), "w") as fh:
+        json.dump(report, fh, indent=2)
+
+    sys.exit(0 if checks and all(c["ok"] for c in checks) else 1)
+
+
+def analyze_frames(frames, phase_marks, keyframes_dir, log):
+    """Compute post-map flashes, 45x45 black-block blinks, visible-span black frames, idle diffs, and resize_contact.png."""
     viewer_box = (int(W * 0.56), int(H * 0.12), int(W * 0.94), int(H * 0.92))
 
     def pane_img(idx):
         return Image.open(frames[idx]).convert("L").crop(viewer_box)
 
-    def full_img(idx):
-        return Image.open(frames[idx]).convert("L")
+    def small_img(idx):
+        return Image.open(frames[idx]).convert("L").resize((360, 225), Image.Resampling.BILINEAR)
 
     def frame_diff(a, b):
         return ImageStat.Stat(ImageChops.difference(a, b)).mean[0]
 
-    # Honest post-startup black-frame check across SolidCraft-visible intervals (excludes pre-map startup)
+    # Auto-detect first mapped UI frame (skips pre-map Xvfb root black frames 1..~10 cleanly)
+    first_map_f = next((i for i in range(len(frames)) if ImageStat.Stat(small_img(i)).mean[0] > 5.0), 0)
+
+    # Honest post-startup black-frame check across every SolidCraft-visible span
     black_frames = []
     checked_spans = []
     for s_key, off_s, e_key, def_dur in [
         ("solidcraft_open", 2.0, "kicad_tab", 3.5),
         ("solidcraft_return", 1.0, "resize_start", 2.5),
+        ("post_resize_settle", 0.0, "detached", 2.5),
     ]:
         if frames and s_key in phase_marks:
-            sf = min(len(frames) - 1, max(0, int((phase_marks[s_key] + off_s) * FPS)))
+            sf = min(len(frames) - 1, max(first_map_f, int((phase_marks[s_key] + off_s) * FPS)))
             ef = min(len(frames), int((phase_marks.get(e_key, phase_marks[s_key] + def_dur)) * FPS))
-            checked_spans.append((sf, ef))
-            for i in range(sf, ef):
-                st = ImageStat.Stat(pane_img(i))
-                if st.mean[0] < 4.0 and st.stddev[0] < 2.0:
-                    black_frames.append(i)
-    log("zero_black_frames", bool(checked_spans) and not black_frames, f"checked_spans={checked_spans} total_frames={len(frames)} black_frames={black_frames[:10]}")
+            if ef > sf:
+                checked_spans.append((sf, ef))
+                for i in range(sf, ef):
+                    st = ImageStat.Stat(pane_img(i))
+                    if st.mean[0] < 4.0 and st.stddev[0] < 2.0:
+                        black_frames.append(i)
+    log("zero_black_frames", bool(checked_spans) and not black_frames, f"first_map_f={first_map_f} checked_spans={checked_spans} total_frames={len(frames)} black_frames={black_frames[:10]}")
 
-    # Full post-startup single-frame flash check (neighbour-agree criterion)
+    # Full post-map checks matching fable/fable-2 criteria: relative neighbour flash + 180x180 block blink + detach/reattach dark blink
     flashes = []
-    if len(frames) > 20 and "files_tab" in phase_marks:
-        s_flash = max(1, int(phase_marks["files_tab"] * FPS))
-        e_flash = len(frames) - 1
-        prev = full_img(s_flash - 1)
-        cur = full_img(s_flash)
-        for i in range(s_flash, e_flash):
-            nxt = full_img(i + 1)
-            dn = frame_diff(prev, nxt)
+    block_flashes = []
+    detach_dark_blinks = []
+    detach_start_f = int(phase_marks["detached"] * FPS) if "detached" in phase_marks else len(frames)
+    if len(frames) - first_map_f > 3:
+        prev = small_img(first_map_f)
+        cur = small_img(first_map_f + 1)
+        def blk_dark(im, x, y):
+            return sum(im.crop((x, y, x + 45, y + 45)).histogram()[:8]) / 2025.0
+        for i in range(first_map_f + 1, len(frames) - 1):
+            nxt = small_img(i + 1)
             d1 = frame_diff(prev, cur)
             d2 = frame_diff(cur, nxt)
-            if dn < 1.0 and d1 > 8.0 and d2 > 8.0:
-                flashes.append((i, round(d1, 2), round(d2, 2), round(dn, 2)))
+            dn = frame_diff(prev, nxt)
+            if d1 > 3.0 and d2 > 3.0 and dn < 0.4 * min(d1, d2):
+                flashes.append((i + 1, round(d1, 2), round(d2, 2), round(dn, 2)))
+            if sum(cur.histogram()[:8]) / 81000.0 >= 0.45 and i >= detach_start_f:
+                detach_dark_blinks.append(i + 1)
+            # Only scan 45x45 blocks if frame changed noticeably from either neighbour
+            if d1 > 2.0 or d2 > 2.0:
+                for y in range(0, 225, 45):
+                    for x in range(0, 360, 45):
+                        if blk_dark(cur, x, y) >= 0.90 and blk_dark(prev, x, y) < 0.30 and blk_dark(nxt, x, y) < 0.30:
+                            block_flashes.append((i + 1, x * 4, y * 4))
+                            break
             prev, cur = cur, nxt
-        log("zero_single_frame_flashes", not flashes, f"checked {s_flash}..{e_flash} flashes={flashes[:10]}")
+        log("zero_single_frame_flashes", not flashes, f"checked {first_map_f+1}..{len(frames)-1} flashes={flashes[:10]}")
+        log("zero_black_block_flashes", not block_flashes and not detach_dark_blinks, f"block_flashes={block_flashes[:10]} detach_dark_blinks={detach_dark_blinks[:10]}")
 
     # Generate 6-panel resize_contact.png: 3 highest-diff shrink frames + 3 highest-diff grow frames inside [resize_start..resize_end]
     if frames and "resize_start" in phase_marks and "resize_end" in phase_marks:
@@ -564,7 +616,7 @@ def main():
         if r_end - r_start >= 6:
             mid = (r_start + r_end) // 2
             def top3(lo, hi):
-                scored = sorted(((frame_diff(full_img(i - 1), full_img(i)), i) for i in range(lo, hi)), reverse=True)
+                scored = sorted(((frame_diff(small_img(i - 1), small_img(i)), i) for i in range(lo, hi)), reverse=True)
                 picked = []
                 for _, idx in scored:
                     if all(abs(idx - p) >= 2 for p in picked):
@@ -578,7 +630,8 @@ def main():
             for idx_pos, f_i in enumerate(sample_idx):
                 im = Image.open(frames[f_i]).convert("RGB").resize((tw, th), Image.Resampling.BILINEAR)
                 sheet.paste(im, ((idx_pos % 3) * tw, (idx_pos // 3) * th))
-            sheet.save(P("keyframes/resize_contact.png"))
+            os.makedirs(keyframes_dir, exist_ok=True)
+            sheet.save(os.path.join(keyframes_dir, "resize_contact.png"))
 
     oscillations = []
     if frames and "post_resize_settle" in phase_marks:
@@ -589,17 +642,6 @@ def main():
             if d > 0.8:
                 oscillations.append((i, round(d, 3)))
     log("zero_idle_flicker", len(frames) > 0 and not oscillations, f"post-settle frame diffs >0.8: {oscillations[:10]}")
-
-    report = {
-        "video": P("video.mp4"),
-        "frame_count": len(frames),
-        "phase_marks": phase_marks,
-        "checks": checks,
-    }
-    with open(P("report.json"), "w") as fh:
-        json.dump(report, fh, indent=2)
-
-    sys.exit(0 if checks and all(c["ok"] for c in checks) else 1)
 
 
 if __name__ == "__main__":
