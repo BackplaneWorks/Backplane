@@ -229,7 +229,7 @@ def main():
         time.sleep(1.5)
 
         with open(P("i3.conf"), "w") as fh:
-            fh.write(f"font pango:monospace 8\nnew_window none\nfor_window [class=\".*\"] border none\ndefault_border none\nhide_edge_borders both\nipc-socket {RUN}/i3.sock\n")
+            fh.write(f"font pango:monospace 8\nnew_window none\nfor_window [class=\".*\"] border none\nfor_window [title=\"^SolidCraft\"] floating enable\ndefault_border none\nhide_edge_borders both\nipc-socket {RUN}/i3.sock\n")
         denv = dict(env, DISPLAY=DISP)
         spawn(["i3", "-c", P("i3.conf")], "i3.log", denv)
         time.sleep(1.0)
@@ -642,9 +642,16 @@ def analyze_frames(frames, phase_marks, keyframes_dir, log, pane_rect=None):
                 templates = [
                     ("gizmo", px + pw - 115, py + 145, 85, 65),
                     ("search_cmd", px + pw - 165, py + 52, 150, 26),
+                    ("sketch_btn", px + 115, py + 95, 72, 60),
                 ]
                 doubled_hits = []
                 frame_arrays = {i: np.asarray(Image.open(frames[i]).convert("L"), dtype=np.float32) for i in range(r_start, r_end)}
+                blank_resize = [
+                    i + 1
+                    for i, full_a in frame_arrays.items()
+                    if float(full_a[py + 80:py + 580, px + 5:px + 265].std()) < 3.0
+                ]
+                log("zero_blank_resize_frames", not blank_resize, f"checked {r_start}..{r_end} blank={blank_resize[:15]}")
                 for tname, tx, ty, tw, th in templates:
                     if tx < 0 or ty < 0 or ty + th > H or tx + tw > W:
                         continue
@@ -669,7 +676,7 @@ def analyze_frames(frames, phase_marks, keyframes_dir, log, pane_rect=None):
                         peaks = []
                         while True:
                             py_i, px_i = np.unravel_index(np.argmax(ncc), ncc.shape)
-                            if ncc[py_i, px_i] < 0.85:
+                            if ncc[py_i, px_i] < 0.78:
                                 break
                             peaks.append((int(px_i), int(py_i + y0), round(float(ncc[py_i, px_i]), 2)))
                             ncc[max(0, py_i - 20):py_i + 20, max(0, px_i - 40):px_i + 40] = -1.0
