@@ -121,16 +121,18 @@ def main():
         with open(script_path, "w") as fh:
             json.dump(
                 {
-                    "steps": [
-                        {"command": "parameters.define", "params": {"name": "w", "expression": "40 mm"}},
-                        {"command": "sketch.create", "params": {"plane": "xy", "name": "base"}},
-                        {"command": "sketch.rectangle", "params": {"center": [0, 0], "width": "w", "height": "25 mm"}},
-                        {"command": "solid.extrude", "params": {"distance": "12 mm"}},
+                    "commands": [
+                        {"command": "parameters.add", "params": {"name": "w", "expression": "40 mm"}},
+                        {"command": "solid.box", "params": {"length": "w", "width": 25, "height": 12, "name": "Base"}},
+                        {"command": "solid.cylinder", "params": {"radius": 3, "height": 12, "operation": "cut", "name": "Hole"}},
                     ]
                 },
                 fh,
             )
-        subprocess.run([cli, "run", script_path, "--save", P("proj/mech/box.sc"), "--out", P("proj/mech/box.stl")], check=False)
+        box_env = dict(os.environ, SOLIDCRAFT_NO_TELEMETRY="1", SOLIDCRAFT_UPDATE_CHECK="0")
+        box_res = subprocess.run([cli, "run", script_path, "--save", P("proj/mech/box.sc"), "--out", P("proj/mech/box.stl")], env=box_env, check=False, capture_output=True, text=True)
+        if box_res.returncode != 0 or not os.path.isfile(P("proj/mech/box.sc")):
+            sys.exit(f"failed to build box.sc fixture (rc={box_res.returncode}): {box_res.stderr or box_res.stdout}")
 
     now = int(time.time())
     seed = [
@@ -144,8 +146,15 @@ def main():
         for e in seed:
             fh.write(json.dumps(e) + "\n")
 
-    # MCP call list for Project File Tools + viewer_show + viewer_render
-    mcp_calls = [
+    # MCP call batches: batch 1 edits box.sc live in the bridged pane; batch 2 tests file tools + viewer_render + viewer_show.
+    mcp_batch_1 = [
+        {"name": "solidcraft_status", "arguments": {}},
+        {"name": "solidcraft_call", "arguments": {"tool": "open", "arguments": {"path": "mech/box.sc"}}},
+        {"name": "solidcraft_summary", "arguments": {}},
+        {"name": "solidcraft_call", "arguments": {"tool": "set_parameter", "arguments": {"name": "w", "expression": "90 mm"}}},
+        {"name": "solidcraft_look", "arguments": {"views": ["iso"]}},
+    ]
+    mcp_batch_2 = [
         {"name": "files_list", "arguments": {"path": ""}},
         {"name": "files_write", "arguments": {"path": "mech/spec.txt", "text": "housing v1\n"}},
         {"name": "files_read", "arguments": {"path": "mech/spec.txt"}},
@@ -155,7 +164,7 @@ def main():
         {"name": "viewer_show", "arguments": {"kind": "mech", "path": "mech/case.step"}},
     ]
     with open(P("mcp_calls.json"), "w") as fh:
-        json.dump(mcp_calls, fh)
+        json.dump(mcp_batch_1 if SC_DIR else mcp_batch_2, fh)
 
     procs = []
     checks = []
@@ -285,8 +294,13 @@ def main():
         def rects():
             r = {}
             for m in metrics():
-                if m.get("event") == "layout":
-                    r.update(m.get("rects", {}))
+                ev = m.get("event")
+                if ev == "layout" and isinstance(m.get("rects"), dict):
+                    r.update(m["rects"])
+                elif ev == "probes" and isinstance(m.get("rects"), list):
+                    for item in m["rects"]:
+                        if isinstance(item, dict) and "id" in item:
+                            r[item["id"]] = item
             return r
 
         def ctrls():
@@ -325,44 +339,81 @@ def main():
         def mark_phase(name):
             phase_marks[name] = time.time() - t_rec
 
-        # 1. Trigger stand-in turn (`zqcalls`) to exercise project file tools + viewer_render + viewer_show
-        subprocess.run(["python3", XIN, "focus", "Backplane"], env=denv, check=False, timeout=10)
-        if click_rect("composer"):
-            subprocess.run(["python3", XIN, "type", "zqcalls"], env=denv, check=False, timeout=15)
-            subprocess.run(["python3", XIN, "key", "Return"], env=denv, check=False, timeout=10)
-        time.sleep(6.0)
-        fake_log = open(P("fake.log"), errors="replace").read() if os.path.isfile(P("fake.log")) else ""
-        log("file_tools_mcp", "CALL files_list ok" in fake_log and "CALL files_write ok" in fake_log and "CALL files_read error" in fake_log,
+        # 1. With box.sc ready in the embedded pane, run Batch 1 (bridged MCP live-edit: solidcraft_status/summary/set_parameter/look)
+        viewer_box = (int(W * 0.48), int(H * 0.12), int(W * 0.96), int(H * 0.92))
+        def run_zqcalls(wait_marker, timeout_s=45):
+            subprocess.run(["python3", XIN, "focus", "Backplane"], env=denv, check=False, timeout=10)
+            if click_rect("composer"):
+                subprocess.run(["python3", XIN, "type", "zqcalls"], env=denv, check=False, timeout=15)
+                subprocess.run(["python3", XIN, "key", "Return"], env=denv, check=False, timeout=10)
+            deadline = time.time() + timeout_s
+            while time.time() < deadline:
+                txt = open(P("fake.log"), errors="replace").read() if os.path.isfile(P("fake.log")) else ""
+                if wait_marker in txt:
+                    time.sleep(1.5)
+                    return txt
+                time.sleep(0.5)
+            return open(P("fake.log"), errors="replace").read() if os.path.isfile(P("fake.log")) else ""
+
+        if SC_DIR:
+            time.sleep(2.0)
+            shot_before = key_shot("key_mcp_before")
+            wins_before = [w["wid"] for w in x11_solidcraft_windows() if w["viewable"]]
+            fake_log = run_zqcalls("CALL solidcraft_look ")
+            shot_after = key_shot("key_mcp_after")
+            wins_after = [w["wid"] for w in x11_solidcraft_windows() if w["viewable"]]
+            img_b = Image.open(shot_before).convert("L").crop(viewer_box)
+            img_a = Image.open(shot_after).convert("L").crop(viewer_box)
+            mcp_diff = ImageStat.Stat(ImageChops.difference(img_b, img_a)).mean[0]
+            sc_lines = [l for l in fake_log.splitlines() if "CALL solidcraft_" in l]
+            status_line = next((l for l in sc_lines if "CALL solidcraft_status ok" in l), "")
+            summary_line = next((l for l in sc_lines if "CALL solidcraft_summary ok" in l), "")
+            mcp_live_ok = (
+                "pane" in status_line
+                and '"name":"w"' in summary_line
+                and "CALL solidcraft_call ok" in fake_log
+                and "CALL solidcraft_look ok" in fake_log
+                and len(wins_before) == 1
+                and wins_before == wins_after
+                and mcp_diff > 0.05
+            )
+            log("mcp_solidcraft_live_edit", mcp_live_ok, f"wins={wins_before}->{wins_after} diff={mcp_diff:.3f} calls={'; '.join(sc_lines)[:260]}")
+            with open(P("mcp_calls.json"), "w") as fh:
+                json.dump(mcp_batch_2, fh)
+
+        # 2. Run Batch 2 (`zqcalls`) to exercise project file tools + viewer_render + viewer_show (mech/case.step)
+        fake_log = run_zqcalls("CALL viewer_show ", timeout_s=45)
+        log("file_tools_mcp", "CALL files_list ok" in fake_log and "CALL files_write ok" in fake_log and "CALL files_read ok" in fake_log and "CALL files_read error" in fake_log,
             "stand-in MCP file tools logged: " + "; ".join([l for l in fake_log.splitlines() if "CALL " in l])[:300])
         log("viewer_render_cli", "CALL viewer_render ok" in fake_log, "viewer_render result in fake.log")
 
-        # 2. Switch to Files tab and click a CAD file, then verify SolidCraft embeds
+        # 3. Switch to Files tab and back to SolidCraft Mech (case.step), verify embedded SolidCraft window
         mark_phase("files_tab")
-        click_rect("rail:files")
+        files_clicked = click_rect("rail:Files")
         time.sleep(1.5)
         key_shot("key_files")
 
         mark_phase("solidcraft_open")
-        click_rect("rail:mech")
-        time.sleep(4.0)
+        mech_clicked = click_rect("rail:Mech")
+        time.sleep(3.5)
         key_shot("key_step_open")
         sc_wins = x11_solidcraft_windows()
-        log("solidcraft_embedded", any(w["viewable"] for w in sc_wins), f"SolidCraft X11 windows: {[w['line'] for w in sc_wins]}")
+        log("solidcraft_embedded", files_clicked and mech_clicked and any(w["viewable"] for w in sc_wins), f"clicked=({files_clicked},{mech_clicked}) SolidCraft X11 windows: {[w['line'] for w in sc_wins]}")
 
-        # 3. Switch across KiCad Board -> Files -> SolidCraft Mech and verify zero Z-order bleed
+        # 4. Switch across KiCad Board -> SolidCraft Mech and verify zero Z-order bleed
         mark_phase("kicad_tab")
-        click_rect("rail:board")
+        board_clicked = click_rect("rail:Board")
         time.sleep(2.0)
         key_shot("key_kicad_tab")
         sc_hidden_on_board = not any(w["viewable"] for w in x11_solidcraft_windows())
-        log("no_zorder_bleed_board", sc_hidden_on_board, f"SolidCraft hidden on Board tab: {sc_hidden_on_board}")
+        log("no_zorder_bleed_board", board_clicked and sc_hidden_on_board, f"board_clicked={board_clicked} SolidCraft hidden on Board tab: {sc_hidden_on_board}")
 
         mark_phase("solidcraft_return")
-        click_rect("rail:mech")
+        click_rect("rail:Mech")
         time.sleep(2.5)
         key_shot("key_solidcraft_return")
 
-        # 4. Resize GPUI window via i3-msg + split pane drag, then allow 10s for any import toast auto-dismiss before idle flicker window
+        # 5. Resize GPUI window via i3-msg + split pane drag, then allow 10s for any import toast auto-dismiss before idle flicker window
         mark_phase("resize")
         i3sock = f"{RUN}/i3.sock"
         subprocess.run(["i3-msg", "-s", i3sock, "floating", "enable"], env=denv, check=False, timeout=5)
@@ -371,9 +422,8 @@ def main():
         key_shot("key_resized")
         subprocess.run(["i3-msg", "-s", i3sock, "floating", "disable"], env=denv, check=False, timeout=5)
         time.sleep(1.5)
-        vr = rects().get("viewer") or rects().get("rail:mech")
-        if vr and "viewer" in rects():
-            vx = int(rects()["viewer"]["x"])
+        if "solidcraft:pane" in rects():
+            vx = int(rects()["solidcraft:pane"]["x"]) - 2
             vy = int(H * 0.5)
             subprocess.run(["python3", XIN, "drag", str(vx), str(vy), str(vx - 80), str(vy)], env=denv, check=False, timeout=10)
             time.sleep(0.8)
@@ -382,19 +432,20 @@ def main():
         mark_phase("post_resize_settle")
         time.sleep(2.5)
 
-        # 5. Detach and reattach if controls exist
-        c = ctrls()
-        detach_id = next((k for k in c if "detach" in k or "popout" in k), None)
-        if detach_id and click_rect(detach_id):
+        # 6. Pop out (detach) and Bring back (reattach) via pane header buttons
+        r_now = rects()
+        detach_rect = next((k for k in ("solidcraft:detach", "pane-tool:mech:solidcraft-pop") if k in r_now), None)
+        if detach_rect and click_rect(detach_rect):
             mark_phase("detached")
-            time.sleep(2.0)
+            time.sleep(2.5)
             key_shot("key_detached")
-            c2 = ctrls()
-            attach_id = next((k for k in c2 if "bring" in k or "popin" in k or "attach" in k), None)
-            if attach_id and click_rect(attach_id):
-                mark_phase("reattached")
-                time.sleep(2.0)
-                key_shot("key_reattached")
+            r_after_detach = rects()
+            bring_back_clicked = click_rect("solidcraft:bring_back") or click_rect("pane-tool:mech:solidcraft-pop")
+            mark_phase("reattached")
+            time.sleep(2.5)
+            key_shot("key_reattached")
+            reattached_ok = bring_back_clicked and any(w["viewable"] for w in x11_solidcraft_windows()) and "solidcraft:detach" in rects()
+            log("solidcraft_detach_reattach", reattached_ok, f"detached_via={detach_rect} bring_back_clicked={bring_back_clicked} after_detach_keys={[k for k in r_after_detach if 'solidcraft' in k]}")
 
         # Stop recording cleanly so mp4 finalizes
         try:
