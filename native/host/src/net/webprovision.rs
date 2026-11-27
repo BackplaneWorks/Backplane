@@ -183,13 +183,74 @@ pub async fn system_proxy_identity() -> std::io::Result<super::webtransport::Pro
 }
 
 #[cfg(unix)]
+async fn remove_stale_browser_socket(directory: &std::path::Path) -> std::io::Result<()> {
+    use std::{
+        io,
+        os::unix::fs::{FileTypeExt, MetadataExt},
+        time::Duration,
+    };
+
+    let socket = directory.join("browser.sock");
+    let meta = match std::fs::symlink_metadata(&socket) {
+        Ok(meta) => meta,
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(err) => return Err(err),
+    };
+    if !meta.file_type().is_socket() || meta.uid() != crate::plat::effective_uid() {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "existing browser.sock is not a private socket",
+        ));
+    }
+    match tokio::time::timeout(
+        Duration::from_millis(500),
+        tokio::net::UnixStream::connect(&socket),
+    )
+    .await
+    {
+        Ok(Err(err)) if err.kind() == io::ErrorKind::ConnectionRefused => {
+            match std::fs::remove_file(&socket) {
+                Ok(()) => Ok(()),
+                Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+                Err(err) => Err(err),
+            }
+        }
+        Ok(Ok(_)) => Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
+            "browser.sock is already active",
+        )),
+        Ok(Err(err)) if err.kind() == io::ErrorKind::NotFound => Ok(()),
+        Ok(Err(err)) => Err(err),
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::AddrInUse,
+            "browser.sock liveness probe timed out",
+        )),
+    }
+}
+
+#[cfg(unix)]
+async fn bind_private_socket_with(
+    directory: &std::path::Path,
+    authority: String,
+    proxy: super::webtransport::ProxyIdentity,
+) -> std::io::Result<super::webtransport::BrowserListener> {
+    match super::webtransport::BrowserListener::bind(directory, authority.clone(), proxy) {
+        Err(err) if err.kind() == std::io::ErrorKind::AddrInUse => {
+            remove_stale_browser_socket(directory).await?;
+            super::webtransport::BrowserListener::bind(directory, authority, proxy)
+        }
+        res => res,
+    }
+}
+
+#[cfg(unix)]
 pub async fn bind_private_backend(
     directory: &std::path::Path,
     authority: String,
 ) -> std::io::Result<super::webtransport::BrowserListener> {
     protected_directory(directory)?;
     let proxy = system_proxy_identity().await?;
-    super::webtransport::BrowserListener::bind(directory, authority, proxy)
+    bind_private_socket_with(directory, authority, proxy).await
 }
 
 /// Called with the same authority that was validated when binding the socket.
@@ -712,7 +773,8 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                 let node = status["Self"]["DNSName"]
                     .as_str()
                     .unwrap_or("")
-                    .trim_end_matches('.');
+                    .trim_end_matches('.')
+                    .to_ascii_lowercase();
                 let service = hub
                     .setting("web.service")
                     .await
@@ -752,7 +814,7 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                                     if let Ok(tcp) = tokio::net::TcpListener::bind((std::net::Ipv4Addr::LOCALHOST, saved)).await {
                                         reserved_listener = Some(std::sync::Arc::new(tcp));
                                         Some(saved)
-                                    } else if configured_authority_for(&config, &service, node, &BackendTarget::Loopback(saved)).is_some() {
+                                    } else if configured_authority_for(&config, &service, &node, &BackendTarget::Loopback(saved)).is_some() {
                                         Some(saved)
                                     } else {
                                         None
@@ -780,7 +842,7 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                                     .as_ref()
                                     .map(|p| p.to_string_lossy().into_owned())
                                     .unwrap_or_else(|| "tailscale".to_owned());
-                                if configured_authority_for(&config, &service, node, &target).is_none() {
+                                if configured_authority_for(&config, &service, &node, &target).is_none() {
                                     if let Some(args) = spare_node_port(&config)
                                         .and_then(|port| private_serve_args_for(None, port, &target))
                                     {
@@ -817,30 +879,47 @@ pub async fn monitor(hub: std::sync::Arc<crate::hub::Hub>, ts: &dyn super::Tails
                                         status_row["command"] = Value::from(user_plan);
                                     }
                                 }
-                                if let Some(authority) = configured_authority_for(&config, &service, node, &target) {
+                                if let Some(authority) = configured_authority_for(&config, &service, &node, &target) {
                                     match target {
                                         #[cfg(unix)]
                                         BackendTarget::Unix(socket) => {
-                                            if let Ok(listener) = bind_private_backend(&canon_dir, authority.clone()).await {
-                                                let mut task = tokio::spawn(listener.run(hub.clone()));
-                                                if https_address_answers(&hub.cfg.home, &authority).await {
-                                                    let active = serde_json::json!({"available":true, "address":format!("https://{authority}")});
-                                                    publish_status(&hub, &mut previous, active).await;
-                                                    tokio::select! {
-                                                        _ = &mut task => (),
-                                                        _ = enabled_changed(&hub, &mut changes, true) => (),
+                                            match bind_private_backend(&canon_dir, authority.clone()).await {
+                                                Ok(listener) => {
+                                                    let mut task = tokio::spawn(listener.run(hub.clone()));
+                                                    if https_address_answers(&hub.cfg.home, &authority).await {
+                                                        let active = serde_json::json!({"available":true, "address":format!("https://{authority}")});
+                                                        publish_status(&hub, &mut previous, active).await;
+                                                        tokio::select! {
+                                                            _ = &mut task => (),
+                                                            _ = enabled_changed(&hub, &mut changes, true) => (),
+                                                        }
+                                                        task.abort();
+                                                        let _ = task.await;
+                                                        let _ = std::fs::remove_file(&socket);
+                                                        requested = None;
+                                                        verification_failed = false;
+                                                        last_action = std::time::Instant::now();
+                                                        continue;
+                                                    }
+                                                    verification_failed = true;
+                                                    status_row["reason"] = Value::from("Private HTTPS forwarding could not be verified. Backplane will retry.");
+                                                    if previous != status_row {
+                                                        eprintln!("backplane: web ui HTTPS verification failed for https://{authority}");
                                                     }
                                                     task.abort();
+                                                    let _ = task.await;
                                                     let _ = std::fs::remove_file(&socket);
-                                                    requested = None;
-                                                    verification_failed = false;
-                                                    last_action = std::time::Instant::now();
-                                                    continue;
                                                 }
-                                                verification_failed = true;
-                                                status_row["reason"] = Value::from("Private HTTPS forwarding could not be verified. Backplane will retry.");
-                                                task.abort();
-                                                let _ = std::fs::remove_file(&socket);
+                                                Err(err) => {
+                                                    status_row["reason"] = Value::from(if err.kind() == std::io::ErrorKind::AddrInUse {
+                                                        "Local Web UI socket is in use by another process. Backplane will retry."
+                                                    } else {
+                                                        "Local Web UI socket could not be bound. Backplane will retry."
+                                                    });
+                                                    if previous != status_row {
+                                                        eprintln!("backplane: web ui backend bind failed for {authority}: {err}");
+                                                    }
+                                                }
                                             }
                                         }
                                         #[cfg(not(unix))]
@@ -946,11 +1025,17 @@ where
     R: std::future::Future<Output = bool>,
 {
     let Ok(status) = serde_json::from_str::<Value>(&ts.status().await) else { return false; };
-    let Some(node) = status["Self"]["DNSName"].as_str().map(|s| s.trim_end_matches('.')).filter(|s| !s.is_empty()) else { return false; };
+    let Some(node) = status["Self"]["DNSName"]
+        .as_str()
+        .map(|s| s.trim_end_matches('.').to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+    else {
+        return false;
+    };
     let raw = ts.serve_status().await;
     let Ok(config) = serde_json::from_str::<Value>(&raw) else { return false; };
     if !config.is_object() { return false; }
-    let Some(authority) = configured_authority_for(&config, service, node, target) else {
+    let Some(authority) = configured_authority_for(&config, service, &node, target) else {
         return private_backend_absent_target(&raw, target);
     };
     let (host, port) = authority.rsplit_once(':').map_or((authority.as_str(), 443), |(host, port)| (host, port.parse().unwrap_or(0)));
@@ -1457,5 +1542,119 @@ mod tests {
         }).await;
         assert!(called);
         assert!(!confirmed);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stale_browser_socket_is_replaced_on_rebind() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::plat::tmp::dir("web-stale-sock");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let proxy = super::super::webtransport::ProxyIdentity {
+            uid: crate::plat::effective_uid(),
+            pid: std::process::id() as i32,
+        };
+        let authority = "node.example.ts.net:8444";
+        let first = bind_private_socket_with(&dir, authority.into(), proxy)
+            .await
+            .unwrap();
+        drop(first);
+        let sock_path = dir.join("browser.sock");
+        assert!(sock_path.exists());
+        let err = match super::super::webtransport::BrowserListener::bind(&dir, authority.into(), proxy) {
+            Ok(_) => panic!("stale socket must cause plain BrowserListener::bind to fail"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+
+        let second = bind_private_socket_with(&dir, authority.into(), proxy)
+            .await
+            .unwrap();
+        let _client = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+        drop(second);
+        let _ = std::fs::remove_file(&sock_path);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn active_browser_socket_is_never_unlinked_on_rebind() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = crate::plat::tmp::dir("web-active-sock");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let proxy = super::super::webtransport::ProxyIdentity {
+            uid: crate::plat::effective_uid(),
+            pid: std::process::id() as i32,
+        };
+        let authority = "node.example.ts.net:8444";
+        let live = bind_private_socket_with(&dir, authority.into(), proxy)
+            .await
+            .unwrap();
+        let err = match bind_private_socket_with(&dir, authority.into(), proxy).await {
+            Ok(_) => panic!("second bind must fail while first listener is alive"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+
+        let sock_path = dir.join("browser.sock");
+        let _client = tokio::net::UnixStream::connect(&sock_path).await.unwrap();
+        drop(live);
+        let _ = std::fs::remove_file(&sock_path);
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_socket_at_browser_sock_path_is_refused_and_preserved() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        let dir = crate::plat::tmp::dir("web-nonsock");
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let proxy = super::super::webtransport::ProxyIdentity {
+            uid: crate::plat::effective_uid(),
+            pid: std::process::id() as i32,
+        };
+        let authority = "node.example.ts.net:8444";
+        let sock_path = dir.join("browser.sock");
+
+        std::fs::write(&sock_path, b"keep").unwrap();
+        let err = match bind_private_socket_with(&dir, authority.into(), proxy).await {
+            Ok(_) => panic!("regular file at browser.sock must be refused"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&sock_path).unwrap(), b"keep");
+        std::fs::remove_file(&sock_path).unwrap();
+
+        let target = dir.join("target-file");
+        std::fs::write(&target, b"preserve").unwrap();
+        symlink(&target, &sock_path).unwrap();
+        let err = match bind_private_socket_with(&dir, authority.into(), proxy).await {
+            Ok(_) => panic!("symlink at browser.sock must be refused"),
+            Err(err) => err,
+        };
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(std::fs::symlink_metadata(&sock_path).unwrap().file_type().is_symlink());
+        assert_eq!(std::fs::read(&target).unwrap(), b"preserve");
+    }
+
+    #[test]
+    fn configured_authority_finds_unix_socket_among_multiple_serve_entries() {
+        let socket = std::path::Path::new("/private/home/web/browser.sock");
+        let target = BackendTarget::Unix(socket.to_path_buf());
+        let config = json!({
+            "TCP": {
+                "8443": {"HTTPS": true},
+                "8444": {"HTTPS": true},
+                "8447": {"HTTPS": true}
+            },
+            "Web": {
+                "box.tail1.ts.net:8443": {"Handlers": {"/": {"Proxy": "http://127.0.0.1:8047"}}},
+                "box.tail1.ts.net:8444": {"Handlers": {"/": {"Proxy": "unix:/private/home/web/browser.sock"}}},
+                "box.tail1.ts.net:8447": {"Handlers": {"/": {"Path": "/srv/static"}}}
+            }
+        });
+        assert_eq!(
+            configured_authority_for(&config, "bp", "box.tail1.ts.net", &target).as_deref(),
+            Some("box.tail1.ts.net:8444")
+        );
+        assert_eq!(spare_node_port(&config), Some(8445));
     }
 }
