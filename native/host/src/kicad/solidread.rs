@@ -17,54 +17,88 @@ pub fn is_other_cad(p: &str) -> bool {
     let l = p.to_ascii_lowercase();
     [".sc", ".solidcraft", ".iges", ".igs", ".stl", ".3mf", ".obj"].iter().any(|e| l.len() > e.len() && l.ends_with(e))
 }
-fn is_sc_design(p: &str) -> bool {
-    let l = p.to_ascii_lowercase();
-    [".sc", ".solidcraft"].iter().any(|e| l.len() > e.len() && l.ends_with(e))
+/// Hook registered by the hub (`solidcraft::start`) so `solidread` uses the hub's managed runtime + child env
+/// without forcing `bp-plot` (standalone test/plot binary) to link `crate::solidcraft`.
+pub type SolidCraftHook = Box<dyn Fn() -> Option<(std::path::PathBuf, Vec<(&'static str, std::ffi::OsString)>)> + Send + Sync>;
+static SOLIDCRAFT_HOOK: std::sync::OnceLock<SolidCraftHook> = std::sync::OnceLock::new();
+#[allow(dead_code)] // bp-plot builds this module without crate::solidcraft
+pub fn set_solidcraft_hook(f: SolidCraftHook) { let _ = SOLIDCRAFT_HOOK.set(f); }
+
+/// Numeric dot-parts version parser matching `solidcraft::runtime`: rejects dot-folders (`.partial`, `.install-*`) and non-version dirs (`settings`, `data`, `control`).
+pub fn parse_version(name: &str) -> Option<Vec<u32>> {
+    if name.is_empty() || name.starts_with('.') { return None }
+    name.split('.').map(|s| (!s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())).then(|| s.parse::<u32>().ok()).flatten()).collect::<Option<Vec<u32>>>().filter(|v| !v.is_empty())
 }
-/// Resolve `solidcraft-cli` for `bp-plot` and `solidread` without pulling the full hub crate into `bp-plot`.
-fn solidcraft_cli() -> Option<std::path::PathBuf> {
+
+fn managed_parent(home: &std::path::Path) -> std::path::PathBuf {
+    let local = std::env::var_os("LOCALAPPDATA");
+    #[cfg(test)] let local = local.filter(|_| false);
+    match local.filter(|d| cfg!(windows) && !d.is_empty()) {
+        Some(d) => std::path::Path::new(&d).join("Backplane").join("solidcraft"),
+        None => home.join("solidcraft"),
+    }
+}
+
+/// Fallback `solidcraft-cli` lookup + isolated env for `bp-plot` (the hub supplies these via `set_solidcraft_hook`).
+fn solidcraft_cli_and_env(stage: &std::path::Path) -> Option<(std::path::PathBuf, Vec<(&'static str, std::ffi::OsString)>)> {
+    if let Some(hook) = SOLIDCRAFT_HOOK.get() {
+        if let Some(res) = hook() { return Some(res) }
+    }
     let exe = if cfg!(windows) { "solidcraft-cli.exe" } else { "solidcraft-cli" };
-    if let Ok(v) = std::env::var("BACKPLANE_SOLIDCRAFT") {
+    let env_cli = std::env::var_os("BACKPLANE_SOLIDCRAFT").filter(|v| !v.is_empty()).and_then(|v| {
         let p = std::path::PathBuf::from(&v);
-        for c in [p.join(exe), p.join("bin").join(exe)] {
-            if c.is_file() { return Some(c) }
-        }
-    }
-    if let Ok(h) = std::env::var("BACKPLANE_HOME") {
-        if let Ok(rd) = std::fs::read_dir(std::path::Path::new(&h).join("solidcraft")) {
-            let mut dirs: Vec<_> = rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
-            dirs.sort();
-            for d in dirs.into_iter().rev() {
-                for c in [d.join("bin").join(exe), d.join(exe)] {
-                    if c.is_file() { return Some(c) }
-                }
-            }
-        }
-    }
-    std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(exe)).find(|c| c.is_file()))
+        [p.join(exe), p.join("bin").join(exe)].into_iter().find(|c| c.is_file())
+    });
+    let home = std::env::var_os("BACKPLANE_HOME").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
+    let managed_cli = home.as_deref().and_then(|h| {
+        let parent = managed_parent(h);
+        let mut vers: Vec<(Vec<u32>, std::path::PathBuf)> = std::fs::read_dir(&parent).ok()?.flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .filter_map(|e| parse_version(&e.file_name().to_string_lossy()).map(|v| (v, e.path())))
+            .collect();
+        vers.sort_by(|a, b| b.0.cmp(&a.0));
+        vers.into_iter().find_map(|(_, d)| [d.join("bin").join(exe), d.join(exe)].into_iter().find(|c| c.is_file()))
+    });
+    let path_cli = std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(exe)).find(|c| c.is_file()));
+    let cli = env_cli.or(managed_cli).or(path_cli)?;
+    // Always keep SolidCraft recovery/logs out of the user's real ~/.local/share/solidcraft.
+    let data_base = home.map(|h| h.join("solidcraft")).unwrap_or_else(|| stage.join("solidcraft-data"));
+    let envs = vec![
+        ("SOLIDCRAFT_SETTINGS_DIR", data_base.join("settings").into_os_string()),
+        ("SOLIDCRAFT_CONTROL_DIR", data_base.join("control").into_os_string()),
+        ("XDG_DATA_HOME", data_base.join("data").into_os_string()),
+    ];
+    Some((cli, envs))
 }
-/// Convert a `.sc`/`.solidcraft` design to a cached STEP file via `solidcraft-cli run` so Mobile/Web 3D viewers can mesh it.
-fn sc_to_cached_step(path: &str) -> Option<String> {
-    let cli = solidcraft_cli()?;
+
+/// Convert `.sc`/`.solidcraft` and non-STEP CAD/mesh files straight to a cached GLB via bounded `solidcraft-cli run` for Mobile/Web 3D viewing.
+fn cad_to_cached_glb(path: &str) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
     use sha2::{Digest, Sha256};
     let hash: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
     let dir = stepglb::cache_dir();
     let _ = std::fs::create_dir_all(&dir);
-    let step_path = in_dir(&dir, &format!("sc-{hash}.step"));
-    if stepglb::have(&step_path) { return Some(step_path) }
-    let stage = stepglb::stage(&step_path, "sc-").ok()?;
-    let tmp_step = stage.join("model.step");
+    let glb_path = in_dir(&dir, &format!("sc-{hash}.glb"));
+    if stepglb::have(&glb_path) { return Some(glb_path) }
+    let stage = stepglb::stage(&glb_path, "sc-").ok()?;
+    let Some((cli, sc_env)) = solidcraft_cli_and_env(&stage) else {
+        let _ = std::fs::remove_dir_all(&stage);
+        return None;
+    };
+    let tmp_glb = stage.join("model.glb");
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &cli);
-    c.args(["run", "--in", path, "--out"]).arg(&tmp_step)
+    c.args(["run", "--in", path, "--out"]).arg(&tmp_glb)
+        .envs(sc_env)
         .env("SOLIDCRAFT_NO_TELEMETRY", "1")
         .env("SOLIDCRAFT_UPDATE_CHECK", "0")
         .env_remove("DISPLAY")
         .env_remove("WAYLAND_DISPLAY");
-    let ok = c.output().map(|o| o.status.success() && stepglb::have(&tmp_step.to_string_lossy())).unwrap_or(false);
-    if ok { let _ = crate::plat::fs::rename(&tmp_step, &step_path); }
+    let ok = crate::proc::probe_output(c, std::time::Duration::from_secs(120))
+        .map(|o| o.status.success() && stepglb::have(&tmp_glb.to_string_lossy()))
+        .unwrap_or(false);
+    if ok { let _ = crate::plat::fs::rename(&tmp_glb, &glb_path); }
     let _ = std::fs::remove_dir_all(&stage);
-    stepglb::have(&step_path).then_some(step_path)
+    stepglb::have(&glb_path).then_some(glb_path)
 }
 /// FS.revision with Pv.cache.revision: the exact revision of a file as a name ("" when it has none)
 fn revision(path: &str) -> String {
@@ -204,24 +238,21 @@ pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> 
 /// STEP refined around that box (its solids there meshed finer: `stepglb::Detail::refined`), kept as a mesh of its own. `asked`: the
 /// person asked for this model past the size limit (`solid::fits_asked`).
 pub fn read_streaming(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str, fine: Option<[f64; 6]>, asked: bool, on: Option<&mut dyn FnMut(Streamed)>) -> Got {
-    let isglb = path.to_ascii_lowercase().ends_with(".glb");
-    let mut step_path = path.to_string();
-    let mut step = is_step(path);
+    let mut isglb = path.to_ascii_lowercase().ends_with(".glb");
+    let mut model_path = path.to_string();
+    let step = is_step(path);
     if !isglb && !step && is_other_cad(path) {
-        if is_sc_design(path) {
-            if let Some(converted) = sc_to_cached_step(path) {
-                step_path = converted;
-                step = true;
-            }
-        }
-        if !step {
+        if let Some(converted) = cad_to_cached_glb(path) {
+            model_path = converted;
+            isglb = true;
+        } else {
             let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
-            return fail(format!("{name} opens in Backplane Desktop's SolidCraft pane; export .step or .glb for phone/web 3D viewing"));
+            return fail(format!("{name} opens in Backplane Desktop's SolidCraft pane; install SolidCraft or export .step/.glb for phone/web 3D viewing"));
         }
     }
-    let out = glb_at(kind, &step_path, fine);
+    let out = glb_at(kind, &model_path, fine);
     let detail = fine.map_or(stepglb::NORMAL, stepglb::Detail::refined);
-    let r = if isglb || stepglb::have(&out) { Ran::default() } else { export(step, kind == 3, kind == 4, &step_path, &out, cli, tools, detail, on) };
+    let r = if isglb || stepglb::have(&out) { Ran::default() } else { export(step, kind == 3, kind == 4, &model_path, &out, cli, tools, detail, on) };
     if r.code != 0 { return fail(format!("3D export failed: {}", r.out.trim().chars().take(600).collect::<String>())) }
     plotgen::write_infos(infos, &missing_note(&r.out));
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
@@ -331,12 +362,20 @@ mod tests {
         assert!(read(2, &b.to_string_lossy(), "", &[], &infos).text.starts_with("3D export failed: KiCad is not installed"));
         let s = d.join("a.step"); std::fs::write(&s, "x").unwrap();
         assert_eq!(read(2, &s.to_string_lossy(), "", &[], &infos).text, format!("3D export failed: {}", stepglb::NO_MESHER));
-        // Non-STEP CAD/mesh files must never invoke kicad-cli; they fail gracefully for phone/web viewing when not converted.
+        // Non-STEP CAD/mesh files must never invoke kicad-cli; they convert via SolidCraft CLI when available or fail gracefully for phone/web viewing.
         for name in ["box.sc", "part.solidcraft", "mesh.stl", "asm.3mf", "body.iges", "part.obj"] {
             let p = d.join(name); std::fs::write(&p, "x").unwrap();
             let g = read(2, &p.to_string_lossy(), "", &[], &infos);
             assert_eq!(g.code, 3);
             assert!(g.text.contains("SolidCraft pane"), "{name}: {}", g.text);
+        }
+    }
+    #[test] fn version_sort_ranks_numeric_parts_and_skips_stage_dirs() {
+        assert_eq!(parse_version("0.50.0"), Some(vec![0, 50, 0]));
+        assert_eq!(parse_version("0.9.0"), Some(vec![0, 9, 0]));
+        assert!(parse_version("0.50.0") > parse_version("0.9.0"));
+        for bad in ["", ".partial", ".install-123", "settings", "data", "control", "0.50.0-rc1"] {
+            assert_eq!(parse_version(bad), None, "{bad}");
         }
     }
 }
