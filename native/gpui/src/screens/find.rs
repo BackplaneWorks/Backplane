@@ -77,6 +77,7 @@ impl Backplane {
     pub(crate) fn find_open_for(&mut self, thread: &str, cx: &mut Context<Self>) {
         let raw = thread.rsplit('|').next().unwrap_or("").to_string();
         if raw.is_empty() { return }
+        self.solidcraft_lend(cx);
         self.find_input(cx);
         if self.screens.find.thread != raw { self.find_reset(cx); self.screens.find.thread = raw.clone(); }
         if self.selected.rsplit('|').next() != Some(raw.as_str()) { let id = if thread.contains('|') { thread.to_string() } else { super::tools::qualify(&self.data, &raw) }; let _ = self.tx.try_send(Command::Action("select".into(), id)); }
@@ -87,6 +88,7 @@ impl Backplane {
     /// A message found elsewhere (Find across threads): its thread, the bar holding the words, and that message shown first and marked.
     pub(crate) fn find_open_at(&mut self, thread: &str, msg: &str, q: &str, cx: &mut Context<Self>) {
         let raw = thread.rsplit('|').next().unwrap_or("").to_string();
+        self.solidcraft_lend(cx);
         let input = self.find_input(cx);
         self.find_reset(cx);
         self.screens.find.thread = raw.clone(); self.screens.find.open = true; self.screens.find.focus = true; self.screens.find.want = msg.to_string(); self.screens.find.q = q.to_string();

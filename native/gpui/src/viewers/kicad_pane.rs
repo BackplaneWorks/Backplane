@@ -1545,7 +1545,7 @@ impl KicadPane {
                 cx.notify();
             }
         }
-        nc::note_pane_keys(self.keys);
+        if self.in_page { nc::note_pane_keys(self.keys); }
         // the Linux focus proxy only where this pane's frame is on screen (in the page, placed): another viewer on show leaves the focus to it
         let on = pane_shows(self.in_page, self.last_place.map(|(_, r, s)| (r, s)));
         self.report_screen(self.container.unwrap_or(0), on);
@@ -1800,35 +1800,38 @@ impl KicadPane {
             self.auto_taken_said = true;
             eprintln!("GPUI_LOG {}", json!({"kicad_auto_keys_taken": {"frame": self.want(), "in_dialog": in_dialog, "has_focus": nc::has_focus(c), "why": nc::focus_debug(c), "after_ms": self.born.elapsed().as_millis() as u64}}));
         }
-        if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); self.grab_click(c, !has); if has { self.touched(); } cx.notify(); }
+        if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); self.grab_click(c, !has); nc::note_pane_keys(has); if has { self.touched(); } cx.notify(); }
         if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h != self.kept) { nc::keep(h); self.kept = h; }
-        for e in nc::events() {
-            // what reached Backplane from the editor (the e2e reads it: one click in KiCad, then a reserved chord, must arrive)
-            eprintln!("GPUI_LOG {}", json!({"kicad_ev": match &e { nc::Ev::Escape => "escape".to_string(), nc::Ev::Click => "click".to_string(), nc::Ev::ShieldClick => "shield click".to_string(), nc::Ev::Key(k) => format!("key {k}"), nc::Ev::Focus(w) => format!("focus {w}") }}));
-            if !self.in_page { continue; }
-            match e {
-                // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
-                nc::Ev::Escape => { self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
-                nc::Ev::Click => { self.chose("click"); if let Some(w) = editor_focus_target(self.in_page, self.want()) { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
-                // the shield did the hand-in itself and replays the press: the state only (no second focus call landing
-                // after the replayed press, which closed a right click's menu before it opened)
-                nc::Ev::ShieldClick => { self.chose("shield click"); if self.want().is_some() { self.grab_click(c, false); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
-                // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: cycle only the tabs shown on the strip, keeping KiCad's keyboard.
-                // `have` is the pane's own frames chained with the hub's (the same list `strip` uses), and feeds both `strip_tabs` and `next_open_tab`'s Simulator rule.
-                nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => {
-                    let have: Vec<String> = self.frames.iter().map(|f| f.kind.to_string())
-                        .chain(self.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from))).collect();
-                    let shown = strip_tabs(self.wanted_kind(), &have);
-                    let to = next_open_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }, &shown, &have);
-                    self.show_kind_by(to, &format!("host shortcut {k} (KiCad key hook)"), cx); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+        if self.in_page {
+            for e in nc::events_for(c, self.toplevel) {
+                // what reached Backplane from the editor (the e2e reads it: one click in KiCad, then a reserved chord, must arrive)
+                eprintln!("GPUI_LOG {}", json!({"kicad_ev": match &e { nc::Ev::Escape => "escape".to_string(), nc::Ev::Click => "click".to_string(), nc::Ev::ShieldClick => "shield click".to_string(), nc::Ev::Key(k) => format!("key {k}"), nc::Ev::Focus(w) => format!("focus {w}") }}));
+                match e {
+                    // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
+                    nc::Ev::Escape => { self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); nc::note_pane_keys(false); cx.notify(); }
+                    nc::Ev::Click => { self.chose("click"); if let Some(w) = editor_focus_target(self.in_page, self.want()) { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); nc::note_pane_keys(true); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+                    // the shield did the hand-in itself and replays the press: the state only (no second focus call landing
+                    // after the replayed press, which closed a right click's menu before it opened)
+                    nc::Ev::ShieldClick => { self.chose("shield click"); if self.want().is_some() { self.grab_click(c, false); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); nc::note_pane_keys(true); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
+                    // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: cycle only the tabs shown on the strip, keeping KiCad's keyboard.
+                    // `have` is the pane's own frames chained with the hub's (the same list `strip` uses), and feeds both `strip_tabs` and `next_open_tab`'s Simulator rule.
+                    nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => {
+                        let have: Vec<String> = self.frames.iter().map(|f| f.kind.to_string())
+                            .chain(self.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from))).collect();
+                        let shown = strip_tabs(self.wanted_kind(), &have);
+                        let to = next_open_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }, &shown, &have);
+                        self.show_kind_by(to, &format!("host shortcut {k} (KiCad key hook)"), cx); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+                    }
+                    nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); nc::note_pane_keys(false);
+                        // the comment chord (and bp.13's ';', KiCad's own comment key) opens the window now, from this event (no keystroke round trip through the next frame)
+                        // the comment chord and the management panels' keys are acted on here, from the event: replayed as a keystroke after a
+                        // comment window had the keyboard they reached no action (gpui's dispatch in this window found none), so they go by name
+                        if k == "ctrl-;" || k == ";" || k.starts_with("alt-shift-") { cx.emit(PaneKey(k)); } else { self.press.push(k); } cx.notify(); }
+                    nc::Ev::Focus(_) => { self.chose("KiCad's click focus (_BACKPLANE_FOCUS)"); if let Some(w) = self.want() { self.took = Some((w, std::time::Instant::now())); } if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); self.grab_click(c, false); nc::note_pane_keys(true); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
                 }
-                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
-                    // the comment chord (and bp.13's ';', KiCad's own comment key) opens the window now, from this event (no keystroke round trip through the next frame)
-                    // the comment chord and the management panels' keys are acted on here, from the event: replayed as a keystroke after a
-                    // comment window had the keyboard they reached no action (gpui's dispatch in this window found none), so they go by name
-                    if k == "ctrl-;" || k == ";" || k.starts_with("alt-shift-") { cx.emit(PaneKey(k)); } else { self.press.push(k); } cx.notify(); }
-                nc::Ev::Focus(_) => { self.chose("KiCad's click focus (_BACKPLANE_FOCUS)"); if let Some(w) = self.want() { self.took = Some((w, std::time::Instant::now())); } if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); self.grab_click(c, false); cx.notify(); } } // i18n-ok: a debug log cause (kicad_auto_to_deliberate)
             }
+        } else {
+            nc::discard_events_for(c);
         }
     }
     /// First render: the container in the client's window, and the hub asked to attach KiCad to it.
@@ -2260,7 +2263,7 @@ impl KicadPane {
         let prev = self.last_place.filter(|(lc, _, _)| *lc == c).map(|(_, r, s)| (Some(r), s));
         nc::place(c, None, None, None, &mut self.last_root); self.log_place("leave", c, None, None, prev, false, false); self.last_place = None; nc::grab_escape(self.toplevel, false);
         // the keyboard back to Backplane's window on leaving the pane (View, another thread)
-        if self.keys { nc::focus(self.toplevel); self.keys = false; }
+        if self.keys { nc::focus(self.toplevel); self.keys = false; nc::note_pane_keys(false); }
         // kept, unmapped, with KiCad's frames in it (still attached in the hub): the next Edit of this project in this window maps it at once
         // (a fork that maps locally; the oldest kept beyond KEEP is let go as before)
         // BACKPLANE_GPUI_KICAD_NO_KEEP=1 (e2e): the other way, the container destroyed (as for another window, or a start not ready)
@@ -2291,6 +2294,7 @@ impl KicadPane {
         if had_keys {
             nc::focus(self.toplevel);
             nc::grab_escape(self.toplevel, false);
+            nc::note_pane_keys(false);
             if let Some(c) = self.container { self.grab_click(c, true); }
             cx.notify();
         }

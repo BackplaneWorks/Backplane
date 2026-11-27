@@ -334,6 +334,8 @@ pub fn open_dialogs(_pid: u32) -> Vec<u64> { vec![] }
 static KEYS: std::sync::Mutex<Vec<super::Ev>> = std::sync::Mutex::new(Vec::new());
 pub fn push_key(chord: &str) { if let Ok(mut q) = KEYS.lock() { q.push(if chord == "ctrl-`" { super::Ev::Escape } else { super::Ev::Key(chord.to_string()) }); } }
 pub fn events() -> Vec<super::Ev> { KEYS.lock().map(|mut q| std::mem::take(&mut *q)).unwrap_or_default() }
+pub fn events_for(_container: u64, _toplevel: u64) -> Vec<super::Ev> { events() }
+pub fn discard_events_for(_container: u64) {}
 /// A reserved chord as Backplane binds it on macOS: wx's Ctrl is Cmd there, so KiCad's "Ctrl+K" is the person's Cmd+K (Backplane's
 /// `secondary-k`); the tab and Escape chords stay Ctrl (Cmd+Tab and Cmd+` belong to macOS).
 pub fn mac_chord(chord: &str) -> String {

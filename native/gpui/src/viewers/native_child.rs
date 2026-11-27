@@ -105,6 +105,29 @@ pub fn cut(pane: R, over: &[R]) -> Vec<R> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ev { /** Ctrl+`: the keyboard back to the client */ Escape, /** a button press over the unfocused container (replayed to KiCad) */ Click, /** Windows: a press the input shield took; the hand-in is already done there and the press replayed, so the pane only notes KiCad has the keys (a second hand-in after the replay moved KiCad's focus off the canvas mid right-click and its context menu never opened, run SB3) */ ShieldClick, /** a reserved chord, as gpui names a keystroke */ Key(String), /** KiCad took the keyboard on a click into this frame */ Focus(u64) }
 
+/// Drain queued native events belonging to `container` or `toplevel` (plus untagged `0` entries), leaving other panes' events queued.
+pub(crate) fn take_events_for(queue: &mut Vec<(u64, Ev)>, container: u64, toplevel: u64) -> Vec<Ev> {
+    let mut taken = Vec::new();
+    let mut kept = Vec::new();
+    for (w, ev) in queue.drain(..) {
+        if w == 0 || (container != 0 && w == container) || (toplevel != 0 && w == toplevel) {
+            taken.push(ev);
+        } else {
+            kept.push((w, ev));
+        }
+    }
+    *queue = kept;
+    taken
+}
+
+/// Discard queued native events tagged for `container` when that pane is off-page, without touching other panes' events.
+pub(crate) fn discard_events_for_container(queue: &mut Vec<(u64, Ev)>, container: u64) {
+    if container == 0 {
+        return;
+    }
+    queue.retain(|(w, _)| *w != container);
+}
+
 /// A reserved chord from `_BACKPLANE_KEY` (an X keysym and modifier mask) as gpui's keystroke text: `ctrl-k`, `ctrl-shift-tab`, `ctrl-``.
 pub fn chord(keysym: u32, mods: u32) -> Option<String> {
     let key = match keysym { 0x20..=0x7e => char::from_u32(keysym)?.to_ascii_lowercase().to_string(), 0xff09 | 0xfe20 /* ISO_Left_Tab: GTK's Shift+Tab */ => "tab".into(), 0xff0d => "enter".into(), 0xff1b => "escape".into(), _ => return None };
@@ -1146,7 +1169,7 @@ mod imp {
     /// What came to our own connection since the last call (drained): the grabbed escape chord, and the fork's ClientMessages to the container
     /// (`_BACKPLANE_KEY`: a reserved chord pressed in KiCad, as a gpui keystroke; `_BACKPLANE_FOCUS`: a click gave KiCad the keyboard).
     /// What our connection read for the pane and it has not taken yet (`pump` fills it, `events` empties it).
-    static PENDING: Mutex<Vec<super::Ev>> = Mutex::new(Vec::new());
+    static PENDING: Mutex<Vec<(u64, super::Ev)>> = Mutex::new(Vec::new());
     /// Reads every event waiting on our connection, keeping the pane's (a key KiCad hands back, a click, KiCad taking the keyboard) for `events`
     /// and dropping the rest; true when it kept one. The socket is empty after it, so the pane's wake thread (kicad_pane) sleeps in poll until
     /// something new comes: woken only for the pane's own events, never by noise it never reads (that spun the main thread for seconds).
@@ -1159,11 +1182,12 @@ mod imp {
                 // a grabbed chord (grab_escape): Ctrl+` gives the keyboard back, any other is a reserved chord for the client
                 x11rb::protocol::Event::KeyPress(k) => {
                     let sym = c.get_keyboard_mapping(k.detail, 1).ok().and_then(|r| r.reply().ok()).and_then(|m| m.keysyms.first().copied()).unwrap_or(0x60);
-                    match super::chord(sym, u16::from(k.state) as u32 & (1 | 4 | 8 | 0x40)) { Some(ch) if ch != "ctrl-`" => out.push(super::Ev::Key(ch)), _ => out.push(super::Ev::Escape) }
+                    let ev = match super::chord(sym, u16::from(k.state) as u32 & (1 | 4 | 8 | 0x40)) { Some(ch) if ch != "ctrl-`" => super::Ev::Key(ch), _ => super::Ev::Escape };
+                    out.push((k.event as u64, ev));
                 }
                 x11rb::protocol::Event::ButtonPress(b) => {
                     let _ = c.allow_events(Allow::REPLAY_POINTER, b.time);
-                    out.push(super::Ev::Click);
+                    out.push((b.event as u64, super::Ev::Click));
                 }
                 x11rb::protocol::Event::FocusIn(f) => {
                     if let Some(top) = pane_fallback_top(WATCHER_RUNNING.load(Ordering::Acquire), f.event) {
@@ -1172,8 +1196,8 @@ mod imp {
                 }
                 x11rb::protocol::Event::ClientMessage(m) if m.format == 32 => {
                     let d = m.data.as_data32();
-                    if m.type_ == key { if let Some(k) = super::chord(d[1], d[2]) { out.push(if k == "ctrl-`" { super::Ev::Escape } else { super::Ev::Key(k) }); } }
-                    else if m.type_ == focus { out.push(super::Ev::Focus(d[0] as u64)); }
+                    if m.type_ == key { if let Some(k) = super::chord(d[1], d[2]) { out.push((m.window as u64, if k == "ctrl-`" { super::Ev::Escape } else { super::Ev::Key(k) })); } }
+                    else if m.type_ == focus { out.push((m.window as u64, super::Ev::Focus(d[0] as u64))); }
                 }
                 _ => {}
             }
@@ -1186,7 +1210,17 @@ mod imp {
     }
     pub fn events() -> Vec<super::Ev> {
         pump();
-        std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner())).into_iter().map(|(_, ev)| ev).collect()
+    }
+    pub fn events_for(container: u64, toplevel: u64) -> Vec<super::Ev> {
+        pump();
+        let mut q = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+        super::take_events_for(&mut q, container, toplevel)
+    }
+    pub fn discard_events_for(container: u64) {
+        pump();
+        let mut q = PENDING.lock().unwrap_or_else(|e| e.into_inner());
+        super::discard_events_for_container(&mut q, container);
     }
     /// A key pressed and released in `w` by a synthetic event (no real input): how stock KiCad, which has no IPC to open an editor, is asked
     /// to (Ctrl+P in its project manager opens the PCB editor, even unmapped). `keysym` an X keysym, `mods` an X modifier mask.
@@ -1683,7 +1717,7 @@ mod imp {
         T0.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
     }
 
-    fn events_q() -> &'static Mutex<Vec<Ev>> { static Q: OnceLock<Mutex<Vec<Ev>>> = OnceLock::new(); Q.get_or_init(Default::default) }
+    fn events_q() -> &'static Mutex<Vec<(u64, Ev)>> { static Q: OnceLock<Mutex<Vec<(u64, Ev)>>> = OnceLock::new(); Q.get_or_init(Default::default) }
     fn containers_map() -> &'static Mutex<HashMap<String, u64>> { static M: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new(); M.get_or_init(Default::default) }
     fn centered_dialogs() -> &'static Mutex<HashSet<u64>> { static D: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new(); D.get_or_init(Default::default) }
 
@@ -1746,13 +1780,13 @@ mod imp {
         CHILD_FOCUSED.store(true, Ordering::SeqCst);
         unsafe { attach_visible_child_queue(container); }
         if button_msg == WM_RBUTTONDOWN || already {
-            if let Ok(mut q) = events_q().lock() { q.push(Ev::Focus(0)); }
+            if let Ok(mut q) = events_q().lock() { q.push((id_of(container), Ev::Focus(0))); }
             return;
         }
         let now = mono_ms();
         if now >= CLICK_GRACE_UNTIL.load(Ordering::SeqCst) {
             CLICK_GRACE_UNTIL.store(now + 500, Ordering::SeqCst);
-            if let Ok(mut q) = events_q().lock() { q.push(Ev::Click); }
+            if let Ok(mut q) = events_q().lock() { q.push((id_of(container), Ev::Click)); }
         }
     }
 
@@ -1783,7 +1817,7 @@ mod imp {
                         unsafe { AttachThreadInput(cur, ctid, 1); }
                     }
                 }
-                if let Ok(mut q) = events_q().lock() { q.push(Ev::Focus(fw)); }
+                if let Ok(mut q) = events_q().lock() { q.push((id_of(h), Ev::Focus(fw))); }
                 0
             }
             WM_MOUSEACTIVATE => {
@@ -1805,7 +1839,7 @@ mod imp {
                     CHILD_FOCUSED.store(false, Ordering::SeqCst);
                     CLICK_GRACE_UNTIL.store(0, Ordering::SeqCst);
                     if let Ok(mut q) = events_q().lock() {
-                        q.push(if k == "ctrl-`" { Ev::Escape } else { Ev::Key(k.to_string()) }); // i18n-ok: gpui keystroke
+                        q.push((id_of(h), if k == "ctrl-`" { Ev::Escape } else { Ev::Key(k.to_string()) })); // i18n-ok: gpui keystroke
                     }
                 }
                 0
@@ -1813,7 +1847,7 @@ mod imp {
             WM_HOTKEY if wparam as i32 == ESC_HOTKEY_ID => {
                 CHILD_FOCUSED.store(false, Ordering::SeqCst);
                 CLICK_GRACE_UNTIL.store(0, Ordering::SeqCst);
-                if let Ok(mut q) = events_q().lock() { q.push(Ev::Escape); }
+                if let Ok(mut q) = events_q().lock() { q.push((id_of(h), Ev::Escape)); }
                 0
             }
             _ => unsafe { DefWindowProcW(h, msg, wparam, lparam) },
@@ -2499,7 +2533,7 @@ mod imp {
                     let fg = unsafe { GetForegroundWindow() };
                     eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg), "replay_pending": true, "frame": id_of(frame)}}));
                 }
-                if let Ok(mut q) = events_q().lock() { q.push(Ev::ShieldClick); }
+                if let Ok(mut q) = events_q().lock() { q.push((ACTIVE_CONTAINER.load(Ordering::SeqCst), Ev::ShieldClick)); }
                 0
             }
             // a release on the shield: the press it belongs to was replayed into KiCad, so the release should have gone there
@@ -2747,7 +2781,15 @@ mod imp {
     }
 
     pub fn events() -> Vec<Ev> {
-        events_q().lock().map_or_else(|_| Vec::new(), |mut q| std::mem::take(&mut *q))
+        events_q().lock().map_or_else(|_| Vec::new(), |mut q| std::mem::take(&mut *q).into_iter().map(|(_, ev)| ev).collect())
+    }
+    pub fn events_for(container: u64, toplevel: u64) -> Vec<Ev> {
+        events_q().lock().map_or_else(|_| Vec::new(), |mut q| super::take_events_for(&mut q, container, toplevel))
+    }
+    pub fn discard_events_for(container: u64) {
+        if let Ok(mut q) = events_q().lock() {
+            super::discard_events_for_container(&mut q, container);
+        }
     }
 
     pub fn poke(_w: u64, _keysym: u32, _mods: u16) {}
@@ -2932,6 +2974,8 @@ mod imp {
 
     pub fn grab_escape(_top: u64, _on: bool) {}
     pub fn events() -> Vec<super::Ev> { vec![] }
+    pub fn events_for(_container: u64, _toplevel: u64) -> Vec<super::Ev> { vec![] }
+    pub fn discard_events_for(_container: u64) {}
     pub fn poke(_w: u64, _keysym: u32, _mods: u16) {}
     pub fn keep(_holder: u64) {}
     pub fn report(_w: u64) -> Option<(R, bool, usize)> { None }
@@ -3176,5 +3220,27 @@ mod tests {
         assert_eq!(dialog_center_pos((100, 100, 100, 900), (0, 0, 400, 300)), None);
         assert_eq!(dialog_center_pos((100, 100, 1100, 900), (0, 0, 0, 300)), None);
         assert_eq!(dialog_center_pos((100, 100, 30000, 900), (0, 0, 400, 300)), None);
+    }
+
+    #[test]
+    fn container_scoped_events_isolate_and_discard_per_pane() {
+        let mut q = vec![
+            (10, Ev::Click),
+            (20, Ev::Focus(99)),
+            (100, Ev::Escape),
+            (200, Ev::Key("ctrl-k".into())),
+            (0, Ev::ShieldClick),
+        ];
+        // Off-page container 10 discards only container 10's events; container 20 and toplevel 200 keep theirs.
+        discard_events_for_container(&mut q, 10);
+        assert_eq!(q.len(), 4);
+        assert_eq!(
+            take_events_for(&mut q, 20, 200),
+            vec![Ev::Focus(99), Ev::Key("ctrl-k".into()), Ev::ShieldClick]
+        );
+        // Only toplevel 100's escape remains.
+        assert_eq!(q, vec![(100, Ev::Escape)]);
+        assert_eq!(take_events_for(&mut q, 10, 100), vec![Ev::Escape]);
+        assert!(q.is_empty());
     }
 }

@@ -266,6 +266,7 @@ impl Backplane {
         let key = self.term_chat();
         if key.is_empty() { self.error = trs("Open a thread first: the terminal works in its folder."); cx.notify(); return }
         self.kicad_lend(cx);
+        self.solidcraft_lend(cx);
         let t = &mut self.screens.term; t.open = true; t.key = key.clone(); t.sel = None; t.scroll = 0;
         let fresh = t.ensure(&key); let (c, r) = t.size;
         self.term_rpc("term.open", json!({"thread": key, "cols": c, "rows": r}));
@@ -379,6 +380,7 @@ impl Backplane {
     }
     /// The card asks for the keyboard (a click; the harness's click lands on the next frame).
     pub(crate) fn card_take_keys(&mut self, key: &str, window: Option<&mut Window>, cx: &mut Context<Self>) {
+        if let Some(w) = window.as_deref() { self.solidcraft_reclaim_to(w, cx); }
         match (window, self.screens.term.card_focus(key)) { (Some(w), Some(f)) => f.focus(w), _ => self.screens.term.focus_card = Some(key.to_string()) }
         self.ui_epoch += 1; cx.notify();
     }
@@ -402,8 +404,8 @@ impl Backplane {
     }
     /// Every frame: the panel follows the thread on screen, and its grid the window's size.
     pub(crate) fn term_layout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(k) = self.screens.term.focus_card.take() { if let Some(f) = self.screens.term.card_focus(&k) { f.focus(window) } }
-        if std::mem::take(&mut self.screens.term.focus_panel) { self.screens.term.take_keys(window) }
+        if let Some(k) = self.screens.term.focus_card.take() { if let Some(f) = self.screens.term.card_focus(&k) { self.solidcraft_reclaim_to(window, cx); f.focus(window) } }
+        if std::mem::take(&mut self.screens.term.focus_panel) { self.solidcraft_reclaim_to(window, cx); self.screens.term.take_keys(window) }
         let focused = self.screens.term.card_keys().find(|(_, f)| f.is_focused(window)).map(|(k, _)| k.clone()); self.screens.term.card_focused = focused;
         if !self.screens.term.open { return }
         let key = self.term_chat();

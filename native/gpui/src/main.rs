@@ -117,9 +117,10 @@ impl Backplane {
         screens::place::watch(cx);screens::devbar::watch(cx);screens::hubbar::watch(cx,hub_at,&token_file);
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
         // the keys held show their hints only in the window in use (keys::hint_mode): its focus coming or going draws them again
-        cx.observe_window_activation(window,|_,window,cx|{
+        cx.observe_window_activation(window,|this,window,cx|{
             // the window's active state as GPUI keeps it, for the KiCad tests (the Linux focus proxy must leave it right: embed_pointer_keys_e2e P4)
             if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some(){eprintln!("GPUI_LOG {}",serde_json::json!({"window_active":window.is_window_active()}));}
+            if window.is_window_active(){this.solidcraft_reclaim_if_popped(window,cx);}
             cx.notify()}).detach();
         // streamer mode as this device left it (on, or watching for a capture), before anything identifying is drawn twice
         cx.spawn(async move |weak,cx|{let _=weak.update(cx,|this,cx|this.streamer_apply(cx));}).detach();
@@ -355,7 +356,9 @@ impl Backplane {
     pub fn open_settings(&mut self,cx:&mut Context<Self>){
         let hub_open=self.data["settings"].is_object();
         let ui=&mut self.screens.settings_ui;
+        let opening=!(ui.open_local||hub_open);
         if ui.open_local||hub_open{ui.open_local=false;ui.device=false;ui.accounts=false;} else {ui.open_local=true;ui.device=true;self.screens.focus_settings=true;}
+        if opening{self.solidcraft_lend(cx);}
         let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));cx.notify();
     }
     /// Open Settings directly on the client-rendered Accounts tab.
@@ -371,7 +374,7 @@ impl Backplane {
     /// Search threads (the top bar's button; Ctrl+Shift+F is Find across threads, palette.rs): the sidebar's box takes the keys; a sidebar folded to its strip, by hand or for want of room, unfolds first
     /// (the box is not drawn there: `sidebar_open` alone missed the fold for room, and the press did nothing)
     pub fn focus_search(&mut self,cx:&mut Context<Self>){if !self.sidebar_open{self.screens.side_force=false;self.sidebar_toggle(cx);}else if !self.screens.side_shown{self.screens.side_force=true;}self.ui_epoch+=1;self.screens.projects.focus=Some("search");cx.notify();}
-    fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {self.select_id(id,cx);self.input.focus_handle(cx).focus(window);}
+    fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {self.select_id(id,cx);self.solidcraft_reclaim_to(window,cx);self.input.focus_handle(cx).focus(window);}
     /// A project's name was clicked: its page (its threads, a New thread button) opens in the main area, at once, from what the sidebar holds; the folder's goal and notes,
     /// parts and boards follow when the hub answers (screens::projects::ask_home).
     /// A viewer open beside it follows: it shows this project's page of the same kind, not the last thread's (projects::page_view).

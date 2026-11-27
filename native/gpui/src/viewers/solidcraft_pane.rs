@@ -291,6 +291,164 @@ pub fn plan_placement(prev: Option<nc::R>, next: Option<nc::R>, over: &[nc::R]) 
     }
 }
 
+/// Result of deciding how to reclaim focus from the embedded SolidCraft child window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReclaimDecision {
+    pub reclaim_native: bool,
+    pub keys_changed: bool,
+    pub focus_target: u64,
+}
+
+/// Decide whether and where to return native keyboard focus when Backplane takes input back.
+pub fn decide_reclaim(
+    keys: &mut bool,
+    press_in: &mut bool,
+    live_focus: bool,
+    pane_toplevel: u64,
+    target_toplevel: Option<u64>,
+) -> ReclaimDecision {
+    *press_in = false;
+    let had_keys = std::mem::take(keys);
+    let reclaim_native = had_keys || live_focus;
+    let focus_target = if reclaim_native {
+        target_toplevel.filter(|t| *t != 0).unwrap_or(pane_toplevel)
+    } else {
+        0
+    };
+    ReclaimDecision {
+        reclaim_native,
+        keys_changed: had_keys,
+        focus_target,
+    }
+}
+
+/// How the user clicked into the embedded SolidCraft pane during a tick.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TickClickIn {
+    None,
+    GrabClick,
+    AlreadyFocused,
+}
+
+/// Native focus action to perform at the end of a `SolidCraftPane::tick()` pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TickFocusAction {
+    None,
+    FocusChild,
+    ReclaimToHost,
+}
+
+/// Pure focus state transition computed by `decide_tick_focus`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TickFocusDecision {
+    pub next_keys: bool,
+    pub next_press_in: bool,
+    pub action: TickFocusAction,
+}
+
+/// Decide SolidCraft keyboard ownership on a tick without allowing unsolicited focus grabs.
+#[allow(clippy::too_many_arguments)]
+pub fn decide_tick_focus(
+    in_page: bool,
+    has_child: bool,
+    keys: bool,
+    press_in: bool,
+    has_focus: bool,
+    in_dialog: bool,
+    button_over: Option<bool>,
+    pointer_elsewhere: bool,
+    click_in: TickClickIn,
+    escaped_in_event: bool,
+) -> TickFocusDecision {
+    if !in_page {
+        return TickFocusDecision {
+            next_keys: false,
+            next_press_in: false,
+            action: if keys || has_focus {
+                TickFocusAction::ReclaimToHost
+            } else {
+                TickFocusAction::None
+            },
+        };
+    }
+    if escaped_in_event {
+        return TickFocusDecision {
+            next_keys: false,
+            next_press_in: false,
+            action: TickFocusAction::ReclaimToHost,
+        };
+    }
+    if click_in != TickClickIn::None && has_child {
+        return TickFocusDecision {
+            next_keys: true,
+            next_press_in: matches!(button_over, Some(true)),
+            action: if click_in == TickClickIn::GrabClick {
+                TickFocusAction::FocusChild
+            } else {
+                TickFocusAction::None
+            },
+        };
+    }
+    if in_dialog {
+        return TickFocusDecision {
+            next_keys: true,
+            next_press_in: false,
+            action: TickFocusAction::None,
+        };
+    }
+    if pointer_elsewhere {
+        return TickFocusDecision {
+            next_keys: keys && has_focus,
+            next_press_in: false,
+            action: if !keys && has_focus {
+                TickFocusAction::ReclaimToHost
+            } else {
+                TickFocusAction::None
+            },
+        };
+    }
+    match button_over {
+        Some(true) if has_child => TickFocusDecision {
+            next_keys: true,
+            next_press_in: true,
+            action: if has_focus {
+                TickFocusAction::None
+            } else {
+                TickFocusAction::FocusChild
+            },
+        },
+        Some(false) if press_in => TickFocusDecision {
+            next_keys: keys && has_focus,
+            next_press_in: true,
+            action: TickFocusAction::None,
+        },
+        Some(false) => TickFocusDecision {
+            next_keys: false,
+            next_press_in: false,
+            action: if keys || has_focus {
+                TickFocusAction::ReclaimToHost
+            } else {
+                TickFocusAction::None
+            },
+        },
+        _ => {
+            if !keys && has_focus {
+                TickFocusDecision {
+                    next_keys: false,
+                    next_press_in: false,
+                    action: TickFocusAction::ReclaimToHost,
+                }
+            } else {
+                TickFocusDecision {
+                    next_keys: keys && has_focus,
+                    next_press_in: false,
+                    action: TickFocusAction::None,
+                }
+            }
+        }
+    }
+}
+
 /// Whether `editor.solidcraft.open` should be sent for live file-follow without respawning.
 pub fn needs_file_open(
     attached: bool,
@@ -403,6 +561,8 @@ pub struct SolidCraftPane {
     screen_key: Option<(u64, u64)>,
     focus: FocusHandle,
     pub keys: bool,
+    press_in: bool,
+    press: Vec<String>,
     pub light: bool,
     at_px: Option<Bounds<Pixels>>,
     ticking: bool,
@@ -446,6 +606,8 @@ impl SolidCraftPane {
             screen_key: None,
             focus: cx.focus_handle(),
             keys: false,
+            press_in: false,
+            press: Vec::new(),
             light: false,
             at_px: None,
             ticking: false,
@@ -522,15 +684,46 @@ impl SolidCraftPane {
         self.bg_applied = Some(key);
     }
 
-    pub fn lend_focus(&mut self) {
-        if self.keys && self.toplevel != 0 {
-            nc::grab_escape(self.toplevel, false);
+    pub fn reclaim_focus(&mut self, target_top: Option<u64>, hand_back: bool) -> bool {
+        let live = self.child_window().is_some() && self.container.is_some_and(nc::has_focus);
+        let d = decide_reclaim(
+            &mut self.keys,
+            &mut self.press_in,
+            live,
+            self.toplevel,
+            target_top,
+        );
+        if d.reclaim_native {
+            if self.toplevel != 0 {
+                nc::grab_escape(self.toplevel, false);
+            }
             if let Some(c) = self.container {
                 nc::grab_click(c, true);
             }
-            nc::focus(self.toplevel);
-            self.keys = false;
+            nc::note_pane_keys(false);
+            if d.focus_target != 0 {
+                if hand_back {
+                    nc::hand_back(d.focus_target);
+                } else {
+                    nc::focus(d.focus_target);
+                }
+            }
         }
+        d.keys_changed
+    }
+
+    pub fn lend_focus(&mut self) {
+        self.reclaim_focus(None, false);
+    }
+
+    pub fn lend_focus_to(&mut self, target_top: Option<u64>, cx: &mut Context<Self>) {
+        if self.reclaim_focus(target_top, false) {
+            cx.notify();
+        }
+    }
+
+    fn on_backplane_click(&mut self, target_top: Option<u64>, cx: &mut Context<Self>) {
+        self.lend_focus_to(target_top, cx);
     }
 
     pub fn set_in_page(&mut self, in_page: bool, cx: &mut Context<Self>) {
@@ -543,14 +736,11 @@ impl SolidCraftPane {
             if let Some((t, c)) = self.screen_key.take() {
                 nc::note_pane_on_screen(t, c, false);
             }
+            self.reclaim_focus(None, false);
             if let Some(c) = self.container {
                 nc::place(c, None, None, None, &mut self.last_root);
                 nc::grab_escape(self.toplevel, false);
                 nc::grab_click(c, true);
-            }
-            if self.keys && self.toplevel != 0 {
-                nc::focus(self.toplevel);
-                self.keys = false;
             }
             self.placed = None;
         }
@@ -702,6 +892,7 @@ impl SolidCraftPane {
         if let Some((tk, k)) = self.screen_key.take() {
             nc::note_pane_on_screen(tk, k, false);
         }
+        self.reclaim_focus(None, false);
         if new_c != old {
             nc::move_frames(old, new_c);
             nc::destroy(old);
@@ -714,7 +905,7 @@ impl SolidCraftPane {
         self.last_root = (i32::MIN, 0);
         self.place_seq = self.place_seq.wrapping_add(1);
         self.frames = nc::frames(new_c);
-        nc::grab_click(new_c, !self.keys);
+        nc::grab_click(new_c, true);
         self.sync_bg_pixel();
         if new_top == self.home {
             if let (Some(r), Some(w)) = (self.home_rect, self.child_window()) {
@@ -734,15 +925,13 @@ impl SolidCraftPane {
         if let Some((t, c)) = self.screen_key.take() {
             nc::note_pane_on_screen(t, c, false);
         }
+        self.reclaim_focus(None, false);
         let Some(c) = self.container.take() else {
             return;
         };
         nc::place(c, None, None, None, &mut self.last_root);
         nc::grab_escape(self.toplevel, false);
-        if self.keys && self.toplevel != 0 {
-            nc::focus(self.toplevel);
-            self.keys = false;
-        }
+        nc::grab_click(c, true);
         let rect = self.last_place.map(|(_, r, _)| r);
         self.placed = None;
         self.last_place = None;
@@ -831,50 +1020,97 @@ impl SolidCraftPane {
         if let Some((Some(at), Some(show), _)) = &self.placed {
             nc::sync_root(c, *at, *show, &mut self.last_root);
         }
+        let child = self.child_window();
+        let has_child = child.is_some();
+        let has_focus = has_child && nc::has_focus(c);
         if !self.in_page {
-            return;
-        }
-        let has = nc::has_focus(c);
-        if has != self.keys {
-            self.keys = has;
-            nc::grab_escape(self.toplevel, has);
-            nc::grab_click(c, !has);
-            cx.notify();
-        }
-        for e in nc::events() {
-            match e {
-                nc::Ev::Escape => {
-                    nc::hand_back(self.toplevel);
-                    self.keys = false;
-                    nc::grab_escape(self.toplevel, false);
-                    nc::grab_click(c, true);
-                    cx.notify();
-                }
-                nc::Ev::Click | nc::Ev::ShieldClick => {
-                    if let Some(w) = self.child_window() {
-                        nc::grab_click(c, false);
-                        nc::focus(w);
-                        self.keys = true;
-                        nc::grab_escape(self.toplevel, true);
-                        cx.notify();
-                    }
-                }
-                nc::Ev::Focus(_) => {
-                    if !self.keys {
-                        self.keys = true;
-                        nc::grab_escape(self.toplevel, true);
-                        nc::grab_click(c, false);
-                        cx.notify();
-                    }
-                }
-                nc::Ev::Key(_) => {
-                    nc::hand_back(self.toplevel);
-                    self.keys = false;
-                    nc::grab_escape(self.toplevel, false);
-                    nc::grab_click(c, true);
+            nc::discard_events_for(c);
+            if self.keys || has_focus {
+                if self.reclaim_focus(None, false) {
                     cx.notify();
                 }
             }
+            return;
+        }
+        let pid = self.info["pid"].as_u64().unwrap_or(0) as u32;
+        let in_dialog = has_child && pid != 0 && nc::focus_in_pid(pid) && !has_focus;
+        if cfg!(windows) && self.in_page && !self.keys && !has_focus && !in_dialog && self.toplevel != 0 {
+            nc::keep_focus(self.toplevel);
+        }
+        let mut escaped = false;
+        let mut saw_key = false;
+        let mut click_in = TickClickIn::None;
+        for e in nc::events_for(c, self.toplevel) {
+            match e {
+                nc::Ev::Escape => {
+                    escaped = true;
+                }
+                nc::Ev::Key(k) => {
+                    escaped = true;
+                    saw_key = true;
+                    self.press.push(k);
+                }
+                nc::Ev::Click => {
+                    if !escaped {
+                        click_in = TickClickIn::GrabClick;
+                    }
+                }
+                nc::Ev::ShieldClick | nc::Ev::Focus(_) => {
+                    if !escaped && click_in == TickClickIn::None {
+                        click_in = TickClickIn::AlreadyFocused;
+                    }
+                }
+            }
+        }
+        let button_over = child.and_then(nc::button_over);
+        let pointer_elsewhere =
+            child.is_some_and(|w| button_over.is_some() && nc::pointer_on_other_window(w));
+        let d = decide_tick_focus(
+            self.in_page,
+            has_child,
+            self.keys,
+            self.press_in,
+            has_focus,
+            in_dialog,
+            button_over,
+            pointer_elsewhere,
+            click_in,
+            escaped,
+        );
+        let prev_keys = self.keys;
+        self.keys = d.next_keys;
+        self.press_in = d.next_press_in;
+        match d.action {
+            TickFocusAction::FocusChild => {
+                if let Some(w) = child {
+                    nc::grab_click(c, false);
+                    nc::focus(w);
+                    nc::grab_escape(self.toplevel, true);
+                    nc::note_pane_keys(true);
+                }
+            }
+            TickFocusAction::ReclaimToHost => {
+                nc::grab_escape(self.toplevel, false);
+                nc::grab_click(c, true);
+                nc::note_pane_keys(false);
+                if self.toplevel != 0 {
+                    if escaped {
+                        nc::hand_back(self.toplevel);
+                    } else {
+                        nc::focus(self.toplevel);
+                    }
+                }
+            }
+            TickFocusAction::None => {
+                if self.keys != prev_keys {
+                    nc::grab_escape(self.toplevel, self.keys);
+                    nc::grab_click(c, !self.keys);
+                    nc::note_pane_keys(self.keys);
+                }
+            }
+        }
+        if self.keys != prev_keys || saw_key {
+            cx.notify();
         }
     }
 
@@ -935,6 +1171,13 @@ impl SolidCraftPane {
     fn after_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if top_of(window) != Some(self.toplevel) {
             return;
+        }
+        for k in std::mem::take(&mut self.press) {
+            if let Ok(k) = Keystroke::parse(&k) {
+                window.defer(cx, move |window, cx| {
+                    window.dispatch_keystroke(k, cx);
+                });
+            }
         }
         let Some(c) = self.container else {
             return;
@@ -1007,6 +1250,9 @@ impl SolidCraftPane {
         let cut_rects = effective_at.filter(|_| !over.is_empty()).map(|p| nc::cut(p, &over));
         match plan {
             PlacePlan::HideNow => {
+                if self.reclaim_focus(None, false) {
+                    cx.notify();
+                }
                 self.report_screen(c, false);
                 nc::place_shaped(c, None, None, None, None, &mut self.last_root);
                 self.last_place = None;
@@ -1129,6 +1375,8 @@ impl Render for SolidCraftPane {
         let c = |n: &str| crate::theme::color(light, n);
         let status = self.status();
         let marker = self.marker.clone();
+        let end_marker = self.end_marker.clone();
+        let pane = cx.entity().downgrade();
         let focus = self.focus.clone();
         let keys = self.keys;
 
@@ -1347,7 +1595,28 @@ impl Render for SolidCraftPane {
                         *marker.lock().unwrap() = Some(hb.id);
                         hb
                     },
-                    |_, _, _, _| {},
+                    move |_, hb, window, _| {
+                        let pane = pane.clone();
+                        let end_marker = end_marker.clone();
+                        window.on_mouse_event(move |ev: &MouseDownEvent, phase, window, cx| {
+                            if phase != DispatchPhase::Capture {
+                                return;
+                            }
+                            let pane_hovered = hb.is_hovered(window);
+                            let hit_after = if pane_hovered {
+                                let after_id = end_marker.lock().unwrap().unwrap_or(hb.id);
+                                window.hitbox_drawn_after(after_id).is_some_and(|(_, over)| {
+                                    over.iter().any(|b| b.contains(&ev.position))
+                                })
+                            } else {
+                                false
+                            };
+                            if kicad_pane::click_is_in_backplane(pane_hovered, hit_after) {
+                                let target = top_of(window);
+                                let _ = pane.update(cx, |this, cx| this.on_backplane_click(target, cx));
+                            }
+                        });
+                    },
                 )
                 .size_full(),
             )
@@ -1744,7 +2013,23 @@ impl Backplane {
 
     pub(crate) fn solidcraft_lend(&mut self, cx: &mut Context<Self>) {
         if let Some(pane) = self.screens.solidcraft.clone() {
-            pane.update(cx, |p, _| p.lend_focus());
+            pane.update(cx, |p, cx| p.lend_focus_to(None, cx));
+        }
+    }
+
+    pub(crate) fn solidcraft_reclaim_to(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if let Some(pane) = self.screens.solidcraft.clone() {
+            let target = top_of(window);
+            pane.update(cx, |p, cx| p.lend_focus_to(target, cx));
+        }
+    }
+
+    pub(crate) fn solidcraft_reclaim_if_popped(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if let Some(pane) = self.screens.solidcraft.clone() {
+            if pane.read(cx).popped {
+                let target = top_of(window);
+                pane.update(cx, |p, cx| p.lend_focus_to(target, cx));
+            }
         }
     }
 
@@ -2043,6 +2328,440 @@ mod tests {
             plan_placement(Some(r1), Some(r2_small_shrink), &overlay),
             PlacePlan::SyncResize {
                 pre_clip: vec![nc::R { x: 10, y: 100, w: 650, h: 700 }],
+            }
+        );
+    }
+
+    #[test]
+    fn reclaim_focus_transitions_handle_cached_keys_live_focus_race_and_popped_target() {
+        let mut keys = true;
+        let mut press_in = true;
+        assert_eq!(
+            decide_reclaim(&mut keys, &mut press_in, false, 100, None),
+            ReclaimDecision {
+                reclaim_native: true,
+                keys_changed: true,
+                focus_target: 100,
+            }
+        );
+        assert!(!keys);
+        assert!(!press_in);
+
+        // Tick-lag race: keys is still false, but native focus is already in SolidCraft.
+        let mut keys = false;
+        let mut press_in = true;
+        assert_eq!(
+            decide_reclaim(&mut keys, &mut press_in, true, 100, None),
+            ReclaimDecision {
+                reclaim_native: true,
+                keys_changed: false,
+                focus_target: 100,
+            }
+        );
+        assert!(!keys);
+        assert!(!press_in);
+
+        // Neither cached nor live focus: no native reclaim.
+        let mut keys = false;
+        let mut press_in = false;
+        assert_eq!(
+            decide_reclaim(&mut keys, &mut press_in, false, 100, Some(200)),
+            ReclaimDecision {
+                reclaim_native: false,
+                keys_changed: false,
+                focus_target: 0,
+            }
+        );
+
+        // Popped-out cross-window click: return focus to the clicked Backplane window, not SolidCraftWindow.
+        let mut keys = true;
+        let mut press_in = false;
+        assert_eq!(
+            decide_reclaim(&mut keys, &mut press_in, true, 200, Some(100)),
+            ReclaimDecision {
+                reclaim_native: true,
+                keys_changed: true,
+                focus_target: 100,
+            }
+        );
+
+        // Zero target_toplevel falls back to pane_toplevel.
+        let mut keys = true;
+        let mut press_in = false;
+        assert_eq!(
+            decide_reclaim(&mut keys, &mut press_in, true, 200, Some(0)),
+            ReclaimDecision {
+                reclaim_native: true,
+                keys_changed: true,
+                focus_target: 200,
+            }
+        );
+    }
+
+    #[test]
+    fn tick_focus_blocks_unsolicited_focus_grab_on_redraw_or_startup() {
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                false,
+                false,
+                true,
+                false,
+                None,
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::ReclaimToHost,
+            }
+        );
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                false,
+                false,
+                true,
+                false,
+                Some(true),
+                true,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::ReclaimToHost,
+            }
+        );
+    }
+
+    #[test]
+    fn tick_focus_hands_in_on_click_and_reclaims_on_backplane_click_or_escape() {
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                false,
+                false,
+                false,
+                false,
+                None,
+                false,
+                TickClickIn::GrabClick,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: true,
+                next_press_in: false,
+                action: TickFocusAction::FocusChild,
+            }
+        );
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                false,
+                false,
+                true,
+                false,
+                Some(true),
+                false,
+                TickClickIn::AlreadyFocused,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: true,
+                next_press_in: true,
+                action: TickFocusAction::None,
+            }
+        );
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                true,
+                false,
+                true,
+                false,
+                Some(false),
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::ReclaimToHost,
+            }
+        );
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                true,
+                true,
+                true,
+                false,
+                Some(true),
+                false,
+                TickClickIn::GrabClick,
+                true,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::ReclaimToHost,
+            }
+        );
+        // External focus loss (e.g. another app focused) drops keys without yanking focus back.
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                true,
+                false,
+                false,
+                false,
+                None,
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::None,
+            }
+        );
+    }
+
+    #[test]
+    fn tick_focus_preserves_orbit_drag_and_solidcraft_dialogs() {
+        // Press starts inside SolidCraft.
+        let d1 = decide_tick_focus(
+            true,
+            true,
+            false,
+            false,
+            false,
+            false,
+            Some(true),
+            false,
+            TickClickIn::None,
+            false,
+        );
+        assert_eq!(
+            d1,
+            TickFocusDecision {
+                next_keys: true,
+                next_press_in: true,
+                action: TickFocusAction::FocusChild,
+            }
+        );
+        // Pointer drags outside the pane while mouse button stays held: preserve keys & drag.
+        let d2 = decide_tick_focus(
+            true,
+            true,
+            d1.next_keys,
+            d1.next_press_in,
+            true,
+            false,
+            Some(false),
+            false,
+            TickClickIn::None,
+            false,
+        );
+        assert_eq!(
+            d2,
+            TickFocusDecision {
+                next_keys: true,
+                next_press_in: true,
+                action: TickFocusAction::None,
+            }
+        );
+        // Button released -> press_in clears.
+        let d3 = decide_tick_focus(
+            true,
+            true,
+            d2.next_keys,
+            d2.next_press_in,
+            true,
+            false,
+            None,
+            false,
+            TickClickIn::None,
+            false,
+        );
+        assert_eq!(
+            d3,
+            TickFocusDecision {
+                next_keys: true,
+                next_press_in: false,
+                action: TickFocusAction::None,
+            }
+        );
+        // Fresh click outside pane reclaims focus to Backplane.
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                d3.next_keys,
+                d3.next_press_in,
+                true,
+                false,
+                Some(false),
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::ReclaimToHost,
+            }
+        );
+        // Floating SolidCraft dialog keeps keys.
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                true,
+                false,
+                false,
+                true,
+                None,
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: true,
+                next_press_in: false,
+                action: TickFocusAction::None,
+            }
+        );
+        // Off-page reclaims if keys or live focus remained, otherwise no-op.
+        assert_eq!(
+            decide_tick_focus(
+                false,
+                true,
+                true,
+                false,
+                false,
+                false,
+                None,
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::ReclaimToHost,
+            }
+        );
+        assert_eq!(
+            decide_tick_focus(
+                false,
+                true,
+                false,
+                false,
+                false,
+                false,
+                None,
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::None,
+            }
+        );
+        // Click then Escape/Key in same tick: escape wins, focus returns to Backplane.
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                false,
+                false,
+                true,
+                false,
+                Some(true),
+                false,
+                TickClickIn::GrabClick,
+                true,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::ReclaimToHost,
+            }
+        );
+        // Floating dialog keeps keys even if keys was false, without stealing or clearing.
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                false,
+                false,
+                false,
+                true,
+                None,
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: true,
+                next_press_in: false,
+                action: TickFocusAction::None,
+            }
+        );
+        // Mouse down over placeholder when no child exists yet never claims keys.
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                false,
+                false,
+                false,
+                false,
+                false,
+                Some(true),
+                false,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: false,
+                next_press_in: false,
+                action: TickFocusAction::None,
+            }
+        );
+        // Pointer over another top-level while SolidCraft holds keys preserves keys until Backplane click.
+        assert_eq!(
+            decide_tick_focus(
+                true,
+                true,
+                true,
+                false,
+                true,
+                false,
+                Some(true),
+                true,
+                TickClickIn::None,
+                false,
+            ),
+            TickFocusDecision {
+                next_keys: true,
+                next_press_in: false,
+                action: TickFocusAction::None,
             }
         );
     }
