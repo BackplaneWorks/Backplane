@@ -217,7 +217,7 @@ impl Agents {
             let altium_installed = host.altium_available();
             prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders, routing_plan: plan,
                 // Keep `<kistack_skills>` in the base prompt so every provider (including Claude with `--plugin-dir` and brand-new projects with no KiCad files yet) sees the mandatory KiStack workflow directive and pinned `SKILL.md` paths untruncated by `<available_skills>`.
-                root: main, pro: f.pro, pcb: f.pcb, sch: f.sch, all: cad.kicad.join("\n"), altium_projects: cad.altium, altium_installed, design, keys, machines, buy, lang, skills: vec![], kistack, solidcraft: crate::solidcraft::runtime::cli_path().is_some() })
+                root: main, pro: f.pro, pcb: f.pcb, sch: f.sch, all: cad.kicad.join("\n"), altium_projects: cad.altium, altium_installed, design, keys, machines, buy, lang, skills: vec![], kistack, solidcraft: match crate::solidcraft::runtime::current() { None => "", Some(r) if r.cli.is_some() => "ok", Some(_) => "missing" } })
         }).await.unwrap_or_default()
     }
     /// PendingChanged: the number of open asks on a thread, written after an ask opens or closes (`extra` asks counted on top).

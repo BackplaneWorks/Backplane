@@ -38,8 +38,9 @@ pub struct Session {
     inner: tokio::sync::Mutex<Inner>,
     /// a changing call whose caller went away before the answer (the turn was interrupted): said once, to the next caller
     interrupted: StdMutex<Option<String>>,
-    /// the child's environment: SolidCraft's own folders under the hub's home (`data_env`), so nothing lands in the person's
-    pub env: Vec<(&'static str, PathBuf)>,
+    /// the child's environment: SolidCraft's own folders under the hub's home (solidcraft/embed.rs `data_env`, the pane's too), so
+    /// nothing lands in the person's own SolidCraft
+    pub env: Vec<(&'static str, std::ffi::OsString)>,
     /// a test's one budget for every call (None: harness::budget)
     pub fixed_budget: Option<Duration>,
 }
@@ -54,12 +55,6 @@ impl<'a> InFlight<'a> {
     fn done(mut self) { if self.armed { *self.slot.lock().unwrap() = None } self.armed = false }
 }
 
-/// SolidCraft's settings, control tokens and recovery folder for a child of this hub: under `<home>/solidcraft`, beside the pane's
-/// (solidcraft/embed.rs), machine-local, never the person's own SolidCraft's.
-pub fn data_env(home: &Path) -> Vec<(&'static str, PathBuf)> {
-    let d = home.join("solidcraft");
-    vec![("SOLIDCRAFT_SETTINGS_DIR", d.join("settings")), ("SOLIDCRAFT_CONTROL_DIR", d.join("control")), ("XDG_DATA_HOME", d.join("data"))]
-}
 fn sha(bytes: &[u8]) -> String { use sha2::Digest; hex::encode(&sha2::Sha256::digest(bytes)[..8]) }
 fn now() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 fn fail(v: Value) -> (bool, Value) { (false, v) }
@@ -112,7 +107,7 @@ impl Session {
         let want = self.want(seam);
         if let Some(c) = &inner.client { if c.alive() && c.mode == want { return Ok(()) } }
         let had = inner.client.take();
-        let Some(program) = (seam.cli)() else { return Err("SolidCraft is not installed on this machine yet: open a CAD file in Backplane's viewer (viewer_show) to install it, or put solidcraft-cli on PATH.".into()) };
+        let Some(program) = (seam.cli)() else { return Err("SolidCraft is not installed on this machine yet. Tell the person and offer this link on its own line: [Open Settings › CAD](backplane://settings/cad) (opening a CAD file in the viewer offers the same install). Nothing was done.".into()) };
         let _ = std::fs::create_dir_all(&self.dir);
         let spawn = Spawn { program, mode: want.clone(), allow: vec![self.root.clone(), self.dir.clone()], env: self.env.clone() };
         let c = Client::start(&spawn, START).await?;

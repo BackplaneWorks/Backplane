@@ -5,6 +5,8 @@ description: "Use for mechanical modeling, STEP export, assemblies, and fit chec
 
 # freecad
 
+For a new part on a machine with SolidCraft (the prompt's `<backplane_solidcraft>` block names its tools), model it with the bundled `solidcraft-cad` skill instead: it is the editor behind Backplane's 3D pane and the person watches the part take shape. Use this skill for existing FreeCAD scripts and `.FCStd` files, or where SolidCraft is not installed.
+
 Model with FreeCAD. Each part is one script in the project's `mech/` folder with its dimensions as named parameters at the top, in millimetres, Z up, the part's front facing -Y; it checks `shape.isValid()`, saves `mech/<part>.FCStd` and exports `mech/<part>.step`.
 
 An assembly is one more script that places the parts and exports one STEP. Give every part a colour that reads as what it is (a printed housing, aluminium, rubber, the board's green): STEP files keep colours only when FreeCAD's GUI writes them, so run the script with the GUI offscreen (no window opens): `QT_QPA_PLATFORM=offscreen timeout 300 "<FreeCAD GUI>" mech/<part>.py`. In it, after `doc.recompute()`, set each object's `ViewObject.ShapeColor = (r, g, b)` (0 to 1), export with `ImportGui.export(objects, 'mech/<part>.step')`, write any messages to a log file (the GUI's output is not shown), and end with `os._exit(0)` or it keeps running.
