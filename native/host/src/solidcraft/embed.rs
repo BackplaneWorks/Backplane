@@ -151,6 +151,34 @@ pub fn control_for_path(path: &str) -> Option<Control> {
 /// The folders the program keeps its control files and settings in, under the hub's home.
 pub fn control_dir(home: &Path) -> PathBuf { home.join("solidcraft").join("control") }
 pub fn settings_dir(home: &Path) -> PathBuf { home.join("solidcraft").join("settings") }
+/// Its recovery files, crash reports and logs (`XDG_DATA_HOME`): the hub's, never the person's own SolidCraft's.
+pub fn data_dir(home: &Path) -> PathBuf { home.join("solidcraft").join("data") }
+/// The environment every SolidCraft the hub starts gets (the window program and the agent's `solidcraft-cli` alike, so they share
+/// one settings and recovery folder): its folders under the hub's home, no usage statistics, no update check.
+pub fn data_env(home: &Path) -> Vec<(&'static str, std::ffi::OsString)> {
+    vec![("SOLIDCRAFT_SETTINGS_DIR", settings_dir(home).into()), ("SOLIDCRAFT_CONTROL_DIR", control_dir(home).into()), ("XDG_DATA_HOME", data_dir(home).into()),
+        ("SOLIDCRAFT_NO_TELEMETRY", "1".into()), ("SOLIDCRAFT_UPDATE_CHECK", "0".into())]
+}
+/// The settings a first start gets, as SolidCraft's own file holds them (a map of names to texts; `solidcraft.prefs` is JSON, and
+/// what it leaves out keeps its default). Without them a first start asks how to import a STEP in a dialog nobody can answer in a
+/// headless run (seen with 0.50.0: the model never loads), and shows a statistics notice and donation and chat buttons in the pane.
+pub fn seed_text() -> String {
+    let prefs = json!({"preferences": {"ask_import_options": false, "show_discord_button": false, "show_donate_button": false, "check_updates": false, "usage_statistics": false, "show_home_on_startup": false}});
+    let stats = json!({"install_id": "", "notice_ok": true, "days": {}, "forget": []});
+    let q = |v: &Value| Value::String(v.to_string()).to_string();
+    format!("{{\n    \"solidcraft.prefs\": {},\n    \"usage_statistics\": {},\n}}\n", q(&prefs), q(&stats))
+}
+/// The hub's SolidCraft folders made (private to the user), and the settings seeded where there are none yet: what the person
+/// changes in the pane afterwards is theirs and is never written over.
+pub fn seed_settings(home: &Path) -> Result<(), String> {
+    for d in [control_dir(home), settings_dir(home), data_dir(home)] {
+        std::fs::create_dir_all(&d).map_err(|e| format!("Could not make {}: {e}", d.display()))?;
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)); }
+    }
+    let f = settings_dir(home).join("app.ron");
+    if !f.exists() { std::fs::write(&f, seed_text()).map_err(|e| format!("Could not write {}: {e}", f.display()))?; }
+    Ok(())
+}
 
 /// One request on a connection of its own; `limit` bounds connect, send and the reply.
 pub async fn call(port: u16, token: &str, method: &str, params: Value, limit: Duration) -> Result<Value, String> {
@@ -196,13 +224,10 @@ async fn spawn(hub: &Arc<Hub>, root: &str, file: &str, display: &str, container:
     let gui = rt.gui.clone().ok_or_else(|| if rt.cli.is_some() { "This computer has SolidCraft's command-line program but not its window program".to_string() } else { "SolidCraft is not installed".to_string() })?;
     let (port, token) = (free_port()?, new_token()?);
     let home = hub.cfg.home.clone();
-    for d in [control_dir(&home), settings_dir(&home)] {
-        std::fs::create_dir_all(&d).map_err(|e| format!("Could not make {}: {e}", d.display()))?;
-        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700)); }
-    }
+    { let h = home.clone(); tokio::task::spawn_blocking(move || seed_settings(&h)).await.map_err(|e| e.to_string())??; }
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &gui);
     c.args(argv(port, file)).current_dir(root).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::piped())
-        .env("SOLIDCRAFT_CONTROL_TOKEN", &token).env("SOLIDCRAFT_CONTROL_DIR", control_dir(&home)).env("SOLIDCRAFT_SETTINGS_DIR", settings_dir(&home))
+        .env("SOLIDCRAFT_CONTROL_TOKEN", &token).envs(data_env(&home))
         // the pane takes an X11 window in (Linux): the program is kept off Wayland, as KiCad is
         .env_remove("WAYLAND_DISPLAY").env("WINIT_UNIX_BACKEND", "x11").env_remove("SOLIDCRAFT_CONTROL_PORT");
     if !display.is_empty() { c.env("DISPLAY", display); }
@@ -416,6 +441,19 @@ mod tests {
         assert_eq!(root_of(&json!({"project": "/a", "root": "/nonexistent-root/"})).unwrap(), "/nonexistent-root");
     }
     #[test]
+    fn seeded_settings() {
+        let t = seed_text();
+        assert!(t.starts_with("{\n    \"solidcraft.prefs\": \"{") && t.ends_with(",\n}\n"));
+        // each value is a text holding JSON, as SolidCraft's settings file keeps them
+        let line = t.lines().nth(1).unwrap().trim().trim_end_matches(','); let (_, v) = line.split_once(": ").unwrap();
+        let inner: String = serde_json::from_str(v).unwrap(); let p: Value = serde_json::from_str(&inner).unwrap();
+        assert_eq!(p["preferences"]["ask_import_options"], false); assert_eq!(p["preferences"]["show_donate_button"], false); assert_eq!(p["preferences"]["usage_statistics"], false);
+        let line = t.lines().nth(2).unwrap().trim().trim_end_matches(','); let (k, v) = line.split_once(": ").unwrap();
+        let inner: String = serde_json::from_str(v).unwrap(); assert_eq!(k, "\"usage_statistics\""); assert_eq!(serde_json::from_str::<Value>(&inner).unwrap()["notice_ok"], true);
+        let env = data_env(Path::new("/home/user/.bp")); assert_eq!(env.len(), 5);
+        assert!(env.iter().any(|(k, v)| *k == "XDG_DATA_HOME" && v == "/home/user/.bp/solidcraft/data"));
+    }
+    #[test]
     fn wire() {
         let l = request_line(1, "control.capabilities", &json!({}), "ab");
         assert!(l.ends_with('\n') && !l[..l.len() - 1].contains('\n'));
@@ -491,7 +529,7 @@ mod tests {
         assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("does not exist"), "{r}");
         // the stand-in program
         let noted = base.join("noted");
-        std::fs::write(bin.join("solidcraft"), format!("#!/bin/sh\necho \"$@\" > '{n}.tmp'\necho \"$SOLIDCRAFT_CONTROL_TOKEN $DISPLAY [$WAYLAND_DISPLAY] $SOLIDCRAFT_CONTROL_DIR $SOLIDCRAFT_SETTINGS_DIR\" >> '{n}.tmp'\nmv '{n}.tmp' '{n}'\nexec sleep 300\n", n = noted.display())).unwrap();
+        std::fs::write(bin.join("solidcraft"), format!("#!/bin/sh\necho \"$@\" > '{n}.tmp'\necho \"$SOLIDCRAFT_CONTROL_TOKEN $DISPLAY [$WAYLAND_DISPLAY] $SOLIDCRAFT_CONTROL_DIR $SOLIDCRAFT_SETTINGS_DIR $XDG_DATA_HOME $SOLIDCRAFT_NO_TELEMETRY $SOLIDCRAFT_UPDATE_CHECK\" >> '{n}.tmp'\nmv '{n}.tmp' '{n}'\nexec sleep 300\n", n = noted.display())).unwrap();
         std::fs::set_permissions(bin.join("solidcraft"), std::fs::Permissions::from_mode(0o755)).unwrap();
         runtime::test_over().lock().unwrap().insert(home.clone(), bin.clone());
         let r = hub.request(&mut conn, &json!({"id": 5, "m": "editor.solidcraft.attach", "p": {"project": root, "file": "mech/a.step", "container": 9, "toplevel": 8, "display": ":99"}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
@@ -505,6 +543,11 @@ mod tests {
         let port: u16 = args[1].parse().unwrap(); assert_eq!(r["control_port"], port);
         assert_eq!((env[0].len(), env[1], env[2]), (64, ":99", "[]"), "a token of 256 bits, the client's display, never Wayland");
         assert_eq!((Path::new(env[3]), Path::new(env[4])), (control_dir(&home).as_path(), settings_dir(&home).as_path()));
+        assert_eq!(env[5..], [data_dir(&home).to_str().unwrap(), "1", "0"], "its recovery folder is the hub's; no statistics, no update check");
+        // the first start's settings were seeded, and a later start leaves the person's changes alone
+        let seeded = std::fs::read_to_string(settings_dir(&home).join("app.ron")).unwrap(); assert_eq!(seeded, seed_text());
+        std::fs::write(settings_dir(&home).join("app.ron"), "{\n}\n").unwrap(); seed_settings(&home).unwrap();
+        assert_eq!(std::fs::read_to_string(settings_dir(&home).join("app.ron")).unwrap(), "{\n}\n");
         let token = env[0].to_string();
         // its control channel answers: ready, with its version
         let opened = Arc::new(Mutex::new(Vec::<String>::new()));
