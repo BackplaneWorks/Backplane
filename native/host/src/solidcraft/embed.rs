@@ -13,7 +13,8 @@
 //!
 //! Info `editor.solidcraft.<digest(root)>` (JSON): `{state: stopped|installing|starting|ready|unresponsive|failed, pid, gen, file, root,
 //! control_port, container, toplevel, version, reason, install_progress: {done, total}, runtime: {installed, path, source, ...}}`.
-//! RPCs: `editor.solidcraft.{attach, open, detach, bring_back, close, install}`; each answers with that picture.
+//! RPCs: `editor.solidcraft.{attach, open, detach, bring_back, close}`, each answering with that picture; `install {consent}` and
+//! `runtime {}` (look for the programs again) are the machine's, not a project's.
 use super::runtime;
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
@@ -182,6 +183,7 @@ pub fn seed_settings(home: &Path) -> Result<(), String> {
 
 /// One request on a connection of its own; `limit` bounds connect, send and the reply.
 pub async fn call(port: u16, token: &str, method: &str, params: Value, limit: Duration) -> Result<Value, String> {
+    if crate::copy::on() { return Err("a hub on a copied log does not control SolidCraft".into()) }
     let line = request_line(1, method, &params, token);
     let io = async {
         let mut s = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.map_err(|e| format!("no SolidCraft is listening on port {port}: {e}"))?;
@@ -308,7 +310,7 @@ pub fn shutdown_all() {
 
 // Hub wiring & RPC handler --------------------------------------------------------------------------------------------------
 
-const METHODS: &[&str] = &["editor.solidcraft.attach", "editor.solidcraft.open", "editor.solidcraft.detach", "editor.solidcraft.bring_back", "editor.solidcraft.close", "editor.solidcraft.install"];
+const METHODS: &[&str] = &["editor.solidcraft.attach", "editor.solidcraft.open", "editor.solidcraft.detach", "editor.solidcraft.bring_back", "editor.solidcraft.close", "editor.solidcraft.install", "editor.solidcraft.runtime"];
 pub struct EmbedRpc;
 
 fn ok_reply(id: &Value, payload: Value) -> Vec<Value> {
@@ -333,6 +335,13 @@ impl RpcHandler for EmbedRpc {
             if crate::copy::on() { return err_reply(id, "a hub on a copied log (BACKPLANE_COPY=1) does not start or control SolidCraft") }
             if method == "editor.solidcraft.install" {
                 return match runtime::install(hub, p["consent"].as_bool().unwrap_or(false)).await { Ok(note) => ok_reply(id, json!({"note": note})), Err(why) => err_reply(id, &why) }
+            }
+            // the programs looked for again (Settings > CAD set a folder, setup's Check again): every pane's picture follows
+            if method == "editor.solidcraft.runtime" {
+                let rt = runtime::publish(hub).await;
+                let roots: Vec<String> = sessions().lock().unwrap().values().filter(|s| !s.is_live()).map(|s| s.root.clone()).collect();
+                for r in roots { publish(hub, &r).await; }
+                return ok_reply(id, rt.to_json())
             }
             let root = match root_of(p) { Ok(r) => r, Err(why) => return err_reply(id, &why) };
             if !crate::files::kicad::known_root(hub, &root, "").await { return err_reply(id, &format!("{root} is not in a project this hub knows")) }

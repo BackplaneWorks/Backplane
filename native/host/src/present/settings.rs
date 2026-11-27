@@ -707,6 +707,51 @@ pub fn freecad_install_row(session: &Value, info: &Value, here: Option<crate::se
     })
 }
 
+/// Settings > CAD's SolidCraft rows: what this computer has (info `solidcraft.runtime`) with the folder of one the person has
+/// (`solidcraft.path`, this machine's alone), and its install while the window program is missing: what it downloads and where it
+/// goes, the consent step, how it goes (info `solidcraft.install`) and its failure.
+pub fn solidcraft_rows(st: &State, session: &Value, info: &Value) -> Vec<Value> {
+    let read = |k: &str| serde_json::from_str::<Value>(info[k].as_str().unwrap_or("")).unwrap_or(Value::Null);
+    let (rt, inst) = (read("solidcraft.runtime"), read("solidcraft.install"));
+    let g = |v: &Value, k: &str| v[k].as_str().unwrap_or("").to_string();
+    let (gui, cli, version, source) = (g(&rt, "gui"), g(&rt, "cli"), g(&rt, "version"), g(&rt, "source"));
+    let saved = set(st, "solidcraft.path", "");
+    let by = match source.as_str() { "managed" => " · installed by Backplane", "set" => " · the folder set here", "env" => " · BACKPLANE_SOLIDCRAFT", _ => "" };
+    let ver = if version.is_empty() { "found".to_string() } else { format!("version {version}") };
+    let status = if !gui.is_empty() { format!("{ver} · {gui}{by}") }
+        else if !cli.is_empty() { format!("command line only · {cli}{by}. Agents model and render with it; the 3D pane needs its window program.") }
+        else if rt.is_null() { "checking".to_string() }
+        else if !saved.trim().is_empty() { "SolidCraft was not found in that folder.".to_string() }
+        else { "SolidCraft was not found. 3D models open and are edited in it. Install it below, or set the folder of one you have.".to_string() };
+    let status = if !saved.trim().is_empty() && source != "set" && (!gui.is_empty() || !cli.is_empty()) { format!("{status}. Nothing runs in {}, so this one is used.", saved.trim()) } else { status };
+    let path = if session["drafts"]["@f.scpath"].is_string() { draft(session, "@f.scpath") } else { saved };
+    let mut v = vec![row_f("SolidCraft", &status, vec![field("scpath", "Folder holding solidcraft and solidcraft-cli, empty to look for it", path)], vec![btn("Set", "solidcraft-path", "", true)])];
+    let offer = &rt["offer"];
+    let can = offer["available"] == true && gui.is_empty() && (offer["window"] == true || cli.is_empty());
+    let (state, note) = (g(&inst, "state"), g(&inst, "note"));
+    let mb = |b: u64| (b + (1 << 19)) >> 20;
+    let ov = g(offer, "version");
+    if state == "running" {
+        let (done, total) = (inst["done"].as_u64().unwrap_or(0), inst["total"].as_u64().unwrap_or(0));
+        let step = if total > 0 && matches!(note.as_str(), "" | "Downloading") { format!("Downloading: {} of {} MB.", mb(done.min(total)), mb(total)) } else if note.is_empty() { "Starting.".to_string() } else { format!("{note}.") };
+        let mut r = row(&format!("Installing SolidCraft {}", g(&inst, "version")), &step, vec![]);
+        if total > 0 { r["progress"] = json!((done as f64 / total as f64).min(1.)); }
+        v.push(r);
+    } else if can {
+        v.push(if draft(session, "@scinstall") == "ask" {
+            row("Install SolidCraft?", &format!("Downloads SolidCraft {ov} (about {} MB) from {}, checks its checksum and unpacks it into {}. It needs no administrator password and changes nothing else on this computer.", mb(offer["size"].as_u64().unwrap_or(0)), g(offer, "from"), g(offer, "folder")),
+                vec![btn("Install", "solidcraft-install", "", true), btn("Cancel", "solidcraft-install-cancel", "", false)])
+        } else if state == "failed" {
+            row("Install SolidCraft", &format!("{}.", note.trim_end_matches('.')), vec![btn("Try again", "solidcraft-install-ask", "", true)])
+        } else {
+            row("Install SolidCraft", &format!("SolidCraft {ov} for this computer, from {}. 3D models open in it inside Backplane, and agents model parts with it.", g(offer, "from")), vec![btn("Install SolidCraft", "solidcraft-install-ask", "", true)])
+        });
+    } else if gui.is_empty() && cli.is_empty() && !rt.is_null() && offer["available"] != true {
+        v.push(row("Install SolidCraft", "No SolidCraft download is published for this computer. Install it from github.com/tangency-labs/solidcraft, then set its folder above.", vec![]));
+    }
+    v
+}
+
 /// The install row while it runs: setup's words and bar (`onboard::install_progress`).
 fn running_row(label: &str, st: &Value, version: &str, note: &str) -> Value {
     let (words, bar) = super::onboard::install_progress(st, &format!(" {version}"), note);
@@ -738,6 +783,7 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
     v.extend(install_row(session, info, pkg));
     v.push(row_f("FreeCAD", &free, vec![field("fpath", "Path to FreeCAD's command line (freecadcmd), empty to look for it", fpath)], vec![btn("Set", "freecad-path", "", true)]));
     v.extend(freecad_install_row(session, info, fc_here));
+    v.extend(solidcraft_rows(st, session, info));
     v.extend([
         row("KiCad over its API", "Lets agents edit a board in a running KiCad. Off uses the files only.", chips(&["on", "off"], set(st, "kicad.ipc", "on"), "kicad.ipc")),
         row("Plan before routing", "On: before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes a routing plan and routes only what you approve in the Plan panel beside the board. Off: agents route as you ask.", chips(&["on", "off"], onoff(crate::plan::is_on(set(st, crate::plan::SETTING, ""))), crate::plan::SETTING)),
@@ -992,6 +1038,20 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             if draft(session, "@kinstall") != "ask" { return Some(Out { patch: json!({"drafts": {"@kinstall": "ask"}}), cmds }) }
             send(session, hub, "kicad.install", json!({"consent": true}), &mut cmds, &mut rid); json!({"drafts": {"@kinstall": ""}})
         }
+        // Install SolidCraft: asks first, as KiCad's does; the folder of one the person has, and the programs looked for again
+        "solidcraft-install-ask" => json!({"drafts": {"@scinstall": "ask"}}),
+        "solidcraft-install-cancel" => json!({"drafts": {"@scinstall": ""}}),
+        "solidcraft-install" => {
+            if draft(session, "@scinstall") != "ask" { return Some(Out { patch: json!({"drafts": {"@scinstall": "ask"}}), cmds }) }
+            send(session, hub, "editor.solidcraft.install", json!({"consent": true}), &mut cmds, &mut rid); json!({"drafts": {"@scinstall": ""}})
+        }
+        "solidcraft-path" => {
+            if !session["drafts"]["@f.scpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
+            let raw = draft(session, "@f.scpath").trim().to_string();
+            send(session, hub, "setting.set", json!({"key": "solidcraft.path", "value": raw}), &mut cmds, &mut rid);
+            send(session, hub, "editor.solidcraft.runtime", json!({}), &mut cmds, &mut rid);
+            json!({"drafts": {"@f.scpath": raw}})
+        }
         "freecad-install-ask" => json!({"drafts": {"@finstall": "ask"}}),
         "freecad-install-cancel" => json!({"drafts": {"@finstall": ""}}),
         "freecad-install" => {
@@ -1121,6 +1181,45 @@ mod tests {
 
     use super::*;
     fn st(kv: &[(&str, &str)]) -> State { let mut s = State::new(); for (k, v) in kv { s.settings.insert(k.to_string(), v.to_string()); } s }
+    #[test]
+    fn cad_says_what_solidcraft_this_computer_has_and_asks_before_installing() {
+        let offer = json!({"available": true, "window": true, "version": "0.50.0", "size": 228331854u64, "from": "github.com/tangency-labs/solidcraft", "folder": "/home/user/.backplane/solidcraft"});
+        let info = |rt: Value, inst: Value| json!({"solidcraft.runtime": rt.to_string(), "solidcraft.install": if inst.is_null() { String::new() } else { inst.to_string() }});
+        let none = json!({"installed": false, "gui": "", "cli": "", "version": "", "source": "", "offer": offer});
+        // none: the row says so with its folder field, and the install row under it asks first
+        let r = solidcraft_rows(&st(&[]), &json!({"drafts": {}}), &info(none.clone(), Value::Null));
+        assert_eq!(r.len(), 2); assert_eq!(r[0]["label"], "SolidCraft"); assert!(r[0]["note"].as_str().unwrap().starts_with("SolidCraft was not found."));
+        assert_eq!((r[0]["fields"][0]["name"].as_str(), r[0]["buttons"][0]["action"].as_str()), (Some("scpath"), Some("solidcraft-path")));
+        assert_eq!((r[1]["label"].as_str(), r[1]["buttons"][0]["action"].as_str()), (Some("Install SolidCraft"), Some("solidcraft-install-ask")));
+        let r = solidcraft_rows(&st(&[]), &json!({"drafts": {"@scinstall": "ask"}}), &info(none.clone(), Value::Null));
+        assert_eq!(r[1]["label"], "Install SolidCraft?"); assert!(r[1]["note"].as_str().unwrap().starts_with("Downloads SolidCraft 0.50.0 (about 218 MB) from github.com/tangency-labs/solidcraft, checks its checksum and unpacks it into /home/user/.backplane/solidcraft."));
+        assert_eq!((r[1]["buttons"][0]["action"].as_str(), r[1]["buttons"][1]["action"].as_str()), (Some("solidcraft-install"), Some("solidcraft-install-cancel")));
+        // running: a bar; failed: why and again
+        let r = solidcraft_rows(&st(&[]), &json!({"drafts": {}}), &info(none.clone(), json!({"state": "running", "note": "Downloading", "version": "0.50.0", "done": 57082963u64, "total": 228331854u64})));
+        assert_eq!((r[1]["label"].as_str(), r[1]["note"].as_str(), r[1]["progress"].as_f64().map(|p| (p * 100.).round())), (Some("Installing SolidCraft 0.50.0"), Some("Downloading: 54 of 218 MB."), Some(25.))); assert!(r[1]["buttons"].as_array().unwrap().is_empty());
+        let r = solidcraft_rows(&st(&[]), &json!({"drafts": {}}), &info(none.clone(), json!({"state": "failed", "note": "SolidCraft archive checksum mismatch", "version": "0.50.0"})));
+        assert_eq!((r[1]["note"].as_str(), r[1]["buttons"][0]["label"].as_str()), (Some("SolidCraft archive checksum mismatch."), Some("Try again")));
+        // found: one row, where it is and whose it is; nothing to install
+        let have = |source: &str, version: &str| json!({"installed": true, "gui": "/opt/sc/bin/solidcraft", "cli": "/opt/sc/bin/solidcraft-cli", "version": version, "source": source, "offer": offer});
+        let r = solidcraft_rows(&st(&[]), &json!({"drafts": {}}), &info(have("managed", "0.50.0"), json!({"state": "done"})));
+        assert_eq!(r.len(), 1); assert_eq!(r[0]["note"], "version 0.50.0 · /opt/sc/bin/solidcraft · installed by Backplane");
+        assert_eq!(solidcraft_rows(&st(&[]), &json!({"drafts": {}}), &info(have("system", ""), Value::Null))[0]["note"], "found · /opt/sc/bin/solidcraft");
+        assert_eq!(solidcraft_rows(&st(&[("solidcraft.path", "/opt/sc")]), &json!({"drafts": {}}), &info(have("set", ""), Value::Null))[0]["note"], "found · /opt/sc/bin/solidcraft · the folder set here");
+        // a folder set that holds none: said, and the one in use named; the field shows the saved folder, then what is being typed
+        let r = solidcraft_rows(&st(&[("solidcraft.path", "/nowhere")]), &json!({"drafts": {}}), &info(have("system", ""), Value::Null));
+        assert_eq!(r[0]["note"], "found · /opt/sc/bin/solidcraft. Nothing runs in /nowhere, so this one is used."); assert_eq!(r[0]["fields"][0]["value"], "/nowhere");
+        assert_eq!(solidcraft_rows(&st(&[("solidcraft.path", "/nowhere")]), &json!({"drafts": {}}), &info(none.clone(), Value::Null))[0]["note"], "SolidCraft was not found in that folder.");
+        assert_eq!(solidcraft_rows(&st(&[]), &json!({"drafts": {"@f.scpath": "/typ"}}), &info(none.clone(), Value::Null))[0]["fields"][0]["value"], "/typ");
+        // the command line alone: said; the window program is still offered where the download has one
+        let cli = json!({"installed": true, "gui": "", "cli": "/usr/bin/solidcraft-cli", "version": "", "source": "system", "offer": offer});
+        let r = solidcraft_rows(&st(&[]), &json!({"drafts": {}}), &info(cli, Value::Null));
+        assert!(r[0]["note"].as_str().unwrap().starts_with("command line only · /usr/bin/solidcraft-cli.")); assert_eq!(r[1]["label"], "Install SolidCraft");
+        // no download for this computer
+        let r = solidcraft_rows(&st(&[]), &json!({"drafts": {}}), &info(json!({"installed": false, "gui": "", "cli": "", "offer": {"available": false}}), Value::Null));
+        assert!(r[1]["note"].as_str().unwrap().starts_with("No SolidCraft download is published for this computer.")); assert!(r[1]["buttons"].as_array().unwrap().is_empty());
+        // not looked for yet
+        assert_eq!(solidcraft_rows(&st(&[]), &json!({"drafts": {}}), &json!({}))[0]["note"], "checking");
+    }
     fn labels(v: &Value) -> Vec<String> { v["rows"].as_array().unwrap().iter().map(|r| r["label"].as_str().unwrap().to_string()).collect() }
 
     /// Matrix S09: a Voice chip chosen in Settings is lit when the page is drawn again. The page is drawn from the lean copy of the state,

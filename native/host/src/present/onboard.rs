@@ -463,6 +463,69 @@ fn freecad_row(f: &Facts) -> (Value, bool) {
     if f.installs["freecad"]["state"] == "running" { if let Some(p) = f.installs["freecad"]["progress"].as_f64() { r["progress"] = json!(p); } }
     (if bad || !s(t, "path").is_empty() { warn(r) } else { r }, false)
 }
+/// SolidCraft, the CAD pane's program, beside the other design tools: found (what and where), installing (the words and a bar), or
+/// one press to install the release Backplane is tested with (info `solidcraft.runtime` and `solidcraft.install`, solidcraft/runtime.rs).
+/// It never holds setup up: boards need none of it, and the pane offers the same install when a model is first opened.
+pub fn solidcraft_row(info: &Value) -> Value {
+    let read = |k: &str| serde_json::from_str::<Value>(s(info, k)).unwrap_or(Value::Null);
+    let (rt, inst) = (read("solidcraft.runtime"), read("solidcraft.install"));
+    let offer = &rt["offer"];
+    let v = |x: &str| if x.is_empty() { String::new() } else { format!(" {x}") };
+    let mb = |b: u64| (b + (1 << 19)) >> 20;
+    if inst["state"] == "running" {
+        let (done, total) = (inst["done"].as_u64().unwrap_or(0), inst["total"].as_u64().unwrap_or(0));
+        let step = match s(&inst, "note") { "" | "Downloading" if total > 0 => format!("Downloading: {} of {} MB.", mb(done.min(total)), mb(total)), "" => "Starting.".to_string(), n => format!("{n}.") };
+        let mut r = row("SolidCraft", &format!("Installing SolidCraft{}. {step}", v(s(&inst, "version"))), vec![]);
+        if total > 0 { r["progress"] = json!((done as f64 / total as f64).min(1.)); }
+        return r
+    }
+    if rt.is_null() { return row("SolidCraft", "Looking for it.", vec![]) }
+    let (gui, cli) = (s(&rt, "gui"), s(&rt, "cli"));
+    if !gui.is_empty() { return row("SolidCraft", &format!("SolidCraft{} at {gui}. 3D models open and are edited in it.", v(s(&rt, "version"))), vec![]) }
+    let can = offer["available"] == true && (offer["window"] == true || cli.is_empty());
+    let install = |label: &str| if can { vec![btn(label, "ob-solidcraft-install", "", true)] } else { vec![] };
+    if inst["state"] == "failed" { return warn(row("SolidCraft", &format!("It did not install: {}.", s(&inst, "note").trim_end_matches('.')), install("Try again"))) }
+    if !cli.is_empty() {
+        // the command-line program alone: agents model and render; the pane needs the window program, where a download has one
+        return row("SolidCraft", &format!("SolidCraft's command line{} at {cli}. Agents model with it.{}", v(s(&rt, "version")), if can { " Its window program, for the 3D pane, is not installed." } else { "" }), install("Install SolidCraft"))
+    }
+    if can { return row("SolidCraft", &format!("Not found. 3D models open and are edited in it, and agents model parts with it. SolidCraft{} is about {} MB, from {}.", v(s(offer, "version")), mb(offer["size"].as_u64().unwrap_or(0)), s(offer, "from")), install("Install SolidCraft")) }
+    row("SolidCraft", "Not found. No SolidCraft download is published for this computer.", vec![])
+}
+#[cfg(test)]
+mod solidcraft_tests {
+    use super::*;
+    fn info(rt: Value, inst: Value) -> Value { json!({"solidcraft.runtime": if rt.is_null() { String::new() } else { rt.to_string() }, "solidcraft.install": if inst.is_null() { String::new() } else { inst.to_string() }}) }
+    fn offer() -> Value { json!({"available": true, "window": true, "version": "0.50.0", "size": 228331854u64, "from": "github.com/tangency-labs/solidcraft", "folder": "/home/user/.backplane/solidcraft"}) }
+    #[test]
+    fn setup_says_what_this_computer_has_and_offers_the_install() {
+        // not looked for yet
+        let r = solidcraft_row(&info(Value::Null, Value::Null)); assert_eq!((r["label"].as_str(), r["note"].as_str()), (Some("SolidCraft"), Some("Looking for it."))); assert!(r["buttons"].as_array().unwrap().is_empty());
+        // found: said, nothing to press
+        let r = solidcraft_row(&info(json!({"installed": true, "gui": "/opt/sc/bin/solidcraft", "cli": "/opt/sc/bin/solidcraft-cli", "version": "0.50.0", "offer": offer()}), Value::Null));
+        assert_eq!(r["note"], "SolidCraft 0.50.0 at /opt/sc/bin/solidcraft. 3D models open and are edited in it."); assert!(r["buttons"].as_array().unwrap().is_empty());
+        // none: one press, and what it downloads
+        let r = solidcraft_row(&info(json!({"installed": false, "gui": "", "cli": "", "version": "", "offer": offer()}), Value::Null));
+        assert_eq!(r["note"], "Not found. 3D models open and are edited in it, and agents model parts with it. SolidCraft 0.50.0 is about 218 MB, from github.com/tangency-labs/solidcraft.");
+        assert_eq!((r["buttons"][0]["label"].as_str(), r["buttons"][0]["action"].as_str()), (Some("Install SolidCraft"), Some("ob-solidcraft-install")));
+        // the command line alone (a system package): agents work; the window program is the offer
+        let r = solidcraft_row(&info(json!({"installed": true, "gui": "", "cli": "/usr/bin/solidcraft-cli", "version": "", "offer": offer()}), Value::Null));
+        assert!(r["note"].as_str().unwrap().starts_with("SolidCraft's command line at /usr/bin/solidcraft-cli. Agents model with it. Its window program")); assert_eq!(r["buttons"][0]["action"], "ob-solidcraft-install");
+        // macOS: the download is the command line, so with it there is nothing more to install
+        let mut mac = offer(); mac["window"] = json!(false);
+        let r = solidcraft_row(&info(json!({"installed": true, "gui": "", "cli": "/x/solidcraft-cli", "version": "0.50.0", "offer": mac}), Value::Null)); assert!(r["buttons"].as_array().unwrap().is_empty());
+        // no download for this computer
+        let r = solidcraft_row(&info(json!({"installed": false, "gui": "", "cli": "", "offer": {"available": false}}), Value::Null));
+        assert_eq!(r["note"], "Not found. No SolidCraft download is published for this computer."); assert!(r["buttons"].as_array().unwrap().is_empty());
+        // installing: words and a bar; failed: why, and again
+        let none = json!({"installed": false, "gui": "", "cli": "", "offer": offer()});
+        let r = solidcraft_row(&info(none.clone(), json!({"state": "running", "note": "Downloading", "version": "0.50.0", "done": 114165927u64, "total": 228331854u64})));
+        assert_eq!(r["note"], "Installing SolidCraft 0.50.0. Downloading: 109 of 218 MB."); assert_eq!(r["progress"], 0.5); assert!(r["buttons"].as_array().unwrap().is_empty());
+        let r = solidcraft_row(&info(none.clone(), json!({"state": "running", "note": "Unpacking", "version": "0.50.0", "done": 9, "total": 9}))); assert_eq!(r["note"], "Installing SolidCraft 0.50.0. Unpacking.");
+        let r = solidcraft_row(&info(none, json!({"state": "failed", "note": "The download stopped (no internet connection: the address did not resolve)", "version": "0.50.0"})));
+        assert_eq!(r["note"], "It did not install: The download stopped (no internet connection: the address did not resolve)."); assert_eq!((r["tone"].as_str(), r["buttons"][0]["label"].as_str()), (Some("warn"), Some("Try again")));
+    }
+}
 /// A Locate row: the full path of a tool found nowhere Backplane looks.
 fn locate(st: &State, session: &Value, field: &str, label: &str, hint: &str, setting: &str, action: &str) -> Value {
     let path = if session["drafts"][format!("@f.{field}")].is_string() { draft(session, &format!("@f.{field}")).to_string() } else { set(st, setting).to_string() };
@@ -472,7 +535,7 @@ fn locate(st: &State, session: &Value, field: &str, label: &str, hint: &str, set
 }
 fn tools(f: &Facts, st: &State, session: &Value) -> Step { tools_with(f, st, session, crate::files::kicad::install::package()) }
 fn tools_with(f: &Facts, st: &State, session: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Step {
-    let body = "Agents use KiCad for boards and schematics, and FreeCAD for mechanical parts. Skip FreeCAD if you only design boards.".to_string();
+    let body = "Agents use KiCad for boards and schematics, and SolidCraft and FreeCAD for mechanical parts. Skip those two if you only design boards.".to_string();
     let ((k, kd), (fc, fd)) = (kicad_row(f, pkg), freecad_row(f));
     let mut rows = vec![];
     rows.push(k);
@@ -480,6 +543,7 @@ fn tools_with(f: &Facts, st: &State, session: &Value, pkg: Option<&crate::files:
     if !kd && f.checked && (!kicad_installing(f.info) || draft(session, "@ob.kicadlocate") == "1") { rows.push(locate(st, session, "obkicad", "Locate KiCad", "kicad-cli", "kicad.path", "ob-kicad")); }
     rows.push(fc);
     if !fd && f.checked { rows.push(locate(st, session, "obfreecad", "Locate FreeCAD", "freecadcmd", "freecad.path", "ob-freecad")); }
+    rows.push(solidcraft_row(f.info));
     let (g, gd) = git_tool_row(f);
     rows.push(g);
     Step { id: "tools", group: "", title: "Design tools".into(), body, rows, choices: vec![], panel: String::new(), done: kd && fd && gd, task: true, accept: false }
@@ -719,6 +783,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         }
         "ob-install" => { if value.is_empty() { return None } ask.send("onboard.install", json!({"tool": value})); json!({}) }
         "ob-kicad-install" => { ask.send("kicad.install", json!({"consent": true})); json!({}) }
+        "ob-solidcraft-install" => { ask.send("editor.solidcraft.install", json!({"consent": true})); json!({}) }
         "ob-kicad-locate" => json!({"drafts": {"@ob.kicadlocate": "1"}}),
         "ob-check" => { ask.send("onboard.check", json!({})); json!({}) }
         "ob-more" => json!({"drafts": {"@ob.more": if draft(session, "@ob.more") == "1" { "" } else { "1" }}}),
