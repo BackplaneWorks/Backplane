@@ -115,12 +115,31 @@ impl Mcpx {
         let cwd = self.agents()?.world().await.cwd(thread);
         self.launch_servers(thread, &provider, &cwd).await.into_iter().find(|s| s.id == id)
     }
+    /// The JSON spec returned by `backplane/mcp_spec` for a resolved server.
+    pub fn spec_value(s: &Server, r: &Resolved) -> Value {
+        if s.remote() {
+            json!({
+                "transport": r.transport,
+                "url": r.url,
+                "headers": r.headers.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
+                "disabled_tools": s.disabled_tools,
+            })
+        } else {
+            json!({
+                "transport": "stdio",
+                "command": r.command,
+                "args": r.args,
+                "env": r.env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(),
+                "cwd": r.cwd,
+                "disabled_tools": s.disabled_tools,
+            })
+        }
+    }
     /// The wrapper's ask (`backplane/mcp_spec`): only for a server this thread gets.
     pub async fn spec(&self, thread: &str, id: &str) -> Result<Value, String> {
         let s = self.active_server(thread, id).await.ok_or_else(|| format!("{id} is not one of this thread's MCP servers (Settings > MCP)"))?;
-        if s.remote() { return Err(format!("{id} is a remote server")) }
         let r = self.resolve(&s).map_err(|e| { self.failed(id, &e, ""); e })?;
-        Ok(json!({"command": r.command, "args": r.args, "env": r.env.iter().map(|(k, v)| json!([k, v])).collect::<Vec<_>>(), "cwd": r.cwd, "disabled_tools": s.disabled_tools}))
+        Ok(Self::spec_value(&s, &r))
     }
     /// Claude's headersHelper (`backplane/mcp_headers`).
     pub async fn headers(&self, thread: &str, id: &str) -> Result<Value, String> {
@@ -219,4 +238,22 @@ pub async fn launch(thread: &str, provider: &str, url: &str, cwd: &str) -> Launc
 /// The launch's fingerprint alone (what decides whether a live Claude is started again).
 pub async fn fingerprint(thread: &str, provider: &str, cwd: &str) -> String {
     match get() { Some(m) => { let s = m.launch_servers(thread, provider, cwd).await; gen::fingerprint(&s.iter().collect::<Vec<_>>(), m.pcbparts().await) } None => gen::fingerprint(&[], true) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test] fn spec_value_covers_stdio_and_remote() {
+        let stdio_srv = Server { id: "fetch".into(), transport: "stdio".into(), disabled_tools: vec!["bad".into()], ..Default::default() };
+        let stdio_res = Resolved { transport: "stdio".into(), command: "/usr/bin/uvx".into(), args: vec!["mcp-server-fetch".into()], env: vec![("K".into(), "V".into())], cwd: "/work".into(), ..Default::default() };
+        assert_eq!(Mcpx::spec_value(&stdio_srv, &stdio_res), json!({"transport":"stdio","command":"/usr/bin/uvx","args":["mcp-server-fetch"],"env":[["K","V"]],"cwd":"/work","disabled_tools":["bad"]}));
+
+        let http_srv = Server { id: "qrpedia".into(), transport: "http".into(), disabled_tools: vec!["del".into()], ..Default::default() };
+        let http_res = Resolved { transport: "http".into(), url: "https://qrpedia.com/mcp".into(), headers: vec![("Authorization".into(), "Bearer tok".into())], ..Default::default() };
+        assert_eq!(Mcpx::spec_value(&http_srv, &http_res), json!({"transport":"http","url":"https://qrpedia.com/mcp","headers":[["Authorization","Bearer tok"]],"disabled_tools":["del"]}));
+
+        let sse_srv = Server { id: "legacy".into(), transport: "sse".into(), ..Default::default() };
+        let sse_res = Resolved { transport: "sse".into(), url: "https://example.com/sse".into(), ..Default::default() };
+        assert_eq!(Mcpx::spec_value(&sse_srv, &sse_res), json!({"transport":"sse","url":"https://example.com/sse","headers":[],"disabled_tools":[]}));
+    }
 }

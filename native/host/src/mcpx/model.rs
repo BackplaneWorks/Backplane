@@ -113,7 +113,7 @@ impl Server {
     }
     /// Whether a thread of `provider`, project `project` and bot `bot` ("" for none) gets it (on, and in its scope).
     pub fn applies(&self, provider: &str, project: &str, bot: &str) -> bool {
-        self.enabled && (self.providers.is_empty() || self.providers.iter().any(|p| p == provider || (p == "antigravity" && provider == "agy") ))
+        self.enabled && (self.providers.is_empty() || self.providers.iter().any(|p| p == provider || (p == "antigravity" && provider == "agy") || (p == "agy" && provider == "antigravity")))
             && (self.projects.is_empty() || self.projects.iter().any(|p| p == project))
             && (bot.is_empty() || self.bots.as_ref().map_or(true, |b| b.iter().any(|x| x == bot)))
     }
@@ -184,6 +184,11 @@ mod tests {
         s.bots = Some(vec![]); assert!(!s.applies("codex", "p2", "b") && s.applies("codex", "p2", ""), "no bot, a person's thread still gets it");
         s.bots = Some(vec!["b".into()]); assert!(s.applies("codex", "p2", "b") && !s.applies("codex", "p2", "c"));
         s.enabled = false; assert!(!s.applies("codex", "p2", ""));
+        let mut ag = stdio("ag");
+        ag.providers = vec!["antigravity".into()];
+        assert!(ag.applies("antigravity", "p1", "") && ag.applies("agy", "p1", "") && !ag.applies("claude", "p1", ""));
+        ag.providers = vec!["agy".into()];
+        assert!(ag.applies("antigravity", "p1", "") && ag.applies("agy", "p1", "") && !ag.applies("codex", "p1", ""));
     }
     #[test] fn the_list_round_trips_and_shows_no_secret_value() {
         let d = crate::plat::tmp::uncreated("mcpx-model");
