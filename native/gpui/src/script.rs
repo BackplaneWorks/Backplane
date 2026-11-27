@@ -1212,6 +1212,7 @@ impl Backplane {
                 match a.as_str() {
                     "install" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| p.install(cx)); },
                     "retry" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| { p.reattach(); cx.notify(); }); },
+                    "full" => self.solidcraft_toggle_full(cx),
                     "detach" => self.solidcraft_popout(cx),
                     "bring_back" => { let h = self.screens.solidcraft_window; self.solidcraft_bring_back(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } }
                     "close" => if let Some(p) = self.screens.solidcraft.clone() { p.update(cx, |p, cx| p.close_session(cx)); },

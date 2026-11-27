@@ -1391,9 +1391,48 @@ html.light .bp-model-picker {
   min-height: 0;
   position: relative;
 }
+.bp-right-area.bp-has-viewer.bp-viewer-wide {
+  width: 62%;
+}
 .bp-right-area.bp-has-viewer.bp-has-mgmt {
   width: 53%;
   min-width: 520px;
+}
+.bp-right-area.bp-has-viewer.bp-viewer-wide.bp-has-mgmt {
+  width: 66%;
+}
+.bp-right-resize {
+  position: absolute;
+  left: -3px;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  cursor: col-resize;
+  z-index: 15;
+}
+.bp-right-resize:hover,
+body.bp-resizing .bp-right-resize {
+  background: rgba(128, 128, 128, 0.35);
+}
+body.bp-resizing {
+  user-select: none;
+  cursor: col-resize;
+}
+body.bp-resizing iframe {
+  pointer-events: none;
+}
+.bp-body.bp-viewer-fullscreen > .bp-sidebar,
+.bp-body.bp-viewer-fullscreen > .bp-center {
+  display: none;
+}
+.bp-body.bp-viewer-fullscreen > .bp-right-area {
+  flex: 1 1 auto;
+  width: auto !important;
+  min-width: 0;
+  border-left: 0;
+}
+.bp-body.bp-viewer-fullscreen .bp-right-resize {
+  display: none;
 }
 .bp-right-top {
   flex: 1;
@@ -2250,6 +2289,7 @@ html.light .bp-model-picker {
     border-left: 0;
     z-index: 25;
   }
+  .bp-right-resize { display: none; }
   .bp-right-top > .bp-viewer-pane {
     position: static;
     inset: auto;

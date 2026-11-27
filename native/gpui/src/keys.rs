@@ -414,6 +414,7 @@ impl Backplane {
         // the token panel (the Context chip's) shuts first, as 0.14's did
         if self.screens.ctx_open { self.screens.ctx_open = false; return true }
         if window.context_stack().iter().any(|k| ESC_OWNERS.iter().any(|o| k.contains(o))) { return false }
+        if self.screens.solidcraft_full { self.solidcraft_set_full(false, cx); return true }
         let thread = &self.data["thread"];
         let open = crate::screens::viewer::is_open(thread).then(|| thread["viewer"]["open"].as_str().unwrap_or(""));
         let split = if open == Some("split") { crate::screens::viewer::split_visible() } else { Vec::new() };

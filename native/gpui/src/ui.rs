@@ -949,6 +949,20 @@ impl Render for Backplane {
         let kscreen = self.screens.kicad_screen && kedit;
         let kfull = kscreen || (!docked && self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")));
         crate::screens::viewer::KICAD_SCREEN.store(kscreen, std::sync::atomic::Ordering::Relaxed);
+        let sc_mine = self.solidcraft_for(thread, cx).is_some();
+        let sc_showing = !thread["diff"].is_object()
+            && self.project_page.is_none()
+            && self.data["bot"].is_null()
+            && if docked {
+                crate::viewers::solidcraft_pane::mech_tile(&thread["viewer"]).is_some()
+            } else {
+                crate::screens::viewer::pane_page(thread, false).is_some_and(|(o, _)| o == "mech")
+            };
+        let sc_active = viewer_open && sc_mine && self.screens.solidcraft_window.is_none() && sc_showing;
+        if !sc_active {
+            self.screens.solidcraft_full = false;
+        }
+        let sc_full = self.screens.solidcraft_full && sc_active;
         // whether the page holds the embedded editor this frame (popped out: its own window does), from this frame's state: macOS hides
         // KiCad's frame by it when the pane is not drawn (#1199: the viewer closed, the PCB Editor stayed on screen)
         if let Some(p) = self.screens.kicad.clone() {
@@ -964,23 +978,15 @@ impl Render for Backplane {
         }
         if let Some(p) = self.screens.solidcraft.clone() {
             if p.read(cx).light != light { p.update(cx, |p, cx| p.set_light(light, cx)); }
-            let mine = self.solidcraft_for(thread, cx).is_some();
-            let showing_mech = !thread["diff"].is_object()
-                && self.project_page.is_none()
-                && self.data["bot"].is_null()
-                && if docked {
-                    crate::viewers::solidcraft_pane::mech_tile(&thread["viewer"]).is_some()
-                } else {
-                    crate::screens::viewer::pane_page(thread, false).is_some_and(|(o, _)| o == "mech")
-                };
-            let sc_in_page = self.screens.solidcraft_window.is_some() || (mine && showing_mech);
+            let sc_in_page = self.screens.solidcraft_window.is_some() || (sc_mine && sc_showing);
             if p.read(cx).in_page != sc_in_page { p.update(cx, |p, cx| p.set_in_page(sc_in_page, cx)); }
         }
         // Follow agent in KiCad: the hub learns whether this thread's page holds KiCad and which frame it shows (viewer.state, on change)
         let kshown = match self.screens.kicad.clone() { Some(p) if p.read(cx).in_page => (true, p.read(cx).tab()), _ => (false, String::new()) };
         if self.screens.kicad_shown != kshown { self.screens.kicad_shown = kshown; let me = cx.entity(); cx.defer(move |cx| me.update(cx, |this, _| crate::screens::plotview::report_state(this))); }
-        let (side_shown, thread_least) = if kfull { (false, 0.) } else { (side_shown, thread_least) };
-        crate::screens::viewer::KICAD_FULL.store(kfull, std::sync::atomic::Ordering::Relaxed); crate::screens::viewer::KICAD_POPPED.store(self.screens.kicad_window.is_some(), std::sync::atomic::Ordering::Relaxed);
+        let pane_full = kfull || sc_full;
+        let (side_shown, thread_least) = if pane_full { (false, 0.) } else { (side_shown, thread_least) };
+        crate::screens::viewer::KICAD_FULL.store(kfull, std::sync::atomic::Ordering::Relaxed); crate::screens::viewer::SOLIDCRAFT_FULL.store(sc_full, std::sync::atomic::Ordering::Relaxed); crate::screens::viewer::KICAD_POPPED.store(self.screens.kicad_window.is_some(), std::sync::atomic::Ordering::Relaxed);
         crate::screens::viewer::set_least(pane_least); crate::screens::viewer::set_share(share); self.screens.side_shown = side_shown;
         // an open panel at the design's side widens the pane at the thread's cost, down to the thread's least (screens/viewer.rs `with_panel`)
         crate::screens::viewer::set_most(win_w - if side_shown { self.local.sidebar_px as f32 } else { crate::screens::viewer::STRIP_W } - crate::screens::viewer::RAIL_W - thread_least);
@@ -1230,7 +1236,7 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::viewer::is_open(thread) && crate::screens::viewer::has_design(&thread["viewer"]) { let alt = crate::screens::viewer::is_altium(&thread["viewer"]); ctl.push(CtlEntry { id: if alt { "ui:Open in Altium" } else { "ui:Open in KiCad" }.into(), label: if alt { "Open in Altium" } else { "Open in KiCad" }.into(), ctl: Ctl::Node("kicad-open".into(), crate::screens::viewer::shown_key(&thread["viewer"])) });
             /* i18n-ok: registered controls the e2e drivers press */ if crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread) { ctl.push(CtlEntry { id: "ui:Edit".into(), label: "Edit".into(), ctl: Ctl::KicadEdit(true) }); if thread["viewer"]["gerbers"] == true && thread["viewer"]["gerberFiles"].as_array().is_some_and(|a| !a.is_empty()) && crate::viewers::kicad_pane::GERBVIEW.load(std::sync::atomic::Ordering::Relaxed) { ctl.push(CtlEntry { id: "ui:Open in GerbView".into(), label: "Open in GerbView".into(), ctl: Ctl::KicadAct("gerbview".into()) }); } if self.screens.kicad.is_some() { /* i18n-ok: ctl ids the drivers press */ for (k, l) in crate::viewers::kicad_pane::TABS { ctl.push(CtlEntry { id: format!("kicad-tab:{k}"), label: (*l).into(), ctl: Ctl::KicadAct((*k).into()) }); } if self.screens.kicad.as_ref().is_some_and(|p| p.read(cx).failed()) { ctl.push(CtlEntry { id: "kicad:retry".into(), label: "Try again".into(), ctl: Ctl::KicadAct("retry".into()) }); } if self.screens.kicad.as_ref().is_some_and(|p| crate::viewers::kicad_pane::open_again(&p.read(cx).seen_info())) { ctl.push(CtlEntry { id: "kicad:open-again".into(), label: "Open the editor again".into(), ctl: Ctl::KicadAct("retry".into()) }); } for (a, l) in [("full", "Full size"), ("screen", "Full screen"), ("popout", "Pop out"), ("popin", "Pop back in")] { ctl.push(CtlEntry { id: format!("kicad:{a}"), label: l.into(), ctl: Ctl::KicadAct(a.into()) }); } } ctl.push(CtlEntry { id: "ui:View".into(), label: "View".into(), ctl: Ctl::KicadEdit(false) }); } }
         if self.screens.solidcraft.is_some() {
-            /* i18n-ok: ctl ids for e2e drivers */ for (id, label, act) in [("solidcraft:install", "Install SolidCraft", "install"), ("solidcraft:retry", "Try again", "retry"), ("solidcraft:detach", "Pop out", "detach"), ("solidcraft:bring_back", "Bring back", "bring_back"), ("solidcraft:close", "Close", "close")] {
+            /* i18n-ok: ctl ids for e2e drivers */ for (id, label, act) in [("solidcraft:install", "Install SolidCraft", "install"), ("solidcraft:retry", "Try again", "retry"), ("solidcraft:full", "Full screen", "full"), ("solidcraft:detach", "Pop out", "detach"), ("solidcraft:bring_back", "Bring back", "bring_back"), ("solidcraft:close", "Close", "close")] {
                 ctl.push(CtlEntry { id: id.into(), label: label.into(), ctl: Ctl::SolidCraftAct(act.into()) });
             }
         }
@@ -1342,7 +1348,7 @@ impl Render for Backplane {
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
                 // folded: the 44 px strip, its unfold chevron where the fold chevron is (screens/siderow.rs)
-                .when(!side_shown && !kscreen, |d| d.child(div().id("side-strip").w(px(44.)).h_full().flex_shrink_0().overflow_hidden().bg(c("bg")).border_r_1().border_color(c("rule")).flex().flex_col().children(self.side_strip(cx, light))))
+                .when(!side_shown && !kscreen && !sc_full, |d| d.child(div().id("side-strip").w(px(44.)).h_full().flex_shrink_0().overflow_hidden().bg(c("bg")).border_r_1().border_color(c("rule")).flex().flex_col().children(self.side_strip(cx, light))))
                 .child(div().w(px(if side_shown { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).children(crate::perf::mark("sidebar")).bg(c("bg")).when(side_shown, |d| d.border_r_1()).border_color(c("rule")).flex().flex_col()
                     .child(crate::screens::hubpick::picker(self, cx, light, &mut ctl))
                     /* i18n-ok: ctl labels and ui: ids the drivers press */ .child(div().flex().items_center().gap_2().h(crate::scale::tpx(crate::screens::siderow::FOLD_ROW)).px_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().tooltip(crate::keys::tip("Fold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| this.side_flip(cx)))).child(crate::screens::projects::search_box(light, &self.screens.projects))
@@ -1358,7 +1364,7 @@ impl Render for Backplane {
                     // held Ctrl: the short legend over the sidebar's foot (0.14's keys-legend)
                     .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(crate::screens::hints::legend(cx, light, &self.local))))
                 // main
-                .child(div().flex_1().min_w(px(thread_least)).when(kfull, |d| d.flex_none().w(px(0.)).overflow_hidden()).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
+                .child(div().flex_1().min_w(px(thread_least)).when(pane_full, |d| d.flex_none().w(px(0.)).overflow_hidden()).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
                     .children(shows_bot_overlay(has_home).then(|| crate::screens::bots::bar(cx, light, &self.data["bot"])).flatten())
                     .children(head_row)
                     .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))

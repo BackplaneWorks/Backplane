@@ -187,9 +187,12 @@ pub(crate) fn page(app: &mut Backplane, cx: &mut Context<Backplane>, light: bool
     let thread = &app.data["thread"];
     let viewer = &thread["viewer"];
     let layout = &viewer["layout"];
+    let sc_full = super::viewer::SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed);
+    let sc_tile = sc_full.then(|| crate::viewers::solidcraft_pane::mech_tile(viewer)).flatten();
+    let effective_max = sc_tile.or_else(|| layout["maximized"].as_str());
     let mut leaves = HashMap::new();
     for (id, row) in viewer["tiles"].as_object().into_iter().flatten() {
-        if layout["maximized"].as_str().is_some_and(|shown| shown != id) { continue; }
+        if effective_max.is_some_and(|shown| shown != id) { continue; }
         let kind = row["kind"].as_str().unwrap_or_default();
         let focused = layout["focus"] == id.as_str();
         let header = Header { identity: Identity::new(kind, &row["identity"]).tile(focused),
@@ -236,7 +239,7 @@ pub(crate) fn page(app: &mut Backplane, cx: &mut Context<Backplane>, light: bool
             .child(pane_header(light,header.identity,super::tile_pages::tools(cx,&app.screens,thread,row),header.controls)).child(body);
         leaves.insert(id.clone(),tile.into_any_element());
     }
-    if let Some(id) = layout["maximized"].as_str() {
+    if let Some(id) = effective_max {
         if let Some(tile) = leaves.remove(id) { return tile; }
     }
     tree(app,cx,viewer,leaves,light)

@@ -27,6 +27,7 @@ import {
   type WebThemePref,
 } from "./settings-model";
 import { ThreadContextDialog } from "./thread-context";
+import { clampWebViewerWidth, resolveWebViewerFullscreen } from "./viewers/viewer-tools";
 import {
   CHATS,
   SidebarView,
@@ -62,12 +63,15 @@ export interface ViewerHostApi {
   getThreadId: () => string;
   closeViewer: () => void;
   openLink?: (href: string, project?: string) => void;
+  setViewerFullscreen?: (on: boolean) => void;
+  isViewerFullscreen?: () => boolean;
 }
 
 type ViewerMountFn = (el: HTMLElement, api: ViewerHostApi) => {
   open: (kind: string, threadId: string, target?: { path?: string; line?: number }) => void;
   close: () => void;
   reconcileHas?: (has: RailHas) => void;
+  refreshHeader?: () => void;
 };
 
 type SubId = number | string;
@@ -300,6 +304,10 @@ function mountApp(): void {
   rightAreaEl.className = "bp-right-area bp-hidden";
   rightAreaEl.setAttribute("data-testid", "right-area");
 
+  const resizeHandleEl = document.createElement("div");
+  resizeHandleEl.className = "bp-right-resize";
+  resizeHandleEl.setAttribute("data-testid", "viewer-resize-handle");
+
   const rightTopEl = document.createElement("div");
   rightTopEl.className = "bp-right-top";
 
@@ -308,7 +316,7 @@ function mountApp(): void {
   viewerEl.setAttribute("data-testid", "viewer-pane");
 
   rightTopEl.appendChild(viewerEl);
-  rightAreaEl.appendChild(rightTopEl);
+  rightAreaEl.append(resizeHandleEl, rightTopEl);
 
   const railEl = document.createElement("nav");
   railEl.className = "bp-rail";
@@ -337,6 +345,8 @@ function mountApp(): void {
   let threadSubId: SubId | null = null;
   let olderCursor: string | null = null;
   let activeRailKind = "";
+  let viewerFullscreen = false;
+  let viewerWidthPx: number | null = null;
   let viewerController: ReturnType<ViewerMountFn> | null = null;
   const THREAD_CACHE_MAX = 20;
   let shellHashes: Record<string, string> = {};
@@ -756,13 +766,75 @@ function mountApp(): void {
     showError: (msg) => composer.showError(msg),
   });
 
+  function activeSidebarWidth(): number {
+    const style = window.getComputedStyle(sidebarEl);
+    if (style.display === "none" || style.position === "fixed") return 0;
+    return sidebarEl.getBoundingClientRect().width;
+  }
+
+  function applyViewerWidth(): void {
+    if (viewerFullscreen || viewerWidthPx === null || window.innerWidth <= 600) {
+      rightAreaEl.style.width = "";
+      return;
+    }
+    const railW = railEl.getBoundingClientRect().width || 72;
+    const sideW = activeSidebarWidth();
+    viewerWidthPx = clampWebViewerWidth(
+      window.innerWidth,
+      window.innerWidth - railW - viewerWidthPx,
+      railW,
+      sideW
+    );
+    rightAreaEl.style.width = `${viewerWidthPx}px`;
+  }
+
   function syncRightArea(): void {
     const viewerOpen = activeRailKind !== "";
     const panelOpen = mgmt.isOpen();
+    if (!viewerOpen || activeRailKind !== "mech") {
+      viewerFullscreen = false;
+    }
     rightAreaEl.classList.toggle("bp-hidden", !viewerOpen && !panelOpen);
     rightAreaEl.classList.toggle("bp-has-viewer", viewerOpen);
     rightAreaEl.classList.toggle("bp-has-mgmt", panelOpen);
+    rightAreaEl.classList.toggle("bp-viewer-wide", viewerOpen && activeRailKind === "mech");
+    body.classList.toggle("bp-viewer-fullscreen", viewerFullscreen);
+    applyViewerWidth();
   }
+
+  let dragActive = false;
+  const onResizeMove = (ev: PointerEvent): void => {
+    if (!dragActive) return;
+    const railW = railEl.getBoundingClientRect().width || 72;
+    const sideW = activeSidebarWidth();
+    viewerWidthPx = clampWebViewerWidth(window.innerWidth, ev.clientX, railW, sideW);
+    rightAreaEl.style.width = `${viewerWidthPx}px`;
+  };
+  const endResizeDrag = (): void => {
+    if (!dragActive) return;
+    dragActive = false;
+    document.body.classList.remove("bp-resizing");
+    window.removeEventListener("pointermove", onResizeMove);
+    window.removeEventListener("pointerup", endResizeDrag);
+    window.removeEventListener("pointercancel", endResizeDrag);
+  };
+  resizeHandleEl.addEventListener("pointerdown", (ev) => {
+    if (ev.button !== 0 || viewerFullscreen) return;
+    ev.preventDefault();
+    dragActive = true;
+    document.body.classList.add("bp-resizing");
+    try { resizeHandleEl.setPointerCapture(ev.pointerId); } catch {}
+    window.addEventListener("pointermove", onResizeMove);
+    window.addEventListener("pointerup", endResizeDrag);
+    window.addEventListener("pointercancel", endResizeDrag);
+  });
+  resizeHandleEl.addEventListener("dblclick", () => {
+    viewerWidthPx = null;
+    rightAreaEl.style.width = "";
+  });
+  window.addEventListener("resize", () => {
+    if (viewerWidthPx !== null && !viewerFullscreen) applyViewerWidth();
+  });
 
   const mgmt = new MgmtStrip(rightTopEl, rightAreaEl, {
     hub,
@@ -1192,6 +1264,7 @@ function mountApp(): void {
   function closeViewer(notifyHub = true): void {
     railGen++;
     activeRailKind = "";
+    viewerFullscreen = false;
     rail.setActive("");
     viewerEl.classList.add("bp-hidden");
     viewerController?.close();
@@ -1299,6 +1372,11 @@ function mountApp(): void {
         getThreadId: () => selectedThreadId,
         closeViewer: () => closeViewer(true),
         openLink: (href, project) => { void handleMessageLink(href, project); },
+        setViewerFullscreen: (on) => {
+          viewerFullscreen = resolveWebViewerFullscreen(viewerFullscreen, on, activeRailKind);
+          syncRightArea();
+        },
+        isViewerFullscreen: () => viewerFullscreen,
       });
     }
     if (viewerController) {
@@ -2186,6 +2264,11 @@ function mountApp(): void {
       else if (settings.isOpen()) settings.handleEscape();
       else if (chat.closePlanRevise()) { /* handled by plan revise drawer */ }
       else if (mgmt.isOpen()) mgmt.closePanel();
+      else if (viewerFullscreen) {
+        viewerFullscreen = false;
+        syncRightArea();
+        viewerController?.refreshHeader?.();
+      }
     }
   });
 

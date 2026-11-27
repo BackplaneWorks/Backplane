@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  clampWebViewerWidth,
   HistoryStripState,
   matchesCompareKey,
+  resolveWebViewerFullscreen,
   SOLID_VIEW_PRESETS,
   solidViewAngles,
+  WEB_VIEWER_MIN_PX,
 } from "../src/viewers/viewer-tools";
 
 describe("viewer-tools", () => {
@@ -99,5 +102,24 @@ describe("viewer-tools", () => {
     expect(matchesCompareKey(frameB, "1|/proj|diff\n", "bbb222", "/proj/board.kicad_pcb")).toBe(false);
     expect(matchesCompareKey(frameB, "", "bbb222", "/proj/board.kicad_pcb")).toBe(false);
     expect(matchesCompareKey(frameB, prefix, "", "/proj/board.kicad_pcb")).toBe(false);
+  });
+
+  test("clampWebViewerWidth allows dragging wide beyond 46% while keeping thread min width", () => {
+    // 1920px window, 72px rail, 260px sidebar -> max viewer = 1920 - 72 - 260 - 320 = 1268
+    expect(clampWebViewerWidth(1920, 600, 72, 260)).toBe(1248);
+    expect(clampWebViewerWidth(1920, 100, 72, 260)).toBe(1268);
+    // 2560px window -> drags wide past 1400px
+    expect(clampWebViewerWidth(2560, 100, 72, 260)).toBe(1908);
+    // Clamps down to WEB_VIEWER_MIN_PX
+    expect(clampWebViewerWidth(1920, 1800, 72, 260)).toBe(WEB_VIEWER_MIN_PX);
+  });
+
+  test("resolveWebViewerFullscreen toggles for mech and resets for non-mech pages", () => {
+    expect(resolveWebViewerFullscreen(false, undefined, "mech")).toBe(true);
+    expect(resolveWebViewerFullscreen(true, undefined, "mech")).toBe(false);
+    expect(resolveWebViewerFullscreen(false, true, "mech")).toBe(true);
+    expect(resolveWebViewerFullscreen(true, false, "mech")).toBe(false);
+    expect(resolveWebViewerFullscreen(true, true, "board")).toBe(false);
+    expect(resolveWebViewerFullscreen(true, undefined, "")).toBe(false);
   });
 });
