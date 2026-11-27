@@ -68,9 +68,10 @@ final class EnterprisePush {
 
     private init() {
         let d = UserDefaults.standard
-        baseURL = d.string(forKey: Self.urlKey) ?? ""
+        let url = d.string(forKey: Self.urlKey) ?? ""
+        baseURL = url
         accountEmail = d.string(forKey: Self.emailKey) ?? ""
-        signedIn = !baseURL.isEmpty && EnterpriseStore.load() != nil
+        signedIn = !url.isEmpty && EnterpriseStore.load() != nil
     }
 
     /// https:// (or http:// for loopback tests) with no trailing slash, else nil.
