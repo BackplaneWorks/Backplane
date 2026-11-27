@@ -5009,6 +5009,17 @@ gpui.c.solidcraft.settings.downloading	Downloading: {done} of {total} MB.	ダウ
 gpui.c.solidcraft.bring.back.cmd	SolidCraft: Bring back	SolidCraft: 戻す	SolidCraft: Traer de vuelta
 gpui.c.solidcraft.cli.only	This computer has SolidCraft's command-line program, not its desktop window.	このコンピュータには SolidCraft のコマンドラインプログラムのみがあり、デスクトップウィンドウはありません。	Este equipo tiene el programa de línea de comandos de SolidCraft, pero no su ventana de escritorio.
 gpui.c.solidcraft.mech.hint	Ask an agent to model one, or add a .sc or STEP file to mech/.	エージェントにモデリングを依頼するか、mech/ に .sc または STEP ファイルを追加してください。	Pide a un agente que modele una, o añade un archivo .sc o STEP en mech/.
+solidcraft.web.open	SolidCraft Web	SolidCraft Web	SolidCraft Web
+solidcraft.web.preview	Fast preview	高速プレビュー	Vista rápida
+solidcraft.web.save	Save	保存	Guardar
+solidcraft.web.saving	Saving…	保存中…	Guardando…
+solidcraft.web.saved	Saved {name}	{name} を保存しました	Guardado {name}
+solidcraft.web.install.btn	Install SolidCraft Web	SolidCraft Web をインストール	Instalar SolidCraft Web
+solidcraft.web.install.prompt	SolidCraft Web ({n} MB) adds full in-browser CAD editing.	SolidCraft Web（{n} MB）でブラウザ上の CAD 編集が使えます。	SolidCraft Web ({n} MB) añade edición CAD completa en el navegador.
+solidcraft.web.installing	Installing SolidCraft Web… {step}	SolidCraft Web をインストール中… {step}	Instalando SolidCraft Web… {step}
+solidcraft.web.loading	Loading SolidCraft Web…	SolidCraft Web を読み込み中…	Cargando SolidCraft Web…
+solidcraft.web.not.installed	SolidCraft Web is not installed on this hub yet.	このハブにはまだ SolidCraft Web がインストールされていません。	SolidCraft Web aún no está instalado en este hub.
+solidcraft.web.readonly	Read-only copy: edits cannot be saved.	読み取り専用コピーのため保存できません。	Copia de solo lectura: no se pueden guardar cambios.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -8043,4 +8054,13 @@ gpui.c.solidcraft.mech.hint	Ask an agent to model one, or add a .sc or STEP file
 
     /// gpui.c.solidcraft.settings.downloading = Downloading: {done} of {total} MB.
     static func gpui_c_solidcraft_settings_downloading(done: String, total: String) -> String { f("gpui.c.solidcraft.settings.downloading", ["done": done, "total": total]) }
+
+    /// solidcraft.web.saved = Saved {name}
+    static func solidcraft_web_saved(name: String) -> String { f("solidcraft.web.saved", ["name": name]) }
+
+    /// solidcraft.web.install.prompt = SolidCraft Web ({n} MB) adds full in-browser CAD editing.
+    static func solidcraft_web_install_prompt(n: String) -> String { f("solidcraft.web.install.prompt", ["n": n]) }
+
+    /// solidcraft.web.installing = Installing SolidCraft Web… {step}
+    static func solidcraft_web_installing(step: String) -> String { f("solidcraft.web.installing", ["step": step]) }
 }

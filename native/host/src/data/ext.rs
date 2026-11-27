@@ -432,6 +432,11 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
             let mut q = json!({"room":room,"text":text}); if safe_id(s(p, "clientId")) && !s(p, "clientId").is_empty() { q["msg"] = p["clientId"].clone() }
             rpc(hub, c, "bots.post", q).await.map(|_| json!({}))
         }
+        "solidcraft.web.status" => {
+            let home = hub.cfg.home.clone();
+            Ok(tokio::task::spawn_blocking(move || crate::solidcraft::web::status_json(&home)).await.unwrap_or_else(|_| json!({"installed": false})))
+        }
+        "solidcraft.web.install" => crate::solidcraft::web::install(hub, p["consent"] == true).await.map_err(|e| err(e)),
         _ => return None,
     })
 }

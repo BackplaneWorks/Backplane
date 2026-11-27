@@ -1300,6 +1300,31 @@ object DataClient {
     data class Mech(val parts: List<String>, val renders: List<String>)
     private fun strings(a: JSONArray?): List<String> = if (a == null) emptyList() else (0 until a.length()).map { a.getString(it) }
     suspend fun mech(tid: String): Mech { val r = call("mech.list", JSONObject().put("thread", tid)); return Mech(strings(r.optJSONArray("parts")), strings(r.optJSONArray("renders"))) }
+    data class SolidCraftWebStatus(val installed: Boolean, val version: String, val size: Long, val installing: Boolean, val copy: Boolean, val state: String, val note: String, val done: Long, val total: Long)
+    private fun parseSolidCraftWeb(r: JSONObject): SolidCraftWebStatus {
+        val inst = r.optJSONObject("install")
+        return SolidCraftWebStatus(
+            installed = r.optBoolean("installed"),
+            version = r.optString("version"),
+            size = r.optLong("size"),
+            installing = r.optBoolean("installing"),
+            copy = r.optBoolean("copy"),
+            state = inst?.optString("state").orEmpty(),
+            note = inst?.optString("note").orEmpty(),
+            done = inst?.optLong("done") ?: 0L,
+            total = inst?.optLong("total") ?: r.optLong("size"),
+        )
+    }
+    suspend fun solidCraftWebStatus(): SolidCraftWebStatus = parseSolidCraftWeb(call("solidcraft.web.status"))
+    suspend fun solidCraftWebInstall(): SolidCraftWebStatus = parseSolidCraftWeb(call("solidcraft.web.install", JSONObject().put("consent", true)))
+    fun solidCraftWebLaunch(tid: String, path: String, light: Boolean): Triple<String, String, String>? {
+        val l = link ?: return null
+        val tok = Pairing.token(l)?.takeIf { it.isNotEmpty() } ?: return null
+        val q = "thread=" + android.net.Uri.encode(tid) + "&path=" + android.net.Uri.encode(path) + "&theme=" + (if (light) "light" else "dark")
+        val url = Pairing.http(l, "/solidcraft-web/", q, token = false) ?: return null
+        val origin = Pairing.http(l, "", "", token = false)?.trimEnd('/') ?: return null
+        return Triple(url, origin, tok)
+    }
     suspend fun browser(tid: String, op: String, extra: JSONObject.() -> Unit = {}) { call("browser", JSONObject().put("thread", tid).put("op", op).apply(extra)) }
     private fun httpGet(path: String, query: String): ByteArray? = runCatching {
         val u = Pairing.http(link ?: return null, path, query) ?: return null

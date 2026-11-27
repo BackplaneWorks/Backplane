@@ -393,9 +393,9 @@ mod tests {
     }
     #[tokio::test] async fn mech_list_script_lists_models_and_renders_sorted() {
         let d = crate::plat::tmp::dir("mech");
-        for f in ["mech/a.step", "mech/b.png", "mech/sub/c.glb", "mech/.hid/x.step", "mech/readme.txt"] { std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap(); std::fs::write(d.join(f), "x").unwrap() }
+        for f in ["mech/a.step", "mech/b.png", "mech/d.sc", "mech/sub/c.glb", "mech/.hid/x.step", "mech/readme.txt"] { std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap(); std::fs::write(d.join(f), "x").unwrap() }
         let r = proc("sh", &["-c", MECH_LIST], &d.to_string_lossy(), &[]).await; assert_eq!(r.code, 0);
-        let names: Vec<&str> = r.out.lines().map(|l| l.rsplit(' ').next().unwrap()).collect(); assert_eq!(names, ["mech/a.step", "mech/b.png", "mech/sub/c.glb"], "{}", r.out);
+        let names: Vec<&str> = r.out.lines().map(|l| l.rsplit(' ').next().unwrap()).collect(); assert_eq!(names, ["mech/a.step", "mech/b.png", "mech/d.sc", "mech/sub/c.glb"], "{}", r.out);
         let e = crate::plat::tmp::dir("mech-empty");
         assert_eq!(proc("sh", &["-c", MECH_LIST], &e.to_string_lossy(), &[]).await.out, "");
     }

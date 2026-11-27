@@ -130,6 +130,60 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
         if r.is_ok() { s.shutdown().await.ok(); }
         return Ok(());
     }
+    if matches!(req.method.as_str(), "GET" | "HEAD") && (req.route() == "/solidcraft-web" || req.route().starts_with("/solidcraft-web/")) {
+        if !hub.auth.allowed(&req) {
+            s.write_all(&crate::files::share::refusal("401 Unauthorized", "this Backplane needs its pairing token")).await.ok();
+            s.shutdown().await.ok();
+            return Ok(());
+        }
+        if crate::solidcraft::web::serve_asset(&hub.arc(), &mut s, &req).await.is_ok() {
+            s.shutdown().await.ok();
+        }
+        return Ok(());
+    }
+    if matches!(req.method.as_str(), "POST" | "PUT") && req.route() == "/solidcraft-web/save" {
+        if !hub.auth.allowed(&req) {
+            s.write_all(&response("401 Unauthorized", "application/json", "Cache-Control: private, no-store\r\n", b"{\"ok\":false,\"error\":\"this Backplane needs its pairing token\"}")).await.ok();
+            crate::plat::net::refused_close(&mut s).await;
+            return Ok(());
+        }
+        let len = if req.header("content-length").trim().is_empty() && req.header("transfer-encoding").is_empty() {
+            Some(0)
+        } else {
+            req.header("content-length").trim().parse::<usize>().ok()
+        };
+        let bad = if !req.header("transfer-encoding").is_empty() || len.is_none() {
+            Some(("411 Length Required", 0u64))
+        } else if len.unwrap() > crate::files::ops::MAX_WRITE {
+            Some(("413 Payload Too Large", len.unwrap() as u64))
+        } else {
+            None
+        };
+        if let Some((st, declared)) = bad {
+            s.write_all(&response(st, "application/json", "Cache-Control: private, no-store\r\n", &serde_json::json!({"ok":false,"error":st}).to_string().into_bytes())).await.ok();
+            if declared > 0 { drain_refused(&mut s, declared).await; } else { crate::plat::net::refused_close(&mut s).await; }
+            return Ok(());
+        }
+        let n = len.unwrap();
+        if n > 0 && req.header("expect").eq_ignore_ascii_case("100-continue") {
+            s.write_all(b"HTTP/1.1 100 Continue\r\n\r\n").await.ok();
+        }
+        let mut body = vec![0u8; n];
+        match tokio::time::timeout(Duration::from_secs(30), s.read_exact(&mut body)).await {
+            Ok(Ok(_)) => {
+                let r = crate::solidcraft::web::handle_save(&hub.arc(), &req, body).await;
+                let out = response_for(r.status, &r.ctype, &r.extra, &r.body);
+                s.write_all(&out).await?;
+                s.shutdown().await.ok();
+                return Ok(());
+            }
+            _ => {
+                s.write_all(&response("408 Request Timeout", "text/plain; charset=utf-8", "", b"408 Request Timeout")).await.ok();
+                crate::plat::net::refused_close(&mut s).await;
+                return Ok(());
+            }
+        }
+    }
     if req.method == "POST" && (req.route().starts_with("/auth/") || hub.http_for(req.route()).map_or(false, |h| h.own_auth())) {
         // no Content-Length and no Transfer-Encoding is an empty body; chunked is refused
         let len = if req.header("content-length").trim().is_empty() && req.header("transfer-encoding").is_empty() { Some(0) } else { req.header("content-length").trim().parse::<usize>().ok() };

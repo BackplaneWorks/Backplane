@@ -488,20 +488,245 @@ private fun RefMenu(rows: List<DataClient.Ref>, pick: (String) -> Unit, modifier
 // ---- Mech: the project's models, one at a time
 @Composable
 private fun MechTab(thread: DThread, open: String?) {
+    val scope = rememberCoroutineScope()
+    val dark = appDark()
     var mech by remember { mutableStateOf<DataClient.Mech?>(null) }
     var part by remember(open) { mutableStateOf(open) }
-    LaunchedEffect(thread.id) { mech = runCatching { DataClient.mech(thread.id) }.getOrNull() }
+    var scStatus by remember { mutableStateOf<DataClient.SolidCraftWebStatus?>(null) }
+    var showWeb by remember { mutableStateOf(false) }
+    var installing by remember { mutableStateOf(false) }
+    var errMsg by remember { mutableStateOf("") }
+    LaunchedEffect(thread.id) {
+        mech = runCatching { DataClient.mech(thread.id) }.getOrNull()
+        scStatus = runCatching { DataClient.solidCraftWebStatus() }.getOrNull()
+    }
+    LaunchedEffect(scStatus?.installing, installing) {
+        if (scStatus?.installing == true || installing) {
+            while (true) {
+                delay(1200)
+                val st = runCatching { DataClient.solidCraftWebStatus() }.getOrNull()
+                if (st != null) {
+                    scStatus = st
+                    if (st.installed) {
+                        installing = false
+                        showWeb = true
+                        break
+                    }
+                    if (!st.installing) {
+                        installing = false
+                        if (st.state == "failed" && st.note.isNotEmpty()) errMsg = st.note
+                        break
+                    }
+                }
+            }
+        }
+    }
     val m = mech
     Column(Modifier.fillMaxSize()) {
         when {
             m == null -> CircularProgressIndicator(Modifier.padding(24.dp))
             m.parts.isEmpty() -> DMono(Msg.android_mech_none, dcs.onSurfaceVariant, 12, Modifier.padding(24.dp))
             else -> {
-                Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState()).padding(8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    m.parts.forEach { p -> DMono(p.substringAfterLast('/'), if (p == part) dcs.onPrimary else dcs.onSurface, 12, Modifier.background(if (p == part) dcs.primary else dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { part = p }.padding(horizontal = 10.dp, vertical = 6.dp).testTag("mech.part.${p.substringAfterLast('/')}")) }
+                Row(
+                    Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState()).padding(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    m.parts.forEach { p ->
+                        DMono(
+                            p.substringAfterLast('/'),
+                            if (p == part) dcs.onPrimary else dcs.onSurface,
+                            12,
+                            Modifier
+                                .background(if (p == part) dcs.primary else dcs.surfaceContainerHigh)
+                                .border(BorderStroke(1.dp, dcs.outlineVariant))
+                                .clickable { part = p }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .testTag("mech.part.${p.substringAfterLast('/')}"),
+                        )
+                    }
+                    part?.takeIf { ext(it) in cadExt }?.let {
+                        val installed = scStatus?.installed == true
+                        val busy = installing || (scStatus?.installing == true)
+                        DBtn(
+                            when {
+                                busy -> Msg.solidcraft_web_installing(scStatus?.note?.ifEmpty { "…" } ?: "…")
+                                installed -> Msg.solidcraft_web_open
+                                else -> Msg.solidcraft_web_install_btn
+                            },
+                            installed,
+                            enabled = !busy,
+                            modifier = Modifier.testTag("mech.solidcraft.web"),
+                        ) {
+                            errMsg = ""
+                            if (installed) {
+                                showWeb = true
+                            } else {
+                                installing = true
+                                scope.launch {
+                                    val r = runCatching { DataClient.solidCraftWebInstall() }
+                                    installing = false
+                                    if (r.isSuccess) {
+                                        scStatus = r.getOrNull()
+                                        if (scStatus?.installed == true) showWeb = true
+                                    } else {
+                                        errMsg = r.exceptionOrNull()?.message ?: Msg.android_file_bad
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (errMsg.isNotEmpty()) {
+                    DMono(errMsg, dcs.error, 11, Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 12.dp, vertical = 4.dp))
                 }
                 if (part == null) LaunchedEffect(m) { part = m.parts.first() }
                 part?.let { MechSolid(thread, it) }
+            }
+        }
+    }
+    val launch = part?.takeIf { showWeb && ext(it) in cadExt }?.let { DataClient.solidCraftWebLaunch(thread.id, it, !dark) }
+    if (launch != null) {
+        SolidCraftWebModal(
+            title = part?.substringAfterLast('/') ?: "",
+            launch = launch,
+            onClose = { showWeb = false },
+        )
+    }
+}
+
+private class SolidCraftBridge(
+    private val onReady: () -> Unit,
+    private val onSaving: () -> Unit,
+    private val onSaved: (String) -> Unit,
+    private val onError: (String) -> Unit,
+) {
+    @android.webkit.JavascriptInterface
+    fun postMessage(raw: String) {
+        val obj = runCatching { JSONObject(raw) }.getOrNull() ?: return
+        when (obj.optString("type")) {
+            "bp:solidcraft:ready" -> onReady()
+            "bp:solidcraft:saving" -> onSaving()
+            "bp:solidcraft:saved" -> onSaved(obj.optString("path"))
+            "bp:solidcraft:error" -> onError(obj.optString("error"))
+        }
+    }
+}
+
+@Composable
+private fun SolidCraftWebModal(title: String, launch: Triple<String, String, String>, onClose: () -> Unit) {
+    val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
+    val (url, expectedOrigin, token) = launch
+    var loading by remember(url) { mutableStateOf(true) }
+    var saving by remember(url) { mutableStateOf(false) }
+    var statusText by remember(url) { mutableStateOf("") }
+    var statusIsError by remember(url) { mutableStateOf(false) }
+    var webViewRef by remember { mutableStateOf<android.webkit.WebView?>(null) }
+
+    DisposableEffect(expectedOrigin) {
+        onDispose {
+            runCatching {
+                val cm = android.webkit.CookieManager.getInstance()
+                val secure = if (url.startsWith("https://")) "; Secure" else ""
+                cm.setCookie(expectedOrigin, "bp_token=; Path=/; Max-Age=0; HttpOnly$secure")
+                cm.flush()
+            }
+            webViewRef?.destroy()
+            webViewRef = null
+        }
+    }
+
+    androidx.compose.ui.window.Dialog(
+        onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        androidx.activity.compose.BackHandler(onBack = onClose)
+        Column(Modifier.fillMaxSize().background(dcs.background)) {
+            Row(
+                Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                DBtn("‹ " + Msg.common_close, false, modifier = Modifier.testTag("solidcraft.web.close"), onClick = onClose)
+                DMono(title, dcs.onSurface, 13, Modifier.weight(1f), bold = true)
+                if (statusText.isNotEmpty()) {
+                    DMono(statusText, if (statusIsError) dcs.error else dcs.primary, 11)
+                }
+                DBtn(
+                    if (saving) Msg.solidcraft_web_saving else Msg.solidcraft_web_save,
+                    true,
+                    enabled = !loading && !saving,
+                    modifier = Modifier.testTag("solidcraft.web.save"),
+                ) {
+                    saving = true
+                    statusText = ""
+                    statusIsError = false
+                    webViewRef?.evaluateJavascript("window.__bpSolidCraft && window.__bpSolidCraft.save()", null)
+                }
+            }
+            DLine()
+            Box(Modifier.fillMaxSize().background(dcs.background)) {
+                AndroidView(
+                    modifier = Modifier.fillMaxSize().testTag("solidcraft.web.view"),
+                    factory = { ctx ->
+                        if (token.isNotEmpty()) {
+                            val cm = android.webkit.CookieManager.getInstance()
+                            cm.setAcceptCookie(true)
+                            val secure = if (url.startsWith("https://")) "; Secure" else ""
+                            cm.setCookie(expectedOrigin, "bp_token=$token; Path=/; HttpOnly$secure")
+                            cm.flush()
+                        }
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.useWideViewPort = true
+                            settings.loadWithOverviewMode = true
+                            settings.allowFileAccess = false
+                            settings.allowContentAccess = false
+                            addJavascriptInterface(
+                                SolidCraftBridge(
+                                    onReady = { mainHandler.post { loading = false } },
+                                    onSaving = { mainHandler.post { saving = true; statusIsError = false } },
+                                    onSaved = { p ->
+                                        mainHandler.post {
+                                            saving = false
+                                            statusIsError = false
+                                            statusText = Msg.solidcraft_web_saved(p.substringAfterLast('/').ifEmpty { title })
+                                        }
+                                    },
+                                    onError = { err ->
+                                        mainHandler.post {
+                                            loading = false
+                                            saving = false
+                                            statusIsError = true
+                                            statusText = err.ifEmpty { Msg.android_file_bad }
+                                        }
+                                    },
+                                ),
+                                "BackplaneBridge",
+                            )
+                            webViewClient = object : android.webkit.WebViewClient() {
+                                override fun shouldOverrideUrlLoading(view: android.webkit.WebView?, request: android.webkit.WebResourceRequest?): Boolean {
+                                    val u = request?.url ?: return true
+                                    val o = "${u.scheme}://${u.authority}"
+                                    return o != expectedOrigin
+                                }
+                            }
+                            webViewRef = this
+                            loadUrl(url)
+                        }
+                    },
+                )
+                if (loading) {
+                    Column(
+                        Modifier.align(Alignment.Center).background(dcs.surfaceVariant.copy(alpha = .92f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(20.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                    ) {
+                        CircularProgressIndicator()
+                        DMono(Msg.solidcraft_web_loading, dcs.onSurfaceVariant, 12)
+                    }
+                }
             }
         }
     }
