@@ -386,6 +386,22 @@ mod tests {
         std::fs::create_dir_all(d.join("m3")).unwrap();
         assert!(place(&un3, &d.join("m3"), &WINDOWS_X64).unwrap_err().contains("not a Windows program"));
     }
+    /// The real thing, when asked for (`cargo test -- --ignored real_install`): the pinned asset from GitHub into a scratch folder,
+    /// checked and placed, and its CLI says the pinned version.
+    #[tokio::test]
+    #[ignore]
+    async fn real_install() {
+        let t = crate::plat::tmp::dir("sc-real"); let parent = t.to_path_buf().join("solidcraft");
+        let p = here().expect("a package for this machine");
+        let mut steps = Vec::new();
+        let dir = fetch(&base_url(None), &parent, p, |s, _, _| if steps.last().map(String::as_str) != Some(s) { steps.push(s.to_string()) }).await.unwrap();
+        assert_eq!(steps, ["Downloading", "Checking", "Unpacking"]);
+        let r = find_in(None, &parent, &[], cfg!(windows));
+        assert_eq!((r.source, r.version.as_str()), ("managed", VERSION)); assert!(r.cli.as_ref().is_some_and(|c| c.starts_with(&dir)));
+        let out = std::process::Command::new(r.cli.unwrap()).arg("--version").env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").output().unwrap();
+        assert!(String::from_utf8_lossy(&out.stdout).contains(VERSION));
+        assert!(!parent.join(".partial").exists() && std::fs::read_dir(&parent).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().starts_with(".install-")), "nothing left behind");
+    }
     #[test]
     fn offers() {
         let o = offer(Some(&LINUX_X64), Path::new("/home/user/.backplane/solidcraft"));
