@@ -34,7 +34,8 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
             match name {
                 // a new name takes the refusal of the last one away
                 "name" => json!({"drafts": {"@f.name": text, "@f.berr": ""}}),
-                "persona" | "rname" | "rpost" | "oname" | "ocron" | "oprompt" | "todonew" => json!({"drafts": {format!("@f.{name}"): text}}),
+                // `title`: the rename box (commands/actions.rs `rename-save` reads it when the press does not carry the title)
+                "persona" | "rname" | "rpost" | "oname" | "ocron" | "oprompt" | "todonew" | "title" => json!({"drafts": {format!("@f.{name}"): text}}),
                 n if n.starts_with("todo.") && n.len() > 5 && n.len() < 100 => json!({"drafts": {format!("@f.{n}"): text}}),
                 "provider" if PROVIDERS.contains(&text) => json!({"drafts": {"@bnew.provider": text}}),
                 _ => return None,
@@ -206,5 +207,12 @@ mod tests {
     }
     #[test] fn a_form_action_with_no_form_open_is_not_ours() {
         let st = State::default(); assert!(act(&st, "h", &sess(json!({})), "bot-create", "").is_none() && act(&st, "h", &sess(json!({})), "form-close", "x").is_none());
+    }
+    /// The rename box's typing is kept as its draft: a refused `bfield title` showed "Not ready yet. Try again." on every key.
+    #[test] fn the_rename_box_typing_is_a_draft() {
+        let st = State::default(); let s = sess(json!({}));
+        let o = act(&st, "h", &s, "bfield", "title\u{1f}mechanical new rev").expect("taken");
+        assert_eq!(o.patch, json!({"drafts": {"@f.title": "mechanical new rev"}})); assert!(o.cmds.is_empty());
+        assert!(act(&st, "h", &s, "bfield", "nosuchfield\u{1f}x").is_none(), "other names stay refused here");
     }
 }
