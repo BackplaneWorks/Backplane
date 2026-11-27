@@ -73,7 +73,8 @@ pub struct Runtime {
     pub gui: Option<PathBuf>,
     /// The command-line program (renders, measurements, MCP).
     pub cli: Option<PathBuf>,
-    /// "managed" (installed by Backplane), "env" (`BACKPLANE_SOLIDCRAFT`), "system" (PATH or a package's place), "" when nothing is found.
+    /// "managed" (installed by Backplane), "env" (`BACKPLANE_SOLIDCRAFT`), "set" (Settings > CAD's folder), "system" (PATH or a package's
+    /// place), "" when nothing is found.
     pub source: &'static str,
     /// The managed install's version ("" for the others: no program is started to ask).
     pub version: String,
@@ -126,10 +127,22 @@ pub fn find_in(over: Option<&Path>, parent: &Path, dirs: &[PathBuf], windows: bo
     r
 }
 static HOME: OnceLock<PathBuf> = OnceLock::new();
+/// Settings > CAD's folder for a SolidCraft the person has (`solidcraft.path`, a setting of this machine alone), as last read.
+fn path_setting() -> &'static std::sync::Mutex<String> { static P: OnceLock<std::sync::Mutex<String>> = OnceLock::new(); P.get_or_init(Default::default) }
+/// The folder a path names: itself, or a program's folder when the person gave the program.
+pub fn folder_of(set: &str) -> Option<PathBuf> {
+    let t = set.trim(); if t.is_empty() { return None }
+    let p = Path::new(t);
+    let name = p.file_name().map(|n| n.to_string_lossy().to_lowercase()).unwrap_or_default();
+    Some(if matches!(name.as_str(), "solidcraft" | "solidcraft-cli" | "solidcraft.exe" | "solidcraft-cli.exe") && !p.is_dir() { p.parent().unwrap_or(p).to_path_buf() } else { p.to_path_buf() })
+}
 #[cfg(test)] pub(crate) fn test_over() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, PathBuf>> { static O: OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, PathBuf>>> = OnceLock::new(); O.get_or_init(Default::default) }
 /// What this machine has, read now (a few folder reads; nothing is started).
 pub fn find(home: &Path) -> Runtime {
-    let over = std::env::var_os("BACKPLANE_SOLIDCRAFT").filter(|v| !v.is_empty()).map(PathBuf::from);
+    let env = std::env::var_os("BACKPLANE_SOLIDCRAFT").filter(|v| !v.is_empty()).map(PathBuf::from);
+    let set = folder_of(&path_setting().lock().unwrap());
+    let from_set = env.is_none() && set.is_some();
+    let over = env.or(set);
     // a test names its stand-in programs for its own home (the environment is every test's at once)
     #[cfg(test)] let over = test_over().lock().unwrap().get(home).cloned();
     let mut dirs: Vec<PathBuf> = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).filter(|d| !d.as_os_str().is_empty()).collect();
@@ -137,7 +150,9 @@ pub fn find(home: &Path) -> Runtime {
     dirs.extend(system_dirs(cfg!(windows), cfg!(target_os = "macos"), user.as_deref(), std::env::var_os("ProgramFiles").map(PathBuf::from).as_deref()));
     // a test hub finds only what it is given (`BACKPLANE_SOLIDCRAFT`) or installs: never the developer's own SolidCraft
     #[cfg(test)] dirs.clear();
-    find_in(over.as_deref(), &parent(home), &dirs, cfg!(windows))
+    let mut r = find_in(over.as_deref(), &parent(home), &dirs, cfg!(windows));
+    if from_set && r.source == "env" { r.source = "set"; }
+    r
 }
 /// The running hub's runtime (None before `start`).
 pub fn current() -> Option<Runtime> { HOME.get().map(|h| find(h)) }
@@ -157,8 +172,10 @@ pub fn offer(p: Option<&Pin>, folder: &Path) -> Value {
 /// Info `solidcraft.runtime`: what is found, and the offer.
 pub async fn publish(hub: &Arc<Hub>) -> Runtime {
     let home = hub.cfg.home.clone();
+    let set = hub.setting("solidcraft.path").await.unwrap_or_default();
+    *path_setting().lock().unwrap() = set.clone();
     let r = tokio::task::spawn_blocking(move || find(&home)).await.unwrap_or_default();
-    let mut v = r.to_json(); v["offer"] = offer(here(), &parent(&hub.cfg.home));
+    let mut v = r.to_json(); v["offer"] = offer(here(), &parent(&hub.cfg.home)); v["set"] = json!(set);
     hub.set_info("solidcraft.runtime", &v.to_string()).await;
     r
 }
@@ -401,6 +418,13 @@ mod tests {
         let out = std::process::Command::new(r.cli.unwrap()).arg("--version").env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").output().unwrap();
         assert!(String::from_utf8_lossy(&out.stdout).contains(VERSION));
         assert!(!parent.join(".partial").exists() && std::fs::read_dir(&parent).unwrap().flatten().all(|e| !e.file_name().to_string_lossy().starts_with(".install-")), "nothing left behind");
+    }
+    #[test]
+    fn a_set_path_names_a_folder() {
+        assert_eq!(folder_of(""), None); assert_eq!(folder_of("  "), None);
+        assert_eq!(folder_of("/opt/sc/"), Some("/opt/sc/".into()));
+        assert_eq!(folder_of("/opt/sc/bin/solidcraft-cli"), Some("/opt/sc/bin".into()));
+        assert_eq!(folder_of("C:/Tools/SolidCraft/SolidCraft.exe"), Some("C:/Tools/SolidCraft".into()));
     }
     #[test]
     fn offers() {
