@@ -562,6 +562,27 @@ pub fn first_show_wait(caps: &[String], decor_env: Option<&str>) -> FirstShow {
     if caps.iter().any(|c| c == "embed-frame-drawn") { return FirstShow::Drawn(1500) }
     match decor_env { Some("0") => FirstShow::None, _ => FirstShow::Sleep(1150) }
 }
+pub fn needs_decor_reshow(first_show: FirstShow) -> bool {
+    matches!(first_show, FirstShow::Sleep(_))
+}
+pub fn socket_poll_delay(attempt: u32) -> Duration {
+    Duration::from_millis(if attempt < 16 { 10 } else if attempt < 32 { 15 } else { 25 })
+}
+pub fn ping_retry_delay(attempt: u32, has_dialog: bool) -> Duration {
+    if has_dialog { return Duration::from_millis(100) }
+    Duration::from_millis(match attempt {
+        0 => 5,
+        1 => 10,
+        2 => 15,
+        3 => 20,
+        4..=39 => 25,
+        _ => 50,
+    })
+}
+pub fn should_poll_startup_events(elapsed_since_socket: Duration, elapsed_since_last_poll: Option<Duration>) -> bool {
+    elapsed_since_socket >= Duration::from_millis(120)
+        && elapsed_since_last_poll.is_none_or(|d| d >= Duration::from_millis(150))
+}
 
 /// Stable info key `editor.kicad.<12-hex-sha256>` for a canonical `.kicad_pro` path.
 pub fn info_key(pro: &str) -> String { format!("editor.kicad.{}", ks::digest(pro)) }
@@ -1129,6 +1150,26 @@ fn rt_set_support(v: &'static str) {
 pub fn refresh_support(home: &Path, env: &Env) {
     let (desc, _) = discover_desc(home, env);
     rt_set_support(runtime_support(&env.status, desc_quiet(&desc)));
+    #[cfg(target_os = "linux")]
+    {
+        super::hostlibs::clear_cache();
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            let home = home.to_path_buf();
+            let cli = env.cli.clone();
+            drop(handle.spawn_blocking(move || { let _ = resolve_gui_bin(&home, &cli); }));
+        } else {
+            let _ = resolve_gui_bin(home, &env.cli);
+        }
+    }
+}
+
+fn resolve_gui_bin(home: &Path, cli: &str) -> Result<PathBuf, String> {
+    let b = kicad_gui_bin(cli)?;
+    // Backplane KiCad on a computer whose glibc is at least its own: started on the computer's loader and graphics driver
+    // (hostlibs.rs: the runtime's own glibc loads no driver here, so KiCad drew in software and its 3D viewer drew nothing)
+    Ok(b.parent().and_then(Path::parent).filter(|_| b.with_file_name("kicad.real").is_file())
+        .and_then(|root| super::hostlibs::gui_program(root, &home.join("kicad-embed-cache").join("hostlibs")))
+        .unwrap_or(b))
 }
 
 /// A desktop client's `cid` (`gpui-<pid>-<millis>`: one per app process, kept across reconnects to the same hub), noted by
@@ -1153,7 +1194,7 @@ pub fn note_client_cid(client: u64, cid: &str) {
 /// carries it first). Pure.
 fn after_kicad_switch(pro: String, gen: u64, res: Result<Option<(u64, String, Vec<Frame>)>, String>) -> Option<Msg> {
     match res {
-        Ok(Some((holder, _, frames))) => Some(Msg::FramesUpdated { pro, gen, holder: Some(holder), frames, reply: None }),
+        Ok(Some((holder, _, frames))) => Some(Msg::FramesUpdated { pro, gen, holder: (holder > 0).then_some(holder), frames, reply: None }),
         Ok(None) | Err(_) => None,
     }
 }
@@ -1434,13 +1475,15 @@ pub fn open_docs(reply: &Value) -> OpenDocs {
     match reply["message"]["documents"].as_array() { Some(d) if reply["ok"] == true => OpenDocs::Docs(d.clone()), _ => OpenDocs::Unknown }
 }
 
+pub fn parse_frames_array(v: &Value) -> Vec<Frame> {
+    v.as_array().map(|a| a.iter().map(parse_frame_info).collect()).unwrap_or_default()
+}
+
 pub fn parse_get_frames(msg: &Value) -> (u64, String, Vec<Frame>) {
     let holder = u64_of(&msg["holder"]);
     let ev = msg["events_socket"].as_str().unwrap_or("");
     let events_sock = ev.strip_prefix("ipc://").unwrap_or(ev).to_string();
-    let frames = msg["frames"].as_array()
-        .map(|a| a.iter().map(parse_frame_info).collect())
-        .unwrap_or_default();
+    let frames = parse_frames_array(&msg["frames"]);
     (holder, events_sock, frames)
 }
 
@@ -2489,15 +2532,19 @@ impl Actor {
                 if snap.mode == "fork" {
                     let me = self.me.clone(); let cid = client;
                     tokio::spawn(async move {
-                        if container > 0 {
-                            let _ = raw_on(&me, &snap.sock, &snap.desc, "kiapi.backplane.embed.AttachToParent",
+                        let attach_holder = if container > 0 {
+                            let at = raw_on(&me, &snap.sock, &snap.desc, "kiapi.backplane.embed.AttachToParent",
                                 json!({"window": container, "toplevel": snap.toplevel, "scale": 1.0}), 15000).await;
-                        }
+                            u64_of(&at["message"]["holder"])
+                        } else {
+                            0
+                        };
                         match switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", "", false, false).await {
                             Ok(Some((holder, _, frames)))
                                 if !cfg!(windows) || container == 0 || container == prev_cont || frames.iter().any(|f| f.shown && f.xid > 0) =>
                             {
-                                let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: Some(holder), frames, reply: Some((cid, reply)) });
+                                let eff_holder = (holder > 0).then_some(holder).or_else(|| (attach_holder > 0).then_some(attach_holder));
+                                let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: eff_holder, frames, reply: Some((cid, reply)) });
                             }
                             _ if cfg!(windows) && container > 0 && prev_cont > 0 && container != prev_cont => {
                                 // On Windows, if the previous client crashed and the OS destroyed `prev_cont` (tearing down `bp.8` `WS_CHILD` frames),
@@ -2554,11 +2601,8 @@ impl Actor {
             self.retire(&victim, "evicted");
         }
 
-        let kicad_bin = match kicad_gui_bin(&env.cli) {
-            // Backplane KiCad on a computer whose glibc is at least its own: started on the computer's loader and graphics driver
-            // (hostlibs.rs: the runtime's own glibc loads no driver here, so KiCad drew in software and its 3D viewer drew nothing)
-            Ok(b) => b.parent().and_then(Path::parent).filter(|_| b.with_file_name("kicad.real").is_file())
-                .and_then(|root| super::hostlibs::gui_program(root, &self.hub.cfg.home.join("kicad-embed-cache").join("hostlibs"))).unwrap_or(b).to_string_lossy().to_string(),
+        let kicad_bin = match resolve_gui_bin(&self.hub.cfg.home, &env.cli) {
+            Ok(b) => b.to_string_lossy().to_string(),
             Err(why) => {
                 // never an unanswered attach (a hung Edit): the start's waiters (a held start's included) hear it, and the picture says it
                 let mut f = Session::new(&pro, &root, "fork", &frame, self.sessions.get(&pro).map_or(0, |s| s.gen), now).failed(&why);
@@ -2748,7 +2792,7 @@ impl Actor {
                 };
                 let reply = take().map(|r| (cid, r));
                 if let Some((holder, _, frames)) = synced {
-                    let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: Some(holder), frames, reply });
+                    let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: (holder > 0).then_some(holder), frames, reply });
                 } else {
                     let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: None, frames: snap.frames.clone(), reply });
                 }
@@ -3300,13 +3344,17 @@ impl Actor {
                     let me = self.me.clone();
                     let s2 = snap.clone();
                     tokio::spawn(async move {
-                        if s2.container != spawn_container {
-                            let _ = raw_on(&me, &s2.sock, &s2.desc, "kiapi.backplane.embed.AttachToParent",
+                        let attach_holder = if s2.container != spawn_container {
+                            let at = raw_on(&me, &s2.sock, &s2.desc, "kiapi.backplane.embed.AttachToParent",
                                 json!({"window": s2.container, "toplevel": if s2.container > 0 { s2.toplevel } else { 0 }, "scale": 1.0}), 15000).await;
-                        }
+                            if s2.container > 0 { u64_of(&at["message"]["holder"]) } else { 0 }
+                        } else {
+                            0
+                        };
                         if s2.container > 0 {
                             if let Ok(Some((h, _, f))) = switch_fork_frame(&me, &s2.sock, &s2.desc, &s2.active, "", "", false, false).await {
-                                let _ = me.send(Msg::FramesUpdated { pro: s2.pro, gen: s2.gen, holder: Some(h), frames: f, reply: None });
+                                let eff_holder = (h > 0).then_some(h).or_else(|| (attach_holder > 0).then_some(attach_holder));
+                                let _ = me.send(Msg::FramesUpdated { pro: s2.pro, gen: s2.gen, holder: eff_holder, frames: f, reply: None });
                             }
                         } else {
                             let gf = raw_on(&me, &s2.sock, &s2.desc, "kiapi.backplane.embed.GetFrames", json!({}), 10000).await;
@@ -3868,6 +3916,11 @@ pub fn first_show_outcome(active: &str, ms: u64, r: &Result<Option<Vec<Frame>>, 
 /// (a frame shown only by the client's ShowWindowAsync kept its canvas unpainted, so the hub's ShowFrame switches it there) and so does
 /// macOS (not local-map: KiCad places its own frames). Pure.
 pub fn hides_others(local_map: bool, windows: bool, macos: bool) -> bool { !(local_map && !windows && !macos) }
+pub fn inline_switch_frames(msg: &Value, need_hide: bool) -> Option<Vec<Frame>> {
+    if need_hide { return None }
+    let frames = parse_frames_array(&msg["frames"]);
+    (!frames.is_empty()).then_some(frames)
+}
 /// Show `kind` in fork mode and hide every other currently-shown frame via `HideFrame` so GTK3/wxMSW owns frame map state cleanly
 /// (`hides_others`: not in Linux local-map mode).
 async fn switch_fork_frame(
@@ -3893,14 +3946,18 @@ async fn switch_fork_frame_n(
         }
     }
     let shown_res = show_fork_frame_n(me, sock, desc, kind, doc, item, focus, seq).await?;
+    let local_map = proto::load(desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm");
+    let need_hide = hides_others(local_map, cfg!(windows), cfg!(target_os = "macos"));
+    if let Some(frames) = inline_switch_frames(&shown_res["message"], need_hide) {
+        return Ok(Some((0, String::new(), frames)));
+    }
     let resp_win = u64_of(&shown_res["message"]["frame"]["window"]);
     let resp_kind = kind_of_fk_val(&shown_res["message"]["frame"]["kind"]);
     let target_win = (resp_win > 0 && resp_kind == target_kind).then_some(resp_win);
     let gf = raw_on(me, sock, desc, "kiapi.backplane.embed.GetFrames", json!({}), 10000).await;
     if !gf["ok"].as_bool().unwrap_or(false) { return Ok(None) }
     let (mut holder, mut events_sock, mut frames) = parse_get_frames(&gf["message"]);
-    let local_map = proto::load(desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm");
-    let others: Vec<u64> = if !hides_others(local_map, cfg!(windows), cfg!(target_os = "macos")) { Vec::new() } else { frames.iter()
+    let others: Vec<u64> = if !need_hide { Vec::new() } else { frames.iter()
         .filter(|f| f.shown && f.xid > 0 && match target_win { Some(w) => f.xid != w, None => f.kind != target_kind })
         .map(|f| f.xid)
         .collect() };
@@ -4210,6 +4267,8 @@ async fn spawn_gui_session(
     let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
     let (sock_tx, sock_rx) = oneshot::channel::<String>();
     let sock_tx = Arc::new(Mutex::new(Some(sock_tx)));
+    let (ready_tx, ready_rx) = oneshot::channel::<()>();
+    let ready_tx = Arc::new(Mutex::new(Some(ready_tx)));
     let done = Arc::new(AtomicBool::new(false));
     let tail = Arc::new(Mutex::new(VecDeque::<String>::new()));
 
@@ -4219,8 +4278,10 @@ async fn spawn_gui_session(
         let done = done.clone();
         let req_sock = req_sock.clone();
         tokio::spawn(async move {
+            let mut attempt = 0u32;
             while !done.load(Ordering::SeqCst) {
-                tokio::time::sleep(Duration::from_millis(80)).await;
+                tokio::time::sleep(socket_poll_delay(attempt)).await;
+                attempt = attempt.saturating_add(1);
                 if let Some((found, _)) = kipc::sockets_at(&req_sock).into_iter().find(|(p, i)| before.get(p) != Some(i)) {
                     if let Some(tx) = sock_tx.lock().unwrap().take() { let _ = tx.send(found); }
                     return;
@@ -4231,6 +4292,7 @@ async fn spawn_gui_session(
 
     let so = {
         let sock_tx = sock_tx.clone();
+        let ready_tx = ready_tx.clone();
         let tail = tail.clone();
         let me = me.clone();
         let pro = pro.clone();
@@ -4244,6 +4306,7 @@ async fn spawn_gui_session(
                     }
                     if let Some(path) = ks::ready(&line) {
                         if let Some(tx) = sock_tx.lock().unwrap().take() { let _ = tx.send(path); }
+                        if let Some(tx) = ready_tx.lock().unwrap().take() { let _ = tx.send(()); }
                     }
                 }).await;
             }
@@ -4307,6 +4370,10 @@ async fn spawn_gui_session(
     let mut forwarded: Vec<String> = Vec::new();
     // macOS: since when KiCad has answered "not ready", and whether the start now waits on a system prompt (mac_prompt_wait)
     let (mut not_ready_since, mut prompted): (Option<std::time::Instant>, bool) = (None, false);
+    let mut ready_rx = Some(ready_rx);
+    let mut ping_attempt = 0u32;
+    let ping_loop_start = std::time::Instant::now();
+    let mut last_ev_poll: Option<std::time::Instant> = None;
     while tokio::time::Instant::now() < deadline && !done.load(Ordering::SeqCst) {
         let p = raw_on(&me, &sock, &desc, "kiapi.common.commands.Ping", json!({}), 3000).await;
         if p["status"] == "AS_NOT_READY" { not_ready_since.get_or_insert_with(std::time::Instant::now); }
@@ -4318,52 +4385,65 @@ async fn spawn_gui_session(
                 break;
             }
         } else if mode == "fork" {
-            let ev_path = format!("{sock}.events");
-            if embed_sock_exists(&ev_path) {
-                let o = raw_on(&me, &ev_path, &desc, "kiapi.backplane.embed.NextEvents",
-                    json!({"since": ev_since, "wait_ms": 0, "max": 64}), 1500).await;
-                if o["ok"].as_bool().unwrap_or(false) {
-                    let next = u64_of(&o["message"]["next"]);
-                    if next > ev_since { ev_since = next; }
-                    if let Some(evs) = o["message"]["events"].as_array() {
-                        for ev in evs {
-                            let ty = ev["type"].as_str().unwrap_or("");
-                            let ty_n = ev["type"].as_i64().unwrap_or(0);
-                            let detail = ev["detail"].as_str().unwrap_or("dialog").to_string();
-                            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
-                            if let Some(m) = startup_dialog(&pro, gen, ev, &mut forwarded) { let _ = me.send(m); }
-                            if let Some(n) = notice_of(ev) {
-                                let _ = me.send(Msg::Notice { pro: pro.clone(), gen, notice: n });
-                            } else if ty == "ET_DIALOG_OPENED" || ty_n == 10 {
-                                open_dialogs.push(detail);
-                            } else if ty == "ET_DIALOG_CLOSED" || ty_n == 11 {
-                                if let Some(pos) = open_dialogs.iter().rposition(|d| d == &detail) {
-                                    open_dialogs.remove(pos);
-                                } else {
-                                    open_dialogs.pop();
+            let should_poll_ev = should_poll_startup_events(ping_loop_start.elapsed(), last_ev_poll.map(|t| t.elapsed()));
+            if should_poll_ev {
+                last_ev_poll = Some(std::time::Instant::now());
+                let ev_path = format!("{sock}.events");
+                if embed_sock_exists(&ev_path) {
+                    let o = raw_on(&me, &ev_path, &desc, "kiapi.backplane.embed.NextEvents",
+                        json!({"since": ev_since, "wait_ms": 0, "max": 64}), 1500).await;
+                    if o["ok"].as_bool().unwrap_or(false) {
+                        let next = u64_of(&o["message"]["next"]);
+                        if next > ev_since { ev_since = next; }
+                        if let Some(evs) = o["message"]["events"].as_array() {
+                            for ev in evs {
+                                let ty = ev["type"].as_str().unwrap_or("");
+                                let ty_n = ev["type"].as_i64().unwrap_or(0);
+                                let detail = ev["detail"].as_str().unwrap_or("dialog").to_string();
+                                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
+                                if let Some(m) = startup_dialog(&pro, gen, ev, &mut forwarded) { let _ = me.send(m); }
+                                if let Some(n) = notice_of(ev) {
+                                    let _ = me.send(Msg::Notice { pro: pro.clone(), gen, notice: n });
+                                } else if ty == "ET_DIALOG_OPENED" || ty_n == 10 {
+                                    open_dialogs.push(detail);
+                                } else if ty == "ET_DIALOG_CLOSED" || ty_n == 11 {
+                                    if let Some(pos) = open_dialogs.iter().rposition(|d| d == &detail) {
+                                        open_dialogs.remove(pos);
+                                    } else {
+                                        open_dialogs.pop();
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
-            if let Some(dlg) = open_dialogs.last() {
-                deadline = tokio::time::Instant::now() + Duration::from_secs(30);
-                let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: format!("waiting on dialog: {dlg}") });
-            } else if mac_prompt_wait(cfg!(target_os = "macos"), not_ready_since.map(|t| t.elapsed()), false) {
-                let why = mac_wait_reason(Path::new(&pro).parent().unwrap_or(Path::new(".")));
-                if !prompted {
-                    prompted = true;
-                    deadline = tokio::time::Instant::now() + MAC_PROMPT_BOUND;
-                    eprintln!("kicad embed: {pro}: KiCad not ready for {} s with no dialog of its own: waiting on {}", MAC_PROMPT_AFTER.as_secs(),
-                        if why == MAC_RECOVER_REASON { "KiCad's offer to recover unsaved changes (its alert comes before its API)" } else { "a macOS prompt" });
+                if let Some(dlg) = open_dialogs.last() {
+                    deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+                    let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: format!("waiting on dialog: {dlg}") });
+                } else if mac_prompt_wait(cfg!(target_os = "macos"), not_ready_since.map(|t| t.elapsed()), false) {
+                    let why = mac_wait_reason(Path::new(&pro).parent().unwrap_or(Path::new(".")));
+                    if !prompted {
+                        prompted = true;
+                        deadline = tokio::time::Instant::now() + MAC_PROMPT_BOUND;
+                        eprintln!("kicad embed: {pro}: KiCad not ready for {} s with no dialog of its own: waiting on {}", MAC_PROMPT_AFTER.as_secs(),
+                            if why == MAC_RECOVER_REASON { "KiCad's offer to recover unsaved changes (its alert comes before its API)" } else { "a macOS prompt" });
+                    }
+                    let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: why.into() });
+                } else {
+                    let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: String::new() });
                 }
-                let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: why.into() });
-            } else {
-                let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: String::new() });
             }
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        let delay = ping_retry_delay(ping_attempt, !open_dialogs.is_empty());
+        ping_attempt = ping_attempt.saturating_add(1);
+        if let Some(rx) = ready_rx.as_mut() {
+            tokio::select! {
+                _ = rx => { ready_rx = None; }
+                _ = tokio::time::sleep(delay) => {}
+            }
+        } else {
+            tokio::time::sleep(delay).await;
+        }
     }
     if !hand_ok {
         if !done.load(Ordering::SeqCst) {
@@ -4382,6 +4462,8 @@ async fn spawn_gui_session(
         for c in embed_caps(&gc["message"]) { if !caps.iter().any(|x| *x == c) { caps.push(c); } }
     }
     if mode == "fork" {
+        // Read holder + events_sock once before ShowFrame (while 0 frames exist and the UI thread is idle) so ShowFrameResponse.frames
+        // can skip the post-ShowFrame GetFrames round-trip on Linux local-map forks.
         let gf0 = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.GetFrames", json!({}), 10000).await;
         let (mut holder, mut events_sock, mut frames) = if gf0["ok"].as_bool().unwrap_or(false) {
             parse_get_frames(&gf0["message"])
@@ -4389,39 +4471,35 @@ async fn spawn_gui_session(
             (0, format!("{sock}.events"), vec![])
         };
         if events_sock.is_empty() { events_sock = format!("{sock}.events"); }
+        let fsw = first_show_wait(&caps, std::env::var("BACKPLANE_KICAD_DECOR_SLEEP").ok().as_deref());
         #[cfg(target_os = "linux")]
-        {
-            // On the very first frame opened at process startup, wxGTK's process-wide `gs_decorExtentSupport` starts at 0 and only
-            // flips to 2 when wxGTK's 1000 ms `wxRequestFrameExtentsTimeout` fires after the first `wxTopLevelWindowGTK::Show(true)`.
-            // Because `PrepareFrame` strips decorations, `GTKUpdateDecorSize` returns early without calling `gtk_widget_show` on that
-            // first frame. Waiting past the 1000 ms timer and toggling `HideFrame` + `ShowFrame` calls `gtk_widget_show` cleanly.
+        if needs_decor_reshow(fsw) {
+            // Legacy pre-bp.13 forks: wxGTK's process-wide `gs_decorExtentSupport` starts at 0 and only flips to 2 after its
+            // 1000 ms timer on the first Show(true); hide and reshow after that timer so gtk_widget_show runs cleanly.
             if let Ok(first) = show_fork_frame(&me, &sock, &desc, &active, "", "", false).await {
                 phase("first show");
                 let win = u64_of(&first["message"]["frame"]["window"]);
-                match first_show_wait(&caps, std::env::var("BACKPLANE_KICAD_DECOR_SLEEP").ok().as_deref()) {
-                    // bp.13: the fork shows embedded frames at once and says when the first one has drawn (ET_FRAME_DRAWN)
-                    FirstShow::Drawn(cap) if win > 0 => {
-                        let drawn = wait_frame_drawn(&me, &pro, gen, &mut forwarded, &sock, &desc, win, &mut ev_since, cap).await;
-                        phase(if drawn { "drawn" } else { "drawn: not said within the cap" });
-                    }
-                    FirstShow::Sleep(ms) if win > 0 => {
+                if let FirstShow::Sleep(ms) = fsw {
+                    if win > 0 {
                         tokio::time::sleep(Duration::from_millis(ms)).await;
                         let _ = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.HideFrame", json!({ "window": win }), 5000).await;
                     }
-                    _ => {}
                 }
             }
         }
         // #1344: the start's show of the editor asked for, and how it went (an Err here was dropped without a word: a blank pane after Ready)
         let t_show = std::time::Instant::now();
         let first = switch_fork_frame(&me, &sock, &desc, &active, "", "", false, false).await;
+        if !cfg!(target_os = "linux") || !needs_decor_reshow(fsw) {
+            if first.is_ok() { phase("first show"); }
+        }
         let (line, notice) = first_show_outcome(&active, t_show.elapsed().as_millis() as u64, &first.as_ref().map(|o| o.as_ref().map(|(_, _, f)| f.clone())).map_err(|e| e.clone()));
         eprintln!("kicad embed: {pro}: {line}");
         // a first show that failed is said in the pane (the session's notices: "KiCad says: …"), never a blank pane with nothing said; the
         // editor's tab shows it again (a tab press asks KiCad once more)
         if let Some(n) = notice { let _ = me.send(Msg::Notice { pro: pro.clone(), gen, notice: n }); }
         if let Ok(Some((h2, ev2, f2))) = first {
-            holder = h2;
+            if h2 > 0 { holder = h2; }
             if !ev2.is_empty() { events_sock = ev2; }
             frames = f2;
         }
@@ -4440,28 +4518,6 @@ async fn spawn_gui_session(
         }
         let _ = me.send(Msg::Ready { pro, gen, sock, version, holder: 0, events_sock: String::new(), ev_since: 0, frames: vec![], spawn_container, spawn_active: active, caps });
     }
-}
-
-/// ET_FRAME_DRAWN (28) for `win` on the events socket within `cap_ms`; `since` moves past what was read (the events loop starts there).
-async fn wait_frame_drawn(me: &mpsc::UnboundedSender<Msg>, pro: &str, gen: u64, forwarded: &mut Vec<String>, sock: &str, desc: &str, win: u64, since: &mut u64, cap_ms: u64) -> bool {
-    let until = tokio::time::Instant::now() + Duration::from_millis(cap_ms);
-    let ev_path = format!("{sock}.events");
-    let mut seen: Vec<Value> = Vec::new();
-    while tokio::time::Instant::now() < until {
-        let left = until.saturating_duration_since(tokio::time::Instant::now()).as_millis() as u64;
-        let o = raw_on(me, &ev_path, desc, "kiapi.backplane.embed.NextEvents", json!({"since": *since, "wait_ms": left.min(1000), "max": 64}), left + 1000).await;
-        if !o["ok"].as_bool().unwrap_or(false) { tokio::time::sleep(Duration::from_millis(30)).await; continue }
-        let next = u64_of(&o["message"]["next"]);
-        for ev in o["message"]["events"].as_array().into_iter().flatten() {
-            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
-            // the recovery alert's close comes here when its answer let KiCad's API up: the session must not keep it open
-            if let Some(m) = startup_dialog(pro, gen, ev, forwarded) { let _ = me.send(m); }
-            seen.push(ev.clone());
-        }
-        if next > *since { *since = next; }
-        if seen.iter().any(|ev| (ev["type"] == "ET_FRAME_DRAWN" || ev["type"].as_i64() == Some(28)) && u64_of(&ev["frame"]["window"]) == win) { return true }
-    }
-    false
 }
 
 /// A titled ET_DIALOG_OPENED/CLOSED read before the events loop runs (the start's handshake, the first frame's draw), for the session as
@@ -5175,6 +5231,33 @@ mod tests {
         assert_eq!(first_show_wait(&["embed".into()], None), FirstShow::Sleep(1150), "older forks keep wxGTK's timer");
         assert_eq!(first_show_wait(&[], Some("0")), FirstShow::None);
         assert_eq!(first_show_wait(&["embed-frame-drawn".into()], Some("0")), FirstShow::Drawn(1500));
+        assert!(!needs_decor_reshow(FirstShow::Drawn(1500)));
+        assert!(needs_decor_reshow(FirstShow::Sleep(1150)));
+        assert!(!needs_decor_reshow(FirstShow::None));
+    }
+
+    #[test] fn socket_and_ping_poll_backoffs_stay_tight() {
+        assert_eq!(socket_poll_delay(0), Duration::from_millis(10));
+        assert_eq!(socket_poll_delay(16), Duration::from_millis(15));
+        assert_eq!(socket_poll_delay(32), Duration::from_millis(25));
+        assert_eq!(ping_retry_delay(0, false), Duration::from_millis(5));
+        assert_eq!(ping_retry_delay(1, false), Duration::from_millis(10));
+        assert_eq!(ping_retry_delay(4, false), Duration::from_millis(25));
+        assert_eq!(ping_retry_delay(40, false), Duration::from_millis(50));
+        assert_eq!(ping_retry_delay(0, true), Duration::from_millis(100));
+        assert!(!should_poll_startup_events(Duration::from_millis(50), None));
+        assert!(should_poll_startup_events(Duration::from_millis(120), None));
+        assert!(!should_poll_startup_events(Duration::from_millis(200), Some(Duration::from_millis(100))));
+        assert!(should_poll_startup_events(Duration::from_millis(200), Some(Duration::from_millis(150))));
+    }
+
+    #[test] fn inline_switch_frames_skips_get_frames_only_without_hide() {
+        let msg = json!({"frames": [{"kind": "FK_PCB", "window": 42, "shown": true}]});
+        let fs = inline_switch_frames(&msg, false).unwrap();
+        assert_eq!(fs.len(), 1);
+        assert_eq!((fs[0].kind.as_str(), fs[0].xid, fs[0].shown), ("PCB", 42, true));
+        assert!(inline_switch_frames(&msg, true).is_none());
+        assert!(inline_switch_frames(&json!({}), false).is_none());
     }
 
     #[test] fn kicads_own_dialogs_are_published_until_they_close() {
