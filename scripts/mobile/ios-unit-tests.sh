@@ -51,3 +51,4 @@ run file-fetch FileFetchTests.swift "" FileFetch.swift DataLinkGrammar.swift
 run plan-floorplanner PlanFloorplannerTests.swift "" PlanFloorplannerModel.swift
 sh "$ROOT/scripts/mobile/ios-outbox-test.sh" && echo "ok outbox"
 run home-model HomeModelTests.swift "" HomeModel.swift
+run solidcraft-web-policy SolidCraftWebPolicyTests.swift "" SolidCraftWebPolicy.swift

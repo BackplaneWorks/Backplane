@@ -1013,11 +1013,49 @@ async fn write_http_text<W: AsyncWrite + Unpin>(
     w.flush().await
 }
 
+/// Returns a `Set-Cookie: bp_token=...` header when the request authenticated via `Authorization: Bearer`
+/// (and does not already send a matching `bp_token` cookie), so embedded WebViews get subresource/fetch cookies.
+pub fn cookie_bootstrap_header(req: &Req) -> String {
+    let Some(tok) = req.header("authorization").strip_prefix("Bearer ") else {
+        return String::new();
+    };
+    if tok.is_empty()
+        || !tok
+            .bytes()
+            .all(|b| (0x21..=0x7e).contains(&b) && b != b';' && b != b',')
+    {
+        return String::new();
+    }
+    let existing = req
+        .header("cookie")
+        .split(';')
+        .find_map(|c| c.trim().strip_prefix("bp_token="))
+        .unwrap_or("");
+    if existing == tok {
+        return String::new();
+    }
+    let secure = if req.header("x-forwarded-proto").eq_ignore_ascii_case("https") {
+        "; Secure"
+    } else {
+        ""
+    };
+    format!("Set-Cookie: bp_token={tok}; Path=/; HttpOnly; SameSite=Strict{secure}\r\n")
+}
+
 /// Streams `/solidcraft-web` and `/solidcraft-web/*` directly off disk (so the 216 MB `.wasm` is never buffered in RAM).
 pub async fn serve_asset<W: AsyncWrite + Unpin>(
     hub: &Arc<Hub>,
     w: &mut W,
     req: &Req,
+) -> std::io::Result<()> {
+    serve_asset_with(hub, w, req, "").await
+}
+
+pub async fn serve_asset_with<W: AsyncWrite + Unpin>(
+    hub: &Arc<Hub>,
+    w: &mut W,
+    req: &Req,
+    extra_headers: &str,
 ) -> std::io::Result<()> {
     let head_only = req.method == "HEAD";
     if req.method != "GET" && !head_only {
@@ -1039,7 +1077,7 @@ pub async fn serve_asset<W: AsyncWrite + Unpin>(
             .map(|(_, q)| format!("?{q}"))
             .unwrap_or_default();
         let head = format!(
-            "HTTP/1.1 302 Found\r\nLocation: /solidcraft-web/{query}\r\nContent-Length: 0\r\nCache-Control: private, no-store\r\nConnection: close\r\n{SC_WEB_SECURITY_HEADERS}\r\n"
+            "HTTP/1.1 302 Found\r\nLocation: /solidcraft-web/{query}\r\nContent-Length: 0\r\nCache-Control: private, no-store\r\nConnection: close\r\n{SC_WEB_SECURITY_HEADERS}{extra_headers}\r\n"
         );
         w.write_all(head.as_bytes()).await?;
         return w.flush().await;
@@ -1067,7 +1105,7 @@ pub async fn serve_asset<W: AsyncWrite + Unpin>(
             w,
             "200 OK",
             "text/html; charset=utf-8",
-            "",
+            extra_headers,
             html.as_bytes(),
             head_only,
         )
@@ -1439,12 +1477,12 @@ mod tests {
             Arc::new(Canned { reply: json!({}) }),
         ).await.unwrap();
 
-        let ask = |target: String, hdrs: Vec<(String, String)>| {
+        let ask = |target: String, hdrs: Vec<(String, String)>, extra: String| {
             let hub = hub.clone();
             async move {
                 let (mut client, mut server) = tokio::io::duplex(64 * 1024);
                 let req = Req::new("GET", &target, hdrs);
-                let srv = tokio::spawn(async move { serve_asset(&hub, &mut server, &req).await });
+                let srv = tokio::spawn(async move { serve_asset_with(&hub, &mut server, &req, &extra).await });
                 let mut resp = Vec::new();
                 client.read_to_end(&mut resp).await.unwrap();
                 srv.await.unwrap().unwrap();
@@ -1452,15 +1490,31 @@ mod tests {
             }
         };
 
-        let r302 = String::from_utf8_lossy(&ask("/solidcraft-web?thread=t1".into(), vec![]).await).into_owned();
+        let r302 = String::from_utf8_lossy(&ask("/solidcraft-web?thread=t1".into(), vec![], String::new()).await).into_owned();
         assert!(r302.starts_with("HTTP/1.1 302 Found") && r302.contains("Location: /solidcraft-web/?thread=t1"));
+        assert!(!r302.contains("Set-Cookie:"));
 
-        let index = String::from_utf8_lossy(&ask("/solidcraft-web/?thread=t1".into(), vec![]).await).into_owned();
+        let bearer_req = Req::new("GET", "/solidcraft-web/?thread=t1", vec![
+            ("Authorization".into(), "Bearer tok123".into()),
+            ("X-Forwarded-Proto".into(), "https".into()),
+        ]);
+        let boot_cookie = cookie_bootstrap_header(&bearer_req);
+        assert_eq!(boot_cookie, "Set-Cookie: bp_token=tok123; Path=/; HttpOnly; SameSite=Strict; Secure\r\n");
+        let index_with_cookie = String::from_utf8_lossy(&ask("/solidcraft-web/?thread=t1".into(), vec![], boot_cookie.clone()).await).into_owned();
+        assert!(index_with_cookie.starts_with("HTTP/1.1 200 OK") && index_with_cookie.contains(&boot_cookie));
+        let r302_with_cookie = String::from_utf8_lossy(&ask("/solidcraft-web?thread=t1".into(), vec![], boot_cookie.clone()).await).into_owned();
+        assert!(r302_with_cookie.starts_with("HTTP/1.1 302 Found") && r302_with_cookie.contains(&boot_cookie));
+
+        // Unsafe characters in Bearer token must not produce a Set-Cookie header; matching cookie skips re-issue.
+        assert_eq!(cookie_bootstrap_header(&Req::new("GET", "/solidcraft-web/", vec![("Authorization".into(), "Bearer bad;token".into())])), "");
+        assert_eq!(cookie_bootstrap_header(&Req::new("GET", "/solidcraft-web/", vec![("Authorization".into(), "Bearer tok123".into()), ("Cookie".into(), "bp_token=tok123".into())])), "");
+
+        let index = String::from_utf8_lossy(&ask("/solidcraft-web/?thread=t1".into(), vec![], String::new()).await).into_owned();
         assert!(index.starts_with("HTTP/1.1 200 OK") && index.contains("solidcraft-web-abc123.js") && index.contains("bp-boot.js") && !index.contains("solidcraft.io"));
-        let boot = String::from_utf8_lossy(&ask("/solidcraft-web/bp-boot.js".into(), vec![]).await).into_owned();
+        let boot = String::from_utf8_lossy(&ask("/solidcraft-web/bp-boot.js".into(), vec![], String::new()).await).into_owned();
         assert!(boot.starts_with("HTTP/1.1 200 OK") && boot.contains("solidcraft-web-abc123_bg.wasm") && boot.contains("waitForExportedBytes"));
 
-        let wasm_raw = ask("/solidcraft-web/solidcraft-web-abc123_bg.wasm".into(), vec![]).await;
+        let wasm_raw = ask("/solidcraft-web/solidcraft-web-abc123_bg.wasm".into(), vec![], String::new()).await;
         let split = wasm_raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
         let wasm_head = String::from_utf8_lossy(&wasm_raw[..split]);
         assert!(wasm_head.starts_with("HTTP/1.1 200 OK"), "{wasm_head}");
@@ -1468,11 +1522,11 @@ mod tests {
         assert_eq!(&wasm_raw[split + 4..], b"\x00asm\x01\x00\x00\x00");
 
         let etag = wasm_head.lines().find_map(|l| l.strip_prefix("ETag: ")).unwrap().trim().to_string();
-        let r304 = String::from_utf8_lossy(&ask("/solidcraft-web/solidcraft-web-abc123_bg.wasm".into(), vec![("If-None-Match".into(), etag)]).await).into_owned();
+        let r304 = String::from_utf8_lossy(&ask("/solidcraft-web/solidcraft-web-abc123_bg.wasm".into(), vec![("If-None-Match".into(), etag)], String::new()).await).into_owned();
         assert!(r304.starts_with("HTTP/1.1 304 Not Modified"), "{r304}");
 
-        assert!(String::from_utf8_lossy(&ask("/solidcraft-web/sw.js".into(), vec![]).await).starts_with("HTTP/1.1 404"));
-        assert!(String::from_utf8_lossy(&ask("/solidcraft-web/../index.html".into(), vec![]).await).starts_with("HTTP/1.1 400"));
+        assert!(String::from_utf8_lossy(&ask("/solidcraft-web/sw.js".into(), vec![], String::new()).await).starts_with("HTTP/1.1 404"));
+        assert!(String::from_utf8_lossy(&ask("/solidcraft-web/../index.html".into(), vec![], String::new()).await).starts_with("HTTP/1.1 400"));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

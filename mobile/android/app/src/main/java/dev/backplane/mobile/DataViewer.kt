@@ -711,9 +711,45 @@ private fun SolidCraftWebModal(title: String, launch: Triple<String, String, Str
                                     val o = "${u.scheme}://${u.authority}"
                                     return o != expectedOrigin
                                 }
+
+                                override fun onReceivedError(
+                                    view: android.webkit.WebView?,
+                                    request: android.webkit.WebResourceRequest?,
+                                    error: android.webkit.WebResourceError?,
+                                ) {
+                                    if (request?.isForMainFrame == true) {
+                                        val msg = error?.description?.toString().orEmpty()
+                                        mainHandler.post {
+                                            loading = false
+                                            saving = false
+                                            statusIsError = true
+                                            statusText = msg.ifEmpty { Msg.android_file_bad }
+                                        }
+                                    }
+                                }
+
+                                override fun onReceivedHttpError(
+                                    view: android.webkit.WebView?,
+                                    request: android.webkit.WebResourceRequest?,
+                                    errorResponse: android.webkit.WebResourceResponse?,
+                                ) {
+                                    if (request?.isForMainFrame == true) {
+                                        val code = errorResponse?.statusCode ?: 0
+                                        mainHandler.post {
+                                            loading = false
+                                            saving = false
+                                            statusIsError = true
+                                            statusText = "HTTP $code"
+                                        }
+                                    }
+                                }
                             }
                             webViewRef = this
-                            loadUrl(url)
+                            if (token.isNotEmpty()) {
+                                loadUrl(url, mapOf("Authorization" to "Bearer $token"))
+                            } else {
+                                loadUrl(url)
+                            }
                         }
                     },
                 )
