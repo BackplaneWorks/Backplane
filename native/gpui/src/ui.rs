@@ -1369,6 +1369,9 @@ impl Render for Backplane {
                     .children(head_row)
                     .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))
                     .when(page_list, |d| d.child(list(self.screens.home_list.clone(), cx.processor(|this, ix, _, cx| this.page_item(ix, cx))).flex_1().min_h_0()))
+                    .when(page_list, |d| d.child(canvas({ let reg = self.screens.reg.clone(); move |_, _, _| {
+                        reg.borrow_mut().resolve_by(|id| id.strip_prefix("home-readme-").and_then(|s| s.parse::<usize>().ok()).map(|i| i + 1));
+                    } }, |_, _, _, _| {}).absolute().size_0()))
                     .when(has_home && !page_list, |d| d.child(div().id("home").track_scroll(&self.screens.home_scroll).overflow_y_scroll().flex_1().min_h_0().flex().flex_col().items_center().child(div().w_full().flex_none().max_w(px(930.)).p_4().flex().flex_col().gap_3().children(home_els))))
                     // a list: only the rows on screen are drawn, however much of the thread is held, and it keeps the reader's place as rows land above them
                     .when(!has_home && !bot_room && !has_swarm, |d| d.child(self.screens.parts.el(Backplane::timeline_part, StyleRefinement::default().flex_1().min_h_0(), cx)))
@@ -1480,6 +1483,28 @@ impl Render for Backplane {
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| { for it in &m.items { ctl.push(CtlEntry { id: format!("ctx:{}", it.label), label: it.label.clone(), ctl: Ctl::Node(it.action.clone(), it.value.clone()) }); } crate::screens::ctxmenu::render(cx, light, &m) }))
             .children(crate::perf::on().then(|| crate::perf::overlay(light, &crate::keys::hint(&self.local, "perf"))))
+            .child({
+                let drag_view = cx.entity().clone();
+                gpui::canvas(|_, _, _| {}, move |_, _, window, _| {
+                    let mv = drag_view.clone();
+                    window.on_mouse_event(move |e: &MouseMoveEvent, phase, _, cx| {
+                        if phase == DispatchPhase::Bubble && mv.read(cx).screens.reg.borrow().dragging {
+                            mv.update(cx, |this, cx| this.timeline_drag_move(e, cx));
+                        }
+                    });
+                    let up = drag_view.clone();
+                    window.on_mouse_event(move |e: &MouseUpEvent, phase, window, cx| {
+                        if phase == DispatchPhase::Bubble
+                            && e.button == MouseButton::Left
+                            && up.read(cx).screens.reg.borrow().dragging
+                        {
+                            up.update(cx, |this, cx| this.timeline_up(e, window, cx));
+                        }
+                    });
+                })
+                .absolute()
+                .size(px(0.))
+            })
             .into_any_element();
         self.controls = ctl;
         // the selection's ends as ordinals of the blocks known now (the rows' part does the same when it draws)
@@ -1493,6 +1518,8 @@ impl Render for Backplane {
                 self.screens.reg.borrow_mut().resolve_by(|id| {
                     posts.and_then(|ps| ps.iter().enumerate().position(|(i, _)| id == format!("talk-{i}")))
                 });
+            } else if page_list {
+                self.screens.reg.borrow_mut().resolve_by(|id| id.strip_prefix("home-readme-").and_then(|s| s.parse::<usize>().ok()).map(|i| i + 1));
             } else {
                 let rows = &self.data["thread"]["entries"];
                 self.screens.reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id))));

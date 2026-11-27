@@ -586,6 +586,21 @@ impl Element for TextElement {
             input.last_bounds = Some(bounds);
             input.scroll_x = scroll_x;
         });
+        let drag_input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+            if phase == gpui::DispatchPhase::Bubble && drag_input.read(cx).is_selecting {
+                drag_input.update(cx, |i, cx| i.on_mouse_move(event, window, cx));
+            }
+        });
+        let up_input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+            if phase == gpui::DispatchPhase::Bubble
+                && event.button == MouseButton::Left
+                && up_input.read(cx).is_selecting
+            {
+                up_input.update(cx, |i, cx| i.on_mouse_up(event, window, cx));
+            }
+        });
     }
 }
 
@@ -614,7 +629,6 @@ impl Render for TextInput {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::on_mouse_down))
             .on_mouse_up(MouseButton::Left, cx.listener(Self::on_mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::on_mouse_up))
-            .on_mouse_move(cx.listener(Self::on_mouse_move))
             .line_height(crate::scale::tpx(22.))
             .text_size(crate::scale::tpx(13.))
             .child(

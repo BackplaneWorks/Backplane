@@ -71,6 +71,7 @@ menu.file.copy = パスをコピー
 menu.uber.demote = メインボットを解除
 # ja? uberbot term
 menu.uber.promote = メインボットにする
+menu.quote = 引用
 
 # settings: hub, tailscale, kicad, update
 settings.tailscale.label = Tailscale：{state}

@@ -958,11 +958,24 @@ pub(super) fn review_body(cx: &mut Context<Backplane>, reg: &Reg, light: bool, r
         return div().size_full().flex().flex_col().children(bar).child(if standalone { main_body(col) } else { col }).child(div().flex_1().min_h(px(160.)).flex().flex_col().child(super::panestate::view(light, &st, None))).into_any_element();
     }
     if blocks.is_empty() { col = col.child(div().text_color(c("dim")).child(if review["busy"] == true { trs("Working…") } else { trs(&string(review, "note")) })); }
-    else { let parsed = md::parse(&blocks); for el in timeline::blocks(cx, reg, light, &parsed, "review") { col = col.child(el); } }
+    else {
+        let parsed = md::parse(&blocks);
+        let mut body = div().flex().flex_col().gap_3()
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+            .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+            .on_mouse_move(cx.listener(|this, e, _, cx| this.doc_move(e, cx)));
+        for el in timeline::blocks(cx, reg, light, &parsed, "review") { body = body.child(el); }
+        col = col.child(body);
+    }
     if review["release"].is_object() {
         col = col.child(div().text_color(c("dim")).child(trs(&string(&review["release"], "note"))));
         let nodes = review["release"]["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
-        col = col.children(timeline::blocks(cx, reg, light, &md::parse(nodes), "release"));
+        let rel = div().flex().flex_col().gap_3()
+            .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+            .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+            .on_mouse_move(cx.listener(|this, e, _, cx| this.doc_move(e, cx)))
+            .children(timeline::blocks(cx, reg, light, &md::parse(nodes), "release"));
+        col = col.child(rel);
     }
     div().flex().flex_col().children(bar).child(if standalone { main_body(col) } else { col }).into_any_element()
 }

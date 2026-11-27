@@ -313,7 +313,7 @@ impl WrappedLineLayout {
         let wrapped_line_start_x;
         if wrapped_line_ix > 0 {
             let Some(line_start_boundary) = self.wrap_boundaries.get(wrapped_line_ix - 1) else {
-                return Err(0);
+                return Err(self.unwrapped_layout.len);
             };
             let run = &self.unwrapped_layout.runs[line_start_boundary.run_ix];
             let glyph = &run.glyphs[line_start_boundary.glyph_ix];

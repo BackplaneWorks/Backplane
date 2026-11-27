@@ -25,9 +25,13 @@ impl Render for Part {
 #[derive(Default)]
 pub struct Parts { views: Vec<(Draw, Entity<Part>)>, pub side_ctl: Vec<CtlEntry>, pub rows_ctl: Vec<CtlEntry>, ticking: Vec<usize> }
 impl Parts {
-    pub fn notify(&self, draw: Draw, cx: &mut Context<Backplane>) {
+    /// Notify only `draw`'s cached part so region-local updates skip rebuilding the rest of the window. Returns false if `draw` has not been rendered yet.
+    pub fn notify(&self, draw: Draw, cx: &mut Context<Backplane>) -> bool {
         if let Some((_, view)) = self.views.iter().find(|(d, _)| *d as usize == draw as usize) {
             view.update(cx, |_, cx| cx.notify());
+            true
+        } else {
+            false
         }
     }
 

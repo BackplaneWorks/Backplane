@@ -681,7 +681,11 @@ pub fn readme_block(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
     let Some(b) = home.readme.get(i) else { return div().into_any_element() };
     let key = format!("home-readme-{i}");
     reg.borrow_mut().enter(i + 1, &key);
-    div().id(SharedString::from(key.clone())).pb_3().text_size(crate::scale::tpx(14.)).child(super::timeline::block_el(cx, reg, light, b, &key, Some(doc))).into_any_element()
+    div().id(SharedString::from(key.clone())).pb_3().text_size(crate::scale::tpx(14.))
+        .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+        .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+        .on_mouse_move(cx.listener(|this, e, _, cx| this.doc_move(e, cx)))
+        .child(super::timeline::block_el(cx, reg, light, b, &key, Some(doc))).into_any_element()
 }
 
 pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>, doc: &super::timeline::Doc, part: Part) -> Vec<AnyElement> {
