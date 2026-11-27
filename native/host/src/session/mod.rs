@@ -62,6 +62,8 @@ fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut()
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
+/// A refused typed field's name for the log (` field "title"`), never its text: which box the window types into that nothing takes.
+fn field_of(params: &Value) -> String { if params["action"] != "bfield" { return String::new() } params["value"].as_str().and_then(|v| v.split_once('\u{1f}')).map(|(n, _)| format!(" field {:?}", n.chars().take(60).collect::<String>())).unwrap_or_default() }
 fn unavailable(id: &Value) -> Value { json!({"t":"reply","id":id,"ok":false,"error":{"code":"PRESENTER_UNAVAILABLE","retryable":true,"compatibilityRequired":false}}) }
 
 /// The error a policy reply stands for: `refused` (page action not offered / token not held) is INVALID_REQUEST, `stale` (the target does not exist) STALE_VIEW.
@@ -178,7 +180,7 @@ impl Hub {
         if let (Some(o), true) = (params.as_object_mut(), p.get("session").map_or(false, Value::is_object)) { o.insert("session".into(), actor::input(c.client, &view_id, &p)); }
         { let reads = actor::take_reads(c.client, &view_id, &p["target"]); if let Some(o) = params.as_object_mut() { o.remove("reads"); if !reads.is_empty() { o.insert("reads".into(), Value::Array(reads)); } } }   // only the hub says what it read
         actor::set_local(&mut params, actor::local_in(c.client, &view_id, m, &p["target"]));
-        let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(e) => { eprintln!("view unavailable: target {} action {:?}: {e:#}", params["target"]["kind"].as_str().unwrap_or("?"), params["action"].as_str().unwrap_or("")); return vec![unavailable(&id)] } }; // (content-free: kind, action and the presenter's reason)
+        let mut pol = match self.presenter.view(&params).await { Ok(v) => v, Err(e) => { eprintln!("view unavailable: target {} action {:?}{}: {e:#}", params["target"]["kind"].as_str().unwrap_or("?"), params["action"].as_str().unwrap_or(""), field_of(&params)); return vec![unavailable(&id)] } }; // (content-free: kind, action and the presenter's reason)
         // the policy's verdicts on the request: a refused native-sidebar-page action (Hub.thin.act.native) and a target that does not exist
         // (an unknown bot, room or project: STALE_VIEW), answered before anything is stored
         if let Some(code) = policy_error(&pol) { return vec![error(&id, code)] }
