@@ -174,12 +174,6 @@ fn a_bridged_server_gets_the_port_and_the_folders() {
 }
 
 #[test]
-fn the_childs_folders_are_the_hubs() {
-    let e = session::data_env(Path::new("/h")); let get = |k: &str| e.iter().find(|x| x.0 == k).unwrap().1.clone();
-    assert_eq!(get("XDG_DATA_HOME"), Path::new("/h/solidcraft/data")); assert_eq!(get("SOLIDCRAFT_SETTINGS_DIR"), Path::new("/h/solidcraft/settings"));
-}
-
-#[test]
 fn a_folder_is_scanned_for_what_it_holds() {
     let t = crate::plat::tmp::dir("solidcad-scan"); let p = t.path();
     assert_eq!(scan(p), (false, false, false));

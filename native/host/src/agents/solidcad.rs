@@ -95,10 +95,17 @@ pub fn own_defs() -> Vec<Value> { vec![
 ] }
 
 impl Cad {
+    /// The environment of a child: the same folders and switches as the pane's SolidCraft, its first-run settings written when absent
+    /// (without them a headless import of a STEP waits on a dialog nobody sees).
+    fn env(&self) -> Vec<(&'static str, std::ffi::OsString)> {
+        let home = &self.hub.cfg.home;
+        if !crate::copy::on() { let _ = crate::solidcraft::embed::seed_settings(home); }
+        crate::solidcraft::embed::data_env(home)
+    }
     async fn learn(&self) {
         if self.defs.lock().unwrap().is_some() { return }
         let Some(program) = (self.seam.cli)() else { return };
-        let spawn = client::Spawn { program, mode: client::Mode::Headless, allow: vec![], env: session::data_env(&self.hub.cfg.home) };
+        let spawn = client::Spawn { program, mode: client::Mode::Headless, allow: vec![], env: self.env() };
         let Ok(c) = client::Client::start(&spawn, Duration::from_secs(30)).await else { return };
         if let Ok(tools) = c.tools(Duration::from_secs(30)).await { self.learned(&tools) }
         c.kill();
@@ -112,7 +119,7 @@ impl Cad {
     }
     fn session(&self, root: &Path) -> Arc<Session> {
         let key = root.to_string_lossy().into_owned();
-        self.sessions.lock().unwrap().entry(key.clone()).or_insert_with(|| { let mut s = Session::new(root.to_path_buf(), self.hub.cfg.home.join("solidcad").join(crate::files::kicad::kserve::digest(&key))); s.env = session::data_env(&self.hub.cfg.home); Arc::new(s) }).clone()
+        self.sessions.lock().unwrap().entry(key.clone()).or_insert_with(|| { let mut s = Session::new(root.to_path_buf(), self.hub.cfg.home.join("solidcad").join(crate::files::kicad::kserve::digest(&key))); s.env = self.env(); Arc::new(s) }).clone()
     }
 
     /// Whether this thread's project gets the tools up front (harness::wanted).

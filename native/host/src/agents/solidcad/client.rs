@@ -14,7 +14,7 @@ impl Mode {
 
 /// What to run. `program` is `solidcraft-cli`; a test names a stand-in.
 #[derive(Clone, Debug)]
-pub struct Spawn { pub program: PathBuf, pub mode: Mode, pub allow: Vec<PathBuf>, pub env: Vec<(&'static str, PathBuf)> }
+pub struct Spawn { pub program: PathBuf, pub mode: Mode, pub allow: Vec<PathBuf>, pub env: Vec<(&'static str, std::ffi::OsString)> }
 
 /// The command line after the program (the token never rides here: other users can read a process list).
 pub fn args(s: &Spawn) -> Vec<String> {
@@ -61,7 +61,13 @@ impl Client {
         c.env_remove("DISPLAY").env_remove("WAYLAND_DISPLAY").env_remove("SOLIDCRAFT_CONTROL_PORT");
         for (k, v) in &s.env { c.env(k, v); }
         if let Mode::Bridged { token, .. } = &s.mode { c.env("SOLIDCRAFT_CONTROL_TOKEN", token); }
-        let mut child = c.spawn().map_err(|e| format!("{} could not be started: {e}", s.program.display()))?;
+        // (a program written a moment ago, an install just unpacked, can be "text file busy" while another thread forks: tried again)
+        let mut tries = 0;
+        let mut child = loop { match c.spawn() {
+            Ok(ch) => break ch,
+            Err(e) if e.raw_os_error() == Some(26) && tries < 20 => { tries += 1; tokio::time::sleep(Duration::from_millis(25)).await }
+            Err(e) => return Err(format!("{} could not be started: {e}", s.program.display())),
+        } };
         let (stdin, stdout, stderr) = (child.stdin.take().ok_or("no stdin")?, child.stdout.take().ok_or("no stdout")?, child.stderr.take().ok_or("no stderr")?);
         let waiting: Waiting = Default::default(); let gone = Arc::new(AtomicBool::new(false)); let errs = Arc::new(StdMutex::new(String::new()));
         { let (w, g) = (waiting.clone(), gone.clone());
