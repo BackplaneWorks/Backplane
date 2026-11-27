@@ -1666,6 +1666,12 @@ impl Window {
         self.frame_presented_callbacks.borrow_mut().push(Box::new(callback));
     }
 
+    /// Backplane patch: re-present the already-rendered current frame and flush GPU/X11 present.
+    pub fn re_present(&self) {
+        self.present();
+        self.platform_window.flush_present();
+    }
+
     /// Backplane patch: in the frame last drawn, the visible bounds of the hitbox `id` (its bounds within its content mask) and the visible
     /// bounds of every hitbox inserted after it that overlaps those (what was painted over it: a popover, a menu, a dialog). None when the
     /// frame has no such hitbox (the element was not drawn).
