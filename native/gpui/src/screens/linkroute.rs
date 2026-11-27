@@ -31,9 +31,12 @@ pub fn route(href: &str, file: bool) -> Route {
     if let Some(w) = h.strip_prefix(super::xprobe::HREF).filter(|w| !w.is_empty()) { return Route::Design(w.to_string()) }
     if h.starts_with("backplane://") || crate::pairing::is_open_link(h) { return Route::Hub(h.to_string()) }
     if h.starts_with("https://") || h.starts_with("http://") || h.starts_with("mailto:") { return Route::Web(h.to_string()) }
-    if share_name(h).is_some() { return Route::Share(h.to_string()) }
+    if share_name(h).is_some() {
+        let clean = h.split(['?', '#']).next().unwrap_or(h);
+        return Route::Share(clean.to_string());
+    }
     // a path, or a file:// address: inside Backplane (the hub's `link-file`)
-    if (file || h.starts_with("file://")) && !h.is_empty() { return Route::File(h.to_string()) }
+    if (file || h.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("file://"))) && !h.is_empty() { return Route::File(h.to_string()) }
     /* i18n-ok: the note is drawn through trs */ Route::Note("That link does not open here.")
 }
 
@@ -41,18 +44,39 @@ pub fn route(href: &str, file: bool) -> Route {
 pub fn share_name(href: &str) -> Option<String> {
     let rest = href.trim().strip_prefix("/s/")?; let rest = rest.split(['?', '#']).next().unwrap_or(rest);
     let (token, name) = rest.split_once('/')?;
-    (token.len() >= 16 && token.bytes().all(|b| b.is_ascii_alphanumeric()) && !name.is_empty() && !name.contains('/')).then(|| crate::viewers::downloads::safe_name(&crate::viewers::downloads::unpct(name)))
+    if token.len() < 16 || !token.bytes().all(|b| b.is_ascii_alphanumeric()) || name.is_empty() || name.contains('/') { return None }
+    let decoded = crate::viewers::downloads::unpct(name);
+    if decoded.is_empty() || decoded == "." || decoded == ".." || decoded.contains(['/', '\\', '\0']) { return None }
+    Some(crate::viewers::downloads::safe_name(&decoded))
 }
-/// A path as a message and the hub's `files` spell it, without what a link adds: `file://`, a `:line` (`:12`, `:L12`) or an anchor.
-fn bare(p: &str) -> &str {
-    let p = p.trim(); let p = p.strip_prefix("file://").unwrap_or(p); let p = p.split('#').next().unwrap_or(p);
-    let p = p.split_once(":L").map_or(p, |(a, b)| if b.chars().next().map_or(false, |c| c.is_ascii_digit()) { a } else { p });
-    match p.rsplit_once(':') { Some((a, b)) if !b.is_empty() && b.bytes().all(|c| c.is_ascii_digit()) => a, _ => p }
+/// A path as a message and the hub's `files` spell it, without what a link adds: `file://`, `localhost`, `?query`, `#fragment`, `%XX`, or `:line`.
+fn bare(p: &str) -> String {
+    let mut p = p.trim();
+    if p.get(..7).is_some_and(|s| s.eq_ignore_ascii_case("file://")) {
+        p = &p[7..];
+        if p.starts_with("localhost/") { p = &p["localhost".len()..]; }
+    }
+    let p = p.split('#').next().unwrap_or(p);
+    let p = p.split('?').next().unwrap_or(p);
+    let mut decoded = unpct(p);
+    if cfg!(windows) {
+        let b = decoded.as_bytes();
+        if b.len() >= 3 && (b[0] == b'/' || b[0] == b'\\') && b[1].is_ascii_alphabetic() && b[2] == b':' {
+            decoded.remove(0);
+        }
+    }
+    let s = decoded.as_str();
+    let s = s.split_once(":L").map_or(s, |(a, b)| if b.chars().next().map_or(false, |c| c.is_ascii_digit()) { a } else { s });
+    match s.rsplit_once(':') { Some((a, b)) if !b.is_empty() && b.bytes().all(|c| c.is_ascii_digit()) => a.to_string(), _ => s.to_string() }
 }
-/// The entry of a message's `files` (the hub's `{path, name, size, open}`) that a file link names.
+/// The entry of a message's `files` (the hub's `{path, name, size, open, absPath?}`) that a file link names.
 pub fn listed<'a>(href: &str, files: &'a serde_json::Value) -> Option<&'a serde_json::Value> {
     let want = bare(href);
-    files.as_array()?.iter().find(|f| f["path"].as_str().map_or(false, |p| !want.is_empty() && bare(p) == want))
+    if want.is_empty() { return None }
+    files.as_array()?.iter().find(|f| {
+        f["path"].as_str().map_or(false, |p| bare(p) == want)
+            || f["absPath"].as_str().map_or(false, |p| !p.is_empty() && bare(p) == want)
+    })
 }
 /// The hub address that downloads a file of the hub's machine (`/file`), and the name it is saved as. A thread of another machine
 /// (`<link>~<id>`) names itself, so its hub reads the file there. A path the hub cannot take whole (relative, outside a far thread) has none.
@@ -62,8 +86,8 @@ pub fn file_download(path: &str, thread: &str) -> Option<(String, String)> {
     let far = thread.contains('~');
     if p.is_empty() || (!abs && !far) { return None }
     use crate::viewers::downloads::{pct, safe_name};
-    let url = if far { format!("/file?thread={}&path={}", pct(thread), pct(p)) } else { format!("/file?path={}", pct(p)) };
-    Some((url, safe_name(file_name(p))))
+    let url = if far { format!("/file?thread={}&path={}", pct(thread), pct(&p)) } else { format!("/file?path={}", pct(&p)) };
+    Some((url, safe_name(file_name(&p))))
 }
 /// What a press on a file link does (docs/file-links.md): on this computer's hub it opens inside Backplane (`link-file`) as always. On another
 /// computer's hub a file the hub lists for the message with `open: "download"` comes down to this computer; one Backplane's viewers draw
@@ -72,7 +96,8 @@ pub fn file_download(path: &str, thread: &str) -> Option<(String, String)> {
 pub enum FileGo { Open(String), Download { url: String, name: String } }
 pub fn file_go(href: &str, files: &serde_json::Value, remote: bool, thread: &str) -> FileGo {
     if remote { if let Some(f) = listed(href, files).filter(|f| f["open"] == "download") {
-        if let Some((url, name)) = file_download(f["path"].as_str().unwrap_or(""), thread) {
+        let best = f["absPath"].as_str().filter(|s| !s.is_empty()).or_else(|| f["path"].as_str()).unwrap_or("");
+        if let Some((url, name)) = file_download(best, thread) {
             let name = f["name"].as_str().filter(|n| !n.is_empty()).map(crate::viewers::downloads::safe_name).unwrap_or(name);
             return FileGo::Download { url, name }
         }
@@ -189,7 +214,13 @@ mod tests {
         assert_eq!(route(&format!("/s/{tok}/a%20b.zip"), true), Route::Share(format!("/s/{tok}/a%20b.zip")), "drawn as a path too");
         assert_eq!(share_name(&format!("/s/{tok}/a%20b.zip")).as_deref(), Some("a b.zip"));
         assert_eq!(share_name("/s/x/a.zip"), None); assert_eq!(share_name(&format!("/s/{tok}/")), None); assert_eq!(share_name(&format!("/s/{tok}/a/b")), None);
+        assert_eq!(share_name(&format!("/s/{tok}/..")), None);
+        assert_eq!(route(&format!("/s/{tok}/POWER_TEST.md?inline=1"), false), Route::Share(format!("/s/{tok}/POWER_TEST.md")));
         assert_eq!(route("/srv/s/a.txt", true), Route::File("/srv/s/a.txt".into()));
+        assert_eq!(route("FILE:///w/My%20Doc.md", false), Route::File("FILE:///w/My%20Doc.md".into()));
+        let abs_files = serde_json::json!([{"path": "/w/p/docs/My Doc.pdf", "name": "My Doc.pdf", "size": 9, "open": "download", "absPath": "/real/p/docs/My Doc.pdf"}]);
+        assert_eq!(file_go("file://localhost/w/p/docs/My%20Doc.pdf#page=2", &abs_files, true, "t1"), FileGo::Download { url: "/file?path=%2Freal%2Fp%2Fdocs%2FMy%20Doc.pdf".into(), name: "My Doc.pdf".into() });
+        assert!(listed("file:///real/p/docs/My%20Doc.pdf", &abs_files).is_some());
     }
     #[test] fn what_opens_nowhere_is_a_note() {
         assert!(matches!(route("ftp://x", false), Route::Note(_))); assert!(matches!(route("", true), Route::Note(_))); assert!(matches!(route("javascript:alert(1)", false), Route::Note(_)));

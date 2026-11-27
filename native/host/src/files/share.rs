@@ -31,12 +31,42 @@ pub const DEFAULT_LIFE_S: u64 = 86400;
 /// By hub home (one hub a process in use; tests run several).
 /// One snapshot each: every root, and the browser's (made together, from the same model, so the two always agree).
 #[derive(Clone, Default)]
-struct Snap { all: Vec<PathBuf>, browser: Vec<PathBuf> }
+struct Snap { all: Vec<PathBuf>, browser: Vec<PathBuf>, projects: Vec<(String, PathBuf)> }
 static ROOTS: LazyLock<RwLock<std::collections::HashMap<PathBuf, Snap>>> = LazyLock::new(Default::default);
 /// The roots of this process's hub (the presenter's).
 pub fn roots() -> Vec<PathBuf> { roots_at(&HOME.read().unwrap().clone()) }
 pub fn roots_at(home: &Path) -> Vec<PathBuf> { ROOTS.read().unwrap().get(home).map(|s| s.all.clone()).unwrap_or_default() }
+pub fn projects() -> Vec<(String, PathBuf)> { projects_at(&HOME.read().unwrap().clone()) }
+pub fn projects_at(home: &Path) -> Vec<(String, PathBuf)> { ROOTS.read().unwrap().get(home).map(|s| s.projects.clone()).unwrap_or_default() }
 fn known(home: &Path) -> bool { ROOTS.read().unwrap().contains_key(home) }
+
+/// Live local projects and their canonical folders, deepest folder first.
+pub fn projects_of(m: &crate::model::Model) -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = vec![];
+    for (id, p) in &m.projects {
+        if p.removed || id.contains('~') || p.root.is_empty() { continue }
+        if let Ok(c) = crate::plat::fs::canonicalize(Path::new(&p.root)) {
+            if c.is_dir() && !too_wide(&c) { out.push((id.clone(), c)) }
+        }
+    }
+    out.sort_by(|a, b| {
+        b.1.components().count().cmp(&a.1.components().count())
+            .then_with(|| b.1.as_os_str().len().cmp(&a.1.as_os_str().len()))
+            .then_with(|| a.0.cmp(&b.0))
+    });
+    out
+}
+
+/// The deepest registered project owning `real`, with its slash-separated relative path.
+pub fn owner_of(projects: &[(String, PathBuf)], real: &Path) -> Option<(String, String)> {
+    let (pid, root) = projects.iter()
+        .filter(|(_, r)| real.starts_with(r))
+        .max_by_key(|(_, r)| (r.components().count(), r.as_os_str().len()))?;
+    let rel = real.strip_prefix(root).ok()?;
+    let rel_s = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
+    if rel_s.is_empty() { return None }
+    Some((pid.clone(), rel_s))
+}
 
 /// The live projects' folders and the live threads' worktrees, then the hub's own allowed folders and the setting's, each its real path.
 pub fn roots_of(m: &crate::model::Model, home: &Path, extra: &str) -> Vec<PathBuf> {
@@ -84,12 +114,39 @@ pub fn local_path(p: &str) -> Option<PathBuf> {
     let decoded;
     let p = if let Some(rest) = strip_file_scheme(p) {
         let rest = rest.split('#').next().unwrap_or(rest);
+        let rest = rest.split('?').next().unwrap_or(rest);
         decoded = crate::present::filelink::url_path(rest);
         decoded.as_str()
     } else { p };
     if p.contains('\0') || !crate::files::mimg::no_climb(p) { return None }
     let full = match p.strip_prefix("~/") { Some(r) => PathBuf::from(crate::plat::dirs::home_or_empty()).join(r), None => PathBuf::from(p) };
     if full.is_absolute() { Some(full) } else { None }
+}
+
+/// Validates `/s/<48-hex-token>/<name>` (stripping optional `?query` and `#fragment`) and returns `(clean_route, token)`.
+pub fn share_route_parts(raw: &str) -> Option<(String, String)> {
+    let s = raw.trim();
+    let s = s.split('#').next().unwrap_or(s);
+    let s = s.split('?').next().unwrap_or(s);
+    let rest = s.strip_prefix("/s/")?;
+    let (token, name) = rest.split_once('/')?;
+    if token.len() != 48 || !token.bytes().all(|b| b.is_ascii_hexdigit()) { return None }
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) { return None }
+    let b = name.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            if i + 2 >= b.len() || !b[i + 1].is_ascii_hexdigit() || !b[i + 2].is_ascii_hexdigit() { return None }
+            i += 3;
+        } else if b[i].is_ascii_alphanumeric() || b"-._~".contains(&b[i]) {
+            i += 1;
+        } else {
+            return None;
+        }
+    }
+    let decoded = crate::files::fm::from_uri(name);
+    if decoded.is_empty() || decoded == "." || decoded == ".." || decoded.contains(['/', '\\', '\0']) { return None }
+    Some((format!("/s/{token}/{name}"), token.to_string()))
 }
 
 /// The rule: the real file and its size, or why not (the words a client shows). `home` is this hub's home.
@@ -156,22 +213,32 @@ pub fn linkable(text: &str) -> Vec<Value> {
     v
 }
 pub fn linkable_with(roots: &[PathBuf], home: &Path, text: &str) -> Vec<Value> {
+    linkable_with_projects(roots, &[], home, text)
+}
+pub fn linkable_with_projects(roots: &[PathBuf], projects: &[(String, PathBuf)], home: &Path, text: &str) -> Vec<Value> {
     if roots.is_empty() { return vec![] }
     let mut out = vec![];
     for p in candidates(text) {
         if out.len() >= 32 { break }
-        if let Ok((_, md)) = check(roots, home, &p) {
+        if let Ok((real, md)) = check(roots, home, &p) {
             let name = p.rsplit(['/', '\\']).next().unwrap_or(&p).to_string();
             let open = if crate::files::fm::preview(&name).is_empty() { "download" } else { "view" };
-            out.push(json!({"path": p, "name": name, "size": md.len(), "open": open}));
+            let mut item = json!({"path": p, "name": name, "size": md.len(), "open": open});
+            if let Some((pid, rel)) = owner_of(projects, &real) {
+                item["project"] = json!(pid);
+                item["relPath"] = json!(rel);
+                item["absPath"] = json!(real.to_string_lossy().into_owned());
+            }
+            out.push(item);
         }
     }
     out
 }
 fn linkable_now(text: &str) -> Vec<Value> {
     let roots = roots();
+    let projects = projects();
     let home = HOME.read().unwrap().clone();
-    linkable_with(&roots, &home, text)
+    linkable_with_projects(&roots, &projects, &home, text)
 }
 static HOME: LazyLock<RwLock<PathBuf>> = LazyLock::new(Default::default);
 
@@ -259,8 +326,8 @@ fn refresh_soon(hub: &Arc<Hub>) {
 }
 pub async fn refresh(hub: &Arc<Hub>) {
     let extra = hub.setting("files.share.roots").await.unwrap_or_default();
-    let (all, browser) = { let m = hub.model().await; (roots_of(&m, &hub.cfg.home, &extra), browser_roots_of(&m, &hub.cfg.home)) };
-    ROOTS.write().unwrap().insert(hub.cfg.home.clone(), Snap { all, browser });
+    let (all, browser, projects) = { let m = hub.model().await; (roots_of(&m, &hub.cfg.home, &extra), browser_roots_of(&m, &hub.cfg.home), projects_of(&m)) };
+    ROOTS.write().unwrap().insert(hub.cfg.home.clone(), Snap { all, browser, projects });
 }
 
 // ---- streaming ----
@@ -355,13 +422,30 @@ pub async fn stream<W: AsyncWrite + Unpin>(w: &mut W, who: Who, req: &Req, o: Op
 }
 
 /// `/file`: the credential was checked by the caller. A thread elsewhere is read there.
-/// `thread` (a thread of this machine) narrows it: the file must be inside that thread's folder.
+/// `thread` (a thread of this machine) or `project` narrows it: the file must be inside that thread's or project's folder.
 pub async fn serve_file<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, who: Who, req: &Req) -> std::io::Result<()> {
     if req.method != "GET" && req.method != "HEAD" { return w.write_all(&refusal("405 Method Not Allowed", "GET only")).await }
-    let path = crate::files::fm::from_uri(&req.param("path"));
+    let mut path = crate::files::fm::from_uri(&req.param("path"));
     let thread = crate::files::fm::from_uri(&req.param("thread"));
+    let project = crate::files::fm::from_uri(&req.param("project"));
     if thread.contains('~') { return far_file(hub, w, who, req, &thread, &path).await }
-    let within = if thread.is_empty() { None } else { match crate::files::root_of(hub, &thread).await { Some(r) => Some(r), None => return w.write_all(&refusal("404 Not Found", "no such thread")).await } };
+    let within = if !thread.is_empty() {
+        match crate::files::root_of(hub, &thread).await { Some(r) => Some(r), None => return w.write_all(&refusal("404 Not Found", "no such thread")).await }
+    } else if !project.is_empty() {
+        if project.contains('~') { return w.write_all(&refusal("404 Not Found", "no such project")).await }
+        let proj_root = {
+            let m = hub.model().await;
+            m.projects.get(&project).filter(|p| !p.removed && !p.root.is_empty()).map(|p| PathBuf::from(&p.root))
+        };
+        let Some(r) = proj_root else { return w.write_all(&refusal("404 Not Found", "no such project")).await };
+        if !path.is_empty() && !crate::plat::fs::is_abs(&path) && !path.starts_with("~/") && strip_file_scheme(&path).is_none() {
+            if !crate::files::fm::files_safe(&path) { return w.write_all(&refusal("403 Forbidden", "that file is not in this project")).await }
+            path = r.join(&path).to_string_lossy().into_owned();
+        }
+        Some(r)
+    } else {
+        None
+    };
     if !known(&hub.cfg.home) { refresh(hub).await }
     let (home, roots) = (hub.cfg.home.clone(), roots_for(who, &hub.cfg.home));
     let p2 = path.clone();
@@ -616,6 +700,8 @@ pub async fn serve_share<W: AsyncWrite + Unpin>(hub: &Arc<Hub>, w: &mut W, who: 
 
 /// Unknown share tokens one address may try a minute (192-bit tokens are not guessed; this only stops a scan from costing the hub).
 const MISSES: u32 = 30;
+pub(crate) fn share_rate_limited(who: &str) -> bool { misses(who, false) >= MISSES }
+pub(crate) fn note_share_miss(who: &str) { misses(who, true); }
 /// The misses of `who` in the current minute, one added when `add`.
 fn misses(who: &str, add: bool) -> u32 {
     use std::{collections::HashMap, sync::Mutex, time::{Duration, Instant}};

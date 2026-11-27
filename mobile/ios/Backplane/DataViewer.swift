@@ -134,8 +134,8 @@ struct DataViewerView: View {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
         let e = ext(openFile)
-        _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" || e == "pcbdoc" ? "Board" : e == "kicad_sch" || e == "schdoc" ? "Schematic" : ["step", "stp", "glb"].contains(e) ? "Mech" : "Files")
-        _target = State(initialValue: e == "kicad_pcb" || e == "pcbdoc" ? ("Board", openFile) : e == "kicad_sch" || e == "schdoc" ? ("Schematic", openFile) : ["step", "stp", "glb"].contains(e) ? ("Mech", openFile) : nil)
+        _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" || e == "pcbdoc" ? "Board" : e == "kicad_sch" || e == "schdoc" ? "Schematic" : cadExt.contains(e) ? "Mech" : "Files")
+        _target = State(initialValue: e == "kicad_pcb" || e == "pcbdoc" ? ("Board", openFile) : e == "kicad_sch" || e == "schdoc" ? ("Schematic", openFile) : cadExt.contains(e) ? ("Mech", openFile) : nil)
         _railState = State(initialValue: ViewerRailState(threadId: thread.id))
     }
     var body: some View {
@@ -620,6 +620,7 @@ struct DLoading: View {
 
 // Files: browse the project, preview what a phone can show, open a board, schematic or model in its tab
 private let imageExt: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "bmp", "heic"]
+private let cadExt: Set<String> = ["step", "stp", "glb", "sc", "solidcraft", "iges", "igs", "stl", "3mf", "obj"]
 private func ext(_ n: String) -> String { (n.split(separator: ".").last.map(String.init) ?? "").lowercased() }
 private func sizeText(_ n: Int) -> String { n < 1024 ? "\(n) B" : n < 1 << 20 ? "\(n / 1024) KB" : "\(n >> 20) MB" }
 
@@ -655,7 +656,7 @@ struct DataFilesTab: View {
                                 switch ext(e.name) {
                                 case "kicad_pcb", "pcbdoc": open(("Board", full))
                                 case "kicad_sch", "schdoc": open(("Schematic", full))
-                                case "step", "stp", "glb": open(("Mech", full))
+                                case let x where cadExt.contains(x): open(("Mech", full))
                                 default: preview = full
                                 }
                             }
@@ -709,7 +710,15 @@ struct DataFilePreview: View {
                 else if d.count < 200_000, !d.contains(0) {
                     let t = String(decoding: d, as: UTF8.self)
                     if line > 0 { DataLinedText(text: t, line: line).accessibilityIdentifier("data.preview.text") }
-                    else { ScrollView { (ext(path) == "md" ? Text(.init(t)) : Text(t)).font(.system(.footnote, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading).padding(12) }.accessibilityIdentifier("data.preview.text") }
+                    else {
+                        ScrollView {
+                            if ext(path) == "md" || ext(path) == "markdown" {
+                                DataMarkdown(text: t, thread: thread.id).padding(12)
+                            } else {
+                                Text(t).font(.system(.footnote, design: .monospaced)).frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                            }
+                        }.accessibilityIdentifier("data.preview.text")
+                    }
                 } else { Text(Tr.ios_preview_none(size: sizeText(d.count))).foregroundStyle(.secondary).padding(16) }
             } else { ProgressView().padding(24) }
             Spacer(minLength: 0)

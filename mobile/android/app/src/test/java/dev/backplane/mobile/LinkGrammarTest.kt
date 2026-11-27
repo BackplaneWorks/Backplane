@@ -40,5 +40,12 @@ class LinkGrammarTest {
             listOf("bppath:/home/user/proj/docs/Parts List.pdf|file:///home/user/proj/docs/Parts%20List.pdf"),
             kinds("see file:///home/user/proj/docs/Parts%20List.pdf now"),
         )
+        val tok = "0123456789abcdef0123456789abcdef0123456789abcdef"
+        assertEquals("bppath:/s/$tok/POWER_TEST.md", linkTargetUrl("/s/$tok/POWER_TEST.md?inline=1"))
+        assertEquals("bppath:/home/user/My Project/.backplane/worktrees/power-test/docs/POWER_TEST.md", linkTargetUrl("/home/user/My%20Project/.backplane/worktrees/power-test/docs/POWER_TEST.md"))
+        assertEquals("bppath:/home/user/proj/Makefile", linkTargetUrl("/home/user/proj/Makefile"))
+        assertEquals("#L42", lineAnchorOf("file:///home/user/proj/src/a.rs#L42"))
+        assertEquals(":12:3", lineAnchorOf("src/a.rs:12:3"))
+        assertEquals("", lineAnchorOf("file:///home/user/proj/docs/a.pdf#page=2"))
     }
 }

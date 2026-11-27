@@ -9,6 +9,7 @@ func kinds(_ t: String) -> [String] { dLinkRuns(t).compactMap { run in run.url.m
 
 // shares
 check(FileFetch.shareRoute("/s/\(tok)/gerbers.zip") == "/s/\(tok)/gerbers.zip", "share")
+check(FileFetch.shareRoute("/s/\(tok)/POWER_TEST.md?inline=1#top") == "/s/\(tok)/POWER_TEST.md", "share strips query and fragment")
 check(FileFetch.shareRoute("/s/\(tok)/my%20case.step") == "/s/\(tok)/my%20case.step", "share, encoded name")
 check(FileFetch.shareRoute("/s/short/gerbers.zip") == nil, "short token")
 check(FileFetch.shareRoute("/s/\(tok)/a/b.zip") == nil, "a folder in the name")
@@ -38,9 +39,10 @@ check(FileFetch.fileQuery(path: "/a b.zip", thread: "t12") == [URLQueryItem(name
 check(FileFetch.fileQuery(path: "~/x.zip", thread: "desk~t9") == [URLQueryItem(name: "path", value: "~/x.zip"), URLQueryItem(name: "thread", value: "desk~t9")], "far thread")
 
 // an entry's files on the wire
-let j = #"{"path":"/x/y.zip","name":"y.zip","size":104857600}"#
+let j = #"{"path":"/x/y.zip","name":"y.zip","size":104857600,"project":"pa","absPath":"/real/x/y.zip"}"#
 let f = try! JSONDecoder().decode(DFileLink.self, from: Data(j.utf8))
-check(f == DFileLink(path: "/x/y.zip", name: "y.zip", size: 104857600, open: "download"), "decode \(f)")
+check(f == DFileLink(path: "/x/y.zip", name: "y.zip", size: 104857600, open: "download", project: "pa", absPath: "/real/x/y.zip"), "decode \(f)")
+check(FileFetch.find("/real/x/y.zip", in: [f])?.project == "pa", "find by absPath")
 
 // resume planning
 check(FileFetch.ask(have: 0, etag: "\"1-2\"").isEmpty, "nothing yet")

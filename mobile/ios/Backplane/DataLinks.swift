@@ -11,16 +11,28 @@ struct DLinkTarget: Equatable {
 }
 
 struct DLinkReply: Decodable {
-    var kind: String; var thread: String; var project: String; var room: String; var path: String; var line: Int; var note: String; var page: String; var name: String; var size: Int64
-    enum CodingKeys: String, CodingKey { case kind, thread, project, room, path, line, note, page, name, size }
+    var kind: String; var thread: String; var project: String; var room: String; var path: String; var absPath: String; var route: String; var line: Int; var note: String; var page: String; var name: String; var size: Int64
+    enum CodingKeys: String, CodingKey { case kind, thread, project, room, path, absPath, route, line, note, page, name, size }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
-        kind = c.str(.kind); thread = c.str(.thread); project = c.str(.project); room = c.str(.room); path = c.str(.path); line = c.int(.line); note = c.str(.note); page = c.str(.page); name = c.str(.name)
+        kind = c.str(.kind); thread = c.str(.thread); project = c.str(.project); room = c.str(.room); path = c.str(.path); absPath = c.str(.absPath); route = c.str(.route); line = c.int(.line); note = c.str(.note); page = c.str(.page); name = c.str(.name)
         size = (try? c.decode(Int64.self, forKey: .size)) ?? Int64(c.int(.size))
     }
 }
 
 extension DataClient {
+    /// Extracts trailing `#L<n>` / `#L<n>-L?<m>` or `:<n>` / `:<n>:<m>` line suffixes preserved across `absPath` rewrites.
+    private func dLinkLineAnchor(_ text: String) -> String {
+        if let r = text.range(of: #"#L\d+(?:-L?\d+)?$"#, options: .regularExpression) {
+            return String(text[r])
+        }
+        let noFrag = text.split(separator: "#", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? text
+        if let r = noFrag.range(of: #"(?::\d+){1,2}$"#, options: .regularExpression) {
+            return String(noFrag[r])
+        }
+        return ""
+    }
+
     /// What to ask the hub for a tapped link: a backplane:// address (this build's own scheme counts as it), or the path a bppath: link carries.
     private func linkText(_ url: URL) -> String? {
         if let p = dPathFrom(url) { return p }
@@ -40,7 +52,12 @@ extension DataClient {
 
     func openLink(_ url: URL, thread: String) {
         guard let text = linkText(url) else { return }
-        if let p = dPathFrom(url), download(p, thread: thread) { return }
+        let tappedPath = dPathFrom(url)
+        if let p = tappedPath, let s = FileFetch.shareRoute(p) { DDownloads.shared.share(s); return }
+        let listed = tappedPath.flatMap { FileFetch.find($0, in: (entries[thread] ?? []).flatMap(\.files)) }
+        if has("fileLinks"), let f = listed, f.open != "view" {
+            DDownloads.shared.file(f, thread: thread); return
+        }
         Task {
             // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
             var waited = 0
@@ -53,17 +70,29 @@ extension DataClient {
                 return
             }
             do {
-                let r: DLinkReply = try await call("link.resolve", ["url": text, "thread": thread])
+                let targetURL: String
+                if let f = listed, !f.absPath.isEmpty {
+                    let anchor = dLinkLineAnchor(text)
+                    targetURL = (!anchor.isEmpty && dLinkLineAnchor(f.absPath).isEmpty) ? (f.absPath + anchor) : f.absPath
+                } else {
+                    targetURL = text
+                }
+                var params: [String: Any] = ["url": targetURL, "thread": thread]
+                if let proj = listed?.project, !proj.isEmpty { params["project"] = proj }
+                let r: DLinkReply = try await call("link.resolve", params)
                 switch r.kind {
                 case "thread": linkTarget = DLinkTarget(kind: .thread, id: r.thread)
                 case "project": linkTarget = DLinkTarget(kind: .project, id: r.project)
                 case "room": linkTarget = DLinkTarget(kind: .room, id: r.room)
                 case "file": linkTarget = DLinkTarget(kind: .file, id: r.thread, path: r.path, line: r.line)
-                case "download": DDownloads.shared.file(DFileLink(path: r.path, name: r.name, size: r.size, open: "download"), thread: thread)
+                case "download": DDownloads.shared.file(DFileLink(path: r.path, name: r.name, size: r.size, open: "download", project: r.project), thread: thread)
+                case "share":
+                    if let s = FileFetch.shareRoute(r.route) { DDownloads.shared.share(s) }
+                    else { say(r.note.isEmpty ? "That link does not open here." : r.note) }
                 case "settings": linkTarget = DLinkTarget(kind: .settings, id: r.page)
                 default:
                     // a file the reply lists that no viewer here opens is downloaded instead
-                    if let p = dPathFrom(url), download(p, thread: thread, viewToo: true) { break }
+                    if let p = tappedPath, download(p, thread: thread, viewToo: true) { break }
                     say(r.note.isEmpty ? "That link does not open here." : r.note)
                 }
             } catch { say(conn == .online ? error.localizedDescription : "Not connected to the hub.") }

@@ -205,4 +205,78 @@ describe("web md in-place copy", () => {
     await Promise.resolve();
     expect(dom.getCopied()).toBe("echo ok");
   });
+
+  test("renders file://, /s/ share, and backplane://file links with preserved label and target project", () => {
+    makeFakeDom();
+    const opened: Array<{ href: string; project?: string }> = [];
+    const tok = "0123456789abcdef0123456789abcdef0123456789abcdef";
+    const wtPath = "/home/user/projects/alpha/.backplane/worktrees/power-test/docs/POWER_TEST.md";
+    const files = [
+      { path: wtPath, name: "POWER_TEST.md", size: 42, open: "view", project: "proj-a", absPath: wtPath },
+    ];
+    const md = [
+      `See [POWER_TEST.md](file://${wtPath})`,
+      `and [My Doc](file:///home/user/projects/alpha/docs/My%20Doc%20(Final).pdf)`,
+      `and [POWER_TEST.md](/s/${tok}/POWER_TEST.md)`,
+      `and [Ref](backplane://file/proj-a/docs/POWER_TEST.md)`,
+      `and [bad](javascript:alert(1)).`,
+    ].join(" ");
+    const frag = renderMarkdown(md, {
+      files,
+      onOpenLink: (href, project) => opened.push({ href, project }),
+    });
+
+    const fileLinks = findAll(frag, (el) => el.classList.contains("bp-md-file"));
+    expect(fileLinks.length).toBe(3);
+    expect(fileLinks[0].getAttribute("data-bp-link")).toBe(wtPath);
+    expect(fileLinks[0].getAttribute("data-bp-project")).toBe("proj-a");
+    expect((fileLinks[0].children[0] as FakeText).textContent).toBe("POWER_TEST.md");
+    expect(fileLinks[1].getAttribute("data-bp-link")).toBe("/home/user/projects/alpha/docs/My Doc (Final).pdf");
+    expect(fileLinks[2].getAttribute("data-bp-link")).toBe("backplane://file/proj-a/docs/POWER_TEST.md");
+
+    const shareLinks = findAll(frag, (el) => el.classList.contains("bp-md-share"));
+    expect(shareLinks.length).toBe(1);
+    expect(shareLinks[0].getAttribute("data-bp-share")).toBe(`/s/${tok}/POWER_TEST.md`);
+    expect(shareLinks[0].href).toBe(`/s/${tok}/POWER_TEST.md`);
+
+    const badCodes = findAll(frag, (el) => el.classList.contains("bp-code-inline"));
+    expect(badCodes.map((c) => c.textContent)).toEqual(["bad"]);
+
+    fileLinks[0].click();
+    shareLinks[0].click();
+    expect(opened).toEqual([
+      { href: wtPath, project: "proj-a" },
+      { href: `/s/${tok}/POWER_TEST.md`, project: undefined },
+    ]);
+  });
+
+  test("preserves line anchors when matched files provide absPath", () => {
+    makeFakeDom();
+    const clicked: Array<{ href: string; project?: string }> = [];
+    const frag = renderMarkdown(
+      "Inspect [main](file:///p/proj-b/src/a.rs#L42) and bare file:///p/proj-b/src/a.rs:19",
+      {
+        files: [{ path: "src/a.rs", absPath: "/p/proj-b/src/a.rs", project: "proj-b" }],
+        onOpenLink: (href, project) => clicked.push({ href, project }),
+      }
+    );
+    const links = findAll(frag, (el) => el.classList.contains("bp-md-file"));
+    expect(links.length).toBe(1);
+    links[0].click();
+    const bares = findAll(frag, (el) => el.classList.contains("bp-md-path"));
+    expect(bares.length).toBe(1);
+    bares[0].click();
+    expect(clicked).toEqual([
+      { href: "/p/proj-b/src/a.rs#L42", project: "proj-b" },
+      { href: "/p/proj-b/src/a.rs:19", project: "proj-b" },
+    ]);
+  });
+
+  test("does not treat bare domains as hub file links", () => {
+    makeFakeDom();
+    const frag = renderMarkdown("Visit [site](example.com) for details");
+    expect(findAll(frag, (el) => el.classList.contains("bp-md-file")).length).toBe(0);
+    const codes = findAll(frag, (el) => el.classList.contains("bp-code-inline"));
+    expect(codes.map((c) => c.textContent)).toEqual(["site"]);
+  });
 });

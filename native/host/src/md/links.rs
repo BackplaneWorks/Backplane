@@ -65,13 +65,81 @@ pub fn is_design(s: &str) -> bool {
     let p = part(s); let rest: String = s.chars().skip(p.chars().count()).collect();
     sfx(&rest) && !p.ends_with('/') && !design_kind(last(&p)).is_empty() && last(&p).split('.').next().map_or(false, |n| !n.is_empty())
 }
+/// A `/s/<48-hex>/<name>` hub share route (normalizes query/fragment, matching `share::share_route_parts`).
+pub fn share_route(u: &str) -> Option<String> {
+    let s = u.trim().split('#').next().unwrap_or(u);
+    let s = s.split('?').next().unwrap_or(s);
+    let rest = s.strip_prefix("/s/")?;
+    let (token, name) = rest.split_once('/')?;
+    if token.len() != 48 || !token.bytes().all(|b| b.is_ascii_hexdigit()) { return None }
+    if name.is_empty() || name == "." || name == ".." || name.contains(['/', '\\']) { return None }
+    let b = name.as_bytes();
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' {
+            if i + 2 >= b.len() || !b[i + 1].is_ascii_hexdigit() || !b[i + 2].is_ascii_hexdigit() { return None }
+            i += 3;
+        } else if b[i].is_ascii_alphanumeric() || b"-._~".contains(&b[i]) {
+            i += 1;
+        } else {
+            return None;
+        }
+    }
+    let decoded = refs::unpct(name);
+    if decoded.is_empty() || decoded == "." || decoded == ".." || decoded.contains(['/', '\\', '\0']) { return None }
+    Some(format!("/s/{token}/{name}"))
+}
+
+fn file_url_rest_ok(s: &str, allow_spaces: bool) -> bool {
+    s.get(..7).filter(|p| p.eq_ignore_ascii_case("file://")).map_or(false, |_| {
+        let r = &s[7..];
+        let r = r.strip_prefix("localhost").filter(|rest| rest.starts_with(['/', '\\'])).unwrap_or(r);
+        let r = r.split(['?', '#']).next().unwrap_or(r);
+        let drive = r.len() >= 3 && r.as_bytes()[0].is_ascii_alphabetic() && r.as_bytes()[1] == b':' && (r.as_bytes()[2] == b'/' || r.as_bytes()[2] == b'\\');
+        let no_bad_ws = if allow_spaces { !r.contains(['\0', '\n', '\r', '\t']) } else { !r.contains(char::is_whitespace) };
+        (r.len() > 1 && r.starts_with('/') || drive) && no_bad_ws
+    })
+}
+
 /// A `file:///abs/path` address (a design file's or any): a link to that file.
-pub fn file_url(s: &str) -> bool { s.strip_prefix("file://").map_or(false, |r| { let r = r.strip_prefix("localhost").unwrap_or(r); r.len() > 1 && r.starts_with('/') && !r.contains(char::is_whitespace) }) }
+pub fn file_url(s: &str) -> bool { file_url_rest_ok(s, false) }
 
-/// Link.target: a markdown target, file:// dropped
-fn target(u: &str) -> String { u.strip_prefix("file://").unwrap_or(u).to_string() }
+fn url_path(r: &str) -> String {
+    let r = r.strip_prefix("localhost").filter(|rest| rest.starts_with(['/', '\\'])).unwrap_or(r);
+    let r = refs::unpct(r);
+    #[cfg(windows)]
+    if r.len() >= 4 && r.starts_with('/') && r.as_bytes()[1].is_ascii_alphabetic() && r.as_bytes()[2] == b':' && (r.as_bytes()[3] == b'/' || r.as_bytes()[3] == b'\\') {
+        return r[1..].to_string();
+    }
+    r
+}
 
-enum Scan { Text(S), Url(S, S), Lab(S, S), Mid(S, S), Href(S, S, S) }
+fn unwrap_angle(u: &str) -> (&str, bool) {
+    let t = u.trim();
+    if t.starts_with('<') && t.ends_with('>') && t.len() >= 2 { (&t[1..t.len() - 1], true) } else { (t, false) }
+}
+
+/// Link.target: a markdown target, `file://` decoded (with `#L<line>` kept), share route normalized
+fn target(u: &str) -> String {
+    let (u, _) = unwrap_angle(u);
+    if let Some(route) = share_route(u) {
+        return route;
+    }
+    if u.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("file://")) {
+        let rest = &u[7..];
+        let (before_frag, frag) = match rest.split_once('#') {
+            Some((a, f)) if f.starts_with('L') && f[1..].chars().next().is_some_and(|c| c.is_ascii_digit()) => (a, Some(f)),
+            Some((a, _)) => (a, None),
+            None => (rest, None),
+        };
+        let before_query = before_frag.split('?').next().unwrap_or(before_frag);
+        let decoded = url_path(before_query);
+        return match frag { Some(f) => format!("{decoded}#{f}"), None => decoded };
+    }
+    u.to_string()
+}
+
+enum Scan { Text(S), Url(S, S), Lab(S, S), Mid(S, S), Href(S, S, S, usize) }
 
 fn text(acc: &[char], out: &mut Vec<Piece>) { if !acc.is_empty() { out.push(Piece::Text(st(acc))) } }
 fn word_end(acc: &[char]) -> bool { acc.last().map_or(false, |c| c.is_ascii_alphanumeric()) }
@@ -110,7 +178,20 @@ fn url_end(acc: S, u: S, out: &mut Vec<Piece>) -> S {
 fn bang(acc: &[char]) -> bool { acc.last() == Some(&'!') }
 
 fn href_ok(u: &str, acc: &[char]) -> bool {
-    if refs::parse(u).is_some() { !bang(acc) } else { valid(u) || (!bang(acc) && is_ref(&target(u), true)) }
+    let (u, angled) = unwrap_angle(u);
+    if refs::parse(u).is_some() { return !bang(acc) }
+    if valid(u) { return true }
+    if bang(acc) { return false }
+    if file_url_rest_ok(u, angled) || share_route(u).is_some() { return true }
+    let t = target(u);
+    if is_ref(&t, true) { return true }
+    let decoded = refs::unpct(&t);
+    let no_bad_ws = if angled { !u.contains(['\0', '\n', '\r', '\t']) } else { !u.contains(char::is_whitespace) };
+    ((decoded.starts_with('/') && !decoded.starts_with("//")) || decoded.starts_with("~/"))
+        && decoded.len() > 1
+        && !decoded.contains('\0')
+        && !decoded.contains("://")
+        && no_bad_ws
 }
 
 fn lab_raw(acc: &[char], l: &[char]) -> S { let mut a = acc.to_vec(); a.push('['); a.extend_from_slice(l); a }
@@ -133,19 +214,25 @@ fn scan(s: &[char]) -> Vec<Piece> {
                 else { l.push(c); Scan::Lab(acc, l) }
             }
             Scan::Mid(acc, l) => {
-                if c == '(' { Scan::Href(acc, l, vec![]) }
+                if c == '(' { Scan::Href(acc, l, vec![], 0) }
                 else { let mut a = lab_raw(&acc, &l); a.push(']'); text_step(a, &mut out, c, t) }
             }
-            Scan::Href(acc, l, mut u) => {
-                if c == ')' {
+            Scan::Href(acc, l, mut u, pd) => {
+                if c == ')' && pd == 0 {
                     let us = st(&u);
                     if href_ok(&us, &acc) {
                         text(&acc, &mut out);
                         let label = if l.is_empty() { us.clone() } else { st(&l) };
-                        out.push(piece(refs::parse(&us), label, target(&us))); Scan::Text(vec![])
+                        let (clean_u, _) = unwrap_angle(&us);
+                        out.push(piece(refs::parse(clean_u), label, target(&us))); Scan::Text(vec![])
                     } else { let mut a = href_raw(&acc, &l, &u); a.push(')'); Scan::Text(a) }
-                } else if stops(c) { let a = href_raw(&acc, &l, &u); text_step(a, &mut out, c, t) }
-                else { u.push(c); Scan::Href(acc, l, u) }
+                } else if c == '(' {
+                    u.push(c); Scan::Href(acc, l, u, pd + 1)
+                } else if c == ')' {
+                    u.push(c); Scan::Href(acc, l, u, pd - 1)
+                } else if stops(c) && !(u.first() == Some(&'<') && !u.contains(&'>') && c == ' ') {
+                    let a = href_raw(&acc, &l, &u); text_step(a, &mut out, c, t)
+                } else { u.push(c); Scan::Href(acc, l, u, pd) }
             }
         };
         i += 1;
@@ -155,7 +242,7 @@ fn scan(s: &[char]) -> Vec<Piece> {
         Scan::Url(acc, u) => { let a = url_end(acc, u, &mut out); text(&a, &mut out) }
         Scan::Lab(acc, l) => text(&lab_raw(&acc, &l), &mut out),
         Scan::Mid(acc, l) => { let mut a = lab_raw(&acc, &l); a.push(']'); text(&a, &mut out) }
-        Scan::Href(acc, l, u) => text(&href_raw(&acc, &l, &u), &mut out),
+        Scan::Href(acc, l, u, _) => text(&href_raw(&acc, &l, &u), &mut out),
     }
     out
 }
@@ -243,7 +330,14 @@ fn bare_flush(b: &mut Bw) {
         let mid_len = n.saturating_sub(l).saturating_sub(t);
         let core: S = w[l.min(n)..(l.min(n) + mid_len).min(n)].to_vec();
         let cs = st(&core);
-        // a path, a design file named alone, or a file:// address
+        // a path, a design file named alone, a share route, or a file:// address
+        if let Some(route) = share_route(&cs) {
+            let mut txt = std::mem::take(&mut b.txt); txt.extend_from_slice(&w[..l]);
+            text(&txt, &mut b.out);
+            b.out.push(Piece::Link(cs, route));
+            b.txt = w[(l + core.len()).min(n)..].to_vec(); b.bang = false;
+            return;
+        }
         if is_path(&cs) || is_design(&cs) || file_url(&cs) {
             let mut txt = std::mem::take(&mut b.txt); txt.extend_from_slice(&w[..l]);
             text(&txt, &mut b.out);
@@ -291,6 +385,12 @@ mod tests {
         assert_eq!(t("(case.STEP)."), vec![Piece::Text("(".into()), Piece::Link("case.STEP".into(), "case.STEP".into()), Piece::Text(").".into())]);
         assert_eq!(t("open file:///home/h/a%20b.kicad_pcb"), vec![Piece::Text("open ".into()), Piece::Link("file:///home/h/a%20b.kicad_pcb".into(), "file:///home/h/a%20b.kicad_pcb".into())]);
         assert_eq!(t("[board](file:///w/a.kicad_pcb)"), vec![Piece::Link("board".into(), "/w/a.kicad_pcb".into())]);
+        assert_eq!(t("[POWER_TEST.md](file:///w/My%20Project/.backplane/worktrees/power-test/docs/POWER_TEST.md)"), vec![Piece::Link("POWER_TEST.md".into(), "/w/My Project/.backplane/worktrees/power-test/docs/POWER_TEST.md".into())]);
+        assert_eq!(t("[My Doc](file:///w/My%20Doc%20(Final).pdf)"), vec![Piece::Link("My Doc".into(), "/w/My Doc (Final).pdf".into())]);
+        let tok = "0123456789abcdef0123456789abcdef0123456789abcdef";
+        assert_eq!(t(&format!("[POWER_TEST.md](/s/{tok}/POWER_TEST.md)")), vec![Piece::Link("POWER_TEST.md".into(), format!("/s/{tok}/POWER_TEST.md"))]);
+        assert_eq!(t(&format!("[My Doc](/s/{tok}/My%20Doc.md)")), vec![Piece::Link("My Doc".into(), format!("/s/{tok}/My%20Doc.md"))]);
+        assert_eq!(t(&format!("get /s/{tok}/My%20Doc.md.")), vec![Piece::Text("get ".into()), Piece::Link(format!("/s/{tok}/My%20Doc.md"), format!("/s/{tok}/My%20Doc.md")), Piece::Text(".".into())]);
         for plain in ["version 1.2 done", "e.g. this", "a .kicad_pcb file", "x.rs alone"] { assert!(t(plain).iter().all(|p| matches!(p, Piece::Text(_))), "{plain}: {:?}", t(plain)); }
     }
     #[test] fn bare_ids() { assert!(matches!(t("see t1700000000-1.")[1], Piece::Ref(..))); }

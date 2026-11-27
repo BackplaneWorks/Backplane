@@ -107,7 +107,7 @@ function isNonPlotPane(p: string): boolean {
 }
 
 export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
-  open: (kind: string, threadId: string) => void;
+  open: (kind: string, threadId: string, target?: { path?: string; line?: number }) => void;
   close: () => void;
   reconcileHas: (has: RailHas) => void;
 } {
@@ -181,6 +181,8 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   let mechParts: string[] = [];
   let selectedMech = "";
   let selectedPath = "";
+  let selectedLine = 0;
+  let filesTarget: { path?: string; line?: number } | undefined;
 
   // Follow agent state
   let followOn = false;
@@ -928,12 +930,19 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       // Non-plot panes (Files, Diff, Review, Terminal) use their own data/1 RPCs directly.
       void api.hub.rpc("viewer.watch", { thread: threadId, kind: "" }).catch(() => {});
       if (page === "files") {
-        activePane = mountFilesPane(stage, api, threadId, (kind, relPath) => {
-          page = kind;
-          selectedPath = relPath;
-          if (kind === "mech") selectedMech = relPath;
-          void startWatch(false);
-        });
+        activePane = mountFilesPane(
+          stage,
+          api,
+          threadId,
+          (kind, relPath) => {
+            page = kind;
+            selectedPath = relPath;
+            selectedLine = 0;
+            if (kind === "mech") selectedMech = relPath;
+            void startWatch(false);
+          },
+          filesTarget
+        );
       } else if (page === "diff") {
         activePane = mountDiffPane(stage, api, threadId);
       } else if (page === "review") {
@@ -1163,7 +1172,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   window.addEventListener("keydown", onKeyDown);
 
   return {
-    open(kind: string, nextThread: string) {
+    open(kind: string, nextThread: string, target?: { path?: string; line?: number }) {
       if (nextThread !== threadId) {
         threadId = nextThread;
         filesInfo = {};
@@ -1200,7 +1209,10 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       }
       // Rule (3): switching pages sends the destination page's viewer.watch directly (no separate stop first).
       page = kind;
-      selectedPath = "";
+      selectedPath = target?.path ?? "";
+      selectedLine = target?.line ?? 0;
+      filesTarget = kind === "files" && target?.path ? { path: target.path, line: target.line } : undefined;
+      if (kind === "mech" && selectedPath) selectedMech = selectedPath;
       void startWatch(false);
     },
     reconcileHas(has: RailHas) {
@@ -1225,6 +1237,9 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
         void api.hub.rpc("viewer.watch", { thread: threadId, kind: "" }).catch(() => {});
       }
       page = "";
+      selectedPath = "";
+      selectedLine = 0;
+      filesTarget = undefined;
       activeKeys.clear();
       clearStage();
       // Keep listeners alive for subsequent opens; app.ts keeps the mounted controller for the session.

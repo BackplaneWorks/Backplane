@@ -47,7 +47,27 @@ func dLinkURL(_ raw: String) -> URL? {
         url = url.trimmingCharacters(in: CharacterSet(charactersIn: "<>"))
     }
     if let p = dFileURLPath(url) { return dPathURL(p) }
+    if full(url, reShare) {
+        var clean = url
+        if let h = clean.firstIndex(of: "#") { clean = String(clean[..<h]) }
+        if let q = clean.firstIndex(of: "?") { clean = String(clean[..<q]) }
+        if ![".", ".."].contains(clean.split(separator: "/").last.map(String.init) ?? "") { return dPathURL(clean) }
+    }
     if dIsPathText(url) { return dPathURL(url) }
+    if (url.hasPrefix("/") && !url.hasPrefix("//")) || url.hasPrefix("~/") || url.hasPrefix("./") || url.hasPrefix("../") {
+        var rest = url
+        var anchor = ""
+        if let hash = rest.firstIndex(of: "#") {
+            let frag = String(rest[rest.index(after: hash)...])
+            rest = String(rest[..<hash])
+            if let r = frag.range(of: "^L\\d{1,6}(?:-L?\\d{1,6})?$", options: .regularExpression) {
+                anchor = "#" + String(frag[r])
+            }
+        }
+        if let q = rest.firstIndex(of: "?") { rest = String(rest[..<q]) }
+        let decoded = rest.removingPercentEncoding ?? rest
+        if !decoded.isEmpty && !decoded.contains("\0") { return dPathURL(decoded + anchor) }
+    }
     return URL(string: url) ?? URL(string: url.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? "")
 }
 
@@ -65,7 +85,7 @@ private func lead(_ s: String, _ r: NSRegularExpression) -> Int? {
 }
 
 // a share's address (docs/file-links.md, `/s/<token>/<name>`): its name may have no extension, or be percent-encoded
-private let reShare = rx("^/s/[0-9A-Fa-f]{48}/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+$")
+private let reShare = rx("^/s/[0-9A-Fa-f]{48}/(?:[A-Za-z0-9._~-]|%[0-9A-Fa-f]{2})+(?:[?#][^\\s]*)?$")
 func dIsPathText(_ t: String) -> Bool { !t.hasPrefix("http") && !t.contains("://") && (full(t, rePath) || full(t, reFile) || full(t, reShare)) }
 
 /// Whether a link may start before s[i]: after a space, a new line or an opening mark, never inside a word.

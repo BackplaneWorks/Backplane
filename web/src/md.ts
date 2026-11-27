@@ -1,8 +1,23 @@
 // Safe, zero-dependency Markdown -> DOM renderer (never assigns untrusted innerHTML).
 // Supports fenced code blocks (with copy button), headings (h1-h6), hr, tables,
 // nested & task lists, blockquotes, inline code, bold, italic, strikethrough,
-// inline images, and safe http(s) links.
+// inline images, safe http(s) links, /s/ shares, file:// and project file links.
 import { t } from "./i18n";
+
+export interface MarkdownFileLink {
+  path: string;
+  name?: string;
+  size?: number;
+  open?: string;
+  project?: string;
+  absPath?: string;
+  relPath?: string;
+}
+
+export interface RenderMarkdownOptions {
+  onOpenLink?: (href: string, project?: string) => void;
+  files?: MarkdownFileLink[];
+}
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const COPY_PATHS = ["M9 9h11v11H9z", "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"];
@@ -72,8 +87,110 @@ function makeInlineCopyButton(wrap: HTMLElement, rawText: string): HTMLButtonEle
   return btn;
 }
 
-function appendPlainWithPaths(parent: HTMLElement, text: string): void {
-  const pathRe = /(^|[\s(\["'<])((?:\.\.?\/|~\/|\/(?=[A-Za-z0-9._-]))[A-Za-z0-9._~+/-]+|[A-Za-z_][A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+\.[A-Za-z][A-Za-z0-9]{0,9})/g;
+const SHARE_ROUTE_RE = /^\/s\/[0-9a-fA-F]{48}\/(?:[A-Za-z0-9._~-]|%[0-9a-fA-F]{2})+$/;
+
+export function parseShareRoute(raw: string): string | null {
+  const clean = raw.trim().split("#")[0].split("?")[0];
+  if (!SHARE_ROUTE_RE.test(clean)) return null;
+  const last = clean.slice(clean.lastIndexOf("/") + 1);
+  if (!last || last === "." || last === "..") return null;
+  try {
+    const dec = decodeURIComponent(last);
+    if (!dec || dec === "." || dec === ".." || dec.includes("/") || dec.includes("\\") || dec.includes("\0")) return null;
+  } catch {
+    return null;
+  }
+  return clean;
+}
+
+export function parseFileUrl(raw: string): string | null {
+  const t = raw.trim();
+  if (!/^file:\/\//i.test(t)) return null;
+  let rest = t.slice(7);
+  if (rest.startsWith("localhost/")) rest = rest.slice("localhost".length);
+  let anchor = "";
+  const hash = rest.indexOf("#");
+  if (hash >= 0) {
+    const frag = rest.slice(hash + 1);
+    rest = rest.slice(0, hash);
+    if (/^L\d{1,6}(?:-L?\d{1,6})?$/.test(frag)) anchor = `#${frag}`;
+  }
+  const q = rest.indexOf("?");
+  if (q >= 0) rest = rest.slice(0, q);
+  let decoded = rest;
+  try { decoded = decodeURIComponent(rest); } catch { /* keep literal on invalid escape */ }
+  if (/^\/[A-Za-z]:\//.test(decoded)) decoded = decoded.slice(1);
+  if (!decoded || decoded.includes("\0")) return null;
+  if (!(decoded.startsWith("/") || decoded.startsWith("~/") || /^[A-Za-z]:\//.test(decoded))) return null;
+  return decoded + anchor;
+}
+
+export function isHubPath(raw: string): boolean {
+  const t = raw.trim();
+  if (!t || t.includes("://")) return false;
+  if (parseShareRoute(t) !== null) return true;
+  if ((t.startsWith("/") && !t.startsWith("//")) || t.startsWith("~/") || t.startsWith("./") || t.startsWith("../")) {
+    return !t.includes("\0") && !/\s/.test(t);
+  }
+  return /^[A-Za-z0-9_@+-][A-Za-z0-9_.@+-]*(?:\/[A-Za-z0-9_.@+-]+)+(?::\d{1,6}){0,2}(?:#L\d{1,6}(?:-L?\d{1,6})?)?$/.test(t)
+    || /^[A-Za-z0-9_@+-][A-Za-z0-9_.@+-]*\.(?:md|markdown|txt|pdf|json|yaml|yml|toml|rs|ts|tsx|js|jsx|py|c|h|cc|cpp|hpp|swift|kt|java|go|sh|css|html|xml|csv|svg|png|jpg|jpeg|webp|kicad_pcb|kicad_sch|kicad_pro|kicad_dru|kicad_sym|kicad_mod|pcbdoc|schdoc|prjpcb|step|stp|sc|solidcraft|iges|igs|stl|3mf|obj|glb|gbr|gbrjob|drl|xln)(?::\d{1,6}){0,2}(?:#L\d{1,6}(?:-L?\d{1,6})?)?$/i.test(t);
+}
+
+function normalizeLinkDest(raw: string): string {
+  const t = raw.trim();
+  if (t.startsWith("<") && t.indexOf(">", 1) > 0) {
+    return t.slice(1, t.indexOf(">", 1)).trim();
+  }
+  const sp = t.search(/\s/);
+  return (sp >= 0 ? t.slice(0, sp) : t).replace(/^<|>$/g, "");
+}
+
+function normalizeHubTarget(dest: string): string {
+  const fileP = parseFileUrl(dest);
+  if (fileP) return fileP;
+  if (dest.startsWith("backplane://")) return dest;
+  let rest = dest;
+  let anchor = "";
+  const hash = rest.indexOf("#");
+  if (hash >= 0) {
+    const frag = rest.slice(hash + 1);
+    rest = rest.slice(0, hash);
+    if (/^L\d{1,6}(?:-L?\d{1,6})?$/.test(frag)) anchor = `#${frag}`;
+  }
+  const q = rest.indexOf("?");
+  if (q >= 0) rest = rest.slice(0, q);
+  try { rest = decodeURIComponent(rest); } catch { /* keep literal */ }
+  return rest + anchor;
+}
+
+function extractLineAnchor(raw: string): string {
+  const hashMatch = /#L\d{1,6}(?:-L?\d{1,6})?$/.exec(raw.trim());
+  if (hashMatch) return hashMatch[0];
+  const noFrag = raw.trim().split("#")[0];
+  const colonMatch = /(?::\d{1,6}){1,2}$/.exec(noFrag);
+  return colonMatch ? colonMatch[0] : "";
+}
+
+function withLineAnchor(base: string, original: string): string {
+  const anchor = extractLineAnchor(original);
+  if (!anchor || extractLineAnchor(base)) return base;
+  return `${base}${anchor}`;
+}
+
+function barePath(raw: string): string {
+  const s = (parseFileUrl(raw) ?? raw.trim()).split("#")[0].split("?")[0];
+  return s.replace(/(?::\d{1,6}){1,2}$/, "");
+}
+
+function matchFileLink(target: string, files?: MarkdownFileLink[]): MarkdownFileLink | undefined {
+  if (!files || files.length === 0) return undefined;
+  const want = barePath(target);
+  if (!want) return undefined;
+  return files.find((f) => barePath(f.path) === want || (f.absPath ? barePath(f.absPath) === want : false));
+}
+
+function appendPlainWithPaths(parent: HTMLElement, text: string, opts?: RenderMarkdownOptions): void {
+  const pathRe = /(^|[\s(\["'<])((?:file:\/\/\/?[^\s<>)"']+|\/s\/[0-9a-fA-F]{48}\/(?:[A-Za-z0-9._~-]|%[0-9a-fA-F]{2})+(?:[?#][^\s<>)"']*)?|(?:\.\.?\/|~\/|\/(?=[A-Za-z0-9._-]))[A-Za-z0-9._~+/-]+|[A-Za-z_][A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+\.[A-Za-z][A-Za-z0-9]{0,9}))/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = pathRe.exec(text)) !== null) {
@@ -87,16 +204,50 @@ function appendPlainWithPaths(parent: HTMLElement, text: string): void {
     while (path.length > 0 && /[.,;:!?)\]]/.test(path[path.length - 1])) {
       path = path.slice(0, -1);
     }
-    if (!path || !/[A-Za-z0-9]/.test(path) || path.includes("://")) {
+    const share = parseShareRoute(path);
+    if (share) {
+      const a = document.createElement("a");
+      a.className = "bp-md-link bp-md-share";
+      a.href = share;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      a.setAttribute("data-bp-share", share);
+      a.textContent = path;
+      if (opts?.onOpenLink) {
+        a.addEventListener("click", (e) => {
+          e.preventDefault();
+          opts.onOpenLink?.(share);
+        });
+      }
+      parent.appendChild(a);
+      if (path.length < raw.length) {
+        parent.appendChild(document.createTextNode(raw.slice(path.length)));
+      }
+      last = start + raw.length;
+      continue;
+    }
+    const fileUrlTarget = parseFileUrl(path);
+    if (!path || !/[A-Za-z0-9]/.test(path) || (path.includes("://") && !fileUrlTarget)) {
       parent.appendChild(document.createTextNode(raw));
       last = start + raw.length;
       continue;
     }
+    const resolvedInput = fileUrlTarget ?? path;
+    const matched = matchFileLink(resolvedInput, opts?.files);
     const wrap = document.createElement("span");
     wrap.className = "bp-path-wrap";
     const span = document.createElement("span");
     span.className = "bp-md-path";
     span.textContent = path;
+    span.setAttribute("data-bp-link", resolvedInput);
+    if (matched?.project) span.setAttribute("data-bp-project", matched.project);
+    if (opts?.onOpenLink) {
+      span.addEventListener("click", () => {
+        if (typeof window !== "undefined" && window.getSelection()?.toString()) return;
+        const resolved = matched?.absPath ? withLineAnchor(matched.absPath, resolvedInput) : resolvedInput;
+        opts.onOpenLink?.(resolved, matched?.project);
+      });
+    }
     const btn = makeInlineCopyButton(wrap, path);
     wrap.append(span, btn);
     parent.appendChild(wrap);
@@ -120,110 +271,199 @@ function safeUrl(raw: string): string | null {
   return null;
 }
 
-function appendStyledText(parent: HTMLElement, text: string): void {
+function appendStyledText(parent: HTMLElement, text: string, opts?: RenderMarkdownOptions, inLink = false): void {
   const re = /(\*\*(?!\s)[^*\n]+?(?<!\s)\*\*|(?<![A-Za-z0-9_])__(?!\s)[^_\n]+?(?<!\s)__(?![A-Za-z0-9_])|~~(?!\s)[^~\n]+?(?<!\s)~~|\*(?!\s)[^*\n]+?(?<!\s)\*|(?<![A-Za-z0-9_])_(?!\s)[^_\n]+?(?<!\s)_(?![A-Za-z0-9_]))/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
-    if (m.index > last) appendPlainWithPaths(parent, text.slice(last, m.index));
+    if (m.index > last) {
+      const pre = text.slice(last, m.index);
+      if (inLink) parent.appendChild(document.createTextNode(pre));
+      else appendPlainWithPaths(parent, pre, opts);
+    }
     const tok = m[0];
     if (tok.startsWith("__") && tok.endsWith("__") && /^[A-Za-z0-9]+$/.test(tok.slice(2, -2))) {
-      appendPlainWithPaths(parent, tok);
+      if (inLink) parent.appendChild(document.createTextNode(tok));
+      else appendPlainWithPaths(parent, tok, opts);
     } else if ((tok.startsWith("**") && tok.endsWith("**")) || (tok.startsWith("__") && tok.endsWith("__"))) {
       const strong = document.createElement("strong");
-      appendInline(strong, tok.slice(2, -2));
+      appendInline(strong, tok.slice(2, -2), opts, inLink);
       parent.appendChild(strong);
     } else if (tok.startsWith("~~") && tok.endsWith("~~")) {
       const del = document.createElement("del");
-      appendInline(del, tok.slice(2, -2));
+      appendInline(del, tok.slice(2, -2), opts, inLink);
       parent.appendChild(del);
     } else {
       const em = document.createElement("em");
-      appendInline(em, tok.slice(1, -1));
+      appendInline(em, tok.slice(1, -1), opts, inLink);
       parent.appendChild(em);
     }
     last = re.lastIndex;
   }
-  if (last < text.length) appendPlainWithPaths(parent, text.slice(last));
+  if (last < text.length) {
+    const tail = text.slice(last);
+    if (inLink) parent.appendChild(document.createTextNode(tail));
+    else appendPlainWithPaths(parent, tail, opts);
+  }
 }
 
-function appendInline(parent: HTMLElement, text: string): void {
-  const re = /(`[^`]+`|!\[([^\]]*)\]\(([^)]+)\)|\[([^\]]+)\]\(([^)]+)\))/g;
+function matchBracketLink(text: string, idx: number): { isImg: boolean; label: string; rawDest: string; end: number } | null {
+  const isImg = text[idx] === "!";
+  const st = isImg ? idx + 1 : idx;
+  if (text[st] !== "[") return null;
+  let d = 0;
+  let j = st;
+  let close = -1;
+  while (j < text.length) {
+    if (text[j] === "\\") { j += 2; continue; }
+    if (text[j] === "[") d++;
+    else if (text[j] === "]") { d--; if (d === 0) { close = j; break; } }
+    j++;
+  }
+  if (close < 0 || close + 1 >= text.length || text[close + 1] !== "(") return null;
+  let pd = 0;
+  let k = close + 1;
+  let end = -1;
+  while (k < text.length) {
+    if (text[k] === "\\") { k += 2; continue; }
+    if (text[k] === "(") pd++;
+    else if (text[k] === ")") { pd--; if (pd === 0) { end = k; break; } }
+    k++;
+  }
+  if (end < 0) return null;
+  return {
+    isImg,
+    label: text.slice(st + 1, close),
+    rawDest: text.slice(close + 2, end),
+    end: end + 1,
+  };
+}
+
+function appendInline(parent: HTMLElement, text: string, opts?: RenderMarkdownOptions, inLink = false): void {
   let last = 0;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    if (m.index > last) {
-      appendStyledText(parent, text.slice(last, m.index));
-    }
-    const tok = m[0];
-    if (tok.startsWith("`") && tok.endsWith("`")) {
-      const codeText = tok.slice(1, -1);
-      const wrap = document.createElement("span");
-      wrap.className = "bp-code-wrap";
-      const code = document.createElement("code");
-      code.className = "bp-code-inline";
-      code.textContent = codeText;
-      const btn = makeInlineCopyButton(wrap, codeText);
-      let clickTimer: ReturnType<typeof setTimeout> | undefined;
-      const clearTimer = typeof window !== "undefined" ? window.clearTimeout.bind(window) : clearTimeout;
-      const setTimer = typeof window !== "undefined" ? window.setTimeout.bind(window) : setTimeout;
-      code.addEventListener("dblclick", () => {
-        if (clickTimer !== undefined) {
-          clearTimer(clickTimer);
-          clickTimer = undefined;
-        }
-      });
-      code.addEventListener("click", (e) => {
-        if (e.detail && e.detail !== 1) return;
-        if (typeof window !== "undefined" && window.getSelection()?.toString()) return;
-        if (clickTimer !== undefined) clearTimer(clickTimer);
-        clickTimer = setTimer(() => {
-          clickTimer = undefined;
-          if (typeof window !== "undefined" && window.getSelection()?.toString()) return;
-          triggerInlineCopy(wrap, btn, codeText);
-        }, 220);
-      });
-      wrap.append(code, btn);
-      parent.appendChild(wrap);
-    } else if (tok.startsWith("![")) {
-      const alt = m[2] ?? "";
-      const src = m[3] ?? "";
-      if (/^\/blob\/[A-Za-z0-9._-]+$/.test(src) && !src.includes("..")) {
-        const img = document.createElement("img");
-        img.className = "bp-md-img";
-        img.alt = alt || src;
-        img.src = src;
-        parent.appendChild(img);
-      } else {
-        const span = document.createElement("code");
-        span.className = "bp-code-inline";
-        span.textContent = alt ? `${alt} (${src})` : src;
-        parent.appendChild(span);
-      }
-    } else if (tok.startsWith("[")) {
-      const label = m[4] ?? "";
-      const rawUrl = m[5] ?? "";
-      const isHttp = /^https?:\/\//i.test(rawUrl);
-      const href = isHttp ? safeUrl(rawUrl) : null;
-      if (href) {
-        const a = document.createElement("a");
-        a.href = href;
-        a.target = "_blank";
-        a.rel = "noopener noreferrer";
-        a.textContent = label;
-        parent.appendChild(a);
-      } else {
+  let i = 0;
+  const flushPlain = (end: number) => {
+    if (end > last) appendStyledText(parent, text.slice(last, end), opts, inLink);
+  };
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "\\") { i += 2; continue; }
+    if (c === "`") {
+      const e = text.indexOf("`", i + 1);
+      if (e > i) {
+        flushPlain(i);
+        const codeText = text.slice(i + 1, e);
+        const wrap = document.createElement("span");
+        wrap.className = "bp-code-wrap";
         const code = document.createElement("code");
         code.className = "bp-code-inline";
-        code.textContent = label || rawUrl;
-        parent.appendChild(code);
+        code.textContent = codeText;
+        const btn = makeInlineCopyButton(wrap, codeText);
+        let clickTimer: ReturnType<typeof setTimeout> | undefined;
+        const clearTimer = typeof window !== "undefined" ? window.clearTimeout.bind(window) : clearTimeout;
+        const setTimer = typeof window !== "undefined" ? window.setTimeout.bind(window) : setTimeout;
+        code.addEventListener("dblclick", () => {
+          if (clickTimer !== undefined) {
+            clearTimer(clickTimer);
+            clickTimer = undefined;
+          }
+        });
+        code.addEventListener("click", (ev) => {
+          if (ev.detail && ev.detail !== 1) return;
+          if (typeof window !== "undefined" && window.getSelection()?.toString()) return;
+          if (clickTimer !== undefined) clearTimer(clickTimer);
+          clickTimer = setTimer(() => {
+            clickTimer = undefined;
+            if (typeof window !== "undefined" && window.getSelection()?.toString()) return;
+            triggerInlineCopy(wrap, btn, codeText);
+          }, 220);
+        });
+        wrap.append(code, btn);
+        parent.appendChild(wrap);
+        i = e + 1;
+        last = i;
+        continue;
       }
     }
-    last = re.lastIndex;
+    if (!inLink && ((c === "!" && text[i + 1] === "[") || c === "[")) {
+      const m = matchBracketLink(text, i);
+      if (m) {
+        flushPlain(i);
+        if (m.isImg) {
+          const src = normalizeLinkDest(m.rawDest);
+          if (/^\/blob\/[A-Za-z0-9._-]+$/.test(src) && !src.includes("..")) {
+            const img = document.createElement("img");
+            img.className = "bp-md-img";
+            img.alt = m.label || src;
+            img.src = src;
+            parent.appendChild(img);
+          } else {
+            const span = document.createElement("code");
+            span.className = "bp-code-inline";
+            span.textContent = m.label ? `${m.label} (${src})` : src;
+            parent.appendChild(span);
+          }
+        } else {
+          const dest = normalizeLinkDest(m.rawDest);
+          const isHttp = /^https?:\/\//i.test(dest);
+          const httpHref = isHttp ? safeUrl(dest) : null;
+          const shareRoute = parseShareRoute(dest);
+          const fileUrl = parseFileUrl(dest);
+          const isBp = dest.startsWith("backplane://");
+          const hubPath = !isHttp && !shareRoute && (fileUrl !== null || isBp || isHubPath(dest));
+          if (httpHref) {
+            const a = document.createElement("a");
+            a.href = httpHref;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            appendInline(a, m.label, opts, true);
+            parent.appendChild(a);
+          } else if (shareRoute) {
+            const a = document.createElement("a");
+            a.className = "bp-md-link bp-md-share";
+            a.href = shareRoute;
+            a.target = "_blank";
+            a.rel = "noopener noreferrer";
+            a.setAttribute("data-bp-share", shareRoute);
+            if (opts?.onOpenLink) {
+              a.addEventListener("click", (ev) => {
+                ev.preventDefault();
+                opts.onOpenLink?.(shareRoute);
+              });
+            }
+            appendInline(a, m.label || shareRoute, opts, true);
+            parent.appendChild(a);
+          } else if (hubPath) {
+            const target = fileUrl ?? normalizeHubTarget(dest);
+            const matched = matchFileLink(target, opts?.files);
+            const a = document.createElement("a");
+            a.className = "bp-md-link bp-md-file";
+            a.href = "#";
+            a.setAttribute("data-bp-link", target);
+            a.title = target;
+            if (matched?.project) a.setAttribute("data-bp-project", matched.project);
+            a.addEventListener("click", (ev) => {
+              ev.preventDefault();
+              const resolved = matched?.absPath ? withLineAnchor(matched.absPath, target) : target;
+              opts?.onOpenLink?.(resolved, matched?.project);
+            });
+            appendInline(a, m.label || target, opts, true);
+            parent.appendChild(a);
+          } else {
+            const code = document.createElement("code");
+            code.className = "bp-code-inline";
+            code.textContent = m.label || m.rawDest;
+            parent.appendChild(code);
+          }
+        }
+        i = m.end;
+        last = i;
+        continue;
+      }
+    }
+    i++;
   }
-  if (last < text.length) {
-    appendStyledText(parent, text.slice(last));
-  }
+  flushPlain(text.length);
 }
 
 function splitTableRow(line: string): string[] {
@@ -263,7 +503,7 @@ function isBlockStarter(lines: string[], idx: number): boolean {
   return false;
 }
 
-function parseList(lines: string[], start: number, minIndent: number): [HTMLUListElement | HTMLOListElement, number] {
+function parseList(lines: string[], start: number, minIndent: number, opts?: RenderMarkdownOptions): [HTMLUListElement | HTMLOListElement, number] {
   const first = LIST_ITEM_RE.exec(lines[start])!;
   const ordered = /\d/.test(first[2]);
   const list = document.createElement(ordered ? "ol" : "ul");
@@ -276,7 +516,7 @@ function parseList(lines: string[], start: number, minIndent: number): [HTMLULis
     const indent = m[1].length;
     if (indent < minIndent) break;
     if (indent > minIndent) {
-      const [sub, next] = parseList(lines, i, indent);
+      const [sub, next] = parseList(lines, i, indent, opts);
       const lastLi = list.lastElementChild;
       if (lastLi) lastLi.appendChild(sub);
       else list.appendChild(sub);
@@ -294,9 +534,9 @@ function parseList(lines: string[], start: number, minIndent: number): [HTMLULis
       box.className = "bp-md-check" + (task[1].toLowerCase() === "x" ? " checked" : "");
       box.textContent = task[1].toLowerCase() === "x" ? "✓" : " ";
       li.appendChild(box);
-      appendInline(li, task[2]);
+      appendInline(li, task[2], opts);
     } else {
-      appendInline(li, m[3]);
+      appendInline(li, m[3], opts);
     }
     list.appendChild(li);
     i++;
@@ -304,7 +544,13 @@ function parseList(lines: string[], start: number, minIndent: number): [HTMLULis
   return [list, i];
 }
 
-export function renderMarkdown(src: string, depth = 0): DocumentFragment {
+export function renderMarkdown(
+  src: string,
+  depthOrOpts?: number | RenderMarkdownOptions,
+  depthArg = 0,
+): DocumentFragment {
+  const opts = typeof depthOrOpts === "object" && depthOrOpts !== null ? depthOrOpts : undefined;
+  const depth = typeof depthOrOpts === "number" ? depthOrOpts : depthArg;
   const frag = document.createDocumentFragment();
   const lines = src.replace(/\r\n/g, "\n").split("\n");
   let i = 0;
@@ -377,7 +623,7 @@ export function renderMarkdown(src: string, depth = 0): DocumentFragment {
       const lvl = Math.min(6, hm[1].length + 1);
       const h = document.createElement(`h${lvl}`);
       h.className = `bp-md-h bp-md-h${hm[1].length}`;
-      appendInline(h, hm[2]);
+      appendInline(h, hm[2], opts);
       frag.appendChild(h);
       i++;
       continue;
@@ -397,7 +643,7 @@ export function renderMarkdown(src: string, depth = 0): DocumentFragment {
         for (let c = 0; c < aligns.length; c++) {
           const th = document.createElement("th");
           if (aligns[c]) th.style.textAlign = aligns[c];
-          appendInline(th, headers[c] ?? "");
+          appendInline(th, headers[c] ?? "", opts);
           htr.appendChild(th);
         }
         thead.appendChild(htr);
@@ -411,7 +657,7 @@ export function renderMarkdown(src: string, depth = 0): DocumentFragment {
           for (let c = 0; c < aligns.length; c++) {
             const td = document.createElement("td");
             if (aligns[c]) td.style.textAlign = aligns[c];
-            appendInline(td, cells[c] ?? "");
+            appendInline(td, cells[c] ?? "", opts);
             tr.appendChild(td);
           }
           tbody.appendChild(tr);
@@ -434,9 +680,9 @@ export function renderMarkdown(src: string, depth = 0): DocumentFragment {
         i++;
       }
       if (depth >= 12) {
-        appendInline(bq, qLines.join("\n"));
+        appendInline(bq, qLines.join("\n"), opts);
       } else {
-        bq.appendChild(renderMarkdown(qLines.join("\n"), depth + 1));
+        bq.appendChild(renderMarkdown(qLines.join("\n"), opts, depth + 1));
       }
       frag.appendChild(bq);
       continue;
@@ -445,7 +691,7 @@ export function renderMarkdown(src: string, depth = 0): DocumentFragment {
     // List (ordered, unordered, nested, or task)
     const lm = LIST_ITEM_RE.exec(line);
     if (lm) {
-      const [listEl, next] = parseList(lines, i, lm[1].length);
+      const [listEl, next] = parseList(lines, i, lm[1].length, opts);
       frag.appendChild(listEl);
       i = next;
       continue;
@@ -465,7 +711,7 @@ export function renderMarkdown(src: string, depth = 0): DocumentFragment {
     p.className = "bp-md-p";
     for (let j = 0; j < pLines.length; j++) {
       if (j > 0) p.appendChild(document.createElement("br"));
-      appendInline(p, pLines[j]);
+      appendInline(p, pLines[j], opts);
     }
     frag.appendChild(p);
   }

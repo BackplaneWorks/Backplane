@@ -35,7 +35,7 @@ fn text(acc: &[char], out: &mut Vec<Node>) {
 fn code(acc: &[char]) -> Node {
     let s = st(acc);
     let c = match super::copy::inline_kind(&s) { Some(k) => Node::El { tag: "code", attrs: vec![("copy", k.into())], kids: vec![Node::Txt(s.clone())] }, None => el("code", vec![Node::Txt(s.clone())]) };
-    if links::is_path(&s) || links::is_design(&s) || links::file_url(&s) { file(&s, vec![c]) } else { c }
+    if let Some(route) = links::share_route(&s) { file(&route, vec![c]) } else if links::is_path(&s) || links::is_design(&s) || links::file_url(&s) { file(&s, vec![c]) } else { c }
 }
 
 /// Md.emphasis: text runs and code spans inside ** or *

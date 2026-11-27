@@ -68,8 +68,8 @@ private data class Target(val tab: String, val path: String)
 fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> Unit) {
     // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
     val fx = ext(file)
-    var tab by remember { mutableStateOf(when { file.isEmpty() -> "Files"; fx == "kicad_pcb" || fx == "pcbdoc" -> "Board"; fx == "kicad_sch" || fx == "schdoc" -> "Schematic"; fx in setOf("step", "stp", "glb") -> "Mech"; else -> "Files" }) }
-    var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" || fx == "pcbdoc" -> Target("Board", file); fx == "kicad_sch" || fx == "schdoc" -> Target("Schematic", file); fx in setOf("step", "stp", "glb") -> Target("Mech", file); else -> null }) }
+    var tab by remember { mutableStateOf(when { file.isEmpty() -> "Files"; fx == "kicad_pcb" || fx == "pcbdoc" -> "Board"; fx == "kicad_sch" || fx == "schdoc" -> "Schematic"; fx in cadExt -> "Mech"; else -> "Files" }) }
+    var target by remember { mutableStateOf<Target?>(when { fx == "kicad_pcb" || fx == "pcbdoc" -> Target("Board", file); fx == "kicad_sch" || fx == "schdoc" -> Target("Schematic", file); fx in cadExt -> Target("Mech", file); else -> null }) }
     var files by remember(thread.id) { mutableStateOf<DataClient.ProjectFiles?>(null) }
     var railState by remember(thread.id) { mutableStateOf(ViewerRailState(threadId = thread.id)) }
     var railRefreshTick by remember(thread.id) { mutableIntStateOf(0) }
@@ -537,7 +537,8 @@ private fun Loading(text: String, modifier: Modifier) {
 
 // ---- Files: browse the project, preview what a phone can show, open a board, schematic or model in its tab
 private val imageExt = setOf("png", "jpg", "jpeg", "gif", "webp", "bmp")
-private val textExt = setOf("txt", "md", "csv", "json", "log", "yaml", "yml", "toml", "kicad_pro", "sh", "rs", "py", "js", "ts", "kt", "swift", "bend", "cfg", "ini")
+private val textExt = setOf("txt", "md", "markdown", "csv", "json", "log", "yaml", "yml", "toml", "kicad_pro", "sh", "rs", "py", "js", "ts", "kt", "swift", "bend", "cfg", "ini")
+private val cadExt = setOf("step", "stp", "glb", "sc", "solidcraft", "iges", "igs", "stl", "3mf", "obj")
 private fun ext(name: String) = name.substringAfterLast('.', "").lowercase()
 
 @Composable
@@ -583,7 +584,7 @@ private fun FilesTab(
                     Column(Modifier.fillMaxWidth().clickable {
                         if (e.dir) dir = full else when (val x = ext(e.name)) {
                             "kicad_pcb", "pcbdoc" -> open(Target("Board", full)); "kicad_sch", "schdoc" -> open(Target("Schematic", full))
-                            "step", "stp", "glb" -> open(Target("Mech", full))
+                            in cadExt -> open(Target("Mech", full))
                             else -> preview = full
                         }
                     }.testTag("file.${e.name}")) {
@@ -642,7 +643,7 @@ private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () 
                 val text = remember(b) { String(b, Charsets.UTF_8).take(200_000) }
                 if (line > 0) { LinedText(text, line); return@Column }
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp).testTag("preview.text")) {
-                    if (ext(path) == "md") MdText(text) else Text(text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
+                    if (ext(path) == "md" || ext(path) == "markdown") MdText(text, thread = thread.id) else Text(text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
                 }
             }
             else -> DMono(Msg.android_file_nopreview(size(b.size.toLong())), dcs.onSurfaceVariant, 12, Modifier.padding(16.dp))

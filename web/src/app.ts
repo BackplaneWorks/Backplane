@@ -8,6 +8,7 @@ import { ChatView, type EntryItem, type ReviewBar, type UnansweredNotice } from 
 import { ComposerView, type MentionItem, type SlashCommand } from "./composer";
 import { onLocaleChange, setLocale, t } from "./i18n";
 import { signOut } from "./logout";
+import { parseShareRoute } from "./md";
 import { MgmtStrip } from "./mgmt";
 import { CommandPalette, type PaletteAction, type PaletteSearchResult } from "./palette";
 import { ProjectHomeView, type HomeThreadRow } from "./project-home";
@@ -60,10 +61,11 @@ export interface ViewerHostApi {
   hub: HubClient;
   getThreadId: () => string;
   closeViewer: () => void;
+  openLink?: (href: string, project?: string) => void;
 }
 
 type ViewerMountFn = (el: HTMLElement, api: ViewerHostApi) => {
-  open: (kind: string, threadId: string) => void;
+  open: (kind: string, threadId: string, target?: { path?: string; line?: number }) => void;
   close: () => void;
   reconcileHas?: (has: RailHas) => void;
 };
@@ -573,6 +575,7 @@ function mountApp(): void {
   const chat = new ChatView(centerEl, {
     onLoadOlder: () => { void loadOlderEntries(); },
     onGoToEntry: (id) => { void goToEntry(id); },
+    onOpenLink: (href, project) => { void handleMessageLink(href, project); },
     onOpenAccounts: () => { openAccounts(); },
     onAnswerAsk: (askId, answer) => {
       void hub.rpc("ask.answer", { ask: askId, answer }).catch((e) => {
@@ -1198,7 +1201,93 @@ function mountApp(): void {
     }
   }
 
-  function openViewer(kind: string): void {
+  function triggerRouteOpen(url: string, downloadName?: string): void {
+    const a = document.createElement("a");
+    a.href = url;
+    if (downloadName) a.download = downloadName;
+    else {
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+    }
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  function viewerKindForPath(path: string): string {
+    const ext = path.split(".").pop()?.toLowerCase() ?? "";
+    if (ext === "kicad_pcb" || ext === "pcbdoc") return "board";
+    if (ext === "kicad_sch" || ext === "schdoc") return "schematic";
+    if (["step", "stp", "glb", "sc", "solidcraft", "iges", "igs", "stl", "3mf", "obj"].includes(ext)) return "mech";
+    return "files";
+  }
+
+  async function handleMessageLink(href: string, project?: string): Promise<void> {
+    const directShare = parseShareRoute(href);
+    if (directShare) {
+      triggerRouteOpen(directShare);
+      return;
+    }
+    try {
+      const res = await hub.rpc<{
+        kind?: string;
+        thread?: string;
+        project?: string;
+        room?: string;
+        path?: string;
+        line?: number;
+        route?: string;
+        name?: string;
+        note?: string;
+      }>("link.resolve", {
+        url: href,
+        thread: selectedThreadId,
+        ...(project ? { project } : {}),
+      });
+      switch (res.kind) {
+        case "thread":
+          if (res.thread) void openThread(res.thread);
+          break;
+        case "project":
+          if (res.project) openProjectHome(res.project);
+          break;
+        case "room":
+          if (res.room) openSwarm(res.room);
+          break;
+        case "share": {
+          const s = res.route ? parseShareRoute(res.route) : null;
+          if (s) triggerRouteOpen(s);
+          else composer.showError(res.note || "That link does not open here.");
+          break;
+        }
+        case "file": {
+          const targetThread = res.thread || selectedThreadId;
+          const relPath = res.path || "";
+          if (targetThread && relPath) {
+            openViewer(viewerKindForPath(relPath), targetThread, { path: relPath, line: res.line || 0 });
+          }
+          break;
+        }
+        case "download":
+          if (res.path) {
+            triggerRouteOpen(`/file?path=${encodeURIComponent(res.path)}`, res.name || undefined);
+          }
+          break;
+        default:
+          composer.showError(res.note || "That link does not open here.");
+          break;
+      }
+    } catch (e) {
+      composer.showError(e instanceof Error ? e.message : "Could not open link.");
+    }
+  }
+
+  function openViewer(
+    kind: string,
+    overrideThreadId?: string,
+    target?: { path?: string; line?: number }
+  ): void {
+    const targetThread = overrideThreadId || selectedThreadId;
     railGen++;
     activeRailKind = kind;
     rail.setActive(kind);
@@ -1209,11 +1298,12 @@ function mountApp(): void {
         hub,
         getThreadId: () => selectedThreadId,
         closeViewer: () => closeViewer(true),
+        openLink: (href, project) => { void handleMessageLink(href, project); },
       });
     }
     if (viewerController) {
       // PR #1367 rule (3): direct destination open replaces active watch without a separate stop first.
-      viewerController.open(kind, selectedThreadId);
+      viewerController.open(kind, targetThread, target);
     } else {
       const box = document.createElement("div");
       box.className = "bp-viewer-placeholder";

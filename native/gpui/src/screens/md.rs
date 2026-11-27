@@ -75,7 +75,7 @@ pub fn linkify(text: &str) -> Vec<Span> {
     while i < text.len() {
         let rest = &text[i..];
         let at_word = i == 0 || b[i - 1].is_ascii_whitespace() || matches!(b[i - 1], b'(' | b'[' | b'"' | b'\'' | b'`' | b'<');
-        let kind = if !at_word { 0 } else if rest.starts_with("http://") || rest.starts_with("https://") || rest.starts_with("backplane://") { 1 } else if (rest.starts_with('/') && rest.len() > 1 && !rest[1..].starts_with(|c: char| c.is_whitespace() || c == '/')) || rest.starts_with("~/") || rest.starts_with("file:///") || design_word(rest) { 2 } else { 0 };
+        let kind = if !at_word { 0 } else if rest.starts_with("http://") || rest.starts_with("https://") || rest.starts_with("backplane://") { 1 } else if (rest.starts_with('/') && rest.len() > 1 && !rest[1..].starts_with(|c: char| c.is_whitespace() || c == '/')) || rest.starts_with("~/") || rest.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("file://")) || design_word(rest) { 2 } else { 0 };
         if kind == 0 { let ch = rest.chars().next().unwrap(); plain.push(ch); i += ch.len_utf8(); continue; }
         let end = rest.find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`' | '\'')).unwrap_or(rest.len());
         let mut word = &rest[..end];
