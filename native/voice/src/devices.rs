@@ -1,9 +1,13 @@
-//! The microphones on this machine: PulseAudio's pactl, else PipeWire's
-//! pw-dump, else ALSA's arecord -L. Monitors of outputs are not microphones.
+//! The microphones on this machine: WASAPI on Windows, else PulseAudio's
+//! pactl, PipeWire's pw-dump, or ALSA's arecord -L. Monitors of outputs are
+//! not microphones.
 
+#[cfg(not(windows))]
 use crate::util::which;
 use serde_json::{json, Value};
+#[cfg(not(windows))]
 use std::process::Stdio;
+#[cfg(not(windows))]
 use std::time::Duration;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -18,11 +22,12 @@ impl Device {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Devices {
     pub default: String,
     pub devices: Vec<Device>,
     pub via: String,
+    pub error: Option<String>,
 }
 
 fn is_monitor(name: &str, cls: &str) -> bool {
@@ -110,6 +115,7 @@ pub fn from_arecord(text: &str) -> Vec<Device> {
     out
 }
 
+#[cfg(not(windows))]
 async fn run(cmd: &[&str]) -> Option<String> {
     let exe = which(cmd[0])?;
     let child = tokio::process::Command::new(exe)
@@ -126,23 +132,30 @@ async fn run(cmd: &[&str]) -> Option<String> {
 
 /// Never fails: an empty list when nothing answers.
 pub async fn list_devices() -> Devices {
-    if let Some(pa) = run(&["pactl", "-f", "json", "list", "sources"]).await {
-        if let Ok(devices) = from_pactl(&pa) {
-            let default = run(&["pactl", "get-default-source"]).await.unwrap_or_default().trim().to_string();
-            return Devices { default, devices, via: "pactl".into() };
+    #[cfg(windows)]
+    {
+        return crate::wasapi::list_devices().await;
+    }
+    #[cfg(not(windows))]
+    {
+        if let Some(pa) = run(&["pactl", "-f", "json", "list", "sources"]).await {
+            if let Ok(devices) = from_pactl(&pa) {
+                let default = run(&["pactl", "get-default-source"]).await.unwrap_or_default().trim().to_string();
+                return Devices { default, devices, via: "pactl".into(), error: None };
+            }
         }
-    }
-    if let Some(pw) = run(&["pw-dump"]).await {
-        if let Ok((default, devices)) = from_pw_dump(&pw) {
-            return Devices { default, devices, via: "pw-dump".into() };
+        if let Some(pw) = run(&["pw-dump"]).await {
+            if let Ok((default, devices)) = from_pw_dump(&pw) {
+                return Devices { default, devices, via: "pw-dump".into(), error: None };
+            }
         }
+        if let Some(al) = run(&["arecord", "-L"]).await {
+            let devices = from_arecord(&al);
+            let default = if devices.iter().any(|d| d.name == "default") { "default".to_string() } else { String::new() };
+            return Devices { default, devices, via: "arecord".into(), error: None };
+        }
+        Devices::default()
     }
-    if let Some(al) = run(&["arecord", "-L"]).await {
-        let devices = from_arecord(&al);
-        let default = if devices.iter().any(|d| d.name == "default") { "default".to_string() } else { String::new() };
-        return Devices { default, devices, via: "arecord".into() };
-    }
-    Devices::default()
 }
 
 #[cfg(test)]

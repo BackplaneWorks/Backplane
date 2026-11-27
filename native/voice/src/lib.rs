@@ -20,3 +20,4 @@ pub mod stop;
 pub mod turn;
 pub mod util;
 pub mod vad;
+pub mod wasapi;

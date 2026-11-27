@@ -113,6 +113,7 @@ fn live_from_a_recorder_stopped_by_sigterm_commits_and_ends_cleanly() {
     stopped_how(true);
 }
 
+#[cfg(unix)]
 #[test]
 fn live_from_a_recorder_stopped_by_sigint_or_stdins_end() {
     let m = Mock::start();
@@ -641,7 +642,10 @@ impl Raw {
     }
 
     fn term(&self) {
+        #[cfg(unix)]
         unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        #[cfg(not(unix))]
+        let _ = self.child.id();
     }
 
     /// Reads N bytes of stdout.

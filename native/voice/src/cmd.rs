@@ -58,7 +58,9 @@ pub async fn devices() -> ! {
     let d = list_devices().await;
     let list: Vec<Value> = d.devices.iter().map(Device::to_json).collect();
     emit(json!({"event": "devices", "default": d.default, "devices": list}));
-    if d.via.is_empty() {
+    if let Some(err) = d.error {
+        error(&err);
+    } else if d.via.is_empty() {
         error("no way to list audio devices (pactl, pw-dump or arecord)");
     }
     end()

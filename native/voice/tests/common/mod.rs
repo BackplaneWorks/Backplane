@@ -377,7 +377,10 @@ impl Run {
     }
 
     pub fn term(&self) {
+        #[cfg(unix)]
         unsafe { libc::kill(self.child.id() as i32, libc::SIGTERM) };
+        #[cfg(not(unix))]
+        let _ = self.child.id();
     }
 
     pub fn pid(&self) -> u32 {
@@ -500,12 +503,15 @@ impl Bins {
     }
 
     pub fn script(&self, name: &str, body: &str) {
-        use std::os::unix::fs::PermissionsExt;
         let p = self.dir.path().join(name);
         // no process of this test binary is between a fork and its exec while the file is open for writing (see `spawning`)
         let _quiet = FORKS.write().unwrap_or_else(|e| e.into_inner());
         std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
-        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
     }
 
     pub fn path(&self) -> &str {
