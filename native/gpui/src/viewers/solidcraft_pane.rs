@@ -895,6 +895,8 @@ impl SolidCraftPane {
             "state": self.info["state"],
             "reason": self.info["reason"],
             "pid": self.info["pid"],
+            "gen": self.info["gen"],
+            "parked": self.info["parked"],
             "control_port": self.info["control_port"],
             "version": self.info["version"],
             "runtime": self.info["runtime"],
