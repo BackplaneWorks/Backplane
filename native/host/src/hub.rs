@@ -548,7 +548,7 @@ impl Hub {
     pub fn view_info_frame(&self) -> Option<Value> {
         let mut i = serde_json::Map::new();
         for (k, v) in self.extra_info.lock().unwrap().iter() {
-            if !v.is_empty() && (k == "hub.offer" || k == "hub.back" || k == crate::settings::provider_notice::INFO_KEY || k == "kicad.update" || k == "kicad.install" || k.starts_with("editor.kicad.") || k.starts_with("kicad.reload.") || k.starts_with("kicad.sel.") || k.starts_with("kicad.coedit.") || k.starts_with("kicad.progress.") || k.starts_with("kicad.checks.") || k.starts_with("browser.tabs.")) {
+            if !v.is_empty() && (k == "hub.offer" || k == "hub.back" || k == crate::settings::provider_notice::INFO_KEY || k == "kicad.update" || k == "kicad.install" || k.starts_with("editor.kicad.") || k.starts_with("editor.solidcraft.") || k == "solidcraft.runtime" || k == "solidcraft.install" || k.starts_with("kicad.reload.") || k.starts_with("kicad.sel.") || k.starts_with("kicad.coedit.") || k.starts_with("kicad.progress.") || k.starts_with("kicad.checks.") || k.starts_with("browser.tabs.")) {
                 i.insert(k.clone(), json!(v));
             }
         }

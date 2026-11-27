@@ -64,7 +64,7 @@ pub fn announce() {
 }
 
 /// What runs on SIGTERM, SIGINT, SIGHUP (and Ctrl+C on Windows): the clients told, then the KiCad sessions ended.
-pub fn on_exit() { announce(); crate::files::kicad::embed::shutdown_all(); }
+pub fn on_exit() { announce(); crate::files::kicad::embed::shutdown_all(); crate::solidcraft::embed::shutdown_all(); }
 
 /// Whether `/proc/<pid>/cmdline` bytes belong to `fresh-watch.sh`.
 pub fn cmdline_is_watcher(cmdline: &[u8]) -> bool {
