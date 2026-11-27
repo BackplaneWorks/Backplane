@@ -1490,6 +1490,12 @@ impl PlatformWindow for X11Window {
         inner.renderer.draw(scene);
     }
 
+    fn flush_present(&self) {
+        let mut inner = self.0.state.borrow_mut();
+        inner.renderer.wait_for_gpu();
+        let _ = self.0.xcb.get_input_focus().ok().and_then(|c| c.reply().ok());
+    }
+
     fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
         let inner = self.0.state.borrow();
         inner.renderer.sprite_atlas().clone()

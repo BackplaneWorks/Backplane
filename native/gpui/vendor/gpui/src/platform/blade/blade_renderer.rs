@@ -447,7 +447,7 @@ impl BladeRenderer {
         })
     }
 
-    fn wait_for_gpu(&mut self) {
+    pub fn wait_for_gpu(&mut self) {
         if let Some(last_sp) = self.last_sync_point.take()
             && !self.gpu.wait_for(&last_sp, MAX_FRAME_TIME_MS)
         {

@@ -12,9 +12,10 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
   `linux_clipboard_offers` / `linux_clipboard_bytes_for` are public so the client tests them (this crate's own tests do not run).
 - `src/platform/windows/clipboard.rs`: a clipboard holding only a bitmap (CF_DIB: PrintScreen, many programs' Copy) reads as a PNG (`read_bitmap_as_png`, tried only when no PNG, GIF, JPEG or SVG is there); upstream read nothing from it.
 
-- `src/window.rs`: `Window::on_frame_drawn` (a listener run after every frame the window draws, for as long as it answers true) and `Window::hitbox_drawn_after` (in the
-  frame last drawn, a hitbox's visible bounds and those of every hitbox drawn after it over them): the windowed Browser tab places Chromium's native window over its pane
-  and hides it under anything gpui draws on top (`viewers/cef_page.rs`).
+- `src/window.rs`: `Window::on_frame_drawn` (a listener run after every frame the window draws, for as long as it answers true), `Window::hitbox_drawn_after` (in the
+  frame last drawn, a hitbox's visible bounds and those of every hitbox drawn after it over them), and `Window::after_present` / `PlatformWindow::flush_present`
+  (one-shot callbacks run after `present()` plus GPU/X11 flush on X11 so native child windows move after host presentation): the windowed Browser tab and SolidCraft pane
+  place native child windows over their panes and hide or clip them against overlays (`viewers/cef_page.rs`, `viewers/solidcraft_pane.rs`).
 - `src/platform/linux/x11/window.rs`: `X11Window` gives its window id as a raw window handle (upstream: `unimplemented!()`), the parent of Chromium's window.
 - `src/platform/linux/x11/client.rs`: a `FocusOut` with detail `Inferior` (the keyboard went to a child window of ours: the Browser tab's Chromium, or the
   window's key proxy below) leaves the window active.

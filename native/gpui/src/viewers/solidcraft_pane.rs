@@ -243,6 +243,59 @@ pub fn container_visible(in_page: bool, popped: bool, has_rect: bool, has_child:
     in_page && !popped && has_rect && has_child
 }
 
+/// Intersection of two physical rectangles, or `None` when empty/disjoint.
+pub fn rect_intersect(a: nc::R, b: nc::R) -> Option<nc::R> {
+    let x0 = a.x.max(b.x);
+    let y0 = a.y.max(b.y);
+    let x1 = (a.x + a.w).min(b.x + b.w);
+    let y1 = (a.y + a.h).min(b.y + b.h);
+    (x0 < x1 && y0 < y1).then_some(nc::R {
+        x: x0,
+        y: y0,
+        w: x1 - x0,
+        h: y1 - y0,
+    })
+}
+
+/// Two-phase placement plan around `Window::present()` so the native child never paints over stale host pixels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PlacePlan {
+    HideNow,
+    Immediate,
+    ShowAfterPresent { unmap_before: bool },
+    SyncResize { pre_clip: Vec<nc::R> },
+}
+
+/// Choose how to synchronize a container transition from `prev` to `next` (with host overlays `over`) around `present()`.
+pub fn plan_placement(prev: Option<nc::R>, next: Option<nc::R>, over: &[nc::R]) -> PlacePlan {
+    match (prev, next) {
+        (_, None) => PlacePlan::HideNow,
+        (None, Some(_)) => PlacePlan::ShowAfterPresent { unmap_before: false },
+        (Some(m), Some(r)) if m == r => PlacePlan::Immediate,
+        (Some(m), Some(r)) => {
+            let Some(inter) = rect_intersect(m, r) else {
+                return PlacePlan::ShowAfterPresent { unmap_before: true };
+            };
+            let dx = inter.x - m.x;
+            let dy = inter.y - m.y;
+            let pre_clip: Vec<nc::R> = nc::cut(inter, over)
+                .into_iter()
+                .map(|c| nc::R {
+                    x: c.x + dx,
+                    y: c.y + dy,
+                    w: c.w,
+                    h: c.h,
+                })
+                .collect();
+            if pre_clip.is_empty() {
+                PlacePlan::ShowAfterPresent { unmap_before: true }
+            } else {
+                PlacePlan::SyncResize { pre_clip }
+            }
+        }
+    }
+}
+
 /// Whether `editor.solidcraft.open` should be sent for live file-follow without respawning.
 pub fn needs_file_open(
     attached: bool,
@@ -349,6 +402,7 @@ pub struct SolidCraftPane {
     placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     last_place: Option<(u64, nc::R, Option<u64>)>,
     last_root: (i32, i32),
+    place_seq: u64,
     screen_key: Option<(u64, u64)>,
     focus: FocusHandle,
     pub keys: bool,
@@ -389,6 +443,7 @@ impl SolidCraftPane {
             placed: None,
             last_place: None,
             last_root: (i32::MIN, 0),
+            place_seq: 0,
             screen_key: None,
             focus: cx.focus_handle(),
             keys: false,
@@ -465,6 +520,7 @@ impl SolidCraftPane {
         }
         self.in_page = in_page;
         if !in_page {
+            self.place_seq = self.place_seq.wrapping_add(1);
             if let Some((t, c)) = self.screen_key.take() {
                 nc::note_pane_on_screen(t, c, false);
             }
@@ -636,6 +692,7 @@ impl SolidCraftPane {
         self.placed = None;
         self.last_place = None;
         self.last_root = (i32::MIN, 0);
+        self.place_seq = self.place_seq.wrapping_add(1);
         self.frames = nc::frames(new_c);
         nc::grab_click(new_c, !self.keys);
         self.rpc(
@@ -660,6 +717,7 @@ impl SolidCraftPane {
         let rect = self.last_place.map(|(_, r, _)| r);
         self.placed = None;
         self.last_place = None;
+        self.place_seq = self.place_seq.wrapping_add(1);
         if self.info["state"] == "ready" && !self.frames.is_empty() && self.toplevel == self.home {
             for old in keep(Kept {
                 toplevel: self.toplevel,
@@ -822,19 +880,6 @@ impl SolidCraftPane {
             if self.frames.is_empty() {
                 self.frames = k.frames;
             }
-            if let (Some(r), Some(w)) = (k.rect, self.child_window()) {
-                if container_visible(
-                    self.in_page,
-                    popped_elsewhere(self.popped, self.toplevel, self.home),
-                    true,
-                    true,
-                ) {
-                    self.report_screen(k.container, true);
-                    nc::place(k.container, Some(r), Some(w), None, &mut self.last_root);
-                    self.placed = Some((Some(r), Some(w), Vec::new()));
-                    self.last_place = Some((k.container, r, Some(w)));
-                }
-            }
         } else {
             self.container = nc::container_for(top, &format!("solidcraft:{}", self.root));
         }
@@ -921,15 +966,84 @@ impl SolidCraftPane {
             }
             return;
         }
-        self.report_screen(c, effective_at.is_some() && effective_show.is_some());
-        nc::place(c, effective_at, effective_show, None, &mut self.last_root);
-        match effective_at {
-            Some(p) if !over.is_empty() => nc::holes(c, Some(&nc::cut(p, &over))),
-            _ => nc::holes(c, None),
+        let prev_at = self.placed.as_ref().and_then(|(prev, _, _)| *prev);
+        let plan = plan_placement(prev_at, effective_at, &over);
+        self.place_seq = self.place_seq.wrapping_add(1);
+        let seq = self.place_seq;
+        let cut_rects = effective_at.filter(|_| !over.is_empty()).map(|p| nc::cut(p, &over));
+        match plan {
+            PlacePlan::HideNow => {
+                self.report_screen(c, false);
+                nc::place_shaped(c, None, None, None, None, &mut self.last_root);
+                self.last_place = None;
+                self.placed = Some(key);
+            }
+            PlacePlan::Immediate => {
+                self.report_screen(c, effective_at.is_some() && effective_show.is_some());
+                nc::place_shaped(
+                    c,
+                    effective_at,
+                    effective_show,
+                    None,
+                    cut_rects.as_deref(),
+                    &mut self.last_root,
+                );
+                self.last_place = effective_at.map(|r| (c, r, effective_show));
+                self.placed = Some(key);
+            }
+            PlacePlan::ShowAfterPresent { unmap_before } => {
+                if unmap_before {
+                    nc::place(c, None, None, None, &mut self.last_root);
+                }
+                let weak = cx.entity().downgrade();
+                window.after_present(move |window, cx| {
+                    let _ = weak.update(cx, |this, _| {
+                        if this.place_seq != seq
+                            || this.container != Some(c)
+                            || top_of(window) != Some(this.toplevel)
+                        {
+                            return;
+                        }
+                        this.report_screen(c, effective_at.is_some() && effective_show.is_some());
+                        nc::place_shaped(
+                            c,
+                            effective_at,
+                            effective_show,
+                            None,
+                            cut_rects.as_deref(),
+                            &mut this.last_root,
+                        );
+                        this.last_place = effective_at.map(|r| (c, r, effective_show));
+                        this.placed = Some((effective_at, effective_show, over));
+                    });
+                });
+            }
+            PlacePlan::SyncResize { pre_clip } => {
+                nc::holes(c, Some(&pre_clip));
+                let weak = cx.entity().downgrade();
+                window.after_present(move |window, cx| {
+                    let _ = weak.update(cx, |this, _| {
+                        if this.place_seq != seq
+                            || this.container != Some(c)
+                            || top_of(window) != Some(this.toplevel)
+                        {
+                            return;
+                        }
+                        this.report_screen(c, effective_at.is_some() && effective_show.is_some());
+                        nc::place_shaped(
+                            c,
+                            effective_at,
+                            effective_show,
+                            None,
+                            cut_rects.as_deref(),
+                            &mut this.last_root,
+                        );
+                        this.last_place = effective_at.map(|r| (c, r, effective_show));
+                        this.placed = Some((effective_at, effective_show, over));
+                    });
+                });
+            }
         }
-        self.last_place = effective_at.map(|r| (c, r, effective_show));
-        self.placed = Some(key);
-        let _ = cx;
     }
 
     pub fn report(&self) -> Value {
@@ -1849,6 +1963,67 @@ mod tests {
         assert_eq!(
             mech_target(&data, &empty_mech),
             Some(("/proj".into(), "".into()))
+        );
+    }
+
+    #[test]
+    fn rect_intersect_handles_overlap_and_disjoint_rects() {
+        let a = nc::R { x: 100, y: 50, w: 300, h: 200 };
+        let b = nc::R { x: 250, y: 100, w: 200, h: 250 };
+        assert_eq!(rect_intersect(a, b), Some(nc::R { x: 250, y: 100, w: 150, h: 150 }));
+        let c = nc::R { x: 400, y: 50, w: 100, h: 200 };
+        assert_eq!(rect_intersect(a, c), None);
+    }
+
+    #[test]
+    fn plan_placement_covers_hide_immediate_show_and_sync_resize() {
+        let r1 = nc::R { x: 700, y: 70, w: 660, h: 800 };
+        let r2_shrink = nc::R { x: 760, y: 70, w: 600, h: 800 };
+        let r2_grow = nc::R { x: 640, y: 70, w: 720, h: 800 };
+        let disjoint = nc::R { x: 50, y: 70, w: 200, h: 200 };
+
+        assert_eq!(plan_placement(Some(r1), None, &[]), PlacePlan::HideNow);
+        assert_eq!(plan_placement(None, None, &[]), PlacePlan::HideNow);
+        assert_eq!(
+            plan_placement(None, Some(r1), &[]),
+            PlacePlan::ShowAfterPresent { unmap_before: false }
+        );
+        assert_eq!(plan_placement(Some(r1), Some(r1), &[]), PlacePlan::Immediate);
+        assert_eq!(
+            plan_placement(Some(r1), Some(disjoint), &[]),
+            PlacePlan::ShowAfterPresent { unmap_before: true }
+        );
+
+        // Shrink: container at r1 (x=700) clips to r1 ∩ r2_shrink (x=760..1360), so pre_clip x=60 in r1-local coords.
+        assert_eq!(
+            plan_placement(Some(r1), Some(r2_shrink), &[]),
+            PlacePlan::SyncResize {
+                pre_clip: vec![nc::R { x: 60, y: 0, w: 600, h: 800 }],
+            }
+        );
+
+        // Grow: container at r1 (x=700) clips to r1 ∩ r2_grow (x=700..1360), so pre_clip x=0 in r1-local coords.
+        assert_eq!(
+            plan_placement(Some(r1), Some(r2_grow), &[]),
+            PlacePlan::SyncResize {
+                pre_clip: vec![nc::R { x: 0, y: 0, w: 660, h: 800 }],
+            }
+        );
+
+        // Stepped shrink/grow with an overlay covering the intersection falls back to unmap_before.
+        let full_over = vec![r1];
+        assert_eq!(
+            plan_placement(Some(r1), Some(r2_shrink), &full_over),
+            PlacePlan::ShowAfterPresent { unmap_before: true }
+        );
+
+        // Stepped resize with a partial overlay translates the cut rectangles into prev-local coordinates.
+        let overlay = vec![nc::R { x: 760, y: 70, w: 600, h: 100 }];
+        assert_eq!(
+            plan_placement(Some(r1), Some(r2_shrink), &overlay),
+            PlacePlan::SyncResize {
+                pre_clip: vec![nc::R { x: 60, y: 100, w: 600, h: 700 }],
+            }
         );
     }
 }
