@@ -721,7 +721,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
             let t = top.clone();
             /* i18n-ok: ctl labels and ids */ ctl.push(CtlEntry { id: "page-open-mech".into(), label: "New 3D part".into(), ctl: Ctl::Select(top.clone()) });
             bar = bar.child(action_button(cx, light, "page-open-mech", "box", crate::i18n::trs("New 3D part"), false).on_click(cx.listener(move |this, _, window, cx| {
-                let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.view_edit = Some((raw, "mech")); this.select(t.clone(), window, cx);
+                let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.solidcraft_create_next = true; this.screens.projects.view_edit = Some((raw, "mech")); this.select(t.clone(), window, cx);
             })));
         }
     } }
