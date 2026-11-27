@@ -891,7 +891,12 @@ mod imp {
                 Some(32) => 0xff00_0000 | (rgb & 0x00ff_ffff),
                 _ => rgb & 0x00ff_ffff,
             };
-            let _ = c.change_window_attributes(w, &ChangeWindowAttributesAux::new().background_pixel(px));
+            let _ = c.change_window_attributes(
+                w,
+                &ChangeWindowAttributesAux::new()
+                    .background_pixel(px)
+                    .bit_gravity(Gravity::NORTH_WEST),
+            );
             if depth == 0 { return }
             for k in c.query_tree(w).ok().and_then(|r| r.reply().ok()).map(|t| t.children).unwrap_or_default() {
                 apply(c, k, rgb, depth - 1);
