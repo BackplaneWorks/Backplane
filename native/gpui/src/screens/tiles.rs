@@ -188,7 +188,7 @@ pub(crate) fn page(app: &mut Backplane, cx: &mut Context<Backplane>, light: bool
     let viewer = &thread["viewer"];
     let layout = &viewer["layout"];
     let sc_full = super::viewer::SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed);
-    let sc_tile = sc_full.then(|| crate::viewers::solidcraft_pane::mech_tile(viewer)).flatten();
+    let sc_tile = (sc_full && !super::viewer::mech_native(&app.data["thread"])).then(|| crate::viewers::solidcraft_pane::mech_tile(viewer)).flatten();
     let effective_max = sc_tile.or_else(|| layout["maximized"].as_str());
     let mut leaves = HashMap::new();
     for (id, row) in viewer["tiles"].as_object().into_iter().flatten() {
@@ -200,7 +200,7 @@ pub(crate) fn page(app: &mut Backplane, cx: &mut Context<Backplane>, light: bool
         let header = super::tile_menu::decorate(cx,light,thread,row,false,&app.screens.tile_menu,header);
         let body = if let Some(reason) = row["error"].as_str() {
             panestate::view(light, &PaneState::error(trs(reason),false),None)
-        } else if kind != "mech" && row["empty"].is_string() {
+        } else if (kind != "mech" || super::viewer::mech_native(thread)) && row["empty"].is_string() {
             let reason = row["empty"].as_str().unwrap_or_default();
             panestate::view(light,&PaneState::empty(trs(reason),trs(row["emptyNext"].as_str().unwrap_or_default())),None)
         } else if matches!(kind, "board" | "schematic" | "gerbers") {

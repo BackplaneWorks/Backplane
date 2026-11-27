@@ -89,14 +89,22 @@ pub(super) fn tools(
         return vec![layers];
     }
     if row["kind"] == "mech"
+        && !super::viewer::mech_native(thread)
         && crate::viewers::solidcraft_pane::mech_tile(&thread["viewer"]) == row["id"].as_str()
         && screens.solidcraft.is_some()
         && screens.solidcraft_window.is_none()
     {
-        return vec![viewer::solidcraft_full_tool(
-            cx,
-            viewer::SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed),
-        )];
+        return vec![
+            viewer::mech_view_tool(cx, false),
+            viewer::solidcraft_full_tool(
+                cx,
+                viewer::SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed),
+            ),
+        ];
+    }
+    // a Mech tile: the switch to the other viewer (viewer::mech_view_tool)
+    if row["kind"] == "mech" {
+        return vec![viewer::mech_view_tool(cx, super::viewer::mech_native(thread))];
     }
     if !focused(thread, row) {
         return vec![];
@@ -247,6 +255,8 @@ pub(super) fn body_with_panel(
                 None,
             ),
         },
+        // Backplane's own viewer (viewer::mech_native): the tile's 3D page, as a 3D tile's (tiles.rs)
+        "mech" if super::viewer::mech_native(thread) => return None,
         "mech" if crate::viewers::solidcraft_pane::mech_tile(v) != Some(id) => missing(light, false),
         "mech" => match &screens.solidcraft {
             Some(pane) if pane.read(cx).popped => crate::viewers::solidcraft_pane::popped_placeholder(cx, light),
@@ -378,7 +388,7 @@ pub(crate) fn settled(
             _ if screens.attacher.target.is_none() => Some("error"),
             _ => None,
         },
-        "mech" if crate::viewers::solidcraft_pane::mech_tile(v) == row["id"].as_str() => {
+        "mech" if !super::viewer::mech_native(thread) && crate::viewers::solidcraft_pane::mech_tile(v) == row["id"].as_str() => {
             match &screens.solidcraft {
                 Some(pane) => pane.read(cx).settled(),
                 _ if screens.attacher.target.is_none() => Some("error"),

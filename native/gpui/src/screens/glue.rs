@@ -305,6 +305,8 @@ impl Backplane {
             .filter(|(_, row)| row["kind"] == "mech")
             .map(|(id, _)| id.clone())
             .collect();
+        // Backplane's own viewer for Mech (viewer::mech_native): its tiles take a 3D page as the 3D tiles do; else SolidCraft has them
+        let mech_tiles = if super::viewer::mech_native(&self.data["thread"]) { std::collections::HashSet::new() } else { mech_tiles };
         let screens = &mut self.screens;
         let wanted: std::collections::HashMap<_, _> = screens.plots.tiles.iter().filter_map(|(id, tile)| {
             if mech_tiles.contains(id) { return None; }
@@ -366,6 +368,7 @@ impl Backplane {
         let source = match viewer["open"].as_str() {
             Some("split") => viewer["panes"][2]["key"].as_str(),
             Some("3d") => viewer["key"].as_str(),
+            Some("mech") if super::viewer::mech_native(thread) => viewer["key"].as_str(),
             _ => None,
         };
         let slot = source.filter(|s| !s.is_empty() && !thread["diff"].is_object()).map(str::to_owned);

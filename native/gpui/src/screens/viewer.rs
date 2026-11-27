@@ -143,7 +143,7 @@ pub fn mech_parts(viewer: &Value) -> Vec<Part> { arr(&viewer["mech"], "parts").m
 pub fn solid_ready(want: &str, have: &str) -> bool { want.is_empty() || want == have }
 /// Whether `view` draws the 3D page for this thread (3D or Split, the pane open, no diff over it): when not, the page is put away
 /// (SolidPage::put_away: its pictures leave the GPU's atlas). Desktop Mech uses SolidCraft instead of SolidPage.
-pub fn shows_solid(thread: &Value) -> bool { is_open(thread) && !thread["diff"].is_object() && matches!(thread["viewer"]["open"].as_str(), Some("3d" | "split")) }
+pub fn shows_solid(thread: &Value) -> bool { is_open(thread) && !thread["diff"].is_object() && match thread["viewer"]["open"].as_str() { Some("3d" | "split") => true, Some("mech") => mech_native(thread), _ => false } }
 
 /// An agent's viewer_show (`kind`, `path`) as the page to open and, for a model, the part on it: Some((view kind, part)). A kind the viewer has no page for is ignored.
 pub fn shown(kind: &str, path: &str) -> Option<(String, Option<String>)> {
@@ -1120,9 +1120,9 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         else if open == "review" && viewer["review"].is_object() { let a = header(cx); review_page(cx, reg, light, &viewer["review"], &mut pv.loading, a, review_panel) }
         else if matches!(open, "board" | "schematic") { let a = header(cx); plot_page(cx, light, open, viewer, plot, pv, a) }
         else if open == "split" { let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default(); let a = header(cx); let b = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards); let lr = pv.last_retry; split_page(cx, light, viewer, plot, split_pv.unwrap(), &mut pv.loading, lr, solid, &have, b, a) }
-        else if open == "mech" {
+        else if open == "mech" && !mech_native(thread) {
             let h = header(cx);
-            let mut tools = Vec::new();
+            let mut tools = vec![mech_view_tool(cx, false)];
             if let Some(sc) = solidcraft {
                 let popped = sc.read(cx).popped;
                 if !popped {
@@ -1170,15 +1170,27 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             };
             div().size_full().flex().flex_col().child(bar).child(measured_body(body)).into_any_element()
         }
-        else if open == "3d" {
+        else if matches!(open, "3d" | "mech") { // Mech here: Backplane's own viewer (mech_native), the part's model as the 3D page draws it
+            let key_empty = string(viewer, "key").is_empty();
             let want = string(viewer, "key");
+            // what the page HOLDS, not what was queued for it: a big model's decode, a frame that fails or is replaced in the worker's slot
             if let Some(s) = solid { if !want.is_empty() && s.read(cx).shown_key() != want { s.update(cx, |p, cx| p.want(&want, cx)); } }
             let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default();
             let ready = matches!(solid, Some(_s) if solid_ready(&want, &have));
             if let Some(s) = solid {
                 if s.read(cx).inline_controls { s.update(cx, |p, cx| { p.inline_controls = false; cx.notify(); }); }
             }
-            let model: AnyElement = match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(&mut pv.loading, &format!("{open}:{want}"), &super::panestate::loading_for(open, false)) };
+            let model: AnyElement = if open == "mech" && key_empty {
+                let mech = &viewer["mech"];
+                let say = [string(mech, "say"), string(mech, "empty")].into_iter().find(|s| !s.is_empty()).unwrap_or_default();
+                let note = string(mech, "note");
+                if say == "Loading…" {
+                    let secs = pv.loading.track_now("mech:list");
+                    super::panestate::view(light, &super::panestate::PaneState::loading(super::panestate::loading_line(&trs("Loading…"), secs, 0)), None)
+                } else {
+                    super::panestate::view(light, &super::panestate::mech_empty(&say, &note), None)
+                }
+            } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(&mut pv.loading, &format!("{open}:{want}"), &super::panestate::loading_for(open, false)) } };
             let h = header(cx);
             let mut tools = Vec::new();
             if let Some(page) = solid.filter(|_| ready) {
@@ -1186,8 +1198,10 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
                     tools.push(button(cx, tool.id, tool.label, Press::Camera(page.downgrade(), tool.action)));
                 }
             }
-            if let Some(board) = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards) { tools.insert(0, board); }
-            let bar = pane_header(light, h.identity, tools, h.controls);
+            let bar = if open == "mech" { tools.insert(0, mech_view_tool(cx, true)); mech_header(cx, light, viewer, pv, h, tools) } else {
+                if let Some(board) = crate::viewers::boards::pane_tool(cx, light, viewer, &pv.boards) { tools.insert(0, board); }
+                pane_header(light, h.identity, tools, h.controls)
+            };
             div().size_full().flex().flex_col().child(bar).child(measured_body(model)).into_any_element()
         }
         else if open == "browser" { match browser { Some(b) => div().size_full().child(b.clone()).into_any_element(), None => { let h = header(cx); pane_body_state(light, &super::panestate::PaneState::empty(trs("The browser page needs a connected hub."), String::new()), Some(pane_header(light, h.identity, vec![], h.controls)), None) } } }
@@ -1273,6 +1287,36 @@ pub fn set_panel(px: f32) { PANE_PANEL.store(px.max(0.).round() as u32, std::syn
 /// is open), and drawn in a window of its own (the pane then says so).
 pub static KICAD_FULL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static SOLIDCRAFT_FULL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Which viewer the Mech page uses in this window: 0 as the hub's `viewer.mech` setting says (`thread.mechView`, SolidCraft unless "backplane"),
+/// 1 Backplane's own (the 3D page, view only), 2 SolidCraft. Set by the pane's "View in Backplane" / "Open in SolidCraft" and SolidCraft's
+/// not-installed screen; a window restart goes back to the setting.
+pub static MECH_VIEW: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+/// Whether the Mech page shows the part in Backplane's own 3D viewer instead of SolidCraft.
+pub fn mech_native(thread: &Value) -> bool {
+    use std::sync::atomic::Ordering::Relaxed;
+    let setting = thread["mechView"].as_str().unwrap_or("");
+    // the setting changed (Settings › CAD, or the not-installed screen's "Always"): it wins over this window's last choice
+    let code = match setting { "" => 0, "backplane" => 2, _ => 1 };
+    let was = MECH_SETTING.swap(code, Relaxed);
+    if code != 0 && was != 0 && was != code { MECH_VIEW.store(0, Relaxed); }
+    mech_native_of(MECH_VIEW.load(Relaxed), setting)
+}
+/// The `viewer.mech` setting last seen (0 not yet, 1 SolidCraft, 2 Backplane).
+static MECH_SETTING: std::sync::atomic::AtomicU8 = std::sync::atomic::AtomicU8::new(0);
+pub fn mech_native_of(chosen: u8, setting: &str) -> bool { match chosen { 1 => true, 2 => false, _ => setting == "backplane" } }
+/// This window's choice from now on; the part's model is asked for at once when it moves to Backplane's viewer.
+pub fn set_mech_native(this: &mut Backplane, native: bool) {
+    MECH_VIEW.store(if native { 1 } else { 2 }, std::sync::atomic::Ordering::Relaxed);
+    WATCHED.lock().unwrap().clear();
+    follow(&this.tx, &this.data["thread"]);
+}
+/// The Mech header's switch between the two viewers: "View in Backplane" while SolidCraft shows the part (the way "Open in KiCad" goes the other
+/// way for a board), "Open in SolidCraft" back.
+pub(super) fn mech_view_tool(cx: &Context<Backplane>, native: bool) -> Tool {
+    let (id, label, tip) = if native { ("mech-view-solidcraft", trs("Open in SolidCraft"), trs("View and edit this part in SolidCraft")) }
+        else { ("mech-view-native", trs("View in Backplane"), trs("Show this part in Backplane's own 3D viewer (view only)")) };
+    hint(button(cx, id, label, Press::MechView(!native)), tip, "")
+}
 /// The embedded editor is the whole window this frame (ui.rs): the pane draws only the editor's strip and the editor.
 pub static KICAD_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static KICAD_POPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1363,12 +1407,25 @@ fn resize_handle(cx: &mut Context<Backplane>) -> AnyElement {
 }
 
 /// Desktop Mech uses embedded SolidCraft rather than `kicad.watch` solid frames.
-pub fn watch_for(_open: &str, _key: &str, _last: &str) -> Option<Value> { None }
+/// The watch a Mech part needs in Backplane's own viewer (mech_native; SolidCraft opens the file itself). Board, Schematic and 3D are watched by the
+/// commands of the action that opened them; a Mech part comes in after a `mech.list` reply, which carries no command, so the window asks for its
+/// model itself when the viewer's key moves. `key` is "<kind>|<root>|<path>" (kind 2 is 3D).
+pub fn watch_for(open: &str, key: &str, last: &str) -> Option<Value> {
+    if open != "mech" || key.is_empty() || key == last { return None }
+    let mut p = key.splitn(3, '|');
+    let (k, root, path) = (p.next()?, p.next()?, p.next()?);
+    let kind = match k { "0" => "board", "1" => "schematic", "2" => "3d", _ => return None };
+    Some(serde_json::json!({"kind": kind, "root": root, "path": path, "tree": ""}))
+}
 static WATCHED: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
-pub fn follow(_tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
+pub fn follow(tx: &tokio::sync::mpsc::Sender<Command>, thread: &Value) {
     let open = thread["viewer"]["open"].as_str().unwrap_or("");
+    let key = thread["viewer"]["key"].as_str().unwrap_or("");
     let mut last = WATCHED.lock().unwrap();
-    if open != "mech" && !last.is_empty() { last.clear(); }
+    if open != "mech" || !mech_native(thread) { if !last.is_empty() { last.clear(); } return }
+    if let Some(p) = watch_for(open, key, &last) {
+        if tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "watch")).is_ok() { *last = key.to_string(); }
+    }
 }
 
 #[cfg(test)]
@@ -1654,6 +1711,7 @@ mod tests {
         let t = |v: &str| j(v);
         assert!(shows_solid(&t(r#"{"viewer":{"open":"3d"}}"#)) && shows_solid(&t(r#"{"viewer":{"open":"split"}}"#)));
         assert!(!shows_solid(&t(r#"{"viewer":{"open":"mech"}}"#)), "desktop mech uses embedded SolidCraft");
+        assert!(shows_solid(&t(r#"{"viewer":{"open":"mech"},"mechView":"backplane"}"#)), "unless Backplane's own viewer is the one set");
         assert!(!shows_solid(&t(r#"{"viewer":{"open":"board"}}"#)), "another page");
         assert!(!shows_solid(&t(r#"{"viewer":{"open":""}}"#)) && !shows_solid(&Value::Null), "the pane closed, or no thread");
         assert!(!shows_solid(&t(r#"{"viewer":{"open":"3d"},"diff":{}}"#)), "a diff drawn over it");
@@ -1697,8 +1755,13 @@ mod tests {
     }
     #[test] fn a_mech_part_is_watched_once_when_its_key_moves() {
         let key = "2|/p|/p/mech/board.step";
-        assert!(watch_for("mech", key, "").is_none(), "desktop mech opens in SolidCraft, not solid mesh frames");
-        assert!(watch_for("mech", "", "").is_none() && watch_for("board", key, "").is_none() && watch_for("gerbers", "0|/p|/p/mfg/b/gerber", "").is_none());
+        assert_eq!(watch_for("mech", key, "").unwrap(), serde_json::json!({"kind": "3d", "root": "/p", "path": "/p/mech/board.step", "tree": ""}));
+        assert!(watch_for("mech", key, key).is_none(), "asked once");
+        assert!(watch_for("mech", "", "").is_none() && watch_for("board", key, "").is_none() && watch_for("gerbers", "0|/p|/p/mfg/b/gerber", "").is_none(), "no key, or a page the presenter watches");
+    }
+    #[test] fn the_mech_page_follows_the_setting_until_the_window_chooses() {
+        assert!(!mech_native_of(0, "") && !mech_native_of(0, "solidcraft") && mech_native_of(0, "backplane"), "the setting, SolidCraft by default");
+        assert!(mech_native_of(1, "solidcraft") && !mech_native_of(2, "backplane"), "View in Backplane / Open in SolidCraft win over it");
     }
     #[test] fn a_drag_makes_the_pane_as_wide_as_the_room_right_of_the_pointer_within_its_range() {
         assert_eq!(width_for(1600.0, 900.0, 71.0, 264.0), 629); assert_eq!(width_for(1600.0, 1500.0, 71.0, 264.0), crate::local::VIEWER_PX.0);

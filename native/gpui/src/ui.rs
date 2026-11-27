@@ -952,6 +952,7 @@ impl Render for Backplane {
         crate::screens::viewer::KICAD_SCREEN.store(kscreen, std::sync::atomic::Ordering::Relaxed);
         let sc_mine = self.solidcraft_for(thread, cx).is_some();
         let sc_showing = !thread["diff"].is_object()
+            && !crate::screens::viewer::mech_native(thread) // Backplane's own viewer has the Mech page: SolidCraft's window is put away
             && self.project_page.is_none()
             && self.data["bot"].is_null()
             && if docked {

@@ -534,6 +534,8 @@ pub enum SolidCraftEvent {
     Popout,
     BringBack,
     Escape,
+    /// Not installed: show the part in Backplane's own viewer instead; true also makes it the default (setting `viewer.mech`)
+    ViewNative(bool),
 }
 
 /// Compute the next SolidCraft fullscreen flag given current flag, desired toggle/set, and
@@ -558,6 +560,8 @@ pub struct SolidCraftPane {
     pub attached: bool,
     pub in_page: bool,
     pub popped: bool,
+    /// The not-installed screen's "Always view parts in Backplane" tick
+    pub native_always: bool,
     pub info: Value,
     pub frames: Vec<nc::Frame>,
     marker: Arc<Mutex<Option<HitboxId>>>,
@@ -603,6 +607,7 @@ impl SolidCraftPane {
             attached: false,
             in_page: true,
             popped: false,
+            native_always: false,
             info: Value::Null,
             frames: Vec::new(),
             marker: Arc::default(),
@@ -1466,6 +1471,51 @@ impl Render for SolidCraftPane {
                         .child(trs("Install SolidCraft"))
                         .on_click(cx.listener(|this, _, _, cx| this.install(cx))),
                     )
+                    // or no install: the part in Backplane's own 3D viewer (view only), and that as the default from now on if ticked
+                    .child(div().text_size(crate::scale::tpx(12.)).child(trs("or")))
+                    .child(
+                        crate::ui::with_rect(
+                            div().id("solidcraft-view-native"),
+                            || "solidcraft:view_native".to_string(),
+                        )
+                        .px_3()
+                        .py_1()
+                        .border_1()
+                        .border_color(c("line"))
+                        .bg(c("raise"))
+                        .text_color(c("text"))
+                        .cursor_pointer()
+                        .hover(|s| s.bg(c("panel")))
+                        .child(trs("View directly in Backplane instead"))
+                        .on_click(cx.listener(|this, _, _, cx| cx.emit(SolidCraftEvent::ViewNative(this.native_always)))),
+                    )
+                    .child({
+                        let on = self.native_always;
+                        crate::ui::with_rect(
+                            div().id("solidcraft-native-always"),
+                            || "solidcraft:native_always".to_string(),
+                        )
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .text_size(crate::scale::tpx(12.))
+                        .cursor_pointer()
+                        .child(
+                            div()
+                                .size(px(14.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .border_1()
+                                .border_color(if on { c("accent") } else { c("line") })
+                                .bg(if on { c("accent") } else { c("raise") })
+                                .text_color(c("on-accent"))
+                                .text_size(crate::scale::tpx(10.))
+                                .child(if on { "✓" } else { "" }),
+                        )
+                        .child(trs("Always view parts in Backplane (change it in Settings › CAD)"))
+                        .on_click(cx.listener(|this, _, _, cx| { this.native_always = !this.native_always; cx.notify(); }))
+                    })
                     .into_any_element(),
             ),
             PaneStatus::Installing { done, total } => {
@@ -1923,6 +1973,7 @@ impl Backplane {
         let viewer = &thread["viewer"];
         let is_mech = crate::screens::viewer::is_open(thread)
             && !thread["diff"].is_object()
+            && !crate::screens::viewer::mech_native(thread)
             && (viewer["open"] == "mech"
                 || (crate::screens::viewer::is_tiled(viewer) && mech_tile(viewer).is_some()));
         if !is_mech {
@@ -1993,6 +2044,12 @@ impl Backplane {
                 if this.screens.solidcraft_full {
                     this.solidcraft_set_full(false, cx);
                 }
+            }
+            SolidCraftEvent::ViewNative(always) => {
+                // the default from now on: the hub's setting (Settings › CAD › Mech tab); this window switches at once either way
+                if *always { let _ = this.tx.try_send(Command::Action("setting".into(), "viewer.mech=backplane".into())); }
+                crate::screens::viewer::set_mech_native(this, true);
+                cx.notify();
             }
         })
         .detach();
