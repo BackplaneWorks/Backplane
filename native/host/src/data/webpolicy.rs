@@ -73,7 +73,8 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "clone.cancel"
         | "clone.retry"
         | "clone.signin"
-        | "home.move.dismiss" => Activity,
+        | "home.move.dismiss"
+        | "solidcraft.web.install" => Activity,
         "attachment.get"
         | "badge.list"
         | "bot.cat"
@@ -139,7 +140,8 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         | "viewer.refs"
         | "voice.always"
         | "voice.page"
-        | "voice.view" => Passive,
+        | "voice.view"
+        | "solidcraft.web.status" => Passive,
         // Native provider account administration.
         "account.act"
         | "account.view"

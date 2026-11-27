@@ -51,7 +51,7 @@ function viewerKindForFile(name: string): string | null {
   const ext = fileExt(name);
   if (ext === "kicad_pcb") return "board";
   if (ext === "kicad_sch") return "schematic";
-  if (ext === "step" || ext === "stp" || ext === "glb") return "mech";
+  if (["sc", "solidcraft", "step", "stp", "stl", "3mf", "iges", "igs", "obj", "glb"].includes(ext)) return "mech";
   return null;
 }
 

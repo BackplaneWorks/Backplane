@@ -8,6 +8,7 @@
 pub mod embed;
 pub mod render;
 pub mod runtime;
+pub mod web;
 
 use crate::hub::Hub;
 use std::sync::Arc;
@@ -39,6 +40,7 @@ pub fn start(hub: &Arc<Hub>) {
     }));
     runtime::start(hub);
     embed::start(hub);
+    web::start(hub);
 }
 
 #[cfg(test)]

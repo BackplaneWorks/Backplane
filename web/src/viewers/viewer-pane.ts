@@ -10,6 +10,7 @@ import { mountBrowserPane } from "./browser";
 import { mountDiffPane, mountFilesPane, mountReviewPane, type PaneHandle } from "./panes";
 import { Plot2DViewer, type LayerMasks } from "./plot2d";
 import { Solid3DViewer } from "./solid3d";
+import { isSolidCraftCad, SolidCraftWebEmbed, type SolidCraftWebStatus } from "./solidcraft-web";
 import {
   HistoryStripState,
   matchesCompareKey,
@@ -137,6 +138,11 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   solidBarEl.setAttribute("data-testid", "solid-presets-bar");
   solidBarEl.hidden = true;
 
+  const scInstallBarEl = document.createElement("div");
+  scInstallBarEl.className = "bp-sc-install-bar";
+  scInstallBarEl.setAttribute("data-testid", "sc-web-install-bar");
+  scInstallBarEl.hidden = true;
+
   const bannerEl = document.createElement("div");
   bannerEl.className = "bp-v-banner";
   bannerEl.hidden = true;
@@ -166,7 +172,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   historyBarEl.setAttribute("data-testid", "viewer-history-bar");
   historyBarEl.hidden = true;
 
-  container.replaceChildren(header, solidBarEl, bannerEl, stageWrap, historyBarEl);
+  container.replaceChildren(header, solidBarEl, scInstallBarEl, bannerEl, stageWrap, historyBarEl);
 
   let threadId = "";
   let page = "";
@@ -198,6 +204,12 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
 
   let plot2d: Plot2DViewer | null = null;
   let solid3d: Solid3DViewer | null = null;
+  let scWebEmbed: SolidCraftWebEmbed | null = null;
+  let scWebStatus: SolidCraftWebStatus | null = null;
+  let mechMode: "solidcraft" | "glb" = "solidcraft";
+  let scSaving = false;
+  let scReady = false;
+  let scPollTimer = 0;
   let activePane: PaneHandle | null = null;
   let activeTerm: { setTheme(light: boolean): void; destroy(): void } | null = null;
 
@@ -231,8 +243,99 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     history.playing = false;
   }
 
+  function stopScInstallPoll(): void {
+    if (scPollTimer) {
+      window.clearInterval(scPollTimer);
+      scPollTimer = 0;
+    }
+  }
+
+  function startScInstallPoll(): void {
+    if (scPollTimer) return;
+    scPollTimer = window.setInterval(() => {
+      if (page !== "mech") {
+        stopScInstallPoll();
+        return;
+      }
+      void api.hub
+        .rpc<SolidCraftWebStatus>("solidcraft.web.status", {})
+        .then((st) => {
+          scWebStatus = st;
+          if (st.installed) {
+            stopScInstallPoll();
+            mechMode = "solidcraft";
+            void startWatch(false);
+          } else if (!st.installing) {
+            stopScInstallPoll();
+            renderScInstallBar();
+          } else {
+            renderScInstallBar();
+          }
+        })
+        .catch(() => {});
+    }, 1000);
+  }
+
+  function renderScInstallBar(): void {
+    const show =
+      page === "mech" &&
+      Boolean(selectedMech) &&
+      isSolidCraftCad(selectedMech) &&
+      Boolean(scWebStatus) &&
+      !scWebStatus!.installed &&
+      !scWebStatus!.copy;
+    scInstallBarEl.hidden = !show;
+    if (!show || !scWebStatus) {
+      scInstallBarEl.replaceChildren();
+      return;
+    }
+    const msg = document.createElement("span");
+    msg.className = "bp-sc-install-msg";
+    const sizeMb = Math.max(1, Math.round((scWebStatus.size || 93_115_471) / (1 << 20)));
+    if (scWebStatus.installing) {
+      const doneMb = Math.round((scWebStatus.install?.done || 0) / (1 << 20));
+      const step = doneMb > 0 ? `${doneMb}/${sizeMb} MB` : (scWebStatus.install?.note || "");
+      msg.textContent = t("solidcraft.web.installing", "Installing SolidCraft Web… {step}", { step });
+      startScInstallPoll();
+    } else {
+      const failNote =
+        scWebStatus.install?.state === "failed" && scWebStatus.install?.note
+          ? ` (${scWebStatus.install.note})`
+          : "";
+      msg.textContent =
+        t("solidcraft.web.install.prompt", "SolidCraft Web ({n} MB) adds full in-browser CAD editing.", {
+          n: sizeMb,
+        }) + failNote;
+    }
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "bp-v-btn is-primary";
+    btn.setAttribute("data-testid", "sc-web-install-btn");
+    btn.textContent = t("solidcraft.web.install.btn", "Install SolidCraft Web");
+    btn.disabled = scWebStatus.installing;
+    btn.addEventListener("click", () => {
+      if (!scWebStatus || scWebStatus.installing) return;
+      scWebStatus = { ...scWebStatus, installing: true, install: { state: "running", note: "Downloading", done: 0, total: scWebStatus.size } };
+      renderScInstallBar();
+      startScInstallPoll();
+      void api.hub
+        .rpc<SolidCraftWebStatus>("solidcraft.web.install", { consent: true })
+        .then((st) => {
+          scWebStatus = st;
+          renderScInstallBar();
+        })
+        .catch((err) => {
+          stopScInstallPoll();
+          setBanner(err instanceof Error ? err.message : String(err), true);
+          if (scWebStatus) scWebStatus = { ...scWebStatus, installing: false };
+          renderScInstallBar();
+        });
+    });
+    scInstallBarEl.replaceChildren(msg, btn);
+  }
+
   function renderSolidBar(): void {
-    const show = page === "3d" || page === "mech";
+    const show = page === "3d" || (page === "mech" && scWebEmbed === null);
     solidBarEl.hidden = !show;
     if (!show) return;
     if (solidBarEl.childElementCount > 0) return;
@@ -537,6 +640,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     const light = isLight();
     plot2d?.setTheme(light);
     solid3d?.setTheme(light);
+    scWebEmbed?.setTheme(light);
     activeTerm?.setTheme(light);
   });
   themeObs.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
@@ -638,6 +742,42 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       controlsEl.append(layersBtn);
     }
 
+    if (page === "mech" && selectedMech && isSolidCraftCad(selectedMech) && scWebStatus?.installed) {
+      if (scWebEmbed !== null) {
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "bp-v-btn is-primary";
+        saveBtn.textContent = scSaving
+          ? t("solidcraft.web.saving", "Saving…")
+          : t("solidcraft.web.save", "Save");
+        saveBtn.disabled = !scReady || scSaving || Boolean(scWebStatus.copy);
+        if (scWebStatus.copy) {
+          saveBtn.title = t("solidcraft.web.readonly", "Read-only copy: edits cannot be saved.");
+        }
+        saveBtn.setAttribute("data-testid", "viewer-sc-save");
+        saveBtn.addEventListener("click", () => {
+          if (!scWebEmbed || !scReady || scSaving || scWebStatus?.copy) return;
+          scSaving = true;
+          renderHeader();
+          scWebEmbed.save();
+        });
+        controlsEl.append(saveBtn);
+      }
+      const toggleBtn = document.createElement("button");
+      toggleBtn.type = "button";
+      toggleBtn.className = "bp-v-btn";
+      toggleBtn.textContent =
+        scWebEmbed !== null
+          ? t("solidcraft.web.preview", "Fast preview")
+          : t("solidcraft.web.open", "SolidCraft Web");
+      toggleBtn.setAttribute("data-testid", "viewer-sc-toggle");
+      toggleBtn.addEventListener("click", () => {
+        mechMode = scWebEmbed !== null ? "glb" : "solidcraft";
+        void startWatch(false);
+      });
+      controlsEl.append(toggleBtn);
+    }
+
     if (page === "board" || page === "schematic" || page === "3d" || page === "mech" || page === "gerbers") {
       const fitBtn = document.createElement("button");
       fitBtn.type = "button";
@@ -647,6 +787,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       fitBtn.addEventListener("click", () => {
         plot2d?.fit();
         solid3d?.fit();
+        scWebEmbed?.fit();
       });
       controlsEl.append(fitBtn);
     }
@@ -898,6 +1039,12 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     plot2d = null;
     solid3d?.destroy();
     solid3d = null;
+    scWebEmbed?.destroy();
+    scWebEmbed = null;
+    scReady = false;
+    scSaving = false;
+    scInstallBarEl.hidden = true;
+    scInstallBarEl.replaceChildren();
     stage.replaceChildren();
     layersOpen = false;
     layersPop.hidden = true;
@@ -989,7 +1136,89 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     }
 
     const light = isLight();
-    if (page === "3d" || page === "mech") {
+    if (page === "mech") {
+      try {
+        const ml = await api.hub.rpc<{ parts?: string[]; primary?: string }>("mech.list", { thread: threadId });
+        if (gen !== watchGen) return;
+        mechParts = Array.isArray(ml.parts) ? ml.parts : [];
+        if (!selectedMech || !mechParts.includes(selectedMech)) {
+          selectedMech = ml.primary || mechParts[0] || "";
+        }
+        renderHeader();
+      } catch (err) {
+        if (gen !== watchGen) return;
+        if (mechParts.length === 0) {
+          setOverlay("error", err instanceof Error ? err.message : String(err), true);
+          return;
+        }
+      }
+      if (!selectedMech) {
+        setOverlay("empty", t("gpui.rail.no.mech", "No mechanical parts in this project"), false);
+        return;
+      }
+      if (isSolidCraftCad(selectedMech)) {
+        try {
+          scWebStatus = await api.hub.rpc<SolidCraftWebStatus>("solidcraft.web.status", {});
+        } catch {
+          scWebStatus = null;
+        }
+        if (gen !== watchGen) return;
+        if (scWebStatus?.installed && mechMode === "solidcraft") {
+          void api.hub.rpc("viewer.watch", { thread: threadId, kind: "" }).catch(() => {});
+          solidBarEl.hidden = true;
+          scInstallBarEl.hidden = true;
+          setOverlay("loading", t("solidcraft.web.loading", "Loading SolidCraft Web…"));
+          scReady = false;
+          scWebEmbed = new SolidCraftWebEmbed(stage, threadId, selectedMech, light, Boolean(scWebStatus.copy), {
+            onReady: () => {
+              if (gen !== watchGen) return;
+              scReady = true;
+              setOverlay("none");
+              setBanner("", false);
+              renderHeader();
+            },
+            onSaving: () => {
+              if (gen !== watchGen) return;
+              scSaving = true;
+              renderHeader();
+            },
+            onSaved: (savedPath) => {
+              if (gen !== watchGen) return;
+              scSaving = false;
+              renderHeader();
+              setBanner(t("solidcraft.web.saved", "Saved {name}", { name: basename(savedPath) }), false);
+            },
+            onError: (op, msg) => {
+              if (gen !== watchGen) return;
+              scSaving = false;
+              renderHeader();
+              setBanner(msg, true);
+              if (op === "boot") setOverlay("error", msg, true);
+            },
+          });
+          renderHeader();
+          return;
+        }
+      }
+      solid3d = new Solid3DViewer(stage, {
+        onStatus: (msg, streaming) => {
+          if (streaming) {
+            setOverlay("none");
+            setBanner(msg, false);
+          } else if (msg) {
+            setOverlay("loading", msg);
+          } else {
+            setOverlay("none");
+            setBanner("", false);
+          }
+        },
+        onUserMove: () => void pauseFollowOnUserMove(),
+      });
+      solid3d.setTheme(light);
+      renderHeader();
+      renderSolidBar();
+      renderScInstallBar();
+    } else if (page === "3d") {
       solid3d = new Solid3DViewer(stage, {
         onStatus: (msg, streaming) => {
           if (streaming) {
@@ -1020,23 +1249,6 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
     if (force) params.force = true;
 
     if (page === "mech") {
-      if (mechParts.length === 0) {
-        try {
-          const ml = await api.hub.rpc<{ parts?: string[]; primary?: string }>("mech.list", { thread: threadId });
-          if (gen !== watchGen) return;
-          mechParts = Array.isArray(ml.parts) ? ml.parts : [];
-          if (!selectedMech) selectedMech = ml.primary || mechParts[0] || "";
-          renderHeader();
-        } catch (err) {
-          if (gen !== watchGen) return;
-          setOverlay("error", err instanceof Error ? err.message : String(err), true);
-          return;
-        }
-      }
-      if (!selectedMech) {
-        setOverlay("empty", t("gpui.rail.no.mech", "No mechanical parts in this project"), false);
-        return;
-      }
       params.kind = "3d";
       params.path = selectedMech;
     } else {
@@ -1224,6 +1436,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       watchGen++;
       watchPending = false;
       stopHistoryPlay();
+      stopScInstallPoll();
       compareMenuOpen = false;
       compareKeyPrefix = "";
       compareCommit = "";
@@ -1231,6 +1444,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       activeCompareSig = "";
       history.goLive();
       solidBarEl.hidden = true;
+      scInstallBarEl.hidden = true;
       historyBarEl.hidden = true;
       clearPending();
       if (threadId) {

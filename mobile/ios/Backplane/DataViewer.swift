@@ -1,5 +1,6 @@
 import SwiftUI
 import PDFKit
+import WebKit
 
 // The viewer over a thread on the phone (the same tabs as the desktop's right rail and the Android app's DataViewer.kt): Board, Schematic, 3D, Mech, Files, Browser,
 // on the data/1 viewer requests (native/host/src/data/ext.rs). Plots and models arrive as the hub's own binary frames (DataClient routes them to `plots`)
@@ -27,6 +28,12 @@ struct DProjectFiles: Decodable { var root: String; var pcb: String; var sch: St
 struct DMech: Decodable { var parts: [String]
     enum CodingKeys: String, CodingKey { case parts }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); parts = (try? c.decode([String].self, forKey: .parts)) ?? [] } }
+struct DSolidCraftWebInstall: Decodable { var state: String; var note: String; var done: Int64; var total: Int64
+    enum CodingKeys: String, CodingKey { case state, note, done, total }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); state = c.str(.state); note = c.str(.note); done = Int64(c.int(.done)); total = Int64(c.int(.total)) } }
+struct DSolidCraftWebStatus: Decodable { var installed: Bool; var version: String; var size: Int64; var installing: Bool; var copy: Bool; var install: DSolidCraftWebInstall?
+    enum CodingKeys: String, CodingKey { case installed, version, size, installing, copy, install }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); installed = c.bool(.installed); version = c.str(.version); size = Int64(c.int(.size)); installing = c.bool(.installing); copy = c.bool(.copy); install = try? c.decodeIfPresent(DSolidCraftWebInstall.self, forKey: .install) } }
 /// `viewer.layers`: what a press does, and what to draw; the rules are the hub's (present/viewer.rs `layer_reply`).
 struct DLayerRow: Decodable, Hashable { var layer: Int; var name: String; var on: Bool; var active: Bool }
 struct DLayers: Decodable, Equatable {
@@ -89,6 +96,19 @@ extension DataClient {
     func info(_ key: String, at: Int, idx: Int) async -> String { ((try? await call("viewer.info", ["key": key, "at": at, "idx": idx]) as DInfo)?.info) ?? "" }
     func entries(_ thread: String, path: String) async throws -> [DEntryRow] { (try await call("files.entries", ["thread": thread, "path": path]) as DEntries).entries }
     func mech(_ thread: String) async -> [String] { ((try? await call("mech.list", ["thread": thread]) as DMech)?.parts) ?? [] }
+    func solidCraftWebStatus() async -> DSolidCraftWebStatus? { try? await call("solidcraft.web.status", [:]) }
+    func solidCraftWebInstall() async throws -> DSolidCraftWebStatus { try await call("solidcraft.web.install", ["consent": true]) }
+    func solidCraftWebLaunch(thread: String, path: String, light: Bool) -> (url: URL, token: String)? {
+        guard let link,
+              let tok = Pairing.token(link),
+              !tok.isEmpty,
+              let url = Pairing.http(link, path: "/solidcraft-web/", query: [
+                  URLQueryItem(name: "thread", value: thread),
+                  URLQueryItem(name: "path", value: path),
+                  URLQueryItem(name: "theme", value: light ? "light" : "dark"),
+              ], token: false) else { return nil }
+        return (url, tok)
+    }
     func browser(_ thread: String, _ op: String, _ extra: [String: Any] = [:]) async throws {
         var p = extra; p["thread"] = thread; p["op"] = op
         _ = try await call("browser", p, as: DEmpty.self)
@@ -563,29 +583,51 @@ struct DataRefMenu: View {
     }
 }
 
-// Mech: the project's models, one at a time
+// Mech: the project's models, one at a time (fast cached-GLB default + SolidCraft Web button)
+private struct DSolidCraftTarget: Identifiable { let id: String }
+
 struct DataMechTab: View {
     let client: DataClient
     let thread: DThread
     let open: String?
     @State private var parts: [String]?
     @State private var part: String?
+    @State private var solidCraftTarget: DSolidCraftTarget?
     var body: some View {
         VStack(spacing: 0) {
             if let ps = parts {
                 if ps.isEmpty { Text(Tr.t("No models in mech/ yet")).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary).padding(24) }
                 else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 8) { ForEach(ps, id: \.self) { p in
-                            Button { part = p } label: { Text(p.split(separator: "/").last.map(String.init) ?? p).font(.system(.footnote, design: .monospaced)).padding(.horizontal, 10).padding(.vertical, 6).foregroundStyle(p == part ? Color.white : .primary).background(p == part ? BackplaneDesign.accent : BackplaneDesign.raised) }
-                        } }.padding(8)
+                    let active = part ?? open ?? ps.first
+                    HStack(spacing: 8) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) { ForEach(ps, id: \.self) { p in
+                                Button { part = p } label: { Text(p.split(separator: "/").last.map(String.init) ?? p).font(.system(.footnote, design: .monospaced)).padding(.horizontal, 10).padding(.vertical, 6).foregroundStyle(p == active ? Color.white : .primary).background(p == active ? BackplaneDesign.accent : BackplaneDesign.raised) }
+                            } }.padding(.vertical, 8).padding(.leading, 8)
+                        }
+                        if let active, cadExt.contains(ext(active)) {
+                            Button {
+                                solidCraftTarget = DSolidCraftTarget(id: active)
+                            } label: {
+                                Text(Tr.k("solidcraft.web.open"))
+                                    .font(.system(.footnote, design: .monospaced))
+                                    .padding(.horizontal, 10).padding(.vertical, 6)
+                                    .foregroundStyle(BackplaneDesign.onAccent)
+                                    .background(BackplaneDesign.accent)
+                            }
+                            .padding(.trailing, 8)
+                            .accessibilityIdentifier("data.mech.solidcraft")
+                        }
                     }.background(BackplaneDesign.panel)
-                    if let p = part ?? open ?? ps.first { DataMechSolid(client: client, thread: thread, path: p) }
+                    if let p = active { DataMechSolid(client: client, thread: thread, path: p) }
                 }
             } else { ProgressView().padding(24) }
             Spacer(minLength: 0)
         }
         .task { parts = await client.mech(thread.id); if let o = open { part = o } }
+        .fullScreenCover(item: $solidCraftTarget) { t in
+            DataSolidCraftWebSheet(client: client, thread: thread, path: t.id)
+        }
     }
 }
 struct DataMechSolid: View {
@@ -605,6 +647,241 @@ struct DataMechSolid: View {
             else if mesh?.mesh == nil || mesh?.decoding == true { DLoading(text: Tr.t("Loading 3D model…")) }
         }
         .task(id: path) { error = ""; do { try await client.watch(thread.id, kind: "3d", path: path) } catch { self.error = error.localizedDescription } }
+    }
+}
+
+private struct DataSolidCraftWebSheet: View {
+    let client: DataClient
+    let thread: DThread
+    let path: String
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var scheme
+    @State private var status: DSolidCraftWebStatus?
+    @State private var ready = false
+    @State private var saving = false
+    @State private var saveNonce = 0
+    @State private var note = ""
+    @State private var isError = false
+    var body: some View {
+        let fname = path.split(separator: "/").last.map(String.init) ?? path
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Button(Tr.k("common.close")) { dismiss() }
+                    .font(.system(.subheadline, design: .monospaced).bold())
+                    .accessibilityIdentifier("data.solidcraft.close")
+                Text(fname)
+                    .font(.system(.subheadline, design: .monospaced))
+                    .lineLimit(1).truncationMode(.middle)
+                Spacer(minLength: 0)
+                if status?.installed == true {
+                    Button {
+                        guard !saving, status?.copy != true else { return }
+                        saving = true; note = ""; isError = false; saveNonce += 1
+                    } label: {
+                        Text(saving ? Tr.k("solidcraft.web.saving") : Tr.k("solidcraft.web.save"))
+                            .font(.system(.footnote, design: .monospaced).bold())
+                            .padding(.horizontal, 12).padding(.vertical, 6)
+                            .foregroundStyle(BackplaneDesign.onAccent)
+                            .background((saving || status?.copy == true) ? BackplaneDesign.dim : BackplaneDesign.accent)
+                    }
+                    .disabled(saving || status?.copy == true)
+                    .accessibilityIdentifier("data.solidcraft.save")
+                }
+            }
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .background(BackplaneDesign.panel)
+            DLine()
+            if !note.isEmpty {
+                Text(note)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(isError ? BackplaneDesign.bad : BackplaneDesign.accent)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12).padding(.vertical, 6)
+                    .background(BackplaneDesign.panel)
+                DLine()
+            }
+            if let st = status {
+                if st.installed, let launch = client.solidCraftWebLaunch(thread: thread.id, path: path, light: scheme == .light) {
+                    ZStack {
+                        SolidCraftWKWebView(
+                            url: launch.url,
+                            token: launch.token,
+                            saveNonce: saveNonce,
+                            onReady: { ready = true; isError = false },
+                            onSaved: {
+                                saving = false
+                                isError = false
+                                note = Tr.solidcraft_web_saved(name: fname)
+                            },
+                            onError: { msg in
+                                saving = false
+                                isError = true
+                                note = msg
+                            }
+                        )
+                        if !ready {
+                            DLoading(text: Tr.k("solidcraft.web.loading"))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if st.installed {
+                    Text(Tr.t("This file could not be read.")).foregroundStyle(BackplaneDesign.bad).padding(24)
+                    Spacer()
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text(Tr.k("solidcraft.web.not.installed")).font(.system(.subheadline, design: .monospaced))
+                        let mb = String(max(1, Int((st.size > 0 ? st.size : 93_115_471) >> 20)))
+                        Text(Tr.solidcraft_web_install_prompt(n: mb)).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary)
+                        if st.installing {
+                            let doneMb = st.install.map { String(Int($0.done >> 20)) } ?? "0"
+                            let step = st.install.map { $0.done > 0 ? "\(doneMb)/\(mb) MB" : $0.note } ?? ""
+                            Text(Tr.solidcraft_web_installing(step: step)).font(.system(.footnote, design: .monospaced)).foregroundStyle(BackplaneDesign.accent)
+                            ProgressView()
+                        } else if st.copy {
+                            Text(Tr.k("solidcraft.web.readonly")).font(.system(.footnote, design: .monospaced)).foregroundStyle(.secondary)
+                        } else {
+                            Button {
+                                Task {
+                                    isError = false; note = ""
+                                    do { status = try await client.solidCraftWebInstall() }
+                                    catch { isError = true; note = error.localizedDescription }
+                                }
+                            } label: {
+                                Text(Tr.k("solidcraft.web.install.btn"))
+                                    .font(.system(.footnote, design: .monospaced).bold())
+                                    .padding(.horizontal, 14).padding(.vertical, 10)
+                                    .foregroundStyle(BackplaneDesign.onAccent)
+                                    .background(BackplaneDesign.accent)
+                            }
+                            .accessibilityIdentifier("data.solidcraft.install")
+                        }
+                        Spacer()
+                    }
+                    .padding(20)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            } else {
+                DLoading(text: Tr.k("solidcraft.web.loading"))
+            }
+        }
+        .background(BackplaneDesign.background)
+        .task {
+            status = await client.solidCraftWebStatus()
+            while !Task.isCancelled, status?.installing == true {
+                try? await Task.sleep(for: .seconds(1))
+                status = await client.solidCraftWebStatus()
+            }
+        }
+    }
+}
+
+private struct SolidCraftWKWebView: UIViewRepresentable {
+    let url: URL
+    let token: String
+    let saveNonce: Int
+    let onReady: () -> Void
+    let onSaved: () -> Void
+    let onError: (String) -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeUIView(context: Context) -> WKWebView {
+        let cfg = WKWebViewConfiguration()
+        cfg.websiteDataStore = .nonPersistent()
+        cfg.allowsInlineMediaPlayback = true
+        let ucc = WKUserContentController()
+        ucc.add(context.coordinator, name: "backplane")
+        cfg.userContentController = ucc
+        let view = WKWebView(frame: .zero, configuration: cfg)
+        view.isOpaque = false
+        view.backgroundColor = .clear
+        view.navigationDelegate = context.coordinator
+        view.scrollView.isScrollEnabled = false
+        view.scrollView.bounces = false
+        context.coordinator.load(view: view, url: url, token: token)
+        return view
+    }
+
+    func updateUIView(_ view: WKWebView, context: Context) {
+        context.coordinator.parent = self
+        if context.coordinator.lastSaveNonce != saveNonce {
+            context.coordinator.lastSaveNonce = saveNonce
+            if saveNonce > 0 {
+                view.evaluateJavaScript("window.__bpSolidCraft && window.__bpSolidCraft.save()", completionHandler: nil)
+            }
+        }
+    }
+
+    static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+        view.configuration.userContentController.removeScriptMessageHandler(forName: "backplane")
+        view.navigationDelegate = nil
+        view.stopLoading()
+    }
+
+    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
+        var parent: SolidCraftWKWebView
+        var lastSaveNonce = 0
+        private var allowedScheme: String?
+        private var allowedHost: String?
+        private var allowedPort: Int?
+
+        init(parent: SolidCraftWKWebView) {
+            self.parent = parent
+            self.allowedScheme = parent.url.scheme?.lowercased()
+            self.allowedHost = parent.url.host?.lowercased()
+            self.allowedPort = parent.url.port
+        }
+
+        func load(view: WKWebView, url: URL, token: String) {
+            let store = view.configuration.websiteDataStore.httpCookieStore
+            var props: [HTTPCookiePropertyKey: Any] = [
+                .name: "bp_token",
+                .value: token,
+                .domain: url.host ?? "",
+                .path: "/",
+                HTTPCookiePropertyKey("HttpOnly"): "TRUE",
+            ]
+            if url.scheme == "https" { props[.secure] = "TRUE" }
+            if let cookie = HTTPCookie(properties: props) {
+                store.setCookie(cookie) {
+                    DispatchQueue.main.async {
+                        view.load(URLRequest(url: url))
+                    }
+                }
+            } else {
+                view.load(URLRequest(url: url))
+            }
+        }
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            guard let body = message.body as? [String: Any], let type = body["type"] as? String else { return }
+            DispatchQueue.main.async {
+                switch type {
+                case "bp:solidcraft:ready": self.parent.onReady()
+                case "bp:solidcraft:saved": self.parent.onSaved()
+                case "bp:solidcraft:error":
+                    let msg = body["error"] as? String ?? "SolidCraft Web error"
+                    self.parent.onError(msg)
+                default: break
+                }
+            }
+        }
+
+        func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
+            guard let u = navigationAction.request.url else { decisionHandler(.cancel); return }
+            let scheme = u.scheme?.lowercased()
+            if scheme == "about" {
+                decisionHandler(.allow); return
+            }
+            let isMainFrame = navigationAction.targetFrame?.isMainFrame ?? true
+            if !isMainFrame && (scheme == "blob" || scheme == "data") {
+                decisionHandler(.allow); return
+            }
+            if scheme == allowedScheme && u.host?.lowercased() == allowedHost && u.port == allowedPort {
+                decisionHandler(.allow); return
+            }
+            decisionHandler(.cancel)
+        }
     }
 }
 

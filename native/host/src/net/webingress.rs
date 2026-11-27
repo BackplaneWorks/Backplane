@@ -515,6 +515,35 @@ mod tests {
         ))
         .await;
         assert!(paired.starts_with("HTTP/1.1 200 "), "{paired}");
+
+        // SolidCraft Web routes: unpaired is 401, paired when absent is 404, paired when present is 200, CSP allows frame-src 'self'
+        assert!(SECURITY_HEADERS.contains("frame-src 'self'"));
+        let sc_unpaired = send_loopback(format!(
+            "GET /solidcraft-web/ HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             Tailscale-User-Login: person@example.com\r\n\r\n"
+        ))
+        .await;
+        assert!(sc_unpaired.starts_with("HTTP/1.1 401 "), "{sc_unpaired}");
+        let sc_absent = send_loopback(format!(
+            "GET /solidcraft-web/ HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             Tailscale-User-Login: person@example.com\r\nCookie: __Host-bp_web={session_cookie}\r\n\r\n"
+        ))
+        .await;
+        assert!(sc_absent.starts_with("HTTP/1.1 404 "), "{sc_absent}");
+        let sc_dir = crate::solidcraft::web::web_parent(&hub.cfg.home).join("0.50.0");
+        std::fs::create_dir_all(&sc_dir).unwrap();
+        std::fs::write(sc_dir.join("index.html"), "<html></html>").unwrap();
+        std::fs::write(sc_dir.join("solidcraft-web-test.js"), "export default async function(){}").unwrap();
+        std::fs::write(sc_dir.join("solidcraft-web-test_bg.wasm"), b"\x00asm\x01\x00\x00\x00").unwrap();
+        let sc_present = send_loopback(format!(
+            "GET /solidcraft-web/ HTTP/1.1\r\nHost: 127.0.0.1:{backend_port}\r\n\
+             X-Forwarded-Host: {authority}\r\nX-Forwarded-Proto: https\r\n\
+             Tailscale-User-Login: person@example.com\r\nCookie: __Host-bp_web={session_cookie}\r\n\r\n"
+        ))
+        .await;
+        assert!(sc_present.starts_with("HTTP/1.1 200 "), "{sc_present}");
     }
 }
 
@@ -522,7 +551,7 @@ const SECURITY_HEADERS: &str = concat!(
     "Cache-Control: private, no-store\r\n",
     "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; ",
     "img-src 'self' blob: data:; media-src 'self'; font-src 'self'; worker-src 'self'; connect-src 'self'; ",
-    "object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\r\n",
+    "frame-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'\r\n",
     "X-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\n",
 );
 
@@ -771,6 +800,35 @@ where S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin + Send {
             let r = match req.route() { "/file" => serve_file(&hub, &mut writer, Who::Browser, &req).await, "/files/get" => serve_files_get(&hub, &mut writer, Who::Browser, &req).await, _ => serve_share(&hub, &mut writer, Who::Browser, &format!("browser:{}", device.as_deref().unwrap_or("")), &req).await };
             if r.is_ok() { writer.shutdown().await.ok(); }
             return Ok(());
+        }
+    } else if matches!(req.method.as_str(), "GET" | "HEAD") && (req.route() == "/solidcraft-web" || req.route().starts_with("/solidcraft-web/")) {
+        let device = crate::net::start::registry(&hub.cfg.home).and_then(|r| crate::auth::browser_device(&r, &req, &login));
+        if device.is_none() {
+            asset_json_response("401 Unauthorized", json!({"state":"unpaired"}))
+        } else {
+            if crate::solidcraft::web::serve_asset(&hub, &mut writer, &req).await.is_ok() {
+                writer.shutdown().await.ok();
+            }
+            return Ok(());
+        }
+    } else if matches!(req.method.as_str(), "POST" | "PUT") && req.route() == "/solidcraft-web/save" {
+        let device = crate::net::start::registry(&hub.cfg.home).and_then(|r| crate::auth::browser_device(&r, &req, &login));
+        let size = single_header(&req, "content-length").and_then(|v| v.parse::<usize>().ok());
+        if device.is_none() {
+            asset_json_response("401 Unauthorized", json!({"state":"unpaired"}))
+        } else if req.headers.iter().any(|(k, _)| k.eq_ignore_ascii_case("transfer-encoding")) || size.is_none() {
+            asset_json_response("411 Length Required", json!({"ok":false,"error":"Content-Length required"}))
+        } else if let Some(len) = size.filter(|&n| n <= crate::files::ops::MAX_WRITE && n >= bytes.len() - end) {
+            let mut body = bytes.split_off(end);
+            let buffered = body.len();
+            body.resize(len, 0);
+            tokio::time::timeout(Duration::from_secs(30), reader.read_exact(&mut body[buffered..])).await??;
+            let r = crate::solidcraft::web::handle_save(&hub, &req, body).await;
+            crate::wire::response_for(r.status, &r.ctype, &r.extra, &r.body)
+        } else if size.is_some_and(|n| n > crate::files::ops::MAX_WRITE) {
+            asset_json_response("413 Payload Too Large", json!({"ok":false,"error":"file too large"}))
+        } else {
+            asset_json_response("400 Bad Request", json!({"ok":false,"error":"invalid request"}))
         }
     } else if req.method == "GET" && (req.target == "/" || req.target.starts_with("/assets/")) {
         let paired = crate::net::start::registry(&hub.cfg.home)

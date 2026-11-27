@@ -3577,6 +3577,38 @@ html.light .bp-v-overlay {
   color: var(--dim);
 }
 
+.bp-sc-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+  background: var(--bg);
+}
+
+.bp-sc-install-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 5px 10px;
+  font-size: 11px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--rule);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.bp-sc-install-bar[hidden] {
+  display: none;
+}
+
+.bp-sc-install-msg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* ---- Rail Panes (Files, Diff, Review, Terminal) ---- */
 .bp-pane {
   position: absolute;
