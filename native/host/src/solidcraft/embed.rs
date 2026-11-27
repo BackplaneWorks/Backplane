@@ -47,6 +47,9 @@ pub struct Session {
     /// The close was asked for: the exit that follows is `stopped`, not `failed`.
     pub closing: bool,
     pub silent: u32,
+    /// The pane left it (another page, another project) and keeps its window for a quick return: when, in seconds since the epoch;
+    /// 0 while it is in a pane or popped out. A parked program is closed after [`parked_limit`].
+    pub parked_at: u64,
 }
 impl Session {
     pub fn is_live(&self) -> bool { self.pid != 0 && matches!(self.state.as_str(), "starting" | "ready" | "unresponsive") }
@@ -56,7 +59,7 @@ impl Session {
         let state = if !self.is_live() && installing { "installing" } else if self.state.is_empty() { "stopped" } else { &self.state };
         json!({
             "state": state, "pid": self.pid, "gen": self.gen, "file": self.file, "root": self.root,
-            "control_port": if self.is_live() { self.port } else { 0 }, "container": self.container, "toplevel": self.toplevel,
+            "control_port": if self.is_live() { self.port } else { 0 }, "container": self.container, "toplevel": self.toplevel, "parked": self.parked_at != 0,
             "version": self.version, "reason": self.reason,
             "install_progress": {"done": install["done"].as_u64().unwrap_or(0), "total": install["total"].as_u64().unwrap_or(0), "note": install["note"], "state": install["state"]},
             "runtime": rt,
@@ -109,8 +112,16 @@ pub fn exit_step(s: &mut Session, code: Option<i32>, tail: &str) {
         let how = code.map_or("was stopped by a signal".to_string(), |c| format!("exited with code {c}"));
         if l.is_empty() { format!("SolidCraft {how}") } else { format!("SolidCraft {how}: {}", l.chars().take(240).collect::<String>()) }
     };
-    s.pid = 0; s.closing = false; s.silent = 0; s.container = 0; s.toplevel = 0;
+    s.pid = 0; s.closing = false; s.silent = 0; s.container = 0; s.toplevel = 0; s.parked_at = 0;
 }
+/// How long a parked program is kept (`BACKPLANE_SOLIDCRAFT_IDLE_S`, default ten minutes).
+pub fn parked_limit(env: Option<&str>) -> u64 { env.and_then(|v| v.trim().parse().ok()).unwrap_or(600) }
+/// The roots whose programs have been parked longer than `limit` seconds: closed, so programs do not pile up across projects.
+pub fn parked_victims(sessions: &HashMap<String, Session>, now: u64, limit: u64) -> Vec<String> {
+    let mut v: Vec<String> = sessions.values().filter(|s| s.is_live() && !s.closing && s.parked_at != 0 && now.saturating_sub(s.parked_at) >= limit).map(|s| s.root.clone()).collect();
+    v.sort(); v
+}
+fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 
 // Sessions ------------------------------------------------------------------------------------------------------------------
 
@@ -308,7 +319,7 @@ impl RpcHandler for EmbedRpc {
                 "editor.solidcraft.attach" | "editor.solidcraft.bring_back" => {
                     let s = snapshot(&root);
                     if s.is_live() {
-                        with(&root, |x| { x.container = container; x.toplevel = toplevel; });
+                        with(&root, |x| { x.container = container; x.toplevel = toplevel; x.parked_at = 0; });
                         if !file.is_empty() && file != s.file && s.state != "starting" { if let Err(why) = open_in(hub, &root, &file).await { let mut v = publish(hub, &root).await; v["open_error"] = json!(why); return ok_reply(id, v) } }
                         return ok_reply(id, publish(hub, &root).await)
                     }
@@ -344,7 +355,8 @@ impl RpcHandler for EmbedRpc {
                     match open_in(hub, &root, &file).await { Ok(()) => ok_reply(id, publish(hub, &root).await), Err(why) => err_reply(id, &why) }
                 }
                 "editor.solidcraft.detach" => {
-                    with(&root, |x| { x.container = 0; x.toplevel = 0; });
+                    let keep = p["keep"].as_bool().unwrap_or(false);
+                    with(&root, |x| { x.container = 0; x.toplevel = 0; x.parked_at = if keep && x.is_live() { now_s().max(1) } else { 0 }; });
                     ok_reply(id, publish(hub, &root).await)
                 }
                 "editor.solidcraft.close" => {
@@ -371,6 +383,9 @@ pub fn start(hub: &Arc<Hub>) {
                 let answered = call(s.port, &s.token, "control.capabilities", json!({}), Duration::from_secs(4)).await.is_ok();
                 if with(&s.root, |x| x.gen == s.gen && x.is_live() && health_step(x, answered)) { publish(&hub, &s.root).await; }
             }
+            let limit = parked_limit(std::env::var("BACKPLANE_SOLIDCRAFT_IDLE_S").ok().as_deref());
+            let old = parked_victims(&sessions().lock().unwrap(), now_s(), limit);
+            for r in old { eprintln!("solidcraft embed: closing the program parked for {r} ({limit} s out of any pane)"); close(&hub, &r, true).await; }
             let installing = runtime::running();
             if installing || was_installing {
                 let idle: Vec<String> = sessions().lock().unwrap().values().filter(|s| !s.is_live()).map(|s| s.root.clone()).collect();
@@ -435,6 +450,16 @@ mod tests {
         assert_eq!(a.to_json(&rt, &inst)["state"], "installing"); assert_eq!(a.to_json(&rt, &inst)["install_progress"]["done"], 5);
         assert_eq!(s.to_json(&rt, &inst)["state"], "ready");
         assert_eq!(Session::default().to_json(&rt, &Value::Null)["state"], "stopped");
+        // parked programs are closed after the limit; one in a pane, popped out, closing or gone never is
+        assert_eq!((parked_limit(None), parked_limit(Some("30")), parked_limit(Some("x"))), (600, 30, 600));
+        let mut m = HashMap::new();
+        m.insert("/a".to_string(), Session { root: "/a".into(), parked_at: 100, ..s.clone() });
+        m.insert("/b".to_string(), Session { root: "/b".into(), parked_at: 0, ..s.clone() });
+        m.insert("/c".to_string(), Session { root: "/c".into(), parked_at: 650, ..s.clone() });
+        m.insert("/d".to_string(), Session { root: "/d".into(), parked_at: 100, closing: true, ..s.clone() });
+        m.insert("/e".to_string(), Session { root: "/e".into(), parked_at: 100, ..a.clone() });
+        assert_eq!(parked_victims(&m, 700, 600), vec!["/a"]); assert_eq!(parked_victims(&m, 1300, 600), vec!["/a", "/c"]);
+        assert!(s.to_json(&rt, &Value::Null)["parked"] == false && m["/a"].to_json(&rt, &Value::Null)["parked"] == true);
     }
     /// The whole of a session against a stand-in program: it notes its arguments and environment and waits; the test answers on the
     /// port the hub chose, as the program's control channel would.
@@ -506,6 +531,12 @@ mod tests {
         assert_eq!((r["container"].as_u64(), r["state"].as_str(), r["pid"].as_u64()), (Some(0), Some("ready"), Some(pid as u64)));
         let r = hub.request(&mut conn, &json!({"id": 9, "m": "editor.solidcraft.bring_back", "p": {"project": root, "container": 19, "toplevel": 18}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
         assert_eq!((r["container"].as_u64(), r["toplevel"].as_u64(), r["pid"].as_u64()), (Some(19), Some(18), Some(pid as u64)));
+        // the pane leaves and keeps the window: parked; back in a pane: not parked
+        let r = hub.request(&mut conn, &json!({"id": 20, "m": "editor.solidcraft.detach", "p": {"project": root, "keep": true}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
+        assert_eq!((r["parked"].as_bool(), r["state"].as_str()), (Some(true), Some("ready")), "{r}");
+        assert_eq!(parked_victims(&sessions().lock().unwrap(), now_s() + 700, 600), vec![norm_root(&root)]);
+        let r = hub.request(&mut conn, &json!({"id": 21, "m": "editor.solidcraft.attach", "p": {"project": root, "container": 19, "toplevel": 18}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
+        assert_eq!((r["parked"].as_bool(), r["pid"].as_u64(), r["file"].as_str()), (Some(false), Some(pid as u64), proj.join("mech/a.step").to_str()), "{r}");
         // closed: stopped, the process gone, no channel left
         let r = hub.request(&mut conn, &json!({"id": 10, "m": "editor.solidcraft.close", "p": {"project": root}})).await.into_iter().find(|f| f["t"] == "reply").unwrap(); assert_eq!(r["ok"], true);
         for _ in 0..200 { if info(&hub)["state"] == "stopped" { break } tokio::time::sleep(Duration::from_millis(25)).await; }
