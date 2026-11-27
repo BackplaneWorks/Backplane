@@ -8,6 +8,18 @@ export default function (pi) {
   const mode = process.env.BACKPLANE_PI_MODE || 'ask';
   if (url) pi.registerMcpServer('backplane', { url, exposure: 'direct', description: 'Backplane: this thread, its project, viewers and other threads' });
   if (parts) pi.registerMcpServer('pcbparts', { url: parts, exposure: 'direct', description: "Parts search: the fab's stock, Mouser, DigiKey" });
+  const servers = JSON.parse(process.env.BACKPLANE_PI_SERVERS || '[]');
+  delete process.env.BACKPLANE_PI_SERVERS;
+  for (const server of servers) {
+    const entries = values => Object.fromEntries(values.map(({ name, value }) => [name, value]));
+    if (server.type === 'sse') continue; // Pi supports streamable HTTP and stdio.
+    // Pi's file format treats !command and ${VAR} as expressions. ACP headers are literals.
+    if ((server.headers || []).some(({ value }) => value.startsWith('!') || value.includes('${'))) continue;
+    const transport = server.command
+      ? { command: server.command, args: server.args, env: entries(server.env || []) }
+      : { url: server.url, headers: entries(server.headers || []) };
+    pi.registerMcpServer(server.name, { ...transport, exposure: 'direct' });
+  }
   const reads = new Set(['read', 'grep', 'find', 'ls']);
   const edits = new Set(['edit', 'write']);
   pi.on('tool_call', async (event, ctx) => {

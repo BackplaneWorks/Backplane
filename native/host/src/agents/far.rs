@@ -15,6 +15,8 @@ fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 const ON_THREAD: &[&str] = &["thread_send", "thread_read", "thread_wait", "thread_interrupt", "thread_update", "thread_settle"];
 /// The tools that need the file they name on this machine
 const LOCAL_THINGS: &[&str] = &["kicad_ipc", "kicad_edit", "kicad_sim", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "kicad_export10", "altium_status", "altium_script", "altium_write", "viewer_show", "viewer_render"];
+/// SolidCraft's tools (agents/solidcad.rs) work on the project's files and the SolidCraft open on this machine: local like KiCad's.
+fn local_thing(name: &str) -> bool { LOCAL_THINGS.contains(&name) || name.starts_with(super::solidcad::harness::PREFIX) }
 /// The tools that take a `machine`
 const ON_MACHINE: &[&str] = &["thread_list", "thread_launch"];
 
@@ -89,7 +91,7 @@ impl Agents {
     /// A tool that works on a local file (KiCad, the viewer) asked by a thread of no project (the uberbot, a bot) for a path this machine does not have:
     /// the error that says where it is done instead, a thread on the machine that has it. None: the tool runs here as before.
     pub async fn not_here(&self, thread: &str, name: &str, a: &Value) -> Option<String> {
-        if !LOCAL_THINGS.contains(&name) { return None }
+        if !local_thing(name) { return None }
         let path = sv(a, "path").trim(); if path.is_empty() { return None }
         let no_project = self.world().await.threads.get(thread).map_or(false, |t| t.project.is_empty());
         if !no_project || std::path::Path::new(path).exists() { return None }

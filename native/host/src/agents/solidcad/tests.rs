@@ -83,9 +83,19 @@ async fn an_edit_is_checkpointed_saved_and_digested() {
     assert_eq!(v["$content"].as_array().unwrap().iter().filter(|b| b["type"] == "image").count(), 2);
     let (_, v) = r.call("execute", json!({"command":"view.fit"})).await; assert!(bp(&v).get("next").is_none(), "a read is no edit: {v}");
     // the restore puts the file back and reopens it, keeping what was there
-    let (ok, v) = r.s.checkpoint(&r.seam, &json!({"action":"restore"})).await; assert!(ok, "{v}");
+    let (ok, v) = r.s.checkpoint(&r.seam, &json!({"action":"restore"}), &|_| Box::pin(async { Ok(()) })).await; assert!(ok, "{v}");
     assert_eq!(std::fs::read_to_string(&f).unwrap(), "v0"); assert_eq!(v["kept"]["note"], "before restoring checkpoint 1");
     assert!(r.log().lines().last().unwrap().starts_with("call measure") && r.log().matches(&format!("call open  {f}")).count() == 2, "{}", r.log());
+}
+
+#[tokio::test]
+async fn a_refused_snapshot_refuses_the_write() {
+    let r = rig(); let f = r.opened().await; r.call("execute", json!({"command":"solid.box"})).await;
+    let no: &session::Guard = &|p| Box::pin(async move { Err(format!("in review: {}", p.join(","))) });
+    let (ok, v) = r.s.call(&r.seam, "batch", &json!({"commands":[{"command":"file.save_as","params":{"path":"b.sc"}}]}), no).await;
+    assert!(!ok && v["error"].as_str().unwrap().contains("b.sc"), "{v}"); assert!(!r.log().contains("call batch"), "nothing was sent");
+    let (ok, v) = r.s.checkpoint(&r.seam, &json!({"action":"restore"}), no).await;
+    assert!(!ok && v["error"].as_str().unwrap().contains(&f), "{v}"); assert_eq!(std::fs::read_to_string(&f).unwrap(), "saved 1", "the file was not put back");
 }
 
 #[tokio::test]
@@ -158,9 +168,15 @@ async fn a_step_file_has_no_design_file_until_it_is_saved() {
 
 #[test]
 fn a_bridged_server_gets_the_port_and_the_folders() {
-    let a = args(&Spawn { program: "x".into(), mode: Mode::Bridged { port: 7, token: "secret".into() }, allow: vec!["/p".into(), "/h/ck".into()] });
+    let a = args(&Spawn { program: "x".into(), mode: Mode::Bridged { port: 7, token: "secret".into() }, allow: vec!["/p".into(), "/h/ck".into()], env: vec![] });
     assert_eq!(a, ["mcp", "--connect", "127.0.0.1:7", "--compact", "--allow-path", "/p", "--allow-path", "/h/ck"]);
-    assert_eq!(args(&Spawn { program: "x".into(), mode: Mode::Headless, allow: vec![] }), ["mcp", "--headless", "--compact"]);
+    assert_eq!(args(&Spawn { program: "x".into(), mode: Mode::Headless, allow: vec![], env: vec![] }), ["mcp", "--headless", "--compact"]);
+}
+
+#[test]
+fn the_childs_folders_are_the_hubs() {
+    let e = session::data_env(Path::new("/h")); let get = |k: &str| e.iter().find(|x| x.0 == k).unwrap().1.clone();
+    assert_eq!(get("XDG_DATA_HOME"), Path::new("/h/solidcraft/data")); assert_eq!(get("SOLIDCRAFT_SETTINGS_DIR"), Path::new("/h/solidcraft/settings"));
 }
 
 #[test]
@@ -205,7 +221,7 @@ async fn real_solidcraft_models_a_part() {
     assert_eq!(v["parameters"][0]["name"], "w"); assert!((v["total"]["volume_mm3"].as_f64().unwrap() - 7929.314).abs() < 0.01, "{v}"); assert!(v["bodies"][0]["mass_g"].as_f64().unwrap() > 0.0);
     let (ok, v) = call("set_parameter", json!({"name":"w","value":80})).await; assert!(ok, "{v}");
     let b = bp(&v); assert_eq!(b["design"]["bbox"]["size"][0], 80.0, "{b}"); assert!(b["saved"].as_str().unwrap().ends_with("plate.sc")); assert!(b["checkpoint"]["id"].as_u64().is_some());
-    let (ok, v) = s.checkpoint(&seam, &json!({"action":"restore"})).await; assert!(ok, "{v}"); assert_eq!(v["design"]["bbox"]["size"][0], 40.0, "{v}");
+    let (ok, v) = s.checkpoint(&seam, &json!({"action":"restore"}), &|_| Box::pin(async { Ok(()) })).await; assert!(ok, "{v}"); assert_eq!(v["design"]["bbox"]["size"][0], 40.0, "{v}");
     for out in ["mech/plate.step", "mech/plate.stl"] { let (ok, v) = call("export", json!({"path":out})).await; assert!(ok, "{v}"); assert!(root.join(out).metadata().unwrap().len() > 100) }
     let (ok, v) = call("execute", json!({"command":"solid.fillet","params":{"radius":500}})).await; assert!(!ok, "{v}");
     s.stop().await;

@@ -205,6 +205,8 @@ async fn run(a: Args) -> Result<()> {
         settings::order::resume(ag.clone()); // Od.resume: follow every order not yet delivered (a copy follows none)
         files::tools::register(&hub, ag);
         files::share::register(&hub, ag);
+        // SolidCraft's MCP tools for agents, through the harness (agents/solidcad.rs): the managed program, bridged to the pane's SolidCraft when one runs
+        agents::solidcad::register(&hub, ag, agents::solidcad::Seam { cli: Box::new(solidcraft::runtime::cli_path), control: Box::new(|root| solidcraft::embed::control(root).map(|c| (c.port, c.token))) });
         fab::start(&hub, Some(ag)); // fab profiles: fab.profile and the agents' fab_profile
         review::start(&hub, Some(ag)); // the design review: design_review, its runs on save
         plan::start(&hub, Some(ag)); // the routing floorplanner: plan_* tools, plan.approve (the person's)

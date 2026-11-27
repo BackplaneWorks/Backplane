@@ -98,7 +98,7 @@ impl Cad {
     async fn learn(&self) {
         if self.defs.lock().unwrap().is_some() { return }
         let Some(program) = (self.seam.cli)() else { return };
-        let spawn = client::Spawn { program, mode: client::Mode::Headless, allow: vec![] };
+        let spawn = client::Spawn { program, mode: client::Mode::Headless, allow: vec![], env: session::data_env(&self.hub.cfg.home) };
         let Ok(c) = client::Client::start(&spawn, Duration::from_secs(30)).await else { return };
         if let Ok(tools) = c.tools(Duration::from_secs(30)).await { self.learned(&tools) }
         c.kill();
@@ -112,7 +112,7 @@ impl Cad {
     }
     fn session(&self, root: &Path) -> Arc<Session> {
         let key = root.to_string_lossy().into_owned();
-        self.sessions.lock().unwrap().entry(key.clone()).or_insert_with(|| Arc::new(Session::new(root.to_path_buf(), self.hub.cfg.home.join("solidcad").join(crate::files::kicad::kserve::digest(&key))))).clone()
+        self.sessions.lock().unwrap().entry(key.clone()).or_insert_with(|| { let mut s = Session::new(root.to_path_buf(), self.hub.cfg.home.join("solidcad").join(crate::files::kicad::kserve::digest(&key))); s.env = session::data_env(&self.hub.cfg.home); Arc::new(s) }).clone()
     }
 
     /// Whether this thread's project gets the tools up front (harness::wanted).
@@ -138,9 +138,13 @@ impl Cad {
     async fn run(&self, thread: &str, name: &str, a: &Value) -> (bool, Value) {
         let Some(root) = self.root_of(thread).await else { return (false, json!({"error":"this thread has no project folder: SolidCraft works on a project's files"})) };
         let s = self.session(&root);
+        let (ag, th) = (self.ag.clone(), thread.to_string());
+        let guard = move |paths: Vec<String>| -> Fut<'static, Result<(), String>> { let (ag, th) = (ag.clone(), th.clone()); Box::pin(async move {
+            let Some(ag) = ag.upgrade() else { return Ok(()) };
+            let ps: Vec<&str> = paths.iter().map(String::as_str).collect(); ag.files_write_guard(&th, &ps).await }) };
+        if name == "solidcraft_checkpoint" { return s.checkpoint(&self.seam, a, &guard).await }
         let (tool, args) = match name {
             "solidcraft_status" => { let mut v = s.status(&self.seam).await; let cli = (self.seam.cli)(); v["installed"] = json!(cli.is_some()); if let Some(p) = cli { v["cli"] = json!(p.to_string_lossy()) } return (true, v) }
-            "solidcraft_checkpoint" => return s.checkpoint(&self.seam, a).await,
             "solidcraft_summary" => return s.summary(&self.seam).await,
             "solidcraft_look" => return s.look(&self.seam, a).await,
             "solidcraft_call" => { let t = a.get("tool").and_then(Value::as_str).unwrap_or("").trim_start_matches(h::PREFIX).to_string(); if t.is_empty() { return (false, json!({"error":"tool is required"})) } (t, a.get("arguments").cloned().unwrap_or(json!({}))) }
@@ -148,10 +152,6 @@ impl Cad {
         };
         if h::HIDDEN.contains(&tool.as_str()) { return (false, json!({"error": format!("{tool} acts on the person's SolidCraft app, not the design: it is not offered here")})) }
         if self.defs.lock().unwrap().is_none() { if let Ok(t) = s.tools(&self.seam).await { self.learned(&t) } }
-        let (ag, th) = (self.ag.clone(), thread.to_string());
-        let guard = move |paths: Vec<String>| -> Fut<'static, Result<(), String>> { let (ag, th) = (ag.clone(), th.clone()); Box::pin(async move {
-            let Some(ag) = ag.upgrade() else { return Ok(()) };
-            let ps: Vec<&str> = paths.iter().map(String::as_str).collect(); ag.files_write_guard(&th, &ps).await }) };
         s.call(&self.seam, &tool, &args, &guard).await
     }
 }

@@ -20,10 +20,12 @@ pub struct PromptEnv {
     pub skills: Vec<(String, String, String)>,
     /// KiStack's copy the agents get (kistack.rs); None when the hub has none, and then no prompt claims it
     pub kistack: Option<crate::agents::kistack::Copy>,
+    /// SolidCraft's program is on this machine (solidcraft/runtime.rs): the prompt names its tools and skill
+    pub solidcraft: bool,
 }
 impl Default for PromptEnv {
     fn default() -> Self { PromptEnv { fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, kicad_ipc: true, models: String::new(), may_delegate: true, orders_on: true, routing_plan: false,
-        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), altium_projects: vec![], altium_installed: false, design: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![], kistack: None } }
+        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), altium_projects: vec![], altium_installed: false, design: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![], kistack: None, solidcraft: false } }
 }
 
 /// Prompt.runtime
@@ -35,6 +37,8 @@ pub fn mech_gui(fc: &str) -> String {
     if fc.ends_with("FreeCADCmd.exe") || fc.ends_with("freecadcmd.exe") { return cut(14, "FreeCAD.exe") }
     if fc.ends_with("/Resources/bin/freecadcmd") { cut(25, "/MacOS/FreeCAD") } else if fc.ends_with("freecadcmd") { cut(10, "freecad") } else if fc.ends_with("FreeCADCmd") { cut(10, "FreeCAD") } else { fc.to_string() }
 }
+/// What an agent is told of SolidCraft when its program is here (agents/solidcad.rs serves the tools).
+pub const SOLIDCRAFT: &str = "<backplane_solidcraft>\nSolidCraft is this machine's parametric CAD editor and the desktop's 3D pane: `.sc` designs and STEP, IGES, STL, 3MF, OBJ and GLB files open in it (`viewer_show`).\nModel and edit parts with the backplane tools `solidcraft_*` (SolidCraft's own MCP tools, run and supervised by Backplane) and follow the bundled `solidcraft-cad` skill: read it before the first call. Keep each part as `mech/<part>.sc` and export `mech/<part>.step`. When SolidCraft is open in the person's pane, the tools act on the design in that window.\nUse FreeCAD only for what needs it (an existing `.FCStd` or FreeCAD script).\n</backplane_solidcraft>";
 /// Prompt.mech
 pub fn mech(fc: &str, render: &str) -> String {
     let setup = if fc.is_empty() {
@@ -180,6 +184,7 @@ pub fn build(e: &PromptEnv) -> String {
     let mut blocks = vec![runtime("Backplane")];
     if has_kicad { blocks.push(T::PROMPT_BOARD[0].into()); }
     blocks.push(mech(&e.fc, &e.render));
+    if e.solidcraft { blocks.push(SOLIDCRAFT.into()); }
     if has_kicad { blocks.push(kicad(&e.kicad, e.kicad_ipc)); }
     if alt {
         blocks.push(altium(cfg!(windows)));
@@ -315,6 +320,11 @@ pub(crate) mod tests {
         assert!(design_words("/r", None, &locks).contains("never edit a worktree copy"));
     }
     #[test] fn a_delegated_task_at_the_depth_limit_may_not_delegate() { assert!(orchestration(false, "m").contains("depth limit") && !orchestration(false, "m").contains("Models available")); }
+    #[test] fn solidcraft_is_named_only_where_its_program_is() {
+        let mut e = gold_env(); assert!(!build(&e).contains("backplane_solidcraft"));
+        e.solidcraft = true; let s = build(&e);
+        assert!(s.contains("<backplane_solidcraft>") && s.contains("`solidcraft-cad` skill") && s.find("<backplane_mechanical>") < s.find("<backplane_solidcraft>"), "{s}");
+    }
     #[test] fn the_bundled_skills_are_named_with_their_files() {
         let mut e = gold_env(); e.skills = vec![("sendcutsend".into(), "Design parts for SendCutSend.".into(), "/h/bundled/skills/sendcutsend/SKILL.md".into())];
         let s = build(&e);

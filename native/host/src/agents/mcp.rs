@@ -249,6 +249,8 @@ impl Mcp {
                 if ag.has_design(thread).await { always_load(&mut tools, "kicad_edit"); always_load(&mut tools, "viewer_render");
                     // and `kicad_sim` (kicad/ksim.rs) where the KiCad runtime simulates
                     if crate::files::kicad::ksim_tool::available(&ag).await { tools.push(crate::files::kicad::ksim_tool::def()) } }
+                // SolidCraft's tools (agents/solidcad.rs): all of them where the project has something mechanical (or nothing yet), else the two entry tools
+                if let Some(cad) = super::solidcad::get() { cad.filter(thread, &mut tools).await }
                 Some(result(&id, json!({"tools":tools}))) }
             "tools/call" => self.call(&ag, thread, gen, &id, &p, sock).await,
             "ping" => Some(result(&id, json!({}))),
