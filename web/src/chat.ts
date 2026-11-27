@@ -3,7 +3,7 @@
 // left-aligned plain assistant reply with Finished time · Copy · Reply,
 // hidden routine git/system notes, load-on-scroll pagination, asks, #1309 review bar, #1311 unanswered notice.
 import { t, trs } from "./i18n";
-import { renderMarkdown } from "./md";
+import { renderMarkdown, type MarkdownFileLink } from "./md";
 import type { NoProviderNotice } from "./provider-notice";
 import type { ThreadItem } from "./sidebar";
 import { splitUserModelRefs, type MessageRef } from "./user-refs";
@@ -41,6 +41,7 @@ export interface EntryItem {
   refs?: MessageRef[];
   images?: string[];
   attachments?: EntryAttachment[];
+  files?: MarkdownFileLink[];
 }
 export interface ReviewBar { on?: boolean; text?: string; button?: string; }
 export interface UnansweredNotice {
@@ -59,6 +60,7 @@ export interface ChatCallbacks {
   onOpenAccounts?: () => void;
   /** a reply's quote: go to the message it answers, reading older pages until it is loaded */
   onGoToEntry?: (entryId: string) => void;
+  onOpenLink?: (href: string, project?: string) => void;
   onLoadImage: (entryId: string, path: string) => Promise<{ url?: string; mime?: string; data?: string } | null>;
 }
 
@@ -429,7 +431,7 @@ export class ChatView {
     entry.live = true;
     const node = this.liveNodes.get(entryId);
     if (node) {
-      node.replaceChildren(renderMarkdown(entry.text));
+      node.replaceChildren(renderMarkdown(entry.text, { onOpenLink: this.cb.onOpenLink, files: entry.files }));
       if (atBottom) this.scrollToBottom();
     } else {
       this.renderEntries(atBottom);
@@ -531,7 +533,7 @@ export class ChatView {
       q.className = "bp-dim";
       q.textContent = `/btw ${this.btwNote.q}`;
       const a = document.createElement("div");
-      a.appendChild(renderMarkdown(this.btwNote.a));
+      a.appendChild(renderMarkdown(this.btwNote.a, { onOpenLink: this.cb.onOpenLink }));
       body.append(q, a);
       const close = document.createElement("button");
       close.type = "button";
@@ -757,7 +759,7 @@ export class ChatView {
         if (entry.kind === "user") {
           body.appendChild(renderUserBody(entry.text || "", entry.refs));
         } else {
-          body.appendChild(renderMarkdown(entry.text || ""));
+          body.appendChild(renderMarkdown(entry.text || "", { onOpenLink: this.cb.onOpenLink, files: entry.files }));
         }
         if (entry.live) this.liveNodes.set(entry.id, body);
         row.appendChild(body);
@@ -905,7 +907,7 @@ export class ChatView {
     const body = document.createElement("div");
     body.className = "bp-plan-body" + (expanded ? " is-expanded" : "");
     body.setAttribute("data-testid", "plan-body");
-    body.appendChild(renderMarkdown(ask.question || ""));
+    body.appendChild(renderMarkdown(ask.question || "", { onOpenLink: this.cb.onOpenLink }));
     card.appendChild(body);
 
     if (ask.state === "open") {

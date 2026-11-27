@@ -279,4 +279,37 @@ fn s(p: &Path) -> String { p.to_string_lossy().into_owned() }
 
     let (h4, _) = split(&fetch(format!("/file?path={}", crate::md::refs::pct(&s(&out.join("out.pdf"))))).await);
     assert!(h4.starts_with("HTTP/1.1 403"), "{h4}");
+
+    // project= scopes relative and absolute paths strictly to that registered project
+    let (h5, b5) = split(&fetch("/file?project=p1&path=docs%2FParts%20List.pdf".into()).await);
+    assert!(h5.starts_with("HTTP/1.1 200 OK") && h5.contains("Content-Type: application/pdf"), "{h5}");
+    assert_eq!(b5, b"%PDF-1.4\nhello");
+
+    let (h6, _) = split(&fetch("/file?project=p1&path=..%2Fout%2Fout.pdf".into()).await);
+    assert!(h6.starts_with("HTTP/1.1 403"), "{h6}");
+
+    let (h7, _) = split(&fetch("/file?project=missing&path=docs%2FParts%20List.pdf".into()).await);
+    assert!(h7.starts_with("HTTP/1.1 404"), "{h7}");
+}
+
+#[test] fn linkable_with_projects_and_share_route_parts() {
+    let tok = "0123456789abcdef0123456789abcdef0123456789abcdef";
+    assert_eq!(share_route_parts(&format!("/s/{tok}/POWER_TEST.md?inline=1#top")), Some((format!("/s/{tok}/POWER_TEST.md"), tok.into())));
+    assert_eq!(share_route_parts(&format!("/s/{tok}/..")), None);
+    assert_eq!(share_route_parts("/s/short/POWER_TEST.md"), None);
+
+    let d = tmp("link-proj");
+    let (outer, inner, home) = (d.join("outer"), d.join("outer/inner"), d.join("home"));
+    std::fs::create_dir_all(outer.join("docs")).unwrap();
+    std::fs::create_dir_all(inner.join("docs")).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    let f_inner = inner.join("docs/POWER_TEST.md");
+    std::fs::write(&f_inner, b"# Test\n").unwrap();
+    let roots = vec![outer.clone(), inner.clone()];
+    let projs = vec![("p_inner".into(), inner.clone()), ("p_outer".into(), outer.clone())];
+    let links = linkable_with_projects(&roots, &projs, &home, &format!("See [POWER_TEST.md](file://{})", s(&f_inner)));
+    assert_eq!(links.len(), 1, "{links:?}");
+    assert_eq!(links[0]["project"], "p_inner");
+    assert_eq!(links[0]["relPath"], "docs/POWER_TEST.md");
+    assert_eq!(links[0]["absPath"], s(&f_inner));
 }

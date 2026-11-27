@@ -34,7 +34,17 @@ pub fn url_path(r: &str) -> String {
 fn fwd(s: &str) -> std::borrow::Cow<'_, str> { if cfg!(windows) && s.contains('\\') { s.replace('\\', "/").into() } else { s.into() } }
 pub fn absolute(href: &str, base: &str, home: &str) -> Option<String> {
     let h = href.trim();
-    let h = match h.strip_prefix("file://") { Some(r) => url_path(r), None => h.to_string() };
+    let h = if h.get(..7).is_some_and(|p| p.eq_ignore_ascii_case("file://")) {
+        let rest = &h[7..];
+        let (before_frag, frag) = match rest.split_once('#') {
+            Some((a, f)) if f.starts_with('L') && f[1..].chars().next().is_some_and(|c| c.is_ascii_digit()) => (a, Some(f)),
+            Some((a, _)) => (a, None),
+            None => (rest, None),
+        };
+        let before_query = before_frag.split('?').next().unwrap_or(before_frag);
+        let decoded = url_path(before_query);
+        match frag { Some(f) => format!("{decoded}#{f}"), None => decoded }
+    } else { h.to_string() };
     // Windows: "C:\\x\\y" and "C:/x/y" are one path, kept with "/" and its drive first ("C:/x/y", not "/C:/x/y")
     let (h, base, home) = (fwd(&h).into_owned(), fwd(base), fwd(home)); let (base, home) = (base.as_ref(), home.as_ref());
     if h.is_empty() || h.contains(['\0', '\n']) || h.contains("://") { return None }
@@ -54,8 +64,20 @@ pub fn absolute(href: &str, base: &str, home: &str) -> Option<String> {
 pub fn under(path: &str, root: &str) -> bool { let (path, root) = (fwd(path), fwd(root)); let r = root.trim_end_matches('/'); !r.is_empty() && path.len() > r.len() && path.starts_with(r) && path.as_bytes()[r.len()] == b'/' }
 /// The project the path lies in (the deepest folder wins: a project inside another's folder is its own), with the path from its root.
 pub fn owner<'a>(st: &'a State, path: &str) -> Option<(&'a str, String)> {
-    st.projects.iter().filter(|(id, p)| !p.removed && !id.contains('~') && under(path, &p.root)).max_by_key(|(_, p)| fwd(&p.root).trim_end_matches('/').len())
-        .map(|(id, p)| (id.as_str(), path[fwd(&p.root).trim_end_matches('/').len() + 1..].to_string()))
+    if let Some((id, p)) = st.projects.iter().filter(|(id, p)| !p.removed && !id.contains('~') && under(path, &p.root)).max_by_key(|(_, p)| fwd(&p.root).trim_end_matches('/').len()) {
+        return Some((id.as_str(), path[fwd(&p.root).trim_end_matches('/').len() + 1..].to_string()));
+    }
+    let real_path = std::fs::canonicalize(path).ok()?;
+    st.projects.iter()
+        .filter(|(id, p)| !p.removed && !id.contains('~') && !p.root.is_empty())
+        .filter_map(|(id, p)| {
+            let rr = std::fs::canonicalize(&p.root).ok()?;
+            let rel = real_path.strip_prefix(&rr).ok()?;
+            let rel_s = rel.components().map(|c| c.as_os_str().to_string_lossy().into_owned()).collect::<Vec<_>>().join("/");
+            if rel_s.is_empty() { None } else { Some((rr.components().count(), id.as_str(), rel_s)) }
+        })
+        .max_by_key(|(depth, _, _)| *depth)
+        .map(|(_, id, rel)| (id, rel))
 }
 /// The folder a thread's files are from (its worktree's design root, else its project's).
 pub fn root_of(st: &State, sel: &str) -> String {

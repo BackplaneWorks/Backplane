@@ -15,6 +15,7 @@ class FileFetchTest {
 
     @Test fun sharesAreLinks() {
         assertEquals("/s/$tok/gerbers.zip", FileFetch.shareRoute("/s/$tok/gerbers.zip"))
+        assertEquals("/s/$tok/POWER_TEST.md", FileFetch.shareRoute("/s/$tok/POWER_TEST.md?inline=1#top"))
         assertEquals("/s/$tok/my%20case.step", FileFetch.shareRoute("/s/$tok/my%20case.step"))
         assertNull(FileFetch.shareRoute("/s/short/gerbers.zip"))
         assertNull(FileFetch.shareRoute("/s/$tok/a/b.zip"))
@@ -52,8 +53,9 @@ class FileFetchTest {
 
     @Test fun anEntryCarriesItsFiles() {
         val e = parseEntry(JSONObject().put("id", "a1").put("kind", "assistant").put("text", "see /x/y.zip")
-            .put("files", JSONArray().put(JSONObject().put("path", "/x/y.zip").put("name", "y.zip").put("size", 104857600L).put("open", "download")).put(JSONObject().put("name", "no path"))))
-        assertEquals(listOf(DFileLink("/x/y.zip", "y.zip", 104857600L, "download")), e.files)
+            .put("files", JSONArray().put(JSONObject().put("path", "/x/y.zip").put("name", "y.zip").put("size", 104857600L).put("open", "download").put("project", "pa").put("absPath", "/real/x/y.zip")).put(JSONObject().put("name", "no path"))))
+        assertEquals(listOf(DFileLink("/x/y.zip", "y.zip", 104857600L, "download", "pa", "/real/x/y.zip")), e.files)
+        assertEquals("pa", FileFetch.find("/real/x/y.zip", e.files)?.project)
         assertEquals(emptyList<DFileLink>(), parseEntry(JSONObject().put("id", "a2").put("kind", "assistant")).files)
     }
 

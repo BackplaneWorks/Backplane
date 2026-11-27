@@ -4,7 +4,7 @@ package dev.backplane.mobile
 // serves, the address it is fetched from, and how a download that stopped goes on. Pure Kotlin, so FileFetchTest runs it without the app.
 
 /** A file an assistant entry names that the hub serves (data/1 feature `fileLinks`): `open` is "view" (Backplane's viewers draw it) or "download". */
-data class DFileLink(val path: String, val name: String, val size: Long, val open: String)
+data class DFileLink(val path: String, val name: String, val size: Long, val open: String, val project: String = "", val absPath: String = "")
 
 object FileFetch {
     // what the hub's share_route writes: the token, then the name with everything but [A-Za-z0-9._~-] percent-encoded (never `\`, `?`, `#`, `..`)
@@ -12,7 +12,10 @@ object FileFetch {
     private val lineTail = Regex("(?::\\d{1,6}){1,2}$|#L\\d{1,6}(?:-L?\\d{1,6})?$")
 
     /** A share's address (`/s/<token>/<name>`, written in a message): fetched as it is, the token its own credential. */
-    fun shareRoute(p: String): String? = p.trim().takeIf { share.matches(it) && it.substringAfterLast('/') !in setOf(".", "..") }
+    fun shareRoute(p: String): String? {
+        val clean = p.trim().substringBefore('#').substringBefore('?')
+        return clean.takeIf { share.matches(it) && it.substringAfterLast('/') !in setOf(".", "..") }
+    }
     /** A share's route carries its own credential: the device's token is not sent with it. */
     fun isShare(route: String) = route.startsWith("/s/")
     /** Whether the address made from a route still asks for that route (no `..` or `\` in it took it elsewhere). */
@@ -27,10 +30,10 @@ object FileFetch {
         return lineTail.replace(s, "")
     }
 
-    /** The file of [files] a tapped path names, in the message's spelling. */
+    /** The file of [files] a tapped path names, in the message's spelling (or resolved `absPath`). */
     fun find(p: String, files: List<DFileLink>): DFileLink? {
         val b = bare(p)
-        return files.firstOrNull { it.path == p || it.path == b || bare(it.path) == b }
+        return files.firstOrNull { it.path == p || it.path == b || bare(it.path) == b || (it.absPath.isNotEmpty() && bare(it.absPath) == b) }
     }
 
     /** A thread of another machine (`<link>~<id>`) is named on the request; this hub's own thread is not. */

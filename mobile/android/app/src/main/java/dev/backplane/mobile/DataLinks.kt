@@ -31,6 +31,15 @@ data class LinkTarget(val kind: Kind, val id: String, val path: String = "", val
     enum class Kind { THREAD, PROJECT, ROOM, FILE, SETTINGS }
 }
 
+private val reLineAnchorSuffix = Regex("#L\\d+(?:-L?\\d+)?$")
+private val reColonLineSuffix = Regex("(?::\\d+){1,2}$")
+
+internal fun lineAnchorOf(text: String): String {
+    reLineAnchorSuffix.find(text)?.value?.let { return it }
+    val noFrag = text.substringBefore('#')
+    return reColonLineSuffix.find(noFrag)?.value ?: ""
+}
+
 /** What to ask the hub for a tapped link: a backplane:// address (this build's own scheme counts as it), or the path a bppath: link carries. */
 private fun linkText(url: String): String? {
     pathOf(url)?.let { return it }
@@ -52,7 +61,17 @@ fun DataClient.download(path: String, thread: String): Boolean {
 
 fun DataClient.openLink(url: String, thread: String) {
     val text = linkText(url) ?: return
-    pathOf(url)?.let { if (download(it, thread)) return }
+    val tappedPath = pathOf(url)
+    if (tappedPath != null) {
+        val c = MdLinks.ctx
+        FileFetch.shareRoute(tappedPath)?.let { route ->
+            if (c != null) { Downloads.share(c, route); return }
+        }
+    }
+    val listed = tappedPath?.let { FileFetch.find(it, entries[thread].orEmpty().flatMap { e -> e.files }) }
+    if (has("fileLinks") && listed != null && listed.open != "view") {
+        MdLinks.ctx?.let { c -> Downloads.file(c, listed, thread); return }
+    }
     scope.launch {
         // a link tapped before the hub has said hello (a cached list, just launched) waits a moment for it: only the hub knows what `desktop~t9` is
         for (i in 0 until 50) { if (conn == DataClient.Conn.ONLINE && has("links")) break; delay(100) }
@@ -66,17 +85,32 @@ fun DataClient.openLink(url: String, thread: String) {
             return@launch
         }
         try {
-            val r = call("link.resolve", JSONObject().put("url", text).put("thread", thread))
+            val targetUrl = if (listed != null && listed.absPath.isNotEmpty()) {
+                val anchor = lineAnchorOf(text)
+                if (anchor.isNotEmpty() && lineAnchorOf(listed.absPath).isEmpty()) listed.absPath + anchor else listed.absPath
+            } else {
+                text
+            }
+            val q = JSONObject().put("url", targetUrl).put("thread", thread)
+            if (listed != null && listed.project.isNotEmpty()) q.put("project", listed.project)
+            val r = call("link.resolve", q)
             linkTarget = when (r.optString("kind")) {
                 "thread" -> LinkTarget(LinkTarget.Kind.THREAD, r.optString("thread"))
                 "project" -> LinkTarget(LinkTarget.Kind.PROJECT, r.optString("project"))
                 "room" -> LinkTarget(LinkTarget.Kind.ROOM, r.optString("room"))
                 "file" -> LinkTarget(LinkTarget.Kind.FILE, r.optString("thread"), r.optString("path"), r.optInt("line"))
-                "download" -> { MdLinks.ctx?.let { c -> Downloads.file(c, DFileLink(r.optString("path"), r.optString("name"), r.optLong("size", -1L), "download"), thread) }; null }
+                "download" -> { MdLinks.ctx?.let { c -> Downloads.file(c, DFileLink(r.optString("path"), r.optString("name"), r.optLong("size", -1L), "download", r.optString("project")), thread) }; null }
+                "share" -> {
+                    val shareRoute = FileFetch.shareRoute(r.optString("route"))
+                    val c = MdLinks.ctx
+                    if (shareRoute != null && c != null) Downloads.share(c, shareRoute)
+                    else say(Tr.t(r.optString("note").ifEmpty { "That link does not open here." }))
+                    null
+                }
                 "settings" -> LinkTarget(LinkTarget.Kind.SETTINGS, r.optString("page"))
                 else -> {
                     // a file the reply lists that no viewer here opens is downloaded instead
-                    val f = pathOf(url)?.let { p -> FileFetch.find(p, entries[thread].orEmpty().flatMap { it.files }) }
+                    val f = listed
                     val c = MdLinks.ctx
                     if (f != null && c != null) Downloads.file(c, f, thread) else say(Tr.t(r.optString("note").ifEmpty { "That link does not open here." })); null
                 }

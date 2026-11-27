@@ -1729,23 +1729,161 @@ fn probed_models(installed: &[&str]) -> Value {
     assert_eq!(r1["result"]["thread"], "ta", "{r1}");
     assert_eq!(r1["result"]["path"], "docs/Parts List.pdf", "{r1}");
 
-    // Bot thread linking to a file in a registered project with NO threads -> kind: "download"
+    // Bot thread linking to a file in a registered project with NO threads -> kind: "file" via project-home-<id>
     let r2 = ask(&mut ws, 2, "link.resolve", json!({"url": pct_path(&pdf_b), "thread": "bot_th"})).await;
-    assert_eq!(r2["result"]["kind"], "download", "{r2}");
-    assert_eq!(r2["result"]["path"], pdf_b.to_string_lossy().as_ref(), "{r2}");
-    assert_eq!(r2["result"]["name"], "No Thread.pdf", "{r2}");
-    assert_eq!(r2["result"]["size"], 10, "{r2}");
+    assert_eq!(r2["result"]["kind"], "file", "{r2}");
+    assert_eq!(r2["result"]["thread"], "project-home-pb", "{r2}");
+    assert_eq!(r2["result"]["project"], "pb", "{r2}");
+    assert_eq!(r2["result"]["path"], "docs/No Thread.pdf", "{r2}");
 
-    // Project whose only thread is a worktree that doesn't contain the file -> kind: "download" (not a 404 viewer thread)
+    // Project whose only thread is a worktree that doesn't contain the file -> kind: "file" via project-home-<id>
     let r3 = ask(&mut ws, 3, "link.resolve", json!({"url": pct_path(&pdf_c), "thread": "bot_th"})).await;
-    assert_eq!(r3["result"]["kind"], "download", "{r3}");
-    assert_eq!(r3["result"]["path"], pdf_c.to_string_lossy().as_ref(), "{r3}");
+    assert_eq!(r3["result"]["kind"], "file", "{r3}");
+    assert_eq!(r3["result"]["thread"], "project-home-pc", "{r3}");
+    assert_eq!(r3["result"]["project"], "pc", "{r3}");
+    assert_eq!(r3["result"]["path"], "docs/Main Only.pdf", "{r3}");
 
     // Security refusals: .env inside project and file outside all projects -> kind: "none"
     let r4 = ask(&mut ws, 4, "link.resolve", json!({"url": format!("file://{}/.env", proj_with_thread.to_string_lossy()), "thread": "bot_th"})).await;
     assert_eq!(r4["result"]["kind"], "none", "{r4}");
     let r5 = ask(&mut ws, 5, "link.resolve", json!({"url": format!("file://{}/secret.pdf", outside.to_string_lossy()), "thread": "bot_th"})).await;
     assert_eq!(r5["result"]["kind"], "none", "{r5}");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn cross_project_file_links_and_shares_resolve_and_serve_safely() {
+    let base = crate::plat::tmp::canonical("cross-proj-links");
+    let proj_a = base.join("alpha");
+    let wt_a = proj_a.join(".backplane/worktrees/power-test");
+    let proj_b = base.join("beta");
+    let outside = base.join("outside");
+    for d in [proj_a.join("docs"), wt_a.join("docs"), wt_a.join(".git"), proj_b.join("notes"), outside.clone()] {
+        std::fs::create_dir_all(&d).unwrap();
+    }
+    let main_md = proj_a.join("docs/README.md");
+    let wt_md = wt_a.join("docs/POWER_TEST.md");
+    let proj_b_md = proj_b.join("notes/SPEC.md");
+    std::fs::write(&main_md, b"# Alpha\n").unwrap();
+    std::fs::write(&wt_md, b"# Power Test\nOK\n").unwrap();
+    std::fs::write(&proj_b_md, b"# Beta Spec\n").unwrap();
+    std::fs::write(wt_a.join(".env"), b"SECRET=1").unwrap();
+    std::fs::write(wt_a.join(".git/HEAD"), b"ref: refs/heads/main\n").unwrap();
+    std::fs::write(outside.join("secret.md"), b"# Outside\n").unwrap();
+    crate::plat::fs::symlink(outside.join("secret.md"), proj_a.join("docs/escape.md")).unwrap();
+
+    let more = format!(
+        "{{\"$\":\"ProjectCreated\",\"id\":\"pa\",\"title\":\"Alpha\",\"root\":{},\"at\":1700000100}}\n\
+         {{\"$\":\"ProjectCreated\",\"id\":\"pb\",\"title\":\"Beta\",\"root\":{},\"at\":1700000101}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"ta_main\",\"project\":\"pa\",\"title\":\"Main\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000110}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"ta_wt\",\"project\":\"pa\",\"title\":\"Power\",\"env\":\"worktree\",\"branch\":\"power-test\",\"worktree\":{},\"provider\":\"claude\",\"model\":\"\",\"at\":1700000111}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"tb_main\",\"project\":\"pb\",\"title\":\"Beta1\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000112}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"bot_th\",\"project\":\"\",\"title\":\"Bot\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000113}}\n\
+         {{\"$\":\"ThreadCreated\",\"id\":\"qc_th\",\"project\":\"chats\",\"title\":\"Chat\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000114}}\n",
+        json!(proj_a.to_string_lossy()),
+        json!(proj_b.to_string_lossy()),
+        json!(wt_a.to_string_lossy()),
+    );
+    let (hub, port) = up_with("cross-proj", &more).await;
+    crate::files::start(hub.clone());
+    crate::files::share::refresh(&hub).await;
+    // Attachment file under hub home -> kind: "download"
+    std::fs::create_dir_all(hub.cfg.home.join("attachments/bot_th")).unwrap();
+    let att_file = hub.cfg.home.join("attachments/bot_th/capture.txt");
+    std::fs::write(&att_file, b"capture").unwrap();
+
+    // Live /s/<token>/POWER_TEST.md share created for wt_md
+    let created = crate::files::share::create(&hub, "ta_wt", &json!({"path": wt_md.to_string_lossy()})).await.unwrap();
+    let share_route = created["link"].as_str().unwrap().to_string();
+
+    let mut ws = open(port, "&enc=json").await;
+    next(&mut ws).await;
+
+    // (a) Bot thread opening .md inside project and inside project's .backplane/worktrees/...
+    let r_main = ask(&mut ws, 1, "link.resolve", json!({"url": format!("file://{}", main_md.to_string_lossy()), "thread": "bot_th"})).await;
+    assert_eq!(r_main["result"]["kind"], "file", "{r_main}");
+    assert_eq!(r_main["result"]["thread"], "ta_main");
+    assert_eq!(r_main["result"]["project"], "pa");
+    assert_eq!(r_main["result"]["path"], "docs/README.md");
+
+    let r_wt = ask(&mut ws, 2, "link.resolve", json!({"url": format!("file://{}", wt_md.to_string_lossy()), "thread": "bot_th"})).await;
+    assert_eq!(r_wt["result"]["kind"], "file", "{r_wt}");
+    assert_eq!(r_wt["result"]["thread"], "ta_wt", "{r_wt}");
+    assert_eq!(r_wt["result"]["project"], "pa");
+    assert_eq!(r_wt["result"]["path"], "docs/POWER_TEST.md");
+
+    // Verify /files/get serves the resolved worktree file cleanly
+    let mut dl_req = crate::auth::Req::new("GET", &format!("/files/get?thread={}&path={}", r_wt["result"]["thread"].as_str().unwrap(), crate::md::refs::pct(r_wt["result"]["path"].as_str().unwrap())), Default::default());
+    dl_req.peer = None;
+    let mut dl_buf = Vec::new();
+    crate::files::share::serve_files_get(&hub, &mut dl_buf, crate::files::share::Who::Native, &dl_req).await.unwrap();
+    let dl_txt = String::from_utf8_lossy(&dl_buf);
+    assert!(dl_txt.starts_with("HTTP/1.1 200 OK") && dl_txt.ends_with("# Power Test\nOK\n"), "{dl_txt}");
+
+    // Also when resolved via main thread (if worktree file is accessed via pa project-home/main relPath), files.read succeeds
+    let who = crate::api::Caller { gen: "g".into(), client: 1 };
+    let fread = hub.rpc_for("files.read").unwrap().call(&hub, &who, &json!(99), "files.read", &json!({"thread":"ta_main","path":".backplane/worktrees/power-test/docs/POWER_TEST.md"})).await;
+    assert_eq!(fread[0]["ok"], true, "{fread:?}");
+    assert_eq!(fread[0]["result"]["text"], "# Power Test\nOK\n");
+
+    // (b) Project A thread and Quick Chat opening a file in Project B (file://, backplane://file, and relative with explicit project)
+    let r_cross = ask(&mut ws, 3, "link.resolve", json!({"url": format!("file://{}", proj_b_md.to_string_lossy()), "thread": "ta_main"})).await;
+    assert_eq!(r_cross["result"]["kind"], "file", "{r_cross}");
+    assert_eq!(r_cross["result"]["thread"], "tb_main");
+    assert_eq!(r_cross["result"]["project"], "pb");
+    assert_eq!(r_cross["result"]["path"], "notes/SPEC.md");
+
+    let r_qc = ask(&mut ws, 4, "link.resolve", json!({"url": "backplane://file/pb/notes/SPEC.md#L2", "thread": "qc_th"})).await;
+    assert_eq!(r_qc["result"]["kind"], "file", "{r_qc}");
+    assert_eq!(r_qc["result"]["thread"], "tb_main");
+    assert_eq!(r_qc["result"]["path"], "notes/SPEC.md");
+    assert_eq!(r_qc["result"]["line"], 2);
+
+    let r_rel_proj = ask(&mut ws, 5, "link.resolve", json!({"url": "notes/SPEC.md", "thread": "bot_th", "project": "pb"})).await;
+    assert_eq!(r_rel_proj["result"]["kind"], "file", "{r_rel_proj}");
+    assert_eq!(r_rel_proj["result"]["thread"], "tb_main");
+    assert_eq!(r_rel_proj["result"]["path"], "notes/SPEC.md");
+
+    // (c) Security: outside project, traversal, symlink escape, .env and .git inside worktree all rejected
+    for bad in [
+        format!("file://{}", outside.join("secret.md").to_string_lossy()),
+        format!("file://{}/docs/../../outside/secret.md", proj_a.to_string_lossy()),
+        format!("file://{}/docs/%2e%2e/.env", wt_a.to_string_lossy()),
+        format!("file://{}", proj_a.join("docs/escape.md").to_string_lossy()),
+        format!("file://{}", wt_a.join(".env").to_string_lossy()),
+        format!("file://{}", wt_a.join(".git/HEAD").to_string_lossy()),
+        "backplane://file/pa/../../outside/secret.md".into(),
+    ] {
+        let r = ask(&mut ws, 6, "link.resolve", json!({"url": bad, "thread": "bot_th"})).await;
+        assert_eq!(r["result"]["kind"], "none", "must reject {bad}: {r}");
+    }
+
+    // (d) /s/<token>/POWER_TEST.md live share and expired/unknown share
+    let r_share = ask(&mut ws, 7, "link.resolve", json!({"url": format!("{share_route}?inline=1"), "thread": "bot_th"})).await;
+    assert_eq!(r_share["result"]["kind"], "share", "{r_share}");
+    assert_eq!(r_share["result"]["route"], share_route);
+    assert_eq!(r_share["result"]["name"], "POWER_TEST.md");
+
+    let bad_share = format!("/s/{}/POWER_TEST.md", "0".repeat(48));
+    let r_bad_share = ask(&mut ws, 8, "link.resolve", json!({"url": bad_share, "thread": "bot_th"})).await;
+    assert_eq!(r_bad_share["result"]["kind"], "none", "{r_bad_share}");
+    assert_eq!(r_bad_share["result"]["note"], "This link has ended or never was.");
+
+    // Non-project allowed root (attachments) still resolves as kind: "download"
+    let r_att = ask(&mut ws, 9, "link.resolve", json!({"url": format!("file://{}", att_file.to_string_lossy()), "thread": "bot_th"})).await;
+    assert_eq!(r_att["result"]["kind"], "download", "{r_att}");
+
+    // (e) linkable_with_projects preserves display-agnostic path + owning project metadata
+    let projects = crate::files::share::projects_of(&*hub.model().await);
+    let roots = crate::files::share::roots_of(&*hub.model().await, &hub.cfg.home, "");
+    let linked = crate::files::share::linkable_with_projects(
+        &roots,
+        &projects,
+        &hub.cfg.home,
+        &format!("See [POWER_TEST.md](file://{})", wt_md.to_string_lossy()),
+    );
+    assert_eq!(linked.len(), 1, "{linked:?}");
+    assert_eq!(linked[0]["project"], "pa");
+    assert_eq!(linked[0]["relPath"], ".backplane/worktrees/power-test/docs/POWER_TEST.md");
+    assert_eq!(linked[0]["absPath"], wt_md.to_string_lossy().as_ref());
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn quick_chats_over_data_create_list_rail_and_move_to_project() {

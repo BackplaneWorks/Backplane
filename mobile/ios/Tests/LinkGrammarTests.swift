@@ -30,5 +30,9 @@ check(dPathFrom(URL(string: "file:///home/user/proj/docs/Parts%20List.pdf")!) ==
 check(dPathFrom(dLinkURL("file:///home/user/proj/docs/My%20Doc%20(Final).pdf")!) == "/home/user/proj/docs/My Doc (Final).pdf", "dLinkURL file:// with parens")
 check(dPathFrom(dLinkURL("<file:///home/user/proj/docs/Parts List.pdf>")!) == "/home/user/proj/docs/Parts List.pdf", "dLinkURL angle-bracket file:// with space")
 check(kinds("see file:///home/user/proj/docs/Parts%20List.pdf now") == ["path:/home/user/proj/docs/Parts List.pdf|file:///home/user/proj/docs/Parts%20List.pdf"], "bare file:// in text \(kinds("see file:///home/user/proj/docs/Parts%20List.pdf now"))")
+let shareTok = "0123456789abcdef0123456789abcdef0123456789abcdef"
+check(dPathFrom(dLinkURL("/s/\(shareTok)/POWER_TEST.md?inline=1")!) == "/s/\(shareTok)/POWER_TEST.md", "dLinkURL share strips query")
+check(dPathFrom(dLinkURL("/home/user/My%20Project/.backplane/worktrees/power-test/docs/POWER_TEST.md")!) == "/home/user/My Project/.backplane/worktrees/power-test/docs/POWER_TEST.md", "dLinkURL hub path with %20")
+check(dPathFrom(dLinkURL("/home/user/proj/Makefile")!) == "/home/user/proj/Makefile", "dLinkURL extensionless hub path")
 if failed == 0 { print("link grammar: ok") }
 exit(failed == 0 ? 0 : 1)

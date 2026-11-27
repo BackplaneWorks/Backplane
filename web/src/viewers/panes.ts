@@ -3,6 +3,7 @@
 // All dynamic text uses textContent (never innerHTML).
 
 import type { ViewerHostApi } from "../app";
+import { renderMarkdown } from "../md";
 
 export interface PaneHandle {
   destroy(): void;
@@ -68,7 +69,8 @@ export function mountFilesPane(
   stage: HTMLElement,
   api: ViewerHostApi,
   threadId: string,
-  onOpenViewer: (kind: string, relPath: string) => void
+  onOpenViewer: (kind: string, relPath: string) => void,
+  initial?: { path?: string; line?: number }
 ): PaneHandle {
   let alive = true;
   let currentDir = "";
@@ -115,7 +117,7 @@ export function mountFilesPane(
     }
   }
 
-  async function openPreview(relPath: string, name: string, size: number): Promise<void> {
+  async function openPreview(relPath: string, name: string, size: number, line = 0): Promise<void> {
     selectedPath = relPath;
     previewEl.replaceChildren();
 
@@ -147,6 +149,15 @@ export function mountFilesPane(
       img.src = url;
       wrap.append(img);
       previewEl.append(wrap);
+      return;
+    }
+
+    if (ext === "pdf") {
+      const frame = document.createElement("iframe");
+      frame.className = "bp-files-pdf";
+      frame.title = name;
+      frame.src = `${url}&inline=1`;
+      previewEl.append(frame);
       return;
     }
 
@@ -221,8 +232,27 @@ export function mountFilesPane(
           return;
         }
         const text = new TextDecoder("utf-8", { fatal: false }).decode(slice);
-        const pre = el("pre", "bp-files-code", text + (truncated ? "\n… (truncated at 256 KB)" : ""));
-        previewEl.append(pre);
+        if ((ext === "md" || ext === "markdown") && !(line > 0)) {
+          const mdWrap = el("div", "bp-files-md");
+          mdWrap.append(renderMarkdown(text, api.openLink ? { onOpenLink: api.openLink } : undefined));
+          if (truncated) mdWrap.append(el("div", "bp-dim", "… (truncated at 256 KB)"));
+          previewEl.append(mdWrap);
+        } else if (line > 0) {
+          const codeBox = el("div", "bp-files-code bp-files-lined");
+          const lines = (text + (truncated ? "\n… (truncated at 256 KB)" : "")).split("\n");
+          let targetRow: HTMLElement | null = null;
+          for (let idx = 0; idx < lines.length; idx++) {
+            const row = el("div", "bp-files-line" + (idx + 1 === line ? " is-target" : ""));
+            row.append(el("span", "bp-files-lnum", String(idx + 1)), el("span", "bp-files-ltxt", lines[idx] || " "));
+            if (idx + 1 === line) targetRow = row;
+            codeBox.append(row);
+          }
+          previewEl.append(codeBox);
+          targetRow?.scrollIntoView({ block: "center" });
+        } else {
+          const pre = el("pre", "bp-files-code", text + (truncated ? "\n… (truncated at 256 KB)" : ""));
+          previewEl.append(pre);
+        }
       } catch (err) {
         if (!alive || selectedPath !== relPath) return;
         loading.textContent = err instanceof Error ? err.message : String(err);
@@ -288,7 +318,15 @@ export function mountFilesPane(
     }
   }
 
-  void loadDir("");
+  if (initial?.path) {
+    const startDir = initial.path.includes("/") ? initial.path.slice(0, initial.path.lastIndexOf("/")) : "";
+    const fileName = initial.path.includes("/") ? initial.path.slice(initial.path.lastIndexOf("/") + 1) : initial.path;
+    selectedPath = initial.path;
+    void loadDir(startDir);
+    void openPreview(initial.path, fileName, 0, initial.line ?? 0);
+  } else {
+    void loadDir("");
+  }
   return {
     destroy() {
       alive = false;

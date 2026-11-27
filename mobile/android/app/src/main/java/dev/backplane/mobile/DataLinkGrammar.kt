@@ -72,7 +72,22 @@ fun linkTargetUrl(raw: String): String {
         trimmed.substringBefore(' ').removePrefix("<").removeSuffix(">")
     }
     fileUrlPath(url)?.let { return pathLink(it) }
+    FileFetch.shareRoute(url)?.let { return pathLink(it) }
     if (isPathText(url)) return pathLink(url)
+    if ((url.startsWith("/") && !url.startsWith("//")) || url.startsWith("~/") || url.startsWith("./") || url.startsWith("../")) {
+        var rest = url
+        var anchor = ""
+        val hash = rest.indexOf('#')
+        if (hash >= 0) {
+            val frag = rest.substring(hash + 1)
+            rest = rest.substring(0, hash)
+            if (reLineFrag.matches(frag)) anchor = "#$frag"
+        }
+        val q = rest.indexOf('?')
+        if (q >= 0) rest = rest.substring(0, q)
+        val decoded = decodePercent(rest)
+        if (decoded.isNotEmpty() && !decoded.contains('\u0000')) return pathLink(decoded + anchor)
+    }
     return url
 }
 

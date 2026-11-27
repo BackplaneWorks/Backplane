@@ -57,7 +57,7 @@ pub fn write(root: &Path, rel: &str, bytes: &[u8]) -> Result<String, String> {
 /// A file of the project, read whole (up to the same bound), regular files only.
 pub fn read(root: &Path, rel: &str) -> Result<Vec<u8>, String> {
     if !fm::files_safe(rel) || rel.is_empty() { return Err("that path is not in this project".into()) }
-    if zip_within(rel) { return Err("that file is never served".into()) }
+    if read_forbidden(rel) { return Err("that file is never served".into()) }
     let parent = fm::parent(rel);
     let d = fm::contained(root, &parent).ok_or_else(|| dir::UNAVAILABLE.to_string())?;
     let p = d.join(fm::last(rel));
@@ -73,7 +73,7 @@ pub fn read_text(root: &Path, rel: &str, max: usize) -> Result<String, String> {
 }
 
 
-/// core/fm's `Fm.zip.rules`: what a zip leaves out and what a download never serves ("=" a name, "*" the end of a name, "^" the start, "/" a path from the root).
+/// core/fm's `Fm.zip.rules`: what a zip leaves out ("=" a name, "*" the end of a name, "^" the start, "/" a path from the root).
 const ZIP_RULES: &[&str] = &["*.pem", "*.key", "=id_rsa", "=id_ed25519", "=.git-credentials", "=.netrc", "=.npmrc", "=.ssh", "=.aws", "=.gnupg", "=.config", "=.codex", "=.claude", "=.backplane-bend", "=secrets", "=vault",
     "=credentials", "=auth.json", "=token", "=.git", "=node_modules", "=.ds_store", "=__pycache__", "=.env", "^.env.", "*-backups", "*.lck", "^_autosave-", "/.backplane/history.git", "/.backplane/worktrees"];
 /// `Fm.zip.skip`: whether a zip leaves out the entry at `p` (from the project's root).
@@ -83,6 +83,29 @@ pub fn zip_skip(p: &str) -> bool {
 }
 /// `Fm.zip.within`: `p` is, or is inside, something a zip leaves out.
 pub fn zip_within(p: &str) -> bool { let mut at = String::new(); p.split('/').any(|c| { at = if at.is_empty() { c.to_string() } else { format!("{at}/{c}") }; zip_skip(&at) }) }
+/// Same secret/VCS exclusions as `zip_within` plus `share::secret_name`, except `.backplane/worktrees/...` files remain readable via `files.read`.
+fn read_secret_name(n: &str) -> bool {
+    let l = n.to_ascii_lowercase();
+    let exact = [".env", ".netrc", ".npmrc", ".pypirc", ".git-credentials", ".pgpass", "token", "auth.json", "credentials", "settings.local.json", "devices-v1.json", "shares-v1.json"];
+    let starts = [".env.", "id_rsa", "id_ecdsa", "id_ed25519", "id_dsa", "credentials.", "secrets", "secret.", "vault"];
+    let ends = [".pem", ".key", ".p12", ".pfx", ".keystore", ".jks", ".kdbx", ".ovpn", ".gpg", ".asc", ".secret", ".secrets", ".token"];
+    exact.contains(&l.as_str()) || starts.iter().any(|s| l.starts_with(s)) || ends.iter().any(|s| l.ends_with(s))
+}
+
+fn read_forbidden(p: &str) -> bool {
+    let mut at = String::new();
+    p.split('/').any(|c| {
+        if read_secret_name(c) { return true }
+        at = if at.is_empty() { c.to_string() } else { format!("{at}/{c}") };
+        let l = at.to_lowercase();
+        let last = l.rsplit('/').next().unwrap_or("");
+        if l.ends_with("/.backplane/history.git") { return true }
+        ZIP_RULES.iter().filter(|&&r| r != "/.backplane/worktrees").any(|r| {
+            let (k, t) = r.split_at(1);
+            match k { "=" => last == t, "*" => last.ends_with(t), "^" => last.starts_with(t), _ => l == t }
+        })
+    })
+}
 
 /// The most a folder download carries.
 pub const MAX_ZIP: u64 = 256 << 20;
@@ -172,5 +195,22 @@ mod tests {
         let b = tmp("big"); assert!(write(&b, "x", &vec![0; MAX_WRITE + 1]).is_err());
         assert_eq!(run(&b, &serde_json::json!({"op":"write","path":"n.txt","data":"aGk="})).unwrap(), "n.txt"); assert_eq!(read_text(&b, "n.txt", 10).unwrap(), "hi");
         assert!(run(&b, &serde_json::json!({"op":"zap"})).is_err()); let _ = std::fs::remove_dir_all(&b);
+    }
+    #[test] fn read_allows_worktree_docs_while_refusing_worktree_secrets_and_zip_keeps_worktrees_out() {
+        let b = tmp("wtread");
+        std::fs::create_dir_all(b.join(".backplane/worktrees/wt1/docs")).unwrap();
+        std::fs::create_dir_all(b.join(".backplane/worktrees/wt1/.git")).unwrap();
+        std::fs::write(b.join(".backplane/worktrees/wt1/docs/POWER_TEST.md"), b"# Power Test\n").unwrap();
+        std::fs::write(b.join(".backplane/worktrees/wt1/.env"), b"SECRET=1").unwrap();
+        std::fs::write(b.join(".backplane/worktrees/wt1/.git/HEAD"), b"ref: refs/heads/main\n").unwrap();
+        std::fs::write(b.join(".backplane/worktrees/wt1/settings.local.json"), b"{}").unwrap();
+        std::fs::write(b.join(".backplane/worktrees/wt1/.pypirc"), b"[pypi]").unwrap();
+        assert_eq!(read_text(&b, ".backplane/worktrees/wt1/docs/POWER_TEST.md", 100).unwrap(), "# Power Test\n");
+        assert!(read(&b, ".backplane/worktrees/wt1/.env").is_err());
+        assert!(read(&b, ".backplane/worktrees/wt1/.git/HEAD").is_err());
+        assert!(read(&b, ".backplane/worktrees/wt1/settings.local.json").is_err());
+        assert!(read(&b, ".backplane/worktrees/wt1/.pypirc").is_err());
+        assert!(zip_within(".backplane/worktrees/wt1/docs/POWER_TEST.md"));
+        let _ = std::fs::remove_dir_all(&b);
     }
 }

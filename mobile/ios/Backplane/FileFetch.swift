@@ -5,13 +5,16 @@ import Foundation
 
 /// A file an assistant entry names that the hub serves (data/1 feature `fileLinks`): `open` is "view" (Backplane's viewers draw it) or "download".
 struct DFileLink: Codable, Equatable {
-    var path: String; var name: String; var size: Int64; var open: String
-    enum CodingKeys: String, CodingKey { case path, name, size, open }
-    init(path: String, name: String, size: Int64, open: String) { self.path = path; self.name = name; self.size = size; self.open = open }
+    var path: String; var name: String; var size: Int64; var open: String; var project: String; var absPath: String
+    enum CodingKeys: String, CodingKey { case path, name, size, open, project, absPath }
+    init(path: String, name: String, size: Int64, open: String, project: String = "", absPath: String = "") {
+        self.path = path; self.name = name; self.size = size; self.open = open; self.project = project; self.absPath = absPath
+    }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         path = (try? c.decode(String.self, forKey: .path)) ?? ""; name = (try? c.decode(String.self, forKey: .name)) ?? ""
         size = (try? c.decode(Int64.self, forKey: .size)) ?? 0; open = (try? c.decode(String.self, forKey: .open)) ?? ""
+        project = (try? c.decode(String.self, forKey: .project)) ?? ""; absPath = (try? c.decode(String.self, forKey: .absPath)) ?? ""
         if open.isEmpty { open = "download" }
     }
 }
@@ -24,7 +27,9 @@ enum FileFetch {
 
     /// A share's address (`/s/<token>/<name>`, written in a message): fetched as it is, the token its own credential.
     static func shareRoute(_ p: String) -> String? {
-        let t = p.trimmingCharacters(in: .whitespaces)
+        var t = p.trimmingCharacters(in: .whitespaces)
+        if let h = t.firstIndex(of: "#") { t = String(t[..<h]) }
+        if let q = t.firstIndex(of: "?") { t = String(t[..<q]) }
         guard share.firstMatch(in: t, range: whole(t)) != nil, ![".", ".."].contains(t.split(separator: "/").last.map(String.init) ?? "") else { return nil }
         return t
     }
@@ -49,10 +54,10 @@ enum FileFetch {
         }
         return lineTail.stringByReplacingMatches(in: s, range: whole(s), withTemplate: "")
     }
-    /// The file of `files` a tapped path names, in the message's spelling.
+    /// The file of `files` a tapped path names, in the message's spelling (or resolved `absPath`).
     static func find(_ p: String, in files: [DFileLink]) -> DFileLink? {
         let b = bare(p)
-        return files.first { $0.path == p || $0.path == b || bare($0.path) == b }
+        return files.first { $0.path == p || $0.path == b || bare($0.path) == b || (!$0.absPath.isEmpty && bare($0.absPath) == b) }
     }
     /// A thread of another machine (`<link>~<id>`) is named on the request; this hub's own thread is not.
     static func far(_ thread: String) -> Bool { thread.contains("~") }

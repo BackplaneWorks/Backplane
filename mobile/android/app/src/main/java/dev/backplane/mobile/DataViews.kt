@@ -101,7 +101,7 @@ internal fun dAgo(ms: Long): String {
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
-private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String, val from: Page? = null) : Page; data class Swarm(val room: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; data class Folders(val clone: CloneAsk? = null) : Page; data class New(val project: String) : Page; object Accounts : Page; object Mcp : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
+private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0, val from: Page? = null) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String, val from: Page? = null) : Page; data class Swarm(val room: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; data class Folders(val clone: CloneAsk? = null) : Page; data class New(val project: String) : Page; object Accounts : Page; object Mcp : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
 
 @Composable
 fun DataRoot() {
@@ -120,7 +120,7 @@ fun DataRoot() {
         DataClient.linkTarget = null
         when (t.kind) {
             LinkTarget.Kind.THREAD -> page = Page.Thread(t.id)
-            LinkTarget.Kind.FILE -> page = Page.Viewer(t.id, t.path, t.line)
+            LinkTarget.Kind.FILE -> page = Page.Viewer(t.id, t.path, t.line, from = page)
             LinkTarget.Kind.PROJECT -> { DataClient.focusProject = t.id; page = Page.Home }
             LinkTarget.Kind.SETTINGS -> page = if (t.id == "accounts") Page.Accounts else Page.Settings
             LinkTarget.Kind.ROOM -> {
@@ -137,10 +137,12 @@ fun DataRoot() {
             Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, Msg.palette_terminal) { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
-            is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }
+            is Page.Viewer -> {
+                val backPage = p.from ?: if (p.id.startsWith("project-home-")) Page.Home else Page.Thread(p.id)
+                BackHandler { page = backPage }
                 val viewerThread = DataClient.threads.firstOrNull { it.id == p.id }
                     ?: if (p.file.isNotEmpty()) DThread(id = p.id, project = "", title = p.file.substringAfterLast('/'), state = "idle", updatedAt = 0L, pinned = false, settled = false, archived = false, provider = "", model = "", preview = "", waiting = 0) else null
-                viewerThread?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
+                viewerThread?.let { ViewerScreen(it, p.file, p.line) { page = backPage } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
             is Page.Thread -> { BackHandler { page = p.from ?: Page.Home }; CompositionLocalProvider(LocalOpenSub provides { k -> page = Page.Sub(p.id, k) }) { ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }, { page = Page.Settings }) { page = p.from ?: Page.Home } } }
