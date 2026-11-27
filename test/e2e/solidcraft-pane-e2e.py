@@ -55,11 +55,13 @@ def find_xvfb():
 def find_solidcraft_bin_dir():
     for cand in [
         os.environ.get("SOLIDCRAFT_BIN_DIR", ""),
-        "/data/bp-tmp/sc-fable-dl/x/solidcraft-0.50.0-linux-x86_64/bin",
+        os.environ.get("BACKPLANE_SOLIDCRAFT", ""),
         os.path.dirname(shutil.which("solidcraft") or ""),
     ]:
         if cand and os.path.isfile(os.path.join(cand, "solidcraft")) and os.path.isfile(os.path.join(cand, "solidcraft-cli")):
             return cand
+        if cand and os.path.isfile(os.path.join(cand, "bin", "solidcraft")) and os.path.isfile(os.path.join(cand, "bin", "solidcraft-cli")):
+            return os.path.join(cand, "bin")
     return ""
 
 
@@ -69,7 +71,7 @@ def main():
     ap.add_argument("hub_bin")
     ap.add_argument("assets_dir")
     ap.add_argument("out_dir")
-    ap.add_argument("--step", default="/home/h/Documents/Nordic/DK_Cases/out/nrf54lm20dk_case.step")
+    ap.add_argument("--step", default="")
     ap.add_argument("--port", type=int, default=3896)
     ap.add_argument("--display", type=int, default=89)
     args = ap.parse_args()
@@ -230,11 +232,13 @@ def main():
             {"select": 0},
             {"wait": 3000},
             # Attach case.step (enters starting), immediately switch to box.sc before ready -> must not respawn (same pid/gen)
-            {"view_show": ["mech", P("proj/mech/case.step")]},
-            {"wait": 400},
+            {"viewshow": ["mech", P("proj/mech/case.step")]},
+            {"wait": 600},
             {"solidcraft": {"report": True, "tag": "while_starting"}},
             {"solidcraft": {"open": P("proj/mech/box.sc"), "tag": "open_while_starting"}},
             {"solidcraft": {"wait_ready": 45000, "min_painted": 5, "tag": "ready_after_race"}},
+            {"wait": 1500},
+            {"solidcraft": {"report": True, "tag": "post_race_file"}},
             {"wait": 300000},
         ]
         with open(P("script.json"), "w") as fh:
@@ -252,23 +256,26 @@ def main():
             denv,
         )
         client = spawn([CLIENT, "--url", f"http://127.0.0.1:{PORT}", "--token-file", P("home/token"), "--script", P("script.json"), "--exit-after", "300"], "client.log", cenv)
-        for _ in range(90):
+        for _ in range(120):
             ms = [json.loads(l.split("GPUI_METRIC ", 1)[1]) for l in open(P("client.log"), errors="replace") if "GPUI_METRIC " in l] if os.path.isfile(P("client.log")) else []
-            if any(m.get("event") == "solidcraft" and m.get("tag") == "ready_after_race" for m in ms):
+            if any(m.get("event") == "solidcraft" and m.get("tag") == "post_race_file" for m in ms):
                 break
             time.sleep(0.5)
 
         sc_events = [json.loads(l.split("GPUI_METRIC ", 1)[1]) for l in open(P("client.log"), errors="replace") if "GPUI_METRIC " in l]
         ev_start = next((m for m in sc_events if m.get("event") == "solidcraft" and m.get("tag") == "while_starting"), {})
         ev_ready = next((m for m in sc_events if m.get("event") == "solidcraft" and m.get("tag") == "ready_after_race"), {})
+        ev_post = next((m for m in sc_events if m.get("event") == "solidcraft" and m.get("tag") == "post_race_file"), {})
+        final_file = ev_post.get("hub_file") or ev_post.get("file") or ""
         same_proc = (
-            ev_ready.get("state") == "ready"
-            and ev_start.get("pid", 0) != 0
-            and ev_start.get("pid") == ev_ready.get("pid")
-            and ev_start.get("gen") == ev_ready.get("gen")
-            and ev_ready.get("file", "").endswith("box.sc")
+            ev_post.get("state") == "ready"
+            and ev_start.get("pid", 0) > 0
+            and ev_post.get("gen", 0) > 0
+            and ev_start.get("pid") == ev_post.get("pid")
+            and ev_start.get("gen") == ev_post.get("gen")
+            and final_file.endswith("box.sc")
         )
-        log("open_while_starting_no_respawn", same_proc, f"start={ev_start.get('pid')}/{ev_start.get('gen')} ready={ev_ready.get('pid')}/{ev_ready.get('gen')} file={ev_ready.get('file')}")
+        log("open_while_starting_no_respawn", same_proc, f"start={ev_start.get('pid')}/{ev_start.get('gen')} ready={ev_ready.get('state')} post={ev_post.get('pid')}/{ev_post.get('gen')} file={final_file}")
 
         def metrics():
             if not os.path.isfile(P("client.log")):
@@ -355,7 +362,7 @@ def main():
         time.sleep(2.5)
         key_shot("key_solidcraft_return")
 
-        # 4. Resize GPUI window via i3-msg and restore
+        # 4. Resize GPUI window via i3-msg + split pane drag, then allow 10s for any import toast auto-dismiss before idle flicker window
         mark_phase("resize")
         i3sock = f"{RUN}/i3.sock"
         subprocess.run(["i3-msg", "-s", i3sock, "floating", "enable"], env=denv, check=False, timeout=5)
@@ -364,8 +371,16 @@ def main():
         key_shot("key_resized")
         subprocess.run(["i3-msg", "-s", i3sock, "floating", "disable"], env=denv, check=False, timeout=5)
         time.sleep(1.5)
+        vr = rects().get("viewer") or rects().get("rail:mech")
+        if vr and "viewer" in rects():
+            vx = int(rects()["viewer"]["x"])
+            vy = int(H * 0.5)
+            subprocess.run(["python3", XIN, "drag", str(vx), str(vy), str(vx - 80), str(vy)], env=denv, check=False, timeout=10)
+            time.sleep(0.8)
+            subprocess.run(["python3", XIN, "drag", str(vx - 80), str(vy), str(vx), str(vy)], env=denv, check=False, timeout=10)
+        time.sleep(8.0)
         mark_phase("post_resize_settle")
-        time.sleep(2.0)
+        time.sleep(2.5)
 
         # 5. Detach and reattach if controls exist
         c = ctrls()
