@@ -378,7 +378,7 @@ gpui.f2.i.runcmd	Installed. If it is not signed in yet, run {cmd} in a terminal.
 gpui.f2.more.agents	More agents	その他のエージェント	Más agentes
 gpui.f2.check.after	After you install or sign in somewhere else.	別の場所でインストールやサインインをした後に。	Después de instalar o iniciar sesión en otro sitio.
 gpui.f2.tools	Design tools	設計ツール	Herramientas de diseño
-gpui.f2.tools.body	Agents use KiCad for boards and schematics, and FreeCAD for mechanical parts. Skip FreeCAD if you only design boards.	エージェントは基板と回路図にKiCadを、機構部品にFreeCADを使います。基板だけを設計するならFreeCADは飛ばしてかまいません。	Los agentes usan KiCad para placas y esquemáticos, y FreeCAD para piezas mecánicas. Salta FreeCAD si solo diseñas placas.
+gpui.f2.tools.body	Agents use KiCad for boards and schematics, and SolidCraft and FreeCAD for mechanical parts. Skip those two if you only design boards.	エージェントは基板と回路図にKiCadを、機構部品にSolidCraftとFreeCADを使います。基板だけを設計するならこの2つは飛ばしてかまいません。	Los agentes usan KiCad para placas y esquemáticos, y SolidCraft y FreeCAD para piezas mecánicas. Salta esos dos si solo diseñas placas.
 gpui.f2.kicad.ok	Backplane KiCad {v} at {path}. Agents can edit a board in a running KiCad.	Backplane KiCad {v}（{path}）。エージェントは起動中のKiCadで基板を編集できます。	Backplane KiCad {v} en {path}. Los agentes pueden editar una placa en un KiCad en ejecución.
 gpui.f2.kicad.installing	Installing Backplane KiCad {v}. {note}	Backplane KiCad {v} をインストール中。{note}	Instalando Backplane KiCad {v}. {note}
 gpui.f2.kicad.auto	Not found. Downloading Backplane KiCad {v} into Backplane's own folder. This takes a few minutes.	見つかりません。Backplane KiCad {v} をBackplane専用のフォルダにダウンロードしています。数分かかります。	No encontrado. Descargando Backplane KiCad {v} en la carpeta propia de Backplane. Esto tarda unos minutos.
@@ -4965,6 +4965,50 @@ web.ring.state.heard	waiting to go to Pebble	Pebble への受け渡し待ち	en 
 web.ring.state.failed	not given to Pebble	Pebble に渡せませんでした	no entregada a Pebble
 web.ring.state.busy	being heard now	認識中	transcribiéndose ahora
 web.ring.no.words	(no words)	(言葉なし)	(sin palabras)
+gpui.c.solidcraft.needs.hub	SolidCraft needs a connected hub.	SolidCraft には接続済みのハブが必要です。	SolidCraft necesita un hub conectado.
+gpui.c.solidcraft.local.only	SolidCraft embeds only on the local machine.	SolidCraft はローカルマシン上でのみ埋め込めます。	SolidCraft solo se integra en la máquina local.
+gpui.c.solidcraft.opening	Opening SolidCraft…	SolidCraft を開いています…	Abriendo SolidCraft…
+gpui.c.solidcraft.waiting	Waiting for SolidCraft window…	SolidCraft ウィンドウを待機しています…	Esperando la ventana de SolidCraft…
+gpui.c.solidcraft.starting	Starting SolidCraft…	SolidCraft を起動しています…	Iniciando SolidCraft…
+gpui.c.solidcraft.not.responding	SolidCraft is not responding.	SolidCraft が応答していません。	SolidCraft no responde.
+gpui.c.solidcraft.could.not.start	SolidCraft could not start.	SolidCraft を起動できませんでした。	No se pudo iniciar SolidCraft.
+gpui.c.solidcraft.could.not.start.prefix	SolidCraft could not start:	SolidCraft を起動できませんでした:	No se pudo iniciar SolidCraft:
+gpui.c.solidcraft.no.embed	This window cannot embed SolidCraft (X11/XWayland or Win32 required).	このウィンドウでは SolidCraft を埋め込めません（X11/XWayland または Win32 が必要です）。	Esta ventana no puede integrar SolidCraft (requiere X11/XWayland o Win32).
+gpui.c.solidcraft.no.container	Could not create embedded SolidCraft container window.	埋め込み用 SolidCraft コンテナウィンドウを作成できませんでした。	No se pudo crear el contenedor integrado de SolidCraft.
+gpui.c.solidcraft.own.window	SolidCraft is open in its own window.	SolidCraft は別ウィンドウで開いています。	SolidCraft está abierto en su propia ventana.
+gpui.c.solidcraft.not.installed	SolidCraft is not installed.	SolidCraft がインストールされていません。	SolidCraft no está instalado.
+gpui.c.solidcraft.install.desc	Install SolidCraft v0.50.0 (~228 MB) to view and edit STEP, SolidCraft, STL, and mesh files.	SolidCraft v0.50.0（約 228 MB）をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。	Instala SolidCraft v0.50.0 (~228 MB) para ver y editar archivos STEP, SolidCraft, STL y malla.
+gpui.c.solidcraft.install.btn	Install SolidCraft	SolidCraft をインストール	Instalar SolidCraft
+gpui.c.solidcraft.installing	Installing SolidCraft…	SolidCraft をインストールしています…	Instalando SolidCraft…
+gpui.c.solidcraft.downloading	Downloading…	ダウンロード中…	Descargando…
+gpui.c.solidcraft.closed	SolidCraft is closed.	SolidCraft は閉じられました。	SolidCraft está cerrado.
+gpui.c.solidcraft.open.btn	Open SolidCraft	SolidCraft を開く	Abrir SolidCraft
+gpui.c.solidcraft.window.err	SolidCraft window could not open:	SolidCraft ウィンドウを開けませんでした:	No se pudo abrir la ventana de SolidCraft:
+gpui.c.solidcraft.install.failed	Install failed.	インストールに失敗しました。	Falló la instalación.
+gpui.c.solidcraft.open	Open in SolidCraft	SolidCraft で開く	Abrir en SolidCraft
+gpui.c.solidcraft.new.part	New 3D part in SolidCraft	SolidCraft で新しい 3D パーツを作成	Nueva pieza 3D en SolidCraft
+gpui.c.solidcraft.new.short	New 3D part	新しい 3D パーツ	Nueva pieza 3D
+gpui.c.solidcraft.popout.cmd	SolidCraft: Pop out	SolidCraft: 別ウィンドウで開く	SolidCraft: Abrir en ventana aparte
+gpui.f2.solidcraft.looking	Looking for it.	確認しています。	Buscando…
+gpui.f2.solidcraft.ok	SolidCraft{v} at {path}. 3D models open and are edited in it.	SolidCraft{v}（{path}）。3D モデルの表示と編集に使われます。	SolidCraft{v} en {path}. Los modelos 3D se abren y editan en él.
+gpui.f2.solidcraft.notfound	Not found. 3D models open and are edited in it, and agents model parts with it. SolidCraft{v} is about {n} MB, from {from}.	見つかりません。3D モデルの表示・編集とエージェントによるパーツ作成に使われます。SolidCraft{v} は約 {n} MB（{from}）です。	No encontrado. Los modelos 3D se abren y editan en él, y los agentes modelan piezas con él. SolidCraft{v} ocupa unos {n} MB, desde {from}.
+gpui.f2.solidcraft.installing	Installing SolidCraft{v}. {step}	SolidCraft{v} をインストールしています。{step}	Instalando SolidCraft{v}. {step}
+gpui.f2.solidcraft.failed	It did not install: {why}.	インストールできませんでした: {why}。	No se pudo instalar: {why}.
+gpui.f2.solidcraft.nopkg	Not found. No SolidCraft download is published for this computer.	見つかりません。このコンピュータ向けの SolidCraft ダウンロードは公開されていません。	No encontrado. No hay descarga de SolidCraft publicada para este equipo.
+gpui.f2.solidcraft.cli	SolidCraft''s command line{v} at {cli}. Agents model with it.	SolidCraft のコマンドライン{v}（{cli}）。エージェントがモデリングに使います。	Línea de comandos de SolidCraft{v} en {cli}. Los agentes modelan con ella.
+gpui.f2.solidcraft.cli.nowin	SolidCraft''s command line{v} at {cli}. Agents model with it. Its window program, for the 3D pane, is not installed.	SolidCraft のコマンドライン{v}（{cli}）。エージェントがモデリングに使います。3D ペイン用のウィンドウプログラムは未インストールです。	Línea de comandos de SolidCraft{v} en {cli}. Los agentes modelan con ella. Su programa de ventana, para el panel 3D, no está instalado.
+gpui.c.solidcraft.settings.ask	Install SolidCraft?	SolidCraft をインストールしますか？	¿Instalar SolidCraft?
+gpui.c.solidcraft.settings.installing	Installing SolidCraft {v}	SolidCraft {v} をインストール中	Instalando SolidCraft {v}
+gpui.c.solidcraft.settings.folder.hint	Folder holding solidcraft and solidcraft-cli, empty to look for it	solidcraft と solidcraft-cli のフォルダ（空欄で自動検索）	Carpeta con solidcraft y solidcraft-cli, vacío para buscarlo
+gpui.c.solidcraft.settings.notfound.dir	SolidCraft was not found in that folder.	そのフォルダに SolidCraft が見つかりませんでした。	No se encontró SolidCraft en esa carpeta.
+gpui.c.solidcraft.settings.notfound	SolidCraft was not found. 3D models open and are edited in it. Install it below, or set the folder of one you have.	SolidCraft が見つかりませんでした。3D モデルの表示・編集に使われます。下からインストールするか、既存のフォルダを指定してください。	No se encontró SolidCraft. Los modelos 3D se abren y editan en él. Instálalo abajo o indica la carpeta de uno existente.
+gpui.c.solidcraft.settings.nopkg	No SolidCraft download is published for this computer. Install it from github.com/tangency-labs/solidcraft, then set its folder above.	このコンピュータ向けの SolidCraft ダウンロードは公開されていません。github.com/tangency-labs/solidcraft からインストールし、上のフォルダを指定してください。	No hay descarga de SolidCraft publicada para este equipo. Instálalo desde github.com/tangency-labs/solidcraft y luego indica su carpeta arriba.
+gpui.c.solidcraft.settings.confirm	Downloads SolidCraft {v} (about {n} MB) from {from}, checks its checksum and unpacks it into {folder}. It needs no administrator password and changes nothing else on this computer.	SolidCraft {v}（約 {n} MB）を {from} からダウンロードし、チェックサム検証後に {folder} に展開します。管理者パスワードは不要で、このコンピュータの他所は変更しません。	Descarga SolidCraft {v} (unos {n} MB) desde {from}, verifica su suma de comprobación y lo descomprime en {folder}. No necesita contraseña de administrador y no cambia nada más en este equipo.
+gpui.c.solidcraft.settings.offer	SolidCraft {v} for this computer, from {from}. 3D models open in it inside Backplane, and agents model parts with it.	このコンピュータ向けの SolidCraft {v}（{from}）。Backplane 内で 3D モデルを開き、エージェントがパーツをモデリングします。	SolidCraft {v} para este equipo, desde {from}. Los modelos 3D se abren dentro de Backplane y los agentes modelan piezas con él.
+gpui.c.solidcraft.settings.downloading	Downloading: {done} of {total} MB.	ダウンロード中: {total} MB 中 {done} MB。	Descargando: {done} de {total} MB.
+gpui.c.solidcraft.bring.back.cmd	SolidCraft: Bring back	SolidCraft: 戻す	SolidCraft: Traer de vuelta
+gpui.c.solidcraft.cli.only	This computer has SolidCraft's command-line program, not its desktop window.	このコンピュータには SolidCraft のコマンドラインプログラムのみがあり、デスクトップウィンドウはありません。	Este equipo tiene el programa de línea de comandos de SolidCraft, pero no su ventana de escritorio.
+gpui.c.solidcraft.mech.hint	Ask an agent to model one, or add a .sc or STEP file to mech/.	エージェントにモデリングを依頼するか、mech/ に .sc または STEP ファイルを追加してください。	Pide a un agente que modele una, o añade un archivo .sc o STEP en mech/.
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -7969,4 +8013,34 @@ web.ring.no.words	(no words)	(言葉なし)	(sin palabras)
 
     /// web.ring.heard.by.sure = Heard by {model}, {conf}% sure
     static func web_ring_heard_by_sure(model: String, conf: String) -> String { f("web.ring.heard.by.sure", ["model": model, "conf": conf]) }
+
+    /// gpui.f2.solidcraft.ok = SolidCraft{v} at {path}. 3D models open and are edited in it.
+    static func gpui_f2_solidcraft_ok(v: String, path: String) -> String { f("gpui.f2.solidcraft.ok", ["v": v, "path": path]) }
+
+    /// gpui.f2.solidcraft.notfound = Not found. 3D models open and are edited in it, and agents model parts with it. SolidCraft{v} is about {n} MB, from {from}.
+    static func gpui_f2_solidcraft_notfound(v: String, n: String, from: String) -> String { f("gpui.f2.solidcraft.notfound", ["v": v, "n": n, "from": from]) }
+
+    /// gpui.f2.solidcraft.installing = Installing SolidCraft{v}. {step}
+    static func gpui_f2_solidcraft_installing(v: String, step: String) -> String { f("gpui.f2.solidcraft.installing", ["v": v, "step": step]) }
+
+    /// gpui.f2.solidcraft.failed = It did not install: {why}.
+    static func gpui_f2_solidcraft_failed(why: String) -> String { f("gpui.f2.solidcraft.failed", ["why": why]) }
+
+    /// gpui.f2.solidcraft.cli = SolidCraft''s command line{v} at {cli}. Agents model with it.
+    static func gpui_f2_solidcraft_cli(v: String, cli: String) -> String { f("gpui.f2.solidcraft.cli", ["v": v, "cli": cli]) }
+
+    /// gpui.f2.solidcraft.cli.nowin = SolidCraft''s command line{v} at {cli}. Agents model with it. Its window program, for the 3D pane, is not installed.
+    static func gpui_f2_solidcraft_cli_nowin(v: String, cli: String) -> String { f("gpui.f2.solidcraft.cli.nowin", ["v": v, "cli": cli]) }
+
+    /// gpui.c.solidcraft.settings.installing = Installing SolidCraft {v}
+    static func gpui_c_solidcraft_settings_installing(v: String) -> String { f("gpui.c.solidcraft.settings.installing", ["v": v]) }
+
+    /// gpui.c.solidcraft.settings.confirm = Downloads SolidCraft {v} (about {n} MB) from {from}, checks its checksum and unpacks it into {folder}. It needs no administrator password and changes nothing else on this computer.
+    static func gpui_c_solidcraft_settings_confirm(v: String, n: String, from: String, folder: String) -> String { f("gpui.c.solidcraft.settings.confirm", ["v": v, "n": n, "from": from, "folder": folder]) }
+
+    /// gpui.c.solidcraft.settings.offer = SolidCraft {v} for this computer, from {from}. 3D models open in it inside Backplane, and agents model parts with it.
+    static func gpui_c_solidcraft_settings_offer(v: String, from: String) -> String { f("gpui.c.solidcraft.settings.offer", ["v": v, "from": from]) }
+
+    /// gpui.c.solidcraft.settings.downloading = Downloading: {done} of {total} MB.
+    static func gpui_c_solidcraft_settings_downloading(done: String, total: String) -> String { f("gpui.c.solidcraft.settings.downloading", ["done": done, "total": total]) }
 }
