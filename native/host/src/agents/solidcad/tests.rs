@@ -151,6 +151,10 @@ async fn the_session_follows_the_pane() {
     assert!(r.log().contains("start mcp --connect 127.0.0.1:27878 --compact"), "{}", r.log());
     assert!(!r.log().contains("tok"), "the token is never an argument");
     assert_eq!(r.s.status(&r.seam).await["session"], "pane");
+    // the person opened another design in the window: the checkpoint before the next change is of that file
+    let g = r.root.join("other.sc").to_string_lossy().into_owned(); std::fs::write(&g, "theirs").unwrap(); std::fs::write(r.state.join("path"), &g).unwrap();
+    let (ok, v) = r.call("execute", json!({"command":"solid.box"})).await; assert!(ok, "{v}");
+    assert_eq!(bp(&v)["checkpoint"]["of"], g, "{v}"); assert_eq!(bp(&v)["saved"], g);
 }
 
 #[tokio::test]

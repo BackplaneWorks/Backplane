@@ -182,6 +182,12 @@ impl Session {
         if let Some(prev) = self.interrupted.lock().unwrap().take() { notes.push(format!("The earlier {}{prev} call was interrupted before it answered: it may or may not have been applied. Check the design ({}summary) before relying on it.", h::PREFIX, h::PREFIX)) }
         if let Err(e) = self.ensure(seam, inner, &mut notes).await { return fail(json!({"error": e})) }
         let changing = matches!(class, Class::Edit | Class::Replace);
+        // in the pane the person switches designs too (a tab, a file opened from the Files tab): the file a change is about to touch is
+        // the one open there now, not the one this session last saw
+        if changing { if let Some(c) = inner.client.as_ref().filter(|c| matches!(c.mode, Mode::Bridged { .. })) {
+            let now = c.call("inspect_design", &json!({"measure":false,"sketches":false,"timeline":false,"bodies":false,"joints":false}), PROBE).await.ok().filter(|r| !client::is_error(r)).and_then(|r| client::first_json(&r));
+            if let Some(i) = now { inner.design = i.get("path").and_then(Value::as_str).map(str::to_string) }
+        } }
         // the turn's snapshot of the project files this call writes (the design's own file, saved after an edit; a save's or export's target)
         let mut touched = h::written_paths(tool, &args);
         if changing { touched.extend(inner.design.clone()) }
