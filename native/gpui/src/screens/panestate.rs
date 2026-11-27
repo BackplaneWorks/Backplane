@@ -38,7 +38,8 @@ pub fn loading_for(open: &str, gerbers: bool) -> String {
         "board" => trs("Loading the board…"),
         "schematic" => trs("Loading the schematic…"),
         "gerbers" => trs("Loading the Gerbers…"),
-        "3d" | "mech" => trs("Loading the model…"),
+        "3d" => trs("Loading the model…"),
+        "mech" => trs("Opening SolidCraft…"),
         "split" => trs("Loading the views…"),
         _ => trs("Opening…"),
     }
@@ -105,7 +106,7 @@ pub fn classify_solid_note(note: &str, failed: bool, retryable: Option<bool>) ->
 /// A Mech page with no parts (the hub's `mech.say` and `mech.note`).
 pub fn mech_empty(say: &str, note: &str) -> PaneState {
     let line = if say.is_empty() { trs("No mechanical parts in this project yet") } else { trs(say) };
-    let next = if note.is_empty() && say.is_empty() { trs("Ask an agent to model one, or add a STEP file to mech/.") } else if note.is_empty() { String::new() } else { trs(note) };
+    let next = if note.is_empty() && say.is_empty() { trs("Ask an agent to model one, or add a .sc or STEP file to mech/.") } else if note.is_empty() { String::new() } else { trs(note) };
     PaneState::empty(line, next)
 }
 

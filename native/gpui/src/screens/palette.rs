@@ -8,7 +8,7 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Do { AddBeside, Rail(String, String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String) }
+pub enum Do { AddBeside, Rail(String, String), SolidCraft(String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String) }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
 /// The key that does what an item does, as the person reads it ("" for none).
@@ -22,7 +22,7 @@ pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
 }
 
 #[derive(Default)]
-pub struct Palette { can_embed: bool, pub(crate) editor_active: bool, pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
+pub struct Palette { can_embed: bool, pub(crate) editor_active: bool, pub(crate) solidcraft_open: bool, pub(crate) solidcraft_popped: bool, pub(crate) solidcraft_installed: Option<bool>, pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
     /// "Search in thread": the thread (its raw id) the box searches, "" for the whole palette
     pub scope: String,
     /// Find across threads (Ctrl+Shift+F): the box lists only what was said, and the threads named by the words
@@ -99,6 +99,10 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
         v.push(Item { label: trs(row.label), place: if row.id == "terminal" { String::new() } else { trs("viewer") }, kind: "action", what: Do::Rail(row.id.into(), row.key.into()), row: Value::Null });
     }
     if thread.is_object() {
+        if can_embed {
+            v.push(Item { label: trs("Open in SolidCraft"), place: trs("viewer"), kind: "action", what: Do::SolidCraft("open".into()), row: Value::Null });
+            v.push(Item { label: trs("New 3D part in SolidCraft"), place: trs("viewer"), kind: "action", what: Do::SolidCraft("new".into()), row: Value::Null });
+        }
         v.push(Item { label: trs("Agent, model and effort"), place: String::new(), kind: "action", what: Do::Models, row: Value::Null });
         v.push(Item { label: trs("Previous thread"), place: String::new(), kind: "action", what: Do::Prev, row: Value::Null });
         v.push(Item { label: trs("Next thread"), place: String::new(), kind: "action", what: Do::Next, row: Value::Null });
@@ -172,6 +176,13 @@ pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
     if p.find_all { let mut v = hits; if answered { v.extend(p.titles.iter().take(6).cloned()); } return v }
     // the sidebar's rows, then the hub's title hits for threads it does not hold (settled, older pages)
     let mut all = items(data, p.can_embed);
+    if p.solidcraft_open {
+        let (act, label) = if p.solidcraft_popped { ("bring_back", trs("SolidCraft: Bring back")) } else { ("detach", trs("SolidCraft: Pop out")) };
+        all.push(Item { label, place: trs("viewer"), kind: "action", what: Do::SolidCraft(act.into()), row: Value::Null });
+    }
+    if p.solidcraft_installed == Some(false) {
+        all.push(Item { label: trs("Install SolidCraft"), place: trs("Settings"), kind: "action", what: Do::SolidCraft("settings".into()), row: Value::Null });
+    }
     if p.editor_active { all.retain(|item| item.what != Do::AddBeside); }
     if answered { let held: std::collections::HashSet<Do> = all.iter().map(|it| it.what.clone()).collect(); all.extend(p.titles.iter().filter(|t| !held.contains(&t.what)).cloned()); }
     let mut v = found(all, &p.q, 10);
@@ -209,7 +220,11 @@ impl Backplane {
     pub(crate) fn palette_open(&mut self, cx: &mut Context<Self>) {
         self.screens.palette.can_embed = crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), &self.data["thread"]);
         self.screens.palette.editor_active = self.dock_editor_active(&self.data["thread"], self.screens.palette.can_embed, cx);
+        self.screens.palette.solidcraft_open = self.screens.solidcraft.is_some();
+        self.screens.palette.solidcraft_popped = self.screens.solidcraft.as_ref().is_some_and(|p| p.read(cx).popped);
+        self.screens.palette.solidcraft_installed = self.screens.solidcraft_infos.get("solidcraft.runtime").and_then(|v| v["installed"].as_bool());
         self.kicad_lend(cx);
+        self.solidcraft_lend(cx);
         if self.screens.palette.input.is_none() {
             let input = cx.new(|cx| Composer::with_context(cx, "PickInput"));
             /* i18n-ok: hints, drawn through trs by the composer */ input.update(cx, |i, _| { i.set_placeholder("Jump to a thread or run a command"); });
@@ -259,6 +274,17 @@ impl Backplane {
                 "simulation" => self.open_simulation(cx),
                 "diff" => self.rail_press("diff", "", cx),
                 kind => self.rail_press("view-kind", kind, cx),
+            },
+            Do::SolidCraft(act) => match act.as_str() {
+                "open" | "new" => self.rail_press("view-kind", "mech", cx),
+                "detach" => self.solidcraft_popout(cx),
+                "bring_back" => {
+                    let h = self.screens.solidcraft_window;
+                    self.solidcraft_bring_back(cx);
+                    if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); }
+                }
+                "settings" => self.go("link-open", "backplane://settings/cad".into(), cx),
+                _ => {}
             },
             Do::Action(a, v) => {
                 if super::tools::makes_thread(&a) { self.arm_new(); }
@@ -331,6 +357,7 @@ pub(crate) fn selected_snapshot(data: &Value, p: &Palette) -> Value {
     let sel_id = sel.map(|it| match &it.what {
         Do::AddBeside => "add-beside".into(),
         Do::Rail(id, _) => format!("rail:{id}"),
+        Do::SolidCraft(a) => format!("solidcraft:{a}"),
         Do::Thread(id) => format!("thread:{id}"),
         Do::Action(a, v) => if v.is_empty() { format!("action:{a}") } else { format!("action:{a}:{v}") },
         Do::Settings => "settings".into(),
@@ -423,6 +450,22 @@ mod tests {
         assert!(found(all.clone(), "zzzz", 10).is_empty());
         let r = found(all.clone(), "new chat", 10); assert_eq!(r[0].what, Do::Action("new-thread".into(), "chats".into()), "a chat in no project, from anywhere");
         let r = found(all, "new thr", 10); assert_eq!(r[0].what, Do::Action("new-thread".into(), "p1".into()), "the project's raw id");
+    }
+    #[test] fn solidcraft_palette_commands_follow_embed_and_runtime_state() {
+        let local = items(&data(), true);
+        assert!(local.iter().any(|i| i.what == Do::SolidCraft("open".into())));
+        assert!(local.iter().any(|i| i.what == Do::SolidCraft("new".into())));
+        let remote = items(&data(), false);
+        assert!(!remote.iter().any(|i| matches!(i.what, Do::SolidCraft(..))));
+
+        let p_install = Palette { q: "install solidcraft".into(), can_embed: true, solidcraft_installed: Some(false), ..Default::default() };
+        assert!(listed(&data(), &p_install).iter().any(|i| i.what == Do::SolidCraft("settings".into())));
+
+        let p_pop = Palette { q: "solidcraft".into(), can_embed: true, solidcraft_open: true, solidcraft_popped: false, ..Default::default() };
+        assert!(listed(&data(), &p_pop).iter().any(|i| i.what == Do::SolidCraft("detach".into())));
+
+        let p_back = Palette { q: "solidcraft".into(), can_embed: true, solidcraft_open: true, solidcraft_popped: true, ..Default::default() };
+        assert!(listed(&data(), &p_back).iter().any(|i| i.what == Do::SolidCraft("bring_back".into())));
     }
     #[test] fn opened_empty_the_threads_waiting_on_the_person_come_first() {
         let d = json!({"projects": [{"id": "h|p1", "title": "Amp", "threads": [{"id": "h|t1", "title": "Quiet one", "status": "inactive", "want": ""},
