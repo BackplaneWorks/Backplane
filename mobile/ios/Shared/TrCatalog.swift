@@ -881,6 +881,7 @@ sidebar.wakes.soon	wakes soon	まもなく再開	despierta pronto
 sidebar.archived	Archived	アーカイブ済み	Archivados
 sidebar.nothing	Nothing active	実行中の作業なし	Nada activo
 sidebar.search.projects	Search projects	プロジェクトを検索	Buscar proyectos
+sidebar.search.hint	Search…	検索…	Buscar…
 thread.title.placeholder	Thread title	スレッド名	Título del hilo
 composer.placeholder	Ask anything: @bot, >thread, %project, #room, $skill, /btw	何でも質問：@bot、>thread、%project、#room、$skill、/btw	Pregunta lo que sea: @bot, >hilo, %proyecto, #sala, $skill, /btw
 thread.subagents	Subthreads	サブスレッド	Subhilos
@@ -4378,6 +4379,7 @@ sidebar.sections.new.group	New group…	新しいグループ…	Nuevo grupo…
 sidebar.sections.new.group.title	New group	新しいグループ	Nuevo grupo
 sidebar.sections.remove.ask	Remove {project} from Backplane? Its folder and files stay.	{project}をBackplaneから外しますか？フォルダとファイルはそのまま残ります。	¿Quitar {project} de Backplane? Su carpeta y archivos se conservan.
 gpui.sections.running	{n, number} running	{n, number}件実行中	{n, number} ejecutándose
+gpui.sections.done	Done ({n, number})	完了（{n, number}）	Hechos ({n, number})
 gpui.sections.rest	{n, plural, one {# thread not listed here, on the project page} other {# threads not listed here, on the project page}}	{n, plural, other {ここにないスレッド#件（プロジェクトページにあります）}}	{n, plural, one {# hilo no listado aquí, en la página del proyecto} other {# hilos no listados aquí, en la página del proyecto}}
 gpui.projects.mech	MECHANICAL ({n})	機構部品（{n}）	MECÁNICO ({n})
 gpui.open.folder	Open folder	フォルダを開く	Abrir carpeta
@@ -7812,6 +7814,9 @@ gpui.c.solidcraft.exit.full.cmd	SolidCraft: Exit full screen	SolidCraft: 全画�
 
     /// gpui.sections.running = {n, number} running
     static func gpui_sections_running(n: Int) -> String { f("gpui.sections.running", ["n": String(n)]) }
+
+    /// gpui.sections.done = Done ({n, number})
+    static func gpui_sections_done(n: Int) -> String { f("gpui.sections.done", ["n": String(n)]) }
 
     /// gpui.sections.rest = {n, plural, one {# thread not listed here, on the project page} other {# threads not listed here, on the project page}}
     static func gpui_sections_rest(n: Int) -> String { f("gpui.sections.rest", ["n": String(n)]) }

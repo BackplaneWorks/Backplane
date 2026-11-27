@@ -519,19 +519,36 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let t = titles_of(&p["threads"]);
     assert_eq!(t[0], "T t8", "the pin first");
     let mut rest = t[1..].to_vec(); rest.sort();
-    assert_eq!(rest, ["T t1", "T t2", "T t3", "T t4", "T t7"], "every thread but the settled-by-hand t5 and the archived t6; t4, settled by the clock, stays: {t:?}");
+    assert_eq!(rest, ["T t1", "T t3", "T t7"], "active/unsettled threads stay directly under the project: {t:?}");
     let acts: Vec<u64> = p["threads"].as_array().unwrap()[1..].iter().map(|r| r["activity"].as_u64().unwrap()).collect();
     assert!(acts.windows(2).all(|w| w[0] >= w[1]), "newest first: {acts:?}");
-    assert_eq!(titles_of(&sec(&v, "needs")["rows"]), ["T t7"], "Needs you is the same");
-    assert_eq!((p["fold"].as_str(), p["folded"].as_bool(), p["under"].as_u64()), (Some("project-fold"), Some(false), Some(6)));
-    // the chevron folds them (the hub's project-fold), and the thread on show opens the row again
+    assert_eq!((p["doneCount"].as_u64(), p["doneOpen"].as_bool(), p["done"].as_array().unwrap().len()), (Some(4), Some(false), 0), "completed and settled threads collapse into Done (4) by default: {p}");
     let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let key = rows[0].key.clone();
+    assert_eq!(p["doneToggle"].as_str(), Some(format!("proj-done:{key}").as_str()));
+    assert_eq!(act(&s, &rows, "side-section", &format!("proj-done:{key}"), &json!({}), NOW).unwrap().open_toggle.as_deref(), Some(format!("proj-done:{key}").as_str()));
+    assert!(act(&s, &rows, "side-section", "proj-done:nope", &json!({}), NOW).is_none());
+    let done_open_set: HashSet<String> = [format!("proj-done:{key}")].into();
+    let v_done_open = build(&s, &rows, &Value::Null, &ctx(&done_open_set));
+    let p_open = &sec(&v_done_open, "active")["rows"][0];
+    assert_eq!(p_open["doneOpen"], true);
+    assert_eq!(titles_of(&p_open["done"]), ["T t5", "T t4", "T t2", "T t6"], "expanded Done fold lists completed and settled threads newest first");
+    assert_eq!(p_open["done"][2]["settle"], "h|t2", "unsettled completed thread still exposes settle when expanded");
+    assert_eq!(p_open["done"][3]["settle"], "", "archived (settled) thread does not");
+    assert_eq!(p_open["done"][0]["settle"], "", "manually settled thread does not");
+    assert_eq!(p_open["done"][1]["settle"], "", "clock-settled thread does not");
+    assert_eq!(titles_of(&sec(&v, "needs")["rows"]), ["T t7"], "Needs you is the same");
+    assert_eq!((p["fold"].as_str(), p["folded"].as_bool(), p["under"].as_u64()), (Some("project-fold"), Some(false), Some(8)));
+    // the chevron folds them (the hub's project-fold), and the thread on show opens the row again
     let a = act(&s, &rows, "project-fold", &key, &json!({}), NOW).unwrap();
     let mut folded = off.clone(); for (k, v) in &a.sets { folded.push(set(k, v, NOW)); }
     let s = one(&folded);
     let p = sec(&view(&s, ""), "active")["rows"][0].clone();
-    assert_eq!((p["folded"].as_bool(), p["threads"].as_array().unwrap().len()), (Some(true), 0));
-    assert_eq!(sec(&view(&s, "t2"), "active")["rows"][0]["threads"].as_array().unwrap().len(), 6, "the open thread's project is never folded away");
+    assert_eq!((p["folded"].as_bool(), p["threads"].as_array().unwrap().len(), p["doneCount"].as_u64().unwrap_or(0), p["done"].as_array().map_or(0, Vec::len)), (Some(true), 0, 0, 0));
+    let v_sel = view(&s, "t2");
+    let p_sel = &sec(&v_sel, "active")["rows"][0];
+    assert_eq!(p_sel["folded"], false, "the open thread's project is never folded away");
+    assert_eq!(p_sel["threads"].as_array().unwrap().len(), 5, "the single selected Done thread stays visible without expanding the rest of Done");
+    assert_eq!(p_sel["doneCount"], 3, "the remaining three Done threads stay collapsed");
     // the search lists what matches either way
     let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let c = Ctx { query: "t5", ..ctx(&open) };
     assert_eq!(titles_of(&sec(&build(&s, &rows, &Value::Null, &c), "active")["rows"][0]["threads"]), ["T t5"]);
@@ -539,6 +556,65 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let r = crate::present::settings::view(&s, &json!({"drafts":{"@settings.page":"appearance"}}), &json!({}));
     let row = r["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Only threads that need attention").expect("the row").clone();
     assert_eq!(row["buttons"].as_array().unwrap().iter().map(|b| (b["value"].as_str().unwrap(), b["on"].as_bool().unwrap())).collect::<Vec<_>>(), [("sidebar.attention=on", false), ("sidebar.attention=off", true)]);
+}
+
+#[test] fn settled_and_done_threads_collapse_into_project_fold_and_unsettled_threads_expose_settle() {
+    let settle_ev = |id: &str, manual: bool, at: u64| json!({"$":"ThreadSettled","id":id,"manual":manual,"at":at});
+    let unsettle_ev = |id: &str, at: u64| json!({"$":"ThreadUnsettled","id":id,"at":at});
+    let mut evs = vec![
+        tc("t_run", "p1", NOW - 90), turn("t_run", "running", NOW - 10),
+        tc("t_need", "p1", NOW - 85), ask("q_need", "t_need", "approval"),
+        tc("t_fail", "p1", NOW - 80), turn("t_fail", "failed", NOW - 20),
+        tc("t_pin", "p1", NOW - 75), turn("t_pin", "completed", NOW - 30), json!({"$":"ThreadPinned","id":"t_pin","pinned":true,"at":NOW-29}),
+        tc("t_done_3h", "p1", NOW - 70), turn("t_done_3h", "completed", NOW - 3 * 3600),
+        tc("t_done_1d", "p1", NOW - 65), turn("t_done_1d", "completed", NOW - 86400),
+        tc("t_settled", "p1", NOW - 60), turn("t_settled", "completed", NOW - 2 * 86400), settle_ev("t_settled", true, NOW - 86400),
+        set(ATTENTION, "off", NOW - 1),
+    ];
+    let s = one(&evs);
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let key = rows[0].key.clone();
+    let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    let p = &sec(&v, "active")["rows"][0];
+    let active_titles = titles_of(&p["threads"]);
+    assert_eq!(active_titles, ["T t_pin", "T t_run", "T t_fail", "T t_need", "T t1"], "active/pinned/failed/idle stay visible under project: {active_titles:?}");
+    assert_eq!(p["doneCount"], 3);
+    assert_eq!(p["doneOpen"], false);
+    assert!(p["done"].as_array().unwrap().is_empty());
+
+    // Unsettled non-running threads expose `settle`, and header tools expose Settle / Settled
+    let fail_row = p["threads"].as_array().unwrap().iter().find(|r| r["id"] == "h|t_fail").unwrap();
+    let pin_row = p["threads"].as_array().unwrap().iter().find(|r| r["id"] == "h|t_pin").unwrap();
+    let run_row = p["threads"].as_array().unwrap().iter().find(|r| r["id"] == "h|t_run").unwrap();
+    assert_eq!(fail_row["settle"], "h|t_fail");
+    assert_eq!(pin_row["settle"], "h|t_pin");
+    assert_eq!(run_row["settle"], "");
+    let tools_done = crate::present::keys::tools(Turn::Completed, false, crate::present::keys::settled(&s, "t_done_3h"), false, false);
+    assert!(tools_done.iter().any(|t| t["action"] == "settle" && t["label"] == "Settle"));
+    let tools_settled = crate::present::keys::tools(Turn::Completed, false, crate::present::keys::settled(&s, "t_settled"), false, false);
+    assert!(tools_settled.iter().any(|t| t["action"] == "unsettle" && t["label"] == "Settled"));
+
+    // Settling t_fail moves it into the collapsed Done fold; unsettling t_settled brings it back to active threads
+    evs.push(settle_ev("t_fail", true, NOW));
+    evs.push(unsettle_ev("t_settled", NOW));
+    let s2 = one(&evs);
+    let rows2 = merged_projects(&s2, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v2 = build(&s2, &rows2, &Value::Null, &ctx(&HashSet::new()));
+    let p2 = &sec(&v2, "active")["rows"][0];
+    let active2 = titles_of(&p2["threads"]);
+    assert!(!active2.contains(&"T t_fail".to_string()), "settled thread moved into collapsed fold: {active2:?}");
+    assert!(active2.contains(&"T t_settled".to_string()), "unsettled thread returned to active list: {active2:?}");
+    let unsettled_row = p2["threads"].as_array().unwrap().iter().find(|r| r["id"] == "h|t_settled").unwrap();
+    assert_eq!(unsettled_row["settle"], "h|t_settled");
+    assert_eq!(p2["doneCount"], 3);
+
+    // Expanding the Done fold reveals all collapsed Done/settled threads
+    let open_done: HashSet<String> = [format!("proj-done:{key}")].into();
+    let v3 = build(&s2, &rows2, &Value::Null, &ctx(&open_done));
+    let p3 = &sec(&v3, "active")["rows"][0];
+    assert_eq!(p3["doneOpen"], true);
+    let mut done_titles = titles_of(&p3["done"]); done_titles.sort();
+    assert_eq!(done_titles, ["T t_done_1d", "T t_done_3h", "T t_fail"]);
 }
 
 #[test] fn a_swarms_needs_you_row_says_what_happened_in_one_line_and_carries_the_actions_that_resolve_it() {

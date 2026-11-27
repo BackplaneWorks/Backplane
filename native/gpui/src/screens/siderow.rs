@@ -109,7 +109,7 @@ pub fn pin_button_as(cx: &mut Context<Backplane>, light: bool, t: &Value, group:
     let (action, value) = pin_press(t); let pinned = action == "row-unpin";
     /* i18n-ok: the context menu's words, drawn through trs */ let tip = crate::i18n::trs(if pinned { "Unpin" } else { "Pin" });
     let raw = value.rsplit('|').next().unwrap_or("").to_string();
-    crate::ui::with_rect(div().id(SharedString::from(format!("{name}-{value}"))), move || format!("{name}:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
+    crate::ui::with_rect(div().id(SharedString::from(format!("{name}-{group}"))), move || format!("{name}:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
         .when(!pinned, |d| d.invisible().group_hover(group, |s| s.visible()))
         .tooltip(crate::keys::tip(&tip, "", light))
         .child(crate::art::icon("pin", 12., c(if pinned { "dim" } else { "faint" })))
@@ -145,7 +145,7 @@ pub fn snooze_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group:
     let c = |n: &str| theme::color(light, n);
     let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or("").to_string();
     /* i18n-ok: the menu's words, drawn through trs */ let tip = crate::i18n::trs(if wake.is_empty() { "Snooze" } else { "Wake" });
-    Some(crate::ui::with_rect(div().id(SharedString::from(format!("snooze-{id}"))), move || format!("snooze:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
+    Some(crate::ui::with_rect(div().id(SharedString::from(format!("snooze-{group}"))), move || format!("snooze:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
         .invisible().group_hover(group, |s| s.visible()).hover(|s| s.bg(c("line")))
         .tooltip(crate::keys::tip(&tip, "", light))
         .child(crate::art::icon(if wake.is_empty() { "clock" } else { "bell" }, 12., c("dim")))
@@ -155,6 +155,16 @@ pub fn snooze_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group:
             /* i18n-ok: menu labels, drawn through trs */ let items = opts.iter().map(|o| crate::screens::ctxmenu::Item { label: format!("Snooze {}", string(o, "label").to_lowercase()), action: "row-snooze".into(), value: string(o, "value"), confirm: false, note: String::new() }).collect();
             this.ctx_open(e.position(), items, cx); }))
         .into_any_element())
+}
+
+/// The id sent for `row-settle` on this row (`t["settle"]`, or a `row-settle` item in `t["lead"]`), "" when not settleable.
+pub fn settle_value(t: &Value) -> String {
+    let direct = string(t, "settle");
+    if !direct.is_empty() { return direct }
+    t["lead"].as_array().into_iter().flatten()
+        .find(|item| item["action"].as_str() == Some("row-settle"))
+        .map(|item| string(item, "value"))
+        .unwrap_or_default()
 }
 
 /// One hover/row action button on a sidebar thread row, in display order.
@@ -177,7 +187,7 @@ pub fn row_actions(t: &Value) -> Vec<RowAction> {
     let mut out = Vec::with_capacity(3);
     if !string(t, "wake").is_empty() { out.push(RowAction::Wake); }
     else if t["snooze"].as_array().is_some_and(|a| !a.is_empty()) { out.push(RowAction::Snooze); }
-    if !string(t, "settle").is_empty() { out.push(RowAction::Settle); }
+    if !settle_value(t).is_empty() { out.push(RowAction::Settle); }
     out.push(if t["pinned"].as_bool().unwrap_or(false) { RowAction::Unpin } else { RowAction::Pin });
     out
 }
@@ -197,10 +207,10 @@ pub fn action_strip(cx: &mut Context<Backplane>, light: bool, t: &Value, group: 
 
 /// Settle in one press: a check on a row the hub says can be settled (`settle`: its id), shown under the pointer. None for any other row.
 pub fn settle_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> Option<AnyElement> {
-    let value = string(t, "settle"); if value.is_empty() { return None }
+    let value = settle_value(t); if value.is_empty() { return None }
     let c = |n: &str| theme::color(light, n);
     let raw = value.rsplit('|').next().unwrap_or("").to_string();
-    Some(crate::ui::with_rect(div().id(SharedString::from(format!("settle-{value}"))), move || format!("settle:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
+    Some(crate::ui::with_rect(div().id(SharedString::from(format!("settle-{group}"))), move || format!("settle:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
         .invisible().group_hover(group, |s| s.visible()).hover(|s| s.bg(c("line")))
         /* i18n-ok: the context menu's word, drawn through trs */ .tooltip(crate::keys::tip(&crate::i18n::trs("Settle"), "", light))
         .child(crate::art::icon("check", 12., c("dim")))
@@ -281,6 +291,14 @@ mod tests {
 
         let needs = json!({"id":"h|t4","snooze":[],"settle":"","pinned":false});
         assert_eq!(row_actions(&needs), vec![RowAction::Pin]);
+
+        let lead_only = json!({"id":"h|t5","snooze":[],"lead":[{"label":"Settle","action":"row-settle","value":"h|t5"}],"pinned":false});
+        assert_eq!(settle_value(&lead_only), "h|t5");
+        assert_eq!(row_actions(&lead_only), vec![RowAction::Settle, RowAction::Pin]);
+
+        let already_settled = json!({"id":"h|t6","snooze":[],"settle":"","lead":[],"pinned":false});
+        assert_eq!(settle_value(&already_settled), "");
+        assert_eq!(row_actions(&already_settled), vec![RowAction::Pin]);
 
         for has_wake in [false, true] {
             for has_snooze in [false, true] {

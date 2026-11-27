@@ -81,14 +81,17 @@ data class DSecRow(val id: String, val title: String, val word: String, val say:
     /** hardware indicators for Bench project rows (present/sections.rs `hasBoard`/`hasSchematic`) */
     val hasBoard: Boolean = false, val hasSchematic: Boolean = false,
     /** thread provider id (e.g. claude, codex, antigravity) */
-    val provider: String = "") {
+    val provider: String = "",
+    /** collapsed-by-default Done (N) fold under a project */
+    val doneCount: Int = 0, val doneOpen: Boolean = false, val doneToggle: String = "", val done: List<DSecRow> = emptyList()) {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
             list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"), DMenuItem.list(o.optJSONArray("menu")),
             o.optString("fold"), o.optBoolean("folded"), o.optInt("under"), o.optInt("needsCount"), o.optInt("rest"), DNeed.of(o.optJSONObject("need")),
             o.optString("label"), o.optString("tone"), DSnoozeOpt.list(o.optJSONArray("snooze")), o.optString("wake"), o.optString("settle"),
-            o.optBoolean("hasBoard"), o.optBoolean("hasSchematic"), o.optString("provider"))
+            o.optBoolean("hasBoard"), o.optBoolean("hasSchematic"), o.optString("provider"),
+            o.optInt("doneCount"), o.optBoolean("doneOpen"), o.optString("doneToggle"), list(o.optJSONArray("done")))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
     /** a chevron on the row: something is under it, or it is folded (an older hub sends no fold) */
@@ -615,6 +618,21 @@ fun LazyListScope.benchItems(bench: List<DSection>, open: (String) -> Unit, page
             item("sp:${s.id}:${p.key}") { SectionProject(p, s.id == "quiet" || s.id == "archived" || (p.off && p.key.isNotEmpty()), { page(p) }, { menu(p) }) }
             if (Swarms.on() && !p.folded) items(SwarmUi.live(Swarms.all, p.id).filter { it.id !in asking }, key = { "ss:${s.id}:${it.id}" }) { x -> SwarmRow(x) { openSwarm(x.id) } }
             items(p.threads, key = { "st:${s.id}:${it.id}" }) { t -> SectionThread(t, indent = 28, open = open) }
+            if (!p.folded && (p.doneCount > 0 || p.doneOpen) && p.doneToggle.isNotEmpty()) {
+                item("sd-tog:${s.id}:${p.key}") {
+                    Row(
+                        Modifier.fillMaxWidth().clickable { DataClient.toggleSection(p.doneToggle) }.padding(start = 28.dp, end = 12.dp, top = 6.dp, bottom = 6.dp).testTag("home.section.done.${p.key}"),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(if (p.doneOpen) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dfaint, modifier = Modifier.size(14.dp))
+                        Spacer(Modifier.width(4.dp))
+                        DMono(Msg.gpui_sections_done(p.doneCount), dfaint, 11)
+                    }
+                }
+                if (p.doneOpen) {
+                    items(p.done, key = { "sd:${s.id}:${it.id}" }) { t -> SectionThread(t, indent = 28, open = open) }
+                }
+            }
         }
     }
 }

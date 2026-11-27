@@ -28,7 +28,9 @@ struct DSecRow: Codable, Identifiable, Equatable {
     var hasBoard: Bool
     /// thread provider id (e.g. claude, codex, antigravity)
     var provider: String
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under, need, label, badgeTone = "tone", snooze, settle, wake, hasBoard, provider }
+    /// collapsed-by-default Done (N) fold under a project
+    var doneCount: Int; var doneOpen: Bool; var doneToggle: String; var done: [DSecRow]
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under, need, label, badgeTone = "tone", snooze, settle, wake, hasBoard, provider, doneCount, doneOpen, doneToggle, done }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
@@ -40,6 +42,7 @@ struct DSecRow: Codable, Identifiable, Equatable {
         need = kind == "swarm" ? DSwarmNeed.of(c, .need) : nil
         label = c.str(.label); badgeTone = c.str(.badgeTone); snooze = (try? c.decode([DSnoozeOpt].self, forKey: .snooze)) ?? []; settle = c.str(.settle); wake = c.str(.wake)
         hasBoard = c.bool(.hasBoard); provider = c.str(.provider)
+        doneCount = c.int(.doneCount); doneOpen = c.bool(.doneOpen); doneToggle = c.str(.doneToggle); done = (try? c.decode([DSecRow].self, forKey: .done)) ?? []
     }
     var isProject: Bool { !key.isEmpty }
     /// a chevron on the row: something is under it, or it is folded (an older hub sends no fold)

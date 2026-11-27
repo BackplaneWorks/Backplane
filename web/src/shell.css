@@ -705,6 +705,10 @@ button.bp-proj-quick:hover { color: var(--accent); }
   font-size: 11px;
   color: var(--faint);
 }
+.bp-proj-done-toggle {
+  padding-left: 34px;
+  cursor: pointer;
+}
 .bp-settled-toggle:hover { color: var(--dim); }
 .bp-side-footer {
   height: 30px;

@@ -133,6 +133,15 @@ pub fn fold_target(data: &Value, hover: Option<&str>, page: Option<&str>, sel: &
     (!action.is_empty() && (folded || p["under"].as_u64().unwrap_or(0) > 0)).then(|| (action, string(p, "nav"), folded))
 }
 
+/// The collapsed-by-default `Done (N)` fold row under a project (count, open, toggle key), or None when folded or empty.
+pub fn project_done_fold(p: &Value) -> Option<(u64, bool, String)> {
+    if p["folded"] == true { return None }
+    let n = p["doneCount"].as_u64().unwrap_or(0);
+    let open = p["doneOpen"] == true;
+    let toggle = string(p, "doneToggle");
+    ((n > 0 || open) && !toggle.is_empty()).then_some((n, open, toggle))
+}
+
 impl Backplane {
     /// Left (fold: true) or Right on the sidebar: fold or unfold the project `fold_target` names; a row already so is left alone.
     pub(crate) fn key_fold(&mut self, fold: bool, cx: &mut Context<Self>) {
@@ -141,6 +150,7 @@ impl Backplane {
     }
     /// The sections' rows, in the hub's order (Bub is drawn above them by the window).
     pub(crate) fn section_rows(&self, cx: &mut Context<Self>, light: bool, rows: &mut Vec<AnyElement>, ctl: &mut Vec<CtlEntry>) {
+        let c = |n: &str| theme::color(light, n);
         let sections: Vec<Value> = self.data["sections"].as_array().cloned().unwrap_or_default();
         // the swarm page on show (its room), for the row's highlight (screens/swarm.rs draws the swarm rows)
         let open_room = if self.data["bot"]["kind"] == "room" { string(&self.data["bot"], "id") } else { String::new() };
@@ -173,6 +183,22 @@ impl Backplane {
                         rows.extend(crate::screens::swarm::project_side_rows(cx, light, p, &open_room, ctl));
                         let qid = string(p, "id"); let pid = qid.rsplit_once('|').map_or(qid.as_str(), |(_, r)| r).to_string();
                         for t in p["threads"].as_array().into_iter().flatten() { let mut t = t.clone(); t["under"] = serde_json::json!(true); rows.push(self.side_thread(cx, light, &t, &pid, "", faded, ctl)); }
+                        if let Some((done_n, done_open, done_toggle)) = project_done_fold(p) {
+                            /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("project-done:{pid}"), label: format!("Done ({done_n})"), ctl: Ctl::Node("side-section".into(), done_toggle.clone()) });
+                            let toggle_click = done_toggle.clone();
+                            rows.push(crate::ui::with_rect(div().id(SharedString::from(format!("pdone-{pid}"))), { let p = pid.clone(); move || format!("project-done:{p}") })
+                                .flex().items_center().gap_1().pl(px(36.)).pr_3().h(crate::scale::tpx(26.)).text_size(crate::scale::tpx(11.)).text_color(c("faint")).cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("dim")))
+                                .child(crate::ui::ic(light, if done_open { "chevron-down" } else { "chevron-right" }, 12., "dim"))
+                                .child(tf("gpui.sections.done", &[("n", done_n.into())]))
+                                .on_click(cx.listener(move |this, _, _, cx| { this.go("side-section", toggle_click.clone(), cx); }))
+                                .into_any_element());
+                            if done_open {
+                                for t in p["done"].as_array().into_iter().flatten() {
+                                    let mut t = t.clone(); t["under"] = serde_json::json!(true);
+                                    rows.push(self.side_thread(cx, light, &t, &pid, "", true, ctl));
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -244,5 +270,15 @@ mod tests {
         assert!(on(&d) && !on(&json!({})));
         assert_eq!(string(find(&d, "p1").unwrap(), "nav"), "k1"); assert_eq!(string(find(&d, "L~p2").unwrap(), "nav"), "k2"); assert!(find(&d, "t1").is_none());
         assert_eq!(projects(&d).len(), 2);
+    }
+    #[test] fn project_done_fold_reads_collapsed_and_expanded_project_done_state() {
+        let collapsed = json!({"id":"h|p1","folded":false,"doneCount":24,"doneOpen":false,"doneToggle":"proj-done:k1"});
+        assert_eq!(project_done_fold(&collapsed), Some((24, false, "proj-done:k1".into())));
+        let open = json!({"id":"h|p1","folded":false,"doneCount":3,"doneOpen":true,"doneToggle":"proj-done:k1"});
+        assert_eq!(project_done_fold(&open), Some((3, true, "proj-done:k1".into())));
+        let folded = json!({"id":"h|p1","folded":true,"doneCount":24,"doneOpen":false,"doneToggle":"proj-done:k1"});
+        assert_eq!(project_done_fold(&folded), None);
+        let empty = json!({"id":"h|p1","folded":false,"doneCount":0,"doneOpen":false,"doneToggle":""});
+        assert_eq!(project_done_fold(&empty), None);
     }
 }

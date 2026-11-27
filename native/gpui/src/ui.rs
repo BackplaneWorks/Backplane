@@ -381,20 +381,19 @@ impl Backplane {
                         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("thread-tree".into(), format!("{tid}|{}", if open { 0 } else { 1 }))); cx.stop_propagation(); cx.notify(); }))
                 });
                 /* i18n-ok: a ctl label */ if kids > 0 && tree { ctl.push(CtlEntry { id: format!("tree:{raw}"), label: format!("{} subthreads", kids), ctl: Ctl::Node("thread-tree".into(), format!("{id}|{}", if open { 0 } else { 1 })) }); }
-                let pin_group = SharedString::from(format!("row-{id}"));
-                // the hub's status label (`label`, `tone`): drawn as a word where the dot was. A row of the lists across projects (Needs you, Running,
-                // Snoozed: `sub`) has two lines: its title, then its label, its project and its age
                 let pill = crate::screens::siderow::pill(light, t);
                 let labelled = t["label"].is_string();
                 let inbox = labelled && !sub.is_empty();
+                let row_scope = if inbox { "in" } else { "pr" };
+                let pin_group = SharedString::from(format!("row-{row_scope}-{id}"));
                 let gutter = if inbox { 10. } else { gutter };
                 { let (snz, wake) = (&t["snooze"], string(t, "wake"));
                   if !wake.is_empty() { ctl.push(CtlEntry { id: format!("wake:{raw}"), label: "Wake".into() /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-snooze".into(), wake) }); }
                   for o in snz.as_array().into_iter().flatten() { ctl.push(CtlEntry { id: format!("snooze:{raw}:{}", string(o, "label")), label: format!("Snooze {}", string(o, "label")) /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-snooze".into(), string(o, "value")) }); } }
-                { let v = string(t, "settle");
+                { let v = crate::screens::siderow::settle_value(t);
                   if !v.is_empty() { ctl.push(CtlEntry { id: format!("settle:{}", v.rsplit('|').next().unwrap_or("")), label: "Settle".into() /* i18n-ok: a ctl label */, ctl: Ctl::Node("row-settle".into(), v) }); } }
                 { let (action, value) = crate::screens::siderow::pin_press(t); ctl.push(CtlEntry { id: format!("pin:{raw}"), label: action.into(), ctl: Ctl::Node(action.into(), value) }); }
-                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).group(pin_group).relative().flex().items_center().gap_2().pr_3().h(crate::scale::tpx(if inbox { 42. } else { 32. })).when(faded || t["off"] == true, |d| d.opacity(0.55))
+                with_rect(div().id(SharedString::from(format!("thread-{row_scope}-{id}"))), || format!("thread:{raw}")).group(pin_group.clone()).relative().flex().items_center().gap_2().pr_3().h(crate::scale::tpx(if inbox { 42. } else { 32. })).when(faded || t["off"] == true, |d| d.opacity(0.55))
                     // a row under its project: no bar and no block when open (the person, 2026-11-15); its L says where it is
                     .border_l_2().border_color(if selected && !under { c("accent") } else { transparent_black().into() })
                     .bg(if selected && !under { c("raise") } else { transparent_black().into() }).hover(|s| s.bg(c("raise"))).cursor_pointer()
@@ -422,7 +421,7 @@ impl Backplane {
                         .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).or_else(|| (!sub.is_empty()).then(|| crate::screens::hints::digit_of(&self.screens.hold_projects, pid)).flatten()).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element() })
                     // under the pointer: Snooze (a span from its menu; Wake on a snoozed row), Settle in one press (the hub's `settle`: a stop that asks
                     // nothing), the pin (always on a pinned row). On a two-line row they lie over the title's end, so they take no width from it
-                    .child({ let g = SharedString::from(format!("row-{id}"));
+                    .child({ let g = pin_group.clone();
                         let acts = crate::screens::siderow::action_strip(cx, light, t, g.clone());
                         if inbox { let raise = c("raise"); acts.absolute().right(px(8.)).top(px(4.)).px(px(2.)).group_hover(g, move |s| s.bg(raise)) } else { acts.flex_shrink_0() } })
                     .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id)) // (another machine's thread: its name, dim; none for this machine's)

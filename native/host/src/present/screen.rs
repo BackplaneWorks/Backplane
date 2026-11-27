@@ -978,7 +978,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let older=plan.older_count()+fplans.iter().map(|(_,_,fp)|fp.older_count()).sum::<usize>();
     if mode!="active" && query.is_empty() && older>0 { shown["olderProjects"]=json!({"count":older,"open":flag(&session,"old-projects")}); }
     // the query in force, said back once the box has been used (the client takes it when it is not what it sent: Enter clears it)
-    if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search projects and threads"}); }
+    if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search\u{2026}"}); }
     { let f=picker::folders(&session["drafts"],&crate::plat::dirs::home_or_empty(),&st.projects.iter().filter(|(_,p)|!p.removed).map(|(id,p)|(p.root.as_str(),id.as_str())).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
     if !thread.is_empty() { shown["usage"]=super::keys::usage(tst,thread,opts.now); shown["tokChip"]=json!(super::keys::tok_chip(tst,thread));
         // infinite context: the thread's memory progress (bots/recall/progress.rs, put in by the session), the chip's bar and words instead of the session's context

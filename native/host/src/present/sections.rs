@@ -419,8 +419,15 @@ fn text_of<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 /// thread of the project the person has not put away stays listed, as in 0.15, pins first, then the newest. Needs you is the same either way.
 pub fn attention_only(st: &State) -> bool { get(st, ATTENTION) != "off" }
 pub const ATTENTION: &str = "sidebar.attention";
-/// A thread the person put away (their Settle, or an archive): not listed under its project with every thread listed. One the clock settled is.
-fn put_away(f: &Th) -> bool { f.t.archived || f.t.src.and_then(|s| s.threads.get(&f.t.id)).map_or(false, |x| x.override_ == crate::state::Override::ForcedSettled) }
+/// Whether the person explicitly unsettled this thread (`Override::ForcedActive`), keeping it in the active list even if its turn completed.
+fn forced_active(f: &Th) -> bool {
+    f.t.src.and_then(|s| s.threads.get(&f.t.id)).map_or(false, |x| x.override_ == crate::state::Override::ForcedActive)
+}
+/// Whether a project's thread belongs in its collapsed-by-default `Done (N)` fold (when `sidebar.attention` is off):
+/// completed (`done`) and settled threads collapse unless pinned, live (`running`/`monitoring`/`limit`/`needs`), or explicitly unsettled (`ForcedActive`).
+fn is_done_fold(f: &Th) -> bool {
+    !f.t.pinned && !live(f.word) && !forced_active(f) && (f.word == "done" || f.settled)
+}
 
 /// One project row: the merged row (`merged::row_json`) with its counts and its visible threads (Needs you's are not repeated under it).
 fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, groups: &Groups) -> Value {
@@ -431,39 +438,67 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let q = c.query;
     let every = !attention_only(st);
     let on_show = |f: &Th| !c.selected.is_empty() && f.t.id == c.selected;
-    // the thread on show is always listed under its project, settled or not: the person sees where they are (and where they left off).
-    // Settings' "Only threads that need attention" off: every thread of it the person has not put away, its asks too (they are also in
-    // Needs you), as in 0.15; a delegated child or a swarm's member still hangs under its parent or its swarm
-    let mut shown: Vec<&Th> = if every && q.is_empty() { ths.iter().filter(|f| (!f.kid && !put_away(f)) || on_show(f)).collect() }
-        else { ths.iter().filter(|f| if q.is_empty() { (!f.needs || snoozed(f, c.now)) && ((f.show && !f.kid && !snoozed(f, c.now)) || on_show(f)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect() };
-    // a pinned thread is a fixed row of its project: first, where it was pinned, whatever runs or stops below it (and never cut by UNDER)
-    if q.is_empty() { shown.sort_by_key(|f| pin_rank(f)); }
-    // At most its two pins and one other: the one on show, else the newest stop that still wants a look. Nothing folds: the rows under a project are few and fixed, so there is no chevron (the person, 2026-11-15: "the
-    // max number of threads viewable under a project are 2 pinned plus one active ... it should not be collapsible anyway")
-    if q.is_empty() && !every {
-        let mut other: Vec<&Th> = shown.iter().filter(|f| !f.t.pinned).copied().collect();
-        // what runs is a row of Running (`build`), not repeated here: under a project, its pins, the thread on show, else its newest stop
-        other.retain(|f| !live(f.word) || on_show(f));
-        other.sort_by_key(|f| (f.t.id != c.selected, std::cmp::Reverse(f.t.activity)));
-        let pins: Vec<&Th> = shown.iter().filter(|f| f.t.pinned).take(crate::commands::plan::PINS).copied().collect();
-        shown = pins.into_iter().chain(other.into_iter().take(1)).collect();
-    }
-    // every thread: the pins, then the newest first (`ths`' order), at most PAGE (the rest are on its page), folded away by its chevron
-    // (`sidebar.fold.<key>`) unless the thread on show is one of them
-    let folded = every && q.is_empty() && folded_at(st, &p.key) > 0 && !shown.iter().any(|f| on_show(f));
-    let under_threads = shown.len().min(if every { PAGE } else { UNDER });
-    let rows: Vec<Value> = if folded { vec![] } else { shown.iter().take(under_threads).map(|f| thread_row(c.hub, c.now, p, f)).collect() };
+    let sw = swarms_of(p, c);
+    let sw_unfolded: Vec<&SwarmEntry> = sw.iter().filter(|x| !x.settled && (x.word == "running" || (x.word == "idle" && c.now.saturating_sub(x.activity) < crate::sidebar::SWARM_STALE))).collect();
+    let (rows, done_rows, done_count, done_open, done_toggle, folded, under) = if every && q.is_empty() {
+        // Settings' "Only threads that need attention" off: active threads stay directly under the project, while completed (`done`)
+        // and settled threads collapse into a collapsed-by-default `Done (N)` fold under the project.
+        let done_toggle = format!("proj-done:{}", p.key);
+        let done_open_req = c.open.contains(&done_toggle);
+        let mut active_ths: Vec<&Th> = vec![];
+        let mut done_ths: Vec<&Th> = vec![];
+        for f in ths.iter().filter(|f| (!f.kid && !f.t.archived) || on_show(f)) {
+            if is_done_fold(f) {
+                if on_show(f) && !done_open_req { active_ths.push(f); } else { done_ths.push(f); }
+            } else {
+                active_ths.push(f);
+            }
+        }
+        active_ths.sort_by_key(|f| pin_rank(f));
+        let has_selected = active_ths.iter().any(|f| on_show(f)) || done_ths.iter().any(|f| on_show(f));
+        let folded = folded_at(st, &p.key) > 0 && !has_selected;
+        let under_active = active_ths.len().min(PAGE);
+        let done_total = done_ths.len();
+        let done_count = if folded { 0 } else { done_total };
+        let done_open = !folded && done_total > 0 && done_open_req;
+        let rows: Vec<Value> = if folded { vec![] } else { active_ths.iter().take(under_active).map(|f| thread_row(c.hub, c.now, p, f)).collect() };
+        let done_rows: Vec<Value> = if done_open { done_ths.iter().take(PAGE).map(|f| thread_row(c.hub, c.now, p, f)).collect() } else { vec![] };
+        let under = under_active + done_total + sw_unfolded.len();
+        (rows, done_rows, done_count, done_open, if done_count > 0 { done_toggle } else { String::new() }, folded, under)
+    } else {
+        let mut shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { (!f.needs || snoozed(f, c.now)) && ((f.show && !f.kid && !snoozed(f, c.now)) || on_show(f)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
+        // a pinned thread is a fixed row of its project: first, where it was pinned, whatever runs or stops below it (and never cut by UNDER)
+        if q.is_empty() { shown.sort_by_key(|f| pin_rank(f)); }
+        // At most its two pins and one other: the one on show, else the newest stop that still wants a look. Nothing folds: the rows under a project are few and fixed, so there is no chevron (the person, 2026-11-15: "the
+        // max number of threads viewable under a project are 2 pinned plus one active ... it should not be collapsible anyway")
+        if q.is_empty() && !every {
+            let mut other: Vec<&Th> = shown.iter().filter(|f| !f.t.pinned).copied().collect();
+            // what runs is a row of Running (`build`), not repeated here: under a project, its pins, the thread on show, else its newest stop
+            other.retain(|f| !live(f.word) || on_show(f));
+            other.sort_by_key(|f| (f.t.id != c.selected, std::cmp::Reverse(f.t.activity)));
+            let pins: Vec<&Th> = shown.iter().filter(|f| f.t.pinned).take(crate::commands::plan::PINS).copied().collect();
+            shown = pins.into_iter().chain(other.into_iter().take(1)).collect();
+        }
+        let under_threads = shown.len().min(if every { PAGE } else { UNDER });
+        let rows: Vec<Value> = shown.iter().take(under_threads).map(|f| thread_row(c.hub, c.now, p, f)).collect();
+        (rows, vec![], 0, false, String::new(), false, 0)
+    };
     r["id"] = json!(qid(c.hub, &pid_of(p)));
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
-    r["threads"] = json!(rows); r["more"] = json!(ths.len().saturating_sub(rows.len()));
+    r["threads"] = json!(rows);
+    if done_count > 0 {
+        r["done"] = json!(done_rows);
+        r["doneCount"] = json!(done_count);
+        r["doneOpen"] = json!(done_open);
+        r["doneToggle"] = json!(done_toggle);
+    }
+    r["more"] = json!(ths.len().saturating_sub(r["threads"].as_array().map_or(0, Vec::len) + r["done"].as_array().map_or(0, Vec::len)));
     // no count of the threads it does not list: a bare number on the row read as noise (the person, 2026-11-15); they are on its page
     r["rest"] = json!(0);
     // its live swarms (a swarm that needs the person is in Needs you, not repeated here; collapsed projects only keep running swarms; stale 0-working swarms stay off the sidebar)
-    let sw = swarms_of(p, c);
     r["running"] = json!(running + sw.iter().filter(|x| !x.settled && x.word == "running").count());
     r["needsCount"] = json!(needs + sw.iter().filter(|x| !x.settled && matches!(x.word, "needs" | "failed")).count());
-    let sw_unfolded: Vec<&SwarmEntry> = sw.iter().filter(|x| !x.settled && (x.word == "running" || (x.word == "idle" && c.now.saturating_sub(x.activity) < crate::sidebar::SWARM_STALE))).collect();
     let live: Vec<Value> = if !q.is_empty() {
         sw.iter().filter(|x| !x.settled && (hit(&p.name, q) || hit(text_of(&x.row, "title"), q))).map(|x| x.row.clone()).collect()
     } else if !every {
@@ -473,7 +508,6 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     } else {
         sw_unfolded.iter().map(|x| x.row.clone()).collect()
     };
-    let under = under_threads + if every { sw_unfolded.len() } else { 0 };
     r["hasBoard"] = json!(p.here.is_some() && hardware(&p.folder)); r["hasSchematic"] = r["hasBoard"].clone();
 
     // no fold while only what needs attention is listed (an older client draws a chevron only for a `fold` action with rows to hide: none);
@@ -504,7 +538,9 @@ fn hardware(folder: &str) -> bool {
     let v = crate::files::kicad::canonical::hardware(folder); m.lock().unwrap().insert(folder.to_string(), (std::time::Instant::now(), v)); v
 }
 fn fold_section(id: &str, title: &str, rows: Vec<Value>, c: &Ctx, extra: Value) -> Value {
-    let open = c.open.contains(&format!("sec:{id}")) || !c.query.is_empty() || rows.iter().any(|r| r["threads"].as_array().map_or(false, |t| t.iter().any(|x| x["id"] == json!(qid(c.hub, c.selected)))));
+    let sel_id = json!(qid(c.hub, c.selected));
+    let has_sel = |r: &Value, k: &str| r[k].as_array().map_or(false, |t| t.iter().any(|x| x["id"] == sel_id));
+    let open = c.open.contains(&format!("sec:{id}")) || !c.query.is_empty() || rows.iter().any(|r| has_sel(r, "threads") || has_sel(r, "done"));
     let mut s = json!({"id":id,"kind":"projects","title":title,"count":rows.len(),"fold":true,"open":open,"toggle":format!("sec:{id}"),"rows":if open { rows } else { vec![] }});
     if let (Some(o), Some(x)) = (s.as_object_mut(), extra.as_object()) { for (k, v) in x { o.insert(k.clone(), v.clone()); } }
     s
@@ -774,8 +810,8 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
     let none = || Act { open_toggle: None, page: None, sets: vec![], clear: vec![], drafts: vec![] };
     let known = |key: &str| rows.iter().any(|p| p.key == key);
     match action {
-        // a section's fold (Groups, Quiet, Archived), the project page's Done (n) and its Older (m)
-        "side-section" => { if !(value.starts_with("sec:group:") || value == "sec:quiet" || value == "sec:all" || value == "sec:snoozed" || value == "sec:archived" || value == "page-done" || value == "page-older") { return None } Some(Act { open_toggle: Some(value.into()), ..none() }) }
+        // a section's fold (Groups, Quiet, Archived), per-project Done (n), and the project page's Done (n) / Older (m)
+        "side-section" => { if !(value.starts_with("sec:group:") || value == "sec:quiet" || value == "sec:all" || value == "sec:snoozed" || value == "sec:archived" || value == "page-done" || value == "page-older" || value.strip_prefix("proj-done:").is_some_and(known)) { return None } Some(Act { open_toggle: Some(value.into()), ..none() }) }
         "project-page" => { if !value.is_empty() && !known(value) { return None }
             // opening a project's page is a visit: it comes to the top of the bench (`bench_rank`)
             let sets = rows.iter().find(|p| p.key == value).and_then(|p| p.here.as_ref()).filter(|id| crate::state::visible::visit_due(st, id, now)).map(|id| vec![(format!("sidebar.visit.{id}"), now.to_string())]).unwrap_or_default();
@@ -837,9 +873,9 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
     }
 }
 
-/// The open folds of the session (`open.sec:*`, `open.page-done` and `open.page-older`).
+/// The open folds of the session (`open.sec:*`, `open.proj-done:*`, `open.page-done` and `open.page-older`).
 pub fn opened(session: &Value) -> HashSet<String> {
-    session["open"].as_object().into_iter().flatten().filter(|(k, v)| (k.starts_with("sec:") || *k == "page-done" || *k == "page-older") && v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect()
+    session["open"].as_object().into_iter().flatten().filter(|(k, v)| (k.starts_with("sec:") || k.starts_with("proj-done:") || *k == "page-done" || *k == "page-older") && v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect()
 }
 /// A count of each section's rows by id, for tests and the e2e (what the person would see at a glance).
 pub fn census(sections: &Value) -> HashMap<String, usize> {
