@@ -47,14 +47,14 @@ pub fn mark(label: &str, q: &str) -> Option<std::ops::Range<usize>> {
 /// The hub's answer to `thread.search` as items: each message found, its line as the label, its thread's title and project as the place.
 pub fn hit_items(result: &Value, hub_of: &dyn Fn(&str) -> String) -> Vec<Item> {
     result["hits"].as_array().into_iter().flatten().map(|h| {
-        let (th, title, project) = (string(h, "thread"), string(h, "title"), string(h, "project"));
+        let (th, title, project) = (string(h, "thread"), string(h, "title"), crate::streamer::project_shown(&string(h, "project")));
         /* i18n-ok: a title and project, not words */ let place = if project.is_empty() { title } else { format!("{title} · {project}") };
         /* i18n-ok: kinds, compared; drawn through trs */ Item { label: string(h, "text"), place, kind: if h["role"] == "user" { "you said" } else { "agent said" }, what: Do::Message(hub_of(&th), string(h, "msg")), row: Value::Null }
     }).collect()
 }
 /// The hub's title hits (`thread.search`'s `titles`) as thread items, with their project as the place.
 pub fn title_items(result: &Value, hub_of: &dyn Fn(&str) -> String) -> Vec<Item> {
-    result["titles"].as_array().into_iter().flatten().map(|t| Item { label: string(t, "title"), place: string(t, "project"), kind: "thread", what: Do::Thread(hub_of(&string(t, "thread"))), row: Value::Null }).collect()
+    result["titles"].as_array().into_iter().flatten().map(|t| Item { label: string(t, "title"), place: crate::streamer::project_shown(&string(t, "project")), kind: "thread", what: Do::Thread(hub_of(&string(t, "thread"))), row: Value::Null }).collect()
 }
 /// The palette's answer (false: not the palette's tag).
 pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
@@ -117,7 +117,7 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     // a chat in no project: always offered, whatever is open (the hub makes its folder)
     v.push(Item { label: trs("New chat (no project)"), place: String::new(), kind: "action", what: Do::Action("new-thread".into(), crate::keys::CHATS.into()), row: Value::Null });
     for p in data["projects"].as_array().into_iter().flatten() {
-        let (pid, ptitle) = (string(p, "id"), string(p, "title"));
+        let (pid, ptitle) = (string(p, "id"), crate::streamer::project_shown(&string(p, "title")));
         let raw = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
         v.push(Item { label: tf("gpui.palette.new.thread.in", &[("project", ptitle.as_str().into())]), place: String::new(), kind: "action", what: Do::Action("new-thread".into(), raw), row: Value::Null });
         for t in p["threads"].as_array().into_iter().flatten().chain(p["settled"].as_array().into_iter().flatten()) {
@@ -144,10 +144,16 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
         if action.is_empty() { continue }
         let what = if action == "select" { Do::Thread(value) } else { Do::Action(action, value) };
         let kind = if j["kind"] == "project" { "project" } else { "thread" };
-        v.push(Item { label: string(j, "label"), place: string(j, "place"), kind, what, row: row_of(j) });
+        let (label, place) = if kind == "project" {
+            (crate::streamer::project_shown(&string(j, "label")), string(j, "place"))
+        } else {
+            let p = string(j, "place");
+            (string(j, "label"), if p.is_empty() { p } else { crate::streamer::project_shown(&p) })
+        };
+        v.push(Item { label, place, kind, what, row: row_of(j) });
     }
     for t in data["active"].as_array().into_iter().flatten().chain(data["activeSettled"]["rows"].as_array().into_iter().flatten()) {
-        v.push(Item { label: string(t, "title"), place: on_machine(&string(t, "project"), t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
+        v.push(Item { label: string(t, "title"), place: on_machine(&crate::streamer::project_shown(&string(t, "project")), t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
     }
     v
 }

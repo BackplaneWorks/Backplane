@@ -4749,6 +4749,8 @@ gpui.mgmt.life.price.since = since {day}
 
 # streamer mode (native/gpui/src/streamer.rs)
 gpui.streamer.account = account {n}
+gpui.streamer.project = Project {n}
+gpui.streamer.group = Group {n}
 gpui.streamer.mode = Streamer mode
 gpui.streamer.section = Streaming
 gpui.streamer.off = Streamer mode: turn off

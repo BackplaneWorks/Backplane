@@ -16,16 +16,140 @@ pub const HIDDEN: &str = "•••";
 pub const IP: &str = "•.•.•.•";
 pub const TAILNET: &str = "•••.ts.net";
 
+/// A project's title and folder basename for Streamer Mode masking.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ProjectId { pub title: String, pub folder: String }
+
+/// The last directory name of a project root path (`/a/b/my-proj/` -> `my-proj`); empty for a drive root or blank.
+pub fn folder_basename(path: &str) -> String {
+    let trimmed = path.trim().trim_end_matches(['/', '\\']);
+    if trimmed.is_empty() || trimmed.ends_with(':') { return String::new() }
+    trimmed.rsplit(['/', '\\']).next().unwrap_or("").trim().to_string()
+}
+
+fn push_project(list: &mut Vec<ProjectId>, title: &str, folder: &str) {
+    let (t, f) = (title.trim(), folder.trim());
+    if t.is_empty() && f.is_empty() { return }
+    if f.is_empty() && matches!(t.to_ascii_lowercase().as_str(), "scratch" | "chats" | "chats with no project") { return } // i18n-ok: sentinel names compared
+    if !t.is_empty() {
+        if let Some(existing) = list.iter_mut().find(|p| p.title.eq_ignore_ascii_case(t)) {
+            if existing.folder.is_empty() && !f.is_empty() { existing.folder = f.to_string(); }
+            return;
+        }
+    }
+    if list.iter().any(|p| p.title.eq_ignore_ascii_case(t) && p.folder.eq_ignore_ascii_case(f)) { return }
+    list.push(ProjectId { title: t.to_string(), folder: f.to_string() });
+}
+
+fn push_unique_ci(list: &mut Vec<String>, s: &str) {
+    let s = s.trim();
+    if !s.is_empty() && !list.iter().any(|x| x.eq_ignore_ascii_case(s)) { list.push(s.to_string()); }
+}
+
 /// The person's own identifiers. `names`: machine and host names, the person's name (whole words, any case); `users`: login names
 /// (whole words when 4+ characters, else only as `user@` and in home paths); `emails` are masked by the email pattern anyway and also
 /// matched exactly (an address the pattern misses, a quoted one).
 #[derive(Debug, Clone, Default, PartialEq)]
-pub struct Ids { pub emails: Vec<String>, pub names: Vec<String>, pub users: Vec<String>, pub homes: Vec<String>, /** account labels, in the hub's order: drawn "account N" */ pub labels: Vec<String> } // i18n-ok: a doc word
+pub struct Ids {
+    pub emails: Vec<String>,
+    pub names: Vec<String>,
+    pub users: Vec<String>,
+    pub homes: Vec<String>,
+    /** account labels, in the hub's order: drawn "account N" */
+    pub labels: Vec<String>,
+    pub projects: Vec<ProjectId>,
+    pub groups: Vec<String>,
+} // i18n-ok: a doc word
 impl Ids {
     /// The hub's `privacy.ids` answer.
     pub fn from_hub(v: &serde_json::Value) -> Ids {
         let l = |k: &str| v[k].as_array().into_iter().flatten().filter_map(|x| x.as_str()).map(str::to_string).collect::<Vec<_>>();
-        Ids { emails: l("emails"), names: l("names"), users: l("users"), homes: l("homes"), labels: l("labels") }
+        let mut projects = vec![];
+        for p in v["projects"].as_array().into_iter().flatten() {
+            if let Some(s) = p.as_str() { push_project(&mut projects, s, ""); }
+            else { push_project(&mut projects, p["title"].as_str().unwrap_or(""), p["folder"].as_str().unwrap_or("")); }
+        }
+        projects.sort_by(|a, b| a.title.to_ascii_lowercase().cmp(&b.title.to_ascii_lowercase()).then(a.folder.to_ascii_lowercase().cmp(&b.folder.to_ascii_lowercase())));
+        let mut groups = vec![];
+        for g in l("groups") { push_unique_ci(&mut groups, &g); }
+        groups.sort_by_key(|g| g.to_ascii_lowercase());
+        Ids { emails: l("emails"), names: l("names"), users: l("users"), homes: l("homes"), labels: l("labels"), projects, groups }
+    }
+    /// Projects, groups, and thread combo account details from the hub's current screen payload (`self.data`).
+    pub fn from_screen(data: &serde_json::Value) -> Ids {
+        let mut ids = Ids::default();
+        if !data.is_object() { return ids }
+        let folder_of = |v: &serde_json::Value| {
+            let r = v["root"].as_str().filter(|s| !s.is_empty()).or_else(|| v["folder"].as_str()).unwrap_or("");
+            folder_basename(r)
+        };
+        for s in data["sections"].as_array().into_iter().flatten() {
+            match s["kind"].as_str().unwrap_or("") {
+                "projects" => {
+                    for p in s["rows"].as_array().into_iter().flatten() {
+                        push_project(&mut ids.projects, p["title"].as_str().unwrap_or(""), &folder_of(p));
+                    }
+                }
+                "threads" => {
+                    for t in s["rows"].as_array().into_iter().flatten() {
+                        if t["chat"] != true {
+                            push_project(&mut ids.projects, t["project"].as_str().unwrap_or(""), "");
+                        }
+                    }
+                }
+                _ => {}
+            }
+            if s["group"].as_str().is_some_and(|g| !g.is_empty()) || s["id"].as_str().is_some_and(|id| id.starts_with("group:")) {
+                if let Some(t) = s["title"].as_str() { push_unique_ci(&mut ids.groups, t); }
+            }
+        }
+        for p in data["projects"].as_array().into_iter().flatten() {
+            push_project(&mut ids.projects, p["title"].as_str().unwrap_or(""), &folder_of(p));
+        }
+        for p in [&data["projectPage"]["project"], &data["thread"]["project"]] {
+            if p.is_object() { push_project(&mut ids.projects, p["title"].as_str().unwrap_or(""), &folder_of(p)); }
+        }
+        for j in data["jump"].as_array().into_iter().flatten() {
+            if j["kind"] == "project" {
+                push_project(&mut ids.projects, j["label"].as_str().unwrap_or(""), "");
+            }
+        }
+        for arr in [&data["groupsTo"], &data["projectPage"]["moveTo"]] {
+            for g in arr.as_array().into_iter().flatten() {
+                if let Some(l) = g["label"].as_str() { push_unique_ci(&mut ids.groups, l); }
+            }
+        }
+        let combo = &data["thread"]["combo"];
+        let combo_email = combo["email"].as_str().unwrap_or("").trim();
+        if !combo_email.is_empty() { push_unique_ci(&mut ids.emails, combo_email); }
+        let combo_acct = combo["account"].as_str().unwrap_or("").trim();
+        if !combo_acct.is_empty() && !matches!(combo_acct.to_ascii_lowercase().as_str(), "default" | "account" | "default login" | "saved account") { // i18n-ok: generic account words compared
+            if combo_acct.contains('@') {
+                push_unique_ci(&mut ids.emails, combo_acct);
+            } else if combo_email.split('@').next().map_or(true, |l| !l.eq_ignore_ascii_case(combo_acct)) {
+                push_unique_ci(&mut ids.labels, combo_acct);
+            }
+        }
+        ids.projects.sort_by(|a, b| a.title.to_ascii_lowercase().cmp(&b.title.to_ascii_lowercase()).then(a.folder.to_ascii_lowercase().cmp(&b.folder.to_ascii_lowercase())));
+        ids.groups.sort_by_key(|g| g.to_ascii_lowercase());
+        ids
+    }
+    /// Account emails, names and labels from the client's `accounts` RPC snapshot.
+    pub fn from_accounts(snap: &serde_json::Value) -> Ids {
+        let mut ids = Ids::default();
+        if !snap.is_object() { return ids }
+        for p in snap["profiles"].as_array().into_iter().flatten() {
+            if let Some(e) = p["identity"]["email"].as_str() { push_unique_ci(&mut ids.emails, e); }
+            if let Some(e) = p["allowance"]["email"].as_str() { push_unique_ci(&mut ids.emails, e); }
+            if let Some(n) = p["identity"]["name"].as_str() { push_unique_ci(&mut ids.names, n); }
+            if let Some(l) = p["label"].as_str() { push_unique_ci(&mut ids.labels, l); }
+        }
+        for (_, d) in snap["default_login"].as_object().into_iter().flatten() {
+            if let Some(e) = d["email"].as_str() { push_unique_ci(&mut ids.emails, e); }
+            if let Some(n) = d["name"].as_str() { push_unique_ci(&mut ids.names, n); }
+        }
+        if let Some(e) = snap["default_allowance"]["email"].as_str() { push_unique_ci(&mut ids.emails, e); }
+        ids
     }
     /// This computer's own: its home folder, login name and host name.
     pub fn local() -> Ids {
@@ -37,8 +161,12 @@ impl Ids {
     }
     pub fn merge(&mut self, o: Ids) {
         for (a, b) in [(&mut self.emails, o.emails), (&mut self.names, o.names), (&mut self.users, o.users), (&mut self.homes, o.homes), (&mut self.labels, o.labels)] {
-            for x in b { let x = x.trim().to_string(); if !x.is_empty() && !a.iter().any(|y| y.eq_ignore_ascii_case(&x)) { a.push(x) } }
+            for x in b { push_unique_ci(a, &x); }
         }
+        for p in o.projects { push_project(&mut self.projects, &p.title, &p.folder); }
+        self.projects.sort_by(|a, b| a.title.to_ascii_lowercase().cmp(&b.title.to_ascii_lowercase()).then(a.folder.to_ascii_lowercase().cmp(&b.folder.to_ascii_lowercase())));
+        for g in o.groups { push_unique_ci(&mut self.groups, &g); }
+        self.groups.sort_by_key(|g| g.to_ascii_lowercase());
     }
 }
 
@@ -54,13 +182,69 @@ fn host_name() -> Option<String> {
 #[cfg(windows)]
 fn host_name() -> Option<String> { std::env::var("COMPUTERNAME").ok().filter(|h| !h.is_empty()) }
 
+/// Common email local-parts that should not be masked as standalone words in ordinary text.
+const GENERIC_LOCAL: &[&str] = &[
+    "admin", "administrator", "root", "user", "info", "support", "help", "sales", "contact", "hello",
+    "mail", "email", "team", "billing", "noreply", "no-reply", "postmaster", "webmaster", "hostmaster",
+    "abuse", "security", "privacy", "accounts", "account", "service", "services", "office", "work",
+    "home", "personal", "default", "claude", "codex", "build", "test", "demo", "guest", "member",
+    "owner", "staff", "engineering", "design", "product", "hardware", "firmware", "software",
+    "backplane", "system", "notifications", "alerts", "news", "updates", "feedback", "jobs",
+    "careers", "press", "media", "legal", "finance", "orders", "order", "shop", "store", "github", "gitlab",
+];
+
+/// Common project/folder words that should still be masked in explicit project slots, but not in free prose.
+const GENERIC_PROJECT: &[&str] = &[
+    "backplane", "project", "projects", "group", "groups", "chats", "quick chats", "scratch", "default", // i18n-ok: generic filter words compared
+    "untitled", "pinned", "recent", "quiet", "active", "archived", "settled", "running", "snoozed",
+    "needs you", "all projects", "documents", "desktop", "downloads", "repos", "workspace", "work", // i18n-ok: generic filter words compared
+    "code", "dev", "src", "home", "tmp", "temp", "test", "tests", "docs", "doc", "app", "web", "api",
+    "lib", "bin", "out", "dist", "build", "hardware", "firmware", "software", "board", "boards", "mech",
+    "extra", "mfg", "local", "share", "cache", "config", "settings", "main", "master", "personal",
+    "private", "public", "shared", "common", "core", "notes", "tools", "scripts", "demo", "example",
+    "examples", "sample", "samples", "template", "templates", "sandbox", "playground", "archive",
+    "backup", "client", "clients", "server", "mobile", "android", "ios", "linux", "macos", "windows",
+    "kicad", "solidcraft", "freecad", "altium", "claude", "codex", "user", "users", "admin", "root",
+    "model", "models", "thread", "threads", "account", "accounts", "machine", "viewer", "files",
+    "terminal", "browser", "plan", "review", "order",
+];
+
+/// Additional group words (beyond `GENERIC_PROJECT`) that should stay unmasked in free prose.
+const GENERIC_GROUP_EXTRA: &[&str] = &[
+    "other", "misc", "general", "office", "team", "internal", "external", "cloud", "infra", "ops",
+];
+
 /// The identifiers made ready for matching (lower case, too-short ones dropped).
 #[derive(Debug, Clone, Default)]
-pub struct Masker { words: Vec<(String, &'static str)>, users: Vec<String>, homes: Vec<String>, /** (label, "account N"): exact case, whole words */ labels: Vec<(String, String)> } // i18n-ok: a doc word
+pub struct Masker {
+    words: Vec<(String, &'static str)>,
+    users: Vec<String>,
+    homes: Vec<String>,
+    /** (label, "account N"): exact case, whole words */
+    labels: Vec<(String, String)>,
+    /** (local_part, "account N"): lowercase, whole words, from email-shaped labels */
+    ci_labels: Vec<(String, String)>,
+    /** (lowercase title/folder/group, "Project N" / "Group N"): non-generic free-text matches */
+    text_words: Vec<(String, String)>,
+    /** exact lowercase project title or folder basename -> "Project N" */
+    project_exact: std::collections::HashMap<String, String>,
+    /** exact lowercase group name -> "Group N" */
+    group_exact: std::collections::HashMap<String, String>,
+} // i18n-ok: a doc word
 impl Masker {
     pub fn new(ids: &Ids) -> Masker {
         let mut words: Vec<(String, &'static str)> = vec![];
-        for e in &ids.emails { if e.contains('@') && e.len() >= 3 { words.push((e.to_ascii_lowercase(), EMAIL)) } }
+        for e in &ids.emails {
+            if e.contains('@') && e.len() >= 3 {
+                words.push((e.to_ascii_lowercase(), EMAIL));
+                if let Some((local, _)) = e.split_once('@') {
+                    let local = local.trim().to_ascii_lowercase();
+                    if local.chars().count() >= 4 && !GENERIC_LOCAL.contains(&local.as_str()) {
+                        words.push((local, USER));
+                    }
+                }
+            }
+        }
         // a machine called by a common word ("desktop", "laptop") names nobody, and masking the word would garble ordinary text
         const GENERIC: &[&str] = &["desktop", "laptop", "server", "workstation", "computer", "home", "office", "mini", "macbook", "imac", "ubuntu", "debian", "fedora", "arch", "raspberrypi", "router", "nas", "localhost", "machine", "user"];
         for n in &ids.names { if n.chars().count() >= 3 && !GENERIC.contains(&n.trim().to_ascii_lowercase().as_str()) {
@@ -73,9 +257,61 @@ impl Masker {
         words.sort_by(|a, b| b.0.len().cmp(&a.0.len())); words.dedup_by(|a, b| a.0 == b.0);
         let homes = ids.homes.iter().map(|h| h.trim_end_matches(['/', '\\']).to_string()).filter(|h| h.len() >= 3).collect();
         // an account's label is the person's own word for it ("Work", "alex-max"): exact case, whole words; a provider's name is no label to hide
-        let labels = ids.labels.iter().enumerate().filter(|(_, l)| l.chars().count() >= 3 && !matches!(l.to_ascii_lowercase().as_str(), "claude" | "codex" | "default" | "default account")) // i18n-ok: provider names compared
-            .map(|(i, l)| (l.clone(), crate::i18n::tf("gpui.streamer.account", &[("n", (i + 1).into())]))).collect();
-        Masker { words, users, homes, labels }
+        let mut labels = vec![];
+        let mut ci_labels = vec![];
+        for (i, l) in ids.labels.iter().enumerate() {
+            if matches!(l.to_ascii_lowercase().as_str(), "claude" | "codex" | "default" | "default account") { continue } // i18n-ok: provider names compared
+            let acct = crate::i18n::tf("gpui.streamer.account", &[("n", (i + 1).into())]);
+            if l.contains('@') {
+                if let Some((local, _)) = l.split_once('@') {
+                    let local_low = local.trim().to_ascii_lowercase();
+                    if local_low.chars().count() >= 4 && !GENERIC_LOCAL.contains(&local_low.as_str()) {
+                        ci_labels.push((local_low, acct));
+                    }
+                }
+            } else if l.chars().count() >= 3 {
+                labels.push((l.clone(), acct));
+            }
+        }
+        labels.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        labels.dedup_by(|a, b| a.0 == b.0);
+        ci_labels.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        ci_labels.dedup_by(|a, b| a.0 == b.0);
+
+        let mut projs = vec![];
+        for p in &ids.projects { push_project(&mut projs, &p.title, &p.folder); }
+        projs.sort_by(|a, b| a.title.to_ascii_lowercase().cmp(&b.title.to_ascii_lowercase()).then(a.folder.to_ascii_lowercase().cmp(&b.folder.to_ascii_lowercase())));
+        let mut groups = vec![];
+        for g in &ids.groups { push_unique_ci(&mut groups, g); }
+        groups.sort_by_key(|g| g.to_ascii_lowercase());
+
+        let mut project_exact = std::collections::HashMap::new();
+        let mut group_exact = std::collections::HashMap::new();
+        let mut text_words: Vec<(String, String)> = vec![];
+        for (i, p) in projs.iter().enumerate() {
+            let placeholder = crate::i18n::tf("gpui.streamer.project", &[("n", (i + 1).into())]);
+            for raw in [p.title.as_str(), p.folder.as_str()] {
+                let key = raw.trim().to_ascii_lowercase();
+                if key.is_empty() { continue }
+                project_exact.entry(key.clone()).or_insert_with(|| placeholder.clone());
+                if key.chars().count() >= 3 && !GENERIC_PROJECT.contains(&key.as_str()) {
+                    text_words.push((key, placeholder.clone()));
+                }
+            }
+        }
+        for (i, g) in groups.iter().enumerate() {
+            let placeholder = crate::i18n::tf("gpui.streamer.group", &[("n", (i + 1).into())]);
+            let key = g.trim().to_ascii_lowercase();
+            if key.is_empty() { continue }
+            group_exact.entry(key.clone()).or_insert_with(|| placeholder.clone());
+            if key.chars().count() >= 3 && !GENERIC_PROJECT.contains(&key.as_str()) && !GENERIC_GROUP_EXTRA.contains(&key.as_str()) {
+                text_words.push((key, placeholder));
+            }
+        }
+        text_words.sort_by(|a, b| b.0.len().cmp(&a.0.len()));
+        text_words.dedup_by(|a, b| a.0 == b.0);
+
+        Masker { words, users, homes, labels, ci_labels, text_words, project_exact, group_exact }
     }
 
     /// Every part of `s` to hide, with what is drawn instead: sorted, not overlapping, each on character boundaries.
@@ -87,8 +323,10 @@ impl Masker {
         home_paths(s, &mut found);
         emails(s, &mut found);
         tailnet(&lower, &mut found);
-        for (w, with) in &self.words { for (i, _) in lower.match_indices(w.as_str()) { if word_at(&lower, i, w.len()) { found.push((i..i + w.len(), *with)) } } }
+        for (l, with) in &self.ci_labels { for (i, _) in lower.match_indices(l.as_str()) { if word_at(&lower, i, l.len()) { found.push((i..i + l.len(), with.as_str())) } } }
         for (l, with) in &self.labels { for (i, _) in s.match_indices(l.as_str()) { if word_at(s, i, l.len()) { found.push((i..i + l.len(), with.as_str())) } } }
+        for (w, with) in &self.words { for (i, _) in lower.match_indices(w.as_str()) { if word_at(&lower, i, w.len()) { found.push((i..i + w.len(), *with)) } } }
+        for (w, with) in &self.text_words { for (i, _) in lower.match_indices(w.as_str()) { if word_at(&lower, i, w.len()) { found.push((i..i + w.len(), with.as_str())) } } }
         for u in &self.users { for (i, _) in lower.match_indices(u.as_str()) {
             let end = i + u.len();
             if word_at(&lower, i, u.len()) && lower[end..].starts_with('@') { found.push((i..end, USER)) }
@@ -99,6 +337,28 @@ impl Masker {
     }
     /// `s` as drawn.
     pub fn mask(&self, s: &str) -> String { apply(s, &self.edits(s)) }
+    /// Explicit project slot (header, sidebar, palette, breadcrumb): masks even short or generic project names to `Project N`.
+    pub fn mask_project(&self, s: &str) -> String {
+        let key = s.trim().to_ascii_lowercase();
+        if let Some(p) = self.project_exact.get(&key) { return p.clone() }
+        self.mask(s)
+    }
+    /// Explicit group slot (sidebar group header, Move to group menu): masks even short or generic group names to `Group N`.
+    pub fn mask_group(&self, s: &str) -> String {
+        let key = s.trim().to_ascii_lowercase();
+        if let Some(g) = self.group_exact.get(&key) { return g.clone() }
+        self.mask(s)
+    }
+    /// Explicit project file name (detached KiCad window title): masks stem if it matches a project, preserving extension.
+    pub fn mask_project_file(&self, filename: &str) -> String {
+        if let Some((stem, ext)) = filename.rsplit_once('.') {
+            let key = stem.trim().to_ascii_lowercase();
+            if let Some(p) = self.project_exact.get(&key) {
+                return format!("{p}.{ext}");
+            }
+        }
+        self.mask_project(filename)
+    }
     /// `s` with each hidden byte drawn as one `•`-like ASCII mark, so its length (and every caret and cell position) is kept:
     /// for editable text and the terminal's grid. `cells`: one mark per character instead of per byte (a terminal cell is a character).
     pub fn same_width(&self, s: &str, cells: bool) -> String {
@@ -332,6 +592,12 @@ pub fn set(m: Option<Masker>) {
 }
 /// A string drawn through anything that is not a gpui text element (a window title): masked while on.
 pub fn shown(s: &str) -> String { active().map_or_else(|| s.to_string(), |m| m.mask(s)) }
+/// An explicit project slot (sidebar, header breadcrumb, command palette): masked to `Project N` while on.
+pub fn project_shown(s: &str) -> String { active().map_or_else(|| s.to_string(), |m| m.mask_project(s)) }
+/// An explicit group slot (sidebar group header, Move to group): masked to `Group N` while on.
+pub fn group_shown(s: &str) -> String { active().map_or_else(|| s.to_string(), |m| m.mask_group(s)) }
+/// An explicit project file name (detached KiCad window title): masked stem + extension while on.
+pub fn project_file_shown(s: &str) -> String { active().map_or_else(|| s.to_string(), |m| m.mask_project_file(s)) }
 /// Editable text and terminal rows: masked to the same length while on.
 pub fn same_width(s: &str, cells: bool) -> Option<String> { active().map(|m| m.same_width(s, cells)).filter(|t| t != s) }
 
@@ -436,7 +702,13 @@ impl crate::Backplane {
         if ui.dismissed.as_ref().map_or(false, |d| *d != ui.seen) { ui.dismissed = None; }
         let mode = self.streamer_mode();
         let why = if !mode.manual && self.screens.streamer.dismissed.is_some() { None } else { mode.on(&self.screens.streamer.seen) };
-        let ids = why.as_ref().map(|_| { let mut i = Ids::local(); i.merge(self.screens.streamer.hub.clone()); i });
+        let ids = why.as_ref().map(|_| {
+            let mut i = Ids::local();
+            i.merge(self.screens.streamer.hub.clone());
+            i.merge(Ids::from_screen(&self.data));
+            i.merge(Ids::from_accounts(&self.screens.acct.snap));
+            i
+        });
         let ui = &mut self.screens.streamer;
         let changed = ui.why != why || ui.applied != ids;
         if why.is_some() && ui.asked.map_or(true, |t| t.elapsed() > ASK_EVERY) {
@@ -447,6 +719,14 @@ impl crate::Backplane {
         if changed {
             set(ids.as_ref().map(Masker::new)); ui.why = why; ui.applied = ids;
             self.ui_epoch += 1; cx.refresh_windows();
+            if let (Some(h), Some(p)) = (self.screens.kicad_window, self.screens.kicad.clone()) {
+                let title = crate::viewers::kicad_pane::window_title(&p.read(cx).project);
+                let _ = h.update(cx, |_, w, _| w.set_window_title(&title));
+            }
+            if let (Some(h), Some(p)) = (self.screens.solidcraft_window, self.screens.solidcraft.clone()) {
+                let title = crate::viewers::solidcraft_pane::window_title(&p.read(cx).root);
+                let _ = h.update(cx, |_, w, _| w.set_window_title(&title));
+            }
             eprintln!("GPUI_LOG {}", serde_json::json!({"streamer": self.screens.streamer.why.is_some()}));
         }
         if (self.local.streamer_share || self.local.streamer_apps) && !self.screens.streamer.watching { self.streamer_watch(cx) }
@@ -481,7 +761,7 @@ mod tests {
     use super::*;
     fn m() -> Masker {
         Masker::new(&Ids { emails: vec!["person@example.com".into(), "build@example.net".into()], names: vec!["boat-hub".into(), "deskbox".into(), "Alex Example".into()],
-            users: vec!["h".into(), "i2cjak".into()], homes: vec!["/home/h".into()], labels: vec![] })
+            users: vec!["h".into(), "i2cjak".into()], homes: vec!["/home/h".into()], labels: vec![], ..Default::default() })
     }
     fn none_left(out: &str) { for bad in ["person@", "example.com", "example.net", "boat-hub", "deskbox", "/home/h", "i2cjak", "tail9f3a", "100.64.84.41", "sk-ant-", "K7QP2MXA", "555", "4155550123"] { assert!(!out.to_lowercase().contains(&bad.to_lowercase()), "{bad} left in {out:?}"); } }
 
@@ -603,5 +883,129 @@ mod tests {
     #[test] fn capture_apps_are_known_by_process_name() {
         assert_eq!(detect::app_of("obs"), Some("OBS")); assert_eq!(detect::app_of("obs64.exe"), Some("OBS")); assert_eq!(detect::app_of("gpu-screen-reco"), Some("GPU Screen Recorder"));
         assert_eq!(detect::app_of("firefox"), None); assert!(detect::grabbing("ffmpeg\0-f\0x11grab\0-i\0:0")); assert!(!detect::grabbing("ffmpeg -i in.mp4 out.webm"));
+    }
+    #[test] fn email_local_parts_and_composer_chip_are_masked_without_breaking_generic_words() {
+        let m = Masker::new(&Ids {
+            emails: vec!["alex.rivera@example.com".into(), "ops@example.com".into(), "admin@example.com".into(), "support@example.com".into(), "build@example.com".into()],
+            ..Default::default()
+        });
+        assert_eq!(m.mask("Fable 5.2 (1M) · alex.rivera · 0%"), "Fable 5.2 (1M) · user · 0%");
+        assert_eq!(m.mask("Fable 5.2 (1M) · ALEX.RIVERA · 0%"), "Fable 5.2 (1M) · user · 0%");
+        assert_eq!(m.mask("alex.rivera@example.com"), "•••@•••");
+        assert_eq!(m.mask("ops admin support build"), "ops admin support build");
+
+        let m_label = Masker::new(&Ids {
+            emails: vec!["alex.rivera@example.com".into()],
+            labels: vec!["alex.rivera@example.com".into()],
+            ..Default::default()
+        });
+        assert_eq!(m_label.mask("Fable 5.2 (1M) · alex.rivera · 0%"), "Fable 5.2 (1M) · account 1 · 0%");
+        assert_eq!(m_label.mask("alex.rivera@example.com"), "•••@•••");
+    }
+    #[test] fn project_names_folders_and_groups_are_deterministically_masked() {
+        let mut ids_a = Ids::default();
+        ids_a.merge(Ids {
+            projects: vec![
+                ProjectId { title: "Orion Health".into(), folder: "orion-health-fw".into() },
+                ProjectId { title: "Acme_DK".into(), folder: "acme_dk".into() },
+                ProjectId { title: "AI".into(), folder: "ai".into() },
+                ProjectId { title: "Test".into(), folder: "test".into() },
+                ProjectId { title: "Backplane".into(), folder: "Backplane".into() },
+                ProjectId { title: "NorthStar".into(), folder: "northstar".into() },
+            ],
+            groups: vec!["Personal".into(), "ClientAlpha".into()],
+            ..Default::default()
+        });
+        let mut ids_b = Ids::default();
+        ids_b.merge(Ids {
+            projects: vec![
+                ProjectId { title: "NorthStar".into(), folder: "northstar".into() },
+                ProjectId { title: "Test".into(), folder: "test".into() },
+                ProjectId { title: "Backplane".into(), folder: "Backplane".into() },
+                ProjectId { title: "AI".into(), folder: "ai".into() },
+                ProjectId { title: "Acme_DK".into(), folder: "acme_dk".into() },
+                ProjectId { title: "Orion Health".into(), folder: "orion-health-fw".into() },
+            ],
+            groups: vec!["ClientAlpha".into(), "Personal".into()],
+            ..Default::default()
+        });
+        assert_eq!(ids_a.projects, ids_b.projects);
+        assert_eq!(ids_a.groups, ids_b.groups);
+
+        let m = Masker::new(&ids_a);
+        // Sorted order: Acme_DK (1), AI (2), Backplane (3), NorthStar (4), Orion Health (5), Test (6)
+        // Groups sorted order: ClientAlpha (1), Personal (2)
+        assert_eq!(m.mask_project("Acme_DK"), "Project 1");
+        assert_eq!(m.mask_project("acme_dk"), "Project 1");
+        assert_eq!(m.mask_project("AI"), "Project 2");
+        assert_eq!(m.mask_project("Backplane"), "Project 3");
+        assert_eq!(m.mask_project("NorthStar"), "Project 4");
+        assert_eq!(m.mask_project("Orion Health"), "Project 5");
+        assert_eq!(m.mask_project("orion-health-fw"), "Project 5");
+        assert_eq!(m.mask_project("Test"), "Project 6");
+        assert_eq!(m.mask_project_file("Acme_DK.kicad_pro"), "Project 1.kicad_pro");
+        assert_eq!(m.mask_project_file("Test.kicad_pro"), "Project 6.kicad_pro");
+        assert_eq!(m.mask_group("ClientAlpha"), "Group 1");
+        assert_eq!(m.mask_group("Personal"), "Group 2");
+
+        assert_eq!(m.mask("Fix orion-health-fw power"), "Fix Project 5 power");
+        assert_eq!(m.mask("~/clients/orion-health-fw/main.kicad_pcb"), "~/clients/Project 5/main.kicad_pcb");
+        assert_eq!(m.mask("Acme_DK.kicad_pro — KiCad · Backplane"), "Project 1.kicad_pro — KiCad · Backplane");
+        assert_eq!(m.mask("SolidCraft · Acme_DK — Backplane"), "SolidCraft · Project 1 — Backplane");
+        assert_eq!(m.mask("CLIENTALPHA 3"), "Group 1 3");
+
+        // Generic / short project and group names stay intact in ordinary prose
+        assert_eq!(m.mask("Backplane runs Test with AI for Personal Home use"), "Backplane runs Test with AI for Personal Home use");
+
+        // Idempotence and same_width invariants
+        for s in [
+            "Fix orion-health-fw power in Acme_DK",
+            "~/clients/orion-health-fw/main.kicad_pcb",
+            "CLIENTALPHA 3",
+        ] {
+            let once = m.mask(s);
+            assert_eq!(m.mask(&once), once);
+            assert_eq!(m.same_width(s, false).len(), s.len());
+            assert_eq!(m.same_width(s, true).chars().count(), s.chars().count());
+        }
+    }
+    #[test] fn ids_from_screen_and_accounts_gather_projects_groups_and_combo_account() {
+        let screen = serde_json::json!({
+            "sections": [
+                {"id": "pinned", "kind": "projects", "title": "Pinned", "rows": [{"title": "Acme_DK", "root": "/home/u/work/acme_dk"}]},
+                {"id": "active", "kind": "projects", "title": "Recent", "rows": [{"title": "Orion Health", "folder": "/home/u/orion-health-fw"}]},
+                {"id": "group:clientalpha", "kind": "projects", "group": "clientalpha", "title": "ClientAlpha", "rows": [{"title": "NorthStar"}]},
+                {"id": "needs", "kind": "threads", "title": "Needs you", "rows": [{"project": "VegaBoard", "chat": false}, {"project": "Chats", "chat": true}]}
+            ],
+            "groupsTo": [{"label": "PartnerGroup", "value": "g2"}],
+            "projectPage": {"project": {"title": "PageProj", "root": "/home/u/page-proj"}, "moveTo": [{"label": "MoveGroup"}]},
+            "thread": {
+                "project": {"title": "ThreadProj"},
+                "combo": {"account": "alex.rivera", "email": "alex.rivera@example.com"}
+            },
+            "jump": [{"kind": "project", "label": "JumpProj"}]
+        });
+        let s_ids = Ids::from_screen(&screen);
+        assert!(s_ids.projects.iter().any(|p| p.title == "Acme_DK" && p.folder == "acme_dk"));
+        assert!(s_ids.projects.iter().any(|p| p.title == "Orion Health" && p.folder == "orion-health-fw"));
+        assert!(s_ids.projects.iter().any(|p| p.title == "NorthStar"));
+        assert!(s_ids.projects.iter().any(|p| p.title == "VegaBoard"));
+        assert!(s_ids.projects.iter().any(|p| p.title == "PageProj" && p.folder == "page-proj"));
+        assert!(s_ids.projects.iter().any(|p| p.title == "ThreadProj"));
+        assert!(s_ids.projects.iter().any(|p| p.title == "JumpProj"));
+        assert!(!s_ids.projects.iter().any(|p| p.title == "Chats"));
+        assert_eq!(s_ids.groups, vec!["ClientAlpha", "MoveGroup", "PartnerGroup"]);
+        assert_eq!(s_ids.emails, vec!["alex.rivera@example.com"]);
+        assert!(s_ids.labels.is_empty(), "combo email local-part does not create a duplicate label");
+
+        let acct = serde_json::json!({
+            "profiles": [{"id": "p1", "label": "Work", "identity": {"email": "work@example.com", "name": "Sam Example"}, "allowance": {"email": "allow@example.com"}}],
+            "default_login": {"claude": {"state": "known", "email": "cli@example.org", "name": "Cli User"}},
+            "default_allowance": {"email": "defallow@example.org"}
+        });
+        let a_ids = Ids::from_accounts(&acct);
+        assert_eq!(a_ids.emails, vec!["work@example.com", "allow@example.com", "cli@example.org", "defallow@example.org"]);
+        assert_eq!(a_ids.names, vec!["Sam Example", "Cli User"]);
+        assert_eq!(a_ids.labels, vec!["Work"]);
     }
 }

@@ -1773,6 +1773,15 @@ impl Render for SolidCraftWindow {
     }
 }
 
+pub(crate) fn window_title(root: &str) -> String {
+    let name = std::path::Path::new(root)
+        .file_name()
+        .map(|f| f.to_string_lossy().into_owned())
+        .unwrap_or_else(|| /* i18n-ok: product name */ "SolidCraft".into());
+    let title = crate::streamer::project_shown(&name);
+    /* i18n-ok: detached window title */ crate::streamer::shown(&format!("SolidCraft · {title} — Backplane"))
+}
+
 impl Backplane {
     /// Handle hub `editor.solidcraft.<digest>`, `solidcraft.runtime`, and `solidcraft.install` info broadcasts.
     pub(crate) fn solidcraft_info(&mut self, digest: String, text: &str, cx: &mut Context<Self>) {
@@ -2096,10 +2105,7 @@ impl Backplane {
             return;
         }
         let (app, light) = (cx.entity().downgrade(), self.light());
-        let title = std::path::Path::new(&pane.read(cx).root)
-            .file_name()
-            .map(|f| f.to_string_lossy().into_owned())
-            .unwrap_or_else(|| /* i18n-ok: product name */ "SolidCraft".into());
+        let title = window_title(&pane.read(cx).root);
         let opts = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
@@ -2107,7 +2113,7 @@ impl Backplane {
                 cx,
             ))),
             titlebar: Some(TitlebarOptions {
-                /* i18n-ok: detached window title */ title: Some(crate::streamer::shown(&format!("SolidCraft · {title} — Backplane")).into()),
+                title: Some(title.into()),
                 ..Default::default()
             }),
             ..Default::default()

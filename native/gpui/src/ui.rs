@@ -724,13 +724,13 @@ impl Backplane {
             let quiet = project["quiet"] == true;
             rows.push(with_rect(div().id(SharedString::from(format!("proj-{pid}"))), || format!("project:{pid}")).when(quiet, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().pt_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(if on_page { c("text") } else { c("dim") }).border_l_2().border_color(if on_page { c("accent") } else { c("bg") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.text_color(c("text")))
                 .on_click(cx.listener(move |this, _, _, cx| { this.open_project(pid.clone(), cx); }))
-                .on_drag(DragProj { id: pid_new.clone(), label: string(project, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
+                .on_drag(DragProj { id: pid_new.clone(), label: crate::streamer::project_shown(&string(project, "title")) }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
                 .drag_over::<DragProj>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) })
                 .on_drop(cx.listener({ let target = pid_new.clone(); move |this, d: &DragProj, _, cx| { let _ = this.tx.try_send(Command::Action("reorder-project".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
                 .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); let proj = project.clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items_of(&pidm, &proj); this.ctx_open(e.position, items, cx); }) })
                 .child(with_rect(div().id(SharedString::from(format!("fold-{pid_new}"))), || format!("fold:{pid_new}")).w(px(16.)).flex_shrink_0().flex().items_center().cursor_pointer().hover(|s| s.bg(c("raise"))).child(ic(light, if closed { "chevron-right" } else { "chevron-down" }, 14., "dim"))
                     .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); let _ = this.tx.try_send(Command::Action("flag".into(), fold_value.clone())); cx.notify(); })))
-                .child(crate::screens::badge::mark(light, project)).child(div().flex_1().min_w_0().flex().items_center().gap_2().relative().child(if crate::screens::siderow::renaming(&self.data, &qpid, "project") { crate::screens::siderow::field(light, &self.screens.fields, &qpid) } else { div().child(string(project, "title").to_uppercase()).into_any_element() }).children(crate::screens::badge::place(light, &project["mark"], project["also"].as_str().unwrap_or(""), &format!("proj-{pid_new}")))
+                .child(crate::screens::badge::mark(light, project)).child(div().flex_1().min_w_0().flex().items_center().gap_2().relative().child(if crate::screens::siderow::renaming(&self.data, &qpid, "project") { crate::screens::siderow::field(light, &self.screens.fields, &qpid) } else { div().child(crate::streamer::project_shown(&string(project, "title")).to_uppercase()).into_any_element() }).children(crate::screens::badge::place(light, &project["mark"], project["also"].as_str().unwrap_or(""), &format!("proj-{pid_new}")))
                     /* i18n-ok: ctl labels and ui: ids the drivers press */ .children(crate::screens::hints::digit_of(&self.screens.hold_projects, &pid_new).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n))))).child(with_rect(div().id(SharedString::from(format!("new-{pid_new}"))), || "ui:New thread".to_string()).cursor_pointer().tooltip(crate::keys::tip("New thread", &if pid_new == new_here { crate::keys::hint(&self.local, "new") } else { String::new() }, light)).on_click({ let new_on = project["newOn"].clone(); cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
                         // a project also on linked machines: the + asks which machine the thread starts on
                         let items = crate::screens::ctxmenu::new_items(&pid_new2, &new_on); if items.len() > 1 { this.ctx_open(e.position(), items, cx); return }
@@ -772,7 +772,8 @@ impl Backplane {
         // the Active view: threads that need the person first, then the settled ones folded under "Settled N"
         for t in self.data["active"].as_array().into_iter().flatten() {
             let pid = string(t, "projectId"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
-            rows.push(self.side_thread(cx, light, t, &pid, &string(t, "project"), false, &mut ctl));
+            let sub = crate::streamer::project_shown(&string(t, "project"));
+            rows.push(self.side_thread(cx, light, t, &pid, &sub, false, &mut ctl));
         }
         if let Some(n) = self.data["activeSettled"]["count"].as_u64().filter(|n| *n > 0) {
             let open = self.data["activeSettled"]["open"].as_bool().unwrap_or(false);
@@ -782,7 +783,8 @@ impl Backplane {
                 .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("side-settled".into(), String::new())); cx.notify(); })).into_any_element());
             for t in self.data["activeSettled"]["rows"].as_array().into_iter().flatten() {
                 let pid = string(t, "projectId"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
-                rows.push(self.side_thread(cx, light, t, &pid, &string(t, "project"), true, &mut ctl));
+                let sub = crate::streamer::project_shown(&string(t, "project"));
+                rows.push(self.side_thread(cx, light, t, &pid, &sub, true, &mut ctl));
             }
         }
         } // (not sectioned)
@@ -1086,7 +1088,7 @@ impl Render for Backplane {
         }
         // the crumb after Backplane: the thread's project, or the project whose page is open, by name
         let crumb = match page.as_ref().and_then(|p| crate::screens::projects::find(&self.data, p)).map(|p| string(p, "title")).filter(|t| !t.is_empty()) {
-            Some(t) => t, None if head_thread => { let t = string(&thread["project"], "title"); if t.is_empty() { trs("Project") } else { t } } None => trs("Projects") };
+            Some(t) => crate::streamer::project_shown(&t), None if head_thread => { let t = string(&thread["project"], "title"); if t.is_empty() { trs("Project") } else { crate::streamer::project_shown(&t) } } None => trs("Projects") };
         let mut rail_pages = Vec::new();
         let mut rail_tools = Vec::new();
         // held Ctrl: each rail button's bare key in its corner (the old rail's keycaps), lit on the view on show

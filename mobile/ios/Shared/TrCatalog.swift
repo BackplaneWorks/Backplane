@@ -4620,6 +4620,8 @@ gpui.gerbers.boardonly	board only	基板だけ	solo placa
 gpui.gerbers.gerbersonly	Gerbers only	ガーバーだけ	solo Gerbers
 gpui.mgmt.life.price.since	since {day}	{day}から	desde {day}
 gpui.streamer.account	account {n}	アカウント {n}	cuenta {n}
+gpui.streamer.project	Project {n}	プロジェクト {n}	Proyecto {n}
+gpui.streamer.group	Group {n}	グループ {n}	Grupo {n}
 gpui.streamer.mode	Streamer mode	配信モード	Modo streamer
 gpui.streamer.section	Streaming	配信	Transmisión
 gpui.streamer.off	Streamer mode: turn off	配信モード: オフにする	Modo streamer: desactivar
@@ -7930,6 +7932,12 @@ gpui.c.solidcraft.exit.full.cmd	SolidCraft: Exit full screen	SolidCraft: 全画�
 
     /// gpui.streamer.account = account {n}
     static func gpui_streamer_account(n: String) -> String { f("gpui.streamer.account", ["n": n]) }
+
+    /// gpui.streamer.project = Project {n}
+    static func gpui_streamer_project(n: String) -> String { f("gpui.streamer.project", ["n": n]) }
+
+    /// gpui.streamer.group = Group {n}
+    static func gpui_streamer_group(n: String) -> String { f("gpui.streamer.group", ["n": n]) }
 
     /// history.snap = Before turn {turn}
     static func history_snap(turn: String) -> String { f("history.snap", ["turn": turn]) }

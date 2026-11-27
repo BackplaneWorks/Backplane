@@ -4030,6 +4030,12 @@ impl Render for KicadWindow {
     }
 }
 
+pub(crate) fn window_title(project: &str) -> String {
+    let name = std::path::Path::new(project).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+    let title = crate::streamer::project_file_shown(&name);
+    crate::streamer::shown(&format!("{title} — KiCad · Backplane"))
+}
+
 impl crate::Backplane {
     /// Pop out: the editor into a window of its own; the pane says where it went.
     pub(crate) fn kicad_popout(&mut self, cx: &mut Context<Self>) {
@@ -4037,9 +4043,9 @@ impl crate::Backplane {
         if self.screens.kicad_window.is_some() { return }
         let (app, light) = (cx.entity().downgrade(), self.light());
         let checks = self.screens.mgmt.checks.clone();
-        let title = std::path::Path::new(&pane.read(cx).project).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        let title = window_title(&pane.read(cx).project);
         let opts = WindowOptions { window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1400.), px(900.)), cx))),
-            titlebar: Some(TitlebarOptions { title: Some(crate::streamer::shown(&format!("{title} — KiCad · Backplane")).into()), ..Default::default() }), ..Default::default() };
+            titlebar: Some(TitlebarOptions { title: Some(title.into()), ..Default::default() }), ..Default::default() };
         match cx.open_window(opts, move |window, cx| {
             let app2 = app.clone();
             window.on_window_should_close(cx, move |window, cx| { let popped = top_of(window).unwrap_or(0); if let Some(a) = app2.upgrade() { a.update(cx, |a, cx| a.kicad_popin_closing(popped, cx)); } true });
