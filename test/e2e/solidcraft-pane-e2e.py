@@ -530,7 +530,7 @@ def main():
     if os.path.isfile(P("video.mp4")):
         subprocess.run(["ffmpeg", "-v", "error", "-i", P("video.mp4"), P("frames/f_%05d.png")], check=False, timeout=120)
     frames = sorted(glob.glob(P("frames/f_*.png")))
-    analyze_frames(frames, phase_marks, keyframes_dir=P("keyframes"), log=log)
+    analyze_frames(frames, phase_marks, keyframes_dir=P("keyframes"), log=log, pane_rect=rects().get("solidcraft:pane"))
 
     report = {
         "video": P("video.mp4"),
@@ -544,8 +544,8 @@ def main():
     sys.exit(0 if checks and all(c["ok"] for c in checks) else 1)
 
 
-def analyze_frames(frames, phase_marks, keyframes_dir, log):
-    """Compute post-map flashes, 45x45 black-block blinks, visible-span black frames, idle diffs, and resize_contact.png."""
+def analyze_frames(frames, phase_marks, keyframes_dir, log, pane_rect=None):
+    """Compute post-map flashes, 45x45 black-block blinks, visible-span black frames, doubled chrome, idle diffs, and resize_contact.png."""
     viewer_box = (int(W * 0.56), int(H * 0.12), int(W * 0.94), int(H * 0.92))
 
     def pane_img(idx):
@@ -632,6 +632,54 @@ def analyze_frames(frames, phase_marks, keyframes_dir, log):
                 sheet.paste(im, ((idx_pos % 3) * tw, (idx_pos // 3) * th))
             os.makedirs(keyframes_dir, exist_ok=True)
             sheet.save(os.path.join(keyframes_dir, "resize_contact.png"))
+
+            # Doubled-chrome NCC check across resize_start..resize_end (e.g. sidebar-collapse reflow ghosting)
+            try:
+                import numpy as np
+                pr = pane_rect or {"x": 755, "y": 70, "w": 611, "h": 799}
+                px, py, pw = int(pr["x"]), int(pr["y"]), int(pr["w"])
+                ref_arr = np.asarray(Image.open(frames[max(0, r_start - 3)]).convert("L"), dtype=np.float32)
+                templates = [
+                    ("gizmo", px + pw - 115, py + 145, 85, 65),
+                    ("search_cmd", px + pw - 165, py + 52, 150, 26),
+                ]
+                doubled_hits = []
+                frame_arrays = {i: np.asarray(Image.open(frames[i]).convert("L"), dtype=np.float32) for i in range(r_start, r_end)}
+                for tname, tx, ty, tw, th in templates:
+                    if tx < 0 or ty < 0 or ty + th > H or tx + tw > W:
+                        continue
+                    tpl = ref_arr[ty:ty + th, tx:tx + tw]
+                    t0 = tpl - tpl.mean()
+                    tn = float(np.sqrt((t0 ** 2).sum()))
+                    if tn < 50.0:
+                        continue
+                    y0, y1 = max(0, ty - 15), min(H, ty + th + 15)
+                    bh, bw = y1 - y0, W
+                    oh, ow = bh - th + 1, bw - tw + 1
+                    t_fft = np.fft.rfft2(t0[::-1, ::-1], s=(bh, bw))
+                    o_fft = np.fft.rfft2(np.ones_like(t0), s=(bh, bw))
+                    for i, full_a in frame_arrays.items():
+                        band = full_a[y0:y1, :]
+                        f_fft = np.fft.rfft2(band, s=(bh, bw))
+                        num = np.fft.irfft2(f_fft * t_fft, s=(bh, bw))[th - 1:th - 1 + oh, tw - 1:tw - 1 + ow]
+                        s1 = np.fft.irfft2(f_fft * o_fft, s=(bh, bw))[th - 1:th - 1 + oh, tw - 1:tw - 1 + ow]
+                        s2 = np.fft.irfft2(np.fft.rfft2(band * band, s=(bh, bw)) * o_fft, s=(bh, bw))[th - 1:th - 1 + oh, tw - 1:tw - 1 + ow]
+                        var = np.maximum(s2 - s1 * s1 / t0.size, 0.0)
+                        ncc = np.where(var > 0.25 * tn * tn, num / (np.sqrt(np.maximum(var, 1e-6)) * tn), 0.0)
+                        peaks = []
+                        while True:
+                            py_i, px_i = np.unravel_index(np.argmax(ncc), ncc.shape)
+                            if ncc[py_i, px_i] < 0.85:
+                                break
+                            peaks.append((int(px_i), int(py_i + y0), round(float(ncc[py_i, px_i]), 2)))
+                            ncc[max(0, py_i - 20):py_i + 20, max(0, px_i - 40):px_i + 40] = -1.0
+                            if len(peaks) > 4:
+                                break
+                        if len(peaks) > 1:
+                            doubled_hits.append((tname, i + 1, peaks))
+                log("zero_doubled_chrome", not doubled_hits, f"checked {r_start}..{r_end} hits={doubled_hits[:10]}")
+            except ImportError:
+                pass
 
     oscillations = []
     if frames and "post_resize_settle" in phase_marks:
