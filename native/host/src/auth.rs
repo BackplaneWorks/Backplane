@@ -51,6 +51,32 @@ fn same(a: &str, b: &str) -> bool {
 }
 fn digest(x: &str) -> String { hex::encode(Sha256::digest(x.as_bytes())) }
 
+fn single_header<'a>(r: &'a Req, name: &str) -> Option<&'a str> {
+    let mut it = r.headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case(name));
+    let v = it.next()?.1.as_str();
+    it.next().is_none().then_some(v)
+}
+
+fn origin_matches_authority(origin_lower: &str, authority: &str, scheme: &str) -> bool {
+    let a = authority.to_ascii_lowercase();
+    if a.is_empty() {
+        return false;
+    }
+    if origin_lower == format!("{scheme}://{a}") {
+        return true;
+    }
+    let default_port = match scheme {
+        "http" => ":80",
+        "https" => ":443",
+        _ => return false,
+    };
+    if let Some(bare) = a.strip_suffix(default_port) {
+        !bare.is_empty() && origin_lower == format!("{scheme}://{bare}")
+    } else {
+        origin_lower == format!("{scheme}://{a}{default_port}")
+    }
+}
+
 pub struct Auth { root: String, devices: Vec<(String, bool)>, pairing: std::sync::OnceLock<std::sync::Arc<dyn crate::api::Pairing>> }
 impl Auth {
     pub fn load(home: &Path) -> Auth {
@@ -73,11 +99,37 @@ impl Auth {
         let c = Self::cookie(r); if c.is_empty() { r.param("token") } else { c }
     }
     pub fn with_root(root: &str) -> Auth { Auth { root: root.to_string(), devices: vec![], pairing: Default::default() } }
-    /// Origin is absent (a native client) or the host's own; a cross-site fetch is refused.
+    /// Origin is absent (a native client) or the host's own (or a trusted loopback tailscale-serve HTTPS proxy's
+    /// X-Forwarded-Host); a cross-site fetch is refused.
     pub fn browser(r: &Req) -> bool {
-        let (o, h) = (r.header("origin").to_lowercase(), r.header("host").to_lowercase());
-        let origin = o.is_empty() || (!h.is_empty() && (o == format!("http://{h}") || o == format!("https://{h}")));
-        origin && !r.header("sec-fetch-site").eq_ignore_ascii_case("cross-site")
+        if r.header("sec-fetch-site").eq_ignore_ascii_case("cross-site") {
+            return false;
+        }
+        let mut origins = r.headers.iter().filter(|(k, _)| k.eq_ignore_ascii_case("origin"));
+        let Some((_, raw_origin)) = origins.next() else {
+            return true;
+        };
+        if origins.next().is_some() {
+            return false;
+        }
+        let o = raw_origin.to_ascii_lowercase();
+        if o.is_empty() {
+            return true;
+        }
+        let Some(host) = single_header(r, "host") else {
+            return false;
+        };
+        if !host.is_empty()
+            && (origin_matches_authority(&o, host, "http") || origin_matches_authority(&o, host, "https"))
+        {
+            return true;
+        }
+        r.trusted
+            && crate::net::owner::local_host(&host.to_ascii_lowercase())
+            && r.header("tailscale-funnel-request").is_empty()
+            && single_header(r, "tailscale-user-login").is_some_and(|u| !u.is_empty())
+            && single_header(r, "x-forwarded-proto").is_some_and(|p| p.eq_ignore_ascii_case("https"))
+            && single_header(r, "x-forwarded-host").is_some_and(|xfh| origin_matches_authority(&o, xfh, "https"))
     }
     fn cookie(r: &Req) -> String {
         r.header("cookie").split(';').find_map(|c| c.trim().strip_prefix("bp_token=").map(str::to_string)).unwrap_or_default()
@@ -138,6 +190,60 @@ mod tests {
         assert!(!a.allowed(&req("/ws?token=t", &[("Origin", "http://evil.example"), ("Host", "hub:1")])));
         assert!(a.allowed(&req("/ws?token=t", &[("Origin", "http://hub:1"), ("Host", "hub:1")])));
         assert!(!a.allowed(&req("/ws?token=t", &[("Sec-Fetch-Site", "cross-site")])));
+    }
+    #[test] fn tailscale_serve_proxy_origin_rules() {
+        let a = Auth::with_root("tok");
+        let make = |trusted: bool, headers: &[(&str, &str)]| {
+            let mut r = req("/solidcraft-web/bp-boot.js", headers);
+            r.trusted = trusted;
+            r
+        };
+        let valid = [
+            ("Host", "127.0.0.1:3797"),
+            ("X-Forwarded-Host", "node.tail.ts.net:8451"),
+            ("X-Forwarded-Proto", "https"),
+            ("Tailscale-User-Login", "person@example.com"),
+            ("Origin", "https://node.tail.ts.net:8451"),
+            ("Sec-Fetch-Site", "same-origin"),
+            ("Cookie", "bp_token=tok"),
+        ];
+        assert!(a.allowed(&make(true, &valid)));
+        // Default :443 port normalization between Origin and X-Forwarded-Host
+        let valid_443 = [
+            ("Host", "localhost:3797"),
+            ("X-Forwarded-Host", "node.tail.ts.net:443"),
+            ("X-Forwarded-Proto", "https"),
+            ("Tailscale-User-Login", "person@example.com"),
+            ("Origin", "https://node.tail.ts.net"),
+            ("Cookie", "bp_token=tok"),
+        ];
+        assert!(a.allowed(&make(true, &valid_443)));
+
+        // Untrusted socket must be denied
+        assert!(!a.allowed(&make(false, &valid)));
+        // Foreign Origin must be denied
+        let mut wrong_origin = valid;
+        wrong_origin[4] = ("Origin", "https://evil.example");
+        assert!(!a.allowed(&make(true, &wrong_origin)));
+        // Funnel requests must be denied
+        let mut funnel = valid.to_vec();
+        funnel.push(("Tailscale-Funnel-Request", "true"));
+        assert!(!a.allowed(&make(true, &funnel)));
+        // Missing Tailscale-User-Login must be denied
+        let no_login: Vec<_> = valid.iter().copied().filter(|(k, _)| *k != "Tailscale-User-Login").collect();
+        assert!(!a.allowed(&make(true, &no_login)));
+        // Non-HTTPS X-Forwarded-Proto must be denied
+        let mut http_proto = valid;
+        http_proto[2] = ("X-Forwarded-Proto", "http");
+        assert!(!a.allowed(&make(true, &http_proto)));
+        // Duplicate X-Forwarded-Host must be denied
+        let mut dup_xfh = valid.to_vec();
+        dup_xfh.push(("X-Forwarded-Host", "evil.example"));
+        assert!(!a.allowed(&make(true, &dup_xfh)));
+        // Sec-Fetch-Site: cross-site must be denied
+        let mut cross_site = valid;
+        cross_site[5] = ("Sec-Fetch-Site", "cross-site");
+        assert!(!a.allowed(&make(true, &cross_site)));
     }
     #[test] fn capability_takes_no_query_token() {
         let a = Auth::with_root("t");

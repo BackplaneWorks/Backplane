@@ -251,3 +251,73 @@ async fn landing_page_answers_burst_of_get_root_probes_fast() {
         assert!(resp.starts_with("HTTP/1.1 200 OK\r\n") && resp.contains("This is Backplane on"), "probe {i} ({path}): {resp}");
     }
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn solidcraft_web_bearer_bootstrap_cookie_works_through_tailscale_serve_proxy() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let dir = crate::plat::tmp::dir("wire-sc-web");
+    std::fs::write(dir.join("token"), "tok").unwrap();
+    std::fs::write(dir.join("events.jsonl"), FIXTURE).unwrap();
+    let cfg = hub::Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+    let hub = Hub::start(cfg, Arc::new(presenter::Canned { reply: json!({}) })).await.unwrap();
+    let _tmp = hub::TestHub { hub: hub.clone(), _tmp: dir };
+    let l = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = l.local_addr().unwrap().port();
+    {
+        let hub = hub.clone();
+        tokio::spawn(async move {
+            loop {
+                let (s, _) = l.accept().await.unwrap();
+                let h = hub.clone();
+                let trusted = s.peer_addr().map_or(false, |p| p.ip().is_loopback());
+                tokio::spawn(async move { let _ = serve_with(h, s, trusted).await; });
+            }
+        });
+    }
+    let sc_dir = crate::solidcraft::web::web_parent(&hub.cfg.home).join("0.50.0");
+    std::fs::create_dir_all(&sc_dir).unwrap();
+    std::fs::write(sc_dir.join("index.html"), "<html></html>").unwrap();
+    std::fs::write(sc_dir.join("solidcraft-web-abc123.js"), "export default async function(){}").unwrap();
+    std::fs::write(sc_dir.join("solidcraft-web-abc123_bg.wasm"), b"\x00asm\x01\x00\x00\x00").unwrap();
+
+    let send = |raw_req: String| async move {
+        let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        s.write_all(raw_req.as_bytes()).await.unwrap();
+        let mut buf = Vec::new();
+        s.read_to_end(&mut buf).await.unwrap();
+        String::from_utf8_lossy(&buf).into_owned()
+    };
+
+    // Initial WebView load carries Authorization: Bearer tok (no Origin) and gets Set-Cookie: bp_token=tok
+    let initial = send(format!(
+        "GET /solidcraft-web/?thread=t1 HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         Authorization: Bearer tok\r\n\
+         X-Forwarded-Host: desk.tail.ts.net:8451\r\n\
+         X-Forwarded-Proto: https\r\n\
+         Tailscale-User-Login: person@example.com\r\n\
+         Connection: close\r\n\r\n"
+    ))
+    .await;
+    assert!(initial.starts_with("HTTP/1.1 200 OK\r\n"), "{initial}");
+    assert!(
+        initial.contains("Set-Cookie: bp_token=tok; Path=/; HttpOnly; SameSite=Strict; Secure\r\n"),
+        "expected Set-Cookie bootstrap: {initial}"
+    );
+
+    // Module script subresource sends Cookie + Origin: https://desk.tail.ts.net:8451 (no Authorization header)
+    let subresource = send(format!(
+        "GET /solidcraft-web/bp-boot.js HTTP/1.1\r\n\
+         Host: 127.0.0.1:{port}\r\n\
+         Cookie: bp_token=tok\r\n\
+         Origin: https://desk.tail.ts.net:8451\r\n\
+         Sec-Fetch-Site: same-origin\r\n\
+         X-Forwarded-Host: desk.tail.ts.net:8451\r\n\
+         X-Forwarded-Proto: https\r\n\
+         Tailscale-User-Login: person@example.com\r\n\
+         Connection: close\r\n\r\n"
+    ))
+    .await;
+    assert!(subresource.starts_with("HTTP/1.1 200 OK\r\n"), "subresource failed: {subresource}");
+    assert!(subresource.contains("solidcraft-web-abc123_bg.wasm"), "{subresource}");
+}

@@ -136,7 +136,8 @@ pub async fn http(hub: &Hub, mut s: TcpStream, mut req: Req) -> Result<()> {
             s.shutdown().await.ok();
             return Ok(());
         }
-        if crate::solidcraft::web::serve_asset(&hub.arc(), &mut s, &req).await.is_ok() {
+        let extra = crate::solidcraft::web::cookie_bootstrap_header(&req);
+        if crate::solidcraft::web::serve_asset_with(&hub.arc(), &mut s, &req, &extra).await.is_ok() {
             s.shutdown().await.ok();
         }
         return Ok(());
