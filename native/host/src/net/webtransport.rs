@@ -8,6 +8,7 @@ use std::{os::unix::fs::MetadataExt, path::Path};
 use tokio::net::{UnixListener, UnixStream};
 
 #[cfg(unix)]
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct ProxyIdentity {
     pub uid: u32,
     pub pid: i32,
