@@ -5,11 +5,10 @@
 //! alive across file switches (`editor.solidcraft.open` -> `--control` `doc.open`), and cuts holes
 //! for any GPUI overlays drawn above the pane so there is zero Z-order bleed and zero flicker.
 use super::{kicad_pane, native_child as nc};
-use crate::{hub::Command, i18n::{tf, trs}, screens::settings::Secret, Backplane};
+use crate::{hub::Command, i18n::trs, screens::settings::Secret, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::{
-    collections::HashMap,
     sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -208,6 +207,10 @@ pub fn pane_status(info: &Value, has_child: bool, popped: bool) -> PaneStatus {
         Some("stopped") | None => {
             if info["runtime"]["installed"] == false {
                 PaneStatus::NotInstalled
+            } else if info["runtime"]["installed"] == true
+                && info["runtime"]["gui"].as_str().unwrap_or("").is_empty()
+            {
+                PaneStatus::Failed(trs("This computer has SolidCraft's command-line program, not its desktop window."))
             } else if info.is_null() {
                 PaneStatus::Starting(trs("Starting SolidCraft…"))
             } else {
@@ -428,6 +431,17 @@ impl SolidCraftPane {
         if self.light != light {
             self.light = light;
             cx.notify();
+        }
+    }
+
+    pub fn lend_focus(&mut self) {
+        if self.keys && self.toplevel != 0 {
+            nc::grab_escape(self.toplevel, false);
+            if let Some(c) = self.container {
+                nc::grab_click(c, true);
+            }
+            nc::focus(self.toplevel);
+            self.keys = false;
         }
     }
 
@@ -1445,6 +1459,10 @@ impl Backplane {
             p.light = light;
             if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() {
                 p.info = v;
+            } else if let Some(rt) = infos.get("solidcraft.runtime").cloned() {
+                if rt["installed"] == false {
+                    p.info = json!({"state": "stopped", "root": p.root, "runtime": rt});
+                }
             }
             p
         });
@@ -1500,6 +1518,12 @@ impl Backplane {
         if let Some(pane) = self.screens.solidcraft.clone() {
             pane.update(cx, |p, _| p.reattach());
             cx.notify();
+        }
+    }
+
+    pub(crate) fn solidcraft_lend(&mut self, cx: &mut Context<Self>) {
+        if let Some(pane) = self.screens.solidcraft.clone() {
+            pane.update(cx, |p, _| p.lend_focus());
         }
     }
 
@@ -1663,6 +1687,10 @@ mod tests {
         assert_eq!(
             pane_status(&json!({"state": "stopped", "runtime": {"installed": false}}), false, false),
             PaneStatus::NotInstalled
+        );
+        assert_eq!(
+            pane_status(&json!({"state": "stopped", "runtime": {"installed": true, "gui": ""}}), false, false),
+            PaneStatus::Failed(trs("This computer has SolidCraft's command-line program, not its desktop window."))
         );
         assert_eq!(
             pane_status(&json!({"state": "installing", "install_progress": {"done": 100, "total": 200}}), false, false),

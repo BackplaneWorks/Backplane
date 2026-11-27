@@ -78,7 +78,9 @@ pub fn glyph(kind: &str) -> (&'static str, &'static str) {
 /// The context menu of a row: (id, label).
 pub fn menu_items(r: &FileRow) -> Vec<(&'static str, &'static str)> {
     let mut v = vec![];
-    /* i18n-ok: drawn through trs */ if !r.action.is_empty() { v.push(("open", "Open")) }
+    let is_cad = crate::viewers::solidcraft_pane::is_cad_file(&r.value) || crate::viewers::solidcraft_pane::is_cad_file(&r.label);
+    /* i18n-ok: drawn through trs */ if is_cad { v.push(("open", "Open in SolidCraft")) }
+    /* i18n-ok: drawn through trs */ else if !r.action.is_empty() { v.push(("open", "Open")) }
     /* i18n-ok: drawn through trs */ if !r.down().is_empty() { v.push(("download", if r.kind == "folder" { "Download as zip" } else { "Download" })) }
     /* i18n-ok: drawn through trs */ v.push(("rename", "Rename")); v.push(("copy", "Copy path")); v.push(("delete", "Delete"));
     v
@@ -533,6 +535,9 @@ mod tests {
         let m: Vec<_> = menu_items(&row("d", "folder")).into_iter().map(|x| x.0).collect(); assert_eq!(m, ["open", "download", "rename", "copy", "delete"]);
         let mut r = row("f", "text"); r.action.clear(); r.down.clear(); let m: Vec<_> = menu_items(&r).into_iter().map(|x| x.0).collect(); assert_eq!(m, ["rename", "copy", "delete"]);
         assert_eq!(menu_items(&row("d", "folder"))[1].1, "Download as zip");
+        assert_eq!(menu_items(&row("case.step", "mech"))[0], ("open", "Open in SolidCraft"));
+        let mut sc = row("part.sc", "mech"); sc.action.clear();
+        assert_eq!(menu_items(&sc)[0], ("open", "Open in SolidCraft"));
     }
     #[test] fn a_pdfs_path_comes_back_out_of_its_url() {
         assert_eq!(path_of_url("/img?path=%2Fhome%2Fh%2Fa%20b.pdf"), "/home/h/a b.pdf"); assert_eq!(path_of_url("/img?path=/x/y.pdf&z=1"), "/x/y.pdf"); assert_eq!(path_of_url("/nothing"), "");

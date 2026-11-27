@@ -392,7 +392,7 @@ impl Backplane {
             Some("board" | "schematic" | "gerbers") => lit[0],
             Some("split") => (split.contains(&"sch") && lit[1]) || (split.contains(&"pcb") && lit[2])
                 || (split.contains(&"3d") && solid_probe),
-            Some("3d" | "mech") => solid_probe,
+            Some("3d") => solid_probe,
             _ => false,
         };
         (consume, kept || lit.contains(&true) || consume, open.is_some() && !consume)

@@ -708,11 +708,20 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
       bar = bar.child(action_button(cx, light, "page-open-folder", "folder-open", crate::i18n::trs("Open folder"), false).on_click(cx.listener(move |this, _, _, _| this.file_open(&r, false)))); }
     if loaded { if let Some(top) = top.clone() {
         bar = bar.child(div().w(px(1.)).h(px(18.)).mx_1().bg(c("line")));
-        for (label, kind, icon) in viewer_buttons(&snap) {
+        let buttons = viewer_buttons(&snap);
+        let has_mech = buttons.iter().any(|(_, k, _)| *k == "mech");
+        for (label, kind, icon) in buttons {
             let (t, id) = (top.clone(), format!("page-open-{kind}"));
             /* i18n-ok: ctl labels and ids */ ctl.push(CtlEntry { id: id.clone(), label: format!("Open {label}"), ctl: Ctl::Select(top.clone()) });
             bar = bar.child(action_button(cx, light, SharedString::from(id), icon, crate::i18n::trs(label), false).on_click(cx.listener(move |this, _, window, cx| {
                 let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.view_edit = Some((raw, kind)); this.select(t.clone(), window, cx);
+            })));
+        }
+        if !has_mech {
+            let t = top.clone();
+            /* i18n-ok: ctl labels and ids */ ctl.push(CtlEntry { id: "page-open-mech".into(), label: "New 3D part".into(), ctl: Ctl::Select(top.clone()) });
+            bar = bar.child(action_button(cx, light, "page-open-mech", "box", crate::i18n::trs("New 3D part"), false).on_click(cx.listener(move |this, _, window, cx| {
+                let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.view_edit = Some((raw, "mech")); this.select(t.clone(), window, cx);
             })));
         }
     } }
@@ -796,7 +805,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     if !mech.is_empty() {
         let open = top.clone().map(|top| {
             let t = top.clone();
-            /* i18n-ok: a ctl id */ crate::ui::with_rect(div().id("home-mech-open"), || "ui:Open Mech".to_string()).px_2().py_px().border_1().border_color(c("line")).bg(c("raise")).text_size(crate::scale::tpx(11.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Mech"))
+            /* i18n-ok: a ctl id */ crate::ui::with_rect(div().id("home-mech-open"), || "ui:Open Mech".to_string()).px_2().py_px().border_1().border_color(c("line")).bg(c("raise")).text_size(crate::scale::tpx(11.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Open in SolidCraft"))
                 .on_click(cx.listener(move |this, _, window, cx| { let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.view_edit = Some((raw, "mech")); this.select(t.clone(), window, cx); })).into_any_element()
         });
         out.push(section(light, crate::i18n::tf("gpui.projects.mech", &[("n", mech.len().into())]), open));
@@ -808,7 +817,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child(name.clone()))
                 .children(first.then(|| div().text_color(c("accent")).child(crate::i18n::trs("Assembly"))))
                 .child(div().text_color(c("faint")).child(size_text(*size)))
-                .on_click(cx.listener(move |this, _, _, _| this.file_open(&pth, true)))
+                .on_click(cx.listener(move |this, _, _, cx| this.link_file(&pth, false, cx)))
                 .tooltip(crate::keys::tip_raw(&rel, "", light))
                 .into_any_element());
         }

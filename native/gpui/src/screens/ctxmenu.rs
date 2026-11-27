@@ -31,6 +31,8 @@ pub const LOCAL_URL_OPEN: &str = "local:url-open";
 pub const LOCAL_LINK_FILE: &str = "local:link-file";
 /// A KiCad file link's Open in KiCad (embedded): opened as above, then the KiCad pane in the viewer edits it (kicad_pane.rs).
 pub const LOCAL_KICAD_EMBED: &str = "local:kicad-embed";
+/// A CAD file link's Open in SolidCraft: opened inside the embedded SolidCraft pane.
+pub const LOCAL_SOLIDCRAFT_OPEN: &str = "local:solidcraft-open";
 /// A Download from the hub to this computer (screens/dlbar.rs): its `value` is the hub address and the name, a line apart.
 pub const LOCAL_DOWNLOAD: &str = "local:download";
 /// An item that opens a second menu where the first was (a project's Move to group): its `value` is the second menu's items, as JSON.
@@ -52,6 +54,7 @@ pub fn link_items(href: &str, file: bool, download: Option<(String, String)>) ->
         /* i18n-ok: menu labels, drawn through trs in render */ Route::File(p) => { let mut v = vec![item("Open", LOCAL_LINK_FILE, &p, false)];
             if let Some((u, n)) = &download { v.push(download_item(u, n)); }
             /* i18n-ok: a menu label, drawn through trs in render */ if super::linkroute::kicad_file(&p) { v.push(item("Open in KiCad (embedded)", LOCAL_KICAD_EMBED, &p, false)); }
+            /* i18n-ok: a menu label, drawn through trs in render */ if super::linkroute::cad_file(&p) { v.push(item("Open in SolidCraft", LOCAL_SOLIDCRAFT_OPEN, &p, false)); }
             /* i18n-ok: menu labels, drawn through trs in render */ v.extend([item("Show in folder", LOCAL_FILE_REVEAL, &p, false), item("Copy path", LOCAL_COPY, &p, false)]); v }
         /* i18n-ok: menu labels, drawn through trs in render */ Route::Web(u) => vec![item("Open link", LOCAL_URL_OPEN, &u, false), item("Copy link", LOCAL_COPY, &u, false)],
         /* i18n-ok: menu labels, drawn through trs in render */ _ => vec![item("Copy link", LOCAL_COPY, href.trim(), false)],
@@ -240,7 +243,7 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_FILE_OPEN || a == LOCAL_FILE_REVEAL => { self.ctx_close(cx); self.file_open(&v, a == LOCAL_FILE_REVEAL); return }
             Some((a, v)) if a == LOCAL_COPY => { self.ctx_close(cx); cx.write_to_clipboard(ClipboardItem::new_string(v)); return }
             Some((a, v)) if a == LOCAL_URL_OPEN => { self.ctx_close(cx); cx.open_url(&v); return }
-            Some((a, v)) if a == LOCAL_LINK_FILE || a == LOCAL_KICAD_EMBED => { self.ctx_close(cx); self.link_file(&v, a == LOCAL_KICAD_EMBED, cx); return }
+            Some((a, v)) if a == LOCAL_LINK_FILE || a == LOCAL_KICAD_EMBED || a == LOCAL_SOLIDCRAFT_OPEN => { self.ctx_close(cx); self.link_file(&v, a == LOCAL_KICAD_EMBED, cx); return }
             Some((a, v)) if a == LOCAL_DOWNLOAD => { self.ctx_close(cx); if let Some((u, n)) = v.split_once('\n') { self.download(u.to_string(), n.to_string(), super::dlbar::From::Other, cx); } return }
             Some((a, _)) if a == LOCAL_SAVE_IMAGE => { self.ctx_close(cx); if let Some(s) = self.screens.ctx_save.take() { self.save_image(s, cx); } return }
             Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); self.copy_image(cx); return }
@@ -371,9 +374,11 @@ mod tests {
         // a KiCad file: Open, Open in KiCad (embedded), Show in folder, Copy path
         assert_eq!(l("boards/main/main.kicad_sch", true).iter().map(|x| (x.0.as_str(), x.1.as_str())).collect::<Vec<_>>(),
             [("Open", LOCAL_LINK_FILE), ("Open in KiCad (embedded)", LOCAL_KICAD_EMBED), ("Show in folder", LOCAL_FILE_REVEAL), ("Copy path", LOCAL_COPY)]);
-        assert_eq!(l("file:///w/a.kicad_pcb", true).len(), 4); assert_eq!(l("/w/case.step", true).len(), 3, "a model has no KiCad to edit it");
+        assert_eq!(l("file:///w/a.kicad_pcb", true).len(), 4);
+        assert_eq!(l("/w/case.step", true).iter().map(|x| (x.0.as_str(), x.1.as_str())).collect::<Vec<_>>(),
+            [("Open", LOCAL_LINK_FILE), ("Open in SolidCraft", LOCAL_SOLIDCRAFT_OPEN), ("Show in folder", LOCAL_FILE_REVEAL), ("Copy path", LOCAL_COPY)]);
         assert_eq!(l("/w/case.sc", true).iter().map(|x| (x.0.as_str(), x.1.as_str())).collect::<Vec<_>>(),
-            [("Open", LOCAL_LINK_FILE), ("Show in folder", LOCAL_FILE_REVEAL), ("Copy path", LOCAL_COPY)]);
+            [("Open", LOCAL_LINK_FILE), ("Open in SolidCraft", LOCAL_SOLIDCRAFT_OPEN), ("Show in folder", LOCAL_FILE_REVEAL), ("Copy path", LOCAL_COPY)]);
         assert_eq!(l("https://x.io", false).iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), [LOCAL_URL_OPEN, LOCAL_COPY]); assert_eq!(l("javascript:x", false).len(), 1);
         assert_eq!(image_items("/h/a.png").iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Copy image", "Save image as\u{2026}", "Open", "Show in folder", "Copy path"]);
         assert_eq!(image_items("").iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), [LOCAL_COPY_IMAGE, LOCAL_SAVE_IMAGE], "a picture with no file of its own (a web picture, a relative one) still copies and saves");
@@ -473,5 +478,12 @@ mod tests {
         let sub = sub_items(&it[5].value);
         assert_eq!(sub, vec![item("Nordic", "group-move", "k1\u{1f}folder:/w/n", false), item("New group\u{2026}", "group-new-start", "k1", false)]);
         assert!(section_items(&Value::Null).is_empty(), "an older hub: the window's own menu");
+    }
+    #[test] fn cad_file_links_offer_open_in_solidcraft() {
+        for p in ["mech/case.step", "mech/part.sc", "model.stl"] {
+            let items = link_items(p, true, None);
+            assert!(items.iter().any(|i| i.action == LOCAL_SOLIDCRAFT_OPEN && i.label == "Open in SolidCraft"), "{p}");
+        }
+        assert!(!link_items("board.kicad_pcb", true, None).iter().any(|i| i.action == LOCAL_SOLIDCRAFT_OPEN));
     }
 }
