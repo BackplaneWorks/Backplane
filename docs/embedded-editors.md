@@ -292,3 +292,12 @@ What did not come for free, and so is the fork's job:
   - The next macOS step is `CAContext` + `CALayerHost` (input forwarded), not IOSurface.
   - Phones and remote hubs keep the viewers. A WASM build is out: its files are KiCad 10.0 only, and serving it is conveying under GPL §6.
 - **GPL:** KiCad stays a separate process behind a documented `.proto` contract and keeps running standalone. Its runtime archive ships with source and notices. Nothing from KiCad is linked into `backplane-gpui`.
+
+## SolidCraft (desktop CAD pane)
+
+Backplane embeds **SolidCraft** (`v0.50.0`, pure-Rust parametric CAD, Apache-2.0/MIT) for all desktop `mech` / CAD viewing and parametric editing (`.sc`, `.solidcraft`, `.step`, `.stp`, `.iges`, `.igs`, `.stl`, `.3mf`, `.obj`, `.glb`). Mobile (iOS/Android) and Web keep their existing 3D mesh/STEP viewers (with `.sc` designs optionally converted via `solidcraft-cli` when available).
+
+- **Hub session (`native/host/src/solidcraft/embed.rs`):** One GUI process per project root (`editor.solidcraft.<digest(root)>`), launched via `proc.rs` with `--control <port> --new-instance` and hub-owned token (`SOLIDCRAFT_CONTROL_TOKEN`), isolated `SOLIDCRAFT_CONTROL_DIR`, `SOLIDCRAFT_SETTINGS_DIR`, `XDG_DATA_HOME`, `SOLIDCRAFT_NO_TELEMETRY=1`, and `SOLIDCRAFT_UPDATE_CHECK=0`. First launch seeds `app.ron` (`ask_import_options: false`, telemetry/update/promo UI off) so STEP/CAD files open directly without blocking modals.
+- **Desktop adoption (`native/gpui/src/viewers/solidcraft_pane.rs`):** GPUI adopts the X11 toplevel by `_NET_WM_PID` into a 24-bit `native_child` container (matching `kicad_pane.rs`), keeping up to 3 containers across tab switches (`detach {keep: true}` parks the session and reclaims after 10 minutes idle) with zero respawn on file switches (`engine.execute {command: "doc.open"}`) and SHAPE cutouts for overlays.
+- **MCP live sync (`native/host/src/agents/solidcad.rs`):** When a SolidCraft pane is open for a project, `solidcraft-cli mcp --connect 127.0.0.1:<port>` connects over the hub-owned control channel so agent edits appear live in the pane; otherwise `solidcraft-cli mcp --headless` is used.
+- **Platforms:** Linux X11/XWayland and Windows x64 support full embedded pane + CLI; macOS installs `solidcraft-cli` for MCP and headless renders (no embedded GUI yet because upstream ships GUI as `.dmg` only); remote machines and phones render via `solidcraft-cli snapshot` / `stepglb`.

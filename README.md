@@ -7,7 +7,7 @@
   <img src="docs/media/readme/backplane-banner.png" alt="Backplane, the default for agentic CAD">
 </p>
 
-Backplane is an open-source workspace for agentic hardware development. Your agent edits KiCad and FreeCAD files; you follow the work in board, schematic, 3D and mechanical viewers, click a part, and talk about it.
+Backplane is an open-source workspace for agentic hardware development. Your agent edits KiCad, SolidCraft, and FreeCAD files; you follow the work in board, schematic, 3D and mechanical viewers, click a part, and talk about it.
 
 - **Your agent, your choice.** Claude, Codex, Grok, OpenCode, Muse Code, Antigravity, Pi and Oh My Pi, in one workspace.
 - **A KiCad fork built for agents.** [Backplane KiCad](https://github.com/BackplaneWorks/Backplane_KiCad) adds board and schematic IPC APIs so agents can edit through KiCad.
@@ -38,7 +38,7 @@ Linux (x64, arm64): the same one-liner, or `backplane-v<version>-linux-<arch>-na
 
 The first run asks about anonymous usage counts in a popup; they are on by default and Settings turns them off.
 
-See [installation](docs/install.md) for details, Windows setup, phone pairing and uninstalling. You need an agent CLI, KiCad for board and schematic work, and FreeCAD for mechanical work. Antigravity can be installed from Settings.
+See [installation](docs/install.md) for details, Windows setup, phone pairing and uninstalling. You need an agent CLI, KiCad for board and schematic work, and SolidCraft (one-click install in onboarding or Settings → CAD; Linux/Windows embedded desktop CAD, macOS CLI-only) or FreeCAD for mechanical work. Antigravity can be installed from Settings.
 
 ## Quick start
 
@@ -56,7 +56,7 @@ See [installation](docs/install.md) for details, Windows setup, phone pairing an
 The viewers show the design as the agent works.
 
 - **Board, Schematic, 3D.** Hierarchical schematics, layer controls in KiCad’s order and names, and cross-probing between views.
-- **Mech.** View STEP or GLB models. Agents model parts with FreeCAD scripts, export STEP, and show the result here. Mechanical-only folders need no KiCad project; see the [mechanical quickstart](docs/mechanical.md).
+- **Mech.** Embedded **SolidCraft** parametric CAD on desktop (1-click install of pinned `v0.50.0` in onboarding or Settings → CAD) plus STEP/GLB viewing on web and phones. Agents create and edit `.sc`/`.solidcraft` parts via `solidcraft_*` MCP tools (or optional FreeCAD scripts for `.FCStd`) and show the result live here. Mechanical-only folders need no KiCad project; see the [mechanical quickstart](docs/mechanical.md).
 - **History and review.** Compare versions, inspect changes by sheet and layer, pin comments to a board or schematic, and run BOM, ERC and DRC checks from the Review tab.
 - **Skills.** KiCad skills from [KiStack](https://github.com/BackplaneWorks/kistack) ship with the app: schematic, layout, footprints, BOM and fabrication exports.
 - **Ordering.** When a design has a fab file, Buy it opens a thread that checks the design and gets a quote. See [ordering](docs/order.md).

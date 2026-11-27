@@ -97,11 +97,11 @@ These agents sign in within a terminal, and Backplane cannot check that sign-in;
 
 ## 3. Design tools
 
-One row for KiCad and one for FreeCAD: found with its version, Install, or Locate it.
+Rows for **KiCad**, **SolidCraft**, and **FreeCAD**: found with version, Install, or Locate it.
 
-Setup installs Backplane KiCad by itself when no KiCad is found and a package exists for the computer: Linux x64, macOS on Apple silicon and Windows x64. It checks the download against the pinned checksum and the release's list, unpacks it in a staging folder and moves it into `<home>/kicad/<version>` (`%LOCALAPPDATA%\Backplane\kicad\<version>` on Windows), with no administrator password. The row shows the progress and ends with the version; a failure shows its reason and Try again. Where no package exists (Linux ARM64, Intel Macs) the row says so and offers the stock download. With stock KiCad found, one press installs Backplane KiCad beside it. Releases: <https://github.com/BackplaneWorks/Backplane_KiCad/releases>.
-
-Stock KiCad 9 or later is enough to plot and export. Agents edit a board in a running KiCad only with Backplane KiCad, our build with an editing API. With stock KiCad, agents edit the files. FreeCAD installs with one press through winget on Windows when it is there, and opens its download page otherwise.
+- **KiCad**: Setup installs Backplane KiCad by itself when no KiCad is found and a package exists for the computer: Linux x64, macOS on Apple silicon and Windows x64. It checks the download against the pinned checksum and the release's list, unpacks it in a staging folder and moves it into `<home>/kicad/<version>` (`%LOCALAPPDATA%\Backplane\kicad\<version>` on Windows), with no administrator password. The row shows the progress and ends with the version; a failure shows its reason and Try again. Where no package exists (Linux ARM64, Intel Macs) the row says so and offers the stock download. With stock KiCad found, one press installs Backplane KiCad beside it. Releases: <https://github.com/BackplaneWorks/Backplane_KiCad/releases>. Stock KiCad 9 or later is enough to plot and export; agents edit a board in a running KiCad only with Backplane KiCad.
+- **SolidCraft**: Backplane's embedded desktop CAD editor and headless 3D/MCP engine (`v0.50.0`, Apache-2.0/MIT). One press installs the pinned release into `<home>/solidcraft/<version>` after checking both the pinned digest and `SHA256SUMS.txt`. Linux (x64, ARM64) and Windows (x64) install both `solidcraft` (embedded CAD pane) and `solidcraft-cli` (MCP + headless snapshots/evaluation). On macOS, Backplane installs `solidcraft-cli` automatically for agent MCP and headless renders while the GUI opens only if installed separately. Missing SolidCraft never blocks setup and can also be installed later from Settings › CAD or directly from an empty CAD pane.
+- **FreeCAD**: Installs with one press through winget on Windows when it is there, and opens its download page otherwise.
 
 | System | KiCad | FreeCAD |
 | --- | --- | --- |
