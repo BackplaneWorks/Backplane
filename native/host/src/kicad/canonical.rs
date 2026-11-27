@@ -94,7 +94,7 @@ pub fn is_design(rel: &str) -> bool {
         || name.ends_with(".fab.json") || name.ends_with(".backplane.json") && name != ".backplane.json"
         || dirs.iter().any(|d| *d == "mech" || *d == "mfg" || d.ends_with(".pretty") || d.ends_with(".3dshapes"))
 }
-const DESIGN_EXT: &[&str] = &[".kicad_pcb", ".kicad_sch", ".kicad_pro", ".kicad_prl", ".kicad_sym", ".kicad_mod", ".kicad_dru", ".kicad_wks", ".step", ".stp", ".wrl", ".fcstd",
+const DESIGN_EXT: &[&str] = &[".kicad_pcb", ".kicad_sch", ".kicad_pro", ".kicad_prl", ".kicad_sym", ".kicad_mod", ".kicad_dru", ".kicad_wks", ".step", ".stp", ".sc", ".solidcraft", ".iges", ".igs", ".stl", ".3mf", ".obj", ".glb", ".wrl", ".fcstd",
     ".prjpcb", ".pcbdoc", ".schdoc", ".schlib", ".pcblib", ".intlib", ".outjob", ".prjpcbstructure"]; // Altium's project, documents and libraries
 fn is_scratch(low: &str) -> bool { (low.starts_with("history/") || low.contains("/history/")) && (low.ends_with(".zip") || low.contains(".schdoc") || low.contains(".pcbdoc") || low.contains(".prjpcb")) || low.contains("__previews/") || low.ends_with(".schdocpreview") || low.ends_with(".pcbdocpreview") || low.contains("-backups/") || low.ends_with(".lck") || low.ends_with("fp-info-cache") || low.contains("_autosave-") || low.contains("/.backplane/") || low.starts_with(".backplane/") }
 /// The documents one writer at a time holds: boards and schematics.
@@ -551,7 +551,7 @@ mod tests {
 
     #[test] fn design_files_are_told_from_code_by_type() {
         for d in ["boards/main/main.kicad_pcb", "a.kicad_sch", "x/y.kicad_pro", "lib/my.kicad_sym", "lib/my.pretty/R_0402.kicad_mod", "fp-lib-table", "sym-lib-table",
-                  "mech/case.py", "mech/case.step", "mfg/gerbers/top.gbr", "boards/main/main.fab.json", "boards/main/main.kicad_pcb.backplane.json", "models/usb.3dshapes/usb.wrl", "enclosure.FCStd"] {
+                  "mech/case.py", "mech/case.step", "case.sc", "case.solidcraft", "part.iges", "part.stl", "part.3mf", "part.obj", "part.glb", "mfg/gerbers/top.gbr", "boards/main/main.fab.json", "boards/main/main.kicad_pcb.backplane.json", "models/usb.3dshapes/usb.wrl", "enclosure.FCStd"] {
             assert!(is_design(d), "{d} is design")
         }
         for c in ["firmware/src/main.c", "src/lib.rs", "Cargo.toml", "CMakeLists.txt", "zephyr/prj.conf", ".backplane.json", "README.md", "boards/main/main-backups/x.kicad_pcb", "boards/main/~main.kicad_pcb.lck", "fp-info-cache", "boards/_autosave-main.kicad_sch", ".backplane/worktrees/x/a.kicad_pcb"] {

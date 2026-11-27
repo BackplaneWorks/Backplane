@@ -16,7 +16,7 @@ pub const CAD_EXTS: &[&str] = &[".step", ".stp", ".sc", ".solidcraft", ".iges", 
 /// Whether `name` is a CAD or 3D model file supported by the SolidCraft pane / viewers.
 pub fn is_cad(name: &str) -> bool {
     let l = name.to_ascii_lowercase();
-    CAD_EXTS.iter().any(|x| l.ends_with(x))
+    CAD_EXTS.iter().any(|x| l.len() > x.len() && l.ends_with(x))
 }
 
 /// Binary CAD/mesh containers whose raw bytes are not useful text for `files_read`.
@@ -106,6 +106,7 @@ mod tests {
         for (n, k) in [("a.kicad_pcb","board"),("A.KICAD_PCB","board"),("x.kicad_sch","schematic"),("m.step","3d"),("m.STP","3d"),("m.glb","3d"),("case.sc","3d"),("case.solidcraft","3d"),("p.iges","3d"),("p.IGS","3d"),("m.stl","3d"),("m.3mf","3d"),("m.obj","3d"),("p.PDF","pdf"),("i.png","image"),("i.JpEg","image"),("n.txt",""),("Makefile",""),("",""),("a.kicad_pcb.bak","")] { assert_eq!(kind(n), k, "{n}") }
         assert!(is_binary_cad("a.sc") && is_binary_cad("a.SOLIDCRAFT") && is_binary_cad("a.3mf") && is_binary_cad("a.glb"));
         assert!(!is_binary_cad("a.step") && !is_binary_cad("a.txt"));
+        assert!(!is_cad(".sc") && !is_cad(".step") && !is_cad("step"));
         assert_eq!(preview("n.md"), "text"); assert_eq!(preview("a.kicad_pcb"), "board"); assert_eq!(preview("x.YAML"), "text");
     }
     // laws fm_safe_up fm_safe_abs fm_safe_down fm_files_safe_*
