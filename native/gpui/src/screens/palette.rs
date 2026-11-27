@@ -22,7 +22,7 @@ pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
 }
 
 #[derive(Default)]
-pub struct Palette { can_embed: bool, pub(crate) editor_active: bool, pub(crate) solidcraft_open: bool, pub(crate) solidcraft_popped: bool, pub(crate) solidcraft_installed: Option<bool>, pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
+pub struct Palette { can_embed: bool, pub(crate) editor_active: bool, pub(crate) solidcraft_open: bool, pub(crate) solidcraft_popped: bool, pub(crate) solidcraft_full: bool, pub(crate) solidcraft_installed: Option<bool>, pub focus: bool, pub open: bool, pub input: Option<Entity<Composer>>, pub q: String, pub ix: usize,
     /// "Search in thread": the thread (its raw id) the box searches, "" for the whole palette
     pub scope: String,
     /// Find across threads (Ctrl+Shift+F): the box lists only what was said, and the threads named by the words
@@ -177,6 +177,10 @@ pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
     // the sidebar's rows, then the hub's title hits for threads it does not hold (settled, older pages)
     let mut all = items(data, p.can_embed);
     if p.solidcraft_open {
+        if !p.solidcraft_popped {
+            let label = if p.solidcraft_full { trs("SolidCraft: Exit full screen") } else { trs("SolidCraft: Full screen") };
+            all.push(Item { label, place: trs("viewer"), kind: "action", what: Do::SolidCraft("full".into()), row: Value::Null });
+        }
         let (act, label) = if p.solidcraft_popped { ("bring_back", trs("SolidCraft: Bring back")) } else { ("detach", trs("SolidCraft: Pop out")) };
         all.push(Item { label, place: trs("viewer"), kind: "action", what: Do::SolidCraft(act.into()), row: Value::Null });
     }
@@ -222,6 +226,7 @@ impl Backplane {
         self.screens.palette.editor_active = self.dock_editor_active(&self.data["thread"], self.screens.palette.can_embed, cx);
         self.screens.palette.solidcraft_open = self.screens.solidcraft.is_some();
         self.screens.palette.solidcraft_popped = self.screens.solidcraft.as_ref().is_some_and(|p| p.read(cx).popped);
+        self.screens.palette.solidcraft_full = self.screens.solidcraft_full;
         self.screens.palette.solidcraft_installed = self.screens.solidcraft_infos.get("solidcraft.runtime").and_then(|v| v["installed"].as_bool());
         self.kicad_lend(cx);
         self.solidcraft_lend(cx);
@@ -278,6 +283,17 @@ impl Backplane {
             Do::SolidCraft(act) => match act.as_str() {
                 "open" => self.rail_press("view-kind", "mech", cx),
                 "new" => self.solidcraft_new_part(cx),
+                "full" => {
+                    let on_mech = self.data["thread"]["viewer"]["open"] == "mech"
+                        || (super::viewer::is_tiled(&self.data["thread"]["viewer"])
+                            && crate::viewers::solidcraft_pane::mech_tile(&self.data["thread"]["viewer"]).is_some());
+                    if !on_mech {
+                        self.rail_press("view-kind", "mech", cx);
+                        self.solidcraft_set_full(true, cx);
+                    } else {
+                        self.solidcraft_toggle_full(cx);
+                    }
+                }
                 "detach" => self.solidcraft_popout(cx),
                 "bring_back" => {
                     let h = self.screens.solidcraft_window;
@@ -464,10 +480,17 @@ mod tests {
         assert!(listed(&data(), &p_install).iter().any(|i| i.what == Do::SolidCraft("settings".into())));
 
         let p_pop = Palette { q: "solidcraft".into(), can_embed: true, solidcraft_open: true, solidcraft_popped: false, ..Default::default() };
-        assert!(listed(&data(), &p_pop).iter().any(|i| i.what == Do::SolidCraft("detach".into())));
+        let pop_items = listed(&data(), &p_pop);
+        assert!(pop_items.iter().any(|i| i.what == Do::SolidCraft("detach".into())));
+        assert!(pop_items.iter().any(|i| i.what == Do::SolidCraft("full".into()) && i.label == trs("SolidCraft: Full screen")));
+
+        let p_full = Palette { q: "solidcraft".into(), can_embed: true, solidcraft_open: true, solidcraft_popped: false, solidcraft_full: true, ..Default::default() };
+        assert!(listed(&data(), &p_full).iter().any(|i| i.what == Do::SolidCraft("full".into()) && i.label == trs("SolidCraft: Exit full screen")));
 
         let p_back = Palette { q: "solidcraft".into(), can_embed: true, solidcraft_open: true, solidcraft_popped: true, ..Default::default() };
-        assert!(listed(&data(), &p_back).iter().any(|i| i.what == Do::SolidCraft("bring_back".into())));
+        let back_items = listed(&data(), &p_back);
+        assert!(back_items.iter().any(|i| i.what == Do::SolidCraft("bring_back".into())));
+        assert!(!back_items.iter().any(|i| i.what == Do::SolidCraft("full".into())));
     }
     #[test] fn opened_empty_the_threads_waiting_on_the_person_come_first() {
         let d = json!({"projects": [{"id": "h|p1", "title": "Amp", "threads": [{"id": "h|t1", "title": "Quiet one", "status": "inactive", "want": ""},

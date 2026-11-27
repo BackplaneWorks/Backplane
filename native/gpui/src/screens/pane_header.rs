@@ -130,6 +130,7 @@ pub enum Press {
     Tile(super::tile_menu::Action),
     FocusProbe,
     ClearProbe,
+    SolidCraftFull,
 }
 
 impl Press {
@@ -194,6 +195,7 @@ impl Press {
                 super::plotview::report_state(this);
                 cx.notify();
             }
+            Self::SolidCraftFull => this.solidcraft_toggle_full(cx),
         }
     }
 }
@@ -295,6 +297,7 @@ fn face(light: bool, tool: &Tool, entity: &WeakEntity<Backplane>, press: &Press,
         Press::Hub(action, _) if action == "view" && tool.id == "gerbers-vs-board" =>
             with_rect(d, || "ui:vs board".into()).into_any_element(), // i18n-ok: physical probe ID
         Press::GerbView(_) => with_rect(d, || "ui:Open in GerbView".into()).into_any_element(), // i18n-ok: physical probe ID
+        Press::SolidCraftFull => with_rect(d, || "solidcraft:full".into()).into_any_element(),
         _ => d.into_any_element(),
     }
 }
@@ -357,6 +360,7 @@ fn tiled_room(room: f32, close: f32, minimum: f32, more: f32, gap: f32,
 fn priority(id: &str, pane_action: bool) -> u8 {
     if id == "br-hand" { return 0 }
     if id == "br-url" { return 1 }
+    if id == "solidcraft-full" || id == "solidcraft-pop" { return 0 }
     if id.starts_with("tile:") && id.ends_with(":fit") { 3 }
     else if id == "layers-btn" || id.starts_with("tile:") && id.ends_with(":layers") || id.starts_with("plot-fit-") || id.starts_with("rv-")
         || id == "fm-up" || id.starts_with("crumb-") { 0 }

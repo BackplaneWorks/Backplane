@@ -172,3 +172,28 @@ export class HistoryStripState {
     return { commit: ref.commit, bits: 0 };
   }
 }
+
+export const WEB_VIEWER_MIN_PX = 340;
+export const WEB_THREAD_MIN_PX = 320;
+
+export function clampWebViewerWidth(
+  windowW: number,
+  pointerX: number,
+  railW: number,
+  sidebarW: number,
+  minViewer = WEB_VIEWER_MIN_PX,
+  minThread = WEB_THREAD_MIN_PX
+): number {
+  const maxW = Math.max(minViewer, Math.floor(windowW - railW - sidebarW - minThread));
+  const wanted = Math.round(windowW - railW - pointerX);
+  return Math.max(minViewer, Math.min(maxW, wanted));
+}
+
+export function resolveWebViewerFullscreen(
+  current: boolean,
+  want: boolean | undefined,
+  activeKind: string
+): boolean {
+  if (activeKind !== "mech") return false;
+  return want ?? !current;
+}

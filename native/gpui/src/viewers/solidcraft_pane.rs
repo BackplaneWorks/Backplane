@@ -533,6 +533,16 @@ pub fn release_all() {
 pub enum SolidCraftEvent {
     Popout,
     BringBack,
+    Escape,
+}
+
+/// Compute the next SolidCraft fullscreen flag given current flag, desired toggle/set, and
+/// whether SolidCraft is actively embedded (visible, local, not popped out).
+pub fn next_solidcraft_full(current: bool, want: Option<bool>, active: bool) -> bool {
+    if !active {
+        return false;
+    }
+    want.unwrap_or(!current)
 }
 
 /// Embedded SolidCraft GPUI pane.
@@ -1038,12 +1048,14 @@ impl SolidCraftPane {
             nc::keep_focus(self.toplevel);
         }
         let mut escaped = false;
+        let mut plain_escape = false;
         let mut saw_key = false;
         let mut click_in = TickClickIn::None;
         for e in nc::events_for(c, self.toplevel) {
             match e {
                 nc::Ev::Escape => {
                     escaped = true;
+                    plain_escape = true;
                 }
                 nc::Ev::Key(k) => {
                     escaped = true;
@@ -1109,7 +1121,10 @@ impl SolidCraftPane {
                 }
             }
         }
-        if self.keys != prev_keys || saw_key {
+        if plain_escape {
+            cx.emit(SolidCraftEvent::Escape);
+        }
+        if self.keys != prev_keys || saw_key || plain_escape {
             cx.notify();
         }
     }
@@ -1965,6 +1980,11 @@ impl Backplane {
                     let _ = h.update(cx, |_, w, _| w.remove_window());
                 }
             }
+            SolidCraftEvent::Escape => {
+                if this.screens.solidcraft_full {
+                    this.solidcraft_set_full(false, cx);
+                }
+            }
         })
         .detach();
         self.screens.solidcraft = Some(page.clone());
@@ -2047,6 +2067,27 @@ impl Backplane {
         self.rail_press("view-kind", "mech", cx);
     }
 
+    pub(crate) fn solidcraft_set_full(&mut self, full: bool, cx: &mut Context<Self>) {
+        let active = self.screens.solidcraft.is_some() && self.screens.solidcraft_window.is_none();
+        let next = next_solidcraft_full(self.screens.solidcraft_full, Some(full), active);
+        if self.screens.solidcraft_full == next {
+            return;
+        }
+        self.screens.solidcraft_full = next;
+        // Keep `placed` intact so `after_frame()` computes `PlacePlan::SyncResize { pre_clip }`
+        // and updates the X11 container inside `window.after_present(...)` without flicker.
+        if let Some(p) = self.screens.solidcraft.clone() {
+            p.update(cx, |p, _| p.lend_focus());
+        }
+        self.ui_epoch += 1;
+        cx.notify();
+    }
+
+    pub(crate) fn solidcraft_toggle_full(&mut self, cx: &mut Context<Self>) {
+        let next = !self.screens.solidcraft_full;
+        self.solidcraft_set_full(next, cx);
+    }
+
     pub(crate) fn solidcraft_popout(&mut self, cx: &mut Context<Self>) {
         let Some(pane) = self.screens.solidcraft.clone() else {
             return;
@@ -2090,6 +2131,7 @@ impl Backplane {
                     p.popped = true;
                     cx.notify();
                 });
+                self.screens.solidcraft_full = false;
                 self.screens.solidcraft_window = Some(h.into());
             }
             Err(e) => {
@@ -2764,5 +2806,15 @@ mod tests {
                 action: TickFocusAction::None,
             }
         );
+    }
+
+    #[test]
+    fn solidcraft_fullscreen_toggles_when_active_and_resets_when_inactive() {
+        assert!(next_solidcraft_full(false, None, true));
+        assert!(!next_solidcraft_full(true, None, true));
+        assert!(next_solidcraft_full(false, Some(true), true));
+        assert!(!next_solidcraft_full(true, Some(false), true));
+        assert!(!next_solidcraft_full(true, None, false));
+        assert!(!next_solidcraft_full(false, Some(true), false));
     }
 }

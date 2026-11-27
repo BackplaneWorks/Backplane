@@ -111,6 +111,7 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
   open: (kind: string, threadId: string, target?: { path?: string; line?: number }) => void;
   close: () => void;
   reconcileHas: (has: RailHas) => void;
+  refreshHeader: () => void;
 } {
   const header = document.createElement("div");
   header.className = "bp-vh";
@@ -806,6 +807,25 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       controlsEl.append(followBtn);
     }
 
+    if (page === "mech" && api.setViewerFullscreen) {
+      const fsOn = Boolean(api.isViewerFullscreen?.());
+      const fsBtn = document.createElement("button");
+      fsBtn.type = "button";
+      fsBtn.className = "bp-v-btn" + (fsOn ? " is-on" : "");
+      fsBtn.textContent = fsOn
+        ? t("gpui.c.kicad.exit.full.screen", "Exit full screen")
+        : t("gpui.c.kicad.full.screen", "Full screen");
+      fsBtn.title = fsOn
+        ? t("gpui.c.solidcraft.exit.full.tip", "Restore the chat and sidebar (Esc)")
+        : t("gpui.c.solidcraft.full.tip", "Expand SolidCraft to fill the window (Esc to restore)");
+      fsBtn.setAttribute("data-testid", "viewer-fullscreen-btn");
+      fsBtn.addEventListener("click", () => {
+        api.setViewerFullscreen?.(!Boolean(api.isViewerFullscreen?.()));
+        renderHeader();
+      });
+      controlsEl.append(fsBtn);
+    }
+
     const closeBtn = document.createElement("button");
     closeBtn.type = "button";
     closeBtn.className = "bp-v-btn bp-v-close";
@@ -1431,6 +1451,9 @@ export function mountViewerPane(container: HTMLElement, api: ViewerHostApi): {
       if (page && !pageHasBacking(page, has)) {
         api.closeViewer();
       }
+    },
+    refreshHeader() {
+      if (page) renderHeader();
     },
     close() {
       watchGen++;

@@ -15,7 +15,7 @@ pub const APP_CHANNELS: [&str; 3] = ["stable", "beta", "nightly"];
 pub const TEXT_PCT: (u32, u32, u32) = (80, 160, 5);   // min, max, step (the slider's stops)
 pub const SIDEBAR_PX: (u32, u32, u32) = (180, 420, 24);
 /// The viewer pane's width: 0 is the default (VIEWER_PX_DEFAULT); a drag on its left edge sets it, a double click puts it back.
-pub const VIEWER_PX: (u32, u32) = (380, 1400);
+pub const VIEWER_PX: (u32, u32) = (380, 3200);
 pub const VIEWER_PX_DEFAULT: u32 = 700;
 /// Keystrokes a shortcut can be set to (a pick, not free text: a bad keystroke would unbind the action).
 pub const KEYS: [&str; 8] = ["enter", "ctrl-enter", "escape", "ctrl-b", "ctrl-k", "ctrl-shift-b", "ctrl-shift-k", "alt-s"];

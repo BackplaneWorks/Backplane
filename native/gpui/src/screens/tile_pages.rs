@@ -88,6 +88,16 @@ pub(super) fn tools(
         layers.active = (focused(thread, row) && screens.plots[slot].layers_open) || strip.mode > 0;
         return vec![layers];
     }
+    if row["kind"] == "mech"
+        && crate::viewers::solidcraft_pane::mech_tile(&thread["viewer"]) == row["id"].as_str()
+        && screens.solidcraft.is_some()
+        && screens.solidcraft_window.is_none()
+    {
+        return vec![viewer::solidcraft_full_tool(
+            cx,
+            viewer::SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed),
+        )];
+    }
     if !focused(thread, row) {
         return vec![];
     }

@@ -1002,6 +1002,18 @@ pub fn editor_press(viewer: &Value) -> Option<String> {
     // against the hub's rail kind, as pane_page reads it (the Gerbers page is the Board page drawing a set: a Board press from it is not answered)
     pressed(&active_kind(viewer, None)).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
 }
+pub(super) fn solidcraft_full_tool(cx: &Context<Backplane>, full: bool) -> Tool {
+    let label = if full { trs("Exit full screen") } else { trs("Full screen") };
+    let tip = t(if full {
+        "gpui.c.solidcraft.exit.full.tip"
+    } else {
+        "gpui.c.solidcraft.full.tip"
+    });
+    let mut tool = button(cx, "solidcraft-full", label, Press::SolidCraftFull);
+    tool.active = full;
+    hint(tool, tip, "")
+}
+
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
 pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: Option<[&mut super::plotview::PlotView; 2]>, solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, solidcraft: Option<&Entity<crate::viewers::solidcraft_pane::SolidCraftPane>>, update: Option<AnyElement>, review_panel: Option<AnyElement>, checks: &super::mgmt_checks::State, tile_menu: &super::tile_menu::State) -> AnyElement {
     let shared_scroll = review_panel.is_some();
@@ -1071,12 +1083,16 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             "3d" => { let h = header(cx); div().size_full().flex().flex_col().child(pane_header(light, h.identity, vec![], h.controls)).child(model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false))).into_any_element() }
             "mech" => {
                 let h = header(cx);
+                let mut tools = Vec::new();
+                if solidcraft.is_some_and(|sc| !sc.read(cx).popped) {
+                    tools.push(solidcraft_full_tool(cx, SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed)));
+                }
                 let body = match solidcraft {
                     Some(sc) if sc.read(cx).popped => crate::viewers::solidcraft_pane::popped_placeholder(cx, light),
                     Some(sc) => div().flex_1().min_h_0().child(sc.clone()).into_any_element(),
                     None => model_loading(&mut pv.loading, &lk, &super::panestate::loading_for(k, false)),
                 };
-                div().size_full().flex().flex_col().child(mech_header(cx, light, viewer, pv, h, Vec::new())).child(body).into_any_element()
+                div().size_full().flex().flex_col().child(mech_header(cx, light, viewer, pv, h, tools)).child(body).into_any_element()
             },
             _ => {
                 let secs = pv.loading.track_now(&lk);
@@ -1096,6 +1112,9 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             let mut tools = Vec::new();
             if let Some(sc) = solidcraft {
                 let popped = sc.read(cx).popped;
+                if !popped {
+                    tools.push(solidcraft_full_tool(cx, SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed)));
+                }
                 let c = |n: &str| theme::color(light, n);
                 let (id, label, probe) = if popped {
                     ("solidcraft-pop", trs("Bring back"), "solidcraft:bring_back")
@@ -1177,19 +1196,52 @@ pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyE
     let open = open.as_str();
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     // a panel docked at the design's side (BOM, Checks, Fab...) takes its room from the thread first, so the design is not squeezed to a strip
-    let (base, width) = (pane_base(open), pane_px(open, PANE_PANEL.load(std::sync::atomic::Ordering::Relaxed) as f32));
+    let width = pane_px(open, PANE_PANEL.load(std::sync::atomic::Ordering::Relaxed) as f32);
+    let sc_full = SOLIDCRAFT_FULL.load(std::sync::atomic::Ordering::Relaxed)
+        && (open == "mech" || (is_tiled(&thread["viewer"]) && crate::viewers::solidcraft_pane::mech_tile(&thread["viewer"]).is_some()));
     // the embedded editor's full size: the pane takes the room of the sidebar and the thread (ui.rs folds them for it)
-    if KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed) && matches!(open, "board" | "schematic" | "3d") {
-        let screen = KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed);
-        return Some(div().flex_1().min_w_0().h_full().relative().when(!screen, |d| d.border_l_1()).border_color(c("rule")).flex().flex_col().when(crate::art::rects_on(), |d| d.child(crate::art::probe_rect("tile:main".into()))).child(page).into_any_element())
+    if (KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed) && matches!(open, "board" | "schematic" | "3d")) || sc_full {
+        let hide_border = KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed) || sc_full;
+        return Some(div().flex_1().min_w_0().h_full().relative().when(!hide_border, |d| d.border_l_1()).border_color(c("rule")).flex().flex_col().when(crate::art::rects_on(), |d| d.child(crate::art::probe_rect("tile:main".into()))).child(page).into_any_element())
     }
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
-    Some(div().w(px(width)).max_w(relative(if width > base { 1. } else { 0.62 })).min_w(px(PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
-        .when(crate::art::rects_on(), |d| d.child(crate::art::probe_rect("tile:main".into()))).child(resize_handle(cx)).child(page).into_any_element())
+    let least = PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32;
+    let most = PANE_MOST.load(std::sync::atomic::Ordering::Relaxed) as f32;
+    let mut wrap = div().w(px(width)).min_w(px(least)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col();
+    wrap = match pane_max_px(most, least) {
+        Some(cap) => wrap.max_w(px(cap)),
+        None => wrap.max_w(relative(1.)),
+    };
+    Some(wrap.when(crate::art::rects_on(), |d| d.child(crate::art::probe_rect("tile:main".into()))).child(resize_handle(cx)).child(page).into_any_element())
+}
+
+pub const MECH_DEFAULT_PX: f32 = 1040.0;
+
+pub fn pane_base_for(open: &str, saved: u32, share: f32, most: f32) -> f32 {
+    let base = if saved > 0 { saved as f32 } else { share };
+    match open {
+        "split" => base.max(960.),
+        "mech" if saved == 0 => {
+            let cap = if most > 0. { most.max(share) } else { MECH_DEFAULT_PX };
+            base.max(MECH_DEFAULT_PX).min(cap)
+        }
+        _ => base,
+    }
+}
+
+pub fn pane_max_px(most: f32, least: f32) -> Option<f32> {
+    (most > 0.).then(|| most.max(least))
 }
 
 /// The pane's own width on a page: this device's, and for a Split at least a desktop's.
-fn pane_base(open: &str) -> f32 { if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 } }
+fn pane_base(open: &str) -> f32 {
+    use std::sync::atomic::Ordering::Relaxed;
+    let _ = pane_width();
+    let saved = PANE_W.load(Relaxed);
+    let share = PANE_SHARE.load(Relaxed) as f32;
+    let most = PANE_MOST.load(Relaxed) as f32;
+    pane_base_for(open, saved, share, most)
+}
 /// The pane's width on a page with a panel `panel` wide docked at its side (0: none): `with_panel` of this frame's room.
 pub fn pane_px(open: &str, panel: f32) -> f32 { with_panel(pane_base(open), panel, PANE_MOST.load(std::sync::atomic::Ordering::Relaxed) as f32) }
 /// The pane's width with a panel `panel` wide docked at the design's side: the pane grows by what the design lacks of a fair width (PANE_FAIR)
@@ -1207,6 +1259,7 @@ pub fn set_panel(px: f32) { PANE_PANEL.store(px.max(0.).round() as u32, std::syn
 /// The embedded editor this frame (set by ui.rs before the window is drawn, as the pane's least is): drawn at full size (only while one
 /// is open), and drawn in a window of its own (the pane then says so).
 pub static KICAD_FULL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+pub static SOLIDCRAFT_FULL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The embedded editor is the whole window this frame (ui.rs): the pane draws only the editor's strip and the editor.
 pub static KICAD_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static KICAD_POPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -1288,7 +1341,8 @@ fn resize_handle(cx: &mut Context<Backplane>) -> AnyElement {
     div().id("viewer-resize").absolute().left(px(-3.)).top_0().h_full().w(px(7.)).cursor_col_resize().hover(|d| d.bg(rgba(0x80808040)))
         .on_drag(ResizeDrag, |_, _, _, cx| cx.new(|_| Ghost))
         .on_drag_move(cx.listener(|this, e: &DragMoveEvent<ResizeDrag>, window, cx| {
-            let w = width_for(f32::from(window.viewport_size().width), f32::from(e.event.position.x), 71.0, if this.sidebar_open { this.local.sidebar_px as f32 } else { 0.0 });
+            let side = if this.screens.side_shown { this.local.sidebar_px as f32 } else { STRIP_W };
+            let w = width_for(f32::from(window.viewport_size().width), f32::from(e.event.position.x), RAIL_W, side);
             set_pane(this, w, cx);
         }))
         .on_click(cx.listener(|this, e: &ClickEvent, _, cx| { if e.click_count() >= 2 { set_pane(this, 0, cx); } }))
@@ -1636,6 +1690,29 @@ mod tests {
     #[test] fn a_drag_makes_the_pane_as_wide_as_the_room_right_of_the_pointer_within_its_range() {
         assert_eq!(width_for(1600.0, 900.0, 71.0, 264.0), 629); assert_eq!(width_for(1600.0, 1500.0, 71.0, 264.0), crate::local::VIEWER_PX.0);
         assert_eq!(width_for(1600.0, 0.0, 71.0, 264.0), 905, "the thread keeps 360 (0.14)"); assert_eq!(width_for(1600.0, 0.0, 71.0, 0.0), 1169);
+        assert_eq!(width_for(2560.0, 0.0, RAIL_W, 264.0), 1864, "wide screens can drag past 1400 px");
+        assert_eq!(width_for(3840.0, 0.0, RAIL_W, STRIP_W), 3200, "4K screens clamp at VIEWER_PX.1 (3200)");
+    }
+
+    #[test] fn solidcraft_mech_defaults_wider_and_pane_has_no_narrow_62pct_cap() {
+        // 1920px window: most = 1920 - 264 - 72 - 360 = 1224, share = 867 -> undragged mech expands to 1040
+        assert_eq!(pane_base_for("mech", 0, 867.0, 1224.0), MECH_DEFAULT_PX);
+        // 1440px window: most = 1440 - 264 - 72 - 360 = 744, share = 616 -> undragged mech fills available room up to most
+        assert_eq!(pane_base_for("mech", 0, 616.0, 744.0), 744.0);
+        // 2560px window: share = 1202 > 1040 -> keeps the wider share
+        assert_eq!(pane_base_for("mech", 0, 1202.0, 1864.0), 1202.0);
+        // Narrow 700px window where most < share -> does not shrink below share or blow past share
+        assert_eq!(pane_base_for("mech", 0, 344.0, 224.0), 344.0);
+        // User-dragged width always wins (both narrower and much wider than 62%)
+        assert_eq!(pane_base_for("mech", 500, 867.0, 1224.0), 500.0);
+        assert_eq!(pane_base_for("mech", 1800, 1202.0, 1864.0), 1800.0);
+        // Non-mech pages preserve existing behavior
+        assert_eq!(pane_base_for("board", 0, 616.0, 744.0), 616.0);
+        assert_eq!(pane_base_for("split", 0, 616.0, 744.0), 960.0);
+        // pane_max_px caps to PANE_MOST (never 0.62) and respects PANE_LEAST
+        assert_eq!(pane_max_px(1224.0, 320.0), Some(1224.0));
+        assert_eq!(pane_max_px(200.0, 320.0), Some(320.0));
+        assert_eq!(pane_max_px(0.0, 320.0), None);
     }
     #[test] fn the_panel_is_open_for_a_page_or_a_diff_only() {
         assert!(is_open(&j(r#"{"viewer":{"open":"board"}}"#))); assert!(is_open(&j(r#"{"diff":{"summary":"","files":[]}}"#)));

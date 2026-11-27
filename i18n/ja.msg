@@ -5186,3 +5186,7 @@ solidcraft.web.installing = SolidCraft Web をインストール中… {step}
 solidcraft.web.loading = SolidCraft Web を読み込み中…
 solidcraft.web.not.installed = このハブにはまだ SolidCraft Web がインストールされていません。
 solidcraft.web.readonly = 読み取り専用コピーのため保存できません。
+gpui.c.solidcraft.full.tip = SolidCraft をウィンドウいっぱいに拡大（Esc で元に戻す）
+gpui.c.solidcraft.exit.full.tip = チャットとサイドバーを元に戻す（Esc）
+gpui.c.solidcraft.full.cmd = SolidCraft: 全画面
+gpui.c.solidcraft.exit.full.cmd = SolidCraft: 全画面を終了

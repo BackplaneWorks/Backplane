@@ -5020,6 +5020,10 @@ solidcraft.web.installing	Installing SolidCraft Web… {step}	SolidCraft Web を
 solidcraft.web.loading	Loading SolidCraft Web…	SolidCraft Web を読み込み中…	Cargando SolidCraft Web…
 solidcraft.web.not.installed	SolidCraft Web is not installed on this hub yet.	このハブにはまだ SolidCraft Web がインストールされていません。	SolidCraft Web aún no está instalado en este hub.
 solidcraft.web.readonly	Read-only copy: edits cannot be saved.	読み取り専用コピーのため保存できません。	Copia de solo lectura: no se pueden guardar cambios.
+gpui.c.solidcraft.full.tip	Expand SolidCraft to fill the window (Esc to restore)	SolidCraft をウィンドウいっぱいに拡大（Esc で元に戻す）	Expande SolidCraft para llenar la ventana (Esc para restaurar)
+gpui.c.solidcraft.exit.full.tip	Restore the chat and sidebar (Esc)	チャットとサイドバーを元に戻す（Esc）	Restaura el chat y la barra lateral (Esc)
+gpui.c.solidcraft.full.cmd	SolidCraft: Full screen	SolidCraft: 全画面	SolidCraft: Pantalla completa
+gpui.c.solidcraft.exit.full.cmd	SolidCraft: Exit full screen	SolidCraft: 全画面を終了	SolidCraft: Salir de pantalla completa
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

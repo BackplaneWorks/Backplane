@@ -5163,3 +5163,7 @@ solidcraft.web.installing = Instalando SolidCraft Web… {step}
 solidcraft.web.loading = Cargando SolidCraft Web…
 solidcraft.web.not.installed = SolidCraft Web aún no está instalado en este hub.
 solidcraft.web.readonly = Copia de solo lectura: no se pueden guardar cambios.
+gpui.c.solidcraft.full.tip = Expande SolidCraft para llenar la ventana (Esc para restaurar)
+gpui.c.solidcraft.exit.full.tip = Restaura el chat y la barra lateral (Esc)
+gpui.c.solidcraft.full.cmd = SolidCraft: Pantalla completa
+gpui.c.solidcraft.exit.full.cmd = SolidCraft: Salir de pantalla completa

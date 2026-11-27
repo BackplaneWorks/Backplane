@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "totalAssetGzipBytes": 250693,
+  "totalAssetGzipBytes": 252088,
   "styleTokensSha256": "a4fed1b1c7bc676acc328907343eb5dcf87e426383d05617c632e48c0c3f2b80",
   "i18nKeys": [
     "agy.signout",
@@ -44,9 +44,13 @@
     "gpui.b.replying.to",
     "gpui.bots.recall.off",
     "gpui.bots.recall.on",
+    "gpui.c.kicad.exit.full.screen",
+    "gpui.c.kicad.full.screen",
     "gpui.c.solid.big.next",
     "gpui.c.solid.load.big",
     "gpui.c.solid.loading.big",
+    "gpui.c.solidcraft.exit.full.tip",
+    "gpui.c.solidcraft.full.tip",
     "gpui.c.term.collapse",
     "gpui.c.term.expand",
     "gpui.commands",
@@ -365,10 +369,10 @@
     "web.settings.providers",
     "web.settings.providers.browser"
   ],
-  "i18nSubsetSha256": "9b69cdd572a7acc0eee500210c3c02b2735e59b229400ad67e538aba8799bda4",
+  "i18nSubsetSha256": "bfd237a69439433685530d44091719fc2f330fa98537c96236ef18442d8f8082",
   "inputs": {
     "web/src/addproject.ts": "06a7ff3e13cd78d993ebca7f638d5d623da06c0099186ad534bae8f184dbe44f",
-    "web/src/app.ts": "ffe73a7b481674fbb97743e895d1461a86ac8bec872af50a6d9b942fbf53283f",
+    "web/src/app.ts": "00be28d1e8a3f0d532fe5da3821e8aece412a4adfc35b423751e62e610d4e2cb",
     "web/src/chat.ts": "c919f1984b5d8b1279a645cf622c3e3fd3f2e924eff5531b58e81d16b005ab84",
     "web/src/clone-model.ts": "d265df49436e14f415bbeb2a271ffa3552f9163be62bdc0158cecc10c3cdae45",
     "web/src/composer.ts": "63a5e9d7acfd321007c0a18880ee0ba055506335fcf4808154febc2b380f91a8",
@@ -394,7 +398,7 @@
     "web/src/ring-model.ts": "66368ffe8996138d4e73f041e50ac4fa573cf20ee59571af5fd1f320e29a895d",
     "web/src/settings-model.ts": "2f8f64cc93ee54c1bf45d918d8568eec2457970db7b3c43e926b2b4c45dcd5f6",
     "web/src/settings.ts": "8d4c24f554ba9c7ba4c4a96098fe25eea68b91f41489aee4d2b01b616f41f507",
-    "web/src/shell.css": "2d5874aeb2389ed690c34bcb3c12215fdf49225e6636f4e6cfec252e171617be",
+    "web/src/shell.css": "3975e68cf496080936a34f1e127195ee915db77af50af0458edc4e07cc509f22",
     "web/src/sidebar.ts": "fb86edf0ec7be1d02457db13e51f45cd41506de082cd6834c36b260c030465ea",
     "web/src/swarm-need.ts": "503bbf5ffe0389f068847571c792321b0ad5c8d26a18c73b8e41c0a8989e227f",
     "web/src/swarm.ts": "f99d85ef52ec6916f52a8be71c5b445bb6bb4b20ab44d4557c9c8d66c15d2b4f",
@@ -411,8 +415,8 @@
     "web/src/viewers/solidcraft-web.ts": "2161f58e17a16e5641d1495e4307657ef9a7fdf75767f6d9cb63ba79fa787d22",
     "web/src/viewers/terminal-state.ts": "316d9c82b63c9d7a73aa3063957b3a2b578ff2ca735a6f32cf290a92cf10ddc2",
     "web/src/viewers/terminal.ts": "dead59ace15647f726f5d7c4dad0a430fa63c82481c4399f40d17f01e5805099",
-    "web/src/viewers/viewer-pane.ts": "317e139ac40f1c48b1d1fcdfd7705f08b6547401156c33cb192f356195cfcfb5",
-    "web/src/viewers/viewer-tools.ts": "7db4587ad1410cf21364b1121454e0520fd515c82b63916d31a5fdc1443615b4",
+    "web/src/viewers/viewer-pane.ts": "4bb0a824a39628f11874216ce5ba08865324c3e4ff53f62b6c030480f2b56087",
+    "web/src/viewers/viewer-tools.ts": "7d2655899facf7d350cc5288358b27dab387f9fc9595d6181d0155e195404243",
     "web/src/voice.ts": "f401f1d5bd1685c7d7270fc02a8ff16f54bde7ae98aee21b4e802f0357063345",
     "web/src/ws.ts": "dda774245a6daa65a243f6c31252ef7c0f759a06e69e56a3d7e83baaa10ee7af",
     "web/vendor/xterm/LICENSE": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
@@ -434,9 +438,9 @@
   },
   "outputs": {
     "assets/app.js": {
-      "bytes": 477352,
-      "gzipBytes": 135118,
-      "sha256": "51cb780911c18b53f513cba3f3e4baea7919ddc3c00e8005c1aa9ae6f64deefd"
+      "bytes": 480550,
+      "gzipBytes": 136147,
+      "sha256": "caf7a0d96f4a10a5280bb51f3ddf397c94caf844f75921db400539c0daf27995"
     },
     "assets/favicon-light.svg": {
       "bytes": 1207,
@@ -454,14 +458,14 @@
       "sha256": "123b6a27f255d339b505c8fd83609674f0bddf9b46c0e907fce23befa96b1eec"
     },
     "assets/pair.js": {
-      "bytes": 65305,
-      "gzipBytes": 19351,
-      "sha256": "4b12c999d3445e60a4d411616c88be578da2521c79b45e1c6b98e2fd1cfc274d"
+      "bytes": 66123,
+      "gzipBytes": 19562,
+      "sha256": "a4123e14f7eb4a4f85810871079622daf3b77965ac7a134d61804b0386f99832"
     },
     "assets/style.css": {
-      "bytes": 109189,
-      "gzipBytes": 17925,
-      "sha256": "12f087fcd568a4527620692f705b6d419b03ad28da6258a3f3fae48b7fadae0b"
+      "bytes": 110019,
+      "gzipBytes": 18080,
+      "sha256": "85ae242c77c3b8a09abeaa90d7bb07570fadb978d81b4a0a683c9a2dedbfdef6"
     },
     "assets/terminal.js": {
       "bytes": 296616,
