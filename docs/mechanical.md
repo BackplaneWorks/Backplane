@@ -22,40 +22,31 @@ live on the machine running the hub, even when you use a browser or phone.
    writes isometric, front, top and right views under `mech/renders/`.
    The renders page also has **Refresh** to reload the parts list.
 
-The supported model formats are `.step`, `.stp` and `.glb`. STEP inspection uses the configured conversion helper; no KiCad project
-is required. FreeCAD documents (`.FCStd`)
-and STL meshes are not displayed directly; export or convert them to a
-supported format first.
+The supported model formats are `.sc`, `.solidcraft`, `.step`, `.stp`, `.iges`, `.igs`, `.stl`, `.3mf`, `.obj` and `.glb`. On Linux and Windows desktop, Backplane embeds SolidCraft directly in the **Mech** tab; on macOS, web and phones, the hub uses `solidcraft-cli` (to convert `.sc`/`.solidcraft` designs) and the configured STEP mesher (`backplane-step2glb`) for 3D viewing. Legacy FreeCAD documents (`.FCStd`) are not displayed directly — export or convert them to a supported format first.
 
-A model can also stay elsewhere in the project. Open it from **Files**,
+A model can also stay elsewhere in the project. Open it from **Files** or **Project Home**,
 or ask the agent:
 
 > Show `vendor/spacer.step` on the Mech tab without changing it.
 
 The agent can use `viewer_show` with the file's absolute path and
-`kind: "mech"`. The viewer follows saves to that file. Copy or export it
+`kind: "mech"`. The viewer follows saves to that file (and live MCP edits when opened in embedded SolidCraft). Copy or export it
 into `mech/` if you also want it in the project's parts list. The **3D**
 tab is for the KiCad board; standalone models belong on **Mech**.
 
 ## Model a part with an agent
 
-Install FreeCAD on the hub's machine for modelling and STEP conversion.
-See [installation](install.md) for platform setup. Set `BACKPLANE_FREECAD`
-to its console executable when starting the hub if automatic discovery
-does not find it. Existing GLB models can be viewed without a conversion.
+Install **SolidCraft** (`v0.50.0`) from onboarding or **Settings → CAD** (one-click download), or set `BACKPLANE_SOLIDCRAFT` when starting the hub; you can also install FreeCAD optionally for legacy `.FCStd` workflows (`BACKPLANE_FREECAD`). Existing GLB models can be viewed without a conversion.
 
 Start with a small, concrete request, for example:
 
 > Make an 80 by 30 by 3 mm rectangular mounting plate with two 5 mm
 > through-holes, centred across its width and 60 mm apart along its length.
 > Centre the pair on the plate. Keep the dimensions as named parameters
-> in `mech/plate.py`, save `mech/plate.FCStd`, export `mech/plate.step`,
-> and show it on the Mech tab.
+> in `mech/plate.sc`, export `mech/plate.step`, and show it on the Mech tab.
 
-Backplane's mechanical instructions tell the agent to work in millimetres,
-with Z up and the front facing -Y, check the shape's validity, and keep
-the script, FreeCAD document and STEP export together. Ask for changes to
-the script and regenerate the export to see each revision.
+Backplane's mechanical instructions (`solidcraft_*` MCP tools and the bundled `solidcraft-cad` skill; see [SOLIDCRAFT-AGENTS.md](SOLIDCRAFT-AGENTS.md)) tell the agent to work in millimetres,
+verify geometry and renders visually, keep named parameters in `.sc` designs, and export STEP/STL for manufacturing. Ask for changes to parameters or features to see live updates in the embedded **Mech** tab.
 
 Keep the source and exports in Git if you want to track mechanical
 revisions. The design history's per-tool KiCad snapshots and board or

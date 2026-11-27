@@ -12,6 +12,60 @@ fn fail(text: String) -> Got { Got { code: 3, text, plot: None } }
 
 /// Pv.is_step
 pub fn is_step(p: &str) -> bool { [".step", ".stp", ".STEP", ".STP"].iter().any(|e| p.ends_with(e)) }
+/// SolidCraft designs and non-STEP/GLB CAD/mesh files supported by the desktop SolidCraft pane.
+pub fn is_other_cad(p: &str) -> bool {
+    let l = p.to_ascii_lowercase();
+    [".sc", ".solidcraft", ".iges", ".igs", ".stl", ".3mf", ".obj"].iter().any(|e| l.len() > e.len() && l.ends_with(e))
+}
+fn is_sc_design(p: &str) -> bool {
+    let l = p.to_ascii_lowercase();
+    [".sc", ".solidcraft"].iter().any(|e| l.len() > e.len() && l.ends_with(e))
+}
+/// Resolve `solidcraft-cli` for `bp-plot` and `solidread` without pulling the full hub crate into `bp-plot`.
+fn solidcraft_cli() -> Option<std::path::PathBuf> {
+    let exe = if cfg!(windows) { "solidcraft-cli.exe" } else { "solidcraft-cli" };
+    if let Ok(v) = std::env::var("BACKPLANE_SOLIDCRAFT") {
+        let p = std::path::PathBuf::from(&v);
+        for c in [p.join(exe), p.join("bin").join(exe)] {
+            if c.is_file() { return Some(c) }
+        }
+    }
+    if let Ok(h) = std::env::var("BACKPLANE_HOME") {
+        if let Ok(rd) = std::fs::read_dir(std::path::Path::new(&h).join("solidcraft")) {
+            let mut dirs: Vec<_> = rd.flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+            dirs.sort();
+            for d in dirs.into_iter().rev() {
+                for c in [d.join("bin").join(exe), d.join(exe)] {
+                    if c.is_file() { return Some(c) }
+                }
+            }
+        }
+    }
+    std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(exe)).find(|c| c.is_file()))
+}
+/// Convert a `.sc`/`.solidcraft` design to a cached STEP file via `solidcraft-cli run` so Mobile/Web 3D viewers can mesh it.
+fn sc_to_cached_step(path: &str) -> Option<String> {
+    let cli = solidcraft_cli()?;
+    let bytes = std::fs::read(path).ok()?;
+    use sha2::{Digest, Sha256};
+    let hash: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
+    let dir = stepglb::cache_dir();
+    let _ = std::fs::create_dir_all(&dir);
+    let step_path = in_dir(&dir, &format!("sc-{hash}.step"));
+    if stepglb::have(&step_path) { return Some(step_path) }
+    let stage = stepglb::stage(&step_path, "sc-").ok()?;
+    let tmp_step = stage.join("model.step");
+    let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &cli);
+    c.args(["run", "--in", path, "--out"]).arg(&tmp_step)
+        .env("SOLIDCRAFT_NO_TELEMETRY", "1")
+        .env("SOLIDCRAFT_UPDATE_CHECK", "0")
+        .env_remove("DISPLAY")
+        .env_remove("WAYLAND_DISPLAY");
+    let ok = c.output().map(|o| o.status.success() && stepglb::have(&tmp_step.to_string_lossy())).unwrap_or(false);
+    if ok { let _ = crate::plat::fs::rename(&tmp_step, &step_path); }
+    let _ = std::fs::remove_dir_all(&stage);
+    stepglb::have(&step_path).then_some(step_path)
+}
 /// FS.revision with Pv.cache.revision: the exact revision of a file as a name ("" when it has none)
 fn revision(path: &str) -> String {
     use crate::plat::fs::MetadataExt;
@@ -150,10 +204,24 @@ pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> 
 /// STEP refined around that box (its solids there meshed finer: `stepglb::Detail::refined`), kept as a mesh of its own. `asked`: the
 /// person asked for this model past the size limit (`solid::fits_asked`).
 pub fn read_streaming(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str, fine: Option<[f64; 6]>, asked: bool, on: Option<&mut dyn FnMut(Streamed)>) -> Got {
-    let (isglb, step) = (path.ends_with(".glb"), is_step(path));
-    let out = glb_at(kind, path, fine);
+    let isglb = path.to_ascii_lowercase().ends_with(".glb");
+    let mut step_path = path.to_string();
+    let mut step = is_step(path);
+    if !isglb && !step && is_other_cad(path) {
+        if is_sc_design(path) {
+            if let Some(converted) = sc_to_cached_step(path) {
+                step_path = converted;
+                step = true;
+            }
+        }
+        if !step {
+            let name = std::path::Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or(path);
+            return fail(format!("{name} opens in Backplane Desktop's SolidCraft pane; export .step or .glb for phone/web 3D viewing"));
+        }
+    }
+    let out = glb_at(kind, &step_path, fine);
     let detail = fine.map_or(stepglb::NORMAL, stepglb::Detail::refined);
-    let r = if isglb || stepglb::have(&out) { Ran::default() } else { export(step, kind == 3, kind == 4, path, &out, cli, tools, detail, on) };
+    let r = if isglb || stepglb::have(&out) { Ran::default() } else { export(step, kind == 3, kind == 4, &step_path, &out, cli, tools, detail, on) };
     if r.code != 0 { return fail(format!("3D export failed: {}", r.out.trim().chars().take(600).collect::<String>())) }
     plotgen::write_infos(infos, &missing_note(&r.out));
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
@@ -263,5 +331,12 @@ mod tests {
         assert!(read(2, &b.to_string_lossy(), "", &[], &infos).text.starts_with("3D export failed: KiCad is not installed"));
         let s = d.join("a.step"); std::fs::write(&s, "x").unwrap();
         assert_eq!(read(2, &s.to_string_lossy(), "", &[], &infos).text, format!("3D export failed: {}", stepglb::NO_MESHER));
+        // Non-STEP CAD/mesh files must never invoke kicad-cli; they fail gracefully for phone/web viewing when not converted.
+        for name in ["box.sc", "part.solidcraft", "mesh.stl", "asm.3mf", "body.iges", "part.obj"] {
+            let p = d.join(name); std::fs::write(&p, "x").unwrap();
+            let g = read(2, &p.to_string_lossy(), "", &[], &infos);
+            assert_eq!(g.code, 3);
+            assert!(g.text.contains("SolidCraft pane"), "{name}: {}", g.text);
+        }
     }
 }

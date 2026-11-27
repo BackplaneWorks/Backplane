@@ -181,6 +181,19 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
             if art.len() >= 26 || seen >= 256 { next = Some(ordinal); break }
         }
     }
+    if art.len() < 26 && seen < 256 {
+        if let Ok(it) = std::fs::read_dir(&real) {
+            for e in it.flatten() {
+                ordinal += 1; if ordinal <= after { continue }
+                seen += 1;
+                let name = e.file_name().to_string_lossy().into_owned();
+                if !name.starts_with('.') && e.file_type().map_or(false, |t| t.is_file()) && crate::files::fm::is_cad(&name) {
+                    if let Some((p, _)) = add(&mut art, "mech", &name, &name, "") { let s = p.to_string_lossy().into_owned(); if let Some(i) = s.rfind('.') { fab_row(&h, &mut art, &mut issues, &format!("{}.fab.json", &s[..i])) } }
+                }
+                if art.len() >= 26 || seen >= 256 { next = Some(ordinal); break }
+            }
+        }
+    }
     if pcb.is_some() || sch.is_some() {
         let mut cands: [Vec<F>; 2] = [vec![], vec![]];
         let cand = |rel: &str, k: usize, c: &mut [Vec<F>; 2]| { if let Some(f) = h.file(rel) { c[k].push(f); c[k].sort_by(|a, b| b.mtime.partial_cmp(&a.mtime).unwrap_or(std::cmp::Ordering::Equal)); c[k].truncate(4) } };
@@ -276,6 +289,14 @@ mod tests {
         assert_eq!(v["intent"], "# Goal\n\nA board\n"); assert_eq!(v["intentComplete"], true); assert_eq!(v["project_home"], "p1");
         let s: Value = serde_json::from_str(v["artifacts"][4]["summary"].as_str().unwrap()).unwrap(); assert_eq!((s["errors"].clone(), s["warnings"].clone(), s["unconnected"].clone()), (json!(2), json!(1), json!(2)));
         assert_eq!(v["intentRevision"], hash(&std::fs::read(d.join(".backplane/intent.md")).unwrap()));
+    }
+    #[test] fn solidcraft_cad_files_in_mech_or_root_appear_on_project_home() {
+        let d = proj("cad"); std::fs::create_dir_all(d.join("mech")).unwrap();
+        std::fs::write(d.join("mech/case.sc"), "zip").unwrap();
+        std::fs::write(d.join("lid.step"), "ISO-10303-21;").unwrap();
+        let (v, _, _) = read_files(d.to_str().unwrap(), &json!({"project":"p2"}));
+        let titles: Vec<&str> = v["artifacts"].as_array().unwrap().iter().filter(|a| a["kind"] == "mech").map(|a| a["title"].as_str().unwrap()).collect();
+        assert!(titles.contains(&"case.sc") && titles.contains(&"lid.step"), "{titles:?}");
     }
     #[test] fn the_goal_is_written_only_against_the_revision_the_page_holds() {
         let d = proj("intent"); std::fs::create_dir_all(d.join(".backplane")).unwrap(); std::fs::write(d.join(".backplane/intent.md"), "# Goal\n\nold\n").unwrap();
