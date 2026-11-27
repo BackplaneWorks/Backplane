@@ -461,7 +461,7 @@ impl Driver for AgyDriver {
         }
         if standalone { if let Some(p) = super::agy_cli::find() {
             let home = std::path::PathBuf::from(crate::plat::dirs::home_or_empty());
-            if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home), !a.pcbparts_url.is_empty()) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
+            if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home), !a.pcbparts_url.is_empty(), &a.mcp.ids) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
             self.bases = bases_from(&std::fs::read_to_string(bases_path(&a.home)).unwrap_or_default()); // the probe's folded list: model + effort -> agy's variant
             self.unset = super::agy_cli::storage_unset_here(&home); // the sign-in's store, as it is at this turn's start
             self.cli = Some(p); return Ok(())
@@ -478,7 +478,7 @@ impl Driver for AgyDriver {
     }
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> {
         if self.cli.is_none() { return vec![] }
-        let exe = std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+        let exe = crate::mcpx::svc::hub_exe();
         vec![("BACKPLANE_MCP_URL".into(), a.mcp_url.clone()), ("BACKPLANE_HUB_EXE".into(), exe), ("AGY_CLI_OSC7501".into(), "off".into()), ("AGY_CLI_DISABLE_AUTO_UPDATE".into(), "1".into()), ("NO_COLOR".into(), "1".into()), (super::agy_cli::UNSET_VAR.into(), self.unset.join(" "))]
     }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
