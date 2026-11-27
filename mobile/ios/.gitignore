@@ -1,3 +1,5 @@
 build/
 xcuserdata/
 *.xcworkspace/xcuserdata/
+Backplane/SolidCraftWeb.bundle/
+SolidCraftWeb.bundle/

@@ -6,10 +6,13 @@
 # environment, BPPerf and Boot marks), in build/ddr; the Debug build stays in build/dd.
 cd "$(dirname "$0")/.." || exit 1
 M=build/gpui/mac-ssh
-RSYNC_RSH=$PWD/$M rsync -a --delete --exclude build mobile/ios/ hs-mac-mini:bp-gpui-ios/ios/ || exit 1
+RSYNC_RSH=$PWD/$M rsync -a --delete --exclude build --exclude Backplane/SolidCraftWeb.bundle mobile/ios/ hs-mac-mini:bp-gpui-ios/ios/ || exit 1
 $M hs-mac-mini '
 export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 cd ~/bp-gpui-ios/ios || exit 1
+if [ "${SKIP_SOLIDCRAFT_WEB_BUNDLE:-0}" != 1 ]; then
+  sh ./stage-solidcraft-web.sh || exit 1
+fi
 SIGNARGS="CODE_SIGNING_ALLOWED=NO"; [ "'"$ADHOC"'" = 1 ] && SIGNARGS="CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-"
 CONDS=""; [ "'"$DATA"'" = 1 ] && CONDS="OTHER_SWIFT_FLAGS=-DDATA_APP"
 [ "'"$1"'" = clean ] && rm -rf build/dd
