@@ -119,6 +119,10 @@ esac
 
 ver=$(resolve_marketing_version)
 
+if [ "${SKIP_SOLIDCRAFT_WEB_BUNDLE:-0}" != 1 ]; then
+  sh ./stage-solidcraft-web.sh
+fi
+
 case $MODE in
 sim)
   xcodebuild -quiet -project Backplane.xcodeproj -scheme Backplane -configuration Debug \

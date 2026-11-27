@@ -463,6 +463,24 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<Value, String> {
         match r {
             Ok(dir) => {
                 eprintln!("solidcraft-web: installed in {}", dir.display());
+                if let Some((js, wasm, _)) = discover_assets(&dir) {
+                    let cache_dir = par.join(".gz-cache");
+                    let d2 = dir.clone();
+                    let _ = tokio::task::spawn_blocking(move || {
+                        for rel in [wasm, js] {
+                            let src = d2.join(&rel);
+                            if let Ok(lm) = std::fs::symlink_metadata(&src) {
+                                let mtime = lm
+                                    .modified()
+                                    .ok()
+                                    .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                                    .map_or(0, |d| d.as_nanos());
+                                let _ = ensure_gzip(&cache_dir, &src, WEB_PIN.version, &rel, lm.len(), mtime);
+                            }
+                        }
+                    })
+                    .await;
+                }
                 say_install(&hub2, false, "done", "", WEB_PIN.size, WEB_PIN.size).await;
             }
             Err(why) => {
@@ -539,7 +557,8 @@ pub fn render_boot_js(b: &WebBundle) -> String {
     let js_json = serde_json::to_string(&format!("./{}", b.js)).unwrap_or_else(|_| "\"./solidcraft-web.js\"".into());
     let wasm_json = serde_json::to_string(&format!("./{}", b.wasm)).unwrap_or_else(|_| "\"./solidcraft-web_bg.wasm\"".into());
     format!(
-        r#"const JS_ENTRY = {js_json};
+        r#"window.__bpSolidCraftBootStarted = true;
+const JS_ENTRY = {js_json};
 const WASM_ENTRY = {wasm_json};
 const DESIGN_EXTS = new Set([".sc", ".solidcraft"]);
 const CAD_EXTS = new Set([".sc", ".solidcraft", ".step", ".stp", ".stl", ".3mf", ".iges", ".igs", ".obj", ".glb"]);
@@ -571,6 +590,10 @@ function notifyHost(msg) {{
   try {{
     window.BackplaneBridge?.postMessage(JSON.stringify(msg));
   }} catch {{}}
+}}
+
+function reportStage(stage, detail = "", done = 0, total = 0) {{
+  notifyHost({{ type: "bp:solidcraft:stage", stage, detail, done, total }});
 }}
 
 function seedPrefs(theme) {{
@@ -621,11 +644,11 @@ function encodeLocalBytes(bytes) {{
     const text = new TextDecoder("utf-8", {{ fatal: true }}).decode(bytes);
     return "t" + text;
   }} catch {{
-    let hex = "x";
+    const hex = new Array(bytes.length);
     for (let i = 0; i < bytes.length; i++) {{
-      hex += bytes[i].toString(16).padStart(2, "0");
+      hex[i] = bytes[i].toString(16).padStart(2, "0");
     }}
-    return hex;
+    return "x" + hex.join("");
   }}
 }}
 
@@ -680,6 +703,48 @@ async function clearBridgeFiles() {{
   }} catch {{}}
 }}
 
+async function writeOpfsViaWorker(name, bytes) {{
+  const workerSrc = `self.onmessage = async (ev) => {{
+    try {{
+      const root = await navigator.storage.getDirectory();
+      const fh = await root.getFileHandle(ev.data.name, {{ create: true }});
+      if (typeof fh.createSyncAccessHandle !== "function") {{
+        throw new Error("no createSyncAccessHandle");
+      }}
+      const access = await fh.createSyncAccessHandle();
+      try {{
+        access.truncate(0);
+        access.write(ev.data.bytes, {{ at: 0 }});
+        access.flush();
+      }} finally {{
+        access.close();
+      }}
+      self.postMessage({{ ok: true }});
+    }} catch (err) {{
+      self.postMessage({{ ok: false, error: err instanceof Error ? err.message : String(err) }});
+    }}
+  }};`;
+  const blobUrl = URL.createObjectURL(new Blob([workerSrc], {{ type: "application/javascript" }}));
+  try {{
+    await new Promise((resolve, reject) => {{
+      const w = new Worker(blobUrl);
+      const copy = new Uint8Array(bytes);
+      w.onmessage = (ev) => {{
+        w.terminate();
+        if (ev.data && ev.data.ok) resolve();
+        else reject(new Error((ev.data && ev.data.error) || "OPFS worker write failed"));
+      }};
+      w.onerror = (ev) => {{
+        w.terminate();
+        reject(new Error(ev.message || "OPFS worker error"));
+      }};
+      w.postMessage({{ name, bytes: copy }}, [copy.buffer]);
+    }});
+  }} finally {{
+    URL.revokeObjectURL(blobUrl);
+  }}
+}}
+
 async function writeBridgeFile(name, bytes) {{
   const dir = await opfsRoot();
   if (dir) {{
@@ -691,7 +756,13 @@ async function writeBridgeFile(name, bytes) {{
         await w.close();
         return;
       }}
-    }} catch {{}}
+      if (typeof Worker === "function") {{
+        await writeOpfsViaWorker(name, bytes);
+        return;
+      }}
+    }} catch {{
+      await dir.removeEntry(name).catch(() => {{}});
+    }}
   }}
   window.localStorage.setItem("solidcraft.file." + name, encodeLocalBytes(bytes));
 }}
@@ -913,31 +984,121 @@ window.addEventListener("keydown", (ev) => {{
   }}
 }}, true);
 
-(async () => {{
-  const t0 = performance.now();
-  seedPrefs(initialTheme);
-  await clearBridgeFiles();
+async function fetchWasmWithProgress() {{
+  const resp = await fetch(WASM_ENTRY, {{ credentials: "same-origin" }});
+  if (!resp.ok) {{
+    throw new Error(`Could not load SolidCraft WASM (HTTP ${{resp.status}})`);
+  }}
+  const totalHeader = Number(resp.headers.get("X-Uncompressed-Length")) || Number(resp.headers.get("Content-Length")) || 0;
+  if (!resp.body || typeof ReadableStream !== "function" || typeof Response !== "function") {{
+    return resp;
+  }}
+  const reader = resp.body.getReader();
+  let done = 0;
+  let lastReport = 0;
+  const stream = new ReadableStream({{
+    async pull(controller) {{
+      const {{ value, done: eof }} = await reader.read();
+      if (eof) {{
+        reportStage("wasm", "", done, totalHeader || done);
+        controller.close();
+        return;
+      }}
+      done += value.byteLength;
+      const now = performance.now();
+      if (now - lastReport >= 150) {{
+        lastReport = now;
+        reportStage("wasm", "", done, totalHeader);
+      }}
+      controller.enqueue(value);
+    }},
+    cancel(reason) {{
+      return reader.cancel(reason);
+    }}
+  }});
+  return new Response(stream, {{ status: resp.status, headers: {{ "Content-Type": "application/wasm" }} }});
+}}
 
-  let stagedName = "";
-  let preloadError = "";
-  if (currentThread && currentPath) {{
-    try {{
-      const bytes = await fetchProjectFile(currentThread, currentPath);
-      stagedName = safeOpfsName(`bp-active-${{Date.now()}}-${{INSTANCE_ID}}-`, currentPath);
-      await writeBridgeFile(stagedName, bytes);
-    }} catch (err) {{
-      preloadError = err instanceof Error ? err.message : String(err);
+function sliceView(view) {{
+  return new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice();
+}}
+
+function normalizeWriteChunk(chunk) {{
+  if (ArrayBuffer.isView(chunk)) {{
+    if (chunk.byteOffset !== 0 || chunk.byteLength !== chunk.buffer.byteLength) {{
+      return sliceView(chunk);
+    }}
+    return chunk;
+  }}
+  if (chunk && typeof chunk === "object" && ArrayBuffer.isView(chunk.data)) {{
+    const d = chunk.data;
+    if (d.byteOffset !== 0 || d.byteLength !== d.buffer.byteLength) {{
+      return Object.assign({{}}, chunk, {{ data: sliceView(d) }});
     }}
   }}
+  return chunk;
+}}
 
+// iOS WebKit's FileSystemWritableFileStream.write ignores ArrayBufferView.byteOffset/byteLength
+// and writes the entire backing 100+ MB WASM heap ArrayBuffer unless sliced to a tight buffer.
+function patchWritableProto(proto) {{
+  if (!proto || typeof proto.write !== "function" || proto.__bpSlicePatched) return;
+  const origWrite = proto.write;
+  proto.write = function (data) {{
+    return origWrite.call(this, normalizeWriteChunk(data));
+  }};
+  proto.__bpSlicePatched = true;
+}}
+
+if (typeof FileSystemWritableFileStream === "function") {{
+  patchWritableProto(FileSystemWritableFileStream.prototype);
+}}
+if (typeof FileSystemFileHandle === "function" && typeof FileSystemFileHandle.prototype?.createWritable === "function") {{
+  const origCreateWritable = FileSystemFileHandle.prototype.createWritable;
+  FileSystemFileHandle.prototype.createWritable = async function (...args) {{
+    const writable = await origCreateWritable.apply(this, args);
+    try {{ patchWritableProto(Object.getPrototypeOf(writable)); }} catch {{}}
+    return writable;
+  }};
+}}
+
+(async () => {{
+  const t0 = performance.now();
   try {{
+    const caps = {{
+      isSecureContext: Boolean(window.isSecureContext),
+      hasWebGPU: Boolean(navigator.gpu),
+      hasOPFS: Boolean(navigator.storage && typeof navigator.storage.getDirectory === "function"),
+      hasWorker: typeof Worker === "function",
+    }};
+    notifyHost({{ type: "bp:solidcraft:diag", level: "caps", message: JSON.stringify(caps) }});
+    seedPrefs(initialTheme);
+    await clearBridgeFiles();
+
+    let stagedName = "";
+    let preloadError = "";
+    if (currentThread && currentPath) {{
+      reportStage("fetch", baseOf(currentPath));
+      try {{
+        const bytes = await fetchProjectFile(currentThread, currentPath);
+        stagedName = safeOpfsName(`bp-active-${{Date.now()}}-${{INSTANCE_ID}}-`, currentPath);
+        await writeBridgeFile(stagedName, bytes);
+      }} catch (err) {{
+        preloadError = err instanceof Error ? err.message : String(err);
+      }}
+    }}
+
+    reportStage("engine");
     const mod = await import(JS_ENTRY);
-    const wasm = await mod.default({{ module_or_path: WASM_ENTRY }});
+    const wasmResp = await fetchWasmWithProgress();
+    reportStage("init");
+    const wasm = await mod.default({{ module_or_path: wasmResp }});
     window.wasmBindings = mod;
     window.dispatchEvent(new CustomEvent("TrunkApplicationStarted", {{ detail: {{ wasm }} }}));
     const api = await waitForApi(30000);
     await applyEmbeddedPrefs(api, initialTheme);
     if (stagedName) {{
+      reportStage("open", baseOf(currentPath));
       await openStagedOpfs(api, stagedName, 15000);
       await api.request("ui.view", {{ view: "fit", animate: false }}).catch(() => {{}});
       await removeBridgeFile(stagedName);
@@ -1011,6 +1172,110 @@ async fn write_http_text<W: AsyncWrite + Unpin>(
         w.write_all(payload).await?;
     }
     w.flush().await
+}
+
+fn accepts_gzip(req: &Req) -> bool {
+    req.header("accept-encoding").split(',').any(|part| {
+        let mut tokens = part.trim().split(';');
+        let Some(enc) = tokens.next().map(str::trim) else {
+            return false;
+        };
+        if !enc.eq_ignore_ascii_case("gzip") {
+            return false;
+        }
+        !tokens.any(|param| {
+            param
+                .trim()
+                .strip_prefix("q=")
+                .or_else(|| param.trim().strip_prefix("Q="))
+                .and_then(|q| q.trim().parse::<f32>().ok())
+                .is_some_and(|v| v <= 0.0)
+        })
+    })
+}
+
+fn gzip_eligible(rel: &str) -> bool {
+    let lower = rel.to_ascii_lowercase();
+    lower.ends_with(".wasm")
+        || lower.ends_with(".js")
+        || lower.ends_with(".mjs")
+        || lower.ends_with(".css")
+        || lower.ends_with(".svg")
+}
+
+fn gz_locks() -> &'static Mutex<HashMap<PathBuf, Arc<Mutex<()>>>> {
+    static MAP: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    MAP.get_or_init(Default::default)
+}
+
+fn ensure_gzip(
+    cache_dir: &Path,
+    src: &Path,
+    version: &str,
+    rel: &str,
+    raw_len: u64,
+    mtime: u128,
+) -> Option<(PathBuf, u64)> {
+    let safe_key: String = rel
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let out = cache_dir
+        .join(version)
+        .join(format!("{safe_key}.{raw_len}.{mtime}.gz"));
+    if let Ok(m) = std::fs::metadata(&out) {
+        if m.len() > 0 {
+            return Some((out, m.len()));
+        }
+    }
+    let lock = {
+        let mut map = gz_locks().lock().unwrap();
+        map.entry(out.clone())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    };
+    let _guard = lock.lock().unwrap();
+    if let Ok(m) = std::fs::metadata(&out) {
+        if m.len() > 0 {
+            return Some((out, m.len()));
+        }
+    }
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent).ok()?;
+    }
+    let tmp = cache_dir
+        .join(version)
+        .join(format!(".{safe_key}.{}.tmp", std::process::id()));
+    let mut input = std::fs::File::open(src).ok()?;
+    let tmp_file = std::fs::File::create(&tmp).ok()?;
+    let mut enc = flate2::write::GzEncoder::new(
+        std::io::BufWriter::new(tmp_file),
+        flate2::Compression::new(4),
+    );
+    if std::io::copy(&mut input, &mut enc).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    }
+    let Ok(writer) = enc.finish() else {
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    };
+    if std::io::Write::flush(&mut { writer }).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    }
+    if std::fs::rename(&tmp, &out).is_err() {
+        let _ = std::fs::remove_file(&tmp);
+        return None;
+    }
+    let gz_len = std::fs::metadata(&out).ok()?.len();
+    (gz_len > 0).then_some((out, gz_len))
 }
 
 /// Returns a `Set-Cookie: bp_token=...` header when the request authenticated via `Authorization: Bearer`
@@ -1147,7 +1412,9 @@ pub async fn serve_asset_with<W: AsyncWrite + Unpin>(
     }
     let dir = bundle.dir.clone();
     let rel_owned = rel.to_string();
-    let found = tokio::task::spawn_blocking(move || -> Option<(PathBuf, u64, String)> {
+    let want_gz = gzip_eligible(rel) && accepts_gzip(req);
+    let cache_dir = web_parent(&hub.cfg.home).join(".gz-cache");
+    let found = tokio::task::spawn_blocking(move || -> Option<(PathBuf, u64, u64, String, bool)> {
         let real = fm::contained(&dir, &rel_owned)?;
         let root_real = crate::plat::fs::canonicalize(&dir).ok()?;
         if !real.starts_with(&root_real) {
@@ -1157,18 +1424,27 @@ pub async fn serve_asset_with<W: AsyncWrite + Unpin>(
         if !lm.file_type().is_file() {
             return None;
         }
+        let raw_len = lm.len();
         let mtime = lm
             .modified()
             .ok()
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map_or(0, |d| d.as_nanos());
-        let etag = format!("\"sc-{}-{}-{mtime}\"", bundle.version, lm.len());
-        Some((real, lm.len(), etag))
+        if want_gz {
+            if let Some((gz_path, gz_len)) =
+                ensure_gzip(&cache_dir, &real, &bundle.version, &rel_owned, raw_len, mtime)
+            {
+                let etag = format!("\"sc-{}-{raw_len}-{mtime}-gz\"", bundle.version);
+                return Some((gz_path, gz_len, raw_len, etag, true));
+            }
+        }
+        let etag = format!("\"sc-{}-{raw_len}-{mtime}\"", bundle.version);
+        Some((real, raw_len, raw_len, etag, false))
     })
     .await
     .ok()
     .flatten();
-    let Some((real, len, etag)) = found else {
+    let Some((real, len, raw_len, etag, is_gz)) = found else {
         return write_http_text(
             w,
             "404 Not Found",
@@ -1185,9 +1461,16 @@ pub async fn serve_asset_with<W: AsyncWrite + Unpin>(
     } else {
         "Cache-Control: private, no-cache\r\n"
     };
+    let enc_hdr = if is_gz {
+        "Content-Encoding: gzip\r\nVary: Accept-Encoding\r\n"
+    } else {
+        ""
+    };
+    let raw_len_hdr = format!("X-Uncompressed-Length: {raw_len}\r\n");
     if req.header("if-none-match").trim() == etag {
+        let vary_hdr = if is_gz { "Vary: Accept-Encoding\r\n" } else { "" };
         let head = format!(
-            "HTTP/1.1 304 Not Modified\r\nETag: {etag}\r\n{cache}Connection: close\r\n{SC_WEB_SECURITY_HEADERS}\r\n"
+            "HTTP/1.1 304 Not Modified\r\nETag: {etag}\r\n{cache}{vary_hdr}{raw_len_hdr}Connection: close\r\n{SC_WEB_SECURITY_HEADERS}\r\n"
         );
         w.write_all(head.as_bytes()).await?;
         return w.flush().await;
@@ -1207,7 +1490,7 @@ pub async fn serve_asset_with<W: AsyncWrite + Unpin>(
         }
     };
     let head = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {len}\r\nETag: {etag}\r\n{cache}Connection: close\r\n{SC_WEB_SECURITY_HEADERS}\r\n"
+        "HTTP/1.1 200 OK\r\nContent-Type: {ctype}\r\nContent-Length: {len}\r\nETag: {etag}\r\n{cache}{enc_hdr}{raw_len_hdr}Connection: close\r\n{SC_WEB_SECURITY_HEADERS}\r\n"
     );
     w.write_all(head.as_bytes()).await?;
     if !head_only && len > 0 {
@@ -1462,6 +1745,11 @@ mod tests {
         assert!(!boot.contains("solidcraft.io") && !boot.contains("sw.js"));
         assert!(html.contains("./solidcraft-web-abc123.js") && html.contains("./bp-boot.js"));
         assert!(boot.contains("ask_import_options: false") && boot.contains("usage_statistics: false"));
+        assert!(boot.contains("window.__bpSolidCraftBootStarted = true"));
+        assert!(boot.contains("bp:solidcraft:stage"));
+        assert!(boot.contains("createSyncAccessHandle"));
+        assert!(boot.contains("removeEntry"));
+        assert!(boot.contains("patchWritableProto") && boot.contains("byteOffset"));
         assert!(SC_WEB_SECURITY_HEADERS.contains("'wasm-unsafe-eval'"));
         assert!(SC_WEB_SECURITY_HEADERS.contains("connect-src 'self' blob: data:"));
     }
@@ -1519,11 +1807,46 @@ mod tests {
         let wasm_head = String::from_utf8_lossy(&wasm_raw[..split]);
         assert!(wasm_head.starts_with("HTTP/1.1 200 OK"), "{wasm_head}");
         assert!(wasm_head.contains("Content-Type: application/wasm"), "{wasm_head}");
+        assert!(wasm_head.contains("X-Uncompressed-Length: 8\r\n"), "{wasm_head}");
+        assert!(!wasm_head.contains("Content-Encoding: gzip"), "{wasm_head}");
         assert_eq!(&wasm_raw[split + 4..], b"\x00asm\x01\x00\x00\x00");
 
         let etag = wasm_head.lines().find_map(|l| l.strip_prefix("ETag: ")).unwrap().trim().to_string();
         let r304 = String::from_utf8_lossy(&ask("/solidcraft-web/solidcraft-web-abc123_bg.wasm".into(), vec![("If-None-Match".into(), etag)], String::new()).await).into_owned();
         assert!(r304.starts_with("HTTP/1.1 304 Not Modified"), "{r304}");
+
+        let wasm_gz = ask(
+            "/solidcraft-web/solidcraft-web-abc123_bg.wasm".into(),
+            vec![("Accept-Encoding".into(), "gzip, deflate, br".into())],
+            String::new(),
+        )
+        .await;
+        let gz_split = wasm_gz.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        let gz_head = String::from_utf8_lossy(&wasm_gz[..gz_split]);
+        assert!(gz_head.starts_with("HTTP/1.1 200 OK"), "{gz_head}");
+        assert!(gz_head.contains("Content-Encoding: gzip\r\n"), "{gz_head}");
+        assert!(gz_head.contains("Vary: Accept-Encoding\r\n"), "{gz_head}");
+        assert!(gz_head.contains("X-Uncompressed-Length: 8\r\n"), "{gz_head}");
+        let mut dec = flate2::read::GzDecoder::new(&wasm_gz[gz_split + 4..]);
+        let mut plain = Vec::new();
+        std::io::Read::read_to_end(&mut dec, &mut plain).unwrap();
+        assert_eq!(plain, b"\x00asm\x01\x00\x00\x00");
+
+        let gz_etag = gz_head.lines().find_map(|l| l.strip_prefix("ETag: ")).unwrap().trim().to_string();
+        assert!(gz_etag.contains("-gz\""), "{gz_etag}");
+        let gz_304 = String::from_utf8_lossy(
+            &ask(
+                "/solidcraft-web/solidcraft-web-abc123_bg.wasm".into(),
+                vec![
+                    ("Accept-Encoding".into(), "gzip".into()),
+                    ("If-None-Match".into(), gz_etag),
+                ],
+                String::new(),
+            )
+            .await,
+        )
+        .into_owned();
+        assert!(gz_304.starts_with("HTTP/1.1 304 Not Modified"), "{gz_304}");
 
         assert!(String::from_utf8_lossy(&ask("/solidcraft-web/sw.js".into(), vec![], String::new()).await).starts_with("HTTP/1.1 404"));
         assert!(String::from_utf8_lossy(&ask("/solidcraft-web/../index.html".into(), vec![], String::new()).await).starts_with("HTTP/1.1 400"));

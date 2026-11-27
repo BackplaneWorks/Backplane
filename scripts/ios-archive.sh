@@ -117,7 +117,7 @@ if [ ! -x "$M" ]; then
 fi
 [ -x "$M" ] || M=ssh
 
-RSYNC_RSH="$M" rsync -a --delete --exclude build --exclude signing.env mobile/ios/ hs-mac-mini:bp-gpui-ios/ios/
+RSYNC_RSH="$M" rsync -a --delete --exclude build --exclude signing.env --exclude Backplane/SolidCraftWeb.bundle mobile/ios/ hs-mac-mini:bp-gpui-ios/ios/
 
 "$M" hs-mac-mini sh -s -- "$MODE" "$VER" <<'REMOTE'
 set -u
@@ -127,6 +127,9 @@ export DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer
 cd ~/bp-gpui-ios/ios || exit 1
 [ -f signing.env ] || cp ~/backplane-ios/signing.env signing.env
 mkdir -p build
+if [ "${SKIP_SOLIDCRAFT_WEB_BUNDLE:-0}" != 1 ]; then
+  sh ./stage-solidcraft-web.sh || exit 1
+fi
 log=$(mktemp build/ios-archive.XXXXXX)
 trap 'rm -f "$log"' EXIT
 case "$MODE" in

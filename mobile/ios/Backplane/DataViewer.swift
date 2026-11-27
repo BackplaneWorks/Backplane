@@ -98,6 +98,13 @@ extension DataClient {
     func mech(_ thread: String) async -> [String] { ((try? await call("mech.list", ["thread": thread]) as DMech)?.parts) ?? [] }
     func solidCraftWebStatus() async throws -> DSolidCraftWebStatus { try await call("solidcraft.web.status", [:]) }
     func solidCraftWebInstall() async throws -> DSolidCraftWebStatus { try await call("solidcraft.web.install", ["consent": true]) }
+    func solidCraftHubBase() -> (baseURL: URL, token: String)? {
+        guard let link,
+              let tok = Pairing.token(link),
+              !tok.isEmpty,
+              let base = Pairing.http(link, path: "", token: false) else { return nil }
+        return (base, tok)
+    }
     func solidCraftWebLaunch(thread: String, path: String, light: Bool) -> (url: URL, token: String)? {
         guard let link,
               let tok = Pairing.token(link),
@@ -667,8 +674,39 @@ private struct DataSolidCraftWebSheet: View {
     @State private var installPoll = 0
     @State private var note = ""
     @State private var isError = false
+    @State private var stageLabel = ""
+    @State private var diagLog: [String] = []
+    @State private var copied = false
+
+    private let bundledDir = SolidCraftLocalServer.bundleDirectory()
+
+    private func stageText(stage: String, detail: String, done: Int64, total: Int64, fname: String) -> String {
+        let name = detail.isEmpty ? fname : detail
+        switch stage {
+        case "fetch": return Tr.solidcraft_web_stage_fetch(name: name)
+        case "engine": return Tr.k("solidcraft.web.stage.engine")
+        case "wasm":
+            if let pct = SolidCraftBundleSupport.progressPercent(done: done, total: total) {
+                return Tr.solidcraft_web_stage_wasm(pct: String(pct))
+            }
+            return Tr.k("solidcraft.web.stage.engine")
+        case "init": return Tr.k("solidcraft.web.stage.init")
+        case "open": return Tr.solidcraft_web_stage_open(name: name)
+        default: return Tr.k("solidcraft.web.loading")
+        }
+    }
+
+    private func appendDiag(_ line: String) {
+        guard !line.isEmpty else { return }
+        if diagLog.count >= 20 { diagLog.removeFirst(diagLog.count - 19) }
+        diagLog.append(line)
+    }
+
     var body: some View {
         let fname = path.split(separator: "/").last.map(String.init) ?? path
+        let hasBundled = bundledDir != nil
+        let showSave = hasBundled || status?.installed == true
+        let loadingText = stageLabel.isEmpty ? Tr.k("solidcraft.web.loading") : stageLabel
         VStack(spacing: 0) {
             HStack(spacing: 10) {
                 Button(Tr.k("common.close")) { dismiss() }
@@ -678,7 +716,7 @@ private struct DataSolidCraftWebSheet: View {
                     .font(.system(.subheadline, design: .monospaced))
                     .lineLimit(1).truncationMode(.middle)
                 Spacer(minLength: 0)
-                if status?.installed == true {
+                if showSave {
                     Button {
                         guard ready, !saving, status?.copy != true else { return }
                         saving = true; note = ""; isError = false; saveNonce += 1
@@ -703,8 +741,22 @@ private struct DataSolidCraftWebSheet: View {
                         .foregroundStyle(isError ? BackplaneDesign.bad : BackplaneDesign.accent)
                         .frame(maxWidth: .infinity, alignment: .leading)
                     if isError && (loadFailed || !statusError.isEmpty) {
+                        Button(copied ? Tr.k("solidcraft.web.copied") : Tr.k("common.copy")) {
+                            let payload = [note, stageLabel.isEmpty ? "" : "stage: \(stageLabel)", diagLog.joined(separator: "\n")]
+                                .filter { !$0.isEmpty }
+                                .joined(separator: "\n")
+                            UIPasteboard.general.string = payload
+                            copied = true
+                            Task {
+                                try? await Task.sleep(for: .seconds(2))
+                                copied = false
+                            }
+                        }
+                        .font(.system(.caption, design: .monospaced).bold())
+                        .foregroundStyle(BackplaneDesign.dim)
+                        .accessibilityIdentifier("data.solidcraft.copy")
                         Button(Tr.k("tools.retry")) {
-                            note = ""; isError = false; loadFailed = false; ready = false
+                            note = ""; isError = false; loadFailed = false; ready = false; stageLabel = ""
                             reloadNonce += 1
                         }
                         .font(.system(.caption, design: .monospaced).bold())
@@ -716,32 +768,32 @@ private struct DataSolidCraftWebSheet: View {
                 .background(BackplaneDesign.panel)
                 DLine()
             }
-            if let st = status {
+            if let dir = bundledDir {
+                if let hub = client.solidCraftHubBase() {
+                    webStageView(
+                        source: .bundled(
+                            bundleDir: dir,
+                            hubBase: hub.baseURL,
+                            token: hub.token,
+                            thread: thread.id,
+                            path: path,
+                            light: scheme == .light,
+                            readOnly: status?.copy == true
+                        ),
+                        fname: fname,
+                        loadingText: loadingText
+                    )
+                } else {
+                    Text(Tr.t("This file could not be read.")).foregroundStyle(BackplaneDesign.bad).padding(24)
+                    Spacer()
+                }
+            } else if let st = status {
                 if st.installed, let launch = client.solidCraftWebLaunch(thread: thread.id, path: path, light: scheme == .light) {
-                    ZStack {
-                        SolidCraftWKWebView(
-                            url: launch.url,
-                            token: launch.token,
-                            saveNonce: saveNonce,
-                            reloadNonce: reloadNonce,
-                            onReady: { ready = true; loadFailed = false; isError = false },
-                            onSaved: {
-                                saving = false
-                                isError = false
-                                note = Tr.solidcraft_web_saved(name: fname)
-                            },
-                            onError: { msg in
-                                saving = false
-                                isError = true
-                                loadFailed = true
-                                note = msg
-                            }
-                        )
-                        if !ready && !loadFailed {
-                            DLoading(text: Tr.k("solidcraft.web.loading"))
-                        }
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    webStageView(
+                        source: .remote(url: launch.url, token: launch.token),
+                        fname: fname,
+                        loadingText: loadingText
+                    )
                 } else if st.installed {
                     Text(Tr.t("This file could not be read.")).foregroundStyle(BackplaneDesign.bad).padding(24)
                     Spacer()
@@ -798,7 +850,7 @@ private struct DataSolidCraftWebSheet: View {
                 .padding(20)
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
-                DLoading(text: Tr.k("solidcraft.web.loading"))
+                DLoading(text: loadingText)
             }
         }
         .background(BackplaneDesign.background)
@@ -807,11 +859,13 @@ private struct DataSolidCraftWebSheet: View {
             do {
                 status = try await client.solidCraftWebStatus()
             } catch {
-                statusError = error.localizedDescription
+                if bundledDir == nil {
+                    statusError = error.localizedDescription
+                }
             }
         }
         .task(id: "\(status?.installing == true)|\(installPoll)") {
-            guard status?.installing == true else { return }
+            guard bundledDir == nil, status?.installing == true else { return }
             while !Task.isCancelled, status?.installing == true {
                 try? await Task.sleep(for: .seconds(1))
                 guard !Task.isCancelled else { break }
@@ -825,13 +879,52 @@ private struct DataSolidCraftWebSheet: View {
             }
         }
     }
+
+    @ViewBuilder
+    private func webStageView(source: SolidCraftWebSource, fname: String, loadingText: String) -> some View {
+        ZStack {
+            SolidCraftWKWebView(
+                source: source,
+                saveNonce: saveNonce,
+                reloadNonce: reloadNonce,
+                onStage: { stage, detail, done, total in
+                    stageLabel = stageText(stage: stage, detail: detail, done: done, total: total, fname: fname)
+                },
+                onDiag: { line in
+                    appendDiag(line)
+                },
+                onReady: { ready = true; loadFailed = false; isError = false },
+                onSaved: {
+                    saving = false
+                    isError = false
+                    note = Tr.solidcraft_web_saved(name: fname)
+                },
+                onError: { msg in
+                    saving = false
+                    isError = true
+                    loadFailed = true
+                    note = msg
+                }
+            )
+            if !ready && !loadFailed {
+                DLoading(text: loadingText)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private enum SolidCraftWebSource {
+    case bundled(bundleDir: URL, hubBase: URL, token: String, thread: String, path: String, light: Bool, readOnly: Bool)
+    case remote(url: URL, token: String)
 }
 
 private struct SolidCraftWKWebView: UIViewRepresentable {
-    let url: URL
-    let token: String
+    let source: SolidCraftWebSource
     let saveNonce: Int
     let reloadNonce: Int
+    let onStage: (String, String, Int64, Int64) -> Void
+    let onDiag: (String) -> Void
     let onReady: () -> Void
     let onSaved: () -> Void
     let onError: (String) -> Void
@@ -848,9 +941,17 @@ private struct SolidCraftWKWebView: UIViewRepresentable {
           const post = (level, msg) => {
             try { window.webkit?.messageHandlers?.backplane?.postMessage({ type: "bp:solidcraft:diag", level, message: String(msg || "") }); } catch {}
           };
+          const postErr = (msg) => {
+            try { window.webkit?.messageHandlers?.backplane?.postMessage({ type: "bp:solidcraft:error", op: "boot", error: String(msg || "Boot error") }); } catch {}
+          };
           window.addEventListener("error", (ev) => {
+            if (ev.target && ev.target !== window) {
+              const src = ev.target.src || ev.target.href || ev.target.tagName || "resource";
+              post("resource", "Failed to load " + src);
+              return;
+            }
             post("error", ev.message || (ev.error && ev.error.stack) || "window error");
-          });
+          }, true);
           window.addEventListener("unhandledrejection", (ev) => {
             const r = ev.reason;
             post("rejection", (r && (r.stack || r.message)) || String(r || "unhandled rejection"));
@@ -860,6 +961,20 @@ private struct SolidCraftWKWebView: UIViewRepresentable {
             post("console.error", args.map((a) => (a && (a.stack || a.message)) || String(a)).join(" "));
             return origErr.apply(console, args);
           };
+          const armWatchdog = () => {
+            setTimeout(() => {
+              if (!window.__bpSolidCraftBootStarted) {
+                fetch("./bp-boot.js", { method: "HEAD", credentials: "same-origin" })
+                  .then((r) => postErr("SolidCraft boot script did not start (HTTP " + r.status + ")"))
+                  .catch((e) => postErr("SolidCraft boot script failed: " + (e && e.message ? e.message : String(e))));
+              }
+            }, 10000);
+          };
+          if (document.readyState === "loading") {
+            window.addEventListener("DOMContentLoaded", armWatchdog, { once: true });
+          } else {
+            armWatchdog();
+          }
         })();
         """
         ucc.addUserScript(WKUserScript(source: diagScript, injectionTime: .atDocumentStart, forMainFrameOnly: false))
@@ -871,7 +986,7 @@ private struct SolidCraftWKWebView: UIViewRepresentable {
         view.navigationDelegate = context.coordinator
         view.scrollView.isScrollEnabled = false
         view.scrollView.bounces = false
-        context.coordinator.load(view: view, url: url, token: token)
+        context.coordinator.load(view: view, source: source)
         return view
     }
 
@@ -886,12 +1001,14 @@ private struct SolidCraftWKWebView: UIViewRepresentable {
         if context.coordinator.lastReloadNonce != reloadNonce {
             context.coordinator.lastReloadNonce = reloadNonce
             if reloadNonce > 0 {
-                context.coordinator.load(view: view, url: url, token: token)
+                context.coordinator.load(view: view, source: source)
             }
         }
     }
 
     static func dismantleUIView(_ view: WKWebView, coordinator: Coordinator) {
+        coordinator.localServer?.stop()
+        coordinator.localServer = nil
         let store = view.configuration.websiteDataStore.httpCookieStore
         if let cookie = coordinator.authCookie {
             store.delete(cookie)
@@ -906,23 +1023,58 @@ private struct SolidCraftWKWebView: UIViewRepresentable {
         var lastSaveNonce = 0
         var lastReloadNonce = 0
         var authCookie: HTTPCookie?
+        var allowedBaseURL: URL?
+        var localServer: SolidCraftLocalServer?
+        private var loadSeq = 0
 
         init(parent: SolidCraftWKWebView) {
             self.parent = parent
         }
 
-        func load(view: WKWebView, url: URL, token: String) {
-            let store = view.configuration.websiteDataStore.httpCookieStore
-            let req = SolidCraftWebPolicy.initialRequest(url: url, token: token)
-            if let cookie = HTTPCookie(properties: SolidCraftWebPolicy.cookieProperties(url: url, token: token)) {
-                self.authCookie = cookie
-                store.setCookie(cookie) {
+        func load(view: WKWebView, source: SolidCraftWebSource) {
+            loadSeq += 1
+            let seq = loadSeq
+            localServer?.stop()
+            localServer = nil
+            switch source {
+            case .bundled(let bundleDir, let hubBase, let token, let thread, let path, let light, let readOnly):
+                guard let srv = SolidCraftLocalServer(bundleDir: bundleDir, hubBase: hubBase, token: token) else {
                     DispatchQueue.main.async {
-                        view.load(req)
+                        self.parent.onError(Tr.t("This file could not be read."))
+                    }
+                    return
+                }
+                localServer = srv
+                Task {
+                    do {
+                        let url = try await srv.start(thread: thread, path: path, light: light, readOnly: readOnly)
+                        await MainActor.run {
+                            guard seq == self.loadSeq else { srv.stop(); return }
+                            self.allowedBaseURL = url
+                            view.load(URLRequest(url: url))
+                        }
+                    } catch {
+                        await MainActor.run {
+                            guard seq == self.loadSeq else { return }
+                            self.parent.onError(error.localizedDescription)
+                        }
                     }
                 }
-            } else {
-                view.load(req)
+            case .remote(let url, let token):
+                allowedBaseURL = url
+                let store = view.configuration.websiteDataStore.httpCookieStore
+                let req = SolidCraftWebPolicy.initialRequest(url: url, token: token)
+                if let cookie = HTTPCookie(properties: SolidCraftWebPolicy.cookieProperties(url: url, token: token)) {
+                    self.authCookie = cookie
+                    store.setCookie(cookie) {
+                        DispatchQueue.main.async {
+                            guard seq == self.loadSeq else { return }
+                            view.load(req)
+                        }
+                    }
+                } else {
+                    view.load(req)
+                }
             }
         }
 
@@ -932,6 +1084,19 @@ private struct SolidCraftWKWebView: UIViewRepresentable {
                 let level = body["level"] as? String ?? "log"
                 let msg = body["message"] as? String ?? ""
                 NSLog("[SolidCraftWeb %@] %@", level, msg)
+                DispatchQueue.main.async {
+                    self.parent.onDiag("[\(level)] \(msg)")
+                }
+                return
+            }
+            if type == "bp:solidcraft:stage" {
+                let stage = body["stage"] as? String ?? ""
+                let detail = body["detail"] as? String ?? ""
+                let done = (body["done"] as? NSNumber)?.int64Value ?? 0
+                let total = (body["total"] as? NSNumber)?.int64Value ?? 0
+                DispatchQueue.main.async {
+                    self.parent.onStage(stage, detail, done, total)
+                }
                 return
             }
             DispatchQueue.main.async {
@@ -956,7 +1121,7 @@ private struct SolidCraftWKWebView: UIViewRepresentable {
             if !isMainFrame && (scheme == "blob" || scheme == "data") {
                 decisionHandler(.allow); return
             }
-            if SolidCraftWebPolicy.isSameOrigin(u, parent.url) {
+            if let base = allowedBaseURL, SolidCraftWebPolicy.isSameOrigin(u, base) {
                 decisionHandler(.allow); return
             }
             decisionHandler(.cancel)
