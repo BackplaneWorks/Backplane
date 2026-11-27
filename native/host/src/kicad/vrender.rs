@@ -60,15 +60,11 @@ impl Kind {
             Ok(Kind::Schematic)
         } else if low.ends_with(".kicad_pcb") {
             Ok(Kind::Pcb)
-        } else if low.ends_with(".step")
-            || low.ends_with(".stp")
-            || low.ends_with(".glb")
-            || low.ends_with(".stl")
-        {
+        } else if mech_ext(&low) {
             Ok(Kind::Mech)
         } else {
             Err(format!(
-                "unsupported file extension for viewer_render: {path} (expected .kicad_sch, .kicad_pcb, .step, .stp, .glb, or .stl)"
+                "unsupported file extension for viewer_render: {path} (expected .kicad_sch, .kicad_pcb, .step, .stp, .glb, .stl, .sc, or .solidcraft)"
             ))
         }
     }
@@ -93,12 +89,7 @@ impl Kind {
         let compatible = match k {
             Kind::Schematic => low.ends_with(".kicad_sch"),
             Kind::Pcb | Kind::Pcb3d => low.ends_with(".kicad_pcb"),
-            Kind::Mech => {
-                low.ends_with(".step")
-                    || low.ends_with(".stp")
-                    || low.ends_with(".glb")
-                    || low.ends_with(".stl")
-            }
+            Kind::Mech => mech_ext(&low),
         };
         if !compatible {
             return Err(format!(
@@ -1583,12 +1574,37 @@ async fn render_pcb_3d(
     }))
 }
 
+/// The model files viewer_render draws: what the hub's own mesher reads (STEP, GLB, STL), and SolidCraft's designs, which only
+/// `solidcraft-cli` draws.
+fn mech_ext(low: &str) -> bool {
+    [".step", ".stp", ".glb", ".stl"].iter().any(|e| low.ends_with(e)) || crate::solidcraft::is_design(low)
+}
+
+/// A model's views from `solidcraft-cli snapshot` (its kernel's own faces and edges), for the files it reads when it is on this
+/// machine. None: not tried, or it failed (said on stderr) and the hub's own mesher draws the file, where it can.
+async fn render_mech_cli(path: &Path, params: &Params, out_dir: &Path) -> Option<Value> {
+    let path_str = path.to_string_lossy();
+    if !crate::solidcraft::cli_reads(&path_str) { return None }
+    let cli = crate::solidcraft::runtime::cli_path()?;
+    let w = params.width.unwrap_or(DEFAULT_3D_WIDTH).clamp(200, 2400);
+    let h = (w * 3 / 4).max(200);
+    let stem = sanitize_stem(path.file_stem().and_then(|s| s.to_str()).unwrap_or("model"));
+    match crate::solidcraft::render::views(&cli, path, out_dir, &stem, &params.views, w, h).await {
+        Ok(paths) => Some(json!({"paths": paths, "width": w, "height": h, "kind": Kind::Mech.as_str(), "views": params.views, "cached": false, "renderer": "solidcraft"})),
+        Err(why) => { eprintln!("viewer_render: solidcraft-cli could not draw {path_str}: {why}"); None }
+    }
+}
+
 async fn render_mech(
     home: &Path,
     path: &Path,
     params: &Params,
     out_dir: &Path,
 ) -> Result<Value, String> {
+    if let Some(done) = render_mech_cli(path, params, out_dir).await { return Ok(done) }
+    if crate::solidcraft::is_design(&path.to_string_lossy()) {
+        return Err(format!("{} is a SolidCraft design: drawing it needs SolidCraft on this computer (Settings, CAD installs it)", path.display()));
+    }
     let home = home.to_path_buf();
     let path_str = path.to_string_lossy().into_owned();
     let out_dir = out_dir.to_path_buf();

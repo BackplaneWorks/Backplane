@@ -41,6 +41,7 @@ pub fn start(hub: Arc<Hub>) {
     hub.register_rpc(Arc::new(rv::Rv));
     hub.register_rpc(Arc::new(export10::Export10));
     kicad::start(&hub);
+    crate::solidcraft::start(&hub);
     imgroutes::start(&hub);
     share::start(&hub);
 }
