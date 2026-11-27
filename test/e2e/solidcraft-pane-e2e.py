@@ -169,6 +169,7 @@ def main():
 
     procs = []
     checks = []
+    pane_r = {}
 
     def log(cid, ok, ev):
         checks.append({"id": cid, "ok": bool(ok), "ev": ev})
@@ -530,7 +531,7 @@ def main():
     if os.path.isfile(P("video.mp4")):
         subprocess.run(["ffmpeg", "-v", "error", "-i", P("video.mp4"), P("frames/f_%05d.png")], check=False, timeout=120)
     frames = sorted(glob.glob(P("frames/f_*.png")))
-    analyze_frames(frames, phase_marks, keyframes_dir=P("keyframes"), log=log, pane_rect=rects().get("solidcraft:pane"))
+    analyze_frames(frames, phase_marks, keyframes_dir=P("keyframes"), log=log, pane_rect=pane_r or None)
 
     report = {
         "video": P("video.mp4"),
