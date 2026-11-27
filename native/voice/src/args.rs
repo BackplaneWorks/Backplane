@@ -12,7 +12,7 @@ pub const USAGE: &str = "usage:
   backplane-voice local-turn --local-dir D
   backplane-voice local-speaker --local-dir D
   backplane-voice live [--keywords-file F] [--prompt P] [--language xx]... [--delay low]
-                       [--source auto|pw-record|parecord|arecord|stdin] [--device NAME] [--key-file F]
+                       [--source auto|pw-record|parecord|arecord|wasapi|stdin] [--device NAME] [--key-file F]
   backplane-voice file PATH [--content-type CT] [--keywords-file F] [--prompt P]
                        [--language xx]... [--delay low] [--key-file F]
   backplane-voice devices
@@ -21,7 +21,7 @@ The key comes from --key-file, else OPENAI_API_KEY. OPENAI_BASE_URL overrides th
 ";
 
 const COMMANDS: [&str; 10] = ["live", "file", "devices", "local-status", "local-install", "local-remove", "local-turn", "local-speaker", "record", "serve"];
-const SOURCES: [&str; 5] = ["auto", "pw-record", "parecord", "arecord", "stdin"];
+const SOURCES: [&str; 6] = ["auto", "pw-record", "parecord", "arecord", "wasapi", "stdin"];
 
 #[derive(Clone, Debug, Default)]
 pub struct Args {
@@ -185,5 +185,7 @@ mod tests {
         assert_eq!(why("serve --local-dir d"), "serve needs --socket");
         assert_eq!(why("serve --socket s"), "--local-dir is needed");
         assert_eq!(p("live --engine local --local-dir d --server s").unwrap().server, "s");
+        assert_eq!(p("live --source wasapi").unwrap().source, "wasapi");
+        assert_eq!(p("record --source wasapi --rate 16000").unwrap().source, "wasapi");
     }
 }

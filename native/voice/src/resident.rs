@@ -19,12 +19,16 @@ use std::path::Path;
 use std::sync::Arc;
 
 pub const THREADS: i32 = 4;
+#[cfg(unix)]
 const HELLO: &str = "bpv1";
 /// 20 s is the longest segment; a frame well over that is not ours.
+#[cfg(unix)]
 const MAX_SAMPLES: u32 = 16000 * 120;
 /// A frame whose count has this bit is an end-of-turn question (turn.rs), not a decode.
+#[cfg(unix)]
 const TURN_BIT: u32 = 1 << 31;
 /// A frame whose count has this bit asks for a speaker embedding (`{"emb": [...]}`).
+#[cfg(unix)]
 const VOICE_BIT: u32 = 1 << 30;
 
 /// Gives freed heap back to the system: building the recognizer leaves about

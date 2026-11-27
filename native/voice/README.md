@@ -12,11 +12,12 @@ cd native/voice && ../../scripts/cargo-q test --offline   # against a local mock
 
 ## What runs where
 
-- **Linux only: recording.** `live` from a microphone and `record` drive
-  `pw-record`, `parecord` or `arecord`, and `devices` asks `pactl`, `pw-dump`
-  or `arecord -L`. On macOS and Windows there is no recorder: `live` from one
-  fails with `no recorder found (...)`, and `devices` is an empty list and an
-  error.
+- **Linux and Windows: recording.** On Linux, `live` from a microphone and
+  `record` drive `pw-record`, `parecord` or `arecord`, and `devices` asks
+  `pactl`, `pw-dump` or `arecord -L`. On Windows, `live`, `record`, and
+  `devices` use WASAPI directly (`--source wasapi`, selected by `auto`). On
+  macOS there is still no native recorder: `live` from one fails with `no
+  recorder found (...)`, and `devices` is an empty list and an error.
 - **Everywhere:** `live --source stdin`, `file`, and the `local-*` commands.
   `file` wants `ffmpeg` on PATH for the local engine; the cloud path falls
   back to REST without it.
@@ -32,7 +33,7 @@ backplane-voice local-status --local-dir D
 backplane-voice local-install --local-dir D [--model ID]
 backplane-voice local-remove --local-dir D [--model ID]
 backplane-voice live [--keywords-file F] [--prompt P] [--language xx]... [--delay low]
-                     [--source auto|pw-record|parecord|arecord|stdin] [--device NAME] [--key-file F]
+                     [--source auto|pw-record|parecord|arecord|wasapi|stdin] [--device NAME] [--key-file F]
 backplane-voice file PATH [--content-type CT] [--keywords-file F] [--prompt P]
                      [--language xx]... [--delay low] [--key-file F]
 backplane-voice serve --local-dir D [--model ID] --socket SOCK
@@ -54,18 +55,21 @@ No arguments, or bad ones: usage on stderr, exit 2.
 
 ### devices
 
-The microphones: `pactl -f json list sources`, else `pw-dump`, else
+On Windows, enumerates active WASAPI capture endpoints (`eCapture`,
+`DEVICE_STATE_ACTIVE`) and returns the default console/communications
+microphone. On Linux, asks `pactl -f json list sources`, else `pw-dump`, else
 `arecord -L`; monitors of outputs are skipped. The default is `pactl
 get-default-source`, or PipeWire's `default.audio.source`, or ALSA's
 `default`. Nothing to ask gives an empty list and an error.
 
 ### live
 
-Records s16le mono from the first of `pw-record --raw`, `parecord --raw`,
-`arecord` found (or the one named; `stdin` reads raw PCM from stdin) from
-`--device NAME` (`pw-record --target`, `parecord --device=`, `arecord -D`;
-absent is the default source). A recorder alive for 500 ms with no audio yet
-counts as started.
+Records s16le mono: on Windows via WASAPI (`--device NAME` takes an endpoint
+ID or friendly name; absent is the default capture endpoint), and on Linux from
+the first of `pw-record --raw`, `parecord --raw`, `arecord` found (or the one
+named; `stdin` reads raw PCM from stdin) from `--device NAME` (`pw-record
+--target`, `parecord --device=`, `arecord -D`; absent is the default source).
+A recorder alive for 500 ms with no audio yet counts as started.
 
 Cloud: 24 kHz, streamed to `gpt-live-transcribe` on the Realtime API, 100 ms
 per append. That model has no turn detection, so the helper commits: a local
@@ -138,7 +142,8 @@ SIGINT, a `stop` line on stdin, stdin's end, or the reader closing stdout.
 stdout is audio and nothing else; diagnostics go to stderr. Exit 0 when
 stopped, 1 when no recorder could start or the recorder died, 2 for usage.
 For a desktop client on another machine than its hub, capturing its own
-microphone. Recorders are Linux-only; `--source stdin` copies stdin through.
+microphone. Works on Linux and Windows (WASAPI); `--source stdin` copies stdin
+through.
 
 ## Events
 
@@ -146,7 +151,7 @@ NDJSON on stdout, one object a line, written at once; diagnostics on stderr.
 
 ```
 {"event":"devices","default":"<name>","devices":[{"name":"<source>","label":"<description>"}]}
-{"event":"ready","recorder":"pw-record","device":"<source>","label":"<description>"}
+{"event":"ready","recorder":"pw-record|wasapi|...","device":"<source>","label":"<description>"}
                                             live: recorder running (the session or the model comes
                                             up alongside; audio waits for it); device is --device
                                             or the default ("" unknown); sent again once if the
