@@ -287,6 +287,23 @@ async fn open_in(hub: &Arc<Hub>, root: &str, file: &str) -> Result<(), String> {
     publish(hub, root).await;
     Ok(())
 }
+/// A new design in the live window, in a tab of its own, saved at `file` at once so it has a path from its first second (the
+/// Files tab shows it, the agent's checkpoints and autosave have somewhere to write). The session's `file` follows.
+async fn new_in(hub: &Arc<Hub>, root: &str, file: &str) -> Result<(), String> {
+    if Path::new(file).exists() { return Err(format!("{file} already exists")) }
+    if let Some(d) = Path::new(file).parent() { std::fs::create_dir_all(d).map_err(|e| format!("Could not make {}: {e}", d.display()))?; }
+    let name = Path::new(file).file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    command(root, "file.new", json!({"name": name, "new_tab": true}), Duration::from_secs(30)).await?;
+    command(root, "file.save_as", json!({"path": file}), Duration::from_secs(30)).await?;
+    with(root, |s| s.file = file.to_string());
+    publish(hub, root).await;
+    Ok(())
+}
+/// The first free `mech/part-N.sc` under a project root (N from 1): where "New 3D part" puts a design nobody named.
+pub fn next_part(root: &str) -> String {
+    let dir = Path::new(root).join("mech");
+    (1..10_000).map(|n| dir.join(format!("part-{n}.sc"))).find(|p| !p.exists()).unwrap_or_else(|| dir.join("part.sc")).to_string_lossy().into_owned()
+}
 /// Close the program of `root`: a design is saved first (its edits are the person's and the agent's work), then it is asked to end,
 /// and stopped for good if it has not within five seconds.
 pub async fn close(hub: &Arc<Hub>, root: &str, save: bool) {
@@ -345,7 +362,11 @@ impl RpcHandler for EmbedRpc {
             }
             let root = match root_of(p) { Ok(r) => r, Err(why) => return err_reply(id, &why) };
             if !crate::files::kicad::known_root(hub, &root, "").await { return err_reply(id, &format!("{root} is not in a project this hub knows")) }
-            let file = match resolve_file(&root, p["file"].as_str().unwrap_or("")) { Ok(f) => f, Err(why) => return err_reply(id, &why) };
+            // `create` with no file: a new design at the first free mech/part-N.sc
+            let create = p["create"].as_bool().unwrap_or(false);
+            let named = p["file"].as_str().unwrap_or("");
+            let file = if create && named.is_empty() { next_part(&root) } else { match resolve_file(&root, named) { Ok(f) => f, Err(why) => return err_reply(id, &why) } };
+            if create && !super::is_design(&file) { return err_reply(id, "A new design is a .sc file") }
             // a file outside the project is opened only where the hub may show it (a link the person followed); a new design need not exist yet
             if !file.is_empty() && !Path::new(&file).starts_with(&root) && !crate::files::kicad::known_root(hub, &root, &file).await { return err_reply(id, &format!("{file} is not in a project this hub knows")) }
             let (container, toplevel) = (p["container"].as_u64().unwrap_or(0), p["toplevel"].as_u64().unwrap_or(0));
@@ -354,7 +375,8 @@ impl RpcHandler for EmbedRpc {
                     let s = snapshot(&root);
                     if s.is_live() {
                         with(&root, |x| { x.container = container; x.toplevel = toplevel; x.parked_at = 0; });
-                        if !file.is_empty() && file != s.file && s.state != "starting" { if let Err(why) = open_in(hub, &root, &file).await { let mut v = publish(hub, &root).await; v["open_error"] = json!(why); return ok_reply(id, v) } }
+                        let fresh = super::is_design(&file) && !Path::new(&file).exists();
+                        if !file.is_empty() && file != s.file && s.state != "starting" { if let Err(why) = if fresh { new_in(hub, &root, &file).await } else { open_in(hub, &root, &file).await } { let mut v = publish(hub, &root).await; v["open_error"] = json!(why); return ok_reply(id, v) } }
                         return ok_reply(id, publish(hub, &root).await)
                     }
                     if method == "editor.solidcraft.bring_back" { return err_reply(id, "SolidCraft is not open for this project") }
@@ -385,8 +407,9 @@ impl RpcHandler for EmbedRpc {
                 }
                 "editor.solidcraft.open" => {
                     if file.is_empty() { return err_reply(id, "No file was named") }
-                    if !Path::new(&file).is_file() { return err_reply(id, &format!("{file} does not exist")) }
-                    match open_in(hub, &root, &file).await { Ok(()) => ok_reply(id, publish(hub, &root).await), Err(why) => err_reply(id, &why) }
+                    let fresh = create && super::is_design(&file) && !Path::new(&file).exists();
+                    if !fresh && !Path::new(&file).is_file() { return err_reply(id, &format!("{file} does not exist")) }
+                    match if fresh { new_in(hub, &root, &file).await } else { open_in(hub, &root, &file).await } { Ok(()) => ok_reply(id, publish(hub, &root).await), Err(why) => err_reply(id, &why) }
                 }
                 "editor.solidcraft.detach" => {
                     let keep = p["keep"].as_bool().unwrap_or(false);
@@ -534,7 +557,7 @@ mod tests {
         assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("not in a project"), "{r}");
         let r = hub.request(&mut conn, &json!({"id": 3, "m": "editor.solidcraft.attach", "p": {"project": root, "file": "x.kicad_pcb"}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
         assert!(r["ok"] == false, "{r}");
-        let r = hub.request(&mut conn, &json!({"id": 4, "m": "editor.solidcraft.attach", "p": {"project": root, "file": "mech/gone.step"}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
+        let r = hub.request(&mut conn, &json!({"id": 4, "m": "editor.solidcraft.attach", "p": {"project": root, "file": "mech/gone.step", "container": 1}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
         assert!(r["ok"] == false && r["error"].as_str().unwrap().contains("does not exist"), "{r}");
         // the stand-in program
         let noted = base.join("noted");
@@ -578,6 +601,14 @@ mod tests {
         let r = hub.request(&mut conn, &json!({"id": 7, "m": "editor.solidcraft.open", "p": {"project": root, "file": "mech/a.step"}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
         assert_eq!(r["file"].as_str(), proj.join("mech/a.step").to_str(), "{r}");
         assert_eq!(*opened.lock().unwrap(), vec![format!("doc.open {}", proj.join("mech/b.step").display()), format!("doc.open {}", proj.join("mech/a.step").display())]);
+        // a new part: a tab of its own, saved at the first free mech/part-N.sc at once
+        let r = hub.request(&mut conn, &json!({"id": 30, "m": "editor.solidcraft.open", "p": {"project": root, "create": true}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
+        assert_eq!((r["ok"].as_bool(), r["file"].as_str(), r["pid"].as_u64()), (Some(true), proj.join("mech/part-1.sc").to_str(), Some(pid as u64)), "{r}");
+        assert_eq!(opened.lock().unwrap()[2..], ["file.new ".to_string(), format!("file.save_as {}", proj.join("mech/part-1.sc").display())]);
+        let r = hub.request(&mut conn, &json!({"id": 31, "m": "editor.solidcraft.open", "p": {"project": root, "create": true, "file": "mech/a.step"}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
+        assert_eq!(r["ok"], false, "a new design is a .sc: {r}");
+        std::fs::write(proj.join("mech/part-1.sc"), "x").unwrap(); assert_eq!(next_part(&root), proj.join("mech/part-2.sc").to_string_lossy());
+        let r = hub.request(&mut conn, &json!({"id": 32, "m": "editor.solidcraft.open", "p": {"project": root, "file": "mech/a.step"}})).await.into_iter().find(|f| f["t"] == "reply").unwrap(); assert_eq!(r["ok"], true);
         // detached: the window floats; brought back: in the pane again; the program is the same one throughout
         let r = hub.request(&mut conn, &json!({"id": 8, "m": "editor.solidcraft.detach", "p": {"project": root}})).await.into_iter().find(|f| f["t"] == "reply").unwrap();
         assert_eq!((r["container"].as_u64(), r["state"].as_str(), r["pid"].as_u64()), (Some(0), Some("ready"), Some(pid as u64)));
