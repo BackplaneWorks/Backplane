@@ -203,6 +203,7 @@ pub fn got(this: &mut Backplane, v: Value, cx: &mut Context<Backplane>) {
     let said: Vec<String> = v["attempts"].as_array().into_iter().flatten().filter(|a| !a["message"].as_str().unwrap_or("").is_empty()).filter_map(|a| a["id"].as_str().map(str::to_string)).collect();
     this.screens.acct.checking.retain(|k| live.contains(k) && !said.contains(k));
     this.screens.acct.snap = v;
+    if this.screens.streamer.why.is_some() { this.streamer_apply(cx); }
     super::onboard::accounts_changed(this);
     poll(this, cx);
 }

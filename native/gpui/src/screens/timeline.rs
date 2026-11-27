@@ -755,7 +755,8 @@ impl FlowText {
                         let mut amp_font = base_font.clone();
                         amp_font.weight = FontWeight::BOLD;
                         let amp = window.text_system().shape_line("&".into(), chip_fs, &[TextRun { len: 1, font: amp_font, color: c("ok").into(), background_color: None, underline: None, strikethrough: None }], None);
-                        let lbl = shape_truncated_label(label, max_label_w, &base_font, chip_fs, c("text"), window);
+                        let masked_label = crate::streamer::shown(label);
+                        let lbl = shape_truncated_label(&masked_label, max_label_w, &base_font, chip_fs, c("text"), window);
                         let kind = window.text_system().shape_line(SharedString::from(kind_word.clone()), kind_fs, &[TextRun { len: kind_word.len(), font: base_font.clone(), color: c("faint").into(), background_color: None, underline: None, strikethrough: None }], None);
                         let w = pad_x * 2. + amp.width + gap + lbl.width + gap + kind.width;
                         let glue_prev = atoms.last().is_some_and(|prev| !prev.is_space);
@@ -769,6 +770,8 @@ impl FlowText {
                         });
                     }
                     RawPiece::Span { text, style: sp_style, range } => {
+                        let masked = crate::streamer::same_width(text, false);
+                        let text: &str = masked.as_deref().unwrap_or(text.as_str());
                         let mut pos = 0usize;
                         while pos < text.len() {
                             let ws = text[pos..].chars().next().unwrap().is_whitespace();

@@ -228,7 +228,7 @@ impl Backplane {
         for (pid, title, p) in strip_projects(&self.data) {
             let on = self.project_page.as_deref() == Some(pid.as_str());
             out.push(div().id(SharedString::from(format!("strip-{pid}"))).w_full().h(crate::scale::tpx(30.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).when(on, |d| d.bg(c("raise")))
-                .tooltip(crate::keys::tip(&title, "", light)).child(super::badge::mark(light, p))
+                .tooltip(crate::keys::tip(&crate::streamer::project_shown(&title), "", light)).child(super::badge::mark(light, p))
                 .on_click(cx.listener(move |this, _, _, cx| this.open_project(pid.clone(), cx))).into_any_element());
         }
         out

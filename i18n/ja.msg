@@ -4772,6 +4772,8 @@ gpui.mgmt.life.price.since = {day}から
 
 # streamer mode (native/gpui/src/streamer.rs)
 gpui.streamer.account = アカウント {n}
+gpui.streamer.project = プロジェクト {n}
+gpui.streamer.group = グループ {n}
 gpui.streamer.mode = 配信モード
 gpui.streamer.section = 配信
 gpui.streamer.off = 配信モード: オフにする

@@ -171,6 +171,13 @@ pub fn project_items_of(pid_raw: &str, project: &Value) -> Vec<Item> {
 pub fn section_items(menu: &Value) -> Vec<Item> {
     fn one(i: &Value) -> Item {
         let (id, label, action, value) = (s(i, "id"), s(i, "label"), s(i, "action"), s(i, "value"));
+        let label = if id == "group" && action == "group-move" && !value.ends_with('\u{1f}') {
+            crate::streamer::group_shown(&label)
+        } else if action == "row-move-project" {
+            crate::streamer::project_shown(&label)
+        } else {
+            label
+        };
         if i["sub"].is_array() {
             let sub: Vec<Value> = i["sub"].as_array().into_iter().flatten().map(|x| { let it = one(x); serde_json::json!([it.label, it.action, it.value, it.confirm]) }).collect();
             return item(&label, LOCAL_SUB, &Value::Array(sub).to_string(), false)

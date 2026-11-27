@@ -25,7 +25,7 @@ fn fixed() -> f32 { OTHERS - (TOK_FRAME + 7. * CH) + SEND_W * (crate::scale::s()
 pub fn split(bar_w: f32, combo: &Value, tok: &str, ctx: &str) -> (f32, String) {
     let words = |t: &str| TOK_FRAME + t.chars().count() as f32 * ch();
     if bar_w <= 0. { return (0., if tok.is_empty() { ctx.to_string() } else { tok.to_string() }) }
-    let short = string(combo, "short");
+    let short = crate::streamer::shown(&string(combo, "short"));
     let need = FRAME + short.chars().count() as f32 * ch();
     let text = if !tok.is_empty() && (ctx.is_empty() || bar_w - fixed() - words(tok) >= need) { tok } else { ctx };
     (bar_w - fixed() - words(text), text.to_string())
@@ -42,7 +42,7 @@ pub fn mem_bar(light: bool, m: &Value) -> AnyElement {
 }
 /// Chip.words: the longest of the hub's three forms (full, mid, short) that fits `avail` px; the full one while the width is not known yet (0).
 pub fn words(combo: &Value, avail: f32) -> String {
-    let forms: Vec<String> = ["full", "mid", "short"].iter().map(|k| string(combo, k)).filter(|s| !s.is_empty()).collect();
+    let forms: Vec<String> = ["full", "mid", "short"].iter().map(|k| crate::streamer::shown(&string(combo, k))).filter(|s| !s.is_empty()).collect();
     let Some(last) = forms.last().cloned() else { return String::new() };
     if avail <= 0. { return forms[0].clone() }
     forms.into_iter().find(|f| FRAME + f.chars().count() as f32 * ch() <= avail).unwrap_or(last)
@@ -54,7 +54,7 @@ pub fn tip(combo: &Value, model_key: &str, account_key: &str) -> String {
     let mut t = string(combo, "tip").lines().map(crate::i18n::trs).collect::<Vec<_>>().join("\n");
     let keys = [(model_key, "gpui.combo.key.model"), (account_key, "gpui.combo.key.account")].iter().filter(|(k, _)| !k.is_empty()).map(|(k, w)| crate::i18n::tf(w, &[("key", (*k).into())])).collect::<Vec<_>>().join(" · ");
     if !keys.is_empty() { if !t.is_empty() { t.push('\n') } t.push_str(&keys) }
-    t
+    crate::streamer::shown(&t)
 }
 /// The Usage part: one row a window ("Weekly", "36% left", "resets Wed 11 Nov 17:00", its tone, whether it binds this thread's model), then the extra usage and why there is nothing.
 #[derive(Debug, PartialEq)]

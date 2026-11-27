@@ -29,9 +29,10 @@ fn head(this: &Backplane, cx: &mut Context<Backplane>, light: bool, s: &Value, c
     let (id, title, fold, open) = (string(s, "id"), string(s, "title"), s["fold"] == true, s["open"] == true);
     let n = s["count"].as_u64().unwrap_or(0);
     let toggle = string(s, "toggle");
-    let label = if fold || s["kind"] == "threads" { format!("{} {n}", trs(&title).to_uppercase()) } else { trs(&title).to_uppercase() };
-    if fold { ctl.push(CtlEntry { id: format!("section:{id}"), label: title.clone(), ctl: Ctl::Node("side-section".into(), toggle.clone()) }); }
     let gid = string(s, "group");
+    let shown_title = if !gid.is_empty() || id.starts_with("group:") { crate::streamer::group_shown(&title) } else { trs(&title) };
+    let label = if fold || s["kind"] == "threads" { format!("{} {n}", shown_title.to_uppercase()) } else { shown_title.to_uppercase() };
+    if fold { ctl.push(CtlEntry { id: format!("section:{id}"), label: title.clone(), ctl: Ctl::Node("side-section".into(), toggle.clone()) }); }
     let needs = id == "needs";
     let mut d = crate::ui::with_rect(div().id(SharedString::from(format!("sec-{id}"))), { let id = id.clone(); move || format!("section:{id}") })
         .flex().items_center().gap_2().pl(px(6.)).pr_3().pt_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(if needs { c("bad") } else { c("dim") })
@@ -97,13 +98,13 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
             /* i18n-ok: menu labels, drawn through trs */ let mut items = vec![crate::screens::ctxmenu::Item { label: if pinned { "Unpin project".into() } else { "Pin project".into() }, action: "project-pin".into(), value: key3.clone(), confirm: false, note: String::new() },
                 /* i18n-ok: a menu label, drawn through trs */ crate::screens::ctxmenu::Item { label: "New swarm".into(), action: "swarm-new".into(), value: pid3.clone(), confirm: false, note: String::new() }];
             for g in groups.as_array().into_iter().flatten() {
-                items.push(crate::screens::ctxmenu::Item { label: tf("gpui.sections.move.to", &[("group", string(g, "label").into())]), action: "group-move".into(), value: format!("{}\u{1f}{}", key3, string(g, "value")), confirm: false, note: String::new() });
+                items.push(crate::screens::ctxmenu::Item { label: tf("gpui.sections.move.to", &[("group", crate::streamer::group_shown(&string(g, "label")).into())]), action: "group-move".into(), value: format!("{}\u{1f}{}", key3, string(g, "value")), confirm: false, note: String::new() });
             }
             this.ctx_open(e.position, items, cx);
         }))
         .child(twisty)
         .child(crate::screens::badge::mark(light, p))
-        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(p, "title")))
+        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::streamer::project_shown(&string(p, "title"))))
         // a hardware project (a board or schematic in it): a faint board glyph, so the bench reads hardware and software apart at a glance
         .children((p["hasBoard"] == true).then(|| crate::art::icon("circuit-board", 12., c("faint"))))
         .children((!dots.is_empty()).then(|| div().flex().gap_1().items_center().children(dots)))
@@ -157,7 +158,7 @@ impl Backplane {
                         let mut t = t.clone(); if matches!(t["want"].as_str(), Some("failed" | "stopped")) { t["want"] = serde_json::json!(""); }
                         // Running lists every project's work in one place, so each row names its project (faint, after the title)
                         // (a chat's section already says what it is: no "Chats" after every title)
-                        let sub = if t["chat"] == true { String::new() } else { string(&t, "project") };
+                        let sub = if t["chat"] == true { String::new() } else { let s = string(&t, "project"); if s.is_empty() { s } else { crate::streamer::project_shown(&s) } };
                         rows.push(self.side_thread(cx, light, &t, "", if sub.is_empty() { " " } else { &sub }, t["off"] == true, ctl));
                     }
                 }

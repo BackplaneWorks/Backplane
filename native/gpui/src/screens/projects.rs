@@ -699,8 +699,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     let root = if loaded { let r = string(&snap, "root"); if r.is_empty() { string(p, "root") } else { r } } else { string(p, "root") };
     let top = threads.first().map(|t| string(t, "id"));
     let mut out: Vec<AnyElement> = vec![
-        div().text_size(crate::scale::tpx(22.)).font_weight(FontWeight::BOLD).child(string(p, "title")).into_any_element(),
-        div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(root.clone()).into_any_element(),
+        div().text_size(crate::scale::tpx(22.)).font_weight(FontWeight::BOLD).child(crate::streamer::project_shown(&string(p, "title"))).into_any_element(),
+        div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::streamer::shown(&root)).into_any_element(),
     ];
     // the actions: New thread first (the way in), Open folder, then the viewers the folder has something for (they open on the project's top thread)
     let mut bar = div().flex().flex_wrap().items_center().gap_2().pt_3().pb_1();
