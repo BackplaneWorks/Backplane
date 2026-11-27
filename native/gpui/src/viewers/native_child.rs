@@ -882,6 +882,25 @@ mod imp {
         place_impl(container, r, show, managed, Some(keep), last_root);
     }
 
+    /// Set `CWBackPixel` on `w` and its immediate child windows (depth 2) so X11 `miWindowExposures`
+    /// atomically fills newly exposed resize/reflow strips instead of leaving stale framebuffer pixels.
+    pub fn set_bg_pixel_x11(w: u64, rgb: u32) {
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        fn apply(c: &RustConnection, w: Window, rgb: u32, depth: u32) {
+            let px = match c.get_geometry(w).ok().and_then(|r| r.reply().ok()).map(|g| g.depth) {
+                Some(32) => 0xff00_0000 | (rgb & 0x00ff_ffff),
+                _ => rgb & 0x00ff_ffff,
+            };
+            let _ = c.change_window_attributes(w, &ChangeWindowAttributesAux::new().background_pixel(px));
+            if depth == 0 { return }
+            for k in c.query_tree(w).ok().and_then(|r| r.reply().ok()).map(|t| t.children).unwrap_or_default() {
+                apply(c, k, rgb, depth - 1);
+            }
+        }
+        apply(c, w as u32, rgb, 2);
+        let _ = c.flush();
+    }
+
     /// Re-check the container's root coordinates and `show`'s geometry (e.g. on a pure WM top-level move, or right after GTK's deferred
     /// `gtk_widget_show` maps `show` at its own default size) and sync `show` to `(0, 0, w, h)` + current root position.
     pub fn sync_root(container: u64, r: R, show: u64, last_root: &mut (i32, i32)) {
@@ -2927,6 +2946,14 @@ pub fn place_shaped(container: u64, r: Option<R>, show: Option<u64>, managed: Op
     place(container, r, show, managed, last_root);
     holes(container, keep);
 }
+
+#[cfg(target_os = "linux")]
+pub fn set_bg_pixel(w: u64, rgb: u32) {
+    imp::set_bg_pixel_x11(w, rgb);
+}
+
+#[cfg(not(target_os = "linux"))]
+pub fn set_bg_pixel(_w: u64, _rgb: u32) {}
 
 #[cfg(test)]
 mod tests {

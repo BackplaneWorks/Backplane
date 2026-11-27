@@ -257,18 +257,12 @@ pub fn rect_intersect(a: nc::R, b: nc::R) -> Option<nc::R> {
     })
 }
 
-/// Minimum rect jump (origin shift or large growth) treated as a layout reflow that masks un-blitted strips briefly.
-pub const REFLOW_JUMP_PX: i32 = 24;
-
 /// Two-phase placement plan around `Window::present()` so the native child never paints over stale host pixels.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PlacePlan {
     HideNow,
     Immediate,
-    SyncResize {
-        pre_clip: Vec<nc::R>,
-        post_clip: Option<Vec<nc::R>>,
-    },
+    SyncResize { pre_clip: Vec<nc::R> },
 }
 
 /// Choose how to synchronize a container transition from `prev` to `next` (with host overlays `over`) around `present()`.
@@ -278,13 +272,8 @@ pub fn plan_placement(prev: Option<nc::R>, next: Option<nc::R>, over: &[nc::R]) 
         (None, Some(_)) => PlacePlan::Immediate,
         (Some(m), Some(r)) if m == r => PlacePlan::Immediate,
         (Some(m), Some(r)) => {
-            let origin_jumped = (r.x - m.x).abs() > REFLOW_JUMP_PX || (r.y - m.y).abs() > REFLOW_JUMP_PX;
-            let grew_large = (r.w - m.w) > REFLOW_JUMP_PX || (r.h - m.h) > REFLOW_JUMP_PX;
             let Some(inter) = rect_intersect(m, r) else {
-                return PlacePlan::SyncResize {
-                    pre_clip: Vec::new(),
-                    post_clip: Some(Vec::new()),
-                };
+                return PlacePlan::SyncResize { pre_clip: Vec::new() };
             };
             let dx = inter.x - m.x;
             let dy = inter.y - m.y;
@@ -297,35 +286,7 @@ pub fn plan_placement(prev: Option<nc::R>, next: Option<nc::R>, over: &[nc::R]) 
                     h: c.h,
                 })
                 .collect();
-            if pre_clip.is_empty() {
-                return PlacePlan::SyncResize {
-                    pre_clip: Vec::new(),
-                    post_clip: Some(Vec::new()),
-                };
-            }
-            let post_clip = if origin_jumped {
-                // Origin shifted (e.g., sidebar auto-collapse reflow): hide shifted X11 pixels briefly until SolidCraft repaints.
-                Some(Vec::new())
-            } else if grew_large && r.x == m.x && r.y == m.y {
-                let rx = inter.x - r.x;
-                let ry = inter.y - r.y;
-                Some(
-                    nc::cut(inter, over)
-                        .into_iter()
-                        .map(|c| nc::R {
-                            x: c.x + rx,
-                            y: c.y + ry,
-                            w: c.w,
-                            h: c.h,
-                        })
-                        .collect(),
-                )
-            } else if grew_large {
-                Some(Vec::new())
-            } else {
-                None
-            };
-            PlacePlan::SyncResize { pre_clip, post_clip }
+            PlacePlan::SyncResize { pre_clip }
         }
     }
 }
@@ -436,7 +397,7 @@ pub struct SolidCraftPane {
     placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     last_place: Option<(u64, nc::R, Option<u64>)>,
     home_rect: Option<nc::R>,
-    shape_hold: Option<(u64, Instant, Option<Vec<nc::R>>)>,
+    bg_applied: Option<(u64, Option<u64>, u32)>,
     last_root: (i32, i32),
     place_seq: u64,
     screen_key: Option<(u64, u64)>,
@@ -479,7 +440,7 @@ impl SolidCraftPane {
             placed: None,
             last_place: None,
             home_rect: None,
-            shape_hold: None,
+            bg_applied: None,
             last_root: (i32::MIN, 0),
             place_seq: 0,
             screen_key: None,
@@ -537,8 +498,28 @@ impl SolidCraftPane {
     pub fn set_light(&mut self, light: bool, cx: &mut Context<Self>) {
         if self.light != light {
             self.light = light;
+            self.sync_bg_pixel();
             cx.notify();
         }
+    }
+
+    fn pane_bg_rgb(&self) -> u32 {
+        if self.light { 0xf5f4ef } else { 0x282b35 }
+    }
+
+    fn sync_bg_pixel(&mut self) {
+        let Some(c) = self.container else { return };
+        let child = self.child_window();
+        let rgb = self.pane_bg_rgb();
+        let key = (c, child, rgb);
+        if self.bg_applied == Some(key) {
+            return;
+        }
+        nc::set_bg_pixel(c, rgb);
+        if let Some(w) = child {
+            nc::set_bg_pixel(w, rgb);
+        }
+        self.bg_applied = Some(key);
     }
 
     pub fn lend_focus(&mut self) {
@@ -559,7 +540,6 @@ impl SolidCraftPane {
         self.in_page = in_page;
         if !in_page {
             self.place_seq = self.place_seq.wrapping_add(1);
-            self.shape_hold = None;
             if let Some((t, c)) = self.screen_key.take() {
                 nc::note_pane_on_screen(t, c, false);
             }
@@ -730,11 +710,12 @@ impl SolidCraftPane {
         self.container = Some(new_c);
         self.placed = None;
         self.last_place = None;
-        self.shape_hold = None;
+        self.bg_applied = None;
         self.last_root = (i32::MIN, 0);
         self.place_seq = self.place_seq.wrapping_add(1);
         self.frames = nc::frames(new_c);
         nc::grab_click(new_c, !self.keys);
+        self.sync_bg_pixel();
         if new_top == self.home {
             if let (Some(r), Some(w)) = (self.home_rect, self.child_window()) {
                 self.report_screen(new_c, true);
@@ -765,7 +746,7 @@ impl SolidCraftPane {
         let rect = self.last_place.map(|(_, r, _)| r);
         self.placed = None;
         self.last_place = None;
-        self.shape_hold = None;
+        self.bg_applied = None;
         self.place_seq = self.place_seq.wrapping_add(1);
         if self.info["state"] == "ready" && !self.frames.is_empty() && self.toplevel == self.home {
             for old in keep(Kept {
@@ -811,12 +792,11 @@ impl SolidCraftPane {
             let interval = weak
                 .update(cx, |this, cx| {
                     this.tick(cx);
-                    if (this.child_window().is_none()
+                    if this.child_window().is_none()
                         && matches!(
                             this.info["state"].as_str(),
                             Some("starting" | "ready") | None
-                        ))
-                        || this.shape_hold.is_some()
+                        )
                     {
                         Duration::from_millis(25)
                     } else {
@@ -834,14 +814,6 @@ impl SolidCraftPane {
         let Some(c) = self.container else {
             return;
         };
-        if let Some((hc, until, _)) = &self.shape_hold {
-            if Instant::now() >= *until {
-                let (hc, _, keep_after) = self.shape_hold.take().unwrap();
-                if hc == c {
-                    nc::holes(c, keep_after.as_deref());
-                }
-            }
-        }
         if let Some(pid) = self.info["pid"].as_u64().filter(|p| *p > 0) {
             #[cfg(not(windows))]
             if !nc::adopt(pid as u32, c, self.toplevel).is_empty() {
@@ -1027,6 +999,7 @@ impl SolidCraftPane {
             }
             return;
         }
+        self.sync_bg_pixel();
         let prev_at = self.placed.as_ref().and_then(|(prev, _, _)| *prev);
         let plan = plan_placement(prev_at, effective_at, &over);
         self.place_seq = self.place_seq.wrapping_add(1);
@@ -1034,14 +1007,12 @@ impl SolidCraftPane {
         let cut_rects = effective_at.filter(|_| !over.is_empty()).map(|p| nc::cut(p, &over));
         match plan {
             PlacePlan::HideNow => {
-                self.shape_hold = None;
                 self.report_screen(c, false);
                 nc::place_shaped(c, None, None, None, None, &mut self.last_root);
                 self.last_place = None;
                 self.placed = Some(key);
             }
             PlacePlan::Immediate => {
-                self.shape_hold = None;
                 self.report_screen(c, effective_at.is_some() && effective_show.is_some());
                 nc::place_shaped(
                     c,
@@ -1057,8 +1028,7 @@ impl SolidCraftPane {
                 }
                 self.placed = Some(key);
             }
-            PlacePlan::SyncResize { pre_clip, post_clip } => {
-                self.shape_hold = None;
+            PlacePlan::SyncResize { pre_clip } => {
                 nc::holes(c, Some(&pre_clip));
                 let weak = cx.entity().downgrade();
                 window.after_present(move |window, cx| {
@@ -1070,28 +1040,14 @@ impl SolidCraftPane {
                             return;
                         }
                         this.report_screen(c, effective_at.is_some() && effective_show.is_some());
-                        if let Some(hold_clip) = post_clip {
-                            nc::place_shaped(
-                                c,
-                                effective_at,
-                                effective_show,
-                                None,
-                                Some(&hold_clip),
-                                &mut this.last_root,
-                            );
-                            window.re_present();
-                            this.shape_hold =
-                                Some((c, Instant::now() + Duration::from_millis(55), cut_rects));
-                        } else {
-                            nc::place_shaped(
-                                c,
-                                effective_at,
-                                effective_show,
-                                None,
-                                cut_rects.as_deref(),
-                                &mut this.last_root,
-                            );
-                        }
+                        nc::place_shaped(
+                            c,
+                            effective_at,
+                            effective_show,
+                            None,
+                            cut_rects.as_deref(),
+                            &mut this.last_root,
+                        );
                         this.last_place = effective_at.map(|r| (c, r, effective_show));
                         if this.toplevel == this.home && effective_at.is_some() {
                             this.home_rect = effective_at;
@@ -1825,7 +1781,7 @@ impl Backplane {
                 cx,
             ))),
             titlebar: Some(TitlebarOptions {
-                /* i18n-ok: detached window title */ title: Some(crate::streamer::shown(&format!("{title} — SolidCraft · Backplane")).into()),
+                /* i18n-ok: detached window title */ title: Some(crate::streamer::shown(&format!("SolidCraft · {title} — Backplane")).into()),
                 ..Default::default()
             }),
             ..Default::default()
@@ -2044,76 +2000,49 @@ mod tests {
         assert_eq!(plan_placement(Some(r1), Some(r1), &[]), PlacePlan::Immediate);
         assert_eq!(
             plan_placement(Some(r1), Some(disjoint), &[]),
-            PlacePlan::SyncResize {
-                pre_clip: Vec::new(),
-                post_clip: Some(Vec::new()),
-            }
+            PlacePlan::SyncResize { pre_clip: Vec::new() }
         );
 
-        // Small stepped shrink (<= 24 px): clip pre-present to r1 ∩ r2_small_shrink in r1-local coords, no post_clip needed.
         assert_eq!(
             plan_placement(Some(r1), Some(r2_small_shrink), &[]),
             PlacePlan::SyncResize {
                 pre_clip: vec![nc::R { x: 10, y: 0, w: 650, h: 800 }],
-                post_clip: None,
             }
         );
 
-        // Small stepped grow (<= 24 px): clip pre-present to r1 ∩ r2_small_grow, no post_clip needed.
         assert_eq!(
             plan_placement(Some(r1), Some(r2_small_grow), &[]),
             PlacePlan::SyncResize {
                 pre_clip: vec![nc::R { x: 0, y: 0, w: 660, h: 800 }],
-                post_clip: None,
             }
         );
 
-        // Large sidebar-collapse reflow (m=[653..1130] w=477 -> r=[528..1110] w=582): origin jumped -125 px -> mask post_clip=Some([]) briefly.
         let m_collapse = nc::R { x: 653, y: 70, w: 477, h: 799 };
         let r_collapse = nc::R { x: 528, y: 70, w: 582, h: 799 };
         assert_eq!(
             plan_placement(Some(m_collapse), Some(r_collapse), &[]),
             PlacePlan::SyncResize {
                 pre_clip: vec![nc::R { x: 0, y: 0, w: 457, h: 799 }],
-                post_clip: Some(Vec::new()),
             }
         );
 
-        // Large sidebar-expand reflow (m=[528..1110] w=582 -> r=[653..1130] w=477): origin jumped +125 px -> mask post_clip=Some([]).
         assert_eq!(
             plan_placement(Some(r_collapse), Some(m_collapse), &[]),
             PlacePlan::SyncResize {
                 pre_clip: vec![nc::R { x: 125, y: 0, w: 457, h: 799 }],
-                post_clip: Some(Vec::new()),
             }
         );
 
-        // Same-origin large growth: keep blitted intersection in r-local coords, mask un-blitted right margin.
-        let r_same_origin_grow = nc::R { x: 700, y: 70, w: 800, h: 800 };
-        assert_eq!(
-            plan_placement(Some(r1), Some(r_same_origin_grow), &[]),
-            PlacePlan::SyncResize {
-                pre_clip: vec![nc::R { x: 0, y: 0, w: 660, h: 800 }],
-                post_clip: Some(vec![nc::R { x: 0, y: 0, w: 660, h: 800 }]),
-            }
-        );
-
-        // Full overlay over intersection falls back to empty masks so container stays viewable without showing stale pixels.
         assert_eq!(
             plan_placement(Some(r1), Some(r2_small_shrink), &[r1]),
-            PlacePlan::SyncResize {
-                pre_clip: Vec::new(),
-                post_clip: Some(Vec::new()),
-            }
+            PlacePlan::SyncResize { pre_clip: Vec::new() }
         );
 
-        // Partial overlay translates pre_clip rectangles into prev-local coordinates.
         let overlay = vec![nc::R { x: 710, y: 70, w: 650, h: 100 }];
         assert_eq!(
             plan_placement(Some(r1), Some(r2_small_shrink), &overlay),
             PlacePlan::SyncResize {
                 pre_clip: vec![nc::R { x: 10, y: 100, w: 650, h: 700 }],
-                post_clip: None,
             }
         );
     }
