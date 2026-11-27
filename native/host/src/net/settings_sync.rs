@@ -9,7 +9,7 @@
 //!   `sidebar.pin.*`, `sidebar.group.of.*`, `sidebar.group.name.*`, `sidebar.group.pick.*`,
 //!   `sidebar.archived.*`, `sidebar.fold.*`, `project.icon.*`, `project.color.*`, `project.pick.*`)
 //!
-//! Machine-local folders/paths, ports, KiCad pane state, local builds, accounts, and secrets stay local.
+//! Machine-local folders/paths, ports, KiCad/SolidCraft pane & runtime state, local builds, accounts, and secrets stay local.
 //! Conflict resolution is per-key Last-Write-Wins by `at` (unix seconds; tie-break by value), including
 //! empty-value clears so unpinning or clearing a preference propagates cleanly.
 use crate::hub::Hub;
@@ -386,7 +386,13 @@ mod tests {
         remote.insert("agent.model".into(), Entry { value: "opus".into(), at: 50 }); // missing locally -> taken
         remote.insert("models.favorites".into(), Entry { value: r#"["claude/opus"]"#.into(), at: 60 }); // valid -> taken
         remote.insert("machine.id".into(), Entry { value: "evil".into(), at: 999 }); // not allowlisted -> ignored
+        remote.insert("solidcraft.runtime".into(), Entry { value: "/opt/sc".into(), at: 999 }); // machine-local -> ignored
+        remote.insert("editor.solidcraft.pane".into(), Entry { value: "open".into(), at: 999 }); // machine-local -> ignored
         remote.insert("notify.quiet".into(), Entry { value: "not-a-window".into(), at: 999 }); // invalid -> ignored
+
+        assert!(!is_shared("solidcraft.runtime"));
+        assert!(!is_shared("editor.solidcraft.pane"));
+        assert!(!is_shared("solidcraft.last_path"));
 
         let evs = merge(&local, &remote);
         assert_eq!(evs.len(), 4, "{evs:?}");

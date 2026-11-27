@@ -290,6 +290,7 @@ pub fn ctype(name: &str) -> &'static str {
         "pdf" => "application/pdf", "zip" => "application/zip", "csv" => "text/csv; charset=utf-8", "json" => "application/json",
         "txt" | "md" | "log" | "yaml" | "yml" | "gbr" | "drl" | "xln" | "gbrjob" => "text/plain; charset=utf-8",
         "step" | "stp" => "model/step", "glb" => "model/gltf-binary", "stl" => "model/stl",
+        "sc" | "solidcraft" => "application/zip", "iges" | "igs" => "model/iges", "3mf" => "model/3mf", "obj" => "model/obj",
         _ => "application/octet-stream",
     }
 }

@@ -710,11 +710,10 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: b
                 Ok(json!({"dir":s(p, "path"),"entries":entries_of(machines::listing_of(&res))}))
             }
             "mech.list" => {
-                // the hub's listing is `cksum` lines (`<crc> <size> <path>`): models (step, stp, glb) and pictures, as paths
+                // the hub's listing is `cksum` lines (`<crc> <size> <path>`): CAD models and pictures, as paths
                 let res = result(rpc(hub, c, "mech.list", json!({"thread":th})).await?);
                 let paths: Vec<String> = s(&res, "mech").lines().filter_map(|l| l.splitn(3, ' ').nth(2).map(str::to_string)).collect();
-                let model = |p: &String| { let l = p.to_lowercase(); l.ends_with(".step") || l.ends_with(".stp") || l.ends_with(".glb") };
-                Ok(json!({"parts":paths.iter().filter(|p| model(p)).collect::<Vec<_>>(),"renders":paths.iter().filter(|p| !model(p)).collect::<Vec<_>>(),"primary":s(&res, "primary")}))
+                Ok(json!({"parts":paths.iter().filter(|p| crate::files::fm::is_cad(p)).collect::<Vec<_>>(),"renders":paths.iter().filter(|p| !crate::files::fm::is_cad(p)).collect::<Vec<_>>(),"primary":s(&res, "primary")}))
             }
             _ => { // browser
                 if !hub.model().await.threads.get(th).map_or(false, |t| !t.deleted) { return Err(err("unknown thread")) }

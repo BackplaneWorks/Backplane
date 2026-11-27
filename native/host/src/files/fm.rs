@@ -10,13 +10,28 @@ pub fn ext(name: &str) -> String {
 }
 fn ends(xs: &[&str], e: &str) -> bool { xs.iter().any(|x| e.ends_with(x)) }
 
+/// Supported SolidCraft CAD / 3D model file extensions (lowercase, with leading dot).
+pub const CAD_EXTS: &[&str] = &[".step", ".stp", ".sc", ".solidcraft", ".iges", ".igs", ".stl", ".3mf", ".obj", ".glb"];
+
+/// Whether `name` is a CAD or 3D model file supported by the SolidCraft pane / viewers.
+pub fn is_cad(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    CAD_EXTS.iter().any(|x| l.ends_with(x))
+}
+
+/// Binary CAD/mesh containers whose raw bytes are not useful text for `files_read`.
+pub fn is_binary_cad(name: &str) -> bool {
+    let l = name.to_ascii_lowercase();
+    [".sc", ".solidcraft", ".3mf", ".glb"].iter().any(|x| l.ends_with(x))
+}
+
 /// Fm.kind: "board", "schematic", "3d", "image", "pdf" or "" (listed only).
 pub fn kind(name: &str) -> &'static str {
     let e = ext(name);
     if e.ends_with(".kicad_pcb") || e.ends_with(".pcbdoc") { "board" } else if e.ends_with(".kicad_sch") || e.ends_with(".schdoc") { "schematic" }
     // a Gerber, drill or job file: drawn on the Board page (kicad/gerber)
     else if crate::files::kicad::gerber::is_fab_file(name) { "board" }
-    else if ends(&[".step", ".stp", ".glb"], &e) { "3d" }
+    else if is_cad(name) { "3d" }
     else if ends(&[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"], &e) { "image" }
     else if e.ends_with(".pdf") { "pdf" } else { "" }
 }
@@ -88,7 +103,9 @@ mod tests {
     use crate::plat::fs::symlink;
     // laws fm_kind_board fm_kind_schematic fm_kind_model fm_kind_pdf fm_kind_image fm_kind_other
     #[test] fn fm_kind() {
-        for (n, k) in [("a.kicad_pcb","board"),("A.KICAD_PCB","board"),("x.kicad_sch","schematic"),("m.step","3d"),("m.STP","3d"),("m.glb","3d"),("p.PDF","pdf"),("i.png","image"),("i.JpEg","image"),("n.txt",""),("Makefile",""),("",""),("a.kicad_pcb.bak","")] { assert_eq!(kind(n), k, "{n}") }
+        for (n, k) in [("a.kicad_pcb","board"),("A.KICAD_PCB","board"),("x.kicad_sch","schematic"),("m.step","3d"),("m.STP","3d"),("m.glb","3d"),("case.sc","3d"),("case.solidcraft","3d"),("p.iges","3d"),("p.IGS","3d"),("m.stl","3d"),("m.3mf","3d"),("m.obj","3d"),("p.PDF","pdf"),("i.png","image"),("i.JpEg","image"),("n.txt",""),("Makefile",""),("",""),("a.kicad_pcb.bak","")] { assert_eq!(kind(n), k, "{n}") }
+        assert!(is_binary_cad("a.sc") && is_binary_cad("a.SOLIDCRAFT") && is_binary_cad("a.3mf") && is_binary_cad("a.glb"));
+        assert!(!is_binary_cad("a.step") && !is_binary_cad("a.txt"));
         assert_eq!(preview("n.md"), "text"); assert_eq!(preview("a.kicad_pcb"), "board"); assert_eq!(preview("x.YAML"), "text");
     }
     // laws fm_safe_up fm_safe_abs fm_safe_down fm_files_safe_*

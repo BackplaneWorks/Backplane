@@ -372,6 +372,8 @@ mod tests {
         assert_eq!(l("boards/main/main.kicad_sch", true).iter().map(|x| (x.0.as_str(), x.1.as_str())).collect::<Vec<_>>(),
             [("Open", LOCAL_LINK_FILE), ("Open in KiCad (embedded)", LOCAL_KICAD_EMBED), ("Show in folder", LOCAL_FILE_REVEAL), ("Copy path", LOCAL_COPY)]);
         assert_eq!(l("file:///w/a.kicad_pcb", true).len(), 4); assert_eq!(l("/w/case.step", true).len(), 3, "a model has no KiCad to edit it");
+        assert_eq!(l("/w/case.sc", true).iter().map(|x| (x.0.as_str(), x.1.as_str())).collect::<Vec<_>>(),
+            [("Open", LOCAL_LINK_FILE), ("Show in folder", LOCAL_FILE_REVEAL), ("Copy path", LOCAL_COPY)]);
         assert_eq!(l("https://x.io", false).iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), [LOCAL_URL_OPEN, LOCAL_COPY]); assert_eq!(l("javascript:x", false).len(), 1);
         assert_eq!(image_items("/h/a.png").iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Copy image", "Save image as\u{2026}", "Open", "Show in folder", "Copy path"]);
         assert_eq!(image_items("").iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), [LOCAL_COPY_IMAGE, LOCAL_SAVE_IMAGE], "a picture with no file of its own (a web picture, a relative one) still copies and saves");

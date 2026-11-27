@@ -86,13 +86,19 @@ pub fn menu_download(href: &str, files: &serde_json::Value, remote: bool, thread
     file_download(href, thread).map(|(u, n)| (u, name.unwrap_or(n)))
 }
 
-/// A file the viewer draws, by its name (the hub's present/filelink.rs `design_kind`): a KiCad board, schematic or project, a STEP, STP or
-/// GLB model, Gerbers. Such a word is a link in a message even alone (`main.kicad_sch`), and opens inside Backplane.
+/// A file the viewer draws, by its name (the hub's present/filelink.rs `design_kind`): a KiCad board, schematic or project, a SolidCraft CAD/3D
+/// model, Gerbers. Such a word is a link in a message even alone (`main.kicad_sch`, `case.sc`), and opens inside Backplane.
 pub fn design_file(p: &str) -> bool {
     let l = file_name(p).to_ascii_lowercase();
     let Some((stem, e)) = l.rsplit_once('.') else { return false };
     let inner = e.strip_prefix('g').map_or(false, |n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit()));
-    !stem.is_empty() && (inner || matches!(e, "kicad_pcb" | "kicad_sch" | "kicad_pro" | "pcbdoc" | "schdoc" | "prjpcb" | "step" | "stp" | "glb" | "gbr" | "gbrjob" | "gtl" | "gbl" | "gts" | "gbs" | "gto" | "gbo" | "gtp" | "gbp" | "gko" | "gm1" | "gml" | "drl" | "xln"))
+    !stem.is_empty() && (inner || matches!(e, "kicad_pcb" | "kicad_sch" | "kicad_pro" | "pcbdoc" | "schdoc" | "prjpcb" | "step" | "stp" | "sc" | "solidcraft" | "iges" | "igs" | "stl" | "3mf" | "obj" | "glb" | "gbr" | "gbrjob" | "gtl" | "gbl" | "gts" | "gbs" | "gto" | "gbo" | "gtp" | "gbp" | "gko" | "gm1" | "gml" | "drl" | "xln"))
+}
+/// A CAD or 3D model file opened in the embedded SolidCraft CAD pane.
+pub fn cad_file(p: &str) -> bool {
+    let l = p.split(['#', '?']).next().unwrap_or(p).to_ascii_lowercase();
+    let l = l.trim_end_matches(|c: char| c.is_ascii_digit() || c == ':');
+    [".step", ".stp", ".sc", ".solidcraft", ".iges", ".igs", ".stl", ".3mf", ".obj", ".glb"].iter().any(|x| l.ends_with(x))
 }
 /// A file KiCad edits (a board, a schematic, a KiCad project): its link offers Open in KiCad (embedded).
 pub fn kicad_file(p: &str) -> bool { let l = p.split(['#', '?']).next().unwrap_or(p).to_ascii_lowercase(); let l = l.trim_end_matches(|c: char| c.is_ascii_digit() || c == ':'); [".kicad_pcb", ".kicad_sch", ".kicad_pro"].iter().any(|x| l.ends_with(x)) }
@@ -140,9 +146,10 @@ mod tests {
     }
     #[test] fn a_file_address_is_a_file_and_design_files_are_known_by_name() {
         assert_eq!(route("file:///w/a.kicad_pcb", false), Route::File("file:///w/a.kicad_pcb".into()));
-        for n in ["main.kicad_sch", "b/a.KICAD_PCB", "x.kicad_pro", "Top.SchDoc", "hw/Board.PcbDoc", "x.PrjPcb", "case.step", "m.glb", "a-F_Cu.gbr", "a.g2", "a.drl"] { assert!(design_file(n), "{n}"); }
+        for n in ["main.kicad_sch", "b/a.KICAD_PCB", "x.kicad_pro", "Top.SchDoc", "hw/Board.PcbDoc", "x.PrjPcb", "case.step", "case.sc", "case.solidcraft", "part.iges", "part.stl", "part.3mf", "part.obj", "m.glb", "a-F_Cu.gbr", "a.g2", "a.drl"] { assert!(design_file(n), "{n}"); }
         for n in ["x.rs", ".kicad_pcb", "notes.md", "g", "a.g123"] { assert!(!design_file(n), "{n}"); }
         assert!(kicad_file("a/b.kicad_sch:12") && kicad_file("file:///w/x.kicad_pro") && !kicad_file("a.step"));
+        assert!(cad_file("case.sc") && cad_file("file:///w/case.step:3") && cad_file("part.STL") && !cad_file("main.kicad_pcb"));
     }
     #[test] fn the_embedded_editor_waits_for_the_viewer_to_show_the_file() {
         assert_eq!(stem_of("boards/main/main.kicad_pro:3"), "main"); assert_eq!(stem_of("file:///w/a.b.kicad_sch"), "a.b");

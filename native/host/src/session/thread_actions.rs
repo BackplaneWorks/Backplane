@@ -11,10 +11,9 @@ fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn draft<'a>(session: &'a Value, k: &str) -> &'a str { s(&session["drafts"], k) }
 fn info<'a>(session: &'a Value, k: &str) -> &'a str { s(&session["info"], k) }
 
-/// Mech.is_model: a STEP (.step, .stp) or a GLB, by extension without regard to case.
+/// Mech.is_model: a CAD or 3D model file supported by SolidCraft / Mech, by extension without regard to case.
 fn is_model(path: &str) -> bool {
-    let l = path.to_ascii_lowercase();
-    [".step", ".stp", ".glb"].iter().any(|e| l.ends_with(e))
+    crate::files::fm::is_cad(path)
 }
 
 /// Mpage.sync (the page on show asks for its parts when the thread or view.n moved from "@mech.at") and Dv.sync (an open Diff follows the thread's changes) have something

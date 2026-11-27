@@ -174,8 +174,8 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
         for e in it.flatten() {
             ordinal += 1; if ordinal <= after { continue }
             seen += 1;
-            let name = e.file_name().to_string_lossy().into_owned(); let lower = name.to_lowercase();
-            if e.file_type().map_or(false, |t| t.is_file()) && (lower.ends_with(".step") || lower.ends_with(".stp") || lower.ends_with(".glb")) {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if e.file_type().map_or(false, |t| t.is_file()) && crate::files::fm::is_cad(&name) {
                 if let Some((p, _)) = add(&mut art, "mech", &format!("mech/{name}"), &name, "") { let s = p.to_string_lossy().into_owned(); if let Some(i) = s.rfind('.') { fab_row(&h, &mut art, &mut issues, &format!("{}.fab.json", &s[..i])) } }
             }
             if art.len() >= 26 || seen >= 256 { next = Some(ordinal); break }

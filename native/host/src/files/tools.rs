@@ -52,7 +52,12 @@ impl ToolSet for Tools {
                     "files_rename" => ops::rename(&root, &g("path"), &g("to")).map(|p| json!({"renamed":p})),
                     "files_delete" => ops::delete(&root, &g("path")).map(|p| json!({"deleted":p})),
                     "files_write" => ops::write(&droot, &drel, g("text").as_bytes()).map(|p| json!({"written":p})),
-                    _ => ops::read_text(&droot, &drel, a2.get("max").and_then(Value::as_u64).unwrap_or(65536).min(1 << 20) as usize).map(|t| json!({"text":t})),
+                    _ => {
+                        if super::fm::is_binary_cad(&drel) {
+                            return Err(format!("{drel} is a binary CAD container; use viewer_show, viewer_render, or SolidCraft MCP tools to inspect it"))
+                        }
+                        ops::read_text(&droot, &drel, a2.get("max").and_then(Value::as_u64).unwrap_or(65536).min(1 << 20) as usize).map(|t| json!({"text":t}))
+                    }
                 }
             }).await.unwrap_or(Err("failed".into()));
             match r { Ok(v) => (true, v), Err(e) => bad(e) }
@@ -62,4 +67,9 @@ impl ToolSet for Tools {
 #[cfg(test)]
 mod tests { use super::*;
     #[test] fn rows_parse_the_listing() { let r = rows("d\t0\tdocs\nf\t12\ta.txt\n"); assert_eq!(r[0]["kind"], "folder"); assert_eq!(r[1]["size"], 12); assert_eq!(r[1]["name"], "a.txt"); }
+    #[test] fn binary_cad_files_are_flagged_for_files_read() {
+        assert!(crate::files::fm::is_binary_cad("mech/case.sc"));
+        assert!(crate::files::fm::is_binary_cad("mech/case.solidcraft"));
+        assert!(!crate::files::fm::is_binary_cad("mech/case.step"));
+    }
 }

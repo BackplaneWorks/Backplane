@@ -53,7 +53,7 @@ pub fn design_kind(name: &str) -> &'static str {
     let inner = e.strip_prefix('g').map_or(false, |n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit()));
     match e {
         "kicad_pcb" | "pcbdoc" => "board", "kicad_sch" | "schdoc" => "schematic", "kicad_pro" => "project",
-        "step" | "stp" | "glb" => "model",
+        "step" | "stp" | "sc" | "solidcraft" | "iges" | "igs" | "stl" | "3mf" | "obj" | "glb" => "model",
         "gbr" | "gbrjob" | "gtl" | "gbl" | "gts" | "gbs" | "gto" | "gbo" | "gtp" | "gbp" | "gko" | "gm1" | "gml" | "drl" | "xln" => "gerber",
         _ if inner => "gerber",
         _ => "",
