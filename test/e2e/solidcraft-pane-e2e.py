@@ -168,6 +168,7 @@ def main():
     path_parts = [P("bin")]
     if SC_DIR:
         path_parts.append(SC_DIR)
+        env["BACKPLANE_SOLIDCRAFT"] = SC_DIR
     path_parts.append(env.get("PATH", ""))
     env.update(
         XDG_RUNTIME_DIR=RUN,
@@ -224,9 +225,20 @@ def main():
         vk = (sorted(glob.glob("/usr/share/vulkan/icd.d/lvp_icd*.json")) or ["/usr/share/vulkan/icd.d/lvp_icd.json"])[0]
         cenv = dict(denv, VK_ICD_FILENAMES=vk, LP_NUM_THREADS="2", BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS="1")
 
-        # Keep script open and drive real interactions + metrics
+        # Keep script open and drive real interactions + metrics + SolidCraft script hooks
+        race_steps = [
+            {"select": 0},
+            {"wait": 3000},
+            # Attach case.step (enters starting), immediately switch to box.sc before ready -> must not respawn (same pid/gen)
+            {"view_show": ["mech", P("proj/mech/case.step")]},
+            {"wait": 400},
+            {"solidcraft": {"report": True, "tag": "while_starting"}},
+            {"solidcraft": {"open": P("proj/mech/box.sc"), "tag": "open_while_starting"}},
+            {"solidcraft": {"wait_ready": 45000, "min_painted": 5, "tag": "ready_after_race"}},
+            {"wait": 300000},
+        ]
         with open(P("script.json"), "w") as fh:
-            json.dump([{"select": 0}, {"wait": 300000}], fh)
+            json.dump(race_steps, fh)
 
         t_rec = time.time()
         rec = spawn(
@@ -240,7 +252,23 @@ def main():
             denv,
         )
         client = spawn([CLIENT, "--url", f"http://127.0.0.1:{PORT}", "--token-file", P("home/token"), "--script", P("script.json"), "--exit-after", "300"], "client.log", cenv)
-        time.sleep(5.0)
+        for _ in range(90):
+            ms = [json.loads(l.split("GPUI_METRIC ", 1)[1]) for l in open(P("client.log"), errors="replace") if "GPUI_METRIC " in l] if os.path.isfile(P("client.log")) else []
+            if any(m.get("event") == "solidcraft" and m.get("tag") == "ready_after_race" for m in ms):
+                break
+            time.sleep(0.5)
+
+        sc_events = [json.loads(l.split("GPUI_METRIC ", 1)[1]) for l in open(P("client.log"), errors="replace") if "GPUI_METRIC " in l]
+        ev_start = next((m for m in sc_events if m.get("event") == "solidcraft" and m.get("tag") == "while_starting"), {})
+        ev_ready = next((m for m in sc_events if m.get("event") == "solidcraft" and m.get("tag") == "ready_after_race"), {})
+        same_proc = (
+            ev_ready.get("state") == "ready"
+            and ev_start.get("pid", 0) != 0
+            and ev_start.get("pid") == ev_ready.get("pid")
+            and ev_start.get("gen") == ev_ready.get("gen")
+            and ev_ready.get("file", "").endswith("box.sc")
+        )
+        log("open_while_starting_no_respawn", same_proc, f"start={ev_start.get('pid')}/{ev_start.get('gen')} ready={ev_ready.get('pid')}/{ev_ready.get('gen')} file={ev_ready.get('file')}")
 
         def metrics():
             if not os.path.isfile(P("client.log")):
