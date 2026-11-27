@@ -449,10 +449,14 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
             let blocks: Vec<Value> = viewer["file"]["blocks"].as_array().cloned().unwrap_or_default();
             let parsed = super::md::parse(&blocks);
             let doc = super::timeline::Doc { imgs: images, target, width: (f32::from(ui.preview_scroll.bounds().size.width) - 24.).max(240.) };
-            div().flex().flex_col().gap_3().p_3().text_size(crate::scale::tpx(14.)).children(super::timeline::doc_blocks(cx, reg, light, &parsed, "file", &doc)).into_any_element()
+            div().flex().flex_col().gap_3().p_3().text_size(crate::scale::tpx(14.))
+                .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+                .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+                .on_mouse_move(cx.listener(|this, e, _, cx| this.doc_move(e, cx)))
+                .children(super::timeline::doc_blocks(cx, reg, light, &parsed, "file", &doc)).into_any_element()
         }
         _ => match ui.texts.get(&url) {
-            Some(Text::Ready(t)) => text_block(light, &name, t),
+            Some(Text::Ready(t)) => text_block(cx, reg, light, t),
             Some(Text::Failed(e)) => div().p_3().text_color(c("bad")).child(trs(e)).into_any_element(),
             _ => div().p_3().text_color(c("dim")).child(trs("Loading…")).into_any_element(),
         },
@@ -460,16 +464,16 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
     div().size_full().flex().flex_col().child(bar).child(super::viewer::main_body(div().id("fm-preview")).track_scroll(&ui.preview_scroll).flex_1().min_h_0().overflow_y_scroll().child(body)).into_any_element()
 }
 
-/// Text lines in the mono font; a Markdown note bolds its headings and dims its rules.
-fn text_block(light: bool, name: &str, t: &str) -> AnyElement {
-    let c = |n: &str| theme::color(light, n);
-    let md = name.to_lowercase().ends_with(".md") || name.to_lowercase().ends_with(".markdown");
-    div().flex().flex_col().p_3().text_size(crate::scale::tpx(12.)).children(t.lines().take(5000).map(|l| {
-        let h = md && l.starts_with('#');
-        let mut d = div().font(crate::art::mono_font()).whitespace_nowrap().min_h(px(16.));
-        if h { d = d.font_weight(FontWeight::BOLD).text_color(c("accent")); }
-        d.child(l.to_string()).into_any_element()
-    }).collect::<Vec<_>>()).into_any_element()
+/// Selectable text in the mono font for plain-text file previews.
+fn text_block(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, t: &str) -> AnyElement {
+    let body = t.lines().take(5000).collect::<Vec<_>>().join("\n");
+    let spans = vec![super::md::Span { text: body, style: Default::default() }];
+    div().flex().flex_col().p_3().text_size(crate::scale::tpx(12.))
+        .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+        .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+        .on_mouse_move(cx.listener(|this, e, _, cx| this.doc_move(e, cx)))
+        .child(super::timeline::text(reg, light, spans, super::timeline::Kind::Code))
+        .into_any_element()
 }
 
 /// A script step `files`: "select:N", "open:N", "key:down", "filter:text", "new:name", "rename:N:name", "delete:N", "confirm_delete", "menu:N", "upload:PATH",

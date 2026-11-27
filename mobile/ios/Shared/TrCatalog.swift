@@ -565,6 +565,7 @@ menu.file.reveal	Show in folder	フォルダで表示	Mostrar en carpeta
 menu.file.copy	Copy path	パスをコピー	Copiar ruta
 menu.uber.demote	Not uberbot	メインボットを解除	Quitar uberbot
 menu.uber.promote	Make uberbot	メインボットにする	Hacer uberbot
+menu.quote	Quote	引用	Citar
 settings.tailscale.label	Tailscale: {state}	Tailscale：{state}	Tailscale: {state}
 settings.tailscale.notconnected	not connected	未接続	desconectado
 settings.tailscale.off.note	Listening on {listen} only: started with --no-tailscale.	{listen}のみで待ち受け中です（--no-tailscaleで起動）。	Escuchando solo en {listen}: iniciado con --no-tailscale.

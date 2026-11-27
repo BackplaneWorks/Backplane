@@ -562,11 +562,18 @@ impl TextLayout {
     /// Get the byte index into the input of the pixel position.
     pub fn index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize> {
         let map = self.0.borrow().as_ref().and_then(|s| s.map.clone());
-        let ix = self.shown_index_for_position(position);
+        let ix = self.shown_index_for_position(position, false);
         match map { Some(m) => ix.map(|i| m.to_orig(i)).map_err(|i| m.to_orig(i)), None => ix }
     }
 
-    fn shown_index_for_position(&self, mut position: Point<Pixels>) -> Result<usize, usize> {
+    /// Get the closest character boundary byte index into the input of the pixel position.
+    pub fn closest_index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize> {
+        let map = self.0.borrow().as_ref().and_then(|s| s.map.clone());
+        let ix = self.shown_index_for_position(position, true);
+        match map { Some(m) => ix.map(|i| m.to_orig(i)).map_err(|i| m.to_orig(i)), None => ix }
+    }
+
+    fn shown_index_for_position(&self, mut position: Point<Pixels>, closest: bool) -> Result<usize, usize> {
         let element_state = self.0.borrow();
         let element_state = element_state
             .as_ref()
@@ -589,7 +596,12 @@ impl TextLayout {
                 line_start_ix += line.len() + 1;
             } else {
                 let position_within_line = position - line_origin;
-                match line.index_for_position(position_within_line, line_height) {
+                let res = if closest {
+                    line.closest_index_for_position(position_within_line, line_height)
+                } else {
+                    line.index_for_position(position_within_line, line_height)
+                };
+                match res {
                     Ok(index_within_line) => return Ok(line_start_ix + index_within_line),
                     Err(index_within_line) => return Err(line_start_ix + index_within_line),
                 }

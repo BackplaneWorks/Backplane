@@ -23,6 +23,7 @@ pub const LOCAL_MOVE: &str = "local:move";
 pub const LOCAL_FILE_OPEN: &str = "local:file-open";
 pub const LOCAL_FILE_REVEAL: &str = "local:file-reveal";
 pub const LOCAL_COPY: &str = "local:copy";
+pub const LOCAL_QUOTE: &str = "local:quote";
 pub const LOCAL_COPY_IMAGE: &str = "local:copy-image";
 /// A picture's Save image as…: the original file, at full size (images.rs `Save`).
 pub const LOCAL_SAVE_IMAGE: &str = "local:save-image";
@@ -39,8 +40,11 @@ pub const LOCAL_DOWNLOAD: &str = "local:download";
 pub const LOCAL_SUB: &str = "local:sub";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
-/// A right-click with text selected in the timeline: its Copy (nothing without a selection).
-/* i18n-ok: menu labels, drawn through trs in render */ pub fn selection_items(selected: &str) -> Vec<Item> { if selected.is_empty() { vec![] } else { vec![item("Copy", LOCAL_COPY, selected, false)] } }
+/// A right-click with text selected in the timeline: Copy and Quote (nothing without a selection).
+pub fn selection_items(selected: &str) -> Vec<Item> {
+    if selected.is_empty() { vec![] }
+    /* i18n-ok: menu labels, drawn through trs/t in render */ else { vec![item("Copy", LOCAL_COPY, selected, false), item("Quote", LOCAL_QUOTE, selected, false)] }
+}
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm, note: String::new() } }
 
 /// A Download item: (hub address, name) in its value.
@@ -233,7 +237,7 @@ impl Backplane {
         if let Some(c) = disarm(&m) { let _ = self.tx.try_send(c); }
         cx.notify(); true
     }
-    fn ctx_click(&mut self, i: usize, cx: &mut Context<Self>) {
+    fn ctx_click(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(m) = self.screens.ctx.as_mut() else { return };
         match m.items.get(i).map(|it| (it.action.clone(), it.value.clone())) {
             // the window's own items: the menu shuts as Esc shuts it (an armed Delete is disarmed), then the item opens its place
@@ -242,6 +246,7 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_INTENT => { self.ctx_close(cx); self.open_project(v, cx); return }
             Some((a, v)) if a == LOCAL_FILE_OPEN || a == LOCAL_FILE_REVEAL => { self.ctx_close(cx); self.file_open(&v, a == LOCAL_FILE_REVEAL); return }
             Some((a, v)) if a == LOCAL_COPY => { self.ctx_close(cx); cx.write_to_clipboard(ClipboardItem::new_string(v)); return }
+            Some((a, v)) if a == LOCAL_QUOTE => { self.ctx_close(cx); self.quote_into_composer(&v, window, cx); return }
             Some((a, v)) if a == LOCAL_URL_OPEN => { self.ctx_close(cx); cx.open_url(&v); return }
             Some((a, v)) if a == LOCAL_LINK_FILE || a == LOCAL_KICAD_EMBED || a == LOCAL_SOLIDCRAFT_OPEN => { self.ctx_close(cx); self.link_file(&v, a == LOCAL_KICAD_EMBED, cx); return }
             Some((a, v)) if a == LOCAL_DOWNLOAD => { self.ctx_close(cx); if let Some((u, n)) = v.split_once('\n') { self.download(u.to_string(), n.to_string(), super::dlbar::From::Other, cx); } return }
@@ -317,11 +322,11 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
     let mut list = div().absolute().left(m.at.x).top(m.at.y).min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).occlude();
     for (i, it) in m.items.iter().enumerate() {
         let armed = m.armed == Some(i);
-        let label = if armed { shown_armed_label(it) } else if it.action == LOCAL_SUB { format!("{} \u{203a}", crate::i18n::trs(&it.label)) } else { crate::i18n::trs(&it.label) };
+        let label = if armed { shown_armed_label(it) } else if it.action == LOCAL_SUB { format!("{} \u{203a}", crate::i18n::trs(&it.label)) } else if it.action == LOCAL_QUOTE { crate::i18n::t("menu.quote") } else { crate::i18n::trs(&it.label) };
         let danger = it.confirm;
         list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("ctx-{i}"))), { let (l, pr) = (it.label.clone(), m.probe); move || format!("{pr}:{l}") }).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
             .when(armed, |d| d.bg(c("raise")).font_weight(FontWeight::BOLD)).hover(|s| s.bg(c("raise"))).child(label)
-            .on_click(cx.listener(move |this, _, _, cx| this.ctx_click(i, cx))));
+            .on_click(cx.listener(move |this, _, window, cx| this.ctx_click(i, window, cx))));
     }
     div().id("ctx-backdrop").absolute().inset_0().occlude()
         .on_click(cx.listener(|this, _, _, cx| { this.ctx_close(cx); }))
@@ -486,5 +491,15 @@ mod tests {
             assert!(items.iter().any(|i| i.action == LOCAL_SOLIDCRAFT_OPEN && i.label == "Open in SolidCraft"), "{p}");
         }
         assert!(!link_items("board.kicad_pcb", true, None).iter().any(|i| i.action == LOCAL_SOLIDCRAFT_OPEN));
+    }
+    #[test] fn selection_items_offer_copy_and_quote_when_non_empty() {
+        assert!(selection_items("").is_empty());
+        let items = selection_items("line one\nline two");
+        assert_eq!(items.len(), 2);
+        assert_eq!((items[0].label.as_str(), items[0].action.as_str(), items[0].value.as_str()), ("Copy", LOCAL_COPY, "line one\nline two"));
+        assert_eq!((items[1].label.as_str(), items[1].action.as_str(), items[1].value.as_str()), ("Quote", LOCAL_QUOTE, "line one\nline two"));
+        assert_eq!(crate::i18n::t("menu.quote"), "Quote");
+        crate::i18n::with_lang("es", || assert_eq!(crate::i18n::t("menu.quote"), "Citar"));
+        crate::i18n::with_lang("ja", || assert_eq!(crate::i18n::t("menu.quote"), "引用"));
     }
 }

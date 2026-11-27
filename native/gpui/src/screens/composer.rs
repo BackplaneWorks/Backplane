@@ -131,6 +131,12 @@ impl Composer {
     pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
     /// A selection made elsewhere in the window (the timeline's) is the one to copy: this one goes, the caret stays where it was.
     pub fn drop_selection(&mut self, cx: &mut Context<Self>) { if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
+    /// Insert a selected excerpt formatted as a Markdown blockquote at the caret/selection as one undoable edit.
+    pub fn insert_quote(&mut self, selected: &str, cx: &mut Context<Self>) {
+        let start = self.ed.selection().start;
+        let ins = format_quote_insert(&self.ed.text()[..start], selected);
+        if !ins.is_empty() { self.edit(cx, |e| e.insert(&ins)); }
+    }
     fn sync(&mut self, cx: &mut Context<Self>) { self.content = self.ed.text().to_string().into(); cx.notify(); }
     fn edit(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Editor)) { f(&mut self.ed); self.sync(cx); }
 
@@ -388,6 +394,18 @@ impl gpui::Element for Element_ {
         let rows = std::mem::take(&mut pre.rows);
         let (scroll, empty, total, follow_sig) = (pre.scroll, pre.empty, pre.total, pre.follow_sig);
         self.input.update(cx, |i, _| { i.rows = if empty { vec![] } else { rows }; i.bounds = Some(bounds); i.line_height = lh; i.scroll_y = scroll; i.total_h = total; i.followed = Some(follow_sig); });
+        let drag_input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
+            if phase == gpui::DispatchPhase::Bubble && drag_input.read(cx).selecting {
+                drag_input.update(cx, |i, cx| i.mouse_move(event, window, cx));
+            }
+        });
+        let up_input = self.input.clone();
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, window, cx| {
+            if phase == gpui::DispatchPhase::Bubble && event.button == MouseButton::Left && up_input.read(cx).selecting {
+                up_input.update(cx, |i, cx| i.mouse_up(event, window, cx));
+            }
+        });
     }
 }
 
@@ -403,7 +421,7 @@ impl Render for Composer {
             .on_action(cx.listener(Self::select_all)).on_action(cx.listener(Self::copy)).on_action(cx.listener(Self::cut)).on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::undo)).on_action(cx.listener(Self::redo)).on_action(cx.listener(Self::newline)).on_action(cx.listener(Self::go)).on_action(cx.listener(Self::go_back)).on_action(cx.listener(Self::palette))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down)).on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up)).on_mouse_move(cx.listener(Self::mouse_move))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_scroll_wheel(cx.listener(Self::wheel))
             .line_height(crate::scale::tpx(20.)).text_size(crate::scale::tpx(13.))
             .child(gpui::div().w_full().child(Element_ { input: cx.entity() }))
@@ -453,6 +471,27 @@ pub fn bindings_for(mac: bool) -> Vec<KeyBinding> {
         // the find bar: Enter the next match, Shift+Enter the previous (bound after the editing keys, so it is not a new line there)
         KeyBinding::new("enter", Go, Some("FindInput")), KeyBinding::new("shift-enter", GoBack, Some("FindInput"))]);
     v
+}
+
+/// Format selected text as a Markdown blockquote with a trailing blank line so the reply starts outside it.
+pub fn format_blockquote(selected: &str) -> String {
+    let norm = selected.replace("\r\n", "\n").replace('\r', "\n");
+    let trimmed = norm.trim_matches('\n');
+    if trimmed.is_empty() { return String::new(); }
+    let mut out = trimmed.split('\n')
+        .map(|l| if l.is_empty() { ">".to_string() } else { format!("> {l}") })
+        .collect::<Vec<_>>()
+        .join("\n");
+    out.push_str("\n\n");
+    out
+}
+
+/// Format a quote insertion given the draft text before the caret/selection.
+pub fn format_quote_insert(before_caret: &str, selected: &str) -> String {
+    let q = format_blockquote(selected);
+    if q.is_empty() { return String::new(); }
+    let prefix = if before_caret.is_empty() || before_caret.ends_with("\n\n") { "" } else if before_caret.ends_with('\n') { "\n" } else { "\n\n" };
+    format!("{prefix}{q}")
 }
 
 /// A wheel or trackpad delta as pixels down the text (lines are the box's rows); GPUI's positive y scrolls toward the top.
@@ -554,5 +593,21 @@ mod tests {
         // always clamped, as before: text that shrank, a box squeezed under one row
         assert_eq!(view_scroll(px(500.), None, lh, view, total), px(360.));
         assert_eq!(view_scroll(px(50.), Some(px(0.)), lh, view, px(20.)), px(0.));
+    }
+    #[test] fn blockquote_formatting_and_draft_insertion_preserve_markdown_separation() {
+        assert_eq!(format_blockquote(""), "");
+        assert_eq!(format_blockquote("\n\r\n"), "");
+        assert_eq!(format_blockquote("single line"), "> single line\n\n");
+        assert_eq!(format_blockquote("\nline 1\r\n\r\nline 2\n"), "> line 1\n>\n> line 2\n\n");
+        assert_eq!(format_quote_insert("", "hello"), "> hello\n\n");
+        assert_eq!(format_quote_insert("existing", "hello"), "\n\n> hello\n\n");
+        assert_eq!(format_quote_insert("existing\n", "hello"), "\n> hello\n\n");
+        assert_eq!(format_quote_insert("existing\n\n", "hello"), "> hello\n\n");
+        let mut ed = Editor::new("draft");
+        let ins = format_quote_insert(&ed.text()[..ed.selection().start], "cited\ntext");
+        ed.insert(&ins);
+        assert_eq!(ed.text(), "draft\n\n> cited\n> text\n\n");
+        assert!(ed.undo());
+        assert_eq!(ed.text(), "draft");
     }
 }

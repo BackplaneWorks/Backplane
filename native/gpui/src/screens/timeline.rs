@@ -7,11 +7,20 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 use std::{cell::RefCell, ops::Range, rc::Rc};
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DragMode { #[default] Char, Word, Block }
+
 /// Everything the pointer needs about the blocks drawn this frame; rebuilt on every render, the selection survives.
 pub struct Registry {
     pub blocks: Vec<Info>, pub dragging: bool, pub entry: usize,
     /// Monotonic counter incremented on every mouse-down so a delayed single-click copy cancels when a second click arrives.
     pub click_seq: u64,
+    /// Which surface started the active drag (`Some(true)` = timeline rows, `Some(false)` = doc/outside blocks).
+    pub drag_surface: Option<bool>,
+    drag_mode: DragMode,
+    drag_origin: Option<(KPos, KPos)>,
+    pub drag_pos: Option<Point<Pixels>>,
+    pub drag_scrolling: bool,
     /// The entry being drawn and how many blocks it has had so far: a block's identity is (entry id, index in entry).
     entry_id: String, idx: usize,
     /// The selection as the person made it, by identity; `sel` is that resolved to this frame's ordinals.
@@ -34,7 +43,14 @@ pub type Reg = Rc<RefCell<Registry>>;
 pub const VIEWER_COPIES: usize = 1000;
 
 impl Default for Registry {
-    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, click_seq: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0, hover: String::new(), design: Default::default(), app: None } }
+    fn default() -> Self {
+        Self {
+            blocks: Vec::new(), dragging: false, entry: 0, click_seq: 0,
+            drag_surface: None, drag_mode: DragMode::Char, drag_origin: None, drag_pos: None, drag_scrolling: false,
+            entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0,
+            hover: String::new(), design: Default::default(), app: None,
+        }
+    }
 }
 
 impl Registry {
@@ -60,6 +76,26 @@ impl Registry {
     /// Move the selection's moving end; its other end stays what the person chose, even scrolled away.
     pub fn extend(&mut self, head: Pos) {
         match (self.keyed.clone(), self.key(head)) { (Some((a, _)), Some(h)) => { self.keyed = Some((a, h)); self.sel.head = head; } _ => self.select(Selection { anchor: head, head }) }
+    }
+    /// Extend an active drag according to its mode (character, double-click word, or triple-click block).
+    pub fn extend_drag(&mut self, pos: Pos) {
+        let Some(b) = self.blocks.get(pos.block) else { return };
+        let (target_start, target_end) = match self.drag_mode {
+            DragMode::Char => { self.extend(pos); return; }
+            DragMode::Word => {
+                let w = select::word_at(&b.text, pos.off);
+                (Pos { block: pos.block, off: w.start }, Pos { block: pos.block, off: w.end })
+            }
+            DragMode::Block => (Pos { block: pos.block, off: 0 }, Pos { block: pos.block, off: b.text.len() }),
+        };
+        let Some((oa, ob)) = self.drag_origin.clone() else { self.select(Selection { anchor: target_start, head: target_end }); return; };
+        let before = self.ord(&oa).map_or_else(|| pos < self.sel.anchor, |a| pos < a);
+        let (anchor_k, head_p) = if before { (ob, target_start) } else { (oa, target_end) };
+        if let Some(head_k) = self.key(head_p) {
+            let anchor_p = self.ord(&anchor_k).unwrap_or(self.sel.anchor);
+            self.keyed = Some((anchor_k, head_k));
+            self.sel = Selection { anchor: anchor_p, head: head_p };
+        }
     }
     #[cfg(test)] pub fn resolve(&mut self) { self.resolve_by(|_| None) }
     /// After the frame's blocks are known: in reading order, and the selection by identity as ordinals. An end scrolled off the rows drawn stands at the
@@ -104,14 +140,22 @@ impl Registry {
     pub fn anchor(&self) -> Selection { self.sel }
     pub fn texts(&self) -> Vec<Text> { self.blocks.iter().map(|b| Text { text: b.text.clone(), entry: b.entry }).collect() }
     /// The position under a window point: inside a block its character; elsewhere the nearest block, above it its start, below its end.
-    pub fn hit(&self, p: Point<Pixels>) -> Option<Pos> {
+    pub fn hit(&self, p: Point<Pixels>) -> Option<Pos> { self.hit_scoped(p, None) }
+    /// Like `hit`, optionally restricted to timeline row blocks (`Some(true)`) or doc/outside blocks (`Some(false)`).
+    pub fn hit_scoped(&self, p: Point<Pixels>, rows_only: Option<bool>) -> Option<Pos> {
+        let matches = |b: &Info| match rows_only {
+            Some(true) => !b.id.is_empty() && !b.id.starts_with("home-readme"),
+            Some(false) => b.id.is_empty() || b.id.starts_with("home-readme"),
+            None => true,
+        };
         // the block under the point first (a table's cells share a row, so distance alone would pick the first), else the nearest
-        let inside = self.blocks.iter().position(|b| b.layout.as_ref().map_or(false, |l| l.bounds().contains(&p)));
+        let inside = self.blocks.iter().position(|b| matches(b) && b.layout.as_ref().map_or(false, |l| l.bounds().contains(&p)));
         let i = match inside {
             Some(i) => i,
             None => {
                 let mut best: Option<(Pixels, Pixels, usize)> = None;
                 for (i, b) in self.blocks.iter().enumerate() {
+                    if !matches(b) { continue; }
                     let Some(l) = &b.layout else { continue };
                     let r = l.bounds();
                     let dy = if p.y < r.top() { r.top() - p.y } else if p.y > r.bottom() { p.y - r.bottom() } else { px(0.) };
@@ -123,7 +167,7 @@ impl Registry {
         };
         let l = self.blocks[i].layout.as_ref()?;
         let r = l.bounds(); let len = self.blocks[i].text.len();
-        let off = if p.y < r.top() { 0 } else if p.y > r.bottom() { len } else { match l.index_for_position(p) { Ok(o) | Err(o) => o.min(len) } };
+        let off = if p.y < r.top() { 0 } else if p.y > r.bottom() { len } else { match l.closest_index_for_position(p) { Ok(o) | Err(o) => o.min(len) } };
         Some(Pos { block: i, off })
     }
     pub fn link_at(&self, pos: Pos) -> Option<&Link> { self.blocks.get(pos.block)?.links.iter().find(|(r, _)| r.contains(&pos.off)).map(|(_, l)| l) }
@@ -206,7 +250,10 @@ impl SelText {
                 let color = match *tok { Tok::Keyword => c("accent"), Tok::Str => c("ok"), Tok::Comment => c("faint"), Tok::Number => c("dim"), Tok::Plain => c("text") };
                 runs.push(TextRun { len: r.len(), font: mono.clone(), color: color.into(), background_color: None, underline: None, strikethrough: None });
             }
-            if runs.is_empty() { runs.push(TextRun { len: 0, font: mono, color: c("text").into(), background_color: None, underline: None, strikethrough: None }); }
+            if runs.is_empty() {
+                let len = self.spans.iter().map(|s| s.text.len()).sum();
+                runs.push(TextRun { len, font: mono, color: c("text").into(), background_color: None, underline: None, strikethrough: None });
+            }
             return runs;
         }
         for s in &self.spans {
@@ -329,6 +376,9 @@ impl BlockLayout {
     }
     pub fn index_for_position(&self, p: Point<Pixels>) -> Result<usize, usize> {
         match self { Self::Text(l) => l.index_for_position(p), Self::Flow(l) => l.index_for_position(p) }
+    }
+    pub fn closest_index_for_position(&self, p: Point<Pixels>) -> Result<usize, usize> {
+        match self { Self::Text(l) => l.closest_index_for_position(p), Self::Flow(l) => l.index_for_position(p) }
     }
     pub fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
         match self { Self::Text(l) => l.position_for_index(index), Self::Flow(l) => l.position_for_index(index) }
@@ -935,7 +985,7 @@ impl Element for FlowText {
     }
 }
 
-fn text(reg: &Reg, light: bool, spans: Vec<Span>, kind: Kind) -> AnyElement { SelText::new(reg, spans, kind, light).into_any_element() }
+pub(crate) fn text(reg: &Reg, light: bool, spans: Vec<Span>, kind: Kind) -> AnyElement { SelText::new(reg, spans, kind, light).into_any_element() }
 fn plain_spans(s: &str) -> Vec<Span> { vec![Span { text: s.to_string(), style: Default::default() }] }
 
 /// A person's message whose text may wrap gets the bubble's full width (640 px at most) instead of shrinking to its text: a shrink-to-fit
@@ -1022,7 +1072,10 @@ pub fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, 
             let shown = *open != DETAILS.with(|d| d.borrow().contains(&k));
             let head = div().id(SharedString::from(format!("details-{key}"))).flex().gap_2().items_center().cursor_pointer()
                 .child(div().text_color(c("dim")).child(if shown { "▾" } else { "▸" })).child(div().flex_1().min_w_0().child(text(reg, light, summary.clone(), Kind::Body)))
-                .on_click(cx.listener(move |_, _, _, cx| { DETAILS.with(|d| { let mut d = d.borrow_mut(); if !d.remove(&k) { d.insert(k.clone()); } }); cx.notify(); }));
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    if !this.screens.reg.borrow().sel.collapsed() { return; }
+                    DETAILS.with(|d| { let mut d = d.borrow_mut(); if !d.remove(&k) { d.insert(k.clone()); } }); cx.notify();
+                }));
             let mut col = div().flex().flex_col().gap_2().child(head);
             if shown { let mut inner = div().pl_4().flex().flex_col().gap_2(); for (i, b) in blocks.iter().enumerate() { inner = inner.child(block_el(cx, reg, light, b, &format!("{key}-{i}"), doc)); } col = col.child(inner); }
             col.into_any_element()
@@ -1279,12 +1332,32 @@ impl Backplane {
     }
     /// Whether a delayed single-click copy should fire after the double-click window passes.
     fn should_delayed_copy(seq_then: u64, seq_now: u64, collapsed: bool) -> bool { seq_then == seq_now && collapsed }
-    fn timeline_pos(&self, p: Point<Pixels>) -> Option<Pos> { self.screens.reg.borrow().hit(p) }
-    pub(crate) fn timeline_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+    fn scoped_pos(&self, p: Point<Pixels>, rows_only: bool) -> Option<Pos> { self.screens.reg.borrow().hit_scoped(p, Some(rows_only)) }
+    fn notify_sel(&self, rows_only: bool, cx: &mut Context<Self>) {
+        if rows_only {
+            let bot_kind = self.data["bot"]["kind"].as_str().unwrap_or("");
+            if bot_kind == "room" && self.data["bot"]["swarm"].is_object() {
+                if !self.screens.parts.notify(Backplane::swarm_part, cx) { cx.notify(); }
+            } else if matches!(bot_kind, "room" | "remote") {
+                cx.notify();
+            } else if !self.screens.parts.notify(Backplane::timeline_part, cx) {
+                cx.notify();
+            }
+        } else if self.project_page.is_some() {
+            cx.notify();
+        } else if super::viewer::is_open(&self.data["thread"]) {
+            if !self.screens.parts.notify(Backplane::viewer_part, cx) { cx.notify(); }
+        } else {
+            cx.notify();
+        }
+    }
+    pub(crate) fn timeline_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) { self.sel_down(e, true, window, cx); }
+    pub(crate) fn doc_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) { self.sel_down(e, false, window, cx); }
+    fn sel_down(&mut self, e: &MouseDownEvent, rows_only: bool, window: &mut Window, cx: &mut Context<Self>) {
         { let mut r = self.screens.reg.borrow_mut(); r.click_seq = r.click_seq.wrapping_add(1); }
-        let Some(pos) = self.timeline_pos(e.position) else { return };
+        let Some(pos) = self.scoped_pos(e.position, rows_only) else { return };
         if e.button == MouseButton::Right {
-            // a selection's Copy first, then a link's own items
+            // a selection's Copy and Quote first, then a link's own items
             let link = self.screens.reg.borrow().link_at(pos).cloned();
             let mut items = super::ctxmenu::selection_items(&self.timeline_selected());
             if let Some(l) = link { let dl = self.link_download(pos.block, &l); items.extend(super::ctxmenu::link_items(&l.href, l.file, dl)); }
@@ -1294,28 +1367,107 @@ impl Backplane {
         let mut r = self.screens.reg.borrow_mut();
         let texts = r.texts();
         match e.click_count {
-            2 => { let w = select::word_at(&texts[pos.block].text, pos.off); r.select(Selection { anchor: Pos { block: pos.block, off: w.start }, head: Pos { block: pos.block, off: w.end } }); }
-            n if n >= 3 => { if let Some(s) = select::block_range(&texts, pos.block) { r.select(s); } }
-            _ => { if e.modifiers.shift { r.extend(pos); } else { r.select(Selection { anchor: pos, head: pos }); } r.dragging = true; }
+            2 => {
+                let w = select::word_at(&texts[pos.block].text, pos.off);
+                r.select(Selection { anchor: Pos { block: pos.block, off: w.start }, head: Pos { block: pos.block, off: w.end } });
+                r.drag_mode = DragMode::Word; r.drag_origin = r.keyed.clone();
+            }
+            n if n >= 3 => {
+                if let Some(s) = select::block_range(&texts, pos.block) { r.select(s); }
+                r.drag_mode = DragMode::Block; r.drag_origin = r.keyed.clone();
+            }
+            _ => {
+                if e.modifiers.shift { r.extend(pos); } else { r.select(Selection { anchor: pos, head: pos }); }
+                r.drag_mode = DragMode::Char; r.drag_origin = None;
+            }
         }
+        r.dragging = true;
+        r.drag_surface = Some(rows_only);
+        r.drag_pos = Some(e.position);
         let picked = e.click_count >= 2;
         drop(r);
         if picked { self.timeline_selection_made(window, cx); }
-        cx.notify();
+        self.notify_sel(rows_only, cx);
     }
-    pub(crate) fn timeline_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
-        if !self.screens.reg.borrow().dragging {
-            let under = self.timeline_pos(e.position).and_then(|p| self.screens.reg.borrow().link_at(p).map(|l| super::linkroute::target(&l.href))).unwrap_or_default();
-            if under != self.screens.reg.borrow().hover { self.screens.reg.borrow_mut().hover = under; cx.notify(); }
-            return;
+    pub(crate) fn timeline_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) { self.sel_hover(e, true, cx); }
+    pub(crate) fn doc_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) { self.sel_hover(e, false, cx); }
+    fn sel_hover(&mut self, e: &MouseMoveEvent, rows_only: bool, cx: &mut Context<Self>) {
+        if self.screens.reg.borrow().dragging { return; }
+        let under = self.scoped_pos(e.position, rows_only).and_then(|p| self.screens.reg.borrow().link_at(p).map(|l| super::linkroute::target(&l.href))).unwrap_or_default();
+        if under != self.screens.reg.borrow().hover { self.screens.reg.borrow_mut().hover = under; self.notify_sel(rows_only, cx); }
+    }
+    fn active_drag_list(&self) -> Option<&ListState> {
+        let bot_kind = self.data["bot"]["kind"].as_str().unwrap_or("");
+        if bot_kind == "room" && self.data["bot"]["swarm"].is_object() {
+            Some(&self.screens.swarm_list)
+        } else if matches!(bot_kind, "room" | "remote") {
+            None
+        } else {
+            Some(&self.timeline)
         }
-        if let Some(pos) = self.timeline_pos(e.position) { self.screens.reg.borrow_mut().extend(pos); cx.notify(); }
+    }
+    fn drag_scroll_step(&self, p: Point<Pixels>) -> Pixels {
+        let Some(list) = self.active_drag_list() else { return px(0.); };
+        let vp = list.viewport_bounds();
+        drag_scroll_delta(p.y, vp.top(), vp.bottom())
+    }
+    fn ensure_drag_scroll(&mut self, cx: &mut Context<Self>) {
+        {
+            let mut r = self.screens.reg.borrow_mut();
+            if r.drag_scrolling { return; }
+            r.drag_scrolling = true;
+        }
+        cx.spawn(async move |this, cx| {
+            loop {
+                cx.background_executor().timer(std::time::Duration::from_millis(32)).await;
+                let keep = this.update(cx, |b, cx| {
+                    let (dragging, rows_only, pos) = {
+                        let r = b.screens.reg.borrow();
+                        (r.dragging, r.drag_surface.unwrap_or(true), r.drag_pos)
+                    };
+                    if !dragging || !rows_only { b.screens.reg.borrow_mut().drag_scrolling = false; return false; }
+                    let Some(p) = pos else { b.screens.reg.borrow_mut().drag_scrolling = false; return false; };
+                    let dy = b.drag_scroll_step(p);
+                    if dy == px(0.) { b.screens.reg.borrow_mut().drag_scrolling = false; return false; }
+                    if let Some(list) = b.active_drag_list() { list.scroll_by(dy); }
+                    if let Some(hit) = b.scoped_pos(p, true) { b.screens.reg.borrow_mut().extend_drag(hit); }
+                    b.notify_sel(true, cx);
+                    true
+                }).unwrap_or(false);
+                if !keep { break; }
+            }
+        }).detach();
+    }
+    pub(crate) fn timeline_drag_move(&mut self, e: &MouseMoveEvent, cx: &mut Context<Self>) {
+        let rows_only = {
+            let mut r = self.screens.reg.borrow_mut();
+            if !r.dragging { return; }
+            r.drag_pos = Some(e.position);
+            r.drag_surface.unwrap_or(true)
+        };
+        if let Some(pos) = self.scoped_pos(e.position, rows_only) {
+            self.screens.reg.borrow_mut().extend_drag(pos);
+        }
+        if rows_only {
+            let dy = self.drag_scroll_step(e.position);
+            if dy != px(0.) {
+                if let Some(list) = self.active_drag_list() { list.scroll_by(dy); }
+                self.ensure_drag_scroll(cx);
+            }
+        }
+        self.notify_sel(rows_only, cx);
     }
     pub(crate) fn timeline_up(&mut self, e: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let was = std::mem::replace(&mut self.screens.reg.borrow_mut().dragging, false);
+        let (was, rows_only) = {
+            let mut r = self.screens.reg.borrow_mut();
+            let was = std::mem::replace(&mut r.dragging, false);
+            let rows_only = r.drag_surface.take().unwrap_or(true);
+            r.drag_pos = None; r.drag_scrolling = false; r.drag_origin = None;
+            (was, rows_only)
+        };
         if !was { return; }
         // a click without a drag on a link opens it
-        let (collapsed, pos) = { let r = self.screens.reg.borrow(); (r.sel.collapsed(), self.timeline_pos(e.position)) };
+        let (collapsed, pos) = { let r = self.screens.reg.borrow(); (r.sel.collapsed(), self.scoped_pos(e.position, rows_only)) };
         let link = pos.filter(|_| collapsed).and_then(|p| self.screens.reg.borrow().link_at(p).cloned());
         if let Some(l) = link {
             self.screens.reg.borrow_mut().hover.clear();
@@ -1341,7 +1493,7 @@ impl Backplane {
             }
         }
         self.timeline_selection_made(window, cx);
-        cx.notify();
+        self.notify_sel(rows_only, cx);
     }
     /// A selection was made in the timeline (a drag, a double or a triple click): it is the PRIMARY selection on Linux (middle-click paste in
     /// other programs), and the copy chord (Ctrl+C, Cmd+C on a Mac) copies it from now on, wherever the keyboard was (`copy_claim`).
@@ -1434,6 +1586,37 @@ impl Backplane {
         if !s.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(s)); }
     }
     fn timeline_selected(&self) -> String { self.screens.reg.borrow().selected(self.active_rows()) }
+    /// Insert the selected text as a Markdown blockquote into the active composer and focus it.
+    pub(crate) fn quote_into_composer(&mut self, text: &str, window: &mut Window, cx: &mut Context<Self>) {
+        let bot_kind = self.data["bot"]["kind"].as_str().unwrap_or("");
+        let field_input = if self.project_page.is_none() {
+            match bot_kind {
+                "room" => self.screens.fields.get("rpost").map(|s| s.input.clone()),
+                "remote" => self.screens.fields.get("rtext").map(|s| s.input.clone()),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        let target = match field_input {
+            Some(input) => input,
+            None => {
+                self.want_focus = true;
+                self.input.clone()
+            }
+        };
+        target.update(cx, |c, cx| c.insert_quote(text, cx));
+        target.focus_handle(cx).focus(window);
+        cx.notify();
+    }
+}
+
+/// Auto-scroll step in pixels when dragging above (`y < top`) or below (`y > bottom`) a list viewport.
+pub fn drag_scroll_delta(y: Pixels, top: Pixels, bottom: Pixels) -> Pixels {
+    if bottom <= top { return px(0.); }
+    if y < top { -((top - y).min(px(160.)) * 0.35 + px(6.)) }
+    else if y > bottom { (y - bottom).min(px(160.)) * 0.35 + px(6.) }
+    else { px(0.) }
 }
 
 /// What a selection made in the timeline does with the keyboard, so that the copy chord copies it (the chord goes where the keyboard is).
@@ -1635,5 +1818,39 @@ mod tests {
         assert!(crate::Backplane::should_delayed_copy(5, 5, true));
         assert!(!crate::Backplane::should_delayed_copy(5, 6, true));
         assert!(!crate::Backplane::should_delayed_copy(5, 5, false));
+    }
+
+    #[test] fn double_and_triple_click_drag_extend_by_word_and_block() {
+        let mut r = Registry::default();
+        frame(&mut r, &[("e1", 0, "alpha beta gamma"), ("e2", 0, "delta epsilon")]);
+        r.select(Selection { anchor: Pos { block: 0, off: 6 }, head: Pos { block: 0, off: 10 } });
+        r.drag_mode = DragMode::Word; r.drag_origin = r.keyed.clone();
+        r.extend_drag(Pos { block: 1, off: 2 });
+        assert_eq!(select::extract(&r.texts(), &r.sel), "beta gamma\n\ndelta");
+        r.extend_drag(Pos { block: 0, off: 1 });
+        assert_eq!(select::extract(&r.texts(), &r.sel), "alpha beta");
+        r.select(Selection { anchor: Pos { block: 1, off: 0 }, head: Pos { block: 1, off: 13 } });
+        r.drag_mode = DragMode::Block; r.drag_origin = r.keyed.clone();
+        r.extend_drag(Pos { block: 0, off: 3 });
+        assert_eq!(select::extract(&r.texts(), &r.sel), "alpha beta gamma\n\ndelta epsilon");
+    }
+
+    #[test] fn drag_scroll_delta_clamps_above_below_and_inside_viewport() {
+        assert_eq!(drag_scroll_delta(px(150.), px(100.), px(300.)), px(0.));
+        assert_eq!(drag_scroll_delta(px(100.), px(100.), px(300.)), px(0.));
+        assert_eq!(drag_scroll_delta(px(300.), px(100.), px(300.)), px(0.));
+        assert_eq!(drag_scroll_delta(px(100.), px(200.), px(200.)), px(0.));
+        assert_eq!(drag_scroll_delta(px(80.), px(100.), px(300.)), px(-(20. * 0.35 + 6.)));
+        assert_eq!(drag_scroll_delta(px(-200.), px(100.), px(300.)), px(-(160. * 0.35 + 6.)));
+        assert_eq!(drag_scroll_delta(px(320.), px(100.), px(300.)), px(20. * 0.35 + 6.));
+        assert_eq!(drag_scroll_delta(px(800.), px(100.), px(300.)), px(160. * 0.35 + 6.));
+    }
+
+    #[test] fn code_seltext_with_no_tokens_uses_full_span_length() {
+        let reg: Reg = Default::default();
+        let st = SelText::new(&reg, plain_spans("hello\nworld"), Kind::Code, false);
+        let runs = st.runs(&TextStyle::default());
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].len, "hello\nworld".len());
     }
 }

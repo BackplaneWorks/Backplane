@@ -69,6 +69,7 @@ menu.file.reveal = Mostrar en carpeta
 menu.file.copy = Copiar ruta
 menu.uber.demote = Quitar uberbot
 menu.uber.promote = Hacer uberbot
+menu.quote = Citar
 
 # settings: hub, tailscale, kicad, update
 settings.tailscale.label = Tailscale: {state}
