@@ -31,6 +31,12 @@ fn first_board(user_home: &str) -> String {
     join(if win_abs(user_home) { Os::Windows } else { Os::Linux }, user_home, &["Backplane", "first-board"])
 }
 
+/// The same as the Folder field shows it: under the person's folder as `~/Backplane/first-board`, which fits the box (the full path showed only
+/// its tail, "/Backplane/first-board", like a folder at the top of the disk). Windows keeps the full path (no `~` there).
+fn first_board_shown(user_home: &str) -> String {
+    if user_home.is_empty() || crate::plat::dirs::win_abs(user_home) { first_board(user_home) } else { "~/Backplane/first-board".into() }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mark { Done, Skipped, Todo }
 impl Mark { pub fn word(self) -> &'static str { match self { Mark::Done => "done", Mark::Skipped => "skipped", Mark::Todo => "todo" } } }
@@ -622,7 +628,7 @@ fn project(f: &Facts, session: &Value, user_home: &str) -> Step {
         r["fields"] = json!([{"name": "obfirst", "hint": "What should the agent do?", "secret": false, "value": draft(session, "@f.obfirst")}]);
         rows.push(r);
     } else {
-        let path = if session["drafts"]["@f.obproject"].is_string() { draft(session, "@f.obproject").to_string() } else { first_board(user_home) };
+        let path = if session["drafts"]["@f.obproject"].is_string() { draft(session, "@f.obproject").to_string() } else { first_board_shown(user_home) };
         let e = draft(session, "@ob.project.err");
         let mut add = row("Folder", if e.is_empty() { "The full path of a folder on this computer." } else { e }, vec![btn("Use this folder", "ob-project", "", true)]);
         add["fields"] = json!([{"name": "obproject", "hint": "Folder", "secret": false, "value": path}]);
@@ -814,7 +820,9 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             let raw = draft(session, "@f.obproject").trim().to_string();
             let path = if raw.is_empty() { first_board(user_home) } else { raw };
             if !(path.starts_with('/') || path.starts_with('~') || path.chars().nth(1) == Some(':')) { return Some(Out { patch: json!({"drafts": {"@ob.project.err": "Give the full path, starting at the top of the disk."}}), cmds: ask.cmds }) }
-            ask.send("project.new", json!({"path": path, "orAdd": true}));
+            // `starter: false`: no empty "New thread" is made with the project; Start makes its thread with the first message (or an empty one when
+            // nothing is typed and the project has none: `ob-thread`). Setup used to leave an empty one, then Start made a second
+            ask.send("project.new", json!({"path": path, "orAdd": true, "starter": false}));
             json!({"drafts": {"@ob.project.err": "", "@f.obproject": Value::Null}})
         }
         "ob-thread" => {
@@ -1073,12 +1081,14 @@ mod tests {
     }
     #[test] fn first_project_makes_the_folder_then_takes_the_first_message_and_offers_a_phone() {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
-        let p = at(&s0, "project", &i, &desk()); assert_eq!(row_of(&p, "Folder")["fields"][0]["value"], "/h/Backplane/first-board");
+        let p = at(&s0, "project", &i, &desk()); assert_eq!(row_of(&p, "Folder")["fields"][0]["value"], "~/Backplane/first-board", "short enough for the box");
+        assert_eq!(first_board_shown(r"C:\Users\ann"), r"C:\Users\ann\Backplane\first-board", "no ~ on Windows");
         assert_eq!(first_board(r"C:\Users\ann"), r"C:\Users\ann\Backplane\first-board", "Windows separators throughout");
         assert_eq!(row_of(&p, "Pair a phone")["buttons"][0]["action"], "device-invite");
         assert_eq!(row_of(&p, "Folder")["buttons"][0]["label"], "Use this folder", "one word for a folder that exists (added) and one that does not (made)");
         let o = act(&s0, "h", &sess(json!({"@ob.step": "project"})), &i, &desk(), "/home/x", "ob-project", "").unwrap();
         assert_eq!(sent(&o, "project.new")[0]["path"], "/home/x/Backplane/first-board"); assert_eq!(sent(&o, "project.new")[0]["orAdd"], true);
+        assert_eq!(sent(&o, "project.new")[0]["starter"], false, "no empty thread is left behind: Start makes the first one");
         let bad = act(&s0, "h", &sess(json!({"@f.obproject": "here"})), &i, &desk(), "/home/x", "ob-project", "").unwrap(); assert!(bad.cmds.is_empty()); assert!(s(&bad.patch["drafts"], "@ob.project.err").contains("full path"));
         let mut s1 = cst(blank(), &[]); s1.apply(&json!({"$":"ProjectCreated","id":"p1","title":"first-board","root":"/h/Backplane/first-board","at":1}));
         let p = at(&s1, "project", &i, &desk()); assert_eq!(p["state"], "done"); assert_eq!(row_of(&p, "First message")["buttons"][0]["value"], "p1");
