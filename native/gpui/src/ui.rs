@@ -1304,6 +1304,13 @@ impl Render for Backplane {
             let weak = cx.entity().downgrade();
             cx.intercept_keystrokes(move |_, _, cx| { let _ = weak.update(cx, |this, _| crate::screens::kicad_update::person_acted(this)); }).detach();
         }
+        // a shortcut waiting for its keys in Settings › Keyboard takes the next key typed, before any binding acts on it (Esc too: it ends the
+        // wait and shuts nothing): screens/settings.rs `recorded`. Registered once
+        static REC_WATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !REC_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let weak = cx.entity().downgrade();
+            cx.intercept_keystrokes(move |ev, _, cx| { if weak.update(cx, |this, cx| crate::screens::settings::recorded(this, &ev.keystroke, cx)).unwrap_or(false) { cx.stop_propagation(); } }).detach();
+        }
         let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")).capture_any_mouse_down(cx.listener(|this, _, window, cx| { crate::screens::kicad_update::person_acted(this); this.solidcraft_reclaim_to(window, cx); })),self.picker_keys(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(crate::scale::tpx(13.)).font_family(self.local.font.clone()).line_height(crate::scale::tpx(20.))
             .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus)).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.side_flip(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| if !this.palette_close(cx) { this.palette_open_find(cx) })).on_action(cx.listener(|this, _: &crate::FindInThreadKey, _, cx| this.find_open(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))

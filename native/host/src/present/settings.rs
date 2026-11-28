@@ -26,7 +26,7 @@ const AKA: &[(&str, &[&str])] = &[("notifications", &["Time zone", "Webhook", "Q
     ("threads", &["Threads", "Projects and git", "Git", "Worktrees", "Attachments"]),
     ("agents", &["Writing", "Model", "Provider", "Failover", "Thinking", "Titles and commit messages"]),
     ("about", &["About", "Network and updates", "Network", "Updates", "Version", "Tailscale", "Licences"]),
-    ("setup", &["Developer", "Import", "First run"]), ("devices", &["Web UI", "Phone", "Pair a phone", "QR code", "Browser access"]),
+    ("setup", &["Developer", "Import from 0.14", "First run"]), ("devices", &["Web UI", "Phone", "Pair a phone", "QR code", "Browser access", "Paired devices", "Shared files", "Web address", "Set up private HTTPS forwarding"]),
     ("voice", &["Ring", "Dictation", "Microphone", "Speech"]), ("cad", &["KiCad", "FreeCAD", "SolidCraft", "Mech", "3D", "Viewer"]),
     ("ordering", &["Buy it", "Order", "Prices"]), ("privacy", &["Telemetry", "Anonymous usage"]), ("mouse", &["Zoom", "Pan", "Trackpad", "Scroll"]),
     ("appearance", &["Theme", "Dark", "Light", "Sidebar", "Thread list"])];
@@ -57,6 +57,9 @@ fn row(label: &str, note: &str, buttons: Vec<Value>) -> Value {
 }
 fn row_f(label: &str, note: &str, fields: Vec<Value>, buttons: Vec<Value>) -> Value { json!({"label": label, "note": note, "fields": fields, "buttons": buttons}) }
 fn field(name: &str, hint: &str, value: &str) -> Value { json!({"name": name, "hint": hint, "secret": false, "value": value}) }
+/// A field for a short value (a time, a code): `w` is about how many characters it holds. The desktop draws a row whose fields all say it on one
+/// line, each box that wide, its buttons after them (a row with one long box keeps that box above, the short one beside the buttons); the phones ignore it.
+pub fn field_w(name: &str, hint: &str, value: &str, chars: u32) -> Value { let mut f = field(name, hint, value); f["w"] = json!(chars); f }
 /// A paragraph that opens a group of rows (what they are about), not a setting: the clients draw it as a heading with its words under it.
 fn intro(label: &str, note: &str) -> Value { let mut r = row(label, note, vec![]); r["intro"] = json!(true); r }
 /// Mob.set.chips: one button per value, `setting key=value`, lit when it is the current one; the label is the value as VLabel.choice says it ("" is "default",
@@ -188,7 +191,7 @@ pub fn notifications(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         let f = if session["drafts"]["@f.qfrom"].is_string() { draft(session, "@f.qfrom").to_string() } else { from };
         let t = if session["drafts"]["@f.qto"].is_string() { draft(session, "@f.qto").to_string() } else { to };
         let bad = draft(session, "@quiet.err") == "bad";
-        v.push(row_f("Quiet from and until", if bad { "Times are HH:MM, 24 hours, and not the same." } else { "HH:MM, 24 hours." }, vec![field("qfrom", "From, 22:00", &f), field("qto", "Until, 07:00", &t)], vec![btn("Save", "notify-quiet", "save", false)]));
+        v.push(row_f("Quiet from and until", if bad { "Times are HH:MM, 24 hours, and not the same." } else { "HH:MM, 24 hours." }, vec![field_w("qfrom", "From, 22:00", &f, 6), field_w("qto", "Until, 07:00", &t, 6)], vec![btn("Save", "notify-quiet", "save", false)]));
     }
     let urgent = set(st, crate::push::QUIET_URGENT, "") == "on";
     v.push(row("Urgent asks come through", "An approval or a question that blocks an agent is pushed in quiet hours, and to a muted phone.", chips(&["on", "off"], onoff(urgent), crate::push::QUIET_URGENT)));
@@ -1041,12 +1044,15 @@ fn also(label: &str) -> &'static str { ALSO.iter().find(|(l, _)| *l == label).ma
 /// What the Settings search looks through for page `id` besides its title, from the rows the page has as things stand (a row the page does not
 /// show now, Install FreeCAD with FreeCAD found, is not found): its rows' labels, one a line (`words`), each of those rows' note on the same line
 /// of `notes` (a note's own line breaks are spaces there) and its plain search words on the same line of `also` (`ALSO`).
-/// (Setup's own rows read the disk: it is found by its title and the sections it holds, Import from 0.14 and Developer with its rows.)
+/// Headings are left out (a page is found by them through its `aka`). (Setup's own rows read the disk: it is found by its title, its `aka` and
+/// Developer's rows.)
 fn page_words(st: &State, session: &Value, info: &Value, id: &str) -> (String, String, String) {
-    let mut rows = if id == "setup" { let mut r = vec![head("Setup"), head("Import from 0.14"), head("Developer")]; r.extend(developer(st)); r } else { rows_of(st, session, info, id) };
-    // what Devices shows only once browser access is on, or something is paired or shared: found by name all the same
-    if id == "devices" { for h in ["Set up private HTTPS forwarding", "Web address", "Paired devices", "Shared files"] { if !rows.iter().any(|r| r["label"] == h) { rows.push(head(h)); } } }
-    let found: Vec<(&str, String)> = rows.iter().filter_map(|r| Some((r["label"].as_str().filter(|l| !l.is_empty())?, r["note"].as_str().unwrap_or("").replace('\n', " ")))).collect();
+    let rows = if id == "setup" { developer(st) } else { rows_of(st, session, info, id) };
+    // a heading (a label and nothing else: Git, Web UI, Paired devices) is not a setting, and a search does not list it; a page is found by its
+    // headings' names through its `aka` (what Devices shows only once browser access is on, or something is paired or shared, too)
+    let empty = |r: &Value, k: &str| r[k].as_array().map_or(true, Vec::is_empty);
+    let heading = |r: &Value| r["note"].as_str().unwrap_or("").is_empty() && empty(r, "buttons") && empty(r, "fields") && empty(r, "qr") && r["slider"].is_null();
+    let found: Vec<(&str, String)> = rows.iter().filter(|r| !heading(r)).filter_map(|r| Some((r["label"].as_str().filter(|l| !l.is_empty())?, r["note"].as_str().unwrap_or("").replace('\n', " ")))).collect();
     (found.iter().map(|(l, _)| *l).collect::<Vec<_>>().join("\n"), found.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join("\n"), found.iter().map(|(l, _)| also(l)).collect::<Vec<_>>().join("\n"))
 }
 
@@ -1448,7 +1454,8 @@ mod tests {
         let only_shared: Vec<String> = pg_rows("devices", &[], json!({}), json!({"shares": [{"id": "s1", "name": "a.pdf", "path": "/home/user/a.pdf", "expires": 1}]})).iter().map(|r| r["label"].as_str().unwrap().to_string()).collect();
         assert_eq!(only_shared, ["Devices", "Add a device", "Web UI", "Browser access", "Shared files", "Shared file · a.pdf"], "no empty Paired devices heading");
         let menu = view(&st(&[]), &json!({}), &json!({})); let words = menu["rows"].as_array().unwrap().iter().find(|r| r["buttons"][0]["value"] == "devices").unwrap()["words"].as_str().unwrap().to_string();
-        for w in ["Set up private HTTPS forwarding", "Web address"] { assert!(words.lines().any(|l| l == w), "the search finds {w} before browser access is on"); }
+        let aka = aka("devices");
+        for w in ["Set up private HTTPS forwarding", "Web address", "Paired devices", "Shared files"] { assert!(!words.lines().any(|l| l == w) && aka.lines().any(|l| l == w), "the search finds Devices by {w} before it shows it, as a page"); }
     }
     #[test] fn projects_and_git_offers_auto_push_off_by_default() {
         let lit = |s: &State| { let v = view(s, &json!({"open": {"settings": true}, "drafts": {"@settings.page": "git"}}), &json!({})); v["rows"].as_array().unwrap().iter().flat_map(|r| r["buttons"].as_array().cloned().unwrap_or_default()).filter(|b| b["on"] == true && b["value"].as_str().unwrap_or("").starts_with("git.")).map(|b| b["value"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>() };
@@ -1923,7 +1930,12 @@ mod tests {
         for (id, _) in PAGES { assert_eq!(words(id).split('\n').count(), notes(id).split('\n').count(), "{id}: a note for each label, on its line"); }
         let at = words("appearance").lines().position(|l| l == "Group projects").unwrap();
         assert!(notes("appearance").split('\n').nth(at).unwrap().contains("git owner"));
-        assert!(words("devices").lines().any(|l| l == "Web UI") && words("voice").lines().any(|l| l == "Ring") && words("setup").lines().any(|l| l == "Import from 0.14"), "a folded page is found by its old name");
+        for (id, head) in [("devices", "Web UI"), ("voice", "Ring"), ("setup", "Import from 0.14"), ("threads", "Git")] {
+            assert!(!words(id).lines().any(|l| l == head) && aka(id).lines().any(|l| l == head), "a folded page is found by its old name, as a page, not as a setting: {id}");
+        }
+        // a heading is no setting: no page lists one among its words
+        let heading = |r: &Value| s(r, "note").is_empty() && r["buttons"].as_array().map_or(true, Vec::is_empty) && r["fields"].as_array().map_or(true, Vec::is_empty);
+        for (id, _) in PAGES { for r in rows_of(&st(&[]), &json!({}), &json!({}), id).iter().filter(|r| heading(r) && !s(r, "label").is_empty()) { assert!(!words(id).lines().any(|l| l == s(r, "label")), "{id}: {}", s(r, "label")); } }
     }
     #[test] fn ordering_hides_its_estimates_when_off() {
         let on = page_rows(&st(&[]), "ordering", json!({})); assert_eq!(on[3]["buttons"][0]["on"], true);
@@ -2123,6 +2135,7 @@ mod tests {
         for l in ["Needs me", "Everything", "Quiet hours", "Urgent asks come through"] { assert_eq!(words(by(&n, l)), ["On", "Off"], "{l}"); }
         assert_eq!(by(&n, "Quiet hours")["buttons"][1]["value"], "off", "the values stay");
         let q = by(&n, "Quiet from and until"); assert_eq!((q["fields"][0]["hint"].as_str(), q["fields"][1]["hint"].as_str()), (Some("From, 22:00"), Some("Until, 07:00")));
+        assert_eq!((q["fields"][0]["w"].as_u64(), q["fields"][1]["w"].as_u64()), (Some(6), Some(6)), "two short boxes: one line on the desktop");
         let c = page_rows(&st(&[]), "cad", json!({}));
         assert_eq!(words(by(&c, "KiCad over its API")), ["On", "Off"]); assert_eq!(by(&c, "KiCad over its API")["buttons"][0]["value"], "kicad.ipc=on");
         let t = page_rows(&st(&[]), "threads", json!({}));

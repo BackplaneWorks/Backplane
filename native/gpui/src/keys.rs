@@ -137,15 +137,50 @@ pub fn show(key: &str, mac: bool) -> String {
         let last = i + 1 == parts.len();
         out.push(match (*p, mac) {
             /* i18n-ok: key names stay as on the keyboard */ ("secondary", true) => "⌘".into(), ("secondary" | "ctrl", false) => "Ctrl".into(), ("ctrl", true) => "⌃".into(),
-            /* i18n-ok: key names stay as on the keyboard */ ("super", true) => "⌘".into(), ("super", false) => "Super".into(), ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(),
+            /* i18n-ok: key names stay as on the keyboard */ ("super" | "cmd", true) => "⌘".into(), ("super" | "win", false) => "Super".into(), ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(), ("fn", _) if !last => "Fn".into(),
             /* i18n-ok: key names stay as on the keyboard */ ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(), ("delete", _) => "Delete".into(), ("backspace", _) => "Backspace".into(), ("tab", _) => "Tab".into(),
             /* i18n-ok: key names stay as on the keyboard */ ("up", _) => "Up".into(), ("down", _) => "Down".into(), ("left", _) => "Left".into(), ("right", _) => "Right".into(),
-            (k, _) if last && k.chars().count() == 1 => k.to_uppercase(), (k, _) => k.to_string(),
+            (k, _) if last && (k.chars().count() == 1 || k.strip_prefix('f').map_or(false, |n| n.parse::<u8>().is_ok())) => k.to_uppercase(), (k, _) => k.to_string(),
         });
     }
     if mac { out.concat() } else { out.join("+") }
 }
 pub fn mac() -> bool { cfg!(target_os = "macos") }
+/// A keystroke as gpui spells it ("secondary-K" is "ctrl-shift-k" off a Mac): how keys are stored once typed, and compared.
+pub fn norm(key: &str) -> Option<String> { Keystroke::parse(key).ok().map(|k| k.unparse()) }
+/// Whether a chord may be a shortcut: it holds Ctrl, Alt or Cmd (Super), or is a function key. Enter, Esc, Tab and plain letters stay the app's and the fields'.
+pub fn chord_ok(k: &Keystroke) -> bool {
+    let fkey = k.key.strip_prefix('f').and_then(|n| n.parse::<u8>().ok()).map_or(false, |n| (1..=24).contains(&n));
+    k.modifiers.control || k.modifiers.alt || k.modifiers.platform || fkey
+}
+/// Whether `key` can be kept as this shortcut's: one of its old choices (a file from before keys were typed), or a typed chord `chord_ok` takes, as `norm` spells it.
+pub fn storable(id: &str, key: &str) -> bool { choices(id).iter().any(|c| c == key) || Keystroke::parse(key).map_or(false, |k| chord_ok(&k) && k.unparse() == key) }
+/// Every keystroke an entry answers to now, as `norm` spells them: this device's key for it (a fixed one's own), a group spelt out ("alt-1…9" is
+/// Alt+1 to Alt+9, "? or F1" two, the rail's letters each) and a symbol chord's shifted form (`shifted`).
+pub fn keys_now(l: &Local, x: &Entry) -> Vec<String> {
+    let key = if x.kind == Fixed { x.key.to_string() } else { l.key(x.id) };
+    let mut v = vec![];
+    for k in key.split(" or ").flat_map(|k| k.split(' ')) {
+        let all: Vec<String> = match k.strip_suffix("1…9") { Some(p) => (1..=9).map(|n| format!("{p}{n}")).collect(), None => vec![k.to_string()] };
+        for k in all { v.extend(norm(&k)); v.extend(shifted(&k).and_then(|s| norm(&s))); }
+    }
+    v
+}
+/// What a key typed while a shortcut waits for its keys in Settings does (`take`).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Take { /** a modifier alone: wait on */ Wait, /** Esc: the wait ends, nothing changes */ Cancel, /** the shortcut's new key */ Set(String), /** nothing changes; why, for the row */ Refuse(String) }
+/// A key typed for the shortcut `id`: Esc ends the wait; a key the app keeps (no Ctrl, Alt or Cmd, and no function key) is refused; so is a chord
+/// another entry of `TABLE` answers to now (`keys_now`, the fixed ones too), naming it; else it is the shortcut's key.
+pub fn take(l: &Local, id: &str, k: &Keystroke) -> Take {
+    if matches!(k.key.as_str(), "shift" | "control" | "alt" | "platform" | "function" | "capslock") { return Take::Wait }
+    if k.key == "escape" && !k.modifiers.modified() { return Take::Cancel }
+    if !chord_ok(k) { return Take::Refuse(trs("Needs Ctrl, Alt or Cmd.")) }
+    let key = norm(&k.unparse()).unwrap_or_else(|| k.unparse());
+    match TABLE.iter().find(|x| x.id != id && keys_now(l, x).contains(&key)) {
+        Some(x) => Take::Refuse(crate::i18n::tf("gpui.keys.used", &[("key", show(&key, mac()).into()), ("what", trs(x.label).into())])),
+        None => Take::Set(key),
+    }
+}
 /// The key of a shortcut for the person to read, "" when it has none.
 pub fn hint(l: &Local, id: &str) -> String { match find(id) { Some(x) if x.kind == Fixed => show(x.key, mac()), Some(_) => show(&l.key(id), mac()), None => String::new() } }
 /// The place of the chats that belong to no project (the hub's `sidebar::CHATS`): `new-thread` with it starts one, in a folder of its own.
@@ -816,6 +851,25 @@ mod tests {
         assert!(l.set("shortcut", "new\u{1f}ctrl-alt-n")); assert_eq!(does(&l, "ctrl-alt-n", &[]), "keys::NewThread"); assert_eq!(does(&l, "ctrl-n", &[]), "");
         assert!(l.set("shortcut", "new")); assert!(!l.set("shortcut", "new\u{1f}enter"), "a bare key is no choice for it");
         assert!(!l.set("shortcut", "projects")); l.set("shortcuts-reset", ""); assert_eq!(does(&l, "ctrl-n", &[]), "keys::NewThread");
+    }
+    /// A shortcut takes the keys typed for it: a chord with Ctrl, Alt or Cmd, or a function key; not a key the app keeps, not another entry's.
+    #[test] fn a_typed_chord_becomes_the_shortcut_unless_the_app_keeps_it_or_another_entry_has_it() {
+        let l = Local::default(); let k = |s: &str| Keystroke::parse(s).unwrap();
+        assert_eq!(take(&l, "models", &k("ctrl-shift-y")), Take::Set("ctrl-shift-y".into())); assert_eq!(take(&l, "models", &k("f7")), Take::Set("f7".into()));
+        assert_eq!(take(&l, "models", &k("alt-j")), Take::Set("alt-j".into())); assert_eq!(take(&l, "models", &k("ctrl-m")), Take::Set("ctrl-m".into()), "its own key again");
+        for bare in ["y", "shift-y", "enter", "tab", "shift-tab", "space"] { assert_eq!(take(&l, "models", &k(bare)), Take::Refuse("Needs Ctrl, Alt or Cmd.".into()), "{bare}"); }
+        assert_eq!(take(&l, "models", &k("escape")), Take::Cancel); assert_eq!(take(&l, "models", &k("shift")), Take::Wait);
+        let used = |key: &str, what: &str| Take::Refuse(format!("{} is already used by {what}.", show(key, mac())));
+        assert_eq!(take(&l, "models", &k("secondary-k")), used("secondary-k", "Commands: jump to a thread or run a command"), "the palette's");
+        assert_eq!(take(&l, "models", &k("alt-3")), used("alt-3", "Go to project 1…9"), "a fixed group's keys, spelt out");
+        assert_eq!(take(&l, "models", &k("f1")), used("f1", "Keyboard shortcuts: this list. ? outside a text box, F1 anywhere"));
+        assert_eq!(take(&l, "models", &k("secondary-}")), used("secondary-}", "Next thread"), "a symbol chord as the keyboard reports it");
+        let mut moved = Local::default(); assert!(moved.set("shortcut", "palette\u{1f}ctrl-alt-k"));
+        assert_eq!(take(&moved, "models", &k("secondary-k")), Take::Set(norm("secondary-k").unwrap()), "an entry's keys as they are now");
+        assert_eq!(take(&moved, "models", &k("ctrl-alt-k")), used("ctrl-alt-k", "Commands: jump to a thread or run a command"));
+        // stored, bound, and reset to its default
+        let mut l = Local::default(); assert!(l.set("shortcut", "models\u{1f}ctrl-shift-y")); assert_eq!(does(&l, "ctrl-shift-y", &[]), "keys::ModelPicker"); assert_eq!(does(&l, "ctrl-m", &[]), "");
+        assert!(!l.set("shortcut", "models\u{1f}y"), "a key the app keeps is never stored"); assert!(l.set("shortcut-reset", "models")); assert_eq!(l.key("models"), "ctrl-m"); assert_eq!(does(&l, "ctrl-m", &[]), "keys::ModelPicker");
     }
     #[test] fn keys_read_per_platform() {
         assert_eq!(show("secondary-shift-n", false), "Ctrl+Shift+N"); assert_eq!(show("secondary-shift-n", true), "⌘⇧N");

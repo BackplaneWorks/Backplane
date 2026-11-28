@@ -70,7 +70,7 @@ impl Local {
         if !VIEWS.iter().any(|(k, _)| *k == l.default_view) { l.default_view = "last".into() }
         if l.font.is_empty() { l.font = FONTS[0].0.into() }
         for r in [&mut l.split_main, &mut l.split_side] { if !(r.is_finite() && *r > 0. && *r < 1.) { *r = 0. } }
-        l.shortcuts.retain(|a, k| crate::keys::rebindable(a) && crate::keys::choices(a).contains(k));
+        l.shortcuts.retain(|a, k| crate::keys::rebindable(a) && crate::keys::storable(a, k));
         l
     }
     /// What the app starts with; the language in force is set from it here, once.
@@ -109,12 +109,14 @@ impl Local {
             "streamer-apps" => self.streamer_apps = value == "on",
             "default-view" if VIEWS.iter().any(|(k, _)| *k == value) => self.default_view = value.into(),
             "app-channel" if value.is_empty() || APP_CHANNELS.contains(&value) => self.app_channel = value.into(),
-            "shortcut" => { // "<action>\u{1f}<key>", or just "<action>" to take the next key in the list
+            "shortcut" => { // "<action>\u{1f}<key>" (a key typed in Settings, or one of its old choices: `keys::storable`), or just "<action>" to take the next key in the list
                 let (a, k) = value.split_once('\u{1f}').unwrap_or((value, ""));
                 if !crate::keys::rebindable(a) { return false }
-                let ch = crate::keys::choices(a); let key = if k.is_empty() { let now = self.key(a); ch[(ch.iter().position(|x| *x == now).map_or(0, |i| i + 1)) % ch.len()].clone() } else if ch.iter().any(|x| x == k) { k.to_string() } else { return false };
+                let ch = crate::keys::choices(a); let key = if k.is_empty() { let now = self.key(a); ch[(ch.iter().position(|x| *x == now).map_or(0, |i| i + 1)) % ch.len()].clone() } else if crate::keys::storable(a, k) { k.to_string() } else { return false };
                 self.shortcuts.insert(a.into(), key);
             }
+            // one shortcut back to its default (its Reset in Settings), or all of them
+            "shortcut-reset" if crate::keys::rebindable(value) => { self.shortcuts.remove(value); }
             "shortcuts-reset" => self.shortcuts.clear(),
             "fav" if !value.is_empty() && value.len() < 200 => { if let Some(i) = self.favs.iter().position(|f| f == value) { self.favs.remove(i); } else { self.favs.push(value.into()); self.favs.truncate(200); } }
             _ => return false,
@@ -148,12 +150,13 @@ mod tests {
         let p = tmp("rt");
         let mut l = Local::default(); assert!(l.set("theme", "light")); assert!(l.set("text", "+")); assert!(l.set("sidebar-width", "-")); assert!(l.set("notifications", "off")); assert!(l.set("shortcut", "sidebar\u{1f}alt-s")); l.save_to(&p);
         let back = Local::read(&p); assert_eq!(back, l); assert_eq!((back.text_pct, back.sidebar_px, back.key("sidebar")), (105, 240, "alt-s".to_string()));
-        std::fs::write(&p, br#"{"text_pct":9999,"sidebar_px":1,"theme":"neon","shortcuts":{"send":"ctrl-q","nope":"enter","close":"ctrl-b"}}"#).unwrap();
-        let b = Local::read(&p); assert_eq!((b.text_pct, b.sidebar_px, b.theme.as_str()), (160, 180, "hub")); assert_eq!(b.key("send"), "enter", "an unknown key is the default"); assert_eq!(b.key("close"), "ctrl-b");
+        std::fs::write(&p, br#"{"text_pct":9999,"sidebar_px":1,"theme":"neon","shortcuts":{"send":"q","nope":"enter","close":"ctrl-b","models":"ctrl-shift-y","new":"secondary-q"}}"#).unwrap();
+        let b = Local::read(&p); assert_eq!((b.text_pct, b.sidebar_px, b.theme.as_str()), (160, 180, "hub")); assert_eq!(b.key("send"), "enter", "a key that cannot be a shortcut is the default"); assert_eq!(b.key("close"), "ctrl-b", "an old stored choice still loads");
+        assert_eq!(b.key("models"), "ctrl-shift-y", "a typed chord loads"); assert_eq!(b.key("new"), crate::keys::find("new").unwrap().key, "one not spelt as typed keys are is the default");
     }
     #[test] fn unknown_names_and_values_change_nothing() {
         let mut l = Local::default(); let before = l.clone();
-        assert!(!l.set("theme", "neon") && !l.set("font", "Comic") && !l.set("shortcut", "send\u{1f}ctrl-q") && !l.set("shortcut", "nope") && !l.set("nope", "x")); assert_eq!(l, before);
+        assert!(!l.set("theme", "neon") && !l.set("font", "Comic") && !l.set("shortcut", "send\u{1f}q") && !l.set("shortcut-reset", "projects") && !l.set("shortcut", "nope") && !l.set("nope", "x")); assert_eq!(l, before);
         assert!(l.set("app-channel", "nightly") && l.app_channel == "nightly");
         assert!(l.set("app-channel", "") && l.app_channel.is_empty());
         assert!(!l.set("app-channel", "canary") && l.app_channel.is_empty());
