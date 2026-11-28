@@ -56,7 +56,7 @@ pub fn count(ix: usize, n: usize, more: bool, answered: bool, occ: usize, occs: 
     if !answered { return String::new() }
     /* i18n-ok: a control id */ if n == 0 { return crate::i18n::trs("No matches") }
     let within = if occs > 1 { format!(" \u{b7} {}/{}", occ + 1, occs) } else { String::new() };
-    format!("{} of {}{}{within}", ix + 1, n, if more { "+" } else { "" })
+    format!("{} of {}{}{}", ix + 1, n, if more { "+" } else { "" }, within)
 }
 /// The matches of a `thread.find` answer.
 pub fn matches_of(result: &Value) -> (Vec<String>, usize, bool) {
