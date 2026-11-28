@@ -975,6 +975,11 @@ object DataClient {
             else r.optJSONObject("thread")?.let { upsert(parseThread(it)) }
         } catch (e: Exception) { failure = e.message ?: "" }
     }
+    /** Fork thread (feature `fork`): the hub makes a thread that starts from this one's conversation; `opened` gets it, to go there. */
+    fun forkThread(tid: String, opened: (String) -> Unit) = scope.launch {
+        try { call("thread.act", JSONObject().put("thread", tid).put("action", "fork")).optJSONObject("thread")?.let { val t = parseThread(it); upsert(t); opened(t.id) } }
+        catch (e: Exception) { failure = e.message ?: "" }
+    }
     suspend fun badgeList(): JSONObject = call("badge.list", JSONObject())
     fun projectAct(id: String, action: String, title: String = "", value: String = "") = scope.launch {
         try {

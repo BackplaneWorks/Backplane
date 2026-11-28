@@ -1012,7 +1012,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
     var drawing by remember(id) { mutableStateOf(false) }
     if (drawing) DrawPadSheet({ drawing = false }) { pending.add(it); notice = "" }
     var openRuns by remember(id) { mutableStateOf(emptySet<String>()) }
-    thread?.let { t -> ThreadMenus(t, menu, { menu = false }, { back() }, if (DataClient.has("search")) ({ finding = true }) else null, buy?.label?.let { it to startBuy }); if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
+    thread?.let { t -> ThreadMenus(t, menu, { menu = false }, { back() }, if (DataClient.has("search")) ({ finding = true }) else null, buy?.label?.let { it to startBuy }, opened = { go(it) }); if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
     // go to a message (a find match, a home search hit): its row, loading earlier pages until it is there; marked until the next one or the find bar closes
     var jumping by remember(id) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     fun jump(msg: String, fade: Boolean) { jumping?.cancel(); jumping = scope.launch {

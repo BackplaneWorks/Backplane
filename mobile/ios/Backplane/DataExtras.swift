@@ -16,6 +16,8 @@ struct DataThreadActions: View {
             Button(Tr.t(thread.settled ? "Unsettle" : "Settle"), systemImage: "checkmark.circle") { Task { await client.threadAct(thread.id, thread.settled ? "unsettle" : "settle") } }
             // no Archive: it is Settle (the hub reads an archive as a settle)
             if !thread.parent.isEmpty { Button(Tr.t("Move to top level"), systemImage: "arrow.up.left") { Task { await client.threadAct(thread.id, "detach") } } }
+            // Fork thread, as the desktop's thread tools: a new thread that starts from this one's conversation (feature `fork`); it opens
+            if client.has("fork") { Button(Tr.t("Fork thread"), systemImage: "arrow.triangle.branch") { Task { if let t = await client.forkThread(thread.id) { client.linkTarget = DLinkTarget(kind: .thread, id: t) } } }.accessibilityIdentifier("data.thread.fork") }
             Button(Tr.t("Rename"), systemImage: "pencil") { renaming = thread }
             Button(Tr.t("Delete…"), systemImage: "trash", role: .destructive) { deleting = thread }
         }

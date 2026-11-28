@@ -1335,6 +1335,12 @@ final class DataClient {
             else if let t = r.thread { upsert(t) }
         } catch { failure = error.localizedDescription }
     }
+    /// Fork thread (feature `fork`): the hub makes a thread that starts from this one's conversation; its id, to open it.
+    func forkThread(_ id: String) async -> String? {
+        do { let r: DThreadOpt = try await call("thread.act", ["thread": id, "action": "fork"]); flushLists(); if let t = r.thread { upsert(t); return t.id } }
+        catch { failure = error.localizedDescription }
+        return nil
+    }
     func badgeList() async -> DBadgeList? { try? await call("badge.list") }
     func projectAct(_ id: String, _ action: String, title: String = "", value: String = "") async {
         var p: [String: Any] = ["project": id, "action": action]; if !title.isEmpty { p["title"] = title }; if !value.isEmpty { p["value"] = value }
