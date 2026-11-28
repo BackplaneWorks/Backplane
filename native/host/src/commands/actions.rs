@@ -32,6 +32,22 @@ pub struct ActOut {
 /// Whether two project ids are on one machine: a linked machine's are `<link>~<id>`, this machine's have no `~`.
 pub fn same_machine(a: &str, b: &str) -> bool { a.split_once('~').map(|x| x.0) == b.split_once('~').map(|x| x.0) }
 fn draft<'a>(s: &'a Value, k: &str) -> &'a str { s["drafts"][k].as_str().unwrap_or("") }
+/// Where Add project's folder field starts: the folder the last project was added or made in (`@proj.last`, the field's "~/" form) while it is
+/// there, else the home folder; the next project is nearly always beside the last one.
+fn picker_start(s: &Value) -> String {
+    let last = draft(s, "@proj.last");
+    if last.is_empty() { return "~/".into() }
+    let home = crate::plat::dirs::home_or_empty();
+    let abs = match last.strip_prefix("~/") { Some(r) if !home.is_empty() => format!("{}/{r}", home.trim_end_matches('/')), _ => last.to_string() };
+    if std::path::Path::new(&abs).is_dir() { last.to_string() } else { "~/".into() }
+}
+/// The folder a project at `path` (absolute, "/"-separated as the picker sends it) sits in, in the field's form: "~/work/boards/" for ~/work/boards/a.
+fn parent_shown(path: &str) -> String {
+    let t = path.trim_end_matches('/');
+    let up = match t.rfind('/') { Some(0) | None => "/".to_string(), Some(i) => format!("{}/", &t[..i]) };
+    let shown = crate::commands::clone::tilde(up.trim_end_matches('/'), &crate::plat::dirs::home_or_empty());
+    if shown.ends_with('/') { shown } else { format!("{shown}/") }
+}
 
 struct Acc<'a> { r: &'a Req<'a>, d: Map<String, Value>, rid: u64, cmds: Vec<Value>, unselect: bool }
 impl<'a> Acc<'a> {
@@ -189,7 +205,7 @@ pub fn act(req: &Req) -> Option<ActOut> {
         "proj-gh-signin" => { a.rpc("clone.signin", json!({"restart": true})); a.set("@proj.signin", "1"); }
         "proj-mode" => {
             let clone = v == "clone";
-            a.set("@proj.mode", if clone { "clone" } else { "" }); a.set("@proj.text", if clone { "" } else { "~/" }); a.set("@proj.clone", ""); a.set("@proj.job", ""); a.set("@proj.err", ""); a.set("@proj.signin", "");
+            a.set("@proj.mode", if clone { "clone" } else { "" }); a.set("@proj.text", &if clone { String::new() } else { picker_start(r.session) }); a.set("@proj.clone", ""); a.set("@proj.job", ""); a.set("@proj.err", ""); a.set("@proj.signin", "");
         }
         // Link with… (a project with no remote): this project shows as one with the other (`project.link.<id>` = the other's key, present/merged.rs); "" unlinks
         "proj-link" => { let (id, key) = v.split_once('|')?; if id.is_empty() { return None } a.rpc("setting.set", json!({"key": format!("project.link.{id}"), "value": key})); a.set("@menu", ""); }
@@ -234,7 +250,7 @@ pub fn act(req: &Req) -> Option<ActOut> {
         "picker-open" => {
             let running = crate::commands::clone::job(draft(r.session, "@proj.job")).map_or(false, |j| j.state == crate::commands::clone::State::Running);
             a.set("@proj.open", "1"); a.set("@menu", "");
-            if !running { a.set("@proj.text", "~/"); a.set("@proj.err", ""); a.set("@proj.clone", ""); a.set("@proj.mode", ""); a.set("@proj.job", ""); a.set("@proj.signin", ""); a.set("@proj.first", ""); }
+            if !running { a.set("@proj.text", &picker_start(r.session)); a.set("@proj.err", ""); a.set("@proj.clone", ""); a.set("@proj.mode", ""); a.set("@proj.job", ""); a.set("@proj.signin", ""); a.set("@proj.first", ""); }
         }
         // /project on a folder that holds something (its reply's `exists`): the dialog opens on that folder, its Add row adding it as it is, the reason above it
         "proj-exists" if !v.is_empty() => { a.set("@proj.open", "1"); a.set("@proj.text", v.trim_end_matches('/')); a.set("@proj.err", &crate::commands::fs::not_empty(v)); a.set("@proj.clone", ""); a.set("@menu", "") }
@@ -252,6 +268,7 @@ pub fn act(req: &Req) -> Option<ActOut> {
             a.set("@want.new", &rid); a.set("@want.new.at", &at);
             a.rpc(if r.action == "proj-add" { "project.add" } else { "project.new" }, json!({"path": v.trim()}));
             a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.err", "");
+            a.set("@proj.last", &parent_shown(v.trim())); // the next Add project opens beside it (proj-close keeps it)
         }
         _ => return None,
     }
@@ -325,6 +342,26 @@ mod tests {
         assert_eq!(serde_json::from_str::<Value>(run("proj-new", "/home/x/n", &sess).cmds[0]["text"].as_str().unwrap()).unwrap()["m"], "project.new");
         assert!(act(&Req { hub: "h", session: &sess, sel: "", action: "proj-add", value: "  ", title_of: &|_| String::new() }).is_none(), "no path, no request");
         assert_eq!(run("proj-close", "", &sess).session_patch["drafts"]["@proj.open"], "");
+    }
+    #[test] fn add_project_opens_where_the_last_one_was_added() {
+        let run = |action: &str, value: &str, session: &Value| act(&Req { hub: "h", session, sel: "", action, value, title_of: &|_| String::new() }).unwrap();
+        let sess = json!({"rid": 3, "drafts": {}, "info": {}});
+        assert_eq!(run("proj-add", "/h/work/boards/a", &sess).session_patch["drafts"]["@proj.last"], "/h/work/boards/");
+        assert_eq!(run("proj-new", "/h/work/boards/b/", &sess).session_patch["drafts"]["@proj.last"], "/h/work/boards/");
+        assert_eq!(run("proj-add", "/a", &sess).session_patch["drafts"]["@proj.last"], "/");
+        let home = crate::plat::dirs::home_or_empty();
+        if !home.is_empty() { assert_eq!(parent_shown(&format!("{}/work/boards/a", home.trim_end_matches('/'))), "~/work/boards/", "under the home: the field's ~/ form"); }
+        // open again: on that folder while it is there, else the home folder; closing keeps it
+        let dir = crate::plat::tmp::dir("picker-last"); let last = format!("{}/", dir.to_string_lossy().trim_end_matches('/'));
+        let with = json!({"rid": 3, "drafts": {"@proj.last": last}, "info": {}});
+        assert_eq!(run("picker-open", "", &with).session_patch["drafts"]["@proj.text"].as_str(), Some(last.as_str()));
+        assert_eq!(run("proj-mode", "folder", &with).session_patch["drafts"]["@proj.text"].as_str(), Some(last.as_str()));
+        assert_eq!(run("proj-mode", "clone", &with).session_patch["drafts"]["@proj.text"], "");
+        assert_eq!(run("picker-open", "", &sess).session_patch["drafts"]["@proj.text"], "~/");
+        let gone = json!({"rid": 3, "drafts": {"@proj.last": "/h/no-such-folder-here/"}, "info": {}});
+        assert_eq!(run("picker-open", "", &gone).session_patch["drafts"]["@proj.text"], "~/", "a folder that is gone: the home folder");
+        assert!(run("proj-close", "", &with).session_patch["drafts"].get("@proj.last").is_none(), "closing keeps it");
+        assert!(run("proj-clone-go", "o/kit\u{1f}/h/x/kit", &with).session_patch["drafts"].get("@proj.last").is_none(), "a clone does not move it");
     }
     // presenter answers each recorded action with this session change and these commands: same keys, same values, same requests
     #[test] fn every_recorded_row_action_is_answered_as_the_presenter_answers_it() {
