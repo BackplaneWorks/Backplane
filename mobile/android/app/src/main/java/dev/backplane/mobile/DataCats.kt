@@ -94,7 +94,7 @@ private fun swatch(c: String): Color = CatPick.hex(c)?.let { Color(0xFF000000 or
 internal fun UberSettings() {
     val b = DataClient.bots.firstOrNull { it.uber }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        DMono(Msg.gpui_f_uber_title.uppercase(), dfaint)
+        SettingsSection("uber", Msg.gpui_f_uber_title, upper = true)
         if (b == null) DText(Msg.native_home_none, dcs.onSurfaceVariant, 14, Modifier.testTag("settings.uber.none"), lines = 1)
         else UberControls(b)
     }

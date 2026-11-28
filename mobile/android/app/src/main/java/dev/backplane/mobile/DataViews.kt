@@ -43,6 +43,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
@@ -1529,7 +1530,7 @@ private fun BotsSettings() {
     val bots = DataClient.bots.filter { it.delete }
     if (bots.isEmpty()) return
     var ask by remember { mutableStateOf<DataClient.Bot?>(null) }
-    DMono(Msg.bots_settings_head.uppercase(), dfaint)
+    SettingsSection("bots", Msg.bots_settings_head, upper = true)
     bots.forEach { b ->
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(b.name, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -1545,8 +1546,13 @@ private fun BotsSettings() {
 private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Unit, mcp: () -> Unit, improve: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.palette_settings, back)
-        Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-            DMono(Msg.native_settings_hubs.uppercase(), dfaint)
+        val scroll = rememberScrollState()
+        val index = remember { SettingsIndex() }
+        CompositionLocalProvider(LocalSettingsIndex provides index) {
+        Column(Modifier.padding(16.dp).verticalScroll(scroll).onGloballyPositioned { index.content(it) }, verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            // the section index: a chip per heading below, a tap scrolls to it
+            SettingsIndexChips(index, scroll)
+            SettingsSection("hubs", Msg.native_settings_hubs, upper = true)
             var forget by remember { mutableStateOf<String?>(null) }
             DataClient.links.mapNotNull { Pairing.key(it) }.forEachIndexed { i, k ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1587,7 +1593,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             if (DataVoice.available) VoiceSettings()
             if (DataDevices.available) { DevicesSettings(); DLine() }
             DataClient.home?.let { h ->
-                DMono(Msg.home_machine, dfaint)
+                SettingsSection("home", Msg.home_machine)
                 val whereText = when (h.kind) {
                     "local" -> "${h.name.ifEmpty { "This machine" }} (this machine)"
                     "boat" -> "${h.name.ifEmpty { "Boat" }} (Boat)"
@@ -1604,7 +1610,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             if (DataNotify.available) { NotifySettings(); DLine() }
             if (DataBrowserStart.available) { BrowserStartSettings(); DLine() }
             if (DataRing.available) { RingSettings(); DLine() }
-            DMono(Msg.android_alerts_head, dfaint)
+            SettingsSection("alerts", Msg.android_alerts_head)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(true to "on", false to "off").forEach { (v, l) -> DBtn(if (v) Msg.option_on else Msg.option_off, alerts == v, modifier = Modifier.testTag("settings.alerts.$l")) { alerts = v; AppSettings.putAlerts(v) } } }
             DText(Msg.android_alerts_note, dcs.onSurfaceVariant, 13, lines = 3)
@@ -1625,7 +1631,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
                 DText(Msg.android_quiet_note, dcs.onSurfaceVariant, 13, lines = 2)
             }
             DLine()
-            DMono(Msg.settings_lang.uppercase(), dfaint)
+            SettingsSection("lang", Msg.settings_lang, upper = true)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("auto" to Msg.settings_lang_auto, "en" to Msg.settings_lang_en, "ja" to Msg.settings_lang_ja, "es" to Msg.settings_lang_es).forEach { (v, l) ->
                     DBtn(l, AppSettings.lang == v, modifier = Modifier.testTag("settings.lang.$v")) { AppSettings.putLang(v); DataClient.channels() }
@@ -1633,7 +1639,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             }
             DText(Msg.settings_lang_note, dcs.onSurfaceVariant, 13, lines = 3)
             DLine()
-            DMono(Msg.settings_appearance.uppercase(), dfaint)
+            SettingsSection("appearance", Msg.settings_appearance, upper = true)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 listOf("system" to Msg.native_settings_system, "light" to Msg.settings_theme_light, "dark" to Msg.settings_theme_dark).forEach { (m, l) -> DBtn(l, AppSettings.appearance == m, modifier = Modifier.testTag("settings.appearance.$m")) { AppSettings.putAppearance(m) } }
             }
@@ -1642,13 +1648,14 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             DLine()
             DBtn(Msg.android_unpair, false, modifier = Modifier.testTag("settings.unpair")) { DataClient.unpair(); back() }
         }
+        }
     }
 }
 
 // the 3D viewers' background (docs/VIEWER-BACKGROUND.md): Auto, Light, Dark or Custom, a swatch or a typed #rrggbb; kept on this device, live
 @Composable
 private fun ViewerBgSettings() {
-    DMono(Msg.android_viewerbg.uppercase(), dfaint)
+    SettingsSection("viewerbg", Msg.android_viewerbg, upper = true)
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         listOf("auto" to Msg.android_viewerbg_auto, "light" to Msg.android_viewerbg_light, "dark" to Msg.android_viewerbg_dark, "custom" to Msg.android_viewerbg_custom)
             .forEach { (m, l) -> DBtn(l, AppSettings.viewerBg == m, modifier = Modifier.testTag("settings.viewerbg.$m")) { AppSettings.putViewerBg(m) } }
@@ -1681,7 +1688,7 @@ private fun UpdateSection() {
     var u by remember { mutableStateOf<org.json.JSONObject?>(null) }
     suspend fun load(m: String, p: org.json.JSONObject = org.json.JSONObject()) { runCatching { DataClient.call(m, p) }.onSuccess { u = it } }
     LaunchedEffect(DataClient.conn) { load("update.status") }
-    DMono(Msg.android_updates_head, dfaint)
+    SettingsSection("updates", Msg.android_updates_head)
     val s = u
     if (s == null) DMono(Msg.settings_tailscale_notconnected, dcs.onSurfaceVariant, 11) else {
         Text("Backplane ${s.optString("current")}", color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
