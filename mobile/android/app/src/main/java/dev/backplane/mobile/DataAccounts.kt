@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.draw.clip
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -92,13 +93,13 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
         }
     }
     adding?.let { pv ->
-        AlertDialog(onDismissRequest = { adding = null }, title = { Text(Tr.t(pv.optString("add")), fontFamily = BpMono, fontSize = 14.sp) },
+        AlertDialog(shape = dShapeDialog, onDismissRequest = { adding = null }, title = { Text(Tr.t(pv.optString("add")), fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
             text = { DField(name, { name = it }, Msg.android_account_name_hint, Modifier.testTag("accounts.add.name")) },
             confirmButton = { TextButton(onClick = {
                 adding = null
                 scope.launch { addAccount(pv, name, open) { failure = it } }
             }) { Text(Msg.android_account_add, fontFamily = BpMono) } },
-            dismissButton = { TextButton(onClick = { adding = null }) { Text(Msg.common_cancel, fontFamily = BpMono) } })
+            dismissButton = { TextButton(onClick = { adding = null }) { Text(Msg.common_cancel, fontFamily = BpUi) } })
     }
 }
 
@@ -134,7 +135,7 @@ internal fun UsageBar(b: JSONObject) {
 /** One person: their email, then each login (Claude, Codex, a sync token) with what it is, whether new threads use it, its state or hold and its bars; a login with an account page opens it. */
 @Composable
 private fun PersonCard(e: JSONObject, open: (String) -> Unit) {
-    Column(Modifier.fillMaxWidth().border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.surfaceVariant).padding(10.dp).testTag("accounts.person.${e.optString("key")}"),
+    Column(Modifier.fillMaxWidth().clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).background(dcs.surfaceVariant).padding(10.dp).testTag("accounts.person.${e.optString("key")}"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text(e.optString("title"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
         e.optJSONArray("logins").objects().forEachIndexed { i, l ->
@@ -166,7 +167,7 @@ private fun PersonCard(e: JSONObject, open: (String) -> Unit) {
 
 @Composable
 private fun AccountRow(a: JSONObject, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.surfaceVariant).clickable(onClick = onClick).padding(10.dp).testTag("accounts.row.${a.optString("id")}"),
+    Row(Modifier.fillMaxWidth().clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).background(dcs.surfaceVariant).clickable(onClick = onClick).padding(10.dp).testTag("accounts.row.${a.optString("id")}"),
         horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Box(Modifier.padding(top = 5.dp)) { DDot(tone(a.optString("tone")), 8) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -241,7 +242,7 @@ internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit, moved: 
                         CopyChip(Msg.android_copy_code, c, Modifier.testTag("account.signin.copycode"))
                     }
                     if (s.optBoolean("paste")) {
-                        DField(code, { code = it }, Msg.android_code_paste, Modifier.testTag("account.signin.field"))
+                        DField(code, { code = it }, Msg.android_code_paste, Modifier.testTag("account.signin.field"), mono = true)
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             DBtn(Msg.android_paste, false) { (ctx.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager).primaryClip?.getItemAt(0)?.coerceToText(ctx)?.toString()?.let { code = it } }
                             DBtn(Msg.android_code_send, true, code.isNotBlank(), Modifier.testTag("account.signin.send")) { scope.launch { act("code") { put("code", code.trim()) } } }
@@ -260,7 +261,7 @@ internal fun AccountScreen(id: String, start: Boolean, back: () -> Unit, moved: 
             }
         }
     }
-    if (confirm) AlertDialog(onDismissRequest = { confirm = false }, text = { Text(Tr.t(a?.optString("remove") ?: ""), fontFamily = BpMono, fontSize = 13.sp) },
-        confirmButton = { TextButton(onClick = { confirm = false; scope.launch { act("remove") } }) { Text(Msg.common_remove, color = dcs.error, fontFamily = BpMono) } },
-        dismissButton = { TextButton(onClick = { confirm = false }) { Text(Msg.android_keep, fontFamily = BpMono) } })
+    if (confirm) AlertDialog(shape = dShapeDialog, onDismissRequest = { confirm = false }, text = { Text(Tr.t(a?.optString("remove") ?: ""), fontFamily = BpUi, fontSize = 14.sp) },
+        confirmButton = { TextButton(onClick = { confirm = false; scope.launch { act("remove") } }) { Text(Msg.common_remove, color = dcs.error, fontFamily = BpUi) } },
+        dismissButton = { TextButton(onClick = { confirm = false }) { Text(Msg.android_keep, fontFamily = BpUi) } })
 }

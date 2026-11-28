@@ -1,5 +1,7 @@
 package dev.backplane.mobile
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -257,7 +259,7 @@ private fun pillIcon(kind: PillKind): ImageVector = when (kind) {
     PillKind.SNOOZED -> Icons.Default.Schedule
 }
 
-/** Square-cornered, glanceable icon+word status pill (min 24dp tall) replacing tiny colored dots. */
+/** Capsule, glanceable icon+word status pill (min 24dp tall) replacing tiny colored dots. */
 @Composable
 fun StatusPill(pill: StatusPillModel, modifier: Modifier = Modifier) {
     val bg: Color
@@ -274,15 +276,15 @@ fun StatusPill(pill: StatusPillModel, modifier: Modifier = Modifier) {
     Row(
         modifier
             .heightIn(min = 24.dp)
-            .background(bg, RectangleShape)
-            .border(BorderStroke(1.dp, border), RectangleShape)
-            .padding(horizontal = 7.dp, vertical = 3.dp)
+            .background(bg, CircleShape)
+            .border(BorderStroke(1.dp, border), CircleShape)
+            .padding(horizontal = 9.dp, vertical = 3.dp)
             .testTag("pill.${pill.kind.name.lowercase()}"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Icon(pillIcon(pill.kind), null, tint = fg, modifier = Modifier.size(12.dp))
-        Text(Tr.t(pill.label), color = fg, fontFamily = BpMono, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(Tr.t(pill.label), color = fg, fontFamily = BpUi, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -292,9 +294,9 @@ fun BoardBadge(modifier: Modifier = Modifier) {
     Row(
         modifier
             .heightIn(min = 20.dp)
-            .background(dcs.surfaceContainerHigh, RectangleShape)
-            .border(BorderStroke(1.dp, dok.copy(alpha = 0.55f)), RectangleShape)
-            .padding(horizontal = 5.dp, vertical = 2.dp)
+            .background(dcs.surfaceContainerHigh, CircleShape)
+            .border(BorderStroke(1.dp, dok.copy(alpha = 0.55f)), CircleShape)
+            .padding(horizontal = 9.dp, vertical = 2.dp)
             .testTag("badge.pcb"),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(3.dp),
@@ -364,9 +366,9 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
                             Text(
                                 r.title,
                                 color = dcs.onSurface,
-                                fontFamily = BpMono,
-                                fontSize = 14.sp,
-                                fontWeight = if (r.word == "needs") FontWeight.Bold else FontWeight.Normal,
+                                fontFamily = BpUi,
+                                fontSize = 15.sp,
+                                fontWeight = if (r.word == "needs") FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 2,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false),
@@ -385,14 +387,14 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
                 }
                 DropdownMenu(menu, { menu = false }) {
                     if (r.wake.isNotEmpty()) {
-                        DropdownMenuItem(text = { Text(Msg.menu_wake, fontFamily = BpMono) }, onClick = { menu = false; DataClient.snoozeRow(r.wake) }, modifier = Modifier.testTag("home.section.wake.${r.id}"))
+                        DropdownMenuItem(text = { Text(Msg.menu_wake, fontFamily = BpUi) }, onClick = { menu = false; DataClient.snoozeRow(r.wake) }, modifier = Modifier.testTag("home.section.wake.${r.id}"))
                     }
                     if (r.snooze.isNotEmpty()) {
-                        DropdownMenuItem(text = { Text(Msg.tools_snooze, fontFamily = BpMono) }, onClick = { menu = false; snoozeSheet = true }, modifier = Modifier.testTag("home.section.snooze.${r.id}"))
+                        DropdownMenuItem(text = { Text(Msg.tools_snooze, fontFamily = BpUi) }, onClick = { menu = false; snoozeSheet = true }, modifier = Modifier.testTag("home.section.snooze.${r.id}"))
                     }
-                    if (r.hide.isNotEmpty()) DropdownMenuItem(text = { Text(Msg.common_hide, fontFamily = BpMono) }, onClick = { menu = false; DataClient.sidebarAct("thread-hide", r.hide) }, modifier = Modifier.testTag("home.section.hide.${r.id}"))
+                    if (r.hide.isNotEmpty()) DropdownMenuItem(text = { Text(Msg.common_hide, fontFamily = BpUi) }, onClick = { menu = false; DataClient.sidebarAct("thread-hide", r.hide) }, modifier = Modifier.testTag("home.section.hide.${r.id}"))
                     // a chat in no project: Move to project… opens the hub's list of projects (`sub`); every other item is a thread.act
-                    acts.forEach { m -> DropdownMenuItem(text = { Text(Tr.t(m.label), fontFamily = BpMono) }, onClick = { menu = false; if (DMenuItem.isMove(m)) moveSheet = m else DataClient.sectionThreadAct(r.id, m.id) }, modifier = Modifier.testTag("home.section.${m.id}.${r.id}")) }
+                    acts.forEach { m -> DropdownMenuItem(text = { Text(Tr.t(m.label), fontFamily = BpUi) }, onClick = { menu = false; if (DMenuItem.isMove(m)) moveSheet = m else DataClient.sectionThreadAct(r.id, m.id) }, modifier = Modifier.testTag("home.section.${m.id}.${r.id}")) }
                 }
             }
             if (need != null) SwarmNeedLine(r, need, indent, { open(r.nav) }, openThread)
@@ -523,7 +525,7 @@ fun SectionProject(r: DSecRow, faded: Boolean, onClick: () -> Unit, onLong: () -
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    DMono(r.title, dcs.onSurface, 14, Modifier.weight(1f, fill = false), bold = r.pinned || r.needsCount > 0)
+                    Text(r.title, Modifier.weight(1f, fill = false), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = if (r.pinned || r.needsCount > 0) FontWeight.Bold else FontWeight.Medium, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                     if (r.hasBoard) BoardBadge()
                     if (r.pinned) Icon(Icons.Default.PushPin, Msg.tools_pinned, tint = dcs.primary, modifier = Modifier.size(12.dp))
                 }
@@ -540,8 +542,8 @@ fun SectionProject(r: DSecRow, faded: Boolean, onClick: () -> Unit, onLong: () -
             }
             if (r.needsCount > 0) {
                 Spacer(Modifier.width(8.dp))
-                Box(Modifier.background(dcs.error, RectangleShape).padding(horizontal = 7.dp, vertical = 3.dp).testTag("home.section.needs.${r.key}")) {
-                    DMono("${r.needsCount}", dcs.onError, 11, bold = true)
+                Box(Modifier.heightIn(min = 22.dp).widthIn(min = 22.dp).background(dcs.error, CircleShape).padding(horizontal = 6.dp).testTag("home.section.needs.${r.key}"), contentAlignment = Alignment.Center) {
+                    Text("${r.needsCount}", color = dcs.onError, fontFamily = BpMono, fontSize = 11.sp, fontWeight = FontWeight.Bold, lineHeight = 13.sp, maxLines = 1)
                 }
             }
             Spacer(Modifier.width(4.dp))
@@ -577,18 +579,19 @@ fun InboxAllClearCard(
         Column(
             Modifier
                 .fillMaxWidth()
-                .background(dcs.surface, RectangleShape)
-                .border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape)
+                .clip(dShapeCard)
+                .background(dcs.surface)
+                .border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard)
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(Modifier.size(28.dp).background(dok.copy(alpha = 0.16f), RectangleShape).border(BorderStroke(1.dp, dok), RectangleShape), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(28.dp).background(dok.copy(alpha = 0.16f), CircleShape).border(BorderStroke(1.dp, dok), CircleShape), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.Check, null, tint = dok, modifier = Modifier.size(16.dp))
                 }
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    DMono(Msg.mobile_inbox_clear, dcs.onSurface, 15, bold = true)
-                    DMono(Msg.mobile_inbox_clear_note, dcs.onSurfaceVariant, 11, lines = 2)
+                    DText(Msg.mobile_inbox_clear, dcs.onSurface, 15, bold = true, lines = 1)
+                    DText(Msg.mobile_inbox_clear_note, dcs.onSurfaceVariant, 13, lines = 2)
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -600,7 +603,7 @@ fun InboxAllClearCard(
         }
         if (quickProjects.isNotEmpty()) {
             DMono(Msg.mobile_inbox_jump_in.uppercase(), dcs.onSurfaceVariant, 11, bold = true)
-            Column(Modifier.fillMaxWidth().background(dcs.surface, RectangleShape).border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape)) {
+            Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard)) {
                 quickProjects.forEach { p ->
                     SectionProject(p, faded = false, onClick = { openProject(p) }, onLong = {})
                 }
@@ -712,12 +715,12 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             val scope = rememberCoroutineScope()
             LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.buyOfProject(pr.id) }.onSuccess { buy = it } }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                DMono("+ " + Msg.android_thread_new_in(pr.title), dcs.primary, 12, Modifier.weight(1f).clickable { newThread(pr.id) }.padding(horizontal = 12.dp, vertical = 12.dp).testTag("project.page.new"))
+                DText("+ " + Msg.android_thread_new_in(pr.title), dcs.primary, 14, Modifier.weight(1f).clickable { newThread(pr.id) }.padding(horizontal = 12.dp, vertical = 12.dp).testTag("project.page.new"), lines = 1)
                 buy?.let { b ->
-                    DMono(Tr.t(b.label), dcs.primary, 12, Modifier.clickable(enabled = !buying) { asking = true }.padding(horizontal = 12.dp, vertical = 12.dp).testTag("project.page.buy"), bold = true)
-                    if (asking) AlertDialog(onDismissRequest = { asking = false }, shape = RectangleShape,
-                        title = { Text(Msg.android_buy_ask(pr.title), fontFamily = BpMono, fontSize = 15.sp) },
-                        text = if (b.tip.isEmpty()) null else { { Text(Tr.t(b.tip), fontFamily = BpMono, fontSize = 13.sp) } },
+                    DText(Tr.t(b.label), dcs.primary, 14, Modifier.clickable(enabled = !buying) { asking = true }.padding(horizontal = 12.dp, vertical = 12.dp).testTag("project.page.buy"), bold = true, lines = 1)
+                    if (asking) AlertDialog(onDismissRequest = { asking = false }, shape = dShapeDialog,
+                        title = { Text(Msg.android_buy_ask(pr.title), fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+                        text = if (b.tip.isEmpty()) null else { { Text(Tr.t(b.tip), fontFamily = BpUi, fontSize = 14.sp) } },
                         confirmButton = { DBtn(Msg.android_buy_it, true, modifier = Modifier.testTag("project.page.buy.confirm")) { asking = false; buying = true; failed = ""
                             scope.launch { try { val t = DataClient.buy(b.thread); if (t.isNotEmpty()) open(t) } catch (e: Exception) { failed = e.message ?: Msg.android_buy_failed } finally { buying = false } } } },
                         dismissButton = { DBtn(Msg.common_cancel, false, modifier = Modifier.testTag("project.page.buy.cancel")) { asking = false } })
@@ -730,7 +733,7 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.projectCard(pr.id) }.onSuccess { card = it } }
             card?.takeIf { it.goal.isNotEmpty() || it.boards.isNotEmpty() || it.leadDays > 0 || it.estimateWarnings.isNotEmpty() }?.let { c ->
                 Column(Modifier.fillMaxWidth().background(dcs.surface).clickable(enabled = c.goal.isNotEmpty()) { whole = !whole }.padding(horizontal = 12.dp, vertical = 8.dp).testTag("project.page.card")) {
-                    if (c.goal.isNotEmpty()) DMono(c.goal, dcs.onSurface, 12, lines = if (whole) 20 else 2)
+                    if (c.goal.isNotEmpty()) DText(c.goal, dcs.onSurface, 13, lines = if (whole) 20 else 2)
                     if (c.boards.isNotEmpty()) DMono(Msg.android_viewer_boards.uppercase() + "  " + c.boards.joinToString(" · "), dcs.onSurfaceVariant, 10, Modifier.padding(top = if (c.goal.isNotEmpty()) 4.dp else 0.dp), lines = 2)
                     if (c.leadDays > 0) DMono(Msg.order_lead_days(c.leadDays), dcs.onSurfaceVariant, 11, Modifier.padding(top = 4.dp).testTag("project.page.lead"))
                     if (c.estimateWarnings.isNotEmpty()) DMono(Msg.order_estimate_warnings(c.estimateWarnings), dwarn, 11, Modifier.padding(top = 4.dp).testTag("project.page.warnings"), lines = 4)

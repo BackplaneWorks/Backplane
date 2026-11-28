@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.draw.clip
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -339,7 +340,7 @@ private fun PickerHead(what: String, name: String, sub: String, tag: String, pre
 @Composable
 private fun PickerSheet(title: String, close: () -> Unit, search: Boolean, rows: @Composable (String) -> Unit) {
     var q by remember { mutableStateOf("") }
-    ModalBottomSheet(onDismissRequest = close, shape = androidx.compose.ui.graphics.RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = close, shape = dShapeSheet, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.75f)) {
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 DMono(title.uppercase(), dfaint, 11, Modifier.weight(1f))
@@ -466,16 +467,16 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
 
 @Composable
 private fun ViewChip(label: String, on: Boolean, tag: String, onClick: () -> Unit) {
-    DMono(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp).testTag(tag))
+    DMono(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.clip(dShape).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant), dShape).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp).testTag(tag))
 }
 
 /** KiCad's high contrast, as the hub lists it: how the others show (a board), a box per layer (show or hide it), its name (make it the active one, again: all back), a comparison's marks last, Reset layers. */
 @Composable
 private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, String) -> Unit, modifier: Modifier) {
-    Column(modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("layer.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier.heightIn(max = 420.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).padding(8.dp).testTag("layer.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (l.modes) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             listOf(Msg.viewer_layers_all, Msg.viewer_layers_dim, Msg.viewer_layers_only).forEachIndexed { i, label ->
-                DMono(label, if (l.mode == i) dcs.primary else dcs.onSurface, 12, Modifier.border(BorderStroke(1.dp, if (l.mode == i) dcs.primary else dcs.outlineVariant)).clickable { act("mode", i.toString()) }.padding(horizontal = 8.dp, vertical = 3.dp).testTag("layer.mode.$i"))
+                DMono(label, if (l.mode == i) dcs.primary else dcs.onSurface, 12, Modifier.clip(dShape).border(BorderStroke(1.dp, if (l.mode == i) dcs.primary else dcs.outlineVariant), dShape).clickable { act("mode", i.toString()) }.padding(horizontal = 8.dp, vertical = 3.dp).testTag("layer.mode.$i"))
             }
         }
         l.rows.filter { it.layer in present }.forEach { r ->
@@ -492,7 +493,7 @@ private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, St
 /** The versions a comparison may take, as the hub lists them; a press shows the Diff against that one. */
 @Composable
 private fun RefMenu(rows: List<DataClient.Ref>, pick: (String) -> Unit, modifier: Modifier) {
-    Column(modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("compare.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier.heightIn(max = 420.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).padding(8.dp).testTag("compare.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (rows.isEmpty()) DMono(Msg.android_compare_none, dcs.onSurfaceVariant, 12)
         rows.forEachIndexed { i, r ->
             Row(Modifier.clickable { pick(r.commit) }.testTag("compare.row.$i"), horizontalArrangement = Arrangement.spacedBy(8.dp)) { DMono(Tr.t(r.kind), dcs.onSurfaceVariant, 12); DMono(Tr.t(r.label), dcs.onSurface, 12) }
@@ -553,8 +554,9 @@ private fun MechTab(thread: DThread, open: String?) {
                             if (p == part) dcs.onPrimary else dcs.onSurface,
                             12,
                             Modifier
+                                .clip(dShape)
                                 .background(if (p == part) dcs.primary else dcs.surfaceContainerHigh)
-                                .border(BorderStroke(1.dp, dcs.outlineVariant))
+                                .border(BorderStroke(1.dp, dcs.outlineVariant), dShape)
                                 .clickable { part = p }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                                 .testTag("mech.part.${p.substringAfterLast('/')}"),
@@ -770,7 +772,7 @@ private fun SolidCraftWebModal(title: String, launch: Triple<String, String, Str
                 )
                 if (loading) {
                     Column(
-                        Modifier.align(Alignment.Center).background(dcs.surfaceVariant.copy(alpha = .92f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(20.dp),
+                        Modifier.align(Alignment.Center).background(dcs.surfaceVariant.copy(alpha = .92f), dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -974,14 +976,14 @@ private fun BrowserTab(thread: DThread) {
                     DBtn("‹", false, modifier = Modifier.testTag("browser.back")) { run("toolbar") { put("command", "back") } }
                     DBtn("›", false, modifier = Modifier.testTag("browser.forward")) { run("toolbar") { put("command", "forward") } }
                     DBtn("↻", false, modifier = Modifier.testTag("browser.reload")) { run("toolbar") { put("command", "reload") } }
-                    Box(Modifier.weight(1f)) { DField(url, { url = it }, Msg.browser_address, Modifier.testTag("browser.url")) }
+                    Box(Modifier.weight(1f)) { DField(url, { url = it }, Msg.browser_address, Modifier.testTag("browser.url"), mono = true) }
                     DBtn(Msg.common_go, true, url.isNotBlank(), Modifier.testTag("browser.go")) { run("navigate") { put("url", pageUrl(url)) } }
                 }
             }
             if (driving) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     // the key field: what the keyboard types here goes to the page (Enter, Tab and the arrows of a hardware keyboard too)
-                    Box(Modifier.weight(1f).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 10.dp)) {
+                    Box(Modifier.weight(1f).clip(dShape).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
                         if (keys.text == BrowserInput.SENTINEL) Text(Msg.android_browser_keys, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
                         BasicTextField(keys, ::keyed, singleLine = true,
                             textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary),
@@ -1187,7 +1189,7 @@ private fun CommentsPage(thread: DThread) {
             val l = list
             if (l == null) CircularProgressIndicator() else if (l.isEmpty()) DMono(Msg.android_comments_none, dcs.onSurfaceVariant, 12)
             l?.filter { it.parent.isEmpty() }?.forEach { c ->
-                Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (c.resolved) dcs.outlineVariant else dcs.primary.copy(alpha = .6f))).padding(10.dp)) {
+                Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (c.resolved) dcs.outlineVariant else dcs.primary.copy(alpha = .6f)), dShapeCard).padding(10.dp)) {
                     Row { DMono((c.by.ifEmpty { Msg.android_you }) + if (c.resolved) " · " + Msg.android_resolved else "", dcs.onSurfaceVariant, 11, Modifier.weight(1f))
                         DMono(if (c.resolved) Msg.android_reopen else Msg.android_resolve, dcs.primary, 11, Modifier.clickable { scope.launch { runCatching { DataClient.comment(thread.id, if (c.resolved) "reopen" else "resolve") { put("id", c.id) } }; load() } }.testTag("review.resolve.${c.id}")) }
                     Text(c.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
@@ -1242,7 +1244,7 @@ object Probe {
 private fun ProbeCard(info: String, lit: Int, modifier: Modifier, close: () -> Unit) {
     val (head, rest) = Probe.lines(info)
     // the words can be selected (a long press), and Copy takes them all: what was picked and its values (the person: the value at the foot should copy)
-    Row(modifier.fillMaxWidth().background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) { androidx.compose.foundation.text.selection.SelectionContainer { Column {
             Text(head, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             if (rest.isNotEmpty() || lit > 1) Text(listOf(rest, if (lit > 1) Msg.android_probe_lit(lit) else "").filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)

@@ -10,6 +10,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
@@ -53,7 +55,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
 
-// Screens for the data/1 app, in the desktop client's language (native/gpui): flat panels on the same tokens, square corners, mono labels, a state dot per thread.
+// Screens for the data/1 app, in the desktop client's language (native/gpui): flat panels on the same tokens, a state dot per thread; on a phone the controls are rounded (dShape, dShapeCard) and interface text is the system face (DText), mono stays for code, paths and small labels (DMono).
 internal val dcs @Composable get() = MaterialTheme.colorScheme
 private val dlight @Composable get() = dcs.background.luminance() > .5f
 internal val dok @Composable get() = Color(if (dlight) 0xFF1C8550 else 0xFF58C28A)
@@ -101,6 +103,11 @@ internal fun dAgo(ms: Long): String {
 }
 @Composable internal fun DMono(t: String, c: Color = dcs.onSurfaceVariant, size: Int = 11, modifier: Modifier = Modifier, bold: Boolean = false, lines: Int = 1) =
     Text(t, modifier, color = c, fontFamily = BpMono, fontSize = size.sp, fontWeight = if (bold) FontWeight.Bold else FontWeight.Normal, maxLines = lines, overflow = TextOverflow.Ellipsis)
+/** Interface text (titles, sentences, labels of controls) in the system face; [DMono] stays for code, paths, ids, meta lines and the small uppercase labels. */
+@Composable internal fun DText(t: String, c: Color = dcs.onSurface, size: Int = 14, modifier: Modifier = Modifier, bold: Boolean = false, lines: Int = Int.MAX_VALUE) =
+    // one line keeps the theme's line height (rows stay as tall as they were); a paragraph reads closer, as the settings' notes do
+    Text(t, modifier, color = c, fontFamily = BpUi, fontSize = size.sp, fontWeight = if (bold) FontWeight.SemiBold else FontWeight.Normal, maxLines = lines, overflow = TextOverflow.Ellipsis,
+        lineHeight = if (lines == 1) androidx.compose.ui.unit.TextUnit.Unspecified else (size + 5).sp)
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
@@ -171,12 +178,12 @@ internal fun DBar(title: String, back: (() -> Unit)?, titleMenu: (@Composable Co
     Column(Modifier.background(dcs.surfaceVariant)) {
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             if (back != null) IconButton(onClick = back) { Icon(Icons.AutoMirrored.Filled.ArrowBack, Msg.tour_back, tint = dcs.onSurfaceVariant) } else { Spacer(Modifier.width(10.dp)); BrandMark(DataClient.conn == DataClient.Conn.ONLINE); Spacer(Modifier.width(8.dp)) }
-            if (titleMenu == null) Text(title.ifEmpty { Msg.thread_new }, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (titleMenu == null) Text(title.ifEmpty { Msg.thread_new }, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             else {
                 var open by remember { mutableStateOf(false) }
                 Box(Modifier.weight(1f)) {
                     Row(Modifier.clickable { open = true }.padding(vertical = 12.dp).testTag("home.hub"), verticalAlignment = Alignment.CenterVertically) {
-                        Text(title, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                        Text(title, color = dcs.onSurface, fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                         Spacer(Modifier.width(4.dp)); Icon(Icons.Default.ArrowDropDown, null, tint = dcs.onSurfaceVariant)
                     }
                     DropdownMenu(open, { open = false }) { titleMenu { open = false } }
@@ -195,8 +202,8 @@ private fun BoxScope.ReconnectingPill() {
             Modifier
                 .align(Alignment.BottomCenter)
                 .padding(bottom = 10.dp)
-                .background(dcs.surfaceContainerHigh, RectangleShape)
-                .border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape)
+                .background(dcs.surfaceContainerHigh, CircleShape)
+                .border(BorderStroke(1.dp, dcs.outlineVariant), CircleShape)
                 .padding(horizontal = 10.dp, vertical = 5.dp)
                 .testTag("conn.reconnecting"),
             verticalAlignment = Alignment.CenterVertically,
@@ -262,7 +269,7 @@ private fun PairScreen() {
             if (address.isNotBlank() && code.isNotBlank() && !DataClient.pairingBusy) { val l = Pairing.codeLink(address.trim(), code); if (l == null) DataClient.pairingError = Msg.android_pair_code_bad else DataClient.pair(l) }
         }
         val codeFocus = remember { FocusRequester() }
-        DField(text, { text = it }, "http://host:3787/pair#invite=…", Modifier.testTag("pair.field"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Done), actions = KeyboardActions(onDone = { pairGo() }))
+        DField(text, { text = it }, "http://host:3787/pair#invite=…", Modifier.testTag("pair.field"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Done), actions = KeyboardActions(onDone = { pairGo() }), mono = true)
         if (DataClient.pairingError.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(Tr.t(DataClient.pairingError), color = dcs.onSurfaceVariant, fontSize = 13.sp) }
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -282,9 +289,9 @@ private fun PairScreen() {
         Spacer(Modifier.height(24.dp))
         Text(Msg.android_pair_code_lead, color = dcs.onSurfaceVariant, fontSize = 13.sp)
         Spacer(Modifier.height(8.dp))
-        DField(address, { address = it }, "host:port", Modifier.testTag("pair.address"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Next), actions = KeyboardActions(onNext = { codeFocus.requestFocus() }))
+        DField(address, { address = it }, "host:port", Modifier.testTag("pair.address"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Next), actions = KeyboardActions(onNext = { codeFocus.requestFocus() }), mono = true)
         Spacer(Modifier.height(8.dp))
-        DField(code, { code = it }, "ABCD-2345", Modifier.testTag("pair.code"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Go), actions = KeyboardActions(onGo = { codeGo() }), focus = codeFocus)
+        DField(code, { code = it }, "ABCD-2345", Modifier.testTag("pair.code"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Go), actions = KeyboardActions(onGo = { codeGo() }), focus = codeFocus, mono = true)
         Spacer(Modifier.height(16.dp))
         DBtn(Msg.android_pair_code, false, address.isNotBlank() && code.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.code.go")) { codeGo() }
     }
@@ -311,18 +318,20 @@ private fun AskPair(link: String) {
 }
 
 @Composable
-internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant, single: Boolean = false, keyboard: KeyboardOptions = KeyboardOptions.Default, actions: KeyboardActions = KeyboardActions.Default, focus: FocusRequester? = null) {
-    Box(modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, line)).padding(horizontal = 10.dp, vertical = 10.dp)) {
-        if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), singleLine = single, maxLines = if (single) 1 else lines, keyboardOptions = keyboard, keyboardActions = actions, modifier = Modifier.fillMaxWidth().let { m -> focus?.let { m.focusRequester(it) } ?: m })
+internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant, single: Boolean = false, keyboard: KeyboardOptions = KeyboardOptions.Default, actions: KeyboardActions = KeyboardActions.Default, focus: FocusRequester? = null, mono: Boolean = false) {
+    val face = if (mono) BpMono else BpUi; val size = if (mono) 13.sp else 15.sp
+    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(BorderStroke(1.dp, line), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
+        if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = face, fontSize = size, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), singleLine = single, maxLines = if (single) 1 else lines, keyboardOptions = keyboard, keyboardActions = actions, modifier = Modifier.fillMaxWidth().let { m -> focus?.let { m.focusRequester(it) } ?: m })
     }
 }
 
 @Composable
-internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant) {
-    Box(modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, line)).padding(horizontal = 10.dp, vertical = 10.dp)) {
-        if (v.text.isEmpty()) Text(hint, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
+internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant, mono: Boolean = false) {
+    val face = if (mono) BpMono else BpUi; val size = if (mono) 13.sp else 15.sp
+    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(BorderStroke(1.dp, line), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
+        if (v.text.isEmpty()) Text(hint, color = dfaint, fontFamily = face, fontSize = size, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
     }
 }
 
@@ -330,8 +339,8 @@ internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: Strin
 internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modifier: Modifier = Modifier, danger: Boolean = false, small: Boolean = false, onClick: () -> Unit) {
     val bg = if (primary && enabled) dcs.primary else dcs.surfaceContainerHigh
     val fg = if (primary && enabled) dcs.onPrimary else if (!enabled) dfaint else if (danger) dcs.error else dcs.onSurface
-    Box(modifier.background(bg).border(BorderStroke(1.dp, if (primary && enabled) dcs.primary else dcs.outlineVariant)).clickable(enabled = enabled, onClick = onClick).heightIn(min = if (small) 28.dp else 40.dp).padding(horizontal = if (small) 8.dp else 14.dp), contentAlignment = Alignment.CenterStart) {
-        Text(label, color = fg, fontFamily = BpMono, fontSize = if (small) 11.sp else 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+    Box(modifier.clip(dShape).background(bg).border(BorderStroke(1.dp, if (primary && enabled) dcs.primary else dcs.outlineVariant), dShape).clickable(enabled = enabled, onClick = onClick).heightIn(min = if (small) 30.dp else 44.dp).padding(horizontal = if (small) 8.dp else 14.dp), contentAlignment = Alignment.Center) {
+        Text(label, color = fg, fontFamily = BpUi, fontSize = if (small) 12.sp else 14.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -339,7 +348,7 @@ internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modi
 @Composable
 internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier, provider: String = "", onClick: () -> Unit) {
     val pv = remember(provider, text) { provider.ifEmpty { ProviderMarks.providerOfChip(text) } }
-    Box(modifier.height(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable(onClick = onClick).padding(horizontal = 10.dp).testTag(tag), contentAlignment = Alignment.CenterStart) {
+    Box(modifier.height(40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable(onClick = onClick).padding(horizontal = 10.dp).testTag(tag), contentAlignment = Alignment.CenterStart) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             if (pv.isNotEmpty()) ProviderMark(pv, 14.dp)
             DMono(Tr.t(text), dcs.onSurface, 12)
@@ -399,8 +408,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     Column(Modifier.fillMaxSize().background(dcs.surfaceVariant)) {
         DBar(DataClient.hubName.ifEmpty { "Backplane" }, null, { dismiss ->
             DataClient.links.drop(1).mapNotNull { Pairing.key(it) }.forEach { k -> DropdownMenuItem({ Text(k, fontFamily = BpMono) }, { dismiss(); DataClient.useHub(k) }, Modifier.testTag("home.hub.use.$k")) }
-            DropdownMenuItem({ Text(Msg.android_hub_add, fontFamily = BpMono) }, { dismiss(); DataClient.pairingError = ""; DataClient.adding = true }, Modifier.testTag("home.hub.add"))
-            if (termsOn()) DropdownMenuItem({ Text(Msg.android_terminals, fontFamily = BpMono) }, { dismiss(); termsOpen(null) }, Modifier.testTag("home.hub.terms"))
+            DropdownMenuItem({ Text(Msg.android_hub_add, fontFamily = BpUi) }, { dismiss(); DataClient.pairingError = ""; DataClient.adding = true }, Modifier.testTag("home.hub.add"))
+            if (termsOn()) DropdownMenuItem({ Text(Msg.android_terminals, fontFamily = BpUi) }, { dismiss(); termsOpen(null) }, Modifier.testTag("home.hub.terms"))
         }) {
             // Persistent 1-tap Bub quick-jump in the top bar across every tab
             if (sectioned && uberBot != null) {
@@ -466,15 +475,16 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                             Row(
                                                 Modifier
                                                     .fillMaxWidth()
-                                                    .background(dcs.surface, RectangleShape)
-                                                    .border(BorderStroke(1.dp, dcs.primary.copy(alpha = 0.45f)), RectangleShape)
+                                                    .clip(dShapeCard)
+                                                    .background(dcs.surface)
+                                                    .border(BorderStroke(1.dp, dcs.primary.copy(alpha = 0.45f)), dShapeCard)
                                                     .clickable { open(b.thread) }
                                                     .padding(horizontal = 14.dp, vertical = 12.dp)
                                                     .testTag("crew.bub"),
                                                 verticalAlignment = Alignment.CenterVertically,
                                             ) {
                                                 if (DataClient.has("cats")) BotCat(b.look, b.color, 52.dp)
-                                                else Box(Modifier.size(44.dp).background(dcs.primary.copy(alpha = 0.14f), RectangleShape), contentAlignment = Alignment.Center) { DMono("@", dcs.primary, 18, bold = true) }
+                                                else Box(Modifier.size(44.dp).background(dcs.primary.copy(alpha = 0.14f), dShape), contentAlignment = Alignment.Center) { DMono("@", dcs.primary, 18, bold = true) }
                                                 Spacer(Modifier.width(12.dp))
                                                 Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                                                     DMono(b.name, dcs.onSurface, 16, bold = true)
@@ -524,7 +534,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                                     .testTag("side.#${r.name}"),
                                                 verticalAlignment = Alignment.CenterVertically,
                                             ) {
-                                                Box(Modifier.size(32.dp).background(dcs.surfaceContainerHigh, RectangleShape).border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape), contentAlignment = Alignment.Center) {
+                                                Box(Modifier.size(32.dp).background(dcs.surfaceContainerHigh, dShape).border(BorderStroke(1.dp, dcs.outlineVariant), dShape), contentAlignment = Alignment.Center) {
                                                     DMono("#", dcs.primary, 14, bold = true)
                                                 }
                                                 Spacer(Modifier.width(12.dp))
@@ -541,7 +551,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                 if (uberBot == null && bots.isEmpty() && rooms.isEmpty()) {
                                     item("crew.empty") {
                                         Column(Modifier.fillMaxWidth().padding(32.dp).testTag("crew.empty"), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text(if (DataClient.listsLoaded) Msg.mobile_crew_empty else Msg.viewer_loading, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                            Text(if (DataClient.listsLoaded) Msg.mobile_crew_empty else Msg.viewer_loading, color = dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 15.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                                         }
                                     }
                                 }
@@ -556,8 +566,9 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                             Modifier
                                                 .weight(1f)
                                                 .heightIn(min = 40.dp)
-                                                .background(dview, RectangleShape)
-                                                .border(BorderStroke(1.dp, dcs.outlineVariant), RectangleShape)
+                                                .clip(dShape)
+                                                .background(dview)
+                                                .border(BorderStroke(1.dp, dcs.outlineVariant), dShape)
                                                 .clickable { searchOpen = true }
                                                 .padding(horizontal = 10.dp)
                                                 .testTag("home.bench.search"),
@@ -565,7 +576,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                                         ) {
                                             Icon(Icons.Default.Search, null, tint = dfaint, modifier = Modifier.size(16.dp))
-                                            DMono(Msg.android_search_hint, dfaint, 13)
+                                            DText(Msg.android_search_hint, dfaint, 15, lines = 1)
                                         }
                                     } else Spacer(Modifier.weight(1f))
                                     IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, Msg.sidebar_add_project, tint = dcs.onSurfaceVariant) }
@@ -576,7 +587,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                     if (partition.bench.isEmpty() && DataClient.projects.isEmpty()) {
                                         item("bench.empty") {
                                             Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
+                                                Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp)
                                                 if (DataClient.listsLoaded) { Spacer(Modifier.height(12.dp)); DBtn(Msg.android_project_add, true, true, onClick = addProject) }
                                             }
                                         }
@@ -616,7 +627,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                             Icon(Icons.Default.Inbox, Msg.mobile_tab_inbox)
                         }
                     },
-                    label = { DMono(Msg.mobile_tab_inbox, if (tab == HomeTab.INBOX) dcs.primary else dcs.onSurfaceVariant, 11, bold = tab == HomeTab.INBOX) },
+                    label = { Text(Msg.mobile_tab_inbox, color = if (tab == HomeTab.INBOX) dcs.primary else dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 12.sp, fontWeight = if (tab == HomeTab.INBOX) FontWeight.Bold else FontWeight.Medium, maxLines = 1) },
                     colors = NavigationBarItemDefaults.colors(selectedIconColor = dcs.primary, unselectedIconColor = dcs.onSurfaceVariant, indicatorColor = dcs.primary.copy(alpha = 0.14f)),
                     modifier = Modifier.testTag("home.tab.inbox"),
                 )
@@ -624,7 +635,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                     selected = tab == HomeTab.CREW,
                     onClick = { tab = HomeTab.CREW; searchOpen = false; q = "" },
                     icon = { Icon(Icons.Default.Groups, Msg.mobile_tab_crew) },
-                    label = { DMono(Msg.mobile_tab_crew, if (tab == HomeTab.CREW) dcs.primary else dcs.onSurfaceVariant, 11, bold = tab == HomeTab.CREW) },
+                    label = { Text(Msg.mobile_tab_crew, color = if (tab == HomeTab.CREW) dcs.primary else dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 12.sp, fontWeight = if (tab == HomeTab.CREW) FontWeight.Bold else FontWeight.Medium, maxLines = 1) },
                     colors = NavigationBarItemDefaults.colors(selectedIconColor = dcs.primary, unselectedIconColor = dcs.onSurfaceVariant, indicatorColor = dcs.primary.copy(alpha = 0.14f)),
                     modifier = Modifier.testTag("home.tab.crew"),
                 )
@@ -632,7 +643,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                     selected = tab == HomeTab.BENCH,
                     onClick = { tab = HomeTab.BENCH; searchOpen = false; q = "" },
                     icon = { Icon(Icons.Default.DeveloperBoard, Msg.mobile_tab_bench) },
-                    label = { DMono(Msg.mobile_tab_bench, if (tab == HomeTab.BENCH) dcs.primary else dcs.onSurfaceVariant, 11, bold = tab == HomeTab.BENCH) },
+                    label = { Text(Msg.mobile_tab_bench, color = if (tab == HomeTab.BENCH) dcs.primary else dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 12.sp, fontWeight = if (tab == HomeTab.BENCH) FontWeight.Bold else FontWeight.Medium, maxLines = 1) },
                     colors = NavigationBarItemDefaults.colors(selectedIconColor = dcs.primary, unselectedIconColor = dcs.onSurfaceVariant, indicatorColor = dcs.primary.copy(alpha = 0.14f)),
                     modifier = Modifier.testTag("home.tab.bench"),
                 )
@@ -658,7 +669,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 items(DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark), lead = botCat(b)) { open(b.thread) } }
                 item("empty") {
                     Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
+                        Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp)
                         if (DataClient.listsLoaded) { Spacer(Modifier.height(12.dp)); DBtn(Msg.android_project_add, true, true, onClick = addProject) }
                     }
                 }
@@ -746,7 +757,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         // Delete room (a long press on a room the hub offers it for): asked first, then `room.delete`
         roomDelete?.let { r ->
             val del = rememberCoroutineScope()
-            AlertDialog(onDismissRequest = { roomDelete = null }, title = { Text(Msg.native_bot_delete_ask(r.name)) },
+            AlertDialog(shape = dShapeDialog, onDismissRequest = { roomDelete = null }, title = { Text(Msg.native_bot_delete_ask(r.name)) },
                 confirmButton = { TextButton({ roomDelete = null; del.launch { runCatching { DataClient.roomDelete(r.id) } } }, Modifier.testTag("room.delete.yes")) { Text(Msg.rooms_delete, color = dcs.error) } },
                 dismissButton = { TextButton({ roomDelete = null }) { Text(Msg.common_cancel) } })
         }
@@ -765,7 +776,7 @@ private fun MachineChips() {
     val chips = DataClient.chips; if (chips.isEmpty()) return
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(start = 10.dp, end = 10.dp, bottom = 8.dp).testTag("home.machines"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         chips.forEach { c ->
-            Box(Modifier.border(BorderStroke(1.dp, if (c.on) dcs.primary else dcs.outlineVariant)).clickable { DataClient.pickMachine(c.value) }.padding(horizontal = 10.dp, vertical = 5.dp).alpha(if (c.away && !c.on) .55f else 1f).testTag("home.machine.${c.value.ifEmpty { "all" }}")) {
+            Box(Modifier.clip(dShape).border(BorderStroke(1.dp, if (c.on) dcs.primary else dcs.outlineVariant), dShape).clickable { DataClient.pickMachine(c.value) }.padding(horizontal = 10.dp, vertical = 5.dp).alpha(if (c.away && !c.on) .55f else 1f).testTag("home.machine.${c.value.ifEmpty { "all" }}")) {
                 DMono(c.label + if (c.away) " · " + Msg.android_away else "", if (c.on) dcs.primary else dcs.onSurfaceVariant, 11)
             }
         }
@@ -803,9 +814,9 @@ private fun ThreadRow(t: DThread, onClick: () -> Unit, depth: Int = 0, kids: Int
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (t.pinned) { Icon(Icons.Default.PushPin, Msg.tools_pinned, tint = dcs.primary, modifier = Modifier.size(11.dp)); Spacer(Modifier.width(5.dp)) }
                 if (t.provider.isNotEmpty()) { ProviderMark(t.provider, 12.dp); Spacer(Modifier.width(6.dp)) }
-                Text(t.title.ifEmpty { Msg.thread_new }, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(t.title.ifEmpty { Msg.thread_new }, color = dcs.onSurface, fontSize = 15.sp, fontFamily = BpUi, fontWeight = FontWeight.Medium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            if (t.preview.isNotEmpty()) Text(t.preview.replace("**", "").replace("`", ""), color = dfaint, fontSize = 11.sp, fontFamily = BpMono, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (t.preview.isNotEmpty()) Text(t.preview.replace("**", "").replace("`", ""), color = dfaint, fontSize = 13.sp, fontFamily = BpUi, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Spacer(Modifier.width(8.dp))
         Row(Modifier.padding(top = 9.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -887,7 +898,7 @@ private fun StateStrip(t: DThread) {
                     planPhaseLabel(pm),
                     ptint,
                     10,
-                    Modifier.border(BorderStroke(1.dp, ptint)).padding(horizontal = 5.dp, vertical = 1.dp).testTag("thread.planmode"),
+                    Modifier.border(BorderStroke(1.dp, ptint), CircleShape).padding(horizontal = 7.dp, vertical = 1.dp).testTag("thread.planmode"),
                     bold = true,
                 )
             }
@@ -1079,7 +1090,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             var planMenu by remember { mutableStateOf(false) }
             if (planMode != null && planActive) {
                 Row(
-                    Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, planTint.copy(alpha = 0.45f))).padding(horizontal = 8.dp, vertical = 5.dp).testTag("thread.plan.banner"),
+                    Modifier.fillMaxWidth().clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, planTint.copy(alpha = 0.45f)), dShape).padding(horizontal = 8.dp, vertical = 5.dp).testTag("thread.plan.banner"),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
@@ -1091,7 +1102,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                             if (isOnce) Msg.gpui_planmode_scope_always else Msg.gpui_planmode_scope_once,
                             planTint,
                             10,
-                            Modifier.border(BorderStroke(1.dp, planTint.copy(alpha = 0.6f))).clickable {
+                            Modifier.clip(dShape).border(BorderStroke(1.dp, planTint.copy(alpha = 0.6f)), dShape).clickable {
                                 scope.launch { runCatching { DataClient.setPlanMode(id, if (isOnce) PlanModeTarget.ALWAYS else PlanModeTarget.ONCE) } }
                             }.padding(horizontal = 6.dp, vertical = 2.dp),
                             bold = true,
@@ -1100,7 +1111,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                             Msg.settings_lang_off,
                             dcs.onSurfaceVariant,
                             10,
-                            Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).clickable {
+                            Modifier.clip(dShape).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable {
                                 scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.OFF) } }
                             }.padding(horizontal = 6.dp, vertical = 2.dp),
                         )
@@ -1114,7 +1125,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                 if (DataClient.has("plan") && planMode != null) {
                     val pcol = if (planActive) planTint else dcs.onSurfaceVariant
                     Box(
-                        Modifier.height(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (planActive) planTint else dcs.outlineVariant))
+                        Modifier.height(40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (planActive) planTint else dcs.outlineVariant), dShape)
                             .combinedClickable(
                                 onClick = {
                                     val nxt = nextPlanModeCycle(planMode)
@@ -1130,30 +1141,30 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                             DMono(if (planActive) planPhaseLabel(planMode) else Msg.gpui_mgmt_plan_tab, pcol, 10, bold = planActive)
                         }
                         DropdownMenu(planMenu, { planMenu = false }) {
-                            DropdownMenuItem({ Text(Msg.settings_lang_off, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.OFF) } } })
-                            DropdownMenuItem({ Text(Msg.gpui_planmode_scope_once, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.ONCE) } } })
-                            DropdownMenuItem({ Text(Msg.gpui_planmode_scope_always, fontFamily = BpMono) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.ALWAYS) } } })
+                            DropdownMenuItem({ Text(Msg.settings_lang_off, fontFamily = BpUi) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.OFF) } } })
+                            DropdownMenuItem({ Text(Msg.gpui_planmode_scope_once, fontFamily = BpUi) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.ONCE) } } })
+                            DropdownMenuItem({ Text(Msg.gpui_planmode_scope_always, fontFamily = BpUi) }, { planMenu = false; scope.launch { runCatching { DataClient.setPlanMode(id, PlanModeTarget.ALWAYS) } } })
                         }
                     }
                 }
-                Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) attachMenu = true else notice = Msg.android_pictures_old }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable { if (DataClient.canSendImages) attachMenu = true else notice = Msg.android_pictures_old }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
                     Icon(Icons.Default.AttachFile, Msg.composer_attach, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
                     DropdownMenu(attachMenu, { attachMenu = false }) {
-                        DropdownMenuItem({ Text(Msg.android_photo_choose, fontFamily = BpMono) }, { attachMenu = false; pick.launch("image/*") }, Modifier.testTag("thread.attach.pick"), leadingIcon = { Icon(Icons.Default.Image, null) })
-                        DropdownMenuItem({ Text(Msg.android_photo_take, fontFamily = BpMono) }, { attachMenu = false
+                        DropdownMenuItem({ Text(Msg.android_photo_choose, fontFamily = BpUi) }, { attachMenu = false; pick.launch("image/*") }, Modifier.testTag("thread.attach.pick"), leadingIcon = { Icon(Icons.Default.Image, null) })
+                        DropdownMenuItem({ Text(Msg.android_photo_take, fontFamily = BpUi) }, { attachMenu = false
                             if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) takePhoto() else camAsk.launch(android.Manifest.permission.CAMERA)
                         }, Modifier.testTag("thread.attach.camera"), leadingIcon = { Icon(Icons.Default.PhotoCamera, null) })
                     }
                 }
-                Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) drawing = true else notice = Msg.android_pictures_old }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, Msg.draw_title, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                Box(Modifier.size(40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable { if (DataClient.canSendImages) drawing = true else notice = Msg.android_pictures_old }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, Msg.draw_title, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
                 if (dictate && (DataVoice.always || DataVoice.alwaysWanted)) AlwaysPill()
                 if (dictate) MicChip(DataVoice.on(id), held = { begins -> DataVoice.held(id, begins) { if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id) else micAsk.launch(android.Manifest.permission.RECORD_AUDIO) } }) {
                     if (DataVoice.on(id) || androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id)
                     else micAsk.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
                 val blank = draft.isBlank() && pending.isEmpty()
-                if (running && blank) DBtn(Msg.composer_stop, false, modifier = Modifier.testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
-                else DBtn(word?.label?.let(Tr::t) ?: (if (planPrimary) Msg.gpui_mgmt_plan_tab else Msg.composer_send), true, !blank, Modifier.testTag("thread.send")) {
+                if (running && blank) DBtn(Msg.composer_stop, false, modifier = Modifier.height(40.dp).testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
+                else DBtn(word?.label?.let(Tr::t) ?: (if (planPrimary) Msg.gpui_mgmt_plan_tab else Msg.composer_send), true, !blank, Modifier.height(40.dp).testTag("thread.send")) {
                     notice = ""; existing = null
                     // sent: the keyboard goes away, so the reply has the screen (a tap on the box brings it back)
                     // (focus first: the keyboard's word in progress is committed before the box empties, never after it)
@@ -1184,7 +1195,7 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
 @Composable
 private fun FoldRow(f: DFold, open: Boolean, toggle: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp)) {
-        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable(onClick = toggle).padding(horizontal = 8.dp).testTag("fold.${f.id}"), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 36.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).clickable(onClick = toggle).padding(horizontal = 8.dp).testTag("fold.${f.id}"), verticalAlignment = Alignment.CenterVertically) {
             Icon(if (open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, if (open) Msg.common_hide else Msg.common_show, tint = dcs.onSurfaceVariant, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(8.dp))
             DMono(Tr.t(f.label), dcs.onSurfaceVariant, 12)
         }
@@ -1231,7 +1242,7 @@ private fun WorkingRow() {
     val a by t.animateFloat(0f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(550), androidx.compose.animation.core.RepeatMode.Reverse), label = "breath")
     Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp).testTag("thread.working"), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(12.dp), contentAlignment = Alignment.Center) { Box(Modifier.size((5 + 7 * a).dp).alpha(.45f + .55f * a).background(dok)) }
-        Spacer(Modifier.width(8.dp)); DMono(Msg.phase_working, dcs.onSurfaceVariant, 13)
+        Spacer(Modifier.width(8.dp)); DText(Msg.phase_working, dcs.onSurfaceVariant, 14, lines = 1)
     }
 }
 
@@ -1251,11 +1262,11 @@ private fun BtwCard(b: DataClient.Btw, close: () -> Unit) {
 private fun SecretBox(tid: String, name0: String, asked: DataClient.SecretAsk?, shut: () -> Unit) {
     val scope = rememberCoroutineScope()
     var name by remember(tid, name0) { mutableStateOf(name0) }; var value by remember(tid, name0) { mutableStateOf("") }; var err by remember(tid, name0) { mutableStateOf("") }
-    Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.primary)).padding(12.dp).testTag("thread.secret"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.primary), dShapeCard).padding(12.dp).testTag("thread.secret"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(if (name0.isEmpty()) Msg.android_secret_new else Msg.android_secret_named(name0), color = dcs.onSurface, fontSize = 13.sp)
         asked?.purpose?.takeIf { it.isNotEmpty() }?.let { DMono(it) }
-        if (name0.isEmpty()) DField(name, { name = it }, Msg.bots_name, Modifier.testTag("thread.secret.name"))
-        Box(Modifier.fillMaxWidth().background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp)) {
+        if (name0.isEmpty()) DField(name, { name = it }, Msg.bots_name, Modifier.testTag("thread.secret.name"), mono = true)
+        Box(Modifier.fillMaxWidth().clip(dShape).background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).padding(12.dp)) {
             if (value.isEmpty()) Text(Msg.android_secret_paste, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
             BasicTextField(value, { value = it }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = 1,
                 visualTransformation = PasswordVisualTransformation(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, autoCorrectEnabled = false), modifier = Modifier.fillMaxWidth().testTag("thread.secret.value"))
@@ -1272,7 +1283,7 @@ private fun SecretBox(tid: String, name0: String, asked: DataClient.SecretAsk?, 
 /** Reply's strip over the composer (the desktop's `reply-strip`): who wrote the message and its first line; a tap goes to it, × drops the reply. */
 @Composable
 private fun ReplyStrip(r: DReplyRef, go: () -> Unit, drop: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("thread.reply.strip"), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).testTag("thread.reply.strip"), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.width(2.dp).fillMaxHeight().background(dcs.primary))
         Column(Modifier.weight(1f).clickable(onClick = go).padding(horizontal = 8.dp, vertical = 4.dp)) {
             DMono(if (ReplyDraft.mine(r)) Msg.secret_you else Msg.model_col_agent, dcs.primary, 11, bold = true)
@@ -1299,8 +1310,8 @@ private fun Modifier.replySwipe(r: DReplyRef?, reply: (DReplyRef) -> Unit): Modi
 @Composable
 private fun ReplyMenuItems(e: DEntry, r: DReplyRef?, close: () -> Unit, reply: (DReplyRef) -> Unit) {
     val clip = androidx.compose.ui.platform.LocalClipboardManager.current
-    r?.let { DropdownMenuItem({ Text(Msg.reply_action, fontFamily = BpMono) }, { close(); reply(it) }, Modifier.testTag("thread.entry.reply.menu"), leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, null) }) }
-    if (e.text.isNotEmpty()) DropdownMenuItem({ Text(Msg.common_copy, fontFamily = BpMono) }, { close(); clip.setText(androidx.compose.ui.text.AnnotatedString(e.text)) }, Modifier.testTag("thread.entry.copy"), leadingIcon = { Icon(Icons.Default.ContentCopy, null) })
+    r?.let { DropdownMenuItem({ Text(Msg.reply_action, fontFamily = BpUi) }, { close(); reply(it) }, Modifier.testTag("thread.entry.reply.menu"), leadingIcon = { Icon(Icons.AutoMirrored.Filled.Reply, null) }) }
+    if (e.text.isNotEmpty()) DropdownMenuItem({ Text(Msg.common_copy, fontFamily = BpUi) }, { close(); clip.setText(androidx.compose.ui.text.AnnotatedString(e.text)) }, Modifier.testTag("thread.entry.copy"), leadingIcon = { Icon(Icons.Default.ContentCopy, null) })
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -1317,15 +1328,15 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
             // long-press: Reply, Copy, and Restore to before this when the hub has the snapshot before the turn this message started (asked first, with the snapshot's info)
             var menu by remember { mutableStateOf(false) }; var asking by remember { mutableStateOf(false) }
             val press = if (e.restore != null || rr != null) Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }) else Modifier
-            if (e.text.isNotEmpty()) Box(press.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) {
-                LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19)
+            if (e.text.isNotEmpty()) Box(Modifier.clip(dShapeCard).then(press).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                LinkText(e.text, tid, color = dcs.onSurface, size = 14, lineHeight = 20, mono = false)
                 DropdownMenu(menu, { menu = false }) {
                     ReplyMenuItems(e, rr, { menu = false }, reply)
-                    if (e.restore != null) DropdownMenuItem({ Text(Msg.thread_restore_action, fontFamily = BpMono) }, { menu = false; asking = true }, Modifier.testTag("thread.entry.restore"))
+                    if (e.restore != null) DropdownMenuItem({ Text(Msg.thread_restore_action, fontFamily = BpUi) }, { menu = false; asking = true }, Modifier.testTag("thread.entry.restore"))
                 }
             }
             e.restore?.takeIf { asking }?.let { r ->
-                AlertDialog(onDismissRequest = { asking = false }, title = { Text(Msg.thread_restore_ask) },
+                AlertDialog(shape = dShapeDialog, onDismissRequest = { asking = false }, title = { Text(Msg.thread_restore_ask) },
                     text = { Column { Text(r.info, fontFamily = BpMono, fontSize = 12.sp); Spacer(Modifier.height(6.dp)); Text(Msg.thread_restore_note, fontSize = 13.sp) } },
                     confirmButton = { TextButton({ asking = false; DataClient.restore(tid, r) }, Modifier.testTag("thread.restore.yes")) { Text(Msg.thread_restore_go, color = dcs.error) } },
                     dismissButton = { TextButton({ asking = false }) { Text(Msg.common_cancel) } })
@@ -1364,7 +1375,7 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
             val c = if (e.tone == "error") dcs.error else dcs.onSurfaceVariant
             if (e.label.isNotEmpty()) { Text(Tr.t(e.label), color = c, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)) }
             Column(Modifier.weight(1f)) {
-                if (e.text.contains('`') || !e.copy.isNullOrEmpty()) MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy")), color = c, fontSize = 12)
+                if (e.text.contains('`') || !e.copy.isNullOrEmpty()) MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy")), color = c, fontSize = 12, mono = true)
                 else LinkText(e.text, tid, color = c, size = 12)
             }
         }
@@ -1375,14 +1386,14 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
 @Composable
 private fun HandoffCard(tid: String, e: DEntry) {
     val h = e.handoff ?: return
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("handoff.card")) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(dShapeCard).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(10.dp).testTag("handoff.card")) {
         val from = "backplane://thread/${h.from}"
         DMono(Msg.android_handoff_from(h.title), dcs.primary, 11, Modifier.clickable { DataClient.openLink(from, tid) }.testTag("handoff.back"))
-        Text(h.summary, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, modifier = Modifier.padding(top = 6.dp).testTag("handoff.summary"))
+        Text(h.summary, color = dcs.onSurface, fontSize = 14.sp, fontFamily = BpUi, modifier = Modifier.padding(top = 6.dp).testTag("handoff.summary"))
         if (h.note.isNotEmpty()) DMono(Msg.android_handoff_note(h.note), dcs.onSurfaceVariant, 12, Modifier.padding(top = 4.dp), lines = 4)
         h.refs.forEachIndexed { i, r ->
             val mark = when (r.kind) { "thread" -> "▸"; "message" -> "“"; "board" -> "▦"; else -> "·" }
-            Row(Modifier.fillMaxWidth().padding(top = 6.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { DataClient.openLink(if (r.kind == "file" || r.kind == "board") PATH_SCHEME + r.url else r.url, r.thread) }.padding(horizontal = 8.dp, vertical = 6.dp).testTag("handoff.ref.$i")) {
+            Row(Modifier.fillMaxWidth().padding(top = 6.dp).clip(dShape).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable { DataClient.openLink(if (r.kind == "file" || r.kind == "board") PATH_SCHEME + r.url else r.url, r.thread) }.padding(horizontal = 8.dp, vertical = 6.dp).testTag("handoff.ref.$i")) {
                 DMono(mark, dcs.primary, 12, bold = true); Spacer(Modifier.width(8.dp)); DMono(r.label, dcs.onSurface, 12, Modifier.weight(1f))
             }
         }
@@ -1406,7 +1417,7 @@ private fun AskCard(tid: String, e: DEntry) {
         val content = a.question.ifEmpty { e.text }
         Row(
             Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)
-                .background(dcs.surfaceVariant).border(BorderStroke(1.dp, border))
+                .clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, border), dShapeCard)
                 .height(IntrinsicSize.Min).testTag("ask.card"),
         ) {
             if (a.open) Box(Modifier.width(3.dp).fillMaxHeight().background(dinput))
@@ -1418,7 +1429,7 @@ private fun AskCard(tid: String, e: DEntry) {
                             Msg.gpui_ask_plan_ready,
                             dinput,
                             10,
-                            Modifier.border(BorderStroke(1.dp, dinput.copy(alpha = 0.65f))).padding(horizontal = 5.dp, vertical = 1.dp),
+                            Modifier.border(BorderStroke(1.dp, dinput.copy(alpha = 0.65f)), CircleShape).padding(horizontal = 7.dp, vertical = 1.dp),
                             bold = true,
                         )
                     }
@@ -1435,8 +1446,9 @@ private fun AskCard(tid: String, e: DEntry) {
                 Box(
                     Modifier.fillMaxWidth()
                         .then(if (expanded) Modifier else Modifier.heightIn(max = 260.dp).verticalScroll(rememberScrollState()))
+                        .clip(dShape)
                         .background(dcs.background)
-                        .border(BorderStroke(1.dp, dcs.outlineVariant))
+                        .border(BorderStroke(1.dp, dcs.outlineVariant), dShape)
                         .padding(10.dp),
                 ) {
                     MdText(content, thread = tid, copy = CopyLookup(null))
@@ -1482,7 +1494,7 @@ private fun AskCard(tid: String, e: DEntry) {
         return
     }
 
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, border)).padding(12.dp).testTag("ask.card")) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, border), dShapeCard).padding(12.dp).testTag("ask.card")) {
         DMono(if (a?.open == true) Msg.android_ask_open else Msg.android_ask_done, dfaint, 11)
         Text(a?.question ?: e.text, color = dcs.onSurface, fontSize = 13.sp, fontFamily = BpMono, modifier = Modifier.padding(vertical = 6.dp))
         if (a != null && a.open) {
@@ -1504,7 +1516,7 @@ private fun botCat(b: DataClient.Bot): (@Composable () -> Unit)? =
 @Composable
 internal fun BotDeleteDialog(b: DataClient.Bot, done: () -> Unit) {
     val del = rememberCoroutineScope()
-    AlertDialog(onDismissRequest = done, title = { Text(b.ask.title.ifEmpty { "" }.let { if (it.isEmpty()) Msg.native_bot_delete_ask(b.name) else Tr.t(it) }) },
+    AlertDialog(shape = dShapeDialog, onDismissRequest = done, title = { Text(b.ask.title.ifEmpty { "" }.let { if (it.isEmpty()) Msg.native_bot_delete_ask(b.name) else Tr.t(it) }) },
         text = if (b.ask.body.isEmpty()) null else ({ Text(Tr.t(b.ask.body), Modifier.testTag("bot.delete.body")) }),
         confirmButton = { TextButton({ done(); del.launch { runCatching { DataClient.botDelete(b.id) } } }, Modifier.testTag("bot.delete.yes")) { Text(if (b.ask.yes.isEmpty()) Msg.bots_delete else Tr.t(b.ask.yes), color = dcs.error) } },
         dismissButton = { TextButton(done) { Text(Msg.common_cancel) } })
@@ -1562,7 +1574,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
                 if (DataMcp.available) McpEntry(mcp)
             }
             forget?.let { k ->
-                AlertDialog(onDismissRequest = { forget = null }, title = { Text(Msg.android_hub_forget_ask(k)) },
+                AlertDialog(shape = dShapeDialog, onDismissRequest = { forget = null }, title = { Text(Msg.android_hub_forget_ask(k)) },
                     text = { Text(Msg.android_hub_forget_note) },
                     confirmButton = { TextButton({ forget = null; DataClient.forgetHub(k); if (DataClient.link == null) back() }) { Text(Msg.bots_memory_forget) } },
                     dismissButton = { TextButton({ forget = null }) { Text(Msg.common_cancel) } })
@@ -1595,22 +1607,22 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             DMono(Msg.android_alerts_head, dfaint)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(true to "on", false to "off").forEach { (v, l) -> DBtn(if (v) Msg.option_on else Msg.option_off, alerts == v, modifier = Modifier.testTag("settings.alerts.$l")) { alerts = v; AppSettings.putAlerts(v) } } }
-            DMono(Msg.android_alerts_note, dcs.onSurfaceVariant, 11, lines = 3)
+            DText(Msg.android_alerts_note, dcs.onSurfaceVariant, 13, lines = 3)
             // an older hub has no Notifications page: its quiet hours and urgent switch are drawn here
             if (DataClient.has("push") && !DataNotify.available) {
                 val quietOn = DataClient.quiet.isNotEmpty() && DataClient.quiet != "off"
-                DMono(Msg.android_quiet_head)
+                DText(Msg.android_quiet_head, size = 15, lines = 1)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DBtn(Msg.option_on, quietOn, modifier = Modifier.testTag("settings.quiet.on")) { if (!quietOn) DataClient.putQuiet("22:00-07:00") }
                     DBtn(Msg.option_off, !quietOn, modifier = Modifier.testTag("settings.quiet.off")) { DataClient.putQuiet("off") }
                 }
                 if (quietOn) DMono(DataClient.quiet.split("-", limit = 2).let { if (it.size == 2) Msg.android_quiet_range(it[0], it[1]) else DataClient.quiet }, dcs.onSurfaceVariant, 12)
-                DMono(Msg.android_urgent_head)
+                DText(Msg.android_urgent_head, size = 15, lines = 1)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     DBtn(Msg.option_on, DataClient.quietUrgent, modifier = Modifier.testTag("settings.urgent.on")) { DataClient.putQuietUrgent(true) }
                     DBtn(Msg.option_off, !DataClient.quietUrgent, modifier = Modifier.testTag("settings.urgent.off")) { DataClient.putQuietUrgent(false) }
                 }
-                DMono(Msg.android_quiet_note, dcs.onSurfaceVariant, 11, lines = 2)
+                DText(Msg.android_quiet_note, dcs.onSurfaceVariant, 13, lines = 2)
             }
             DLine()
             DMono(Msg.settings_lang.uppercase(), dfaint)
@@ -1619,7 +1631,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
                     DBtn(l, AppSettings.lang == v, modifier = Modifier.testTag("settings.lang.$v")) { AppSettings.putLang(v); DataClient.channels() }
                 }
             }
-            DMono(Msg.settings_lang_note, dcs.onSurfaceVariant, 11, lines = 3)
+            DText(Msg.settings_lang_note, dcs.onSurfaceVariant, 13, lines = 3)
             DLine()
             DMono(Msg.settings_appearance.uppercase(), dfaint)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -1657,9 +1669,9 @@ private fun ViewerBgSettings() {
         Box(Modifier.size(56.dp, 30.dp).background(androidx.compose.ui.graphics.Brush.verticalGradient(listOf(Color(0xFF000000.toInt() or top), Color(0xFF000000.toInt() or bottom))))
             .border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("settings.viewerbg.preview"))
         DField(typed, { v -> typed = v.take(7); if (v.trim().removePrefix("#").length == 6 && ViewerBg.parse(v) != null) AppSettings.putViewerBgCustom(v) },
-            Msg.android_viewerbg_hex, Modifier.width(120.dp).testTag("settings.viewerbg.hex"))
+            Msg.android_viewerbg_hex, Modifier.width(120.dp).testTag("settings.viewerbg.hex"), mono = true)
     }
-    DMono(Msg.android_viewerbg_note, dcs.onSurfaceVariant, 11, lines = 2)
+    DText(Msg.android_viewerbg_note, dcs.onSurfaceVariant, 13, lines = 2)
 }
 
 // the hub's updates: the hub says what to show (update.status); this draws it
@@ -1672,8 +1684,8 @@ private fun UpdateSection() {
     DMono(Msg.android_updates_head, dfaint)
     val s = u
     if (s == null) DMono(Msg.settings_tailscale_notconnected, dcs.onSurfaceVariant, 11) else {
-        Text("Backplane ${s.optString("current")}", color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
-        DMono(Tr.t(s.optString("line")), dcs.onSurfaceVariant, 11, Modifier.testTag("settings.update.line"))
+        Text("Backplane ${s.optString("current")}", color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = FontWeight.Medium)
+        DText(Tr.t(s.optString("line")), dcs.onSurfaceVariant, 13, Modifier.testTag("settings.update.line"), lines = 2)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             listOf("stable", "beta").forEach { c -> DBtn(if (c == "stable") Msg.option_stable else Msg.android_option_beta, s.optString("channel") == c, modifier = Modifier.testTag("settings.update.$c")) { scope.launch { load("update.channel", org.json.JSONObject().put("channel", c)) } } }
         }
@@ -1765,7 +1777,7 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
 }
 
 @Composable private fun Pic(b: ByteArray, size: Int) {
-    AnimatedPic(b, Modifier.heightIn(max = size.dp).widthIn(max = (size * 1.5).toInt().dp).border(BorderStroke(1.dp, dcs.outlineVariant)), maxSidePx = 1400)
+    AnimatedPic(b, Modifier.heightIn(max = size.dp).widthIn(max = (size * 1.5).toInt().dp).clip(RoundedCornerShape(8.dp)).border(BorderStroke(1.dp, dcs.outlineVariant), RoundedCornerShape(8.dp)), maxSidePx = 1400)
 }
 @Composable private fun PicZoomable(bytes: ByteArray, size: Int, zoom: Boolean) {
     var full by remember(bytes) { mutableStateOf(false) }
@@ -1837,7 +1849,7 @@ private fun ImproveScreen(back: () -> Unit) {
 /** The review bar (#1305): while the thread is read-only, why, and Allow edits; just after the person switched it off, Read-only again. The hub's words. */
 @Composable
 internal fun ReviewBar(r: DReviewBar, enabled: Boolean, press: () -> Unit) {
-    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).border(BorderStroke(1.dp, if (r.on) dwarn else dcs.outlineVariant)).background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp).testTag("thread.review"),
+    Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(dShapeCard).border(BorderStroke(1.dp, if (r.on) dwarn else dcs.outlineVariant), dShapeCard).background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp).testTag("thread.review"),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         DMono(Tr.t(r.text), if (r.on) dcs.onSurface else dcs.onSurfaceVariant, 12, Modifier.weight(1f).testTag("thread.review.text"), lines = 3)
         DBtn(Tr.t(r.button), false, enabled, Modifier.testTag("thread.review.button")) { press() }
@@ -1848,10 +1860,10 @@ internal fun ReviewBar(r: DReviewBar, enabled: Boolean, press: () -> Unit) {
 @Composable
 internal fun NoProviderBanner(onOpenAccounts: () -> Unit) {
     val n = DataClient.noProvider ?: return
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).border(BorderStroke(1.dp, dwarn)).background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 8.dp).testTag("provider.notice"),
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).clip(dShapeCard).border(BorderStroke(1.dp, dwarn), dShapeCard).background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 8.dp).testTag("provider.notice"),
         verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        DMono(Tr.t(n.head), dcs.onSurface, 12, bold = true)
-        if (n.text.isNotEmpty()) DMono(Tr.t(n.text), dcs.onSurfaceVariant, 11, lines = 3)
+        DText(Tr.t(n.head), dcs.onSurface, 14, bold = true, lines = 1)
+        if (n.text.isNotEmpty()) DText(Tr.t(n.text), dcs.onSurfaceVariant, 13, lines = 3)
         DBtn(if (n.button.isNotEmpty()) Tr.t(n.button) else Msg.provider_notice_button, true, modifier = Modifier.testTag("provider.notice.button")) { onOpenAccounts() }
     }
 }
@@ -1860,7 +1872,7 @@ internal fun NoProviderBanner(onOpenAccounts: () -> Unit) {
 @Composable
 private fun OrderCard(o: DataClient.Order) {
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.surfaceVariant).padding(10.dp).testTag("thread.order"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).background(dcs.surfaceVariant).padding(10.dp).testTag("thread.order"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         DMono(if (o.name.isEmpty()) Msg.android_order_head else Msg.android_order_named(o.name), dcs.onSurface, 12, bold = true)
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             o.steps.forEachIndexed { i, s ->

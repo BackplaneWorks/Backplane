@@ -157,7 +157,7 @@ struct DDownloadStrip: View {
                     }.padding(.horizontal, 12).padding(.vertical, 8).accessibilityIdentifier("download.\(r.name)")
                 }
             }
-            .background(BackplaneDesign.raised).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+            .background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).strokeBorder(BackplaneDesign.line, lineWidth: 1))
             .padding(.bottom, 118).padding(.horizontal, 12).accessibilityIdentifier("downloads")
         }
     }

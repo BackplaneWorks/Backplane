@@ -1,5 +1,7 @@
 package dev.backplane.mobile
 
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.draw.clip
 import android.graphics.BitmapFactory
 import android.util.LruCache
 import androidx.compose.foundation.BorderStroke
@@ -292,7 +294,8 @@ private fun heading(level: Int) = when (level) { 1 -> 18; 2 -> 16; 3 -> 14 else 
 
 /** A message's Markdown. `thread` lets a picture at a path on the hub's machine load. Everything in it can be selected. */
 @Composable
-fun MdText(src: String, modifier: Modifier = Modifier, thread: String? = null, copy: CopyLookup = CopyLookup(null), color: Color = MaterialTheme.colorScheme.onSurface, fontSize: Int = 13) {
+/** [mono]: the whole message in the mono face at [fontSize] (a tool's or the hub's note); else prose is the system face a size up, code staying mono. */
+fun MdText(src: String, modifier: Modifier = Modifier, thread: String? = null, copy: CopyLookup = CopyLookup(null), color: Color = MaterialTheme.colorScheme.onSurface, fontSize: Int = 13, mono: Boolean = false) {
     val dcs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     SideEffect { MdLinks.ctx = ctx.applicationContext; MdLinks.thread = thread ?: "" }
@@ -300,33 +303,37 @@ fun MdText(src: String, modifier: Modifier = Modifier, thread: String? = null, c
     val pal = remember(dcs, dark, color) { MdPalette(color, color, dcs.surfaceContainerHigh, dcs.primary, dark) }
     val blocks = remember(src) { mdBlocks(src) }
     val chat = LocalChatTerm.current?.takeIf { DataClient.has("termChat") }
-    SelectionContainer { MdBlocks(blocks, pal, thread, modifier, copy, chat, fontSize) }
+    SelectionContainer { MdBlocks(blocks, pal, thread, modifier, copy, chat, fontSize, mono) }
 }
 
 @Composable
-private fun MdBlocks(blocks: List<MdBlock>, pal: MdPalette, tid: String?, modifier: Modifier = Modifier, copy: CopyLookup = CopyLookup(null), chat: ChatTerm? = null, fontSize: Int = 13) {
+private fun MdBlocks(blocks: List<MdBlock>, pal: MdPalette, tid: String?, modifier: Modifier = Modifier, copy: CopyLookup = CopyLookup(null), chat: ChatTerm? = null, fontSize0: Int = 13, mono: Boolean = false) {
     val dcs = MaterialTheme.colorScheme
-    val lh = (fontSize + 6).sp
+    // prose in the system face a size up, its line height scaled the same; code spans and blocks keep the mono face
+    val face = if (mono) BpMono else BpUi
+    val up = if (mono) 0 else 1
+    val fontSize = fontSize0 + up
+    val lh = ((fontSize0 + 6) * fontSize / fontSize0.toFloat()).sp
     Column(modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         blocks.forEachIndexed { idx, b ->
             key(idx) {
                 when (b) {
-                    is MdBlock.P -> { val r = mdInlineCopy(b.text, pal, copy, chat != null); Text(r.text, color = pal.text, fontSize = fontSize.sp, lineHeight = lh, fontFamily = BpMono, inlineContent = mdInlineContent(r, chat)) }
-                    is MdBlock.H -> { val r = mdInlineCopy(b.text, pal, copy, chat != null); Text(r.text, Modifier.padding(top = 4.dp), color = pal.text, fontSize = heading(b.level).sp, lineHeight = (heading(b.level) + 7).sp, fontWeight = FontWeight.Bold, fontFamily = BpMono, inlineContent = mdInlineContent(r, chat)) }
+                    is MdBlock.P -> { val r = mdInlineCopy(b.text, pal, copy, chat != null); Text(r.text, color = pal.text, fontSize = fontSize.sp, lineHeight = lh, fontFamily = face, inlineContent = mdInlineContent(r, chat)) }
+                    is MdBlock.H -> { val r = mdInlineCopy(b.text, pal, copy, chat != null); Text(r.text, Modifier.padding(top = 4.dp), color = pal.text, fontSize = (heading(b.level) + up).sp, lineHeight = (heading(b.level) + up + 7).sp, fontWeight = FontWeight.Bold, fontFamily = face, inlineContent = mdInlineContent(r, chat)) }
                     is MdBlock.Li -> Row(Modifier.padding(start = (b.depth * 14).dp)) {
                         if (b.task >= 0) Box(Modifier.padding(top = 3.dp, end = 8.dp).size(13.dp).border(BorderStroke(1.dp, if (b.task == 1) dcs.primary else dcs.outline)).background(if (b.task == 1) dcs.primary else Color.Transparent), contentAlignment = Alignment.Center) {
                             if (b.task == 1) Text("✓", color = dcs.onPrimary, fontSize = 10.sp, lineHeight = 10.sp, fontWeight = FontWeight.Bold)
-                        } else Text(b.marker, Modifier.widthIn(min = 18.dp).padding(end = 4.dp), color = dcs.onSurfaceVariant, fontSize = fontSize.sp, lineHeight = lh, fontFamily = BpMono)
+                        } else Text(b.marker, Modifier.widthIn(min = 18.dp).padding(end = 4.dp), color = dcs.onSurfaceVariant, fontSize = fontSize.sp, lineHeight = lh, fontFamily = face)
                         val r = mdInlineCopy(b.text, pal, copy, chat != null)
-                        Text(r.text, color = if (b.task == 1) dcs.onSurfaceVariant else pal.text, fontSize = fontSize.sp, lineHeight = lh, fontFamily = BpMono,
+                        Text(r.text, color = if (b.task == 1) dcs.onSurfaceVariant else pal.text, fontSize = fontSize.sp, lineHeight = lh, fontFamily = face,
                             textDecoration = if (b.task == 1) TextDecoration.LineThrough else null, inlineContent = mdInlineContent(r, chat))
                     }
                     is MdBlock.Code -> CodeBlock(b, copy.blockCmd(b.text, b.lang), chat)
                     is MdBlock.Quote -> Row(Modifier.height(IntrinsicSize.Min)) {
                         Box(Modifier.width(2.dp).fillMaxHeight().background(dcs.outline)); Spacer(Modifier.width(10.dp))
-                        MdBlocks(b.blocks, pal, tid, copy = copy, chat = chat, fontSize = fontSize)
+                        MdBlocks(b.blocks, pal, tid, copy = copy, chat = chat, fontSize0 = fontSize0, mono = mono)
                     }
-                    is MdBlock.Table -> TableBlock(b, pal)
+                    is MdBlock.Table -> TableBlock(b, pal, face, if (mono) 12 else 13)
                     is MdBlock.Img -> ImageBlock(b, tid)
                     MdBlock.Rule -> Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
                 }
@@ -338,7 +345,7 @@ private fun MdBlocks(blocks: List<MdBlock>, pal: MdPalette, tid: String?, modifi
 @Composable
 private fun CodeBlock(b: MdBlock.Code, cmd: Boolean, chat: ChatTerm?) {
     val dcs = MaterialTheme.colorScheme
-    Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant))) {
+    Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard)) {
         // the block's bar: its language, Run in terminal for a command, and Copy (always there: a touch screen has no hover)
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 2.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(b.lang, Modifier.weight(1f), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp)
@@ -350,15 +357,15 @@ private fun CodeBlock(b: MdBlock.Code, cmd: Boolean, chat: ChatTerm?) {
 }
 
 @Composable
-private fun TableBlock(b: MdBlock.Table, pal: MdPalette) {
+private fun TableBlock(b: MdBlock.Table, pal: MdPalette, face: androidx.compose.ui.text.font.FontFamily = BpMono, size: Int = 12) {
     val dcs = MaterialTheme.colorScheme
     val cols = maxOf(b.head.size, b.rows.maxOfOrNull { it.size } ?: 0)
-    Row(Modifier.horizontalScroll(rememberScrollState()).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("md.table")) {
+    Row(Modifier.clip(dShape).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).horizontalScroll(rememberScrollState()).testTag("md.table")) {
         for (c in 0 until cols) {
             Column(Modifier.width(IntrinsicSize.Max)) {
                 fun al(): TextAlign = when (b.aligns.getOrNull(c)) { 1 -> TextAlign.Center; 2 -> TextAlign.End; else -> TextAlign.Start }
-                Text(mdInline(b.head.getOrElse(c) { "" }, pal), Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold, softWrap = false, textAlign = al())
-                b.rows.forEach { r -> Text(mdInline(r.getOrElse(c) { "" }, pal), Modifier.fillMaxWidth().border(BorderStroke(.5.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 6.dp), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, softWrap = false, textAlign = al()) }
+                Text(mdInline(b.head.getOrElse(c) { "" }, pal), Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 10.dp, vertical = 6.dp), color = dcs.onSurface, fontFamily = face, fontSize = size.sp, fontWeight = FontWeight.Bold, softWrap = false, textAlign = al())
+                b.rows.forEach { r -> Text(mdInline(r.getOrElse(c) { "" }, pal), Modifier.fillMaxWidth().border(BorderStroke(.5.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 6.dp), color = dcs.onSurface, fontFamily = face, fontSize = size.sp, softWrap = false, textAlign = al()) }
             }
         }
     }
@@ -372,7 +379,7 @@ private fun ImageBlock(b: MdBlock.Img, tid: String?) {
     LaunchedEffect(b.url) { if (bmp == null) { bmp = MdPics.load(b.url, tid); failed = bmp == null } }
     val m = bmp
     when {
-        m != null -> androidx.compose.foundation.Image(m, b.alt, Modifier.widthIn(max = (m.width / 2).dp).heightIn(max = 360.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("md.image"), contentScale = ContentScale.Fit, alignment = Alignment.CenterStart)
+        m != null -> androidx.compose.foundation.Image(m, b.alt, Modifier.widthIn(max = (m.width / 2).dp).heightIn(max = 360.dp).clip(RoundedCornerShape(8.dp)).border(BorderStroke(1.dp, dcs.outlineVariant), RoundedCornerShape(8.dp)).testTag("md.image"), contentScale = ContentScale.Fit, alignment = Alignment.CenterStart)
         failed -> Text(b.alt.ifEmpty { b.url }, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
         else -> Box(Modifier.fillMaxWidth().height(96.dp).background(dcs.surfaceVariant))
     }

@@ -64,10 +64,10 @@ struct DReplyTile: View {
             if let decoded {
                 if carousel {
                     DPictureView(image: decoded.image, animated: decoded.animated, contentMode: .fit)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity).background(BackplaneDesign.panel).dbox()
+                        .frame(maxWidth: .infinity, maxHeight: .infinity).background(BackplaneDesign.panel).dbox(radius: 8)
                 } else {
                     DPictureView(image: decoded.image, animated: decoded.animated, contentMode: .fit)
-                        .frame(maxWidth: min(decoded.image.size.width, 520), maxHeight: 360).dbox()
+                        .frame(maxWidth: min(decoded.image.size.width, 520), maxHeight: 360).dbox(radius: 8)
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             } else {
@@ -79,7 +79,7 @@ struct DReplyTile: View {
                     Text(name).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.middle)
                 }
                 .padding(12).frame(maxWidth: .infinity, minHeight: carousel ? nil : (failed ? 96 : 160), maxHeight: carousel ? .infinity : nil)
-                .background(BackplaneDesign.panel).dbox()
+                .background(BackplaneDesign.panel).dbox(radius: 8)
             }
         }
         .contentShape(Rectangle())

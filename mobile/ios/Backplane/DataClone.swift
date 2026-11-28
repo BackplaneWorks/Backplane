@@ -123,7 +123,7 @@ struct DataCloneView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(r.name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
-                            if r.priv { Text(Tr.t("private")).dmono(10).foregroundStyle(BackplaneDesign.dim).padding(.horizontal, 4).padding(.vertical, 1).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
+                            if r.priv { Text(Tr.t("private")).dmono(10).foregroundStyle(BackplaneDesign.dim).padding(.horizontal, 6).padding(.vertical, 1).overlay(Capsule().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
                             Spacer(minLength: 0)
                         }
                         if !r.description.isEmpty { Text(r.description).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(2) }

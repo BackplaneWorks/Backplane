@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.draw.clip
 import android.graphics.Paint
 import android.graphics.Typeface
 import androidx.compose.foundation.BorderStroke
@@ -145,7 +146,7 @@ internal fun TermCard(e: DEntry) {
     val sc = Terms.screen(t.key); val rev = Terms.rev(t.key)
     val tp = rememberTermPaint(with(LocalDensity.current) { 10.sp.toPx() })
     val state = sc.stateLine
-    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("term.card.${t.id}")) {
+    Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).testTag("term.card.${t.id}")) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).clickable { open(t.key) }.padding(start = 10.dp, end = 4.dp).heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
             DMono(sc.title.ifEmpty { t.title }, dcs.onSurface, 12, Modifier.weight(1f), bold = true)
             if (state.isNotEmpty()) { Spacer(Modifier.width(8.dp)); DMono(termStateLabel(state), termStateColor(state), 11, Modifier.testTag("term.card.state")) }
@@ -234,8 +235,8 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
                 drawTerm(lines, live, if (scroll == 0) sc.vt.cursor() else null)
             }
             DropdownMenu(menu, { menu = false }) {
-                DropdownMenuItem({ Text(Msg.android_paste, fontFamily = BpMono) }, { menu = false; paste() }, Modifier.testTag("term.menu.paste"))
-                DropdownMenuItem({ Text(Msg.android_term_copy, fontFamily = BpMono) }, { menu = false; clip.setText(AnnotatedString(sc.vt.lines(0).joinToString("\n") { l -> l.runs.joinToString("") { it.text } }.trimEnd())) }, Modifier.testTag("term.menu.copy"))
+                DropdownMenuItem({ Text(Msg.android_paste, fontFamily = BpUi) }, { menu = false; paste() }, Modifier.testTag("term.menu.paste"))
+                DropdownMenuItem({ Text(Msg.android_term_copy, fontFamily = BpUi) }, { menu = false; clip.setText(AnnotatedString(sc.vt.lines(0).joinToString("\n") { l -> l.runs.joinToString("") { it.text } }.trimEnd())) }, Modifier.testTag("term.menu.copy"))
             }
             // the keyboard's door: a field nobody sees; what it receives is the program's input
             BasicTextField(

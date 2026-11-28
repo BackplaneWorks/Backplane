@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -56,7 +57,7 @@ fun CopyButton(text: String, modifier: Modifier = Modifier, word: Boolean = fals
     var focused by remember { mutableStateOf(false) }
     val label = if (copied) Msg.android_copied else Msg.common_copy
     val c = if (copied) dok else dcs.onSurfaceVariant
-    Row(modifier.onFocusChanged { focused = it.isFocused }.border(BorderStroke(1.dp, if (focused) dcs.primary else Color.Transparent))
+    Row(modifier.onFocusChanged { focused = it.isFocused }.clip(dShape).border(BorderStroke(1.dp, if (focused) dcs.primary else Color.Transparent), dShape)
         .semantics(mergeDescendants = true) { contentDescription = label; role = Role.Button }
         .clickable(onClickLabel = Msg.common_copy) { copyToClipboard(ctx, text); copied = true }
         .padding(horizontal = 4.dp, vertical = 3.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
@@ -70,7 +71,7 @@ fun CopyButton(text: String, modifier: Modifier = Modifier, word: Boolean = fals
 fun RunButton(cmd: String, run: (String) -> Unit, modifier: Modifier = Modifier, word: Boolean = false, tag: String = "run", size: Int = 16) {
     var focused by remember { mutableStateOf(false) }
     val label = Msg.android_copy_run
-    Row(modifier.onFocusChanged { focused = it.isFocused }.border(BorderStroke(1.dp, if (focused) dcs.primary else Color.Transparent))
+    Row(modifier.onFocusChanged { focused = it.isFocused }.clip(dShape).border(BorderStroke(1.dp, if (focused) dcs.primary else Color.Transparent), dShape)
         .semantics(mergeDescendants = true) { contentDescription = label; role = Role.Button }
         .clickable(onClickLabel = label) { run(cmd) }
         .padding(horizontal = 4.dp, vertical = 3.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
@@ -86,12 +87,12 @@ fun CopyChip(label: String, text: String, modifier: Modifier = Modifier, compact
     var copied by rememberCopied(text)
     var focused by remember { mutableStateOf(false) }
     val shown = if (copied) Msg.android_copied else label
-    Row(modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (focused) dcs.primary else dcs.outlineVariant)).onFocusChanged { focused = it.isFocused }
+    Row(modifier.clip(dShape).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (focused) dcs.primary else dcs.outlineVariant), dShape).onFocusChanged { focused = it.isFocused }
         .semantics(mergeDescendants = true) { contentDescription = shown; role = Role.Button }
         .clickable { copyToClipboard(ctx, text); copied = true }
-        .heightIn(min = if (compact) 32.dp else 40.dp).padding(horizontal = if (compact) 10.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
+        .heightIn(min = if (compact) 32.dp else 44.dp).padding(horizontal = if (compact) 10.dp else 14.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(if (copied) Icons.Default.Check else Icons.Default.ContentCopy, null, tint = if (copied) dok else dcs.onSurfaceVariant, modifier = Modifier.size(14.dp))
-        Spacer(Modifier.width(6.dp)); Text(shown, color = dcs.onSurface, fontFamily = BpMono, fontSize = if (compact) 12.sp else 13.sp, maxLines = 1)
+        Spacer(Modifier.width(6.dp)); Text(shown, color = dcs.onSurface, fontFamily = BpUi, fontSize = if (compact) 12.sp else 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 1)
     }
 }
 

@@ -128,7 +128,7 @@ struct DataAccountsView: View {
                 if l.profile.isEmpty { login(l, e, chevron: false) }
                 else { Button { opened = DAccountRoute(id: l.profile) } label: { login(l, e, chevron: true) }.buttonStyle(.plain).accessibilityIdentifier("accounts.login." + l.profile) }
             }
-        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox()
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(radius: DRadius.card)
     }
     private func login(_ l: DLogin, _ e: DPerson, chevron: Bool) -> some View {
         let what = [Tr.t(l.title), l.plan, l.kind == "cli" ? Tr.t("CLI login") : "", l.label.caseInsensitiveCompare(e.title) == .orderedSame ? "" : l.label].filter { !$0.isEmpty }.joined(separator: " · ")
@@ -159,7 +159,7 @@ struct DataAccountsView: View {
                 if !a.hold.isEmpty { Text(Tr.t(a.hold)).dmono(11).foregroundStyle(a.out == true ? BackplaneDesign.bad : BackplaneDesign.warn) }
             }
             if chevron { Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.faint).padding(.top, 4) }
-        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox().contentShape(Rectangle())
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(radius: DRadius.card).contentShape(Rectangle())
     }
 }
 

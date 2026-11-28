@@ -545,10 +545,10 @@ struct DPageRowView: View {
     var body: some View {
         let r = row
         VStack(alignment: .leading, spacing: 6) {
-            Text(Tr.t(r.label)).dmono(13)
+            Text(Tr.t(r.label)).dui(15, weight: .medium)
             // a note that is a value (the hub's `copy`): the value as it is, with its copy button; else the note in the reader's words
             if !note.isEmpty, !r.copy.isEmpty, note == r.note { DCopyValue(shown: note, value: r.copy).accessibilityIdentifier(idPrefix + ".copy") }
-            else if !note.isEmpty { Text(Tr.t(note)).dmono(11).foregroundStyle(noteTone == "bad" ? BackplaneDesign.bad : noteTone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
+            else if !note.isEmpty { Text(Tr.t(note)).dui(13).foregroundStyle(noteTone == "bad" ? BackplaneDesign.bad : noteTone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
             if let t = told { Text(t).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier(idPrefix + ".told") }
             if !r.qr.isEmpty { DQRCode(rows: r.qr).accessibilityIdentifier(idPrefix + ".qr") }
             if !r.qrnote.isEmpty { Text(Tr.t(r.qrnote)).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }
