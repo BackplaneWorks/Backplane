@@ -996,7 +996,10 @@ impl Render for Backplane {
                       Some(was) => if !has && !menu { self.screens.rename_was = None; let id = string(&self.data["renaming"], "id");
                           crate::screens::settings::flush_fields(self); let _ = self.tx.try_send(crate::screens::tools::rename_leave(&id, &was, &text)); },
                   } } } }
-        if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); focused_backplane = true; }
+        // Settings opened, or its page changed: the keys go to the Settings window (Esc, Ctrl+K…), not to a field of the page that went away
+        // (its input kept the focus, drawn nowhere, and every key went to nothing); the search box keeps them while it has them
+        if self.screens.focus_settings { self.screens.focus_settings = false;
+            if !self.screens.settings_ui.search.as_ref().is_some_and(|i| i.focus_handle(cx).is_focused(window)) { window.focus(&self.screens.settings_focus); focused_backplane = true; } }
         if self.screens.setup.want_focus { self.screens.setup.want_focus = false; window.focus(&self.screens.setup_focus); focused_backplane = true; }
         if self.screens.palette.focus { self.screens.palette.focus = false; if let Some(i) = self.screens.palette.input.clone() { window.focus(&i.focus_handle(cx)); focused_backplane = true; } }
         if self.screens.find.focus { self.screens.find.focus = false; if let Some(i) = self.screens.find.input.clone() { window.focus(&i.focus_handle(cx)); focused_backplane = true; } }

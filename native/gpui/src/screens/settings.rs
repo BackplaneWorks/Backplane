@@ -525,9 +525,11 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
     }).detach();
 }
 
+/// A nav entry's element id: one per entry (`keys` = API keys, `@keys` = Keyboard).
+fn nav_el_id(id: &str) -> String { format!("set-nav-{id}") }
 /// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
 /// A hub page of the nav, chosen (a click, or the e2e `click` on `set-nav:<page>`): what is typed goes first, then the hub is asked for the page.
-pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); let ui = &mut this.screens.settings_ui; ui.refused = None; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
+pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); this.screens.focus_settings = true; let ui = &mut this.screens.settings_ui; ui.refused = None; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
     // Usage opens with each account's limit bars over the totals: the hub's accounts read again (and each signed-in account's usage, at most every 5 minutes)
     if p == "usage" { super::accounts::list(this); super::accounts::refresh_usage(this); } }
 /// Where the gear opens Settings: the page it was on when it shut (`left`, this run of the app), else Appearance; as (hub page, Keyboard,
@@ -541,7 +543,7 @@ pub fn reopen(left: &str) -> (String, bool, bool, bool) {
 pub fn open_nav(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     let id = if id == "@device" { "appearance" } else { id };
     if !id.starts_with('@') { go_page(this, id); cx.notify(); return }
-    flush_fields(this);
+    flush_fields(this); this.screens.focus_settings = true;
     let ui = &mut this.screens.settings_ui; ui.refused = None; ui.keys = id == "@keys"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts"; ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui);
     if id == "@accounts" { super::accounts::open_page(this, cx); }
     cx.notify();
@@ -982,7 +984,9 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             NavLine::Item { id, title, hits } => {
                 let on = match id.as_str() { "@keys" => on_keys, "@hubs" => on_hubs, "@accounts" => on_acct, p => !on_keys && !on_acct && !on_hubs && p == page };
                 let none = searching && hits.is_empty();
-                let el_id = match id.as_str() { "@keys" => "set-nav-keys".to_string(), "@hubs" => "set-nav-hubs".to_string(), "@accounts" => "set-nav-accounts".to_string(), p => format!("set-nav-{p}") };
+                // each entry its own element id, this app's pages keeping their `@`: the hub's API keys page is `keys`, and Keyboard as `set-nav-keys` too
+                // took its clicks (two elements of one id: the press went to Keyboard's, so the API keys row never opened)
+                let el_id = nav_el_id(id);
                 let item = div().id(SharedString::from(el_id)).relative().flex().items_start().gap_3().px_3().py(px(3.)).cursor_pointer().text_size(crate::scale::tpx(13.)).border_l_2().border_color(c(if on { "accent" } else { "bg" }));
                 let item = if on { item.bg(c("raise")) } else { item.text_color(c(if none { "faint" } else { "text" })).hover(|s| s.bg(c("panel"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named as its control is: `set-nav:<page>` (a GPUI_RECT line, and the
@@ -1123,6 +1127,12 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn settings_nav_ids_differ_for_api_keys_and_keyboard() {
+        use super::nav_el_id;
+        let ids = ["keys", "@keys", "hubs", "@hubs", "accounts", "@accounts"].map(nav_el_id);
+        for (i, a) in ids.iter().enumerate() { for b in &ids[i + 1..] { assert_ne!(a, b); } }
+    }
     use super::*;
     #[test] fn enter_in_the_masked_box_is_its_save() {
         assert_eq!(secret_enter(&serde_json::json!({"thread":{"secretBox":{"save":"@secret\u{1f}gh"}}})).as_deref(), Some("@secret\u{1f}gh"));
