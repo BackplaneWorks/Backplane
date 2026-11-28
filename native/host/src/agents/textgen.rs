@@ -210,7 +210,7 @@ impl Agents {
         if text.trim().is_empty() { return None }
         let input = title_input(text);
         let mut tries: Vec<(&str, String, Launch, &str)> = vec![];
-        // Settings > Writing: a provider or model the person chose is what names threads (the page says so); with neither set, Haiku as before
+        // Settings > Agents, its writing rows: a provider or model the person chose is what names threads (the page says so); with neither set, Haiku as before
         let (tp, tm) = { let w = self.world().await; (w.setting("text.provider").to_string(), w.setting("text.model").to_string()) };
         if !tp.trim().is_empty() || !tm.trim().is_empty() { let (p, m) = pick(&tp, &tm); if p == "claude" || p == "codex" { tries.push((p, m, Launch::default(), "the Writing setting")) } }
         // no Writing setting: a Codex thread is titled by Codex first (a Codex-only install has no Claude to try); Claude's attempts below stay as the fallback (#1162)

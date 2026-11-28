@@ -8,7 +8,7 @@
 //!   and before the turn's first write. In a repository Backplane made it is a commit on the checked-out branch; in one the person had
 //!   already, it is a commit on a ref of its own (`refs/backplane/snapshots/<thread>/<n>`, parent HEAD), so the person's branch, index and
 //!   stash are never touched. Either way `snap_ref(thread, n)` names it, and nothing is stashed, reset or discarded.
-//! - `off_branch` (Settings > Projects and git > Keep Backplane's commits off my branch, `git.off_branch`, off by default: #1188): every
+//! - `off_branch` (Settings > Threads and git > Git > Keep Backplane's commits off my branch, `git.off_branch`, off by default: #1188): every
 //!   commit above goes on a ref of Backplane's own instead, even in a repository Backplane made (its first commit is `FIRST_REF`, the
 //!   branch left unborn), and the design commits of kicad/canonical.rs go on `design_ref(branch)` (`record_on_ref`). The person's branch,
 //!   index and work tree are never written; /restore, the snapshots and the KiCad history work the same.

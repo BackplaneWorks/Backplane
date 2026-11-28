@@ -1,6 +1,6 @@
 //! The always-on Boat hub's cost (docs/BOAT-HUB.md): `scripts/boat-hub.sh cost --save`, run on the desktop (which has the `boat` CLI
 //! signed in), writes one JSON line to `~/.config/backplane/boat-hub/cost.json` there and on the box. Every five minutes this reads it into the
-//! info `boathub.cost`; Settings, Network draws it (`present::settings::boat_hub_rows`). A hub with no such file shows nothing.
+//! info `boathub.cost`; Settings, About and updates draws it in its Network section (`present::settings::boat_hub_rows`). A hub with no such file shows nothing.
 use crate::{api::{Fut, Ticker}, hub::Hub};
 use serde_json::Value;
 use std::{path::PathBuf, sync::{atomic::{AtomicU64, Ordering::SeqCst}, Arc}};

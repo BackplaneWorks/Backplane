@@ -5,18 +5,30 @@ desktop draws what the menu rows say and sorts nothing.
 
 | Group | Pages |
 | --- | --- |
-| General | Appearance, Threads, Notifications, Time zone |
-| Agents and tools | Agents, Writing, API keys, MCP servers, Voice (with Ring), Rules and task board, Usage |
-| Workspace | Projects and git, CAD, Browser, Mouse and trackpad, Ordering |
-| Connect | Devices (with Web UI: browser access, forwarding setup, the web address), Machines, Network and updates |
-| System | Setup (with Import from 0.14), Privacy, About, Developer |
+| General | Appearance, Notifications (with Time zone and the webhook), Threads and git (with Git), Mouse and trackpad |
+| Agents | Agents (with the failover order and Writing), API keys, MCP servers, Rules and task board, Voice (with Ring), Usage |
+| Workspace | CAD, Browser, Ordering |
+| Connect | Devices (with Web UI: browser access, forwarding setup, the web address), Machines |
+| System | Setup (with Import from 0.14 and Developer), Privacy, About and updates (with Network) |
 
-Each menu row carries `group`, `words` (its rows' labels, one a line) and `notes` (each label's note on the same line). The desktop's
-search matches titles, labels and notes (this device's own page too), names the first settings found under each page, and Enter opens
-the first page found. Three pages were folded into their neighbours: the ids `web`, `ring` and `import` still open Devices, Voice and
-Setup (`canon`: a `settings-page` press, a saved session, a `backplane://settings/<id>` link). The desktop adds three pages of its own:
-This device and Hubs (kept on this computer) and Accounts (leading Agents and tools). The phones keep their own pages
-(`devices.page`, `ring.page`, ...), and the web client its own dialog (`web/src/settings.ts`).
+Pages are by topic. Each menu row carries `group`, `words` (its rows' labels, one a line), `notes` (each label's note on the same line)
+and `aka` (other names the page is found by, one a line: what it was called before, such as Time zone, Writing or Network and updates,
+or what it holds, such as Webhook or Tailscale). The desktop's search matches titles, aka names, labels and notes (this device's own page
+too), names the first settings found under each page, and Enter opens the first page found. Eight pages were folded into their
+neighbours: the ids `web`, `ring`, `import`, `developer`, `timezone`, `writing`, `git` and `network` still open Devices, Voice, Setup,
+Setup, Notifications, Agents, Threads and git, and About and updates (`canon`: a `settings-page` press, a saved session, a
+`backplane://settings/<id>` link). A test (`settings_inventory_is_all_still_reachable`) holds the list of every setting, action and field
+the pages had before they were regrouped, so none is lost. The desktop adds three pages of its own: This device and Hubs (kept on this
+computer) and Accounts (leading Agents). The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
+the regrouping, and the web client its own dialog (`web/src/settings.ts`).
+
+A row marked `"adv": true` is rarely needed: a client folds these under Advanced at the end of the page, and a client that does not
+know the mark draws them where they are, last (the hub puts them after every other row, each part in its own order; a heading so
+marked comes only before rows so marked). Under Advanced: the webhook (Notifications), Short grace for read conversations and Largest
+attachment (Threads and git), each input of Mouse and trackpad under "Board and schematic: each input" and "3D and STEP: each input"
+(the page itself shows the zoom direction and the two presets), Bots: infinite context, the failover order and the writing model
+(Agents), How eager, End of turn: Jev, Voice commands and Send after silence (Voice), KiCad over its API, Board 3D and Open designs in
+(CAD), and Developer (Setup).
 
 The occasional second click had a reproducible transport cause: a background
 `view.update` or `view.changed` could issue a newer presentation revision while

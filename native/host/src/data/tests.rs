@@ -272,7 +272,7 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!(ask(&mut ws, 5, "composer.run", json!({"thread":"t1","text":"/secret gh"})).await["result"], json!({"kind":"secret","name":"gh"}));
     assert_eq!(ask(&mut ws, 6, "composer.run", json!({"thread":"t1","text":"/btw why"})).await["result"], json!({"kind":"btw","q":"why"}));
     let a = loop { let v = next(&mut ws).await; if v["k"] == "btw" { break v } };
-    assert_eq!((a["t"].as_str(), a["thread"].as_str(), a["q"].as_str()), (Some("d"), Some("t1"), Some("why"))); assert!(a["a"].as_str().unwrap().contains("Settings, Writing"), "no model here: it says where the model is chosen");
+    assert_eq!((a["t"].as_str(), a["thread"].as_str(), a["q"].as_str()), (Some("d"), Some("t1"), Some("why"))); assert!(a["a"].as_str().unwrap().contains("Settings, Agents"), "no model here: it says where the model is chosen");
     assert!(hello["commands"].as_array().unwrap().iter().any(|c| c["word"] == "/project"), "{hello}");
     assert_eq!(ask(&mut ws, 7, "composer.run", json!({"thread":"t1","text":"/project"})).await["result"], json!({"kind":"project"}), "alone: the app's Add project");
     assert_eq!(ask(&mut ws, 8, "composer.run", json!({"thread":"t1","text":"/project puck Build it"})).await["result"], json!({"kind":"made","thread":"made-8","note":""}));

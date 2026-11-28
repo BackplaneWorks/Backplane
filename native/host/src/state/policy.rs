@@ -45,7 +45,7 @@ pub fn lean_keeps(k: &str) -> bool {
     if ["voice.engine", "voice.model", "voice.device"].contains(&k) || k.starts_with("voice.e.") || k.starts_with("voice.l.") { return true }
     // Settings, Rules and task board: the person's standing rules and the task board's items (a few, each at most a few KB; a removed one is gone, `blank_gone`)
     if k.starts_with("rule.") || k.starts_with("board.") { return true }
-    // Settings, Projects and git (present/settings.rs `git`): git.auto_push and git.off_branch, one on/off value each; without them both chips always looked Off (#1232)
+    // Settings, Threads and git, its Git section (present/settings.rs `git`): git.auto_push and git.off_branch, one on/off value each; without them both chips always looked Off (#1232)
     if k == "git.auto_push" || k == "git.off_branch" { return true }
     // the viewer's probe, one per board (present/viewer.rs `probe_action`: the tapped piece's info line, at most 2000 characters)
     if k.starts_with("probe:") { return true }
@@ -156,7 +156,7 @@ impl Policy {
         let g = self.lock();
         if g.booting.is_some() { Value::Null } else { super::star::offer(&g.core.st.get(super::star::KEY, ""), now_s) }
     }
-    /// star.replay: the offer made again (Settings, Developer)
+    /// star.replay: the offer made again (Settings, Setup, Developer)
     pub fn star_replay(&self, now_s: u64) -> Vec<Value> { if self.lock().booting.is_some() { vec![] } else { super::star::replay(now_s) } }
     /// star.nudge {token, action}: the decision (opened / dismissed, terminal; later, a week's snooze), only for the offered token
     pub fn star_decide(&self, token: &str, action: &str, now_s: u64) -> Vec<Value> {
