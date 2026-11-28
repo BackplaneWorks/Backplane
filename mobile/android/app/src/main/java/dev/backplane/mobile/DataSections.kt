@@ -355,9 +355,10 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
+                        // two lines of title; the mark and the pin sit on its first line
+                        Row(verticalAlignment = Alignment.Top) {
                             if (r.provider.isNotEmpty()) {
-                                ProviderMark(r.provider, 12.dp)
+                                ProviderMark(r.provider, 12.dp, Modifier.padding(top = 4.dp))
                                 Spacer(Modifier.width(6.dp))
                             }
                             Text(
@@ -366,13 +367,13 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
                                 fontFamily = BpMono,
                                 fontSize = 14.sp,
                                 fontWeight = if (r.word == "needs") FontWeight.Bold else FontWeight.Normal,
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
                                 modifier = Modifier.weight(1f, fill = false),
                             )
                             if (r.pinned) {
                                 Spacer(Modifier.width(6.dp))
-                                Icon(Icons.Default.PushPin, Msg.tools_pinned, tint = dcs.primary, modifier = Modifier.size(12.dp).testTag("home.section.pinned.${r.id}"))
+                                Icon(Icons.Default.PushPin, Msg.tools_pinned, tint = dcs.primary, modifier = Modifier.padding(top = 4.dp).size(12.dp).testTag("home.section.pinned.${r.id}"))
                             }
                         }
                         if (meta.isNotEmpty()) DMono(meta, dcs.onSurfaceVariant, 11)

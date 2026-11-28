@@ -21,6 +21,7 @@ struct PairView: View {
     @State private var hubAddress = ""
     @State private var scanning = false
     @State private var invalid = false
+    @FocusState private var codeFocused: Bool
 
     init(link: String, status: String = "", repair: Bool = false, adding: Bool = false, done: @escaping (String) -> Void) {
         self._link = State(initialValue: link);self.status = status;self.repair = repair;self.adding = adding;self.done = done
@@ -31,6 +32,12 @@ struct PairView: View {
         invalid = false
         link = ""
         done(text)
+    }
+
+    /// Connect with code, from its button and from the code field's Go key.
+    private func connectCode() {
+        guard let value = Pairing.codeLink(address: hubAddress, code: code) else { invalid = true;return }
+        connect(value)
     }
 
     var body: some View {
@@ -83,11 +90,10 @@ struct PairView: View {
                 }
                 DisclosureGroup(Tr.t("Type a short code")) {
                     TextField(Tr.t("Hub address"), text: $hubAddress).textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
+                        .submitLabel(.next).onSubmit { codeFocused = true }
                     TextField(Tr.t("8-character code"), text: $code).textInputAutocapitalization(.characters).autocorrectionDisabled().privacySensitive()
-                    Button(Tr.t("Connect with code")) {
-                        guard let value = Pairing.codeLink(address: hubAddress, code: code) else { invalid = true;return }
-                        connect(value)
-                    }.buttonStyle(PairActionStyle())
+                        .focused($codeFocused).submitLabel(.go).onSubmit { connectCode() }
+                    Button(Tr.t("Connect with code")) { connectCode() }.buttonStyle(PairActionStyle())
                 }
                 Button(Tr.k("native.pair.connect")) { connect(link) }
                     .buttonStyle(PairActionStyle())

@@ -1531,15 +1531,17 @@ final class DataClient {
         let stale = await c.deliveredNotifications().filter { !s.keys.contains($0.request.content.userInfo["key"] as? String ?? "") }.map(\.request.identifier)
         if !stale.isEmpty { c.removeDeliveredNotifications(withIdentifiers: stale) }
     }
-    /// Alerts not decided yet: DataAlertsBanner says why and offers them; the system's question comes only from its Allow alerts. Not now hides it until the next launch.
+    /// Alerts not decided yet: DataAlertsBanner says why and offers them; the system's question comes only from its Allow alerts. Not now hides it for a week (alertsLater, alertsDue).
     var alertsAsk = false
+    /// The banner's Not now: kept (seconds since 1970, key alerts.later.at), so the banner waits a week, not just until the next launch.
+    func alertsLater() { alertsAsk = false; UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: "alerts.later.at") }
     /// Launch, and once a hub can use it: take a token when alerts are allowed; when they are not decided yet, offer them (DataAlertsBanner) instead of asking at once.
     func enablePush(ask: Bool = false) async {
         guard has("push") else { return }
         let c = UNUserNotificationCenter.current()
         var status = await c.notificationSettings().authorizationStatus
         if status == .notDetermined, AppSettings.shared.alerts {
-            if !ask { alertsAsk = true; return }
+            if !ask { alertsAsk = alertsDue(now: Date().timeIntervalSince1970, laterAt: UserDefaults.standard.double(forKey: "alerts.later.at")); return }
             alertsAsk = false
             _ = try? await c.requestAuthorization(options: [.alert, .sound, .badge])
             status = await c.notificationSettings().authorizationStatus

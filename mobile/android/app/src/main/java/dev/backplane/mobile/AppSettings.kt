@@ -47,6 +47,9 @@ object AppSettings {
     fun putLang(v: String) { lang = v; prefs.edit().putString("app.lang", v).apply() }
     fun alertsOn() = prefs.getBoolean("data.alerts", true)
     fun putAlerts(v: Boolean) { prefs.edit().putBoolean("data.alerts", v).apply() }
+    /** When the alerts banner's Not now was pressed (ms since the epoch), 0 never: the banner waits a week after it (alertsDue). */
+    fun alertsLaterAt() = prefs.getLong("alerts.later.at", 0L)
+    fun putAlertsLater(ms: Long) { prefs.edit().putLong("alerts.later.at", ms).apply() }
     fun putAppearance(v: String) { appearance = v; prefs.edit().putString("app.appearance", v).apply() }
     fun putThreadList(v: String) { threadList = v; prefs.edit().putString("app.threadList", v).apply() }
     fun putDefaultTab(v: String) { defaultTab = v; prefs.edit().putString("app.defaultTab", v).apply() }
@@ -60,3 +63,6 @@ object AppSettings {
     }
 
 }
+
+/** The alerts banner is due again a week after its Not now (laterAtMs), at once when it was never pressed or the clock moved back before it. */
+internal fun alertsDue(nowMs: Long, laterAtMs: Long): Boolean = laterAtMs <= 0 || nowMs < laterAtMs || nowMs - laterAtMs >= 7L * 24 * 60 * 60 * 1000

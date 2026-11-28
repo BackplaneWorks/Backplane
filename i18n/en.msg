@@ -4488,6 +4488,7 @@ ios.enterprise.server.answered = The server answered
 ios.enterprise.registered = Registered
 ios.enterprise.registered.muted = Registered, alerts off
 ios.enterprise.expired = Sign-in expired or revoked
+mobile.crew.empty = No bots or rooms yet. The ones you make show here.
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Needs you

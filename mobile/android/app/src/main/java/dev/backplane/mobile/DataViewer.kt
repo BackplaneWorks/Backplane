@@ -20,11 +20,14 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -157,7 +160,14 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     DisposableEffect(thread.id) { DataClient.viewerThread = thread.id; onDispose { DataClient.stopWatch(thread.id); DataClient.lightRefs = emptyList() } }
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.android_viewer_title(thread.title.ifEmpty { Msg.thread_new }), back)
-        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState())) {
+        // the strip scrolls on a phone: a fade at an edge it scrolls past, and the tab on show is brought into view (when the viewer opens, on a change)
+        val tabScroll = rememberScrollState()
+        val tabAt = remember(thread.id) { mutableStateMapOf<String, Pair<Int, Int>>() }   // a tab's x and width in the strip
+        var stripW by remember { mutableIntStateOf(0) }
+        val selAt = tabAt[tab]
+        LaunchedEffect(tab, selAt, stripW) { if (selAt != null && stripW > 0) tabScroll.animateScrollTo((selAt.first + selAt.second / 2 - stripW / 2).coerceIn(0, tabScroll.maxValue)) }
+        Box(Modifier.fillMaxWidth().onSizeChanged { stripW = it.width }) {
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(tabScroll)) {
             strip.forEach { item ->
                 val t = item.tab
                 val active = !item.disabled && t == tab
@@ -166,6 +176,7 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                 val label = if (item.label.isNotEmpty()) Tr.t(item.label) else tabLabel(t)
                 Box(
                     Modifier
+                        .onGloballyPositioned { c -> val at = c.positionInParent().x.toInt() to c.size.width; if (tabAt[t] != at) tabAt[t] = at }
                         .heightIn(min = 48.dp)
                         .background(bg)
                         .semantics {
@@ -197,6 +208,10 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                     DMono(label, fg, 12, bold = active)
                 }
             }
+        }
+        // drawn over the strip's ends, no pointer input of their own: a touch goes through to the tab under them
+        if (tabScroll.canScrollBackward) Box(Modifier.matchParentSize().wrapContentWidth(Alignment.Start).width(24.dp).background(Brush.horizontalGradient(listOf(dcs.surfaceVariant, Color.Transparent))))
+        if (tabScroll.canScrollForward) Box(Modifier.matchParentSize().wrapContentWidth(Alignment.End).width(24.dp).background(Brush.horizontalGradient(listOf(Color.Transparent, dcs.surfaceVariant))))
         }
         if (railState.disabledWhy.isNotEmpty()) {
             DMono(Tr.t(railState.disabledWhy), dfaint, 11, Modifier.fillMaxWidth().background(dcs.surface).padding(horizontal = 12.dp, vertical = 6.dp).testTag("vtab.why"), lines = 1)

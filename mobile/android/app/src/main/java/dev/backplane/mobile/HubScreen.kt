@@ -106,7 +106,7 @@ internal fun HubBanner(open: () -> Unit) {
     }
 }
 
-/** Alerts, asked for once the person sees why (Android 13+): one line, Allow alerts shows the system's question, Not now hides it until the next launch.
+/** Alerts, asked for once the person sees why (Android 13+): one line, Allow alerts shows the system's question, Not now hides it for a week (AppSettings.alertsLaterAt, alertsDue).
  *  Shown once paired and online, so it sits over Bub's chat or the list, never over the pairing screen. */
 @Composable
 internal fun AlertsBanner() {
@@ -122,7 +122,7 @@ internal fun AlertsBanner() {
                 if (android.os.Build.VERSION.SDK_INT >= 33) act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
             }
             Spacer(Modifier.width(4.dp))
-            DMono(Msg.android_alerts_later, dcs.onSurfaceVariant, 12, Modifier.testTag("alerts.later").clickable { DataClient.alertsAsk = false }.padding(horizontal = 4.dp, vertical = 4.dp))
+            DMono(Msg.android_alerts_later, dcs.onSurfaceVariant, 12, Modifier.testTag("alerts.later").clickable { DataClient.alertsAsk = false; AppSettings.putAlertsLater(System.currentTimeMillis()) }.padding(horizontal = 4.dp, vertical = 4.dp))
         }
         DLine()
     }

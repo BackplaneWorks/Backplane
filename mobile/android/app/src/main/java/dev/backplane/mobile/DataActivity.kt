@@ -16,8 +16,8 @@ class DataActivity : ComponentActivity() {
         DataClient.init(this)
         DataClient.channels()
         intent?.data?.let { route(it) }
-        // alerts are not asked for at start: AlertsBanner says why first, and its Allow alerts shows the system's question (Android 13+)
-        DataClient.alertsAsk = android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED
+        // alerts are not asked for at start: AlertsBanner says why first, and its Allow alerts shows the system's question (Android 13+); after its Not now, a week later
+        DataClient.alertsAsk = android.os.Build.VERSION.SDK_INT >= 33 && checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED && alertsDue(System.currentTimeMillis(), AppSettings.alertsLaterAt())
         // a check without hands (debug builds): --es thread <id> --es vtab 3D opens that thread's viewer on that tab
         if (BuildConfig.DEBUG) DataClient.openViewerTab = intent?.getStringExtra("vtab")
         DataClient.openFromIntent = intent?.getStringExtra("thread")?.ifEmpty { null }
