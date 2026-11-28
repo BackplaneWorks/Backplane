@@ -422,6 +422,8 @@ gpui.swarm.topic	Topic	トピック	Tema
 gpui.swarm.goal	Goal, in a line	目標（1行で）	Objetivo, en una línea
 gpui.swarm.seed	First message to every member	全メンバーへの最初のメッセージ	Primer mensaje para cada miembro
 gpui.swarm.role	Role (optional)	役割（任意）	Rol (opcional)
+gpui.swarm.needs.topic	Needs a topic	トピックが必要です	Falta un tema
+gpui.swarm.needs.members	Needs two to eight members	メンバーは2〜8人必要です	Faltan de dos a ocho miembros
 gpui.swarm.remove	Remove from the swarm	スウォームから外す	Quitar del enjambre
 gpui.swarm.over	This swarm is over.	このスウォームは終了しました。	Este enjambre ha terminado.
 gpui.swarm.none	No posts yet.	まだ投稿はありません。	Sin publicaciones aún.

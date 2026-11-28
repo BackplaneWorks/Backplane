@@ -1157,7 +1157,9 @@ impl Render for Backplane {
         // the thread's header (screens/head.rs): its state and tools beside the name in the top bar when it has the room, else a row of their own
         // a project's page over a thread: the header is the page's (its project's name), not the thread's
         // a swarm's page over the thread its viewer is drawn for: the page is what is open, so that thread has no header
-        let head_thread = has_thread && !has_home && !crate::screens::swarm::over_thread(&self.data);
+        // the New swarm form open: the header is the form's (its project / New swarm), as a project's page is, so none of the thread under it shows
+        let swarm_form = self.data["newSwarm"].is_object();
+        let head_thread = has_thread && !has_home && !swarm_form && !crate::screens::swarm::over_thread(&self.data);
         // a project's page over a thread: its Send starts a new thread on the default model, so nothing of the open thread is drawn there
         // (its dock, its asks and queue, its model, plan and context chips): they would act on the thread, not on what the page sends
         let on_page = has_home; let chrome = thread_chrome_on(on_page, !string(thread, "id").is_empty());
@@ -1175,7 +1177,8 @@ impl Render for Backplane {
             else { head_row = Some(with_rect(div().flex_shrink_0(), || "pane-row-reference".into()).child(div().id("thread-head").h(crate::scale::tpx(crate::screens::head::ROW_H)).flex_shrink_0().flex().items_center().relative().pr(px(crate::screens::head::ROW_END)).border_b_1().border_color(c("rule")).child(crate::screens::head::measure(cx, self.screens.head.row.clone())).on_mouse_down(MouseButton::Right, menu).child(st).child(div().flex_1().min_w(px(crate::screens::head::GAP))).child(tl)).into_any_element()); }
         }
         // the crumb after Backplane: the thread's project, or the project whose page is open, by name
-        let crumb = match page.as_ref().and_then(|p| crate::screens::projects::find(&self.data, p)).map(|p| string(p, "title")).filter(|t| !t.is_empty()) {
+        let form_title = if swarm_form { Some(string(&self.data["newSwarm"], "title")).filter(|t| !t.is_empty()) } else { None };
+        let crumb = match form_title.or_else(|| page.as_ref().and_then(|p| crate::screens::projects::find(&self.data, p)).map(|p| string(p, "title")).filter(|t| !t.is_empty())) {
             Some(t) => Some(crate::streamer::project_shown(&t)),
             None => match bot_crumb(&self.data["bot"]) { Some(c) => c, None if head_thread => { let t = string(&thread["project"], "title"); Some(if t.is_empty() { trs("Project") } else { crate::streamer::project_shown(&t) }) } None => Some(trs("Projects")) } };
         let mut rail_pages = Vec::new();
@@ -1443,6 +1446,7 @@ impl Render for Backplane {
                     .children(self.screens.elsewhere.clone().map(|(short, full)| div().id("elsewhere").flex().items_center().gap(px(3.)).px_1().border_1().border_color(c("accent")).text_size(crate::scale::tpx(11.)).text_color(c("accent"))
                         .tooltip(crate::keys::tip_raw(&tf("gpui.b.window.on.machine", &[("machine", full.into())]), "", light)).child(ic(light, "link", 11., "accent")).child(tf("gpui.b.on.machine", &[("machine", short.into())]))))
                     .when_some(crumb, |d, crumb| d.child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).whitespace_nowrap().child(crumb)))
+                    .when(swarm_form, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("form-title").font_weight(FontWeight::BOLD).whitespace_nowrap().child(trs("New swarm"))))
                     // another machine's thread: "Project · on desktop" (this machine's looks as always)
                     .when(head_thread, |d| d.children(crate::screens::badge::place(light, &thread["mark"], "", "crumb").map(|p| div().flex().items_center().gap_2().child(div().text_color(c("faint")).child("·")).child(p))))
                     // a buy thread's title is marked an Order with the cart, as 0.14's was (the hub sends its Order card only for a buy thread)
