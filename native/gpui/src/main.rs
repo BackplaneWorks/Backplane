@@ -382,19 +382,20 @@ impl Backplane {
         let key=screens::projects::nav_key(&self.data,&pid);
         if !key.is_empty(){self.go("project-page",key,cx);}
         let follow=screens::viewer::is_open(&self.data["thread"]).then(||screens::viewer::active_kind(&self.data["thread"]["viewer"],None)).and_then(|k|screens::projects::page_view(&self.data,Some(&pid),&self.selected,&k));
-        self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();
+        // the page's box is its own: empty when the page opens over a thread (that thread's draft stays saved and comes back with it)
+        let was=self.project_page.replace(pid).is_some();if !was{self.input.update(cx,|i,cx|i.set(String::new(),cx));}self.ui_epoch+=1;cx.notify();
         if let Some((t,k))=follow {self.page_viewer(t,k,cx);}}
     /// The viewer of the project whose page is on show: the project's thread `id` becomes the one selected (its viewer is the project's) with the page left up,
     /// and the page of `kind` opens once that thread is here (projects::sync).
     pub(crate) fn page_viewer(&mut self,id:String,kind:&'static str,cx:&mut Context<Self>){
         self.screens.projects.view_edit=Some((id.rsplit('|').next().unwrap_or("").to_string(),kind));
-        let page=self.project_page.take();self.select_id(id,cx);self.project_page=page;}
+        let (page,keep)=(self.project_page.clone(),self.input.read(cx).content.to_string());self.select_id(id,cx);self.project_page=page;self.input.update(cx,|i,cx|i.set(keep,cx));}
     /// An action for the hub from a click or key; one that goes somewhere (projects::leaves_page) closes the project's page first.
     pub fn go(&mut self,action:&str,value:String,cx:&mut Context<Self>){if action=="open-thread" {if !value.is_empty() {self.select_id(value,cx);} return} if screens::projects::leaves_page(action)&&self.project_page.take().is_some(){self.ui_epoch+=1;}let _=self.tx.try_send(Command::Action(action.into(),value));cx.notify();}
-    pub(crate) fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.project_page=None;self.ui_epoch+=1;self.screens.panels.sub_view=None;
+    pub(crate) fn select_id(&mut self,id:String,cx:&mut Context<Self>) {let page_open=self.project_page.take().is_some();self.ui_epoch+=1;self.screens.panels.sub_view=None;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
-        
-        let current=self.input.read(cx).content.to_string();
+        // over a project's page the box held the page's text, not the thread's draft: the thread keeps its own
+        let current=screens::drafts::leaving(&self.drafts,&self.selected,&self.input.read(cx).content,page_open);
         let text=screens::drafts::switch(&mut self.drafts,&self.selected,&raw,&current);
         self.thread_switch(&raw);
         self.selected=raw.clone();
