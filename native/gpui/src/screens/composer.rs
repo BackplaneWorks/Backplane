@@ -1,5 +1,6 @@
 //! The multi-line composer: wrapped text, caret and selection painted from GPUI's shaped lines, mouse
-//! (click, drag, double and triple click), the system input method, undo/redo, and paste / drop of images
+//! (click, drag, double and triple click, drag by word or line after them, middle-click paste and the primary selection on Linux, a right-click
+//! menu), Tab and Shift+Tab between a form's fields, the system input method, undo/redo, and paste / drop of images
 //! and files. The text model is `edit::Editor`; this file only maps GPUI input onto it. Attachments leave
 //! as `ComposerEvent`s; the hub decides what is attached (screens::attach).
 use super::edit::Editor;
@@ -14,7 +15,22 @@ use std::ops::Range;
 use std::path::PathBuf;
 
 actions!(composer, [Backspace, Delete, WordBackspace, WordDelete, LineBackspace, LineDelete, Left, Right, WordLeft, WordRight, SelLeft, SelRight, SelWordLeft, SelWordRight,
-    Up, Down, SelUp, SelDown, Home, End, DocStart, DocEnd, SelHome, SelEnd, SelDocStart, SelDocEnd, SelectAll, Copy, Cut, Paste, Undo, Redo, Newline, CharPalette, Go, GoBack, Tab]);
+    Up, Down, SelUp, SelDown, Home, End, DocStart, DocEnd, SelHome, SelEnd, SelDocStart, SelDocEnd, SelectAll, Copy, Cut, Paste, Undo, Redo, Newline, CharPalette, Go, GoBack, Tab, BackTab,
+    /** a right click in a field: the window opens its menu (`take_field_menu`) */ FieldMenu]);
+
+thread_local! {
+    /// The field a right click was in and where, for the window's `FieldMenu` handler (the action carries no data).
+    static FIELD_MENU: std::cell::RefCell<Option<(gpui::WeakEntity<Composer>, Point<Pixels>)>> = const { std::cell::RefCell::new(None) };
+}
+/// The last right-clicked field and the pointer's place, once.
+pub fn take_field_menu() -> Option<(gpui::WeakEntity<Composer>, Point<Pixels>)> { FIELD_MENU.with(|m| m.borrow_mut().take()) }
+/// Whether Tab and Shift+Tab in a field of this key context move the keyboard to the next or previous field (a form's: a bot's Name then
+/// Persona, settings). The message box keeps Tab for its popup, and the palette's search and the find bar are one field over the window.
+pub fn tabs_between_fields(ctx: &str) -> bool { /* i18n-ok: key contexts */ matches!(ctx, "AskInput" | "ImpInput") }
+/// Text pasted into a one-row field: its line breaks as spaces.
+pub fn one_row(s: &str) -> String { s.replace("\r\n", " ").replace(['\r', '\n'], " ") }
+/// A right click at `i` keeps the selection when it is inside it (the menu then cuts or copies it), else the caret goes there.
+pub fn keeps_selection(sel: &Range<usize>, i: usize) -> bool { !sel.is_empty() && sel.start <= i && i <= sel.end }
 
 pub const MAX_LINES: f32 = 12.0;
 
@@ -38,6 +54,10 @@ pub enum ComposerEvent {
     PopupMove(i32),
     /// The popup is open and Tab was pressed: the highlighted row is chosen.
     PopupPick,
+    /// Ctrl+A (Cmd+A) in the message box right after a selection in the thread or the document (the box kept the keyboard): the window selects all of that.
+    SelectAllTimeline,
+    /// Up (-1) or Down (1) in the main message box while it is empty or shows an untouched recalled message: the window brings back what was sent before (`recall`).
+    Recall(i32),
 }
 
 /// Reference words drawn as chips in the draft (the colours are the accent over its own tint).
@@ -104,6 +124,10 @@ pub struct Composer {
     /// The most rows the box is tall (`MAX_LINES`); a one-row box (a row's rename) scrolls to the caret's row instead of growing over its neighbours.
     pub max_lines: f32,
     ctx: &'static str,
+    /// A selection was made elsewhere in the window (the thread's, `drop_selection`) and nothing was done in the box since: Ctrl+A selects all there.
+    elsewhere: bool,
+    /// The message brought back by Up (its place among the messages sent, newest first, and its text); the box still showing that text is "untouched".
+    pub recalled: Option<(usize, String)>,
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
@@ -116,8 +140,8 @@ impl Composer {
     /* i18n-ok: key contexts */ pub fn new(cx: &mut Context<Self>) -> Self { Self::with_context(cx, "Composer") }
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
-        /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, max_lines: MAX_LINES, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
-            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), total_h: px(0.), followed: None, selecting: false }
+        /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, max_lines: MAX_LINES, ctx, focus: cx.focus_handle().tab_stop(tabs_between_fields(ctx)), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
+            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), total_h: px(0.), followed: None, selecting: false, elsewhere: false, recalled: None }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
     pub fn dictate(&mut self, range: std::ops::Range<usize>, with: &str, caret: usize, cx: &mut Context<Self>) { self.ed.dictate(range, with, caret); self.sync(cx); }
@@ -130,14 +154,20 @@ impl Composer {
     pub fn editor(&self) -> &Editor { &self.ed }
     pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
     /// A selection made elsewhere in the window (the timeline's) is the one to copy: this one goes, the caret stays where it was.
-    pub fn drop_selection(&mut self, cx: &mut Context<Self>) { if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
+    pub fn drop_selection(&mut self, cx: &mut Context<Self>) { self.elsewhere = true; if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
     /// Insert a selected excerpt formatted as a Markdown blockquote at the caret/selection as one undoable edit.
     pub fn insert_quote(&mut self, selected: &str, cx: &mut Context<Self>) {
         let start = self.ed.selection().start;
         let ins = format_quote_insert(&self.ed.text()[..start], selected);
         if !ins.is_empty() { self.edit(cx, |e| e.insert(&ins)); }
     }
-    fn sync(&mut self, cx: &mut Context<Self>) { self.content = self.ed.text().to_string().into(); cx.notify(); }
+    /// For the right-click menu: (a selection that may be cut or copied, any text to select).
+    pub fn menu_state(&self) -> (bool, bool) { (!self.masked && !self.ed.selection().is_empty(), !self.ed.is_empty()) }
+    /// A right-click menu item ("cut", "copy", "paste", "all"): what its key does.
+    pub fn menu_do(&mut self, what: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match what { "cut" => self.cut(&Cut, window, cx), "copy" => self.copy(&Copy, window, cx), "paste" => self.paste(&Paste, window, cx), "all" => { self.elsewhere = false; self.select_all(&SelectAll, window, cx) } _ => {} }
+    }
+    fn sync(&mut self, cx: &mut Context<Self>) { self.elsewhere = false; self.content = self.ed.text().to_string().into(); cx.notify(); }
     fn edit(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Editor)) { f(&mut self.ed); self.sync(cx); }
 
     // ---- actions
@@ -163,16 +193,23 @@ impl Composer {
     fn doc_end(&mut self, _: &DocEnd, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_end(false)); }
     fn sel_doc_start(&mut self, _: &SelDocStart, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_start(true)); }
     fn sel_doc_end(&mut self, _: &SelDocEnd, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_end(true)); }
-    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
+    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        // just after a selection in the thread (the box kept the keyboard, as it does): all of the thread, as a page's Ctrl+A
+        /* i18n-ok: a key context */ if self.elsewhere && self.ctx == "Composer" { cx.emit(ComposerEvent::SelectAllTimeline); return }
+        self.edit(cx, |e| e.select_all());
+    }
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.undo(); }); }
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.redo(); }); }
     fn go(&mut self, _: &Go, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::Submit); }
     fn go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::SubmitBack); }
     fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) { if self.max_lines <= 1.0 { return; } self.edit(cx, |e| e.newline()); }
     fn palette(&mut self, _: &CharPalette, window: &mut Window, _: &mut Context<Self>) { window.show_character_palette(); }
-    fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(-1)); } else { self.vertical(-1, false, cx); } }
-    fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(1)); } else { self.vertical(1, false, cx); } }
-    fn tab(&mut self, _: &Tab, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupPick); } }
+    fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(-1)); } else if self.recalling() { cx.emit(ComposerEvent::Recall(-1)); } else { self.vertical(-1, false, cx); } }
+    fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(1)); } else if self.recalling() && recalled_at(self.ed.text(), self.recalled.as_ref()).is_some() { cx.emit(ComposerEvent::Recall(1)); } else { self.vertical(1, false, cx); } }
+    /// Up and Down bring back sent messages: the main message box only, while it is empty or shows a recalled message as it was brought back.
+    /* i18n-ok: a key context */ fn recalling(&self) -> bool { self.ctx == "Composer" && untouched(self.ed.text(), self.recalled.as_ref()) }
+    fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupPick); } else if tabs_between_fields(self.ctx) { window.focus_next(); } }
+    fn back_tab(&mut self, _: &BackTab, window: &mut Window, _: &mut Context<Self>) { if !self.popup_open && tabs_between_fields(self.ctx) { window.focus_prev(); } }
     fn sel_up(&mut self, _: &SelUp, _: &mut Window, cx: &mut Context<Self>) { self.vertical(-1, true, cx); }
     fn sel_down(&mut self, _: &SelDown, _: &mut Window, cx: &mut Context<Self>) { self.vertical(1, true, cx); }
     fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<Self>) {
@@ -237,13 +274,46 @@ impl Composer {
         match e.click_count {
             2 => self.edit(cx, |ed| ed.select_word_at(i)),
             n if n >= 3 => self.edit(cx, |ed| ed.select_line_at(i)),
-            _ => self.edit(cx, |ed| ed.place(i, e.modifiers.shift)),
+            _ if e.modifiers.shift => self.edit(cx, |ed| ed.extend_chars(i)),
+            _ => self.edit(cx, |ed| ed.place(i, false)),
         }
+        if e.click_count >= 2 { self.to_primary(cx); }
     }
+    /// A drag: by character after a click, by word after a double click, by line after a triple (`Editor::drag_to`).
     fn mouse_move(&mut self, e: &MouseMoveEvent, _: &mut Window, cx: &mut Context<Self>) {
-        if self.selecting { let i = self.index_at(e.position); self.edit(cx, |ed| ed.place(i, true)); }
+        if self.selecting { let i = self.index_at(e.position); self.edit(cx, |ed| ed.drag_to(i)); }
     }
-    fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) { self.selecting = false; }
+    fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, cx: &mut Context<Self>) { if std::mem::take(&mut self.selecting) { self.to_primary(cx); } }
+    /// A selection made with the mouse is the PRIMARY selection on Linux (middle click pastes it in other programs); a secret's never is.
+    fn to_primary(&self, cx: &mut Context<Self>) {
+        #[cfg(target_os = "linux")]
+        if !self.masked && !self.ed.selection().is_empty() { cx.write_to_primary(ClipboardItem::new_string(self.ed.selected().to_string())); }
+        #[cfg(not(target_os = "linux"))]
+        let _ = cx;
+    }
+    /// Middle click on Linux: the PRIMARY selection goes in where the pointer is, as one undo step (a one-row field gets it on one row).
+    fn middle_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(target_os = "linux")]
+        {
+            cx.stop_propagation();
+            window.focus(&self.focus);
+            let i = self.index_at(e.position);
+            let text = cx.read_from_primary().and_then(|c| c.text()).map(|t| if self.max_lines <= 1.0 { one_row(&t) } else { t });
+            self.edit(cx, |ed| { ed.place(i, false); if let Some(t) = text { ed.insert(&t); } });
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = (e, window, cx);
+    }
+    /// Right click: the keyboard comes here, the caret goes to the pointer unless it is inside the selection, and the window opens the
+    /// field's menu (Cut, Copy, Paste, Select all) through `FieldMenu`.
+    fn right_down(&mut self, e: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        cx.stop_propagation();
+        window.focus(&self.focus);
+        let i = self.index_at(e.position);
+        if !keeps_selection(&self.ed.selection(), i) { self.edit(cx, |ed| ed.place(i, false)); }
+        FIELD_MENU.with(|m| *m.borrow_mut() = Some((cx.entity().downgrade(), e.position)));
+        window.dispatch_action(Box::new(FieldMenu), cx);
+    }
     /// The wheel or trackpad scrolls the text inside the box (the caret stays); the event goes on to the thread behind when the box has nothing to scroll that way.
     fn wheel(&mut self, e: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
         let Some(b) = self.bounds else { return };
@@ -421,13 +491,14 @@ impl Render for Composer {
             .on_action(cx.listener(Self::backspace)).on_action(cx.listener(Self::delete)).on_action(cx.listener(Self::word_backspace)).on_action(cx.listener(Self::word_delete)).on_action(cx.listener(Self::line_backspace)).on_action(cx.listener(Self::line_delete))
             .on_action(cx.listener(Self::left)).on_action(cx.listener(Self::right)).on_action(cx.listener(Self::word_left)).on_action(cx.listener(Self::word_right))
             .on_action(cx.listener(Self::sel_left)).on_action(cx.listener(Self::sel_right)).on_action(cx.listener(Self::sel_word_left)).on_action(cx.listener(Self::sel_word_right))
-            .on_action(cx.listener(Self::tab)).on_action(cx.listener(Self::up)).on_action(cx.listener(Self::down)).on_action(cx.listener(Self::sel_up)).on_action(cx.listener(Self::sel_down))
+            .on_action(cx.listener(Self::tab)).on_action(cx.listener(Self::back_tab)).on_action(cx.listener(Self::up)).on_action(cx.listener(Self::down)).on_action(cx.listener(Self::sel_up)).on_action(cx.listener(Self::sel_down))
             .on_action(cx.listener(Self::home)).on_action(cx.listener(Self::end)).on_action(cx.listener(Self::sel_home)).on_action(cx.listener(Self::sel_end))
             .on_action(cx.listener(Self::doc_start)).on_action(cx.listener(Self::doc_end)).on_action(cx.listener(Self::sel_doc_start)).on_action(cx.listener(Self::sel_doc_end))
             .on_action(cx.listener(Self::select_all)).on_action(cx.listener(Self::copy)).on_action(cx.listener(Self::cut)).on_action(cx.listener(Self::paste))
             .on_action(cx.listener(Self::undo)).on_action(cx.listener(Self::redo)).on_action(cx.listener(Self::newline)).on_action(cx.listener(Self::go)).on_action(cx.listener(Self::go_back)).on_action(cx.listener(Self::palette))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down)).on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up))
+            .on_mouse_down(MouseButton::Middle, cx.listener(Self::middle_down)).on_mouse_down(MouseButton::Right, cx.listener(Self::right_down))
             .on_scroll_wheel(cx.listener(Self::wheel))
             .line_height(crate::scale::tpx(20.)).text_size(crate::scale::tpx(13.))
             .child(gpui::div().w_full().child(Element_ { input: cx.entity() }))
@@ -440,9 +511,11 @@ pub fn bind(cx: &mut App) { cx.bind_keys(bindings()); }
 pub fn bindings() -> Vec<KeyBinding> { bindings_for(crate::keys::mac()) }
 /// The text fields' editing keys. Off a Mac, Ctrl moves and deletes by word and Home/End go to the line's ends (Ctrl+Home/End the text's).
 /// On a Mac as its own text fields do (#1172): Option by word, Cmd to the line's start or end (Left/Right, Backspace/Delete) and to the
-/// text's (Up/Down), Shift selecting with each; Home/End and Cmd+Home/End as off a Mac.
+/// text's (Up/Down), Shift selecting with each; Home/End and Cmd+Home/End as off a Mac. The shared chords name their modifier (Ctrl, or
+/// Cmd for a Mac) rather than `secondary-`, which GPUI reads by the OS it was built on: `bindings_for(false)` is Ctrl on a Mac build too.
 pub fn bindings_for(mac: bool) -> Vec<KeyBinding> {
     let mut v: Vec<KeyBinding> = Vec::new();
+    let sec = |k: &str| format!("{}-{k}", if mac { "cmd" } else { "ctrl" });
     /* i18n-ok: key contexts */ for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
     let c = Some(ctx);
     v.extend([
@@ -452,12 +525,14 @@ pub fn bindings_for(mac: bool) -> Vec<KeyBinding> {
         KeyBinding::new("shift-left", SelLeft, c), KeyBinding::new("shift-right", SelRight, c),
         KeyBinding::new("tab", Tab, c), KeyBinding::new("up", Up, c), KeyBinding::new("down", Down, c), KeyBinding::new("shift-up", SelUp, c), KeyBinding::new("shift-down", SelDown, c),
         KeyBinding::new("home", Home, c), KeyBinding::new("end", End, c), KeyBinding::new("shift-home", SelHome, c), KeyBinding::new("shift-end", SelEnd, c),
-        KeyBinding::new("secondary-home", DocStart, c), KeyBinding::new("secondary-end", DocEnd, c),
-        KeyBinding::new("secondary-shift-home", SelDocStart, c), KeyBinding::new("secondary-shift-end", SelDocEnd, c),
-        KeyBinding::new("secondary-a", SelectAll, c), KeyBinding::new("secondary-c", Copy, c), KeyBinding::new("secondary-x", Cut, c), KeyBinding::new("secondary-v", Paste, c),
-        KeyBinding::new("secondary-z", Undo, c), KeyBinding::new("secondary-shift-z", Redo, c), KeyBinding::new("secondary-y", Redo, c),
+        KeyBinding::new(&sec("home"), DocStart, c), KeyBinding::new(&sec("end"), DocEnd, c),
+        KeyBinding::new(&sec("shift-home"), SelDocStart, c), KeyBinding::new(&sec("shift-end"), SelDocEnd, c),
+        KeyBinding::new(&sec("a"), SelectAll, c), KeyBinding::new(&sec("c"), Copy, c), KeyBinding::new(&sec("x"), Cut, c), KeyBinding::new(&sec("v"), Paste, c),
+        KeyBinding::new(&sec("z"), Undo, c), KeyBinding::new(&sec("shift-z"), Redo, c), KeyBinding::new(&sec("y"), Redo, c),
         KeyBinding::new("shift-enter", Newline, c),
     ]);
+    // Shift+Tab to the previous field; in the message box it stays Plan mode's (keys.rs)
+    if ctx != "Composer" { v.push(KeyBinding::new("shift-tab", BackTab, c)); }
     if mac {
         v.extend([
             KeyBinding::new("alt-left", WordLeft, c), KeyBinding::new("alt-right", WordRight, c), KeyBinding::new("alt-shift-left", SelWordLeft, c), KeyBinding::new("alt-shift-right", SelWordRight, c),
@@ -493,6 +568,23 @@ pub fn format_blockquote(selected: &str) -> String {
 }
 
 /// Format a quote insertion given the draft text before the caret/selection.
+/// Up (-1) and Down (1) over the messages sent before in this thread, `history` newest first; `at` the one the box shows (None: the empty box).
+/// Up from the empty box brings the newest, each Up an older one (the oldest stays); Down a newer one, and past the newest the empty box again.
+pub fn recall(history: &[String], at: Option<usize>, dir: i32) -> Option<usize> {
+    if history.is_empty() { return None }
+    let last = history.len() - 1;
+    match (at.map(|i| i.min(last)), dir < 0) {
+        (None, true) => Some(0),
+        (Some(i), true) => Some((i + 1).min(last)),
+        (None, false) | (Some(0), false) => None,
+        (Some(i), false) => Some(i - 1),
+    }
+}
+/// The box is untouched for recall: empty, or still exactly the message Up brought back (any edit ends recall, and Up moves the caret again).
+pub fn untouched(text: &str, recalled: Option<&(usize, String)>) -> bool { text.is_empty() || recalled.is_some_and(|r| r.1 == text) }
+/// Where recall stands: the recalled message's place while the box shows it untouched, None for the empty box (or an edited one).
+pub fn recalled_at(text: &str, recalled: Option<&(usize, String)>) -> Option<usize> { if text.is_empty() { None } else { recalled.filter(|r| r.1 == text).map(|r| r.0) } }
+
 pub fn format_quote_insert(before_caret: &str, selected: &str) -> String {
     let q = format_blockquote(selected);
     if q.is_empty() { return String::new(); }
@@ -522,6 +614,18 @@ mod tests {
         map.bindings_for_input(&[gpui::Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string()).unwrap_or_default()
     }
     // #1172: a Mac's text keys: Option by word, Cmd to the line's (Left/Right, Backspace/Delete) and the text's (Up/Down) ends; Shift selects
+    #[test] fn up_brings_back_what_was_sent_newest_first_and_down_goes_back_to_the_empty_box() {
+        let h: Vec<String> = ["third", "second", "first"].map(String::from).to_vec();
+        assert_eq!(recall(&h, None, -1), Some(0), "Up in the empty box: the newest");
+        assert_eq!(recall(&h, Some(0), -1), Some(1)); assert_eq!(recall(&h, Some(2), -1), Some(2), "the oldest stays");
+        assert_eq!(recall(&h, Some(2), 1), Some(1)); assert_eq!(recall(&h, Some(0), 1), None, "past the newest: the empty box");
+        assert_eq!(recall(&h, None, 1), None); assert_eq!(recall(&[], None, -1), None, "nothing sent yet");
+        assert_eq!(recall(&h, Some(9), -1), Some(2), "a place past the list (the thread changed) stands at its end");
+        let held = (1, "second".to_string());
+        assert!(untouched("", None) && untouched("", Some(&held)) && untouched("second", Some(&held)), "empty, or the recalled text as it came");
+        assert!(!untouched("second!", Some(&held)) && !untouched("a draft", None), "an edit ends recall: Up moves the caret");
+        assert_eq!(recalled_at("second", Some(&held)), Some(1)); assert_eq!(recalled_at("", Some(&held)), None); assert_eq!(recalled_at("seco", Some(&held)), None);
+    }
     #[test] fn on_a_mac_option_moves_by_word_and_cmd_to_the_line_and_text_ends() {
         for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
             for (k, a) in [("alt-left", "WordLeft"), ("alt-right", "WordRight"), ("alt-shift-left", "SelWordLeft"), ("alt-shift-right", "SelWordRight"),
@@ -541,6 +645,25 @@ mod tests {
             assert_eq!(edit_key(false, k, "Composer"), format!("composer::{a}"), "{k}");
         }
         for k in ["alt-left", "alt-right", "alt-backspace", "ctrl-up", "ctrl-down", "super-left", "super-backspace"] { assert_eq!(edit_key(false, k, "Composer"), "", "{k} unbound off a Mac, as before"); }
+    }
+    // a Mac build read `secondary-` as Cmd, so the Linux/Windows key table (`bindings_for(false)`) lost Ctrl there
+    #[test] fn the_shared_chords_name_their_modifier_and_shift_tab_goes_back_a_field() {
+        for ctx in ["Composer", "AskInput"] {
+            assert_eq!(edit_key(false, "ctrl-c", ctx), "composer::Copy"); assert_eq!(edit_key(false, "ctrl-shift-z", ctx), "composer::Redo");
+            assert_eq!(edit_key(true, "cmd-c", ctx), "composer::Copy"); assert_eq!(edit_key(true, "cmd-home", ctx), "composer::DocStart");
+            assert_eq!(edit_key(false, "cmd-c", ctx), ""); assert_eq!(edit_key(true, "ctrl-c", ctx), "");
+        }
+        for mac in [false, true] { assert_eq!(edit_key(mac, "shift-tab", "AskInput"), "composer::BackTab"); assert_eq!(edit_key(mac, "tab", "AskInput"), "composer::Tab"); }
+        assert_eq!(edit_key(false, "shift-tab", "Composer"), "", "the message box's Shift+Tab is Plan mode's");
+    }
+    #[test] fn tab_moves_between_a_forms_fields_only() {
+        assert!(tabs_between_fields("AskInput") && tabs_between_fields("ImpInput"));
+        for c in ["Composer", "PickInput", "FindInput", "PadLength"] { assert!(!tabs_between_fields(c), "{c}"); }
+    }
+    #[test] fn a_middle_click_paste_in_a_one_row_field_stays_on_one_row_and_a_right_click_keeps_a_selection_it_is_in() {
+        assert_eq!(one_row("a\nb\r\nc\rd"), "a b c d");
+        assert!(keeps_selection(&(2..5), 2) && keeps_selection(&(2..5), 5) && keeps_selection(&(2..5), 3));
+        assert!(!keeps_selection(&(2..5), 6) && !keeps_selection(&(2..5), 1) && !keeps_selection(&(3..3), 3));
     }
     #[test] fn the_pairing_fields_get_the_macs_line_and_clipboard_keys() {
         let k = |mac: bool, key: &str| { let map = gpui::Keymap::new(crate::input::bindings_for(mac));

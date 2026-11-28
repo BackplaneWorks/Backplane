@@ -134,7 +134,7 @@ Done says one thing: press `?` any time for keys. Open the uberbot ends setup an
 
 ## Keyboard shortcuts
 
-Press `?` when no text box has the keyboard, or F1 anywhere, or pick Keyboard shortcuts in the palette (Ctrl+K, Cmd+K on macOS). The sheet lists every key by where it works, with this device's choices. Settings, This device changes them.
+Press `?` when no text box has the keyboard, or F1 anywhere, or pick Keyboard shortcuts in the palette (Ctrl+K, Cmd+K on macOS). The sheet lists every key by where it works, with this device's choices. Settings, Keyboard changes them.
 
 ## Linking another computer
 

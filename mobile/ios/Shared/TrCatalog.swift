@@ -353,7 +353,7 @@ ios.buy.last	Buy it · last estimate: from {price}	購入 · 前回の見積も�
 ios.buy.incomplete	Buy it · estimate incomplete	購入 · 見積もりが不完全	Comprar · estimación incompleta
 ios.improve.search	Search projects…	プロジェクトを検索…	Buscar proyectos…
 android.notify.head	NOTIFICATIONS	通知	NOTIFICACIONES
-gpui.keysheet.note	Settings, This device changes them. Esc closes this.	設定 → このデバイスで変更できます。Escで閉じます。	Ajustes, Este dispositivo los cambia. Esc cierra esto.
+gpui.keysheet.note	Settings, Keyboard changes them. Esc closes this.	設定 → キーボードで変更できます。Escで閉じます。	Ajustes, Teclado los cambia. Esc cierra esto.
 gpui.keys.help	Keyboard shortcuts: this list. ? outside a text box, F1 anywhere	キーボードショートカット：この一覧。テキスト欄の外では ?、どこでも F1	Atajos de teclado: esta lista. ? fuera de un cuadro de texto, F1 en cualquier sitio
 gpui.f2.welcome.body	Backplane runs coding agents on your boards, schematics and mechanical parts. Six short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.	Backplaneは基板・回路図・機構部品の上でコーディングエージェントを動かします。6つの短いステップで準備し、どれも飛ばせます。「後で続ける」で次回起動までセットアップを閉じます。	Backplane ejecuta agentes de programación sobre tus placas, esquemáticos y piezas mecánicas. Seis pasos cortos lo configuran, y cada uno se puede saltar. Terminar luego cierra la configuración hasta el próximo inicio.
 gpui.f2.data.folder.note	{home}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.	{home}。スレッド・設定・ボット・キーはここに保存され、ハブはここからエージェントを動かします。	{home}. Tus hilos, ajustes, bots y claves se guardan aquí, y el hub ejecuta tus agentes desde ahí.
@@ -408,7 +408,7 @@ gpui.f2.pair.phone	Pair a phone	スマホをペアリング	Vincular un teléfon
 gpui.f2.pair.phone.note	Optional. Get the app, then show the code here and scan it. The phone opens your uberbot.	任意です。アプリを入れてから、ここでコードを表示して読み取ってください。スマホはメインボットを開きます。	Opcional. Consigue la app, muestra el código aquí y escanéalo. El teléfono abre tu uberbot.
 gpui.f2.pair.phone.shown	Scan this with the Backplane app, or type the short code and this address. It works once, for ten minutes. Treat it as a password.	Backplaneアプリでこれを読み取るか、短いコードとこのアドレスを入力してください。1回だけ、10分間有効です。パスワードと同じように扱ってください。	Escanea esto con la app de Backplane, o escribe el código corto y esta dirección. Funciona una vez, durante diez minutos. Trátalo como una contraseña.
 gpui.f2.show.code	Show the code	コードを表示	Mostrar el código
-gpui.f2.done.body	Press ? any time for keys.	? でいつでもキー一覧を表示できます。	Pulsa ? en cualquier momento para ver los atajos.
+gpui.f2.done.body	Press F1 any time for keys.	F1 でいつでもキー一覧を表示できます。	Pulsa F1 en cualquier momento para ver los atajos.
 gpui.f2.open.uber	Open the uberbot	メインボットを開く	Abrir el uberbot
 gpui.f2.setup.phone	Setup runs on a computer, in Settings, Setup there. This phone is paired with it.	セットアップはコンピュータの 設定 → セットアップ で行います。このスマホはそのコンピュータとペアリングされています。	La configuración se ejecuta en un ordenador, en Ajustes, Configuración allí. Este teléfono está vinculado a él.
 gpui.f2.setup.five	Six short steps: agents, design tools, your uberbot's name, where it lives and a first project.	6つの短いステップ：エージェント、設計ツール、メインボットの名前、置き場所、最初のプロジェクト。	Seis pasos cortos: agentes, herramientas de diseño, el nombre de tu uberbot, dónde vive y un primer proyecto.
@@ -827,7 +827,7 @@ agy.signin.back	Paste the address Google sent you to	Googleから移動した先
 agy.signin.open	Open Google's sign-in	Googleのサインインを開く	Abrir inicio de sesión de Google
 agy.signin.next	Continue	続行	Continuar
 agy.signin.failed	Sign-in failed	サインインに失敗しました	Falló el inicio de sesión
-btw.none	No answer came back (Settings, Writing: the model it asks).	回答がありませんでした（質問先のモデルは設定の「文章生成」で選べます）。	No llegó respuesta (Ajustes, Escritura: el modelo al que pregunta).
+btw.none	No answer came back (Settings, Agents: the model it asks).	回答がありませんでした（質問先のモデルは設定の「エージェント」で選べます）。	No llegó respuesta (Ajustes, Agentes: el modelo al que pregunta).
 sched.every.minute	every minute	毎分	cada minuto
 sched.every.minutes	every {n} minutes	{n}分ごと	cada {n} minutos
 sched.every.hour	every hour	毎時	cada hora
@@ -951,7 +951,7 @@ settings.search	Search settings	設定を検索	Buscar ajustes
 settings.search.none	No setting matches.	一致する設定はありません。	Ningún ajuste coincide.
 settings.sidebar.note	Projects groups threads by project; active lists what is going on, what needs you first.	プロジェクト別、または対応待ちを優先した実行状況別に表示します。	Proyectos agrupa hilos por proyecto; activos lista lo que está en curso, lo que te necesita primero.
 settings.sidebar.active	Active	進行中	Activos
-settings.network	Network and updates	ネットワークと更新	Red y actualizaciones
+settings.network	About and updates	概要と更新	Acerca de y actualizaciones
 settings.channel	Update channel	更新チャンネル	Canal de actualización
 settings.channel.note	Stable takes releases; nightly also takes the daily builds.	安定版はリリースのみ、ナイトリーは日次ビルドも受け取ります。	Estable toma versiones publicadas; nocturno también toma compilaciones diarias.
 settings.channel.nightly	Nightly	ナイトリー	Nocturno
@@ -2010,6 +2010,7 @@ gpui.subview.more	{more, plural, one {# earlier step not shown} other {# earlier
 gpui.no.matches	No matches	一致なし	Sin coincidencias
 gpui.find.in.this.thread	Find in this thread	このスレッド内を検索	Buscar en este hilo
 gpui.find.in.thread	Find in thread	スレッド内を検索	Buscar en el hilo
+gpui.find.in.all.threads	Find in all threads	すべてのスレッド内を検索	Buscar en todos los hilos
 gpui.previous.match	Previous match	前の一致	Coincidencia anterior
 gpui.next.match	Next match	次の一致	Siguiente coincidencia
 gpui.back.to.the.thread	Back to the thread	スレッドに戻る	Volver al hilo
@@ -2042,10 +2043,20 @@ home.move.failed.note	Home move failed: {note}	ホームの移動に失敗しま
 home.machine	Home machine	ホームマシン	Máquina de inicio
 home.move.here	Make this machine the home	このマシンをホームにする	Hacer de esta máquina el inicio
 gpui.settings.group.general	General	一般	General
-gpui.settings.group.agents	Agents and tools	エージェントとツール	Agentes y herramientas
+gpui.settings.group.agents	Agents	エージェント	Agentes
 gpui.settings.group.workspace	Workspace	ワークスペース	Espacio de trabajo
+gpui.settings.group.connect	Connect	接続	Conexión
+gpui.settings.group.system	System	システム	Sistema
 gpui.settings.web.ui	Web UI	Web UI	Interfaz web
 gpui.settings.shared.files	Shared files	共有ファイル	Archivos compartidos
+gpui.settings.page.threads.git	Threads and git	スレッドと git	Hilos y git
+gpui.settings.git	Git	Git	Git
+gpui.settings.network	Network	ネットワーク	Red
+gpui.settings.mouse.board.each	Board and schematic: each input	基板と回路図: 各操作	Placa y esquema: cada entrada
+gpui.settings.mouse.solid.each	3D and STEP: each input	3DとSTEP: 各操作	3D y STEP: cada entrada
+gpui.settings.mouse.preset.note	A preset sets every input (each one is under Advanced). Each input does one thing: choosing an action for an input replaces what it did.	プリセットはすべての操作を設定します（各操作は「詳細」にあります）。各操作は1つの動作だけを持ちます。動作を選ぶと、それまでの動作が置き換わります。	Un preajuste fija todas las entradas (cada una está en Avanzado). Cada entrada hace una sola cosa: elegir una acción para una entrada sustituye la anterior.
+gpui.settings.every.device	Every device	すべての端末	Todos los dispositivos
+gpui.settings.advanced	Advanced	詳細	Avanzado
 gpui.imp.could.not.keep.this.draft	Could not keep this draft on this device. Retry.	この下書きをこの端末に保存できませんでした。再試行してください。	No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change	Describe the change…	変更内容を書いてください…	Describe el cambio…
 gpui.imp.describe.the.behavior.in.detail	Describe the behavior in detail: what you did and what you saw.	操作した内容と、そのとき見えたことを詳しく書いてください。	Describe el comportamiento en detalle: qué hiciste y qué viste.
@@ -2210,7 +2221,7 @@ gpui.acct.resets.now	\s· resets now	\s· まもなくリセット	\s· se reini
 gpui.acct.resets	\s· resets {when}	\s· {when}にリセット	\s· se reinicia {when}
 gpui.bots.webhook.name	Webhook name	Webhookの名前	Nombre del webhook
 gpui.bots.eg	{label} (e.g. {e})	{label}（例：{e}）	{label} (p. ej. {e})
-gpui.bots.no.tasks.yet.teach.this	No tasks yet. Teach this bot a browser task and it shows here.	タスクはまだありません。このボットにブラウザのタスクを教えると、ここに表示されます。	Sin tareas aún. Enseña a este bot una tarea del navegador y aparecerá aquí.
+gpui.bots.no.tasks.yet.teach.this	No tasks yet. Tasks this bot learns in its Browser tab are listed here.	タスクはまだありません。このボットがブラウザタブで覚えたタスクがここに表示されます。	Sin tareas aún. Las tareas que este bot aprende en su pestaña Navegador aparecen aquí.
 gpui.bots.mem.range	{from}–{to} of {total}	{total}件中 {from}–{to}	{from}–{to} de {total}
 gpui.bots.recall	Infinite context	無限コンテキスト	Contexto infinito
 gpui.bots.recall.on	On	オン	Activado
@@ -2233,13 +2244,13 @@ gpui.bots.nothing.to.report	Nothing to report.	報告することはありませ
 gpui.bots.no.mail	No mail.	メールはありません。	Sin correo.
 gpui.bots.mail.older	{n, plural, one {# older conversation not shown} other {# older conversations not shown}}	{n, plural, other {表示していない古い会話が#件あります}}	{n, plural, one {# conversación anterior no mostrada} other {# conversaciones anteriores no mostradas}}
 gpui.bots.this.space.is.a.web	This space is a web page; it is shown in the phone apps.	このスペースはWebページです。スマートフォンのアプリで表示されます。	Este space es una página web; se muestra en las apps del teléfono.
-gpui.bots.no.space.yet.the.bot	No space yet. The bot writes it with space_set.	スペースはまだありません。ボットがspace_setで作ります。	Sin space aún. El bot lo escribe con space_set.
+gpui.bots.no.space.yet.the.bot	No space yet. A space is a page this bot keeps for you; ask it in Chat to make one.	スペースはまだありません。スペースはボットがあなたのために保つページです。チャットで作るよう頼んでください。	Sin espacio aún. Un espacio es una página que este bot mantiene para ti; pídeselo en el Chat.
 gpui.bots.created	Created	作成日	Creado
 gpui.bots.the.hub.refused.it	The hub refused it.	ハブに拒否されました。	El hub lo rechazó.
 gpui.bots.webhook.made.keep.its.secret	Webhook made. Keep its secret: it is shown only now.	Webhookを作成しました。シークレットは今だけ表示されるので、控えておいてください。	Webhook creado. Guarda su secreto: solo se muestra ahora.
 gpui.bots.path	Path	パス	Ruta
 gpui.bots.token.off	off	オフ	desactivado
-gpui.bots.no.hooks	No hooks.	Webhookはありません。	Sin webhooks.
+gpui.bots.no.hooks	No webhooks.	Webhookはありません。	Sin webhooks.
 gpui.bots.hook.calls	{n, plural, one {# call} other {# calls}}	{n, plural, other {#回の呼び出し}}	{n, plural, one {# llamada} other {# llamadas}}
 gpui.bots.no.token	No token	トークンなし	Sin token
 gpui.bots.no.messages.yet	No messages yet.	メッセージはまだありません。	Sin mensajes aún.
@@ -2283,7 +2294,7 @@ gpui.send.the.message	Send the message	メッセージを送信	Enviar el mensaj
 gpui.new.line.in.the.message	New line in the message	メッセージ内で改行	Nueva línea en el mensaje
 gpui.send.also	Send (also)	送信（別のキー）	Enviar (también)
 gpui.put.the.keyboard.in.the	Put the keyboard in the message box	メッセージ欄に入力を移す	Poner el foco en el cuadro de mensaje
-gpui.put.the.keyboard.in.the2	Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)	どこからでもメッセージ欄に入力を移す（入力欄・ビューア・ダイアログから）	Poner el foco en el cuadro de mensaje, desde cualquier lugar (un campo, un visor, un diálogo)
+gpui.put.the.keyboard.in.the2	Put the keyboard in the message box from anywhere	どこからでもメッセージ欄に入力を移す	Poner el foco en el cuadro de mensaje desde cualquier lugar
 gpui.agent.model.and.effort	Agent, model and effort	エージェント・モデル・推論の強さ	Agente, modelo y esfuerzo
 gpui.account.of.this.thread.with	Account of this thread, with what each has left	このスレッドのアカウント（各アカウントの残量つき）	Cuenta de este hilo, con lo que le queda a cada una
 gpui.pick.account.n.in	Pick account 1…9 in the account menu	アカウントメニューでアカウント1…9を選択	Elegir cuenta 1…9 en el menú de cuentas
@@ -2304,6 +2315,10 @@ gpui.previous.thread	Previous thread	前のスレッド	Hilo anterior
 gpui.next.thread	Next thread	次のスレッド	Hilo siguiente
 gpui.uberbot.chat	Uberbot chat	Uberbot チャット	Chat de Uberbot
 gpui.settle.or.unsettle.the.thread	Settle or unsettle the thread	スレッドを完了／完了を取り消す	Cerrar o reabrir el hilo
+gpui.rename.the.open.thread	Rename the open thread	開いているスレッドの名前を変更	Renombrar el hilo abierto
+gpui.larger.text	Larger text	文字を大きく	Texto más grande
+gpui.smaller.text	Smaller text	文字を小さく	Texto más pequeño
+gpui.text.size.back.to.normal	Text size back to normal (100%)	文字サイズを標準（100%）に戻す	Tamaño del texto normal (100%)
 gpui.stop.the.running.turn	Stop the running turn	実行中のターンを停止	Detener el turno en curso
 gpui.layer.focus.the.other.layers	Layer focus: the other layers as they are, dimmed, hidden	レイヤーフォーカス：他のレイヤーをそのまま・薄く・非表示	Enfoque de capa: las demás capas tal cual, atenuadas, ocultas
 gpui.undo.the.last.stroke.or	Undo the last stroke or change	直前の線や変更を取り消す	Deshacer el último trazo o cambio
@@ -2649,7 +2664,7 @@ gpui.connecting	Connecting…	接続中…	Conectando…
 gpui.connected	Connected	接続済み	Conectado
 gpui.disconnected	Disconnected	切断	Desconectado
 gpui.hub.is.opening.its.log	Hub is opening its log…	ハブがログを開いています…	El hub está abriendo su registro…
-gpui.hub.disconnected.draft.kept.reconnecting	Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.	ハブとの接続が切れました。下書きは残してあり、再接続しています。実験用ハブのログを確認してください。	Hub desconectado. Borrador conservado; reconectando. Revisa el registro experimental del hub.
+gpui.hub.disconnected.draft.kept.reconnecting	Hub disconnected. Draft kept; reconnecting. If it stays like this, restart Backplane.	ハブとの接続が切れました。下書きは残してあり、再接続しています。このまま続く場合は Backplane を再起動してください。	Hub desconectado. Borrador guardado; reconectando. Si sigue así, reinicia Backplane.
 gpui.hub.refused.it	The hub refused it: {why}	ハブが拒否しました: {why}	El hub lo rechazó: {why}
 gpui.that.is.not.on.this	This thread, bot or room is not on this hub: it was deleted, or it is on another machine.	このスレッド、ボット、ルームはこのハブにありません。削除されたか、別のマシンにあります。	Este hilo, bot o sala no está en este hub: fue eliminado o está en otra máquina.
 gpui.hub.view.refused	View request refused: {code}	表示の要求が拒否されました: {code}	Petición de vista rechazada: {code}
@@ -3021,6 +3036,8 @@ notify.quiet.hours	Quiet hours	静かな時間帯	Horas de silencio
 notify.a.push.waits.until.the	A push waits until the end of quiet hours, in your time zone, and goes then as one.	プッシュは静かな時間帯が終わる(あなたのタイムゾーン)まで待ち、終わるとまとめて送られます。	Una notificación push espera hasta el fin de las horas de silencio, en tu zona horaria, y se envía entonces junta.
 notify.quiet.from.and.until	Quiet from and until	静かな時間帯の開始と終了	Silencio desde y hasta
 notify.hh.mm.hours	HH:MM, 24 hours.	HH:MM(24時間表記)。	HH:MM, 24 horas.
+notify.quiet.from.hint	From, 22:00	開始、22:00	Desde, 22:00
+notify.quiet.until.hint	Until, 07:00	終了、07:00	Hasta, 07:00
 notify.times.are.hh.mm.hours	Times are HH:MM, 24 hours, and not the same.	時刻はHH:MM(24時間表記)で、同じ時刻にはできません。	Las horas son HH:MM, 24 horas, y no la misma.
 notify.quiet.hours.are.hh.mm	Quiet hours are HH:MM to HH:MM, 24 hours, and not the same time twice.	静かな時間帯はHH:MMからHH:MM(24時間表記)で、同じ時刻にはできません。	Las horas de silencio son HH:MM a HH:MM, 24 horas, y no la misma hora dos veces.
 notify.urgent.asks.come.through	Urgent asks come through	緊急の確認は通す	Las peticiones urgentes pasan
@@ -3041,6 +3058,8 @@ gpui.e.failover.default.order	Default order	既定の順序	Orden por defecto
 gpui.e.failover.use.the.default.order	Use the default order	既定の順序を使う	Usar el orden por defecto
 gpui.e.failover.choose.an.installed.provider.and	Choose an installed provider, and a model or its default, then add it to the end.	インストール済みのプロバイダーと、モデルまたはその既定を選び、末尾に追加します。	Elige un proveedor instalado, y un modelo o su predeterminado, y añádelo al final.
 gpui.e.failover.add.to.the.order	Add to the order	順序に追加	Añadir al orden
+gpui.e.failover.already.in.the.order	Already in the order.	すでに順序に入っています。	Ya está en el orden.
+gpui.e.failover.not.installed.here	Not installed on this machine.	このマシンにはインストールされていません。	No está instalado en esta máquina.
 ring.ring	Ring	リング	Anillo
 ring.pebble.index.ring	Pebble Index ring	Pebble Index リング	Anillo Pebble Index
 ring.test.event	Test event	テストイベント	Evento de prueba
@@ -3187,7 +3206,7 @@ gpui.f.found.at	Found at {path}.	{path}にあります。	Encontrado en {path}.
 gpui.f.path.fix	Add ~/.local/bin to your PATH to run backplane from a terminal.	ターミナルからbackplaneを実行するには、~/.local/binをPATHに追加してください。	Añade ~/.local/bin a tu PATH para ejecutar backplane desde una terminal.
 gpui.f.path.fix.windows	Backplane is not on your PATH. Open it from its folder or the Start menu.	BackplaneはPATHにありません。フォルダかスタートメニューから開いてください。	Backplane no está en tu PATH. Ábrelo desde su carpeta o el menú Inicio.
 gpui.f.updates	Updates	更新	Actualizaciones
-gpui.f.updates.note	Settings, Network and updates picks the stable or the nightly channel.	設定 → ネットワークと更新で、安定版かナイトリーのチャンネルを選べます。	Ajustes, Red y actualizaciones elige el canal estable o el nocturno.
+gpui.f.updates.note	Settings, About and updates picks the stable or the nightly channel.	設定 → 概要と更新で、安定版かナイトリーのチャンネルを選べます。	Ajustes, Acerca de y actualizaciones elige el canal estable o el nocturno.
 gpui.f.home.title	Where your data is kept	データの保存場所	Dónde se guardan tus datos
 gpui.f.home.body	Backplane keeps your threads, settings, bots and keys in one folder on this computer. A background program, the hub, runs your agents from that folder. It keeps running when you close the window, so agents finish their work. Each computer usually has one.	Backplaneはスレッド、設定、ボット、キーをこのコンピュータの1つのフォルダに保存します。バックグラウンドのプログラムであるハブが、そのフォルダからエージェントを動かします。ウィンドウを閉じても動き続けるので、エージェントは作業を終えられます。通常、1台のコンピュータに1つです。	Backplane guarda tus hilos, ajustes, bots y claves en una carpeta de este ordenador. Un programa en segundo plano, el hub, ejecuta tus agentes desde esa carpeta. Sigue ejecutándose al cerrar la ventana, para que los agentes terminen su trabajo. Cada ordenador suele tener uno.
 gpui.f.data.folder	Data folder	データフォルダ	Carpeta de datos
@@ -3367,12 +3386,12 @@ gpui.f.n.paired	{n, number} paired. Settings, Devices lists and revokes them.	{n
 gpui.f.remote.title	Restarts and updates	再起動と更新	Reinicios y actualizaciones
 gpui.f.cont.on	On. Turns that a restart cuts short go on by themselves.	オン。再起動で中断したターンは自動で続きます。	Activado. Los turnos interrumpidos por un reinicio continúan por sí solos.
 gpui.f.cont.off	Off. A restart stops running turns, and you start them again.	オフ。再起動すると実行中のターンは止まり、自分で再開します。	Desactivado. Un reinicio detiene los turnos en curso y los inicias de nuevo.
-gpui.f.remote.body.package	The hub keeps running when you close the window, so agents finish their work. This hub is updated by the installer or package it came from. To update, run the install command again. Settings, Network and updates shows the version and the update channel. Settings, Threads sets what happens to running turns when the hub restarts.	ウィンドウを閉じてもハブは動き続けるので、エージェントは作業を終えられます。このハブは、入手元のインストーラやパッケージで更新されます。更新するにはインストールコマンドをもう一度実行してください。設定 → ネットワークと更新でバージョンと更新チャンネルを確認できます。設定 → スレッドで、ハブの再起動時に実行中のターンをどうするかを決められます。	El hub sigue ejecutándose al cerrar la ventana, así los agentes terminan su trabajo. Este hub se actualiza mediante el instalador o paquete del que vino. Para actualizar, ejecuta el comando de instalación de nuevo. Ajustes, Red y actualizaciones muestra la versión y el canal de actualización. Ajustes, Hilos define qué ocurre con los turnos en curso cuando el hub se reinicia.
-gpui.f.remote.body.channel	The hub keeps running when you close the window, so agents finish their work. This hub checks for a new build every hour on the {channel} channel and installs it once no turn is running. If the new build fails its health check, the hub goes back to the one it had. Paired phones show the same line in their Settings. Settings, Network and updates shows the version and the update channel. Settings, Threads sets what happens to running turns when the hub restarts.	ウィンドウを閉じてもハブは動き続けるので、エージェントは作業を終えられます。このハブは{channel}チャンネルの新しいビルドを1時間ごとに確認し、実行中のターンがなくなったらインストールします。新しいビルドがヘルスチェックに失敗すると、元のビルドに戻ります。ペアリング済みのスマートフォンの設定にも同じ内容が表示されます。設定 → ネットワークと更新でバージョンと更新チャンネルを確認できます。設定 → スレッドで、ハブの再起動時に実行中のターンをどうするかを決められます。	El hub sigue ejecutándose al cerrar la ventana, así los agentes terminan su trabajo. Este hub busca una nueva compilación cada hora en el canal {channel} y la instala cuando no hay ningún turno en curso. Si la nueva compilación falla su comprobación de salud, el hub vuelve a la que tenía. Los teléfonos vinculados muestran la misma línea en sus Ajustes. Ajustes, Red y actualizaciones muestra la versión y el canal de actualización. Ajustes, Hilos define qué ocurre con los turnos en curso cuando el hub se reinicia.
+gpui.f.remote.body.package	The hub keeps running when you close the window, so agents finish their work. This hub is updated by the installer or package it came from. To update, run the install command again. Settings, About and updates shows the version and the update channel. Settings, Threads and git sets what happens to running turns when the hub restarts.	ウィンドウを閉じてもハブは動き続けるので、エージェントは作業を終えられます。このハブは、入手元のインストーラやパッケージで更新されます。更新するにはインストールコマンドをもう一度実行してください。設定 → 概要と更新でバージョンと更新チャンネルを確認できます。設定 → スレッドと git で、ハブの再起動時に実行中のターンをどうするかを決められます。	El hub sigue ejecutándose al cerrar la ventana, así los agentes terminan su trabajo. Este hub se actualiza mediante el instalador o paquete del que vino. Para actualizar, ejecuta el comando de instalación de nuevo. Ajustes, Acerca de y actualizaciones muestra la versión y el canal de actualización. Ajustes, Hilos y git define qué ocurre con los turnos en curso cuando el hub se reinicia.
+gpui.f.remote.body.channel	The hub keeps running when you close the window, so agents finish their work. This hub checks for a new build every hour on the {channel} channel and installs it once no turn is running. If the new build fails its health check, the hub goes back to the one it had. Paired phones show the same line in their Settings. Settings, About and updates shows the version and the update channel. Settings, Threads and git sets what happens to running turns when the hub restarts.	ウィンドウを閉じてもハブは動き続けるので、エージェントは作業を終えられます。このハブは{channel}チャンネルの新しいビルドを1時間ごとに確認し、実行中のターンがなくなったらインストールします。新しいビルドがヘルスチェックに失敗すると、元のビルドに戻ります。ペアリング済みのスマートフォンの設定にも同じ内容が表示されます。設定 → 概要と更新でバージョンと更新チャンネルを確認できます。設定 → スレッドと git で、ハブの再起動時に実行中のターンをどうするかを決められます。	El hub sigue ejecutándose al cerrar la ventana, así los agentes terminan su trabajo. Este hub busca una nueva compilación cada hora en el canal {channel} y la instala cuando no hay ningún turno en curso. Si la nueva compilación falla su comprobación de salud, el hub vuelve a la que tenía. Los teléfonos vinculados muestran la misma línea en sus Ajustes. Ajustes, Acerca de y actualizaciones muestra la versión y el canal de actualización. Ajustes, Hilos y git define qué ocurre con los turnos en curso cuando el hub se reinicia.
 gpui.f.cont.restart	Continue after a restart	再起動後に続ける	Continuar tras un reinicio
 gpui.f.open.page	Open the page	ページを開く	Abrir la página
-gpui.f.open.page.note	Closes setup and opens Settings, Network and updates. Finish setup in the sidebar brings you back.	セットアップを閉じて設定 → ネットワークと更新を開きます。サイドバーの「セットアップを続ける」で戻れます。	Cierra la configuración y abre Ajustes, Red y actualizaciones. Finalizar configuración en la barra lateral te trae de vuelta.
-gpui.f.network.updates	Network and updates	ネットワークと更新	Red y actualizaciones
+gpui.f.open.page.note	Closes setup and opens Settings, About and updates. Finish setup in the sidebar brings you back.	セットアップを閉じて設定 → 概要と更新を開きます。サイドバーの「セットアップを続ける」で戻れます。	Cierra la configuración y abre Ajustes, Acerca de y actualizaciones. Finalizar configuración en la barra lateral te trae de vuelta.
+gpui.f.network.updates	About and updates	概要と更新	Acerca de y actualizaciones
 gpui.f.project.title	Your first project	最初のプロジェクト	Tu primer proyecto
 gpui.f.project.body	A project is a folder, usually with a KiCad project in it. Give a folder that exists to add it, or a new path to make it. In a git repository, each thread works in its own worktree, so threads do not touch each other's files.	プロジェクトはフォルダで、通常はKiCadプロジェクトが入っています。既存のフォルダを指定すると追加され、新しいパスを指定すると作成されます。Gitリポジトリでは各スレッドが専用のワークツリーで作業するので、スレッド同士が互いのファイルに触れることはありません。	Un proyecto es una carpeta, normalmente con un proyecto de KiCad dentro. Indica una carpeta existente para añadirla, o una ruta nueva para crearla. En un repositorio git, cada hilo trabaja en su propio worktree, así los hilos no tocan los archivos de los demás.
 gpui.f.add.another	Add another project.	別のプロジェクトを追加します。	Añadir otro proyecto.
@@ -3410,9 +3429,9 @@ gpui.f.tour.space.body	Each bot has a Space tab, a page the bot writes for you w
 gpui.f.tour.rooms.body	A room is a shared chat for you and your bots. Pick who joins, then post. Each bot reads the room and answers there, so two bots can review each other's work while you watch. Rooms work across linked machines too.	ルームは、あなたとボットの共有チャットです。参加者を選んで投稿します。各ボットがルームを読んでそこで答えるので、2体のボットが互いの作業をレビューする様子を見守れます。ルームはリンクしたマシンをまたいでも使えます。	Una sala es un chat compartido para ti y tus bots. Elige quién se une y publica. Cada bot lee la sala y responde allí, así que dos bots pueden revisar el trabajo del otro mientras miras. Las salas también funcionan entre máquinas vinculadas.
 gpui.f.make.room	Make a room	ルームを作る	Crear una sala
 gpui.f.new.room	New room	新しいルーム	Nueva sala
-gpui.f.tour.routines.body	A routine runs a bot on a schedule. Open a bot, then its Routines tab, and write what it should do and when. Backplane reads times like tomorrow 9am, monday 09:00, in 20m or 2026-10-14 09:00. Routines follow your time zone, which Settings, Time zone shows. Reminders use the same list.	ルーティンはボットを予定どおりに動かします。ボットを開いてルーティンタブで、何をいつするかを書きます。Backplaneは tomorrow 9am、monday 09:00、in 20m、2026-10-14 09:00 のような時刻を読み取ります。ルーティンはあなたのタイムゾーンに従い、設定 → タイムゾーンで確認できます。リマインダーも同じ一覧を使います。	Una rutina ejecuta un bot de forma programada. Abre un bot, luego su pestaña Rutinas y escribe qué debe hacer y cuándo. Backplane lee horas como tomorrow 9am, monday 09:00, in 20m o 2026-10-14 09:00. Las rutinas siguen tu zona horaria, que muestra Ajustes, Zona horaria. Los recordatorios usan la misma lista.
+gpui.f.tour.routines.body	A routine runs a bot on a schedule. Open a bot, then its Routines tab, and write what it should do and when. Backplane reads times like tomorrow 9am, monday 09:00, in 20m or 2026-10-14 09:00. Routines follow your time zone, which Settings, Notifications shows. Reminders use the same list.	ルーティンはボットを予定どおりに動かします。ボットを開いてルーティンタブで、何をいつするかを書きます。Backplaneは tomorrow 9am、monday 09:00、in 20m、2026-10-14 09:00 のような時刻を読み取ります。ルーティンはあなたのタイムゾーンに従い、設定 → 通知で確認できます。リマインダーも同じ一覧を使います。	Una rutina ejecuta un bot de forma programada. Abre un bot, luego su pestaña Rutinas y escribe qué debe hacer y cuándo. Backplane lee horas como tomorrow 9am, monday 09:00, in 20m o 2026-10-14 09:00. Las rutinas siguen tu zona horaria, que muestra Ajustes, Notificaciones. Los recordatorios usan la misma lista.
 gpui.f.tour.palette	Palette and shortcuts	パレットとショートカット	Paleta y atajos
-gpui.f.tour.palette.body	{m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, This device lists every shortcut and lets you change them.	{m}+Kでパレットを開きます。スレッド名やコマンドの一部を入力してEnterを押します。設定 → このデバイスですべてのショートカットを確認・変更できます。	{m}+K abre la paleta. Escribe parte del nombre de un hilo o un comando y pulsa Enter. Ajustes, Este dispositivo lista cada atajo y te permite cambiarlos.
+gpui.f.tour.palette.body	{m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, Keyboard lists every shortcut and lets you change them.	{m}+Kでパレットを開きます。スレッド名やコマンドの一部を入力してEnterを押します。設定 → キーボードですべてのショートカットを確認・変更できます。	{m}+K abre la paleta. Escribe parte del nombre de un hilo o un comando y pulsa Enter. Ajustes, Teclado lista cada atajo y te permite cambiarlos.
 gpui.f.key.agent	Agent, model and effort	エージェント・モデル・思考量	Agente, modelo y esfuerzo
 gpui.f.key.prevnext	Previous and next thread	前と次のスレッド	Hilo anterior y siguiente
 gpui.f.key.prevnext.keys	{m}+Shift+[ and {m}+Shift+]	{m}+Shift+[ と {m}+Shift+]	{m}+Shift+[ y {m}+Shift+]
@@ -4366,6 +4385,15 @@ android.download.share	Share	共有	Compartir
 android.download.retry	Retry	再試行	Reintentar
 android.download.noapp	No app here opens that file.	このファイルを開けるアプリがありません。	Ninguna app aquí abre ese archivo.
 android.download.button	Download	ダウンロード	Descargar
+mobile.diff.summary	{files} files, +{added} −{removed}	{files} ファイル、+{added} −{removed}	{files} archivos, +{added} −{removed}
+mobile.diff.summary.one	1 file, +{added} −{removed}	1 ファイル、+{added} −{removed}	1 archivo, +{added} −{removed}
+mobile.diff.new	new	新規	nuevo
+mobile.diff.deleted	deleted	削除	eliminado
+mobile.diff.renamed	renamed	名前変更	renombrado
+mobile.diff.binary	binary	バイナリ	binario
+mobile.settings.advanced	Advanced	詳細設定	Avanzado
+android.attach.file	Choose a file	ファイルを選ぶ	Elegir un archivo
+android.connecting.word	connecting	接続中	conectando
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
@@ -4737,6 +4765,7 @@ gpui.rail.no.board	No board in this project	このプロジェクトには基板
 gpui.rail.no.schematic	No schematic in this project	このプロジェクトには回路図がありません	Este proyecto no tiene esquema
 gpui.rail.split.needs.both	Split needs a board and a schematic	分割表示には基板と回路図が必要です	La vista dividida requiere una placa y un esquema
 gpui.rail.no.mech	No mechanical parts in this project	このプロジェクトには機械部品がありません	Este proyecto no tiene piezas mecánicas
+gpui.rail.no.thread	Open a thread to use this	スレッドを開くと使えます	Abre un hilo para usar esto
 gpui.panestate.next.board	Ask an agent to lay one out.	エージェントに基板のレイアウトを依頼してください。	Pide a un agente que diseñe una placa.
 gpui.panestate.next.schematic	Ask an agent to draw one.	エージェントに回路図の作成を依頼してください。	Pide a un agente que dibuje uno.
 gpui.panestate.next.solid	Ask an agent to lay out a board.	エージェントに基板のレイアウトを依頼してください。	Pide a un agente que diseñe una placa.
@@ -4994,7 +5023,8 @@ gpui.c.solidcraft.no.embed	This window cannot embed SolidCraft (X11/XWayland or 
 gpui.c.solidcraft.no.container	Could not create embedded SolidCraft container window.	埋め込み用 SolidCraft コンテナウィンドウを作成できませんでした。	No se pudo crear el contenedor integrado de SolidCraft.
 gpui.c.solidcraft.own.window	SolidCraft is open in its own window.	SolidCraft は別ウィンドウで開いています。	SolidCraft está abierto en su propia ventana.
 gpui.c.solidcraft.not.installed	SolidCraft is not installed.	SolidCraft がインストールされていません。	SolidCraft no está instalado.
-gpui.c.solidcraft.install.desc	Install SolidCraft v0.50.0 (~228 MB) to view and edit STEP, SolidCraft, STL, and mesh files.	SolidCraft v0.50.0（約 228 MB）をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。	Instala SolidCraft v0.50.0 (~228 MB) para ver y editar archivos STEP, SolidCraft, STL y malla.
+gpui.c.solidcraft.install.desc	Install SolidCraft {version} (about {mb} MB) to view and edit STEP, SolidCraft, STL, and mesh files.	SolidCraft {version}（約 {mb} MB）をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。	Instala SolidCraft {version} (unos {mb} MB) para ver y editar archivos STEP, SolidCraft, STL y malla.
+gpui.c.solidcraft.install.desc.nosize	Install SolidCraft to view and edit STEP, SolidCraft, STL, and mesh files.	SolidCraft をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。	Instala SolidCraft para ver y editar archivos STEP, SolidCraft, STL y malla.
 gpui.c.solidcraft.install.btn	Install SolidCraft	SolidCraft をインストール	Instalar SolidCraft
 gpui.c.solidcraft.installing	Installing SolidCraft…	SolidCraft をインストールしています…	Instalando SolidCraft…
 gpui.c.solidcraft.downloading	Downloading…	ダウンロード中…	Descargando…
@@ -5056,6 +5086,8 @@ settings.cad.mech.tab	Mech tab	Mech タブ	Pestaña Mech
 settings.cad.mech.tab.note	Where a mechanical part opens on the desktop: in SolidCraft, to view and edit it, or in Backplane's own 3D viewer, view only and quick. The Mech tab's header switches between them for a while.	デスクトップで機械部品を開く場所：SolidCraft（表示と編集）または Backplane の 3D ビューアー（表示のみ、高速）。Mech タブのヘッダーでしばらくの間切り替えられます。	Dónde se abre una pieza mecánica en el escritorio: en SolidCraft, para verla y editarla, o en el visor 3D de Backplane, solo para ver y más rápido. La cabecera de la pestaña Mech cambia entre ellos por un tiempo.
 settings.cad.mech.solidcraft	SolidCraft	SolidCraft	SolidCraft
 settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Visor de Backplane
+common.cut	Cut	切り取り	Cortar
+menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -6945,7 +6977,7 @@ settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Viso
     /// gpui.f.n.paired = {n, number} paired. Settings, Devices lists and revokes them.
     static func gpui_f_n_paired(n: Int) -> String { f("gpui.f.n.paired", ["n": String(n)]) }
 
-    /// gpui.f.remote.body.channel = The hub keeps running when you close the window, so agents finish their work. This hub checks for a new build every hour on the {channel} channel and installs it once no turn is running. If the new build fails its health check, the hub goes back to the one it had. Paired phones show the same line in their Settings. Settings, Network and updates shows the version and the update channel. Settings, Threads sets what happens to running turns when the hub restarts.
+    /// gpui.f.remote.body.channel = The hub keeps running when you close the window, so agents finish their work. This hub checks for a new build every hour on the {channel} channel and installs it once no turn is running. If the new build fails its health check, the hub goes back to the one it had. Paired phones show the same line in their Settings. Settings, About and updates shows the version and the update channel. Settings, Threads and git sets what happens to running turns when the hub restarts.
     static func gpui_f_remote_body_channel(channel: String) -> String { f("gpui.f.remote.body.channel", ["channel": channel]) }
 
     /// gpui.f.new.thread.in = New thread in {project}
@@ -6957,7 +6989,7 @@ settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Viso
     /// gpui.f.tour.thread.body = Settle takes a thread out of the active list and Snooze hides it until later. Fork starts a new thread from this one. Runs of tool calls fold into one row, and delegated work shows under Subagents. {m}+Shift+S settles and Ctrl+. stops a running turn.
     static func gpui_f_tour_thread_body(m: String) -> String { f("gpui.f.tour.thread.body", ["m": m]) }
 
-    /// gpui.f.tour.palette.body = {m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, This device lists every shortcut and lets you change them.
+    /// gpui.f.tour.palette.body = {m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, Keyboard lists every shortcut and lets you change them.
     static func gpui_f_tour_palette_body(m: String) -> String { f("gpui.f.tour.palette.body", ["m": m]) }
 
     /// gpui.f.key.prevnext.keys = {m}+Shift+[ and {m}+Shift+]
@@ -7581,6 +7613,12 @@ settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Viso
     /// android.download.of = {have} of {total}
     static func android_download_of(have: String, total: String) -> String { f("android.download.of", ["have": have, "total": total]) }
 
+    /// mobile.diff.summary = {files} files, +{added} −{removed}
+    static func mobile_diff_summary(files: String, added: String, removed: String) -> String { f("mobile.diff.summary", ["files": files, "added": added, "removed": removed]) }
+
+    /// mobile.diff.summary.one = 1 file, +{added} −{removed}
+    static func mobile_diff_summary_one(added: String, removed: String) -> String { f("mobile.diff.summary.one", ["added": added, "removed": removed]) }
+
     /// ios.sections.running = {n, number} running
     static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }
 
@@ -8069,6 +8107,9 @@ settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Viso
 
     /// web.ring.heard.by.sure = Heard by {model}, {conf}% sure
     static func web_ring_heard_by_sure(model: String, conf: String) -> String { f("web.ring.heard.by.sure", ["model": model, "conf": conf]) }
+
+    /// gpui.c.solidcraft.install.desc = Install SolidCraft {version} (about {mb} MB) to view and edit STEP, SolidCraft, STL, and mesh files.
+    static func gpui_c_solidcraft_install_desc(version: String, mb: String) -> String { f("gpui.c.solidcraft.install.desc", ["version": version, "mb": mb]) }
 
     /// gpui.f2.solidcraft.ok = SolidCraft{v} at {path}. 3D models open and are edited in it.
     static func gpui_f2_solidcraft_ok(v: String, path: String) -> String { f("gpui.f2.solidcraft.ok", ["v": v, "path": path]) }

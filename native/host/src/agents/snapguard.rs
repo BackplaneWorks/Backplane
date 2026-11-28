@@ -94,7 +94,7 @@ impl Agents {
         self.commit_events(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("sg", now, self.seq_n()),"tone":tone,"kind":"git","summary":summary,"at":now})]).await
     }
     pub fn turn_guard(&self, th: &str) -> Option<TurnGuard> { self.turn_guards.lock().unwrap().get(th).cloned() }
-    /// Settings > Projects and git > Keep Backplane's commits off my branch (settings/offbranch.rs, #1188): snapshots go on Backplane's refs
+    /// Settings > Threads and git > Git > Keep Backplane's commits off my branch (settings/offbranch.rs, #1188): snapshots go on Backplane's refs
     /// even in a repository it made.
     async fn off_branch(&self) -> bool { crate::settings::offbranch::on(self.world().await.setting(crate::settings::offbranch::KEY)) }
     /// `thread.review {thread, on}`: the person's press on the thread's review bar. Review mode switches on or off at once, the running turn's

@@ -385,6 +385,8 @@ struct TextLayoutInner {
     lines: SmallVec<[WrappedLine; 1]>,
     line_height: Pixels,
     wrap_width: Option<Pixels>,
+    /// Backplane: the width an ellipsis text was cut to (a later measure at another width lays it out again)
+    truncate_width: Option<Pixels>,
     size: Option<Size<Pixels>>,
     bounds: Option<Bounds<Pixels>>,
 }
@@ -407,7 +409,7 @@ impl TextLayout {
             Some((t, r, m)) => (t, r, Some(Arc::new(m))),
             None => (text, runs, None),
         };
-        let mut runs = if let Some(runs) = runs {
+        let runs = if let Some(runs) = runs {
             runs
         } else {
             vec![text_style.to_run(text.len())]
@@ -446,12 +448,20 @@ impl TextLayout {
                 if let Some(text_layout) = element_state.0.borrow().as_ref()
                     && text_layout.size.is_some()
                     && (wrap_width.is_none() || wrap_width == text_layout.wrap_width)
+                    && truncate_width == text_layout.truncate_width
                 {
                     return text_layout.size.unwrap();
                 }
 
-                let mut line_wrapper = cx.text_system().line_wrapper(text_style.font(), font_size);
+                // Backplane: cut a fresh copy of the runs on every measure. truncate_line shortens the
+                // runs it is given; cutting the element's own runs left them shorter than the text at
+                // the next measure (another width, or none), and the uncovered rest of the text was
+                // drawn in the fallback (sans) font. The width is measured in the runs' own font
+                // (e.g. mono notes), not the inherited text style's.
+                let mut runs = runs.clone();
                 let text = if let Some(truncate_width) = truncate_width {
+                    let font = runs.first().map(|r| r.font.clone()).unwrap_or_else(|| text_style.font());
+                    let mut line_wrapper = cx.text_system().line_wrapper(font, font_size);
                     line_wrapper.truncate_line(
                         text.clone(),
                         truncate_width,
@@ -480,6 +490,7 @@ impl TextLayout {
                         map: None,
                         line_height,
                         wrap_width,
+                        truncate_width,
                         size: Some(Size::default()),
                         bounds: None,
                     });
@@ -499,6 +510,7 @@ impl TextLayout {
                     map: map.clone(),
                     line_height,
                     wrap_width,
+                    truncate_width,
                     size: Some(size),
                     bounds: None,
                 });

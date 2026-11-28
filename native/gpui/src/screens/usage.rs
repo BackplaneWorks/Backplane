@@ -184,7 +184,7 @@ fn act(this: &mut Backplane, what: Act, window: &mut Window, cx: &mut Context<Ba
     match what {
         /* i18n-ok: Claude's own command, sent as the person would type it */ Act::Compact => { let _ = this.tx.try_send(crate::hub::Command::Send("/compact".into())); }
         Act::Model => this.combo_model(window, cx),
-        Act::Accounts => { this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); }
+        Act::Accounts => { this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.keys = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); }
     }
     cx.notify();
 }

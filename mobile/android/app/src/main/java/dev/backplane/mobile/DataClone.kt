@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -128,7 +129,7 @@ internal fun CloneBody(ask: CloneAsk?, opened: (String?) -> Unit) {
     if (browsing) { FolderBrowser(dest?.parent?.ifEmpty { null } ?: dest?.defaultParent?.ifEmpty { null }, Msg.android_clone_folder_use, "clone.parent.use") { parent = it; browsing = false }; return }
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         if (job != null) { CloneProgress(job, signing, { signing = it }, opened) { picked = null; typed = job.repo; Clones.following = "" }; return@Column }
-        DField(typed, { typed = it; picked = null; name = null; err = "" }, Msg.android_clone_repo_hint, Modifier.testTag("clone.repo"))
+        DField(typed, { typed = it; picked = null; name = null; err = "" }, Msg.android_clone_repo_hint, Modifier.testTag("clone.repo"), mono = true)
         val r = repos
         if (picked == null && r != null) {
             if (r.showsHint) DMono(hubWords(r.hint), dfaint, 12, Modifier.testTag("clone.hint"), lines = 3)
@@ -169,7 +170,7 @@ private fun RepoRow(r: CloneRepo, pick: () -> Unit) {
                 DMono(r.name, dcs.onSurface, 13, bold = true)
                 if (r.description.isNotEmpty()) DMono(r.description, dcs.onSurfaceVariant, 12, lines = 2)
             }
-            if (r.private) DMono(Msg.android_clone_private, dfaint, 11, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 6.dp, vertical = 2.dp))
+            if (r.private) DMono(Msg.android_clone_private, dfaint, 11, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant), CircleShape).padding(horizontal = 8.dp, vertical = 2.dp))
         }
         DLine()
     }
@@ -180,7 +181,7 @@ private fun RepoRow(r: CloneRepo, pick: () -> Unit) {
 private fun SigninPanel() {
     val ctx = LocalContext.current
     val s = Clones.signin
-    Column(Modifier.fillMaxWidth().border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp).testTag("clone.signin.panel"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth().border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(12.dp).testTag("clone.signin.panel"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         when {
             s == null || (s.state == "starting" && s.code.isEmpty()) -> DMono(Msg.android_clone_signin_wait, dfaint, 12)
             s.state == "done" -> DMono(Msg.android_clone_signin_done, dok, 13, Modifier.testTag("clone.signin.done"))

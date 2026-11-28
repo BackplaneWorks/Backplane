@@ -109,7 +109,8 @@ func dMdBlocks(_ src: String) -> [DMdBlock] {
 
 // MARK: inline
 
-private struct Fmt { var bold = false, italic = false, strike = false, link: URL? = nil, showLink = true }
+/// `ui`: prose in the system face (code spans stay mono); else every run is mono (a tool's or the hub's note).
+private struct Fmt { var bold = false, italic = false, strike = false, link: URL? = nil, showLink = true, ui = false }
 
 private func find(_ s: [Character], _ tok: [Character], from: Int) -> Int? {
     guard from >= 0, !tok.isEmpty, s.count >= tok.count else { return nil }
@@ -122,8 +123,11 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
     func put(_ t: String, _ f: Fmt, code: Bool = false) {
         var a = AttributedString(t)
         let sz = code ? size - 0.5 : size
-        // the bundled mono face has no italic: slant it (about 12 degrees)
-        if f.italic {
+        if f.ui && !code {
+            let base = Font.system(size: sz, weight: f.bold ? .bold : .regular)
+            a.font = f.italic ? base.italic() : base
+        } else if f.italic {
+            // the bundled mono face has no italic: slant it (about 12 degrees)
             let ui = Mono.uiFont(size: sz, weight: f.bold ? .bold : .regular)
             a.font = Font(UIFont(descriptor: ui.fontDescriptor.withMatrix(CGAffineTransform(a: 1, b: 0, c: 0.21, d: 1, tx: 0, ty: 0)), size: sz))
         } else { a.font = Font.mono(size: sz, weight: f.bold ? .bold : .regular) }
@@ -208,10 +212,10 @@ private func inl(_ s: [Character], _ f: Fmt, _ size: CGFloat, _ out: inout Attri
     flush()
 }
 
-func dMdInline(_ text: String, size: CGFloat, bold: Bool = false, textColor: Color = BackplaneDesign.text, toneKey: String = "text") -> AttributedString {
-    let key = "\(size)|\(bold)|\(toneKey)|" + text
+func dMdInline(_ text: String, size: CGFloat, bold: Bool = false, textColor: Color = BackplaneDesign.text, toneKey: String = "text", ui: Bool = false) -> AttributedString {
+    let key = "\(size)|\(bold)|\(toneKey)|\(ui)|" + text
     if let c = DMdCache.inline.object(forKey: key as NSString) { return c.v }
-    var out = AttributedString(); inl(Array(text), Fmt(bold: bold), size, &out, 0, textColor)
+    var out = AttributedString(); inl(Array(text), Fmt(bold: bold, ui: ui), size, &out, 0, textColor)
     DMdCache.inline.setObject(Box(out), forKey: key as NSString); return out
 }
 
@@ -243,6 +247,8 @@ struct DataMarkdown: View {
     var textColor: Color = BackplaneDesign.text
     var toneKey = "text"
     var baseSize: CGFloat = 13
+    /// the whole of it mono at baseSize (a tool's or the hub's note); else prose is the system face a size up, code staying mono
+    var mono = false
     @State private var viewer: DReplyOpen?
     @Environment(\.runInTerminal) private var runInTerminal
     var body: some View {
@@ -251,7 +257,7 @@ struct DataMarkdown: View {
         let (entry, all) = (entry, images)
         let show: (String) -> Void = { viewer = DReplyOpen(entry: entry, all: all, start: ReplyImages.start($0, in: all)) }
         let pics = images.isEmpty ? nil : DMdPicPlan(blocks: blocks, entry: entry, layout: layout, open: show)
-        DMdBlocks(blocks: blocks, pics: pics, copy: copy, textColor: textColor, toneKey: toneKey, baseSize: baseSize)
+        DMdBlocks(blocks: blocks, pics: pics, copy: copy, textColor: textColor, toneKey: toneKey, baseSize: baseSize, mono: mono)
             .environment(\.openURL, OpenURLAction { url in
                 if let copyText = Copyable.copyFrom(url) {
                     UIPasteboard.general.string = Copyable.exact(copyText)
@@ -324,8 +330,11 @@ private struct DMdBlocks: View {
     var textColor: Color = BackplaneDesign.text
     var toneKey = "text"
     var baseSize: CGFloat = 13
+    var mono = false
     @ScaledMetric(relativeTo: .footnote) private var body13: CGFloat = 13
     private var fontSize: CGFloat { body13 * baseSize / 13 }
+    /// prose a size up in the system face
+    private var up: CGFloat { mono ? 0 : 1 }
     private func head(_ n: Int) -> CGFloat { n <= 1 ? 18 : n == 2 ? 16 : n == 3 ? 14 : 13 }
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -340,8 +349,8 @@ private struct DMdBlocks: View {
     @ViewBuilder private func block(_ b: DMdBlock) -> some View {
         switch b {
         case .p(let s):
-            Text(dMdInline(s, size: fontSize, textColor: textColor, toneKey: toneKey)).foregroundStyle(textColor).lineSpacing(3).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
-        case .h(let n, let s): Text(dMdInline(s, size: head(n) * fontSize / 13, bold: true, textColor: textColor, toneKey: toneKey)).foregroundStyle(textColor).padding(.top, 4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+            Text(dMdInline(s, size: fontSize + up, textColor: textColor, toneKey: toneKey, ui: !mono)).foregroundStyle(textColor).lineSpacing(3).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
+        case .h(let n, let s): Text(dMdInline(s, size: head(n) * fontSize / 13 + up, bold: true, textColor: textColor, toneKey: toneKey, ui: !mono)).foregroundStyle(textColor).padding(.top, 4).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .leading)
         case .li(let depth, let marker, let task, let s):
             HStack(alignment: .firstTextBaseline, spacing: 6) {
                 if task >= 0 {
@@ -349,11 +358,11 @@ private struct DMdBlocks: View {
                         if task == 1 { Text("✓").font(.system(size: 9, weight: .bold)).foregroundStyle(BackplaneDesign.onAccent) } }
                         .frame(width: 13, height: 13).alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
                 } else { Text(marker).dmono(baseSize).foregroundStyle(BackplaneDesign.dim).frame(minWidth: 16, alignment: .leading) }
-                Text(dMdInline(s, size: fontSize, textColor: textColor, toneKey: toneKey)).foregroundStyle(task == 1 ? BackplaneDesign.dim : textColor).strikethrough(task == 1).lineSpacing(3).textSelection(.enabled)
+                Text(dMdInline(s, size: fontSize + up, textColor: textColor, toneKey: toneKey, ui: !mono)).foregroundStyle(task == 1 ? BackplaneDesign.dim : textColor).strikethrough(task == 1).lineSpacing(3).textSelection(.enabled)
             }.padding(.leading, CGFloat(depth) * 14).frame(maxWidth: .infinity, alignment: .leading)
         case .code(let lang, let s): DMdCode(lang: lang, text: s, cmd: Copyable.blockCmd(s, lang: lang, hub: copy))
-        case .quote(let inner): HStack(alignment: .top, spacing: 10) { Rectangle().fill(BackplaneDesign.dim).frame(width: 2); DMdBlocks(blocks: inner, copy: copy, textColor: textColor, toneKey: toneKey, baseSize: baseSize) }.fixedSize(horizontal: false, vertical: true)
-        case .table(let head, let aligns, let rows): DMdTable(head: head, aligns: aligns, rows: rows, size: body13 - 1)
+        case .quote(let inner): HStack(alignment: .top, spacing: 10) { Rectangle().fill(BackplaneDesign.dim).frame(width: 2); DMdBlocks(blocks: inner, copy: copy, textColor: textColor, toneKey: toneKey, baseSize: baseSize, mono: mono) }.fixedSize(horizontal: false, vertical: true)
+        case .table(let head, let aligns, let rows): DMdTable(head: head, aligns: aligns, rows: rows, size: body13 - 1 + up, ui: !mono)
         // a local path's image is the reply's own (drawn by the plan, through the hub); a web address is fetched here
         case .image(let alt, let url): if pics != nil && !url.hasPrefix("http") { EmptyView() } else { DMdImage(alt: alt, url: url) }
         case .rule: DLine()
@@ -374,12 +383,13 @@ private struct DMdCode: View {
                 DCopyButton(text: text, word: true)
             }.padding(.leading, 10).padding(.trailing, 4)
             ScrollView(.horizontal, showsIndicators: false) { Text(text).dmono(12).lineSpacing(2).fixedSize().textSelection(.enabled).padding(.horizontal, 10).padding(.bottom, 10) }
-        }.frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.panel)
+        }.frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.panel, radius: DRadius.card)
     }
 }
 
 private struct DMdTable: View {
     let head: [String], aligns: [Int], rows: [[String]], size: CGFloat
+    var ui = false
     var body: some View {
         let cols = max(head.count, rows.map(\.count).max() ?? 0)
         ScrollView(.horizontal, showsIndicators: false) {
@@ -390,12 +400,12 @@ private struct DMdTable: View {
                         ForEach(Array(rows.enumerated()), id: \.offset) { _, r in cell(c < r.count ? r[c] : "", c, bold: false).overlay(alignment: .top) { Rectangle().fill(BackplaneDesign.line).frame(height: 0.5) } }
                     }.fixedSize(horizontal: true, vertical: false)
                 }
-            }.overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+            }.clipShape(RoundedRectangle(cornerRadius: DRadius.control)).overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1))
         }.accessibilityIdentifier("md.table")
     }
     private func cell(_ s: String, _ c: Int, bold: Bool) -> some View {
         let a = c < aligns.count ? aligns[c] : 0
-        return Text(dMdInline(s, size: size, bold: bold)).foregroundStyle(BackplaneDesign.text).lineLimit(1).fixedSize().textSelection(.enabled)
+        return Text(dMdInline(s, size: size, bold: bold, ui: ui)).foregroundStyle(BackplaneDesign.text).lineLimit(1).fixedSize().textSelection(.enabled)
             .padding(.horizontal, 10).padding(.vertical, 6).frame(minWidth: 0, maxWidth: .infinity, alignment: a == 1 ? .center : a == 2 ? .trailing : .leading)
     }
 }
@@ -410,7 +420,7 @@ private struct DMdImage: View {
             if let i = img ?? DMdPics.cache.object(forKey: url as NSString) {
                 // tap for the full size; a long press saves it to Photos or shares it
                 DPictureView(image: i.image, animated: i.animated, contentMode: .fit)
-                    .frame(maxWidth: i.image.size.width, maxHeight: 360).dbox().onTapGesture { full = true }.dImageMenu(i.image)
+                    .frame(maxWidth: i.image.size.width, maxHeight: 360).dbox(radius: 8).onTapGesture { full = true }.dImageMenu(i.image)
                     .fullScreenCover(isPresented: $full) { DImageFull(image: i.image, animated: i.animated) { full = false } }.accessibilityIdentifier("md.image")
             }
             else if failed { Text(alt.isEmpty ? url : alt).dmono(12).foregroundStyle(BackplaneDesign.dim) }

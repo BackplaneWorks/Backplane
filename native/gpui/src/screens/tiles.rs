@@ -225,7 +225,7 @@ pub(crate) fn page(app: &mut Backplane, cx: &mut Context<Backplane>, light: bool
         } else if let Some(solid) = app.screens.tile_solid(id) {
             solid.clone().into_any_element()
         } else {
-            panestate::view(light,&PaneState::loading(panestate::loading_for(kind,false)),None)
+            panestate::view(light,&PaneState::loading(if kind == "mech" { panestate::loading_for_mech(super::viewer::mech_native(thread)) } else { panestate::loading_for(kind,false) }),None)
         };
         let key = id.clone();
         let body = with_rect(div().flex_1().min_h_0().min_w_0().overflow_hidden().child(body),||format!("tile-body:{id}"));

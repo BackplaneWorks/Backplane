@@ -2437,7 +2437,7 @@ async fn tool_of(ag: &Arc<Agents>, name: &str) -> Arc<dyn mcp::ToolSet> { ag.too
     assert!(!log_from(&hub, from).await.iter().any(|e| turn_is(e, "running") && e["thread"] == other), "the report did not start the settled thread"); ag.shutdown();
 }
 
-#[tokio::test(flavor = "multi_thread")] async fn the_writing_setting_names_threads_and_without_it_haiku_does() { // Settings > Writing: the one-shot's provider and model
+#[tokio::test(flavor = "multi_thread")] async fn the_writing_setting_names_threads_and_without_it_haiku_does() { // Settings > Agents, its writing rows: the one-shot's provider and model
     let sd = dir("wr-bin"); let log = sd.join("argv"); let logp = log.display().to_string().replace('\\', "/"); // sh reads a backslash as an escape: the path with slashes (Windows)
     script(&sd, "claude", &format!("#!/bin/sh\ncat > /dev/null\necho \"claude $*\" >> {}\nprintf '{{\"type\":\"result\",\"is_error\":false,\"result\":\"Claude title\"}}\\n'\n", logp));
     script(&sd, "codex", &format!("#!/bin/sh\ncat > /dev/null\necho \"codex $*\" >> {}\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"type\":\"agent_message\",\"text\":\"Codex title\"}}}}\\n'\n", logp));

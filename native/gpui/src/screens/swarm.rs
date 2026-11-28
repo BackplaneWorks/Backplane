@@ -436,7 +436,9 @@ impl Backplane {
             div().flex_1().flex().justify_center().items_start().child(div().w_full().max_w(px(930.)).px_4().py_4().text_color(c("dim")).child(trs("No posts yet."))).into_any_element()
         } else {
             let meta = meta.clone();
-            list(self.screens.swarm_list.clone(), cx.processor(move |this, ix, _, cx| this.swarm_row(ix, &meta, cx))).flex_1().min_h_0().into_any_element()
+            div().flex_1().min_h_0().relative().flex().flex_col()
+                .child(list(self.screens.swarm_list.clone(), cx.processor(move |this, ix, _, cx| this.swarm_row(ix, &meta, cx))).flex_1().min_h_0())
+                .child(super::scrollbar::bar("swarm", super::scrollbar::Src::List(self.screens.swarm_list.clone()), light)).into_any_element()
         };
 
         let board = div().id("swarm-board").flex_1().min_h_0().relative().flex().flex_col()
@@ -476,7 +478,7 @@ impl Backplane {
                         }))))
             })
             .when(!hover_text.is_empty(), |d| {
-                d.child(div().absolute().left_0().bottom_0().max_w_full().px_2().py_px().bg(c("raise")).border_t_1().border_r_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).overflow_hidden().whitespace_nowrap().child(hover_text))
+                d.child(crate::ui::link_address(light, &hover_text, self.screens.swarm_list.viewport_bounds().size.width))
             });
 
         if !self.screens.img_poll && self.screens.images.loading() {

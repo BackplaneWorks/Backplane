@@ -1,11 +1,15 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Icon
@@ -39,7 +43,7 @@ internal fun MicChip(on: Boolean, held: (Boolean) -> Unit = {}, press: () -> Uni
         onLongPress = { held(true) },
         onPress = { tryAwaitRelease(); held(false) },
     ) }
-    Box(Modifier.size(40.dp).background(if (on) dcs.error else dcs.surfaceVariant).border(BorderStroke(1.dp, if (on) dcs.error else dcs.outlineVariant)).then(hold).testTag("thread.mic"), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(40.dp).clip(dShape).background(if (on) dcs.error else dcs.surfaceVariant).border(BorderStroke(1.dp, if (on) dcs.error else dcs.outlineVariant), dShape).then(hold).testTag("thread.mic"), contentAlignment = Alignment.Center) {
         Icon(if (on) Icons.Default.Stop else Icons.Default.Mic, Msg.android_dictate, tint = if (on) dcs.onError else dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }
 }
@@ -48,7 +52,7 @@ internal fun MicChip(on: Boolean, held: (Boolean) -> Unit = {}, press: () -> Uni
 @Composable
 internal fun AlwaysPill() {
     val stops = DataVoice.always; val paused = DataVoice.alwaysPaused.isNotEmpty()
-    Row(Modifier.heightIn(min = 40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (stops) dcs.error else dcs.outlineVariant)).clickable { DataVoice.alwaysToggle() }.padding(horizontal = 8.dp).testTag("voice.always"),
+    Row(Modifier.heightIn(min = 40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (stops) dcs.error else dcs.outlineVariant), dShape).clickable { DataVoice.alwaysToggle() }.padding(horizontal = 8.dp).testTag("voice.always"),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
         DDot(if (!stops) dcs.outlineVariant else if (paused) dcs.onSurfaceVariant else dcs.error, 8)
         DMono(if (!stops) Msg.settings_voice_always else if (paused) Msg.voice_always_pill_paused else Msg.voice_always_pill_listening, dcs.onSurfaceVariant, 12)
@@ -58,7 +62,7 @@ internal fun AlwaysPill() {
 
 @Composable
 private fun VChip(label: String, primary: Boolean = false, tag: String, press: () -> Unit) {
-    Box(Modifier.heightIn(min = 36.dp).background(if (primary) dcs.primary else dcs.surfaceVariant).border(BorderStroke(1.dp, if (primary) dcs.primary else dcs.outlineVariant)).clickable(onClick = press).padding(horizontal = 10.dp).testTag(tag), contentAlignment = Alignment.Center) {
+    Box(Modifier.heightIn(min = 36.dp).clip(dShape).background(if (primary) dcs.primary else dcs.surfaceVariant).border(BorderStroke(1.dp, if (primary) dcs.primary else dcs.outlineVariant), dShape).clickable(onClick = press).padding(horizontal = 10.dp).testTag(tag), contentAlignment = Alignment.Center) {
         DMono(Tr.t(label), if (primary) dcs.onPrimary else dcs.onSurface, 12)
     }
 }
@@ -137,16 +141,32 @@ internal fun PageRows(title: String, tag: String, rows: List<org.json.JSONObject
     // the row last pressed: a refusal is drawn under it, where the person is looking, not at the top of a long page
     var pressed by remember { mutableStateOf("") }
     val atRow = error.isNotEmpty() && rows.any { it.optString("label") == pressed }
+    // rows the hub marks `adv` fold under one Advanced row, closed at first; a refusal under one of them opens it
+    val (plain, adv) = SettingsNav.split(rows, SettingsNav.debugAdv)
+    var advOpen by androidx.compose.runtime.saveable.rememberSaveable(tag) { mutableStateOf(false) }
+    LaunchedEffect(atRow, pressed) { if (atRow && adv.any { it.optString("label") == pressed }) advOpen = true }
     Column(Modifier.fillMaxWidth().testTag("settings.$tag"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        DMono(title, dfaint)
+        SettingsSection(tag, title)
         if (error.isNotEmpty() && !atRow) DMono(Tr.t(error), dcs.error, 12)
-        rows.forEach { r ->
+        @Composable fun row(r: JSONObject) {
             val label = r.optString("label")
             PlainRow(r, tag, { name, hub -> typed[name] ?: hub }, { name, v -> typed[name] = v }, error = if (atRow && label == pressed) error else "") { b ->
                 val action = b.optString("action"); val value = b.optString("value"); val sent = typed.toMap(); pressed = label
                 if (!pageLocal(ctx, action, value)) scope.launch { act(action, value, sent)?.let { typed.remove(it) } }
             }
             DLine()
+        }
+        plain.forEach { row(it) }
+        if (adv.isNotEmpty()) {
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable { advOpen = !advOpen }.testTag("settings.$tag.adv"), verticalAlignment = Alignment.CenterVertically) {
+                Icon(if (advOpen) Icons.Default.ExpandMore else Icons.Default.ChevronRight, if (advOpen) Msg.common_hide else Msg.common_show, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                DText(Msg.mobile_settings_advanced, dcs.onSurfaceVariant, 14, lines = 1)
+                Spacer(Modifier.width(6.dp))
+                DMono("${adv.size}", dfaint, 12)
+            }
+            DLine()
+            if (advOpen) adv.forEach { row(it) }
         }
     }
 }
@@ -158,12 +178,12 @@ internal fun PageRows(title: String, tag: String, rows: List<org.json.JSONObject
 internal fun PlainRow(r: JSONObject, tag: String, shown: (String, String) -> String, type: (String, String) -> Unit, compact: Boolean = false, error: String = "", press: (JSONObject) -> Unit) {
     val label = r.optString("label"); val tone = r.optString("tone")
     Column(Modifier.fillMaxWidth().testTag("$tag.row.$label"), verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
-        if (label.isNotEmpty() || !compact) Text(Tr.t(label), color = dcs.onSurface, fontFamily = BpMono, fontSize = if (compact) 12.5.sp else 13.sp)
+        if (label.isNotEmpty() || !compact) Text(Tr.t(label), color = dcs.onSurface, fontFamily = BpUi, fontSize = if (compact) 14.sp else 15.sp, fontWeight = FontWeight.Medium)
         // a note that is a value (a path, an id, a link: the row's `copy`) has its copy button beside it
         val noteCopy = r.optString("copy")
         if (r.optString("note").isNotEmpty()) Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(Tr.t(r.optString("note")), color = when (tone) { "bad" -> dcs.error; "warn" -> dwarn; else -> dcs.onSurfaceVariant }, fontFamily = BpMono, fontSize = 11.sp,
-                lineHeight = 15.sp, modifier = Modifier.weight(1f, fill = false).testTag("$tag.note.$label"))
+            Text(Tr.t(r.optString("note")), color = when (tone) { "bad" -> dcs.error; "warn" -> dwarn; else -> dcs.onSurfaceVariant }, fontFamily = if (noteCopy.isNotEmpty()) BpMono else BpUi, fontSize = if (noteCopy.isNotEmpty()) 11.sp else 13.sp,
+                lineHeight = if (noteCopy.isNotEmpty()) 15.sp else 18.sp, modifier = Modifier.weight(1f, fill = false).testTag("$tag.note.$label"))
             if (noteCopy.isNotEmpty()) { Spacer(Modifier.width(4.dp)); CopyButton(noteCopy, tag = "$tag.copy.$label", size = 14) }
         }
         // a code to scan (a pairing link's), as the hub drew it, and its line (the code, the address, until when)
@@ -174,7 +194,7 @@ internal fun PlainRow(r: JSONObject, tag: String, shown: (String, String) -> Str
             val name = f.optString("name")
             val v = shown(name, f.optString("value"))
             val lines = f.optInt("lines", 1).coerceIn(1, 12)
-            Box(Modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = if (compact) 9.dp else 10.dp).testTag("$tag.field.$name")) {
+            Box(Modifier.fillMaxWidth().clip(dShape).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).padding(horizontal = 10.dp, vertical = if (compact) 9.dp else 10.dp).testTag("$tag.field.$name")) {
                 if (v.isEmpty()) Text(Tr.t(f.optString("hint")), color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
                 BasicTextField(v, { type(name, it) }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), singleLine = lines == 1, minLines = lines,
                     visualTransformation = if (f.optBoolean("secret")) PasswordVisualTransformation() else VisualTransformation.None, modifier = Modifier.fillMaxWidth())

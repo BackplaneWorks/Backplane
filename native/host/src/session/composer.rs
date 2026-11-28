@@ -191,7 +191,7 @@ pub fn btw_json(session: &Value, thread: &str) -> Value {
     json!({"q": q, "a": if a.is_empty() { "Thinking…" } else { a }})
 }
 /// Btw.answer: an answer that came back empty says where the model is chosen.
-pub fn btw_answer(a: &str) -> String { let a = a.trim(); if a.is_empty() { "No answer came back (Settings, Writing: the model it asks).".into() } else { a.to_string() } }
+pub fn btw_answer(a: &str) -> String { let a = a.trim(); if a.is_empty() { "No answer came back (Settings, Agents: the model it asks).".into() } else { a.to_string() } }
 /// `thread.secretBox`: the masked box of this thread: one opened here (`/secret`), else the first of the agents' requests in it (`asks`: `(name, purpose, thread)`).
 /// No value is ever here: the field is the app's own, and Save goes straight to the hub (`secret.set`).
 pub fn secret_box(session: &Value, thread: &str, title: &str, asks: &[(String, String, String)]) -> Value {
@@ -566,7 +566,7 @@ mod tests {
         assert!(o.cmds.iter().any(|c| c["type"] == "compose" && c["text"] == ""), "the box is emptied now, not when the answer comes");
         assert_eq!(btw_json(&json!({"drafts": {format!("@btw:{T}"): "why", format!("@btw.a:{T}"): ""}}), T), json!({"q": "why", "a": "Thinking…"}));
         assert_eq!(btw_json(&json!({"drafts": {format!("@btw:{T}"): "why", format!("@btw.a:{T}"): "because"}}), T)["a"], "because"); assert_eq!(btw_json(&json!({"drafts": {}}), T), Value::Null);
-        assert!(btw_answer("  ").contains("Settings, Writing")); assert_eq!(btw_answer(" a "), "a");
+        assert!(btw_answer("  ").contains("Settings, Agents")); assert_eq!(btw_answer(" a "), "a");
     }
     #[test] fn a_refused_command_says_why_and_keeps_the_draft() {
         for (draft, says_) in [("/btw", BTW_EMPTY)] {

@@ -1,4 +1,4 @@
-//! The text size this device chose (Settings, This device, `Local::text_pct`). Every text size and line height in the client is
+//! The text size this device chose (Settings, Appearance, `Local::text_pct`). Every text size and line height in the client is
 //! written in its size at 100% and goes through `tpx`, so a size and its line grow together and keep the proportions they have at 100%
 //! (a root line height that grew while an 11 px label kept its size spread every label and note apart and over its neighbours). A box
 //! sized to hold one line of text (a bar, a chip, a list row) is written through `tpx` too, so the line it holds still fits it.

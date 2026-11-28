@@ -548,7 +548,7 @@ fn press(this: &mut Backplane, row: &MenuRow, cx: &mut Context<Backplane>) {
         let thread = current_thread(this);
         let p = select_params(&thread, &row.profile, row.epoch, &this.screens.acct.snap);
         /* i18n-ok: drawn through tr */ if this.tx.try_send(Command::Rpc("accounts.select".into(), Secret(p), "acct-select")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); }
-    } else { this.screens.acct.menu = false; this.screens.picker_open = false; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); }
+    } else { this.screens.acct.menu = false; this.screens.picker_open = false; this.open_settings(cx); this.screens.settings_ui.keys = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; open_page(this, cx); }
     cx.notify();
 }
 /// The digit `n` in the open menu.
@@ -586,7 +586,7 @@ pub fn section(cx: &mut Context<Backplane>, light: bool, st: &Accounts, s: f32) 
             /* i18n-ok: drawn through tr */ .child(trs("Move all threads here")).on_click(cx.listener(move |this, _, _, cx| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": bound, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } cx.notify(); })));
     }
     list.child(div().id("acct-m-manage").flex().items_center().gap_2().px_3().py(px(6.)).mx_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_size(px(13. * s)).text_color(c("dim"))
-        .child(trs("Manage accounts in Settings")).on_click(cx.listener(|this, _, _, cx| { this.screens.acct.menu = false; this.screens.picker_open = false; this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = true; open_page(this, cx); cx.notify(); })))
+        .child(trs("Manage accounts in Settings")).on_click(cx.listener(|this, _, _, cx| { this.screens.acct.menu = false; this.screens.picker_open = false; this.want_focus = true; this.open_settings(cx); this.screens.settings_ui.keys = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; open_page(this, cx); cx.notify(); })))
 }
 
 // ---- what an account has left ----------------------------------------------------------------------------------------------------------------

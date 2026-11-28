@@ -58,8 +58,18 @@ private fun backplaneScheme(light: Boolean): ColorScheme {
 
 private val lightScheme = backplaneScheme(true)
 private val darkScheme = backplaneScheme(false)
-private val square = RoundedCornerShape(0.dp)
-private val shapes = Shapes(square, square, square, square, square)
+// The phone may be rounder than the desktop: controls 10, cards 12, sheets and dialogs 16 (menus, dialogs, bottom sheets and the navigation indicator follow these).
+private val shapes = Shapes(extraSmall = RoundedCornerShape(6.dp), small = RoundedCornerShape(10.dp), medium = RoundedCornerShape(12.dp), large = RoundedCornerShape(16.dp), extraLarge = RoundedCornerShape(20.dp))
+/** Interface text (buttons, titles, prose): the system face. Code, paths, ids, meta lines and the small uppercase labels stay [BpMono]. */
+val BpUi: FontFamily = FontFamily.Default
+/** Corner radius of controls (buttons, fields, chips) and of cards (bubbles, ASKS, tool-call boxes, code blocks). */
+val dR = 10.dp
+val dRCard = 12.dp
+val dShape = RoundedCornerShape(dR)
+val dShapeCard = RoundedCornerShape(dRCard)
+/** Dialogs, and bottom sheets (top corners only). */
+val dShapeDialog = RoundedCornerShape(16.dp)
+val dShapeSheet = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)
 // JetBrains Mono (SIL OFL 1.1, res/font) for code and mono labels, ligatures off; body text stays the system face.
 val BpMono = FontFamily(Font(R.font.jetbrains_mono_regular, FontWeight.Normal), Font(R.font.jetbrains_mono_bold, FontWeight.Bold))
 const val NO_LIGATURES = "calt 0"

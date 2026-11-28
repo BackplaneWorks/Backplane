@@ -47,6 +47,39 @@ fn memory_pages(sizes: impl Iterator<Item = usize>) -> Vec<usize> {
     starts
 }
 /// BU.ago, in words short enough for a row
+/// A mailroom row's sender as the person knows it: a bot by its name, a thread by its title (the address, `bot:<id>` / `thread:<id>`, when neither is known).
+pub(crate) fn mail_who(w: &super::world::World, addr: &str, title: &dyn Fn(&str) -> Option<String>) -> String {
+    if let Some(id) = addr.strip_prefix("bot:") { if let Some(b) = w.bot(id) { return b.name.clone() } }
+    if let Some(th) = addr.strip_prefix("thread:") { if let Some(t) = thread_name(w, th, title) { return t } }
+    addr.to_string()
+}
+/// A thread as the person knows it: the bot whose chat it is, else its title.
+fn thread_name(w: &super::world::World, th: &str, title: &dyn Fn(&str) -> Option<String>) -> Option<String> {
+    w.bots.values().find(|b| !b.deleted && b.thread == th).map(|b| b.name.clone()).or_else(|| title(th))
+}
+/// A mailroom row's first line with each `backplane://thread/<id>` the hub wrote into it (a bot's report) named as `thread_name` names it.
+/// What the bots were sent is not changed: only the row shows names.
+pub(crate) fn mail_head(w: &super::world::World, head: &str, title: &dyn Fn(&str) -> Option<String>) -> String {
+    const REF: &str = "backplane://thread/";
+    let mut out = String::new(); let mut rest = head;
+    while let Some(i) = rest.find(REF) {
+        out.push_str(&rest[..i]); let after = &rest[i + REF.len()..];
+        let n = after.find(|c: char| !(c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '~'))).unwrap_or(after.len());
+        match thread_name(w, &after[..n], title) { Some(t) if n > 0 => out.push_str(&t), _ => { out.push_str(REF); out.push_str(&after[..n]); } }
+        rest = &after[n..];
+    }
+    out.push_str(rest); out
+}
+/// A routine row's last run, for the person who pressed Run or waits for the next: "ran just now", "ran 5m ago"; empty when it never ran.
+pub(crate) fn ran_text(now: u64, last: u64) -> String { if last == 0 { String::new() } else { format!("ran {}", ago(now, last)) } }
+/// How long after a routine fired a running turn of its bot is taken as that routine's run (Plane's ROUTINE_WINDOW).
+pub(crate) const ROUTINE_RUN_WINDOW: u64 = 900;
+/// Whether a routine that last fired at `last` is running now: its bot's turn runs and it fired within the window.
+pub(crate) fn routine_running(turn_running: bool, last: u64, now: u64) -> bool { turn_running && last > 0 && now <= last + ROUTINE_RUN_WINDOW }
+/// Whether the hub's folded state has `thread`'s turn running.
+pub(crate) fn turn_running(thread: &str) -> bool {
+    !thread.is_empty() && crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(thread).map(|t| t.turn == crate::state::Turn::Running))).flatten().unwrap_or(false)
+}
 fn ago(now: u64, at: u64) -> String { if at == 0 { return "never".into() } let s = now.saturating_sub(at); if s < 60 { "just now".into() } else if s < 3600 { format!("{}m ago", s / 60) } else if s < 86400 { format!("{}h ago", s / 3600) } else { format!("{}d ago", s / 86400) } }
 
 /// MBots.bot.m for a bot here, without what the presenter adds from its own state (mood, note): its header, tabs and the page of `tab` (BU.tab.of: the tab asked for when the bot has it, else Chat).
@@ -72,6 +105,8 @@ pub async fn page_from(hub: &Arc<Hub>, bot: &str, tab: &str, now: u64, from: usi
     // Settings: its name and cat, the control setup's Your uberbot draws (present/onboard_uber.rs), its presses `bot-cat` (present/screen.rs)
     if on == "settings" { v["catpick"] = crate::present::onboard_uber::cat_row(&format!("bcn.{bot}"), &format!("bcc.{bot}"), &me.name, "", (!me.auto).then_some(me.look), &me.color, "bot-cat", Some("Save name"), ""); }
     if tab_of_world(&w, bot, on, now, from, &mut v) {
+        // Routines: the one whose turn is running now says so (its Run does nothing until it ends: routines.rs `routine_run`)
+        if on == "routines" && !uber { let busy = turn_running(&me.thread); if let Some(rs) = v["routines"].as_array_mut() { for r in rs { let last = w.routines.get(r["id"].as_str().unwrap_or("")).map_or(0, |x| x.last); r["running"] = json!(routine_running(busy, last, now)); } } }
         // Settings: the memory tree's state (its engine reads the world itself)
         if on == "settings" && v["recall"].is_object() { drop(w); if let Some(rc) = b.recall.get() { let (n, lines, left) = rc.stats(&me.thread).await; v["recall"]["messages"] = json!(n); v["recall"]["lines"] = json!(lines); v["recall"]["left"] = json!(left); if v["recall"]["on"] == true && rc.on(&me.thread) { v["recall"]["progress"] = rc.publish(&me.thread, false).await; } } }
         return Some(v)
@@ -90,7 +125,8 @@ pub async fn page_from(hub: &Arc<Hub>, bot: &str, tab: &str, now: u64, from: usi
         }
         "mail" => {
             let l = super::mail::requests::list(&w, &json!({"bot":bot,"n":40}));
-            let rows: Vec<Value> = l["convs"].as_array().map(|a| a.iter().map(|c| json!({"id":c["id"],"subject":c["subject"],"from":c["from"],"head":c["head"],"n":c["n"],"unread":c["unread"],"status":c["status"],"ago":ago(now, c["last"].as_u64().unwrap_or(0))})).collect()).unwrap_or_default();
+            let title = |th: &str| crate::statehost::policies().and_then(|p| p.with_state(|st| st.threads.get(th).map(|t| t.title.clone()))).flatten().filter(|t| !t.is_empty());
+            let rows: Vec<Value> = l["convs"].as_array().map(|a| a.iter().map(|c| json!({"id":c["id"],"subject":c["subject"],"from":mail_who(&w, c["from"].as_str().unwrap_or(""), &title),"head":mail_head(&w, c["head"].as_str().unwrap_or(""), &title),"n":c["n"],"unread":c["unread"],"status":c["status"],"ago":ago(now, c["last"].as_u64().unwrap_or(0))})).collect()).unwrap_or_default();
             v["mail"] = Value::Array(rows); v["mailTotal"] = l["total"].clone();
         }
         "tasks" => { if let Some(d) = crate::term::driver::get(hub) { let t = d.tasks_view(bot).await; v["tasks"] = t["items"].clone(); v["taskRuns"] = t["runs"].clone(); } }
@@ -117,7 +153,7 @@ fn tab_of_world(w: &super::world::World, bot: &str, on: &str, now: u64, from: us
             let z = super::clock::Zones { settings: &w.settings };
             let mut rs: Vec<_> = w.routines.values().filter(|r| r.bot == bot && !r.deleted).collect(); rs.sort_by(|a, c| a.id.cmp(&c.id));
             v["routines"] = rs.iter().map(|r| { let s = super::sched_text::row(&z, r, now);
-                json!({"id":r.id,"name":r.name,"cron":r.cron,"when":s.when,"prompt":r.prompt,"on":r.on,"last":ago(now, r.last),"kind":s.kind,"label":s.when,"next":s.next_text,"rel":s.rel,"done":s.done}) }).collect();
+                json!({"id":r.id,"name":r.name,"cron":r.cron,"when":s.when,"prompt":r.prompt,"on":r.on,"last":ago(now, r.last),"ran":ran_text(now, r.last),"kind":s.kind,"label":s.when,"next":s.next_text,"rel":s.rel,"done":s.done}) }).collect();
         }
         "space" => {
             let spec = w.spaces.get(bot).map(String::as_str).unwrap_or("");
@@ -324,5 +360,27 @@ mod far_tests {
         assert!(o["copy"].is_array());
         let b = o["blocks"].to_string();
         assert!(b.contains(r#""tag":"code""#) && b.contains("EPC2306") && b.contains(r#""tag":"pre""#) && b.contains("cargo test"), "{b}");
+    }
+}
+
+#[cfg(test)]
+mod routine_row_tests {
+    use super::*;
+    #[test] fn a_mailroom_row_names_bots_and_threads() {
+        let mut w = super::super::world::World::default();
+        w.apply_line(r#"{"$":"BotSet","id":"b1","thread":"t1","name":"Scout","color":"","at":1}"#);
+        let title = |th: &str| (th == "t2").then(|| "Fix the regulator".to_string());
+        assert_eq!(mail_who(&w, "bot:b1", &title), "Scout"); assert_eq!(mail_who(&w, "thread:t2", &title), "Fix the regulator");
+        assert_eq!(mail_who(&w, "bot:gone", &title), "bot:gone", "unknown: as it is");
+        assert_eq!(mail_head(&w, "Bot report from backplane://thread/t1:", &title), "Bot report from Scout:");
+        assert_eq!(mail_head(&w, "see backplane://thread/t2 and backplane://thread/t9.", &title), "see Fix the regulator and backplane://thread/t9.");
+    }
+    #[test] fn a_routine_row_says_when_it_ran_and_whether_it_runs_now() {
+        assert_eq!(ran_text(1000, 0), "", "never ran: nothing");
+        assert_eq!(ran_text(1000, 990), "ran just now"); assert_eq!(ran_text(4000, 400), "ran 1h ago");
+        assert!(routine_running(true, 990, 1000), "fired 10 s ago and its bot's turn runs");
+        assert!(!routine_running(false, 990, 1000), "the turn ended");
+        assert!(!routine_running(true, 0, 1000), "never fired: the turn is the person's");
+        assert!(!routine_running(true, 10, 10 + ROUTINE_RUN_WINDOW + 1), "fired long ago: the turn running now is another");
     }
 }

@@ -141,7 +141,9 @@ impl<'a> Facts<'a> {
     pub fn signed(&self, id: &str) -> bool { s(self.agent(id), "signed") == "yes" || !self.accounts(id).is_empty() }
     pub fn runs(&self, tool: &str) -> bool { self.checks[tool]["runs"].as_bool().unwrap_or(false) }
     pub fn projects(&self) -> Vec<&crate::state::Project> { self.st.projects.values().filter(|p| !p.removed).collect() }
-    pub fn threads(&self) -> usize { let p: Vec<&str> = self.st.projects.iter().filter(|(_, p)| !p.removed).map(|(id, _)| id.as_str()).collect(); self.st.threads.values().filter(|t| !t.deleted && p.contains(&t.project.as_str())).count() }
+    pub fn threads_in(&self, project: &str) -> usize { self.st.threads.values().filter(|t| !t.deleted && t.project == project).count() }
+    /// The threads a first message started (project.start names them `home-<msg>`): the project's own empty first thread is not one.
+    pub fn started(&self) -> usize { self.st.threads.iter().filter(|(id, t)| id.starts_with("home-") && !t.deleted && self.st.projects.get(&t.project).map_or(false, |p| !p.removed)).count() }
 }
 
 fn looking(f: &Facts) -> &'static str { if f.checked { "" } else { "Checking this machine." } }
@@ -615,14 +617,14 @@ fn project(f: &Facts, session: &Value, user_home: &str) -> Step {
     if let Some(p) = ps.iter().max_by_key(|p| p.created) {
         rows.push(row(&p.title, &p.root, vec![]));
         let id = f.st.projects.iter().find(|(_, x)| x.root == p.root).map(|(i, _)| i.as_str()).unwrap_or("");
-        let n = f.threads();
+        let n = f.started();
         let mut r = row("First message", &if n == 0 { "Starts a thread in this project with it. You can also leave it empty and write after setup.".to_string() } else { format!("{n} {} so far. Another message starts another one.", if n == 1 { "thread" } else { "threads" }) }, vec![btn("Start", "ob-thread", id, n == 0)]);
         r["fields"] = json!([{"name": "obfirst", "hint": "What should the agent do?", "secret": false, "value": draft(session, "@f.obfirst")}]);
         rows.push(r);
     } else {
         let path = if session["drafts"]["@f.obproject"].is_string() { draft(session, "@f.obproject").to_string() } else { first_board(user_home) };
         let e = draft(session, "@ob.project.err");
-        let mut add = row("Folder", if e.is_empty() { "The full path of a folder on this computer." } else { e }, vec![btn("Create", "ob-project", "", true)]);
+        let mut add = row("Folder", if e.is_empty() { "The full path of a folder on this computer." } else { e }, vec![btn("Use this folder", "ob-project", "", true)]);
         add["fields"] = json!([{"name": "obproject", "hint": "Folder", "secret": false, "value": path}]);
         rows.push(add);
     }
@@ -637,7 +639,7 @@ fn uber_of(st: &State) -> Option<String> { let u = set(st, "uber.bot"); st.bots_
 fn finish(marks: &[(String, String, Mark)]) -> Step {
     let open: Vec<&(String, String, Mark)> = marks.iter().filter(|(id, _, m)| *m != Mark::Done && id != "done").collect();
     let rows = open.iter().map(|(id, title, m)| row(title, if *m == Mark::Skipped { "Skipped." } else { "Not done." }, vec![btn("Go", "ob-go", id, false)])).collect();
-    Step { id: "done", group: "", title: "Done".into(), body: "Press ? any time for keys.".into(), rows, choices: vec![choice("Open the uberbot", "ob-uber-open", "")], panel: String::new(), done: true, task: false, accept: false }
+    Step { id: "done", group: "", title: "Done".into(), body: "Press F1 any time for keys.".into(), rows, choices: vec![choice("Open the uberbot", "ob-uber-open", "")], panel: String::new(), done: true, task: false, accept: false }
 }
 
 fn all(f: &Facts, st: &State, session: &Value, c: &Client, user_home: &str) -> Vec<Step> {
@@ -774,7 +776,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             ask.send("onboard.check", json!({}));
             json!({"drafts": {"@ob.open": "1", "@ob.closed": "", "@ob.step": first}, "open": {"settings": false}})
         }
-        // Settings, Developer: setup's progress forgotten, opened at the first step as on a new hub
+        // Settings, Setup, Developer: setup's progress forgotten, opened at the first step as on a new hub
         "ob-replay" => {
             let first = steps[0].id;
             for (k, v) in [("onboard.done", ""), ("onboard.skipped", ""), ("onboard.seen", ""), ("onboard.kicad.auto", ""), ("onboard.step", first)] { ask.put(k, v); }
@@ -818,9 +820,11 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         "ob-thread" => {
             let text = draft(session, "@f.obfirst").trim().to_string();
             if !st.projects.contains_key(value) { return None }
-            let mut p = json!({"project": value});
-            if !text.is_empty() { p["text"] = json!(text); }
-            ask.send("thread.create", p);
+            // the message makes its thread and is its first turn in one request (project.start); thread.create takes no text, so the
+            // message was dropped and an empty second "New thread" was left. With nothing typed there is nothing to start: the new
+            // project already has its empty thread, and only a project with none gets one
+            if !text.is_empty() { ask.send("project.start", json!({"project": value, "msg": format!("ob{}-{}", st.seq, ask.rid), "text": text})); }
+            else if f.threads_in(value) == 0 { ask.send("thread.create", json!({"project": value})); }
             json!({"drafts": {"@f.obfirst": ""}})
         }
         _ => return None,
@@ -1072,20 +1076,28 @@ mod tests {
         let p = at(&s0, "project", &i, &desk()); assert_eq!(row_of(&p, "Folder")["fields"][0]["value"], "/h/Backplane/first-board");
         assert_eq!(first_board(r"C:\Users\ann"), r"C:\Users\ann\Backplane\first-board", "Windows separators throughout");
         assert_eq!(row_of(&p, "Pair a phone")["buttons"][0]["action"], "device-invite");
+        assert_eq!(row_of(&p, "Folder")["buttons"][0]["label"], "Use this folder", "one word for a folder that exists (added) and one that does not (made)");
         let o = act(&s0, "h", &sess(json!({"@ob.step": "project"})), &i, &desk(), "/home/x", "ob-project", "").unwrap();
         assert_eq!(sent(&o, "project.new")[0]["path"], "/home/x/Backplane/first-board"); assert_eq!(sent(&o, "project.new")[0]["orAdd"], true);
         let bad = act(&s0, "h", &sess(json!({"@f.obproject": "here"})), &i, &desk(), "/home/x", "ob-project", "").unwrap(); assert!(bad.cmds.is_empty()); assert!(s(&bad.patch["drafts"], "@ob.project.err").contains("full path"));
         let mut s1 = cst(blank(), &[]); s1.apply(&json!({"$":"ProjectCreated","id":"p1","title":"first-board","root":"/h/Backplane/first-board","at":1}));
         let p = at(&s1, "project", &i, &desk()); assert_eq!(p["state"], "done"); assert_eq!(row_of(&p, "First message")["buttons"][0]["value"], "p1");
         let t = act(&s1, "h", &sess(json!({"@ob.step": "project", "@f.obfirst": "make a blinky"})), &i, &desk(), "/h", "ob-thread", "p1").unwrap();
-        assert_eq!(sent(&t, "thread.create")[0], json!({"project": "p1", "text": "make a blinky"}));
+        let m = &sent(&t, "project.start")[0]; assert_eq!((m["project"].as_str(), m["text"].as_str()), (Some("p1"), Some("make a blinky")), "the message is sent with its thread: thread.create drops a text");
+        assert!(m["msg"].as_str().map_or(false, |k| k.starts_with("ob") && k.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')), "{m}"); assert!(sent(&t, "thread.create").is_empty());
+        // the project's own empty thread is not "1 thread so far"; a started one is
+        s1.apply(&json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"New thread","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2}));
+        let p = at(&s1, "project", &i, &desk()); assert!(row_of(&p, "First message")["note"].as_str().unwrap().starts_with("Starts a thread"), "{p}"); assert_eq!(row_of(&p, "First message")["buttons"][0]["on"], true);
+        let none = act(&s1, "h", &sess(json!({"@ob.step": "project"})), &i, &desk(), "/h", "ob-thread", "p1").unwrap(); assert!(none.cmds.is_empty(), "nothing typed, and the project has its thread: no second empty one");
+        s1.apply(&json!({"$":"ThreadCreated","id":"home-ob1-1","project":"p1","title":"make a blinky","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":3}));
+        assert!(row_of(&at(&s1, "project", &i, &desk()), "First message")["note"].as_str().unwrap().starts_with("1 thread so far"));
         let link = sess(json!({"@ob.step": "project", "@invite": json!({"link": "http://127.0.0.1:3800/pair#invite=x", "code": "ABCD2345", "localOnly": true}).to_string()}));
         let q = page(&s0, &link, &i, &desk(), "/h"); assert!(row_of(&q, "Pair a phone")["qr"].is_array()); assert_eq!(row_of(&q, "Only this computer")["tone"], "warn");
     }
     #[test] fn done_says_the_help_key_and_opens_the_uberbot() {
         let (s0, i) = (cst(blank(), &[("onboard.skipped", "tools")]), info("linux"));
         let p = at(&s0, "done", &i, &desk());
-        assert_eq!(p["body"], "Press ? any time for keys."); assert_eq!(p["choices"][0]["action"], "ob-uber-open");
+        assert_eq!(p["body"], "Press F1 any time for keys."); assert_eq!(p["choices"][0]["action"], "ob-uber-open");
         let k = row_of(&p, "Design tools"); assert_eq!(k["note"], "Skipped."); assert_eq!(k["buttons"][0]["value"], "tools");
         let o = act(&s0, "h", &sess(json!({"@ob.step": "done"})), &i, &desk(), "/h", "ob-uber-open", "").unwrap();
         assert_eq!(setting_of(&o, "onboard.done").as_deref(), Some("1")); assert!(ended("ob-uber-open", &o.patch)); assert_eq!(sent(&o, "onboard.uber").len(), 1, "no uberbot yet: made");
@@ -1297,6 +1309,10 @@ mod tests {
         let mut d = typed.clone(); d["@ob.uber.look"] = json!(picked.to_string()); d["@ob.uber.color"] = json!("#6fb3f2");
         let p = page(&s0, &sess(d.clone()), &info("linux"), &desk(), "/h"); assert_eq!((p["rows"][0]["look"].as_u64(), p["rows"][0]["picked"].as_bool()), (Some(picked), Some(true)));
         assert_eq!(press(&s0, d.clone(), "ob-uber", "auto").patch["drafts"]["@ob.uber.look"], "auto");
+        // the box is drawn back with exactly what was typed, a trailing space too (a trimmed copy rewrote the field while typing and lost spaces)
+        let mut sp = typed.clone(); sp["@f.obubername"] = json!("Mochi ");
+        assert_eq!(page(&s0, &sess(sp.clone()), &info("linux"), &desk(), "/h")["rows"][0]["fields"][0]["value"], "Mochi ");
+        assert_eq!(sent(&press(&s0, sp, "ob-next", ""), "bots.create")[0]["name"], "Mochi", "Say hello trims");
         let mut bad = typed.clone(); bad["@f.obubercustom"] = json!("blue");
         assert_eq!(press(&s0, bad, "ob-uber", "custom").patch["drafts"]["@ob.uber.err"], "Type a colour like #6fb3f2.");
         // Say hello (the step's Next): made with the name, the colour and the pick, and the step stays for the arrival

@@ -28,7 +28,17 @@ pub fn split(bar_w: f32, combo: &Value, tok: &str, ctx: &str) -> (f32, String) {
     let short = crate::streamer::shown(&string(combo, "short"));
     let need = FRAME + short.chars().count() as f32 * ch();
     let text = if !tok.is_empty() && (ctx.is_empty() || bar_w - fixed() - words(tok) >= need) { tok } else { ctx };
+    // a narrow row (a pane open beside a small window): the context chip drops its words as a whole (its gauge alone) before the chip's words are cut;
+    // a row measured with no room left gives the chip 1 px, not 0 (0 is "not measured yet": all of its words)
+    if !ctx.is_empty() && bar_w - fixed() - words(text) < need { return ((bar_w - fixed() - TOK_ICON).max(1.), String::new()) }
     (bar_w - fixed() - words(text), text.to_string())
+}
+/// The context chip with its gauge alone (no words, no gap).
+const TOK_ICON: f32 = TOK_FRAME - 8.;
+/// The chip draws its mark alone (no half words, no lone "…") when the row was measured and even its short form does not fit.
+pub fn mark_only(combo: &Value, avail: f32) -> bool {
+    let short = crate::streamer::shown(&string(combo, "short"));
+    avail > 0. && FRAME + short.chars().count() as f32 * ch() > avail
 }
 
 /// The context chip's memory bar (infinite context): its width and gap, taken from the row before it is split.
@@ -73,20 +83,24 @@ pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32
     let provider = super::picker::bare(thread["provider"].as_str().or(thread["picker"]["providers"].as_array().and_then(|p| p.iter().find(|x| x["on"] == true)).and_then(|x| x["value"].as_str())).unwrap_or("claude")).to_string();
     let text = words(combo, avail);
     let text = if text.is_empty() { "…".to_string() } else { text };
+    let mark_only = mark_only(combo, avail);
     let tipped = tip(combo, keys.0, keys.1);
     // where it was drawn: a press on it is the chip's own (it shuts the menu), not a press outside the menu
     let at = this_chip.clone();
     div().id("model-chip").relative().cursor_pointer().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).hover(|s| s.bg(c("raise")))
         .text_size(crate::scale::tpx(12.)).font(crate::art::mono_font()).flex().items_center().gap_2()
         .child(canvas(move |b, _, _| at.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full()).child(crate::art::probe("modelchip"))
-        .child(super::picker::logo(&provider)).child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(c(tone(combo))).child(text))
-        .when(!tipped.is_empty() && !menu_open, |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tipped.clone(), light)).into()))
+        .child(super::picker::logo(&provider)).when(!mark_only, |d| d.child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(c(tone(combo))).child(text)))
+        .when(!tipped.is_empty() && !menu_open, |d| d.tooltip(move |w, cx| { let at = w.mouse_position(); cx.new(|_| Tip::new(tipped.clone(), light, at)).into() }))
         .on_click(cx.listener(|this, _, window, cx| this.combo_click(window, cx)))
 }
 /// A hover of several lines.
-pub(crate) struct Tip(pub String, pub bool);
+pub(crate) struct Tip(pub String, pub bool, pub crate::keys::Hush);
+impl Tip { pub(crate) fn new(text: String, light: bool, at: Point<Pixels>) -> Self { Tip(text, light, crate::keys::Hush::new(at)) } }
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // as every tooltip (keys::Hush): nothing while a right-click menu is open or after a press on its element
+        if self.2.quiet() { return div() }
         let c = |n: &str| theme::color(self.1, n);
         div().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_color(c("text")).text_size(crate::scale::tpx(12.)).flex().flex_col().children(self.0.lines().map(|l| div().whitespace_nowrap().child(l.to_string())).collect::<Vec<_>>())
     }
@@ -215,6 +229,17 @@ mod tests {
         let (avail, text) = split(532., &combo(), tok, "ctx 44%"); assert_eq!(text, "ctx 44%"); assert!(FRAME + string(&combo(), "short").chars().count() as f32 * CH <= avail);
         // nothing measured yet, or no context words: the hub's token words as they are
         assert_eq!(split(0., &combo(), tok, "ctx 44%"), (0., tok.to_string())); assert_eq!(split(532., &combo(), tok, "").1, tok);
+    }
+    #[test] fn a_narrow_row_drops_whole_words_never_half_of_them() {
+        let tok = "885k tok · $0.0915 · ctx 44%";
+        // a pane open beside a 900 px window leaves the row ~240 px: the context chip keeps its gauge alone, the chip its mark alone
+        let (avail, text) = split(240., &combo(), tok, "ctx 44%"); assert_eq!(text, "", "no \"^ ct\": the context words go as a whole");
+        assert!(avail > 0. && mark_only(&combo(), avail), "measured with no room: the mark alone, not the full words");
+        // a little more room: the context chip's gauge alone gives the chip room for its short form
+        let (avail, text) = split(420., &combo(), tok, "ctx 44%"); assert_eq!(text, ""); assert!(!mark_only(&combo(), avail)); assert_eq!(words(&combo(), avail), "Opus 5.5 · 36%");
+        // the usual row: the words, the chip whole
+        let (avail, text) = split(532., &combo(), tok, "ctx 44%"); assert_eq!(text, "ctx 44%"); assert!(!mark_only(&combo(), avail));
+        assert!(!mark_only(&combo(), 0.), "not measured yet: the words");
     }
     #[test] fn the_chip_says_as_much_as_fits() {
         let c = combo();

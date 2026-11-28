@@ -453,6 +453,11 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // The hub's answers this request carries (Diff, Review) are applied before anything is answered; the commands they make go out first.
     let read_cmds=match p["reads"].as_array().filter(|r|!r.is_empty()) { Some(reads)=>crate::session::pages::apply_reads(&crate::session::dispatch::StateFacts(st),hub,&mut session,reads), None=>vec![] };
     let mut cmds=read_cmds.clone();
+    // a bot or a room the person just made (its reply came with this request): its page opens, as its sidebar row would open it
+    if action.is_empty() { if let Some(target)=go_made(st,&mut session) {
+        if let Some(o)=session.as_object_mut() { o.remove("route"); }
+        return Some(json!({"remoteReady":false,"nextTarget":target,"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+    } }
     // The shared pure dispatcher owns composer/commands/select; this root owns private sidebar paging.
     let mut adopted=p.clone(); adopted["session"]=session.clone();
     let dispatched=crate::session::dispatch::dispatch(&crate::session::dispatch::StateFacts(st),&adopted);
@@ -489,7 +494,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     } else if let Some(o)=super::botforms::act(st,hub,&session,action,value) {
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else if let Some(o)=super::settings::act(hub,&session,action,value) {
+        let was_open=super::settings::is_open(&session);
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
+        // Settings closed: the viewer its opening shut comes back (viewer::reopen)
+        if was_open && !super::settings::is_open(&session) { if let Some(r)=super::viewer::reopen(st,hub,&session) { let th=text(&session,"sel").to_string(); cmds=applied_view(st,hub,&th,&mut session,&cmds,r); } }
     } else {
     // the viewers' actions read the open thread's state: a linked machine's mirror for its thread (its project folder is over there)
     let sel_id=text(&session,"sel").to_string();
@@ -940,6 +948,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,far,un,hub),"bots":bots(st,far,un,hub,opts.now),"theme":setting(st,"ui.theme"),"mouse":json!({"2d":setting(st,"mouse.2d"),"3d":setting(st,"mouse.3d"),"invert":setting(st,"mouse.invert")}),"browserStart":crate::settings::browser_start::url(setting(st,crate::settings::browser_start::KEY)),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":super::botforms::new_room(st,hub,&session).unwrap_or(Value::Null),"newBot":super::botforms::new_bot(&session).unwrap_or(Value::Null),"projectHome":null});
     let mut shown=shown;
+    shown["settingsPages"]=super::settings::palette_pages(); // Ctrl+K finds a Settings page by its name or another one while Settings is shut
     let no_provider=crate::settings::provider_notice::from_screen(p.get("hubInfo").and_then(|h|h["models"].as_str()), p.get("hubInfo").and_then(|h|h["modelsProbedHere"].as_bool()), setting(st,"accounts.inventory"));
     if !no_provider.is_null() { shown["noProvider"]=no_provider; }
     if !far.is_empty() { shown["machines"]=machine_switch(far,un,&mpick); }
@@ -1010,6 +1019,20 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     Some(json!({"remoteReady":true,"shown":shown,"session":session,"cmds":cmds,"overlay":{"j":overlay,"key":hub,"name":hub.split(':').next().unwrap_or("")},"window":window,"local":ns.local()}))
 }
 
+/// The page of what the person just made with New bot or New room (`@go.bot` / `@go.room`: its name, set when the hub accepted it, session/pages.rs):
+/// the bot of that name, or the newest room of that name. The mark is taken either way; None when there is none or nothing of that name is known yet.
+pub(crate) fn go_made(st:&State,session:&mut Value)->Option<Value> {
+    let take=|session:&mut Value,k:&str|->String { let v=session["drafts"][k].as_str().unwrap_or("").to_string(); if !v.is_empty() { session["drafts"][k]=json!(""); } v };
+    let bot=take(session,"@go.bot"); let room=take(session,"@go.room"); let roomid=take(session,"@go.roomid");
+    if !roomid.is_empty() && st.rooms_nav.contains_key(&roomid) { return Some(json!({"kind":"room","id":roomid})) }
+    if !bot.is_empty() { if let Some((id,_))=st.bots_nav.iter().find(|(_,b)|b.name==bot) { return Some(json!({"kind":"bot","id":id})) } }
+    if !room.is_empty() {
+        let seq=|id:&str|->(u64,u64) { let mut it=id.trim_start_matches(|c:char|c.is_ascii_alphabetic()).splitn(2,'-'); (it.next().and_then(|n|n.parse().ok()).unwrap_or(0),it.next().and_then(|n|n.parse().ok()).unwrap_or(0)) };
+        if let Some((id,_))=st.rooms_nav.iter().filter(|(id,r)|r.name==room&&!r.ephemeral&&!id.starts_with("dm:")).max_by_key(|(id,_)|seq(id)) { return Some(json!({"kind":"room","id":id})) }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1038,8 +1061,8 @@ mod tests {
         for path in ["/shown/projects","/overlay/j/projects"] { for pr in actual.pointer_mut(path).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(o)=pr.as_object_mut() { o.remove("color"); o.remove("css"); o.remove("closed"); o.remove("swarms"); /* a project's swarms (docs/SWARM.md), which 0.14 had none of */
             // and a red row's want word (sidebar::want), drawn where its age goes
             for k in ["threads","settled","snoozed","archived"] { for r in o.get_mut(k).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(r)=r.as_object_mut() { r.remove("want"); } } } } } }
-        // approved additions: the sidebar's sections, Ctrl+K's list, the groups a project moves to, a project's page (present/sections.rs), the Browser's start page (settings/browser_start.rs), which 0.14 has none of
-        for path in ["/shown","/overlay/j"] { if let Some(o)=actual.pointer_mut(path).and_then(|v|v.as_object_mut()) { for k in ["sections","jump","groupsTo","projectPage","mouse","browserStart"] { o.remove(k); } } }
+        // approved additions: the sidebar's sections, Ctrl+K's list, the groups a project moves to, a project's page (present/sections.rs), the Browser's start page (settings/browser_start.rs), the Settings pages for Ctrl+K (present/settings.rs `palette_pages`), which 0.14 has none of
+        for path in ["/shown","/overlay/j"] { if let Some(o)=actual.pointer_mut(path).and_then(|v|v.as_object_mut()) { for k in ["sections","jump","groupsTo","projectPage","mouse","browserStart","settingsPages"] { o.remove(k); } } }
         let mut shown=expected["shown"].clone(); retain_root(&mut shown,OMITTED);
         assert_eq!(actual["shown"],shown,"retained GPUI shown fields differ (no value normalisations)");
         let mut overlay=expected["overlay"].clone(); retain_root(&mut overlay["j"],OVERLAY_OMITTED);

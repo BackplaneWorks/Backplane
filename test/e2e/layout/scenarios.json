@@ -155,39 +155,6 @@
    ]
   },
   {
-   "name": "settings-device",
-   "steps": [
-    {
-     "click": "set-nav:@device"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
-   "name": "settings-hubs",
-   "steps": [
-    {
-     "click": "set-nav:@hubs"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
-   "name": "settings-accounts",
-   "steps": [
-    {
-     "click": "set-nav:@accounts"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
    "name": "settings-appearance",
    "steps": [
     {
@@ -199,10 +166,112 @@
    ]
   },
   {
+   "name": "settings-notifications",
+   "steps": [
+    {
+     "click": "set-nav:notifications"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-notifications-adv",
+   "steps": [
+    {
+     "click": "set-nav:notifications"
+    },
+    {
+     "wait": 900
+    },
+    {
+     "click": "set-adv:notifications",
+     "within": 3000
+    },
+    {
+     "wait": 900
+    }
+   ],
+   "after": [
+    {
+     "click": "set-adv:notifications"
+    },
+    {
+     "wait": 500
+    }
+   ],
+   "text": [
+    "Webhook"
+   ]
+  },
+  {
    "name": "settings-threads",
    "steps": [
     {
      "click": "set-nav:threads"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-keyboard",
+   "steps": [
+    {
+     "click": "set-nav:@keys"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-mouse",
+   "steps": [
+    {
+     "click": "set-nav:mouse"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-mouse-adv",
+   "steps": [
+    {
+     "click": "set-nav:mouse"
+    },
+    {
+     "wait": 900
+    },
+    {
+     "click": "set-adv:mouse",
+     "within": 3000
+    },
+    {
+     "wait": 900
+    }
+   ],
+   "after": [
+    {
+     "click": "set-adv:mouse"
+    },
+    {
+     "wait": 500
+    }
+   ],
+   "text": [
+    "Board and schematic: each input"
+   ]
+  },
+  {
+   "name": "settings-accounts",
+   "steps": [
+    {
+     "click": "set-nav:@accounts"
     },
     {
      "wait": 900
@@ -221,10 +290,54 @@
    ]
   },
   {
-   "name": "settings-writing",
+   "name": "settings-keys",
    "steps": [
     {
-     "click": "set-nav:writing"
+     "click": "set-nav:keys"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-mcp",
+   "steps": [
+    {
+     "click": "set-nav:mcp"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-rules",
+   "steps": [
+    {
+     "click": "set-nav:rules"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-voice",
+   "steps": [
+    {
+     "click": "set-nav:voice"
+    },
+    {
+     "wait": 900
+    }
+   ]
+  },
+  {
+   "name": "settings-usage",
+   "steps": [
+    {
+     "click": "set-nav:usage"
     },
     {
      "wait": 900
@@ -243,10 +356,10 @@
    ]
   },
   {
-   "name": "settings-ordering",
+   "name": "settings-browser",
    "steps": [
     {
-     "click": "set-nav:ordering"
+     "click": "set-nav:browser"
     },
     {
      "wait": 900
@@ -254,10 +367,10 @@
    ]
   },
   {
-   "name": "settings-network",
+   "name": "settings-ordering",
    "steps": [
     {
-     "click": "set-nav:network"
+     "click": "set-nav:ordering"
     },
     {
      "wait": 900
@@ -287,54 +400,10 @@
    ]
   },
   {
-   "name": "settings-voice",
+   "name": "settings-hubs",
    "steps": [
     {
-     "click": "set-nav:voice"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
-   "name": "settings-keys",
-   "steps": [
-    {
-     "click": "set-nav:keys"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
-   "name": "settings-timezone",
-   "steps": [
-    {
-     "click": "set-nav:timezone"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
-   "name": "settings-rules",
-   "steps": [
-    {
-     "click": "set-nav:rules"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
-   "name": "settings-usage",
-   "steps": [
-    {
-     "click": "set-nav:usage"
+     "click": "set-nav:@hubs"
     },
     {
      "wait": 900
@@ -353,28 +422,6 @@
    ]
   },
   {
-   "name": "settings-import",
-   "steps": [
-    {
-     "click": "set-nav:setup"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
-   "name": "settings-about",
-   "steps": [
-    {
-     "click": "set-nav:about"
-    },
-    {
-     "wait": 900
-    }
-   ]
-  },
-  {
    "name": "settings-privacy",
    "steps": [
     {
@@ -386,10 +433,10 @@
    ]
   },
   {
-   "name": "settings-developer",
+   "name": "settings-about",
    "steps": [
     {
-     "click": "set-nav:developer"
+     "click": "set-nav:about"
     },
     {
      "wait": 900

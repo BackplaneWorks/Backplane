@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -103,7 +104,10 @@ internal fun MgmtHost(
             }
         }
         DLine()
-        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+        // the strip scrolls when its tools do not fit: a fade at an edge it scrolls past, as the viewer's tab strip has
+        val stripScroll = rememberScrollState()
+        Box(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(stripScroll), verticalAlignment = Alignment.CenterVertically) {
             panels.forEach { p ->
                 val id = p.optString("id"); val on = id == open
                 val badge = DataClient.mgmtData(id)?.optJSONObject("badge"); val n = badge?.optInt("n") ?: 0
@@ -111,12 +115,16 @@ internal fun MgmtHost(
                     .padding(horizontal = 14.dp, vertical = 12.dp).testTag("mgmt.tab.$id"), verticalAlignment = Alignment.CenterVertically) {
                     DMono(Tr.t(p.optString("label")), if (on) dcs.onSurface else dcs.onSurfaceVariant, 12, bold = on)
                     if (n > 0) { Spacer(Modifier.width(6.dp)); val t = tone(if (badge?.optString("tone") == "bad") "bad" else "warn")
-                        DMono(if (n > 99) "99+" else n.toString(), t, 10, Modifier.border(BorderStroke(1.dp, t)).padding(horizontal = 4.dp, vertical = 1.dp)) }
+                        DMono(if (n > 99) "99+" else n.toString(), t, 10, Modifier.border(BorderStroke(1.dp, t), CircleShape).padding(horizontal = 6.dp, vertical = 1.dp)) }
                 }
             }
             Spacer(Modifier.weight(1f))
             if (open.isNotEmpty()) Box(Modifier.size(44.dp).clickable { open = ""; DataClient.lightRefs = emptyList() }.testTag("mgmt.close"), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+        }
+        // drawn over the strip's ends, no pointer input of their own: a touch goes through to the tool under them
+        if (stripScroll.canScrollBackward) Box(Modifier.matchParentSize().wrapContentWidth(Alignment.Start).width(24.dp).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(dcs.surfaceVariant, Color.Transparent))).testTag("mgmt.strip.fade.start"))
+        if (stripScroll.canScrollForward) Box(Modifier.matchParentSize().wrapContentWidth(Alignment.End).width(24.dp).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Transparent, dcs.surfaceVariant))).testTag("mgmt.strip.fade.end"))
         }
     }
 }
@@ -136,7 +144,7 @@ private fun BomPanel() {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DMono(Msg.gpui_mgmt_bom_summary(d.optInt("parts"), lines.size), dcs.onSurfaceVariant, 11)
             val live = d.optString("source") == "kicad"
-            DMono(if (live) Msg.history_live else Msg.gpui_mgmt_bom_saved_state, if (live) dcs.primary else dcs.onSurfaceVariant, 10, Modifier.border(BorderStroke(1.dp, if (live) dcs.primary else dcs.outlineVariant)).padding(horizontal = 5.dp, vertical = 1.dp))
+            DMono(if (live) Msg.history_live else Msg.gpui_mgmt_bom_saved_state, if (live) dcs.primary else dcs.onSurfaceVariant, 10, Modifier.border(BorderStroke(1.dp, if (live) dcs.primary else dcs.outlineVariant), CircleShape).padding(horizontal = 7.dp, vertical = 1.dp))
             val priced = d.optInt("priced"); val looked = d.optInt("lookups")
             if (priced > 0 && d.optInt("checking") == 0) DMono(if (priced < looked) Msg.gpui_mgmt_bom_cost_least(Mgmt.money(d.optDouble("cost"))) else Msg.gpui_mgmt_bom_cost(Mgmt.money(d.optDouble("cost"))), dcs.onSurfaceVariant, 11)
             if (d.optBoolean("paused")) DMono(Msg.gpui_mgmt_bom_paused, tone("faint"), 11)
@@ -151,16 +159,17 @@ private fun BomPanel() {
         val shown = lines.filter { l -> q.isBlank() || q.lowercase().split(' ').filter { it.isNotEmpty() }.all { w -> (w == "dnp" && l.optBoolean("dnp")) ||
             listOf(Mgmt.strs(l.optJSONArray("refs")).joinToString(" "), l.optString("value"), l.optString("footprint"), l.optString("mpn"), l.optString("fab")).joinToString(" ").lowercase().contains(w) } }
         val started = lines.any { it.optString("mpn").isNotEmpty() || it.optString("fab").isNotEmpty() }
+        val focus = androidx.compose.ui.platform.LocalFocusManager.current
         LazyColumn(Modifier.weight(1f).testTag("mgmt.bom.rows")) {
             items(shown, key = { it.optString("id") }) { l ->
                 val id = l.optString("id"); val refs = Mgmt.strs(l.optJSONArray("refs")); val dnp = l.optBoolean("dnp"); val st = l.optJSONObject("stock")
                 val faint = if (dnp) tone("faint") else dcs.onSurface
                 Column(Modifier.fillMaxWidth().background(if (sel == id) dcs.surfaceVariant else dcs.background)
-                    .combinedClickable(onClick = { sel = id; DataClient.lightRefs = refs }, onLongClick = { editing = l })
+                    .combinedClickable(onClick = { focus.clearFocus(); sel = id; DataClient.lightRefs = refs; DataClient.goToRefs++ }, onLongClick = { editing = l })
                     .padding(horizontal = 12.dp, vertical = 8.dp).testTag("mgmt.bom.row.$id")) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         DMono(Mgmt.refsFit(refs, 18), faint, 13, Modifier.weight(1f), bold = true)
-                        if (dnp) DMono(Msg.gpui_mgmt_bom_dnp, tone("faint"), 10, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 4.dp, vertical = 1.dp))
+                        if (dnp) DMono(Msg.gpui_mgmt_bom_dnp, tone("faint"), 10, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant), CircleShape).padding(horizontal = 6.dp, vertical = 1.dp))
                         else Mgmt.stock(st)?.let { (t, tn) -> DMono(t, tone(tn), 12) }
                     }
                     Row(Modifier.padding(top = 2.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -194,7 +203,7 @@ private fun BomEdit(l: JSONObject, close: () -> Unit) {
                 Box(Modifier.size(36.dp).clickable(onClick = close).testTag("mgmt.bom.edit.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
             }
             DMono(listOf(l.optString("value"), Mgmt.pkg(l.optString("footprint"))).filter { it.isNotEmpty() }.joinToString(" · "), dcs.onSurfaceVariant, 11)
-            DField(mpn, { mpn = it }, Msg.gpui_mgmt_bom_mpn_ph, Modifier.testTag("mgmt.bom.edit.mpn"))
+            DField(mpn, { mpn = it }, Msg.gpui_mgmt_bom_mpn_ph, Modifier.testTag("mgmt.bom.edit.mpn"), mono = true)
             fun write(field: String, value: String, undo: Boolean = false) = scope.launch {
                 said = Msg.gpui_mgmt_bom_writing
                 runCatching { DataClient.bomEdit(refs, field, value) }.onSuccess { r -> last = if (undo) null else r; said = when { undo -> Msg.gpui_mgmt_bom_putback; r.optInt("changed") == 0 -> Msg.gpui_mgmt_bom_nochange

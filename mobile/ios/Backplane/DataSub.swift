@@ -58,7 +58,7 @@ private struct DataSubEntry: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(Tr.k("ios.ask.asked")).dmono(11).foregroundStyle(BackplaneDesign.faint)
                 DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text)
-            }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.raised).padding(.vertical, 4).accessibilityIdentifier("data.sub.asked")
+            }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.raised, radius: DRadius.card).padding(.vertical, 4).accessibilityIdentifier("data.sub.asked")
         case "assistant":
             DataMarkdown(text: entry.text, thread: thread, entry: entry.id, images: entry.live ? [] : entry.images, copy: entry.copy).padding(.vertical, 4).frame(maxWidth: .infinity, alignment: .leading)
         case "tool":

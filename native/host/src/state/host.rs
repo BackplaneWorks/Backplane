@@ -141,7 +141,7 @@ impl RpcHandler for StarRpc {
     fn methods(&self) -> &'static [&'static str] { &["star.nudge", "star.offer", "star.replay"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, params: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
-            // Settings, Developer: offered again now, to every client (the other devices show it too)
+            // Settings, Setup, Developer: offered again now, to every client (the other devices show it too)
             if method == "star.replay" {
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
                 let ev = self.policy.star_replay(now);

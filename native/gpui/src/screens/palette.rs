@@ -8,7 +8,9 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Do { AddBeside, Rail(String, String), SolidCraft(String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String) }
+pub enum Do { AddBeside, Rail(String, String), SolidCraft(String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String),
+    /** the sidebar's "Add project" (the hub's folder picker) */ AddProject, /** Find across threads (Ctrl+Shift+F) */ FindAll, /** the sidebar's filter, focused */ Filter, /** the Improvements panel */ Improvements, /** Plan mode's next setting (Shift+Tab) */ PlanMode,
+    /** a Settings page (the hub's `settingsPages`, or this app's own: `@accounts`, `@hubs`, `@keys`) and the other words it is found by, lowercase */ SettingsPage(String, String) }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
 /// The key that does what an item does, as the person reads it ("" for none).
@@ -16,7 +18,7 @@ pub fn shortcut(it: &Item, current: &str, l: &crate::local::Local) -> String {
     let id = match &it.what {
         Do::Rail(id, key) => return crate::ui::rail_hint(l, id, key),
         Do::Action(a, v) => crate::keys::id_for(a, v, current),
-        Do::Sidebar => "sidebar", Do::Models => "models", Do::Prev => "prev", Do::Next => "next", Do::Uber => "uber", _ => "",
+        Do::Sidebar => "sidebar", Do::Models => "models", Do::Prev => "prev", Do::Next => "next", Do::Uber => "uber", Do::FindAll => "search", _ => "",
     };
     if id.is_empty() { String::new() } else { crate::keys::hint(l, id) }
 }
@@ -68,15 +70,39 @@ pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<
     cx.notify(); true
 }
 
-/// 0: no match; a prefix 3, a word that starts with it 2, the letters in order 1 (an empty text matches everything a little).
+/// 0: no match; a prefix 3, a word that starts with it 2, the letters in order in a stretch of at most 4 characters a letter typed 1 (an empty text matches everything a little).
 pub fn rank(label: &str, q: &str) -> u8 {
     let (l, q) = (label.to_lowercase(), q.trim().to_lowercase());
     if q.is_empty() { return 1 }
     if l.starts_with(&q) { return 3 }
     if l.split(|c: char| !c.is_alphanumeric()).any(|w| w.starts_with(&q)) { return 2 }
-    let mut it = l.chars(); if q.chars().all(|c| it.any(|x| x == c)) { 1 } else { 0 }
+    // the shortest stretch holding the letters in order (each start, matched greedily): a long one is junk ("search" in "Streamer mode: hide emails...")
+    let (l, q): (Vec<char>, Vec<char>) = (l.chars().collect(), q.chars().collect());
+    let end = |s: usize| { let (mut k, mut j) = (1, s); while k < q.len() { j += 1; if j >= l.len() { return None } if l[j] == q[k] { k += 1 } } Some(j) };
+    let span = (0..l.len()).filter(|&s| l[s] == q[0]).filter_map(|s| end(s).map(|e| e - s + 1)).min();
+    if span.is_some_and(|n| n <= 4 * q.len()) { 1 } else { 0 }
+}
+/// Words an item is also found by though its label does not hold them (lowercase, space separated).
+fn also(what: &Do) -> &'static str {
+    match what {
+        Do::Shortcuts => "keys help hotkeys", Do::Settings => "preferences options", Do::Streamer => "privacy", Do::FindAll | Do::Filter => "search", // i18n-ok: search words the box matches, never drawn
+        Do::AddProject => "clone git open folder new", Do::Improvements => "feedback bug report idea", // i18n-ok: search words the box matches, never drawn
+        Do::Action(a, _) if a == "bot-new" || a == "room-new" => "create add", Do::Action(a, _) if a == "swarm-new" => "agents group team", // i18n-ok: search words the box matches, never drawn
+        Do::PlanMode => "plan first", _ => "", // i18n-ok: search words the box matches, never drawn
+    }
 }
 
+/// The Settings pages the box offers: (id, title, other words lowercase). The hub's list (`settingsPages`: none from an older hub), then this app's
+/// own pages, which no hub serves.
+fn settings_pages(data: &Value) -> Vec<(String, String, String)> {
+    let mut v: Vec<(String, String, String)> = data["settingsPages"].as_array().into_iter().flatten()
+        .map(|p| (string(p, "id"), string(p, "title"), p["aka"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).map(|w| crate::i18n::trs(w).to_lowercase()).collect::<Vec<_>>().join(" ")))
+        .filter(|(id, t, _)| !id.is_empty() && !t.is_empty()).collect();
+    /* i18n-ok: page titles drawn through trs; the words are only matched */ for (id, title, words) in [("@accounts", "Accounts", "login sign in account usage limits"), ("@hubs", "Hubs", "hub machine connect"), ("@keys", "Keyboard", "keys shortcuts")] {
+        v.push((id.into(), title.into(), words.into()));
+    }
+    v
+}
 /// Every thing the box can offer now (before the text filters it).
 fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     let mut v: Vec<Item> = vec![];
@@ -85,7 +111,7 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
         for t in thread["tools"].as_array().into_iter().flatten().chain(thread["menu"].as_array().into_iter().flatten()) {
             let (label, action, value) = (string(t, "label"), string(t, "action"), string(t, "value"));
             if matches!(action.as_str(), "view-kind" | "diff") { continue }
-            if label.is_empty() || action.is_empty() || action == "delete" || t["options"].as_array().map_or(false, |o| !o.is_empty()) { continue }
+            if label.is_empty() || action.is_empty() || action == "delete" || action == "row-delete" /* the thread menu's Delete: it asks first, in the menu; from here it did nothing */ || t["options"].as_array().map_or(false, |o| !o.is_empty()) { continue }
             v.push(Item { label: trs(&label), place: String::new(), kind: "action", what: Do::Action(action, value), row: Value::Null });
         }
     }
@@ -94,7 +120,8 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
         v.push(Item { label: crate::i18n::t("viewer.tile.add.tip"), place: trs("viewer"), kind: "action", what: Do::AddBeside, row: Value::Null });
     }
     let simulation = crate::viewers::kicad_pane::rail_simulation(viewer, can_embed).is_some();
-    for row in crate::ui::rail_rows(viewer, simulation) {
+    let rows = crate::ui::rail_rows(viewer, simulation);
+    for row in if crate::ui::rail_off_page(data) { crate::ui::rail_rows_off(rows) } else { rows } {
         if row.state == "disabled" || row.id == "commands" || (!thread.is_object() && row.id != "terminal") { continue }
         v.push(Item { label: trs(row.label), place: if row.id == "terminal" { String::new() } else { trs("viewer") }, kind: "action", what: Do::Rail(row.id.into(), row.key.into()), row: Value::Null });
     }
@@ -104,6 +131,10 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
             v.push(Item { label: trs("New 3D part in SolidCraft"), place: trs("viewer"), kind: "action", what: Do::SolidCraft("new".into()), row: Value::Null });
         }
         v.push(Item { label: trs("Agent, model and effort"), place: String::new(), kind: "action", what: Do::Models, row: Value::Null });
+        if super::planmode::parse(&thread["planMode"]).is_some() { v.push(Item { label: crate::i18n::t("gpui.keys.planmode"), place: String::new(), kind: "action", what: Do::PlanMode, row: Value::Null }); }
+        // a project's thread: a swarm on its project (else only its row's right-click menu has it)
+        let (pid, ptitle) = (string(&thread["project"], "id"), string(&thread["project"], "title"));
+        if !pid.is_empty() && pid != "chats" { v.push(Item { label: crate::i18n::t("gpui.swarm.new"), place: ptitle, kind: "action", what: Do::Action("swarm-new".into(), pid), row: Value::Null }); }
         v.push(Item { label: trs("Previous thread"), place: String::new(), kind: "action", what: Do::Prev, row: Value::Null });
         v.push(Item { label: trs("Next thread"), place: String::new(), kind: "action", what: Do::Next, row: Value::Null });
     }
@@ -112,6 +143,9 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     v.push(Item { label: trs("Settings"), place: String::new(), kind: "action", what: Do::Settings, row: Value::Null });
     v.push(Item { label: if crate::streamer::is_on() { trs("Streamer mode: turn off") } else { trs("Streamer mode: hide emails, paths and machine names") }, place: String::new(), kind: "action", what: Do::Streamer, row: Value::Null });
     v.push(Item { label: trs("Fold or unfold the sidebar"), place: String::new(), kind: "action", what: Do::Sidebar, row: Value::Null });
+    // the window's own buttons (the sidebar's +, the top bar's), so the box can do what they do
+    for (label, what) in [(trs("New bot"), Do::Action("bot-new".into(), String::new())), (trs("New room"), Do::Action("room-new".into(), String::new())), (trs("Add project"), Do::AddProject),
+        (trs("Find in all threads"), Do::FindAll), (trs("Filter projects and threads"), Do::Filter), (trs("Improvements"), Do::Improvements)] { v.push(Item { label, place: String::new(), kind: "action", what, row: Value::Null }); }
     // always here, whatever the hub sends or fails to send: these do not go through it (hubbar.rs)
     for a in ["restart", "safe", "rollback"] { v.push(Item { label: trs(super::hubbar::label_of(a)), place: String::new(), kind: "action", what: Do::Hub(a.into()), row: Value::Null }); }
     // a chat in no project: always offered, whatever is open (the hub makes its folder)
@@ -155,6 +189,8 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     for t in data["active"].as_array().into_iter().flatten().chain(data["activeSettled"]["rows"].as_array().into_iter().flatten()) {
         v.push(Item { label: string(t, "title"), place: on_machine(&crate::streamer::project_shown(&string(t, "project")), t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
     }
+    // Settings' pages by name and by their other names ("phone" finds Devices), after the commands: the hub's, then this app's own three
+    for (id, title, words) in settings_pages(data) { v.push(Item { label: format!("{}: {}", trs("Settings"), trs(&title)) /* i18n-ok: two translated words */, place: String::new(), kind: "action", what: Do::SettingsPage(id, words), row: Value::Null }); }
     v
 }
 
@@ -166,14 +202,17 @@ pub fn urgency(it: &Item) -> u8 { match it.row["want"].as_str().unwrap_or("") { 
 /// The items the text keeps, best first (threads before actions among equals), at most `n`. Opened with nothing typed, the threads that
 /// wait on the person come first (r04: Ctrl+K, Enter goes to the one waiting).
 pub fn found(all: Vec<Item>, q: &str, n: usize) -> Vec<Item> {
-    let empty = q.trim().is_empty();
-    let mut r: Vec<(u8, usize, Item)> = all.into_iter().enumerate().filter_map(|(i, it)| { let s = rank(&it.label, q).max(if it.place.is_empty() { 0 } else { rank(&it.place, q).min(1) }); (s > 0).then_some((s, i, it)) }).collect();
+    let empty = q.trim().is_empty(); let ql = q.trim().to_lowercase();
+    let mut r: Vec<(u8, usize, Item)> = all.into_iter().enumerate().filter_map(|(i, it)| {
+        let s = rank(&it.label, q).max(if it.place.is_empty() { 0 } else { rank(&it.place, q).min(1) }).max(if !empty && match &it.what { Do::SettingsPage(_, w) => w.as_str(), w => also(w) }.split_whitespace().any(|w| w.starts_with(&ql)) { 2 } else { 0 });
+        (s > 0).then_some((s, i, it)) }).collect();
     r.sort_by(|a, b| (if empty { urgency(&b.2).cmp(&urgency(&a.2)) } else { std::cmp::Ordering::Equal }).then(b.0.cmp(&a.0)).then((a.2.kind != "thread").cmp(&(b.2.kind != "thread"))).then(a.1.cmp(&b.1)));
     let mut seen = std::collections::HashSet::new();
     r.into_iter().map(|x| x.2).filter(|it| seen.insert((it.label.clone(), it.place.clone(), it.kind))).take(n).collect()
 }
 
 /// What the box lists for this text: in a thread's search only what was said there; else the jumps and commands, then what was said.
+/// Opened empty it lists the first ten as before, then every command, so the box can be browsed.
 pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
     let answered = search_of(&p.q).as_deref() == Some(p.hits_q.as_str());
     let hits: Vec<Item> = if answered { p.hits.clone() } else { vec![] };
@@ -195,7 +234,14 @@ pub fn listed(data: &Value, p: &Palette) -> Vec<Item> {
     }
     if p.editor_active { all.retain(|item| item.what != Do::AddBeside); }
     if answered { let held: std::collections::HashSet<Do> = all.iter().map(|it| it.what.clone()).collect(); all.extend(p.titles.iter().filter(|t| !held.contains(&t.what)).cloned()); }
+    let empty = p.q.trim().is_empty();
+    let rest: Vec<Item> = if empty { all.iter().filter(|it| it.kind == "action").cloned().collect() } else { vec![] };
     let mut v = found(all, &p.q, 10);
+    if empty {
+        let held: std::collections::HashSet<Do> = v.iter().map(|it| it.what.clone()).collect();
+        let mut seen: std::collections::HashSet<(String, String, &str)> = v.iter().map(|it| (it.label.clone(), it.place.clone(), it.kind)).collect();
+        v.extend(rest.into_iter().filter(|it| !held.contains(&it.what) && seen.insert((it.label.clone(), it.place.clone(), it.kind))));
+    }
     let room = 14usize.saturating_sub(v.len());
     v.extend(hits.into_iter().take(room)); v
 }
@@ -324,6 +370,14 @@ impl Backplane {
             Do::Shortcuts => self.keysheet_toggle(cx),
             Do::Streamer => self.streamer_toggle(cx),
             Do::Hub(a) => self.hub_click(&a, cx),
+            Do::AddProject => { let _ = self.tx.try_send(super::projects::open_cmd()); }
+            // the box again, finding what was said: the first opening's loan ends first (the new one lends again when KiCad just had the keys)
+            Do::FindAll => { self.kicad_release(cx); self.want_focus = false; self.palette_open_find(cx); return }
+            Do::Filter => self.focus_search(cx),
+            Do::Improvements => super::improvements::toggle(self, cx),
+            Do::PlanMode => super::planmode::cycle(self, cx),
+            // a hub page: its settings-page action opens Settings on it (the hub opens a shut Settings in the same action); this app's own pages open here
+            Do::SettingsPage(id, _) => if id.starts_with('@') { if !(self.screens.settings_ui.open_local || self.data["settings"].is_object()) { self.open_settings(cx); } super::settings::open_nav(self, &id, cx) } else { super::settings::go_page(self, &id) },
         }
         if gives_back { self.kicad_return(cx) } else { self.kicad_release(cx) }
         cx.notify();
@@ -341,7 +395,9 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette,
     /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child(crate::i18n::trs(if (!p.scope.is_empty() || p.find_all) && search_of(&p.q).is_none() { if p.find_all { "Type a word said in any thread" } else { "Type a word said in this thread" } } else { "Nothing matches" }))); }
     for (i, it) in list.iter().enumerate() {
         let want = it.row["want"].as_str().unwrap_or("").to_string();
-        col = col.child(div().id(SharedString::from(format!("pal-{i}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().when(i == ix, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
+        col = col.child(div().id(SharedString::from(format!("pal-{i}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().when(i == ix, |d| d.bg(c("raise")))
+            // one highlight: the pointer moves the keyboard's row (a resting pointer does nothing), so Enter runs the row that is lit
+            .on_mouse_move(cx.listener(move |this, _, _, cx| if this.screens.palette.ix != i { this.screens.palette.ix = i; cx.notify(); }))
             .children(it.row.is_object().then(|| super::siderow::dot(light, &it.row)))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().when(matches!(it.what, Do::Message(..)), |d| d.text_color(c("dim")))
                 .child(match (&it.what, mark(&it.label, &p.q)) { // a message found: the word it was found by stands out (0.14 marked it)
@@ -392,6 +448,12 @@ pub(crate) fn selected_snapshot(data: &Value, p: &Palette) -> Value {
         Do::Shortcuts => "shortcuts".into(),
         Do::Streamer => "streamer".into(),
         Do::Hub(a) => format!("hub:{a}"),
+        Do::AddProject => "add-project".into(),
+        Do::FindAll => "find-all".into(),
+        Do::Filter => "filter".into(),
+        Do::Improvements => "improvements".into(),
+        Do::PlanMode => "plan-mode".into(),
+        Do::SettingsPage(id, _) => format!("settings:{id}"),
         Do::Message(t, m) => format!("message:{t}:{m}"),
     }).unwrap_or_default();
     serde_json::json!({
@@ -408,7 +470,7 @@ mod tests {
     use super::*;
     use serde_json::json;
     use core::prelude::v1::test;
-    fn data() -> Value { json!({"thread": {"tools": [{"label": "Pin", "action": "pin"}, {"label": "Delete", "action": "delete"}], "menu": []},
+    fn data() -> Value { json!({"thread": {"tools": [{"label": "Pin", "action": "pin"}, {"label": "Delete", "action": "delete"}], "menu": [{"label": "Delete", "action": "row-delete", "value": "t1"}]},
         "projects": [{"id": "h|p1", "title": "Demo", "threads": [{"id": "h|t1", "title": "Board layout review"}, {"id": "h|t2", "title": "Power budget"}], "settled": [{"id": "h|t3", "title": "Old notes"}]}]}) }
     #[test] fn no_thread_offers_only_terminal_from_the_rail() {
         let rails: Vec<_> = items(&json!({}), true).into_iter().filter(|i| matches!(i.what, Do::Rail(..))).collect();
@@ -439,6 +501,37 @@ mod tests {
         assert!(!items(&d, false).iter().any(|i| i.label == "Simulation"));
     }
     #[test] fn a_prefix_beats_a_word_beats_letters_in_order() { assert_eq!((rank("Board layout", "boa"), rank("Board layout", "lay"), rank("Board layout", "blt"), rank("Board layout", "zz"), rank("x", "")), (3, 2, 1, 0, 1)); }
+    #[test] fn letters_in_order_count_only_in_a_short_stretch() {
+        let s = "Streamer mode: hide emails, paths and machine names";
+        assert_eq!((rank(s, "search"), rank(s, "remind"), rank("Keyboard shortcuts", "kbd")), (0, 0, 1));
+    }
+    #[test] fn commands_are_found_by_the_words_people_look_for() {
+        let all = items(&data(), true);
+        assert_eq!(found(all.clone(), "clone", 10)[0].label, "Add project");
+        let r = found(all.clone(), "search", 10);
+        assert!(r.iter().any(|i| i.label == "Find in all threads") && !r.iter().any(|i| i.what == Do::Streamer), "{r:?}");
+        assert_eq!(found(all.clone(), "room", 10)[0].label, "New room");
+        assert_eq!(found(all, "bot", 10)[0].what, Do::Action("bot-new".into(), String::new()));
+    }
+    #[test] fn a_settings_page_is_found_by_its_name_or_another_one() {
+        let d = serde_json::json!({"settingsPages": [{"id": "devices", "title": "Devices", "aka": ["Phone", "Pair a phone"]}, {"id": "usage", "title": "Usage", "aka": []}]});
+        let all = items(&d, false);
+        assert_eq!(found(all.clone(), "phone", 10)[0].what, Do::SettingsPage("devices".into(), "phone pair a phone".into()));
+        assert_eq!(found(all.clone(), "usage", 10)[0].label, "Settings: Usage");
+        assert!(matches!(&found(all.clone(), "accounts", 10)[0].what, Do::SettingsPage(id, _) if id == "@accounts"), "this app's own page too");
+        let none = items(&serde_json::json!({}), false);
+        assert!(!none.iter().any(|i| matches!(&i.what, Do::SettingsPage(id, _) if !id.starts_with('@'))), "no list from the hub: only this app's own pages");
+        let empty = found(all, "", 400); let first_page = empty.iter().position(|i| matches!(i.what, Do::SettingsPage(..))).unwrap();
+        assert!(empty.iter().skip(first_page).all(|i| matches!(i.what, Do::SettingsPage(..))), "listed after the commands");
+    }
+    #[test] fn a_projects_thread_offers_a_swarm_and_plan_mode() {
+        let d = serde_json::json!({"thread": {"id": "t1", "project": {"id": "p1", "title": "Motor"}, "planMode": {"phase": "off"}}});
+        let all = items(&d, false);
+        let sw = found(all.clone(), "swarm", 10); assert_eq!((sw[0].what.clone(), sw[0].place.as_str()), (Do::Action("swarm-new".into(), "p1".into()), "Motor"));
+        assert_eq!(found(all, "plan", 10)[0].what, Do::PlanMode);
+        let chat = items(&serde_json::json!({"thread": {"id": "c1", "project": {"id": "chats", "title": "Chats"}}}), false);
+        assert!(!chat.iter().any(|i| matches!(&i.what, Do::Action(a, _) if a == "swarm-new")), "a chat has no project to swarm on");
+    }
     #[test] fn a_thread_the_sidebar_does_not_hold_is_found_by_its_title_from_the_hub() {
         let res = json!({"hits": [], "titles": [{"thread": "t1", "title": "Board layout review", "project": "Demo"}, {"thread": "t9", "title": "Old board notes", "project": "Amp"}]});
         let titles = title_items(&res, &|raw| format!("h|{raw}"));
@@ -468,7 +561,7 @@ mod tests {
     #[test] fn threads_and_actions_are_found_by_what_is_typed_and_a_delete_is_never_offered() {
         let all = items(&data(), true);
         assert!(all.iter().any(|i| i.what == Do::Thread("h|t3".into())) && all.iter().any(|i| i.what == Do::Action("pin".into(), String::new())) && all.iter().any(|i| i.what == Do::Settings));
-        assert!(!all.iter().any(|i| i.what == Do::Action("delete".into(), String::new())), "Delete asks first and is not a palette action");
+        assert!(!all.iter().any(|i| matches!(&i.what, Do::Action(a, _) if a == "delete" || a == "row-delete")), "Delete asks first and is not a palette action (the thread menu's is row-delete)");
         let r = found(all.clone(), "pow", 10); assert_eq!(r[0].label, "Power budget");
         assert!(found(all.clone(), "zzzz", 10).is_empty());
         let r = found(all.clone(), "new chat", 10); assert_eq!(r[0].what, Do::Action("new-thread".into(), "chats".into()), "a chat in no project, from anywhere");
@@ -506,6 +599,16 @@ mod tests {
         assert_eq!(r[..3].iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Battery life", "Grounding plan", "Firmware pin map"], "approval, question, failed (Urg.rank)");
         assert_eq!(r[0].row["want"], "approval");
         assert_eq!(found(items(&d, true), "quiet", 10)[0].label, "Quiet one", "a typed query ranks as before");
+    }
+    #[test] fn opened_empty_every_command_can_be_browsed_after_the_first_ten() {
+        let threads: Vec<Value> = (0..14).map(|n| json!({"id": format!("h|t{n}"), "title": format!("Thread number {n}")})).collect();
+        let d = json!({"projects": [{"id": "h|p1", "title": "Amp", "threads": threads}]});
+        let l = listed(&d, &Palette::default());
+        let first: Vec<Do> = found(items(&d, false), "", 10).into_iter().map(|i| i.what).collect();
+        assert_eq!(l[..10].iter().map(|i| i.what.clone()).collect::<Vec<_>>(), first, "Ctrl+K Enter goes where it went");
+        for c in ["Settings", "Keyboard shortcuts", "New bot", "Add project"] { assert_eq!(l.iter().filter(|i| i.label == c).count(), 1, "{c}"); }
+        assert!(l[10..].iter().all(|i| i.kind != "thread"), "threads past ten are the sidebar's");
+        assert!(listed(&d, &Palette { q: "set".into(), ..Default::default() }).len() <= 10);
     }
     #[test] fn what_was_said_is_listed_after_the_jumps_and_alone_in_a_threads_search() {
         let res = json!({"hits": [{"thread": "t2", "title": "Firmware pin map", "project": "Sensor", "msg": "m1", "role": "user", "text": "where does the pinecone go"}]});

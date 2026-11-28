@@ -94,8 +94,8 @@ private fun swatch(c: String): Color = CatPick.hex(c)?.let { Color(0xFF000000 or
 internal fun UberSettings() {
     val b = DataClient.bots.firstOrNull { it.uber }
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        DMono(Msg.gpui_f_uber_title.uppercase(), dfaint)
-        if (b == null) DMono(Msg.native_home_none, dcs.onSurfaceVariant, 12, Modifier.testTag("settings.uber.none"))
+        SettingsSection("uber", Msg.gpui_f_uber_title, upper = true)
+        if (b == null) DText(Msg.native_home_none, dcs.onSurfaceVariant, 14, Modifier.testTag("settings.uber.none"), lines = 1)
         else UberControls(b)
     }
 }
@@ -150,7 +150,7 @@ private fun UberControls(b: DataClient.Bot) {
         }
     }
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        DField(custom, { custom = it }, Msg.android_viewerbg_custom, Modifier.weight(1f).testTag("settings.uber.custom"))
+        DField(custom, { custom = it }, Msg.android_viewerbg_custom, Modifier.weight(1f).testTag("settings.uber.custom"), mono = true)
         DBtn(Msg.gpui_use, false, !busy && custom.isNotBlank(), Modifier.testTag("settings.uber.custom.use")) {
             val c = CatPick.hex(custom)
             if (c == null) err = Msg.cat_color_bad else send(JSONObject().put("color", c))

@@ -52,13 +52,15 @@ struct DVoiceRow: Identifiable {
     var qr: [String] = [], qrnote = ""
     /// the note is a value (a path, an id, a link): what its copy button copies (the hub's `copy`)
     var copy = ""
+    /// a rarely needed row (the hub's `adv`): drawn under the page's Advanced fold
+    var adv = false
     /// the hub's `rows` array (voice.page, machines.page, devices.page)
     static func parse(_ v: Any?) -> [DVoiceRow] {
         (v as? [[String: Any]] ?? []).enumerated().map { i, r in
             DVoiceRow(id: i, label: r["label"] as? String ?? "", note: r["note"] as? String ?? "", tone: r["tone"] as? String ?? "",
                       buttons: (r["buttons"] as? [[String: Any]] ?? []).map { ($0["label"] as? String ?? "", $0["action"] as? String ?? "", $0["value"] as? String ?? "", $0["on"] as? Bool ?? false) },
                       fields: (r["fields"] as? [[String: Any]] ?? []).map(DVoiceField.init),
-                      qr: r["qr"] as? [String] ?? [], qrnote: r["qrnote"] as? String ?? "", copy: r["copy"] as? String ?? "")
+                      qr: r["qr"] as? [String] ?? [], qrnote: r["qrnote"] as? String ?? "", copy: r["copy"] as? String ?? "", adv: r["adv"] as? Bool ?? false)
         }
     }
 }
@@ -507,16 +509,32 @@ struct DPageRows: View {
     @State private var typed: [String: String] = [:]
     @State private var errors: [Int: String] = [:]
     @State private var told: [Int: String] = [:]   // what a press the phone did itself says (Copied), under the row's note
+    @State private var advOpen = false   // the Advanced fold: rows the hub marks `adv`, closed at first
+
+    private var plainRows: [DVoiceRow] { rows.filter { !$0.adv } }
+    private var advRows: [DVoiceRow] { rows.filter { $0.adv } }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             DHeading(text: title)
-            ForEach(rows) { r in
-                DPageRowView(row: r, idPrefix: idPrefix, note: errors[r.id] ?? r.note, noteTone: errors[r.id] != nil ? "bad" : r.tone, told: told[r.id],
-                             text: { binding($0) }, press: { press(r, $0) })
+            ForEach(plainRows) { r in rowView(r) }
+            if !advRows.isEmpty {
+                Button { advOpen.toggle() } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: advOpen ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim)
+                        Text(Tr.k("mobile.settings.advanced")).dui(14).foregroundStyle(BackplaneDesign.dim)
+                        Text(verbatim: "\(advRows.count)").dmono(12).foregroundStyle(BackplaneDesign.faint)
+                        Spacer()
+                    }.frame(minHeight: 44).contentShape(Rectangle())
+                }.buttonStyle(.plain).accessibilityIdentifier(idPrefix + ".adv")
+                if advOpen { ForEach(advRows) { r in rowView(r) } }
             }
             if rows.isEmpty, !empty.isEmpty { Text(empty).dmono(11).foregroundStyle(BackplaneDesign.dim) }
         }
+    }
+    private func rowView(_ r: DVoiceRow) -> some View {
+        DPageRowView(row: r, idPrefix: idPrefix, note: errors[r.id] ?? r.note, noteTone: errors[r.id] != nil ? "bad" : r.tone, told: told[r.id],
+                     text: { binding($0) }, press: { press(r, $0) })
     }
     private func binding(_ f: DVoiceField) -> Binding<String> { Binding(get: { typed[f.name] ?? f.value }, set: { typed[f.name] = $0 }) }
     private func press(_ r: DVoiceRow, _ b: (label: String, action: String, value: String, on: Bool)) {
@@ -526,6 +544,8 @@ struct DPageRows: View {
         Task {
             let err = await act(r, b, fields)
             errors[r.id] = err.isEmpty ? nil : err
+            // a refusal under a folded row opens the fold, where the person is looking
+            if !err.isEmpty, r.adv { advOpen = true }
             if err.isEmpty { for f in r.fields { typed[f.name] = nil } }
         }
     }
@@ -545,10 +565,10 @@ struct DPageRowView: View {
     var body: some View {
         let r = row
         VStack(alignment: .leading, spacing: 6) {
-            Text(Tr.t(r.label)).dmono(13)
+            Text(Tr.t(r.label)).dui(15, weight: .medium)
             // a note that is a value (the hub's `copy`): the value as it is, with its copy button; else the note in the reader's words
             if !note.isEmpty, !r.copy.isEmpty, note == r.note { DCopyValue(shown: note, value: r.copy).accessibilityIdentifier(idPrefix + ".copy") }
-            else if !note.isEmpty { Text(Tr.t(note)).dmono(11).foregroundStyle(noteTone == "bad" ? BackplaneDesign.bad : noteTone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
+            else if !note.isEmpty { Text(Tr.t(note)).dui(13).foregroundStyle(noteTone == "bad" ? BackplaneDesign.bad : noteTone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
             if let t = told { Text(t).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier(idPrefix + ".told") }
             if !r.qr.isEmpty { DQRCode(rows: r.qr).accessibilityIdentifier(idPrefix + ".qr") }
             if !r.qrnote.isEmpty { Text(Tr.t(r.qrnote)).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }

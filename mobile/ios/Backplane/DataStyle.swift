@@ -1,6 +1,7 @@
 import SwiftUI
 
-// The data app's pieces in the desktop client's language (native/gpui, assets/web/style.css): mono type, 1 px lines, square corners, flat panels, one accent.
+// The data app's pieces in the desktop client's language (native/gpui, assets/web/style.css): 1 px lines, flat panels, one accent; on the phone a little rounder
+// (controls 10, cards 12, sheets 16) with the system face for interface text, mono kept for code, paths, ids, meta lines and the small uppercase labels.
 // The same as the Android app's DBar, DBtn, DField, DDot and DLine (DataViews.kt).
 
 private struct DMonoFont: ViewModifier {
@@ -10,20 +11,37 @@ private struct DMonoFont: ViewModifier {
     func body(content: Content) -> some View { content.font(.mono(size: size, weight: bold ? .bold : .regular)) }
 }
 
+private struct DUiFont: ViewModifier {
+    @ScaledMetric private var size: CGFloat
+    private let weight: Font.Weight
+    init(size: CGFloat, weight: Font.Weight) { _size = ScaledMetric(wrappedValue: size, relativeTo: .footnote); self.weight = weight }
+    func body(content: Content) -> some View { content.font(.system(size: size, weight: weight)) }
+}
+
+/// The phone's corner radii (the Android app's dR, dRCard and the sheets' 16).
+enum DRadius {
+    static let control: CGFloat = 10
+    static let card: CGFloat = 12
+    static let sheet: CGFloat = 16
+}
+
 extension View {
     /// JetBrains Mono at a desktop size, scaled with this phone's text size.
     func dmono(_ size: CGFloat = 13, bold: Bool = false) -> some View { modifier(DMonoFont(size: size, bold: bold)) }
 
+    /// The system face for interface text (titles, sentences, the labels of controls), scaled with this phone's text size.
+    func dui(_ size: CGFloat = 15, weight: Font.Weight = .regular) -> some View { modifier(DUiFont(size: size, weight: weight)) }
+
     /// A screen's bar: the panel colour, its title in mono, a square back arrow (`back: false` for the first screen of a sheet).
     func dataBar(_ title: String, back: Bool = true) -> some View { modifier(DBar(title: title, back: back)) }
 
-    /// A field: a 1 px box on the view colour.
-    func dbox(_ line: Color = BackplaneDesign.line, fill: Color = BackplaneDesign.view) -> some View {
-        background(fill).overlay(Rectangle().strokeBorder(line, lineWidth: 1))
+    /// A field: a 1 px box on the view colour, its corners rounded (`radius: DRadius.card` for a card); what is inside is clipped to them.
+    func dbox(_ line: Color = BackplaneDesign.line, fill: Color = BackplaneDesign.view, radius: CGFloat = DRadius.control) -> some View {
+        background(fill).clipShape(RoundedRectangle(cornerRadius: radius)).overlay(RoundedRectangle(cornerRadius: radius).strokeBorder(line, lineWidth: 1))
     }
 
-    /// A sheet: square, on the panel colour.
-    func dataSheet() -> some View { presentationBackground(BackplaneDesign.panel).presentationCornerRadius(0) }
+    /// A sheet: on the panel colour, its corners rounded.
+    func dataSheet() -> some View { presentationBackground(BackplaneDesign.panel).presentationCornerRadius(DRadius.sheet) }
 
     /// A row of a flat list: no insets, no separator, its own background.
     func dataRow(_ fill: Color = BackplaneDesign.panel) -> some View { listRowInsets(EdgeInsets()).listRowSeparator(.hidden).listRowBackground(fill) }
@@ -42,7 +60,7 @@ private struct DBar: ViewModifier {
                         Button { dismiss() } label: { Image(systemName: "chevron.left").foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel(Tr.t("Back")).accessibilityIdentifier("data.back")
                     }.dflat()
                 }
-                ToolbarItem(placement: .principal) { Text(title).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1) }.dflat()
+                ToolbarItem(placement: .principal) { Text(title).dui(16, weight: .semibold).foregroundStyle(BackplaneDesign.text).lineLimit(1) }.dflat()
             }
     }
 }
@@ -124,12 +142,12 @@ struct DButton: ButtonStyle {
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         let solid = primary && enabled
-        configuration.label.dmono(compact ? 11.5 : 13, bold: true).lineLimit(1)
+        configuration.label.dui(compact ? 12 : 14, weight: .semibold).lineLimit(1)
             .foregroundStyle(solid ? BackplaneDesign.onAccent : !enabled ? BackplaneDesign.faint : danger ? BackplaneDesign.bad : BackplaneDesign.text)
-            .padding(.horizontal, compact ? 10 : 14).frame(minHeight: compact ? 30 : 40)
-            .background(solid ? BackplaneDesign.accent : BackplaneDesign.raised)
-            .overlay(Rectangle().strokeBorder(solid ? BackplaneDesign.accent : BackplaneDesign.line, lineWidth: 1))
-            .opacity(configuration.isPressed ? 0.7 : 1).contentShape(Rectangle())
+            .padding(.horizontal, compact ? 10 : 14).frame(minHeight: compact ? 30 : 44)
+            .background(solid ? BackplaneDesign.accent : BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control))
+            .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(solid ? BackplaneDesign.accent : BackplaneDesign.line, lineWidth: 1))
+            .opacity(configuration.isPressed ? 0.7 : 1).contentShape(RoundedRectangle(cornerRadius: DRadius.control))
     }
 }
 
@@ -160,7 +178,7 @@ struct DWorkingRow: View {
     var body: some View {
         HStack(spacing: 8) {
             ZStack { Rectangle().fill(BackplaneDesign.ok).frame(width: up ? 12 : 5, height: up ? 12 : 5).opacity(up ? 1 : 0.45) }.frame(width: 12, height: 12)
-            Text(Tr.t("Working…")).dmono(13).foregroundStyle(BackplaneDesign.dim)
+            Text(Tr.t("Working…")).dui(14).foregroundStyle(BackplaneDesign.dim)
         }
         .padding(.vertical, 6)
         .onAppear { withAnimation(.easeInOut(duration: 0.55).repeatForever(autoreverses: true)) { up = true } }

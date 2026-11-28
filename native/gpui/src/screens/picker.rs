@@ -494,7 +494,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, thread: &Value, open: bool
             .when(here, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).when(!ch.ok, |d| d.opacity(0.55))
             .child(div().w(z(10.)).flex_shrink_0().text_color(c("accent")).child(if ch.value == own.provider { "✓" } else { "" }))
             .child(logo(&ch.value))
-            .child(div().flex_shrink_0().when(here, |d| d.text_color(c("accent"))).child(ch.label.clone()))
+            .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().when(here, |d| d.text_color(c("accent"))).child(ch.label.clone()))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(z(11.)).text_color(c("faint")).child(crate::i18n::trs(&ch.note)))
             .tooltip(tip_of(full, light))
             .on_click(cx.listener(move |this, _, _, cx| { this.picker_press(0, &value, cx); if drill { this.picker_go(1, cx) } })));
@@ -675,7 +675,7 @@ fn plan_once_row(cx: &mut Context<Backplane>, light: bool, thread: &Value) -> Op
         })).into_any_element())
 }
 /// A hover with the whole text of a row, for what the row had to cut short.
-fn tip_of(text: String, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static { move |_, cx| cx.new(|_| super::combo::Tip(text.clone(), light)).into() }
+fn tip_of(text: String, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static { move |w, cx| { let at = w.mouse_position(); cx.new(|_| super::combo::Tip::new(text.clone(), light, at)).into() } }
 
 impl Backplane {
     /// The model chip or its key: open or shut the menu; opening clears the search and puts the keyboard in it.

@@ -113,18 +113,18 @@ struct DataSectionHead: View {
 /// while it works, quiet when it waits or is done. It replaced the row's coloured dot, which said almost nothing at a glance.
 struct DStatusPill: View {
     let pill: HomePill
-    private var color: Color { switch pill.tone { case "bad": BackplaneDesign.bad; case "run": BackplaneDesign.accent; case "ok": BackplaneDesign.ok; default: BackplaneDesign.dim } }
+    private var color: Color { switch pill.tone { case "bad": BackplaneDesign.bad; case "run": BackplaneDesign.accent; case "ok": BackplaneDesign.ok; case "wait": BackplaneDesign.warn; default: BackplaneDesign.dim } }
     var body: some View {
         // solid when the person must act (approve, answer, sign in); a stop is red too, as a line: it waits for nobody
-        let solid = pill.tone == "bad" && pill.label != "Failed" && pill.label != "Stopped"
+        let solid = pill.tone == "bad" && pill.label != "Failed" && pill.label != "Stopped" && pill.label != "offline"
         HStack(spacing: 4) {
             Image(systemName: pill.symbol).font(.system(size: 10, weight: .bold))
-            Text(Tr.t(pill.label)).dmono(11, bold: true).lineLimit(1)
+            Text(Tr.t(pill.label)).dui(11, weight: .semibold).lineLimit(1)
         }
         .foregroundStyle(solid ? BackplaneDesign.background : color)
-        .padding(.horizontal, 7).frame(minHeight: 24)
-        .background(solid ? color : color.opacity(0.12))
-        .overlay(Rectangle().strokeBorder(color, lineWidth: 1))
+        .padding(.horizontal, 9).frame(minHeight: 24)
+        .background(solid ? color : color.opacity(0.12), in: Capsule())
+        .overlay(Capsule().strokeBorder(color, lineWidth: 1))
         .fixedSize().accessibilityElement(children: .combine)
     }
 }
@@ -135,8 +135,8 @@ struct DBoardBadge: View {
             Image(systemName: "cpu").font(.system(size: 9, weight: .semibold))
             Text(Tr.t("PCB")).dmono(10, bold: true)
         }
-        .foregroundStyle(BackplaneDesign.ok).padding(.horizontal, 5).frame(minHeight: 18)
-        .overlay(Rectangle().strokeBorder(BackplaneDesign.ok.opacity(0.6), lineWidth: 1)).fixedSize().accessibilityElement(children: .combine)
+        .foregroundStyle(BackplaneDesign.ok).padding(.horizontal, 9).frame(minHeight: 18)
+        .overlay(Capsule().strokeBorder(BackplaneDesign.ok.opacity(0.6), lineWidth: 1)).fixedSize().accessibilityElement(children: .combine)
     }
 }
 /// A thread row of a section: its title, under it where it is and when, and its status as a word at the right. One whose machine is off is
@@ -156,7 +156,7 @@ struct DataSectionThread: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
                         if !r.provider.isEmpty { ProviderMark(provider: r.provider, size: 12) }
-                        Text(r.title).dmono(14).foregroundStyle(BackplaneDesign.text).lineLimit(2)
+                        Text(r.title).dui(15, weight: r.word == "needs" ? .semibold : .medium).foregroundStyle(BackplaneDesign.text).lineLimit(2)
                         if r.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.pinned." + r.id) }
                     }
                     if !sub.isEmpty { Text(sub).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.middle) }
@@ -254,14 +254,14 @@ struct DataSectionProject: View {
                     .buttonStyle(.plain).accessibilityLabel(Tr.t(r.folded ? "Show" : "Hide")).accessibilityIdentifier("data.section.fold." + r.key).padding(.trailing, -8)
             } else { Color.clear.frame(width: 6, height: 44) }
             if r.icon == "backplane" { BrandMark(size: tall ? 16 : 14) } else { Image(systemName: dataBadgeSymbol(r.icon)).font(.system(size: tall ? 16 : 14)).foregroundStyle(Color(css: r.css) ?? BackplaneDesign.ok).frame(width: 20) }
-            Text(r.title).dmono(14, bold: tall).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+            Text(r.title).dui(15, weight: tall ? .semibold : .medium).foregroundStyle(BackplaneDesign.text).lineLimit(1)
             if r.hasBoard { DBoardBadge().accessibilityIdentifier("data.section.board." + r.key) }
             if r.dots.count > 1 { HStack(spacing: 3) { ForEach(Array(r.dots.enumerated()), id: \.offset) { _, d in Circle().fill(d.dim ? BackplaneDesign.faint : (d.here ? BackplaneDesign.accent : BackplaneDesign.dim)).frame(width: 5, height: 5) } }.accessibilityHidden(true) }
             Spacer(minLength: 0)
             if r.rest > 0 { Text("\(r.rest)").dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.rest." + r.key) }
             if r.running > 0 { Text(Tr.ios_sections_running(n: r.running)).dmono(11, bold: true).foregroundStyle(BackplaneDesign.accent).lineLimit(1).fixedSize() }
             // what of it waits on the person (its rows are in Needs you, folded or not)
-            if r.needsCount > 0 { Text("\(r.needsCount)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.background).padding(.horizontal, 6).frame(minHeight: 20).background(BackplaneDesign.bad).accessibilityIdentifier("data.section.needs." + r.key) }
+            if r.needsCount > 0 { Text("\(r.needsCount)").dmono(11, bold: true).foregroundStyle(BackplaneDesign.background).padding(.horizontal, 6).frame(minWidth: 20, minHeight: 20).background(BackplaneDesign.bad, in: Capsule()).accessibilityIdentifier("data.section.needs." + r.key) }
             if r.pinned { Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(BackplaneDesign.dim) }
             Image(systemName: "chevron.right").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint).accessibilityHidden(true)
         }.padding(.leading, 8).padding(.trailing, 12).frame(minHeight: tall ? 52 : 46).contentShape(Rectangle()).opacity(faded || r.projOff ? 0.55 : 1)
@@ -287,12 +287,30 @@ struct DataProjectPageView: View {
     /// what the project is, as the desktop's project page opens: its goal (a tap shows it whole) and its boards
     @State private var card: DProjectCard?
     @State private var whole = false
+    @State private var readme: String?
     var body: some View {
         List {
+            // as the desktop's project page: the folder (selectable), and the viewer on the project itself without a thread
+            // (`project-home-<id>`): Board, Schematic and 3D when it has a board, Files always
+            if let p = project {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !p.root.isEmpty { Text(verbatim: p.root).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(2).textSelection(.enabled).accessibilityIdentifier("data.project.page.path") }
+                    HStack(spacing: 8) {
+                        ForEach(((card?.boards.isEmpty ?? true) ? [] : ["Board", "Schematic", "3D"]) + ["Files"], id: \.self) { t in
+                            Button { path.append(DViewerRoute(id: "project-home-" + p.id, tab: t)) } label: {
+                                Text(Tr.t(t)).dui(12, weight: .semibold).lineLimit(1).foregroundStyle(BackplaneDesign.text)
+                                    .padding(.horizontal, 10).frame(minHeight: 30)
+                                    .background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control))
+                                    .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1))
+                            }.buttonStyle(.plain).accessibilityIdentifier("data.project.page.tool.\(t)")
+                        }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).dataRow()
+            }
             if let c = card, !c.goal.isEmpty || !c.boards.isEmpty || c.leadDays > 0 || !c.estimateWarnings.isEmpty {
                 Button { whole.toggle() } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        if !c.goal.isEmpty { Text(c.goal).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(whole ? 20 : 2).multilineTextAlignment(.leading) }
+                        if !c.goal.isEmpty { Text(c.goal).dui(13).foregroundStyle(BackplaneDesign.text).lineLimit(whole ? 20 : 2).multilineTextAlignment(.leading) }
                         if !c.boards.isEmpty { Text(Tr.t("Boards").uppercased() + "  " + c.boards.joined(separator: " · ")).dmono(10).foregroundStyle(BackplaneDesign.dim).lineLimit(2) }
                         if c.leadDays > 0 { Text(Tr.order_lead_days(days: c.leadDays)).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("data.project.page.lead") }
                         if !c.estimateWarnings.isEmpty { Text(Tr.order_estimate_warnings(warnings: c.estimateWarnings)).dmono(11).foregroundStyle(BackplaneDesign.warn).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("data.project.page.warnings") }
@@ -309,6 +327,11 @@ struct DataProjectPageView: View {
                     }
                 }
                 if page.sections.allSatisfy({ $0.rows.isEmpty && $0.count == 0 }) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(14).dataRow() }
+                // under the threads, as the desktop's project page: its README (when it has one) and its goal and notes, folded, read-only
+                if let p = project {
+                    if let r = readme { DataProjectNote(title: Tr.k("gpui.readme").uppercased(), tag: "readme", empty: "") { r }.dataRow() }
+                    if client.has("projecthome") { DataProjectNote(title: Tr.k("gpui.goal.notes"), tag: "goal", empty: Tr.k("gpui.no.goal.yet.ask.an")) { await client.projectIntent(p.id) }.dataRow() }
+                }
             } else { DLoading(text: Tr.t("Loading…")).dataRow() }
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
@@ -320,11 +343,40 @@ struct DataProjectPageView: View {
             Button(Tr.t("Buy it")) { if let b = buyAsk { startBuy(b) } }.accessibilityIdentifier("data.project.page.buy.confirm")
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
-        .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id); card = await client.projectCard(p.id) } }
+        .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id); card = await client.projectCard(p.id)
+            readme = (await client.fileBytes("project-home-" + p.id, "README.md")).flatMap { String(data: $0, encoding: .utf8) } } }
     }
     private func startBuy(_ b: DBuy) {
         guard !buying else { return }; buying = true; buyFailed = ""
         Task { do { let t = try await client.buy(b.thread); if !t.isEmpty { client.linkTarget = DLinkTarget(kind: .thread, id: t) } } catch { buyFailed = error.localizedDescription }; buying = false }
     }
     private func load() async { page = await client.projectPage(route.key, done: done, older: older) }
+}
+
+/// A folded note of a project's page (README, Goal & notes): the head as a section's, the text in the app's Markdown when opened; `load` runs then.
+struct DataProjectNote: View {
+    let title: String
+    let tag: String
+    let empty: String
+    let load: () async -> String
+    @State private var open = false
+    @State private var text: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { open.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(BackplaneDesign.dim)
+                    Text(verbatim: title).dmono(11).foregroundStyle(BackplaneDesign.dim)
+                    Spacer()
+                }.frame(minHeight: 36).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("data.project.page.\(tag)")
+            if open {
+                if let t = text {
+                    if t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text(verbatim: empty).dmono(12).foregroundStyle(BackplaneDesign.faint) }
+                    else { DataMarkdown(text: t).accessibilityIdentifier("data.project.page.\(tag).text") }
+                } else { Text(Tr.t("Loading…")).dmono(12).foregroundStyle(BackplaneDesign.faint) }
+            }
+        }.padding(.horizontal, 14).padding(.vertical, 2)
+        .task(id: open) { if open && text == nil { text = await load() } }
+    }
 }

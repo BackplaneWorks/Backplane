@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.draw.clip
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -224,14 +225,18 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                 "Board" -> {
                     var hasPanels by remember(root) { mutableStateOf(false) }
                     var mgmtOpen by remember(root) { mutableStateOf("") }
+                    var mgmtH by remember { mutableIntStateOf(0) }
+                    val gap = with(androidx.compose.ui.platform.LocalDensity.current) { 44.dp.roundToPx() }
                     Box(Modifier.fillMaxSize()) {
                         Column(Modifier.fillMaxSize()) {
                             Box(Modifier.weight(1f)) {
-                                PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard)
+                                // what an open panel covers of the drawing's lower part: a BOM row's parts are centred in the rest
+                                PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard,
+                                    cover = if (hasPanels && mgmtOpen.isNotEmpty() && mgmtOpen != "plan") (mgmtH - gap).coerceAtLeast(0) else 0)
                             }
                             if (hasPanels && mgmtOpen != "plan") Spacer(Modifier.height(44.dp))
                         }
-                        MgmtHost(panelsOf, root, Modifier.align(Alignment.BottomCenter)) { has, op ->
+                        MgmtHost(panelsOf, root, Modifier.align(Alignment.BottomCenter).onSizeChanged { mgmtH = it.height }) { has, op ->
                             hasPanels = has
                             mgmtOpen = op
                         }
@@ -339,7 +344,7 @@ private fun PickerHead(what: String, name: String, sub: String, tag: String, pre
 @Composable
 private fun PickerSheet(title: String, close: () -> Unit, search: Boolean, rows: @Composable (String) -> Unit) {
     var q by remember { mutableStateOf("") }
-    ModalBottomSheet(onDismissRequest = close, shape = androidx.compose.ui.graphics.RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = close, shape = dShapeSheet, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.75f)) {
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 DMono(title.uppercase(), dfaint, 11, Modifier.weight(1f))
@@ -366,7 +371,7 @@ private fun PickerRow(name: String, sub: String, on: Boolean, depth: Int, tag: S
 
 // ---- Board, Schematic and 3D: the hub's plot, drawn by the GPU view
 @Composable
-private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, none: String, tree: String = "") {
+private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, none: String, tree: String = "", cover: Int = 0) {
     val scope = rememberCoroutineScope()
     val three = kind == "3d"
     val head = if (three) "2|" else if (kind == "schematic") "1|" else "0|"
@@ -402,10 +407,12 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     LaunchedEffect(kind, path, bits) { if (!three && bits != 0 && DataClient.has("layers")) act("", "") }
     // a management row (a BOM line, a finding) lights its parts here, through the hub's probe of the plot on show
     val asked = DataClient.lightRefs
-    LaunchedEffect(asked, frame?.key) {
+    var goTo by remember { mutableStateOf(DataClient.goToRefs to emptyList<String>()) }   // a BOM row's tap (its count) and its parts: the view centres on them
+    LaunchedEffect(asked, frame?.key, DataClient.goToRefs) {
         val k = frame?.key ?: return@LaunchedEffect
         if (three) return@LaunchedEffect
         lit = asked.flatMap { r -> runCatching { DataClient.probe(k, "ref", r) }.getOrDefault(emptyList()) }.distinct()
+        if (DataClient.goToRefs != goTo.first) goTo = DataClient.goToRefs to lit
         if (BuildConfig.DEBUG) android.util.Log.i("bpview", "$kind: lit ${asked.joinToString(",")} -> ${lit.size}")
     }
     val off = layers?.off ?: 0; val dim = layers?.dim ?: 0; val lift = layers?.lift ?: 255
@@ -432,6 +439,8 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
             s.mark(picked) // closing the card deselects
             s.markAll(lit)
+            s.cover(cover)
+            s.goTo(goTo.first, goTo.second)
             if (three) { s.mesh(mesh); s.parts(parts) }
             if (s.renderer.off != off || s.renderer.dim != dim || s.renderer.lift != lift) { s.renderer.off = off; s.renderer.dim = dim; s.renderer.lift = lift; s.requestRender() }
         })
@@ -466,16 +475,16 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
 
 @Composable
 private fun ViewChip(label: String, on: Boolean, tag: String, onClick: () -> Unit) {
-    DMono(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant)).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp).testTag(tag))
+    DMono(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.clip(dShape).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant), dShape).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp).testTag(tag))
 }
 
 /** KiCad's high contrast, as the hub lists it: how the others show (a board), a box per layer (show or hide it), its name (make it the active one, again: all back), a comparison's marks last, Reset layers. */
 @Composable
 private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, String) -> Unit, modifier: Modifier) {
-    Column(modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("layer.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier.heightIn(max = 420.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).padding(8.dp).testTag("layer.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (l.modes) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             listOf(Msg.viewer_layers_all, Msg.viewer_layers_dim, Msg.viewer_layers_only).forEachIndexed { i, label ->
-                DMono(label, if (l.mode == i) dcs.primary else dcs.onSurface, 12, Modifier.border(BorderStroke(1.dp, if (l.mode == i) dcs.primary else dcs.outlineVariant)).clickable { act("mode", i.toString()) }.padding(horizontal = 8.dp, vertical = 3.dp).testTag("layer.mode.$i"))
+                DMono(label, if (l.mode == i) dcs.primary else dcs.onSurface, 12, Modifier.clip(dShape).border(BorderStroke(1.dp, if (l.mode == i) dcs.primary else dcs.outlineVariant), dShape).clickable { act("mode", i.toString()) }.padding(horizontal = 8.dp, vertical = 3.dp).testTag("layer.mode.$i"))
             }
         }
         l.rows.filter { it.layer in present }.forEach { r ->
@@ -492,7 +501,7 @@ private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, St
 /** The versions a comparison may take, as the hub lists them; a press shows the Diff against that one. */
 @Composable
 private fun RefMenu(rows: List<DataClient.Ref>, pick: (String) -> Unit, modifier: Modifier) {
-    Column(modifier.heightIn(max = 420.dp).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("compare.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(modifier.heightIn(max = 420.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).padding(8.dp).testTag("compare.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (rows.isEmpty()) DMono(Msg.android_compare_none, dcs.onSurfaceVariant, 12)
         rows.forEachIndexed { i, r ->
             Row(Modifier.clickable { pick(r.commit) }.testTag("compare.row.$i"), horizontalArrangement = Arrangement.spacedBy(8.dp)) { DMono(Tr.t(r.kind), dcs.onSurfaceVariant, 12); DMono(Tr.t(r.label), dcs.onSurface, 12) }
@@ -553,8 +562,9 @@ private fun MechTab(thread: DThread, open: String?) {
                             if (p == part) dcs.onPrimary else dcs.onSurface,
                             12,
                             Modifier
+                                .clip(dShape)
                                 .background(if (p == part) dcs.primary else dcs.surfaceContainerHigh)
-                                .border(BorderStroke(1.dp, dcs.outlineVariant))
+                                .border(BorderStroke(1.dp, dcs.outlineVariant), dShape)
                                 .clickable { part = p }
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                                 .testTag("mech.part.${p.substringAfterLast('/')}"),
@@ -770,7 +780,7 @@ private fun SolidCraftWebModal(title: String, launch: Triple<String, String, Str
                 )
                 if (loading) {
                     Column(
-                        Modifier.align(Alignment.Center).background(dcs.surfaceVariant.copy(alpha = .92f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(20.dp),
+                        Modifier.align(Alignment.Center).background(dcs.surfaceVariant.copy(alpha = .92f), dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
@@ -974,14 +984,14 @@ private fun BrowserTab(thread: DThread) {
                     DBtn("‹", false, modifier = Modifier.testTag("browser.back")) { run("toolbar") { put("command", "back") } }
                     DBtn("›", false, modifier = Modifier.testTag("browser.forward")) { run("toolbar") { put("command", "forward") } }
                     DBtn("↻", false, modifier = Modifier.testTag("browser.reload")) { run("toolbar") { put("command", "reload") } }
-                    Box(Modifier.weight(1f)) { DField(url, { url = it }, Msg.browser_address, Modifier.testTag("browser.url")) }
+                    Box(Modifier.weight(1f)) { DField(url, { url = it }, Msg.browser_address, Modifier.testTag("browser.url"), mono = true) }
                     DBtn(Msg.common_go, true, url.isNotBlank(), Modifier.testTag("browser.go")) { run("navigate") { put("url", pageUrl(url)) } }
                 }
             }
             if (driving) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                     // the key field: what the keyboard types here goes to the page (Enter, Tab and the arrows of a hardware keyboard too)
-                    Box(Modifier.weight(1f).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 10.dp)) {
+                    Box(Modifier.weight(1f).clip(dShape).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
                         if (keys.text == BrowserInput.SENTINEL) Text(Msg.android_browser_keys, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
                         BasicTextField(keys, ::keyed, singleLine = true,
                             textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary),
@@ -1113,23 +1123,89 @@ private fun DiffTab(thread: DThread) {
             d == null -> CircularProgressIndicator(Modifier.padding(24.dp))
             nogit.isNotEmpty() -> DMono(Msg.android_diff_nogit, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.nogit"), lines = 4)
             d.isBlank() -> DMono(Msg.android_diff_none, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.none"))
-            else -> {
-                val green = androidx.compose.ui.graphics.Color(0xFF4CAF7A); val lines = remember(d) { d.lines().take(4000) }
-                LazyColumn(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).testTag("diff.list")) {
-                    items(lines.size) { i ->
-                        val l = lines[i]
-                        val (c, bgc) = when {
-                            l.startsWith("+++") || l.startsWith("---") || l.startsWith("diff ") || l.startsWith("index ") -> dcs.onSurface to dcs.surfaceVariant
-                            l.startsWith("+") -> green to green.copy(alpha = .12f)
-                            l.startsWith("-") -> dcs.error to dcs.error.copy(alpha = .12f)
-                            l.startsWith("@@") -> dcs.primary to androidx.compose.ui.graphics.Color.Transparent
-                            else -> dcs.onSurfaceVariant to androidx.compose.ui.graphics.Color.Transparent
-                        }
-                        Text(l.ifEmpty { " " }, Modifier.fillMaxWidth().background(bgc).padding(horizontal = 8.dp, vertical = 1.dp), color = c, fontFamily = BpMono, fontSize = 11.sp, softWrap = false, fontWeight = if (l.startsWith("diff ")) FontWeight.Bold else FontWeight.Normal)
-                    }
-                }
+            else -> DiffFiles(thread, d)
+        }
+    }
+}
+
+/** The changed files (DiffModel): totals, then per file a header that folds and its numbered, wrapped lines. */
+@Composable
+private fun DiffFiles(thread: DThread, d: String) {
+    val p = remember(d) { DiffModel.parse(d) }
+    // gutter digits per file: 4, more when a file's numbers are longer
+    val digits = remember(p) { p.files.map { f -> maxOf(4, f.lines.maxOfOrNull { maxOf(it.old, it.new) }?.toString()?.length ?: 0) } }
+    val open = remember(thread.id) { mutableStateMapOf<String, Boolean>() }
+    val small = p.files.size <= 3
+    // open by default when few files or a short one; a file past the line cap (nothing of it kept) starts folded
+    fun isOpen(f: DiffModel.File) = open[f.path] ?: ((small || f.lines.size <= 80) && !(f.cut && f.lines.isEmpty()))
+    val ok = dok; val bad = dcs.error
+    // counts as plain digits (as the desktop writes them), so the +/− parts can be found and coloured
+    val sum = if (p.files.size == 1) Msg.mobile_diff_summary_one("${p.added}", "${p.removed}") else Msg.mobile_diff_summary("${p.files.size}", "${p.added}", "${p.removed}")
+    val sumText = remember(sum, ok, bad) {
+        androidx.compose.ui.text.buildAnnotatedString {
+            append(sum)
+            val a = "+${p.added}"; val i = sum.lastIndexOf(a); if (i >= 0) addStyle(androidx.compose.ui.text.SpanStyle(color = ok), i, i + a.length)
+            val r = "−${p.removed}"; val j = sum.lastIndexOf(r); if (j >= 0) addStyle(androidx.compose.ui.text.SpanStyle(color = bad), j, j + r.length)
+        }
+    }
+    Text(sumText, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("diff.summary"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    DLine()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    LazyColumn(Modifier.fillMaxSize().testTag("diff.list")) {
+        p.files.forEachIndexed { i, f ->
+            val shown = isOpen(f)
+            item(key = "f:$i") { DiffFileHead(f, i, shown) { open[f.path] = !shown } }
+            if (shown) {
+                val w = with(density) { (digits[i] * 6 + 4).sp.toDp() }
+                items(f.lines.size, key = { j -> "l:$i:$j" }) { j -> DiffLineRow(f.lines[j], w) }
+                if (f.cut) item(key = "c:$i") { DMono(Msg.gpui_c_diff_cut, dcs.onSurfaceVariant, 12, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("diff.cut.$i"), lines = 2) }
             }
         }
+    }
+}
+
+@Composable
+private fun DiffFileHead(f: DiffModel.File, i: Int, shown: Boolean, toggle: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).background(dcs.surfaceVariant).clickable(onClick = toggle).padding(horizontal = 8.dp, vertical = 6.dp).testTag("diff.file.$i"), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (shown) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight, null, Modifier.size(16.dp), tint = dcs.onSurfaceVariant)
+            Spacer(Modifier.width(6.dp))
+            // the folder dim and cut at its end, the file name bold: a long path keeps its name (a middle ellipsis)
+            val cut = f.path.lastIndexOf('/')
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                // (aligned to its end: a cut folder's "…" sits against the name, with no gap)
+                if (cut >= 0) Text(f.path.substring(0, cut + 1), Modifier.weight(1f, fill = false), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                Text(f.path.substring(cut + 1), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.width(8.dp))
+            val word = when (f.state) { "new" -> Msg.mobile_diff_new; "deleted" -> Msg.mobile_diff_deleted; "renamed" -> Msg.mobile_diff_renamed; "binary" -> Msg.mobile_diff_binary; else -> "" }
+            if (word.isNotEmpty()) DMono(word, dcs.onSurfaceVariant, 11)
+            else {
+                DMono("+${f.added}", dok, 11); Spacer(Modifier.width(6.dp)); DMono("−${f.removed}", dcs.error, 11)
+            }
+        }
+        DLine()
+    }
+}
+
+@Composable
+private fun DiffLineRow(l: DiffModel.Line, gutter: androidx.compose.ui.unit.Dp) {
+    val (bg, fg) = when (l.kind) {
+        '+' -> dok.copy(alpha = .12f) to dcs.onSurface
+        '-' -> dcs.error.copy(alpha = .12f) to dcs.onSurface
+        '@' -> dcs.surfaceVariant to dcs.primary
+        '\\' -> Color.Transparent to dcs.onSurfaceVariant   // dim, still readable on the dark theme (it carries the too-big counts)
+        else -> Color.Transparent to dcs.onSurface
+    }
+    val text = when (l.kind) { '+', '-', ' ' -> "${l.kind}${l.text}"; else -> l.text }
+    Row(Modifier.fillMaxWidth().background(bg).padding(end = 8.dp)) {
+        listOf(l.old, l.new).forEach { n ->
+            Text(if (n > 0) "$n" else "", Modifier.width(gutter).padding(top = 2.dp), color = dfaint, fontFamily = BpMono, fontSize = 10.sp, maxLines = 1, softWrap = false,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(text.ifEmpty { " " }, Modifier.weight(1f).padding(vertical = 1.dp), color = fg, fontFamily = BpMono, fontSize = 12.sp, softWrap = true)
     }
 }
 
@@ -1187,7 +1263,7 @@ private fun CommentsPage(thread: DThread) {
             val l = list
             if (l == null) CircularProgressIndicator() else if (l.isEmpty()) DMono(Msg.android_comments_none, dcs.onSurfaceVariant, 12)
             l?.filter { it.parent.isEmpty() }?.forEach { c ->
-                Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (c.resolved) dcs.outlineVariant else dcs.primary.copy(alpha = .6f))).padding(10.dp)) {
+                Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (c.resolved) dcs.outlineVariant else dcs.primary.copy(alpha = .6f)), dShapeCard).padding(10.dp)) {
                     Row { DMono((c.by.ifEmpty { Msg.android_you }) + if (c.resolved) " · " + Msg.android_resolved else "", dcs.onSurfaceVariant, 11, Modifier.weight(1f))
                         DMono(if (c.resolved) Msg.android_reopen else Msg.android_resolve, dcs.primary, 11, Modifier.clickable { scope.launch { runCatching { DataClient.comment(thread.id, if (c.resolved) "reopen" else "resolve") { put("id", c.id) } }; load() } }.testTag("review.resolve.${c.id}")) }
                     Text(c.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
@@ -1242,7 +1318,7 @@ object Probe {
 private fun ProbeCard(info: String, lit: Int, modifier: Modifier, close: () -> Unit) {
     val (head, rest) = Probe.lines(info)
     // the words can be selected (a long press), and Copy takes them all: what was picked and its values (the person: the value at the foot should copy)
-    Row(modifier.fillMaxWidth().background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
+    Row(modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.weight(1f)) { androidx.compose.foundation.text.selection.SelectionContainer { Column {
             Text(head, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             if (rest.isNotEmpty() || lit > 1) Text(listOf(rest, if (lit > 1) Msg.android_probe_lit(lit) else "").filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)

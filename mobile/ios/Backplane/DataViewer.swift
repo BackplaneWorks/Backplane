@@ -7,7 +7,7 @@ import WebKit
 // and are drawn by the app's Metal view (PlotCanvasView: pinch, pan, orbit, tap to inspect). Written without a simulator run: compile-checked only.
 
 /// `file` and `line`: a link to a file (src/x.rs:12) opens the viewer at it
-struct DViewerRoute: Hashable { var id: String; var file = ""; var line = 0 }
+struct DViewerRoute: Hashable { var id: String; var file = ""; var line = 0; var tab = "" }   // tab: the page to open on (the project page's Board / Schematic / 3D / Files)
 struct DEntryRow: Decodable, Identifiable { var dir: Bool; var size: Int; var name: String; var id: String { name }
     enum CodingKeys: String, CodingKey { case dir, size, name }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); dir = c.bool(.dir); size = c.int(.size); name = c.str(.name) } }
@@ -157,13 +157,15 @@ struct DataViewerView: View {
     @State private var sheetPick = ""
     @State private var choosing: String?
     @State private var mgmtOpen = ""
-    init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0) {
+    init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0, tab openTab: String = "") {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
         let e = ext(openFile)
         _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" || e == "pcbdoc" ? "Board" : e == "kicad_sch" || e == "schdoc" ? "Schematic" : cadExt.contains(e) ? "Mech" : "Files")
         _target = State(initialValue: e == "kicad_pcb" || e == "pcbdoc" ? ("Board", openFile) : e == "kicad_sch" || e == "schdoc" ? ("Schematic", openFile) : cadExt.contains(e) ? ("Mech", openFile) : nil)
         _railState = State(initialValue: ViewerRailState(threadId: thread.id))
+        // a page asked for by name (the project page's buttons) is the person's own pick: the rail's reply keeps it
+        if !openTab.isEmpty && tabs.contains(openTab) { _tab = State(initialValue: openTab); _railState = State(initialValue: ViewerRailState(threadId: thread.id).onLocalSelect()) }
     }
     var body: some View {
         let hasRail = client.has("rail")
@@ -510,7 +512,7 @@ struct DataPlotTab: View {
                             Text(r.1).textSelection(.enabled).lineLimit(2)
                         }.font(.system(.footnote, design: .monospaced)).accessibilityElement(children: .combine).accessibilityIdentifier("data.viewer.info.row")
                     }
-                }.padding(10).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4)))
+                }.padding(10).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(.secondary.opacity(0.4)))
                 .accessibilityElement(children: .contain).accessibilityIdentifier("data.viewer.info")
                 .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
@@ -524,7 +526,7 @@ struct DataPlotTab: View {
         .task(id: "\(kind)|\(path)|\(bits)") { if !three && bits != 0 { act("", "", bits) } }
     }
     private func chip(_ label: String, id: String, on: Bool, _ tap: @escaping () -> Void) -> some View {
-        Button(action: tap) { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(on ? BackplaneDesign.accent : .primary).padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.raised).overlay(Rectangle().stroke(on ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
+        Button(action: tap) { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(on ? BackplaneDesign.accent : .primary).padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control)).overlay(RoundedRectangle(cornerRadius: DRadius.control).stroke(on ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
             .accessibilityIdentifier(id)
     }
     /// A press: the hub answers what it does; a comparison on show keeps its marks to the active layer.
@@ -557,7 +559,7 @@ struct DataLayerMenu: View {
                 if layers.layerModes {
                     HStack(spacing: 4) {
                         ForEach(Array([Tr.k("viewer.layers.all"), Tr.k("viewer.layers.dim"), Tr.k("viewer.layers.only")].enumerated()), id: \.offset) { i, label in
-                            Button { act("mode", String(i)) } label: { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(layers.layerMode == i ? BackplaneDesign.accent : .primary).padding(.horizontal, 8).padding(.vertical, 3).overlay(Rectangle().stroke(layers.layerMode == i ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
+                            Button { act("mode", String(i)) } label: { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(layers.layerMode == i ? BackplaneDesign.accent : .primary).padding(.horizontal, 8).padding(.vertical, 3).overlay(RoundedRectangle(cornerRadius: DRadius.control).stroke(layers.layerMode == i ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
                                 .accessibilityIdentifier("data.layer.mode.\(i)")
                         }
                     }
@@ -576,7 +578,7 @@ struct DataLayerMenu: View {
                 }
             }.padding(8)
         }
-        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.layer.menu")
+        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.layer.menu")
     }
 }
 
@@ -595,7 +597,7 @@ struct DataRefMenu: View {
                 }
             }.padding(8)
         }
-        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.compare.menu")
+        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.compare.menu")
     }
 }
 
@@ -1509,6 +1511,8 @@ struct DataDiffTab: View {
     let client: DataClient
     let thread: DThread
     @State private var diff: DDiff?
+    @State private var parsed: DiffModel.Parsed?
+    @State private var open: [String: Bool] = [:]
     @State private var err = ""
     @State private var n = 0
     var body: some View {
@@ -1520,13 +1524,15 @@ struct DataDiffTab: View {
             else if let d = diff {
                 if !d.nogit.isEmpty { Text(Tr.t("This project is not a git repository, so there is nothing to compare.")).foregroundStyle(.secondary).padding(16).accessibilityIdentifier("data.diff.nogit") }
                 else if d.diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text(Tr.t("No changes.")).foregroundStyle(.secondary).padding(16) }
-                else {
-                    ScrollView([.vertical, .horizontal]) {
+                else if let p = parsed {
+                    // the totals, then per file a header that folds and its numbered, wrapped lines (DiffModel)
+                    Text(summary(p)).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                        .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8).accessibilityIdentifier("data.diff.summary")
+                    Divider()
+                    ScrollView {
                         LazyVStack(alignment: .leading, spacing: 0) {
-                            ForEach(Array(d.diff.split(separator: "\n", omittingEmptySubsequences: false).prefix(4000).enumerated()), id: \.offset) { _, l in
-                                let line = String(l)
-                                Text(line.isEmpty ? " " : line).font(.system(size: 11, design: .monospaced)).lineLimit(1).fixedSize()
-                                    .foregroundStyle(color(line)).frame(maxWidth: .infinity, alignment: .leading).background(tint(line))
+                            ForEach(Array(p.files.enumerated()), id: \.offset) { i, f in
+                                fileRows(i, f, isOpen(f, p))
                             }
                         }
                     }.accessibilityIdentifier("data.diff.list")
@@ -1534,20 +1540,109 @@ struct DataDiffTab: View {
             } else { ProgressView().padding(24) }
             Spacer(minLength: 0)
         }
-        .task(id: n) { diff = nil; err = ""; do { diff = try await client.diff(thread.id) } catch { self.err = error.localizedDescription } }
+        .task(id: n) {
+            diff = nil; parsed = nil; err = ""
+            do { let d = try await client.diff(thread.id); parsed = DiffModel.parse(d.diff); diff = d } catch { self.err = error.localizedDescription }
+        }
     }
-    private func color(_ l: String) -> Color {
-        if l.hasPrefix("+++") || l.hasPrefix("---") || l.hasPrefix("diff ") || l.hasPrefix("index ") { return .primary }
-        if l.hasPrefix("+") { return Color(red: 0.30, green: 0.69, blue: 0.48) }
-        if l.hasPrefix("-") { return .red }
-        if l.hasPrefix("@@") { return BackplaneDesign.accent }
-        return .secondary
+
+    /// Open by default when few files or a short one; a file past the line cap (nothing of it kept) starts folded.
+    private func isOpen(_ f: DiffModel.File, _ p: DiffModel.Parsed) -> Bool {
+        open[f.path] ?? ((p.files.count <= 3 || f.lines.count <= 80) && !(f.cut && f.lines.isEmpty))
     }
-    private func tint(_ l: String) -> Color {
-        if l.hasPrefix("+++") || l.hasPrefix("---") { return .clear }
-        if l.hasPrefix("+") { return Color(red: 0.30, green: 0.69, blue: 0.48).opacity(0.12) }
-        if l.hasPrefix("-") { return Color.red.opacity(0.12) }
-        return .clear
+
+    /// "60 files, +0 −1227238": the added part green, the removed part red (counts as plain digits, as the desktop writes them).
+    private func summary(_ p: DiffModel.Parsed) -> AttributedString {
+        let s = p.files.count == 1 ? Tr.mobile_diff_summary_one(added: String(p.added), removed: String(p.removed))
+            : Tr.mobile_diff_summary(files: String(p.files.count), added: String(p.added), removed: String(p.removed))
+        var a = AttributedString(s)
+        if let r = a.range(of: "+" + String(p.added), options: .backwards) { a[r].foregroundColor = BackplaneDesign.ok }
+        if let r = a.range(of: "−" + String(p.removed), options: .backwards) { a[r].foregroundColor = BackplaneDesign.bad }
+        return a
+    }
+
+    @ViewBuilder private func fileRows(_ i: Int, _ f: DiffModel.File, _ shown: Bool) -> some View {
+        Button { open[f.path] = !shown } label: { fileHead(f, shown) }.buttonStyle(.plain).accessibilityIdentifier("data.diff.file.\(i)")
+        Divider()
+        if shown {
+            let w = gutter(f)
+            ForEach(Array(f.lines.enumerated()), id: \.offset) { _, l in lineRow(l, w) }
+            if f.cut {
+                Text(Tr.k("gpui.c.diff.cut")).dmono(12).foregroundStyle(BackplaneDesign.dim)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 8)
+            }
+        }
+    }
+
+    /// A file's header: a chevron, the folder dim (cut at its end) and the name bold, then +N −M or the file's state.
+    private func fileHead(_ f: DiffModel.File, _ shown: Bool) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: shown ? "chevron.down" : "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(BackplaneDesign.dim).frame(width: 16)
+            HStack(spacing: 0) {
+                if !folder(f.path).isEmpty { Text(verbatim: folder(f.path)).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.tail) }
+                Text(verbatim: name(f.path)).dmono(12, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1).layoutPriority(1)
+            }
+            Spacer(minLength: 8)
+            if stateWord(f.state).isEmpty {
+                Text(verbatim: "+" + String(f.added)).dmono(11).foregroundStyle(BackplaneDesign.ok)
+                Text(verbatim: "−" + String(f.removed)).dmono(11).foregroundStyle(BackplaneDesign.bad)
+            } else {
+                Text(stateWord(f.state)).dmono(11).foregroundStyle(BackplaneDesign.dim)
+            }
+        }
+        .padding(.horizontal, 8).padding(.vertical, 6)
+        .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+        .background(BackplaneDesign.panel).contentShape(Rectangle())
+    }
+
+    /// One line: the old and new numbers, then its text, wrapping; + green, - red, a hunk head on the panel in the accent.
+    private func lineRow(_ l: DiffModel.Line, _ w: CGFloat) -> some View {
+        let text = (l.kind == "+" || l.kind == "-" || l.kind == " ") ? String(l.kind) + l.text : l.text
+        return HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(verbatim: l.old > 0 ? String(l.old) : " ").dmono(10).foregroundStyle(BackplaneDesign.faint).lineLimit(1).frame(width: w, alignment: .trailing)
+            Text(verbatim: l.new > 0 ? String(l.new) : " ").dmono(10).foregroundStyle(BackplaneDesign.faint).lineLimit(1).frame(width: w, alignment: .trailing)
+            Text(verbatim: text.isEmpty ? " " : text).dmono(12).foregroundStyle(lineColor(l.kind))
+                .fixedSize(horizontal: false, vertical: true).frame(maxWidth: .infinity, alignment: .leading).padding(.leading, 8)
+        }
+        .padding(.vertical, 1).padding(.trailing, 8).background(lineTint(l.kind))
+    }
+
+    private func folder(_ path: String) -> String {
+        guard let i = path.lastIndex(of: "/") else { return "" }
+        return String(path[...i])
+    }
+    private func name(_ path: String) -> String {
+        guard let i = path.lastIndex(of: "/") else { return path }
+        return String(path[path.index(after: i)...])
+    }
+    /// The gutter's width: four digits, more when the file's numbers are longer.
+    private func gutter(_ f: DiffModel.File) -> CGFloat {
+        let top = f.lines.reduce(0) { max($0, max($1.old, $1.new)) }
+        return CGFloat(max(4, String(top).count)) * 6.2 + 4
+    }
+    private func stateWord(_ s: String) -> String {
+        switch s {
+        case "new": return Tr.k("mobile.diff.new")
+        case "deleted": return Tr.k("mobile.diff.deleted")
+        case "renamed": return Tr.k("mobile.diff.renamed")
+        case "binary": return Tr.k("mobile.diff.binary")
+        default: return ""
+        }
+    }
+    private func lineColor(_ k: Character) -> Color {
+        switch k {
+        case "@": return BackplaneDesign.accent
+        case "\\": return BackplaneDesign.dim
+        default: return BackplaneDesign.text
+        }
+    }
+    private func lineTint(_ k: Character) -> Color {
+        switch k {
+        case "+": return BackplaneDesign.ok.opacity(0.12)
+        case "-": return BackplaneDesign.bad.opacity(0.12)
+        case "@": return BackplaneDesign.panel
+        default: return .clear
+        }
     }
 }
 
@@ -1618,7 +1713,7 @@ struct DataCommentsPage: View {
                                     Button(Tr.t(c.resolved ? "reopen" : "resolve")) { Task { try? await client.comment(thread.id, c.resolved ? "reopen" : "resolve", ["id": c.id]); await load() } }.font(.caption).accessibilityIdentifier("data.review.resolve." + c.id) }
                                 Text(c.text).font(.system(.footnote, design: .monospaced))
                                 ForEach(l.filter { $0.parent == c.id }) { r in Text("↳ " + r.text).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary) }
-                            }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().stroke(c.resolved ? Color.secondary.opacity(0.3) : BackplaneDesign.accent.opacity(0.6)))
+                            }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(c.resolved ? Color.secondary.opacity(0.3) : BackplaneDesign.accent.opacity(0.6)))
                         }
                     } else { ProgressView() }
                 }.padding(12)

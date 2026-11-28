@@ -12,14 +12,21 @@ pub fn popup_step(ix: usize, d: i32, n: usize) -> usize { (ix as i32 + d).rem_eu
 /// completing it to `/settle ` would take a second Enter). Tab always completes.
 pub fn enter_completes(word: &str, draft: &str) -> bool { !(word.starts_with('/') && draft.trim_end_matches(' ') == word && !draft.contains('\n')) }
 
+/// The thread the composer's box belongs to: the open one, none over a project's page (its Send starts a new thread). The page's text is
+/// no draft of the thread under it, and a picture attached there is not staged on that thread (it went with that thread's next message).
+pub fn box_thread(selected: &str, page_open: bool) -> &str { if page_open { "" } else { selected } }
+
 impl Backplane {
     /// A composer event (paste, drop, picked files): start the uploads off the UI thread; say why when nothing starts.
     pub(crate) fn attach_event(&mut self, event: &ComposerEvent, cx: &mut Context<Self>) {
         if matches!(event, ComposerEvent::CopyTimeline) { return self.timeline_copy(cx); }
         if let ComposerEvent::PopupMove(d) = event { let n = self.popup_rows().len(); if n > 0 { self.screens.popup_ix = popup_step(self.screens.popup_ix, *d, n); self.screens.popup_scroll.scroll_to_item(self.screens.popup_ix); self.m("popup", serde_json::json!({"ix": self.screens.popup_ix, "rows": n})); cx.notify(); } return; }
         if matches!(event, ComposerEvent::PopupPick) { self.popup_pick(cx); return; }
+        if matches!(event, ComposerEvent::SelectAllTimeline) { self.select_all_key(None, cx); return; }
+        if let ComposerEvent::Recall(d) = event { self.recall_sent(*d, cx); return; }
         let cap = self.data["thread"]["cap"].as_u64().unwrap_or(DEFAULT_CAP);
-        if let Err(e) = self.screens.attacher.event(&self.tx, &self.selected, cap, event) { self.error = e; }
+        let to = box_thread(&self.selected, self.project_page.is_some()).to_string();
+        if let Err(e) = self.screens.attacher.event(&self.tx, &to, cap, event) { self.error = e; }
         cx.notify();
     }
     pub(crate) fn pick_files(&mut self, cx: &mut Context<Self>) {
@@ -35,7 +42,7 @@ impl Backplane {
     pub(crate) fn draft_changed(&mut self, text: &str) -> bool {
         if self.drafts.get(&self.selected).map_or(text.is_empty(), |d| d == text) { return false; }
         let old = self.drafts.get(&self.selected).cloned().unwrap_or_default(); self.voice_typed(&old, text);
-        if self.selected.is_empty() { return true; }
+        if box_thread(&self.selected, self.project_page.is_some()).is_empty() { return true; }
         if text.is_empty() { self.drafts.remove(&self.selected); } else { self.drafts.insert(self.selected.clone(), text.to_string()); }
         self.screens.drafts.set(&self.selected, text);
         true
@@ -118,6 +125,19 @@ impl Backplane {
     }
     /// Choose the highlighted row: the hub puts its word where the one being typed is.
     pub(crate) fn popup_pick(&mut self, cx: &mut Context<Self>) -> bool { self.popup_pick_by(cx, false) }
+    /// Up (-1) or Down (1) in the empty message box: what this person sent before in this thread, from its own rows (newest first), as a shell's history.
+    fn recall_sent(&mut self, dir: i32, cx: &mut Context<Self>) {
+        let history: Vec<String> = self.data["thread"]["entries"].as_array().into_iter().flatten().rev()
+            .filter(|e| e["kind"] == "user").map(|e| crate::string(e, "text")).filter(|t| !t.trim().is_empty()).collect();
+        let (text, held) = { let i = self.input.read(cx); (i.content.to_string(), i.recalled.clone()) };
+        let at = super::composer::recalled_at(&text, held.as_ref());
+        let next = super::composer::recall(&history, at, dir);
+        if next == at { return }
+        self.input.update(cx, |c, cx| match next {
+            Some(i) => { c.set(history[i].clone(), cx); c.recalled = Some((i, history[i].clone())); }
+            None => { c.set(String::new(), cx); c.recalled = None; }
+        });
+    }
     /// Enter on an open popup: completes the row, except a command typed in full, which is sent.
     pub(crate) fn popup_enter(&mut self, cx: &mut Context<Self>) -> bool { self.popup_pick_by(cx, true) }
     fn popup_pick_by(&mut self, cx: &mut Context<Self>, enter: bool) -> bool {
@@ -456,6 +476,10 @@ pub fn far_from(max: f32, y: f32) -> bool { max - y > FAR }
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_project_pages_box_belongs_to_no_thread() {
+        assert_eq!(super::box_thread("h|t1", false), "h|t1");
+        assert_eq!(super::box_thread("h|t1", true), "", "over a project's page: no draft of, no picture for, the thread under it");
+    }
     #[core::prelude::v1::test] fn a_new_tab_opens_the_hubs_start_page_and_google_from_an_older_hub() {
         use serde_json::json;
         assert_eq!(super::start_page(&json!({"browserStart": "https://example.com"})), "https://example.com");

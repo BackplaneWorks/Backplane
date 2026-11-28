@@ -130,6 +130,12 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let r = ask(&mut ws, 3, "thread.create", json!({"project":pid,"title":"Mine","text":"first words","permission":"ask"})).await; assert_eq!(r["ok"], true, "{r}");
     let th = r["result"]["thread"]["id"].as_str().unwrap().to_string(); assert_eq!(r["result"]["thread"]["title"], "Mine");
     let e = ask(&mut ws, 4, "thread.entries", json!({"thread":th})).await; assert_eq!(e["result"]["entries"][0]["text"], "first words");
+    { // a New thread that starts with a picture and no words: the picture goes with the first message, as a reply's does
+        use base64::Engine; let png = base64::engine::general_purpose::STANDARD.encode([0x89u8, b'P', b'N', b'G', 13, 10, 26, 10, 1, 2]);
+        let r = ask(&mut ws, 40, "thread.create", json!({"project":pid,"attachments":[{"name":"p.png","mime":"image/png","data":png}]})).await; assert_eq!(r["ok"], true, "{r}");
+        let t2 = r["result"]["thread"]["id"].as_str().unwrap().to_string();
+        let e = ask(&mut ws, 41, "thread.entries", json!({"thread":t2})).await; assert_eq!(e["result"]["entries"][0]["attachments"].as_array().map(Vec::len), Some(1), "{e}");
+    }
     let a = ask(&mut ws, 5, "message.send", json!({"thread":th,"text":"again","clientId":"c-1"})).await; assert_eq!((a["result"]["entry"]["clientId"].as_str(), a["result"]["entry"]["kind"].as_str()), (Some("c-1"), Some("user")));
     let b = ask(&mut ws, 6, "message.send", json!({"thread":th,"text":"again","clientId":"c-1"})).await; assert_eq!(a["result"]["entry"], b["result"]["entry"], "the same clientId posts once");
     let n = ask(&mut ws, 7, "thread.entries", json!({"thread":th})).await["result"]["entries"].as_array().unwrap().iter().filter(|x| x["text"] == "again").count(); assert_eq!(n, 1);
@@ -272,7 +278,7 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!(ask(&mut ws, 5, "composer.run", json!({"thread":"t1","text":"/secret gh"})).await["result"], json!({"kind":"secret","name":"gh"}));
     assert_eq!(ask(&mut ws, 6, "composer.run", json!({"thread":"t1","text":"/btw why"})).await["result"], json!({"kind":"btw","q":"why"}));
     let a = loop { let v = next(&mut ws).await; if v["k"] == "btw" { break v } };
-    assert_eq!((a["t"].as_str(), a["thread"].as_str(), a["q"].as_str()), (Some("d"), Some("t1"), Some("why"))); assert!(a["a"].as_str().unwrap().contains("Settings, Writing"), "no model here: it says where the model is chosen");
+    assert_eq!((a["t"].as_str(), a["thread"].as_str(), a["q"].as_str()), (Some("d"), Some("t1"), Some("why"))); assert!(a["a"].as_str().unwrap().contains("Settings, Agents"), "no model here: it says where the model is chosen");
     assert!(hello["commands"].as_array().unwrap().iter().any(|c| c["word"] == "/project"), "{hello}");
     assert_eq!(ask(&mut ws, 7, "composer.run", json!({"thread":"t1","text":"/project"})).await["result"], json!({"kind":"project"}), "alone: the app's Add project");
     assert_eq!(ask(&mut ws, 8, "composer.run", json!({"thread":"t1","text":"/project puck Build it"})).await["result"], json!({"kind":"made","thread":"made-8","note":""}));
@@ -554,6 +560,14 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 4, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["detail"], "alpha", "{r}");
     hub.commit(&json!({"$":"SettingSet","key":"summary.t1","value":"Routing the rail; DRC left.","at":1700000060})).await.unwrap();
     let r = ask(&mut ws, 5, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["detail"], "Routing the rail; DRC left.", "{r}");
+}
+#[test] fn data_a_messages_attached_files_are_listed() {
+    // a file (not a picture) sent with a message: its line is not shown, so the entry lists it for the phone's chip, by its own name
+    let t = "read this\n\n[attachment: /h/attachments/t1/k9f-data sheet.pdf]\n[attachment: /h/attachments/t1/k1-x.png]\n[attachment: /p/notes.csv]";
+    assert_eq!(super::attached_files(t), vec![json!({"name":"data sheet.pdf","path":"/h/attachments/t1/k9f-data sheet.pdf"}), json!({"name":"notes.csv","path":"/p/notes.csv"})]);
+    assert!(super::attached_files("hi\n\n[attachment: /a/x.jpg]").is_empty(), "pictures come as attachments");
+    assert!(super::attached_files("no lines here").is_empty());
+    assert_eq!(shown_text(t), "read this");
 }
 #[test] fn data_a_messages_attachment_lines_are_not_shown() {
     assert_eq!(shown_text("hi\n\n[attachment: /a/x.png]\n[attachment: /a/y.jpg]"), "hi");

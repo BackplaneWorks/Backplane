@@ -41,7 +41,7 @@ struct DCopyButton: View {
                 if word || label != nil { Text(copied ? Tr.t("Copied") : (label ?? Tr.t("Copy"))).dmono(11).foregroundStyle(copied ? BackplaneDesign.ok : BackplaneDesign.accent) }
             }
             .padding(.horizontal, 6).frame(minWidth: 32, minHeight: 32).contentShape(Rectangle())
-            .overlay(Rectangle().strokeBorder(focused ? BackplaneDesign.accent : Color.clear, lineWidth: 1))
+            .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(focused ? BackplaneDesign.accent : Color.clear, lineWidth: 1))
         }
         .buttonStyle(.plain)
         .focusable(true).focused($focused)
@@ -67,7 +67,7 @@ struct DRunButton: View {
                     if word { Text(Tr.t("Run in terminal")).dmono(11).foregroundStyle(BackplaneDesign.accent) }
                 }
                 .padding(.horizontal, 6).frame(minWidth: 32, minHeight: 32).contentShape(Rectangle())
-                .overlay(Rectangle().strokeBorder(focused ? BackplaneDesign.accent : Color.clear, lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(focused ? BackplaneDesign.accent : Color.clear, lineWidth: 1))
             }
             .buttonStyle(.plain)
             .focusable(true).focused($focused)

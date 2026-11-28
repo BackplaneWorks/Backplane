@@ -171,7 +171,7 @@ struct DataStarBanner: View {
                     Button(Tr.t("Later")) { client.starDecide("later") }.buttonStyle(DButton()).frame(maxWidth: .infinity).accessibilityIdentifier("star.later")
                     Button(Tr.t("Don't ask again")) { client.starDecide("dismiss") }.buttonStyle(DButton()).frame(maxWidth: .infinity).accessibilityIdentifier("star.dismiss")
                 }
-            }.padding(12).background(BackplaneDesign.raised).overlay(Rectangle().stroke(BackplaneDesign.accent, lineWidth: 1)).padding(8)
+            }.padding(12).background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(BackplaneDesign.accent, lineWidth: 1)).padding(8)
         }
     }
 }

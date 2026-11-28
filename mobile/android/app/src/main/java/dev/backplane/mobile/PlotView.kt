@@ -826,7 +826,7 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
     fun bindSource(key: String) {
         if (key == stateKey) return
         savePose(); stateKey = key; pendingPose = poses[key]
-        fitted = false; box = FloatArray(0); edge = FloatArray(0); chunks = emptyList(); shown = null; shownMesh = null; picked = ""; lit = emptyList(); shownGen = -1; shownParts = 0
+        fitted = false; box = FloatArray(0); edge = FloatArray(0); chunks = emptyList(); shown = null; shownMesh = null; picked = ""; lit = emptyList(); shownGen = -1; shownParts = 0; focusBox = null
         flingX = 0f; flingY = 0f
         queueEvent { renderer.load(emptyList(), emptySet()); renderer.mesh(null); renderer.partsReset(); renderer.highlight(null, null); renderer.slab(FloatArray(0), 0) }
     }
@@ -902,6 +902,7 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         // a board still as it was fitted stays fitted in the new room (a panel opening under it, the keyboard): what a row lights is then on show, not under the panel
         else if (atFit(ow, oh)) refit()
         restorePose()
+        centreFocus()
     }
     /** Whether the flat view is still the fit of a `w` by `h` view: nobody panned or zoomed it since. */
     private fun atFit(w: Int, h: Int): Boolean {
@@ -1001,6 +1002,34 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         queueEvent { renderer.highlightAll(found) }
         requestRender()
     }
+    // a BOM row's parts ("chunk,info" each): the flat view centres on them at a zoom where they read; held through a resize (the keyboard
+    // going down, a panel) until a finger moves the view
+    private var goneTo = -1
+    private var focusBox: FloatArray? = null
+    fun goTo(n: Int, ps: List<String>) {
+        if (n == goneTo) return
+        goneTo = n
+        val bs = ps.mapNotNull { k -> val x = k.split(",").mapNotNull { it.toIntOrNull() }; val c = if (x.size == 2) chunks.getOrNull(x[0]) else null; c?.pieces?.firstOrNull { it.info == x[1] }?.box }
+        focusBox = if (three || bs.isEmpty()) null else floatArrayOf(bs.minOf { it[0] }, bs.minOf { it[1] }, bs.maxOf { it[2] }, bs.maxOf { it[3] })
+        centreFocus()
+    }
+    // the pixels at the view's foot a panel covers (the BOM over the drawing's lower part): the parts are centred in the rest
+    private var covered = 0
+    fun cover(px: Int) { if (px == covered) return; covered = px; centreFocus() }
+    private fun centreFocus() {
+        val b = focusBox ?: return
+        if (three || width <= 0 || box.size < 4) return
+        val h = (height - covered).coerceAtLeast(height / 4)
+        val f = fit
+        // the parts take about a quarter of the room in view, never less zoomed than the whole board nor past the closest zoom
+        val s = min(max(0.25f * min(width / max(b[2] - b[0], 1f), h / max(b[3] - b[1], 1f)), f), max(zmax, f))
+        renderer.scale = s
+        renderer.offX = width / 2f - (b[0] + b[2]) / 2 * s
+        renderer.offY = h / 2f - (b[1] + b[3]) / 2 * s
+        fitted = true; pendingPose = null; flingX = 0f; flingY = 0f
+        requestRender()
+    }
+
     // the picked piece ("chunk,info" of the held chunks), drawn bright
     fun mark(p: String) {
         if (p == picked) return
@@ -1174,7 +1203,7 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
-        if (e.actionMasked == MotionEvent.ACTION_DOWN) requestFocus()
+        if (e.actionMasked == MotionEvent.ACTION_DOWN) { requestFocus(); focusBox = null }
         twisted(e)
         scaler.onTouchEvent(e)
         gestures.onTouchEvent(e)

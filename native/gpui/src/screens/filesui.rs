@@ -403,7 +403,8 @@ pub(super) fn files_body(cx: &mut Context<Backplane>, light: bool, files: &Value
     if rows.len() > MAX_ROWS { list = list.child(div().px_3().py_1().text_color(c("dim")).child(tf("gpui.b.files.more", &[("n", (rows.len() - MAX_ROWS).into())]))); }
     if vis.is_empty() { list = list.child(div().px_3().py_2().text_color(c("dim")).child(if files["ready"] == false { trs("Loading…") } else if !files["error"].as_str().unwrap_or("").is_empty() { trs(files["error"].as_str().unwrap_or("")) } else if rows.is_empty() { trs("Empty folder. Drop files here to upload.") } else { trs("Nothing matches") })); }
     list = list.on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| { this.m("files_drop", json!({"paths": paths.paths().iter().map(|p| p.display().to_string()).collect::<Vec<_>>()})); act(this, Do::Upload(paths.paths().to_vec()), None, cx) }));
-    col = col.child(if standalone { super::viewer::main_body(list) } else { list });
+    let list = if standalone { super::viewer::main_body(list) } else { list };
+    col = col.child(div().flex_1().min_h_0().relative().flex().flex_col().child(list).child(super::scrollbar::bar("files-list", super::scrollbar::Src::Handle(ui.scroll.clone()), light)));
     if let Some((i, pos)) = ui.menu {
         if let Some(r) = vis.get(i).and_then(|&k| rows.get(k)) {
             let items = menu_items(r);
@@ -461,7 +462,9 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
             _ => div().p_3().text_color(c("dim")).child(trs("Loading…")).into_any_element(),
         },
     };
-    div().size_full().flex().flex_col().child(bar).child(super::viewer::main_body(div().id("fm-preview")).track_scroll(&ui.preview_scroll).flex_1().min_h_0().overflow_y_scroll().child(body)).into_any_element()
+    div().size_full().flex().flex_col().child(bar).child(div().flex_1().min_h_0().relative().flex().flex_col()
+        .child(super::viewer::main_body(div().id("fm-preview")).track_scroll(&ui.preview_scroll).flex_1().min_h_0().overflow_y_scroll().child(body))
+        .child(super::scrollbar::bar("fm-preview", super::scrollbar::Src::Handle(ui.preview_scroll.clone()), light))).into_any_element()
 }
 
 /// Selectable text in the mono font for plain-text file previews.

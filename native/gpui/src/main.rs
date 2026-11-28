@@ -56,7 +56,7 @@ use serde_json::Value;
 use std::{collections::{HashMap,VecDeque},time::{Duration,Instant}};
 use script::{Pending,Step};
 use hub::{Command,Event};
-actions!(backplane,[Send,ClosePopup,CopySelection,ToggleSidebarKey,FocusSearchKey,OpenPaletteKey,FindInThreadKey]);
+actions!(backplane,[Send,ClosePopup,CopySelection,SelectAllKey,ToggleSidebarKey,FocusSearchKey,OpenPaletteKey,FindInThreadKey]);
 pub struct Backplane { pub pair:Option<screens::pair::Ui>, pub paired:bool, /** the hubs this device knows (the first is in use) */ pub hubs:Vec<hubs::Hub>, /** the sidebar picker's menu is open */ pub hub_menu:bool, /** this window has a hub to go back to from the pairing form */ pub has_hub:bool,
     pub input:Entity<screens::composer::Composer>, data:Value, status:String, error:String, note:String,
     tx:tokio::sync::mpsc::Sender<Command>, selected:String,
@@ -352,12 +352,12 @@ impl Backplane {
             cx.spawn(async move|this,cx|{loop{cx.background_executor().timer(Duration::from_secs(3600)).await;if this.update(cx,|this,_|{let _=this.tx.try_send(hub::Command::Rpc("update.status".into(),screens::settings::Secret(serde_json::json!({})),"hubupd"));}).is_err(){break}}}).detach();
         }
     }
-    /// The gear: this device's page opens at once (no round trip), and the hub is asked for its pages beside it.
+    /// The gear: Settings opens at once on Appearance with this device's rows (no round trip), and the hub is asked for its pages beside it.
     pub fn open_settings(&mut self,cx:&mut Context<Self>){
         let hub_open=self.data["settings"].is_object();
         let ui=&mut self.screens.settings_ui;
         let opening=!(ui.open_local||hub_open);
-        if ui.open_local||hub_open{ui.open_local=false;ui.device=false;ui.accounts=false;} else {ui.open_local=true;ui.device=true;self.screens.focus_settings=true;}
+        if ui.open_local||hub_open{ui.open_local=false;ui.keys=false;ui.hubs=false;ui.accounts=false;} else {ui.open_local=true;ui.keys=false;ui.hubs=false;ui.accounts=false;if ui.page.is_empty(){ui.page="appearance".into();}self.screens.focus_settings=true;}
         if opening{self.solidcraft_lend(cx);}
         let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));cx.notify();
     }
@@ -365,7 +365,7 @@ impl Backplane {
     pub fn open_accounts(&mut self,cx:&mut Context<Self>){
         self.want_focus=true;
         if !screens::settings::is_open(self){self.open_settings(cx);}
-        self.screens.settings_ui.device=false;
+        self.screens.settings_ui.keys=false;
         self.screens.settings_ui.hubs=false;
         self.screens.settings_ui.accounts=true;
         screens::accounts::open_page(self,cx);
@@ -382,19 +382,22 @@ impl Backplane {
         let key=screens::projects::nav_key(&self.data,&pid);
         if !key.is_empty(){self.go("project-page",key,cx);}
         let follow=screens::viewer::is_open(&self.data["thread"]).then(||screens::viewer::active_kind(&self.data["thread"]["viewer"],None)).and_then(|k|screens::projects::page_view(&self.data,Some(&pid),&self.selected,&k));
-        self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();
+        // the page's box is its own: empty when the page opens over a thread (that thread's draft stays saved and comes back with it)
+        let was=self.project_page.replace(pid).is_some();if !was{self.input.update(cx,|i,cx|i.set(String::new(),cx));}
+        // the page's box has the keys, as a thread's does on open (its blue border said so; typed letters went to the window's keys: "b" opened Board)
+        self.want_focus=true;self.ui_epoch+=1;cx.notify();
         if let Some((t,k))=follow {self.page_viewer(t,k,cx);}}
     /// The viewer of the project whose page is on show: the project's thread `id` becomes the one selected (its viewer is the project's) with the page left up,
     /// and the page of `kind` opens once that thread is here (projects::sync).
     pub(crate) fn page_viewer(&mut self,id:String,kind:&'static str,cx:&mut Context<Self>){
         self.screens.projects.view_edit=Some((id.rsplit('|').next().unwrap_or("").to_string(),kind));
-        let page=self.project_page.take();self.select_id(id,cx);self.project_page=page;}
+        let (page,keep)=(self.project_page.clone(),self.input.read(cx).content.to_string());self.select_id(id,cx);self.project_page=page;self.input.update(cx,|i,cx|i.set(keep,cx));}
     /// An action for the hub from a click or key; one that goes somewhere (projects::leaves_page) closes the project's page first.
     pub fn go(&mut self,action:&str,value:String,cx:&mut Context<Self>){if action=="open-thread" {if !value.is_empty() {self.select_id(value,cx);} return} if screens::projects::leaves_page(action)&&self.project_page.take().is_some(){self.ui_epoch+=1;}let _=self.tx.try_send(Command::Action(action.into(),value));cx.notify();}
-    pub(crate) fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.project_page=None;self.ui_epoch+=1;self.screens.panels.sub_view=None;
+    pub(crate) fn select_id(&mut self,id:String,cx:&mut Context<Self>) {let page_open=self.project_page.take().is_some();self.ui_epoch+=1;self.screens.panels.sub_view=None;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
-        
-        let current=self.input.read(cx).content.to_string();
+        // over a project's page the box held the page's text, not the thread's draft: the thread keeps its own
+        let current=screens::drafts::leaving(&self.drafts,&self.selected,&self.input.read(cx).content,page_open);
         let text=screens::drafts::switch(&mut self.drafts,&self.selected,&raw,&current);
         self.thread_switch(&raw);
         self.selected=raw.clone();
@@ -487,7 +490,8 @@ impl Backplane {
     fn user_entries(&self)->usize {self.data["thread"]["entries"].as_array().map_or(0,|e|e.iter().filter(|e|e["kind"]=="user").count())}
     /// Ctrl/Cmd-C with no text field focused (a click in the timeline leaves none): copy what is selected there.
     fn copy_selection(&mut self,_:&CopySelection,_:&mut Window,cx:&mut Context<Self>){self.timeline_copy(cx);}
-    fn close_popup(&mut self,_:&ClosePopup,window:&mut Window,cx:&mut Context<Self>){if self.screens.dock.cancel_drag(){cx.notify();return;}if screens::migrate::is_up(&self.data){return;}if self.kcomment_escape(cx){return;}if screens::asks::escape_revise(self,cx){return;}if self.screens.plots[0].part_search.is_some() && self.screens.plots[0].part_search.take().is_some(){cx.notify();return;}if viewers::boards::escape(self,cx){return;}if screens::sheets::escape(self,cx){return;}if viewers::layers::escape(self,cx){return;}if self.pad_escape(window,cx){return;}if self.ctx_close(cx){return;}if screens::thread_context::close(self,cx){return;}if self.screens.acct.menu{screens::accounts::toggle(self,window,cx);return;}if self.picker_keys(){self.picker_close(cx);return;}if screens::filesui::escape(self,window,cx){return;}if self.palette_close(cx){return;}if self.keysheet_close(cx){return;}if self.find_close(cx){return;}if screens::histbar::escape(self){cx.notify();return;}if self.lightbox_close(window,cx){return;}if self.screens.picker_open{self.picker_close(cx);return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if self.data["tour"].is_object(){screens::settings::flush_fields(self);let _=self.tx.try_send(Command::Action("ob-skip".into(),String::new()));cx.notify();return;}if screens::improvements::escape(self,cx){return;}if self.term_hide(cx){return;}if self.screens.panels.sub_view.is_some(){self.sub_back(cx);return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}else{self.escape_rest(window,cx);}cx.notify();}
+    fn select_all_keyed(&mut self,_:&SelectAllKey,window:&mut Window,cx:&mut Context<Self>){self.select_all_key(Some(window),cx);}
+    fn close_popup(&mut self,_:&ClosePopup,window:&mut Window,cx:&mut Context<Self>){if self.screens.dock.cancel_drag(){cx.notify();return;}if screens::migrate::is_up(&self.data){return;}if self.kcomment_escape(cx){return;}if screens::asks::escape_revise(self,cx){return;}if self.screens.plots[0].part_search.is_some() && self.screens.plots[0].part_search.take().is_some(){cx.notify();return;}if viewers::boards::escape(self,cx){return;}if screens::sheets::escape(self,cx){return;}if viewers::layers::escape(self,cx){return;}if self.pad_escape(window,cx){return;}if self.ctx_close(cx){return;}if screens::thread_context::close(self,cx){return;}if self.screens.acct.menu{screens::accounts::toggle(self,window,cx);return;}if self.picker_keys(){self.picker_close(cx);return;}if screens::filesui::escape(self,window,cx){return;}if self.palette_close(cx){return;}if self.keysheet_close(cx){return;}if self.find_close(cx){return;}if screens::histbar::escape(self){cx.notify();return;}if self.lightbox_close(window,cx){return;}if self.screens.picker_open{self.picker_close(cx);return;}if screens::settings::is_open(self){screens::settings::close(self,cx);return;}if self.data["tour"].is_object(){screens::settings::flush_fields(self);let _=self.tx.try_send(Command::Action("ob-skip".into(),String::new()));cx.notify();return;}if screens::improvements::escape(self,cx){return;}if screens::projects::search_escape(self,window,cx){return;}if self.term_hide(cx){return;}if self.screens.panels.sub_view.is_some(){self.sub_back(cx);return;}if let Some(a)=screens::projects::close_on_escape(&self.data){let _=self.tx.try_send(a);cx.notify();return;}if let Some(a)=screens::tools::close_question(&self.data) {let _=self.tx.try_send(a);}else if self.data["settings"].is_object() {let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));}else if let Some(a)=screens::bots::close_form(&self.data) {let _=self.tx.try_send(a);}else if self.input.read(cx).popup_open {let draft=self.input.read(cx).content.to_string();self.screens.popup_off=Some(draft);}else if self.screens.ctx_open || !self.selection_escape(cx) {self.escape_rest(window,cx);}cx.notify();}
 }
 /// Every key binding, from the defaults and this device's shortcut choices (called again when one changes).
 pub fn bind_all(cx:&mut App,l:&local::Local){keys::bind_all(cx,l);}

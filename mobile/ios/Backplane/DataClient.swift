@@ -1075,8 +1075,10 @@ final class DataClient {
     /// unsent ones wait, it goes to the outbox instead (a message with pictures is not kept there: it stays in the conversation with Retry).
     /// `voice`: dictated (what the hub tells the agent of it, voice/mark.rs). The message's client id.
     /// `reply`: the message this one answers (the composer's strip, feature `reply`); the strip is dropped once it is sent.
-    @discardableResult func send(_ tid: String, _ text: String, images: [Data] = [], voice: [String: Any]? = nil, reply: DReplyRef? = nil) -> String {
-        let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    /// `files`: uploaded already (attachFile); each goes as an `[attachment: <path>]` line under the words (DAttachedFile.join).
+    @discardableResult func send(_ tid: String, _ text: String, images: [Data] = [], voice: [String: Any]? = nil, reply: DReplyRef? = nil, files: [DAttachedFile] = []) -> String {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = DAttachedFile.join(words, files)
         guard !text.isEmpty || !images.isEmpty else { return "" }
         let cid = UUID().uuidString
         let rp = reply.flatMap { has("reply") && !text.isEmpty ? ReplyDraft.param($0) : nil }
@@ -1087,8 +1089,8 @@ final class DataClient {
             if conn == .online { let g = gen; Task { await flushOutbox(g) } }
             return cid
         }
-        var local = DEntry(id: "local:" + cid, kind: "user", text: text, at: Int(Date().timeIntervalSince1970 * 1000), clientId: cid)
-        local.sending = true; local.localImages = images; local.voice = voice.map(DVoiceMark.init); local.replyParam = rp
+        var local = DEntry(id: "local:" + cid, kind: "user", text: words, at: Int(Date().timeIntervalSince1970 * 1000), clientId: cid)
+        local.sending = true; local.localImages = images; local.attached = files; local.voice = voice.map(DVoiceMark.init); local.replyParam = rp
         if let r = reply, rp != nil { let c = ReplyDraft.chip(r); local.replyTo = DReplyTo(id: c.id, quote: c.quote) }
         entries[tid, default: []].append(local)
         setDraft(tid, "")
@@ -1103,17 +1105,19 @@ final class DataClient {
         l[i].failed = false; l[i].sending = true; entries[tid] = l
         Task { await deliver(tid, entry.text, cid, entry.localImages, reply: entry.replyParam) }
     }
+    /// Pictures as `message.send` and `thread.create` take them: name, mime and the bytes in base64.
+    static func attachmentsParam(_ images: [Data]) -> [[String: String]] {
+        images.enumerated().map {
+            let gif = AnimatedImage.isGIF($0.element)
+            return ["name": gif ? "image-\($0.offset + 1).gif" : "photo-\($0.offset + 1).jpg", "mime": gif ? "image/gif" : "image/jpeg", "data": $0.element.base64EncodedString()]
+        }
+    }
     private func deliver(_ tid: String, _ text: String, _ cid: String, _ images: [Data], voice: [String: Any]? = nil, reply: [String: String]? = nil) async {
         do {
             var p: [String: Any] = ["thread": tid, "text": text, "clientId": cid]
             if let voice { p["voice"] = voice }
             if let reply { p["replyTo"] = reply }
-            if !images.isEmpty {
-                p["attachments"] = images.enumerated().map {
-                    let gif = AnimatedImage.isGIF($0.element)
-                    return ["name": gif ? "image-\($0.offset + 1).gif" : "photo-\($0.offset + 1).jpg", "mime": gif ? "image/gif" : "image/jpeg", "data": $0.element.base64EncodedString()]
-                }
-            }
+            if !images.isEmpty { p["attachments"] = Self.attachmentsParam(images) }
             let r: DEntryReply = try await call("message.send", p)
             // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
             for (i, a) in r.entry.attachments.enumerated() where i < images.count { Self.attachmentCache.setObject(images[i] as NSData, forKey: a.id as NSString) }
@@ -1199,6 +1203,21 @@ final class DataClient {
         try? outbox.encoded().write(to: Self.outboxURL(hub), options: .atomic)
     }
 
+    /// Choose a file: the picked document goes to the hub as it is (`POST /attach`, the hub's `files.max.mb` limit), into the thread's attachments
+    /// folder; the answer is its path there. A refusal throws with the hub's words (over the limit: upload.cap).
+    func attachFile(_ tid: String, url: URL) async throws -> DAttachedFile {
+        let name = url.lastPathComponent.isEmpty ? "file" : url.lastPathComponent
+        let key = String(UInt32.random(in: 0...UInt32.max), radix: 16)
+        guard let link, let u = Pairing.http(link, path: "/attach", query: [URLQueryItem(name: "thread", value: tid), URLQueryItem(name: "key", value: key), URLQueryItem(name: "name", value: name)]) else { throw DError(code: "upload", message: Tr.k("upload.network")) }
+        let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        var req = URLRequest(url: u); req.httpMethod = "POST"; req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        guard let (d, _) = try? await URLSession.shared.upload(for: req, fromFile: url) else { throw DError(code: "upload", message: Tr.k("upload.network")) }
+        let j = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any] ?? [:]
+        if let p = j["attached"] as? String, !p.isEmpty { return DAttachedFile(name: name, path: p) }
+        if (j["uiError"] as? String) == "upload.cap" { throw DError(code: "upload", message: Tr.upload_cap(mb: j["uiDetail"] as? String ?? "")) }
+        throw DError(code: "upload", message: (j["text"] as? String).map { Tr.t($0) } ?? Tr.k("upload.failed"))
+    }
+
     // MARK: pictures
     nonisolated(unsafe) static let attachmentCache = NSCache<NSString, NSData>()
     private func blobBytes(_ path: String) async -> Data? {
@@ -1266,12 +1285,16 @@ final class DataClient {
         let r: DProjectReply = try await call("project.add", p)
         flushLists()
         if let i = projects.firstIndex(where: { $0.id == r.project.id }) { projects[i] = r.project } else { projects.insert(r.project, at: 0) }
+        // the home's Bench draws the hub's sections, not `projects`: ask for them again so the new project is listed at once
+        await loadSections()
         return r.project
     }
-    func createThread(project: String, text: String, choice: DNewThreadChoice = DNewThreadChoice()) async throws -> DThread {
+    /// `images`: the pictures of the first message (New thread's Attach and Draw), sent with it as a reply's are (`attachments`).
+    func createThread(project: String, text: String, choice: DNewThreadChoice = DNewThreadChoice(), images: [Data] = []) async throws -> DThread {
         var p: [String: Any] = ["project": project, "clientId": UUID().uuidString, "permission": "ask"]
         for (k, v) in choice.params where (v as? String)?.isEmpty == false { p[k] = v }
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines); if !t.isEmpty { p["text"] = t }
+        if !images.isEmpty { p["attachments"] = Self.attachmentsParam(images) }
         let r: DThreadReply = try await call("thread.create", p)
         upsert(r.thread)
         return r.thread
@@ -1335,18 +1358,29 @@ final class DataClient {
             else if let t = r.thread { upsert(t) }
         } catch { failure = error.localizedDescription }
     }
+    /// Fork thread (feature `fork`): the hub makes a thread that starts from this one's conversation; its id, to open it.
+    func forkThread(_ id: String) async -> String? {
+        do { let r: DThreadOpt = try await call("thread.act", ["thread": id, "action": "fork"]); flushLists(); if let t = r.thread { upsert(t); return t.id } }
+        catch { failure = error.localizedDescription }
+        return nil
+    }
     func badgeList() async -> DBadgeList? { try? await call("badge.list") }
     func projectAct(_ id: String, _ action: String, title: String = "", value: String = "") async {
         var p: [String: Any] = ["project": id, "action": action]; if !title.isEmpty { p["title"] = title }; if !value.isEmpty { p["value"] = value }
         do {
             _ = try await call("project.act", p, as: DEmpty.self)
             flushLists()
-            if action == "remove" { projects.removeAll { $0.id == id }; threads.removeAll { $0.project == id }; scheduleSave() } else { await refresh() }
+            if action == "remove" { projects.removeAll { $0.id == id }; threads.removeAll { $0.project == id }; scheduleSave(); await loadSections() } else { await refresh() }
         } catch { failure = error.localizedDescription }
     }
     func search(_ q: String) async -> DSearch? { try? await call("search", ["q": q]) }
     func buyOf(_ thread: String) async -> DBuy? { guard has("buy") else { return nil }; return (try? await call("thread.buy", ["thread": thread], as: DBuyReply.self))?.buy }
     /// Buy it on a project's page: the hub's button for the project, naming the thread it buys from (`thread.buy {project}`); nil when there is nothing to buy.
+    /// A project's goal and notes as written (`.backplane/intent.md`, feature `projecthome`'s `project.home`); "" when there are none.
+    func projectIntent(_ project: String) async -> String {
+        guard has("projecthome"), let r = try? await call("project.home", ["project": project], as: DProjectHome.self) else { return "" }
+        return r.intent
+    }
     func projectCard(_ project: String) async -> DProjectCard? { guard has("projectcard") else { return nil }; return try? await call("project.card", ["project": project], as: DProjectCard.self) }
     func buyOfProject(_ project: String) async -> DBuy? { guard has("buy"), let b = (try? await call("thread.buy", ["project": project], as: DBuyReply.self))?.buy, !b.thread.isEmpty else { return nil }; return b }
     func buy(_ thread: String) async throws -> String { try await call("order.buy", ["thread": thread], as: DThreadRef.self).thread }
@@ -1637,3 +1671,8 @@ final class DataClient {
         }
     }
 }
+
+/// `project.home`'s goal and notes (the rest of its answer is read elsewhere or not on the phone).
+struct DProjectHome: Decodable { var intent: String
+    enum CodingKeys: String, CodingKey { case intent }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); intent = (try? c.decode(String.self, forKey: .intent)) ?? "" } }

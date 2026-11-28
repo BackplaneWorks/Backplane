@@ -138,6 +138,9 @@ impl Bots {
         let w = self.world().await;
         let Some(r) = w.routines.get(routine).cloned().filter(|r| !r.deleted && !r.done) else { return vec![err(id, "That routine is done or removed; edit its time to schedule it again.")] };
         let now = now_s();
+        // a second Run while its turn still runs: nothing more (the row says it is running)
+        let th = w.bot(&r.bot).map(|b| b.thread.clone()).unwrap_or_default();
+        if !w.uber_is(&r.bot) && super::api::routine_running(super::api::turn_running(&th), r.last, now) { return vec![ok(id)] } // (the uberbot's run in a mail lane of its own, and queues)
         match self.fire_commit(&r, w, now, 0, false).await { Ok(_) => vec![ok(id)], Err(e) => vec![err(id, &e)] }
     }
 

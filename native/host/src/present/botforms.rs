@@ -35,7 +35,9 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
                 // a new name takes the refusal of the last one away
                 "name" => json!({"drafts": {"@f.name": text, "@f.berr": ""}}),
                 // `title`: the rename box (commands/actions.rs `rename-save` reads it when the press does not carry the title)
-                "persona" | "rname" | "rpost" | "oname" | "ocron" | "oprompt" | "todonew" | "title" => json!({"drafts": {format!("@f.{name}"): text}}),
+                // a When typed again takes the hub's refusal of the last one away (it was about that field)
+                "ocron" => json!({"drafts": {"@f.ocron": text, "@f.oerr": ""}}),
+                "persona" | "rname" | "rpost" | "oname" | "oprompt" | "todonew" | "title" => json!({"drafts": {format!("@f.{name}"): text}}),
                 n if n.starts_with("todo.") && n.len() > 5 && n.len() < 100 => json!({"drafts": {format!("@f.{n}"): text}}),
                 "provider" if PROVIDERS.contains(&text) => json!({"drafts": {"@bnew.provider": text}}),
                 _ => return None,
@@ -52,15 +54,18 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
             if name.is_empty() { return Some(Out { patch: json!({}), cmds }) }
             // a name the hub would refuse (a space, a 25th letter) keeps the form and what was typed, and says the rule: the form used to close with nothing made
             if !crate::bots::rpc::name_ok(name) { return Some(Out { patch: json!({"drafts": {"@f.berr": NAME_RULE}}), cmds }) }
+            let req = rid;
             send(session, hub, "bots.create", json!({"name": name, "persona": draft(session, "@f.persona"), "provider": draft(session, "@bnew.provider")}), &mut cmds, &mut rid);
-            json!({"drafts": {"@bnew": "", "@f.name": "", "@f.persona": "", "@f.berr": ""}})
+            // the reply opens the bot just made (session/pages.rs `apply_reads` → `@go.bot`, present/screen.rs `go_made`)
+            json!({"drafts": {"@bnew": "", "@f.name": "", "@f.persona": "", "@f.berr": "", format!("@b.req:{req}"): name}})
         }
         "room-save" if on(session, "@rnew") => {
             let m = members(session);
             if m.is_empty() { return Some(Out { patch: json!({}), cmds }) }
             let name = draft(session, "@f.rname").trim();
-            send(session, hub, "bots.room", json!({"room": "", "name": if name.is_empty() { "room" } else { name }, "members": m.join("\n")}), &mut cmds, &mut rid);
-            json!({"drafts": {"@rnew": "", "@f.rname": "", "@rnew.members": ""}})
+            let req = rid; let name = if name.is_empty() { "room" } else { name };
+            send(session, hub, "bots.room", json!({"room": "", "name": name, "members": m.join("\n")}), &mut cmds, &mut rid);
+            json!({"drafts": {"@rnew": "", "@f.rname": "", "@rnew.members": "", format!("@r.req:{req}"): name}})
         }
         _ => return None,
     };
@@ -112,8 +117,10 @@ pub fn new_bot(session: &Value) -> Option<Value> {
     if !on(session, "@bnew") { return None }
     let cur = draft(session, "@bnew.provider");
     Some(json!({"hint": "Name", "name": draft(session, "@f.name"), "persona": draft(session, "@f.persona"), "error": draft(session, "@f.berr"),
-        "providers": PROVIDERS.iter().map(|p| json!({"label": p, "provider": p, "on": *p == cur})).collect::<Vec<_>>()}))
+        "providers": PROVIDERS.iter().map(|p| json!({"label": provider_name(p), "provider": p, "on": *p == cur})).collect::<Vec<_>>()}))
 }
+/// A provider's name as setup lists it (onboard.rs `AGENTS`: Claude Code, Codex, Grok Build…), not its id; setup names Antigravity's CLI `agy`.
+pub(crate) fn provider_name(p: &str) -> &str { let id = if p == "antigravity" { "agy" } else { p }; super::onboard::AGENTS.iter().find(|a| a.id == id).map_or(p, |a| a.name) }
 /// The screen's `newRoom` object: the bots of this machine to pick from.
 pub fn new_room(st: &State, hub: &str, session: &Value) -> Option<Value> {
     if !on(session, "@rnew") { return None }
@@ -134,7 +141,9 @@ mod tests {
         let mut s = sess(json!({})); crate::session::patch::merge(&mut s, &o.patch);
         assert!(new_bot(&s).is_some() && new_room(&st, "h", &s).is_none());
         for (k, v) in [("name", "Rex"), ("persona", "dog"), ("provider", "codex")] { let o = act(&st, "h", &s, "bfield", &format!("{k}\u{1f}{v}")).unwrap(); crate::session::patch::merge(&mut s, &o.patch); }
-        let nb = new_bot(&s).unwrap(); assert_eq!(nb["name"], "Rex"); assert!(nb["providers"].as_array().unwrap().iter().any(|p| p["provider"] == "codex" && p["on"] == true));
+        let nb = new_bot(&s).unwrap(); assert_eq!(nb["name"], "Rex");
+        let labels: Vec<&str> = nb["providers"].as_array().unwrap().iter().map(|p| p["label"].as_str().unwrap()).collect();
+        assert_eq!(labels, ["Claude Code", "Codex", "Grok Build", "Muse Code", "Antigravity", "OpenCode", "Pi", "Oh My Pi"], "names, not ids"); assert!(nb["providers"].as_array().unwrap().iter().any(|p| p["provider"] == "codex" && p["on"] == true));
         let o = act(&st, "h", &s, "bot-create", "").unwrap();
         let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
         assert_eq!((req["m"].as_str(), req["p"]["name"].as_str(), req["p"]["provider"].as_str(), req["id"].as_u64()), (Some("bots.create"), Some("Rex"), Some("codex"), Some(5)));
@@ -204,6 +213,35 @@ mod tests {
         let id = serde_json::from_str::<Value>(o.cmds[0]["text"].as_str().unwrap()).unwrap()["id"].as_u64().unwrap();
         apply_reads(&facts, "h", &mut s, &[json!({"kind": "history.refs", "method": "bots.routine", "id": id, "ok": true, "result": {}})]);
         assert_eq!(routine_form(&s)["open"], false);
+    }
+    #[test] fn a_bot_or_room_just_made_opens_once_the_hub_has_it() {
+        use crate::session::pages::apply_reads;
+        let mut st = State::default();
+        st.apply_line(r#"{"$":"BotSet","id":"b1","thread":"t9","name":"Scout","color":"","at":1}"#);
+        st.apply_line(r#"{"$":"RoomSet","id":"r5-1","name":"bench","members":"b1","at":5}"#);
+        st.apply_line(r#"{"$":"RoomSet","id":"r9-2","name":"bench","members":"b1","at":9}"#);
+        let facts = crate::session::dispatch::StateFacts(&st);
+        let mut s = sess(json!({"@bnew": "1", "@f.name": "Scout", "@bnew.provider": "claude"})); s["sel"] = json!("t1");
+        let o = act(&st, "h", &s, "bot-create", "").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
+        let id = serde_json::from_str::<Value>(o.cmds[0]["text"].as_str().unwrap()).unwrap()["id"].as_u64().unwrap();
+        apply_reads(&facts, "h", &mut s, &[json!({"kind": "history.refs", "method": "bots.create", "id": id, "ok": true, "result": {}})]);
+        assert_eq!(crate::present::screen::go_made(&st, &mut s), Some(json!({"kind": "bot", "id": "b1"})));
+        assert_eq!(crate::present::screen::go_made(&st, &mut s), None, "once");
+        // a room: the newest of that name; a refused one goes nowhere
+        let mut s = sess(json!({"@rnew": "1", "@f.rname": "bench", "@rnew.members": "b1"})); s["sel"] = json!("t1");
+        let o = act(&st, "h", &s, "room-save", "").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
+        let id = serde_json::from_str::<Value>(o.cmds[0]["text"].as_str().unwrap()).unwrap()["id"].as_u64().unwrap();
+        apply_reads(&facts, "h", &mut s, &[json!({"kind": "history.refs", "method": "bots.room", "id": id, "ok": true, "result": {}})]);
+        assert_eq!(crate::present::screen::go_made(&st, &mut s), Some(json!({"kind": "room", "id": "r9-2"})));
+        let mut s = sess(json!({"@bnew": "1", "@f.name": "Kit", "@bnew.provider": "claude"})); s["sel"] = json!("t1");
+        let o = act(&st, "h", &s, "bot-create", "").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
+        let id = serde_json::from_str::<Value>(o.cmds[0]["text"].as_str().unwrap()).unwrap()["id"].as_u64().unwrap();
+        apply_reads(&facts, "h", &mut s, &[json!({"kind": "history.refs", "method": "bots.create", "id": id, "ok": false, "result": {}, "error": "no"})]);
+        assert_eq!(crate::present::screen::go_made(&st, &mut s), None);
+    }
+    #[test] fn typing_the_when_again_takes_the_refusal_away() {
+        let st = State::default(); let s = sess(json!({"@onew": "1", "@f.oerr": "I can't read that schedule."}));
+        let o = act(&st, "h", &s, "bfield", "ocron\u{1f}daily 09:00").unwrap(); assert_eq!(o.patch["drafts"]["@f.oerr"], "");
     }
     #[test] fn a_form_action_with_no_form_open_is_not_ours() {
         let st = State::default(); assert!(act(&st, "h", &sess(json!({})), "bot-create", "").is_none() && act(&st, "h", &sess(json!({})), "form-close", "x").is_none());
