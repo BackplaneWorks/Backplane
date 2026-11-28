@@ -3,6 +3,9 @@
 #[path="../state/mod.rs"] mod state;
 #[path="../store.rs"] mod store;
 #[path="../plat/mod.rs"] #[allow(dead_code)] mod plat;
+/// plat's macOS browser-peer check (plat/mod.rs `macos_browser_peer`) asks netstat through the hub's process gate, which this program
+/// does not have. It accepts no connection, so the plain command stands in; without it the macOS build of this program fails.
+#[cfg(target_os = "macos")] #[allow(dead_code)] mod proc { pub enum Kind { Local } pub fn std_cmd<S: AsRef<std::ffi::OsStr>>(_: Kind, program: S) -> std::process::Command { std::process::Command::new(program) } }
 #[path="../ckpt.rs"] mod ckpt;
 #[path="../startup.rs"] mod startup;
 #[path="../model.rs"] mod model;
