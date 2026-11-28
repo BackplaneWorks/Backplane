@@ -31,6 +31,9 @@ const AKA: &[(&str, &[&str])] = &[("notifications", &["Time zone", "Webhook", "Q
     ("ordering", &["Buy it", "Order", "Prices"]), ("privacy", &["Telemetry", "Anonymous usage"]), ("mouse", &["Zoom", "Pan", "Trackpad", "Scroll"]),
     ("appearance", &["Theme", "Dark", "Light", "Sidebar", "Thread list"])];
 fn aka(id: &str) -> String { AKA.iter().find(|(p, _)| *p == id).map_or(String::new(), |(_, a)| a.join("\n")) }
+/// The pages for a client's command palette (Ctrl+K "phone", "usage"…): id, title and other names (`aka`), in the menu's order. Sent with every
+/// screen (`settingsPages`), so the palette finds a page while Settings is shut.
+pub fn palette_pages() -> Value { Value::Array(PAGES.iter().map(|(id, title)| json!({"id": id, "title": title, "aka": AKA.iter().find(|(p, _)| p == id).map_or(&[][..], |(_, a)| *a)})).collect()) }
 pub fn group_of(id: &str) -> &'static str { GROUPS.iter().find(|(_, ps)| ps.contains(&id)).map_or("", |(g, _)| *g) }
 /// The page an id names: eight pages were folded into their neighbours (Web UI into Devices, Ring into Voice, Import from 0.14 and Developer into Setup,
 /// Time zone into Notifications, Writing into Agents, Projects and git into Threads and git, Network and updates into About and updates), and
@@ -1275,6 +1278,11 @@ mod tests {
     }
 
     use super::*;
+    #[test] fn the_palette_gets_every_page_with_its_other_names() {
+        let v = palette_pages(); let a = v.as_array().unwrap(); assert_eq!(a.len(), PAGES.len());
+        let dev = a.iter().find(|p| p["id"] == "devices").unwrap(); assert_eq!(dev["title"], "Devices"); assert!(dev["aka"].as_array().unwrap().iter().any(|w| w == "Phone"));
+        assert_eq!(a.iter().find(|p| p["id"] == "usage").unwrap()["aka"], json!([]), "a page with no other name has an empty list");
+    }
     fn st(kv: &[(&str, &str)]) -> State { let mut s = State::new(); for (k, v) in kv { s.settings.insert(k.to_string(), v.to_string()); } s }
     #[test]
     fn cad_says_what_solidcraft_this_computer_has_and_asks_before_installing() {

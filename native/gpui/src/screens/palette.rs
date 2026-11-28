@@ -9,7 +9,8 @@ use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Do { AddBeside, Rail(String, String), SolidCraft(String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String),
-    /** the sidebar's "Add project" (the hub's folder picker) */ AddProject, /** Find across threads (Ctrl+Shift+F) */ FindAll, /** the sidebar's filter, focused */ Filter, /** the Improvements panel */ Improvements, /** Plan mode's next setting (Shift+Tab) */ PlanMode }
+    /** the sidebar's "Add project" (the hub's folder picker) */ AddProject, /** Find across threads (Ctrl+Shift+F) */ FindAll, /** the sidebar's filter, focused */ Filter, /** the Improvements panel */ Improvements, /** Plan mode's next setting (Shift+Tab) */ PlanMode,
+    /** a Settings page (the hub's `settingsPages`, or this app's own: `@accounts`, `@hubs`, `@keys`) and the other words it is found by, lowercase */ SettingsPage(String, String) }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
 /// The key that does what an item does, as the person reads it ("" for none).
@@ -91,6 +92,17 @@ fn also(what: &Do) -> &'static str {
     }
 }
 
+/// The Settings pages the box offers: (id, title, other words lowercase). The hub's list (`settingsPages`: none from an older hub), then this app's
+/// own pages, which no hub serves.
+fn settings_pages(data: &Value) -> Vec<(String, String, String)> {
+    let mut v: Vec<(String, String, String)> = data["settingsPages"].as_array().into_iter().flatten()
+        .map(|p| (string(p, "id"), string(p, "title"), p["aka"].as_array().into_iter().flatten().filter_map(|w| w.as_str()).map(|w| crate::i18n::trs(w).to_lowercase()).collect::<Vec<_>>().join(" ")))
+        .filter(|(id, t, _)| !id.is_empty() && !t.is_empty()).collect();
+    /* i18n-ok: page titles drawn through trs; the words are only matched */ for (id, title, words) in [("@accounts", "Accounts", "login sign in account usage limits"), ("@hubs", "Hubs", "hub machine connect"), ("@keys", "Keyboard", "keys shortcuts")] {
+        v.push((id.into(), title.into(), words.into()));
+    }
+    v
+}
 /// Every thing the box can offer now (before the text filters it).
 fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     let mut v: Vec<Item> = vec![];
@@ -177,6 +189,8 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
     for t in data["active"].as_array().into_iter().flatten().chain(data["activeSettled"]["rows"].as_array().into_iter().flatten()) {
         v.push(Item { label: string(t, "title"), place: on_machine(&crate::streamer::project_shown(&string(t, "project")), t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
     }
+    // Settings' pages by name and by their other names ("phone" finds Devices), after the commands: the hub's, then this app's own three
+    for (id, title, words) in settings_pages(data) { v.push(Item { label: format!("{}: {}", trs("Settings"), trs(&title)) /* i18n-ok: two translated words */, place: String::new(), kind: "action", what: Do::SettingsPage(id, words), row: Value::Null }); }
     v
 }
 
@@ -190,7 +204,7 @@ pub fn urgency(it: &Item) -> u8 { match it.row["want"].as_str().unwrap_or("") { 
 pub fn found(all: Vec<Item>, q: &str, n: usize) -> Vec<Item> {
     let empty = q.trim().is_empty(); let ql = q.trim().to_lowercase();
     let mut r: Vec<(u8, usize, Item)> = all.into_iter().enumerate().filter_map(|(i, it)| {
-        let s = rank(&it.label, q).max(if it.place.is_empty() { 0 } else { rank(&it.place, q).min(1) }).max(if !empty && also(&it.what).split_whitespace().any(|w| w.starts_with(&ql)) { 2 } else { 0 });
+        let s = rank(&it.label, q).max(if it.place.is_empty() { 0 } else { rank(&it.place, q).min(1) }).max(if !empty && match &it.what { Do::SettingsPage(_, w) => w.as_str(), w => also(w) }.split_whitespace().any(|w| w.starts_with(&ql)) { 2 } else { 0 });
         (s > 0).then_some((s, i, it)) }).collect();
     r.sort_by(|a, b| (if empty { urgency(&b.2).cmp(&urgency(&a.2)) } else { std::cmp::Ordering::Equal }).then(b.0.cmp(&a.0)).then((a.2.kind != "thread").cmp(&(b.2.kind != "thread"))).then(a.1.cmp(&b.1)));
     let mut seen = std::collections::HashSet::new();
@@ -362,6 +376,8 @@ impl Backplane {
             Do::Filter => self.focus_search(cx),
             Do::Improvements => super::improvements::toggle(self, cx),
             Do::PlanMode => super::planmode::cycle(self, cx),
+            // a hub page: its settings-page action opens Settings on it (the hub opens a shut Settings in the same action); this app's own pages open here
+            Do::SettingsPage(id, _) => if id.starts_with('@') { if !(self.screens.settings_ui.open_local || self.data["settings"].is_object()) { self.open_settings(cx); } super::settings::open_nav(self, &id, cx) } else { super::settings::go_page(self, &id) },
         }
         if gives_back { self.kicad_return(cx) } else { self.kicad_release(cx) }
         cx.notify();
@@ -437,6 +453,7 @@ pub(crate) fn selected_snapshot(data: &Value, p: &Palette) -> Value {
         Do::Filter => "filter".into(),
         Do::Improvements => "improvements".into(),
         Do::PlanMode => "plan-mode".into(),
+        Do::SettingsPage(id, _) => format!("settings:{id}"),
         Do::Message(t, m) => format!("message:{t}:{m}"),
     }).unwrap_or_default();
     serde_json::json!({
@@ -495,6 +512,17 @@ mod tests {
         assert!(r.iter().any(|i| i.label == "Find in all threads") && !r.iter().any(|i| i.what == Do::Streamer), "{r:?}");
         assert_eq!(found(all.clone(), "room", 10)[0].label, "New room");
         assert_eq!(found(all, "bot", 10)[0].what, Do::Action("bot-new".into(), String::new()));
+    }
+    #[test] fn a_settings_page_is_found_by_its_name_or_another_one() {
+        let d = serde_json::json!({"settingsPages": [{"id": "devices", "title": "Devices", "aka": ["Phone", "Pair a phone"]}, {"id": "usage", "title": "Usage", "aka": []}]});
+        let all = items(&d, false);
+        assert_eq!(found(all.clone(), "phone", 10)[0].what, Do::SettingsPage("devices".into(), "phone pair a phone".into()));
+        assert_eq!(found(all.clone(), "usage", 10)[0].label, "Settings: Usage");
+        assert!(matches!(&found(all.clone(), "accounts", 10)[0].what, Do::SettingsPage(id, _) if id == "@accounts"), "this app's own page too");
+        let none = items(&serde_json::json!({}), false);
+        assert!(!none.iter().any(|i| matches!(&i.what, Do::SettingsPage(id, _) if !id.starts_with('@'))), "no list from the hub: only this app's own pages");
+        let empty = found(all, "", 400); let first_page = empty.iter().position(|i| matches!(i.what, Do::SettingsPage(..))).unwrap();
+        assert!(empty.iter().skip(first_page).all(|i| matches!(i.what, Do::SettingsPage(..))), "listed after the commands");
     }
     #[test] fn a_projects_thread_offers_a_swarm_and_plan_mode() {
         let d = serde_json::json!({"thread": {"id": "t1", "project": {"id": "p1", "title": "Motor"}, "planMode": {"phase": "off"}}});
