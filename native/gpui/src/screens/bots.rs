@@ -150,6 +150,13 @@ pub fn focus_target(data: &Value) -> String {
     if data["newRoom"].is_object() { return "rname".into(); }
     match data["bot"]["kind"].as_str() { Some("room") => "rpost".into(), Some("remote") => "rtext".into(), _ => String::new() }
 }
+/// Which page holds the keys: the field `focus_target` names, then the bot or room on show (kind and id). A change gives the keys again
+/// (screens/glue.rs): a field when one is named, else the message box, so opening another bot or room from the sidebar lands in its box
+/// as opening a thread does (only the field's change counted, and a click on a bot left the keys nowhere: typed letters fired the viewer keys).
+pub fn focus_key(data: &Value) -> (String, String) {
+    let page = match data["bot"]["kind"].as_str() { Some(k) => format!("{k}:{}", data["bot"]["id"].as_str().unwrap_or("")), None => String::new() };
+    (focus_target(data), page)
+}
 /// Enter in a one-line field of the New bot or New room form: the form's accent button (Create, Save) when it is enabled; None otherwise.
 /// `named`: the Name box holds more than blanks.
 fn form_enter(data: &Value, field: &str, named: bool) -> Option<Command> {
@@ -227,12 +234,13 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> Option<AnyE
     if bot["kind"] != "bot" { return None; }
     let c = |n: &str| theme::color(light, n);
     let on = bot["navTab"].as_str().or(bot["tab"].as_str()).unwrap_or("chat").to_string();
-    let mut strip = div().flex().gap_1();
+    // narrow (a viewer pane open beside the page): the tabs scroll sideways within the main column, never drawn over the pane's header
+    let mut strip = div().id("bot-tabs").flex().gap_1().min_w_0().overflow_x_scroll();
     for (i, t) in tabs(bot, "tabs").into_iter().enumerate() { let is = t.id == on; strip = strip.child(btn(cx, light, format!("btab-{i}"), trs(&t.label), is, tab_cmd, t.id)); }
     let subs = tabs(bot, "subtabs");
     // the tabs in a band of their own, the sub-tabs in the next: the first row never moves when a tab has sub-tabs
-    let mut col = div().h(px(bar_h(bot))).flex_shrink_0().px_3().flex().flex_col().border_b_1().border_color(c("line")).bg(c("bg"))
-        .child(div().h(px(BAR_H * crate::scale::s())).flex_shrink_0().flex().gap_2().items_center().child(strip).children(super::badge::place(light, &bot["mark"], "", "bot-bar")));
+    let mut col = div().h(px(bar_h(bot))).flex_shrink_0().min_w_0().overflow_hidden().px_3().flex().flex_col().border_b_1().border_color(c("line")).bg(c("bg"))
+        .child(div().h(px(BAR_H * crate::scale::s())).flex_shrink_0().min_w_0().flex().gap_2().items_center().child(strip).children(super::badge::place(light, &bot["mark"], "", "bot-bar")));
     if !subs.is_empty() { let cur = string(bot, "tab"); col = col.child(div().flex_1().flex().items_center().gap_1().children(subs.into_iter().enumerate().map(|(i, t)| { let is = t.id == cur; btn(cx, light, format!("bsub-{i}"), trs(&t.label), is, tab_cmd, t.id) }).collect::<Vec<_>>())); }
     Some(col.into_any_element())
 }
@@ -653,6 +661,16 @@ mod tests {
         assert!(matches!(form_enter(&nr(true), "rname", false), Some(Command::Action(a, _)) if a == "room-save"));
         assert!(form_enter(&nr(false), "rname", false).is_none(), "no member: Save is off");
         assert!(form_enter(&j("{}"), "name", true).is_none());
+    }
+    #[test] fn another_bot_or_room_changes_the_focus_key_and_its_tabs_do_not() {
+        let b1 = focus_key(&j(r#"{"bot":{"kind":"bot","id":"b1","tab":"chat"}}"#));
+        assert_eq!(b1, (String::new(), "bot:b1".to_string()), "a bot's page: the message box");
+        assert_eq!(focus_key(&j(r#"{"bot":{"kind":"bot","id":"b1","tab":"memory"}}"#)), b1, "a tab of the same bot keeps the keys where they are");
+        assert_ne!(focus_key(&j(r#"{"bot":{"kind":"bot","id":"b2","tab":"chat"}}"#)), b1, "another bot gives them again");
+        assert_ne!(focus_key(&j("{}")), b1, "from a thread to a bot");
+        let r1 = focus_key(&j(r#"{"bot":{"kind":"room","id":"r1"}}"#));
+        assert_eq!(r1.0, "rpost");
+        assert_ne!(focus_key(&j(r#"{"bot":{"kind":"room","id":"r2"}}"#)), r1, "room to room: the new room's box");
     }
     #[test] fn an_empty_mail_conversation_draws_no_lone_colon() {
         assert_eq!(mail_line("Scout", "Bot report"), "Scout: Bot report"); assert_eq!(mail_line("", ""), ""); assert_eq!(mail_line("Scout", ""), "Scout");

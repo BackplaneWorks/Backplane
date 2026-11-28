@@ -300,9 +300,9 @@ impl Backplane {
         super::filesui::sync(self, cx);
         self.browser_page(cx);
         self.solidcraft_sync(cx);
-        // a form or a room page opened: its first field takes the keys; closed: back to the composer
-        let open = super::bots::focus_target(&self.data);
-        if open != self.screens.bots_open { self.screens.bots_open = open.clone(); if open.is_empty() { self.want_focus = true; } else { self.screens.focus_field = Some(open); } }
+        // a form or a room page opened: its first field takes the keys; closed, or another bot or room on show: its box (bots::focus_key)
+        let (open, page) = super::bots::focus_key(&self.data);
+        if (&open, &page) != (&self.screens.bots_open, &self.screens.bots_page) { self.screens.bots_open = open.clone(); self.screens.bots_page = page; if open.is_empty() { self.want_focus = true; } else { self.screens.focus_field = Some(open); } }
         // settings opened: the keys go into it; closed: back to the composer
         let open = super::settings::is_open(self);
         if open != self.screens.settings_was_open { self.screens.settings_was_open = open; if open { self.screens.focus_settings = true; } else { self.want_focus = true; } }
