@@ -1603,6 +1603,7 @@ gpui.subview.more = {more, plural, one {# paso anterior no mostrado} other {# pa
 gpui.no.matches = Sin coincidencias
 gpui.find.in.this.thread = Buscar en este hilo
 gpui.find.in.thread = Buscar en el hilo
+gpui.find.in.all.threads = Buscar en todos los hilos
 gpui.previous.match = Coincidencia anterior
 gpui.next.match = Siguiente coincidencia
 gpui.back.to.the.thread = Volver al hilo

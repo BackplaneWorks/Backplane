@@ -408,7 +408,7 @@ gpui.f2.pair.phone	Pair a phone	スマホをペアリング	Vincular un teléfon
 gpui.f2.pair.phone.note	Optional. Get the app, then show the code here and scan it. The phone opens your uberbot.	任意です。アプリを入れてから、ここでコードを表示して読み取ってください。スマホはメインボットを開きます。	Opcional. Consigue la app, muestra el código aquí y escanéalo. El teléfono abre tu uberbot.
 gpui.f2.pair.phone.shown	Scan this with the Backplane app, or type the short code and this address. It works once, for ten minutes. Treat it as a password.	Backplaneアプリでこれを読み取るか、短いコードとこのアドレスを入力してください。1回だけ、10分間有効です。パスワードと同じように扱ってください。	Escanea esto con la app de Backplane, o escribe el código corto y esta dirección. Funciona una vez, durante diez minutos. Trátalo como una contraseña.
 gpui.f2.show.code	Show the code	コードを表示	Mostrar el código
-gpui.f2.done.body	Press ? any time for keys.	? でいつでもキー一覧を表示できます。	Pulsa ? en cualquier momento para ver los atajos.
+gpui.f2.done.body	Press F1 any time for keys.	F1 でいつでもキー一覧を表示できます。	Pulsa F1 en cualquier momento para ver los atajos.
 gpui.f2.open.uber	Open the uberbot	メインボットを開く	Abrir el uberbot
 gpui.f2.setup.phone	Setup runs on a computer, in Settings, Setup there. This phone is paired with it.	セットアップはコンピュータの 設定 → セットアップ で行います。このスマホはそのコンピュータとペアリングされています。	La configuración se ejecuta en un ordenador, en Ajustes, Configuración allí. Este teléfono está vinculado a él.
 gpui.f2.setup.five	Six short steps: agents, design tools, your uberbot's name, where it lives and a first project.	6つの短いステップ：エージェント、設計ツール、メインボットの名前、置き場所、最初のプロジェクト。	Seis pasos cortos: agentes, herramientas de diseño, el nombre de tu uberbot, dónde vive y un primer proyecto.
@@ -2009,6 +2009,7 @@ gpui.subview.more	{more, plural, one {# earlier step not shown} other {# earlier
 gpui.no.matches	No matches	一致なし	Sin coincidencias
 gpui.find.in.this.thread	Find in this thread	このスレッド内を検索	Buscar en este hilo
 gpui.find.in.thread	Find in thread	スレッド内を検索	Buscar en el hilo
+gpui.find.in.all.threads	Find in all threads	すべてのスレッド内を検索	Buscar en todos los hilos
 gpui.previous.match	Previous match	前の一致	Coincidencia anterior
 gpui.next.match	Next match	次の一致	Siguiente coincidencia
 gpui.back.to.the.thread	Back to the thread	スレッドに戻る	Volver al hilo
