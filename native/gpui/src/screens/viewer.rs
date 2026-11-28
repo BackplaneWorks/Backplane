@@ -1417,6 +1417,32 @@ fn resize_handle(cx: &mut Context<Backplane>) -> AnyElement {
         .into_any_element()
 }
 
+/// The sidebar's width a drag of its right edge asks for, in a window `window_w` wide: 200 to 480 px, and never so wide that the thread keeps less
+/// than THREAD_LEAST beside a fair viewer (else `fit` would fold the sidebar the moment the viewer opens).
+pub const SIDE_DRAG: (f32, f32) = (200., 480.);
+pub fn clamp_side(width: f32, window_w: f32) -> f32 {
+    let most = (window_w - RAIL_W - THREAD_LEAST - PANE_FAIR).min(SIDE_DRAG.1).max(SIDE_DRAG.0);
+    width.round().clamp(SIDE_DRAG.0, most)
+}
+struct SideDrag;
+fn set_side(this: &mut Backplane, w: u32, cx: &mut Context<Backplane>) {
+    if this.local.sidebar_px == w { return }
+    this.local.sidebar_px = w; this.ui_epoch += 1; cx.notify();
+    save_soon(cx);
+}
+/// The open sidebar's right edge: a 6 px strip over its border (the thread's side of it too), drag to resize, double click for the default width.
+/// Kept on this device as the Settings' Sidebar width is (local.rs `sidebar_px`); folding and unfolding keep it.
+pub(crate) fn side_handle(cx: &mut Context<Backplane>) -> AnyElement {
+    /* i18n-ok: a ui: id the drivers press */ div().flex_none().w_0().h_full().relative().child(crate::ui::with_rect(div().id("sidebar-resize"), || "ui:Sidebar edge".to_string()).absolute().left(px(-3.)).top_0().h_full().w(px(6.)).cursor_col_resize().hover(|d| d.bg(rgba(0x80808040)))
+        .on_drag(SideDrag, |_, _, _, cx| cx.new(|_| Ghost))
+        .on_drag_move(cx.listener(|this, e: &DragMoveEvent<SideDrag>, window, cx| {
+            let w = clamp_side(f32::from(e.event.position.x), f32::from(window.viewport_size().width));
+            set_side(this, w as u32, cx);
+        }))
+        .on_click(cx.listener(|this, e: &ClickEvent, _, cx| { if e.click_count() >= 2 { set_side(this, crate::local::Local::default().sidebar_px, cx); } })))
+        .into_any_element()
+}
+
 /// Desktop Mech uses embedded SolidCraft rather than `kicad.watch` solid frames.
 /// The watch a Mech part needs in Backplane's own viewer (mech_native; SolidCraft opens the file itself). Board, Schematic and 3D are watched by the
 /// commands of the action that opened them; a Mech part comes in after a `mech.list` reply, which carries no command, so the window asks for its
@@ -1693,6 +1719,15 @@ mod tests {
         assert_eq!(d[0].lines.len(), 3); assert_eq!((diff_sign(d[0].lines[1].k), diff_sign(d[0].lines[2].k), diff_sign(4)), ("-", "+", " "));
     }
     // a diff copied from the Diff page pastes into an editor as the lines themselves: one a row, no +/- gutter, no line numbers
+    // the sidebar's edge drags from 200 to 480 px, and never takes the room a fair viewer needs beside the thread (else opening it folds the sidebar)
+    #[test] fn the_sidebar_edge_drags_within_its_range_and_leaves_the_thread_and_a_viewer_room() {
+        assert_eq!((clamp_side(369.4, 1400.), clamp_side(120., 1400.), clamp_side(900., 1400.)), (369., 200., 480.));
+        assert_eq!(clamp_side(450., 1200.), 288., "1200 - rail 72 - thread 360 - fair viewer 480");
+        assert_eq!(clamp_side(450., 800.), 200., "a narrow window: the least, the fold of `fit` decides the rest");
+        for (w, x) in [(1400., 480.), (1200., 288.)] { assert!(fit(w, clamp_side(x, w), true, false, true).0, "the viewer opens beside it at {w}"); }
+        assert!(crate::local::SIDEBAR_PX.1 as f32 >= SIDE_DRAG.1 && (crate::local::SIDEBAR_PX.0 as f32) <= SIDE_DRAG.0, "a dragged width survives the file's own clamp");
+        assert_eq!(crate::local::Local::default().sidebar_px, 264, "double click: the default as it was");
+    }
     #[test] fn a_diffs_lines_copy_without_their_gutter_one_a_row() {
         let d = diff_files(&j(r#"{"summary":"1 file, +2 −1","files":[{"name":"notes.txt","status":"modified","lines":[{"k":4,"t":"@@ -1,2 +1,3 @@","o":"","n":""},{"k":0,"t":"alpha line one","o":"1","n":"1"},{"k":2,"t":"beta line two","o":"2","n":""},{"k":1,"t":"beta line 2","o":"","n":"2"},{"k":1,"t":"","o":"","n":"3"},{"k":1,"t":"gamma line three","o":"","n":"4"}]}]}"#));
         let reg: Reg = Default::default(); reg.borrow_mut().begin_outside();

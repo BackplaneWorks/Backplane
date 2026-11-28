@@ -1401,6 +1401,8 @@ impl Render for Backplane {
                     .child(div().px_3().py_1().border_t_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(crate::i18n::trs(&self.status)))
                     // held Ctrl: the short legend over the sidebar's foot (0.14's keys-legend)
                     .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(crate::screens::hints::legend(cx, light, &self.local))))
+                // the open sidebar's right edge: drag to resize, double click for the default (screens/viewer.rs side_handle); no width of its own
+                .when(side_shown && !kscreen && !sc_full, |d| d.child(crate::screens::viewer::side_handle(cx)))
                 // main
                 .child(div().flex_1().min_w(px(thread_least)).when(pane_full, |d| d.flex_none().w(px(0.)).overflow_hidden()).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
                     .children(shows_bot_overlay(has_home).then(|| crate::screens::bots::bar(cx, light, &self.data["bot"])).flatten())
