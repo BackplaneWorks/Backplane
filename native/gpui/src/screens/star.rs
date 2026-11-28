@@ -1,4 +1,4 @@
-//! The GitHub star suggestion: a small card in the window's upper right corner (nothing behind it is dimmed or blocked) while the hub says its offer is out and undecided.
+//! The GitHub star suggestion: a small card over the sidebar's foot, bottom left (nothing behind it is dimmed or blocked) while the hub says its offer is out and undecided.
 //! The hub decides everything (state/star.rs): it sends `{"t":"star","offer"}` at the person's fifth prompt (or after a few days of use, or when a
 //! Later's week is up) and `offer:null` once it is decided, and answers `star.offer` on every (re)connect. Star on GitHub opens the URL and decides
 //! `open`; Later decides `later` (a week); Don't ask again decides `dismiss`. The card waits (`due`) while the thread on screen runs a turn,
@@ -24,7 +24,15 @@ pub fn due(o: Option<&Offer>, data: &Value, draft: &str) -> bool {
     o.is_some() && data["thread"]["sendAct"] != "interrupt" && draft.trim().is_empty() && !data["tour"].is_object() && !super::migrate::is_up(data)
 }
 
-pub fn card(cx: &mut Context<Backplane>, o: Option<&Offer>, light: bool) -> Option<AnyElement> {
+/// Where the card sits: over the sidebar's foot, above its status line ("Connected"), as wide as the sidebar less its margins, so it covers
+/// none of the thread's or a viewer's controls; with the sidebar folded, under the top bar clear of the rail, as before.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Place { Foot { left: f32, bottom: f32, width: f32 }, Top { right: f32, top: f32, width: f32 } }
+pub fn place(side_shown: bool, sidebar_px: f32) -> Place {
+    if side_shown && sidebar_px >= 200. { Place::Foot { left: 8., bottom: 36., width: (sidebar_px - 16.).min(340.) } } else { Place::Top { right: 88., top: 48., width: 340. } }
+}
+
+pub fn card(cx: &mut Context<Backplane>, o: Option<&Offer>, light: bool, at: Place) -> Option<AnyElement> {
     let o = o?;
     let c = |n: &str| theme::color(light, n);
     let tr = crate::i18n::trs;
@@ -32,7 +40,8 @@ pub fn card(cx: &mut Context<Backplane>, o: Option<&Offer>, light: bool) -> Opti
     let small = |id: &'static str, label: &str| div().id(id).flex_1().h(crate::scale::tpx(26.)).flex().items_center().justify_center().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("dim")).bg(c("raise")).hover(|s| s.bg(c("line"))).child(tr(label));
     let repo = if o.repo.is_empty() { o.url.trim_start_matches("https://").trim_start_matches("github.com/").to_string() } else { o.repo.clone() };
     /* i18n-ok: drawn through tr */ let label = if o.label.is_empty() { "Star on GitHub".to_string() } else { o.label.clone() };
-    let card = div().id("star-card").w(px(340.)).flex().flex_col().gap_2().p_4().bg(c("bg")).border_1().border_color(c("accent")).shadow_md().occlude()
+    let w = match at { Place::Foot { width, .. } | Place::Top { width, .. } => width };
+    let card = div().id("star-card").w(px(w)).flex().flex_col().gap_2().p_4().bg(c("bg")).border_1().border_color(c("accent")).shadow_md().occlude()
         .child(div().flex().items_start().gap_2().child(div().flex_shrink_0().pt(px(1.)).child(crate::ui::ic(light, "star", 16., "accent")))
             .child(div().flex_1().min_w_0().flex().flex_col().gap_1()
                 .child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).text_color(c("text")).child(tr(&o.text)))
@@ -43,8 +52,10 @@ pub fn card(cx: &mut Context<Backplane>, o: Option<&Offer>, light: bool) -> Opti
         .child(div().flex().gap_2()
             /* i18n-ok: drawn through tr */ .child(rect(small("star-later", "Later"), "star:later").on_click(cx.listener(|this, _, _, cx| this.star_decide("later", cx))))
             /* i18n-ok: drawn through tr */ .child(rect(small("star-dismiss", "Don't ask again"), "star:dismiss").on_click(cx.listener(|this, _, _, cx| this.star_decide("dismiss", cx)))));
-    // under the top bar, clear of the right rail: where a conversation is emptiest
-    Some(div().id("star-nudge").absolute().right(px(88.)).top(px(48.)).child(rect(card, "star")).into_any_element())
+    // over the sidebar's foot, above its status line: clear of the top bar and of a viewer's header buttons (it came the moment a first
+    // design finished, over Layers / Fit / Follow agent of the board the person had just opened)
+    let at = match at { Place::Foot { left, bottom, .. } => div().id("star-nudge").absolute().left(px(left)).bottom(px(bottom)), Place::Top { right, top, .. } => div().id("star-nudge").absolute().right(px(right)).top(px(top)) };
+    Some(at.child(rect(card, "star")).into_any_element())
 }
 
 impl Backplane {
@@ -65,6 +76,12 @@ impl Backplane {
 mod tests {
     use super::*; use core::prelude::v1::test;
     fn offer() -> Value { json!({"token":"m5","text":"Like Backplane? Give us a star on GitHub!","url":"https://github.com/BackplaneWorks/Backplane","label":"Star on GitHub","repo":"BackplaneWorks/Backplane","why":"Stars help."}) }
+    #[test] fn the_card_sits_over_the_sidebars_foot_not_over_the_top_bar_or_a_viewer() {
+        assert_eq!(place(true, 263.), Place::Foot { left: 8., bottom: 36., width: 247. }, "within the sidebar, above its status line");
+        assert_eq!(place(true, 420.), Place::Foot { left: 8., bottom: 36., width: 340. }, "never wider than before");
+        assert_eq!(place(false, 263.), Place::Top { right: 88., top: 48., width: 340. }, "sidebar folded: the old place");
+        assert!(matches!(place(true, 120.), Place::Top { .. }), "a sidebar too narrow for it");
+    }
     #[test] fn the_hubs_offer_is_shown_as_it_says() {
         let o = of(&offer()).unwrap();
         assert_eq!((o.token.as_str(), o.text.as_str(), o.url.as_str(), o.label.as_str()), ("m5", "Like Backplane? Give us a star on GitHub!", "https://github.com/BackplaneWorks/Backplane", "Star on GitHub"));

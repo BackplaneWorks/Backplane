@@ -1548,8 +1548,8 @@ impl Render for Backplane {
             // the comment window over the KiCad pane (Ctrl+;)
             .children({ if let Some(k) = self.screens.kcomment.as_mut().filter(|k| k.focus_pending) { k.focus_pending = false; window.focus(&k.input.focus_handle(cx)); eprintln!("GPUI_LOG {}", serde_json::json!({"kcomment": "rendered", "at_ms": crate::screens::kcomment::epoch_ms() as u64})); } crate::screens::kcomment::view(self, cx, light, window.viewport_size()) })
             .children(crate::screens::migrate::view(cx, light, &self.data["migrate"]))
-            // the GitHub star suggestion, while the hub says it is out: a small card in the upper right corner, at a pause (screens/star.rs `due`)
-            .children(self.star_up(cx).then(|| crate::screens::star::card(cx, self.screens.star.clone().as_ref(), light)).flatten())
+            // the GitHub star suggestion, while the hub says it is out: a small card over the sidebar's foot, at a pause (screens/star.rs `due`, `place`)
+            .children(self.star_up(cx).then(|| crate::screens::star::card(cx, self.screens.star.clone().as_ref(), light, crate::screens::star::place(side_shown, self.local.sidebar_px as f32))).flatten())
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| { for it in &m.items { ctl.push(CtlEntry { id: format!("ctx:{}", it.label), label: it.label.clone(), ctl: Ctl::Node(it.action.clone(), it.value.clone()) }); } crate::screens::ctxmenu::render(cx, light, &m) }))
             .children(crate::perf::on().then(|| crate::perf::overlay(light, &crate::keys::hint(&self.local, "perf"))))
