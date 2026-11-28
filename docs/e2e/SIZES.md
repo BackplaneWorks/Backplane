@@ -64,7 +64,7 @@ A dialog Compose draws inside the activity's window leaves the page under it in 
 
 ### Android
 
-`test/e2e/layout/android.py` (driver), `android_scenarios.json` (the screens: pairing start, confirm and code, home, hub picker, new thread, thread, model picker, thread menu, delete dialog, viewer, a streaming turn, composer with the keyboard, bot, room, Settings and its pages, Accounts, Hub, Add a hub, Improvements; scrolling screens are walked 3 pages), `android-fixture.mjs` (a hub on a temp home with stand-in agents, `lib/hubfx.mjs`), `android-known.json` (the first run's findings; they do not fail, the list only shrinks).
+`test/e2e/layout/android.py` (driver), `android_scenarios.json` (the screens: pairing start, confirm and code, home (the Inbox tab), Bench, a project's page, hub picker, new thread (from the project's page), thread, model picker, thread menu, delete dialog, viewer, a streaming turn, composer with the keyboard, bot and room (the Crew tab), Settings and its pages, Accounts, Hub, Add a hub, Improvements; scrolling screens are walked 3 pages), `android-fixture.mjs` (a hub on a temp home with stand-in agents, `lib/hubfx.mjs`), `android-known.json` (the first run's findings; they do not fail, the list only shrinks).
 Sizes from `sizes.json` (`wm size` and `wm density`), portrait and landscape (`user_rotation`), font scale 0.85, 1.0 and 1.3 (`font_scale`); the emulator is put back as it was.
 
 ```sh

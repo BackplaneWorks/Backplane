@@ -80,11 +80,12 @@ def settle(fast=False):
     return x
 
 def to_home():
-    """paired, on the thread list: back out of anything, relaunch when the app left"""
+    """paired, on the home (its Inbox | Crew | Bench tabs, whichever is on show): back out of anything, relaunch when the app left.
+    Back on the home itself leaves the app, so the home is known by its tab bar; each scenario taps the tab it needs."""
     for _ in range(5):
         if 'mInputShown=true' in sh('dumpsys input_method | grep -m1 mInputShown'): sh('input keyevent KEYCODE_BACK'); time.sleep(0.6)   # a keyboard left up covers the list
         x, t = tree()
-        if t and find(t, r'^Add project$') and find(t, r'^Settings$'): return t
+        if t and find(t, r'^Inbox$') and find(t, r'^Bench$') and find(t, r'^Settings$'): return t
         if not foreground(): launch(); continue
         sh('input keyevent KEYCODE_BACK'); time.sleep(0.8)
     launch(); return tree()[1]
@@ -92,12 +93,15 @@ def to_home():
 def run_steps(steps):
     for st in steps:
         if 'tap' in st:
-            for k in range(7):
+            unfolded, k = False, 0
+            while k < 7:
                 x, t = tree(); n = find(t, st['tap'])
                 if n: tap_node(n); break
+                f = st.get('unfold') and not unfolded and find(t, st['unfold'])   # a thread the hub has moved into a fold (a project page's Done): open the fold once, look under it
+                if f: tap_node(f); unfolded, k = True, 4; time.sleep(1.0); continue
                 if k == 2: [swipe_down() or time.sleep(0.3) for _ in range(3)]   # a list left scrolled by the last screen: back to its top
                 elif k >= 4: swipe_up()   # a row below the fold
-                time.sleep(0.6)
+                time.sleep(0.6); k += 1
             else: return 'control not found: ' + st['tap']
             time.sleep(0.3)
         elif 'wait' in st: time.sleep(st['wait'] / 1000)
@@ -110,7 +114,7 @@ def run_steps(steps):
 def swipe_down():
     W, H = STATE['size']; sh('input swipe %d %d %d %d 300' % (W // 2, H * 0.55, W // 2, H * 0.95))   # inside the list: a drag that starts on the header does not scroll it
 def swipe_up():
-    W, H = STATE['size']; sh('input swipe %d %d %d %d 300' % (W // 2, H * 0.9, W // 2, H * 0.45))
+    W, H = STATE['size']; sh('input swipe %d %d %d %d 300' % (W // 2, H * 0.8, W // 2, H * 0.4))   # from 0.9 of a 640 dp screen it starts under a page's scroller (Settings: its bottom padding and the nav bar)
 
 def run_combo(size, orient, font):
     tag = '%s-%s-f%g' % (size['name'], orient, font); d = os.path.join(OUT, tag); shutil.rmtree(d, ignore_errors=True)

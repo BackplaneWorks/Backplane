@@ -35,10 +35,56 @@
   },
   {
    "name": "home",
-   "steps": [],
+   "steps": [
+    {
+     "tap": "^Inbox$"
+    },
+    {
+     "wait": 800
+    }
+   ],
    "scroll": true,
    "text": [
-    "e2e thread 0"
+    "Inbox",
+    "Crew",
+    "Bench"
+   ]
+  },
+  {
+   "name": "bench",
+   "steps": [
+    {
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 800
+    }
+   ],
+   "scroll": true,
+   "text": [
+    "proj"
+   ]
+  },
+  {
+   "name": "project",
+   "steps": [
+    {
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
+    },
+    {
+     "wait": 1000
+    }
+   ],
+   "scroll": true,
+   "text": [
+    "e2e thread 0",
+    "New thread in proj"
    ]
   },
   {
@@ -57,7 +103,19 @@
    "name": "new-thread",
    "steps": [
     {
-     "tap": "^New thread$"
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^\\+ New thread in proj$"
     },
     {
      "wait": 1000
@@ -68,7 +126,20 @@
    "name": "thread",
    "steps": [
     {
-     "tap": "^e2e thread 0$"
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^e2e thread 0$",
+     "unfold": "^DONE \\(\\d+\\)$"
     },
     {
      "wait": 1200
@@ -83,7 +154,20 @@
    "name": "picker",
    "steps": [
     {
-     "tap": "^e2e thread 0$"
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^e2e thread 0$",
+     "unfold": "^DONE \\(\\d+\\)$"
     },
     {
      "wait": 1000
@@ -105,13 +189,26 @@
    "name": "thread-menu",
    "steps": [
     {
-     "tap": "^e2e thread 0$"
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
     },
     {
      "wait": 1000
     },
     {
-     "tap": "^More$"
+     "tap": "^e2e thread 0$",
+     "unfold": "^DONE \\(\\d+\\)$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^Menu$"
     },
     {
      "wait": 800
@@ -126,13 +223,26 @@
    "name": "delete-dialog",
    "steps": [
     {
-     "tap": "^e2e thread 0$"
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
     },
     {
      "wait": 1000
     },
     {
-     "tap": "^More$"
+     "tap": "^e2e thread 0$",
+     "unfold": "^DONE \\(\\d+\\)$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^Menu$"
     },
     {
      "wait": 600
@@ -150,7 +260,20 @@
    "name": "thread-viewer",
    "steps": [
     {
-     "tap": "^e2e thread 0$"
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^e2e thread 0$",
+     "unfold": "^DONE \\(\\d+\\)$"
     },
     {
      "wait": 1000
@@ -167,7 +290,20 @@
    "name": "streaming",
    "steps": [
     {
-     "tap": "^e2e thread 1$"
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^e2e thread 1$",
+     "unfold": "^DONE \\(\\d+\\)$"
     },
     {
      "wait": 1000
@@ -195,7 +331,20 @@
    "name": "composer-keyboard",
    "steps": [
     {
-     "tap": "^e2e thread 2$"
+     "tap": "^Bench$"
+    },
+    {
+     "wait": 600
+    },
+    {
+     "tap": "^proj$"
+    },
+    {
+     "wait": 1000
+    },
+    {
+     "tap": "^e2e thread 2$",
+     "unfold": "^DONE \\(\\d+\\)$"
     },
     {
      "wait": 1000
@@ -215,6 +364,12 @@
    "name": "bot",
    "steps": [
     {
+     "tap": "^Crew$"
+    },
+    {
+     "wait": 800
+    },
+    {
      "tap": "^Bub$"
     },
     {
@@ -225,6 +380,12 @@
   {
    "name": "room",
    "steps": [
+    {
+     "tap": "^Crew$"
+    },
+    {
+     "wait": 800
+    },
     {
      "tap": "^e2e-room$"
     },
