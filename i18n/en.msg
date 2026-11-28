@@ -4003,6 +4003,7 @@ mobile.diff.new = new
 mobile.diff.deleted = deleted
 mobile.diff.renamed = renamed
 mobile.diff.binary = binary
+android.attach.file = Choose a file
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
 ios.alerts.ask = Bub can alert you when a thread needs you.

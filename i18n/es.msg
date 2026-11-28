@@ -4004,6 +4004,7 @@ mobile.diff.new = nuevo
 mobile.diff.deleted = eliminado
 mobile.diff.renamed = renombrado
 mobile.diff.binary = binario
+android.attach.file = Elegir un archivo
 
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} ejecutándose

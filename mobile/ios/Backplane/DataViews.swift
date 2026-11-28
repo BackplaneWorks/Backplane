@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import PhotosUI
+import UniformTypeIdentifiers
 
 // The phone app's screens for data/1 (docs/PHONE-DATA.md): native SwiftUI over typed values from DataClient, drawn as the desktop draws them (DataStyle.swift):
 // one list of projects and threads, one thread with its runs folded and the composer under it, this phone's settings. The same screens as the Android app's DataViews.kt.
@@ -825,6 +826,12 @@ struct DataNewThreadSheet: View {
     @State private var choice = DNewThreadChoice()
     @State private var chip = ""
     @State private var picking = false
+    // a thread can start with pictures, as a reply carries them: Attach (a photo, or one taken now) and Draw, sent with the first message
+    @State private var pending: [Data] = []
+    @State private var picked: [PhotosPickerItem] = []
+    @State private var photoLibrary = false
+    @State private var camera = false
+    @State private var drawing = false
     private var owner: DProject? { client.projects.first { $0.id == project || $0.newOn.contains { $0.value == project } } }
     // where it runs (D6): the hub's choice first ("runs on desktop"); the line opens the machine picker when the project is on more than one
     @State private var target = ""
@@ -856,6 +863,7 @@ struct DataNewThreadSheet: View {
                 if text.isEmpty { Text(Tr.t("What should it do?")).dmono(13).foregroundStyle(BackplaneDesign.faint).padding(.horizontal, 11).padding(.vertical, 14).allowsHitTesting(false) }
             }.frame(minHeight: 120).dbox(BackplaneDesign.accent)
             if !error.isEmpty { Text(Tr.t(error)).dmono(12).foregroundStyle(BackplaneDesign.bad) }
+            DataPendingPics(pending: $pending)
             HStack(spacing: 6) {
                 if client.has("picker") {
                     let pv = choice.provider.flatMap { $0.isEmpty ? nil : $0 } ?? ProviderMarks.providerOfChip(chip)
@@ -868,6 +876,17 @@ struct DataNewThreadSheet: View {
                     }
                         .buttonStyle(.plain).accessibilityLabel(Tr.ios_model_label(model: chip)).accessibilityIdentifier("data.thread.new.model")
                 } else { Spacer() }
+                Menu {
+                    Button(Tr.t("Choose a photo"), systemImage: "photo") { photoLibrary = true }
+                    if UIImagePickerController.isSourceTypeAvailable(.camera) { Button(Tr.t("Take a photo"), systemImage: "camera") { camera = true } }
+                } label: {
+                    Image(systemName: "paperclip").font(.system(size: 15)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
+                }
+                .disabled(!client.canSendImages || pending.count >= 4).accessibilityLabel(Tr.t("Attach pictures")).accessibilityIdentifier("data.thread.new.attach")
+                Button { drawing = true } label: {
+                    Image(systemName: "pencil.tip").font(.system(size: 15)).foregroundStyle(client.canSendImages ? BackplaneDesign.dim : BackplaneDesign.faint).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
+                }
+                .disabled(!client.canSendImages || pending.count >= 4).accessibilityLabel(Tr.t("Draw")).accessibilityIdentifier("data.thread.new.draw")
                 Button(Tr.t(busy ? "Starting…" : "Start")) { Task { await start() } }.buttonStyle(DButton(primary: true)).disabled(busy).accessibilityIdentifier("data.thread.new.start")
             }
             Spacer(minLength: 0)
@@ -875,14 +894,33 @@ struct DataNewThreadSheet: View {
         .padding(14).background(BackplaneDesign.panel)
         .presentationDetents([.medium, .large]).dataSheet()
         .sheet(isPresented: $picking) { DataPickerSheet(client: client, thread: nil, choice: $choice) }
+        .fullScreenCover(isPresented: $drawing) { DataPadView { add([$0]) } }
+        .photosPicker(isPresented: $photoLibrary, selection: $picked, maxSelectionCount: max(1, 4 - pending.count), matching: .images)
+        .fullScreenCover(isPresented: $camera) { DCamera { d in camera = false; if let d { add([d]) } }.ignoresSafeArea() }
+        .onChange(of: picked) { _, items in
+            guard !items.isEmpty else { return }
+            Task {
+                var raw: [Data] = []
+                for it in items { if let d = try? await it.loadTransferable(type: Data.self) { raw.append(d) } }
+                picked = []
+                add(raw)
+            }
+        }
         .task(id: choice) { if client.has("picker") { chip = (try? await client.picker(thread: nil, choice))?.chip ?? chip } }
     }
     private func start() async {
         busy = true; defer { busy = false }
         do {
-            let t = try await client.createThread(project: runTo, text: text, choice: choice)
+            let t = try await client.createThread(project: runTo, text: text, choice: choice, images: pending)
             dismiss(); started(t.id)
         } catch { self.error = error.localizedDescription }
+    }
+    // pictures chosen, taken or drawn: shrunk off the main thread, at most four to a message (as the thread's composer)
+    private func add(_ raw: [Data]) {
+        Task {
+            let small = await Task.detached { raw.compactMap { DataClient.prepared($0) } }.value
+            pending = Array((pending + small).prefix(4))
+        }
     }
 }
 
@@ -951,6 +989,10 @@ struct DataThreadView: View {
     let id: String
     @State private var text = ""
     @State private var pending: [Data] = []
+    // Choose a file (a datasheet, a CSV): sent to the hub at once, as the desktop's paperclip does; a chip with its name until the message goes
+    @State private var pendingFiles: [DAttachedFile] = []
+    @State private var choosingFile = false
+    @State private var uploading = ""
     @State private var picked: [PhotosPickerItem] = []
     @State private var photoLibrary = false
     @State private var camera = false
@@ -1140,6 +1182,11 @@ struct DataThreadView: View {
         // full screen, not a sheet: a pen stroke downward must not swipe it away
         .fullScreenCover(isPresented: $drawing) { DataPadView { add([$0]) } }
         .photosPicker(isPresented: $photoLibrary, selection: $picked, maxSelectionCount: max(1, 4 - pending.count), matching: .images)
+        .fileImporter(isPresented: $choosingFile, allowedContentTypes: [.item]) { r in
+            guard case .success(let url) = r else { return }
+            uploading = url.lastPathComponent; notice = ""
+            Task { do { pendingFiles.append(try await client.attachFile(id, url: url)) } catch { notice = (error as? DError)?.message ?? Tr.k("upload.failed") }; uploading = "" }
+        }
         .fullScreenCover(isPresented: $camera) { DCamera { d in camera = false; if let d { add([d]) } }.ignoresSafeArea() }
         // a picture another app handed over waits here, like one chosen from Photos (a modifier of its own: the body's chain is at the type checker's limit)
         .modifier(DIncomingImages(client: client) { add($0) })
@@ -1304,18 +1351,14 @@ struct DataThreadView: View {
                     Button(Tr.t("Add existing")) { Task { do { _ = try await client.addProject(path: dir); existing = nil; notice = ""; text = ""; client.setDraft(id, "") } catch { notice = (error as? DError)?.message ?? "That could not be done." } } }
                         .buttonStyle(DButton()).accessibilityIdentifier("data.project.existing")
                 }
-                if !pending.isEmpty {
+                DataPendingPics(pending: $pending)
+                if !pendingFiles.isEmpty || !uploading.isEmpty {
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
-                            ForEach(Array(pending.enumerated()), id: \.offset) { i, d in
-                                ZStack(alignment: .topTrailing) {
-                                    if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
-                                    Button { pending.remove(at: i) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(BackplaneDesign.text).frame(width: 20, height: 20).background(BackplaneDesign.raised) }
-                                        .accessibilityLabel(Tr.t("Remove picture"))
-                                }
-                            }
+                            ForEach(pendingFiles, id: \.self) { f in DataFileChip(name: f.name) { pendingFiles.removeAll { $0 == f } } }
+                            if !uploading.isEmpty { Text(Tr.gpui_attach_uploading(name: uploading)).dmono(12).foregroundStyle(BackplaneDesign.faint) }
                         }
-                    }.accessibilityIdentifier("data.pending.images")
+                    }.accessibilityIdentifier("data.pending.files")
                 }
                 if let r = client.replying[id] { replyStrip(r) }
                 UIKitField(text: text, placeholder: Tr.t("Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw"), editable: true,
@@ -1391,6 +1434,7 @@ struct DataThreadView: View {
                     Menu {
                         Button(Tr.t("Choose a photo"), systemImage: "photo") { photoLibrary = true }
                         if UIImagePickerController.isSourceTypeAvailable(.camera) { Button(Tr.t("Take a photo"), systemImage: "camera") { camera = true } }
+                        Button(Tr.t("Choose a file"), systemImage: "doc") { choosingFile = true }.accessibilityIdentifier("data.attach.file")
                     } label: {
                         Image(systemName: "paperclip").font(.system(size: 15)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
                     }
@@ -1401,12 +1445,12 @@ struct DataThreadView: View {
                     }
                     .disabled(pending.count >= 4)
                     .accessibilityLabel(Tr.t("Draw")).accessibilityIdentifier("data.draw")
-                    let blank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pending.isEmpty
+                    let blank = text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && pending.isEmpty && pendingFiles.isEmpty
                     if working && blank {
                         Button(Tr.t("Stop")) { Task { await client.interrupt(id) } }.buttonStyle(DButton(danger: true)).accessibilityLabel(Tr.t("Stop")).accessibilityIdentifier("thread.send")
                     } else {
                         let sendLbl = client.commandOf(text)?.label ?? (planPrimary ? Tr.k("gpui.mgmt.plan.tab") : Tr.t("Send"))
-                        Button(client.commandOf(text) != nil ? Tr.t(sendLbl) : sendLbl) { send() }.buttonStyle(DButton(primary: true)).disabled(blank).accessibilityIdentifier("thread.send")
+                        Button(client.commandOf(text) != nil ? Tr.t(sendLbl) : sendLbl) { send() }.buttonStyle(DButton(primary: true)).disabled(blank || !uploading.isEmpty).accessibilityIdentifier("thread.send")
                     }
                 }
             }
@@ -1463,12 +1507,12 @@ struct DataThreadView: View {
     }
     private func send() {
         let t = text
-        guard !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pending.isEmpty else { return }
+        guard !t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !pending.isEmpty || !pendingFiles.isEmpty, uploading.isEmpty else { return }
         if client.commandOf(t) != nil { run(t); return }
-        let images = pending
-        text = ""; pending = []; atEnd = true
+        let images = pending; let files = pendingFiles
+        text = ""; pending = []; pendingFiles = []; atEnd = true
         // a dictated draft goes marked as spoken (the agent is told; edited when typed in)
-        client.send(id, t, images: images, voice: images.isEmpty ? client.voice.dictated(id) : nil, reply: client.replying[id])
+        client.send(id, t, images: images, voice: images.isEmpty ? client.voice.dictated(id) : nil, reply: client.replying[id], files: files)
         client.voice.sent(id, draft: "")
     }
     // pictures chosen or pasted: shrunk off the main thread, at most four to a message
@@ -1686,6 +1730,7 @@ struct DataEntryRow: View {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(entry.localImages.enumerated()), id: \.offset) { _, d in DataLocalImage(data: d) }
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
+                        ForEach(entry.attached, id: \.self) { f in DataFileChip(name: f.name).accessibilityIdentifier("data.entry.file") }
                         if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
                     }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised, radius: DRadius.card)
                     // long-press: Reply, Copy, and Restore to before this when the hub has the snapshot before the turn this message started
@@ -2357,5 +2402,39 @@ private struct DThreadContext: View {
                 data = try await client.call("thread.context.mcp", ["thread": thread, "action": action, "path": config.path, "sha256": config.sha256])
             } else { data = try await client.call("thread.context", ["thread": thread]) }
         } catch { problem = error.localizedDescription }
+    }
+}
+
+/// A file sent with a message, or waiting in the composer (with its × to drop it): a document mark and its name.
+struct DataFileChip: View {
+    let name: String
+    var remove: (() -> Void)? = nil
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "doc").font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim)
+            Text(verbatim: name).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).truncationMode(.middle).frame(maxWidth: 220, alignment: .leading)
+            if let remove { Button(action: remove) { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(BackplaneDesign.dim).frame(width: 28, height: 28) }.buttonStyle(.plain).accessibilityLabel(Tr.t("Remove")) }
+        }.padding(.leading, 8).padding(.trailing, remove == nil ? 10 : 2).frame(minHeight: 32)
+        .background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control)).overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1))
+    }
+}
+
+/// The pictures waiting to go with a message (a thread's composer, New thread): a thumbnail each with its × to drop it.
+struct DataPendingPics: View {
+    @Binding var pending: [Data]
+    var body: some View {
+        if !pending.isEmpty {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(Array(pending.enumerated()), id: \.offset) { i, d in
+                        ZStack(alignment: .topTrailing) {
+                            if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
+                            Button { pending.remove(at: i) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(BackplaneDesign.text).frame(width: 20, height: 20).background(BackplaneDesign.raised) }
+                                .accessibilityLabel(Tr.t("Remove picture"))
+                        }
+                    }
+                }
+            }.accessibilityIdentifier("data.pending.images")
+        }
     }
 }

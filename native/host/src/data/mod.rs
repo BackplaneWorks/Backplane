@@ -450,6 +450,7 @@ fn row_entry_hid_with(r: &crate::model::Row, bot: bool, backend: &HashSet<String
                 en["text"] = json!(shown_text(&body)); en["replyTo"] = json!({"id": to, "quote": quote.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")});
             }
             with_refs_catalog(&mut en, catalog);
+            with_attached(&mut en, &r.text);
         }
         if crate::present::thread::hidden(bot, &r.id, &r.role, &r.text) || (bot && backend.contains(&r.id)) { en["agentOnly"] = json!(true) }
         if kind == "assistant" { with_images(&mut en, &r.text); with_files(&mut en, &r.text); with_copy(&mut en) }
@@ -509,6 +510,18 @@ pub(crate) fn with_copy(en: &mut Value) {
 /// The paths of attached images are told to the agent in the message's text (`[attachment: <path>]` lines, the ones agents/inputs.rs reads as image
 /// blocks; messages from before said `[Attached image: <path>]`, which the agent got as words only); the phone shows the pictures instead.
 fn is_attachment_line(l: &str) -> bool { (l.starts_with("[attachment: ") || l.starts_with("[Attached image: ")) && l.ends_with(']') }
+/// The files (not pictures: those come as `attachments`) a person's message carries as `[attachment: <path>]` lines (a phone's or the desktop's
+/// `POST /attach`, then the line in the text), as `attached: [{name, path}]`: the text a phone shows drops the lines, so it draws these as chips.
+/// `name` is the file's own name: an upload is stored as `<key>-<name>` in the hub's attachments folder, the key is dropped.
+pub(crate) fn attached_files(t: &str) -> Vec<Value> {
+    if !t.contains("[attachment: ") { return Vec::new() }
+    t.lines().filter_map(|l| l.trim().strip_prefix("[attachment: ").and_then(|r| r.strip_suffix(']'))).filter(|p| !p.is_empty() && crate::agents::inputs::mime(p).is_empty()).map(|p| {
+        let base = p.rsplit('/').next().unwrap_or(p);
+        let name = if p.contains("/attachments/") { base.split_once('-').map_or(base, |(_, n)| n) } else { base };
+        json!({"name": if name.is_empty() { base } else { name }, "path": p})
+    }).collect()
+}
+fn with_attached(en: &mut Value, raw: &str) { let a = attached_files(raw); if !a.is_empty() { en["attached"] = json!(a) } }
 fn shown_text(t: &str) -> String { if !t.contains("[attachment: ") && !t.contains("[Attached image: ") { return t.to_string() } t.lines().filter(|l| !is_attachment_line(l)).collect::<Vec<_>>().join("\n").trim_end().to_string() }
 fn live_entry(thread: &str, text: &str) -> Value { json!({"id":format!("live:{thread}"),"kind":"assistant","text":text,"at":now_ms(),"live":true}) }
 
@@ -658,8 +671,8 @@ async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, cl
     if !meta.is_empty() { p["attachments"] = json!(meta); p["agentText"] = json!(agent_text) }
     if voice.is_object() { p["voice"] = voice.clone() } // dictated (voice/mark.rs): the agent is told
     rpc(hub, c, "turn.start", p).await?;
-    let mut e = json!({"id":msg,"kind":"user","text":body,"at":now_ms()});
-    with_refs(&mut e);
+    let mut e = json!({"id":msg,"kind":"user","text":shown_text(body),"at":now_ms()});
+    with_refs(&mut e); with_attached(&mut e, body);
     if let Some((_, r)) = &rto { e["replyTo"] = r.clone() }
     if voice.is_object() { e["voice"] = voice.clone() }
     if !meta.is_empty() { e["attachments"] = json!(meta) }
@@ -819,8 +832,11 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
         "thread.create" => {
             let project = s(p, "project"); if project.is_empty() { return Err(err("project")) }
             if project == crate::sidebar::SCRATCH { return Err(err(SCRATCH_CLOSED)) }
-            let has_text = !s(p, "text").trim().is_empty();
+            // the first message's pictures (a phone's New thread with Attach or Draw), sent with it as a reply's are
+            let atts = p.get("attachments").filter(|a| a.as_array().map_or(false, |x| !x.is_empty())).cloned().unwrap_or(Value::Null);
+            let has_text = !s(p, "text").trim().is_empty() || !atts.is_null();
             let far_proj = machines::is_far(project);
+            if far_proj && !atts.is_null() { return Err(err("Images go to threads on this machine only.")) }
             if has_text && !far_proj {
                 if let Some(why) = crate::settings::provider_notice::send_guard(hub).await {
                     return Err(no_provider_err(why));
@@ -844,7 +860,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: bool
                 let sent = if far {
                     rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await.map(|_| ())
                 } else {
-                    send_message(hub, c, &id, s(p, "text"), "", &Value::Null, &Value::Null, &Value::Null).await.map(|_| ())
+                    send_message(hub, c, &id, s(p, "text"), "", &atts, &Value::Null, &Value::Null).await.map(|_| ())
                 };
                 if let Err(mut e) = sent {
                     if !e.is_object() {
@@ -948,6 +964,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 let (said, voice) = crate::voice::mark::split(s(&e, "text"));
                 let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(&said) } else { crate::settings::order::pay_shown(&said) },"at":ms(e["at"].as_u64().unwrap_or(0))});
                 if let Some(v) = voice { en["voice"] = v.json() }
+                if kind == "user" { with_attached(&mut en, &said) }
                 let bot = bot_chat(&th);
                 let backend = bot && {
                     if !last_in.contains_key(&th) { let m = hub.model().await; let rows: Vec<crate::model::Row> = m.tail(&hub.store, &th, 48).into_iter().filter(|r| r.seq <= base).collect(); last_in.insert(th.clone(), crate::present::thread::turn_of(&rows)); }
