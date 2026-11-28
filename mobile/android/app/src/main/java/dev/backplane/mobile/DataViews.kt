@@ -20,6 +20,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -31,6 +32,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
@@ -43,6 +45,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
@@ -131,7 +134,7 @@ fun DataRoot() {
             }
         }
     }
-    Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
+    Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
             Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
@@ -253,11 +256,17 @@ private fun PairScreen() {
         Spacer(Modifier.height(4.dp))
         Text(if (DataClient.needsRepair) Msg.android_pair_revoked else Msg.android_pair_paste, color = dcs.onSurfaceVariant, fontSize = 14.sp)
         Spacer(Modifier.height(20.dp))
-        DField(text, { text = it }, "http://host:3787/pair#invite=…", Modifier.testTag("pair.field"))
+        // the keyboard's Done presses Pair, Next (address) moves to the code, Go (code) presses Pair with code: each only when its button is on
+        val pairGo = { if (text.isNotBlank() && !DataClient.pairingBusy) DataClient.pair(text) }
+        val codeGo = {
+            if (address.isNotBlank() && code.isNotBlank() && !DataClient.pairingBusy) { val l = Pairing.codeLink(address.trim(), code); if (l == null) DataClient.pairingError = Msg.android_pair_code_bad else DataClient.pair(l) }
+        }
+        val codeFocus = remember { FocusRequester() }
+        DField(text, { text = it }, "http://host:3787/pair#invite=…", Modifier.testTag("pair.field"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Done), actions = KeyboardActions(onDone = { pairGo() }))
         if (DataClient.pairingError.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(Tr.t(DataClient.pairingError), color = dcs.onSurfaceVariant, fontSize = 13.sp) }
         Spacer(Modifier.height(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            DBtn(Msg.native_pair_action, true, text.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.go")) { DataClient.pair(text) }
+            DBtn(Msg.native_pair_action, true, text.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.go")) { pairGo() }
             DBtn(Msg.native_pair_scanner_title, false, !DataClient.pairingBusy, Modifier.testTag("pair.scan"), onClick = scan.start)
             if (DataClient.adding && DataClient.link != null) DBtn(Msg.common_cancel, false, true, Modifier.testTag("pair.cancel")) { DataClient.adding = false; DataClient.pairingError = "" }
         }
@@ -273,14 +282,11 @@ private fun PairScreen() {
         Spacer(Modifier.height(24.dp))
         Text(Msg.android_pair_code_lead, color = dcs.onSurfaceVariant, fontSize = 13.sp)
         Spacer(Modifier.height(8.dp))
-        DField(address, { address = it }, "host:port", Modifier.testTag("pair.address"))
+        DField(address, { address = it }, "host:port", Modifier.testTag("pair.address"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Next), actions = KeyboardActions(onNext = { codeFocus.requestFocus() }))
         Spacer(Modifier.height(8.dp))
-        DField(code, { code = it }, "ABCD-2345", Modifier.testTag("pair.code"))
+        DField(code, { code = it }, "ABCD-2345", Modifier.testTag("pair.code"), single = true, keyboard = KeyboardOptions(imeAction = ImeAction.Go), actions = KeyboardActions(onGo = { codeGo() }), focus = codeFocus)
         Spacer(Modifier.height(16.dp))
-        DBtn(Msg.android_pair_code, false, address.isNotBlank() && code.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.code.go")) {
-            val l = Pairing.codeLink(address.trim(), code)
-            if (l == null) DataClient.pairingError = Msg.android_pair_code_bad else DataClient.pair(l)
-        }
+        DBtn(Msg.android_pair_code, false, address.isNotBlank() && code.isNotBlank() && !DataClient.pairingBusy, Modifier.testTag("pair.code.go")) { codeGo() }
     }
     }
 }
@@ -305,10 +311,10 @@ private fun AskPair(link: String) {
 }
 
 @Composable
-internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant) {
+internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant, single: Boolean = false, keyboard: KeyboardOptions = KeyboardOptions.Default, actions: KeyboardActions = KeyboardActions.Default, focus: FocusRequester? = null) {
     Box(modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, line)).padding(horizontal = 10.dp, vertical = 10.dp)) {
         if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), singleLine = single, maxLines = if (single) 1 else lines, keyboardOptions = keyboard, keyboardActions = actions, modifier = Modifier.fillMaxWidth().let { m -> focus?.let { m.focusRequester(it) } ?: m })
     }
 }
 
@@ -344,12 +350,18 @@ internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier,
 private enum class HomeTab { INBOX, CREW, BENCH }
 
 // ---- home: mobile-native Inbox | Crew | Bench tabs (with persistent top-bar Bub + global Search)
+/** The project page open over the home list, with the hub it belongs to (DataClient.usingKey): it outlives HomeScreen while a thread opened from it
+ *  is in front, so Back lands on the page again; a page of another hub is not shown. The row only gives the page its key and title. */
+private var homeSecPage by mutableStateOf<Pair<String, DSecRow>?>(null)
+/** The home tab on show, kept the same way: Back from a thread or a project page lands on the tab it was opened from. */
+private val homeTab = mutableStateOf(HomeTab.INBOX)
+
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
-    var tab by remember { mutableStateOf(HomeTab.INBOX) }
+    var tab by homeTab
     var projMenu by remember { mutableStateOf<DProject?>(null) }
     var botDelete by remember { mutableStateOf<DataClient.Bot?>(null) }
     var roomDelete by remember { mutableStateOf<DataClient.Room?>(null) }
@@ -357,11 +369,13 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var projSheet by remember { mutableStateOf(false) }
     var pickNew by remember { mutableStateOf<DProject?>(null) }
     var newSwarm by remember { mutableStateOf<DProject?>(null) }   // New swarm's sheet, from a project's menu   // a project on more than one machine: where the new thread starts
-    var secPage by remember { mutableStateOf<DSecRow?>(null) }    // a project's page (sections), over the list until Back
+    // a project's page (sections), over the list until Back; kept outside the screen (homeSecPage) so Back from a thread it opened comes back to it
+    val secPage = homeSecPage?.takeIf { it.first == DataClient.usingKey }?.second
+    fun showSec(r: DSecRow?) { homeSecPage = r?.let { DataClient.usingKey to it } }
     var secMenu by remember { mutableStateOf<DSecRow?>(null) }
     var secRename by remember { mutableStateOf<DSection?>(null) }
     var secNewSwarm by remember { mutableStateOf<String?>(null) }   // New swarm from a section project's menu (a project id)
-    secPage?.let { p -> androidx.activity.compose.BackHandler { secPage = null }; ProjectPageScreen(p, open, { id -> secPage = null; newThread(id) }, { room -> secPage = null; openSwarm(room) }) { secPage = null }; return }
+    secPage?.let { p -> androidx.activity.compose.BackHandler { showSec(null) }; ProjectPageScreen(p, open, { id -> showSec(null); newThread(id) }, { room -> showSec(null); openSwarm(room) }) { showSec(null) }; return }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
@@ -431,7 +445,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                             bub = uberBot,
                                             quickProjects = partition.quickJumpProjects(3),
                                             openBub = open,
-                                            openProject = { secPage = it },
+                                            openProject = { showSec(it) },
                                             openBench = { tab = HomeTab.BENCH },
                                         )
                                     }
@@ -524,6 +538,13 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                         }
                                     }
                                 }
+                                if (uberBot == null && bots.isEmpty() && rooms.isEmpty()) {
+                                    item("crew.empty") {
+                                        Column(Modifier.fillMaxWidth().padding(32.dp).testTag("crew.empty"), horizontalAlignment = Alignment.CenterHorizontally) {
+                                            Text(if (DataClient.listsLoaded) Msg.mobile_crew_empty else Msg.viewer_loading, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 14.sp, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                                        }
+                                    }
+                                }
                             }
                         }
                         HomeTab.BENCH -> {
@@ -560,7 +581,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                             }
                                         }
                                     } else {
-                                        benchItems(partition.bench, open, { secPage = it }, { secMenu = it }, { secRename = it }, openSwarm)
+                                        benchItems(partition.bench, open, { showSec(it) }, { secMenu = it }, { secRename = it }, openSwarm)
                                     }
                                     if (hist.count > 0) {
                                         item("history") {
@@ -582,8 +603,11 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                     ReconnectingPill()
                 }
             }
-            DLine()
-            NavigationBar(containerColor = dcs.surfaceVariant, tonalElevation = 0.dp, modifier = Modifier.testTag("home.tabs")) {
+            // the keyboard up (search): the tabs give their room to the list
+            @OptIn(ExperimentalLayoutApi::class)
+            val imeUp = WindowInsets.isImeVisible
+            if (!imeUp) DLine()
+            if (!imeUp) NavigationBar(containerColor = dcs.surfaceVariant, tonalElevation = 0.dp, modifier = Modifier.testTag("home.tabs")) {
                 NavigationBarItem(
                     selected = tab == HomeTab.INBOX,
                     onClick = { tab = HomeTab.INBOX; searchOpen = false; q = "" },
@@ -905,7 +929,20 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
     // the reader's place: the list follows the newest row only while they are at the end of it
     var stick by remember(id) { mutableStateOf(true) }
     LaunchedEffect(state) { snapshotFlow { state.isScrollInProgress to state.canScrollForward }.collect { (moving, more) -> if (moving) stick = !more } }
-    LaunchedEffect(rows.size, list.lastOrNull()?.text?.length, thread?.state) { if (stick && state.layoutInfo.totalItemsCount > 0) state.scrollToItem(state.layoutInfo.totalItemsCount - 1, Int.MAX_VALUE) }
+    suspend fun toEnd() { if (state.layoutInfo.totalItemsCount > 0) state.scrollToItem(state.layoutInfo.totalItemsCount - 1, Int.MAX_VALUE) }
+    LaunchedEffect(rows.size, list.lastOrNull()?.text?.length, thread?.state) { if (stick) toEnd() }
+    // the keyboard opening: a reader at the end (or within ~80 dp of it) keeps the newest row above the composer while the list shrinks; one who
+    // had scrolled up stays where they are
+    @OptIn(ExperimentalLayoutApi::class)
+    val imeUp = WindowInsets.isImeVisible
+    val nearPx = with(androidx.compose.ui.platform.LocalDensity.current) { 80.dp.roundToPx() }
+    LaunchedEffect(imeUp) {
+        if (!imeUp) return@LaunchedEffect
+        val li = state.layoutInfo; val last = li.visibleItemsInfo.lastOrNull()
+        if (!stick && (last == null || last.index != li.totalItemsCount - 1 || last.offset + last.size - li.viewportEndOffset > nearPx)) return@LaunchedEffect
+        stick = true
+        snapshotFlow { state.layoutInfo.viewportSize }.collect { if (stick) toEnd() }
+    }
     // a tapped notification lands on its approval, once it is loaded
     LaunchedEffect(rows.size, DataClient.pendingAsk) {
         val at = rows.indexOfFirst { DataClient.pendingAsk.isNotEmpty() && it.id == "ask:" + DataClient.pendingAsk }
@@ -1022,7 +1059,13 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                 if (DNoProvider.isSendError(it)) DBtn(Msg.provider_notice_button, false, true, Modifier.testTag("thread.refused.accounts")) { DataClient.openAccounts = true }
             }
             if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) { Pic(b, 64) }; }
+                // a tap on the picture drops it, as before; the × in its corner says so (square, as iOS's xmark on the same thumbnails)
+                pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) {
+                    Pic(b, 64)
+                    Box(Modifier.align(Alignment.TopEnd).padding(3.dp).size(18.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { pending.remove(b) }.testTag("thread.pending.remove"), contentAlignment = Alignment.Center) {
+                        Icon(Icons.Default.Close, Msg.ios_picture_remove, tint = dcs.onSurface, modifier = Modifier.size(12.dp))
+                    }
+                } }
             }
             if (dictate) VoiceStrip(id)
             // Reply on a message: the strip over the box (who wrote it, its first line; a tap goes to it, × drops it), and the box takes the keyboard

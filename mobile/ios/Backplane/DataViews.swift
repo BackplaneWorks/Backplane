@@ -432,6 +432,7 @@ struct DataThreadsView: View {
             awayRow
             crewRows
             historyRows
+            crewEmpty
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .background(BackplaneDesign.panel).refreshable { await client.refresh() }.accessibilityIdentifier("data.home.crew")
@@ -519,6 +520,13 @@ struct DataThreadsView: View {
                 Button { Task { await client.loadHistory(more: true) } } label: { Text(Tr.t("More")).dmono(11).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32) }
                     .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.history.more")
             }
+        }
+    }
+    /// Crew with nothing to list (no Bub, no bots, no rooms, no old chats): one dim line, not a blank page.
+    @ViewBuilder private var crewEmpty: some View {
+        if client.bots.allSatisfy({ $0.thread.isEmpty }) && client.rooms.isEmpty && client.history.count == 0 {
+            Text(client.listsLoaded ? Tr.t("No bots or rooms yet. The ones you make show here.") : Tr.t("Loading…")).dmono(13).foregroundStyle(BackplaneDesign.dim).multilineTextAlignment(.center)
+                .padding(32).frame(maxWidth: .infinity).dataRow().accessibilityIdentifier("crew.empty")
         }
     }
     @ViewBuilder private var crewRows: some View {

@@ -511,6 +511,7 @@ ios.enterprise.server.answered	The server answered	サーバーの応答	El serv
 ios.enterprise.registered	Registered	登録済み	Registrado
 ios.enterprise.registered.muted	Registered, alerts off	登録済み、通知はオフ	Registrado, alertas desactivadas
 ios.enterprise.expired	Sign-in expired or revoked	サインインの期限切れ、または取り消し	Sesión caducada o revocada
+mobile.crew.empty	No bots or rooms yet. The ones you make show here.	ボットやルームはまだありません。作成するとここに表示されます。	Aún no hay bots ni salas. Los que crees aparecerán aquí.
 common.cancel	Cancel	キャンセル	Cancelar
 common.delete	Delete	削除	Eliminar
 common.save	Save	保存	Guardar

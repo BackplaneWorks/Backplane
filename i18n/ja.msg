@@ -4511,6 +4511,7 @@ ios.enterprise.server.answered = サーバーの応答
 ios.enterprise.registered = 登録済み
 ios.enterprise.registered.muted = 登録済み、通知はオフ
 ios.enterprise.expired = サインインの期限切れ、または取り消し
+mobile.crew.empty = ボットやルームはまだありません。作成するとここに表示されます。
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = 対応が必要

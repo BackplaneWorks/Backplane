@@ -4490,6 +4490,7 @@ ios.enterprise.server.answered = El servidor respondió
 ios.enterprise.registered = Registrado
 ios.enterprise.registered.muted = Registrado, alertas desactivadas
 ios.enterprise.expired = Sesión caducada o revocada
+mobile.crew.empty = Aún no hay bots ni salas. Los que crees aparecerán aquí.
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Te necesita

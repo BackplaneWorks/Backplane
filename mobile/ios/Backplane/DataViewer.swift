@@ -189,6 +189,8 @@ struct DataViewerView: View {
             String(railRefreshTick),
         ].joined(separator: "|")
         VStack(spacing: 0) {
+            // the strip scrolls on a phone: the tab on show is brought into view (on open, on a change), and a fade at the end says there is more
+            ScrollViewReader { proxy in
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 0) {
                     ForEach(strip) { item in
@@ -221,9 +223,16 @@ struct DataViewerView: View {
                         .accessibilityAddTraits(active ? [.isSelected] : [])
                         .accessibilityValue(item.disabled ? (item.why.isEmpty ? Tr.t("Disabled") : Tr.t("Disabled") + ": " + Tr.t(item.why)) : "")
                         .accessibilityHint(item.disabled ? Tr.t(item.why) : "")
+                        .id(t)
                     }
                 }
-            }.background(BackplaneDesign.panel)
+            }
+            .onChange(of: tab, initial: true) { _, t in withAnimation { proxy.scrollTo(t, anchor: .center) } }
+            }
+            .background(BackplaneDesign.panel)
+            .overlay(alignment: .trailing) {
+                LinearGradient(colors: [BackplaneDesign.panel.opacity(0), BackplaneDesign.panel], startPoint: .leading, endPoint: .trailing).frame(width: 24).allowsHitTesting(false)
+            }
             if !railState.disabledWhy.isEmpty {
                 Text(Tr.t(railState.disabledWhy)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 6)

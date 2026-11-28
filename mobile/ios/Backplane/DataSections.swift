@@ -154,9 +154,9 @@ struct DataSectionThread: View {
         Button { if !r.off { open(r.nav) } } label: {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 3) {
-                    HStack(spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
                         if !r.provider.isEmpty { ProviderMark(provider: r.provider, size: 12) }
-                        Text(r.title).dmono(14).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                        Text(r.title).dmono(14).foregroundStyle(BackplaneDesign.text).lineLimit(2)
                         if r.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.pinned." + r.id) }
                     }
                     if !sub.isEmpty { Text(sub).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.middle) }

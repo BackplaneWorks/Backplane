@@ -103,7 +103,10 @@ struct DataHubBanner: View {
     }
 }
 
-/// Alerts, offered once the person sees why (DataClient.alertsAsk): one line; Allow alerts shows the system's question, Not now hides it until the next launch.
+/// The alerts banner is due again a week after its Not now (laterAt, seconds since 1970), at once when it was never pressed or the clock moved back before it.
+func alertsDue(now: Double, laterAt: Double) -> Bool { laterAt <= 0 || now < laterAt || now - laterAt >= 7 * 24 * 60 * 60 }
+
+/// Alerts, offered once the person sees why (DataClient.alertsAsk): one line; Allow alerts shows the system's question, Not now hides it for a week (DataClient.alertsLater, alertsDue).
 struct DataAlertsBanner: View {
     let client: DataClient
     var body: some View {
@@ -113,7 +116,7 @@ struct DataAlertsBanner: View {
                     Text(Tr.t("Bub can alert you when a thread needs you.")).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2)
                     Spacer(minLength: 0)
                     Button(Tr.t("Allow alerts")) { Task { await client.enablePush(ask: true) } }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("alerts.allow")
-                    Button(Tr.t("Not now")) { client.alertsAsk = false }.dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("alerts.later")
+                    Button(Tr.t("Not now")) { client.alertsLater() }.dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("alerts.later")
                 }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.raised)
                 DLine()
             }
