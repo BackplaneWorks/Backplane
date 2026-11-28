@@ -1116,7 +1116,7 @@ impl Render for Backplane {
         // infinite context (the hub's bots/recall/progress.rs): the context chip draws the memory's bar and its words instead of the session's context
         let memory = self.data["memory"].clone(); let mem_on = memory.is_object();
         let (tok, ctx) = if mem_on { (crate::i18n::trs(&string(&memory, "line")), crate::i18n::trs(&string(&memory, "short"))) } else { (string(&self.data, "tokChip"), ctx) };
-        let plan_chip_w = if crate::screens::planmode::parse(&thread["planMode"]).is_some() { 92. } else { 0. };
+        let plan_chip_w = if crate::screens::planmode::parse(&thread["planMode"]).is_some() { crate::screens::combo::plan_w() } else { 0. };
         let (combo_avail, tok_words) = crate::screens::combo::split(if bar_w > 0. { (bar_w - if mem_on { crate::screens::combo::MEM_BAR } else { 0. } - plan_chip_w).max(0.) } else { 0. }, &thread["combo"], &tok, &ctx);
         // the thread's header (screens/head.rs): its state and tools beside the name in the top bar when it has the room, else a row of their own
         // a project's page over a thread: the header is the page's (its project's name), not the thread's
