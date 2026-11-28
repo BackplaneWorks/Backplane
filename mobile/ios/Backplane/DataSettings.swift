@@ -87,13 +87,13 @@ struct DataSettingsView: View {
                     VStack(spacing: 0) {
                         ForEach(f) { x in
                             NavigationLink(value: x.page) {
-                                HStack { Text(x.title).dmono(13).foregroundStyle(BackplaneDesign.text); Spacer(); Text(x.group).dmono(11).foregroundStyle(BackplaneDesign.faint)
+                                HStack { Text(x.title).dui(15).foregroundStyle(BackplaneDesign.text); Spacer(); Text(x.group).dmono(11).foregroundStyle(BackplaneDesign.faint)
                                     Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.faint) }
                                     .padding(.horizontal, 12).frame(minHeight: 44).contentShape(Rectangle())
                             }.buttonStyle(.plain).accessibilityIdentifier("settings.found." + x.id)
                             if x.id != f.last?.id { DLine() }
                         }
-                    }.dbox()
+                    }.dbox(radius: DRadius.card)
                 } else {
                     ForEach(Array(groups().enumerated()), id: \.offset) { _, rows in
                         VStack(spacing: 0) {
@@ -101,7 +101,7 @@ struct DataSettingsView: View {
                                 NavigationLink(value: r.page) { row(r) }.buttonStyle(.plain).accessibilityIdentifier(r.id)
                                 if r.id != rows.last?.id { DLine().padding(.leading, 52) }
                             }
-                        }.dbox()
+                        }.dbox(radius: DRadius.card)
                     }
                     let i = Bundle.main.infoDictionary
                     Text(Tr.ios_version(version: i?["CFBundleShortVersionString"] as? String ?? "?", build: i?["CFBundleVersion"] as? String ?? "?")).dmono(11).foregroundStyle(BackplaneDesign.faint)
@@ -116,9 +116,9 @@ struct DataSettingsView: View {
     }
     private func row(_ r: DSettingsGroup) -> some View {
         HStack(spacing: 12) {
-            Image(systemName: r.icon).font(.system(size: 14)).foregroundStyle(BackplaneDesign.accent).frame(width: 28, height: 28).background(BackplaneDesign.raised)
+            Image(systemName: r.icon).font(.system(size: 14)).foregroundStyle(BackplaneDesign.accent).frame(width: 28, height: 28).background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: 8))
             VStack(alignment: .leading, spacing: 4) {
-                Text(r.title).dmono(14).foregroundStyle(BackplaneDesign.text)
+                Text(r.title).dui(15).foregroundStyle(BackplaneDesign.text)
                 summary(r)
             }
             Spacer(minLength: 6)
@@ -251,7 +251,7 @@ struct DataSettingsPageView: View {
     @ViewBuilder private var appearance: some View {
         DHeading(text: Tr.k("settings.lang"))
         DChoices(options: [(label: Tr.k("settings.lang.auto"), value: "auto"), (label: Tr.k("settings.lang.en"), value: "en"), (label: Tr.k("settings.lang.ja"), value: "ja"), (label: Tr.k("settings.lang.es"), value: "es")], value: $settings.lang).accessibilityIdentifier("settings.lang")
-        Text(Tr.k("settings.lang.note")).dmono(11).foregroundStyle(BackplaneDesign.dim)
+        Text(Tr.k("settings.lang.note")).dui(13).foregroundStyle(BackplaneDesign.dim)
         DHeading(text: Tr.t("Appearance"))
         DChoices(options: [(label: Tr.t("system"), value: "system"), (label: Tr.t("light"), value: "light"), (label: Tr.t("dark"), value: "dark")], value: $settings.appearance)
         DHeading(text: Tr.t("Text size"))
@@ -264,7 +264,7 @@ struct DataSettingsPageView: View {
             .onChange(of: settings.alerts) { _, on in Task { if on { await client.enablePush(ask: true) }; await client.pushMute(); if client.has("notifysettings") { await client.notify.load() } } }
         if settings.alerts { onOff(Tr.t("Alert sound"), $settings.alertSound, id: "settings.sound") }
         onOff(Tr.t("Haptics"), $settings.haptics, id: "settings.haptics")
-        Text(Tr.t("Off: only what you let through reaches this phone. Alerts come from your uberbot.")).dmono(11).foregroundStyle(BackplaneDesign.dim)
+        Text(Tr.t("Off: only what you let through reaches this phone. Alerts come from your uberbot.")).dui(13).foregroundStyle(BackplaneDesign.dim)
         // an older hub has no Notifications page: its quiet hours and urgent switch are drawn here
         if client.has("push") && !client.has("notifysettings") { DLine(); DataQuietSection(client: client) }
         if client.has("notifysettings") { DLine(); DataNotifySection(client: client) }
@@ -286,7 +286,7 @@ struct DataSettingsPageView: View {
                 Button(Tr.t("Forget")) { forgetKey = k }.buttonStyle(DButton(danger: true)).accessibilityIdentifier("settings.hub.forget.\(k)")
             }
         }
-        if client.links.isEmpty { Text(Tr.t("Not paired")).dmono(13) }
+        if client.links.isEmpty { Text(Tr.t("Not paired")).dui(15) }
         if !client.failure.isEmpty, client.conn != .online { Text(Tr.t(client.failure)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
         HStack(spacing: 6) {
             Button(Tr.t("Reconnect")) { client.connect() }.buttonStyle(DButton())

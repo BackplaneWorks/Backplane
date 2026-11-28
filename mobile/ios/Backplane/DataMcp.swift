@@ -178,7 +178,7 @@ struct McpRowView: View {
                 }
             }
             .padding(10).frame(maxWidth: .infinity, alignment: .leading)
-            .background(BackplaneDesign.view).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+            .background(BackplaneDesign.view, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).strokeBorder(BackplaneDesign.line, lineWidth: 1))
             .textSelection(.enabled).padding(.vertical, 4)
         case .empty:
             VStack(spacing: 10) {
@@ -294,7 +294,7 @@ struct McpCard: View {
             }
         }
         .background(BackplaneDesign.panel)
-        .overlay(Rectangle().strokeBorder(edge, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).strokeBorder(edge, lineWidth: 1))
         .padding(.top, r.open ? 10 : 6).padding(.bottom, r.open ? 4 : 0)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("mcp.card." + (r.cardId.isEmpty ? r.shownTitle : r.cardId))
@@ -309,7 +309,7 @@ struct McpCard: View {
                     Text(Tr.t(r.shownTitle)).dmono(r.compact ? 13 : 14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1).truncationMode(.tail)
                     if !r.badge.isEmpty {
                         Text(Tr.t(r.badge)).dmono(9.5).foregroundStyle(BackplaneDesign.dim).lineLimit(1).fixedSize()
-                            .padding(.horizontal, 4).padding(.vertical, 1).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+                            .padding(.horizontal, 6).padding(.vertical, 1).overlay(Capsule().strokeBorder(BackplaneDesign.line, lineWidth: 1))
                     }
                     if !r.pillText.isEmpty { McpPill(text: r.pillText, tone: r.pillTone) }
                 }
@@ -450,11 +450,11 @@ struct McpChipButton: View {
     var body: some View {
         let lit = b.on && !primary && !danger
         Button(action: action) {
-            Text(Tr.t(b.label)).dmono(small ? 11.5 : 12.5, bold: true).lineLimit(1)
+            Text(Tr.t(b.label)).dui(small ? 12 : 13, weight: .semibold).lineLimit(1)
                 .foregroundStyle(primary || danger ? BackplaneDesign.onAccent : lit ? BackplaneDesign.accentText : BackplaneDesign.text)
                 .padding(.horizontal, small ? 10 : 14).frame(maxWidth: wide ? .infinity : nil, minHeight: small ? 30 : 36)
-                .background(danger ? BackplaneDesign.bad : primary ? BackplaneDesign.accent : BackplaneDesign.raised)
-                .overlay(Rectangle().strokeBorder(danger ? BackplaneDesign.bad : primary || lit ? BackplaneDesign.accent : BackplaneDesign.line, lineWidth: 1))
+                .background(danger ? BackplaneDesign.bad : primary ? BackplaneDesign.accent : BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control))
+                .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(danger ? BackplaneDesign.bad : primary || lit ? BackplaneDesign.accent : BackplaneDesign.line, lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(McpPressStyle())

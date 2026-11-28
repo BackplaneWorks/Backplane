@@ -172,7 +172,7 @@ struct DataSwarmPost: View {
                 VStack(alignment: .leading, spacing: 6) {
                     HStack(spacing: 6) { DHeading(text: Tr.t("synthesis")); Text(who).dmono(11, bold: true).foregroundStyle(dSwarmColor(post.color)) }
                     DataMarkdown(text: post.text, thread: post.thread, entry: post.id, images: post.images, copy: Copyable.list(post.copy, hubHasCopy: hubHasCopy))
-                }.padding(12).frame(maxWidth: .infinity, alignment: .leading).dbox(BackplaneDesign.accent, fill: BackplaneDesign.panel).padding(.vertical, 8)
+                }.padding(12).frame(maxWidth: .infinity, alignment: .leading).dbox(BackplaneDesign.accent, fill: BackplaneDesign.panel, radius: DRadius.card).padding(.vertical, 8)
             default:
                 HStack(alignment: .top, spacing: 8) {
                     Rectangle().fill(post.from == "you" && post.thread.isEmpty ? BackplaneDesign.accent : dSwarmColor(post.color)).frame(width: 3)

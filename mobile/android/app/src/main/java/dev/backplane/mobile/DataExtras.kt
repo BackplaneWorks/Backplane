@@ -1,5 +1,7 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -53,15 +55,15 @@ import org.json.JSONObject
 
 // The data/1 additions on the phone: thread and project actions, search, the model picker, mention popup, bots and rooms (see native/host/src/data/ext.rs).
 
-/** A flat list of actions in a dialog (the desktop's row menu): square, mono, one tap each. */
+/** A flat list of actions in a dialog (the desktop's row menu): one tap each, on a rounded card. */
 @Composable
 fun ActionSheet(title: String, actions: List<Pair<String, () -> Unit>>, close: () -> Unit) {
     Dialog(onDismissRequest = close) {
-        Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("sheet")) {
+        Column(Modifier.fillMaxWidth().clip(dShapeDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeDialog).testTag("sheet")) {
             DMono(title.ifEmpty { Msg.thread_new }, dcs.onSurfaceVariant, 11, Modifier.padding(12.dp))
             DLine()
             actions.forEach { (label, run) ->
-                Text(Tr.t(label), Modifier.fillMaxWidth().clickable { close(); run() }.padding(14.dp).testTag("sheet.$label"), color = if (label.startsWith("Delete") || label.startsWith("Remove")) dcs.error else dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
+                Text(Tr.t(label), Modifier.fillMaxWidth().clickable { close(); run() }.padding(14.dp).testTag("sheet.$label"), color = if (label.startsWith("Delete") || label.startsWith("Remove")) dcs.error else dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp)
                 DLine()
             }
         }
@@ -72,7 +74,7 @@ fun ActionSheet(title: String, actions: List<Pair<String, () -> Unit>>, close: (
 fun TextPrompt(title: String, initial: String, ok: String, close: () -> Unit, done: (String) -> Unit) {
     var t by remember { mutableStateOf(initial) }
     Dialog(onDismissRequest = close) {
-        Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxWidth().clip(dShapeDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeDialog).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DMono(title, dcs.onSurfaceVariant, 11)
             DField(t, { t = it }, "", Modifier.testTag("prompt.field"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { DBtn(ok, true, t.isNotBlank(), Modifier.testTag("prompt.ok")) { close(); done(t.trim()) }; DBtn(Msg.common_cancel, false, onClick = close) }
@@ -118,7 +120,7 @@ fun BadgeSheet(p: DProject, close: () -> Unit) {
     var list by remember { mutableStateOf<JSONObject?>(null) }
     LaunchedEffect(p.id) { list = runCatching { DataClient.badgeList() }.getOrNull() }
     Dialog(onDismissRequest = close) {
-        Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp).testTag("badge.sheet"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(Modifier.fillMaxWidth().clip(dShapeDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeDialog).padding(12.dp).testTag("badge.sheet"), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             DMono(p.title, dcs.onSurfaceVariant, 11)
             val l = list
             if (l == null) DMono(Msg.viewer_loading, dcs.onSurfaceVariant, 11)
@@ -199,7 +201,7 @@ fun PickerSheet(thread: String?, choice: DNewThreadChoice, choose: (DNewThreadCh
     var err by remember { mutableStateOf("") }
     suspend fun load(c: DNewThreadChoice) { try { picker = DataClient.picker(thread, c); err = "" } catch (e: Exception) { err = e.message ?: "" } }
     LaunchedEffect(Unit) { load(choice) }
-    ModalBottomSheet(onDismissRequest = close, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = close, shape = dShapeSheet, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
       // one height from the first frame: a sheet that opens empty and grows when the list arrives stays where it opened; short of the whole screen, it clears the status bar
       Column(Modifier.fillMaxWidth().fillMaxHeight(.85f)) {
         Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -283,7 +285,7 @@ fun MentionPopup(draft: String, pick: (String) -> Unit) {
     var items by remember { mutableStateOf<List<DataClient.Mention>>(emptyList()) }
     LaunchedEffect(sigil, q) { items = runCatching { DataClient.mentions(q, sigil) }.getOrDefault(emptyList()) }
     if (items.isEmpty()) return
-    Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("mentions")) {
+    Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).testTag("mentions")) {
         items.take(6).forEach { it ->
             Row(Modifier.fillMaxWidth().clickable { pick(draft.dropLast(m.value.trimStart().length) + it.word.ifEmpty { it.sigil + (if (it.sigil == "@" || it.sigil == "#" || it.sigil == "&") it.label else it.id) } + " ") }.padding(horizontal = 12.dp, vertical = 8.dp)) {
                 DMono(it.sigil + it.label, dcs.onSurface, 12, Modifier.weight(1f)); DMono(Tr.t(it.detail))
@@ -300,7 +302,7 @@ fun SidebarRow(sigil: String, name: String, detail: String, onLong: (() -> Unit)
     Column((if (onLong != null) Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLong) else Modifier.fillMaxWidth().clickable(onClick = onClick)).testTag("side.$sigil$name")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             // a bot's cat (feature cats) in place of its sigil
-            if (lead != null) lead() else DMono(sigil, dcs.primary, 13, bold = true); Spacer(Modifier.width(10.dp)); Text(name, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp); DMono(detail, dfaint)
+            if (lead != null) lead() else DMono(sigil, dcs.primary, 13, bold = true); Spacer(Modifier.width(10.dp)); Text(name, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = FontWeight.Medium); DMono(detail, dfaint)
         }
     }
 }
@@ -378,7 +380,7 @@ fun FindInThread(tid: String, close: () -> Unit, go: (String) -> Unit) {
     var err by remember { mutableStateOf("") }
     LaunchedEffect(q) { if (q.isBlank()) { hits = null; return@LaunchedEffect }; kotlinx.coroutines.delay(250); try { hits = DataClient.searchIn(tid, q.trim()); err = "" } catch (e: Exception) { err = e.message ?: "" } }
     val focus = remember { androidx.compose.ui.focus.FocusRequester() }
-    ModalBottomSheet(onDismissRequest = close, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = close, shape = dShapeSheet, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).testTag("find")) {
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 DMono(Msg.android_find_head, dcs.onSurfaceVariant, 11, Modifier.weight(1f))
@@ -396,7 +398,7 @@ fun FindInThread(tid: String, close: () -> Unit, go: (String) -> Unit) {
                     items(h, key = { it.msg + it.at }) { x ->
                         Column(Modifier.fillMaxWidth().clickable { close(); go(x.msg) }.padding(horizontal = 14.dp, vertical = 10.dp).testTag("find.hit")) {
                             DMono((if (x.role == "user") Msg.android_you else Msg.android_agent) + " · " + dAgo(x.at), dfaint, 11)
-                            Text(x.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, maxLines = 3)
+                            Text(x.text, color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp, maxLines = 3)
                         }
                         DLine()
                     }
@@ -422,7 +424,7 @@ fun QueueStrip(tid: String, rows: List<QRow>, edit: (String) -> Unit) {
                 r.buttons.filter { it.action != "q-up" }.forEach { b ->
                     // q-* the hub's queue, o-* its far outbox, u-* this phone's own outbox (Outbox.kt; never sent to the hub)
                     DMono(Tr.t(b.label), if (b.action == "q-steer") dcs.primary else if (b.action.endsWith("-remove")) dcs.error else dcs.onSurfaceVariant, 12,
-                        Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { scope.launch { try {
+                        Modifier.clip(dShape).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable { scope.launch { try {
                             val t = if (Outbox.isOwn(b.action)) DataClient.outboxAct(b) else DataClient.queueAct(tid, b)
                             if (b.action.endsWith("-edit") && t.isNotEmpty()) edit(t); err = ""
                         } catch (e: Exception) { err = e.message ?: "" } } }

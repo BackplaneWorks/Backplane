@@ -1,5 +1,7 @@
 package dev.backplane.mobile
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -46,8 +48,8 @@ internal fun McpChip(label: String, on: Boolean, modifier: Modifier = Modifier, 
     val bg = when { on && danger -> dcs.error; on -> dcs.primary; else -> dcs.surfaceContainerHigh }
     val fg = when { on && danger -> dcs.onError; on -> dcs.onPrimary; main -> dcs.primary; danger -> dcs.error; else -> dcs.onSurface }
     val line = when { on && danger -> dcs.error; on || main -> dcs.primary; else -> dcs.outlineVariant }
-    Box(modifier.heightIn(min = if (tall) 40.dp else 32.dp).background(bg).border(BorderStroke(1.dp, line)).clickable(onClick = press).padding(horizontal = if (tall) 14.dp else 10.dp), contentAlignment = Alignment.Center) {
-        Text(label, color = fg, fontFamily = BpMono, fontSize = 12.sp, fontWeight = if (on || main) FontWeight.Bold else FontWeight.Normal, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Box(modifier.heightIn(min = if (tall) 40.dp else 32.dp).clip(dShape).background(bg).border(BorderStroke(1.dp, line), dShape).clickable(onClick = press).padding(horizontal = if (tall) 14.dp else 10.dp), contentAlignment = Alignment.Center) {
+        Text(label, color = fg, fontFamily = BpUi, fontSize = 12.sp, fontWeight = if (on || main) FontWeight.Bold else FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -200,7 +202,7 @@ private fun Card(r: JSONObject, press: (JSONObject) -> Unit, type: (String, Stri
     val title = r.optString("title").ifEmpty { r.optString("label") }
     val sub = r.optString("sub"); val meta = r.optString("meta"); val badge = r.optString("badge")
     var m = Modifier.fillMaxWidth()
-    if (framed) m = m.background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (open) dcs.primary else dcs.outlineVariant))
+    if (framed) m = m.clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (open) dcs.primary else dcs.outlineVariant), dShapeCard)
     if (tap != null) m = m.clickable { press(tap) }
     Column(m.padding(horizontal = 12.dp, vertical = if (compact) 9.dp else 12.dp).testTag("mcp.card.${r.optString("id").ifEmpty { title }}")) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -209,7 +211,7 @@ private fun Card(r: JSONObject, press: (JSONObject) -> Unit, type: (String, Stri
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     Text(Tr.t(title), Modifier.weight(1f, fill = false), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (badge.isNotEmpty()) Box(Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 4.dp)) { Text(Tr.t(badge), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 9.5.sp, maxLines = 1) }
+                    if (badge.isNotEmpty()) Box(Modifier.border(BorderStroke(1.dp, dcs.outlineVariant), CircleShape).padding(horizontal = 6.dp)) { Text(Tr.t(badge), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 9.5.sp, maxLines = 1) }
                     Pill(r.optJSONObject("pill"))
                 }
                 if (sub.isNotEmpty()) Text(sub, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -230,7 +232,7 @@ private fun Card(r: JSONObject, press: (JSONObject) -> Unit, type: (String, Stri
 /** An opened card: the card and the rows inside it on one surface, framed in the accent. */
 @Composable
 private fun OpenCard(r: JSONObject, inner: List<JSONObject>, press: (JSONObject, JSONObject) -> Unit, type: (String, String) -> Unit) {
-    Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.primary)).testTag("mcp.open")) {
+    Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.primary), dShapeCard).testTag("mcp.open")) {
         Card(r, { press(it, r) }, type, framed = false)
         Box(Modifier.padding(horizontal = 12.dp).fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
         Column(Modifier.fillMaxWidth().padding(start = 12.dp, end = 12.dp, top = 12.dp, bottom = 4.dp)) {
@@ -277,7 +279,7 @@ private fun Notice(r: JSONObject, modifier: Modifier = Modifier, press: (JSONObj
 
 @Composable
 private fun Code(r: JSONObject) {
-    Column(Modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp).testTag("mcp.code"), verticalArrangement = Arrangement.spacedBy(1.dp)) {
+    Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(horizontal = 10.dp, vertical = 8.dp).testTag("mcp.code"), verticalArrangement = Arrangement.spacedBy(1.dp)) {
         r.optString("text").lines().take(14).forEach { l -> Text(l, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, lineHeight = 15.sp, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     }
 }
@@ -309,7 +311,7 @@ private fun Panel(r: JSONObject, press: (JSONObject) -> Unit) {
         Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.primary))
         Row(Modifier.fillMaxWidth().padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Text(Tr.t(r.optString("label")), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.5.sp, fontWeight = FontWeight.Bold, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (segmented) Row(Modifier.border(BorderStroke(1.dp, dcs.outlineVariant))) {
+            if (segmented) Row(Modifier.clip(dShape).border(BorderStroke(1.dp, dcs.outlineVariant), dShape)) {
                 bs.forEachIndexed { i, b ->
                     if (i > 0) Box(Modifier.width(1.dp).height(30.dp).background(dcs.outlineVariant))
                     val on = b.optBoolean("on")
@@ -327,7 +329,7 @@ private fun Panel(r: JSONObject, press: (JSONObject) -> Unit) {
 private fun McpField(v: String, on: (String) -> Unit, hint: String, lines: Int, tag: String) {
     val big = lines > 1
     val focus = remember { FocusRequester() }
-    Box(Modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { runCatching { focus.requestFocus() } }.padding(horizontal = 10.dp, vertical = if (big) 10.dp else 9.dp).testTag(tag)) {
+    Box(Modifier.fillMaxWidth().clip(dShape).background(dview).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable(indication = null, interactionSource = remember { MutableInteractionSource() }) { runCatching { focus.requestFocus() } }.padding(horizontal = 10.dp, vertical = if (big) 10.dp else 9.dp).testTag(tag)) {
         val style = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = if (big) 11.5.sp else 13.sp, lineHeight = if (big) 16.sp else 18.sp)
         if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = BpMono, fontSize = style.fontSize, lineHeight = style.lineHeight, maxLines = 1, overflow = TextOverflow.Ellipsis)
         // a pasted config wraps (a sideways scroll lost typed characters to the cursor following them on the emulator)

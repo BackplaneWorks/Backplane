@@ -129,13 +129,13 @@ fun DataClient.say(note: String) {
 @Composable
 fun BoxScope.LinkNote() {
     val n = DataClient.linkNote
-    if (n.isNotEmpty()) Text(Tr.t(n), Modifier.align(Alignment.BottomCenter).padding(bottom = 70.dp, start = 16.dp, end = 16.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 12.dp, vertical = 9.dp).testTag("link.note"),
-        color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
+    if (n.isNotEmpty()) Text(Tr.t(n), Modifier.align(Alignment.BottomCenter).padding(bottom = 70.dp, start = 16.dp, end = 16.dp).background(dcs.surfaceContainerHigh, dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(horizontal = 12.dp, vertical = 9.dp).testTag("link.note"),
+        color = dcs.onSurface, fontFamily = BpUi, fontSize = 13.sp)
 }
 
 /** Plain text with its links tappable (a user's message, a room post, a note): not Markdown, so `*` and `_` stay as typed. Selectable. */
 @Composable
-fun LinkText(text: String, thread: String, modifier: Modifier = Modifier, color: Color = dcs.onSurface, size: Int = 13, lineHeight: Int = 0) {
+fun LinkText(text: String, thread: String, modifier: Modifier = Modifier, color: Color = dcs.onSurface, size: Int = 13, lineHeight: Int = 0, mono: Boolean = true) {
     val ctx = LocalContext.current
     SideEffect { MdLinks.ctx = ctx.applicationContext; if (thread.isNotEmpty()) MdLinks.thread = thread }
     val link = dcs.primary
@@ -147,5 +147,5 @@ fun LinkText(text: String, thread: String, modifier: Modifier = Modifier, color:
             }
         }
     }
-    SelectionContainer { Text(styled, modifier, color = color, fontSize = size.sp, lineHeight = if (lineHeight > 0) lineHeight.sp else androidx.compose.ui.unit.TextUnit.Unspecified, fontFamily = BpMono) }
+    SelectionContainer { Text(styled, modifier, color = color, fontSize = size.sp, lineHeight = if (lineHeight > 0) lineHeight.sp else androidx.compose.ui.unit.TextUnit.Unspecified, fontFamily = if (mono) BpMono else BpUi) }
 }

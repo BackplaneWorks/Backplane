@@ -510,7 +510,7 @@ struct DataPlotTab: View {
                             Text(r.1).textSelection(.enabled).lineLimit(2)
                         }.font(.system(.footnote, design: .monospaced)).accessibilityElement(children: .combine).accessibilityIdentifier("data.viewer.info.row")
                     }
-                }.padding(10).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4)))
+                }.padding(10).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(.secondary.opacity(0.4)))
                 .accessibilityElement(children: .contain).accessibilityIdentifier("data.viewer.info")
                 .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
             }
@@ -524,7 +524,7 @@ struct DataPlotTab: View {
         .task(id: "\(kind)|\(path)|\(bits)") { if !three && bits != 0 { act("", "", bits) } }
     }
     private func chip(_ label: String, id: String, on: Bool, _ tap: @escaping () -> Void) -> some View {
-        Button(action: tap) { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(on ? BackplaneDesign.accent : .primary).padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.raised).overlay(Rectangle().stroke(on ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
+        Button(action: tap) { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(on ? BackplaneDesign.accent : .primary).padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control)).overlay(RoundedRectangle(cornerRadius: DRadius.control).stroke(on ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
             .accessibilityIdentifier(id)
     }
     /// A press: the hub answers what it does; a comparison on show keeps its marks to the active layer.
@@ -557,7 +557,7 @@ struct DataLayerMenu: View {
                 if layers.layerModes {
                     HStack(spacing: 4) {
                         ForEach(Array([Tr.k("viewer.layers.all"), Tr.k("viewer.layers.dim"), Tr.k("viewer.layers.only")].enumerated()), id: \.offset) { i, label in
-                            Button { act("mode", String(i)) } label: { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(layers.layerMode == i ? BackplaneDesign.accent : .primary).padding(.horizontal, 8).padding(.vertical, 3).overlay(Rectangle().stroke(layers.layerMode == i ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
+                            Button { act("mode", String(i)) } label: { Text(label).font(.system(.footnote, design: .monospaced)).foregroundStyle(layers.layerMode == i ? BackplaneDesign.accent : .primary).padding(.horizontal, 8).padding(.vertical, 3).overlay(RoundedRectangle(cornerRadius: DRadius.control).stroke(layers.layerMode == i ? BackplaneDesign.accent : .secondary.opacity(0.4))) }
                                 .accessibilityIdentifier("data.layer.mode.\(i)")
                         }
                     }
@@ -576,7 +576,7 @@ struct DataLayerMenu: View {
                 }
             }.padding(8)
         }
-        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.layer.menu")
+        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.layer.menu")
     }
 }
 
@@ -595,7 +595,7 @@ struct DataRefMenu: View {
                 }
             }.padding(8)
         }
-        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel).overlay(Rectangle().stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.compare.menu")
+        .frame(maxHeight: 420).fixedSize(horizontal: true, vertical: false).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(.secondary.opacity(0.4))).accessibilityIdentifier("data.compare.menu")
     }
 }
 
@@ -1618,7 +1618,7 @@ struct DataCommentsPage: View {
                                     Button(Tr.t(c.resolved ? "reopen" : "resolve")) { Task { try? await client.comment(thread.id, c.resolved ? "reopen" : "resolve", ["id": c.id]); await load() } }.font(.caption).accessibilityIdentifier("data.review.resolve." + c.id) }
                                 Text(c.text).font(.system(.footnote, design: .monospaced))
                                 ForEach(l.filter { $0.parent == c.id }) { r in Text("↳ " + r.text).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary) }
-                            }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().stroke(c.resolved ? Color.secondary.opacity(0.3) : BackplaneDesign.accent.opacity(0.6)))
+                            }.padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(c.resolved ? Color.secondary.opacity(0.3) : BackplaneDesign.accent.opacity(0.6)))
                         }
                     } else { ProgressView() }
                 }.padding(12)

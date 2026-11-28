@@ -1100,7 +1100,7 @@ private fun PlanItemInspectorSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        shape = RectangleShape,
+        shape = dShapeSheet,
         containerColor = dcs.surfaceVariant,
         dragHandle = null,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),

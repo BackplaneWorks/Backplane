@@ -1,5 +1,7 @@
 package dev.backplane.mobile
 
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -211,7 +213,7 @@ private fun SwarmBody(room: String, back: () -> Unit, openThread: (String) -> Un
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 10.dp, vertical = 8.dp).testTag("swarm.members"), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             b.members.forEach { m ->
                 val on = SwarmUi.opens(m)
-                Row(Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).alpha(if (m.state == "removed") .45f else 1f)
+                Row(Modifier.clip(dShape).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).alpha(if (m.state == "removed") .45f else 1f)
                     .combinedClickable(enabled = on, onClick = { openThread(m.thread) }, onLongClick = { if (!SwarmUi.ended(b.room.state)) removing = m })
                     .height(32.dp).padding(horizontal = 8.dp).testTag("swarm.member.${m.name}"), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(width = 3.dp, height = 16.dp).background(hex(m.color, dcs.primary))); Spacer(Modifier.width(6.dp))
@@ -276,7 +278,7 @@ private fun SwarmBody(room: String, back: () -> Unit, openThread: (String) -> Un
 private fun SwarmPost(p: DSwarmPost, claims: List<DSwarmClaim>) {
     val syn = SwarmUi.synthesis(p)
     val bar = if (p.guard) Color.Transparent else hex(p.color, dcs.primary)
-    val outer = if (syn) Modifier.padding(horizontal = 10.dp, vertical = 10.dp).border(BorderStroke(1.dp, dcs.primary)).background(dcs.surfaceContainerHigh).padding(10.dp) else Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
+    val outer = if (syn) Modifier.padding(horizontal = 10.dp, vertical = 10.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.primary), dShapeCard).background(dcs.surfaceContainerHigh).padding(10.dp) else Modifier.padding(horizontal = 12.dp, vertical = 5.dp)
     Column(Modifier.fillMaxWidth().then(outer).alpha(if (SwarmUi.dimmed(p)) .5f else 1f).testTag(if (syn) "swarm.synthesis" else if (p.guard) "swarm.guard" else "swarm.post.${p.id}")) {
         if (syn) DMono(Msg.android_swarm_tag_synthesis.uppercase(), dcs.primary, 11, Modifier.padding(bottom = 6.dp), bold = true)
         Row(Modifier.height(IntrinsicSize.Min)) {
@@ -284,7 +286,7 @@ private fun SwarmPost(p: DSwarmPost, claims: List<DSwarmClaim>) {
             Column(Modifier.weight(1f)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     DMono(p.from.ifEmpty { Msg.android_you }, if (p.guard) dfaint else bar, 11, bold = !p.guard)
-                    SwarmUi.labels(p).forEach { t -> Spacer(Modifier.width(6.dp)); DMono(swarmTag(t).uppercase(), dcs.onSurfaceVariant, 9, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 4.dp, vertical = 1.dp)) }
+                    SwarmUi.labels(p).forEach { t -> Spacer(Modifier.width(6.dp)); DMono(swarmTag(t).uppercase(), dcs.onSurfaceVariant, 9, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant), CircleShape).padding(horizontal = 6.dp, vertical = 1.dp)) }
                     Spacer(Modifier.weight(1f)); DMono(dAgo(p.at), dfaint, 10)
                 }
                 if (p.guard) SelectionContainer { Text(p.text, color = dfaint, fontFamily = BpMono, fontSize = 12.sp) }
@@ -296,7 +298,7 @@ private fun SwarmPost(p: DSwarmPost, claims: List<DSwarmClaim>) {
                     val mark = SwarmUi.claim(p, claims)
                     Column(Modifier.padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                         p.files.forEach { f ->
-                            Row(Modifier.border(BorderStroke(1.dp, if (mark == "waiting") dwarn else dcs.outlineVariant)).padding(horizontal = 6.dp, vertical = 2.dp).testTag("swarm.file"), verticalAlignment = Alignment.CenterVertically) {
+                            Row(Modifier.border(BorderStroke(1.dp, if (mark == "waiting") dwarn else dcs.outlineVariant), dShape).padding(horizontal = 6.dp, vertical = 2.dp).testTag("swarm.file"), verticalAlignment = Alignment.CenterVertically) {
                                 DMono(f, if (mark.isEmpty()) dfaint else dcs.onSurface, 11)
                                 if (mark == "waiting") { Spacer(Modifier.width(6.dp)); DMono(Msg.android_swarm_waiting, dwarn, 10, Modifier.testTag("swarm.waiting"), bold = true) }
                             }
@@ -315,7 +317,7 @@ private fun MemberPickRow(n: Int, pick: DSwarmPick, models: List<Pair<String, Li
     var prov by remember { mutableStateOf(false) }
     var mod by remember { mutableStateOf(false) }
     val choices = models.firstOrNull { it.first == pick.provider }?.second ?: emptyList()
-    Column(Modifier.fillMaxWidth().border(BorderStroke(1.dp, dcs.outlineVariant)).padding(8.dp).testTag("swarm.new.member.$n"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+    Column(Modifier.fillMaxWidth().border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(8.dp).testTag("swarm.new.member.$n"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             DMono(Msg.android_swarm_member_n(n), dfaint, 11, Modifier.weight(1f))
             if (remove != null) Box(Modifier.size(28.dp).clickable(onClick = remove).testTag("swarm.new.remove.$n"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, Msg.common_remove, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
@@ -335,7 +337,7 @@ private fun MemberPickRow(n: Int, pick: DSwarmPick, models: List<Pair<String, Li
             Box(Modifier.weight(1f)) {
                 ModelChip(choices.firstOrNull { it.value == pick.model }?.value ?: Msg.common_default, "swarm.new.model.$n", Modifier.fillMaxWidth()) { mod = true }
                 DropdownMenu(mod, { mod = false }) {
-                    DropdownMenuItem({ Text(Msg.common_default, fontFamily = BpMono) }, { mod = false; change(pick.copy(model = "")) }, Modifier.testTag("swarm.pick.model.default"))
+                    DropdownMenuItem({ Text(Msg.common_default, fontFamily = BpUi) }, { mod = false; change(pick.copy(model = "")) }, Modifier.testTag("swarm.pick.model.default"))
                     choices.forEach { c -> DropdownMenuItem({ Column { Text(Tr.t(c.label), fontFamily = BpMono, color = if (c.ok) dcs.onSurface else dfaint); if (!c.ok && c.why.isNotEmpty()) DMono(Tr.t(c.why), dfaint, 10) } },
                         { mod = false; change(pick.copy(model = c.value)) }, Modifier.testTag("swarm.pick.model.${c.value}"), enabled = c.ok) }
                 }
@@ -361,7 +363,7 @@ fun NewSwarmSheet(project: String, close: () -> Unit, created: (String) -> Unit)
     var err by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { loadModels(scope) { models = it; if (members.isEmpty()) members = List(SwarmUi.MIN) { _ -> SwarmUi.firstPick(it) } } }
     val title = DataClient.projects.firstOrNull { it.id == project }?.title ?: ""
-    ModalBottomSheet(onDismissRequest = close, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = close, shape = dShapeSheet, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.92f).testTag("swarm.new")) {
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 DMono(Msg.android_swarm_new + (if (title.isNotEmpty()) " · $title" else ""), dcs.onSurface, 13, Modifier.weight(1f), bold = true)
@@ -393,7 +395,7 @@ private fun AddMemberDialog(close: () -> Unit, add: (DSwarmPick) -> Unit) {
     var pick by remember { mutableStateOf<DSwarmPick?>(null) }
     LaunchedEffect(Unit) { loadModels(scope) { models = it; if (pick == null) pick = SwarmUi.firstPick(it) } }
     Dialog(onDismissRequest = close) {
-        Column(Modifier.fillMaxWidth().background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(12.dp).testTag("swarm.addsheet"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().clip(dShapeDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeDialog).padding(12.dp).testTag("swarm.addsheet"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             DMono(Msg.android_swarm_member_add, dcs.onSurfaceVariant, 11)
             pick?.let { p -> MemberPickRow(1, p, models, { pick = it }, null) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

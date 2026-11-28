@@ -52,13 +52,13 @@ struct DataTermCard: View {
                 Spacer(minLength: 4)
                 if screen.missing { Text(Tr.t("gone")).dmono(11).foregroundStyle(BackplaneDesign.dim) } else { TermState(state: screen.state).accessibilityIdentifier("term.card.state") }
                 if screen.live {
-                    Button { client.terms.stop(info.key) } label: { Text(Tr.t("Stop")).dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 8).frame(minHeight: 28).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
+                    Button { client.terms.stop(info.key) } label: { Text(Tr.t("Stop")).dmono(11, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 8).frame(minHeight: 28).overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
                         .buttonStyle(.plain).accessibilityIdentifier("term.card.stop")
                 }
             }.padding(.horizontal, 8).frame(minHeight: 34).background(BackplaneDesign.raised)
             TermCardSurface(screen: screen, rev: screen.rev).accessibilityIdentifier("term.card.screen")
         }
-        .overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+        .clipShape(RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).strokeBorder(BackplaneDesign.line, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { client.terms.open(info.key, title: info.title) }
         .modifier(TermVisible(seen: $seen, key: info.key, terms: client.terms, cols: info.cols, rows: info.rows))
@@ -142,7 +142,7 @@ struct TermFullView: View {
                 Spacer(minLength: 0)
                 if scroll > 0 { Button { handle.surface?.scrollToBottom() } label: { Image(systemName: "arrow.down.to.line").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.accent) }.accessibilityLabel(Tr.t("Jump to the end")).accessibilityIdentifier("term.bottom") }
                 Button { handle.surface?.pasteFromButton() } label: { Image(systemName: "doc.on.clipboard").frame(width: 36, height: 36).foregroundStyle(BackplaneDesign.dim) }.accessibilityLabel(Tr.t("Paste")).accessibilityIdentifier("term.paste")
-                if screen.live { Button { terms.stop(route.key) } label: { Text(Tr.t("Stop")).dmono(12, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 10).frame(minHeight: 32).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }.accessibilityIdentifier("term.stop") }
+                if screen.live { Button { terms.stop(route.key) } label: { Text(Tr.t("Stop")).dmono(12, bold: true).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 10).frame(minHeight: 32).overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1)) }.accessibilityIdentifier("term.stop") }
             }.padding(.horizontal, 8).frame(minHeight: 44).background(BackplaneDesign.panel)
             // what Run in terminal could not do here
             if !terms.notice.isEmpty { Text(Tr.t(terms.notice)).dmono(11).foregroundStyle(BackplaneDesign.warn).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 10).padding(.vertical, 4).background(BackplaneDesign.panel).accessibilityIdentifier("term.notice") }

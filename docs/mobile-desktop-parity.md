@@ -10,7 +10,7 @@ Status: **done** (built and driven), **code** (written, not run: no Mac here), *
 - The old phone apps spoke hub's view protocol through `bridge.js` (QuickJS / JavaScriptCore). The Rust hub speaks `data/1` to phones: plain JSON over
   `/ws?data=1&enc=json`, no presenter. iOS had a client for it; **Android now has one too** (`DataClient.kt`, `DataModels.kt`, `DataViews.kt`,
   `DataMarkdown.kt`, launcher `DataActivity`). Gradle `-PbpData=false` brings back the old launcher; the classic screens stay in the APK.
-- The Android screens use the desktop's tokens (`BackplaneTheme.kt` = `src/web/style.css`, light and dark), JetBrains Mono for all text, square corners,
+- The Android screens use the desktop's tokens (`BackplaneTheme.kt` = `src/web/style.css`, light and dark), JetBrains Mono for code, paths and small labels (the system face for interface text), rounded controls and cards (bars, rows and strips stay square),
   flat panels, a `STATE ● finished` label, an `Ask anything: @bot, >thread, %project, $skill, /btw` composer with a blue Send, like `native/gpui`.
 
 ## Feature table

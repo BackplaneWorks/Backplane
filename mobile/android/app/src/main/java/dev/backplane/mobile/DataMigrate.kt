@@ -77,7 +77,7 @@ private fun MigrateSheet(c: DMigrateCard) {
     val scope = rememberCoroutineScope()
     var err by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
-    ModalBottomSheet(onDismissRequest = { DataClient.migrateOpen = false }, shape = RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+    ModalBottomSheet(onDismissRequest = { DataClient.migrateOpen = false }, shape = dShapeSheet, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 16.dp).navigationBarsPadding().testTag("migrate.card")) {
             Text(Tr.t(c.title), color = dcs.onSurface, fontFamily = BpMono, fontSize = 15.sp, fontWeight = FontWeight.Bold)
             if (c.body.isNotEmpty()) { Spacer(Modifier.height(8.dp)); Text(Tr.t(c.body), color = dcs.onSurface, fontSize = 14.sp) }

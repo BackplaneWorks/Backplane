@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.draw.clip
 import android.os.SystemClock
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -67,9 +68,9 @@ internal fun HubScreen(back: () -> Unit) {
     }
 
     asking?.let { a ->
-        AlertDialog(onDismissRequest = { asking = null }, shape = RectangleShape,
-            title = { Text(Tr.t(a.label) + if (Tr.lang == "ja") "？" else "?", fontFamily = BpMono, fontSize = 15.sp) },
-            text = if (a.text.isEmpty()) null else { { Text(Tr.t(a.text), fontFamily = BpMono, fontSize = 13.sp) } },
+        AlertDialog(onDismissRequest = { asking = null }, shape = dShapeDialog,
+            title = { Text(Tr.t(a.label) + if (Tr.lang == "ja") "？" else "?", fontFamily = BpUi, fontSize = 16.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold) },
+            text = if (a.text.isEmpty()) null else { { Text(Tr.t(a.text), fontFamily = BpUi, fontSize = 14.sp) } },
             confirmButton = { DBtn(Tr.t(a.label), true, modifier = Modifier.testTag("hub.confirm")) { send(a) } },
             dismissButton = { DBtn(Msg.common_cancel, false, modifier = Modifier.testTag("hub.cancel")) { asking = null } })
     }
@@ -100,7 +101,7 @@ internal fun HubBanner(open: () -> Unit) {
     Column(Modifier.testTag("hub.banner").clickable(onClick = open)) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             DDot(if (n.warn) dwarn else dfaint, 8); Spacer(Modifier.width(8.dp))
-            Text(Tr.t(n.text), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(Tr.t(n.text), color = dcs.onSurface, fontFamily = BpUi, fontSize = 13.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         DLine()
     }
@@ -114,7 +115,7 @@ internal fun AlertsBanner() {
     if (!DataClient.alertsAsk || DataClient.conn != DataClient.Conn.ONLINE) return
     Column(Modifier.testTag("alerts.banner")) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(Msg.android_alerts_ask, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Text(Msg.android_alerts_ask, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpUi, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(8.dp))
             // a filled primary button, as iOS's DButton(primary: true)
             DBtn(Msg.android_alerts_allow, true, true, Modifier.testTag("alerts.allow")) {
@@ -122,7 +123,7 @@ internal fun AlertsBanner() {
                 if (android.os.Build.VERSION.SDK_INT >= 33) act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
             }
             Spacer(Modifier.width(4.dp))
-            DMono(Msg.android_alerts_later, dcs.onSurfaceVariant, 12, Modifier.testTag("alerts.later").clickable { DataClient.alertsAsk = false; AppSettings.putAlertsLater(System.currentTimeMillis()) }.padding(horizontal = 4.dp, vertical = 4.dp))
+            DText(Msg.android_alerts_later, dcs.onSurfaceVariant, 13, Modifier.testTag("alerts.later").clickable { DataClient.alertsAsk = false; AppSettings.putAlertsLater(System.currentTimeMillis()) }.padding(horizontal = 4.dp, vertical = 4.dp), lines = 1)
         }
         DLine()
     }
@@ -138,7 +139,7 @@ internal fun TelemetryBanner(settings: () -> Unit) {
     LaunchedEffect(n.token, owner) { owner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) { DataClient.telemetryShown(n.token) } }
     Column(Modifier.testTag("telemetry.banner")) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(Tr.t(n.text), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Text(Tr.t(n.text), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpUi, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(8.dp))
             DMono(Tr.t(n.off.ifEmpty { "Turn off" }), dcs.primary, 12, Modifier.testTag("telemetry.off").clickable { DataClient.telemetryAct("off") }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
             DMono(Tr.t(n.settings.ifEmpty { "Settings" }), dcs.onSurfaceVariant, 12, Modifier.testTag("telemetry.settings").clickable(onClick = settings).padding(horizontal = 4.dp, vertical = 4.dp))
@@ -156,19 +157,19 @@ internal fun StarBanner() {
     if (!DStarOffer.due(s, DataClient.threads.any { it.state == "working" || it.state == "asking" }, DataClient.typing())) return
     val ctx = LocalContext.current
     run {
-        Column(Modifier.fillMaxWidth().padding(8.dp).background(dcs.surfaceContainerHigh).border(androidx.compose.foundation.BorderStroke(1.dp, dcs.primary)).padding(12.dp).testTag("star.banner"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Column(Modifier.fillMaxWidth().padding(8.dp).clip(dShapeCard).background(dcs.surfaceContainerHigh).border(androidx.compose.foundation.BorderStroke(1.dp, dcs.primary), dShapeCard).padding(12.dp).testTag("star.banner"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Star, null, tint = dcs.primary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp))
-                Text(Tr.t(s.text), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Text(Tr.t(s.text), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
             }
             DMono(s.place, dfaint, 11)
-            if (s.why.isNotEmpty()) Text(Tr.t(s.why), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
-            Row(Modifier.fillMaxWidth().height(36.dp).background(dcs.primary).testTag("star.open").clickable {
+            if (s.why.isNotEmpty()) Text(Tr.t(s.why), color = dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 13.sp, lineHeight = 18.sp)
+            Row(Modifier.fillMaxWidth().height(36.dp).clip(dShape).background(dcs.primary).testTag("star.open").clickable {
                 runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(s.url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 DataClient.starDecide("open")
             }, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Default.Star, null, tint = dcs.onPrimary, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp))
-                Text(Tr.t(s.label.ifEmpty { "Star on GitHub" }), color = dcs.onPrimary, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Text(Tr.t(s.label.ifEmpty { "Star on GitHub" }), color = dcs.onPrimary, fontFamily = BpUi, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 DBtn(Tr.t("Later"), false, modifier = Modifier.weight(1f).testTag("star.later")) { DataClient.starDecide("later") }

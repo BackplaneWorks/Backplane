@@ -308,8 +308,8 @@ struct DataThreadsView: View {
                 Text(Tr.k("mobile.conn.reconnecting")).dmono(11).foregroundStyle(BackplaneDesign.dim)
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
-            .background(BackplaneDesign.raised)
-            .overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+            .background(BackplaneDesign.raised, in: Capsule())
+            .overlay(Capsule().strokeBorder(BackplaneDesign.line, lineWidth: 1))
             .padding(.bottom, 14)
             .allowsHitTesting(false)
             .accessibilityIdentifier("data.connection.reconnecting")
@@ -696,7 +696,7 @@ struct DataMachineChips: View {
                     ForEach(client.chips) { c in
                         Button { client.pickMachine(c.value) } label: {
                             Text(dAway(Tr.t(c.label), c.away)).dmono(11).foregroundStyle(c.on ? BackplaneDesign.accent : BackplaneDesign.dim).padding(.horizontal, 10).frame(height: 28)
-                                .overlay(Rectangle().stroke(c.on ? BackplaneDesign.accent : BackplaneDesign.faint.opacity(0.5), lineWidth: 1)).opacity(c.away && !c.on ? 0.55 : 1)
+                                .overlay(RoundedRectangle(cornerRadius: DRadius.control).stroke(c.on ? BackplaneDesign.accent : BackplaneDesign.faint.opacity(0.5), lineWidth: 1)).contentShape(RoundedRectangle(cornerRadius: DRadius.control)).opacity(c.away && !c.on ? 0.55 : 1)
                         }.buttonStyle(.plain).accessibilityLabel(Tr.t(c.hint.isEmpty ? c.label : c.hint)).accessibilityIdentifier("data.machine." + (c.value.isEmpty ? "all" : c.value))
                     }
                 }.padding(.horizontal, 10).padding(.bottom, 8)
@@ -1228,8 +1228,8 @@ struct DataThreadView: View {
                     Text(planPhaseLabel(pm))
                         .dmono(10, bold: true)
                         .foregroundStyle(ptint)
-                        .padding(.horizontal, 5).padding(.vertical, 1)
-                        .overlay(Rectangle().strokeBorder(ptint, lineWidth: 1))
+                        .padding(.horizontal, 7).padding(.vertical, 1)
+                        .overlay(Capsule().strokeBorder(ptint, lineWidth: 1))
                         .accessibilityIdentifier("data.thread.planmode")
                 }
                 Spacer()
@@ -1264,7 +1264,7 @@ struct DataThreadView: View {
                             .dmono(10, bold: true)
                             .foregroundStyle(ptint)
                             .padding(.horizontal, 6).frame(minHeight: 22)
-                            .overlay(Rectangle().strokeBorder(ptint.opacity(0.6), lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(ptint.opacity(0.6), lineWidth: 1))
                     }.buttonStyle(.plain)
                     Button {
                         Task { try? await client.setPlanMode(id, target: .off) }
@@ -1273,7 +1273,7 @@ struct DataThreadView: View {
                             .dmono(10)
                             .foregroundStyle(BackplaneDesign.dim)
                             .padding(.horizontal, 6).frame(minHeight: 22)
-                            .overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1))
                     }.buttonStyle(.plain)
                 }
             }
@@ -1305,7 +1305,7 @@ struct DataThreadView: View {
                         HStack(spacing: 8) {
                             ForEach(Array(pending.enumerated()), id: \.offset) { i, d in
                                 ZStack(alignment: .topTrailing) {
-                                    if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFill().frame(width: 64, height: 64).clipped().overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
+                                    if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFill().frame(width: 64, height: 64).clipShape(RoundedRectangle(cornerRadius: 8)).overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(BackplaneDesign.line, lineWidth: 1)) }
                                     Button { pending.remove(at: i) } label: { Image(systemName: "xmark").font(.system(size: 10, weight: .bold)).foregroundStyle(BackplaneDesign.text).frame(width: 20, height: 20).background(BackplaneDesign.raised) }
                                         .accessibilityLabel(Tr.t("Remove picture"))
                                 }
@@ -1505,7 +1505,7 @@ struct DataQueueStrip: View {
                     ForEach(r.buttons.filter { $0.action != "q-up" }, id: \.self) { b in
                         Button { Task { await client.queueAct(thread, b) } } label: {
                             Text(Tr.t(b.label)).dmono(12).foregroundStyle(b.action == "q-steer" ? BackplaneDesign.accent : b.action.hasSuffix("-remove") ? BackplaneDesign.bad : BackplaneDesign.dim)
-                                .padding(.horizontal, 10).frame(minHeight: 30).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)).contentShape(Rectangle())
+                                .padding(.horizontal, 10).frame(minHeight: 30).overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1)).contentShape(RoundedRectangle(cornerRadius: DRadius.control))
                         }.buttonStyle(.plain).accessibilityIdentifier("queue.\(b.action)")
                     }
                 }.accessibilityElement(children: .contain).accessibilityIdentifier("queue.row")
@@ -1579,7 +1579,7 @@ struct DataFoldRow: View {
                     Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 12)
                     Text(Tr.t(fold.label)).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                     Spacer(minLength: 0)
-                }.padding(.horizontal, 8).frame(minHeight: 36).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1)).contentShape(Rectangle())
+                }.padding(.horizontal, 8).frame(minHeight: 36).overlay(RoundedRectangle(cornerRadius: DRadius.card).strokeBorder(BackplaneDesign.line, lineWidth: 1)).contentShape(RoundedRectangle(cornerRadius: DRadius.card))
             }
             .buttonStyle(.plain).accessibilityLabel(Tr.t(fold.label)).accessibilityValue(Tr.t(open ? "open" : "shut")).accessibilityIdentifier("data.fold." + fold.id)
             if open { ForEach(fold.items) { DataToolRow(entry: $0) }.padding(.leading, 8) }
@@ -1683,7 +1683,7 @@ struct DataEntryRow: View {
                         ForEach(Array(entry.localImages.enumerated()), id: \.offset) { _, d in DataLocalImage(data: d) }
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
                         if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
-                    }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised)
+                    }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised, radius: DRadius.card)
                     // long-press: Reply, Copy, and Restore to before this when the hub has the snapshot before the turn this message started
                     .contextMenu { replyMenu; if let r = entry.restore { Button(Tr.t("Restore to before this"), systemImage: "clock.arrow.circlepath") { restoring = r }.accessibilityIdentifier("data.entry.restore") } }
                     .confirmationDialog(Tr.t("Restore the project to before this message?"), isPresented: Binding(get: { restoring != nil }, set: { if !$0 { restoring = nil } }), titleVisibility: .visible, presenting: restoring) { r in
@@ -1728,7 +1728,7 @@ struct DataEntryRow: View {
                 if entry.text.contains("`") || !(entry.copy ?? []).isEmpty {
                     DataMarkdown(text: Tr.t(entry.text), thread: thread, copy: Copyable.list(entry.copy, hubHasCopy: client.has("copy")),
                                  textColor: entry.tone == "error" ? BackplaneDesign.bad : BackplaneDesign.dim,
-                                 toneKey: entry.tone == "error" ? "bad" : "dim", baseSize: 12)
+                                 toneKey: entry.tone == "error" ? "bad" : "dim", baseSize: 12, mono: true)
                 } else {
                     DLinkText(text: Tr.t(entry.text), size: 12, thread: thread)
                 }
@@ -1782,7 +1782,7 @@ struct DataHandoffCard: View {
                     }.padding(.horizontal, 8).padding(.vertical, 6).dbox(fill: BackplaneDesign.panel)
                 }.buttonStyle(.plain).accessibilityIdentifier("handoff.ref.\(i)")
             }
-        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.raised).padding(.vertical, 4).accessibilityElement(children: .contain).accessibilityIdentifier("handoff.card")
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox(fill: BackplaneDesign.raised, radius: DRadius.card).padding(.vertical, 4).accessibilityElement(children: .contain).accessibilityIdentifier("handoff.card")
     }
 }
 
@@ -1809,7 +1809,7 @@ struct DataAskCard: View {
             }
         }
         .padding(12).frame(maxWidth: .infinity, alignment: .leading)
-        .dbox(accent, fill: BackplaneDesign.panel)
+        .dbox(accent, fill: BackplaneDesign.panel, radius: DRadius.card)
         .overlay(alignment: .leading) {
             if isPlan && ask?.isOpen == true {
                 Rectangle().fill(PhaseColor.input).frame(width: 3)
@@ -1849,8 +1849,8 @@ struct DataAskCard: View {
                 Text(Tr.k("gpui.ask.plan.ready"))
                     .dmono(10, bold: true)
                     .foregroundStyle(PhaseColor.input)
-                    .padding(.horizontal, 5).padding(.vertical, 1)
-                    .overlay(Rectangle().strokeBorder(PhaseColor.input.opacity(0.65), lineWidth: 1))
+                    .padding(.horizontal, 7).padding(.vertical, 1)
+                    .overlay(Capsule().strokeBorder(PhaseColor.input.opacity(0.65), lineWidth: 1))
             }
             Spacer(minLength: 4)
             Button(Tr.k(copied ? "mobile.plan.copied" : "common.copy")) {
@@ -2107,7 +2107,7 @@ struct DataReviewBar: View {
             Text(Tr.t(bar.text)).dmono(12).foregroundStyle(bar.on ? BackplaneDesign.text : BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("thread.review.text")
             Button(Tr.t(bar.button)) { press() }.buttonStyle(DButton(compact: true)).disabled(!enabled).accessibilityIdentifier("thread.review.button")
         }
-        .padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(bar.on ? BackplaneDesign.warn : BackplaneDesign.line, lineWidth: 1))
+        .padding(.horizontal, 10).padding(.vertical, 6).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).strokeBorder(bar.on ? BackplaneDesign.warn : BackplaneDesign.line, lineWidth: 1))
         .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("thread.review")
     }
 }
@@ -2124,7 +2124,7 @@ struct DataNoProviderBanner: View {
                     .buttonStyle(DButton(primary: true, compact: true)).accessibilityIdentifier("provider.notice.button")
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 10).padding(.vertical, 8).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.warn, lineWidth: 1))
+            .padding(.horizontal, 10).padding(.vertical, 8).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).strokeBorder(BackplaneDesign.warn, lineWidth: 1))
             .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("provider.notice")
         }
     }
@@ -2156,7 +2156,7 @@ struct DataOrderCard: View {
             if !order.estimateWarnings.isEmpty { Text(Tr.order_estimate_warnings(warnings: order.estimateWarnings)).dmono(11).foregroundStyle(BackplaneDesign.warn).fixedSize(horizontal: false, vertical: true).accessibilityIdentifier("thread.order.warnings") }
             if let u = order.payURL { Button(Tr.t(order.label.isEmpty ? "Buy now" : order.label)) { openURL(u) }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("thread.order.pay") }
         }
-        .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel).overlay(Rectangle().strokeBorder(BackplaneDesign.line, lineWidth: 1))
+        .padding(10).frame(maxWidth: .infinity, alignment: .leading).background(BackplaneDesign.panel, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).strokeBorder(BackplaneDesign.line, lineWidth: 1))
         .padding(.horizontal, 12).padding(.vertical, 6).accessibilityElement(children: .contain).accessibilityIdentifier("thread.order") // a container: Buy now keeps its own identifier
     }
 }

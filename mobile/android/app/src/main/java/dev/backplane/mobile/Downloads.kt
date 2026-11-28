@@ -1,5 +1,6 @@
 package dev.backplane.mobile
 
+import androidx.compose.ui.draw.clip
 import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
@@ -166,7 +167,7 @@ fun BoxScope.DownloadStrip() {
     val rows = Downloads.rows
     if (rows.isEmpty()) return
     val ctx = androidx.compose.ui.platform.LocalContext.current
-    Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 118.dp, start = 12.dp, end = 12.dp).fillMaxWidth().background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("downloads")) {
+    Column(Modifier.align(Alignment.BottomCenter).padding(bottom = 118.dp, start = 12.dp, end = 12.dp).fillMaxWidth().clip(dShapeCard).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).testTag("downloads")) {
         rows.forEach { r ->
             Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("download.${r.name}")) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

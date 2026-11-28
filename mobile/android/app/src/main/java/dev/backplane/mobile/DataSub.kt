@@ -60,7 +60,7 @@ internal fun SubScreen(thread: String, key: String, back: () -> Unit) {
 @Composable
 private fun SubEntry(thread: String, e: DEntry) {
     when (e.kind) {
-        "user" -> Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("sub.asked")) {
+        "user" -> Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).background(dcs.surfaceContainerHigh, dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).padding(10.dp).testTag("sub.asked")) {
             DMono(Msg.android_sub_asked, dfaint, 11); LinkText(e.text, thread, color = dcs.onSurface, size = 13, lineHeight = 19)
         }
         "assistant" -> Box(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp)) { LinkText(e.text, thread, color = dcs.onSurface, size = 13, lineHeight = 19) }
