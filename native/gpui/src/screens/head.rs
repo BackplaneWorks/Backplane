@@ -43,11 +43,15 @@ pub struct Head {
     pub state: Rc<Cell<f32>>, pub row: Rc<Cell<f32>>,
     /// The name's text and its shaped width; the tools' words and the strip's widths (with words, with icons only).
     shaped: RefCell<(String, f32)>, strip: RefCell<(String, (f32, f32))>,
+    /// Each tool's width when tight (its icon alone, or its word when it has no icon), for `keep_when_tight`.
+    tight_w: RefCell<Vec<f32>>,
+    /// The tools the last layout did not draw (bit i = tool i; none unless tight): they go into the thread's menus (`dropped_items`).
+    pub dropped: Cell<u64>,
 }
 
 /// How the header is laid out this frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct Layout { pub one: bool, pub icons: bool }
+pub struct Layout { pub one: bool, pub icons: bool, pub tight: bool, /** tight: which tools still fit (bit i = tool i), the rest are in the thread's menu */ pub keep: u64 }
 
 /// Whether the top bar holds the name, the state and the tools side by side with the window's controls: every width known and the
 /// sum, with the bar's padding and the gaps between the four groups, within the window's width.
@@ -56,6 +60,22 @@ pub fn one_row(win_w: f32, left: f32, state: f32, tools: f32, right: f32) -> boo
 }
 /// In a row of their own: whether the tools give up their words (the row is measured and too narrow for the state and the worded tools).
 pub fn icons_only(row_w: f32, state: f32, tools: f32) -> bool { row_w > 0. && state + GAP + tools + ROW_END > row_w }
+/// Folded and still too narrow (the strip with its foldable tools as icons): every tool with an icon shows the icon alone, Stop and Buy it too.
+pub fn tight(row_w: f32, state: f32, icons: f32) -> bool { row_w > 0. && state + GAP + icons + ROW_END > row_w }
+
+/// Tight and still too narrow for every icon: which tools stay (bit i = tool i). The branching ones go first, then the keeping ones, then
+/// Buy it, Stop/Retry last, each group from its end (they are all in the thread's menu, the ▾ by its name and a right-click on the header).
+/// `tools` is each tool's group and tight width, in the strip's order; `room` the width the strip may take.
+pub fn keep_when_tight(tools: &[(u8, f32)], room: f32) -> u64 {
+    let mut keep: Vec<bool> = vec![true; tools.len()];
+    let width = |keep: &[bool]| { let (mut w, mut prev) = (0., None); for (i, (g, tw)) in tools.iter().enumerate() { if keep[i] { w += space(prev, *g) + tw; prev = Some(*g); } } w };
+    while width(&keep) > room {
+        let Some(i) = (0..tools.len()).filter(|&i| keep[i]).max_by_key(|&i| ([3u8, 2, 1, 0].iter().position(|g| *g == tools[i].0).map_or(0, |p| 4 - p), i)) else { break };
+        if keep.iter().filter(|k| **k).count() <= 1 { break }
+        keep[i] = false;
+    }
+    keep.iter().enumerate().filter(|(i, k)| **k && *i < 64).fold(0u64, |m, (i, _)| m | 1 << i)
+}
 
 /// The left group's width with this frame's name in it: the measured group, less the name it was measured with, plus the new name's shaped width.
 pub fn left_now(left: f32, title_was: f32, title_now: f32) -> f32 { if left <= 0. { 0. } else { left - title_was + title_now } }
@@ -85,6 +105,17 @@ pub fn strip_width(items: &[Item], shape: &mut dyn FnMut(&str) -> f32) -> (f32, 
     (full, icons)
 }
 
+/// The tools a tight header did not draw (`Head::dropped`), first in the thread's menus (the ▾ by its name, a right-click on the header): Buy it by its word.
+pub fn dropped_items(thread: &Value, dropped: u64) -> Vec<super::ctxmenu::Item> {
+    tools(thread).into_iter().enumerate().filter(|(i, _)| *i < 64 && dropped & (1 << i) != 0)
+        .map(|(_, t)| super::ctxmenu::Item { label: if t.action == "fab-buy" { split_buy(&t.label).0.to_string() } else { t.label.clone() }, action: t.action, value: t.value, confirm: t.danger, note: String::new() }).collect()
+}
+
+/// Each tool's width when the strip is tight (`strip` with `Layout::tight`): an icon alone, or the word of a tool with no icon.
+pub fn tight_widths(items: &[Item], shape: &mut dyn FnMut(&str) -> f32) -> Vec<f32> {
+    items.iter().map(|t| if t.icon.is_empty() { PL + shape(&crate::i18n::trs(&t.label)) + PR } else { PL + ICON + PL + if t.action == "fab-buy" { 2. } else { 0. } }).collect()
+}
+
 impl Head {
     /// This frame's layout. `font` is the window's text font, `title_size` the name's text size.
     pub fn layout(&self, window: &mut Window, win_w: f32, title: &str, items: &[Item], font: &str, title_size: f32) -> Layout {
@@ -95,9 +126,12 @@ impl Head {
         };
         let now = { let mut s = self.shaped.borrow_mut(); if s.0 != title || (s.1 <= 0. && !title.is_empty()) { *s = (title.to_string(), shape(window, title, title_size, FontWeight::BOLD)); } s.1 };
         let key = items.iter().map(|t| format!("{}\u{1f}{}\u{1f}{}", t.action, t.icon, t.label)).collect::<Vec<_>>().join("\u{1e}") + font + crate::i18n::tag() + &crate::scale::s().to_string();
-        let (full, _) = { let mut s = self.strip.borrow_mut(); if s.0 != key { let w = strip_width(items, &mut |t| shape(window, t, TEXT * crate::scale::s(), FontWeight::NORMAL)); *s = (key, w); } s.1 };
+        let (full, folded) = { let mut s = self.strip.borrow_mut(); if s.0 != key { let w = strip_width(items, &mut |t| shape(window, t, TEXT * crate::scale::s(), FontWeight::NORMAL)); *self.tight_w.borrow_mut() = tight_widths(items, &mut |t| shape(window, t, TEXT * crate::scale::s(), FontWeight::NORMAL)); *s = (key, w); } s.1 };
         let one = one_row(win_w, left_now(self.left.get(), self.title.get(), now), self.state.get(), full, self.right.get());
-        Layout { one, icons: !one && icons_only(self.row.get(), self.state.get(), full) }
+        let is_tight = !one && tight(self.row.get(), self.state.get(), folded);
+        let keep = if is_tight { let tw = self.tight_w.borrow(); keep_when_tight(&items.iter().zip(tw.iter()).map(|(t, w)| (group(&t.action), *w)).collect::<Vec<_>>(), self.row.get() - self.state.get() - GAP - ROW_END) } else { u64::MAX };
+        self.dropped.set(!keep);
+        Layout { one, icons: !one && icons_only(self.row.get(), self.state.get(), full), tight: is_tight, keep }
     }
 }
 
@@ -145,23 +179,25 @@ fn button(cx: &mut Context<Backplane>, light: bool, i: usize, t: &Item, fold: bo
     let d = crate::ui::with_rect(div().id(SharedString::from(format!("tool-{i}"))), move || rect).h(crate::scale::tpx(BTN_H)).flex().items_center().gap(px(ICON_GAP)).pl(px(PL)).pr(px(if fold { PL } else { PR }))
         .text_size(crate::scale::tpx(TEXT)).whitespace_nowrap().cursor_pointer().text_color(c(fg)).hover(|s| s.bg(c("raise")).text_color(c(if t.danger { "bad" } else if buy { "accent" } else { "text" })))
         .when(t.on && !buy, |d| d.bg(c("raise")))
-        // Buy it is the one framed chip; it alone gives way (its estimate ellipsised) when even the icons do not fit
-        .when(buy, |d| d.flex_shrink().min_w_0().border_1().border_color(c("line")).bg(c("panel"))).when(!buy, |d| d.flex_shrink_0());
+        // Buy it is the one framed chip; it alone gives way (its estimate ellipsised) when even the icons do not fit, and clips, never paints over Stop
+        .when(buy, |d| d.min_w_0().overflow_hidden().border_1().border_color(c("line")).bg(c("panel"))).when(buy && !fold, |d| d.flex_shrink()).when(!buy || fold, |d| d.flex_shrink_0());
     // an icon the set lacks keeps its room (art::icon draws an empty square too), so the width is what strip_width counts
     let d = if t.icon.is_empty() { d } else { d.child(div().flex_shrink_0().size(px(ICON)).children(crate::art::icon_name(&t.icon).map(|n| crate::art::icon(n, ICON, c(ic))))) };
     let d = if fold { d } else { d.child(div().flex_shrink_0().child(word.to_string())) };
-    let d = d.when(!est.is_empty(), |d| d.child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(c("faint")).child(est.to_string())));
+    let d = d.when(!fold && !est.is_empty(), |d| d.child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(c("faint")).child(est.to_string())));
     d.tooltip(crate::keys::tip(&tip.0, &tip.1, light)).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); if super::tools::makes_thread(&a) { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); }))
 }
 
-/// The tools: one shape each, the groups apart by spacing alone; with `icons`, the foldable ones as icons with their words in their tooltips.
-pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, local: &crate::local::Local, icons: bool) -> AnyElement {
+/// The tools: one shape each, the groups apart by spacing alone; with `icons`, the foldable ones as icons with their words in their tooltips;
+/// `tight`, every tool that has an icon (Buy it without its estimate).
+pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, local: &crate::local::Local, l: Layout) -> AnyElement {
     let mut row = div().id("thread-tools").min_w_0().h_full().flex().items_center().overflow_hidden();
     let mut prev: Option<u8> = None;
     for (i, t) in tools(thread).into_iter().enumerate() {
+        if l.tight && i < 64 && l.keep & (1 << i) == 0 { continue } // no room even for its icon: it is in the thread's menu
         let k = if t.tip.contains("Ctrl+") { String::new() } else { crate::keys::hint(local, crate::keys::id_for(&t.action, &t.value, "")) };
         let g = group(&t.action); let sp = space(prev, g); prev = Some(g);
-        let fold = icons && can_fold(&t);
+        let fold = (l.icons && can_fold(&t)) || (l.tight && !t.icon.is_empty());
         // folded, the tooltip leads with the word the button no longer shows
         let (label, tipw) = (crate::i18n::trs(&t.label), crate::i18n::trs(&t.tip));
         /* i18n-ok: a label and its tip, both through trs */ let tip = if t.tip.is_empty() { label } else if fold { format!("{label}: {tipw}") } else { tipw };
@@ -217,5 +253,35 @@ mod tests {
         assert_eq!(icons, 132. + (14. + 25.) + (2. + 25.) + (14. + 25.));
         let stop = [item("interrupt", "stop", "Stop")]; assert_eq!(strip_width(&stop, &mut w).0, strip_width(&stop, &mut w).1, "Stop never folds");
         assert!(!can_fold(&item("pin", "", "Pin")), "a tool with no icon keeps its word");
+    }
+    #[test] fn tight_drops_the_branching_then_keeping_tools_and_keeps_stop_last() {
+        // Buy it, Stop, Pin, Settle, Fork as icons: 27 + 14 + 25 + 14 + 25 + 2 + 25 + 14 + 25 = 171
+        let ts = [(1u8, 27.), (0, 25.), (2, 25.), (2, 25.), (3, 25.)];
+        assert_eq!(keep_when_tight(&ts, 171.), 0b11111, "all fit");
+        assert_eq!(keep_when_tight(&ts, 170.), 0b01111, "Fork goes first");
+        assert_eq!(keep_when_tight(&ts, 120.), 0b00111, "then Settle (the keeping group from its end)");
+        assert_eq!(keep_when_tight(&ts, 66.), 0b00011, "Buy it and Stop");
+        assert_eq!(keep_when_tight(&ts, 40.), 0b00010, "Stop is the last to go");
+        assert_eq!(keep_when_tight(&ts, 0.), 0b00010, "never none");
+        assert_eq!(keep_when_tight(&[], 10.), 0);
+    }
+    #[test] fn the_tools_a_tight_header_drops_are_in_its_menu() {
+        let t = serde_json::json!({"tools": [{"action":"fab-buy","icon":"shopping-cart","label":"Buy it · from $5"},{"action":"interrupt","icon":"square","label":"Stop"},{"action":"pin","icon":"pin","label":"Pin"},{"action":"fork","icon":"git-fork","label":"Fork thread"}]});
+        assert_eq!(tools(&t).len(), 4);
+        assert!(dropped_items(&t, 0).is_empty(), "nothing dropped: nothing added");
+        let d = dropped_items(&t, !0b0011);
+        assert_eq!(d.iter().map(|i| (i.label.as_str(), i.action.as_str())).collect::<Vec<_>>(), [("Pin", "pin"), ("Fork thread", "fork")]);
+        assert_eq!(dropped_items(&t, 0b0001)[0].label, "Buy it", "Buy it by its word, without its estimate");
+    }
+    #[test] fn tight_only_when_even_the_icons_do_not_fit() {
+        // state 140 + 24 + icons 200 + 6 = 370
+        assert!(!tight(370., 140., 200.), "the icons fit: Stop and Buy it keep their words");
+        assert!(tight(369., 140., 200.));
+        assert!(!tight(0., 140., 200.), "an unmeasured row is never tight");
+        // tight is past icons_only: the folded strip is never wider than the worded one
+        let mut w = |s: &str| s.chars().count() as f32 * 7.;
+        let ts = [item("interrupt", "stop", "Stop"), item("fab-buy", "shopping-cart", "Buy it · from $5"), item("pin", "pin", "Pin")];
+        let (full, icons) = strip_width(&ts, &mut w);
+        for r in (100..800).step_by(3) { let r = r as f32; assert!(!tight(r, 140., icons) || icons_only(r, 140., full), "tight but worded at {r}"); }
     }
 }

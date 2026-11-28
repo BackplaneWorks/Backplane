@@ -192,10 +192,17 @@ pub fn row_actions(t: &Value) -> Vec<RowAction> {
     out
 }
 
+/// The planner's actions drawn only under the pointer: all but a pinned row's pin.
+pub fn hover_actions(t: &Value) -> Vec<RowAction> { row_actions(t).into_iter().filter(|a| *a != RowAction::Unpin).collect() }
+/// The planner's action drawn whether hovered or not: a pinned row's pin (it says the row is pinned), None on the others.
+pub fn always_drawn(t: &Value) -> Option<RowAction> { row_actions(t).into_iter().find(|a| *a == RowAction::Unpin) }
+
 /// The row's hover action strip (`Snooze`/`Wake`, `Settle`, `Pin`/`Unpin`), built once from `row_actions(t)` so no icon can appear twice.
-pub fn action_strip(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> Div {
+pub fn action_strip(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> Div { actions_of(cx, light, t, group, &row_actions(t)) }
+/// Some of the planner's actions (`hover_actions`, `always_drawn`), as `action_strip` draws them.
+pub fn actions_of(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString, acts: &[RowAction]) -> Div {
     let mut strip = div().flex().items_center().gap_1();
-    for act in row_actions(t) {
+    for &act in acts {
         match act {
             RowAction::Wake | RowAction::Snooze => { strip = strip.children(snooze_button(cx, light, t, group.clone())); }
             RowAction::Settle => { strip = strip.children(settle_button(cx, light, t, group.clone())); }
@@ -297,6 +304,12 @@ mod tests {
         assert_eq!(row_actions(&lead_only), vec![RowAction::Settle, RowAction::Pin]);
 
         let already_settled = json!({"id":"h|t6","snooze":[],"settle":"","lead":[],"pinned":false});
+        // a one-line row: the hover-only actions lie over the title's end, a pinned row's pin stays drawn in the row (never both)
+        assert_eq!(hover_actions(&done), row_actions(&done), "an unpinned row's actions are all hover-only");
+        assert_eq!(always_drawn(&done), None);
+        assert_eq!(hover_actions(&snoozed_pinned), vec![RowAction::Wake, RowAction::Settle], "a pinned row's pin is never hover-only");
+        assert_eq!(always_drawn(&snoozed_pinned), Some(RowAction::Unpin));
+        for r in [&done, &snoozed_pinned, &running, &needs, &lead_only] { let mut all = hover_actions(r); all.extend(always_drawn(r)); assert_eq!(all, row_actions(r)); }
         assert_eq!(settle_value(&already_settled), "");
         assert_eq!(row_actions(&already_settled), vec![RowAction::Pin]);
 
