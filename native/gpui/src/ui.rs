@@ -1136,7 +1136,7 @@ impl Render for Backplane {
         let head_thread = has_thread && !has_home && !crate::screens::swarm::over_thread(&self.data);
         // a project's page over a thread: its Send starts a new thread on the default model, so nothing of the open thread is drawn there
         // (its dock, its asks and queue, its model, plan and context chips): they would act on the thread, not on what the page sends
-        let on_page = has_home; let chrome = thread_chrome_on(on_page);
+        let on_page = has_home; let chrome = thread_chrome_on(on_page, !string(thread, "id").is_empty());
         let quiet = Value::Null; let box_thread = if chrome { thread } else { &quiet };
         crate::keys::set_tip_font(&self.local.font);
         crate::keys::set_tip_menu(self.screens.ctx.is_some());
@@ -1947,8 +1947,8 @@ impl Backplane {
 /// Whether the bot/swarm page and bar may cover the main column (suppressed while a project page is open).
 pub(crate) fn shows_bot_overlay(has_home: bool) -> bool { !has_home }
 /// Whether the open thread's chrome (its dock, composer boxes, model/plan/context chips, Send's words) is drawn: not over a project's page,
-/// whose Send starts a new thread.
-pub(crate) fn thread_chrome_on(on_page: bool) -> bool { !on_page }
+/// whose Send starts a new thread, and not on the start page with no thread at all (the chip read "✳ …", the meter was empty).
+pub(crate) fn thread_chrome_on(on_page: bool, has_id: bool) -> bool { !on_page && has_id }
 
 #[cfg(test)]
 mod home_tests {
@@ -2010,8 +2010,9 @@ mod home_tests {
 
     #[test]
     fn a_project_page_shows_none_of_the_previous_threads_chrome() {
-        assert!(!super::thread_chrome_on(true));
-        assert!(super::thread_chrome_on(false));
+        assert!(!super::thread_chrome_on(true, true));
+        assert!(super::thread_chrome_on(false, true));
+        assert!(!super::thread_chrome_on(false, false), "the start page: no thread, no thread chrome");
         // what the page's Send and box get in place of the thread: plain Send on the accent, the normal border, whatever the thread was doing
         let planning = json!({"planMode": {"phase": "planning", "interaction": "plan", "once": false}, "send": "Send", "sendAct": "send"});
         assert_eq!(crate::screens::planmode::send_button(&planning, false), ("Plan".into(), "input"));
