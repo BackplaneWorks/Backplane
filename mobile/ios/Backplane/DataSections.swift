@@ -287,8 +287,26 @@ struct DataProjectPageView: View {
     /// what the project is, as the desktop's project page opens: its goal (a tap shows it whole) and its boards
     @State private var card: DProjectCard?
     @State private var whole = false
+    @State private var readme: String?
     var body: some View {
         List {
+            // as the desktop's project page: the folder (selectable), and the viewer on the project itself without a thread
+            // (`project-home-<id>`): Board, Schematic and 3D when it has a board, Files always
+            if let p = project {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !p.root.isEmpty { Text(verbatim: p.root).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(2).textSelection(.enabled).accessibilityIdentifier("data.project.page.path") }
+                    HStack(spacing: 8) {
+                        ForEach(((card?.boards.isEmpty ?? true) ? [] : ["Board", "Schematic", "3D"]) + ["Files"], id: \.self) { t in
+                            Button { path.append(DViewerRoute(id: "project-home-" + p.id, tab: t)) } label: {
+                                Text(Tr.t(t)).dui(12, weight: .semibold).lineLimit(1).foregroundStyle(BackplaneDesign.text)
+                                    .padding(.horizontal, 10).frame(minHeight: 30)
+                                    .background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control))
+                                    .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1))
+                            }.buttonStyle(.plain).accessibilityIdentifier("data.project.page.tool.\(t)")
+                        }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).dataRow()
+            }
             if let c = card, !c.goal.isEmpty || !c.boards.isEmpty || c.leadDays > 0 || !c.estimateWarnings.isEmpty {
                 Button { whole.toggle() } label: {
                     VStack(alignment: .leading, spacing: 4) {
@@ -309,6 +327,11 @@ struct DataProjectPageView: View {
                     }
                 }
                 if page.sections.allSatisfy({ $0.rows.isEmpty && $0.count == 0 }) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(14).dataRow() }
+                // under the threads, as the desktop's project page: its README (when it has one) and its goal and notes, folded, read-only
+                if let p = project {
+                    if let r = readme { DataProjectNote(title: Tr.k("gpui.readme").uppercased(), tag: "readme", empty: "") { r }.dataRow() }
+                    if client.has("projecthome") { DataProjectNote(title: Tr.k("gpui.goal.notes"), tag: "goal", empty: Tr.k("gpui.no.goal.yet.ask.an")) { await client.projectIntent(p.id) }.dataRow() }
+                }
             } else { DLoading(text: Tr.t("Loading…")).dataRow() }
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
@@ -320,11 +343,40 @@ struct DataProjectPageView: View {
             Button(Tr.t("Buy it")) { if let b = buyAsk { startBuy(b) } }.accessibilityIdentifier("data.project.page.buy.confirm")
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
-        .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id); card = await client.projectCard(p.id) } }
+        .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id); card = await client.projectCard(p.id)
+            readme = (await client.fileBytes("project-home-" + p.id, "README.md")).flatMap { String(data: $0, encoding: .utf8) } } }
     }
     private func startBuy(_ b: DBuy) {
         guard !buying else { return }; buying = true; buyFailed = ""
         Task { do { let t = try await client.buy(b.thread); if !t.isEmpty { client.linkTarget = DLinkTarget(kind: .thread, id: t) } } catch { buyFailed = error.localizedDescription }; buying = false }
     }
     private func load() async { page = await client.projectPage(route.key, done: done, older: older) }
+}
+
+/// A folded note of a project's page (README, Goal & notes): the head as a section's, the text in the app's Markdown when opened; `load` runs then.
+struct DataProjectNote: View {
+    let title: String
+    let tag: String
+    let empty: String
+    let load: () async -> String
+    @State private var open = false
+    @State private var text: String?
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Button { open.toggle() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.system(size: 11, weight: .semibold)).foregroundStyle(BackplaneDesign.dim)
+                    Text(verbatim: title).dmono(11).foregroundStyle(BackplaneDesign.dim)
+                    Spacer()
+                }.frame(minHeight: 36).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityIdentifier("data.project.page.\(tag)")
+            if open {
+                if let t = text {
+                    if t.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { Text(verbatim: empty).dmono(12).foregroundStyle(BackplaneDesign.faint) }
+                    else { DataMarkdown(text: t).accessibilityIdentifier("data.project.page.\(tag).text") }
+                } else { Text(Tr.t("Loading…")).dmono(12).foregroundStyle(BackplaneDesign.faint) }
+            }
+        }.padding(.horizontal, 14).padding(.vertical, 2)
+        .task(id: open) { if open && text == nil { text = await load() } }
+    }
 }

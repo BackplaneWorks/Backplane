@@ -59,6 +59,7 @@ data class DEntry(
     val live: Boolean = false, val tool: DTool? = null, val ask: DAsk? = null, val attachments: List<DAttachment> = emptyList(),
     val sending: Boolean = false, val failed: Boolean = false,
     val localImages: List<ByteArray> = emptyList(), // phone-only: the pictures of a message this phone is sending
+    val attached: List<DAttachedFile> = emptyList(), // the files (not pictures) a person's message carries (data/1 `attached`): chips under the bubble
     val label: String = "", // a design step: what changed; a note: its name
     val agentOnly: Boolean = false, // a message only the agent reads (data/1 `agentOnly`): never shown
     val tone: String = "",  // a note: error, info…
@@ -149,6 +150,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     replyTo = o.optJSONObject("replyTo")?.takeIf { it.str("id").isNotEmpty() }?.let { DReplyTo(it.str("id"), it.str("quote")) },
     voice = o.optJSONObject("voice")?.let(::parseVoiceMark),
     copy = parseCopy(o.optJSONArray("copy")),
+    attached = o.optJSONArray("attached").list { DAttachedFile(it.str("name"), it.str("path")) },
     restore = o.optJSONObject("restore")?.let { DRestore(it.lng("turn"), it.str("commit"), it.str("info")) },
     h = o.str("h"),
     queued = o.optBoolean("queued", false),
@@ -244,4 +246,14 @@ fun parseHome(o: JSONObject?): DHome? = o?.takeIf { it.optString("kind").isNotEm
         canMoveHere = it.optBoolean("canMoveHere", false),
         moving = mv,
     )
+}
+
+/** A file sent with a message (the composer's Choose a file): uploaded to the hub first (`POST /attach`), then told to the agent as an
+ *  `[attachment: <path>]` line under the words, the desktop's way; the hub lists them back on the entry as `attached` (data/1). */
+data class DAttachedFile(val name: String, val path: String) {
+    companion object {
+        /** The text sent: the words, then a blank line and one line per file (just the lines when there are no words). */
+        fun join(text: String, files: List<DAttachedFile>): String =
+            if (files.isEmpty()) text else text.trimEnd() + (if (text.isBlank()) "" else "\n\n") + files.joinToString("\n") { "[attachment: ${it.path}]" }
+    }
 }

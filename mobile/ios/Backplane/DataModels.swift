@@ -96,6 +96,18 @@ struct DPlanMode: Codable, Equatable, Hashable {
     }
 }
 
+/// A file sent with a message (the composer's Choose a file): uploaded to the hub first (`POST /attach`), then told to the agent as an
+/// `[attachment: <path>]` line under the words, the desktop's way; the hub lists them back on the entry as `attached` (data/1).
+struct DAttachedFile: Codable, Equatable, Hashable {
+    var name: String
+    var path: String
+    /// The text sent: the words, then a blank line and one line per file (just the lines when there are no words).
+    static func join(_ text: String, _ files: [DAttachedFile]) -> String {
+        guard !files.isEmpty else { return text }
+        let words = text.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+        return words + (words.isEmpty ? "" : "\n\n") + files.map { "[attachment: \($0.path)]" }.joined(separator: "\n")
+    }
+}
 struct DAttachment: Codable, Equatable, Identifiable {
     var id: String
     var name: String
@@ -134,8 +146,9 @@ struct DEntry: Codable, Equatable, Identifiable {
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
+    var attached: [DAttachedFile] = []   // the files (not pictures) a person's message carries (data/1 `attached`): chips in the bubble
     var replyParam: [String: String]?   // the `replyTo {id, text}` a message this phone is sending carries (feature `reply`), for Retry
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h, queued, files }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, folds, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice, copy, restore, h, queued, files, attached }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -151,6 +164,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         term = try? c.decode(DTermInfo.self, forKey: .term)
         handoff = try? c.decode(DHandoff.self, forKey: .handoff)
         attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []
+        attached = (try? c.decode([DAttachedFile].self, forKey: .attached)) ?? []
         images = (try? c.decode([String].self, forKey: .images)) ?? []
         replyTo = try? c.decode(DReplyTo.self, forKey: .replyTo)
         copy = try? c.decode([DCopyPiece].self, forKey: .copy)

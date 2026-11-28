@@ -145,13 +145,15 @@ fun DataRoot() {
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
-            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
+            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }, { page = Page.Viewer(it) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, Msg.palette_terminal) { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
             is Page.Viewer -> {
                 val backPage = p.from ?: if (p.id.startsWith("project-home-")) Page.Home else Page.Thread(p.id)
                 BackHandler { page = backPage }
                 val viewerThread = DataClient.threads.firstOrNull { it.id == p.id }
+                    // a project's own viewer (the project page's Board / Schematic / 3D / Files): no thread, the project's folder
+                    ?: p.id.removePrefix("project-home-").takeIf { p.id.startsWith("project-home-") && it.isNotEmpty() }?.let { pid -> DThread(id = p.id, project = pid, title = DataClient.projects.firstOrNull { it.id == pid }?.title ?: pid, state = "idle", updatedAt = 0L, pinned = false, settled = false, archived = false, provider = "", model = "", preview = "", waiting = 0) }
                     ?: if (p.file.isNotEmpty()) DThread(id = p.id, project = "", title = p.file.substringAfterLast('/'), state = "idle", updatedAt = 0L, pinned = false, settled = false, archived = false, provider = "", model = "", preview = "", waiting = 0) else null
                 viewerThread?.let { ViewerScreen(it, p.file, p.line) { page = backPage } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
@@ -345,6 +347,67 @@ internal fun DBtn(label: String, primary: Boolean, enabled: Boolean = true, modi
     }
 }
 
+/** The composer's picture tools, the same in a thread and on New thread: Attach (Choose a photo, Take a photo, and what `more` adds) and Draw;
+ *  each picture made ready (DataClient.prepared) goes into `pending`; `say` gets the line for the composer's notice ("" clears it). */
+@Composable
+internal fun PhotoTools(pending: androidx.compose.runtime.snapshots.SnapshotStateList<ByteArray>, say: (String) -> Unit, tag: String, more: @Composable (close: () -> Unit) -> Unit = {}) {
+    val ctx = androidx.compose.ui.platform.LocalContext.current; val scope = rememberCoroutineScope()
+    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, uri) }; if (b != null) pending.add(b) else say(Msg.android_picture_bad) }
+    }
+    // the camera's photo (Take a photo, by Attach): into the app's cache through its FileProvider, then made ready like a chosen one
+    var shotUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    val shoot = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.TakePicture()) { ok ->
+        val u = shotUri; if (ok && u != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, u) }; if (b != null) pending.add(b) else say(Msg.android_photo_bad) }
+    }
+    fun takePhoto() = runCatching {
+        val dir = java.io.File(ctx.cacheDir, "camera").apply { mkdirs() }
+        dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.delete() }
+        val u = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg"))
+        shotUri = u; shoot.launch(u)
+    }.onFailure { say(Msg.android_camera_failed) }
+    val camAsk = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
+        if (ok) { say(""); takePhoto() } else say(Msg.android_camera_off)
+    }
+    var attachMenu by remember { mutableStateOf(false) }
+    var drawing by remember { mutableStateOf(false) }
+    if (drawing) DrawPadSheet({ drawing = false }) { pending.add(it); say("") }
+    Box(Modifier.size(40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable { if (DataClient.canSendImages) attachMenu = true else say(Msg.android_pictures_old) }.testTag("$tag.attach"), contentAlignment = Alignment.Center) {
+        Icon(Icons.Default.AttachFile, Msg.composer_attach, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        DropdownMenu(attachMenu, { attachMenu = false }) {
+            DropdownMenuItem({ Text(Msg.android_photo_choose, fontFamily = BpUi) }, { attachMenu = false; pick.launch("image/*") }, Modifier.testTag("$tag.attach.pick"), leadingIcon = { Icon(Icons.Default.Image, null) })
+            DropdownMenuItem({ Text(Msg.android_photo_take, fontFamily = BpUi) }, { attachMenu = false
+                if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) takePhoto() else camAsk.launch(android.Manifest.permission.CAMERA)
+            }, Modifier.testTag("$tag.attach.camera"), leadingIcon = { Icon(Icons.Default.PhotoCamera, null) })
+            more { attachMenu = false }
+        }
+    }
+    Box(Modifier.size(40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable { if (DataClient.canSendImages) drawing = true else say(Msg.android_pictures_old) }.testTag("$tag.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, Msg.draw_title, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+}
+
+/** The pictures waiting to go with a message: a tap on one drops it; the × in its corner says so (square, as iOS's xmark on the same thumbnails). */
+@Composable
+internal fun PendingPics(pending: androidx.compose.runtime.snapshots.SnapshotStateList<ByteArray>, tag: String) {
+    if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        pending.toList().forEach { b -> Box(Modifier.testTag("$tag.pending").clickable { pending.remove(b) }) {
+            Pic(b, 64)
+            Box(Modifier.align(Alignment.TopEnd).padding(3.dp).size(18.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { pending.remove(b) }.testTag("$tag.pending.remove"), contentAlignment = Alignment.Center) {
+                Icon(Icons.Default.Close, Msg.ios_picture_remove, tint = dcs.onSurface, modifier = Modifier.size(12.dp))
+            }
+        } }
+    }
+}
+
+/** A file sent with a message, or waiting in the composer (with its × to drop it): a document mark and its name. */
+@Composable
+internal fun FileChip(name: String, modifier: Modifier = Modifier, remove: (() -> Unit)? = null) {
+    Row(modifier.clip(dShape).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).padding(start = 8.dp, end = if (remove == null) 10.dp else 2.dp).heightIn(min = 36.dp), verticalAlignment = Alignment.CenterVertically) {
+        Icon(Icons.Default.Description, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
+        DMono(name, dcs.onSurface, 12, Modifier.widthIn(max = 220.dp))
+        if (remove != null) Box(Modifier.size(32.dp).clickable(onClick = remove).testTag("thread.pending.file.remove"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, Msg.common_remove, tint = dcs.onSurfaceVariant, modifier = Modifier.size(14.dp)) }
+    }
+}
+
 /** The composer's model chip: the hub's "claude / opus / high" in a line box; a tap opens the picker. */
 @Composable
 internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier, provider: String = "", onClick: () -> Unit) {
@@ -368,7 +431,7 @@ private val homeTab = mutableStateOf(HomeTab.INBOX)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
+private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openViewer: (String) -> Unit = {}, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var tab by homeTab
@@ -385,7 +448,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var secMenu by remember { mutableStateOf<DSecRow?>(null) }
     var secRename by remember { mutableStateOf<DSection?>(null) }
     var secNewSwarm by remember { mutableStateOf<String?>(null) }   // New swarm from a section project's menu (a project id)
-    secPage?.let { p -> androidx.activity.compose.BackHandler { showSec(null) }; ProjectPageScreen(p, open, { id -> showSec(null); newThread(id) }, { room -> showSec(null); openSwarm(room) }) { showSec(null) }; return }
+    secPage?.let { p -> androidx.activity.compose.BackHandler { showSec(null) }; ProjectPageScreen(p, open, { id -> showSec(null); newThread(id) }, { room -> showSec(null); openSwarm(room) }, openViewer) { showSec(null) }; return }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
@@ -977,9 +1040,6 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
     LaunchedEffect(id) { DataClient.refreshSecretAsks(id) }
     val word = DataClient.commandOf(draft)
     fun put(t: String) = DataClient.setField(id, TextFieldValue(t, TextRange(t.length)), typed = false)
-    val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, uri) }; if (b != null) pending.add(b) else notice = Msg.android_picture_bad }
-    }
     var menu by remember { mutableStateOf(false) }; var models by remember { mutableStateOf(false) }; var finding by remember(id) { mutableStateOf(false) }
     val rowsNow by rememberUpdatedState(rows); var found by remember(id) { mutableStateOf("") } // the row find or a search hit went to, marked
     var order by remember(id) { mutableStateOf<DataClient.Order?>(null) }
@@ -993,25 +1053,15 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
     LaunchedEffect(id, thread?.state, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE && thread?.state != "working") runCatching { DataClient.buyOf(id) }.onSuccess { buy = it } }
     val startBuy: () -> Unit = { if (!buying) { buying = true; scope.launch { try { val t = DataClient.buy(id); if (t.isNotEmpty()) go(t) } catch (e: Exception) { notice = e.message ?: Msg.android_buy_failed } finally { buying = false } } } }
     val focus = androidx.compose.ui.platform.LocalFocusManager.current
-    // the camera's photo (Take a photo, by Attach): into the app's cache through its FileProvider, then made ready like a chosen one
-    var shotUri by remember(id) { mutableStateOf<android.net.Uri?>(null) }
-    val shoot = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.TakePicture()) { ok ->
-        val u = shotUri; if (ok && u != null) scope.launch { val b = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { DataClient.prepared(ctx, u) }; if (b != null) pending.add(b) else notice = Msg.android_photo_bad }
+    // Choose a file (a datasheet, a CSV): sent to the hub at once, as the desktop's paperclip does; a chip with its name until the message goes
+    val pendingFiles = remember(id) { mutableStateListOf<DAttachedFile>() }
+    var uploading by remember(id) { mutableStateOf("") }
+    val pickFile = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) scope.launch { uploading = uri.lastPathSegment?.substringAfterLast('/').orEmpty().ifEmpty { "…" }; notice = ""
+            try { pendingFiles.add(DataClient.attachFile(ctx, id, uri)) } catch (e: Exception) { notice = e.message ?: Msg.upload_failed } finally { uploading = "" } }
     }
-    fun takePhoto() = runCatching {
-        val dir = java.io.File(ctx.cacheDir, "camera").apply { mkdirs() }
-        dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3_600_000 }?.forEach { it.delete() }
-        val u = androidx.core.content.FileProvider.getUriForFile(ctx, ctx.packageName + ".files", java.io.File(dir, "photo-${System.currentTimeMillis()}.jpg"))
-        shotUri = u; shoot.launch(u)
-    }.onFailure { notice = Msg.android_camera_failed }
-    val camAsk = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) { notice = ""; takePhoto() } else notice = Msg.android_camera_off
-    }
-    var attachMenu by remember { mutableStateOf(false) }
-    var drawing by remember(id) { mutableStateOf(false) }
-    if (drawing) DrawPadSheet({ drawing = false }) { pending.add(it); notice = "" }
     var openRuns by remember(id) { mutableStateOf(emptySet<String>()) }
-    thread?.let { t -> ThreadMenus(t, menu, { menu = false }, { back() }, if (DataClient.has("search")) ({ finding = true }) else null, buy?.label?.let { it to startBuy }); if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
+    thread?.let { t -> ThreadMenus(t, menu, { menu = false }, { back() }, if (DataClient.has("search")) ({ finding = true }) else null, buy?.label?.let { it to startBuy }, opened = { go(it) }); if (models) PickerSheet(t.id, DNewThreadChoice(), {}) { models = false } }
     // go to a message (a find match, a home search hit): its row, loading earlier pages until it is there; marked until the next one or the find bar closes
     var jumping by remember(id) { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     fun jump(msg: String, fade: Boolean) { jumping?.cancel(); jumping = scope.launch {
@@ -1070,14 +1120,10 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                 DMono(Tr.t(it), dcs.error, 12, Modifier.testTag("thread.refused"))
                 if (DNoProvider.isSendError(it)) DBtn(Msg.provider_notice_button, false, true, Modifier.testTag("thread.refused.accounts")) { DataClient.openAccounts = true }
             }
-            if (pending.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // a tap on the picture drops it, as before; the × in its corner says so (square, as iOS's xmark on the same thumbnails)
-                pending.toList().forEach { b -> Box(Modifier.testTag("thread.pending").clickable { pending.remove(b) }) {
-                    Pic(b, 64)
-                    Box(Modifier.align(Alignment.TopEnd).padding(3.dp).size(18.dp).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { pending.remove(b) }.testTag("thread.pending.remove"), contentAlignment = Alignment.Center) {
-                        Icon(Icons.Default.Close, Msg.ios_picture_remove, tint = dcs.onSurface, modifier = Modifier.size(12.dp))
-                    }
-                } }
+            PendingPics(pending, "thread")
+            if (pendingFiles.isNotEmpty() || uploading.isNotEmpty()) Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                pendingFiles.toList().forEach { f -> FileChip(f.name, Modifier.testTag("thread.pending.file")) { pendingFiles.remove(f) } }
+                if (uploading.isNotEmpty()) DMono(Msg.gpui_attach_uploading(uploading), dfaint, 12, Modifier.testTag("thread.pending.uploading"))
             }
             if (dictate) VoiceStrip(id)
             // Reply on a message: the strip over the box (who wrote it, its first line; a tap goes to it, × drops it), and the box takes the keyboard
@@ -1148,28 +1194,19 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
                         }
                     }
                 }
-                Box(Modifier.size(40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable { if (DataClient.canSendImages) attachMenu = true else notice = Msg.android_pictures_old }.testTag("thread.attach"), contentAlignment = Alignment.Center) {
-                    Icon(Icons.Default.AttachFile, Msg.composer_attach, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                    DropdownMenu(attachMenu, { attachMenu = false }) {
-                        DropdownMenuItem({ Text(Msg.android_photo_choose, fontFamily = BpUi) }, { attachMenu = false; pick.launch("image/*") }, Modifier.testTag("thread.attach.pick"), leadingIcon = { Icon(Icons.Default.Image, null) })
-                        DropdownMenuItem({ Text(Msg.android_photo_take, fontFamily = BpUi) }, { attachMenu = false
-                            if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.CAMERA) == android.content.pm.PackageManager.PERMISSION_GRANTED) takePhoto() else camAsk.launch(android.Manifest.permission.CAMERA)
-                        }, Modifier.testTag("thread.attach.camera"), leadingIcon = { Icon(Icons.Default.PhotoCamera, null) })
-                    }
-                }
-                Box(Modifier.size(40.dp).clip(dShape).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShape).clickable { if (DataClient.canSendImages) drawing = true else notice = Msg.android_pictures_old }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, Msg.draw_title, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                PhotoTools(pending, { notice = it }, "thread") { close -> DropdownMenuItem({ Text(Msg.android_attach_file, fontFamily = BpUi) }, { close(); pickFile.launch(arrayOf("*/*")) }, Modifier.testTag("thread.attach.file"), leadingIcon = { Icon(Icons.Default.Description, null) }) }
                 if (dictate && (DataVoice.always || DataVoice.alwaysWanted)) AlwaysPill()
                 if (dictate) MicChip(DataVoice.on(id), held = { begins -> DataVoice.held(id, begins) { if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id) else micAsk.launch(android.Manifest.permission.RECORD_AUDIO) } }) {
                     if (DataVoice.on(id) || androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id)
                     else micAsk.launch(android.Manifest.permission.RECORD_AUDIO)
                 }
-                val blank = draft.isBlank() && pending.isEmpty()
+                val blank = draft.isBlank() && pending.isEmpty() && pendingFiles.isEmpty()
                 if (running && blank) DBtn(Msg.composer_stop, false, modifier = Modifier.height(40.dp).testTag("thread.stop"), danger = true) { DataClient.interrupt(id) }
-                else DBtn(word?.label?.let(Tr::t) ?: (if (planPrimary) Msg.gpui_mgmt_plan_tab else Msg.composer_send), true, !blank, Modifier.height(40.dp).testTag("thread.send")) {
+                else DBtn(word?.label?.let(Tr::t) ?: (if (planPrimary) Msg.gpui_mgmt_plan_tab else Msg.composer_send), true, !blank && uploading.isEmpty(), Modifier.height(40.dp).testTag("thread.send")) {
                     notice = ""; existing = null
                     // sent: the keyboard goes away, so the reply has the screen (a tap on the box brings it back)
                     // (focus first: the keyboard's word in progress is committed before the box empties, never after it)
-                    if (word == null) { val text = draft; focus.clearFocus(); val spoken = if (dictate && pending.isEmpty()) DataVoice.dictated(id) else null; if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList(), voice = spoken, reply = DataClient.replying[id]); pending.clear(); stick = true }
+                    if (word == null) { val text = draft; focus.clearFocus(); val spoken = if (dictate && pending.isEmpty()) DataVoice.dictated(id) else null; if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList(), voice = spoken, reply = DataClient.replying[id], files = pendingFiles.toList()); pending.clear(); pendingFiles.clear(); stick = true }
                     // a command of the composer: the hub runs it; a refusal leaves the draft and says why
                     else { val text = draft.trim(); scope.launch { try {
                         val r = DataClient.runCommand(id, text)
@@ -1326,6 +1363,7 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
             e.replyTo?.let { r -> DMono(Msg.gpui_b_in_reply_to(r.quote), dfaint, modifier = Modifier.clickable { goTo(r.id) }.padding(bottom = 3.dp).testTag("thread.entry.replyto")) }
             e.localImages.forEach { Pic(it, 160); Spacer(Modifier.height(4.dp)) }
             e.attachments.filter { e.localImages.isEmpty() }.forEach { PicById(it.id, 160); Spacer(Modifier.height(4.dp)) }
+            e.attached.forEach { FileChip(it.name, Modifier.padding(bottom = 4.dp).testTag("thread.entry.file")) }
             // long-press: Reply, Copy, and Restore to before this when the hub has the snapshot before the turn this message started (asked first, with the snapshot's info)
             var menu by remember { mutableStateOf(false) }; var asking by remember { mutableStateOf(false) }
             val press = if (e.restore != null || rr != null) Modifier.combinedClickable(onClick = {}, onLongClick = { menu = true }) else Modifier
@@ -1353,7 +1391,7 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
                 }
                 if (e.sending) DMono(Msg.thread_sending, dfaint)
                 else if (e.failed) DMono(Msg.android_send_retry, dcs.error, modifier = Modifier.clickable { DataClient.retry(tid, e) })
-                else { replyLink(); DMono(dStamp(e.at), dfaint) }
+                else { if (e.text.isNotBlank()) CopyButton(e.text, word = true, tag = "thread.entry.copy", size = 12); replyLink(); DMono(dStamp(e.at), dfaint) }
             }
         }
         "assistant" -> Column(Modifier.fillMaxWidth().replySwipe(rr, reply).padding(horizontal = 14.dp, vertical = 6.dp)) {
@@ -1364,7 +1402,8 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
             // the footer: the time, Reply; a long-press on it (the text keeps its own selection) is Reply and Copy
             if (!e.live) { var menu by remember { mutableStateOf(false) }
                 Row(Modifier.padding(top = 4.dp).combinedClickable(onClick = {}, onLongClick = { if (rr != null) menu = true }), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    DMono(dStamp(e.at), dfaint); replyLink()
+                    // Copy the whole message (its Markdown, as the desktop's Copy), beside Reply
+                    DMono(dStamp(e.at), dfaint); replyLink(); if (e.text.isNotBlank()) CopyButton(e.text, word = true, tag = "thread.entry.copy", size = 12)
                     DropdownMenu(menu, { menu = false }) { ReplyMenuItems(e, rr, { menu = false }, reply) }
                 } }
         }
@@ -1753,6 +1792,8 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
     var choice by remember { mutableStateOf(DNewThreadChoice()) }
     var chip by remember { mutableStateOf("") }
     var picking by remember { mutableStateOf(false) }
+    // a thread can start with pictures, as a reply carries them: the same Attach and Draw as a thread's composer, sent with the first message
+    val pending = remember { mutableStateListOf<ByteArray>() }
     val owner = DataClient.projects.firstOrNull { it.id == project || it.newOn.any { n -> n.value == project } }
     val title = owner?.title ?: ""
     // where it runs (D6): the hub's choice first ("runs on desktop"); the line opens the machine picker when the project is on more than one
@@ -1773,10 +1814,12 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
             if (where.isNotEmpty()) DMono(Tr.t(where) + if ((owner?.newOn?.size ?: 0) > 1) " ▾" else "", dfaint, 11, Modifier.testTag("new.where").clickable(enabled = (owner?.newOn?.size ?: 0) > 1) { pickRun = true })
             DField(text, { text = it }, Msg.android_thread_new_hint, Modifier.heightIn(min = 120.dp).focusRequester(focus).testTag("new.text"), 8, dcs.primary)
             if (err.isNotEmpty()) Text(Tr.t(err), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp)
+            PendingPics(pending, "new")
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (DataClient.has("picker")) ModelChip(chip.ifEmpty { " " }, "new.model", Modifier.weight(1f), provider = choice.provider ?: "") { picking = true } else Spacer(Modifier.weight(1f))
+                PhotoTools(pending, { err = it }, "new")
                 DBtn(if (busy) Msg.state_starting else Msg.android_start, true, !busy, Modifier.testTag("new.start")) {
-                    busy = true; scope.launch { try { created(DataClient.createThread(target, text, choice).id) } catch (e: Exception) { err = e.message ?: ""; busy = false } }
+                    busy = true; scope.launch { try { created(DataClient.createThread(target, text, choice, pending.toList()).id) } catch (e: Exception) { err = e.message ?: ""; busy = false } }
                 }
             }
         }

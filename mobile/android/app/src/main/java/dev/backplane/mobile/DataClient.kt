@@ -8,6 +8,7 @@ import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.runtime.setValue
 import kotlinx.coroutines.*
 import okhttp3.*
+import okio.source
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -778,8 +779,9 @@ object DataClient {
     val canSendImages get() = "images" in features
     /** `voice`: dictated (what the hub tells the agent of it, voice/mark.rs). The message's client id. */
     /** `reply`: the message this one answers (the composer's strip, feature `reply`); the strip goes once it is sent. */
-    fun send(tid: String, text: String, images: List<ByteArray> = emptyList(), voice: JSONObject? = null, reply: DReplyRef? = null): String {
-        val t = text.trim(); if (t.isEmpty() && images.isEmpty()) return ""
+    /** `files`: uploaded already (attachFile); each goes as an `[attachment: <path>]` line under the words (DAttachedFile.join). */
+    fun send(tid: String, text: String, images: List<ByteArray> = emptyList(), voice: JSONObject? = null, reply: DReplyRef? = null, files: List<DAttachedFile> = emptyList()): String {
+        val words = text.trim(); val t = DAttachedFile.join(words, files); if (t.isEmpty() && images.isEmpty()) return ""
         val cid = UUID.randomUUID().toString()
         val rp = reply?.takeIf { has("reply") && t.isNotEmpty() }?.let(ReplyDraft::param)
         sendError = sendError - tid; replying = replying - tid
@@ -790,7 +792,7 @@ object DataClient {
             if (conn == Conn.ONLINE) { val g = gen; scope.launch { flushOutbox(g) } }
             return cid
         }
-        val local = DEntry("local:$cid", "user", t, System.currentTimeMillis(), clientId = cid, sending = true, localImages = images, voice = voice?.let(::parseVoiceMark),
+        val local = DEntry("local:$cid", "user", words, System.currentTimeMillis(), clientId = cid, sending = true, localImages = images, attached = files, voice = voice?.let(::parseVoiceMark),
             replyTo = if (rp != null) reply?.let(ReplyDraft::chip) else null, replyParam = rp)
         entries = entries + (tid to (entries[tid] ?: emptyList()) + local)
         setDraft(tid, ""); fields[tid] = TextFieldValue("")
@@ -807,15 +809,17 @@ object DataClient {
         entries = entries + (tid to (entries[tid] ?: emptyList()).map { if (it.id == e.id) it.copy(sending = true, failed = false) else it })
         scope.launch { deliver(tid, e.text, cid, e.localImages, reply = e.replyParam) }
     }
+    /** Pictures as `message.send` and `thread.create` take them: name, mime and the bytes in base64. */
+    private fun attachmentsJson(images: List<ByteArray>) = JSONArray(images.mapIndexed { i, b ->
+        val ext = GifFormat.extOf(b)
+        val name = if (ext == "gif") "image-${i + 1}.gif" else "photo-${i + 1}.jpg"
+        JSONObject().put("name", name).put("mime", GifFormat.mimeOf(b)).put("data", android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)) })
     private suspend fun deliver(tid: String, text: String, cid: String, images: List<ByteArray>, voice: JSONObject? = null, reply: Map<String, String>? = null) {
         try {
             val p = JSONObject().put("thread", tid).put("text", text).put("clientId", cid)
             if (voice != null) p.put("voice", voice)
             if (reply != null) p.put("replyTo", JSONObject(reply))
-            if (images.isNotEmpty()) p.put("attachments", JSONArray(images.mapIndexed { i, b ->
-                val ext = GifFormat.extOf(b)
-                val name = if (ext == "gif") "image-${i + 1}.gif" else "photo-${i + 1}.jpg"
-                JSONObject().put("name", name).put("mime", GifFormat.mimeOf(b)).put("data", android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)) }))
+            if (images.isNotEmpty()) p.put("attachments", attachmentsJson(images))
             val r = call("message.send", p)
             val e = r.optJSONObject("entry")?.let(::parseEntry)
             // the pictures sent stay on this phone under the hub's ids: no fetch for what we just sent
@@ -902,9 +906,11 @@ object DataClient {
     }
     /** The place of the chats that belong to no project (the hub's `sidebar::CHATS`): `thread.create` with it starts one, in a folder of its own. */
     const val CHATS = "chats"
-    suspend fun createThread(project: String, text: String, choice: DNewThreadChoice = DNewThreadChoice()): DThread {
+    /** `images`: the pictures of the first message (New thread's Attach and Draw), sent with it as a reply's are (`attachments`). */
+    suspend fun createThread(project: String, text: String, choice: DNewThreadChoice = DNewThreadChoice(), images: List<ByteArray> = emptyList()): DThread {
         val p = choice.into(JSONObject().put("project", project).put("clientId", UUID.randomUUID().toString()).put("permission", "ask"), skipEmpty = true)
         if (text.isNotBlank()) p.put("text", text.trim())
+        if (images.isNotEmpty()) p.put("attachments", attachmentsJson(images))
         val t = parseThread(call("thread.create", p).getJSONObject("thread")); upsert(t); return t
     }
     suspend fun dirs(path: String?): Triple<String, String?, List<String>> {
@@ -975,6 +981,11 @@ object DataClient {
             else r.optJSONObject("thread")?.let { upsert(parseThread(it)) }
         } catch (e: Exception) { failure = e.message ?: "" }
     }
+    /** Fork thread (feature `fork`): the hub makes a thread that starts from this one's conversation; `opened` gets it, to go there. */
+    fun forkThread(tid: String, opened: (String) -> Unit) = scope.launch {
+        try { call("thread.act", JSONObject().put("thread", tid).put("action", "fork")).optJSONObject("thread")?.let { val t = parseThread(it); upsert(t); opened(t.id) } }
+        catch (e: Exception) { failure = e.message ?: "" }
+    }
     suspend fun badgeList(): JSONObject = call("badge.list", JSONObject())
     fun projectAct(id: String, action: String, title: String = "", value: String = "") = scope.launch {
         try {
@@ -1011,6 +1022,8 @@ object DataClient {
     /** Buy it on a project's page: the hub's button for the project, naming the thread it buys from (`thread.buy {project}`); null when there is nothing to buy. */
     /** The top of a project's page (feature "projectcard"): its goal and its boards by name; null from a hub without it. */
     data class ProjectCard(val goal: String, val boards: List<String>, val leadDays: Int = 0, val estimateWarnings: String = "")
+    /** A project's goal and notes as written (`.backplane/intent.md`, feature `projecthome`'s `project.home`); "" when there are none. */
+    suspend fun projectIntent(project: String): String = if (!has("projecthome")) "" else call("project.home", JSONObject().put("project", project)).optString("intent")
     suspend fun projectCard(project: String): ProjectCard? {
         if (!has("projectcard")) return null
         val o = call("project.card", JSONObject().put("project", project))
@@ -1330,6 +1343,29 @@ object DataClient {
         val u = Pairing.http(link ?: return null, path, query) ?: return null
         http.newCall(Request.Builder().url(u).build()).execute().use { r -> if (r.isSuccessful) r.body?.bytes() else null }
     }.getOrNull()
+    /** Choose a file: the picked document goes to the hub as it is (`POST /attach`, streamed, the hub's `files.max.mb` limit), into the thread's
+     *  attachments folder; the answer is its path there. A refusal throws with the hub's words (over the limit: upload.cap). */
+    suspend fun attachFile(ctx: android.content.Context, tid: String, uri: android.net.Uri): DAttachedFile = withContext(Dispatchers.IO) {
+        val cr = ctx.contentResolver
+        var name = ""; var size = -1L
+        cr.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME, android.provider.OpenableColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst()) { name = c.getString(0).orEmpty(); if (!c.isNull(1)) size = c.getLong(1) } }
+        name = name.ifEmpty { uri.lastPathSegment?.substringAfterLast('/').orEmpty() }.ifEmpty { "file" }
+        val key = java.lang.Long.toHexString(System.nanoTime() and 0xffffffffL)
+        val u = Pairing.http(link ?: throw Exception(Msg.upload_network), "/attach", "thread=" + android.net.Uri.encode(tid) + "&key=" + key + "&name=" + android.net.Uri.encode(name)) ?: throw Exception(Msg.upload_network)
+        // a provider that does not say the size: read whole first (the hub takes a Content-Length body only)
+        if (size < 0) size = runCatching { cr.openInputStream(uri)?.use { it.readBytes().size.toLong() } }.getOrNull() ?: throw Exception(Msg.upload_failed)
+        val body = object : okhttp3.RequestBody() {
+            override fun contentType() = okhttp3.MediaType.Companion.run { "application/octet-stream".toMediaType() }
+            override fun contentLength() = size
+            override fun writeTo(sink: okio.BufferedSink) { (cr.openInputStream(uri) ?: throw java.io.IOException()).use { i -> sink.writeAll(i.source()) } }
+        }
+        val r = try { http.newCall(Request.Builder().url(u).post(body).build()).execute() } catch (e: java.io.IOException) { throw Exception(Msg.upload_network) }
+        val j = r.use { runCatching { JSONObject(it.body?.string().orEmpty()) }.getOrNull() } ?: throw Exception(Msg.upload_failed)
+        val path = j.optString("attached")
+        if (path.isEmpty()) throw Exception(if (j.optString("uiError") == "upload.cap") Msg.upload_cap(j.optString("uiDetail")) else j.optString("text").takeIf { it.isNotEmpty() }?.let(Tr::t) ?: Msg.upload_failed)
+        DAttachedFile(name, path)
+    }
     suspend fun fileBytes(tid: String, path: String): ByteArray? = withContext(Dispatchers.IO) { httpGet("/files/get", "thread=" + android.net.Uri.encode(tid) + "&path=" + android.net.Uri.encode(path)) }
     suspend fun screenBytes(tid: String): ByteArray? = withContext(Dispatchers.IO) { httpGet("/bots/" + android.net.Uri.encode(tid) + "/screen.jpg", "") }
 
