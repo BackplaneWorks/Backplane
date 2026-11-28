@@ -585,11 +585,14 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                                 MachineChips()
                                 DLine()
                                 LazyColumn(Modifier.fillMaxSize().testTag("home.bench"), state = listState) {
-                                    if (partition.bench.isEmpty() && DataClient.projects.isEmpty()) {
+                                    if (!benchShows(partition.bench)) {
+                                        // no project yet; or the hub's sections lag behind a project this phone knows: say Loading and ask for them again
+                                        val none = DataClient.projects.isEmpty()
                                         item("bench.empty") {
+                                            if (!none) LaunchedEffect(DataClient.projects.size) { DataClient.loadSections() }
                                             Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                                Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp)
-                                                if (DataClient.listsLoaded) { Spacer(Modifier.height(12.dp)); DBtn(Msg.android_project_add, true, true, onClick = addProject) }
+                                                Text(if (DataClient.listsLoaded && none) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp)
+                                                if (DataClient.listsLoaded && none) { Spacer(Modifier.height(12.dp)); DBtn(Msg.android_project_add, true, true, onClick = addProject) }
                                             }
                                         }
                                     } else {
@@ -1372,12 +1375,21 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}, reply:
         "ask" -> AskCard(tid, e)
         "handoff" -> HandoffCard(tid, e)
         "term" -> if (e.term != null && termsOn()) TermCard(e)
-        else -> Row(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 4.dp)) {
-            val c = if (e.tone == "error") dcs.error else dcs.onSurfaceVariant
-            if (e.label.isNotEmpty()) { Text(Tr.t(e.label), color = c, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)) }
-            Column(Modifier.weight(1f)) {
-                if (e.text.contains('`') || !e.copy.isNullOrEmpty()) MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy")), color = c, fontSize = 12, mono = true)
-                else LinkText(e.text, tid, color = c, size = 12)
+        else -> {
+            // a hub note longer than two lines (the worktree, uncommitted design files) shows two lines and "…"; a tap opens it whole, a tap again
+            // folds it. `long` is null until the folded text was measured; a short note is then drawn as before (links, selection).
+            var long by remember(e.id, e.text) { mutableStateOf<Boolean?>(null) }
+            var open by remember(e.id) { mutableStateOf(false) }
+            val md = e.text.contains('`') || !e.copy.isNullOrEmpty()
+            Row(Modifier.fillMaxWidth().then(if (long == true) Modifier.clickable { open = !open }.testTag("thread.note.fold") else Modifier).padding(horizontal = 14.dp, vertical = 4.dp)) {
+                val c = if (e.tone == "error") dcs.error else dcs.onSurfaceVariant
+                if (e.label.isNotEmpty()) { Text(Tr.t(e.label), color = c, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold); Spacer(Modifier.width(8.dp)) }
+                Column(Modifier.weight(1f)) {
+                    if (long != false && !open) Text(if (md) e.text.replace("`", "") else e.text, color = c, fontFamily = BpMono, fontSize = 12.sp, lineHeight = if (md) 18.sp else androidx.compose.ui.unit.TextUnit.Unspecified,
+                        maxLines = 2, overflow = TextOverflow.Ellipsis, onTextLayout = { if (long == null) long = it.hasVisualOverflow })
+                    else if (md) MdText(e.text, thread = tid, copy = CopyLookup.of(e.copy, DataClient.has("copy")), color = c, fontSize = 12, mono = true)
+                    else LinkText(e.text, tid, color = c, size = 12)
+                }
             }
         }
     }
@@ -1558,15 +1570,21 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     // the hub connected to now: the one in use, or the home hub while that one cannot be reached
                     val on = k == DataClient.usingKey
-                    if (on) DDot(if (DataClient.conn == DataClient.Conn.ONLINE) dcs.primary else if (DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8)
                     Text(k, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    // its state as the app's small pill, on the address's line
+                    if (on) StatusPill(when (DataClient.conn) {
+                        DataClient.Conn.ONLINE -> StatusPillModel(PillKind.DONE, Msg.android_online, PillTone.OK)
+                        DataClient.Conn.CONNECTING -> StatusPillModel(PillKind.WAITING, Msg.android_connecting_word, PillTone.WAIT)
+                        else -> StatusPillModel(PillKind.FAILED, Msg.android_offline_word, PillTone.BAD_OUTLINE)
+                    }, Modifier.testTag("settings.hub.state.$k"))
                     if (k == DataClient.homeKey) DMono(Msg.native_hub_home, dcs.onSurfaceVariant, 12, Modifier.testTag("settings.hub.home.$k"))
                     if (i == 0 && DataClient.onHome) DMono(Msg.native_hub_unreachable, dcs.onSurfaceVariant, 12)
                     if (i > 0 && !on) DBtn(Msg.android_hub_use, false, modifier = Modifier.testTag("settings.hub.use.$k")) { DataClient.useHub(k); back() }
                     DBtn(Msg.bots_memory_forget, false, modifier = Modifier.testTag("settings.hub.forget.$k"), danger = true) { forget = k }
                 }
             }
-            DMono(if (DataClient.conn == DataClient.Conn.ONLINE) Msg.android_online else Msg.android_offline(DataClient.failure), dcs.onSurfaceVariant, 12)
+            // why it is offline, when known (the state itself is the pill above)
+            if (DataClient.conn == DataClient.Conn.OFFLINE && DataClient.failure.isNotEmpty()) DMono(Msg.android_offline(DataClient.failure), dcs.onSurfaceVariant, 12)
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 DBtn(Msg.android_hub, false, modifier = Modifier.testTag("settings.hub"), onClick = hub)
                 DBtn(Msg.android_hub_add, false, modifier = Modifier.testTag("settings.hub.add")) { DataClient.pairingError = ""; DataClient.adding = true }

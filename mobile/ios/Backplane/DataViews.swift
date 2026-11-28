@@ -1659,6 +1659,8 @@ struct DataEntryRow: View {
     var goTo: (String) -> Void = { _ in }   // a reply's chip: to the message it answers
     var reply: (DReplyRef) -> Void = { _ in }   // Reply on this message (feature `reply`): the composer's strip
     @State private var restoring: DRestore?   // Restore to before this, pressed: its confirm is up
+    @State private var noteOpen = false   // a long hub note (the worktree, uncommitted design files) opened whole by a tap
+    private var noteLong: Bool { entry.text.count > 90 || entry.text.contains("\n") }
 
     /// The message a Reply here answers, when the hub takes replies
     private var replyRef: DReplyRef? { client.has("reply") ? ReplyDraft.of(id: entry.id, kind: entry.kind, text: entry.text, live: entry.live) : nil }
@@ -1734,6 +1736,10 @@ struct DataEntryRow: View {
                 }
                 Spacer(minLength: 0)
             }.foregroundStyle(entry.tone == "error" ? BackplaneDesign.bad : BackplaneDesign.dim).padding(.vertical, 3)
+            // a note longer than about two lines shows two and "…"; a tap opens it whole, a tap again folds it
+            .lineLimit(noteLong && !noteOpen ? 2 : nil)
+            .contentShape(Rectangle())
+            .onTapGesture { if noteLong { noteOpen.toggle() } }
         }
     }
 }

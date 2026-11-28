@@ -3985,6 +3985,7 @@ mobile.diff.deleted = deleted
 mobile.diff.renamed = renamed
 mobile.diff.binary = binary
 mobile.settings.advanced = Advanced
+android.connecting.word = connecting
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
 ios.alerts.ask = Bub can alert you when a thread needs you.

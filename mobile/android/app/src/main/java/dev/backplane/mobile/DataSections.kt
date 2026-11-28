@@ -612,6 +612,9 @@ fun InboxAllClearCard(
     }
 }
 
+/** Whether the Bench draws anything for these sections: a section shows when it has rows or is a fold with something in it (as [benchItems]). */
+fun benchShows(bench: List<DSection>): Boolean = bench.any { it.rows.isNotEmpty() || (it.fold && it.count > 0) }
+
 /** Bench tab items: Pinned, Recent (`active`, ≤8), Groups, All projects, Quiet. */
 fun LazyListScope.benchItems(bench: List<DSection>, open: (String) -> Unit, page: (DSecRow) -> Unit, menu: (DSecRow) -> Unit, rename: (DSection) -> Unit, openSwarm: (String) -> Unit = {}) {
     val asking = DataClient.sections.firstOrNull { it.id == "needs" }?.rows?.mapNotNull { it.swarmRoom }?.toSet() ?: emptySet()

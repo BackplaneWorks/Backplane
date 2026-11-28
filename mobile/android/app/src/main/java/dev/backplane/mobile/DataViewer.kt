@@ -225,14 +225,18 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
                 "Board" -> {
                     var hasPanels by remember(root) { mutableStateOf(false) }
                     var mgmtOpen by remember(root) { mutableStateOf("") }
+                    var mgmtH by remember { mutableIntStateOf(0) }
+                    val gap = with(androidx.compose.ui.platform.LocalDensity.current) { 44.dp.roundToPx() }
                     Box(Modifier.fillMaxSize()) {
                         Column(Modifier.fillMaxSize()) {
                             Box(Modifier.weight(1f)) {
-                                PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard)
+                                // what an open panel covers of the drawing's lower part: a BOM row's parts are centred in the rest
+                                PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard,
+                                    cover = if (hasPanels && mgmtOpen.isNotEmpty() && mgmtOpen != "plan") (mgmtH - gap).coerceAtLeast(0) else 0)
                             }
                             if (hasPanels && mgmtOpen != "plan") Spacer(Modifier.height(44.dp))
                         }
-                        MgmtHost(panelsOf, root, Modifier.align(Alignment.BottomCenter)) { has, op ->
+                        MgmtHost(panelsOf, root, Modifier.align(Alignment.BottomCenter).onSizeChanged { mgmtH = it.height }) { has, op ->
                             hasPanels = has
                             mgmtOpen = op
                         }
@@ -367,7 +371,7 @@ private fun PickerRow(name: String, sub: String, on: Boolean, depth: Int, tag: S
 
 // ---- Board, Schematic and 3D: the hub's plot, drawn by the GPU view
 @Composable
-private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, none: String, tree: String = "") {
+private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, none: String, tree: String = "", cover: Int = 0) {
     val scope = rememberCoroutineScope()
     val three = kind == "3d"
     val head = if (three) "2|" else if (kind == "schematic") "1|" else "0|"
@@ -403,10 +407,12 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     LaunchedEffect(kind, path, bits) { if (!three && bits != 0 && DataClient.has("layers")) act("", "") }
     // a management row (a BOM line, a finding) lights its parts here, through the hub's probe of the plot on show
     val asked = DataClient.lightRefs
-    LaunchedEffect(asked, frame?.key) {
+    var goTo by remember { mutableStateOf(DataClient.goToRefs to emptyList<String>()) }   // a BOM row's tap (its count) and its parts: the view centres on them
+    LaunchedEffect(asked, frame?.key, DataClient.goToRefs) {
         val k = frame?.key ?: return@LaunchedEffect
         if (three) return@LaunchedEffect
         lit = asked.flatMap { r -> runCatching { DataClient.probe(k, "ref", r) }.getOrDefault(emptyList()) }.distinct()
+        if (DataClient.goToRefs != goTo.first) goTo = DataClient.goToRefs to lit
         if (BuildConfig.DEBUG) android.util.Log.i("bpview", "$kind: lit ${asked.joinToString(",")} -> ${lit.size}")
     }
     val off = layers?.off ?: 0; val dim = layers?.dim ?: 0; val lift = layers?.lift ?: 255
@@ -433,6 +439,8 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
             if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
             s.mark(picked) // closing the card deselects
             s.markAll(lit)
+            s.cover(cover)
+            s.goTo(goTo.first, goTo.second)
             if (three) { s.mesh(mesh); s.parts(parts) }
             if (s.renderer.off != off || s.renderer.dim != dim || s.renderer.lift != lift) { s.renderer.off = off; s.renderer.dim = dim; s.renderer.lift = lift; s.requestRender() }
         })

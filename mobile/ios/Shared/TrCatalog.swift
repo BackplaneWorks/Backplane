@@ -4373,6 +4373,7 @@ mobile.diff.deleted	deleted	削除	eliminado
 mobile.diff.renamed	renamed	名前変更	renombrado
 mobile.diff.binary	binary	バイナリ	binario
 mobile.settings.advanced	Advanced	詳細設定	Avanzado
+android.connecting.word	connecting	接続中	conectando
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos

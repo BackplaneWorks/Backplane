@@ -4008,6 +4008,7 @@ mobile.diff.deleted = 削除
 mobile.diff.renamed = 名前変更
 mobile.diff.binary = バイナリ
 mobile.settings.advanced = 詳細設定
+android.connecting.word = 接続中
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
