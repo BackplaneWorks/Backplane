@@ -2305,6 +2305,9 @@ gpui.next.thread	Next thread	次のスレッド	Hilo siguiente
 gpui.uberbot.chat	Uberbot chat	Uberbot チャット	Chat de Uberbot
 gpui.settle.or.unsettle.the.thread	Settle or unsettle the thread	スレッドを完了／完了を取り消す	Cerrar o reabrir el hilo
 gpui.rename.the.open.thread	Rename the open thread	開いているスレッドの名前を変更	Renombrar el hilo abierto
+gpui.larger.text	Larger text	文字を大きく	Texto más grande
+gpui.smaller.text	Smaller text	文字を小さく	Texto más pequeño
+gpui.text.size.back.to.normal	Text size back to normal (100%)	文字サイズを標準（100%）に戻す	Tamaño del texto normal (100%)
 gpui.stop.the.running.turn	Stop the running turn	実行中のターンを停止	Detener el turno en curso
 gpui.layer.focus.the.other.layers	Layer focus: the other layers as they are, dimmed, hidden	レイヤーフォーカス：他のレイヤーをそのまま・薄く・非表示	Enfoque de capa: las demás capas tal cual, atenuadas, ocultas
 gpui.undo.the.last.stroke.or	Undo the last stroke or change	直前の線や変更を取り消す	Deshacer el último trazo o cambio
