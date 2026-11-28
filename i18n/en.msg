@@ -1603,6 +1603,7 @@ gpui.subview.more = {more, plural, one {# earlier step not shown} other {# earli
 gpui.no.matches = No matches
 gpui.find.in.this.thread = Find in this thread
 gpui.find.in.thread = Find in thread
+gpui.find.in.all.threads = Find in all threads
 gpui.previous.match = Previous match
 gpui.next.match = Next match
 gpui.back.to.the.thread = Back to the thread

@@ -1626,6 +1626,7 @@ gpui.subview.more = 以前の{more}ステップは表示されていません
 gpui.no.matches = 一致なし
 gpui.find.in.this.thread = このスレッド内を検索
 gpui.find.in.thread = スレッド内を検索
+gpui.find.in.all.threads = すべてのスレッド内を検索
 gpui.previous.match = 前の一致
 gpui.next.match = 次の一致
 gpui.back.to.the.thread = スレッドに戻る
