@@ -108,6 +108,8 @@ fn chain_ok<'a>(st: &'a State, start: &str, mut p: &'a str) -> bool {
     p.is_empty()
 }
 fn parent<'a>(st: &'a State, id: &str) -> &'a str { let p = parent_raw(st, id); if chain_ok(st, id, p) { p } else { "" } }
+/// The parent a thread is drawn under (`display_parent`), "" for a root: the sections list a subthread on show under it.
+pub fn shown_parent<'a>(st: &'a State, id: &str) -> &'a str { if st.threads.contains_key(id) { display_parent(st, id) } else { "" } }
 /// Tree.display_parent: archiving moves one conversation; live children of an archived parent become roots
 fn display_parent<'a>(st: &'a State, id: &str) -> &'a str {
     let p = parent(st, id);
