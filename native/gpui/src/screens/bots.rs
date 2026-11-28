@@ -217,7 +217,9 @@ pub fn forms(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
 }
 
 /// The bot's header and tab strip at the top of the main area (a bot only); a fixed height so the page below can sit under it.
-pub const BAR_H: f32 = 76.;
+/// One row, a thread's header's height: its rule lines up with the threads' and the sidebar's. The bot's name and state are the top bar's
+/// (title and STATE), not said again here (the page had its name twice and its state in two words, "inactive" and "asleep").
+pub const BAR_H: f32 = super::head::ROW_H;
 /// The strip is taller with a row of sub-tabs under it (Browser: Tasks, Mailroom: Status, Settings: Webhooks), or they sit under the page.
 /// At the text size in force (scale.rs): it holds two or three lines.
 pub fn bar_h(bot: &Value) -> f32 { crate::scale::s() * if bot["subtabs"].as_array().map_or(false, |a| !a.is_empty()) { BAR_H + 36. } else { BAR_H } }
@@ -228,11 +230,10 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> Option<AnyE
     let mut strip = div().flex().gap_1();
     for (i, t) in tabs(bot, "tabs").into_iter().enumerate() { let is = t.id == on; strip = strip.child(btn(cx, light, format!("btab-{i}"), trs(&t.label), is, tab_cmd, t.id)); }
     let subs = tabs(bot, "subtabs");
-    let mut col = div().h(px(bar_h(bot))).flex_shrink_0().px_3().py_1().flex().flex_col().gap_1().border_b_1().border_color(c("line")).bg(c("bg"))
-        .child(div().flex().gap_2().items_center().child(div().font_weight(FontWeight::BOLD).child(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))))
-            .child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&string(bot, "note"))))
-            .children(super::badge::place(light, &bot["mark"], "", "bot-bar"))).child(strip);
-    if !subs.is_empty() { let cur = string(bot, "tab"); col = col.child(div().flex().gap_1().children(subs.into_iter().enumerate().map(|(i, t)| { let is = t.id == cur; btn(cx, light, format!("bsub-{i}"), trs(&t.label), is, tab_cmd, t.id) }).collect::<Vec<_>>())); }
+    // the tabs in a band of their own, the sub-tabs in the next: the first row never moves when a tab has sub-tabs
+    let mut col = div().h(px(bar_h(bot))).flex_shrink_0().px_3().flex().flex_col().border_b_1().border_color(c("line")).bg(c("bg"))
+        .child(div().h(px(BAR_H * crate::scale::s())).flex_shrink_0().flex().gap_2().items_center().child(strip).children(super::badge::place(light, &bot["mark"], "", "bot-bar")));
+    if !subs.is_empty() { let cur = string(bot, "tab"); col = col.child(div().flex_1().flex().items_center().gap_1().children(subs.into_iter().enumerate().map(|(i, t)| { let is = t.id == cur; btn(cx, light, format!("bsub-{i}"), trs(&t.label), is, tab_cmd, t.id) }).collect::<Vec<_>>())); }
     Some(col.into_any_element())
 }
 
