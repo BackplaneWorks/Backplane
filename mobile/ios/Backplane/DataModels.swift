@@ -286,7 +286,8 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var memory: DMemory? // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); nil for a thread without it
     var planMode: DPlanMode? = nil
     var forkOf = ""      // a fork: the thread it forked from (data/1 `forkOf`); its actions offer Back to the original
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory, planMode, forkOf }
+    var ctxPct: Int? = nil   // how full its context is, 0...100 (data/1 `ctxPct`, the desktop composer's "ctx N%"); nil while not known
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm, memory, planMode, forkOf, ctxPct }
     init(id: String, project: String = "", title: String = "", state: String = "idle", updatedAt: Int = 0, pinned: Bool = false, pinOrder: Int = 0, settled: Bool = false, settledAt: Int = 0, archived: Bool = false, provider: String = "", model: String = "", effort: String = "", runtime: String = "", chip: String = "", preview: String = "", waiting: Int = 0, parent: String = "", history: Bool = false, status: String = "", mark: DMark? = nil, swarm: String = "", memory: DMemory? = nil, planMode: DPlanMode? = nil) {
         self.id = id; self.project = project; self.title = title; self.state = state; self.updatedAt = updatedAt
         self.pinned = pinned; self.pinOrder = pinOrder; self.settled = settled; self.settledAt = settledAt; self.archived = archived
@@ -303,6 +304,7 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
         memory = try? c.decode(DMemory.self, forKey: .memory)
         planMode = try? c.decode(DPlanMode.self, forKey: .planMode)
         forkOf = c.str(.forkOf)
+        ctxPct = try? c.decode(Int.self, forKey: .ctxPct)
     }
 }
 /// A thread's memory progress, every word the hub's: the bar is `done` of `total`, `state` caught | behind | held.
