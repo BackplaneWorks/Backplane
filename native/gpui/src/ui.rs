@@ -31,6 +31,25 @@ pub(crate) fn rail_rows(viewer: &Value, simulation: bool) -> Vec<RailRow<'_>> {
         .map(|(id, label, icon, group)| RailRow { id, label, icon, group, key: crate::keys::rail_letter(id), ..Default::default() }).collect()
 }
 
+/// A room's or a linked machine's bot page (`data.bot.kind` room/remote, not a swarm): no thread is open, so every rail entry that needs one is drawn
+/// off and says why, as on a bot's own page; Terminal and Commands stay.
+pub(crate) fn rail_rows_off(rows: Vec<RailRow<'_>>) -> Vec<RailRow<'_>> {
+    rows.into_iter().map(|r| if matches!(r.id, "terminal" | "commands") { r } else { RailRow { state: "disabled", why: "Open a thread to use this" /* i18n-ok: drawn through trs (gpui.rail.no.thread) */, present: false, ..r } }).collect()
+}
+/// The top bar's crumb after Backplane on a bot's, a room's or a remote bot's page: Some(None) for a bot (its chat's title, the bot's name, follows),
+/// `#room` for a room, the bot's name for a remote one; None on any other page (the project's crumb).
+pub(crate) fn bot_crumb(bot: &Value) -> Option<Option<String>> {
+    let name = string(bot, "name"); let name = if name.is_empty() { string(bot, "title") } else { name };
+    match bot["kind"].as_str() {
+        Some("bot") => Some(None),
+        Some("room") if !name.is_empty() => Some(Some(format!("#{}", name.trim_start_matches('#')))),
+        Some("remote") if !name.is_empty() => Some(Some(name)),
+        _ => None,
+    }
+}
+/// Whether the page on show is a room's or a remote bot's (no swarm): the rail has no thread to act on.
+pub(crate) fn rail_off_page(data: &Value) -> bool { data["bot"]["swarm"].is_null() && matches!(data["bot"]["kind"].as_str(), Some("room" | "remote")) }
+
 pub(crate) fn rail_hint(local: &crate::local::Local, id: &str, key: &str) -> String {
     let binding = match id { "diff" | "files" => id, "terminal" => "term", "commands" => "palette", _ => "" };
     [key.to_uppercase(), crate::keys::hint(local, binding)].into_iter().filter(|k| !k.is_empty()).collect::<Vec<_>>().join(&format!(" {} ", trs("or")))
@@ -664,8 +683,10 @@ impl Backplane {
                     .children(marks.get(bid).map(|_| div().absolute().bottom(px(3.)).right(px(2.)).size(px(5.)).rounded_full().bg(c("dim")))).into_any_element());
             }
             /* i18n-ok: ui: ids the drivers press */ ctl.push(CtlEntry { id: "ui:New bot".into(), label: "New bot".into(), ctl: Ctl::Node("bot-new".into(), String::new()) });
-            /* i18n-ok: a ui: id the drivers press */ strip.push(with_rect(div().id("ui:New bot"), || "ui:New bot".to_string()).flex_shrink_0().size(px(32.)).flex().items_center().justify_center().cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("New bot", "", light))
-                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot-new".into(), String::new())); cx.notify(); })).child(ic(light, "plus", 14., "dim")).into_any_element());
+            // with no bot yet, the + says what it makes (a faint word, as the room's below does): the two lone + read alike
+            let no_bots = strip.is_empty();
+            /* i18n-ok: a ui: id the drivers press */ strip.push(with_rect(div().id("ui:New bot"), || "ui:New bot".to_string()).flex_shrink_0().h(px(32.)).when(no_bots, |d| d.px(px(4.)).gap_1()).when(!no_bots, |d| d.w(px(32.)).justify_center()).flex().items_center().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("faint")).hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("New bot", "", light))
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot-new".into(), String::new())); cx.notify(); })).child(ic(light, "plus", 14., "dim")).when(no_bots, |d| d.child(trs("bot"))).into_any_element());
             crew.push(div().id("crew-bots").flex().flex_wrap().items_center().px(px(6.)).children(strip).into_any_element());
             // the rooms: chips (#name and its members), wrapping, three lines at most (the rest scroll within the band), then +
             let mut chips: Vec<AnyElement> = Vec::new();
@@ -682,9 +703,11 @@ impl Backplane {
                     .children(crate::screens::badge::machine_mark(light, &r["mark"], false, &rid)).into_any_element());
             }
             /* i18n-ok: ui: ids the drivers press */ ctl.push(CtlEntry { id: "ui:New room".into(), label: "New room".into(), ctl: Ctl::Node("room-new".into(), String::new()) });
+            let no_rooms = chips.is_empty();
             /* i18n-ok: a ui: id the drivers press */ chips.push(with_rect(div().id("ui:New room"), || "ui:New room".to_string()).flex_shrink_0().h(px(22.)).px(px(4.)).flex().items_center().gap_1().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("faint")).hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip("New room", "", light))
-                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("room-new".into(), String::new())); cx.notify(); })).child(ic(light, "plus", 14., "dim")).into_any_element());
-            crew.push(div().id("crew-rooms").flex().flex_wrap().items_center().px(px(7.)).pb(px(6.)).max_h(px(3. * 22. + 6.)).overflow_y_scroll().children(chips).into_any_element());
+                .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("room-new".into(), String::new())); cx.notify(); })).child(ic(light, "plus", 14., "dim")).when(no_rooms, |d| d.child(trs("room"))).into_any_element());
+            // (the same left edge as the bots' strip: an empty strip's "+ bot" and "+ room" sit on one line)
+            crew.push(div().id("crew-rooms").flex().flex_wrap().items_center().px(px(6.)).pb(px(6.)).max_h(px(3. * 22. + 6.)).overflow_y_scroll().children(chips).into_any_element());
         }
         if let Some((line, bad)) = home_away_line(&self.data["home"]) {
             let dismissible = home_move_dismissible(&self.data["home"]);
@@ -1088,7 +1111,8 @@ impl Render for Backplane {
         }
         // the crumb after Backplane: the thread's project, or the project whose page is open, by name
         let crumb = match page.as_ref().and_then(|p| crate::screens::projects::find(&self.data, p)).map(|p| string(p, "title")).filter(|t| !t.is_empty()) {
-            Some(t) => crate::streamer::project_shown(&t), None if head_thread => { let t = string(&thread["project"], "title"); if t.is_empty() { trs("Project") } else { crate::streamer::project_shown(&t) } } None => trs("Projects") };
+            Some(t) => Some(crate::streamer::project_shown(&t)),
+            None => match bot_crumb(&self.data["bot"]) { Some(c) => c, None if head_thread => { let t = string(&thread["project"], "title"); Some(if t.is_empty() { trs("Project") } else { crate::streamer::project_shown(&t) }) } None => Some(trs("Projects")) } };
         let mut rail_pages = Vec::new();
         let mut rail_tools = Vec::new();
         // held Ctrl: each rail button's bare key in its corner (the old rail's keycaps), lit on the view on show
@@ -1101,7 +1125,7 @@ impl Render for Backplane {
         let dock_editor_active = self.dock_editor_active(thread, can_embed, cx);
         self.screens.palette.editor_active = dock_editor_active;
         let sim_rail = crate::viewers::kicad_pane::rail_simulation(&thread["viewer"], can_embed).is_some();
-        let rows = rail_rows(&thread["viewer"], sim_rail);
+        let rows = if bot_room { rail_rows_off(rail_rows(&thread["viewer"], sim_rail)) } else { rail_rows(&thread["viewer"], sim_rail) };
         // when the local embedded KiCad pane is on show in this thread, light the rail from its wanted frame (`KicadPane::tab()`,
         // which can be ahead of KiCad while `pending_show` is set), provided the mapped entry exists and is enabled in `rows`
         let pane_frame = can_embed.then(|| self.kicad_for(thread, cx).map(|p| p.read(cx).tab())).flatten();
@@ -1321,7 +1345,7 @@ impl Render for Backplane {
                         .child(ic(light, "radio", 11., "warn")).child(if why.is_empty() { trs("Streamer mode") } else { format!("{} · {}", trs("Streamer mode"), trs(&why)) })))
                     .children(self.screens.elsewhere.clone().map(|(short, full)| div().id("elsewhere").flex().items_center().gap(px(3.)).px_1().border_1().border_color(c("accent")).text_size(crate::scale::tpx(11.)).text_color(c("accent"))
                         .tooltip(crate::keys::tip_raw(&tf("gpui.b.window.on.machine", &[("machine", full.into())]), "", light)).child(ic(light, "link", 11., "accent")).child(tf("gpui.b.on.machine", &[("machine", short.into())]))))
-                    .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).whitespace_nowrap().child(crumb))
+                    .when_some(crumb, |d, crumb| d.child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).whitespace_nowrap().child(crumb)))
                     // another machine's thread: "Project · on desktop" (this machine's looks as always)
                     .when(head_thread, |d| d.children(crate::screens::badge::place(light, &thread["mark"], "", "crumb").map(|p| div().flex().items_center().gap_2().child(div().text_color(c("faint")).child("·")).child(p))))
                     // a buy thread's title is marked an Order with the cart, as 0.14's was (the hub sends its Order card only for a buy thread)
@@ -1618,7 +1642,7 @@ mod tests {
         }
     }
 
-    use super::{kicad_lit_id, kicad_rail_id, rail_inventory_json, rail_lit_id, rail_metric_change, rail_rows, viewer_row_on, RailInvRow, RailRow};
+    use super::{bot_crumb, kicad_lit_id, kicad_rail_id, rail_inventory_json, rail_lit_id, rail_metric_change, rail_off_page, rail_rows, rail_rows_off, viewer_row_on, RailInvRow, RailRow};
     use serde_json::{json, Value};
     #[test]
     fn rail_rows_follow_hub_order_content_and_empty_list() {
@@ -1632,6 +1656,23 @@ mod tests {
         assert_eq!((rows[1].icon, rows[1].group, rows[1].key, rows[1].state, rows[1].why), ("cpu", "design", "b", "disabled", "No board"));
         assert!(rail_rows(&json!({"rail":[]}), true).is_empty());
         assert_eq!(rail_rows(&Value::Null, false).last().unwrap().id, "commands");
+    }
+
+    #[test]
+    fn a_bots_and_a_rooms_page_name_themselves_in_the_top_bar() {
+        assert_eq!(bot_crumb(&json!({"kind":"bot","name":"Scout"})), Some(None), "the bot's chat title follows: no Project");
+        assert_eq!(bot_crumb(&json!({"kind":"room","name":"bench"})), Some(Some("#bench".into())));
+        assert_eq!(bot_crumb(&json!({"kind":"room","name":"#bench"})), Some(Some("#bench".into())));
+        assert_eq!(bot_crumb(&json!({"kind":"remote","name":"Kit"})), Some(Some("Kit".into())));
+        assert_eq!(bot_crumb(&Value::Null), None);
+    }
+
+    #[test]
+    fn a_rooms_page_draws_the_thread_entries_of_the_rail_off() {
+        let rows = rail_rows_off(rail_rows(&Value::Null, false));
+        for r in &rows { assert_eq!(r.state == "disabled", !matches!(r.id, "terminal" | "commands"), "{}", r.id); }
+        assert!(rail_off_page(&json!({"bot":{"kind":"room"}})) && rail_off_page(&json!({"bot":{"kind":"remote"}})));
+        assert!(!rail_off_page(&json!({"bot":{"kind":"room","swarm":{}}})) && !rail_off_page(&json!({"bot":{"kind":"bot"}})) && !rail_off_page(&Value::Null));
     }
 
     #[test]

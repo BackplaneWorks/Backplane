@@ -67,7 +67,7 @@ fn delete_task(this: &mut Backplane, slug: &str, cx: &mut Context<Backplane>) {
 fn tasks_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let items: Vec<&Value> = arr(bot, "tasks").collect();
-    if items.is_empty() { return div().p_3().text_color(c("dim")).child(trs("No tasks yet. Teach this bot a browser task and it shows here.")).into_any_element(); }
+    if items.is_empty() { return div().p_3().text_color(c("dim")).child(trs("No tasks yet. Tasks this bot learns in its Browser tab are listed here.")).into_any_element(); }
     let asking = ASKING.lock().unwrap().clone();
     let mut col = div().flex().flex_col();
     for (i, t) in items.into_iter().enumerate() {
@@ -149,6 +149,20 @@ pub fn focus_target(data: &Value) -> String {
     if data["newBot"].is_object() { return "name".into(); }
     if data["newRoom"].is_object() { return "rname".into(); }
     match data["bot"]["kind"].as_str() { Some("room") => "rpost".into(), Some("remote") => "rtext".into(), _ => String::new() }
+}
+/// Enter in a one-line field of the New bot or New room form: the form's accent button (Create, Save) when it is enabled; None otherwise.
+/// `named`: the Name box holds more than blanks.
+fn form_enter(data: &Value, field: &str, named: bool) -> Option<Command> {
+    if data["newBot"].is_object() && matches!(field, "name" | "persona") { return named.then(|| create_bot("")) }
+    if data["newRoom"].is_object() && field == "rname" { return picks(&data["newRoom"]).iter().any(|p| p.on).then(|| save_room("")) }
+    None
+}
+/// Enter in a field (screens/settings.rs `submit`): true when it was one of these forms' and was handled.
+pub fn form_submit(this: &mut Backplane, field: &str, cx: &mut Context<Backplane>) -> bool {
+    if !matches!(field, "name" | "persona" | "rname") || !(this.data["newBot"].is_object() || this.data["newRoom"].is_object()) { return false }
+    let named = this.screens.fields.get("name").map_or(false, |s| !s.input.read(cx).content.trim().is_empty());
+    if let Some(c) = form_enter(&this.data, field, named) { super::settings::flush_fields(this); let _ = this.tx.try_send(c); cx.notify(); }
+    true
 }
 /// Esc on a form: the action that drops it.
 pub fn close_form(data: &Value) -> Option<Command> {
@@ -243,6 +257,8 @@ fn memory_page(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> AnyElem
 
 /// The hub's reason a routine did not save (`routine.error`), shown on the form; None when there is none.
 fn routine_error(form: &Value) -> Option<String> { Some(string(form, "error")).filter(|e| !e.is_empty()) }
+/// A routine row's time line: when it runs, the next run, how far off, and when it last ran (the hub's words, `ran`).
+fn routine_when(r: &Value) -> String { [string(r, "label"), string(r, "next"), string(r, "rel"), string(r, "ran")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ") }
 fn routines_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let items: Vec<&Value> = arr(bot, "routines").collect();
@@ -263,13 +279,13 @@ fn routines_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
     if items.is_empty() { return div().flex().flex_col().child(head).child(div().p_3().text_color(c("dim")).child(trs("No routines."))).into_any_element(); }
     div().flex().flex_col().child(head).children(items.into_iter().enumerate().map(|(i, r)| {
         let id = string(r, "id");
-        let when = [string(r, "label"), string(r, "next"), string(r, "rel")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ");
+        let when = routine_when(r);
         div().flex().flex_col().gap_1().px_3().py_2().border_b_1().border_color(c("line"))
             .child(div().flex().gap_2().items_center().child(div().font_weight(FontWeight::BOLD).child(string(r, "name"))).child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(if when.is_empty() { string(r, "cron") } else { when }))
                 .child(div().flex_1())
                 .child(btn(cx, light, format!("rt-on-{i}"), if r["on"] == true { trs("On") } else { trs("Off") }, r["on"] == true, routine_toggle, id.clone()))
                 .child(btn(cx, light, format!("rt-edit-{i}"), trs("Edit"), false, routine_edit, id.clone()))
-                .child(btn(cx, light, format!("rt-run-{i}"), trs("Run"), false, routine_run, id.clone()))
+                .child(if r["running"] == true { div().id(SharedString::from(format!("rt-running-{i}"))).px_2().py_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Running")).into_any_element() } else { btn(cx, light, format!("rt-run-{i}"), trs("Run"), false, routine_run, id.clone()) })
                 .child(btn(cx, light, format!("rt-del-{i}"), trs("Delete"), false, routine_delete, id)))
             .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(string(r, "prompt"))).into_any_element()
     }).collect::<Vec<_>>()).into_any_element()
@@ -288,6 +304,8 @@ fn status_page(light: bool, bot: &Value) -> AnyElement {
     }).collect::<Vec<_>>()).into_any_element()
 }
 
+/// A mailroom row's second line: who wrote last and its first words ("Scout: Bot report…"); a conversation with nothing in it yet draws nothing (it drew ":").
+fn mail_line(from: &str, head: &str) -> String { if from.is_empty() || head.is_empty() { format!("{from}{head}") } else { format!("{from}: {head}") /* i18n-ok: a name and the hub's words */ } }
 fn mail_page(light: bool, bot: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let items: Vec<&Value> = arr(bot, "mail").collect();
@@ -298,7 +316,7 @@ fn mail_page(light: bool, bot: &Value) -> AnyElement {
         div().flex().flex_col().gap_1().px_3().py_2().border_b_1().border_color(c("line"))
             .child(div().flex().gap_2().child(div().when(unread, |d| d.font_weight(FontWeight::BOLD)).child(string(m, "subject")))
                 .child(div().flex_1()).child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("{} · {}", m["n"], string(m, "ago")))))
-            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(format!("{}: {}", string(m, "from"), string(m, "head")))).into_any_element()
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(mail_line(&string(m, "from"), &string(m, "head")))).into_any_element()
     }).collect::<Vec<_>>()).children((total as usize > items.len()).then(|| div().p_3().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(tf("gpui.bots.mail.older", &[("n", (total as usize - items.len()).into())])))).into_any_element()
 }
 
@@ -330,7 +348,7 @@ fn space_block(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String
 
 fn space_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, bot: &Value) -> AnyElement {
     let sp = &bot["space"];
-    if !sp.is_object() { return note(light, &if bot["spacePage"] == true { trs("This space is a web page; it is shown in the phone apps.") } else { trs("No space yet. The bot writes it with space_set.") }); }
+    if !sp.is_object() { return note(light, &if bot["spacePage"] == true { trs("This space is a web page; it is shown in the phone apps.") } else { trs("No space yet. A space is a page this bot keeps for you; ask it in Chat to make one.") }); }
     let blocks: Vec<AnyElement> = arr(sp, "blocks").enumerate().map(|(i, b)| space_block(cx, light, fields, b, format!("sp-{i}"))).collect();
     div().flex().flex_col().gap_2().p_3().children((!string(sp, "title").is_empty()).then(|| div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(18.)).child(string(sp, "title")))).children(blocks).into_any_element()
 }
@@ -513,7 +531,7 @@ fn hooks_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String,
         col = col.child(box_);
     }
     let items: Vec<&Value> = arr(bot, "hooks").collect();
-    if items.is_empty() { return col.child(div().p_3().text_color(c("dim")).child(trs("No hooks."))).into_any_element(); }
+    if items.is_empty() { return col.child(div().p_3().text_color(c("dim")).child(trs("No webhooks."))).into_any_element(); }
     col.children(items.into_iter().enumerate().map(|(i, h)| {
         let (a, b, d) = (string(h, "id"), string(h, "id"), string(h, "id"));
         div().flex().gap_2().items_center().px_3().py_2().border_b_1().border_color(c("line"))
@@ -625,6 +643,23 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    #[test] fn enter_in_the_new_bot_or_room_form_presses_its_accent_button() {
+        let nb = j(r#"{"newBot":{"name":"Scout","providers":[]}}"#);
+        assert!(matches!(form_enter(&nb, "name", true), Some(Command::Action(a, _)) if a == "bot-create"));
+        assert!(matches!(form_enter(&nb, "persona", true), Some(Command::Action(a, _)) if a == "bot-create"));
+        assert!(form_enter(&nb, "name", false).is_none(), "no name: Create is off");
+        let nr = |on: bool| j(&format!(r#"{{"newRoom":{{"name":"bench","picks":[{{"id":"b1","name":"Scout","on":{on}}}]}}}}"#));
+        assert!(matches!(form_enter(&nr(true), "rname", false), Some(Command::Action(a, _)) if a == "room-save"));
+        assert!(form_enter(&nr(false), "rname", false).is_none(), "no member: Save is off");
+        assert!(form_enter(&j("{}"), "name", true).is_none());
+    }
+    #[test] fn an_empty_mail_conversation_draws_no_lone_colon() {
+        assert_eq!(mail_line("Scout", "Bot report"), "Scout: Bot report"); assert_eq!(mail_line("", ""), ""); assert_eq!(mail_line("Scout", ""), "Scout");
+    }
+    #[test] fn a_routine_row_says_when_it_last_ran() {
+        assert_eq!(routine_when(&j(r#"{"label":"daily at 09:00","next":"Sat 09:00","rel":"in 4h","ran":"ran just now"}"#)), "daily at 09:00 · Sat 09:00 · in 4h · ran just now");
+        assert_eq!(routine_when(&j(r#"{"label":"daily at 09:00","next":"","rel":"","ran":""}"#)), "daily at 09:00");
+    }
     #[test] fn the_routine_form_shows_the_hubs_reason_when_there_is_one() {
         assert_eq!(routine_error(&j(r#"{"open":true,"error":"I can't read that time."}"#)).as_deref(), Some("I can't read that time."));
         assert_eq!(routine_error(&j(r#"{"open":true,"error":""}"#)), None); assert_eq!(routine_error(&j(r#"{"open":true}"#)), None);

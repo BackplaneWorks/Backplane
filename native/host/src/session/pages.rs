@@ -382,6 +382,12 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
                     p = json!({"drafts": d});
                 }
             }
+            // a bot or a room the person just made: accepted, the page opens on it (present/screen.rs `go_made`); refused, the window says why
+            "bots.create" | "bots.room" => {
+                let (req, go) = if method == "bots.create" { (format!("@b.req:{id}"), "@go.bot") } else { (format!("@r.req:{id}"), "@go.room") };
+                let name = draft(session, &req).to_string();
+                if !name.is_empty() { let mut d = json!({(req.clone()): ""}); if ok { d[go] = json!(name); } p = json!({"drafts": d}); }
+            }
             // a commit or a revert changes what Diff shows: a Diff on show is asked again
             "git.act" | "git.revert" => {
                 if diff_on(session, &sel) {

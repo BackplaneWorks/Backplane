@@ -94,7 +94,8 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
         v.push(Item { label: crate::i18n::t("viewer.tile.add.tip"), place: trs("viewer"), kind: "action", what: Do::AddBeside, row: Value::Null });
     }
     let simulation = crate::viewers::kicad_pane::rail_simulation(viewer, can_embed).is_some();
-    for row in crate::ui::rail_rows(viewer, simulation) {
+    let rows = crate::ui::rail_rows(viewer, simulation);
+    for row in if crate::ui::rail_off_page(data) { crate::ui::rail_rows_off(rows) } else { rows } {
         if row.state == "disabled" || row.id == "commands" || (!thread.is_object() && row.id != "terminal") { continue }
         v.push(Item { label: trs(row.label), place: if row.id == "terminal" { String::new() } else { trs("viewer") }, kind: "action", what: Do::Rail(row.id.into(), row.key.into()), row: Value::Null });
     }

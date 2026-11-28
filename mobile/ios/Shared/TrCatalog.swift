@@ -2210,7 +2210,7 @@ gpui.acct.resets.now	\s· resets now	\s· まもなくリセット	\s· se reini
 gpui.acct.resets	\s· resets {when}	\s· {when}にリセット	\s· se reinicia {when}
 gpui.bots.webhook.name	Webhook name	Webhookの名前	Nombre del webhook
 gpui.bots.eg	{label} (e.g. {e})	{label}（例：{e}）	{label} (p. ej. {e})
-gpui.bots.no.tasks.yet.teach.this	No tasks yet. Teach this bot a browser task and it shows here.	タスクはまだありません。このボットにブラウザのタスクを教えると、ここに表示されます。	Sin tareas aún. Enseña a este bot una tarea del navegador y aparecerá aquí.
+gpui.bots.no.tasks.yet.teach.this	No tasks yet. Tasks this bot learns in its Browser tab are listed here.	タスクはまだありません。このボットがブラウザタブで覚えたタスクがここに表示されます。	Sin tareas aún. Las tareas que este bot aprende en su pestaña Navegador aparecen aquí.
 gpui.bots.mem.range	{from}–{to} of {total}	{total}件中 {from}–{to}	{from}–{to} de {total}
 gpui.bots.recall	Infinite context	無限コンテキスト	Contexto infinito
 gpui.bots.recall.on	On	オン	Activado
@@ -2233,13 +2233,13 @@ gpui.bots.nothing.to.report	Nothing to report.	報告することはありませ
 gpui.bots.no.mail	No mail.	メールはありません。	Sin correo.
 gpui.bots.mail.older	{n, plural, one {# older conversation not shown} other {# older conversations not shown}}	{n, plural, other {表示していない古い会話が#件あります}}	{n, plural, one {# conversación anterior no mostrada} other {# conversaciones anteriores no mostradas}}
 gpui.bots.this.space.is.a.web	This space is a web page; it is shown in the phone apps.	このスペースはWebページです。スマートフォンのアプリで表示されます。	Este space es una página web; se muestra en las apps del teléfono.
-gpui.bots.no.space.yet.the.bot	No space yet. The bot writes it with space_set.	スペースはまだありません。ボットがspace_setで作ります。	Sin space aún. El bot lo escribe con space_set.
+gpui.bots.no.space.yet.the.bot	No space yet. A space is a page this bot keeps for you; ask it in Chat to make one.	スペースはまだありません。スペースはボットがあなたのために保つページです。チャットで作るよう頼んでください。	Sin espacio aún. Un espacio es una página que este bot mantiene para ti; pídeselo en el Chat.
 gpui.bots.created	Created	作成日	Creado
 gpui.bots.the.hub.refused.it	The hub refused it.	ハブに拒否されました。	El hub lo rechazó.
 gpui.bots.webhook.made.keep.its.secret	Webhook made. Keep its secret: it is shown only now.	Webhookを作成しました。シークレットは今だけ表示されるので、控えておいてください。	Webhook creado. Guarda su secreto: solo se muestra ahora.
 gpui.bots.path	Path	パス	Ruta
 gpui.bots.token.off	off	オフ	desactivado
-gpui.bots.no.hooks	No hooks.	Webhookはありません。	Sin webhooks.
+gpui.bots.no.hooks	No webhooks.	Webhookはありません。	Sin webhooks.
 gpui.bots.hook.calls	{n, plural, one {# call} other {# calls}}	{n, plural, other {#回の呼び出し}}	{n, plural, one {# llamada} other {# llamadas}}
 gpui.bots.no.token	No token	トークンなし	Sin token
 gpui.bots.no.messages.yet	No messages yet.	メッセージはまだありません。	Sin mensajes aún.
@@ -2649,7 +2649,7 @@ gpui.connecting	Connecting…	接続中…	Conectando…
 gpui.connected	Connected	接続済み	Conectado
 gpui.disconnected	Disconnected	切断	Desconectado
 gpui.hub.is.opening.its.log	Hub is opening its log…	ハブがログを開いています…	El hub está abriendo su registro…
-gpui.hub.disconnected.draft.kept.reconnecting	Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.	ハブとの接続が切れました。下書きは残してあり、再接続しています。実験用ハブのログを確認してください。	Hub desconectado. Borrador conservado; reconectando. Revisa el registro experimental del hub.
+gpui.hub.disconnected.draft.kept.reconnecting	Hub disconnected. Draft kept; reconnecting. If it stays like this, restart Backplane.	ハブとの接続が切れました。下書きは残してあり、再接続しています。このまま続く場合は Backplane を再起動してください。	Hub desconectado. Borrador guardado; reconectando. Si sigue así, reinicia Backplane.
 gpui.hub.refused.it	The hub refused it: {why}	ハブが拒否しました: {why}	El hub lo rechazó: {why}
 gpui.that.is.not.on.this	This thread, bot or room is not on this hub: it was deleted, or it is on another machine.	このスレッド、ボット、ルームはこのハブにありません。削除されたか、別のマシンにあります。	Este hilo, bot o sala no está en este hub: fue eliminado o está en otra máquina.
 gpui.hub.view.refused	View request refused: {code}	表示の要求が拒否されました: {code}	Petición de vista rechazada: {code}
@@ -4737,6 +4737,7 @@ gpui.rail.no.board	No board in this project	このプロジェクトには基板
 gpui.rail.no.schematic	No schematic in this project	このプロジェクトには回路図がありません	Este proyecto no tiene esquema
 gpui.rail.split.needs.both	Split needs a board and a schematic	分割表示には基板と回路図が必要です	La vista dividida requiere una placa y un esquema
 gpui.rail.no.mech	No mechanical parts in this project	このプロジェクトには機械部品がありません	Este proyecto no tiene piezas mecánicas
+gpui.rail.no.thread	Open a thread to use this	スレッドを開くと使えます	Abre un hilo para usar esto
 gpui.panestate.next.board	Ask an agent to lay one out.	エージェントに基板のレイアウトを依頼してください。	Pide a un agente que diseñe una placa.
 gpui.panestate.next.schematic	Ask an agent to draw one.	エージェントに回路図の作成を依頼してください。	Pide a un agente que dibuje uno.
 gpui.panestate.next.solid	Ask an agent to lay out a board.	エージェントに基板のレイアウトを依頼してください。	Pide a un agente que diseñe una placa.

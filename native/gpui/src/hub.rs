@@ -14,14 +14,18 @@ impl Event {
 }
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 /// The disconnect banner (the reconnect loop's Event::Error), as the person reads it.
-pub fn disconnected_text()->String{crate::i18n::trs("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log.")}
+pub fn disconnected_text()->String{crate::i18n::trs("Hub disconnected. Draft kept; reconnecting. If it stays like this, restart Backplane.")}
 /// Whether the footer's error goes once the hub says Connected: always the disconnect banner itself (every reconnect path ends in Connected);
 /// another error (a refusal setup shows) stays while setup is up, until the person presses something there.
 /// `back`: the status was something else before (the connection came back). A view that merely says Connected again leaves a refusal alone: every reply says it,
 /// including the one that carries a composer command's refusal (/project, /btw), which was wiped as it arrived; the next Send clears it.
 pub fn clears_on_connect(error:&str,setup_up:bool,back:bool)->bool{error==disconnected_text()||(back&&!setup_up)}
+/// A request whose refusal the hub draws on the form that sent it (a routine's `routine.error` under its When): the window does not raise it again
+/// above the message box, where it stayed after the form was fixed and saved.
+pub fn form_shows_refusal(method:&str)->bool{method=="bots.routine"}
 pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
 #[cfg(test)] mod status_tests{use super::*;use core::prelude::v1::test;
+    #[test] fn a_routine_forms_refusal_is_drawn_on_the_form_only(){assert!(form_shows_refusal("bots.routine"));assert!(!form_shows_refusal("thread.create"));}
     /* i18n-ok: test */ #[test] fn a_refused_view_or_command_leaves_the_connection_label_alone(){assert_eq!(status_for(&Event::Refused("View request refused: \"PRESENTER_UNAVAILABLE\"".into())),None);assert_eq!(status_for(&Event::Error("Hub disconnected".into())),Some("Disconnected"));assert_eq!(status_for(&Event::Accepted),None);}
     /* i18n-ok: test */ #[test] fn the_disconnect_banner_goes_on_reconnect_even_during_setup(){assert!(clears_on_connect(&disconnected_text(),true,true));assert!(clears_on_connect(&disconnected_text(),false,false));assert!(clears_on_connect("Pairing refused",false,true));assert!(!clears_on_connect("Pairing refused",true,true),"a refusal setup shows stays until the person acts");
         /* i18n-ok: test */ assert!(!clears_on_connect("\"..\" cannot be a project's folder",false,false),"a view that says Connected again keeps a command's refusal");}}
@@ -666,7 +670,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,queued:&mu
                         // every product RPC's answer is logged, so a refused send is never silent (the reply's error may be a plain string, a code or a message)
                         let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};
                         eprintln!("GPUI_LOG {}",json!({"rpc_reply":name,"ok":x["ok"]==true,"error":why.chars().take(160).collect::<String>()}));
-                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;} if name=="thread.create"||name=="project.new" {let th=x["thread"].as_str().or(x["result"]["thread"].as_str()).unwrap_or("").to_string(); eprintln!("GPUI_LOG {}",json!({"made":th,"by":name})); if !th.is_empty() {if name=="project.new" {let _=events.send(Event::Data("project-made",x["note"].clone())).await;} let _=events.send(Event::Data("created",json!(th))).await;}}}else{if name=="thread.create"{let _=events.send(Event::Data("create-refused",json!(why))).await;} if let Some(d)=x["result"]["exists"].as_str().filter(|_|name=="project.new") {let _=events.send(Event::Data("project-exists",json!(d))).await;}let _=events.send(Event::Refused(crate::i18n::tf("gpui.hub.refused.it", &[("why", crate::i18n::trs(&why).into())]))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
+                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;} if name=="thread.create"||name=="project.new" {let th=x["thread"].as_str().or(x["result"]["thread"].as_str()).unwrap_or("").to_string(); eprintln!("GPUI_LOG {}",json!({"made":th,"by":name})); if !th.is_empty() {if name=="project.new" {let _=events.send(Event::Data("project-made",x["note"].clone())).await;} let _=events.send(Event::Data("created",json!(th))).await;}}}else{if name=="thread.create"{let _=events.send(Event::Data("create-refused",json!(why))).await;} if let Some(d)=x["result"]["exists"].as_str().filter(|_|name=="project.new") {let _=events.send(Event::Data("project-exists",json!(d))).await;}if !form_shows_refusal(&name) {let _=events.send(Event::Refused(crate::i18n::tf("gpui.hub.refused.it", &[("why", crate::i18n::trs(&why).into())]))).await;}}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     let paged=v.paging.take_if(|(page,_)|*page==id).map(|(_,cursor)|cursor);
                     let on_older=v.older_reqs.remove(&id);
