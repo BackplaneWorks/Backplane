@@ -1851,6 +1851,15 @@ mod tests {
         r.begin_rows(); r.begin_outside(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["Light or dark", "264 px."]);
         r.enter(0, &format!("{SET_ID}settings")); assert!(r.blocks.is_empty(), "Settings' next frame (or its closing) replaces them");
     }
+    // a plan card's text had a registry of its own (Copy and Ctrl+C never saw it): its head and body are two scopes of the window's, both kept
+    #[test] fn an_ask_cards_head_and_body_scopes_keep_each_other() {
+        let reg: Reg = Default::default(); reg.borrow_mut().begin();
+        let push = |t: &str| { let mut r = reg.borrow_mut(); let (e, id) = (r.entry, r.entry_id.clone()); r.blocks.push(Info { entry: e, ..info(&id, 0, t) }); };
+        Registry::scoped(&reg, ASK_ROW, &format!("{ASK_ID}p1"), || push("Proposed plan"));
+        Registry::scoped(&reg, ASK_ROW, &format!("{ASK_ID}p1-b"), || { push("Steps"); push("1. A") });
+        let r = reg.borrow(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["Proposed plan", "Steps", "1. A"]);
+        assert!(r.blocks.iter().all(|b| in_scope(b, Some(true)) && b.entry == ASK_ROW), "the rows' surface, after every row");
+    }
     // a double click on a fold's head, the gutter or the Working row lit up a word of the bubble above (the nearest block)
     #[test] fn a_double_click_selects_only_on_text_and_a_click_off_it_still_finds_the_nearest() {
         let laid = |id: &str, t: &str, y: f32| Info { layout: Some(BlockLayout::Flow(FlowLayout { bounds: Bounds { origin: point(px(400.), px(y)), size: size(px(500.), px(20.)) }, line_height: px(20.), text_len: t.len(), lines: vec![] })), ..info(id, 0, t) };

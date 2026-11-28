@@ -975,8 +975,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     }
     // Usage: each account's limit windows first, then the hub's lifetime totals
     // (one child, so a row's child index is known before it is drawn: `row_child`)
-    if !on_keys && !on_acct && !on_hubs && page == "usage" { els.insert(0, div().flex().flex_col().children(super::accounts::usage_summary(light, acct)).into_any_element()); }
-    if more > 0 { els.push(div().py_2().text_color(c("dim")).child(tf("gpui.settings.more", &[("n", more.into())])).into_any_element()); }
+    if !on_keys && !on_acct && !on_hubs && page == "usage" { els.insert(0, div().flex().flex_col().children(super::accounts::usage_summary(cx, light, acct)).into_any_element()); }
+    if more > 0 { els.push(words(cx, light, div().py_2().text_color(c("dim")), tf("gpui.settings.more", &[("n", more.into())])).into_any_element()); }
     // the left nav
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
     if let Some(input) = &ui.search {
