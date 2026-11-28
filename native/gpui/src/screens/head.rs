@@ -86,6 +86,10 @@ pub fn group(action: &str) -> u8 {
 }
 /// Whether a tool can show its icon alone (its word in its tooltip): the keeping and branching ones, when the hub gave them an icon.
 pub fn can_fold(t: &Item) -> bool { group(&t.action) >= 2 && !t.icon.is_empty() }
+/// The word a toggling tool shows in its other state (the hub's words, present/keys.rs): its button keeps the longer one's width.
+pub fn toggle_twin(action: &str) -> Option<&'static str> {
+    match action { "pin" => Some("Pinned"), "unpin" => Some("Pin"), "settle" => Some("Settled"), "unsettle" => Some("Settle"), _ => None }
+}
 /// Buy it's words as the chip shows them: the word, and its estimate (what follows the first " · ") as a quieter second half.
 pub fn split_buy(label: &str) -> (&str, &str) { label.split_once(" · ").unwrap_or((label, "")) }
 /// The room before a tool: none first, a little within a group, more between groups.
@@ -98,7 +102,8 @@ pub fn strip_width(items: &[Item], shape: &mut dyn FnMut(&str) -> f32) -> (f32, 
         let g = group(&t.action); let sp = space(prev, g); prev = Some(g);
         let icon = if t.icon.is_empty() { 0. } else { ICON + ICON_GAP };
         let label = crate::i18n::trs(&t.label); // measured as drawn (button)
-        let w = if t.action == "fab-buy" { let (word, est) = split_buy(&label); 2. + PL + icon + shape(word) + if est.is_empty() { 0. } else { ICON_GAP + shape(est) } + PR } else { PL + icon + shape(&label) + PR };
+        let w = if t.action == "fab-buy" { let (word, est) = split_buy(&label); 2. + PL + icon + shape(word) + if est.is_empty() { 0. } else { ICON_GAP + shape(est) } + PR }
+            else { PL + icon + shape(&label).max(toggle_twin(&t.action).map_or(0., |tw| shape(&crate::i18n::trs(tw)))) + PR };
         full += sp + w;
         icons += sp + if can_fold(t) { PL + ICON + PL } else { w };
     }
@@ -183,7 +188,9 @@ fn button(cx: &mut Context<Backplane>, light: bool, i: usize, t: &Item, fold: bo
         .when(buy, |d| d.min_w_0().overflow_hidden().border_1().border_color(c("line")).bg(c("panel"))).when(buy && !fold, |d| d.flex_shrink()).when(!buy || fold, |d| d.flex_shrink_0());
     // an icon the set lacks keeps its room (art::icon draws an empty square too), so the width is what strip_width counts
     let d = if t.icon.is_empty() { d } else { d.child(div().flex_shrink_0().size(px(ICON)).children(crate::art::icon_name(&t.icon).map(|n| crate::art::icon(n, ICON, c(ic))))) };
-    let d = if fold { d } else { d.child(div().flex_shrink_0().child(word.to_string())) };
+    // a toggle (Pin/Pinned, Settle/Settled) keeps the width of its longer word, so pressing it moves none of the tools beside it
+    let d = if fold { d } else { d.child(div().flex_shrink_0().flex().flex_col().child(word.to_string())
+        .children(toggle_twin(&t.action).map(|tw| div().h(px(0.)).overflow_hidden().invisible().child(crate::i18n::trs(tw))))) };
     let d = d.when(!fold && !est.is_empty(), |d| d.child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(c("faint")).child(est.to_string())));
     d.tooltip(crate::keys::tip(&tip.0, &tip.1, light)).on_click(cx.listener(move |this, _, _, cx| { super::settings::flush_fields(this); if super::tools::makes_thread(&a) { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); }))
 }
@@ -247,8 +254,9 @@ mod tests {
         let mut w = |s: &str| s.chars().count() as f32 * 7.;
         let ts = [item("fab-buy", "shopping-cart", "Buy it · from $5"), item("pin", "pin", "Pin"), item("settle", "circle-check", "Settle"), item("fork", "git-fork", "Fork thread")];
         let (full, icons) = strip_width(&ts, &mut w);
-        // buy: 2 + 6 + 19 + 42 + 6 + 49 + 8 = 132; pin: 14 + 6 + 19 + 21 + 8 = 68; settle: 2 + 6 + 19 + 42 + 8 = 77; fork: 14 + 6 + 19 + 77 + 8 = 124
-        assert_eq!(full, 132. + 68. + 77. + 124.);
+        // buy: 2 + 6 + 19 + 42 + 6 + 49 + 8 = 132; pin (room for "Pinned"): 14 + 6 + 19 + 42 + 8 = 89; settle (room for "Settled"): 2 + 6 + 19 + 49 + 8 = 84;
+        // fork: 14 + 6 + 19 + 77 + 8 = 124
+        assert_eq!(full, 132. + 89. + 84. + 124.);
         // folded: 6 + 13 + 6 = 25 each, buy unchanged
         assert_eq!(icons, 132. + (14. + 25.) + (2. + 25.) + (14. + 25.));
         let stop = [item("interrupt", "stop", "Stop")]; assert_eq!(strip_width(&stop, &mut w).0, strip_width(&stop, &mut w).1, "Stop never folds");
@@ -272,6 +280,13 @@ mod tests {
         let d = dropped_items(&t, !0b0011);
         assert_eq!(d.iter().map(|i| (i.label.as_str(), i.action.as_str())).collect::<Vec<_>>(), [("Pin", "pin"), ("Fork thread", "fork")]);
         assert_eq!(dropped_items(&t, 0b0001)[0].label, "Buy it", "Buy it by its word, without its estimate");
+    }
+    #[test] fn a_toggles_width_is_its_longer_word() {
+        assert_eq!((toggle_twin("settle"), toggle_twin("unsettle"), toggle_twin("pin"), toggle_twin("unpin")), (Some("Settled"), Some("Settle"), Some("Pinned"), Some("Pin")));
+        assert_eq!(toggle_twin("fork"), None);
+        let mut w = |s: &str| s.chars().count() as f32 * 7.;
+        let a = strip_width(&[item("settle", "circle-check", "Settle")], &mut w).0; let b = strip_width(&[item("unsettle", "circle-check", "Settled")], &mut w).0;
+        assert_eq!(a, b, "Settle and Settled take the same room");
     }
     #[test] fn tight_only_when_even_the_icons_do_not_fit() {
         // state 140 + 24 + icons 200 + 6 = 370
