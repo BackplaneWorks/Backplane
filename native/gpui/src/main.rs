@@ -384,7 +384,9 @@ impl Backplane {
         let follow=screens::viewer::is_open(&self.data["thread"]).then(||screens::viewer::active_kind(&self.data["thread"]["viewer"],None)).and_then(|k|screens::projects::page_view(&self.data,Some(&pid),&self.selected,&k));
         // the page's box is its own: empty when the page opens over a thread (that thread's draft stays saved and comes back with it)
         let prev=self.project_page.replace(pid.clone());if prev.is_none(){self.input.update(cx,|i,cx|i.set(String::new(),cx));}
-        if prev.as_deref()!=Some(pid.as_str()){self.screens.projects.refused.clear();} // another page: the last one's refusal is not this one'sself.ui_epoch+=1;cx.notify();
+        // another page: the last one's refusal is not this one's
+        if prev.as_deref()!=Some(pid.as_str()){self.screens.projects.refused.clear();}
+        self.ui_epoch+=1;cx.notify();
         if let Some((t,k))=follow {self.page_viewer(t,k,cx);}}
     /// The viewer of the project whose page is on show: the project's thread `id` becomes the one selected (its viewer is the project's) with the page left up,
     /// and the page of `kind` opens once that thread is here (projects::sync).
