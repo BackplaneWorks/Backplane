@@ -129,6 +129,8 @@ pub fn spawn_with(copy: bool, hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super:
     if root.is_empty() { return }
     // a copy of a log runs no git that writes: its job runs on "/" (Copy.nowhere) and says at once that the thread uses the project folder
     let root = if copy { "/".to_string() } else { root };
+    // a project folder that is gone gets no worktree and no "not a git repository" note: the turn's start says it is gone (agents::folder_gone)
+    if crate::agents::folder_gone(&root, &root).is_some() { return }
     tokio::spawn(async move {
         let mut opts = opts;
         if opts.base.is_empty() && !opts.prefer.is_empty() && !copy && git::run_ro(&root, &["rev-parse", "--verify", "-q", &format!("refs/heads/{}^{{commit}}", opts.prefer)]).await.code == 0 { opts.base = opts.prefer.clone() }

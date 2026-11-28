@@ -647,9 +647,11 @@ impl Agents {
 /// A thread whose creation asked for a worktree (a branch) or that is an improvement thread must not fall back to its project folder.
 /// A thread's folder that vanished (a removed worktree) never stops a turn: it is made again as a fresh git worktree of the project (detached at HEAD),
 /// else as a plain folder, so threads, bots and restarts always have somewhere to run.
+/// A project's own folder (moved, deleted, a drive not mounted) is never made again: the turn says so and starts nothing.
 async fn remake_folder(cwd: &str, root: &str) -> Result<(), String> {
     let p = std::path::Path::new(cwd);
     if cwd.is_empty() { return Err("the thread has no folder".into()) }
+    if let Some(why) = folder_gone(cwd, root) { return Err(why) }
     if p.is_dir() { return Ok(()) }
     if !crate::copy::on() && !root.is_empty() && std::path::Path::new(root).join(".git").exists() {
         if let Some(parent) = p.parent() { let _ = std::fs::create_dir_all(parent); }
@@ -660,6 +662,15 @@ async fn remake_folder(cwd: &str, root: &str) -> Result<(), String> {
     if !p.is_dir() { std::fs::create_dir_all(p).map_err(|e| format!("its folder {cwd} is gone and could not be made again: {e}"))? }
     Ok(())
 }
+pub(crate) const FOLDER_GONE: &str = "The project folder is gone: ";
+/// Why a turn in `cwd` cannot start: the project's folder `root` is not there and `cwd` is in it. None on a copy (root "/") or a folder elsewhere.
+pub(crate) fn folder_gone(cwd: &str, root: &str) -> Option<String> {
+    let r = std::path::Path::new(root);
+    if crate::copy::on() || root.is_empty() || !r.is_absolute() || !std::path::Path::new(cwd).starts_with(r) || r.is_dir() { return None }
+    Some(format!("{FOLDER_GONE}{root}. Put it back, or remove the project and add it where it is now."))
+}
+/// How a start that failed reads: the folder that is gone says only that.
+fn start_failed(cli: &str, e: &str) -> (String, &'static str) { if e.starts_with(FOLDER_GONE) { (e.to_string(), "git") } else { (format!("could not start {cli}: {e}"), "spawn") } }
 /// A thread that waits for its worktree before it starts: made with a branch, or an improvement thread. One whose job found no repository (`skipped`) runs in the project folder.
 fn wants_worktree(id: &str, branch: &str, env: &str, skipped: bool) -> bool { !skipped && (id.starts_with("improvement-") || (!branch.is_empty() && env != "local")) }
 /// What the Claude CLI says when `--resume` names a session it does not have.
@@ -855,7 +866,8 @@ impl Actor {
             let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) };
             (t, w.cwd(&self.th), w.cx(&self.th), w.setting(&format!("ride.{}", self.th)).to_string())
         };
-        let (t, cwd, cx, ride) = if t.worktree.is_empty() && wants_worktree(&self.th, &t.branch, &t.env, t.wt_skipped) { // made with a branch (or an improvement thread): never the project folder, which may be a guarded checkout
+        let gone = { let w = self.ag.world().await; folder_gone(&cwd, &w.roots.get(&t.project).cloned().unwrap_or_default()).is_some() }; // (the start below says so)
+        let (t, cwd, cx, ride) = if !gone && t.worktree.is_empty() && wants_worktree(&self.th, &t.branch, &t.env, t.wt_skipped) { // made with a branch (or an improvement thread): never the project folder, which may be a guarded checkout
             let end = Instant::now() + Duration::from_secs(60); let mut got = None;
             loop { { let w = self.ag.world().await; if let Some(x) = w.threads.get(&self.th) { if !x.worktree.is_empty() || x.wt_skipped { got = Some((x.clone(), w.cwd(&self.th), w.cx(&self.th), w.setting(&format!("ride.{}", self.th)).to_string())); } } } if got.is_some() || Instant::now() > end { break } tokio::time::sleep(Duration::from_millis(200)).await }
             match got { Some(g) => g, None => { let why = "this thread's worktree is not ready (its creation made none): not started in the project folder".to_string(); let (now, th) = (now_s(), self.th.clone()); self.commit(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("rf", now, self.ag.seq()),"tone":"error","kind":"refused","summary":format!("not started: {why}"),"at":now})]).await; return Err(why) } }
@@ -1040,7 +1052,7 @@ impl Actor {
         if crate::copy::turn_gated(self.pressed) || self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return } // Copy.turns: only a person's turn starts an agent on a copy
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         let root = self.ag.world().await.roots.get(&t.project).cloned().unwrap_or_default();
-        if let Err(e) = remake_folder(cwd, &root).await { self.fail(format!("could not start codex: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+        if let Err(e) = remake_folder(cwd, &root).await { let (why, kind) = start_failed("codex", &e); self.fail(why, kind, &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
         let Some(made) = providers::driver(&t.provider) else { self.fail(format!("{} threads are not run by the Rust hub yet", t.provider), "spawn", &format!("spawn-{now}")).await; return };
         let mut prog = match (if self.person { self.person_prog(made.cli) } else { self.ag.cli.resolve(made.cli) }) { Ok(p) => p, Err(e) => { let hint = made.driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return } };
         self.stop().await; self.lines = None; self.exit = None;
@@ -1228,7 +1240,7 @@ impl Actor {
                 self.recall_fresh = false;
                 if self.login_refused(&e).await { return }
                 if account_err(&e) && self.account_retry(&msg, &text, &agent_text, &e).await { return }
-                self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
+                let (why, kind) = start_failed("claude", &e); self.fail(why, kind, &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
             self.acct_tries = 0;
             if fresh { self.handover = false; let v = self.ag.recall_view(&th).await; if !v.is_empty() { agent_text = format!("{v}\n\n{agent_text}") } }
             else if std::mem::take(&mut self.handover) { let ctx = crate::commands::lost_session_context(&self.ag.hub, &th, &text).await; if !ctx.is_empty() { agent_text = format!("{ctx}\n\n{agent_text}") } }
@@ -1672,5 +1684,24 @@ mod remake_tests {
         super::remake_folder(gone.to_str().unwrap(), root.to_str().unwrap()).await.unwrap();
         assert!(gone.is_dir() && gone.join(".git").exists(), "a fresh worktree");
         let plain = d.join("plain/x"); super::remake_folder(plain.to_str().unwrap(), "").await.unwrap(); assert!(plain.is_dir());
+    }
+    #[tokio::test] async fn a_thread_of_a_project_whose_folder_is_gone_starts_nothing() {
+        let d = crate::plat::tmp::dir("remake-gone");
+        let root = d.join("moved-away"); let r = root.to_str().unwrap();
+        for cwd in [r.to_string(), format!("{r}/.backplane/worktrees/backplane-ab12cd34")] {
+            let e = super::remake_folder(&cwd, r).await.unwrap_err();
+            assert_eq!(e, format!("The project folder is gone: {r}. Put it back, or remove the project and add it where it is now."));
+            assert!(!root.exists(), "nothing made the folder again");
+        }
+        assert_eq!(super::start_failed("claude", &super::folder_gone(r, r).unwrap()).1, "git");
+        // a folder elsewhere (a bot's, a chat's) is not the project's: made again as before
+        let other = d.join("bots/b1"); super::remake_folder(other.to_str().unwrap(), r).await.unwrap(); assert!(other.is_dir() && !root.exists());
+    }
+    #[tokio::test] async fn the_folder_back_again_runs() {
+        let d = crate::plat::tmp::dir("remake-back");
+        let root = d.join("proj"); let r = root.to_str().unwrap();
+        assert!(super::remake_folder(r, r).await.is_err());
+        std::fs::create_dir_all(&root).unwrap();
+        super::remake_folder(r, r).await.unwrap();
     }
 }

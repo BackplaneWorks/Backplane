@@ -363,6 +363,17 @@ async fn settled(h: &Arc<Hub>, n0: usize, want: usize) -> Vec<Value> {
     assert_eq!(ev[1]["$"], "WorktreeSkipped"); assert_eq!(ev[1]["id"], "tc");
     assert!(!repo.join(".backplane").exists(), "no worktree was made"); assert!(!repo.join(".git/info/exclude").to_str().map_or(false, |p| std::fs::read_to_string(p).unwrap_or_default().contains(".backplane")));
 }
+// a project whose folder is gone: the worktree job makes nothing (not the folder, no "not a git repository" note); the turn's start says it is gone (agents::folder_gone)
+#[tokio::test] async fn the_worktree_job_of_a_project_whose_folder_is_gone_makes_nothing() {
+    let h = hub("wtgone").await; let gone = crate::plat::tmp::dir("wtgone-root").join("moved-away");
+    h.commit(&json!({"$":"ProjectCreated","id":"pg","title":"g","root":gone.to_str().unwrap(),"at":9})).await.unwrap();
+    h.commit(&json!({"$":"ThreadCreated","id":"tg","project":"pg","title":"x","env":"auto","branch":"","worktree":"","provider":"claude","model":"","at":9})).await.unwrap();
+    let fold = Arc::new(tokio::sync::Mutex::new(super::fold::Fold::default()));
+    let n0 = h.store.len();
+    super::worktree::spawn_with(false, h.clone(), fold, "tg".into(), gone.to_str().unwrap().into(), "auto".into(), String::new(), "claude".into(), String::new(), Default::default());
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    assert_eq!(h.store.len(), n0, "no note, no skip"); assert!(!gone.exists(), "nothing made the folder again");
+}
 // Hub.job.ready: the report lands, the waiting messages start through the agents seam, and a stale report (another provider now) does not start them
 #[tokio::test] async fn a_made_worktree_is_recorded_and_the_waiting_messages_start() {
     let h = hub("wtreal").await; let repo = git_repo("wtreal-repo");

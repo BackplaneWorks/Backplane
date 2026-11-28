@@ -723,6 +723,9 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
         div().text_size(crate::scale::tpx(22.)).font_weight(FontWeight::BOLD).child(crate::streamer::project_shown(&string(p, "title"))).into_any_element(),
         div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::streamer::shown(&root)).into_any_element(),
     ];
+    // the hub's word that this machine's folder of the project is gone (present/sections.rs `folder_gone`)
+    let gone = string(&data["projectPage"]["project"], "gone");
+    if !gone.is_empty() { out.push(div().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(crate::i18n::trs(&gone)).into_any_element()) }
     // the actions: New thread first (the way in), Open folder, then the viewers the folder has something for (they open on the project's top thread)
     let mut bar = div().flex().flex_wrap().items_center().gap_2().pt_3().pb_1();
     { let pid2 = pid.to_string();

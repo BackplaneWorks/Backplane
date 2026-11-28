@@ -3874,6 +3874,8 @@ android.hub.err.project.retry	Choose an existing project and retry this request.
 android.hub.err.project.message	Choose a project and enter a message before starting a thread.	スレッドを始める前に、プロジェクトを選んでメッセージを入力してください。	Elige un proyecto e introduce un mensaje antes de iniciar un hilo.
 android.hub.err.project.already	already a project: {root}	すでにプロジェクトです: {root}	ya es un proyecto: {root}
 android.hub.err.project.invalid	invalid project folder: {path}	無効なプロジェクトフォルダーです: {path}	carpeta de proyecto inválida: {path}
+android.hub.project.folder.gone	The project folder is gone: {path}. Put it back, or remove the project and add it where it is now.	プロジェクトのフォルダがありません: {path}。元の場所に戻すか、プロジェクトを削除して今ある場所で追加し直してください。	La carpeta del proyecto ya no está: {path}. Vuelve a ponerla, o quita el proyecto y añádelo donde está ahora.
+android.hub.project.page.gone	This folder is gone.	このフォルダはありません。	Esta carpeta ya no está.
 android.hub.err.project.nofolder	no folder given	フォルダーが指定されていません	no se indicó carpeta
 android.hub.err.project.unavailable	Project folder is unavailable.	プロジェクトフォルダーを使用できません。	La carpeta del proyecto no está disponible.
 android.hub.err.project.home	the project home could not be read	プロジェクトのホームを読み込めませんでした	no se pudo leer el inicio del proyecto
@@ -7199,6 +7201,9 @@ menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
 
     /// android.hub.err.project.invalid = invalid project folder: {path}
     static func android_hub_err_project_invalid(path: String) -> String { f("android.hub.err.project.invalid", ["path": path]) }
+
+    /// android.hub.project.folder.gone = The project folder is gone: {path}. Put it back, or remove the project and add it where it is now.
+    static func android_hub_project_folder_gone(path: String) -> String { f("android.hub.project.folder.gone", ["path": path]) }
 
     /// android.hub.devices.used.by = Used by {name}. Each link pairs one device.
     static func android_hub_devices_used_by(name: String) -> String { f("android.hub.devices.used.by", ["name": name]) }
