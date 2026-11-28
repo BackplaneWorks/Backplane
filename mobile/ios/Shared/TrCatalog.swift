@@ -3158,6 +3158,7 @@ gpui.side.old.chats.that.belong.to	Old chats that belong to no project. New ones
 gpui.side.group.projects	Group projects	プロジェクトをグループ化	Agrupar proyectos
 gpui.side.on.projects.with.nothing.going	On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.	オン: 最近動きのないプロジェクトを Git のオーナー（なければフォルダ）ごとにまとめます。オフ: 1 つの一覧にし、自分で作ったグループだけを表示します。	Activado: los proyectos sin actividad reciente se agrupan por su propietario git, o por su carpeta. Desactivado: una sola lista y solo los grupos que tú crees.
 gpui.side.no.group	No group	グループなし	Sin grupo
+gpui.side.nomatch	No name matches. Enter searches what was said.	名前に一致しません。Enterで会話の中を検索します。	Ningún nombre coincide. Enter busca en lo dicho.
 gpui.e.freecad.install	Install FreeCAD	FreeCADをインストール	Instalar FreeCAD
 gpui.e.freecad.ask	Install FreeCAD?	FreeCADをインストールしますか？	¿Instalar FreeCAD?
 gpui.e.freecad.installing	Installing FreeCAD	FreeCADをインストール中	Instalando FreeCAD

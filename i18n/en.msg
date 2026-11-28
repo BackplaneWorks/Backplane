@@ -2763,6 +2763,7 @@ gpui.side.old.chats.that.belong.to = Old chats that belong to no project. New on
 gpui.side.group.projects = Group projects
 gpui.side.on.projects.with.nothing.going = On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.
 gpui.side.no.group = No group
+gpui.side.nomatch = No name matches. Enter searches what was said.
 gpui.e.freecad.install = Install FreeCAD
 gpui.e.freecad.ask = Install FreeCAD?
 gpui.e.freecad.installing = Installing FreeCAD

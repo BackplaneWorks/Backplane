@@ -766,6 +766,8 @@ impl Backplane {
         // the hub's sections (Needs you, Pinned, Active, groups, Quiet: screens/sections.rs); an older hub sends projects and the Active view
         let sectioned = crate::screens::sections::on(&self.data);
         if sectioned { self.section_rows(cx, light, &mut rows, &mut ctl); }
+        // the Search field's words match no name: one dim line in place of the list
+        rows.extend(crate::screens::projects::nomatch(light, &self.data));
         if !sectioned {
         for project in self.data["projects"].as_array().into_iter().flatten() {
             let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();

@@ -2764,6 +2764,7 @@ gpui.side.old.chats.that.belong.to = Chats antiguos que no pertenecen a ningún 
 gpui.side.group.projects = Agrupar proyectos
 gpui.side.on.projects.with.nothing.going = Activado: los proyectos sin actividad reciente se agrupan por su propietario git, o por su carpeta. Desactivado: una sola lista y solo los grupos que tú crees.
 gpui.side.no.group = Sin grupo
+gpui.side.nomatch = Ningún nombre coincide. Enter busca en lo dicho.
 gpui.e.freecad.install = Instalar FreeCAD
 gpui.e.freecad.ask = ¿Instalar FreeCAD?
 gpui.e.freecad.installing = Instalando FreeCAD
