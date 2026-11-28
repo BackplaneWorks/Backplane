@@ -51,6 +51,18 @@ pub fn block_range(texts: &[Text], block: usize) -> Option<Selection> {
     Some(Selection { anchor: Pos { block, off: 0 }, head: Pos { block, off: t.text.len() } })
 }
 
+/// Triple click in a block holding newlines (a code block, a file's text): the logical line at `pos`, its newline not included; a
+/// position past the end is the last line, an empty line an empty range there. A block without a newline: the whole block.
+pub fn line_range(texts: &[Text], pos: Pos) -> Option<Selection> {
+    let l = line_at(&texts.get(pos.block)?.text, pos.off);
+    Some(Selection { anchor: Pos { block: pos.block, off: l.start }, head: Pos { block: pos.block, off: l.end } })
+}
+/// The logical line of `text` at `off` (see `line_range`).
+pub fn line_at(text: &str, off: usize) -> Range<usize> {
+    let off = snap(text, off);
+    text[..off].rfind('\n').map_or(0, |i| i + 1)..text[off..].find('\n').map_or(text.len(), |i| off + i)
+}
+
 /// The text a Ctrl-C copies: each covered block's part, blocks of one message on separate lines, messages by a blank line (an activity row by one
 /// newline), the cells of a table row by a tab; a row drawn cut copies to its real end.
 pub fn extract(texts: &[Text], sel: &Selection) -> String {
@@ -127,6 +139,14 @@ mod tests {
         assert_eq!(word_at("", 3), 0..0);
         let texts = [t("one", 0), t("two words", 0)];
         assert_eq!(extract(&texts, &block_range(&texts, 1).unwrap()), "two words"); assert!(block_range(&texts, 9).is_none());
+    }
+    #[test] fn a_triple_click_takes_the_line_not_the_block() {
+        let texts = [t("a b\ncd ef\n\ngh", 0), t("two words", 0)];
+        let line = |b: usize, o: usize| { let s = line_range(&texts, p(b, o)).unwrap(); (s.anchor.block == b && s.head.block == b).then_some(s.anchor.off..s.head.off) };
+        assert_eq!(line(0, 1), Some(0..3)); assert_eq!(line(0, 3), Some(0..3)); assert_eq!(line(0, 4), Some(4..9)); assert_eq!(line(0, 9), Some(4..9));
+        assert_eq!(line(0, 10), Some(10..10), "an empty line selects nothing more"); assert_eq!(line(0, 12), Some(11..13)); assert_eq!(line(0, 99), Some(11..13));
+        assert_eq!(line(1, 4), Some(0..9), "no newline: the whole block"); assert_eq!(line_range(&texts, p(1, 4)), block_range(&texts, 1));
+        assert!(line_range(&texts, p(9, 0)).is_none());
     }
 }
 

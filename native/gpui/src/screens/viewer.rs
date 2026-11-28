@@ -495,7 +495,7 @@ pub(super) fn diff_body(cx: &mut Context<Backplane>, reg: &Reg, light: bool, dif
             let mut row = div().flex().gap_2().px_3().font(crate::art::mono_font());
             if let Some(mut b) = bg { b.a = 0.14; row = row.bg(b); }
             if l.k == 4 { row = row.text_color(c("accent")); }
-            files = files.child(row.child(div().w(px(34.)).text_color(c("faint")).child(if l.k == 2 { l.old.clone() } else { l.new.clone() })).child(div().w(px(10.)).child(diff_sign(l.k))).child(div().flex_1().whitespace_nowrap().child(timeline::line_text(reg, light, l.t.clone(), ""))));
+            files = files.child(row.child(div().w(px(34.)).flex_none().text_color(c("faint")).child(if l.k == 2 { l.old.clone() } else { l.new.clone() })).child(div().w(px(10.)).flex_none().child(diff_sign(l.k))).child(div().flex_1().whitespace_nowrap().child(timeline::line_text(reg, light, l.t.clone(), ""))));
         }
     }
     col = col.child(files);
