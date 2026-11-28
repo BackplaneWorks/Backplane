@@ -8,3 +8,5 @@ Mono.swift | Copyright 2020 The JetBrains Mono Project Authors | the font's lice
 PairView.swift | BACKPLANE | the product name as its wordmark
 Outbox.swift | Edit | the outbox rows take the hub's queue row shape (English, like the hub's own); the strip shows them through Tr.t
 Outbox.swift | Remove | the same: a queue row button in the hub's words, translated where the strip draws it
+DataNotify.swift | https://enterprise.example.com | the shape of an Enterprise server address, an example
+DataNotify.swift | bpe_u_… | the shape of an account token, its fixed prefix

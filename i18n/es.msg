@@ -4479,6 +4479,17 @@ mobile.snooze.wakes = Vuelve en {time}
 mobile.bench.all = Todos los proyectos
 mobile.snooze.for = Posponer
 mobile.conn.reconnecting = Reconectando…
+ios.enterprise.alerts = Alertas de Enterprise
+ios.enterprise.url.https = La dirección del servidor debe empezar por https://
+ios.enterprise.token.enter = Introduce el token de tu cuenta
+ios.enterprise.url.invalid = La dirección del servidor no es válida
+ios.enterprise.token.unsaved = No se pudo guardar el token en este teléfono
+ios.enterprise.token.refused = Ese token no fue aceptado
+ios.enterprise.too.many = Demasiados intentos, espera un momento
+ios.enterprise.server.answered = El servidor respondió
+ios.enterprise.registered = Registrado
+ios.enterprise.registered.muted = Registrado, alertas desactivadas
+ios.enterprise.expired = Sesión caducada o revocada
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Te necesita

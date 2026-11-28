@@ -21,7 +21,9 @@ class FileFetchTest {
         assertNull(FileFetch.shareRoute("/s/$tok/a/b.zip"))
         assertNull(FileFetch.shareRoute("/s/$tok/"))
         // only what the hub's share_route writes: nothing that takes the address to another route (a review found `..\..\file?path=` did, on OkHttp)
-        listOf("..\\..\\file?path=%2Fx", "..", ".", "a?b", "a#b", "a\\b", "%zz", "a b").forEach { assertNull(it, FileFetch.shareRoute("/s/$tok/$it")) }
+        listOf("..\\..\\file?path=%2Fx", "..", ".", "a\\b", "%zz", "a b", "?b", "#b").forEach { assertNull(it, FileFetch.shareRoute("/s/$tok/$it")) }
+        // a query or a fragment after the name is dropped, never sent: the route is the name alone
+        listOf("a?b", "a#b", "a?path=%2Fx#L3").forEach { assertEquals(it, "/s/$tok/a", FileFetch.shareRoute("/s/$tok/$it")) }
         assertTrue(FileFetch.isShare("/s/$tok/a.zip")); assertFalse(FileFetch.isShare("/file"))
         assertEquals("download", FileFetch.safeName("..")); assertEquals("download", FileFetch.safeName(" . ")); assertEquals("a_b_c", FileFetch.safeName("a/b\\c"))
         // in running text, a share is a link as a path is (a name without an extension too), and what follows it in a sentence stays out
