@@ -1438,8 +1438,10 @@ impl Render for Backplane {
                         .tooltip(crate::keys::tip("Review mode: the design files are read-only for this thread", "", light)).child(ic(light, "search", 12., "warn")).child(trs("Read-only"))))
                     .children(head_thread.then(|| crate::screens::planmode::top_mark(light, thread)).flatten())
                     .when(head_thread, |d| d.child(div().text_color(c("faint")).child("/")).child(div().id("thread-title").relative().min_w_0().flex().font_weight(FontWeight::BOLD).child(crate::screens::head::measure(cx, self.screens.head.title.clone())).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(thread, "title")))
-                        // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu
-                        .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = this.title_menu(); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
+                        // the name is not a button (Rename is in its menu): a right click on it, or the ▾ beside it, opens the thread's menu;
+                        // a double click renames it, as F2 and the menu's Rename do (the hub opens the title box in the thread's row)
+                        .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { let items = this.title_menu(); if !items.is_empty() { this.ctx_open(e.position, items, cx); } }))
+                        .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| { if e.click_count == 2 { this.rename_open_thread(cx); } })))
                         /* i18n-ok: ui: ids (tips go through keys::tip, words through trs) */ .child(with_rect(div().id("thread-menu"), || "ui:Thread menu".to_string()).px_1().h_full().flex().items_center().cursor_pointer().hover(|s| s.bg(c("raise")))
                             // the menu drops from under the ▾
                             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); let items = this.title_menu(); if !items.is_empty() { this.ctx_open(point(e.position.x - px(8.), e.position.y + px(14.)), items, cx); } }))
