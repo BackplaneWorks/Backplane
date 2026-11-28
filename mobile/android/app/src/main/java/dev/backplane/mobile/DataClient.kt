@@ -902,6 +902,8 @@ object DataClient {
     suspend fun addProject(path: String): DProject {
         val p = parseProject(call("project.add", JSONObject().put("path", path)).getJSONObject("project"))
         projects = (projects.filter { it.id != p.id } + p).sortedByDescending { it.updatedAt }
+        // the Bench draws the hub's sections, not `projects`: ask for them again so the new project is listed at once
+        scope.launch { loadSections() }
         return p
     }
     /** The place of the chats that belong to no project (the hub's `sidebar::CHATS`): `thread.create` with it starts one, in a folder of its own. */
@@ -990,7 +992,7 @@ object DataClient {
     fun projectAct(id: String, action: String, title: String = "", value: String = "") = scope.launch {
         try {
             call("project.act", JSONObject().put("project", id).put("action", action).apply { if (title.isNotEmpty()) put("title", title); if (value.isNotEmpty()) put("value", value) })
-            if (action == "remove") { projects = projects.filter { it.id != id }; threads = threads.filter { it.project != id } } else refresh()
+            if (action == "remove") { projects = projects.filter { it.id != id }; threads = threads.filter { it.project != id }; loadSections() } else refresh()
         } catch (e: Exception) { failure = e.message ?: "" }
     }
     // `search`: threads and projects by title, and what was said (`messages`, newest first, at most 3 a thread; an older hub sends none)
@@ -1211,6 +1213,8 @@ object DataClient {
     private var mgmtAsked = ""
     /** the parts a management row asks the board or schematic to light (a BOM line's references, a finding's parts) */
     var lightRefs by mutableStateOf<List<String>>(emptyList())
+    /** Bumped by a BOM row's tap: the board view goes to the parts [lightRefs] lights (a tap on the board itself lights without moving it). */
+    var goToRefs by mutableStateOf(0)
     /** the thread the viewer is open on ("Fix with agent" sends there) */
     var viewerThread = ""
     private fun heardMgmt(info: JSONObject) {

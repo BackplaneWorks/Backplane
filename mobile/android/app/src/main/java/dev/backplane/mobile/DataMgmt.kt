@@ -104,7 +104,10 @@ internal fun MgmtHost(
             }
         }
         DLine()
-        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState()), verticalAlignment = Alignment.CenterVertically) {
+        // the strip scrolls when its tools do not fit: a fade at an edge it scrolls past, as the viewer's tab strip has
+        val stripScroll = rememberScrollState()
+        Box(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(stripScroll), verticalAlignment = Alignment.CenterVertically) {
             panels.forEach { p ->
                 val id = p.optString("id"); val on = id == open
                 val badge = DataClient.mgmtData(id)?.optJSONObject("badge"); val n = badge?.optInt("n") ?: 0
@@ -118,6 +121,10 @@ internal fun MgmtHost(
             Spacer(Modifier.weight(1f))
             if (open.isNotEmpty()) Box(Modifier.size(44.dp).clickable { open = ""; DataClient.lightRefs = emptyList() }.testTag("mgmt.close"), contentAlignment = Alignment.Center) {
                 Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+        }
+        // drawn over the strip's ends, no pointer input of their own: a touch goes through to the tool under them
+        if (stripScroll.canScrollBackward) Box(Modifier.matchParentSize().wrapContentWidth(Alignment.Start).width(24.dp).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(dcs.surfaceVariant, Color.Transparent))).testTag("mgmt.strip.fade.start"))
+        if (stripScroll.canScrollForward) Box(Modifier.matchParentSize().wrapContentWidth(Alignment.End).width(24.dp).background(androidx.compose.ui.graphics.Brush.horizontalGradient(listOf(Color.Transparent, dcs.surfaceVariant))).testTag("mgmt.strip.fade.end"))
         }
     }
 }
@@ -152,12 +159,13 @@ private fun BomPanel() {
         val shown = lines.filter { l -> q.isBlank() || q.lowercase().split(' ').filter { it.isNotEmpty() }.all { w -> (w == "dnp" && l.optBoolean("dnp")) ||
             listOf(Mgmt.strs(l.optJSONArray("refs")).joinToString(" "), l.optString("value"), l.optString("footprint"), l.optString("mpn"), l.optString("fab")).joinToString(" ").lowercase().contains(w) } }
         val started = lines.any { it.optString("mpn").isNotEmpty() || it.optString("fab").isNotEmpty() }
+        val focus = androidx.compose.ui.platform.LocalFocusManager.current
         LazyColumn(Modifier.weight(1f).testTag("mgmt.bom.rows")) {
             items(shown, key = { it.optString("id") }) { l ->
                 val id = l.optString("id"); val refs = Mgmt.strs(l.optJSONArray("refs")); val dnp = l.optBoolean("dnp"); val st = l.optJSONObject("stock")
                 val faint = if (dnp) tone("faint") else dcs.onSurface
                 Column(Modifier.fillMaxWidth().background(if (sel == id) dcs.surfaceVariant else dcs.background)
-                    .combinedClickable(onClick = { sel = id; DataClient.lightRefs = refs }, onLongClick = { editing = l })
+                    .combinedClickable(onClick = { focus.clearFocus(); sel = id; DataClient.lightRefs = refs; DataClient.goToRefs++ }, onLongClick = { editing = l })
                     .padding(horizontal = 12.dp, vertical = 8.dp).testTag("mgmt.bom.row.$id")) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         DMono(Mgmt.refsFit(refs, 18), faint, 13, Modifier.weight(1f), bold = true)

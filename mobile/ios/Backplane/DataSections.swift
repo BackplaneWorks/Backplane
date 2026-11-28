@@ -113,10 +113,10 @@ struct DataSectionHead: View {
 /// while it works, quiet when it waits or is done. It replaced the row's coloured dot, which said almost nothing at a glance.
 struct DStatusPill: View {
     let pill: HomePill
-    private var color: Color { switch pill.tone { case "bad": BackplaneDesign.bad; case "run": BackplaneDesign.accent; case "ok": BackplaneDesign.ok; default: BackplaneDesign.dim } }
+    private var color: Color { switch pill.tone { case "bad": BackplaneDesign.bad; case "run": BackplaneDesign.accent; case "ok": BackplaneDesign.ok; case "wait": BackplaneDesign.warn; default: BackplaneDesign.dim } }
     var body: some View {
         // solid when the person must act (approve, answer, sign in); a stop is red too, as a line: it waits for nobody
-        let solid = pill.tone == "bad" && pill.label != "Failed" && pill.label != "Stopped"
+        let solid = pill.tone == "bad" && pill.label != "Failed" && pill.label != "Stopped" && pill.label != "offline"
         HStack(spacing: 4) {
             Image(systemName: pill.symbol).font(.system(size: 10, weight: .bold))
             Text(Tr.t(pill.label)).dui(11, weight: .semibold).lineLimit(1)

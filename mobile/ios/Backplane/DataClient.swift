@@ -1285,6 +1285,8 @@ final class DataClient {
         let r: DProjectReply = try await call("project.add", p)
         flushLists()
         if let i = projects.firstIndex(where: { $0.id == r.project.id }) { projects[i] = r.project } else { projects.insert(r.project, at: 0) }
+        // the home's Bench draws the hub's sections, not `projects`: ask for them again so the new project is listed at once
+        await loadSections()
         return r.project
     }
     /// `images`: the pictures of the first message (New thread's Attach and Draw), sent with it as a reply's are (`attachments`).
@@ -1368,7 +1370,7 @@ final class DataClient {
         do {
             _ = try await call("project.act", p, as: DEmpty.self)
             flushLists()
-            if action == "remove" { projects.removeAll { $0.id == id }; threads.removeAll { $0.project == id }; scheduleSave() } else { await refresh() }
+            if action == "remove" { projects.removeAll { $0.id == id }; threads.removeAll { $0.project == id }; scheduleSave(); await loadSections() } else { await refresh() }
         } catch { failure = error.localizedDescription }
     }
     func search(_ q: String) async -> DSearch? { try? await call("search", ["q": q]) }

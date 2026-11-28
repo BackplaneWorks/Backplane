@@ -137,4 +137,15 @@ class MobileSectionsTest {
         assertEquals(2, p.snoozedCount)
         assertEquals(1, p.quickJumpProjects(3).size)
     }
+
+    @Test fun benchShowsOnlyWhenASectionDrawsSomething() {
+        // a hub whose sections lag behind (no rows, no counted fold) leaves the Bench nothing to draw: the empty/loading state must show
+        val stale = DSection.list(JSONArray("""[{"id":"active","kind":"projects","title":"Recent","count":0,"rows":[]},{"id":"quiet","kind":"projects","title":"Quiet","count":0,"fold":true,"rows":[]}]"""))
+        assertFalse(benchShows(stale))
+        assertFalse(benchShows(emptyList()))
+        val folded = DSection.list(JSONArray("""[{"id":"all","kind":"projects","title":"All projects","count":4,"fold":true,"rows":[]}]"""))
+        assertTrue(benchShows(folded))
+        val listed = DSection.list(JSONArray("""[{"id":"active","kind":"projects","title":"Recent","count":1,"rows":[{"id":"p1","key":"k1","title":"BoardA"}]}]"""))
+        assertTrue(benchShows(listed))
+    }
 }

@@ -4006,6 +4006,7 @@ mobile.diff.renamed = renombrado
 mobile.diff.binary = binario
 mobile.settings.advanced = Avanzado
 android.attach.file = Elegir un archivo
+android.connecting.word = conectando
 
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} ejecutándose
