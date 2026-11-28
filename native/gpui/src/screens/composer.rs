@@ -54,6 +54,10 @@ pub enum ComposerEvent {
     PopupMove(i32),
     /// The popup is open and Tab was pressed: the highlighted row is chosen.
     PopupPick,
+    /// Ctrl+A (Cmd+A) in the message box right after a selection in the thread or the document (the box kept the keyboard): the window selects all of that.
+    SelectAllTimeline,
+    /// Up (-1) or Down (1) in the main message box while it is empty or shows an untouched recalled message: the window brings back what was sent before (`recall`).
+    Recall(i32),
 }
 
 /// Reference words drawn as chips in the draft (the colours are the accent over its own tint).
@@ -120,6 +124,10 @@ pub struct Composer {
     /// The most rows the box is tall (`MAX_LINES`); a one-row box (a row's rename) scrolls to the caret's row instead of growing over its neighbours.
     pub max_lines: f32,
     ctx: &'static str,
+    /// A selection was made elsewhere in the window (the thread's, `drop_selection`) and nothing was done in the box since: Ctrl+A selects all there.
+    elsewhere: bool,
+    /// The message brought back by Up (its place among the messages sent, newest first, and its text); the box still showing that text is "untouched".
+    pub recalled: Option<(usize, String)>,
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
@@ -133,7 +141,7 @@ impl Composer {
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
         /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, max_lines: MAX_LINES, ctx, focus: cx.focus_handle().tab_stop(tabs_between_fields(ctx)), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
-            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), total_h: px(0.), followed: None, selecting: false }
+            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), total_h: px(0.), followed: None, selecting: false, elsewhere: false, recalled: None }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
     pub fn dictate(&mut self, range: std::ops::Range<usize>, with: &str, caret: usize, cx: &mut Context<Self>) { self.ed.dictate(range, with, caret); self.sync(cx); }
@@ -146,7 +154,7 @@ impl Composer {
     pub fn editor(&self) -> &Editor { &self.ed }
     pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
     /// A selection made elsewhere in the window (the timeline's) is the one to copy: this one goes, the caret stays where it was.
-    pub fn drop_selection(&mut self, cx: &mut Context<Self>) { if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
+    pub fn drop_selection(&mut self, cx: &mut Context<Self>) { self.elsewhere = true; if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
     /// Insert a selected excerpt formatted as a Markdown blockquote at the caret/selection as one undoable edit.
     pub fn insert_quote(&mut self, selected: &str, cx: &mut Context<Self>) {
         let start = self.ed.selection().start;
@@ -157,9 +165,9 @@ impl Composer {
     pub fn menu_state(&self) -> (bool, bool) { (!self.masked && !self.ed.selection().is_empty(), !self.ed.is_empty()) }
     /// A right-click menu item ("cut", "copy", "paste", "all"): what its key does.
     pub fn menu_do(&mut self, what: &str, window: &mut Window, cx: &mut Context<Self>) {
-        match what { "cut" => self.cut(&Cut, window, cx), "copy" => self.copy(&Copy, window, cx), "paste" => self.paste(&Paste, window, cx), "all" => self.select_all(&SelectAll, window, cx), _ => {} }
+        match what { "cut" => self.cut(&Cut, window, cx), "copy" => self.copy(&Copy, window, cx), "paste" => self.paste(&Paste, window, cx), "all" => { self.elsewhere = false; self.select_all(&SelectAll, window, cx) } _ => {} }
     }
-    fn sync(&mut self, cx: &mut Context<Self>) { self.content = self.ed.text().to_string().into(); cx.notify(); }
+    fn sync(&mut self, cx: &mut Context<Self>) { self.elsewhere = false; self.content = self.ed.text().to_string().into(); cx.notify(); }
     fn edit(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Editor)) { f(&mut self.ed); self.sync(cx); }
 
     // ---- actions
@@ -185,15 +193,21 @@ impl Composer {
     fn doc_end(&mut self, _: &DocEnd, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_end(false)); }
     fn sel_doc_start(&mut self, _: &SelDocStart, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_start(true)); }
     fn sel_doc_end(&mut self, _: &SelDocEnd, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_end(true)); }
-    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
+    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        // just after a selection in the thread (the box kept the keyboard, as it does): all of the thread, as a page's Ctrl+A
+        /* i18n-ok: a key context */ if self.elsewhere && self.ctx == "Composer" { cx.emit(ComposerEvent::SelectAllTimeline); return }
+        self.edit(cx, |e| e.select_all());
+    }
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.undo(); }); }
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.redo(); }); }
     fn go(&mut self, _: &Go, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::Submit); }
     fn go_back(&mut self, _: &GoBack, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::SubmitBack); }
     fn newline(&mut self, _: &Newline, _: &mut Window, cx: &mut Context<Self>) { if self.max_lines <= 1.0 { return; } self.edit(cx, |e| e.newline()); }
     fn palette(&mut self, _: &CharPalette, window: &mut Window, _: &mut Context<Self>) { window.show_character_palette(); }
-    fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(-1)); } else { self.vertical(-1, false, cx); } }
-    fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(1)); } else { self.vertical(1, false, cx); } }
+    fn up(&mut self, _: &Up, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(-1)); } else if self.recalling() { cx.emit(ComposerEvent::Recall(-1)); } else { self.vertical(-1, false, cx); } }
+    fn down(&mut self, _: &Down, _: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupMove(1)); } else if self.recalling() && recalled_at(self.ed.text(), self.recalled.as_ref()).is_some() { cx.emit(ComposerEvent::Recall(1)); } else { self.vertical(1, false, cx); } }
+    /// Up and Down bring back sent messages: the main message box only, while it is empty or shows a recalled message as it was brought back.
+    /* i18n-ok: a key context */ fn recalling(&self) -> bool { self.ctx == "Composer" && untouched(self.ed.text(), self.recalled.as_ref()) }
     fn tab(&mut self, _: &Tab, window: &mut Window, cx: &mut Context<Self>) { if self.popup_open { cx.emit(ComposerEvent::PopupPick); } else if tabs_between_fields(self.ctx) { window.focus_next(); } }
     fn back_tab(&mut self, _: &BackTab, window: &mut Window, _: &mut Context<Self>) { if !self.popup_open && tabs_between_fields(self.ctx) { window.focus_prev(); } }
     fn sel_up(&mut self, _: &SelUp, _: &mut Window, cx: &mut Context<Self>) { self.vertical(-1, true, cx); }
@@ -554,6 +568,23 @@ pub fn format_blockquote(selected: &str) -> String {
 }
 
 /// Format a quote insertion given the draft text before the caret/selection.
+/// Up (-1) and Down (1) over the messages sent before in this thread, `history` newest first; `at` the one the box shows (None: the empty box).
+/// Up from the empty box brings the newest, each Up an older one (the oldest stays); Down a newer one, and past the newest the empty box again.
+pub fn recall(history: &[String], at: Option<usize>, dir: i32) -> Option<usize> {
+    if history.is_empty() { return None }
+    let last = history.len() - 1;
+    match (at.map(|i| i.min(last)), dir < 0) {
+        (None, true) => Some(0),
+        (Some(i), true) => Some((i + 1).min(last)),
+        (None, false) | (Some(0), false) => None,
+        (Some(i), false) => Some(i - 1),
+    }
+}
+/// The box is untouched for recall: empty, or still exactly the message Up brought back (any edit ends recall, and Up moves the caret again).
+pub fn untouched(text: &str, recalled: Option<&(usize, String)>) -> bool { text.is_empty() || recalled.is_some_and(|r| r.1 == text) }
+/// Where recall stands: the recalled message's place while the box shows it untouched, None for the empty box (or an edited one).
+pub fn recalled_at(text: &str, recalled: Option<&(usize, String)>) -> Option<usize> { if text.is_empty() { None } else { recalled.filter(|r| r.1 == text).map(|r| r.0) } }
+
 pub fn format_quote_insert(before_caret: &str, selected: &str) -> String {
     let q = format_blockquote(selected);
     if q.is_empty() { return String::new(); }
@@ -583,6 +614,18 @@ mod tests {
         map.bindings_for_input(&[gpui::Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string()).unwrap_or_default()
     }
     // #1172: a Mac's text keys: Option by word, Cmd to the line's (Left/Right, Backspace/Delete) and the text's (Up/Down) ends; Shift selects
+    #[test] fn up_brings_back_what_was_sent_newest_first_and_down_goes_back_to_the_empty_box() {
+        let h: Vec<String> = ["third", "second", "first"].map(String::from).to_vec();
+        assert_eq!(recall(&h, None, -1), Some(0), "Up in the empty box: the newest");
+        assert_eq!(recall(&h, Some(0), -1), Some(1)); assert_eq!(recall(&h, Some(2), -1), Some(2), "the oldest stays");
+        assert_eq!(recall(&h, Some(2), 1), Some(1)); assert_eq!(recall(&h, Some(0), 1), None, "past the newest: the empty box");
+        assert_eq!(recall(&h, None, 1), None); assert_eq!(recall(&[], None, -1), None, "nothing sent yet");
+        assert_eq!(recall(&h, Some(9), -1), Some(2), "a place past the list (the thread changed) stands at its end");
+        let held = (1, "second".to_string());
+        assert!(untouched("", None) && untouched("", Some(&held)) && untouched("second", Some(&held)), "empty, or the recalled text as it came");
+        assert!(!untouched("second!", Some(&held)) && !untouched("a draft", None), "an edit ends recall: Up moves the caret");
+        assert_eq!(recalled_at("second", Some(&held)), Some(1)); assert_eq!(recalled_at("", Some(&held)), None); assert_eq!(recalled_at("seco", Some(&held)), None);
+    }
     #[test] fn on_a_mac_option_moves_by_word_and_cmd_to_the_line_and_text_ends() {
         for ctx in ["Composer", "AskInput", "ImpInput", "PickInput", "FindInput", "PadLength"] {
             for (k, a) in [("alt-left", "WordLeft"), ("alt-right", "WordRight"), ("alt-shift-left", "SelWordLeft"), ("alt-shift-right", "SelWordRight"),
