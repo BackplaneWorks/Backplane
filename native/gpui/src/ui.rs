@@ -1559,13 +1559,14 @@ impl Render for Backplane {
             .children({ let l = self.screens.downloads.list.clone(); crate::screens::dlbar::strip(cx, &l, light) })
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
-            .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs,self.screens.offers.on_home.as_deref()))
+            // (its words selectable: `with_sel`)
+            .children({ let reg = self.screens.reg.clone(); crate::screens::settings::with_sel(&reg, "settings", || crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs,self.screens.offers.on_home.as_deref())) })
             .children(crate::screens::thread_context::view(&self.screens.thread_context, cx, light, window.viewport_size()))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
             .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
             .children({ let title = crate::screens::badge::from_machine(&self.data["thread"]["mark"], &string(&self.data["thread"], "title")); crate::screens::term::view(cx, window, light, &self.local, &title, &self.screens.term, if self.screens.side_shown { self.local.sidebar_px as f32 } else { crate::screens::viewer::STRIP_W }) })
             .children(crate::screens::padview::view(cx, window, light, &self.local, &mut self.screens.pad, &mut ctl))
-            .children(crate::screens::onboard::view(cx, light, &self.screens.fields, &self.data["tour"], &self.screens.acct, &self.screens.setup_focus, &self.screens.setup.scroll, f32::from(window.viewport_size().width), &self.error))
+            .children({ let reg = self.screens.reg.clone(); crate::screens::settings::with_sel(&reg, "setup", || crate::screens::onboard::view(cx, light, &self.screens.fields, &self.data["tour"], &self.screens.acct, &self.screens.setup_focus, &self.screens.setup.scroll, f32::from(window.viewport_size().width), &self.error)) })
             // a 0.14 home coming across: over setup and everything else of the window
             // the keys sheet, over setup too (? and F1 work there)
             .children(crate::screens::keysheet::view(cx, light, self.screens.keysheet, &self.local))

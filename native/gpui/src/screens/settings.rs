@@ -144,6 +144,20 @@ struct NoGhost;
 impl Render for NoGhost { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div() } }
 // the track's left edge and width as last drawn, and the value last set (a drag sets it only when it moves to another stop)
 thread_local! { static SLIDER_BOX: std::cell::Cell<(f32, f32)> = const { std::cell::Cell::new((0., 0.)) }; static SLIDER_LAST: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
+// the window's text registry while Settings or setup draws (`with_sel`): their words select and copy as a message's do (timeline.rs, "outside")
+thread_local! { static SEL: std::cell::RefCell<Option<super::timeline::Reg>> = const { std::cell::RefCell::new(None) }; }
+/// Draw Settings or setup (`f`) with their words selectable, as the blocks of `id` (each frame's replace the last; closed, there are none).
+pub fn with_sel<R>(reg: &super::timeline::Reg, id: &str, f: impl FnOnce() -> R) -> R {
+    SEL.with(|s| *s.borrow_mut() = Some(reg.clone()));
+    let out = super::timeline::Registry::scoped(reg, 0, &format!("{}{id}", super::timeline::SET_ID), f);
+    SEL.with(|s| *s.borrow_mut() = None); out
+}
+/// `t` in `d`: selectable text (drag, double/triple click, Copy) in the colour and size `d` gives it; outside `with_sel` plain text.
+pub(crate) fn words(cx: &mut Context<Backplane>, light: bool, d: Div, t: String) -> Div {
+    let Some(reg) = SEL.with(|s| s.borrow().clone()) else { return d.child(t) };
+    d.on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx))).on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+        .on_mouse_move(cx.listener(|this, e, _, cx| this.doc_move(e, cx))).child(super::timeline::line_text(&reg, light, t, ""))
+}
 fn slider_set(this: &mut Backplane, sl: &Slider, x: f32, cx: &mut Context<Backplane>) {
     let (left, w) = SLIDER_BOX.with(|b| b.get()); if w <= 0. { return }
     let v = slider_at(sl, x, left, w);
@@ -609,12 +623,12 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let has_field = r.fields.iter().any(|f| fields.contains_key(&f.name));
     let controls = !r.buttons.is_empty() || has_field || !r.qr.is_empty();
     if !controls && r.note.is_empty() {
-        return div().pt_4().pb_1().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)).into_any_element();
+        return words(cx, light, div().pt_4().pb_1().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD), trs(&r.label)).into_any_element();
     }
     // a paragraph that opens a group: the heading, its words under it, no hairline (it is not a setting)
     if r.raw["intro"] == true && !controls {
-        return div().pt_4().pb_1().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)))
-            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs(&r.note))).into_any_element();
+        return div().pt_4().pb_1().flex().flex_col().gap_1().child(words(cx, light, div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD), trs(&r.label)))
+            .child(words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c("dim")), trs(&r.note))).into_any_element();
     }
     // a text field takes the room the controls have beside the words (a folder path or an address is longer than 260 px, and wrapped in the field)
     let field_w = (avail - LABEL_MIN - GAP).clamp(260., CONTROLS_MAX).min(avail);
@@ -634,7 +648,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         w.max(if has_field { field_w } else { slider_w }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
     if !r.label.is_empty() {
-        let label = div().text_size(crate::scale::tpx(13.)).child(trs(&r.label));
+        let label = words(cx, light, div().text_size(crate::scale::tpx(13.)), trs(&r.label));
         // changed from what a fresh install has: a mark after the label on its line, and Reset when the row says what puts it back (the label stays where it is)
         left = if r.raw["changed"] != true { left.child(label) } else {
             let mut line = div().flex().items_center().gap_2().text_size(crate::scale::tpx(13.)).child(label.min_w_0()).child(div().flex_none().size(px(6.)).bg(c("accent")));
@@ -648,7 +662,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         };
     }
     if !r.note.is_empty() {
-        let note = div().text_size(crate::scale::tpx(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note));
+        let note = words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })), trs(&r.note));
         // a value to copy (the hub's `copy`: a path, an id, a link): its copy button shows while the pointer is on the row
         left = match r.raw["copy"].as_str().filter(|v| !v.is_empty()) { Some(v) => left.child(super::copyable::value(light, format!("set-note-{i}"), note, v.to_string(), false, cx)), None => left.child(note) };
     }
@@ -680,7 +694,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     }
     // the note under the code (code, address, until when) wraps in the room planned for the controls: one line of it widened the column past the dialog
     if !r.qr.is_empty() && crate::streamer::is_on() { right = right.child(div().w(px(qr_w(r.qr.len()))).h(px(qr_w(r.qr.len()))).flex().items_center().justify_center().p_3().border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("The code is hidden in streamer mode."))); }
-    else if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().max_w(px(right_w)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.qrnote))); } }
+    else if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(words(cx, light, div().max_w(px(right_w)).text_size(crate::scale::tpx(11.)).text_color(c("dim")), trs(&r.qrnote))); } }
     if let Some(sl) = &slider {
         right = right.child(div().flex().items_center().gap_2().child(slider_el(cx, light, sl)).children(r.buttons.iter().enumerate().map(|(j, b)| {
             let b2 = b.clone();
@@ -816,7 +830,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         .child(div().flex().flex_1().min_h_0().child(nav)
             .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().track_scroll(&ui.scroll).px(px(fit.gutter)).py_3().flex().flex_col()
                 .child(div().pb_1().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::BOLD).child(trs(&title)))
-                .children(sub.map(|t| div().pb_2().text_size(crate::scale::tpx(12.)).text_color(c(if on_acct { "dim" } else { "accent" })).child(trs(t)))).children(els)));
+                .children(sub.map(|t| words(cx, light, div().pb_2().text_size(crate::scale::tpx(12.)).text_color(c(if on_acct { "dim" } else { "accent" })), trs(t)))).children(els)));
     // (the dim backdrop lets a press through: a thread clicked while Settings is open shuts Settings and shows that thread, as 0.14 did;
     // the dialog itself takes its own presses)
     Some(div().id("settings").absolute().inset_0().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p(px(fit.pad)).child(dialog).into_any_element())
