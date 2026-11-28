@@ -79,15 +79,15 @@ internal fun HubScreen(back: () -> Unit) {
         DBar(Msg.android_hub, back)
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             DMono(DataClient.hubName, dcs.onSurfaceVariant, 12)
-            Text(Tr.t(panel.text), Modifier.testTag("hub.text"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
+            Text(Tr.t(panel.text), Modifier.testTag("hub.text"), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp)
             panel.actions.forEach { a -> DBtn(Tr.t(a.label), false, !busy, Modifier.fillMaxWidth().testTag("hub.action.${a.id}")) { asking = a } }
-            if (answer.isNotEmpty()) Text(Tr.t(answer), Modifier.testTag("hub.answer"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
-            if (progress.isNotEmpty()) Text(Tr.t(progress), Modifier.testTag("hub.progress"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
+            if (answer.isNotEmpty()) Text(Tr.t(answer), Modifier.testTag("hub.answer"), color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp)
+            if (progress.isNotEmpty()) Text(Tr.t(progress), Modifier.testTag("hub.progress"), color = dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 13.sp)
             if (fetch != HubFetch.Loading) DBtn(Msg.common_refresh, false, !busy, Modifier.testTag("hub.refresh")) { fetch = HubFetch.Loading; scope.launch { load() } }
             panel.incidents.forEach { i ->
                 DLine()
                 DMono(dStamp(i.atMs), dfaint)
-                Text(listOf(i.what, i.why, i.did).filter { it.isNotEmpty() }.joinToString(" · ") { Tr.t(it) }, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
+                Text(listOf(i.what, i.why, i.did).filter { it.isNotEmpty() }.joinToString(" · ") { Tr.t(it) }, color = dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 13.sp)
             }
         }
     }
@@ -141,39 +141,34 @@ internal fun TelemetryBanner(settings: () -> Unit) {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(Tr.t(n.text), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpUi, fontSize = 13.sp, lineHeight = 18.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(8.dp))
-            DMono(Tr.t(n.off.ifEmpty { "Turn off" }), dcs.primary, 12, Modifier.testTag("telemetry.off").clickable { DataClient.telemetryAct("off") }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
-            DMono(Tr.t(n.settings.ifEmpty { "Settings" }), dcs.onSurfaceVariant, 12, Modifier.testTag("telemetry.settings").clickable(onClick = settings).padding(horizontal = 4.dp, vertical = 4.dp))
+            DText(Tr.t(n.off.ifEmpty { "Turn off" }), dcs.primary, 13, Modifier.testTag("telemetry.off").clickable { DataClient.telemetryAct("off") }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true, lines = 1)
+            DText(Tr.t(n.settings.ifEmpty { "Settings" }), dcs.onSurfaceVariant, 13, Modifier.testTag("telemetry.settings").clickable(onClick = settings).padding(horizontal = 4.dp, vertical = 4.dp), lines = 1)
             Box(Modifier.size(28.dp).clickable { DataClient.telemetryAct("close") }.testTag("telemetry.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
         }
         DLine()
     }
 }
 
-/** The GitHub star suggestion (DataClient.star): a small card under the top bar with the hub's title, the repository, why stars help, a Star on
- *  GitHub (opens the page, decides open), Later (a week, decides later) and Don't ask again (decides dismiss). It waits for a pause (DStarOffer.due). */
+/** The GitHub star suggestion (DataClient.star): a compact card under the top bar, the hub's title on one line, then one row: Star on
+ *  GitHub (opens the page, decides open), Later (a week, decides later) and a dim Don't ask again (decides dismiss). It waits for a pause (DStarOffer.due). */
 @Composable
 internal fun StarBanner() {
     val s = DataClient.star ?: return
     if (!DStarOffer.due(s, DataClient.threads.any { it.state == "working" || it.state == "asking" }, DataClient.typing())) return
     val ctx = LocalContext.current
-    run {
-        Column(Modifier.fillMaxWidth().padding(8.dp).clip(dShapeCard).background(dcs.surfaceContainerHigh).border(androidx.compose.foundation.BorderStroke(1.dp, dcs.primary), dShapeCard).padding(12.dp).testTag("star.banner"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Star, null, tint = dcs.primary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp))
-                Text(Tr.t(s.text), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
-            }
-            DMono(s.place, dfaint, 11)
-            if (s.why.isNotEmpty()) Text(Tr.t(s.why), color = dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 13.sp, lineHeight = 18.sp)
-            Row(Modifier.fillMaxWidth().height(36.dp).clip(dShape).background(dcs.primary).testTag("star.open").clickable {
+    Column(Modifier.fillMaxWidth().padding(8.dp).clip(dShapeCard).background(dcs.surfaceContainerHigh).border(androidx.compose.foundation.BorderStroke(1.dp, dcs.primary), dShapeCard).padding(horizontal = 12.dp, vertical = 8.dp).testTag("star.banner"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(Icons.Default.Star, null, tint = dcs.primary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp))
+            Text(Tr.t(s.text), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            DBtn(Tr.t(s.label.ifEmpty { "Star on GitHub" }), true, small = true, modifier = Modifier.testTag("star.open")) {
                 runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(s.url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 DataClient.starDecide("open")
-            }, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Star, null, tint = dcs.onPrimary, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp))
-                Text(Tr.t(s.label.ifEmpty { "Star on GitHub" }), color = dcs.onPrimary, fontFamily = BpUi, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold)
             }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DBtn(Tr.t("Later"), false, modifier = Modifier.weight(1f).testTag("star.later")) { DataClient.starDecide("later") }
-                DBtn(Tr.t("Don't ask again"), false, modifier = Modifier.weight(1f).testTag("star.dismiss")) { DataClient.starDecide("dismiss") }
+            DBtn(Tr.t("Later"), false, small = true, modifier = Modifier.testTag("star.later")) { DataClient.starDecide("later") }
+            Box(Modifier.weight(1f), contentAlignment = Alignment.CenterEnd) {
+                DText(Tr.t("Don't ask again"), dcs.onSurfaceVariant, 12, Modifier.clip(dShape).clickable { DataClient.starDecide("dismiss") }.heightIn(min = 30.dp).wrapContentHeight().padding(horizontal = 6.dp).testTag("star.dismiss"), lines = 1)
             }
         }
     }
