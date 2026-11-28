@@ -45,11 +45,15 @@ pub type Reg = Rc<RefCell<Registry>>;
 /// apart by this prefix of their id and drawn after every row.
 pub const ASK_ID: &str = "ask:";
 pub const ASK_ROW: usize = usize::MAX / 2;
-/// Whether a block is on the surface asked for: the thread's rows and the asks' cards (`Some(true)`), the viewer's page or a project's README (`Some(false)`), any.
+/// Settings' and setup's words (settings.rs `with_sel`): on the "outside" surface, drawn by the window's own frame, so the parts keep them.
+pub const SET_ID: &str = "@set:";
+/// Whether a block is on the surface asked for: the thread's rows and the asks' cards (`Some(true)`), the viewer's page, a project's README or
+/// Settings (`Some(false)`), any.
 fn in_scope(b: &Info, rows_only: Option<bool>) -> bool {
+    let outside = b.id.is_empty() || b.id.starts_with("home-readme") || b.id.starts_with(SET_ID);
     match rows_only {
-        Some(true) => !b.id.is_empty() && !b.id.starts_with("home-readme"),
-        Some(false) => b.id.is_empty() || b.id.starts_with("home-readme"),
+        Some(true) => !outside,
+        Some(false) => outside,
         None => true,
     }
 }
@@ -73,8 +77,8 @@ impl Registry {
     /// The viewer's page draws (or is gone): forget the blocks drawn outside the thread's rows (a review or file page, no entry id) and its
     /// code blocks' Copy places (numbered from VIEWER_COPIES). The rows' stay: their part (part.rs) may reuse its last frame.
     pub fn begin_outside(&mut self) { self.blocks.retain(|b| !b.id.is_empty()); self.copies.retain(|c| c.0 < VIEWER_COPIES); self.copy_seen = VIEWER_COPIES; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
-    /// The rows' part draws (or is gone): forget the rows' blocks and Copy places, keep the viewer's.
-    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty() || b.id.starts_with(ASK_ID)); self.copies.retain(|c| c.0 >= VIEWER_COPIES); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
+    /// The rows' part draws (or is gone): forget the rows' blocks and Copy places, keep the viewer's (and the asks' and Settings', drawn by the window).
+    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty() || b.id.starts_with(ASK_ID) || b.id.starts_with(SET_ID)); self.copies.retain(|c| c.0 >= VIEWER_COPIES); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
     /// The list draws only the rows on screen, in its own order, and may draw one twice in a frame: the last drawing's blocks stand.
     pub fn enter(&mut self, row: usize, id: &str) { self.blocks.retain(|b| b.id != id); self.entry = row; self.entry_id = id.to_string(); self.idx = 0; }
     fn next_idx(&mut self) -> usize { let i = self.idx; self.idx += 1; i }
@@ -1468,6 +1472,8 @@ impl Backplane {
             let selected = self.timeline_selected();
             let mut items = super::ctxmenu::selection_items(&selected);
             if selected.is_empty() && rows_only && self.screens.reg.borrow().inside(e.position, true) { items = super::ctxmenu::message_items(&self.message_text_at(pos)); }
+            // Settings and Setup text: Copy only (a Quote would go into the message box behind the dialog)
+            if self.screens.reg.borrow().blocks.get(pos.block).is_some_and(|b| b.id.starts_with(SET_ID)) { items.retain(|i| i.action != super::ctxmenu::LOCAL_QUOTE); }
             if let Some(l) = link { let dl = self.link_download(pos.block, &l); items.extend(super::ctxmenu::link_items(&l.href, l.file, dl)); }
             if !items.is_empty() { self.ctx_open(e.position, items, cx); }
             return;
@@ -1835,6 +1841,15 @@ mod tests {
         r.blocks.push(outside("review")); r.blocks.push(info("e1", 0, "one")); r.blocks.push(info("e2", 0, "two"));
         r.begin_outside(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["one", "two"]);
         r.blocks.push(outside("review again")); r.begin_rows(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["review again"]);
+    }
+    // Settings' words were dead text: they are the "outside" surface (a drag there selects none of the thread), and neither part's frame forgets them
+    #[test] fn settings_words_are_the_outside_surface_and_survive_both_parts() {
+        let set = |idx: usize, t: &str| Info { entry: 0, ..info(&format!("{SET_ID}settings"), idx, t) };
+        let mut r = Registry::default(); r.begin();
+        r.blocks.push(info("e1", 0, "one")); r.blocks.push(set(0, "Light or dark")); r.blocks.push(set(1, "264 px."));
+        assert!(!in_scope(&r.blocks[1], Some(true)) && in_scope(&r.blocks[1], Some(false)) && in_scope(&r.blocks[0], Some(true)));
+        r.begin_rows(); r.begin_outside(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["Light or dark", "264 px."]);
+        r.enter(0, &format!("{SET_ID}settings")); assert!(r.blocks.is_empty(), "Settings' next frame (or its closing) replaces them");
     }
     // a double click on a fold's head, the gutter or the Working row lit up a word of the bubble above (the nearest block)
     #[test] fn a_double_click_selects_only_on_text_and_a_click_off_it_still_finds_the_nearest() {
