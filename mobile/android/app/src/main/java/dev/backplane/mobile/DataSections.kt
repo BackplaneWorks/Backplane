@@ -753,6 +753,8 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             // as the desktop's project page: the folder (selectable, so it can be copied), and the viewer on the project itself without a thread
             // (`project-home-<id>`, the hub's own folder of a project): Board, Schematic and 3D when it has a board, Files always
             if (pr.root.isNotEmpty()) androidx.compose.foundation.text.selection.SelectionContainer { DMono(pr.root, dfaint, 11, Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp).testTag("project.page.path"), lines = 2) }
+            // the folder is not there any more (the hub's `gone`): said under the path, as the desktop's page does
+            if (pr.gone) DMono(Msg.android_project_gone, dcs.error, 12, Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp).testTag("project.page.gone"))
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 10.dp).testTag("project.page.tools"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val tabs = (if (card?.boards?.isNotEmpty() == true) listOf("Board" to Msg.viewer_board, "Schematic" to Msg.viewer_schematic, "3D" to Msg.viewer_solid) else emptyList()) + ("Files" to Msg.viewer_files)
                 for ((tab, label) in tabs) DBtn(label, false, small = true, modifier = Modifier.testTag("project.page.tool.$tab")) { DataClient.openViewerTab = tab; openViewer("project-home-" + pr.id, "") }

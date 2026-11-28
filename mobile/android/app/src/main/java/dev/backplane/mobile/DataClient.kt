@@ -1503,7 +1503,7 @@ object DataClient {
             withContext(Dispatchers.IO) {
                 val j = JSONObject().put("hub", hub)
                     .put("projects", JSONArray(ps.map { JSONObject().put("id", it.id).put("title", it.title).put("root", it.root).put("threadCount", it.threadCount).apply { it.settledCount?.let { n -> put("settledCount", n) } }.put("updatedAt", it.updatedAt).put("waiting", it.waiting).put("also", it.also).put("mark", markJson(it.mark))
-                        .put("icon", it.icon).put("css", it.css).put("key", it.key).put("runsOn", it.runsOn).put("newOn", JSONArray(it.newOn.map { n -> JSONObject().put("value", n.value).put("label", n.label).put("away", n.away) })) }))
+                        .put("icon", it.icon).put("css", it.css).put("key", it.key).put("gone", it.gone).put("runsOn", it.runsOn).put("newOn", JSONArray(it.newOn.map { n -> JSONObject().put("value", n.value).put("label", n.label).put("away", n.away) })) }))
                     .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("pinOrder", it.pinOrder).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting).put("mark", markJson(it.mark)).put("swarm", it.swarm).apply { it.planMode?.let { pm -> put("planMode", planModeJson(pm)) } } }))
                     .put("entries", JSONObject().also { o -> es.forEach { (k, v) -> o.put(k, JSONArray(v.map(::J))) } })
                     .put("features", JSONArray(fs))

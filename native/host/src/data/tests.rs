@@ -571,6 +571,12 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!(ask(&mut ws, 2, "viewer.git", json!({"thread":"nope","action":"commit_push"})).await["ok"], false, "unknown thread");
     assert!(matches!(super::webpolicy::policy("viewer.git", &json!({"thread":"t2","action":"commit_push"})), super::webpolicy::Policy::Denied));
 }
+#[test] fn data_a_project_whose_folder_is_gone_says_so() {
+    let d = crate::plat::tmp::dir("data-gone");
+    assert!(!super::folder_gone(&d.to_string_lossy()), "a folder that is there");
+    assert!(super::folder_gone(&d.join("moved-away").to_string_lossy()), "a folder that is not");
+    assert!(!super::folder_gone(""), "no root: nothing to say");
+}
 #[test] fn data_a_threads_context_is_a_percent_when_its_window_is_known() {
     let row = |u: &str| { let mut r = json!({}); super::with_ctx(&mut r, u); r };
     assert_eq!(row("62000/200000")["ctxPct"], 31); assert_eq!(row("250000/200000")["ctxPct"], 100, "never past full");

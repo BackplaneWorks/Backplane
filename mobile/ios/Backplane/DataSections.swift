@@ -296,6 +296,8 @@ struct DataProjectPageView: View {
             if let p = project {
                 VStack(alignment: .leading, spacing: 8) {
                     if !p.root.isEmpty { Text(verbatim: p.root).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(2).textSelection(.enabled).accessibilityIdentifier("data.project.page.path") }
+                    // the folder is not there any more (the hub's `gone`): said under the path, as the desktop's page does
+                    if p.gone { Text(Tr.k("android.project.gone")).dmono(12).foregroundStyle(BackplaneDesign.bad).accessibilityIdentifier("data.project.page.gone") }
                     HStack(spacing: 8) {
                         ForEach(((card?.boards.isEmpty ?? true) ? [] : ["Board", "Schematic", "3D"]) + ["Files"], id: \.self) { t in
                             Button { path.append(DViewerRoute(id: "project-home-" + p.id, tab: t)) } label: {

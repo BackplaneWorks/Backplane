@@ -280,9 +280,14 @@ fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) 
     let waiting: u64 = ts.iter().map(|(i, _)| asks.get(*i).copied().unwrap_or(0)).sum();
     let pick = setting_of(&format!("project.pick.{id}"));
     let color = crate::present::badge::color_eff(&setting_of(&format!("project.color.{id}")), &pick, id).to_string();
-    Some(json!({"id":id,"title":p.title,"root":p.root,"origin":crate::mirror::origin_of_root(&p.root),"threadCount":count,"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
-        "icon":crate::present::badge::icon_eff(&setting_of(&format!("project.icon.{id}")), &pick, &p.title),"css":crate::present::badge::css_of(&color),"color":color}))
+    let mut row = json!({"id":id,"title":p.title,"root":p.root,"origin":crate::mirror::origin_of_root(&p.root),"threadCount":count,"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
+        "icon":crate::present::badge::icon_eff(&setting_of(&format!("project.icon.{id}")), &pick, &p.title),"css":crate::present::badge::css_of(&color),"color":color});
+    if folder_gone(&p.root) { row["gone"] = json!(true) }
+    Some(row)
 }
+/// A project whose folder is not there any more (moved, deleted, an unplugged drive): its row says `gone`, and a phone's project page says so in red
+/// under the path, as the desktop's page does. Read when the row is built (one stat), never polled.
+pub(crate) fn folder_gone(root: &str) -> bool { !root.is_empty() && !std::path::Path::new(root).is_dir() }
 
 /// The linked machines' projects and threads next to this hub's: `f(shown machines, unified marks and join map, the pick)` (docs/PHONE-DATA.md, Your machines).
 pub(super) fn with_far<R>(hub: &Hub, want: &str, f: impl FnOnce(&machines::Far, &crate::present::screen::Unified, &str) -> R) -> R {

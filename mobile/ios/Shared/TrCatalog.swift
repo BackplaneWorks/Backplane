@@ -4396,6 +4396,7 @@ android.diff.pr	PR	PR	PR
 android.diff.commit.ask	Commit this thread''s changes with its title as the message, then push them?	このスレッドの変更をタイトルをメッセージとしてコミットし、プッシュしますか？	¿Confirmar los cambios de este hilo con su título como mensaje y enviarlos?
 android.diff.pr.ask	Commit this thread''s changes, push them and open a pull request?	このスレッドの変更をコミットしてプッシュし、プルリクエストを開きますか？	¿Confirmar los cambios de este hilo, enviarlos y abrir una pull request?
 android.ctx.pct	ctx {pct}%	ctx {pct}%	ctx {pct}%
+android.project.gone	This folder is gone.	このフォルダーはもうありません。	Esta carpeta ya no existe.
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
