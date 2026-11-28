@@ -184,9 +184,11 @@ fn inert(light: bool, label: String) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     div().px_2().py_1().text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).text_color(c("faint")).opacity(0.6).child(label).into_any_element()
 }
-fn field_box(light: bool, fields: &HashMap<String, FieldSlot>, name: &str, min_h: f32) -> Option<AnyElement> {
+fn field_box(light: bool, fields: &HashMap<String, FieldSlot>, name: &str, min_h: f32) -> Option<AnyElement> { field_box_w(light, fields, name, min_h, Some(560.)) }
+/// `field_box` that spans its parent (`max` None): the New swarm form's boxes all end on the column's right edge.
+fn field_box_w(light: bool, fields: &HashMap<String, FieldSlot>, name: &str, min_h: f32, max: Option<f32>) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
-    fields.get(name).map(|s| div().w_full().max_w(px(560.)).min_h(px(min_h)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(s.input.clone()).into_any_element())
+    fields.get(name).map(|s| div().w_full().when_some(max, |d, m| d.max_w(px(m))).min_h(px(min_h)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(s.input.clone()).into_any_element())
 }
 /// An agent's and its models' choices: `pa`/`ma` are the actions, `pre` goes before each value (a member row's index).
 fn picks(cx: &mut Context<Backplane>, light: bool, id: &str, row: &Value, pa: &'static str, ma: &'static str, pre: &str) -> AnyElement {
@@ -600,26 +602,38 @@ impl Backplane {
 
 // ---- New swarm ----
 
-/// The New swarm form over the main area: topic, goal, seed; two to eight members, each an agent, a model and a role; Cancel and Start.
+/// What Start waits for, from the hub's own enable condition (`ok`: a topic, and two to eight members): None when Start is on, else the first thing
+/// missing, in English (drawn through trs).
+pub fn start_waits(ns: &Value) -> Option<&'static str> {
+    if ns["ok"] == true { return None }
+    if string(ns, "topic").trim().is_empty() { return Some("Needs a topic") } // i18n-ok: drawn through trs in form
+    Some("Needs two to eight members") // i18n-ok: drawn through trs in form
+}
+
+/// The New swarm form over the main area, in the page column (as a project's page): topic, goal, seed; two to eight members, each an agent, a model and a
+/// role; Cancel and Start, and beside a grey Start what it waits for. Every box and rule ends on the column's right edge.
 pub fn form(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, data: &Value) -> Option<AnyElement> {
     let ns = &data["newSwarm"]; if !ns.is_object() { return None }
     let c = |n: &str| theme::color(light, n);
     let can_rm = ns["canRemove"] == true;
     let rows: Vec<AnyElement> = arr(ns, "members").enumerate().map(|(i, m)| {
         div().flex().gap_3().py_2().border_t_1().border_color(c("line"))
-            .child(div().w(px(18.)).text_color(c("faint")).child(format!("{}", i + 1)))
+            // the indent: the member's number, and its × under it, so the chips and the Role box end where the boxes above do
+            .child(div().w(px(22.)).flex_shrink_0().flex().flex_col().gap_1().child(div().text_color(c("faint")).child(format!("{}", i + 1)))
+                .children(can_rm.then(|| button(cx, light, format!("srow-del-{i}"), "×".into(), false, "swarm-row-del", i.to_string()))))
             .child(div().flex_1().min_w_0().flex().flex_col().gap_1().child(picks(cx, light, &format!("srow-{i}"), m, "swarm-row-provider", "swarm-row-model", &format!("{i}{SEP}")))
-                .children(field_box(light, fields, &format!("srole.{i}"), 0.)))
-            .children(can_rm.then(|| button(cx, light, format!("srow-del-{i}"), "×".into(), false, "swarm-row-del", i.to_string())))
+                .children(field_box_w(light, fields, &format!("srole.{i}"), 0., None)))
             .into_any_element()
     }).collect();
     let add = if ns["canAdd"] == true { button(cx, light, "srow-add".into(), trs("Add member"), false, "swarm-row-add", String::new()) } else { inert(light, trs("Add member")) };
     let go = if ns["ok"] == true { button(cx, light, "form-go".into(), trs("Start"), true, "swarm-start", String::new()) } else { inert(light, trs("Start")) };
-    Some(div().id("swarm-form").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().p_4().gap_2()
-        .child(div().flex().items_baseline().gap_2().child(div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(trs("New swarm"))).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(string(ns, "title"))))
-        .children(field_box(light, fields, "stopic", 0.)).children(field_box(light, fields, "sgoal", 0.)).children(field_box(light, fields, "sseed", 48.))
-        .child(div().id("swarm-form-rows").min_h_0().overflow_y_scroll().flex().flex_col().max_w(px(760.)).children(rows).child(div().pt_2().flex().child(add)))
-        .child(div().flex().gap_2().child(button(cx, light, "form-cancel".into(), trs("Cancel"), false, "form-close", "@snew".into())).child(go))
+    let waits = start_waits(ns).map(|w| div().id("form-go-waits").text_size(crate::scale::tpx(12.)).text_color(c("faint")).whitespace_nowrap().child(trs(w)));
+    Some(div().id("swarm-form").absolute().inset_0().occlude().bg(c("bg")).flex().justify_center()
+        .child(div().w_full().max_w(px(930.)).min_h_0().px_4().py_4().flex().flex_col().gap_2()
+            .child(div().flex().items_baseline().gap_2().child(div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(trs("New swarm"))).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(string(ns, "title"))))
+            .children(field_box_w(light, fields, "stopic", 0., None)).children(field_box_w(light, fields, "sgoal", 0., None)).children(field_box_w(light, fields, "sseed", 48., None))
+            .child(div().id("swarm-form-rows").min_h_0().overflow_y_scroll().flex().flex_col().children(rows).child(div().pt_2().flex().child(add)))
+            .child(div().flex().items_center().gap_2().child(button(cx, light, "form-cancel".into(), trs("Cancel"), false, "form-close", "@snew".into())).child(go).children(waits)))
         .into_any_element())
 }
 
@@ -665,6 +679,12 @@ mod tests {
         assert_eq!(r.iter().map(|r| &t[r.clone()]).collect::<Vec<_>>(), ["@Opus", "@codex-2"]);
         assert!(mention_ranges(t, &[], &names).is_empty(), "the hub names who is mentioned");
         assert_eq!(mention_ranges("@codex-", &["thread:2".into()], &names), [0..6]);
+    }
+    #[test] fn swarm_form_says_what_start_waits_for() {
+        assert_eq!(start_waits(&json!({"ok": true, "topic": "Motor"})), None);
+        assert_eq!(start_waits(&json!({"ok": false, "topic": "  "})), Some("Needs a topic"));
+        assert_eq!(start_waits(&json!({"ok": false, "topic": "Motor"})), Some("Needs two to eight members"));
+        for w in ["Needs a topic", "Needs two to eight members"] { assert!(crate::i18n::catalog().japanese(w).is_some(), "{w}"); }
     }
     #[test] fn the_add_value_is_what_the_presenter_maps() {
         assert_eq!(add_value(&json!({"provider": "codex", "model": "gpt-6"}), " critic "), "add|codex|gpt-6|critic");
