@@ -67,10 +67,16 @@ pub fn rename_in_sidebar(data: &Value, sidebar_open: bool) -> bool {
 }
 
 /// The title box in place of a row's title: Enter keeps it, Esc leaves it (the window's own keys: settings::submit, close_question).
-/// A press in it never selects or drags the row.
-pub fn field(light: bool, fields: &HashMap<String, FieldSlot>, id: &str) -> AnyElement {
+/// A press in it never selects or drags the row. A left press anywhere else takes the keys from it (unless a menu is open: its Paste is
+/// for the box), and the window then saves a changed title or drops the rename (ui.rs, `rename_was`); the bar's own buttons say which.
+pub fn field(light: bool, fields: &HashMap<String, FieldSlot>, id: &str, menu: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    div().id(SharedString::from(format!("rename-{id}"))).flex_1().min_w_0().h(crate::scale::tpx(22.)).px_1().flex().items_center().border_1().border_color(c("accent")).bg(c("view")).text_size(crate::scale::tpx(12.))
+    let input = fields.get("title").map(|s| s.input.clone());
+    div().id(SharedString::from(format!("rename-{id}")))
+        .when_some(input.filter(|_| !menu && id != "bar"), |d, input| d.on_mouse_down_out(move |e, window, cx| {
+            if e.button == MouseButton::Left && input.focus_handle(cx).is_focused(window) { window.blur(); }
+        }))
+        .flex_1().min_w_0().h(crate::scale::tpx(22.)).px_1().flex().items_center().border_1().border_color(c("accent")).bg(c("view")).text_size(crate::scale::tpx(12.))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).on_mouse_down(MouseButton::Right, |_, _, cx| cx.stop_propagation())
         .on_click(|_, _, cx| cx.stop_propagation())
         .children(fields.get("title").map(|s| s.input.clone())).into_any_element()
@@ -85,7 +91,7 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fi
     let btn = |id: &'static str, label: String| div().id(id).px_2().h(crate::scale::tpx(22.)).flex().items_center().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child(label);
     Some(div().id("rename-bar").absolute().top_0().left_0().right_0().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).bg(c("panel")).occlude()
         .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(string(r, "title")))
-        .child(div().flex_1().max_w(px(520.)).flex().child(field(light, fields, "bar")))
+        .child(div().flex_1().max_w(px(520.)).flex().child(field(light, fields, "bar", true)))
         .child(btn("rename-bar-no", string(r, "no")).on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::hub::Command::Action("rename-no".into(), String::new())); cx.notify(); })))
         .child(btn("rename-bar-yes", string(r, "yes")).on_click(cx.listener(move |this, _, _, cx| {
             super::settings::flush_fields(this);

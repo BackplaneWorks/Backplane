@@ -38,6 +38,11 @@ pub fn focus_target(data: &Value) -> &'static str { if data["renaming"].is_objec
 pub fn close_question(data: &Value) -> Option<Command> {
     if data["renaming"].is_object() { Some(Command::Action("rename-no".into(), String::new())) } else if data["deleting"].is_object() { Some(Command::Action("delete-no".into(), String::new())) } else { None }
 }
+/// The rename's box lost the keys to a click elsewhere: the new title is saved when it changed and is not empty, else the rename is dropped.
+pub fn rename_leave(id: &str, was: &str, text: &str) -> Command {
+    if text.trim() == was.trim() { return Command::Action("rename-no".into(), String::new()) }
+    rename_save(id, text).unwrap_or_else(|| Command::Action("rename-no".into(), String::new()))
+}
 pub fn rename_save(id: &str, text: &str) -> Option<Command> { let t = text.trim(); if t.is_empty() { None } else { Some(Command::Action("rename-save".into(), format!("{id}{SEP}{t}"))) } }
 
 /// A thread tool whose answer is a new thread the window goes to (Fork thread, Buy it): the window arms for it before sending, as New thread does.
@@ -123,5 +128,11 @@ mod tests {
         assert!(matches!(close_question(&j(r#"{"deleting":{"id":"t1"}}"#)), Some(Command::Action(a, _)) if a == "delete-no")); assert!(close_question(&Value::Null).is_none());
         match rename_save("t1", "  New name ").unwrap() { Command::Action(a, v) => { assert_eq!(a, "rename-save"); assert_eq!(v, "t1\u{1f}New name"); } c => panic!("{c:?}") }
         assert!(rename_save("t1", "   ").is_none(), "a blank title sends nothing");
+    }
+    #[test] fn a_click_elsewhere_saves_a_changed_title_and_drops_the_rest() {
+        let act = |c: Command| match c { Command::Action(a, v) => (a, v), c => panic!("{c:?}") };
+        assert_eq!(act(rename_leave("t1", "Old", "New")), ("rename-save".to_string(), "t1\u{1f}New".to_string()));
+        assert_eq!(act(rename_leave("t1", "Old", " Old ")).0, "rename-no", "unchanged: the rename is dropped");
+        assert_eq!(act(rename_leave("t1", "Old", "  ")).0, "rename-no", "emptied: the old title stays");
     }
 }

@@ -115,10 +115,10 @@ fn filter_text(this: &Backplane, cx: &App) -> String { this.screens.files.filter
 /// Called each frame (glue.rs): make the fields once, reset on a new folder, start the fetch a preview needs.
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.files.filter.is_none() {
-        let f = cx.new(|cx| Composer::with_context(cx, "AskInput"));
+        let f = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); c.max_lines = 1.0; c });
         f.update(cx, |i, _| i.set_placeholder(&trs("Filter this folder")));
         cx.observe(&f, |this, _, cx| { this.screens.files.sel = None; cx.notify(); }).detach();
-        let n = cx.new(|cx| Composer::with_context(cx, "AskInput"));
+        let n = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); c.max_lines = 1.0; c });
         cx.subscribe(&n, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { commit_name(this, cx); }).detach();
         this.screens.files.filter = Some(f); this.screens.files.name = Some(n); this.screens.files.focus = Some(cx.focus_handle());
     }

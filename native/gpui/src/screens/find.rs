@@ -80,7 +80,7 @@ pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<
 impl Backplane {
     fn find_input(&mut self, cx: &mut Context<Self>) -> Entity<Composer> {
         if let Some(i) = self.screens.find.input.clone() { return i }
-        let input = cx.new(|cx| Composer::with_context(cx, "FindInput"));
+        let input = cx.new(|cx| { let mut c = Composer::with_context(cx, "FindInput"); c.max_lines = 1.0; c });
         /* i18n-ok: a control id */ input.update(cx, |i, _| i.set_placeholder("Find in this thread"));
         cx.observe(&input, |this, input, cx| { let q = input.read(cx).content.to_string(); if q != this.screens.find.q { this.screens.find.q = q; this.find_ask(cx); } cx.notify(); }).detach();
         cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| match ev {
