@@ -24,7 +24,8 @@ impl Backplane {
         if matches!(event, ComposerEvent::PopupPick) { self.popup_pick(cx); return; }
         let cap = self.data["thread"]["cap"].as_u64().unwrap_or(DEFAULT_CAP);
         let to = box_thread(&self.selected, self.project_page.is_some()).to_string();
-        if let Err(e) = self.screens.attacher.event(&self.tx, &to, cap, event) { self.error = e; }
+        // on a page, its own line by the box says why (it goes with the page), not the window's error line, which stayed after it
+        if let Err(e) = self.screens.attacher.event(&self.tx, &to, cap, event) { if self.project_page.is_some() { self.screens.projects.refused = e; } else { self.error = e; } }
         cx.notify();
     }
     pub(crate) fn pick_files(&mut self, cx: &mut Context<Self>) {
