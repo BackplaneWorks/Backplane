@@ -1897,8 +1897,11 @@ gpui.appnotice.appbehind	This app is {app}; the hub runs {hub}.	このアプリ�
 gpui.appnotice.hubbehind	The hub runs {hub}, older than this app ({app}).	ハブは{hub}で、このアプリ ({app}) より古いです。	El hub ejecuta la {hub}, más antigua que esta app ({app}).
 gpui.appnotice.checkhub	Check the hub	ハブを確認	Comprobar el hub
 gpui.keys.fixed	{key}. Fixed.	{key}。固定です。	{key}. Fijo.
-gpui.keys.now	Now {key}. Press to take the next key.	現在は{key}。押すと次のキーに変わります。	Ahora {key}. Pulsa para tomar la siguiente tecla.
+gpui.keys.now	Now {key}.	現在は{key}。	Ahora {key}.
 gpui.keys.notyet	Not yet: {why}.	未対応: {why}。	Aún no: {why}.
+gpui.keys.used	{key} is already used by {what}.	{key}は「{what}」で使われています。	{key} ya lo usa {what}.
+gpui.keys.typing	Type the keys…	キーを押してください…	Pulsa las teclas…
+gpui.keys.needs	Needs Ctrl, Alt or Cmd.	Ctrl、Alt、Cmd のいずれかが必要です。	Necesita Ctrl, Alt o Cmd.
 gpui.all.devices.hub	All devices (hub)	すべてのデバイス（ハブ）	Todos los dispositivos (hub)
 gpui.this.device	This device	この端末	Este dispositivo
 gpui.accounts	Accounts	アカウント	Cuentas
@@ -5959,11 +5962,14 @@ menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
     /// gpui.keys.fixed = {key}. Fixed.
     static func gpui_keys_fixed(key: String) -> String { f("gpui.keys.fixed", ["key": key]) }
 
-    /// gpui.keys.now = Now {key}. Press to take the next key.
+    /// gpui.keys.now = Now {key}.
     static func gpui_keys_now(key: String) -> String { f("gpui.keys.now", ["key": key]) }
 
     /// gpui.keys.notyet = Not yet: {why}.
     static func gpui_keys_notyet(why: String) -> String { f("gpui.keys.notyet", ["why": why]) }
+
+    /// gpui.keys.used = {key} is already used by {what}.
+    static func gpui_keys_used(key: String, what: String) -> String { f("gpui.keys.used", ["key": key, "what": what]) }
 
     /// gpui.sidebar.archived.count = Archived ({n})
     static func gpui_sidebar_archived_count(n: String) -> String { f("gpui.sidebar.archived.count", ["n": n]) }

@@ -34,7 +34,8 @@ pub fn parse(settings: &Value) -> Vec<Row> {
         fields: r["fields"].as_array().into_iter().flatten().map(|f| { let vault = f["vault"].as_bool().unwrap_or(false); Field { name: string(f, "name"), hint: string(f, "hint"), secret: f["secret"].as_bool().unwrap_or(false), value: if vault { String::new() } else { string(f, "value") }, vault } }).collect(),
         qr: r["qr"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_string)).collect(),
         qrnote: string(r, "qrnote"), local: r["local"].as_bool().unwrap_or(false), tone: string(r, "tone"),
-        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true || r["progress"].is_number() || r["sublink"].is_object() || r["adv"] == true || r["changed"] == true || r["intro"] == true { r.clone() } else { Value::Null },
+        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true || r["progress"].is_number() || r["sublink"].is_object() || r["adv"] == true || r["changed"] == true || r["intro"] == true
+            || r["fields"].as_array().map_or(false, |f| f.iter().any(|f| f["w"].is_u64())) { r.clone() } else { Value::Null },
     }).collect()
 }
 
@@ -99,7 +100,8 @@ pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, /** 
     /** the rows' scroll: a page opens at its top */ pub scroll: ScrollHandle, /** the hub page last shown (its title), to tell when it changes */ pub shown: String,
     /** the search's results highlighted by Up and Down (Enter opens it) */ pub hit: usize, /** a result or a page was opened since the search last changed: the page shows, not the results */ pub landed: bool,
     /** a result pressed: its page, label and which row of that label it is, until the page draws it (`land`) */ pub pending: Option<(String, String, usize)>,
-    /** the row a result led to, lit for `LIT_MS` */ pub lit: Option<(String, String, usize)>, lit_gen: u64, /** where the page was scrolled when the results took its place */ page_at: Option<Point<Pixels>> }
+    /** the row a result led to, lit for `LIT_MS` */ pub lit: Option<(String, String, usize)>, lit_gen: u64, /** where the page was scrolled when the results took its place */ page_at: Option<Point<Pixels>>,
+    /** the shortcut whose button was pressed, waiting for the keys typed for it (`recorded`) */ pub rec: Option<String>, /** a chord refused for a shortcut: its id and why, its row's note until the next press */ pub rec_note: Option<(String, String)> }
 /// A setting the search can find on a page: its label, its note and the hub's plain search words for it (`also`: what it does, what it was called).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Find { pub label: String, pub note: String, pub also: String }
@@ -130,6 +132,17 @@ const GAP: f32 = 16.0;
 /// A chip's width at the settings' 12 px (its 12 px padding each side): wide (CJK) characters count as a full em. An estimate on the generous side,
 /// so a line of chips is never wider than the room it was packed for.
 /// The words grow with the text size (scale.rs); the padding does not.
+/// A short box's width (the hub's `w` on a field: about how many characters it holds) in the same maths: 8 px of padding each side.
+pub fn short_w(chars: u64) -> f32 { 16. + crate::scale::s() * 7.6 * chars as f32 }
+/// The short boxes that end a row (its last fields that each say `w`, the hub's `field_w`), their widths in order; empty when the last field
+/// does not say it. They go on one line with the row's buttons (`short_line_w`), after any longer box above them.
+pub fn short_tail(raw: &Value, n: usize) -> Vec<f32> {
+    let ws: Vec<Option<u64>> = (0..n).map(|k| raw["fields"][k]["w"].as_u64().filter(|w| *w > 0)).collect();
+    let k = ws.iter().rposition(|w| w.is_none()).map_or(0, |i| i + 1);
+    ws[k..].iter().map(|w| short_w(w.unwrap_or(0))).collect()
+}
+/// The width of the line of short boxes and buttons: each as wide as it is drawn, 4 px between them.
+pub fn short_line_w(boxes: &[f32], buttons: &[f32]) -> f32 { let all = boxes.iter().chain(buttons); all.clone().sum::<f32>() + 4. * all.count().saturating_sub(1) as f32 }
 pub fn chip_w(label: &str) -> f32 { 24. + crate::scale::s() * label.chars().map(|c| if (c as u32) >= 0x1100 && !c.is_whitespace() { 12.5 } else { 7.6 }).sum::<f32>() }
 
 /// A row's slider (a local row's `raw.slider`: the `local:<name>` it sets, its range, step and value): dragged or pressed anywhere on its
@@ -213,7 +226,8 @@ pub fn field_beside(field_w: f32, buttons: &[f32]) -> Option<f32> {
 /// What this device's settings differ in from a fresh install (`fresh`: `device_rows(&Local::default())`), as the hub marks its own rows
 /// (host present/settings.rs `mark_changed`): a row whose lit choice is another than the fresh one's (matched by label, and which of the rows with
 /// that label it is) gets `changed`, and `reset`, the fresh lit press, when its buttons press the same in both. A shortcut is changed when its key
-/// is not its default one (no Reset of its own: "Shortcuts to defaults" is there). The text size has its own Reset, and lights nothing to compare.
+/// is not its default one, and its Reset puts that one back (`local:shortcut-reset`; "Shortcuts to defaults" puts them all back). The text size
+/// has its own Reset, and lights nothing to compare.
 pub fn mark_device(rows: &mut [Row], fresh: &[Row]) {
     let nth = |all: &[Row], i: usize| all[..i].iter().filter(|r| r.label == all[i].label).count();
     let lit = |r: &Row| -> Vec<Btn> { r.buttons.iter().filter(|b| b.on).cloned().collect() };
@@ -222,7 +236,7 @@ pub fn mark_device(rows: &mut [Row], fresh: &[Row]) {
     let marks: Vec<Option<Option<Btn>>> = (0..all.len()).map(|i| {
         let r = &all[i];
         let d = fresh.iter().filter(|f| f.label == r.label).nth(nth(all, i))?;
-        if r.buttons.len() == 1 && r.buttons[0].action == "local:shortcut" { return (d.buttons.first().map(|b| &b.label) != Some(&r.buttons[0].label)).then_some(None) }
+        if r.buttons.len() == 1 && r.buttons[0].action == "local:shortcut" { return (d.buttons.first().map(|b| &b.label) != Some(&r.buttons[0].label)).then(|| Some(Btn { label: String::new(), action: "local:shortcut-reset".into(), value: r.buttons[0].value.clone(), on: false })) }
         let (now, was) = (lit(r), lit(d));
         let names = |v: &[Btn]| v.iter().map(|b| b.label.clone()).collect::<Vec<_>>();
         if now.is_empty() || was.is_empty() || names(&now) == names(&was) { return None }
@@ -234,6 +248,33 @@ pub fn mark_device(rows: &mut [Row], fresh: &[Row]) {
         if let Some(b) = m { r.raw["reset"] = serde_json::json!({"action": b.action, "value": b.value}); }
     }
 }
+/// The shortcut waiting for its keys (`rec`): its button reads "Type the keys…", lit; a chord refused for one (`note`: its id and why) is that
+/// row's note, in the warn tone. Applied after `mark_device`, which compares the keys the buttons name.
+pub fn show_recording(rows: &mut [Row], rec: Option<&str>, note: Option<&(String, String)>) {
+    for r in rows.iter_mut() {
+        let Some(b) = r.buttons.first_mut().filter(|b| b.action == "local:shortcut") else { continue };
+        if let Some((_, why)) = note.filter(|(id, _)| *id == b.value) { r.note = why.clone(); r.tone = "warn".into(); }
+        /* i18n-ok: drawn through trs by chip_el */ if rec == Some(b.value.as_str()) { b.label = "Type the keys…".into(); b.on = true; }
+    }
+}
+/// A key typed while a shortcut waits for its keys (`SettingsUi::rec`), taken here before any binding sees it (true; false when nothing waits):
+/// it becomes the shortcut and the wait ends, or it is refused and the row says why until the next press, or Esc ends the wait (Settings stays
+/// open); a modifier alone waits on (`keys::take`).
+pub fn recorded(this: &mut Backplane, k: &Keystroke, cx: &mut Context<Backplane>) -> bool {
+    let Some(id) = this.screens.settings_ui.rec.clone() else { return false };
+    if !is_open(this) { this.screens.settings_ui.rec = None; return false }
+    let took = crate::keys::take(&this.local, &id, k);
+    let ui = &mut this.screens.settings_ui;
+    match took {
+        crate::keys::Take::Wait => return true,
+        crate::keys::Take::Cancel => { ui.rec = None; ui.rec_note = None; }
+        crate::keys::Take::Refuse(why) => ui.rec_note = Some((id, why)),
+        crate::keys::Take::Set(key) => { ui.rec = None; ui.rec_note = None; this.local_press("shortcut", &format!("{id}\u{1f}{key}"), cx); }
+    }
+    cx.notify(); true
+}
+/// A press anywhere in the dialog ends a shortcut's wait for its keys (a press on a shortcut's button then starts its own). True when one waited.
+pub fn end_recording(ui: &mut SettingsUi) -> bool { ui.rec_note = None; ui.rec.take().is_some() }
 /// A group's name in the nav: the hub's English name, drawn through its own message (`gpui.settings.group.<name>`) where there is one, so a
 /// group is not read as the verb or another screen's word that says the same in English ("Connect").
 pub fn group_name(h: &str) -> String {
@@ -481,7 +522,7 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
 
 /// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
 /// A hub page of the nav, chosen (a click, or the e2e `click` on `set-nav:<page>`): what is typed goes first, then the hub is asked for the page.
-pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); let ui = &mut this.screens.settings_ui; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
+pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); let ui = &mut this.screens.settings_ui; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
     // Usage opens with each account's limit bars over the totals: the hub's accounts read again (and each signed-in account's usage, at most every 5 minutes)
     if p == "usage" { super::accounts::list(this); super::accounts::refresh_usage(this); } }
 /// A page of the nav, chosen: one of this app's three, or the hub's (`@device`, the page this device's rows had before they moved to the pages
@@ -490,7 +531,7 @@ pub fn open_nav(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     let id = if id == "@device" { "appearance" } else { id };
     if !id.starts_with('@') { go_page(this, id); cx.notify(); return }
     flush_fields(this);
-    let ui = &mut this.screens.settings_ui; ui.keys = id == "@keys"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts"; ui.landed = true; to_top(ui);
+    let ui = &mut this.screens.settings_ui; ui.keys = id == "@keys"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts"; ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui);
     if id == "@accounts" { super::accounts::open_page(this, cx); }
     cx.notify();
 }
@@ -506,9 +547,10 @@ fn searched(this: &mut Backplane, q: String) {
     if !before && now { ui.page_at = Some(ui.scroll.offset()); to_top(ui); }
     if before && !now { if let Some(at) = ui.page_at.take() { ui.scroll.set_offset(at); } }
 }
-/// Esc while the search holds something empties it (the page shows again); a second Esc shuts Settings.
+/// Esc while the search holds something empties it (the page shows again, the row a result lit no longer lit); a second Esc shuts Settings.
 pub fn escape_search(this: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
     if !is_open(this) || this.screens.settings_ui.q.is_empty() { return false }
+    let ui = &mut this.screens.settings_ui; ui.lit = None; ui.pending = None;
     match this.screens.settings_ui.search.clone() { Some(input) => input.update(cx, |i, cx| i.set(String::new(), cx)), None => searched(this, String::new()) }
     cx.notify(); true
 }
@@ -712,18 +754,26 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let field_w = (avail - LABEL_MIN - GAP).clamp(260., CONTROLS_MAX).min(avail);
     let slider = slider_of(&r.raw);
     let btn_ws: Vec<f32> = r.buttons.iter().map(btn_w).collect();
+    // short boxes (the hub's `w`: quiet hours' From and Until, a pairing code) at their own width on one line with the buttons, at the right
+    // edge the row's chips share; a longer box before them keeps its own line above (`short_tail`)
+    let short = if slider.is_none() { short_tail(&r.raw, r.fields.len()) } else { vec![] };
+    let tail_at = r.fields.len() - short.len();
+    let short = if r.fields[tail_at..].iter().all(|f| fields.contains_key(&f.name)) { short } else { vec![] };
+    let line_w = if short.is_empty() { 0. } else { short_line_w(&short, &btn_ws) };
     // the last box and the buttons on one line, the box less the buttons' width (KiCad's path and Set); too narrow, the buttons go under it
-    let beside = if slider.is_none() && r.fields.last().map_or(false, |f| fields.contains_key(&f.name)) { field_beside(field_w, &btn_ws) } else { None };
+    let beside = if slider.is_none() && short.is_empty() && r.fields.last().map_or(false, |f| fields.contains_key(&f.name)) { field_beside(field_w, &btn_ws) } else { None };
     // a slider and its buttons are one line: the slider then the chips
-    let widths: Vec<f32> = if slider.is_some() || beside.is_some() { vec![] } else { btn_ws };
+    let widths: Vec<f32> = if slider.is_some() || beside.is_some() || !short.is_empty() { vec![] } else { btn_ws };
+    // the room the boxes take: a long box's, or the short line's alone
+    let field_room = if short.is_empty() { field_w } else if tail_at == 0 { line_w } else { field_w.max(line_w) };
     let slider_w = slider.as_ref().map_or(0., |_| SLIDER_W + r.buttons.iter().map(|b| 8. + chip_w(&trs(&b.label))).sum::<f32>());
-    let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { slider_w }, if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) });
+    let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_room } else { slider_w }, if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) });
     // the words keep their least width beside the controls (never squeezed to a letter a line), or the whole row's under a stack
     let mut left = div().flex().flex_col().gap_1().min_w_0();
     // beside the controls, the words get the row's width less the controls' (their widest line, field or QR code), as a fixed width: a flex
     // share alone let a long note be measured wider than its column in setup's page, and run on under the button
     let right_w = { let mut at = 0; let mut w = 0f32; for &n in &lines { w = w.max(widths[at..at + n].iter().sum::<f32>() + 4. * (n.max(1) - 1) as f32); at += n; }
-        w.max(if has_field { field_w } else { slider_w }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
+        w.max(if has_field { field_room } else { slider_w }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
     if !r.label.is_empty() {
         let label = div().text_size(crate::scale::tpx(13.)).child(trs(&r.label));
@@ -761,6 +811,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(CONTROLS_MAX)) };
     let last = r.fields.len().saturating_sub(1);
     for (k, f) in r.fields.iter().enumerate() {
+        if !short.is_empty() && k >= tail_at { break }
         let Some(slot) = fields.get(&f.name) else { continue };
         // the line is as wide as a box alone, so the box starts where the boxes above it (and on the rows around) start; the buttons take
         // what they are drawn at and the box the rest (`beside` is the least it gets, from the buttons' estimated widths)
@@ -769,6 +820,10 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
                 .children(r.buttons.iter().enumerate().map(|(j, b)| chip_el(cx, light, i, j, b)).collect::<Vec<_>>())),
             None => right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())),
         }
+    }
+    if !short.is_empty() {
+        let boxes = r.fields[tail_at..].iter().zip(&short).filter_map(|(f, &w)| fields.get(&f.name).map(|slot| div().flex_none().w(px(w)).px_2().py_1().bg(c("raise")).child(slot.input.clone()).into_any_element())).collect::<Vec<_>>();
+        right = right.child(div().flex().items_center().gap_1().children(boxes).children(r.buttons.iter().enumerate().map(|(j, b)| chip_el(cx, light, i, j, b)).collect::<Vec<_>>()));
     }
     // the note under the code (code, address, until when) wraps in the room planned for the controls: one line of it widened the column past the dialog
     if !r.qr.is_empty() && crate::streamer::is_on() { right = right.child(div().w(px(qr_w(r.qr.len()))).h(px(qr_w(r.qr.len()))).flex().items_center().justify_center().p_3().border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("The code is hidden in streamer mode."))); }
@@ -814,6 +869,9 @@ fn chip_el(cx: &mut Context<Backplane>, light: bool, i: usize, j: usize, b: &Btn
 
 /// A row's button pressed: the client's own actions here, a vault Save straight to the hub, anything else the view action it names.
 pub fn on_press(this: &mut Backplane, b2: &Btn, cx: &mut Context<Backplane>) {
+    // a shortcut's button waits for the keys typed for it (`recorded`); any other press ends that wait
+    if b2.action == "local:shortcut" { let ui = &mut this.screens.settings_ui; ui.rec_note = None; ui.rec = Some(b2.value.clone()); cx.notify(); return }
+    end_recording(&mut this.screens.settings_ui);
     if super::onboard::press(this, b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "update-check" { this.app_check(cx); } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(b2) { save_vault(this, b2, cx); } else { let _ = this.tx.try_send(press(b2)); } cx.notify();
 }
 
@@ -822,7 +880,7 @@ pub fn on_press(this: &mut Backplane, b2: &Btn, cx: &mut Context<Backplane>) {
 /// Settings shut (the ×, Esc, a click outside): this device's page and the accounts page at once, and the hub's pages when it has them open.
 pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let hub = this.data["settings"].is_object();
-    let ui = &mut this.screens.settings_ui; ui.open_local = false; ui.keys = false; ui.accounts = false; ui.hubs = false; ui.pending = None; ui.lit = None;
+    let ui = &mut this.screens.settings_ui; ui.open_local = false; ui.keys = false; ui.accounts = false; ui.hubs = false; ui.pending = None; ui.lit = None; end_recording(ui);
     this.screens.acct.menu = false;
     if hub { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); }
     cx.notify();
@@ -875,6 +933,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let c = |n: &str| theme::color(light, n);
     let mut dev_rows = device_rows(local);
     mark_device(&mut dev_rows, &device_rows(&crate::local::Local::default()));
+    show_recording(&mut dev_rows, ui.rec.as_deref(), ui.rec_note.as_ref());
     let PageRows { page, on_page, title_now, list, more } = page_rows(settings, ui, local, &dev_rows);
     // the row a result led to, lit for a moment
     let lit = ui.lit.as_ref().filter(|(p, _, _)| *p == page && !on_acct && !on_hubs).and_then(|(_, l, n)| nth_row(&list, l, *n));
@@ -912,8 +971,9 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
                 let el_id = match id.as_str() { "@keys" => "set-nav-keys".to_string(), "@hubs" => "set-nav-hubs".to_string(), "@accounts" => "set-nav-accounts".to_string(), p => format!("set-nav-{p}") };
                 let item = div().id(SharedString::from(el_id)).relative().flex().items_start().gap_3().px_3().py(px(3.)).cursor_pointer().text_size(crate::scale::tpx(13.)).border_l_2().border_color(c(if on { "accent" } else { "bg" }));
                 let item = if on { item.bg(c("raise")) } else { item.text_color(c(if none { "faint" } else { "text" })).hover(|s| s.bg(c("panel"))) };
-                // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named as its control is: `set-nav:<page>`
-                let item = if crate::art::rects_on() { let rn = format!("set-nav:{id}"); item.child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { item };
+                // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named as its control is: `set-nav:<page>` (a GPUI_RECT line, and the
+                // control list's rect: `art::probe_rect`)
+                let item = if crate::art::rects_on() { let rn = format!("set-nav:{id}"); item.child(crate::art::probe_rect(rn.clone())).child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { item };
                 // how many were found, on the title's first line in the entry's right margin (over it, so no title wraps or moves while searching)
                 let count = (searching && !hits.is_empty()).then(|| div().absolute().right(px(4.)).top(px(3. + (13. - 11.) * NAV_LINE * crate::scale::s() / 2.)).text_size(crate::scale::tpx(11.)).text_color(c("accent")).child(hits.len().to_string()));
                 let to = id.clone();
@@ -932,6 +992,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     if shows { let mut at: HashMap<&str, usize> = HashMap::new(); els = res.iter().enumerate().map(|(k, (p, t, f))| { let n = at.entry(p.as_str()).or_default(); *n += 1; hit_el(cx, light, k, k == ui.hit.min(res.len().saturating_sub(1)), p, *n - 1, t, f, fit.rows) }).collect(); }
     /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let sub = if shows { None } else if on_hubs { Some("Kept on this computer only. Each hub has its own credential here.") } else if on_acct { Some("Kept in the hub for this machine; sign-ins never leave it.") } else if on_keys { Some("Kept on this computer only. Never sent to the hub, and other devices keep their own.") } else { None };
     let dialog = div().id("settings-dialog").occlude().flex().flex_col().w(px(1040.)).max_w_full().h(px(840.)).max_h_full().border_1().border_color(c("line")).bg(c("bg")).overflow_hidden().on_mouse_down_out(cx.listener(|this, _, _, cx| close(this, cx)))
+        .capture_any_mouse_down(cx.listener(|this, _, _, cx| if end_recording(&mut this.screens.settings_ui) { cx.notify() }))
         .child(div().h(crate::scale::tpx(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
             .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(14.)).child(trs("Settings")))
             .child(div().id("settings-close").p_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise"))).child(crate::art::icon("x", 16., c("dim")))
@@ -956,7 +1017,7 @@ fn hit_el(cx: &mut Context<Backplane>, light: bool, k: usize, on: bool, page: &s
         .children((!f.note.is_empty()).then(|| div().w(px(avail)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).truncate().child(trs(&f.note).replace('\n', " "))));
     let d = div().id(SharedString::from(format!("set-hit-{k}"))).mx(px(-8.)).px(px(8.)).cursor_pointer();
     let d = if on { d.bg(c("raise")) } else { d.hover(|s| s.bg(c("panel"))) };
-    let d = if crate::art::rects_on() { let rn = format!("set-hit:{page}:{n}"); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
+    let d = if crate::art::rects_on() { let rn = format!("set-hit:{page}:{n}"); d.relative().child(crate::art::probe_rect(rn.clone())).child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
     let (p, f2) = (page.to_string(), f.clone());
     d.child(div().py_3().border_b_1().border_color(c("line")).child(words))
         .on_click(cx.listener(move |this, _, _, cx| open_hit(this, &p, &f2, cx))).into_any_element()
@@ -998,7 +1059,7 @@ fn adv_el(cx: &mut Context<Backplane>, light: bool, page: &str, n: usize, open: 
         .child(div().h(px(24.)).flex().items_center().gap_2().child(crate::art::icon(if open { "chevron-down" } else { "chevron-right" }, 14., c("dim")))
             .child(div().text_size(crate::scale::tpx(13.)).child(trs("Advanced"))).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n.to_string())));
     // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only): `set-adv:<page>`
-    let d = if crate::art::rects_on() { let rn = format!("set-adv:{page}"); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
+    let d = if crate::art::rects_on() { let rn = format!("set-adv:{page}"); d.relative().child(crate::art::probe_rect(rn.clone())).child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
     d.on_click(cx.listener(move |this, _, _, cx| toggle_adv(this, &to, cx))).into_any_element()
 }
 
@@ -1360,8 +1421,34 @@ mod tests {
         let marked: Vec<&Row> = rows.iter().filter(|r| r.raw["changed"] == true).collect();
         assert_eq!(marked.len(), 2, "{:?}", marked.iter().map(|r| &r.label).collect::<Vec<_>>());
         let font = marked.iter().find(|r| r.label == "Font").unwrap(); assert_eq!((font.raw["reset"]["action"].as_str(), font.raw["reset"]["value"].as_str()), (Some("local:font"), Some(crate::local::FONTS[0].0)));
-        let key = marked.iter().find(|r| r.buttons.first().map_or(false, |b| b.action == "local:shortcut")).unwrap(); assert!(key.raw["reset"].is_null(), "Shortcuts to defaults puts keys back");
+        let key = marked.iter().find(|r| r.buttons.first().map_or(false, |b| b.action == "local:shortcut")).unwrap();
+        assert_eq!((key.raw["reset"]["action"].as_str(), key.raw["reset"]["value"].as_str()), (Some("local:shortcut-reset"), Some(first.id)), "a changed shortcut's own Reset");
+        assert!(l.set("shortcut-reset", first.id)); let mut back = device_rows(&l); mark_device(&mut back, &fresh); assert_eq!(back.iter().filter(|r| r.raw["changed"] == true).count(), 1, "the reset shortcut is its default again");
         assert!(rows.iter().find(|r| r.label == "Text size").unwrap().raw["changed"].is_null(), "the text size has its own Reset");
+    }
+    #[test] fn short_boxes_say_their_width_and_share_a_line_with_the_buttons() {
+        let quiet = j(r#"{"fields":[{"name":"qfrom","w":6},{"name":"qto","w":6}]}"#);
+        assert_eq!(short_tail(&quiet, 2), vec![short_w(6); 2]); assert_eq!(short_w(6), 16. + 7.6 * 6. * crate::scale::s());
+        let save = chip_w("Save"); assert_eq!(short_line_w(&short_tail(&quiet, 2), &[save]), 2. * short_w(6) + save + 8., "4 px between each");
+        assert!(short_line_w(&short_tail(&quiet, 2), &[save]) < 260., "narrower than a long box");
+        let pair = j(r#"{"fields":[{"name":"maddr"},{"name":"mcode","w":10}]}"#); assert_eq!(short_tail(&pair, 2), vec![short_w(10)], "the long box keeps its line above");
+        let none = j(r#"{"fields":[{"name":"qfrom","w":6},{"name":"kname"}]}"#); assert!(short_tail(&none, 2).is_empty(), "the last box is long: as before");
+        assert!(short_tail(&j(r#"{"fields":[{"name":"kname"}]}"#), 1).is_empty()); assert!(short_tail(&j("{}"), 0).is_empty());
+        let rows = parse(&j(r#"{"rows":[{"label":"Quiet from and until","fields":[{"name":"qfrom","w":6},{"name":"qto","w":6}],"buttons":[{"label":"Save","action":"notify-quiet","value":"save"}]}]}"#));
+        assert_eq!(short_tail(&rows[0].raw, rows[0].fields.len()).len(), 2, "the row the hub sent is kept for its widths");
+    }
+    #[test] fn a_shortcut_waiting_for_its_keys_says_so_and_a_refused_chord_says_why_on_its_row() {
+        let l = crate::local::Local::default(); let fresh = device_rows(&l);
+        let mut rows = fresh.clone(); mark_device(&mut rows, &fresh);
+        let why = ("models".to_string(), "Ctrl+K is already used by Commands: jump to a thread or run a command.".to_string());
+        show_recording(&mut rows, Some("models"), Some(&why));
+        let at = |rows: &[Row], id: &str| rows.iter().position(|r| r.buttons.first().map_or(false, |b| b.action == "local:shortcut" && b.value == id)).unwrap();
+        let (m, f) = (&rows[at(&rows, "models")], &rows[at(&rows, "find")]);
+        assert_eq!((m.buttons[0].label.as_str(), m.buttons[0].on, m.note.as_str(), m.tone.as_str()), ("Type the keys…", true, why.1.as_str(), "warn"));
+        assert_eq!((f.buttons[0].on, f.tone.as_str()), (false, ""), "the other shortcuts as they were"); assert_eq!(f.note, tf("gpui.keys.now", &[("key", crate::keys::hint(&l, "find").into())]));
+        assert!(rows[at(&rows, "models")].raw["changed"].is_null(), "waiting is no change");
+        assert_eq!(tf("gpui.keys.now", &[("key", "Ctrl+M".into())]), "Now Ctrl+M.");
+        let mut ui = SettingsUi { rec: Some("models".into()), rec_note: Some(why), ..Default::default() }; assert!(end_recording(&mut ui)); assert!(ui.rec.is_none() && ui.rec_note.is_none()); assert!(!end_recording(&mut ui));
     }
     #[test] fn a_group_is_named_by_its_own_message_and_not_the_verb() {
         crate::i18n::with_lang("es", || {

@@ -60,7 +60,7 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
         r.push(x);
     }
     let mut p = row("Pair a machine", "Enter the other machine's address and the code it made. It then asks you there to approve.", vec![btn("Pair", "machine-pair", "", true)]);
-    p["fields"] = json!([field("maddr", "Address (https://box.example.ts.net or http://box:3787)", &draft("maddr")), field("mcode", "Code", &draft("mcode"))]);
+    p["fields"] = json!([field("maddr", "Address (https://box.example.ts.net or http://box:3787)", &draft("maddr")), crate::present::settings::field_w("mcode", "Code", &draft("mcode"), 10)]);
     r.push(p);
     // attempts made from here: under the form, so the form does not move when one appears
     for o in d["outgoing"].as_array().into_iter().flatten() {
@@ -139,6 +139,13 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
 mod tests {
     use super::*;
 
+    #[test]
+    fn the_pairing_code_box_is_short_and_the_address_box_is_not() {
+        let rs = rows(&json!({}), &|_| String::new());
+        let p = rs.iter().find(|r| r["label"] == "Pair a machine").unwrap();
+        assert_eq!((p["fields"][0]["name"].as_str(), p["fields"][0].get("w")), (Some("maddr"), None));
+        assert_eq!((p["fields"][1]["name"].as_str(), p["fields"][1]["w"].as_u64()), (Some("mcode"), Some(10)));
+    }
     #[test]
     fn linked_machine_rows_show_version_and_warn_when_older() {
         let d = json!({

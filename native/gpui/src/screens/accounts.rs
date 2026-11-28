@@ -427,6 +427,15 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
     out.push(div().pb_3().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Each account is a separate Claude or Codex subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
+    // adding an account first, under the page's words: no scrolling past every provider's card to it
+    if let Some(input) = &st.label {
+        let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mb_3().child(div().w_full().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
+            else { div().flex().items_center().gap_2().mb_3().child(div().flex_1().min_w_0().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
+        out.push(row
+            .child(button(cx, light, "acct-add-claude".into(), &trs(add_word("claude")), st.add_provider != "codex", false, |this, cx| add(this, cx, "claude")))
+            .child(button(cx, light, "acct-add-codex".into(), &trs(add_word("codex")), st.add_provider == "codex", false, |this, cx| add(this, cx, "codex")))
+            .child(button(cx, light, "acct-add-sync".into(), &trs("Add Claude (sync)"), false, false, |this, cx| add_sync(this, cx))).into_any_element());
+    }
     if !st.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
     if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
     // the hub's accounts by person (host settings/accounts_people.rs): one entry per email, each login of it with its bars; an older hub sends none and the cards below stand
@@ -440,14 +449,6 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
     }
     let ps = profiles(&st.snap);
     for (i, p) in ps.iter().enumerate().filter(|(_, p)| p["sameAsDefault"] != true) { out.push(card(cx, light, st, p, i, avail < ADD_ROW_MIN)); }
-    }
-    if let Some(input) = &st.label {
-        let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mt_2().child(div().w_full().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
-            else { div().flex().items_center().gap_2().mt_2().child(div().flex_1().min_w_0().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
-        out.push(row
-            .child(button(cx, light, "acct-add-claude".into(), &trs(add_word("claude")), st.add_provider != "codex", false, |this, cx| add(this, cx, "claude")))
-            .child(button(cx, light, "acct-add-codex".into(), &trs(add_word("codex")), st.add_provider == "codex", false, |this, cx| add(this, cx, "codex")))
-            .child(button(cx, light, "acct-add-sync".into(), &trs("Add Claude (sync)"), false, false, |this, cx| add_sync(this, cx))).into_any_element());
     }
     out.extend(super::google::section(cx, light, &st.google));
     out
