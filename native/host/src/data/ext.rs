@@ -23,7 +23,7 @@ use super::*;
 
 pub const FEATURES: &[&str] = &["actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "layers", "onboard", "push", "commands", "work", "star", "accounts", "machines", "history", "devices", "find", "notifysettings", "ring", "threadContext", "chats"];
 
-const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach"];
+const THREAD_ACTS: &[&str] = &["pin", "unpin", "settle", "unsettle", "archive", "unarchive", "delete", "detach", "back"];
 
 /// The composer's chip as the desktop draws it: "claude / opus / high".
 pub fn chip(provider: &str, model: &str, effort: &str) -> String { format!("{provider} / {} / {}", if model.is_empty() { "default" } else { model }, if effort.is_empty() { "auto" } else { effort }) }
@@ -467,7 +467,7 @@ async fn thread_act(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, Va
     } else if THREAD_ACTS.contains(&act) {
         rpc(hub, c, &format!("thread.{act}"), json!({"thread":th})).await?;
         if act == "delete" { return Ok(json!({})) }
-    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, reparent, rename, fork or move_project")) }
+    } else { return Err(err("action: pin, unpin, settle, unsettle, archive, unarchive, delete, detach, back, reparent, rename, fork or move_project")) }
     thread_now(hub, th).await.map(|t| json!({"thread":t}))
 }
 

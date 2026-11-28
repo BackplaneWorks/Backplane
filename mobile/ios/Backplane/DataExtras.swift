@@ -18,6 +18,8 @@ struct DataThreadActions: View {
             if !thread.parent.isEmpty { Button(Tr.t("Move to top level"), systemImage: "arrow.up.left") { Task { await client.threadAct(thread.id, "detach") } } }
             // Fork thread, as the desktop's thread tools: a new thread that starts from this one's conversation (feature `fork`); it opens
             if client.has("fork") { Button(Tr.t("Fork thread"), systemImage: "arrow.triangle.branch") { Task { if let t = await client.forkThread(thread.id) { client.linkTarget = DLinkTarget(kind: .thread, id: t) } } }.accessibilityIdentifier("data.thread.fork") }
+            // a fork: its work goes back to the thread it forked from (with that thread's next message), and that thread opens, as on the desktop
+            if !thread.forkOf.isEmpty { Button(Tr.t("Back to the original"), systemImage: "arrow.uturn.backward") { Task { if await client.backToOriginal(thread.id) { client.linkTarget = DLinkTarget(kind: .thread, id: thread.forkOf) } } }.accessibilityIdentifier("data.thread.back") }
             Button(Tr.t("Rename"), systemImage: "pencil") { renaming = thread }
             Button(Tr.t("Delete…"), systemImage: "trash", role: .destructive) { deleting = thread }
         }

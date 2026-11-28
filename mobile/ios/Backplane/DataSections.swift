@@ -288,6 +288,7 @@ struct DataProjectPageView: View {
     @State private var card: DProjectCard?
     @State private var whole = false
     @State private var readme: String?
+    @State private var boards: [String] = []
     var body: some View {
         List {
             // as the desktop's project page: the folder (selectable), and the viewer on the project itself without a thread
@@ -303,6 +304,19 @@ struct DataProjectPageView: View {
                                     .background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control))
                                     .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1))
                             }.buttonStyle(.plain).accessibilityIdentifier("data.project.page.tool.\(t)")
+                        }
+                    }
+                    // more than one board: each opens on its own, as the desktop's project page lists them (one board: Board above is it)
+                    if boards.count > 1 {
+                        ForEach(boards, id: \.self) { b in
+                            Button { path.append(DViewerRoute(id: "project-home-" + p.id, file: b)) } label: {
+                                HStack(spacing: 8) {
+                                    Image(systemName: "cpu").font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim)
+                                    Text(verbatim: b).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2).multilineTextAlignment(.leading)
+                                    Spacer(minLength: 0)
+                                    Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.faint)
+                                }.frame(minHeight: 36).contentShape(Rectangle())
+                            }.buttonStyle(.plain).accessibilityIdentifier("data.project.page.board")
                         }
                     }
                 }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).dataRow()
@@ -344,7 +358,8 @@ struct DataProjectPageView: View {
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
         .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id); card = await client.projectCard(p.id)
-            readme = (await client.fileBytes("project-home-" + p.id, "README.md")).flatMap { String(data: $0, encoding: .utf8) } } }
+            readme = (await client.fileBytes("project-home-" + p.id, "README.md")).flatMap { String(data: $0, encoding: .utf8) }
+            boards = await client.projectBoards(p.id) } }
     }
     private func startBuy(_ b: DBuy) {
         guard !buying else { return }; buying = true; buyFailed = ""

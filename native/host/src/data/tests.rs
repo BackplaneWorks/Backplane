@@ -374,6 +374,9 @@ impl crate::api::RpcHandler for PushState {
     let created = &fork["result"]["thread"];
     assert_eq!(created["title"], "Fork: First", "{fork}");
     assert_ne!(created["id"].as_str().unwrap(), "t1");
+    // Back to the original: the fork's work goes to t1 with its next message; a thread that is not a fork is refused
+    let back = ask(&mut ws, 82, "thread.act", json!({"thread":created["id"],"action":"back"})).await; assert_eq!(back["ok"], true, "{back}");
+    assert_eq!(ask(&mut ws, 83, "thread.act", json!({"thread":"t1","action":"back"})).await["ok"], false, "t1 is not a fork");
 }
 
 #[test] fn notify_says_what_the_gate_sent() {
