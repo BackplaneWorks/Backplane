@@ -388,6 +388,11 @@ pub fn apply_reads(f: &dyn select::Facts, hub: &str, session: &mut Value, reads:
                 let name = draft(session, &req).to_string();
                 if !name.is_empty() { let mut d = json!({(req.clone()): ""}); if ok { d[go] = json!(name); } p = json!({"drafts": d}); }
             }
+            // a swarm the person just started: accepted, its board opens (by the room id the reply names)
+            "swarm.create" => {
+                let req = format!("@s.req:{id}");
+                if !draft(session, &req).is_empty() { let mut d = json!({(req.clone()): ""}); if ok { d["@go.roomid"] = json!(s(res, "room")); } p = json!({"drafts": d}); }
+            }
             // a commit or a revert changes what Diff shows: a Diff on show is asked again
             "git.act" | "git.revert" => {
                 if diff_on(session, &sel) {

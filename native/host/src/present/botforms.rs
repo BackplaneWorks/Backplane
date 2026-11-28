@@ -120,7 +120,7 @@ pub fn new_bot(session: &Value) -> Option<Value> {
         "providers": PROVIDERS.iter().map(|p| json!({"label": provider_name(p), "provider": p, "on": *p == cur})).collect::<Vec<_>>()}))
 }
 /// A provider's name as setup lists it (onboard.rs `AGENTS`: Claude Code, Codex, Grok Build…), not its id; setup names Antigravity's CLI `agy`.
-fn provider_name(p: &str) -> &str { let id = if p == "antigravity" { "agy" } else { p }; super::onboard::AGENTS.iter().find(|a| a.id == id).map_or(p, |a| a.name) }
+pub(crate) fn provider_name(p: &str) -> &str { let id = if p == "antigravity" { "agy" } else { p }; super::onboard::AGENTS.iter().find(|a| a.id == id).map_or(p, |a| a.name) }
 /// The screen's `newRoom` object: the bots of this machine to pick from.
 pub fn new_room(st: &State, hub: &str, session: &Value) -> Option<Value> {
     if !on(session, "@rnew") { return None }

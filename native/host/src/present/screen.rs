@@ -1019,7 +1019,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
 /// the bot of that name, or the newest room of that name. The mark is taken either way; None when there is none or nothing of that name is known yet.
 pub(crate) fn go_made(st:&State,session:&mut Value)->Option<Value> {
     let take=|session:&mut Value,k:&str|->String { let v=session["drafts"][k].as_str().unwrap_or("").to_string(); if !v.is_empty() { session["drafts"][k]=json!(""); } v };
-    let bot=take(session,"@go.bot"); let room=take(session,"@go.room");
+    let bot=take(session,"@go.bot"); let room=take(session,"@go.room"); let roomid=take(session,"@go.roomid");
+    if !roomid.is_empty() && st.rooms_nav.contains_key(&roomid) { return Some(json!({"kind":"room","id":roomid})) }
     if !bot.is_empty() { if let Some((id,_))=st.bots_nav.iter().find(|(_,b)|b.name==bot) { return Some(json!({"kind":"bot","id":id})) } }
     if !room.is_empty() {
         let seq=|id:&str|->(u64,u64) { let mut it=id.trim_start_matches(|c:char|c.is_ascii_alphabetic()).splitn(2,'-'); (it.next().and_then(|n|n.parse().ok()).unwrap_or(0),it.next().and_then(|n|n.parse().ok()).unwrap_or(0)) };
