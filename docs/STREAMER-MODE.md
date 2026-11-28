@@ -1,6 +1,6 @@
 # Streamer mode (desktop client)
 
-While on, the desktop client draws no identifier of the person: for screen recordings and streams. Settings → This device → Streaming, the
+While on, the desktop client draws no identifier of the person: for screen recordings and streams. Settings → Privacy, under This device, the
 palette ("Streamer mode"), and the top bar's mark (a click turns it off) switch it.
 
 ## What is hidden

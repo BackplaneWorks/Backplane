@@ -1668,6 +1668,8 @@ gpui.settings.network = ネットワーク
 gpui.settings.mouse.board.each = 基板と回路図: 各操作
 gpui.settings.mouse.solid.each = 3DとSTEP: 各操作
 gpui.settings.mouse.preset.note = プリセットはすべての操作を設定します（各操作は「詳細」にあります）。各操作は1つの動作だけを持ちます。動作を選ぶと、それまでの動作が置き換わります。
+gpui.settings.every.device = すべての端末
+gpui.settings.advanced = 詳細
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = この下書きをこの端末に保存できませんでした。再試行してください。
@@ -3048,7 +3050,7 @@ gpui.f.make.room = ルームを作る
 gpui.f.new.room = 新しいルーム
 gpui.f.tour.routines.body = ルーティンはボットを予定どおりに動かします。ボットを開いてルーティンタブで、何をいつするかを書きます。Backplaneは tomorrow 9am、monday 09:00、in 20m、2026-10-14 09:00 のような時刻を読み取ります。ルーティンはあなたのタイムゾーンに従い、設定 → 通知で確認できます。リマインダーも同じ一覧を使います。
 gpui.f.tour.palette = パレットとショートカット
-gpui.f.tour.palette.body = {m}+Kでパレットを開きます。スレッド名やコマンドの一部を入力してEnterを押します。設定 → このデバイスですべてのショートカットを確認・変更できます。
+gpui.f.tour.palette.body = {m}+Kでパレットを開きます。スレッド名やコマンドの一部を入力してEnterを押します。設定 → キーボードですべてのショートカットを確認・変更できます。
 gpui.f.key.agent = エージェント・モデル・思考量
 gpui.f.key.prevnext = 前と次のスレッド
 gpui.f.key.prevnext.keys = {m}+Shift+[ と {m}+Shift+]
@@ -4359,7 +4361,7 @@ ios.buy.incomplete = 購入 · 見積もりが不完全
 ios.improve.search = プロジェクトを検索…
 
 android.notify.head = 通知
-gpui.keysheet.note = 設定 → このデバイスで変更できます。Escで閉じます。
+gpui.keysheet.note = 設定 → キーボードで変更できます。Escで閉じます。
 gpui.keys.help = キーボードショートカット：この一覧。テキスト欄の外では ?、どこでも F1
 gpui.f2.welcome.body = Backplaneは基板・回路図・機構部品の上でコーディングエージェントを動かします。6つの短いステップで準備し、どれも飛ばせます。「後で続ける」で次回起動までセットアップを閉じます。
 gpui.f2.data.folder.note = {home}。スレッド・設定・ボット・キーはここに保存され、ハブはここからエージェントを動かします。

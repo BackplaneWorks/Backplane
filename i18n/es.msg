@@ -1647,6 +1647,8 @@ gpui.settings.network = Red
 gpui.settings.mouse.board.each = Placa y esquema: cada entrada
 gpui.settings.mouse.solid.each = 3D y STEP: cada entrada
 gpui.settings.mouse.preset.note = Un preajuste fija todas las entradas (cada una está en Avanzado). Cada entrada hace una sola cosa: elegir una acción para una entrada sustituye la anterior.
+gpui.settings.every.device = Todos los dispositivos
+gpui.settings.advanced = Avanzado
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change = Describe el cambio…
@@ -3026,7 +3028,7 @@ gpui.f.make.room = Crear una sala
 gpui.f.new.room = Nueva sala
 gpui.f.tour.routines.body = Una rutina ejecuta un bot de forma programada. Abre un bot, luego su pestaña Rutinas y escribe qué debe hacer y cuándo. Backplane lee horas como tomorrow 9am, monday 09:00, in 20m o 2026-10-14 09:00. Las rutinas siguen tu zona horaria, que muestra Ajustes, Notificaciones. Los recordatorios usan la misma lista.
 gpui.f.tour.palette = Paleta y atajos
-gpui.f.tour.palette.body = {m}+K abre la paleta. Escribe parte del nombre de un hilo o un comando y pulsa Enter. Ajustes, Este dispositivo lista cada atajo y te permite cambiarlos.
+gpui.f.tour.palette.body = {m}+K abre la paleta. Escribe parte del nombre de un hilo o un comando y pulsa Enter. Ajustes, Teclado lista cada atajo y te permite cambiarlos.
 gpui.f.key.agent = Agente, modelo y esfuerzo
 gpui.f.key.prevnext = Hilo anterior y siguiente
 gpui.f.key.prevnext.keys = {m}+Shift+[ y {m}+Shift+]
@@ -4338,7 +4340,7 @@ ios.buy.incomplete = Comprar · estimación incompleta
 ios.improve.search = Buscar proyectos…
 
 android.notify.head = NOTIFICACIONES
-gpui.keysheet.note = Ajustes, Este dispositivo los cambia. Esc cierra esto.
+gpui.keysheet.note = Ajustes, Teclado los cambia. Esc cierra esto.
 gpui.keys.help = Atajos de teclado: esta lista. ? fuera de un cuadro de texto, F1 en cualquier sitio
 gpui.f2.welcome.body = Backplane ejecuta agentes de programación sobre tus placas, esquemáticos y piezas mecánicas. Seis pasos cortos lo configuran, y cada uno se puede saltar. Terminar luego cierra la configuración hasta el próximo inicio.
 gpui.f2.data.folder.note = {home}. Tus hilos, ajustes, bots y claves se guardan aquí, y el hub ejecuta tus agentes desde ahí.

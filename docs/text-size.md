@@ -1,6 +1,6 @@
 # Text size
 
-A setting of this device (Settings → This device → Text size), kept in
+A setting of this device (Settings → Appearance → Text size), kept in
 `local-settings.json` as `text_pct`: 80% to 160% in steps of 5. It is a slider
 (press anywhere on the track or drag the thumb; the value snaps to a step and
 applies at once) with Reset beside it. The phone apps follow their operating

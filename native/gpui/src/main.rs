@@ -352,12 +352,12 @@ impl Backplane {
             cx.spawn(async move|this,cx|{loop{cx.background_executor().timer(Duration::from_secs(3600)).await;if this.update(cx,|this,_|{let _=this.tx.try_send(hub::Command::Rpc("update.status".into(),screens::settings::Secret(serde_json::json!({})),"hubupd"));}).is_err(){break}}}).detach();
         }
     }
-    /// The gear: this device's page opens at once (no round trip), and the hub is asked for its pages beside it.
+    /// The gear: Settings opens at once on Appearance with this device's rows (no round trip), and the hub is asked for its pages beside it.
     pub fn open_settings(&mut self,cx:&mut Context<Self>){
         let hub_open=self.data["settings"].is_object();
         let ui=&mut self.screens.settings_ui;
         let opening=!(ui.open_local||hub_open);
-        if ui.open_local||hub_open{ui.open_local=false;ui.device=false;ui.accounts=false;} else {ui.open_local=true;ui.device=true;self.screens.focus_settings=true;}
+        if ui.open_local||hub_open{ui.open_local=false;ui.keys=false;ui.hubs=false;ui.accounts=false;} else {ui.open_local=true;ui.keys=false;ui.hubs=false;ui.accounts=false;if ui.page.is_empty(){ui.page="appearance".into();}self.screens.focus_settings=true;}
         if opening{self.solidcraft_lend(cx);}
         let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));cx.notify();
     }
@@ -365,7 +365,7 @@ impl Backplane {
     pub fn open_accounts(&mut self,cx:&mut Context<Self>){
         self.want_focus=true;
         if !screens::settings::is_open(self){self.open_settings(cx);}
-        self.screens.settings_ui.device=false;
+        self.screens.settings_ui.keys=false;
         self.screens.settings_ui.hubs=false;
         self.screens.settings_ui.accounts=true;
         screens::accounts::open_page(self,cx);

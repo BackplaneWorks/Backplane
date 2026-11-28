@@ -353,7 +353,7 @@ ios.buy.last	Buy it · last estimate: from {price}	購入 · 前回の見積も�
 ios.buy.incomplete	Buy it · estimate incomplete	購入 · 見積もりが不完全	Comprar · estimación incompleta
 ios.improve.search	Search projects…	プロジェクトを検索…	Buscar proyectos…
 android.notify.head	NOTIFICATIONS	通知	NOTIFICACIONES
-gpui.keysheet.note	Settings, This device changes them. Esc closes this.	設定 → このデバイスで変更できます。Escで閉じます。	Ajustes, Este dispositivo los cambia. Esc cierra esto.
+gpui.keysheet.note	Settings, Keyboard changes them. Esc closes this.	設定 → キーボードで変更できます。Escで閉じます。	Ajustes, Teclado los cambia. Esc cierra esto.
 gpui.keys.help	Keyboard shortcuts: this list. ? outside a text box, F1 anywhere	キーボードショートカット：この一覧。テキスト欄の外では ?、どこでも F1	Atajos de teclado: esta lista. ? fuera de un cuadro de texto, F1 en cualquier sitio
 gpui.f2.welcome.body	Backplane runs coding agents on your boards, schematics and mechanical parts. Six short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.	Backplaneは基板・回路図・機構部品の上でコーディングエージェントを動かします。6つの短いステップで準備し、どれも飛ばせます。「後で続ける」で次回起動までセットアップを閉じます。	Backplane ejecuta agentes de programación sobre tus placas, esquemáticos y piezas mecánicas. Seis pasos cortos lo configuran, y cada uno se puede saltar. Terminar luego cierra la configuración hasta el próximo inicio.
 gpui.f2.data.folder.note	{home}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.	{home}。スレッド・設定・ボット・キーはここに保存され、ハブはここからエージェントを動かします。	{home}. Tus hilos, ajustes, bots y claves se guardan aquí, y el hub ejecuta tus agentes desde ahí.
@@ -2052,6 +2052,8 @@ gpui.settings.network	Network	ネットワーク	Red
 gpui.settings.mouse.board.each	Board and schematic: each input	基板と回路図: 各操作	Placa y esquema: cada entrada
 gpui.settings.mouse.solid.each	3D and STEP: each input	3DとSTEP: 各操作	3D y STEP: cada entrada
 gpui.settings.mouse.preset.note	A preset sets every input (each one is under Advanced). Each input does one thing: choosing an action for an input replaces what it did.	プリセットはすべての操作を設定します（各操作は「詳細」にあります）。各操作は1つの動作だけを持ちます。動作を選ぶと、それまでの動作が置き換わります。	Un preajuste fija todas las entradas (cada una está en Avanzado). Cada entrada hace una sola cosa: elegir una acción para una entrada sustituye la anterior.
+gpui.settings.every.device	Every device	すべての端末	Todos los dispositivos
+gpui.settings.advanced	Advanced	詳細	Avanzado
 gpui.imp.could.not.keep.this.draft	Could not keep this draft on this device. Retry.	この下書きをこの端末に保存できませんでした。再試行してください。	No se pudo guardar este borrador en este dispositivo. Reintenta.
 gpui.imp.describe.the.change	Describe the change…	変更内容を書いてください…	Describe el cambio…
 gpui.imp.describe.the.behavior.in.detail	Describe the behavior in detail: what you did and what you saw.	操作した内容と、そのとき見えたことを詳しく書いてください。	Describe el comportamiento en detalle: qué hiciste y qué viste.
@@ -3418,7 +3420,7 @@ gpui.f.make.room	Make a room	ルームを作る	Crear una sala
 gpui.f.new.room	New room	新しいルーム	Nueva sala
 gpui.f.tour.routines.body	A routine runs a bot on a schedule. Open a bot, then its Routines tab, and write what it should do and when. Backplane reads times like tomorrow 9am, monday 09:00, in 20m or 2026-10-14 09:00. Routines follow your time zone, which Settings, Notifications shows. Reminders use the same list.	ルーティンはボットを予定どおりに動かします。ボットを開いてルーティンタブで、何をいつするかを書きます。Backplaneは tomorrow 9am、monday 09:00、in 20m、2026-10-14 09:00 のような時刻を読み取ります。ルーティンはあなたのタイムゾーンに従い、設定 → 通知で確認できます。リマインダーも同じ一覧を使います。	Una rutina ejecuta un bot de forma programada. Abre un bot, luego su pestaña Rutinas y escribe qué debe hacer y cuándo. Backplane lee horas como tomorrow 9am, monday 09:00, in 20m o 2026-10-14 09:00. Las rutinas siguen tu zona horaria, que muestra Ajustes, Notificaciones. Los recordatorios usan la misma lista.
 gpui.f.tour.palette	Palette and shortcuts	パレットとショートカット	Paleta y atajos
-gpui.f.tour.palette.body	{m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, This device lists every shortcut and lets you change them.	{m}+Kでパレットを開きます。スレッド名やコマンドの一部を入力してEnterを押します。設定 → このデバイスですべてのショートカットを確認・変更できます。	{m}+K abre la paleta. Escribe parte del nombre de un hilo o un comando y pulsa Enter. Ajustes, Este dispositivo lista cada atajo y te permite cambiarlos.
+gpui.f.tour.palette.body	{m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, Keyboard lists every shortcut and lets you change them.	{m}+Kでパレットを開きます。スレッド名やコマンドの一部を入力してEnterを押します。設定 → キーボードですべてのショートカットを確認・変更できます。	{m}+K abre la paleta. Escribe parte del nombre de un hilo o un comando y pulsa Enter. Ajustes, Teclado lista cada atajo y te permite cambiarlos.
 gpui.f.key.agent	Agent, model and effort	エージェント・モデル・思考量	Agente, modelo y esfuerzo
 gpui.f.key.prevnext	Previous and next thread	前と次のスレッド	Hilo anterior y siguiente
 gpui.f.key.prevnext.keys	{m}+Shift+[ and {m}+Shift+]	{m}+Shift+[ と {m}+Shift+]	{m}+Shift+[ y {m}+Shift+]
@@ -6963,7 +6965,7 @@ settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Viso
     /// gpui.f.tour.thread.body = Settle takes a thread out of the active list and Snooze hides it until later. Fork starts a new thread from this one. Runs of tool calls fold into one row, and delegated work shows under Subagents. {m}+Shift+S settles and Ctrl+. stops a running turn.
     static func gpui_f_tour_thread_body(m: String) -> String { f("gpui.f.tour.thread.body", ["m": m]) }
 
-    /// gpui.f.tour.palette.body = {m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, This device lists every shortcut and lets you change them.
+    /// gpui.f.tour.palette.body = {m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, Keyboard lists every shortcut and lets you change them.
     static func gpui_f_tour_palette_body(m: String) -> String { f("gpui.f.tour.palette.body", ["m": m]) }
 
     /// gpui.f.key.prevnext.keys = {m}+Shift+[ and {m}+Shift+]

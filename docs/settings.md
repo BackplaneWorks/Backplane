@@ -18,8 +18,11 @@ too), names the first settings found under each page, and Enter opens the first 
 neighbours: the ids `web`, `ring`, `import`, `developer`, `timezone`, `writing`, `git` and `network` still open Devices, Voice, Setup,
 Setup, Notifications, Agents, Threads and git, and About and updates (`canon`: a `settings-page` press, a saved session, a
 `backplane://settings/<id>` link). A test (`settings_inventory_is_all_still_reachable`) holds the list of every setting, action and field
-the pages had before they were regrouped, so none is lost. The desktop adds three pages of its own: This device and Hubs (kept on this
-computer) and Accounts (leading Agents). The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
+the pages had before they were regrouped, so none is lost. The desktop puts this computer's own settings on the page of their topic, under
+"This device" above the hub's rows ("Every device"): Language, Theme, Text size, Font, the 3D background and the layout on Appearance,
+Desktop notifications on Notifications, Streamer mode on Privacy. It adds three pages of its own: Keyboard (before Mouse and trackpad;
+the keys that cannot be changed under Advanced), Hubs (after Machines), both kept on this computer, and Accounts (leading Agents). A page
+opens at its top. The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
 the regrouping, and the web client its own dialog (`web/src/settings.ts`).
 
 A row marked `"adv": true` is rarely needed: a client folds these under Advanced at the end of the page, and a client that does not

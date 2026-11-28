@@ -1645,6 +1645,8 @@ gpui.settings.network = Network
 gpui.settings.mouse.board.each = Board and schematic: each input
 gpui.settings.mouse.solid.each = 3D and STEP: each input
 gpui.settings.mouse.preset.note = A preset sets every input (each one is under Advanced). Each input does one thing: choosing an action for an input replaces what it did.
+gpui.settings.every.device = Every device
+gpui.settings.advanced = Advanced
 
 # ---- gpui-a: improvements, accounts, bots ----
 gpui.imp.could.not.keep.this.draft = Could not keep this draft on this device. Retry.
@@ -3025,7 +3027,7 @@ gpui.f.make.room = Make a room
 gpui.f.new.room = New room
 gpui.f.tour.routines.body = A routine runs a bot on a schedule. Open a bot, then its Routines tab, and write what it should do and when. Backplane reads times like tomorrow 9am, monday 09:00, in 20m or 2026-10-14 09:00. Routines follow your time zone, which Settings, Notifications shows. Reminders use the same list.
 gpui.f.tour.palette = Palette and shortcuts
-gpui.f.tour.palette.body = {m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, This device lists every shortcut and lets you change them.
+gpui.f.tour.palette.body = {m}+K opens the palette. Type part of a thread's name or a command, then press Enter. Settings, Keyboard lists every shortcut and lets you change them.
 gpui.f.key.agent = Agent, model and effort
 gpui.f.key.prevnext = Previous and next thread
 gpui.f.key.prevnext.keys = {m}+Shift+[ and {m}+Shift+]
@@ -4336,7 +4338,7 @@ ios.buy.incomplete = Buy it · estimate incomplete
 ios.improve.search = Search projects…
 
 android.notify.head = NOTIFICATIONS
-gpui.keysheet.note = Settings, This device changes them. Esc closes this.
+gpui.keysheet.note = Settings, Keyboard changes them. Esc closes this.
 gpui.keys.help = Keyboard shortcuts: this list. ? outside a text box, F1 anywhere
 gpui.f2.welcome.body = Backplane runs coding agents on your boards, schematics and mechanical parts. Six short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.
 gpui.f2.data.folder.note = {home}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.
