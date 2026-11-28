@@ -49,6 +49,9 @@ pub fn lock_for(root: &str, file: &str) -> String {
 }
 
 /// The brief every member starts with (its first message, with the seed after it).
+/// A member's thread title: its name (its role) first, then the swarm's topic. In the sidebar's narrow row the topic, the same for every
+/// member, came first and the part that tells them apart was cut ("Review the amp · l…"). Older members keep the title they were made with.
+pub fn member_title(name: &str, topic: &str) -> String { format!("{name} · {topic}") }
 pub fn brief(topic: &str, room: &str, goal: &str, me: &str, role: &str, peers: &[String], joining: bool) -> String {
     let n = peers.len() + 1;
     format!("You are {me}, one of {n} peers in the swarm \"{topic}\" (room {room}){}{}. {}There is no boss: nobody assigns you work and you report to nobody; you are all equals. \
@@ -512,7 +515,7 @@ impl Bots {
             let peers: Vec<String> = names.iter().filter(|x| *x != nm).cloned().collect();
             let mut prompt = brief(&topic, &rid, &goal, nm, gs(m, "role"), &peers, false); if !seed.is_empty() { prompt.push_str(&format!("\n\nTo start with:\n{seed}")) }
             let model = crate::settings::models::sanitize_model_now(gs(m, "provider"), gs(m, "model"));
-            let mut args = json!({"project":project,"prompt":prompt,"provider":gs(m, "provider"),"model":model,"title":format!("{topic} · {nm}"),"subthread":false,"report":false,"_id":tid});
+            let mut args = json!({"project":project,"prompt":prompt,"provider":gs(m, "provider"),"model":model,"title":member_title(nm, &topic),"subthread":false,"report":false,"_id":tid});
             if !gs(m, "account").is_empty() { args["account"] = m["account"].clone() }
             match self.inbox.launch(by, args).await { Ok(t) if &t == tid => started.push(json!({"thread":t,"name":nm})), Ok(t) => failed.push(format!("{nm}: started as {t}, not the id the room lists")), Err(e) => failed.push(format!("{nm}: {e}")) }
         }
@@ -609,7 +612,7 @@ impl Bots {
                     json!({"$":"SettingSet","key":format!("room.joined.{}.{key}", r.id),"value":ann_id,"at":now}), ann];
                 if let Err(e) = self.hub.commit_many(&w.also(now, ev)).await { return fail(&format!("{e:#}")) }
                 let project = r.project.clone(); drop(w); { let _w = self.world().await; }
-                let mut args = json!({"project":project,"prompt":brief(&r.name, &r.id, &r.goal, &nm, gs(&m, "role"), &taken, true),"provider":prov,"model":model,"title":format!("{} · {nm}", r.name),"subthread":false,"report":false,"_id":tid});
+                let mut args = json!({"project":project,"prompt":brief(&r.name, &r.id, &r.goal, &nm, gs(&m, "role"), &taken, true),"provider":prov,"model":model,"title":member_title(&nm, &r.name),"subthread":false,"report":false,"_id":tid});
                 if !gs(&m, "account").is_empty() { args["account"] = m["account"].clone() }
                 match self.inbox.launch(&r.by, args).await { Ok(t) => (true, json!({"room":r.id,"thread":t,"name":nm})), Err(e) => {
                     let w = self.world().await; if let Some(r2) = w.room(&r.id).cloned() { let _ = self.hub.commit_many(&w.also(now_s(), vec![r2.set_ev(now_s(), |x| x.members.retain(|m| m != &key))])).await; }

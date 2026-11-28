@@ -421,6 +421,15 @@ mod tests {
         let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{"local.machine":"m","local.generation":"7"}}), sel: "", action: "new-thread", value: "p1", title_of: &t }).unwrap();
         assert_eq!(o.session_patch["drafts"]["@want.new.at"], "m|7"); assert_eq!(o.session_patch["drafts"]["@want.new"], "4");
     }
+    /// New subthread (`<parent>|<project>`) arms the same selection as New thread and asks for the thread under its parent.
+    #[test] fn a_new_subthread_is_made_under_its_parent_and_selected_as_a_new_thread_is() {
+        let t = |_: &str| String::new();
+        let o = act(&Req { hub: "h", session: &json!({"sel":"t1","rid":4,"drafts":{"@menu":"x"},"info":{"local.machine":"m","local.generation":"7"}}), sel: "t1", action: "thread-child", value: "t1|p1", title_of: &t }).unwrap();
+        let d = &o.session_patch["drafts"]; assert_eq!((d["@want.new"].as_str(), d["@want.new.at"].as_str(), d["@menu"].as_str()), (Some("4"), Some("m|7"), Some("")));
+        let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((sent["m"].as_str(), sent["p"]["project"].as_str(), sent["p"]["parent"].as_str()), (Some("thread.create"), Some("p1"), Some("t1")));
+        assert!(act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{}}), sel: "", action: "thread-child", value: "t1", title_of: &t }).is_none(), "no project: nothing made");
+    }
     /// No pick of machine X becomes a create on machine Y: a target on another machine than the one picked is refused (the window keeps the text).
     #[test] fn a_new_thread_on_another_machine_than_the_one_picked_is_refused() {
         let t = |_: &str| String::new();

@@ -49,6 +49,7 @@ async fn post(b: &Arc<Bots>, th: &str, a: Value) -> (bool, Value) { b.tool_call(
     assert!(ok, "{r}");
     let room = r["room"].as_str().unwrap().to_string();
     let l = peers.launched.lock().unwrap().clone(); assert_eq!(l.len(), 3);
+    assert_eq!(l.iter().map(|a| a["title"].as_str().unwrap()).collect::<Vec<_>>(), ["opus · debounce", "gemini · debounce", "codex · debounce"], "a member's thread is named by it first, then the topic");
     for a in &l { assert_eq!((a["subthread"].clone(), a["report"].clone(), a["project"].clone()), (json!(false), json!(false), json!("p1")), "peers: top level, reporting to nobody"); }
     assert!(l[0]["prompt"].as_str().unwrap().contains("one of 3 peers") && l[0]["prompt"].as_str().unwrap().contains("There is no boss") && l[0]["prompt"].as_str().unwrap().contains("The encoder bounces"), "{}", l[0]["prompt"]);
     let (opus, gem, codex) = (l[0]["_id"].as_str().unwrap().to_string(), l[1]["_id"].as_str().unwrap().to_string(), l[2]["_id"].as_str().unwrap().to_string());
@@ -160,6 +161,7 @@ async fn post(b: &Arc<Bots>, th: &str, a: Value) -> (bool, Value) { b.tool_call(
     // added by the person: it starts with the joining brief and hears only what comes after it joined
     let a = rpc(&hub, "swarm.act", json!({"room":room,"action":"add","provider":"claude","role":"critic"})).await; assert_eq!(a["ok"], true, "{a}");
     let crit = a["result"]["thread"].as_str().unwrap().to_string();
+    assert_eq!(peers.launched.lock().unwrap().last().unwrap()["title"], "critic · pair", "one added later too");
     assert!(peers.launched.lock().unwrap().last().unwrap()["prompt"].as_str().unwrap().contains("room_read the board first"));
     post(&bots, &des, json!({"room":room,"text":"second sketch, with @critic please"})).await;
     let c = rides_to(&peers, &crit); assert_eq!(c.len(), 1); assert!(c[0].contains("second sketch") && !c[0].contains("first sketch"), "{}", c[0]);

@@ -408,7 +408,7 @@ impl Backplane {
                 // a row under its project row (`under`, the sections) is one of its few fixed rows: no tree of its own either
                 let under = t["under"] == true;
                 let tree = sub.is_empty() && !pid.is_empty() && !under;
-                let gutter = if under { 44. } else { 6. + depth * 14. + 16. }; // the indent and the chevron's slot (under a project: its title lines up with the project's name, the L hangs from the project's icon)
+                let gutter = if under { 44. + depth * 14. } else { 6. + depth * 14. + 16. }; // the indent and the chevron's slot (under a project: its title lines up with the project's name, the L hangs from the project's icon; a subthread's one step further, from its parent's dot)
                 // the chevron's target is the row's full height and the whole gutter left of the dot (the arrow alone, 16 x 14, was easy to miss: a near miss selected the thread)
                 let toggle = (kids > 0 && tree).then(|| {
                     let tid = id.clone();
@@ -444,8 +444,8 @@ impl Backplane {
                     // a row under its project row: a small faint L in the indent (half a row down, then right to the dot), so it reads
                     // as the project's own; the open one's L a shade brighter
                     .child(toggle.map_or_else(|| div().w(px(gutter)).h_full().flex_shrink_0().relative().when(under, |d| { let l = c(if selected { "dim" } else { "line" });
-                        d.child(div().absolute().left(px(36.)).top_0().w(px(1.)).h(relative(0.5)).bg(l))
-                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).children((!labelled).then(|| crate::screens::siderow::dot(light, t))).child(if renaming { crate::screens::siderow::field(light, &self.screens.fields, &id, self.screens.ctx.is_some() || self.screens.ctx_field.is_some()) } else if inbox {
+                        d.child(div().absolute().left(px(36. + depth * 14.)).top_0().w(px(1.)).h(relative(0.5)).bg(l))
+                         .child(div().absolute().left(px(36. + depth * 14.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).children((!labelled).then(|| crate::screens::siderow::dot(light, t))).child(if renaming { crate::screens::siderow::field(light, &self.screens.fields, &id, self.screens.ctx.is_some() || self.screens.ctx_field.is_some()) } else if inbox {
                         let (proj, ago) = (sub.trim().to_string(), trs(&string(t, "ago")));
                         div().flex_1().min_w_0().flex().flex_col().justify_center().gap(px(1.)).relative()
                             .child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().line_height(crate::scale::tpx(18.)).child(string(t, "title")))
