@@ -1079,6 +1079,10 @@ impl Render for Backplane {
         // a project's page over a thread: the header is the page's (its project's name), not the thread's
         // a swarm's page over the thread its viewer is drawn for: the page is what is open, so that thread has no header
         let head_thread = has_thread && !has_home && !crate::screens::swarm::over_thread(&self.data);
+        // a project's page over a thread: its Send starts a new thread on the default model, so nothing of the open thread is drawn there
+        // (its dock, its asks and queue, its model, plan and context chips): they would act on the thread, not on what the page sends
+        let on_page = has_home; let chrome = thread_chrome_on(on_page);
+        let quiet = Value::Null; let box_thread = if chrome { thread } else { &quiet };
         crate::keys::set_tip_font(&self.local.font);
         let head = if head_thread { self.screens.head.layout(window, f32::from(window.viewport_size().width), &string(thread, "title"), &crate::screens::tools::tools(thread), &self.local.font, 13. * self.local.text_pct as f32 / 100.) } else { Default::default() };
         let (mut top_mid, mut head_row): (Option<AnyElement>, Option<AnyElement>) = (None, None);
@@ -1260,8 +1264,8 @@ impl Render for Backplane {
         // the bot form, a bot's tabs and its Webhooks page are controls too (screens::bots::controls)
         /* i18n-ok: registered controls the e2e drivers press */ for (id, label, c) in crate::screens::bots::controls(&self.data).into_iter().chain(crate::screens::swarm::controls(&self.data)) { ctl.push(CtlEntry { id, label, ctl: c }); }
         /* i18n-ok: registered controls the e2e drivers press */ if has_thread { ctl.push(CtlEntry { id: "ui:Thread menu".into(), label: "Thread actions".into(), ctl: Ctl::ThreadMenu }); }
-        /* i18n-ok: registered controls the e2e drivers press */ if has_thread { ctl.push(CtlEntry { id: "ui:Model".into(), label: "Model".into(), ctl: Ctl::ModelChip }); }
-        /* i18n-ok: registered controls the e2e drivers press */ if has_thread && crate::screens::planmode::parse(&thread["planMode"]).is_some() { ctl.push(CtlEntry { id: "ui:Plan mode".into(), label: "Plan".into(), ctl: Ctl::None }); }
+        /* i18n-ok: registered controls the e2e drivers press */ if has_thread && chrome { ctl.push(CtlEntry { id: "ui:Model".into(), label: "Model".into(), ctl: Ctl::ModelChip }); }
+        /* i18n-ok: registered controls the e2e drivers press */ if has_thread && chrome && crate::screens::planmode::parse(&thread["planMode"]).is_some() { ctl.push(CtlEntry { id: "ui:Plan mode".into(), label: "Plan".into(), ctl: Ctl::None }); }
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) { for (id, label) in [("@device", "This device"), ("@hubs", "Hubs"), ("@accounts", "Accounts")] { ctl.push(CtlEntry { id: format!("set-nav:{id}"), label: label.into(), ctl: Ctl::SettingsPage(id.into()) }); } }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         /* i18n-ok: registered controls the e2e drivers press */ if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
@@ -1269,7 +1273,7 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ for b in crate::screens::settings::parse(&self.data["settings"]).into_iter().flat_map(|r| r.buttons).filter(|b| b.action.starts_with("kicad-install") || b.action == "device-share-revoke") { ctl.push(CtlEntry { id: format!("set:{}", b.action), label: b.label, ctl: Ctl::Node(b.action, b.value) }); }
         /* i18n-ok: registered controls the e2e drivers press */ if let Some(p) = self.data["projects"].as_array().and_then(|p| p.first()) { let id = string(p, "id"); let id = id.rsplit_once('|').map_or(id.as_str(), |(_, r)| r).to_string(); ctl.push(CtlEntry { id: "ui:New thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), id) }); }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "send".into(), label: "Send".into(), ctl: Ctl::Send });
-        /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Context".into(), label: "Context".into(), ctl: Ctl::ToggleContext });
+        /* i18n-ok: registered controls the e2e drivers press */ if chrome { ctl.push(CtlEntry { id: "ui:Context".into(), label: "Context".into(), ctl: Ctl::ToggleContext }); }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Jump or run a command".into(), label: "Jump or run a command".into(), ctl: Ctl::OpenPalette });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Account".into(), label: "Account".into(), ctl: Ctl::AccountMenu });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Accounts".into(), label: "Accounts".into(), ctl: Ctl::AccountsPage });
@@ -1373,7 +1377,7 @@ impl Render for Backplane {
                 .child(div().flex_1().min_w(px(thread_least)).when(pane_full, |d| d.flex_none().w(px(0.)).overflow_hidden()).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
                     .children(shows_bot_overlay(has_home).then(|| crate::screens::bots::bar(cx, light, &self.data["bot"])).flatten())
                     .children(head_row)
-                    .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))
+                    .children(chrome.then(|| crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread)).flatten())
                     .when(page_list, |d| d.child(list(self.screens.home_list.clone(), cx.processor(|this, ix, _, cx| this.page_item(ix, cx))).flex_1().min_h_0()))
                     .when(page_list, |d| d.child(canvas({ let reg = self.screens.reg.clone(); move |_, _, _| {
                         reg.borrow_mut().resolve_by(|id| id.strip_prefix("home-readme-").and_then(|s| s.parse::<usize>().ok()).map(|i| i + 1));
@@ -1388,7 +1392,7 @@ impl Render for Backplane {
                     .child(div().flex_shrink_0().relative().child(art::probe("composer")).children(crate::perf::mark("composer")).border_t_1().border_color(c("rule")).flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_3().flex().flex_col().gap_2()
                         .when(show_popup, |d| d.child(div().relative().border_1().border_color(c("line")).bg(c("panel")).child(popup).children(popup_bar)))
                         .children(crate::screens::provider_notice::view(cx, light, &self.data["noProvider"], self.data["tour"].is_object() || (self.project_page.is_none() && thread["mark"].is_object())))
-                        .children(crate::screens::review::view(cx, light, &thread["review"]))
+                        .when(chrome, |d| d.children(crate::screens::review::view(cx, light, &thread["review"]))
                         .children(crate::screens::planmode::bar(cx, light, thread))
                         .children(crate::screens::order::view(cx, light, &thread["order"]))
                         // #1304: the agent has not answered the person's mid-turn message (screens/unanswered.rs)
@@ -1398,11 +1402,11 @@ impl Render for Backplane {
                         .children(self.screens.voice.views.get(&self.selected).cloned().and_then(|v| crate::screens::voice::view(cx, light, &v, self.screens.voice.level, self.screens.voice.fix.clone().as_ref())))
                         .children(crate::screens::sidebox::btw(cx, light, &thread["btw"]))
                         .children(crate::screens::sidebox::secret(cx, light, &self.screens.fields, &thread["secretBox"]))
-                        .children(reply_chip(cx, light, &thread["replying"]))
+                        .children(reply_chip(cx, light, &thread["replying"])))
                         .children(crate::screens::attach::chips(cx, light, &self.screens.attacher.previews, thread))
                         // the messages waiting for the agent (screens/queue.rs)
-                        .children(crate::screens::queue::strip(cx, light, thread, &self.screens.unsent.rows(thread["id"].as_str().unwrap_or(""))))
-                        .child(div().id("composer-box").relative().child(canvas({ let at = self.screens.box_at.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).border_1().border_color(c(crate::screens::planmode::composer_border(thread))).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.solidcraft_reclaim_to(window, cx); this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
+                        .when(chrome, |d| d.children(crate::screens::queue::strip(cx, light, thread, &self.screens.unsent.rows(thread["id"].as_str().unwrap_or("")))))
+                        .child(div().id("composer-box").relative().child(canvas({ let at = self.screens.box_at.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).border_1().border_color(c(crate::screens::planmode::composer_border(box_thread))).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.solidcraft_reclaim_to(window, cx); this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
                         // another machine's thread: where an agent sent from here runs
                         .children(if self.project_page.is_some() { None } else { crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)) })
                         // a project's page: what the hub said when it would not do what the page asked (a New thread refused), one line by the box
@@ -1433,22 +1437,24 @@ impl Render for Backplane {
                                 if resized || (moved && open) { if let Some(this) = me.upgrade() { cx.defer(move |cx| this.update(cx, |_, cx| cx.notify())) } }
                             } }, |_, _, _, _| {}).absolute().size_full())
                             // the chip's menu (screens/combo.rs): out of the row's flow, floating over the thread from the row; hidden while something covers the page
-                            .children((!self.chip_menu_covered()).then(|| crate::screens::usage::view(cx, light, self, &self.screens.ctx_chip, &self.screens.box_at, (f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)))).flatten())
-                            .children((!self.chip_menu_covered()).then(|| crate::screens::combo::menu(cx, light, &thread, self, bar_w, (f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)))).flatten())
-                            .child(crate::screens::bar::fit(with_rect(crate::screens::combo::chip(cx, light, thread, combo_avail, (&crate::keys::hint(&self.local, "models"), &crate::keys::hint(&self.local, "account")), &self.screens.pick.chip, self.screens.picker_open), || "ui:Model".to_string()))
+                            .children((chrome && !self.chip_menu_covered()).then(|| crate::screens::usage::view(cx, light, self, &self.screens.ctx_chip, &self.screens.box_at, (f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)))).flatten())
+                            .children((chrome && !self.chip_menu_covered()).then(|| crate::screens::combo::menu(cx, light, &thread, self, bar_w, (f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)))).flatten())
+                            // (on a page: the chip's room, so Attach, Dictate and Send stay at the row's right end)
+                            .when(!chrome, |d| d.child(div().flex_1()))
+                            .when(chrome, |d| d.child(crate::screens::bar::fit(with_rect(crate::screens::combo::chip(cx, light, thread, combo_avail, (&crate::keys::hint(&self.local, "models"), &crate::keys::hint(&self.local, "account")), &self.screens.pick.chip, self.screens.picker_open), || "ui:Model".to_string()))
                                 // held Ctrl: the menu's key over the chip's end (0.14's "Ctrl M"), so the chip keeps its width
-                                .when(self.screens.held == crate::keys::Held::Threads, |d| d.relative().child(div().absolute().right(px(4.)).top_0().bottom_0().flex().items_center().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "models")).iter().map(|k| crate::screens::hints::cap(light, k, false))))))
-                            .children(crate::screens::planmode::chip(cx, light, thread, &crate::keys::hint(&self.local, "plan-mode")))
+                                .when(self.screens.held == crate::keys::Held::Threads, |d| d.relative().child(div().absolute().right(px(4.)).top_0().bottom_0().flex().items_center().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "models")).iter().map(|k| crate::screens::hints::cap(light, k, false)))))))
+                            .children(chrome.then(|| crate::screens::planmode::chip(cx, light, thread, &crate::keys::hint(&self.local, "plan-mode"))).flatten())
                             // (the Draw button is gone for now: screens/pad.rs stays, to come back redone)
-                            .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).min_w_0().overflow_hidden().cursor_pointer().tooltip(crate::keys::tip("Tokens, cost and context: the thread's numbers", "", light)).on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).relative().flex().items_center().gap_2().when(self.screens.ctx_open, |d| d.border_color(c("accent"))).child(canvas({ let at = self.screens.ctx_chip.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).child(ic(light, "gauge", 14., if self.screens.ctx_open { "accent" } else { "dim" }))
+                            .when(chrome, |d| d.child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("ctx-chip"), || "ui:Context".to_string())).min_w_0().overflow_hidden().cursor_pointer().tooltip(crate::keys::tip("Tokens, cost and context: the thread's numbers", "", light)).on_click(cx.listener(|this, _, _, cx| { this.screens.ctx_open = !this.screens.ctx_open; cx.notify(); })).relative().flex().items_center().gap_2().when(self.screens.ctx_open, |d| d.border_color(c("accent"))).child(canvas({ let at = self.screens.ctx_chip.clone(); move |b, _, _| at.set(b) }, |_, _, _, _| {}).absolute().size_full()).child(ic(light, "gauge", 14., if self.screens.ctx_open { "accent" } else { "dim" }))
                                 .children(mem_on.then(|| crate::screens::combo::mem_bar(light, &memory)))
                                 // the hub's words for the thread's tokens, cost and context (0.14's token button), else the context alone
-                                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(tok_words)))
+                                .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(tok_words))))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string())).flex_shrink_0().cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
                             .children(crate::screens::voice::always_pill(cx, light, &self.screens.voice))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("dictate"), || "ui:Dictate".to_string())).flex_shrink_0().cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_down(cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
-                            .child({ let (lbl, bg) = crate::screens::planmode::send_button(thread, crate::screens::voice::flashing(&self.screens.voice));
+                            .child({ let (lbl, bg) = crate::screens::planmode::send_button(box_thread, crate::screens::voice::flashing(&self.screens.voice));
                                 crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(bg)).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&lbl)).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx))) }))))
                     .when(has_swarm && shows_bot_overlay(has_home), |d| d.child(self.screens.parts.el(Backplane::swarm_part, StyleRefinement::default().absolute().inset_0(), cx)))
                     .children(shows_bot_overlay(has_home).then(|| { let reg = self.screens.reg.clone(); crate::screens::bots::page(cx, light, &self.screens.fields, &self.data["bot"], self.screens.browser.as_ref().map(|(_, b)| b), &reg, &mut self.screens.parsed) }).flatten())
@@ -1833,6 +1839,9 @@ pub(crate) fn home_move_dismiss_cmd() -> Command {
 
 /// Whether the bot/swarm page and bar may cover the main column (suppressed while a project page is open).
 pub(crate) fn shows_bot_overlay(has_home: bool) -> bool { !has_home }
+/// Whether the open thread's chrome (its dock, composer boxes, model/plan/context chips, Send's words) is drawn: not over a project's page,
+/// whose Send starts a new thread.
+pub(crate) fn thread_chrome_on(on_page: bool) -> bool { !on_page }
 
 #[cfg(test)]
 mod home_tests {
@@ -1890,5 +1899,16 @@ mod home_tests {
     fn bot_overlay_does_not_occlude_open_project_page() {
         assert!(!super::shows_bot_overlay(true));
         assert!(super::shows_bot_overlay(false));
+    }
+
+    #[test]
+    fn a_project_page_shows_none_of_the_previous_threads_chrome() {
+        assert!(!super::thread_chrome_on(true));
+        assert!(super::thread_chrome_on(false));
+        // what the page's Send and box get in place of the thread: plain Send on the accent, the normal border, whatever the thread was doing
+        let planning = json!({"planMode": {"phase": "planning", "interaction": "plan", "once": false}, "send": "Send", "sendAct": "send"});
+        assert_eq!(crate::screens::planmode::send_button(&planning, false), ("Plan".into(), "input"));
+        assert_eq!(crate::screens::planmode::send_button(&Value::Null, false), ("Send".into(), "accent"));
+        assert_eq!(crate::screens::planmode::composer_border(&Value::Null), "accent");
     }
 }
