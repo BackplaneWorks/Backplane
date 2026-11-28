@@ -1337,7 +1337,25 @@ impl Render for Backplane {
         }
         let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")).capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, window, cx| { crate::keys::tip_pressed(e.position); crate::screens::kicad_update::person_acted(this); this.solidcraft_reclaim_to(window, cx); })),self.picker_keys(),self.screens.ctx.is_some(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(crate::scale::tpx(13.)).font_family(self.local.font.clone()).line_height(crate::scale::tpx(20.))
-            .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus)).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::composer::FieldMenu, _, cx| this.field_menu(cx))).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.side_flip(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| if !this.palette_close(cx) { this.palette_open_find(cx) })).on_action(cx.listener(|this, _: &crate::FindInThreadKey, _, cx| this.find_open(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection)).on_action(cx.listener(Self::select_all_keyed))
+            .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus))
+            // a plain left press that no text surface took (an empty pane area, a row, a button) clears the window's text selection, as a click on a
+            // page's empty area does in a browser. Painted first, so its bubble runs after every other press handler: none where one stopped the press
+            // (a scrollbar, a field's box), none while a menu is open (its Copy and Quote read the selection), none with Shift (it extends)
+            .child({
+                let view = cx.entity().downgrade();
+                gpui::canvas(|_, _, _| {}, move |_, _, window, _| {
+                    let seen = std::rc::Rc::new(std::cell::Cell::new(None::<u64>));
+                    let view = view.clone();
+                    window.on_mouse_event(move |e: &MouseDownEvent, phase, _, cx| {
+                        if e.button != MouseButton::Left || e.modifiers.shift { return }
+                        let Some(v) = view.upgrade() else { return };
+                        match phase {
+                            DispatchPhase::Capture => { let b = v.read(cx); seen.set(b.screens.ctx.is_none().then(|| b.screens.reg.borrow().click_seq)); }
+                            DispatchPhase::Bubble => if let Some(seq) = seen.take() { if v.read(cx).screens.reg.borrow().click_seq == seq { v.update(cx, |this, cx| { this.selection_escape(cx); }); } },
+                        }
+                    });
+                }).absolute().size(px(0.))
+            }).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::composer::FieldMenu, _, cx| this.field_menu(cx))).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.side_flip(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| if !this.palette_close(cx) { this.palette_open_find(cx) })).on_action(cx.listener(|this, _: &crate::FindInThreadKey, _, cx| this.find_open(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection)).on_action(cx.listener(Self::select_all_keyed))
             // the dev build strip, only while a build is being made or waits to relaunch
             .children(self.screens.devbar.clone().map(|b| crate::screens::devbar::strip(cx, &b, light, self.screens.devbar_confirm.is_some())))
             .children({ let s = std::mem::take(&mut self.screens.hubbar); let e = crate::screens::hubbar::strip(cx, &s, light); self.screens.hubbar = s; e })
