@@ -148,6 +148,44 @@ pub fn is_default(snap: &Value, p: &Value) -> bool {
     d["id"] == p["id"] && d["epoch"] == p["epoch"]
 }
 
+/// The provider whose CLI login threads use when nothing else is picked (the model picker's "Default account · CLI login", `menu_rows`): the thread's, else Claude.
+pub fn default_provider(snap: &Value) -> &str { snap["thread"]["provider"].as_str().filter(|p| !p.is_empty()).unwrap_or("claude") }
+/// Whether a provider is set up: it has an added account, or it is the default CLI login's provider, or its CLI said who is signed in.
+pub fn set_up(provider: &str, snap: &Value) -> bool {
+    provider == default_provider(snap) || profiles(snap).iter().any(|p| p["provider"] == provider) || snap["default_login"][provider]["state"] == "known"
+}
+/// Whether one of the hub's `people` entries is drawn above the "Not set up" fold: a login of a set-up provider, or one signed in or with a reading.
+pub fn entry_set_up(e: &Value, snap: &Value) -> bool {
+    e["logins"].as_array().into_iter().flatten().any(|l| set_up(l["provider"].as_str().unwrap_or(""), snap) || l["state"] == "connected" || l["bars"].as_array().map_or(false, |b| !b.is_empty()))
+}
+/// Whether an entry holds the default login (the default provider's CLI login, or its own login when it has no accounts).
+fn holds_default(e: &Value, snap: &Value) -> bool {
+    let dp = default_provider(snap);
+    e["logins"].as_array().into_iter().flatten().any(|l| l["provider"] == dp && matches!(l["kind"].as_str(), Some("cli" | "provider")))
+}
+/// Settings › Accounts' cards in order: (above the fold, under "Not set up"). The default login comes first and always has a card: when the hub left it out
+/// (its usage was not read and its CLI did not say who), one is made that says "usage not read".
+pub fn arrange(snap: &Value, people: &[Value]) -> (Vec<Value>, Vec<Value>) {
+    let (mut up, quiet): (Vec<Value>, Vec<Value>) = people.iter().cloned().partition(|e| entry_set_up(e, snap) || holds_default(e, snap));
+    let dp = default_provider(snap);
+    if !up.iter().any(|e| holds_default(e, snap)) && matches!(dp, "claude" | "codex") {
+        /* i18n-ok: product names */ let name = if dp == "codex" { "Codex" } else { "Claude" };
+        let hold = if dp == "claude" { snap["holds"][""]["text"].as_str().unwrap_or("").to_string() } else { String::new() };
+        let default = serde_json::from_str::<Value>(snap["defaults"][dp].as_str().unwrap_or("")).map_or(true, |d| d["id"].as_str().map_or(true, str::is_empty));
+        /* i18n-ok: joins catalog words */ let title = format!("{name} {}", trs("CLI login"));
+        up.insert(0, json!({"key": format!("cli:{dp}"), "title": title, "logins": [{"provider": dp, "title": name, "kind": "cli", "profile": "", "epoch": 0, "plan": "", "state": "unchecked",
+            "line": trs("usage not read"), "tone": "dim", "hold": hold, "out": !hold.is_empty(), "default": default, "bars": [], "note": "", "also": [], "label": ""}]}));
+    } else if let Some(i) = up.iter().position(|e| holds_default(e, snap)) { let e = up.remove(i); up.insert(0, e); }
+    (up, quiet)
+}
+/// A folded card's note: "Not set up." and what was seen of it here, never the raw failure of a usage read ("Agy /quota failed: exit 1").
+pub fn quiet_note(note: &str) -> String {
+    let seen: Vec<&str> = note.split(". ").map(|p| p.trim_end_matches('.')).filter(|p| p.starts_with("Seen here today") || p.starts_with("Last rate limit")).collect();
+    let mut out = trs("Not set up.");
+    /* i18n-ok: joins the hub's own sentences */ if !seen.is_empty() { out.push(' '); out.push_str(&seen.join(". ")); out.push('.'); }
+    out
+}
+
 // ---- requests ------------------------------------------------------------------------------------------------------------------------------------
 
 /// The hub knows a thread by its own id; the picture names it with the hub in front (`hub|id`).
@@ -423,7 +461,8 @@ fn default_card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provide
 /// The width under which the label box and Add go one under the other (settings::Fit::rows).
 pub const ADD_ROW_MIN: f32 = 380.0;
 /// `avail`: the width the page's rows are laid out in.
-pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32) -> Vec<AnyElement> {
+/// `fold_open`: the "Not set up" fold is open (Settings' `adv` holds "accounts").
+pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32, fold_open: bool) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
     out.push(div().pb_3().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Each account is a separate Claude or Codex subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
@@ -440,7 +479,14 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
     if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
     // the hub's accounts by person (host settings/accounts_people.rs): one entry per email, each login of it with its bars; an older hub sends none and the cards below stand
     if let Some(people) = st.snap["people"].as_array() {
-        for (i, e) in people.iter().enumerate() { out.push(person(cx, light, st, e, i, avail < ADD_ROW_MIN)); }
+        // the logins in use first (the default one always), then one fold line over the providers that are not set up
+        let (up, quiet) = arrange(&st.snap, people);
+        for (i, e) in up.iter().enumerate() { out.push(person(cx, light, st, e, i, avail < ADD_ROW_MIN, false)); }
+        if !quiet.is_empty() {
+            out.push(super::settings::fold_el(cx, light, "accounts", &trs("Not set up"), quiet.len(), fold_open));
+            // the folded cards start a gap under the fold's hairline, as the cards above it sit under the add row
+            if fold_open { out.push(div().h(px(12.)).flex_shrink_0().into_any_element()); for (k, e) in quiet.iter().enumerate() { out.push(person(cx, light, st, e, up.len() + k, avail < ADD_ROW_MIN, true)); } }
+        }
     } else {
     // the CLI's own login is always there, for each provider whose CLI said anything (Claude always): who it is, and an added account of the same identity folded in
     for provider in ["claude", "codex"] {
@@ -470,7 +516,8 @@ fn usage_bar(light: bool, b: &Value) -> AnyElement {
 }
 /// One person's entry: their email, then each login of it (Claude, Codex, a sync token): what it is, whether it is used for new threads, its state or hold, a bar
 /// per limit window, and the buttons of the added account behind it. All of it as the hub's `people` says (host settings/accounts_people.rs).
-fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i: usize, narrow: bool) -> AnyElement {
+/// `quiet`: a card under the "Not set up" fold (its note says so instead of a raw failure).
+fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i: usize, narrow: bool, quiet: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut card = div().flex().flex_col().gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
         .child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(string(e, "title")));
@@ -489,7 +536,7 @@ fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i:
             .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
         let mut col = div().flex().flex_col().gap_2().when(j > 0, |d| d.pt_3().border_t_1().border_color(c("line"))).child(head);
         for b in l["bars"].as_array().into_iter().flatten() { col = col.child(usage_bar(light, b)); }
-        let note = string(l, "note"); if !note.is_empty() { col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&note))); }
+        let note = if quiet { quiet_note(&string(l, "note")) } else { trs(&string(l, "note")) }; if !note.is_empty() { col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(note)); }
         let also: Vec<String> = l["also"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_string)).collect();
         if !also.is_empty() { col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("{} {}: {}", trs("Also added as"), also.join(", "), trs("the same account, counted once")))); }
         if let Some(p) = profiles(&st.snap).into_iter().find(|p| string(p, "id") == pid && !pid.is_empty()) {
@@ -712,6 +759,36 @@ mod tests {
             assert_eq!(allowance(&profiles(&snap())[0]), "5時間の62%を使用");
             assert_eq!(menu_rows(&snap(), 0)[2].detail, "未接続"); assert_eq!(menu_rows(&snap(), 0)[0].label, "既定のアカウント");
         });
+    }
+    /// Nov 28: six providers never set up each had a full card with a raw "Agy /quota failed: exit 1", and the login the threads use had none.
+    #[test] fn the_login_in_use_comes_first_and_providers_not_set_up_fold() {
+        let others = |p: &str, note: &str| json!({"key":format!("provider:{p}"),"title":p,"logins":[{"provider":p,"kind":"provider","state":"unchecked","line":"usage not read","bars":[],"note":note}]});
+        let mut s = json!({"profiles":[],"default_login":{"claude":{"state":"unknown","reason":"can't tell"}},"defaults":{},"holds":{}});
+        assert!(set_up("claude", &s), "the default login's provider"); assert!(!set_up("codex", &s) && !set_up("agy", &s));
+        s["profiles"] = json!([{"id":"c","provider":"codex","label":"C","state":"disconnected"}]); assert!(set_up("codex", &s), "an added account");
+        s["profiles"] = json!([]); s["default_login"]["codex"] = json!({"state":"known","email":"a@b.com"}); assert!(set_up("codex", &s), "its CLI says who"); s["default_login"]["codex"] = Value::Null;
+        s["thread"] = json!({"provider":"agy"}); assert!(set_up("agy", &s), "the thread's provider is the login in use"); s["thread"] = Value::Null;
+        let people = vec![others("agy", "Agy /quota failed: exit 1"), others("pi", "Usage not reported by Pi")];
+        let (up, quiet) = arrange(&s, &people);
+        assert_eq!(up.iter().map(|e| e["key"].as_str().unwrap()).collect::<Vec<_>>(), ["cli:claude"], "the default login has a card though the hub left it out");
+        assert_eq!((up[0]["title"].as_str().unwrap(), up[0]["logins"][0]["line"].as_str().unwrap(), up[0]["logins"][0]["default"].as_bool().unwrap()), ("Claude CLI login", "usage not read", true));
+        assert_eq!(quiet.len(), 2);
+        let mut read = others("muse", ""); read["logins"][0]["state"] = json!("connected"); read["logins"][0]["bars"] = json!([{"name":"Daily"}]);
+        let cli = json!({"key":"person@example.com","title":"person@example.com","logins":[{"provider":"claude","kind":"cli","state":"connected","bars":[]}]});
+        let (up, quiet) = arrange(&s, &[others("agy", ""), read, cli]);
+        assert_eq!(up.iter().map(|e| e["key"].as_str().unwrap()).collect::<Vec<_>>(), ["person@example.com", "provider:muse"], "the hub's own card of the login first, then one with a reading");
+        assert_eq!(quiet.len(), 1);
+        assert_eq!(quiet_note("Agy /quota failed: exit 1"), "Not set up.");
+        assert_eq!(quiet_note("Usage not reported by Pi. Seen here today: 2 turns"), "Not set up. Seen here today: 2 turns.");
+        crate::i18n::with_lang("ja", || assert_eq!(quiet_note(""), "未設定です。"));
+    }
+    #[test] fn accounts_google_says_a_missing_client_once_and_add_is_plain_until_it_can_work() {
+        use super::super::google::{can_add, notice_shown};
+        let line = "Backplane has no Google OAuth client yet: it needs a client id";
+        let v = json!({"client":{"ready":false,"line":line},"add":"Add Google account","note":"Bots use only the accounts allowed them here."});
+        assert_eq!(notice_shown(line, &v), "Bots use only the accounts allowed them here.", "the refusal of Add is the client line already shown");
+        assert_eq!(notice_shown("The hub refused that.", &v), "The hub refused that."); assert!(!can_add(&v));
+        let mut ok = v.clone(); ok["client"]["ready"] = json!(true); assert!(can_add(&ok)); assert_eq!(notice_shown(line, &ok), line);
     }
     #[test] fn a_window_says_what_is_left_and_when_it_resets() {
         assert_eq!(window_line(&json!({"scope":"seven_day","used_percent":86.0,"resets_at":10_000u64 + 2 * 86400}), 10_000).unwrap(), "Weekly  14% left · resets in 2d 0h");

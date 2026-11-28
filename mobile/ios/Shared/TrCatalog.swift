@@ -2223,6 +2223,9 @@ gpui.acct.in.minutes	in {m}m	{m}分後	en {m}m
 gpui.acct.left	{window}  {pct}% left	{window}  残り{pct}%	{window}  {pct}% restante
 gpui.acct.resets.now	\s· resets now	\s· まもなくリセット	\s· se reinicia ahora
 gpui.acct.resets	\s· resets {when}	\s· {when}にリセット	\s· se reinicia {when}
+gpui.acct.not.set.up	Not set up	未設定	Sin configurar
+gpui.acct.not.set.up.note	Not set up.	未設定です。	Sin configurar.
+gpui.acct.usage.not.read	usage not read	使用量を読めていません	uso no leído
 gpui.bots.webhook.name	Webhook name	Webhookの名前	Nombre del webhook
 gpui.bots.eg	{label} (e.g. {e})	{label}（例：{e}）	{label} (p. ej. {e})
 gpui.bots.no.tasks.yet.teach.this	No tasks yet. Tasks this bot learns in its Browser tab are listed here.	タスクはまだありません。このボットがブラウザタブで覚えたタスクがここに表示されます。	Sin tareas aún. Las tareas que este bot aprende en su pestaña Navegador aparecen aquí.
