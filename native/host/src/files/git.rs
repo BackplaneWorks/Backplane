@@ -148,10 +148,21 @@ async fn index_seed(cwd: &str, idx: &str) -> Ran { sh(INDEX_SEED, &[idx], cwd, &
 pub async fn snapshot(cwd: &str, thread: &str) -> Result<String, String> {
     let gd = seq(run(cwd, &["rev-parse", "--absolute-git-dir"]).await, false)?;
     let idx = format!("{gd}/backplane-{}.index", b64url(thread));
-    seq(index_seed(cwd, &idx).await, false)?;
+    seed(cwd, &idx).await?;
     seq(run_idx(cwd, &idx, &["add", "-A"]).await, false)?;
     seq(run_idx(cwd, &idx, &["write-tree"]).await, false)
 }
+/// The thread's private index from the real one, skip-worktree bits included: a code worktree's design files are skip-worktree
+/// (kicad::canonical::strip_design), not on disk there and not deleted either. Without the bit `add -A` took them for deleted, and a
+/// hardware thread's Diff listed every design file as removed.
+async fn seed(cwd: &str, idx: &str) -> Result<(), String> {
+    seq(index_seed(cwd, idx).await, false)?;
+    let skip = skip_worktree(&run_ro(cwd, &["ls-files", "-t", "-z"]).await.out);
+    for chunk in skip.chunks(200) { let mut a = vec!["update-index", "--skip-worktree", "--"]; a.extend(chunk.iter().map(String::as_str)); seq(run_idx(cwd, idx, &a).await, false)?; }
+    Ok(())
+}
+/// The skip-worktree paths in `git ls-files -t -z` output (its "S " entries), relative to where it ran.
+pub fn skip_worktree(out: &str) -> Vec<String> { out.split('\0').filter_map(|e| e.strip_prefix("S ")).filter(|p| !p.is_empty()).map(str::to_string).collect() }
 /// Git.checkpoint.capture: the work tree as turn n of a thread (no commit lands on any branch); answers the commit id.
 pub async fn checkpoint_capture(cwd: &str, thread: &str, n: u64) -> Result<String, String> {
     let tree = snapshot(cwd, thread).await?;
@@ -196,7 +207,7 @@ pub async fn checkpoint_revert(cwd: &str, thread: &str, n: u64) -> String {
         let gd = seq(run(cwd, &["rev-parse", "--absolute-git-dir"]).await, false)?;
         let idx = format!("{gd}/backplane-{}.index", b64url(thread));
         let tree = seq(run(cwd, &["rev-parse", "--verify", &format!("{}^{{tree}}", checkpoint_ref(thread, n))]).await, false)?;
-        seq(index_seed(cwd, &idx).await, false)?;
+        seed(cwd, &idx).await?;
         seq(run_idx(cwd, &idx, &["add", "-A"]).await, false)?;
         seq(run_idx(cwd, &idx, &["read-tree", "-u", "--reset", &tree]).await, false)?;
         Ok::<String, String>(String::new())
@@ -349,6 +360,26 @@ mod tests {
         // a missing checkpoint is an empty diff; outside a repository git's error
         assert_eq!(diff(&d, "other", "0", "-1").await, "");
         let none = tmp("nogit"); assert!(!is_repo(&none).await); assert!(failed(&status(&none).await));
+    }
+    #[tokio::test] async fn a_code_worktrees_design_files_are_not_taken_for_deleted() {
+        assert_eq!(skip_worktree("H a.py\0S b.kicad_pcb\0S sub/c.kicad_sch\0"), ["b.kicad_pcb", "sub/c.kicad_sch"]);
+        // a hardware thread's code worktree: its design files skip-worktree and gone from disk (canonical::strip_design)
+        let d = tmp("wtskip"); g(&d, &["init", "-q"]).await; std::fs::write(format!("{d}/a.kicad_pcb"), "pcb\n").unwrap(); std::fs::write(format!("{d}/code.py"), "one\n").unwrap();
+        g(&d, &["add", "."]).await; g(&d, &["commit", "-qm", "i"]).await;
+        let wd = tmp("wtskip-w"); let w = format!("{wd}/wt"); assert_eq!(g(&d, &["worktree", "add", "-q", &w, "-b", "w"]).await.code, 0);
+        g(&w, &["update-index", "--skip-worktree", "--", "a.kicad_pcb"]).await; std::fs::remove_file(format!("{w}/a.kicad_pcb")).unwrap();
+        checkpoint_capture(&w, "th", 0).await.unwrap();
+        std::fs::write(format!("{w}/code.py"), "two\n").unwrap();
+        let df = diff(&w, "th", "0", "-1").await;
+        assert!(df.contains("+two") && !df.contains("a.kicad_pcb"), "only the code changed: {df}");
+        // the main checkout's snapshot (checkpoint 0 of a thread whose first turn began there) against the worktree's: the design file stays
+        checkpoint_capture(&d, "th2", 0).await.unwrap(); checkpoint_capture(&w, "th2", 1).await.unwrap();
+        let d01 = diff(&w, "th2", "0", "1").await; assert!(!d01.contains("deleted file") && !d01.contains("a.kicad_pcb"), "{d01}");
+        assert!(g(&w, &["ls-files", "-t"]).await.out.contains("S a.kicad_pcb"), "the real index keeps its bit");
+        // Revert thread in the worktree: the code goes back, the design file is not written into the worktree (it lives in the main checkout)
+        assert_eq!(checkpoint_revert(&w, "th", 0).await, "");
+        assert_eq!(std::fs::read_to_string(format!("{w}/code.py")).unwrap(), "one\n");
+        assert!(!Path::new(&format!("{w}/a.kicad_pcb")).exists(), "no design file appears in the code worktree");
     }
     #[tokio::test] async fn big_diffs_are_capped() {
         let d = tmp("cap"); g(&d, &["init", "-q"]).await; std::fs::write(format!("{d}/big.txt"), "x\n").unwrap(); g(&d, &["add", "."]).await; g(&d, &["commit", "-qm", "i"]).await;
