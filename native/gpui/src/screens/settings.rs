@@ -93,10 +93,22 @@ impl Echo {
 
 /// The settings dialog's own state (the hub keeps the page; this keeps the list the left nav shows and what is typed in its search).
 #[derive(Default)]
-pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, /** page -> its group's name (the hub's `group`) */ pub groups: HashMap<String, String>, /** page -> each of its rows' label and note (the hub's `words` and `notes`): what the search finds besides titles */ pub finds: HashMap<String, Vec<(String, String)>>,
+pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, /** page -> its group's name (the hub's `group`) */ pub groups: HashMap<String, String>, /** page -> each of its rows' label, note and search words (the hub's `words`, `notes` and `also`): what the search finds besides titles */ pub finds: HashMap<String, Vec<Find>>,
     /** page -> its other names (the hub's `aka`, one a line): found by the search as its title is */ pub akas: HashMap<String, Vec<String>>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool,
     /** the Keyboard page of this device */ pub keys: bool, /** the Hubs page of this device */ pub hubs: bool, /** the pages whose Advanced fold is open (while the app runs) */ pub adv: HashSet<String>,
-    /** the rows' scroll: a page opens at its top */ pub scroll: ScrollHandle, /** the hub page last shown (its title), to tell when it changes */ pub shown: String }
+    /** the rows' scroll: a page opens at its top */ pub scroll: ScrollHandle, /** the hub page last shown (its title), to tell when it changes */ pub shown: String,
+    /** the search's results highlighted by Up and Down (Enter opens it) */ pub hit: usize, /** a result or a page was opened since the search last changed: the page shows, not the results */ pub landed: bool,
+    /** a result pressed: its page, label and which row of that label it is, until the page draws it (`land`) */ pub pending: Option<(String, String, usize)>,
+    /** the row a result led to, lit for `LIT_MS` */ pub lit: Option<(String, String, usize)>, lit_gen: u64, /** where the page was scrolled when the results took its place */ page_at: Option<Point<Pixels>> }
+/// A setting the search can find on a page: its label, its note and the hub's plain search words for it (`also`: what it does, what it was called).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Find { pub label: String, pub note: String, pub also: String }
+/// What the search found on a page: a row (its label, which of the page's rows with that label it is, its note), or the page itself (`row` false:
+/// its title or other name matched and none of its rows did; `label` is the page's title).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Found { pub label: String, pub nth: usize, pub note: String, pub row: bool }
+/// How long the row a result led to stays lit.
+pub const LIT_MS: u64 = 1500;
 /// How the dialog fits a window of `w` x `h` px: the margin around it, the page list's width, and whether a row's controls go under its words
 /// (a narrow page has no room beside them). The page list and the rows each scroll on their own, so nothing is out of reach on a short window.
 /// `rows` is the width the rows are laid out in (the page less its side margins, `gutter` each); each row decides from it whether its controls
@@ -257,48 +269,46 @@ fn menu_page(r: &Value) -> Option<String> { r["buttons"].as_array()?.iter().find
 pub fn menu_groups(rows: &Value) -> HashMap<String, String> {
     rows.as_array().into_iter().flatten().filter_map(|r| Some((menu_page(r)?, r["group"].as_str().filter(|g| !g.is_empty())?.to_string()))).collect()
 }
-/// What each page holds, by page: its rows' labels (the hub's `words`, one a line) each with its note (the same line of `notes`; older hubs
-/// send no notes, and none at all: the search then matches titles only).
-pub fn menu_finds(rows: &Value) -> HashMap<String, Vec<(String, String)>> {
-    rows.as_array().into_iter().flatten().filter_map(|r| { let words = r["words"].as_str()?; let mut notes = r["notes"].as_str().unwrap_or("").split('\n');
-        Some((menu_page(r)?, words.split('\n').map(|w| (w.to_string(), notes.next().unwrap_or("").to_string())).filter(|(w, _)| !w.is_empty()).collect())) }).collect()
+/// What each page holds, by page: its rows' labels (the hub's `words`, one a line) each with its note and its search words (the same line of
+/// `notes` and of `also`; older hubs send no notes or no also, and none at all: the search then matches titles only).
+pub fn menu_finds(rows: &Value) -> HashMap<String, Vec<Find>> {
+    rows.as_array().into_iter().flatten().filter_map(|r| { let words = r["words"].as_str()?; let (mut notes, mut also) = (r["notes"].as_str().unwrap_or("").split('\n'), r["also"].as_str().unwrap_or("").split('\n'));
+        Some((menu_page(r)?, words.split('\n').map(|w| Find { label: w.to_string(), note: notes.next().unwrap_or("").to_string(), also: also.next().unwrap_or("").to_string() }).filter(|f| !f.label.is_empty()).collect())) }).collect()
 }
 /// Each page's other names (the hub's `aka`, one a line: what it was called before the pages were regrouped, or what it holds); older hubs send none.
 pub fn menu_akas(rows: &Value) -> HashMap<String, Vec<String>> {
     rows.as_array().into_iter().flatten().filter_map(|r| Some((menu_page(r)?, r["aka"].as_str()?.split('\n').filter(|a| !a.trim().is_empty()).map(str::to_string).collect::<Vec<_>>()))).filter(|(_, a)| !a.is_empty()).collect()
 }
-/// The settings of a page the search finds: the labels of the rows whose label or note holds what is typed, as written or as this language
-/// shows it, each once and in the page's order. Nothing for an empty search.
-pub fn hits(finds: &[(String, String)], q: &str) -> Vec<String> {
+/// The settings of a page the search finds: the rows whose label or note holds what is typed, as written or as this language shows it, or
+/// whose search words (`also`) do, in the page's order; a label the page has twice is found as each of its rows (`nth`). Nothing for an empty search.
+pub fn hits(finds: &[Find], q: &str) -> Vec<Found> {
     let q = q.trim().to_lowercase(); if q.is_empty() { return vec![] }
     let has = |t: &str| !t.is_empty() && (t.to_lowercase().contains(&q) || trs(t).to_lowercase().contains(&q));
-    let mut out: Vec<String> = Vec::new();
-    for (l, n) in finds { if (has(l) || has(n)) && !out.contains(l) { out.push(l.clone()); } }
-    out
+    finds.iter().enumerate().filter(|(_, f)| has(&f.label) || has(&f.note) || f.also.to_lowercase().contains(&q))
+        .map(|(i, f)| Found { label: f.label.clone(), nth: finds[..i].iter().filter(|x| x.label == f.label).count(), note: f.note.clone(), row: true }).collect()
 }
-/// The most found settings named under a page in the nav (the rest are on the page).
-pub const HITS_SHOWN: usize = 3;
 /// A line of the nav: a group's name, or a page (`id`: a hub page, or `@keys`, `@hubs`, `@accounts` for the three that are this app's) with
-/// the settings the search found on it.
+/// what the search found on it (nothing while nothing is typed).
 #[derive(Clone, Debug, PartialEq)]
-pub enum NavLine { Head(String), Item { id: String, title: String, hits: Vec<String> } }
+pub enum NavLine { Head(String), Item { id: String, title: String, hits: Vec<Found> } }
 /// The nav with no hub: the pages that hold this device's rows (`device_section`) and the Hubs page, under the groups the hub would put them in.
 /* i18n-ok: drawn through trs by row_el, nav_title or the title */ pub const LOCAL_PAGES: &[(&str, &str, &str)] = &[("General", "appearance", "Appearance"), ("General", "notifications", "Notifications"), ("General", "@keys", "Keyboard"), ("Connect", "@hubs", "Hubs"), ("System", "privacy", "Privacy")];
 /// The nav as drawn: the hub's pages in its order under its group names, this app's placed among them: Accounts before Agents, Keyboard before
 /// Mouse and trackpad, Hubs after Machines (a hub without the page they follow, an older one, has them at the end under "This device", with
-/// any page of `LOCAL_PAGES` it does not serve). No hub: `LOCAL_PAGES`. A search keeps the pages whose title or other name (`akas`) matches or
-/// that hold a matching setting (the hub's `finds` or this device's rows on that page, `device`), and a group's name only while one of its pages shows.
-/// A hub that names no groups (an older one) lists its pages under "All devices (hub)".
-pub fn nav_lines(nav: &[(String, String)], groups: &HashMap<String, String>, finds: &HashMap<String, Vec<(String, String)>>, akas: &HashMap<String, Vec<String>>, device: &HashMap<String, Vec<(String, String)>>, q: &str) -> Vec<NavLine> {
+/// any page of `LOCAL_PAGES` it does not serve). No hub: `LOCAL_PAGES`. A search keeps every page where it is and says what it found on each: the
+/// settings that match (the hub's `finds` or this device's rows on that page, `device`), else the page itself when its title or other name
+/// (`akas`) does. A hub that names no groups (an older one) lists its pages under "All devices (hub)".
+pub fn nav_lines(nav: &[(String, String)], groups: &HashMap<String, String>, finds: &HashMap<String, Vec<Find>>, akas: &HashMap<String, Vec<String>>, device: &HashMap<String, Vec<Find>>, q: &str) -> Vec<NavLine> {
     /* i18n-ok: drawn through trs by row_el, nav_title or the title */ const HUB: &str = "All devices (hub)";
     /* i18n-ok: drawn through trs by row_el, nav_title or the title */ const HERE: &str = "This device";
-    let none: Vec<(String, String)> = Vec::new();
-    let pairs = |id: &str| -> Vec<(String, String)> { device.get(id).unwrap_or(&none).iter().chain(finds.get(id).unwrap_or(&none)).cloned().collect() };
+    let none: Vec<Find> = Vec::new();
+    // this device's rows first, as the page draws them
+    let pairs = |id: &str| -> Vec<Find> { device.get(id).unwrap_or(&none).iter().chain(finds.get(id).unwrap_or(&none)).cloned().collect() };
     let mut out: Vec<NavLine> = Vec::new(); let mut last = String::new();
-    let mut put = |head: &str, id: &str, title: &str, pairs: &[(String, String)]| {
-        let found = hits(pairs, q);
-        let aka = akas.get(id).map_or(&[][..], Vec::as_slice).iter().any(|a| !q.trim().is_empty() && (nav_matches(a, q) || nav_matches(&trs(a), q)));
-        if !(nav_matches(title, q) || nav_matches(&trs(title), q) || aka || !found.is_empty()) { return }
+    let mut put = |head: &str, id: &str, title: &str, pairs: &[Find]| {
+        let mut found = hits(pairs, q);
+        let named = !q.trim().is_empty() && (nav_matches(title, q) || nav_matches(&trs(title), q) || akas.get(id).map_or(&[][..], Vec::as_slice).iter().any(|a| nav_matches(a, q) || nav_matches(&trs(a), q)));
+        if found.is_empty() && named { found.push(Found { label: title.to_string(), nth: 0, note: String::new(), row: false }); }
         if last != head { last = head.to_string(); out.push(NavLine::Head(head.to_string())); }
         out.push(NavLine::Item { id: id.to_string(), title: title.to_string(), hits: found });
     };
@@ -317,11 +327,18 @@ pub fn nav_lines(nav: &[(String, String)], groups: &HashMap<String, String>, fin
     for (_, id, title) in LOCAL_PAGES { if !id.starts_with('@') && !has(id) { put(HERE, id, title, &pairs(id)); } }
     out
 }
-/// The page Enter in the search opens: the first one found.
-pub fn first_found(lines: &[NavLine]) -> Option<&str> { lines.iter().find_map(|l| match l { NavLine::Item { id, .. } => Some(id.as_str()), _ => None }) }
+/// What the search found, in the nav's order: each page's finds with the page (its id and title). The results the page area lists.
+pub fn found(lines: &[NavLine]) -> Vec<(String, String, Found)> {
+    lines.iter().flat_map(|l| match l { NavLine::Item { id, title, hits } => hits.iter().map(|h| (id.clone(), title.clone(), h.clone())).collect(), _ => vec![] }).collect()
+}
+/// The result Enter opens: the first one found.
+pub fn first_found(lines: &[NavLine]) -> Option<(String, String, Found)> { found(lines).into_iter().next() }
+/// Plain words the search also finds this device's rows by, keyed by label (the hub's rows have theirs in `also`).
+/* i18n-ok: search words, never drawn */ const DEVICE_ALSO: &[(&str, &str)] = &[("Language", "locale japanese spanish english"), ("Text size", "font size zoom bigger"), ("Font", "typeface mono"), ("Sidebar width", "narrower wider"), ("Opens on", "start launch"), ("Desktop notifications", "alerts popup"), ("Streamer mode", "hide private recording obs stream"), ("Theme", "dark mode light mode")];
 /// What the search looks through of this device's rows (`device_rows`), by the page that holds them (`device_section`).
-pub fn device_finds(rows: &[Row]) -> HashMap<String, Vec<(String, String)>> {
-    DEVICE_PAGES.iter().map(|(_, p)| *p).chain(["@keys"]).map(|p| (p.to_string(), device_section(p, rows).iter().filter(|r| !r.label.is_empty()).map(|r| (r.label.clone(), r.note.clone())).collect())).collect()
+pub fn device_finds(rows: &[Row]) -> HashMap<String, Vec<Find>> {
+    let also = |l: &str| DEVICE_ALSO.iter().find(|(k, _)| *k == l).map_or("", |(_, a)| *a).to_string();
+    DEVICE_PAGES.iter().map(|(_, p)| *p).chain(["@keys"]).map(|p| (p.to_string(), device_section(p, rows).iter().filter(|r| !r.label.is_empty()).map(|r| Find { label: r.label.clone(), note: r.note.clone(), also: also(&r.label) }).collect())).collect()
 }
 /// The page that holds each section of `device_rows`, by its heading: Appearance and Layout on Appearance, Notifications on Notifications,
 /// Streaming on Privacy, the keyboard shortcuts on this app's Keyboard page (`@keys`).
@@ -344,7 +361,7 @@ pub fn is_adv(r: &Row) -> bool { r.raw["adv"] == true }
 pub fn is_heading(r: &Row) -> bool { r.raw["intro"] == true || r.kind.is_empty() && r.note.is_empty() && r.buttons.is_empty() && r.fields.is_empty() && r.qr.is_empty() && r.raw["slider"].is_null() }
 /// Whether a page's Advanced fold is drawn open: it was opened, or a search is typed that one of its folded rows matches.
 pub fn adv_open(rows: &[Row], q: &str, opened: bool) -> bool {
-    opened || !hits(&rows.iter().filter(|r| is_adv(r) && !r.label.is_empty()).map(|r| (r.label.clone(), r.note.clone())).collect::<Vec<_>>(), q).is_empty()
+    opened || !hits(&rows.iter().filter(|r| is_adv(r) && !r.label.is_empty()).map(|r| Find { label: r.label.clone(), note: r.note.clone(), also: String::new() }).collect::<Vec<_>>(), q).is_empty()
 }
 
 pub struct FieldSlot { pub input: Entity<Composer>, pub vault: bool, pub hub: String, echo: Echo, pending: Option<String>, timer: bool }
@@ -401,13 +418,18 @@ fn sync_nav(this: &mut Backplane, rows: &[Row], cx: &mut Context<Backplane>) {
     if !this.data["settings"].is_object() { let ui = &mut this.screens.settings_ui; if !ui.open_local { ui.page.clear(); } ui.auto = false; ui.shown.clear(); return; }
     if this.screens.settings_ui.search.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
-        input.update(cx, |i, _| { i.set_placeholder(&trs("Search")); });
-        cx.observe(&input, |this, input, cx| { this.screens.settings_ui.q = input.read(cx).content.to_string(); cx.notify(); }).detach();
-        // Enter opens the first page found
-        cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) {
-            let ui = &this.screens.settings_ui; if ui.q.trim().is_empty() { return }
-            let lines = nav_lines(if this.data["settings"].is_object() { &ui.nav } else { &[] }, &ui.groups, &ui.finds, &ui.akas, &device_finds(&device_rows(&this.local)), &ui.q);
-            if let Some(id) = first_found(&lines).map(str::to_string) { open_nav(this, &id, cx); }
+        // (popup_open: Up and Down move the results' highlight instead of the caret)
+        input.update(cx, |i, _| { i.set_placeholder(&trs("Search")); i.popup_open = true; });
+        cx.observe(&input, |this, input, cx| { let q = input.read(cx).content.to_string(); if q != this.screens.settings_ui.q { searched(this, q); cx.notify(); } }).detach();
+        // Enter opens the result highlighted (the first one found unless Up or Down moved it); Up and Down move the highlight
+        cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| match ev {
+            ComposerEvent::Submit => { let r = results(this); if let Some((page, _, f)) = r.get(this.screens.settings_ui.hit.min(r.len().saturating_sub(1))).cloned() { open_hit(this, &page, &f, cx); } }
+            ComposerEvent::PopupMove(d) => {
+                let n = results(this).len(); let ui = &mut this.screens.settings_ui;
+                if n == 0 || !results_shown(ui) { return }
+                ui.hit = (ui.hit as i32 + d).clamp(0, n as i32 - 1) as usize; ui.scroll.scroll_to_item(1 + ui.hit); cx.notify();
+            }
+            _ => {}
         }).detach();
         // a rig's shot of the search (`BACKPLANE_GPUI_SETTINGS_Q`): the box opens holding it
         if let Some(q) = std::env::var("BACKPLANE_GPUI_SETTINGS_Q").ok().filter(|q| !q.is_empty()) { input.update(cx, |i, cx| i.set(q, cx)); }
@@ -459,7 +481,7 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
 
 /// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
 /// A hub page of the nav, chosen (a click, or the e2e `click` on `set-nav:<page>`): what is typed goes first, then the hub is asked for the page.
-pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); let ui = &mut this.screens.settings_ui; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
+pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); let ui = &mut this.screens.settings_ui; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
     // Usage opens with each account's limit bars over the totals: the hub's accounts read again (and each signed-in account's usage, at most every 5 minutes)
     if p == "usage" { super::accounts::list(this); super::accounts::refresh_usage(this); } }
 /// A page of the nav, chosen: one of this app's three, or the hub's (`@device`, the page this device's rows had before they moved to the pages
@@ -468,12 +490,82 @@ pub fn open_nav(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     let id = if id == "@device" { "appearance" } else { id };
     if !id.starts_with('@') { go_page(this, id); cx.notify(); return }
     flush_fields(this);
-    let ui = &mut this.screens.settings_ui; ui.keys = id == "@keys"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts"; to_top(ui);
+    let ui = &mut this.screens.settings_ui; ui.keys = id == "@keys"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts"; ui.landed = true; to_top(ui);
     if id == "@accounts" { super::accounts::open_page(this, cx); }
     cx.notify();
 }
 /// The rows scrolled back to their top: a page opens there, never at the offset the page before had.
 fn to_top(ui: &SettingsUi) { ui.scroll.set_offset(point(px(0.), px(0.))); }
+/// Whether the page area lists the search's results: something is typed and no result or page was opened since.
+pub fn results_shown(ui: &SettingsUi) -> bool { !ui.q.trim().is_empty() && !ui.landed }
+/// The search changed to `q`: the results show (from their top, the page's place kept) while it holds something, the page again once it is empty.
+fn searched(this: &mut Backplane, q: String) {
+    let ui = &mut this.screens.settings_ui; let before = results_shown(ui);
+    ui.q = q; ui.landed = false; ui.hit = 0;
+    let now = results_shown(ui);
+    if !before && now { ui.page_at = Some(ui.scroll.offset()); to_top(ui); }
+    if before && !now { if let Some(at) = ui.page_at.take() { ui.scroll.set_offset(at); } }
+}
+/// Esc while the search holds something empties it (the page shows again); a second Esc shuts Settings.
+pub fn escape_search(this: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
+    if !is_open(this) || this.screens.settings_ui.q.is_empty() { return false }
+    match this.screens.settings_ui.search.clone() { Some(input) => input.update(cx, |i, cx| i.set(String::new(), cx)), None => searched(this, String::new()) }
+    cx.notify(); true
+}
+/// What the search finds now, in the nav's order (`found`): the page area's results, and what Enter, Up and Down move through.
+pub fn results(this: &Backplane) -> Vec<(String, String, Found)> {
+    let ui = &this.screens.settings_ui;
+    found(&nav_lines(if this.data["settings"].is_object() { &ui.nav } else { &[] }, &ui.groups, &ui.finds, &ui.akas, &device_finds(&device_rows(&this.local)), &ui.q))
+}
+/// A result pressed (or Enter): its page opens (the one already open keeps its place), the search text stays; a row is then scrolled into
+/// view and lit once the page draws it (`land`), its Advanced fold opened if it is under it.
+pub fn open_hit(this: &mut Backplane, page: &str, f: &Found, cx: &mut Context<Backplane>) {
+    if current(this) == page { let ui = &mut this.screens.settings_ui; ui.landed = true; if let Some(at) = ui.page_at.take() { ui.scroll.set_offset(at); } } else { open_nav(this, page, cx); }
+    let ui = &mut this.screens.settings_ui; ui.page_at = None;
+    ui.pending = f.row.then(|| (page.to_string(), f.label.clone(), f.nth));
+    cx.notify();
+}
+/// The page shown now: one of this app's (`@keys`, `@hubs`, `@accounts`) or the hub's (`page_shown`).
+pub fn current(this: &Backplane) -> String {
+    let ui = &this.screens.settings_ui;
+    if ui.accounts { return "@accounts".into() } if ui.hubs { return "@hubs".into() }
+    let rows = parse(&this.data["settings"]);
+    let on_page = this.data["settings"].is_object() && !ui.keys && matches!(shown(&rows), Shown::Page) && !hub_behind(ui, &rows[0].label);
+    page_shown(ui, if on_page { rows[0].label.as_str() } else { "" }, ui.keys)
+}
+/// Which row of `list` is the `nth` (from 0) with this label.
+pub fn nth_row(list: &[Row], label: &str, nth: usize) -> Option<usize> { list.iter().enumerate().filter(|(_, r)| r.label == label).nth(nth).map(|(i, _)| i) }
+/// The child of the rows' scroll that draws row `at` of a page's `list` (`page_rows`): the title comes first, then a page's own words (`sub`),
+/// then what is drawn over the rows (`top`: Usage's limit bars, one child), the rows above the fold, the fold line and the folded rows.
+pub fn row_child(list: &[Row], at: usize, sub: bool, top: usize) -> usize {
+    let k = if is_adv(&list[at]) { list.iter().filter(|r| !is_adv(r)).count() + 1 + list[..at].iter().filter(|r| is_adv(r)).count() } else { list[..at].iter().filter(|r| !is_adv(r)).count() };
+    1 + sub as usize + top + k
+}
+/// A pressed result's row, once its page draws it: the fold it is under opened, the row lit for `LIT_MS` (one timer; nothing repaints
+/// meanwhile) and, after this frame has laid the page out, scrolled to (only when it is not wholly in view: then with the row above it at the
+/// top). Until then it waits: the hub's rows arrive after the page is pressed. A row the page does not have once its rows are there is let go.
+pub fn land(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backplane>) {
+    let Some((page, label, nth)) = this.screens.settings_ui.pending.clone() else { return };
+    if !is_open(this) || results_shown(&this.screens.settings_ui) { this.screens.settings_ui.pending = None; return }
+    let pr = page_rows(&this.data["settings"], &this.screens.settings_ui, &this.local, &device_rows(&this.local));
+    if pr.page != page { return }
+    let Some(at) = nth_row(&pr.list, &label, nth) else { if pr.on_page || !this.data["settings"].is_object() || page.starts_with('@') { this.screens.settings_ui.pending = None; } return };
+    let ix = row_child(&pr.list, at, page == "@keys", (page == "usage") as usize);
+    let ui = &mut this.screens.settings_ui; ui.pending = None;
+    if is_adv(&pr.list[at]) { ui.adv.insert(page.clone()); }
+    ui.lit_gen += 1; let mine = ui.lit_gen; ui.lit = Some((page, label, nth));
+    cx.on_next_frame(window, move |this, _, cx| {
+        let s = &this.screens.settings_ui.scroll;
+        let Some(b) = s.bounds_for_item(ix) else { s.scroll_to_item(ix); cx.notify(); return };
+        let (vp, y) = (s.bounds(), s.offset().y);
+        if b.top() + y >= vp.top() && b.bottom() + y <= vp.bottom() { return }
+        s.scroll_to_top_of_item(ix - 1); cx.notify();
+    });
+    cx.spawn(async move |weak, cx| {
+        cx.background_executor().timer(std::time::Duration::from_millis(LIT_MS)).await;
+        let _ = weak.update(cx, |this, cx| { let ui = &mut this.screens.settings_ui; if ui.lit_gen == mine { ui.lit = None; cx.notify(); } });
+    }).detach();
+}
 /// A page's Advanced fold pressed: open or shut, kept while the app runs.
 pub fn toggle_adv(this: &mut Backplane, page: &str, cx: &mut Context<Backplane>) { let a = &mut this.screens.settings_ui.adv; if !a.remove(page) { a.insert(page.to_string()); } cx.notify(); }
 pub fn flush_fields(this: &mut Backplane) {
@@ -647,7 +739,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         };
     }
     if !r.note.is_empty() {
-        let note = div().text_size(crate::scale::tpx(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note));
+        let note = div().text_size(crate::scale::tpx(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(tr_lines(&r.note));
         // a value to copy (the hub's `copy`: a path, an id, a link): its copy button shows while the pointer is on the row
         left = match r.raw["copy"].as_str().filter(|v| !v.is_empty()) { Some(v) => left.child(super::copyable::value(light, format!("set-note-{i}"), note, v.to_string(), false, cx)), None => left.child(note) };
     }
@@ -699,6 +791,13 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let line = if stack { div().flex().flex_col().gap_2() } else { div().flex().items_center().justify_between().gap(px(GAP)) };
     line.py_3().border_b_1().border_color(c("line")).child(left).child(right).into_any_element()
 }
+/// A note through the catalog line by line when its lines are messages of their own (the hub puts a sentence on a line under a status: CAD's
+/// "Empty looks for it."; whole, a status template would take the sentence for part of its path), else whole.
+pub fn tr_lines(note: &str) -> String {
+    if !note.contains('\n') { return trs(note) }
+    let lines = note.split('\n').map(trs).collect::<Vec<_>>().join("\n");
+    if lines != note { lines } else { trs(note) }
+}
 /// A row's button `j` of row `i`: lit or not, its press the row's action (a copy press is the copy button).
 fn chip_el(cx: &mut Context<Backplane>, light: bool, i: usize, j: usize, b: &Btn) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
@@ -722,7 +821,7 @@ pub fn on_press(this: &mut Backplane, b2: &Btn, cx: &mut Context<Backplane>) {
 /// Settings shut (the ×, Esc, a click outside): this device's page and the accounts page at once, and the hub's pages when it has them open.
 pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let hub = this.data["settings"].is_object();
-    let ui = &mut this.screens.settings_ui; ui.open_local = false; ui.keys = false; ui.accounts = false; ui.hubs = false;
+    let ui = &mut this.screens.settings_ui; ui.open_local = false; ui.keys = false; ui.accounts = false; ui.hubs = false; ui.pending = None; ui.lit = None;
     this.screens.acct.menu = false;
     if hub { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); }
     cx.notify();
@@ -730,13 +829,15 @@ pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
 /// Whether any settings page is up (the hub's, or this device's and the accounts page, which the hub need not serve).
 pub fn is_open(this: &Backplane) -> bool { this.data["settings"].is_object() || this.screens.settings_ui.open_local }
 
-pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts, fit: Fit, hub_list: &[crate::hubs::Hub], on_home: Option<&str>) -> Option<AnyElement> {
+/// What a page of the dialog draws in its rows (but Hubs' and Accounts'), in order: the page shown (`page_shown`), whether the hub's rows for it
+/// are there (`on_page`) and its title then, the rows (this device's under "This device", the hub's, an About page's app row among them) and how
+/// many of the hub's are left out (over `MAX_ROWS`). `view` draws it; `land` finds a result's row in it.
+pub struct PageRows { pub page: String, pub on_page: bool, pub title_now: String, pub list: Vec<Row>, pub more: usize }
+pub fn page_rows(settings: &Value, ui: &SettingsUi, local: &crate::local::Local, dev_rows: &[Row]) -> PageRows {
     let hub_on = settings.is_object();
-    if !hub_on && !ui.open_local { return None; }
     let on_acct = ui.accounts;
     let on_hubs = ui.hubs && !on_acct;
     let on_keys = ui.keys && !on_acct && !on_hubs;
-    let c = |n: &str| theme::color(light, n);
     let mut rows = parse(settings);
     let on_page = hub_on && !on_keys && !on_acct && !on_hubs && matches!(shown(&rows), Shown::Page) && !hub_behind(ui, &rows[0].label);
     let title_now = if on_page { rows[0].label.clone() } else { String::new() };
@@ -750,55 +851,73 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             rows.insert(at, r);
         }
     }
-    let mut dev_rows = device_rows(local);
-    mark_device(&mut dev_rows, &device_rows(&crate::local::Local::default()));
-    let dev = if on_acct || on_hubs { vec![] } else { device_section(&page, &dev_rows) };
+    let dev = if on_acct || on_hubs { vec![] } else { device_section(&page, dev_rows) };
     let more = if on_page { rows.len().saturating_sub(1 + MAX_ROWS) } else { 0 };
     // a hub page that holds this device's rows too: "This device" over them (drawn while the hub's rows are on their way too, so nothing moves
-    // when they come), "Every device" over the hub's. A page with one kind has no such heading
+    // when they come), "Every device" over the hub's, unless the hub's part starts with a heading of its own (Notifications' "Notify me for").
+    // A page with one kind has no such heading
     let heads = hub_on && !on_keys && !dev.is_empty() && (on_page || ui.nav.iter().any(|(p, _)| *p == page));
     let mut list: Vec<Row> = Vec::new();
     /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if heads { list.push(Row { label: "This device".into(), local: true, ..Default::default() }); }
     list.extend(dev);
-    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if heads && on_page && rows.len() > 1 { list.push(Row { label: "Every device".into(), ..Default::default() }); }
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if heads && on_page && rows.len() > 1 && !is_heading(&rows[1]) { list.push(Row { label: "Every device".into(), ..Default::default() }); }
     if on_page { list.extend(rows.iter().skip(1).take(MAX_ROWS).cloned()); }
+    PageRows { page, on_page, title_now, list, more }
+}
+
+pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts, fit: Fit, hub_list: &[crate::hubs::Hub], on_home: Option<&str>) -> Option<AnyElement> {
+    let hub_on = settings.is_object();
+    if !hub_on && !ui.open_local { return None; }
+    let on_acct = ui.accounts;
+    let on_hubs = ui.hubs && !on_acct;
+    let on_keys = ui.keys && !on_acct && !on_hubs;
+    let c = |n: &str| theme::color(light, n);
+    let mut dev_rows = device_rows(local);
+    mark_device(&mut dev_rows, &device_rows(&crate::local::Local::default()));
+    let PageRows { page, on_page, title_now, list, more } = page_rows(settings, ui, local, &dev_rows);
+    // the row a result led to, lit for a moment
+    let lit = ui.lit.as_ref().filter(|(p, _, _)| *p == page && !on_acct && !on_hubs).and_then(|(_, l, n)| nth_row(&list, l, *n));
+    let lit_el = |i: usize, e: AnyElement| if lit == Some(i) { div().mx(px(-8.)).px(px(8.)).bg(c("raise")).child(e).into_any_element() } else { e };
     // the rarely needed rows (`adv`) after a fold line, in their order; ids by index over both, so no two rows share one
-    let (main, folded): (Vec<&Row>, Vec<&Row>) = list.iter().partition(|r| !is_adv(r));
+    let (main, folded): (Vec<usize>, Vec<usize>) = (0..list.len()).partition(|&i| !is_adv(&list[i]));
     let hubs_rows = super::hubpick::rows_on(hub_list, on_home);
-    let mut els: Vec<AnyElement> = if on_hubs { hubs_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows) } else { main.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() };
+    let mut els: Vec<AnyElement> = if on_hubs { hubs_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows) } else { main.iter().enumerate().map(|(k, &i)| { let e = row_el(cx, light, fields, &list[i], k, fit.rows); lit_el(i, e) }).collect() };
     if !on_hubs && !on_acct && !folded.is_empty() {
         let open = adv_open(&list, &ui.q, ui.adv.contains(&page));
-        els.push(adv_el(cx, light, &page, folded.iter().filter(|r| !is_heading(r)).count(), open));
-        if open { els.extend(folded.iter().enumerate().map(|(k, r)| row_el(cx, light, fields, r, main.len() + k, fit.rows))); }
+        els.push(adv_el(cx, light, &page, folded.iter().filter(|&&i| !is_heading(&list[i])).count(), open));
+        if open { els.extend(folded.iter().enumerate().map(|(k, &i)| { let e = row_el(cx, light, fields, &list[i], main.len() + k, fit.rows); lit_el(i, e) })); }
     }
     // Usage: each account's limit windows first, then the hub's lifetime totals
-    if !on_keys && !on_acct && !on_hubs && page == "usage" { let mut top = super::accounts::usage_summary(light, acct); top.append(&mut els); els = top; }
+    // (one child, so a row's child index is known before it is drawn: `row_child`)
+    if !on_keys && !on_acct && !on_hubs && page == "usage" { els.insert(0, div().flex().flex_col().children(super::accounts::usage_summary(light, acct)).into_any_element()); }
     if more > 0 { els.push(div().py_2().text_color(c("dim")).child(tf("gpui.settings.more", &[("n", more.into())])).into_any_element()); }
     // the left nav
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
-    if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
+    if let Some(input) = &ui.search {
+        let bx = div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise"));
+        // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only): `set-search`, where a pointer press puts the keys
+        let bx = if crate::art::rects_on() { bx.relative().child(canvas(|_, _, _| (), |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report("set-search", r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { bx };
+        nav = nav.child(bx.child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone())));
+    }
     let lines = nav_lines(if hub_on { &ui.nav } else { &[] }, &ui.groups, &ui.finds, &ui.akas, &device_finds(&dev_rows), &ui.q);
-    if lines.is_empty() { nav = nav.child(div().px_3().py_2().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Nothing matches"))); }
+    // while something is typed every page stays where it is: the ones with nothing found dimmed, the others with how many were found
+    let searching = !ui.q.trim().is_empty();
     for (n, line) in lines.iter().enumerate() {
         match line {
             NavLine::Head(h) => nav = nav.child(div().px_3().pt(px(if n == 0 { 2. } else { 8. })).pb(px(2.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(group_name(h).to_uppercase())),
             NavLine::Item { id, title, hits } => {
                 let on = match id.as_str() { "@keys" => on_keys, "@hubs" => on_hubs, "@accounts" => on_acct, p => !on_keys && !on_acct && !on_hubs && p == page };
+                let none = searching && hits.is_empty();
                 let el_id = match id.as_str() { "@keys" => "set-nav-keys".to_string(), "@hubs" => "set-nav-hubs".to_string(), "@accounts" => "set-nav-accounts".to_string(), p => format!("set-nav-{p}") };
-                let item = div().id(SharedString::from(el_id)).flex().items_start().gap_3().px_3().py(px(3.)).cursor_pointer().text_size(crate::scale::tpx(13.)).border_l_2().border_color(c(if on { "accent" } else { "bg" }));
-                let item = if on { item.bg(c("raise")) } else { item.text_color(c("text")).hover(|s| s.bg(c("panel"))) };
+                let item = div().id(SharedString::from(el_id)).relative().flex().items_start().gap_3().px_3().py(px(3.)).cursor_pointer().text_size(crate::scale::tpx(13.)).border_l_2().border_color(c(if on { "accent" } else { "bg" }));
+                let item = if on { item.bg(c("raise")) } else { item.text_color(c(if none { "faint" } else { "text" })).hover(|s| s.bg(c("panel"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named as its control is: `set-nav:<page>`
-                let item = if crate::art::rects_on() { let rn = format!("set-nav:{id}"); item.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { item };
+                let item = if crate::art::rects_on() { let rn = format!("set-nav:{id}"); item.child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { item };
+                // how many were found, on the title's first line in the entry's right margin (over it, so no title wraps or moves while searching)
+                let count = (searching && !hits.is_empty()).then(|| div().absolute().right(px(4.)).top(px(3. + (13. - 11.) * NAV_LINE * crate::scale::s() / 2.)).text_size(crate::scale::tpx(11.)).text_color(c("accent")).child(hits.len().to_string()));
                 let to = id.clone();
-                nav = nav.child(item.child(nav_icon_el(crate::art::icon(nav_icon(id), 16., c(if on { "accent" } else { "dim" })))).child(nav_title(title))
+                nav = nav.child(item.child(nav_icon_el(crate::art::icon(nav_icon(id), 16., c(if on { "accent" } else if none { "faint" } else { "dim" })))).child(nav_title(title)).children(count)
                     .on_click(cx.listener(move |this, _, _, cx| open_nav(this, &to, cx))));
-                // what the search found on the page, named under it (the first few; the page has them all)
-                for (k, h) in hits.iter().take(HITS_SHOWN).enumerate() {
-                    let to = id.clone();
-                    nav = nav.child(div().id(SharedString::from(format!("set-hit-{n}-{k}"))).pl(px(43.)).pr_3().py(px(2.)).cursor_pointer().text_size(crate::scale::tpx(11.)).text_color(c("dim")).hover(|s| s.text_color(c("text")))
-                        .child(trs(h)).on_click(cx.listener(move |this, _, _, cx| open_nav(this, &to, cx))));
-                }
-                if hits.len() > HITS_SHOWN { nav = nav.child(div().pl(px(43.)).pr_3().pb(px(2.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(tf("gpui.settings.more", &[("n", (hits.len() - HITS_SHOWN).into())]))); }
             }
         }
     }
@@ -806,7 +925,11 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let title = if on_hubs { "Hubs".to_string() } else if on_acct { "Accounts".to_string() } else if on_keys { "Keyboard".to_string() } else if on_page { title_now.clone() }
         else { ui.nav.iter().find(|(p, _)| *p == page).map(|(_, t)| t.clone()).or_else(|| LOCAL_PAGES.iter().find(|(_, p, _)| *p == page).map(|(_, _, t)| t.to_string())).unwrap_or_default() };
     // this app's own pages say where they are kept; a hub page says nothing (its rows are the hub's, under "Every device" beside this device's)
-    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let sub = if on_hubs { Some("Kept on this computer only. Each hub has its own credential here.") } else if on_acct { Some("Kept in the hub for this machine; sign-ins never leave it.") } else if on_keys { Some("Kept on this computer only. Never sent to the hub, and other devices keep their own.") } else { None };
+    // what the search found, in place of the page, while it holds something and nothing was opened from it since
+    let (shows, res) = (results_shown(ui), found(&lines));
+    let title = if !shows { trs(&title) } else if res.is_empty() { trs("Nothing matches") } else { tf("gpui.settings.found", &[("n", res.len().into())]) };
+    if shows { let mut at: HashMap<&str, usize> = HashMap::new(); els = res.iter().enumerate().map(|(k, (p, t, f))| { let n = at.entry(p.as_str()).or_default(); *n += 1; hit_el(cx, light, k, k == ui.hit.min(res.len().saturating_sub(1)), p, *n - 1, t, f, fit.rows) }).collect(); }
+    /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let sub = if shows { None } else if on_hubs { Some("Kept on this computer only. Each hub has its own credential here.") } else if on_acct { Some("Kept in the hub for this machine; sign-ins never leave it.") } else if on_keys { Some("Kept on this computer only. Never sent to the hub, and other devices keep their own.") } else { None };
     let dialog = div().id("settings-dialog").occlude().flex().flex_col().w(px(1040.)).max_w_full().h(px(840.)).max_h_full().border_1().border_color(c("line")).bg(c("bg")).overflow_hidden().on_mouse_down_out(cx.listener(|this, _, _, cx| close(this, cx)))
         .child(div().h(crate::scale::tpx(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
             .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(14.)).child(trs("Settings")))
@@ -814,11 +937,28 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
                 .on_click(cx.listener(|this, _, _, cx| close(this, cx)))))
         .child(div().flex().flex_1().min_h_0().child(nav)
             .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().track_scroll(&ui.scroll).px(px(fit.gutter)).py_3().flex().flex_col()
-                .child(div().pb_1().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::BOLD).child(trs(&title)))
+                .child(div().pb_1().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::BOLD).child(title))
                 .children(sub.map(|t| div().pb_2().text_size(crate::scale::tpx(12.)).text_color(c(if on_acct { "dim" } else { "accent" })).child(trs(t)))).children(els)));
     // (the dim backdrop lets a press through: a thread clicked while Settings is open shuts Settings and shows that thread, as 0.14 did;
     // the dialog itself takes its own presses)
     Some(div().id("settings").absolute().inset_0().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p(px(fit.pad)).child(dialog).into_any_element())
+}
+
+/// A result of the search in the page area: the row's label with the page that holds it at the right (a page found by its name: its title alone),
+/// under it its note on one line, a hairline under it as under a setting (the words where a setting's are; `avail`: the rows' width, `Fit::rows`).
+/// `on`: the one Enter opens. A press opens it (`open_hit`). Its rectangle for the e2e drivers: `set-hit:<page>:<n>`, the page's `n`th result.
+fn hit_el(cx: &mut Context<Backplane>, light: bool, k: usize, on: bool, page: &str, n: usize, title: &str, f: &Found, avail: f32) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    // (the note's width is set, not left to the flex: gpui cuts a line with "…" only at a width it knows when it first measures it)
+    let words = div().flex().flex_col().gap_1()
+        .child(div().flex().items_center().gap(px(GAP)).child(div().flex_1().min_w_0().text_size(crate::scale::tpx(13.)).child(trs(&f.label))).children(f.row.then(|| div().flex_none().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(title)))))
+        .children((!f.note.is_empty()).then(|| div().w(px(avail)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).truncate().child(trs(&f.note).replace('\n', " "))));
+    let d = div().id(SharedString::from(format!("set-hit-{k}"))).mx(px(-8.)).px(px(8.)).cursor_pointer();
+    let d = if on { d.bg(c("raise")) } else { d.hover(|s| s.bg(c("panel"))) };
+    let d = if crate::art::rects_on() { let rn = format!("set-hit:{page}:{n}"); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
+    let (p, f2) = (page.to_string(), f.clone());
+    d.child(div().py_3().border_b_1().border_color(c("line")).child(words))
+        .on_click(cx.listener(move |this, _, _, cx| open_hit(this, &p, &f2, cx))).into_any_element()
 }
 
 /// The page the dialog shows (but for Hubs and Accounts): `@keys`, the hub's page (known from its title `hub_title`, as well as from ui.page: a
@@ -1037,39 +1177,75 @@ mod tests {
     fn menu_json() -> Value { serde_json::json!([
         {"label":"Appearance","group":"General","words":"Theme\nThread list\nGroup projects","notes":"The window and the web page.\n\nOn: projects with nothing going on lately are grouped by their git owner.","buttons":[{"action":"settings-page","value":"appearance"}]},
         {"label":"Agents","group":"Agents and tools","words":"Default agent","buttons":[{"action":"settings-page","value":"agents"}]},
-        {"label":"Devices","group":"Connect","words":"Add a device\nWeb UI\nBrowser access\nWeb address","notes":"Makes a link.\n\nPair a browser over HTTPS on your tailnet.\n","buttons":[{"action":"settings-page","value":"devices"}]},
+        {"label":"Devices","group":"Connect","words":"Add a device\nWeb UI\nBrowser access\nWeb address","notes":"Makes a link.\n\nPair a browser over HTTPS on your tailnet.\n","also":"pair phone qr code link android iphone\n\nweb ui https tailscale\n","buttons":[{"action":"settings-page","value":"devices"}]},
+        {"label":"Notifications","group":"General","words":"Notify me for\nQuiet hours","notes":"Phone and desktop alerts.\nNo alerts between these times.","also":"\nnight do not disturb dnd silence mute sleep","buttons":[{"action":"settings-page","value":"notifications"}]},
+        {"label":"Privacy","group":"System","words":"Share anonymous usage","notes":"Counts of what is used.","also":"telemetry analytics privacy data","buttons":[{"action":"settings-page","value":"privacy"}]},
         {"label":"Voice","buttons":[{"action":"settings-page","value":"voice"}]}]) }
     fn lines_for(q: &str) -> Vec<NavLine> {
         let m = menu_json(); let nav: Vec<(String, String)> = m.as_array().unwrap().iter().map(|r| (r["buttons"][0]["value"].as_str().unwrap().to_string(), r["label"].as_str().unwrap().to_string())).collect();
-        let device: HashMap<String, Vec<(String, String)>> = [("appearance".to_string(), vec![("Font".to_string(), "The typeface of the interface and the thread.".to_string())])].into_iter().collect();
+        let device: HashMap<String, Vec<Find>> = [("appearance".to_string(), vec![Find { label: "Font".into(), note: "The typeface of the interface and the thread.".into(), also: "typeface mono".into() }])].into_iter().collect();
         nav_lines(&nav, &menu_groups(&m), &menu_finds(&m), &menu_akas(&m), &device, q)
     }
     fn heads(l: &[NavLine]) -> Vec<&str> { l.iter().filter_map(|x| match x { NavLine::Head(h) => Some(h.as_str()), _ => None }).collect() }
     fn ids(l: &[NavLine]) -> Vec<&str> { l.iter().filter_map(|x| match x { NavLine::Item { id, .. } => Some(id.as_str()), _ => None }).collect() }
+    /// The pages the search found something on.
+    fn hit_ids(l: &[NavLine]) -> Vec<&str> { l.iter().filter_map(|x| match x { NavLine::Item { id, hits, .. } if !hits.is_empty() => Some(id.as_str()), _ => None }).collect() }
+    fn labels(h: &[Found]) -> Vec<&str> { h.iter().map(|f| f.label.as_str()).collect() }
+    fn f(label: &str, note: &str) -> Find { Find { label: label.into(), note: note.into(), also: String::new() } }
     #[test] fn the_search_finds_a_page_by_a_setting_it_holds_or_what_its_note_says() {
         let m = menu_finds(&menu_json());
-        assert_eq!(m.len(), 3, "a page with no words is found by its title only"); assert_eq!(m["appearance"][0], ("Theme".to_string(), "The window and the web page.".to_string())); assert_eq!(m["agents"], [("Default agent".to_string(), String::new())], "an older hub sends no notes");
+        assert_eq!(m.len(), 5, "a page with no words is found by its title only"); assert_eq!(m["appearance"][0], f("Theme", "The window and the web page.")); assert_eq!(m["agents"], [f("Default agent", "")], "an older hub sends no notes nor also");
         let a = &m["appearance"];
-        assert_eq!(hits(a, "group"), ["Group projects"]); assert_eq!(hits(a, " Group Projects "), ["Group projects"]); assert_eq!(hits(a, "thread"), ["Thread list"]);
-        assert_eq!(hits(a, "git owner"), ["Group projects"], "found by its note"); assert_eq!(hits(a, "web page"), ["Theme"]);
+        assert_eq!(labels(&hits(a, "group")), ["Group projects"]); assert_eq!(labels(&hits(a, " Group Projects ")), ["Group projects"]); assert_eq!(labels(&hits(a, "thread")), ["Thread list"]);
+        assert_eq!(labels(&hits(a, "git owner")), ["Group projects"], "found by its note"); assert_eq!(labels(&hits(a, "web page")), ["Theme"]);
         assert!(hits(a, "voice").is_empty() && hits(a, "").is_empty() && hits(&[], "group").is_empty(), "an empty search is the titles' to match");
+        // by what a row does or was called (the hub's `also`), line for line with its label
+        assert_eq!(m["devices"][2].also, "web ui https tailscale"); assert_eq!(m["devices"][3].also, "");
+        assert_eq!(labels(&hits(&m["notifications"], "night")), ["Quiet hours"]); assert_eq!(labels(&hits(&m["privacy"], "telemetry")), ["Share anonymous usage"]);
+        assert_eq!(labels(&hits(&m["devices"], "pair")), ["Add a device", "Browser access"], "Add a device by its words, Browser access by its note");
+        assert_eq!(hit_ids(&lines_for("night")), ["notifications"]); assert_eq!(hit_ids(&lines_for("typeface")), ["appearance"], "this device's rows by their words too");
+        assert_eq!(labels(&hits(&[f("Theme", ""), Find { also: "dark mode".into(), ..f("Font", "") }], "dark")), ["Font"]);
     }
-    #[test] fn the_nav_draws_the_hubs_groups_and_a_search_keeps_only_what_it_found() {
+    #[test] fn the_nav_draws_the_hubs_groups_and_a_search_keeps_every_page_with_what_it_found() {
         let all = lines_for("");
-        assert_eq!(heads(&all), ["General", "Agents and tools", "Connect", "All devices (hub)", "This device"], "a page the hub put in no group goes under the hub's own name");
-        assert_eq!(ids(&all), ["appearance", "@accounts", "agents", "devices", "voice", "@keys", "@hubs", "notifications", "privacy"],
-            "Accounts leads the group that holds Agents; a hub without Mouse, Machines, Notifications or Privacy has this app's pages for them at the end");
-        assert!(all.iter().all(|l| !matches!(l, NavLine::Item { hits, .. } if !hits.is_empty())), "nothing is named under a page while nothing is typed");
+        assert_eq!(heads(&all), ["General", "Agents and tools", "Connect", "General", "System", "All devices (hub)", "This device"], "a page the hub put in no group goes under the hub's own name");
+        assert_eq!(ids(&all), ["appearance", "@accounts", "agents", "devices", "notifications", "privacy", "voice", "@keys", "@hubs"],
+            "Accounts leads the group that holds Agents; a hub without Mouse or Machines has this app's pages for them at the end");
+        assert!(all.iter().all(|l| !matches!(l, NavLine::Item { hits, .. } if !hits.is_empty())), "nothing is found while nothing is typed");
+        // a search keeps the whole list, in place, and says how many it found on each page
+        for q in ["tailnet", "web", "zzz", "night"] { let l = lines_for(q); assert_eq!(ids(&l), ids(&all), "{q}"); assert_eq!(heads(&l), heads(&all), "{q}"); }
         let fw = lines_for("tailnet");
-        assert_eq!(fw, [NavLine::Head("Connect".into()), NavLine::Item { id: "devices".into(), title: "Devices".into(), hits: vec!["Browser access".into()] }]);
-        assert_eq!(first_found(&fw), Some("devices"), "Enter opens it");
-        assert_eq!(ids(&lines_for("web")), ["appearance", "devices"]); assert_eq!(ids(&lines_for("font")), ["appearance"], "this device's own settings are found on the page that holds them");
-        assert_eq!(ids(&lines_for("acc")), ["@accounts", "devices"]); assert_eq!(ids(&lines_for("VOICE")), ["voice"], "a title, in any case");
-        assert!(lines_for("zzz").is_empty() && first_found(&lines_for("zzz")).is_none());
+        assert_eq!(fw.iter().find_map(|l| match l { NavLine::Item { id, hits, .. } if id == "devices" => Some(hits.clone()), _ => None }).unwrap(), [Found { label: "Browser access".into(), nth: 0, note: "Pair a browser over HTTPS on your tailnet.".into(), row: true }]);
+        assert_eq!(hit_ids(&fw), ["devices"]); assert_eq!(first_found(&fw).map(|(p, t, f)| (p, t, f.label)), Some(("devices".into(), "Devices".into(), "Browser access".into())), "Enter opens it");
+        assert_eq!(hit_ids(&lines_for("web")), ["appearance", "devices"]); assert_eq!(hit_ids(&lines_for("font")), ["appearance"], "this device's own settings are found on the page that holds them");
+        assert_eq!(found(&lines_for("web")).iter().map(|(p, _, f)| (p.as_str(), f.label.as_str())).collect::<Vec<_>>(), [("appearance", "Theme"), ("devices", "Web UI"), ("devices", "Browser access"), ("devices", "Web address")], "in the nav's order, each page's in its order");
+        // a page found by its title (or another name) and nothing in it: the page itself is the one result
+        assert_eq!(found(&lines_for("VOICE")), [("voice".to_string(), "Voice".to_string(), Found { label: "Voice".into(), nth: 0, note: String::new(), row: false })], "a title, in any case");
+        assert_eq!(hit_ids(&lines_for("acc")), ["@accounts", "devices"]);
+        assert!(hit_ids(&lines_for("zzz")).is_empty() && first_found(&lines_for("zzz")).is_none());
         // a hub that names no groups (an older one): one list under the hub's name, Accounts before Agents, this app's pages at the end
         let nav = vec![("appearance".to_string(), "Appearance".to_string()), ("agents".to_string(), "Agents".to_string())];
         let old = nav_lines(&nav, &HashMap::new(), &HashMap::new(), &HashMap::new(), &HashMap::new(), "");
         assert_eq!(heads(&old), ["All devices (hub)", "This device"]); assert_eq!(ids(&old), ["appearance", "@accounts", "agents", "@keys", "@hubs", "notifications", "privacy"]);
+    }
+    #[test] fn a_note_with_a_sentence_on_a_line_of_its_own_is_translated_line_by_line() {
+        crate::i18n::with_lang("ja", || {
+            let n = tr_lines("stock KiCad 10.0.7 · /usr/bin/kicad-cli\nEmpty uses the one on PATH.");
+            assert!(n.ends_with(&format!("\n{}", trs("Empty uses the one on PATH."))) && !n.contains("Empty"), "{n}");
+            assert_eq!(tr_lines("Empty looks for it."), trs("Empty looks for it."));
+        });
+        assert_eq!(tr_lines("/x/freecadcmd\nEmpty looks for it."), "/x/freecadcmd\nEmpty looks for it.");
+    }
+    #[test] fn a_result_lands_on_its_row_the_nth_of_a_label_and_the_child_the_scroll_is_given() {
+        // a label a page has twice (Mouse and trackpad's "Left drag", once a kind) is found as each of its rows
+        let fs = [f("Board and schematic: each input", ""), f("Left drag", "Pans the board."), f("3D and STEP: each input", ""), f("Left drag", "Orbits the model.")];
+        assert_eq!(hits(&fs, "left drag").iter().map(|h| (h.label.as_str(), h.nth, h.note.as_str())).collect::<Vec<_>>(), [("Left drag", 0, "Pans the board."), ("Left drag", 1, "Orbits the model.")]);
+        let list = parse(&j(r#"{"rows":[{"label":"Zoom direction","note":"n","buttons":[{"label":"On","action":"x","value":"","on":true}]},{"label":"Board and schematic: each input","adv":true},{"label":"Left drag","note":"a","adv":true,"buttons":[{"label":"Pan","action":"x","value":"","on":true}]},
+            {"label":"3D and STEP: each input","adv":true},{"label":"Left drag","note":"b","adv":true,"buttons":[{"label":"Orbit","action":"x","value":"","on":true}]},{"label":"Reset","note":"r","buttons":[{"label":"Reset","action":"x","value":"","on":false}]}]}"#));
+        assert_eq!((nth_row(&list, "Left drag", 0), nth_row(&list, "Left drag", 1), nth_row(&list, "Left drag", 2), nth_row(&list, "Zoom direction", 0)), (Some(2), Some(4), None, Some(0)));
+        // the title, then the rows above the fold (Zoom direction, Reset), the fold line, the folded rows in their order
+        assert_eq!(row_child(&list, 0, false, 0), 1); assert_eq!(row_child(&list, 5, false, 0), 2); assert_eq!(row_child(&list, 1, false, 0), 4);
+        assert_eq!(row_child(&list, 4, false, 0), 7); assert_eq!(row_child(&list, 4, true, 1), 9, "a page's own words and Usage's bars come before the rows");
     }
     /// The hub's menu as it is now (present/settings.rs PAGES, GROUPS and some of AKA).
     fn hub_menu() -> Value {
@@ -1095,12 +1271,13 @@ mod tests {
         assert_eq!(ids(&none), ["appearance", "notifications", "@keys", "@hubs", "privacy"]); assert_eq!(heads(&none), ["General", "Connect", "System"]);
     }
     #[test] fn the_search_finds_a_page_by_its_other_names_and_this_devices_rows_where_they_are() {
-        assert!(ids(&hub_lines("time zone")).contains(&"notifications"), "Time zone was a page of its own");
-        assert!(ids(&hub_lines("network")).contains(&"about"), "Network and updates is About and updates now");
-        assert!(ids(&hub_lines("shortcut")).contains(&"@keys"), "the shortcuts are on Keyboard");
-        assert!(ids(&hub_lines("streamer")).contains(&"privacy") && !ids(&hub_lines("streamer")).contains(&"appearance"), "Streamer mode is on Privacy");
-        assert!(ids(&hub_lines("desktop notifications")).contains(&"notifications"));
-        assert!(!ids(&hub_lines("time zone")).contains(&"about"), "an other name is not a page's when nothing in it matches");
+        assert!(hit_ids(&hub_lines("time zone")).contains(&"notifications"), "Time zone was a page of its own");
+        assert!(hit_ids(&hub_lines("network")).contains(&"about"), "Network and updates is About and updates now");
+        assert!(hit_ids(&hub_lines("shortcut")).contains(&"@keys"), "the shortcuts are on Keyboard");
+        assert!(hit_ids(&hub_lines("streamer")).contains(&"privacy") && !hit_ids(&hub_lines("streamer")).contains(&"appearance"), "Streamer mode is on Privacy");
+        assert!(hit_ids(&hub_lines("desktop notifications")).contains(&"notifications"));
+        assert!(!hit_ids(&hub_lines("time zone")).contains(&"about"), "an other name is not a page's when nothing in it matches");
+        assert!(hit_ids(&hub_lines("obs")).contains(&"privacy") && hit_ids(&hub_lines("dark mode")).contains(&"appearance"), "this device's rows by their search words");
         assert_eq!(menu_akas(&hub_menu())["notifications"], ["Time zone", "Webhook", "Quiet hours"]); assert!(!menu_akas(&hub_menu()).contains_key("cad"), "no other names, no entry");
     }
     #[test] fn device_inventory_is_all_still_reachable() {

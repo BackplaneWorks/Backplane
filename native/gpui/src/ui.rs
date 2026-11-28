@@ -912,6 +912,7 @@ impl Render for Backplane {
         crate::screens::desk::tick(self, window, cx);
         self.term_layout(window, cx);
         self.term_script(window, cx);
+        crate::screens::settings::land(self, window, cx);
         let mut focused_backplane = false;
         if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); focused_backplane = true; }
         if std::mem::take(&mut self.screens.acct.script_menu) { self.combo_account(window, cx); }
@@ -1261,6 +1262,8 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) { for (id, label) in [("@keys", "Keyboard"), ("@hubs", "Hubs"), ("@accounts", "Accounts")] { ctl.push(CtlEntry { id: format!("set-nav:{id}"), label: label.into(), ctl: Ctl::SettingsPage(id.into()) }); } }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         /* i18n-ok: registered controls the e2e drivers press */ if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
+        // the search's results while the page area lists them: `set-hit:<page>:<n>`, the page's `n`th
+        /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) && crate::screens::settings::results_shown(&self.screens.settings_ui) { let mut at: std::collections::HashMap<String, usize> = Default::default(); for (page, _, f) in crate::screens::settings::results(self) { let n = at.entry(page.clone()).or_default(); ctl.push(CtlEntry { id: format!("set-hit:{page}:{n}"), label: f.label.clone(), ctl: Ctl::SettingsHit(page.clone(), *n) }); *n += 1; } }
         // the shown page's Advanced fold, while it has one: `set-adv:<page>`
         /* i18n-ok: registered controls the e2e drivers press */ if let Some(p) = crate::screens::settings::adv_shown(self) { ctl.push(CtlEntry { id: format!("set-adv:{p}"), label: "Advanced".into(), ctl: Ctl::SettingsAdv(p) }); }
         // Settings > CAD's Install KiCad buttons (Install KiCad, Install, Cancel, Try again): `set:<action>`
