@@ -45,8 +45,9 @@ pub fn rename_leave(id: &str, was: &str, text: &str) -> Command {
 }
 pub fn rename_save(id: &str, text: &str) -> Option<Command> { let t = text.trim(); if t.is_empty() { None } else { Some(Command::Action("rename-save".into(), format!("{id}{SEP}{t}"))) } }
 
-/// A thread tool whose answer is a new thread the window goes to (Fork thread, Buy it): the window arms for it before sending, as New thread does.
-pub fn makes_thread(action: &str) -> bool { matches!(action, "fork" | "fab-buy") }
+/// A thread tool whose answer is a new thread the window goes to (Fork thread, Buy it, New subthread): the window arms for it before sending, as New
+/// thread does. Unarmed, the hub's `created` reply is dropped (main.rs) and the window stays where it was while the thread is made out of sight.
+pub fn makes_thread(action: &str) -> bool { matches!(action, "fork" | "fab-buy" | "thread-child") }
 /// The header's right-click menu: the hub's thread menu (Diff, Terminal, Find file, Snooze choices, Delete...) as context-menu items.
 pub fn context_items(thread: &Value) -> Vec<super::ctxmenu::Item> {
     let mut v = Vec::new();
@@ -96,7 +97,7 @@ pub fn questions(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
 mod tests {
     use super::*;
     use core::prelude::v1::test;
-    #[test] fn buy_it_and_fork_make_a_thread_the_window_goes_to() { assert!(makes_thread("fab-buy") && makes_thread("fork")); assert!(!makes_thread("pin") && !makes_thread("settle")); }
+    #[test] fn buy_it_and_fork_make_a_thread_the_window_goes_to() { assert!(makes_thread("fab-buy") && makes_thread("fork") && makes_thread("thread-child")); assert!(!makes_thread("pin") && !makes_thread("settle")); }
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
     #[test] fn the_hubs_tools_and_menu_parse_with_options_and_danger() {
         let t = j(r#"{"tools":[{"label":"Pin","tip":"t","action":"pin","value":"","on":false,"danger":false},{"label":"Archive","action":"archive","value":"","on":false,"danger":false}],

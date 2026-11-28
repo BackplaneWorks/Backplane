@@ -483,6 +483,7 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
         let rows: Vec<Value> = shown.iter().take(under_threads).map(|f| thread_row(c.hub, c.now, p, f)).collect();
         (rows, vec![], 0, false, String::new(), false, 0)
     };
+    let rows = nest_on_show(c, p, ths, rows);
     r["id"] = json!(qid(c.hub, &pid_of(p)));
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
@@ -524,6 +525,22 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     r["off"] = json!(!p.machines.is_empty() && p.machines.iter().all(|m| m["dim"] == true));
     r["dots"] = json!(p.machines.iter().map(|m| json!({"name":m["name"],"short":m["short"],"here":m["here"],"dim":m["dim"],"note":m["note"]})).collect::<Vec<_>>());
     r
+}
+/// A subthread on show (New subthread opens on one, still empty) is listed one step in, right under its parent's row; the parent's row is
+/// added when the project's few fixed rows do not have it. Without that it read as a stray top-level thread, or (before it was opened) not
+/// at all. Other subthreads stay as they were.
+fn nest_on_show(c: &Ctx, p: &MergedProject, ths: &[Th], mut rows: Vec<Value>) -> Vec<Value> {
+    let Some(f) = ths.iter().find(|f| !c.selected.is_empty() && f.t.id == c.selected) else { return rows };
+    let Some(st) = f.t.src else { return rows };
+    let par = crate::sidebar::shown_parent(st, c.selected);
+    let Some(pf) = ths.iter().find(|x| !par.is_empty() && x.t.id == par) else { return rows };
+    let (sel, pid) = (json!(qid(c.hub, c.selected)), json!(qid(c.hub, par)));
+    let Some(i) = rows.iter().position(|r| r["id"] == sel) else { return rows };
+    let mut child = rows.remove(i);
+    child["depth"] = json!(1);
+    let at = match rows.iter().position(|r| r["id"] == pid) { Some(j) => j + 1, None => { let j = i.min(rows.len()); rows.insert(j, thread_row(c.hub, c.now, p, pf)); j + 1 } };
+    rows.insert(at, child);
+    rows
 }
 /// When the person was last in a project (opened its page or a thread of it: `sidebar.visit.<project id>`, state/visible.rs `visit`), s; 0 for never.
 fn visited_at(st: &State, p: &MergedProject) -> u64 { p.here.as_ref().map_or(0, |id| num(st, &format!("sidebar.visit.{id}"))) }

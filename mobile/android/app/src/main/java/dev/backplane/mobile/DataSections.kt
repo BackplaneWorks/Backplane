@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
@@ -386,7 +387,8 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
                         StatusPill(pill)
                     }
                 }
-                DropdownMenu(menu, { menu = false }) {
+                // opens at the row's text inset, not flush with the screen's edge
+                DropdownMenu(menu, { menu = false }, offset = DpOffset(indent.dp, 0.dp)) {
                     if (r.wake.isNotEmpty()) {
                         DropdownMenuItem(text = { Text(Msg.menu_wake, fontFamily = BpUi) }, onClick = { menu = false; DataClient.snoozeRow(r.wake) }, modifier = Modifier.testTag("home.section.wake.${r.id}"))
                     }
@@ -716,12 +718,15 @@ private fun ProjectNote(title: String, tag: String, empty: String, load: suspend
 @Composable
 fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_sections_rename, s.title, Msg.menu_rename, close) { DataClient.sidebarAct("group-rename", s.group + "\u001f" + it) } }
 
+/** Each project page's open folds ("<key>/done", "<key>/older") for this app run: the page comes back as it was left after a thread opened from it. */
+private val pageFolds = androidx.compose.runtime.mutableStateMapOf<String, Boolean>()
+
 /** A project's page: running, then needs you, then recent, then Done (n) folded; every machine's threads. */
 @Composable
 fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit = {}, openViewer: (String, String) -> Unit = { _, _ -> }, back: () -> Unit) {
-    var done by remember { mutableStateOf(false) }
+    val done = pageFolds[p.key + "/done"] == true
     // a long Done list: its newest rows, the rest behind the hub's "Older (m)" (`page-older`)
-    var older by remember { mutableStateOf(false) }
+    val older = pageFolds[p.key + "/older"] == true
     var lists by remember { mutableStateOf<List<DSection>?>(null) }
     // record this visit on the hub so the Recent bench order follows this phone too
     LaunchedEffect(p.key) { DataClient.visitProject(p.key) }
@@ -757,6 +762,8 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             // as the desktop's project page: the folder (selectable, so it can be copied), and the viewer on the project itself without a thread
             // (`project-home-<id>`, the hub's own folder of a project): Board, Schematic and 3D when it has a board, Files always
             if (pr.root.isNotEmpty()) androidx.compose.foundation.text.selection.SelectionContainer { DMono(pr.root, dfaint, 11, Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp).testTag("project.page.path"), lines = 2) }
+            // the folder is not there any more (the hub's `gone`): said under the path, as the desktop's page does
+            if (pr.gone) DMono(Msg.android_project_gone, dcs.error, 12, Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp).testTag("project.page.gone"))
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 10.dp).testTag("project.page.tools"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val tabs = (if (card?.boards?.isNotEmpty() == true) listOf("Board" to Msg.viewer_board, "Schematic" to Msg.viewer_schematic, "3D" to Msg.viewer_solid) else emptyList()) + ("Files" to Msg.viewer_files)
                 for ((tab, label) in tabs) DBtn(label, false, small = true, modifier = Modifier.testTag("project.page.tool.$tab")) { DataClient.openViewerTab = tab; openViewer("project-home-" + pr.id, "") }
@@ -789,7 +796,7 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             for (s in ls) {
                 if (s.rows.isEmpty() && !(s.fold && s.count > 0)) continue
                 item("pg:${s.id}") {
-                    Row(Modifier.fillMaxWidth().height(36.dp).clickable(enabled = s.fold) { if (s.toggle == "page-older") older = !older else done = !done }.padding(start = 12.dp, top = 6.dp).testTag("project.page.${s.id}"), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().height(36.dp).clickable(enabled = s.fold) { if (s.toggle == "page-older") pageFolds[p.key + "/older"] = !older else pageFolds[p.key + "/done"] = !done }.padding(start = 12.dp, top = 6.dp).testTag("project.page.${s.id}"), verticalAlignment = Alignment.CenterVertically) {
                         if (s.fold) { Icon(if (s.open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp)) }
                         DMono(Tr.t(s.title).uppercase(), dcs.onSurfaceVariant, 11)
                     }

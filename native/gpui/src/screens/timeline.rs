@@ -45,11 +45,15 @@ pub type Reg = Rc<RefCell<Registry>>;
 /// apart by this prefix of their id and drawn after every row.
 pub const ASK_ID: &str = "ask:";
 pub const ASK_ROW: usize = usize::MAX / 2;
-/// Whether a block is on the surface asked for: the thread's rows and the asks' cards (`Some(true)`), the viewer's page or a project's README (`Some(false)`), any.
+/// Settings' and setup's words (settings.rs `with_sel`): on the "outside" surface, drawn by the window's own frame, so the parts keep them.
+pub const SET_ID: &str = "@set:";
+/// Whether a block is on the surface asked for: the thread's rows and the asks' cards (`Some(true)`), the viewer's page, a project's README or
+/// Settings (`Some(false)`), any.
 fn in_scope(b: &Info, rows_only: Option<bool>) -> bool {
+    let outside = b.id.is_empty() || b.id.starts_with("home-readme") || b.id.starts_with(SET_ID);
     match rows_only {
-        Some(true) => !b.id.is_empty() && !b.id.starts_with("home-readme"),
-        Some(false) => b.id.is_empty() || b.id.starts_with("home-readme"),
+        Some(true) => !outside,
+        Some(false) => outside,
         None => true,
     }
 }
@@ -73,8 +77,8 @@ impl Registry {
     /// The viewer's page draws (or is gone): forget the blocks drawn outside the thread's rows (a review or file page, no entry id) and its
     /// code blocks' Copy places (numbered from VIEWER_COPIES). The rows' stay: their part (part.rs) may reuse its last frame.
     pub fn begin_outside(&mut self) { self.blocks.retain(|b| !b.id.is_empty()); self.copies.retain(|c| c.0 < VIEWER_COPIES); self.copy_seen = VIEWER_COPIES; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
-    /// The rows' part draws (or is gone): forget the rows' blocks and Copy places, keep the viewer's.
-    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty() || b.id.starts_with(ASK_ID)); self.copies.retain(|c| c.0 >= VIEWER_COPIES); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
+    /// The rows' part draws (or is gone): forget the rows' blocks and Copy places, keep the viewer's (and the asks' and Settings', drawn by the window).
+    pub fn begin_rows(&mut self) { self.blocks.retain(|b| b.id.is_empty() || b.id.starts_with(ASK_ID) || b.id.starts_with(SET_ID)); self.copies.retain(|c| c.0 >= VIEWER_COPIES); self.copy_seen = 0; self.idx = 0; self.entry = 0; self.entry_id.clear(); }
     /// The list draws only the rows on screen, in its own order, and may draw one twice in a frame: the last drawing's blocks stand.
     pub fn enter(&mut self, row: usize, id: &str) { self.blocks.retain(|b| b.id != id); self.entry = row; self.entry_id = id.to_string(); self.idx = 0; }
     fn next_idx(&mut self) -> usize { let i = self.idx; self.idx += 1; i }
@@ -120,7 +124,7 @@ impl Registry {
     pub fn extend(&mut self, head: Pos) {
         match (self.keyed.clone(), self.key(head)) { (Some((a, _)), Some(h)) => { self.keyed = Some((a, h)); self.sel.head = head; } _ => self.select(Selection { anchor: head, head }) }
     }
-    /// Extend an active drag according to its mode (character, double-click word, or triple-click block).
+    /// Extend an active drag according to its mode (character, double-click word, or triple-click line).
     pub fn extend_drag(&mut self, pos: Pos) {
         let Some(b) = self.blocks.get(pos.block) else { return };
         let (target_start, target_end) = match self.drag_mode {
@@ -129,7 +133,7 @@ impl Registry {
                 let w = select::word_at(&b.text, pos.off);
                 (Pos { block: pos.block, off: w.start }, Pos { block: pos.block, off: w.end })
             }
-            DragMode::Block => (Pos { block: pos.block, off: 0 }, Pos { block: pos.block, off: b.text.len() }),
+            DragMode::Block => { let l = select::line_at(&b.text, pos.off); (Pos { block: pos.block, off: l.start }, Pos { block: pos.block, off: l.end }) }
         };
         let Some((oa, ob)) = self.drag_origin.clone() else { self.select(Selection { anchor: target_start, head: target_end }); return; };
         let before = self.ord(&oa).map_or_else(|| pos < self.sel.anchor, |a| pos < a);
@@ -212,7 +216,7 @@ impl Registry {
         Some(Pos { block: i, off })
     }
     /// A press of the left button at `p` (`pos`: where `hit_scoped` puts it): a click puts the caret there (Shift extends the selection), a double
-    /// click selects the word and a triple the block, and the drag that follows goes by the same unit. Only on a block itself: off every block
+    /// click selects the word and a triple the line (a block without newlines: the block), and the drag that follows goes by the same unit. Only on a block itself: off every block
     /// (a margin, a fold's head, a button) a double or triple click clears the selection as a click does. True when it picked text.
     pub fn press(&mut self, p: Point<Pixels>, pos: Pos, clicks: usize, shift: bool, rows_only: bool) -> bool {
         let texts = self.texts();
@@ -224,7 +228,7 @@ impl Registry {
                 self.drag_mode = DragMode::Word; self.drag_origin = self.keyed.clone();
             }
             n if n >= 3 && direct => {
-                if let Some(s) = select::block_range(&texts, pos.block) { self.select(s); }
+                if let Some(s) = select::line_range(&texts, pos) { self.select(s); }
                 self.drag_mode = DragMode::Block; self.drag_origin = self.keyed.clone();
             }
             _ => {
@@ -1468,6 +1472,8 @@ impl Backplane {
             let selected = self.timeline_selected();
             let mut items = super::ctxmenu::selection_items(&selected);
             if selected.is_empty() && rows_only && self.screens.reg.borrow().inside(e.position, true) { items = super::ctxmenu::message_items(&self.message_text_at(pos)); }
+            // Settings and Setup text: Copy only (a Quote would go into the message box behind the dialog)
+            if self.screens.reg.borrow().blocks.get(pos.block).is_some_and(|b| b.id.starts_with(SET_ID)) { items.retain(|i| i.action != super::ctxmenu::LOCAL_QUOTE); }
             if let Some(l) = link { let dl = self.link_download(pos.block, &l); items.extend(super::ctxmenu::link_items(&l.href, l.file, dl)); }
             if !items.is_empty() { self.ctx_open(e.position, items, cx); }
             return;
@@ -1836,6 +1842,24 @@ mod tests {
         r.begin_outside(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["one", "two"]);
         r.blocks.push(outside("review again")); r.begin_rows(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["review again"]);
     }
+    // Settings' words were dead text: they are the "outside" surface (a drag there selects none of the thread), and neither part's frame forgets them
+    #[test] fn settings_words_are_the_outside_surface_and_survive_both_parts() {
+        let set = |idx: usize, t: &str| Info { entry: 0, ..info(&format!("{SET_ID}settings"), idx, t) };
+        let mut r = Registry::default(); r.begin();
+        r.blocks.push(info("e1", 0, "one")); r.blocks.push(set(0, "Light or dark")); r.blocks.push(set(1, "264 px."));
+        assert!(!in_scope(&r.blocks[1], Some(true)) && in_scope(&r.blocks[1], Some(false)) && in_scope(&r.blocks[0], Some(true)));
+        r.begin_rows(); r.begin_outside(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["Light or dark", "264 px."]);
+        r.enter(0, &format!("{SET_ID}settings")); assert!(r.blocks.is_empty(), "Settings' next frame (or its closing) replaces them");
+    }
+    // a plan card's text had a registry of its own (Copy and Ctrl+C never saw it): its head and body are two scopes of the window's, both kept
+    #[test] fn an_ask_cards_head_and_body_scopes_keep_each_other() {
+        let reg: Reg = Default::default(); reg.borrow_mut().begin();
+        let push = |t: &str| { let mut r = reg.borrow_mut(); let (e, id) = (r.entry, r.entry_id.clone()); r.blocks.push(Info { entry: e, ..info(&id, 0, t) }); };
+        Registry::scoped(&reg, ASK_ROW, &format!("{ASK_ID}p1"), || push("Proposed plan"));
+        Registry::scoped(&reg, ASK_ROW, &format!("{ASK_ID}p1-b"), || { push("Steps"); push("1. A") });
+        let r = reg.borrow(); assert_eq!(r.blocks.iter().map(|b| b.text.as_str()).collect::<Vec<_>>(), ["Proposed plan", "Steps", "1. A"]);
+        assert!(r.blocks.iter().all(|b| in_scope(b, Some(true)) && b.entry == ASK_ROW), "the rows' surface, after every row");
+    }
     // a double click on a fold's head, the gutter or the Working row lit up a word of the bubble above (the nearest block)
     #[test] fn a_double_click_selects_only_on_text_and_a_click_off_it_still_finds_the_nearest() {
         let laid = |id: &str, t: &str, y: f32| Info { layout: Some(BlockLayout::Flow(FlowLayout { bounds: Bounds { origin: point(px(400.), px(y)), size: size(px(500.), px(20.)) }, line_height: px(20.), text_len: t.len(), lines: vec![] })), ..info(id, 0, t) };
@@ -2008,6 +2032,19 @@ mod tests {
         r.drag_mode = DragMode::Block; r.drag_origin = r.keyed.clone();
         r.extend_drag(Pos { block: 0, off: 3 });
         assert_eq!(select::extract(&r.texts(), &r.sel), "alpha beta gamma\n\ndelta epsilon");
+    }
+
+    #[test] fn a_triple_drag_grows_by_lines() {
+        let mut r = Registry::default();
+        frame(&mut r, &[("e1", 0, "a b\ncd ef\n\ngh"), ("e2", 0, "x1\ny2")]);
+        let p = |block, off| Pos { block, off };
+        r.select(select::line_range(&r.texts(), p(0, 5)).unwrap()); r.drag_mode = DragMode::Block; r.drag_origin = r.keyed.clone();
+        assert_eq!(select::extract(&r.texts(), &r.sel), "cd ef", "a triple click: the line");
+        r.extend_drag(p(0, 12)); assert_eq!(r.sel.ordered(), (p(0, 4), p(0, 13)));
+        r.extend_drag(p(0, 1)); assert_eq!(r.sel.ordered(), (p(0, 0), p(0, 9)), "back above: the anchor line stays");
+        r.extend_drag(p(0, 6)); assert_eq!(r.sel.ordered(), (p(0, 4), p(0, 9)));
+        r.extend_drag(p(1, 1)); assert_eq!(select::extract(&r.texts(), &r.sel), "cd ef\n\ngh\n\nx1", "into the next block: its line at the pointer");
+        r.extend_drag(p(1, 4)); assert_eq!(select::extract(&r.texts(), &r.sel), "cd ef\n\ngh\n\nx1\ny2");
     }
 
     #[test] fn drag_scroll_delta_clamps_above_below_and_inside_viewport() {

@@ -84,7 +84,7 @@ fn copy_text_of(ask: &Ask) -> String {
     parsed.iter().map(super::md::block_text).collect::<Vec<_>>().join("\n\n")
 }
 
-fn plan_card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Composer>>, ask: &Ask, i: usize, expanded: bool, revising: bool) -> AnyElement {
+fn plan_card(cx: &mut Context<Backplane>, reg: &Reg, light: bool, input: Option<Entity<Composer>>, ask: &Ask, i: usize, expanded: bool, revising: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let aid = ask.id.clone();
     let aid_exp = aid.clone();
@@ -93,9 +93,13 @@ fn plan_card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Comp
     let copy_id = SharedString::from(format!("ask-{i}-copy"));
     let copied = super::copyable::just_copied(&copy_id);
 
+    // (a scope is replaced when entered again: the body is its own, "-b", after the head)
+    // the plan's head and text are selectable as a message's are, in the asks' scope after the thread's rows (a selection runs into them)
+    let sid = format!("{ASK_ID}{}", ask.id);
+    let head_text = Registry::scoped(reg, ASK_ROW + i, &sid, || line_text(reg, light, trs(&ask.head), ""));
     let left = div().flex().items_center().gap_2().flex_1().min_w(px(140.))
         .child(ic(light, "file-text", 14., "input"))
-        .child(div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(13.)).text_color(c("text")).child(trs(&ask.head)))
+        .child(div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(13.)).text_color(c("text")).child(head_text))
         .child(div().px(px(5.)).py(px(1.)).border_1().border_color(c("input")).bg(c("raise")).text_size(crate::scale::tpx(10.)).text_color(c("input")).child(trs("Ready for review")));
 
     let mut hdr_btns = div().flex().items_center().gap_1().flex_shrink_0();
@@ -115,15 +119,11 @@ fn plan_card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Comp
 
     let body_el = if !ask.blocks.is_empty() {
         let parsed = super::md::parse(&ask.blocks);
-        let reg: super::timeline::Reg = Default::default();
-        {
-            let mut r = reg.borrow_mut();
-            r.app = Some(cx.entity().downgrade());
-            r.enter(0, &format!("plan-ask-{}", ask.id));
-        }
-        div().flex().flex_col().gap(px(6.)).children(super::timeline::blocks(cx, &reg, light, &parsed, &format!("plan-ask-{}", ask.id)))
+        // the window's registry (no registry of its own): Copy, Ctrl+C and the primary selection reach the plan's text
+        let els = Registry::scoped(reg, ASK_ROW + i, &format!("{sid}-b"), || super::timeline::blocks(cx, reg, light, &parsed, &format!("plan-ask-{}", ask.id)));
+        div().flex().flex_col().gap(px(6.)).children(els)
     } else {
-        div().text_size(crate::scale::tpx(12.5)).text_color(c("text")).child(ask.detail.clone())
+        div().text_size(crate::scale::tpx(12.5)).text_color(c("text")).child(Registry::scoped(reg, ASK_ROW + i, &format!("{sid}-b"), || line_text(reg, light, ask.detail.clone(), "")))
     };
     let body = div().id(SharedString::from(format!("ask-{i}-body")))
         .max_h(px(if expanded { 560. } else { 280. }))
@@ -201,7 +201,7 @@ pub fn escape_revise(app: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
 }
 
 fn card(cx: &mut Context<Backplane>, reg: &Reg, light: bool, input: Option<Entity<Composer>>, ask: &Ask, i: usize, expanded: bool, revising: bool) -> AnyElement {
-    if ask.kind == "plan" { return plan_card(cx, light, input, ask, i, expanded, revising) }
+    if ask.kind == "plan" { return plan_card(cx, reg, light, input, ask, i, expanded, revising) }
     let c = |n: &str| theme::color(light, n);
     let rail = if ask.needs { "accent" } else { "bad" };
     let mut col = div().flex_1().min_w_0().flex().flex_col().gap_2().p_3();
@@ -217,7 +217,7 @@ fn card(cx: &mut Context<Backplane>, reg: &Reg, light: bool, input: Option<Entit
     }
     col = col.child(head);
     if !ask.blocks.is_empty() {
-        col = col.child(div().id(SharedString::from(format!("ask-{i}-body"))).max_h(px(220.)).overflow_y_scroll().flex().flex_col().gap_1().children(ask.blocks.iter().map(|b| crate::ui::block(b, light, 0))));
+        col = col.child(div().id(SharedString::from(format!("ask-{i}-body"))).max_h(px(220.)).overflow_y_scroll().flex().flex_col().gap_1().children(Registry::scoped(reg, ASK_ROW + i, &format!("{ASK_ID}{}-b", ask.id), || ask.blocks.iter().map(|b| crate::ui::block_in(b, light, 0, Some(reg))).collect::<Vec<_>>())));
     } else if let Some(detail) = detail_text {
         col = col.child(div().id(SharedString::from(format!("ask-{i}-detail"))).max_h(px(300.)).overflow_y_scroll().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(detail));
     }

@@ -494,6 +494,22 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     assert_eq!(titles_of(&row(&s, "t1")["threads"]), ["T t1"]);
 }
 
+/// New subthread opens on an empty child: it is listed one step in under its parent (the parent's row added where only the one on show is
+/// listed), in both sidebar modes; a subthread not on show is not moved.
+#[test] fn an_empty_subthread_on_show_is_listed_under_its_parent() {
+    let s = one(&[turn("t1", "completed", NOW - 50), tc("t9", "p1", NOW - 10), json!({"$":"ThreadParentSet","id":"t9","parent":"t1","at":NOW-10}), set("thread.tree.t1", "1", NOW - 10)]);
+    let open = HashSet::new();
+    let row = |s: &State, sel: &'static str| { let rows = merged_projects(s, &[], &|_| false, &|_| String::new(), "desk", &[]); let c = Ctx { selected: sel, ..ctx(&open) }; sec(&build(s, &rows, &Value::Null, &c), "active")["rows"][0].clone() };
+    let r = row(&s, "t9"); let th = r["threads"].as_array().unwrap();
+    assert_eq!(titles_of(&r["threads"]), ["T t1", "T t9"], "the parent, then the new subthread");
+    assert_eq!((th[0]["depth"].as_u64(), th[1]["depth"].as_u64(), th[1]["id"].as_str()), (Some(0), Some(1), Some("h|t9")));
+    assert_eq!(titles_of(&row(&s, "t1")["threads"]), ["T t1"], "the parent on show: as before");
+    let every = one(&[turn("t1", "completed", NOW - 50), tc("t9", "p1", NOW - 10), json!({"$":"ThreadParentSet","id":"t9","parent":"t1","at":NOW-10}), set(ATTENTION, "off", NOW - 5)]);
+    let r = row(&every, "t9"); let th = r["threads"].as_array().unwrap();
+    let at = |id: &str| th.iter().position(|x| x["id"] == id).unwrap();
+    assert_eq!((at("h|t9"), th[at("h|t9")]["depth"].as_u64()), (at("h|t1") + 1, Some(1)), "every thread listed: right under its parent, one step in");
+}
+
 // ---- #1186: "Only threads that need attention" (on by default) or every thread --------------------------------------------------
 /// On (unset, a new install's and an existing one's alike): under the project its pin and the one thread that runs; the ask is in Needs you.
 /// Off: every thread the person has not settled or archived is listed under it, the ask too, pins first, then the newest; one the clock

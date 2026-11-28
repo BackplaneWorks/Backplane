@@ -184,8 +184,11 @@ fn inline_text(node: &Value, out: &mut String) {
     for k in node["kids"].as_array().into_iter().flatten() { inline_text(k, out); }
 }
 
-pub(crate) fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
+pub(crate) fn block(node: &Value, light: bool, depth: usize) -> AnyElement { block_in(node, light, depth, None) }
+/// A hub block (an ask card's body); with `reg` its words are selectable text in the scope the caller opened, without it plain text.
+pub(crate) fn block_in(node: &Value, light: bool, depth: usize, reg: Option<&crate::screens::timeline::Reg>) -> AnyElement {
     let c = |name: &str| theme::color(light, name);
+    let words = |t: String| -> AnyElement { match reg { Some(r) => crate::screens::timeline::line_text(r, light, t, ""), None => t.into_any_element() } };
     let tag = node["tag"].as_str().unwrap_or("p");
     let mut text = String::new();
     match tag {
@@ -194,18 +197,18 @@ pub(crate) fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
             for (i, item) in node["kids"].as_array().into_iter().flatten().enumerate() {
                 let mut t = String::new(); inline_text(item, &mut t);
                 let mark = if tag == "ol" { format!("{}.", i + 1) } else { "•".to_string() };
-                list = list.child(div().flex().gap_2().child(div().text_color(c("dim")).child(mark)).child(div().flex_1().child(t)));
+                list = list.child(div().flex().gap_2().child(div().text_color(c("dim")).child(mark)).child(div().flex_1().child(words(t))));
             }
             list.into_any_element()
         }
-        "pre" => { inline_text(node, &mut text); div().font(art::mono_font()).w_full().bg(c("raise")).border_1().border_color(c("line")).p_2().text_size(crate::scale::tpx(12.)).child(text).into_any_element() }
-        t if t.starts_with('h') && t.len() == 2 => { inline_text(node, &mut text); div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(text).into_any_element() }
+        "pre" => { inline_text(node, &mut text); div().font(art::mono_font()).w_full().bg(c("raise")).border_1().border_color(c("line")).p_2().text_size(crate::scale::tpx(12.)).child(words(text)).into_any_element() }
+        t if t.starts_with('h') && t.len() == 2 => { inline_text(node, &mut text); div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(words(text)).into_any_element() }
         "blockquote" => {
             let mut q = div().border_l_2().border_color(c("line")).pl_3().text_color(c("dim"));
-            if depth < 4 { for k in node["kids"].as_array().into_iter().flatten() { q = q.child(block(k, light, depth + 1)); } }
+            if depth < 4 { for k in node["kids"].as_array().into_iter().flatten() { q = q.child(block_in(k, light, depth + 1, reg)); } }
             q.into_any_element()
         }
-        _ => { inline_text(node, &mut text); div().child(text).into_any_element() }
+        _ => { inline_text(node, &mut text); div().child(words(text)).into_any_element() }
     }
 }
 
@@ -408,7 +411,7 @@ impl Backplane {
                 // a row under its project row (`under`, the sections) is one of its few fixed rows: no tree of its own either
                 let under = t["under"] == true;
                 let tree = sub.is_empty() && !pid.is_empty() && !under;
-                let gutter = if under { 44. } else { 6. + depth * 14. + 16. }; // the indent and the chevron's slot (under a project: its title lines up with the project's name, the L hangs from the project's icon)
+                let gutter = if under { 44. + depth * 14. } else { 6. + depth * 14. + 16. }; // the indent and the chevron's slot (under a project: its title lines up with the project's name, the L hangs from the project's icon; a subthread's one step further, from its parent's dot)
                 // the chevron's target is the row's full height and the whole gutter left of the dot (the arrow alone, 16 x 14, was easy to miss: a near miss selected the thread)
                 let toggle = (kids > 0 && tree).then(|| {
                     let tid = id.clone();
@@ -444,8 +447,8 @@ impl Backplane {
                     // a row under its project row: a small faint L in the indent (half a row down, then right to the dot), so it reads
                     // as the project's own; the open one's L a shade brighter
                     .child(toggle.map_or_else(|| div().w(px(gutter)).h_full().flex_shrink_0().relative().when(under, |d| { let l = c(if selected { "dim" } else { "line" });
-                        d.child(div().absolute().left(px(36.)).top_0().w(px(1.)).h(relative(0.5)).bg(l))
-                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).children((!labelled).then(|| crate::screens::siderow::dot(light, t))).child(if renaming { crate::screens::siderow::field(light, &self.screens.fields, &id, self.screens.ctx.is_some() || self.screens.ctx_field.is_some()) } else if inbox {
+                        d.child(div().absolute().left(px(36. + depth * 14.)).top_0().w(px(1.)).h(relative(0.5)).bg(l))
+                         .child(div().absolute().left(px(36. + depth * 14.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).children((!labelled).then(|| crate::screens::siderow::dot(light, t))).child(if renaming { crate::screens::siderow::field(light, &self.screens.fields, &id, self.screens.ctx.is_some() || self.screens.ctx_field.is_some()) } else if inbox {
                         let (proj, ago) = (sub.trim().to_string(), trs(&string(t, "ago")));
                         div().flex_1().min_w_0().flex().flex_col().justify_center().gap(px(1.)).relative()
                             .child(div().w_full().overflow_hidden().whitespace_nowrap().text_ellipsis().line_height(crate::scale::tpx(18.)).child(string(t, "title")))
@@ -977,6 +980,7 @@ impl Render for Backplane {
         self.term_layout(window, cx);
         self.term_script(window, cx);
         self.find_seek(window);
+        crate::screens::settings::land(self, window, cx);
         let mut focused_backplane = false;
         if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); focused_backplane = true; }
         if std::mem::take(&mut self.screens.acct.script_menu) { self.combo_account(window, cx); }
@@ -1349,6 +1353,8 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) { for (id, label) in [("@keys", "Keyboard"), ("@hubs", "Hubs"), ("@accounts", "Accounts")] { ctl.push(CtlEntry { id: format!("set-nav:{id}"), label: label.into(), ctl: Ctl::SettingsPage(id.into()) }); } }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         /* i18n-ok: registered controls the e2e drivers press */ if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
+        // the search's results while the page area lists them: `set-hit:<page>:<n>`, the page's `n`th
+        /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) && crate::screens::settings::results_shown(&self.screens.settings_ui) { let mut at: std::collections::HashMap<String, usize> = Default::default(); for (page, _, f) in crate::screens::settings::results(self) { let n = at.entry(page.clone()).or_default(); ctl.push(CtlEntry { id: format!("set-hit:{page}:{n}"), label: f.label.clone(), ctl: Ctl::SettingsHit(page.clone(), *n) }); *n += 1; } }
         // the shown page's Advanced fold, while it has one: `set-adv:<page>`
         /* i18n-ok: registered controls the e2e drivers press */ if let Some(p) = crate::screens::settings::adv_shown(self) { ctl.push(CtlEntry { id: format!("set-adv:{p}"), label: "Advanced".into(), ctl: Ctl::SettingsAdv(p) }); }
         // Settings > CAD's Install KiCad buttons (Install KiCad, Install, Cancel, Try again): `set:<action>`
@@ -1388,6 +1394,13 @@ impl Render for Backplane {
         if !ACT_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
             let weak = cx.entity().downgrade();
             cx.intercept_keystrokes(move |_, _, cx| { let _ = weak.update(cx, |this, _| crate::screens::kicad_update::person_acted(this)); }).detach();
+        }
+        // a shortcut waiting for its keys in Settings › Keyboard takes the next key typed, before any binding acts on it (Esc too: it ends the
+        // wait and shuts nothing): screens/settings.rs `recorded`. Registered once
+        static REC_WATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !REC_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let weak = cx.entity().downgrade();
+            cx.intercept_keystrokes(move |ev, _, cx| { if weak.update(cx, |this, cx| crate::screens::settings::recorded(this, &ev.keystroke, cx)).unwrap_or(false) { cx.stop_propagation(); } }).detach();
         }
         let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")).capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, window, cx| { crate::keys::tip_pressed(e.position); crate::screens::kicad_update::person_acted(this); this.solidcraft_reclaim_to(window, cx); })),self.picker_keys(),self.screens.ctx.is_some(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(crate::scale::tpx(13.)).font_family(self.local.font.clone()).line_height(crate::scale::tpx(20.))
@@ -1582,13 +1595,14 @@ impl Render for Backplane {
             .children({ let l = self.screens.downloads.list.clone(); crate::screens::dlbar::strip(cx, &l, light) })
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
-            .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs,self.screens.offers.on_home.as_deref()))
+            // (its words selectable: `with_sel`)
+            .children({ let reg = self.screens.reg.clone(); crate::screens::settings::with_sel(&reg, "settings", || crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs,self.screens.offers.on_home.as_deref())) })
             .children(crate::screens::thread_context::view(&self.screens.thread_context, cx, light, window.viewport_size()))
             .children(crate::screens::improvements::view(cx, light, &self.screens.imp))
             .children(crate::screens::improvements::indicator(cx, light, &self.screens.imp))
             .children({ let title = crate::screens::badge::from_machine(&self.data["thread"]["mark"], &string(&self.data["thread"], "title")); crate::screens::term::view(cx, window, light, &self.local, &title, &self.screens.term, if self.screens.side_shown { self.local.sidebar_px as f32 } else { crate::screens::viewer::STRIP_W }) })
             .children(crate::screens::padview::view(cx, window, light, &self.local, &mut self.screens.pad, &mut ctl))
-            .children(crate::screens::onboard::view(cx, light, &self.screens.fields, &self.data["tour"], &self.screens.acct, &self.screens.setup_focus, &self.screens.setup.scroll, f32::from(window.viewport_size().width), &self.error))
+            .children({ let reg = self.screens.reg.clone(); crate::screens::settings::with_sel(&reg, "setup", || crate::screens::onboard::view(cx, light, &self.screens.fields, &self.data["tour"], &self.screens.acct, &self.screens.setup_focus, &self.screens.setup.scroll, f32::from(window.viewport_size().width), &self.error)) })
             // a 0.14 home coming across: over setup and everything else of the window
             // the keys sheet, over setup too (? and F1 work there)
             .children(crate::screens::keysheet::view(cx, light, self.screens.keysheet, &self.local))

@@ -169,7 +169,8 @@ async fn data_budget(port: u16) {
     assert!(open0 <= OPEN_MAX && open1 <= OPEN_MAX && back <= OPEN_MAX, "a thread open: {open0}/{open1}/{back} B, at most {OPEN_MAX}");
 }
 /// Phase 0's ceilings (measured: 31.6 KB and 6.6 KB, JSON); Phase 1's compression and `shell.sync`/`thread.open` bring them to 6 KB and 3 KB.
-const LISTS_MAX: usize = 36 * 1024;
+// (+512: the fixture's project roots do not exist, so since #1782 each of its 8 rows carries `"gone":true`, 14 B a real project with its folder does not)
+const LISTS_MAX: usize = 36 * 1024 + 512;
 const OPEN_MAX: usize = 8 * 1024;
 
 // ---- Phase 1: compressed, one round trip (docs/PHONE-DATA.md, Compression and one-round-trip reads) ----

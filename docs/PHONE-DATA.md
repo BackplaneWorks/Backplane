@@ -13,7 +13,7 @@ natively with typed Codable structs, cache-first. Fresh-home screens only: proje
 
 ## Types
 ```
-Project = {id, title, root, origin, threadCount, updatedAt, waiting, icon, color, css, mark?, also?, marks?, newOn?}
+Project = {id, title, root, origin, threadCount, updatedAt, waiting, icon, color, css, mark?, also?, marks?, newOn?, gone?} (`gone`: true when its folder is not there any more; a phone says "This folder is gone." under the path on its page)
           origin = the folder's git origin remote, normalized (`github.com/o/r`; "" for none): the key that makes one repository on two machines one project
 Thread  = {id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, preview, waiting, status?, parent, mark?}
           status? = the sidebar dot's word (feature `status`; signal.rs, children's work included): active, waiting, blocked, failed, stalled, finished (a turn done and not

@@ -206,6 +206,44 @@
    ]
   },
   {
+   "name": "settings-search",
+   "steps": [
+    {
+     "pointer": "set-search"
+    },
+    {
+     "wait": 300
+    },
+    {
+     "keys": "q u i e t"
+    },
+    {
+     "wait": 900
+    }
+   ],
+   "after": [
+    {
+     "escape": true
+    },
+    {
+     "wait": 400
+    },
+    {
+     "action": [
+      "settings-page",
+      "notifications"
+     ]
+    },
+    {
+     "wait": 600
+    }
+   ],
+   "text": [
+    "Quiet hours",
+    "found"
+   ]
+  },
+  {
    "name": "settings-threads",
    "steps": [
     {

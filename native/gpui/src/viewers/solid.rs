@@ -1197,7 +1197,10 @@ impl SolidPage {
 
     fn view_controls(&self, cx: &mut Context<Self>) -> Div {
         let mut bar = div().flex().flex_wrap().gap_1();
-        for tool in solid_tools() {
+        // a narrow panel (a Split's 3D tile beside a side panel): only the buttons that fit one row, Fit first, so they never cover the model
+        let room = self.size.lock().unwrap()[0] - 16.;
+        let tools = solid_tools(); let n = tools_that_fit(&tools.iter().map(|t| t.label.chars().count()).collect::<Vec<_>>(), room, crate::scale::s());
+        for tool in tools.into_iter().take(n) {
             bar = bar.child(div().id(SharedString::from(tool.id)).px_2().h(crate::scale::tpx(TOOL_H)).flex().items_center().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
                 .hover(|d| d.bg(rgba(0x2a3548ee))).child(tool.label)
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -1213,6 +1216,14 @@ impl SolidPage {
         }
         bar
     }
+}
+/// How many of the camera buttons (their labels' lengths, in order) fit one row of `room` px at text scale `k` (12 px mono, ~7.3 px a
+/// character, the button's padding and gap); all of them before the panel is measured (`room` <= 0), never fewer than one.
+pub fn tools_that_fit(labels: &[usize], room: f32, k: f32) -> usize {
+    if room <= 0. { return labels.len() }
+    let (mut used, mut n) = (0f32, 0usize);
+    for len in labels { let w = (*len as f32 * 7.3 + 18.) * k + 4.; if used + w > room { break } used += w; n += 1; }
+    n.max(1).min(labels.len())
 }
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SolidTool { View(&'static str), Snap, ClearProbe }
@@ -1323,6 +1334,14 @@ impl Render for SolidPage {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_narrow_3d_tile_shows_the_camera_buttons_that_fit_one_row() {
+        let labels = [3, 3, 3, 6, 5, 5, 4, 4, 9]; // Fit Iso Top Bottom Front Right Back Left Snap view
+        assert_eq!(super::tools_that_fit(&labels, 0., 1.), 9, "not measured yet: all");
+        assert_eq!(super::tools_that_fit(&labels, 2000., 1.), 9);
+        assert_eq!(super::tools_that_fit(&labels, 134., 1.), 3, "a 150 px tile: Fit, Iso, Top");
+        assert_eq!(super::tools_that_fit(&labels, 10., 1.), 1, "never none: Fit");
+        assert!(super::tools_that_fit(&labels, 300., 1.5) < super::tools_that_fit(&labels, 300., 1.), "bigger text, fewer");
+    }
     #[test] fn solid_tools_match_the_camera_actions_and_snap() {
         let tools = super::solid_tools();
         let views = ["fit","iso","top","bottom","front","right","back","left","snap"];

@@ -85,8 +85,8 @@ pub fn rows(info: &Value, ui: &Ui, now: u64) -> Vec<Value> {
     // the servers
     v.push(json!({"kind": "group", "label": "Servers", "note": "", "buttons": []}));
     if servers.is_empty() && view.is_empty() {
-        v.push(json!({"kind": "empty", "label": "No servers of yours yet", "note": "Paste the snippet a vendor's docs give, add one from the gallery, or bring in what Claude Code, Codex, Cursor or VS Code already have.",
-            "buttons": [btn("Paste a config", "mcp-view", "add", false), btn("Gallery", "mcp-view", "gallery", false), btn("Import", "mcp-view", "import", false)]}));
+        // one line: the header's Add, Import and Gallery are the ways in, not repeated here
+        v.push(json!({"kind": "empty", "label": "No servers of yours yet", "note": "", "buttons": []}));
     }
     for x in &servers { card_rows(&mut v, x, info, ui, now, machine) }
     v.push(json!({"kind": "group", "label": "Built in", "note": "", "buttons": []}));
@@ -416,9 +416,11 @@ mod tests {
         let f = form_servers(&Ui { get: &get }, &[]).unwrap(); assert_eq!(f.servers[0].id, "everything"); assert_eq!(f.plain.len(), 1);
         let m: HashMap<&str, &str> = [("mode", "remote"), ("murl", "https://mcp.deepwiki.com/mcp")].into(); let get = ui(&m); assert_eq!(form_servers(&Ui { get: &get }, &[]).unwrap().servers[0].id, "deepwiki");
     }
-    #[test] fn empty_state_offers_three_ways_in() {
+    #[test] fn empty_state_says_so_in_one_line_and_the_header_keeps_the_three_ways_in() {
         let m = HashMap::new(); let get = ui(&m); let mut i = info(); i["servers"] = json!([]); i["projects"] = json!([]);
-        let r = rows(&i, &Ui { get: &get }, 0); let e = r.iter().find(|x| x["kind"] == "empty").unwrap(); assert_eq!(e["buttons"].as_array().unwrap().len(), 3);
+        let r = rows(&i, &Ui { get: &get }, 0); let e = r.iter().find(|x| x["kind"] == "empty").unwrap();
+        assert_eq!((e["label"].as_str(), e["note"].as_str(), e["buttons"].as_array().map(Vec::len)), (Some("No servers of yours yet"), Some(""), Some(0)), "no buttons of its own");
+        let head: Vec<&str> = r[0]["buttons"].as_array().unwrap().iter().map(|b| s(b, "label")).collect(); assert_eq!(head, ["Add", "Import", "Gallery"]);
     }
     #[test] fn gallery_and_import_views() {
         let m: HashMap<&str, &str> = [("view", "gallery")].into(); let get = ui(&m); let r = rows(&info(), &Ui { get: &get }, 0);

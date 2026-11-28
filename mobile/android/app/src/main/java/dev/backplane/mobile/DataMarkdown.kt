@@ -88,7 +88,8 @@ fun splitCells(row: String): List<String> {
     out += b.toString().trim(); return out
 }
 
-private fun parse(lines: List<String>): List<MdBlock> {
+/** [soft]: a file's Markdown, where a paragraph's single newlines are spaces (a line ending in two spaces or `\` still breaks); a message keeps its newlines. */
+private fun parse(lines: List<String>, soft: Boolean = false): List<MdBlock> {
     val out = ArrayList<MdBlock>(); var i = 0
     while (i < lines.size) {
         val l = lines[i]; val t = l.trim()
@@ -105,7 +106,7 @@ private fun parse(lines: List<String>): List<MdBlock> {
         if (t.startsWith(">")) {
             val q = ArrayList<String>()
             while (i < lines.size && lines[i].trim().startsWith(">")) { q += lines[i].trim().removePrefix(">").removePrefix(" "); i++ }
-            out += MdBlock.Quote(parse(q)); continue
+            out += MdBlock.Quote(parse(q, soft)); continue
         }
         val m = reItem.find(l)
         if (m != null) {
@@ -113,7 +114,7 @@ private fun parse(lines: List<String>): List<MdBlock> {
             reTask.find(body)?.let { task = if (it.groupValues[1] == " ") 0 else 1; body = it.groupValues[2] }
             val mk = m.groupValues[2]; val depth = (indentOf(l) / 2).coerceAtMost(6); i++
             val sb = StringBuilder(body)
-            while (i < lines.size && lines[i].isNotBlank() && indentOf(lines[i]) >= indentOf(l) + 2 && !reItem.matches(lines[i]) && !isFence(lines[i].trim())) { sb.append('\n').append(lines[i].trim()); i++ }
+            while (i < lines.size && lines[i].isNotBlank() && indentOf(lines[i]) >= indentOf(l) + 2 && !reItem.matches(lines[i]) && !isFence(lines[i].trim())) { sb.append(if (soft) ' ' else '\n').append(lines[i].trim()); i++ }
             out += MdBlock.Li(depth, if (mk[0].isDigit()) mk else "•", task, sb.toString()); continue
         }
         if (t.contains('|') && i + 1 < lines.size && reSep.matches(lines[i + 1].trim()) && lines[i + 1].contains('-')) {
@@ -125,17 +126,18 @@ private fun parse(lines: List<String>): List<MdBlock> {
         }
         val im = reImg.find(t)
         if (im != null) { out += MdBlock.Img(im.groupValues[1], im.groupValues[2]); i++; continue }
-        val para = ArrayList<String>(); para += l.trimEnd(); i++
-        while (i < lines.size && !startsBlock(lines[i], lines.getOrNull(i + 1))) { para += lines[i].trimEnd(); i++ }
-        out += MdBlock.P(para.joinToString("\n"))
+        val para = StringBuilder(l.trimEnd()); var hard = l.endsWith("  "); i++
+        while (i < lines.size && !startsBlock(lines[i], lines.getOrNull(i + 1))) { val lb = !soft || hard || para.endsWith('\\'); if (soft && para.endsWith('\\')) para.setLength(para.length - 1); para.append(if (lb) '\n' else ' ').append(if (soft) lines[i].trim() else lines[i].trimEnd()); hard = lines[i].endsWith("  "); i++ }
+        out += MdBlock.P(para.toString())
     }
     return out
 }
 
 private val blockCache = LruCache<String, List<MdBlock>>(64)
-fun mdBlocks(src: String): List<MdBlock> {
-    blockCache.get(src)?.let { return it }
-    return parse(src.replace("\r\n", "\n").split('\n')).also { blockCache.put(src, it) }
+fun mdBlocks(src: String, soft: Boolean = false): List<MdBlock> {
+    val key = if (soft) "\u0001" + src else src
+    blockCache.get(key)?.let { return it }
+    return parse(src.replace("\r\n", "\n").split('\n'), soft).also { blockCache.put(key, it) }
 }
 
 /** The link a tap follows (DataLinks.kt): web addresses, emails and phone numbers go to the system; a backplane:// link or a path is asked of the hub and opens its screen here, or says why not. */
@@ -295,13 +297,13 @@ private fun heading(level: Int) = when (level) { 1 -> 18; 2 -> 16; 3 -> 14 else 
 /** A message's Markdown. `thread` lets a picture at a path on the hub's machine load. Everything in it can be selected. */
 @Composable
 /** [mono]: the whole message in the mono face at [fontSize] (a tool's or the hub's note); else prose is the system face a size up, code staying mono. */
-fun MdText(src: String, modifier: Modifier = Modifier, thread: String? = null, copy: CopyLookup = CopyLookup(null), color: Color = MaterialTheme.colorScheme.onSurface, fontSize: Int = 13, mono: Boolean = false) {
+fun MdText(src: String, modifier: Modifier = Modifier, thread: String? = null, copy: CopyLookup = CopyLookup(null), color: Color = MaterialTheme.colorScheme.onSurface, fontSize: Int = 13, mono: Boolean = false, soft: Boolean = false) {
     val dcs = MaterialTheme.colorScheme
     val ctx = LocalContext.current
     SideEffect { MdLinks.ctx = ctx.applicationContext; MdLinks.thread = thread ?: "" }
     val dark = dcs.background.red < .5f
     val pal = remember(dcs, dark, color) { MdPalette(color, color, dcs.surfaceContainerHigh, dcs.primary, dark) }
-    val blocks = remember(src) { mdBlocks(src) }
+    val blocks = remember(src, soft) { mdBlocks(src, soft) }
     val chat = LocalChatTerm.current?.takeIf { DataClient.has("termChat") }
     SelectionContainer { MdBlocks(blocks, pal, thread, modifier, copy, chat, fontSize, mono) }
 }

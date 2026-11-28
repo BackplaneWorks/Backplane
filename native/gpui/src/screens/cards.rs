@@ -71,38 +71,39 @@ fn field_box(fields: &HashMap<String, FieldSlot>, light: bool, raw: &Value, name
 pub fn el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize, avail: f32) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let raw = &r.raw;
-    let note = |d: Div, t: &str, tone: &str| if t.is_empty() { d } else { d.child(div().text_size(crate::scale::tpx(12.)).text_color(c(tone)).child(trs(t))) };
+    let note = |cx: &mut Context<Backplane>, d: Div, t: &str, tone: &str| if t.is_empty() { d } else { d.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c(tone)), trs(t))) };
     Some(match r.kind.as_str() {
         "cat" => super::catpick::view(cx, light, fields, raw, avail),
         "head" => div().flex().items_start().justify_between().gap_4().pb_3().mb_1().border_b_1().border_color(c("line"))
-            .child(note(div().flex().flex_col().gap_1().min_w_0().flex_1(), &r.note, "dim"))
+            .child(note(cx, div().flex().flex_col().gap_1().min_w_0().flex_1(), &r.note, "dim"))
             .child(chips_p(cx, light, &r.buttons, i, false, raw["primary"].as_u64().map(|x| x as usize))).into_any_element(),
         "group" => div().pt_4().pb(px(4.)).flex().items_baseline().gap_2().min_w_0().child(div().flex_none().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.label).to_uppercase()))
             .when(!r.note.is_empty(), |d| d.child(div().min_w_0().text_size(crate::scale::tpx(11.)).text_color(c("faint")).whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.note.clone()))).into_any_element(),
         "notice" => {
             let col = c(tone_token(&r.tone));
             div().flex().items_center().gap_3().my_1().px_3().py_2().border_l_2().border_color(col).bg(alpha(col, 0.07))
-                .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w_0().child(div().text_size(crate::scale::tpx(12.)).text_color(if r.tone == "ok" || r.tone == "busy" { c("text") } else { col }).child(trs(&r.label)))
-                    .when(!r.note.is_empty(), |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.note)))))
+                .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w_0().child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(if r.tone == "ok" || r.tone == "busy" { c("text") } else { col }), trs(&r.label)))
+                    .when(!r.note.is_empty(), |d| d.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(11.)).text_color(c("dim")), trs(&r.note)))))
                 .when(!r.buttons.is_empty(), |d| d.child(chips(cx, light, &r.buttons, i, true))).into_any_element()
         }
         "code" => div().my_1().px_3().py_2().bg(c("view")).border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).flex().flex_col()
             .children(string(raw, "text").lines().take(14).map(|l| div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(l.to_string())).collect::<Vec<_>>()).into_any_element(),
         "empty" => div().my_2().p_6().flex().flex_col().items_center().gap_2().border_1().border_dashed().border_color(c("line"))
             .child(crate::art::icon("plug", 22., c("faint"))).child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)))
-            .child(div().max_w(px(460.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).text_center().child(trs(&r.note))).child(div().pt_2().child(chips(cx, light, &r.buttons, i, false))).into_any_element(),
+            .when(!r.note.is_empty(), |d| d.child(super::settings::words(cx, light, div().max_w(px(460.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).text_center(), trs(&r.note))))
+            .when(!r.buttons.is_empty(), |d| d.child(div().pt_2().child(chips(cx, light, &r.buttons, i, false)))).into_any_element(),
         "panel" => div().mt_3().pt_3().pb_2().flex().items_center().justify_between().gap_3().border_t_1().border_color(c("accent"))
-            .child(note(div().flex().flex_col().gap_1().min_w_0().flex_1().child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).child(trs(&r.label))), &r.note, "dim"))
+            .child(note(cx, div().flex().flex_col().gap_1().min_w_0().flex_1().child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).child(trs(&r.label))), &r.note, "dim"))
             .child(chips(cx, light, &r.buttons, i, false)).into_any_element(),
         "paste" => div().py_2().flex().flex_col().gap_2()
-            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs(&r.note)))
+            .child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c("dim")), trs(&r.note)))
             .children(r.fields.iter().filter_map(|f| field_box(fields, light, raw, &f.name))).into_any_element(),
         "actions" => div().py_3().flex().items_center().justify_between().gap_3()
-            .child(div().text_size(crate::scale::tpx(11.)).text_color(c(if r.note.contains("again") { "bad" } else { "dim" })).child(trs(&r.note)))
+            .child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(11.)).text_color(c(if r.note.contains("again") { "bad" } else { "dim" })), trs(&r.note)))
             .child(chips(cx, light, &r.buttons, i, false)).into_any_element(),
         "tool" => div().ml(px(48.)).py(px(6.)).flex().items_center().gap_3().border_b_1().border_color(c("line"))
             .child(div().flex_1().min_w_0().flex().flex_col().gap(px(1.))
-                .child(div().text_size(crate::scale::tpx(12.)).text_color(if raw["toggle"]["on"] == false { c("faint") } else { c("text") }).child(r.label.clone()))
+                .child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(if raw["toggle"]["on"] == false { c("faint") } else { c("text") }), r.label.clone()))
                 .when(!r.note.is_empty(), |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.note.clone()))))
             .children(switch(cx, light, &raw["toggle"], format!("set-{i}-t"))).into_any_element(),
         "card" => {
