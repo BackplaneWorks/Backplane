@@ -416,14 +416,18 @@ impl Backplane {
                                 .children((!proj.is_empty()).then(|| div().min_w_0().overflow_hidden().text_ellipsis().text_color(c("dim")).child(proj)))
                                 .child(div().flex_shrink_0().child(ago)))
                             .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element()
-                    } else { div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().relative().child(div().min_w_0().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(sub.to_string())))
+                    } else { div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().relative().child(div().flex_shrink().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(sub.to_string())))
                         // held Ctrl: this row's Ctrl+digit; held Alt, in the Active view: its project's Alt+digit; over the title's end, so nothing moves (screens/hints.rs)
-                        .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).or_else(|| (!sub.is_empty()).then(|| crate::screens::hints::digit_of(&self.screens.hold_projects, pid)).flatten()).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element() })
+                        .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).or_else(|| (!sub.is_empty()).then(|| crate::screens::hints::digit_of(&self.screens.hold_projects, pid)).flatten()).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n))))
+                        // under the pointer: the hover-only actions over the title's end, on the row's hover colour, so they take no width from it
+                        .child({ let g = pin_group.clone(); let raise = c("raise");
+                            crate::screens::siderow::actions_of(cx, light, t, g.clone(), &crate::screens::siderow::hover_actions(t)).absolute().right_0().top_0().bottom_0().px(px(2.)).group_hover(g, move |s| s.bg(raise)) }).into_any_element() })
                     // under the pointer: Snooze (a span from its menu; Wake on a snoozed row), Settle in one press (the hub's `settle`: a stop that asks
-                    // nothing), the pin (always on a pinned row). On a two-line row they lie over the title's end, so they take no width from it
-                    .child({ let g = pin_group.clone();
-                        let acts = crate::screens::siderow::action_strip(cx, light, t, g.clone());
-                        if inbox { let raise = c("raise"); acts.absolute().right(px(8.)).top(px(4.)).px(px(2.)).group_hover(g, move |s| s.bg(raise)) } else { acts.flex_shrink_0() } })
+                    // nothing), the pin (always on a pinned row). On a two-line row they lie over the title's end, so they take no width from it;
+                    // on a one-line row only a pinned row's pin is here, in the row, so the title never runs under a pin that is always drawn
+                    .children({ let g = pin_group.clone();
+                        if inbox { let acts = crate::screens::siderow::action_strip(cx, light, t, g.clone()); let raise = c("raise"); Some(acts.absolute().right(px(8.)).top(px(4.)).px(px(2.)).group_hover(g, move |s| s.bg(raise))) }
+                        else { crate::screens::siderow::always_drawn(t).map(|a| crate::screens::siderow::actions_of(cx, light, t, g, &[a]).flex_shrink_0()) } })
                     .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id)) // (another machine's thread: its name, dim; none for this machine's)
                     .children((labelled && !inbox).then(|| pill.clone_el()).flatten()) // under its project: the label before its age
                     .children((!inbox).then(|| { let want = if labelled { String::new() } else { string(t, "want") }; // a red row says what it wants where its age goes (0.14 Side.want, r01); the label says it now
