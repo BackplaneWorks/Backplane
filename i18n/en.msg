@@ -3997,6 +3997,12 @@ android.download.share = Share
 android.download.retry = Retry
 android.download.noapp = No app here opens that file.
 android.download.button = Download
+mobile.diff.summary = {files} files, +{added} −{removed}
+mobile.diff.summary.one = 1 file, +{added} −{removed}
+mobile.diff.new = new
+mobile.diff.deleted = deleted
+mobile.diff.renamed = renamed
+mobile.diff.binary = binary
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
 ios.alerts.ask = Bub can alert you when a thread needs you.

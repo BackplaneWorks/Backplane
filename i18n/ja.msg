@@ -4020,6 +4020,12 @@ android.download.share = 共有
 android.download.retry = 再試行
 android.download.noapp = このファイルを開けるアプリがありません。
 android.download.button = ダウンロード
+mobile.diff.summary = {files} ファイル、+{added} −{removed}
+mobile.diff.summary.one = 1 ファイル、+{added} −{removed}
+mobile.diff.new = 新規
+mobile.diff.deleted = 削除
+mobile.diff.renamed = 名前変更
+mobile.diff.binary = バイナリ
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
