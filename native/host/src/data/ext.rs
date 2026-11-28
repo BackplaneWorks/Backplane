@@ -286,7 +286,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value, is_browser: 
         "machines.page" | "machines.page.act" | "devices.page" | "devices.page.act" | "notify.page" | "notify.page.act" | "ring.list" | "ring.get" | "ring.search" | "ring.hear" | "ring.send" | "ring.setup" | "ring.page" | "ring.page.act" | "mcp.page" | "mcp.page.act" | "browser.page" | "browser.page.act" => {
             rpc(hub, c, m, p.clone()).await.map(|mut r| { if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } } r })
         }
-        "viewer.diff" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
+        "viewer.diff" | "viewer.git" | "review.page" | "review.tick" | "review.comment" | "review.list" => review(hub, c, m, p).await?,
         "thread.work" => Ok(json!({"thread":s(p, "thread"),"subs":work_now(hub, s(p, "thread")).await})),
         // feature "subview": one subagent's own timeline (present/panels.rs `sub_view`), opened from its fold row's `tool.sub` or its Subagents row's `key`
         "thread.sub" => { let (th, k) = (s(p, "thread"), s(p, "key")); if th.is_empty() || k.is_empty() { return Some(Err(err("thread and key"))) }
@@ -823,6 +823,17 @@ async fn review(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Resu
             "viewer.diff" => {
                 let mut q = json!({"thread":th}); for k in ["from", "to"] { if p.get(k).is_some() { q[k] = p[k].clone() } }
                 rpc(hub, c, "git.diff", q).await.map(result)
+            }
+            // the Diff header's Commit & push and PR (the desktop's `git` actions): the hub's git.act in the thread's folder, the message its title;
+            // the answer's `text` is git's lines ("commit: …", "push: …", "pr: <url>" or "error: …"). No Revert from a phone; a linked machine's thread: not from here.
+            "viewer.git" => {
+                let action = s(p, "action");
+                if !matches!(action, "commit_push" | "commit_push_pr") { return Err(err("action: commit_push or commit_push_pr")) }
+                if machines::is_far(th) { return Err(err("Commit & push runs on the machine the thread is on.")) }
+                // git's own words either way: a failure's are in its `result.text` too (files/mod.rs `git.act`), not in `error`
+                let r = hub.request_here(c, &json!({"id":0,"m":"git.act","p":{"thread":th,"action":action}})).await.into_iter().find(|v| v["t"] == "reply").ok_or_else(|| err("no answer"))?;
+                let text = r["result"]["text"].as_str().or(r["error"].as_str()).unwrap_or("").trim().to_string();
+                if r["ok"] == true { Ok(json!({"text":text})) } else { Err(err(if text.is_empty() { "error: git" } else { &text })) }
             }
             "review.page" => {
                 let (page, mut q) = (s(p, "page"), json!({"thread":th}));

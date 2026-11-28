@@ -1104,10 +1104,24 @@ private fun DiffTab(thread: DThread) {
     var err by remember { mutableStateOf("") }
     var n by remember { mutableIntStateOf(0) }
     LaunchedEffect(thread.id, n) { diff = null; err = ""; runCatching { DataClient.diff(thread.id) }.onSuccess { diff = it.first; nogit = it.second }.onFailure { err = it.message ?: "" } }
+    // the desktop Diff header's Commit & push and PR (no Revert from a phone): each asks first; git's answer stays under the header
+    var asking by remember { mutableStateOf("") }; var acting by remember { mutableStateOf(false) }; var said by remember(thread.id) { mutableStateOf("") }; var saidBad by remember(thread.id) { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val canAct = !diff.isNullOrBlank() && nogit.isEmpty() && !acting && !thread.id.contains('~')
+    if (asking.isNotEmpty()) AlertDialog(onDismissRequest = { asking = "" }, shape = dShapeDialog,
+        title = { Text(if (asking == "commit_push") Msg.palette_commit else Msg.android_diff_pr, fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold) },
+        text = { Text(if (asking == "commit_push") Msg.android_diff_commit_ask else Msg.android_diff_pr_ask, fontFamily = BpUi, fontSize = 14.sp) },
+        confirmButton = { DBtn(if (asking == "commit_push") Msg.palette_commit else Msg.android_diff_pr, true, modifier = Modifier.testTag("diff.act.confirm")) { val a = asking; asking = ""; acting = true; said = ""; saidBad = false
+            scope.launch { said = try { DataClient.gitAct(thread.id, a) } catch (e: Exception) { saidBad = true; e.message ?: Msg.android_failed_generic } finally { acting = false }; n++ } } },
+        dismissButton = { DBtn(Msg.common_cancel, false, modifier = Modifier.testTag("diff.act.cancel")) { asking = "" } })
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            DMono(Msg.android_changes_head, dcs.onSurfaceVariant, 11, Modifier.weight(1f).padding(start = 4.dp)); DBtn(Msg.common_refresh, false, modifier = Modifier.testTag("diff.refresh")) { n++ }
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            DMono(Msg.android_changes_head, dcs.onSurfaceVariant, 11, Modifier.weight(1f).padding(start = 4.dp))
+            DBtn(Msg.palette_commit, false, canAct, Modifier.testTag("diff.commit"), small = true) { asking = "commit_push" }
+            DBtn(Msg.android_diff_pr, false, canAct, Modifier.testTag("diff.pr"), small = true) { asking = "commit_push_pr" }
+            DBtn(Msg.common_refresh, false, modifier = Modifier.testTag("diff.refresh"), small = true) { n++ }
         }
+        if (said.isNotEmpty()) androidx.compose.foundation.text.selection.SelectionContainer { DMono(Tr.t(said), if (saidBad || said.lines().any { it.startsWith("error") }) dcs.error else dcs.onSurfaceVariant, 11, Modifier.fillMaxWidth().background(dcs.surfaceVariant).padding(horizontal = 12.dp, vertical = 4.dp).testTag("diff.act.said"), lines = 6) }
         DLine()
         val d = diff
         when {

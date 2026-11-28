@@ -1492,12 +1492,17 @@ struct DTicked: Decodable { var ticked: DReport
 struct DComment: Decodable, Identifiable { var id: String; var text: String; var by: String; var parent: String; var resolved: Bool
     enum CodingKeys: String, CodingKey { case id, text, by, parent, resolved }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); text = c.str(.text); by = c.str(.by); parent = c.str(.parent); resolved = c.bool(.resolved) } }
+struct DGitText: Decodable { var text: String
+    enum CodingKeys: String, CodingKey { case text }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); text = (try? c.decode(String.self, forKey: .text)) ?? "" } }
 struct DComments: Decodable { var comments: [DComment]
     enum CodingKeys: String, CodingKey { case comments }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); comments = (try? c.decode([DComment].self, forKey: .comments)) ?? [] } }
 
 extension DataClient {
     func diff(_ thread: String) async throws -> DDiff { try await call("viewer.diff", ["thread": thread]) }
+    /// The Diff header's Commit & push (`commit_push`) and PR (`commit_push_pr`): the hub's git in the thread's folder; git's answer lines.
+    func gitAct(_ thread: String, _ action: String) async throws -> String { (try await call("viewer.git", ["thread": thread, "action": action]) as DGitText).text }
     func reviewPage(_ thread: String, _ page: String) async throws -> DReport { (try await call("review.page", ["thread": thread, "page": page]) as DReportReply).report }
     func tick(_ thread: String, _ index: Int) async -> [DTask]? { (try? await call("review.tick", ["thread": thread, "index": index]) as DTicked)?.ticked.tasks }
     func comments(_ thread: String) async throws -> [DComment] { (try await call("review.list", ["thread": thread]) as DComments).comments }
@@ -1515,10 +1520,23 @@ struct DataDiffTab: View {
     @State private var open: [String: Bool] = [:]
     @State private var err = ""
     @State private var n = 0
+    // the desktop Diff header's Commit & push and PR (no Revert from a phone): each asks first; git's answer stays under the header
+    @State private var asking = ""
+    @State private var acting = false
+    @State private var said = ""
+    @State private var saidBad = false
+    private var canAct: Bool { !(diff?.diff.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true) && (diff?.nogit.isEmpty ?? false) && !acting && !thread.id.contains("~") }
     var body: some View {
         VStack(spacing: 0) {
-            HStack { Text(Tr.t("CHANGES")).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary); Spacer(); Button(Tr.t("Refresh")) { n += 1 }.accessibilityIdentifier("data.diff.refresh") }
+            HStack(spacing: 12) {
+                Text(Tr.t("CHANGES")).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary); Spacer()
+                Button(Tr.t("Commit & push")) { asking = "commit_push" }.disabled(!canAct).accessibilityIdentifier("data.diff.commit")
+                Button(Tr.k("android.diff.pr")) { asking = "commit_push_pr" }.disabled(!canAct).accessibilityIdentifier("data.diff.pr")
+                Button(Tr.t("Refresh")) { n += 1 }.accessibilityIdentifier("data.diff.refresh")
+            }
                 .padding(8).background(BackplaneDesign.panel)
+            if !said.isEmpty { Text(verbatim: said).dmono(11).foregroundStyle(saidBad || said.split(separator: "\n").contains { $0.hasPrefix("error") } ? BackplaneDesign.bad : BackplaneDesign.dim).textSelection(.enabled).lineLimit(6)
+                .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 12).padding(.vertical, 4).background(BackplaneDesign.panel).accessibilityIdentifier("data.diff.said") }
             Divider()
             if !err.isEmpty { Text(Tr.t(err)).foregroundStyle(BackplaneDesign.bad).font(.footnote).padding(16) }
             else if let d = diff {
@@ -1540,6 +1558,13 @@ struct DataDiffTab: View {
             } else { ProgressView().padding(24) }
             Spacer(minLength: 0)
         }
+        .confirmationDialog(asking == "commit_push" ? Tr.t("Commit & push") : Tr.k("android.diff.pr"), isPresented: Binding(get: { !asking.isEmpty }, set: { if !$0 { asking = "" } }), titleVisibility: .visible) {
+            Button(asking == "commit_push" ? Tr.t("Commit & push") : Tr.k("android.diff.pr")) {
+                let a = asking; asking = ""; acting = true; said = ""; saidBad = false
+                Task { do { said = try await client.gitAct(thread.id, a) } catch { said = error.localizedDescription; saidBad = true }; acting = false; n += 1 }
+            }.accessibilityIdentifier("data.diff.act.confirm")
+            Button(Tr.t("Cancel"), role: .cancel) {}
+        } message: { Text(Tr.k(asking == "commit_push" ? "android.diff.commit.ask" : "android.diff.pr.ask")) }
         .task(id: n) {
             diff = nil; parsed = nil; err = ""
             do { let d = try await client.diff(thread.id); parsed = DiffModel.parse(d.diff); diff = d } catch { self.err = error.localizedDescription }

@@ -561,6 +561,13 @@ impl crate::api::RpcHandler for PushState {
     hub.commit(&json!({"$":"SettingSet","key":"summary.t1","value":"Routing the rail; DRC left.","at":1700000060})).await.unwrap();
     let r = ask(&mut ws, 5, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["detail"], "Routing the rail; DRC left.", "{r}");
 }
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_viewer_git_takes_commit_push_and_pr_only() {
+    // the Diff header's two actions from a phone; Revert and anything else is refused before git is asked, and a browser may not ask at all
+    let (_hub, port) = up("vgit").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    for a in ["revert", "", "init", "push"] { let r = ask(&mut ws, 1, "viewer.git", json!({"thread":"t2","action":a})).await; assert_eq!(r["ok"], false, "{a}: {r}"); }
+    assert_eq!(ask(&mut ws, 2, "viewer.git", json!({"thread":"nope","action":"commit_push"})).await["ok"], false, "unknown thread");
+    assert!(matches!(super::webpolicy::policy("viewer.git", &json!({"thread":"t2","action":"commit_push"})), super::webpolicy::Policy::Denied));
+}
 #[test] fn data_a_messages_attached_files_are_listed() {
     // a file (not a picture) sent with a message: its line is not shown, so the entry lists it for the phone's chip, by its own name
     let t = "read this\n\n[attachment: /h/attachments/t1/k9f-data sheet.pdf]\n[attachment: /h/attachments/t1/k1-x.png]\n[attachment: /p/notes.csv]";

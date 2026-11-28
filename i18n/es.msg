@@ -4005,6 +4005,9 @@ mobile.diff.deleted = eliminado
 mobile.diff.renamed = renombrado
 mobile.diff.binary = binario
 android.attach.file = Elegir un archivo
+android.diff.pr = PR
+android.diff.commit.ask = ¿Confirmar los cambios de este hilo con su título como mensaje y enviarlos?
+android.diff.pr.ask = ¿Confirmar los cambios de este hilo, enviarlos y abrir una pull request?
 
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} ejecutándose
