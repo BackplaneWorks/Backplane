@@ -436,7 +436,9 @@ impl Backplane {
             div().flex_1().flex().justify_center().items_start().child(div().w_full().max_w(px(930.)).px_4().py_4().text_color(c("dim")).child(trs("No posts yet."))).into_any_element()
         } else {
             let meta = meta.clone();
-            list(self.screens.swarm_list.clone(), cx.processor(move |this, ix, _, cx| this.swarm_row(ix, &meta, cx))).flex_1().min_h_0().into_any_element()
+            div().flex_1().min_h_0().relative().flex().flex_col()
+                .child(list(self.screens.swarm_list.clone(), cx.processor(move |this, ix, _, cx| this.swarm_row(ix, &meta, cx))).flex_1().min_h_0())
+                .child(super::scrollbar::bar("swarm", super::scrollbar::Src::List(self.screens.swarm_list.clone()), light)).into_any_element()
         };
 
         let board = div().id("swarm-board").flex_1().min_h_0().relative().flex().flex_col()

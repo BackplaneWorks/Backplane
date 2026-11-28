@@ -838,7 +838,9 @@ impl Backplane {
         self.screens.parts.side_ctl = ctl;
         /* i18n-ok: a key context */ div().id("sidebar").size_full().flex().flex_col().track_focus(&self.screens.side_focus).key_context("Sidebar")
             .child(div().id("crew").flex_none().flex().flex_col().border_b_1().border_color(c("line")).children(crew))
-            .child(div().id("sidebar-list").flex_1().min_h_0().overflow_y_scroll().pb_3().children(rows)).into_any_element()
+            .child(div().flex_1().min_h_0().relative().flex().flex_col()
+                .child(div().id("sidebar-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.screens.side_scroll).pb_3().children(rows))
+                .child(crate::screens::scrollbar::bar("sidebar", crate::screens::scrollbar::Src::Handle(self.screens.side_scroll.clone()), light))).into_any_element()
     }
     /// The viewer's page, a part of the window (part.rs): a board or schematic is drawn again only when the page itself changed, not for
     /// a hover in the sidebar or the caret's blink.
