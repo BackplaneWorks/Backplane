@@ -5199,3 +5199,4 @@ settings.cad.mech.tab = Mech tab
 settings.cad.mech.tab.note = Where a mechanical part opens on the desktop: in SolidCraft, to view and edit it, or in Backplane's own 3D viewer, view only and quick. The Mech tab's header switches between them for a while.
 settings.cad.mech.solidcraft = SolidCraft
 settings.cad.mech.backplane = Backplane's viewer
+common.cut = Cut

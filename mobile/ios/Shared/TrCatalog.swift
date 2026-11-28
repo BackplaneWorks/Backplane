@@ -5056,6 +5056,7 @@ settings.cad.mech.tab	Mech tab	Mech タブ	Pestaña Mech
 settings.cad.mech.tab.note	Where a mechanical part opens on the desktop: in SolidCraft, to view and edit it, or in Backplane's own 3D viewer, view only and quick. The Mech tab's header switches between them for a while.	デスクトップで機械部品を開く場所：SolidCraft（表示と編集）または Backplane の 3D ビューアー（表示のみ、高速）。Mech タブのヘッダーでしばらくの間切り替えられます。	Dónde se abre una pieza mecánica en el escritorio: en SolidCraft, para verla y editarla, o en el visor 3D de Backplane, solo para ver y más rápido. La cabecera de la pestaña Mech cambia entre ellos por un tiempo.
 settings.cad.mech.solidcraft	SolidCraft	SolidCraft	SolidCraft
 settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Visor de Backplane
+common.cut	Cut	切り取り	Cortar
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

@@ -1,7 +1,9 @@
 //! The floating terminal: the open thread's shell (the hub's `term.open`, in the thread's worktree or project folder) in a panel over the page.
 //! Ctrl+J or a bare backtick shows it and gives it the keyboard; pressed again with the keyboard in it they put it away, and with the keyboard
 //! elsewhere they bring the keyboard back to it. Shift+Esc in it puts it away and the message box has the keyboard again; outside it, Shift+Esc
-//! gives the keyboard back to it. Ctrl+Shift+C copies what the mouse selected, Ctrl+Shift+V pastes. Every other key is the shell's (keys.rs mutes
+//! gives the keyboard back to it. Ctrl+Shift+C copies what the mouse selected, Ctrl+Shift+V pastes; a double click selects a word, a triple
+//! click a row (a drag after them goes by words or rows), Shift+click extends, a right click offers Copy and Paste, and on Linux a selection is
+//! the PRIMARY selection and a middle click pastes it. Every other key is the shell's (keys.rs mutes
 //! the client's shortcuts in the `Terminal` context, so Ctrl+C, Ctrl+K, Esc and a backtick reach the program).
 //! The screen is drawn by the hub's own emulator (host/src/term/vt.rs, shared by path): the hub sends every byte the shell prints as a `term`
 //! frame, and a snapshot (`term.snap`) when this client has no screen for it yet (a shell started before, or a reconnect).
@@ -33,6 +35,9 @@ impl Sel {
     /// The two ends in reading order.
     pub fn span(&self) -> ((usize, usize), (usize, usize)) { if self.a <= self.b { (self.a, self.b) } else { (self.b, self.a) } }
 }
+/// What a drag extends by: cells after a click, words after a double click, rows after a triple.
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Unit { #[default] Cell, Word, Row }
 
 pub struct Term {
     pub open: bool,
@@ -47,6 +52,8 @@ pub struct Term {
     grid: Rc<Cell<Bounds<Pixels>>>,
     pub sel: Option<Sel>,
     dragging: bool,
+    /// What the drag extends by, and what the double or triple click selected (the drag keeps it; the bare cell on a blank).
+    unit: Unit, origin: Option<Sel>,
     /// Rows scrolled back into the scrollback (0: the live screen).
     pub scroll: usize,
     tick: u64,
@@ -149,6 +156,25 @@ pub fn selected_text(vt: &Vt, s: &Sel) -> String {
     }
     out.join("\n")
 }
+/// A double click's word: the run of non-blank characters on the row around `cell`; None on a blank (or past the row's text).
+pub fn word_at(vt: &Vt, (r, c): (usize, usize)) -> Option<Sel> {
+    let t: Vec<char> = row_text(vt, r).chars().collect();
+    if t.get(c).map_or(true, |ch| ch.is_whitespace()) { return None }
+    let a = t[..c].iter().rposition(|ch| ch.is_whitespace()).map_or(0, |i| i + 1);
+    let b = t[c..].iter().position(|ch| ch.is_whitespace()).map_or(t.len(), |i| c + i);
+    Some(Sel { a: (r, a), b: (r, b - 1) })
+}
+/// A triple click's row: column 0 to its last non-blank one; None for an empty row.
+pub fn row_sel(vt: &Vt, row: usize) -> Option<Sel> {
+    let n = row_text(vt, row).trim_end().chars().count();
+    (n > 0).then(|| Sel { a: (row, 0), b: (row, n - 1) })
+}
+/// A drag after a double or triple click: the union of what the click selected (`origin`) and the word or row under the pointer (`unit`; the
+/// bare cell on a blank), the far end of the origin its anchor.
+pub fn extend(origin: Sel, unit: Option<Sel>, cell: (usize, usize)) -> Sel {
+    let ((o0, o1), (u0, u1)) = (origin.span(), unit.map_or((cell, cell), |u| u.span()));
+    if u0 < o0 { Sel { a: o1, b: u0 } } else if u1 > o1 { Sel { a: o0, b: u1 } } else { Sel { a: o0, b: o1 } }
+}
 
 pub struct CardView<'a> { pub vt: &'a Vt, pub state: &'a str, pub focus: Option<&'a FocusHandle>, pub open: bool, pub home: (u16, u16) }
 /// The rows of a screen a card shows: (first row, how many). Collapsed, the CARD_ROWS that end at the cursor or the last written row,
@@ -183,7 +209,7 @@ pub fn shown_runs(runs: &[vt::VRun]) -> std::borrow::Cow<'_, [vt::VRun]> {
 impl Term {
     pub fn new(focus: FocusHandle) -> Term { Term { focus: Some(focus), ..Term::new_detached() } }
     pub fn new_detached() -> Term {
-        Term { open: false, key: String::new(), screens: HashMap::new(), focus: None, size: (100, 24), cell: (8., LINE_PX), grid: Rc::new(Cell::new(Bounds::default())), sel: None, dragging: false, scroll: 0, tick: 0, script: None, focus_card: None, card_focused: None, focus_panel: false, prefill: None }
+        Term { open: false, key: String::new(), screens: HashMap::new(), focus: None, size: (100, 24), cell: (8., LINE_PX), grid: Rc::new(Cell::new(Bounds::default())), sel: None, dragging: false, unit: Unit::Cell, origin: None, scroll: 0, tick: 0, script: None, focus_card: None, card_focused: None, focus_panel: false, prefill: None }
     }
     pub fn focused(&self, window: &Window) -> bool { self.focus.as_ref().is_some_and(|f| f.is_focused(window)) }
     pub fn take_keys(&self, window: &mut Window) { if let Some(f) = &self.focus { f.focus(window) } }
@@ -240,6 +266,32 @@ impl Term {
         self.size = (cols, rows);
         if let Some(s) = self.screens.get_mut(&self.key) { if (s.vt.cols(), s.vt.rows()) != (cols as usize, rows as usize) { s.vt.resize(cols as usize, rows as usize) } }
         fresh
+    }
+    /// The word or row (by `unit`) under `cell`: None for a click's cells, and on a blank.
+    fn unit_at(&self, cell: (usize, usize)) -> Option<Sel> { let vt = self.vt()?; match self.unit { Unit::Cell => None, Unit::Word => word_at(vt, cell), Unit::Row => row_sel(vt, cell.0) } }
+    /// A left press on the grid: a click starts a selection at the cell (Shift+click moves the end of the one there is), a double click selects
+    /// the word, a triple the row.
+    pub fn press(&mut self, cell: (usize, usize), clicks: usize, shift: bool) {
+        self.unit = match clicks { 2 => Unit::Word, n if n >= 3 => Unit::Row, _ => Unit::Cell };
+        self.dragging = true;
+        match (self.unit, self.sel.as_mut()) {
+            (Unit::Cell, Some(s)) if shift => { s.b = cell; self.origin = None; }
+            (Unit::Cell, _) => { self.sel = Some(Sel { a: cell, b: cell }); self.origin = None; }
+            _ => { self.sel = self.unit_at(cell); self.origin = Some(self.sel.unwrap_or(Sel { a: cell, b: cell })); }
+        }
+    }
+    /// The pointer moved to `cell` while pressed: true when the selection changed.
+    pub fn drag(&mut self, cell: (usize, usize)) -> bool {
+        if !self.dragging { return false }
+        let to = match self.origin { Some(o) => Some(extend(o, self.unit_at(cell), cell)), None => self.sel.map(|s| Sel { b: cell, ..s }) };
+        let changed = to != self.sel; self.sel = to; changed
+    }
+    /// The press ended: a click that did not move clears the selection (a double or triple click keeps its one-cell word). The text selected, if any.
+    pub fn release(&mut self) -> Option<String> {
+        if !std::mem::take(&mut self.dragging) { return None }
+        if self.unit == Unit::Cell && self.sel.is_some_and(|s| s.a == s.b) { self.sel = None; }
+        let (vt, s) = (self.vt()?, self.sel?);
+        Some(selected_text(vt, &s)).filter(|t| !t.is_empty())
     }
     /// The cell under a window position: (absolute row, column).
     fn cell_at(&self, p: Point<Pixels>) -> Option<(usize, usize)> {
@@ -426,6 +478,8 @@ impl Backplane {
         if self.screens.term.resize(c, r) { let key = self.screens.term.key.clone(); self.term_rpc("term.resize", json!({"thread": key, "cols": c, "rows": r})); }
     }
     fn term_key(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) {
+        // Esc shuts the panel's right-click menu (the keyboard stays here while it is open) rather than reaching the shell
+        if self.screens.ctx.is_some() && e.keystroke.key == "escape" && !e.keystroke.modifiers.modified() { self.ctx_close(cx); cx.stop_propagation(); return }
         let Some(vt) = self.screens.term.vt() else { return };
         let bytes = bytes_for(&e.keystroke, vt);
         if bytes.is_empty() { return }
@@ -438,10 +492,31 @@ impl Backplane {
         let text = selected_text(vt, &s);
         if !text.is_empty() { cx.write_to_clipboard(ClipboardItem::new_string(text)); }
     }
-    fn term_paste(&mut self, cx: &mut Context<Self>) {
-        let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) else { return };
+    fn term_paste(&mut self, cx: &mut Context<Self>) { if let Some(text) = cx.read_from_clipboard().and_then(|c| c.text()) { self.term_paste_text(&text, cx) } }
+    /// A mouse selection ended: on Linux it is the PRIMARY selection (a middle click pastes it, here or in another program).
+    fn term_released(&mut self, cx: &mut Context<Self>) {
+        let text = self.screens.term.release();
+        #[cfg(target_os = "linux")]
+        if let Some(t) = text { cx.write_to_primary(ClipboardItem::new_string(t)); }
+        #[cfg(not(target_os = "linux"))]
+        let _ = text;
+        cx.notify();
+    }
+    /// The panel's right-click menu: Copy (with a selection) and Paste, at the pointer. The keyboard stays put until an item is picked
+    /// (in the terminal, Esc would be the shell's, not the menu's).
+    fn term_menu(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let has_sel = { let t = &self.screens.term; t.vt().zip(t.sel).is_some_and(|(vt, s)| !selected_text(vt, &s).is_empty()) };
+        self.ctx_open(at, super::ctxmenu::term_items(has_sel), cx);
+    }
+    /// The menu's Copy or Paste; the keyboard goes back to the terminal.
+    pub(crate) fn term_menu_do(&mut self, what: &str, window: &mut Window, cx: &mut Context<Self>) {
+        match what { "copy" => self.term_copy(cx), "paste" => self.term_paste(cx), _ => {} }
+        self.screens.term.take_keys(window); cx.notify();
+    }
+    /// Text pasted into the shell (as a paste, bracketed when the program asked for it).
+    fn term_paste_text(&mut self, text: &str, cx: &mut Context<Self>) {
         let Some(vt) = self.screens.term.vt() else { return };
-        let bytes = vt.paste(&text); self.screens.term.scroll = 0; self.term_send(bytes); cx.notify();
+        let bytes = vt.paste(text); self.screens.term.scroll = 0; self.term_send(bytes); cx.notify();
     }
     fn term_wheel(&mut self, e: &ScrollWheelEvent, cx: &mut Context<Self>) {
         let t = &mut self.screens.term; let Some(hist) = t.vt().map(|v| v.history()) else { return };
@@ -567,14 +642,23 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
         .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, _, cx| this.term_wheel(e, cx)))
         .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
             let t = &mut this.screens.term; t.take_keys(window);
-            t.sel = t.cell_at(e.position).map(|p| Sel { a: p, b: p }); t.dragging = t.sel.is_some(); cx.stop_propagation(); cx.notify();
+            match t.cell_at(e.position) { Some(p) => t.press(p, e.click_count, e.modifiers.shift), None => t.sel = None }
+            cx.stop_propagation(); cx.notify();
         }))
         .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
             let t = &mut this.screens.term; if !t.dragging { return }
-            if let (Some(p), Some(s)) = (t.cell_at(e.position), t.sel.as_mut()) { if s.b != p { s.b = p; cx.notify(); } }
+            if let Some(p) = t.cell_at(e.position) { if t.drag(p) { cx.notify(); } }
         }))
-        .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { let t = &mut this.screens.term; t.dragging = false; if t.sel.is_some_and(|s| s.a == s.b) { t.sel = None; } cx.notify(); }))
-        .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, _| this.screens.term.dragging = false))
+        .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| this.term_released(cx)))
+        .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| this.term_released(cx)))
+        // on Linux a middle click pastes the PRIMARY selection into the shell; the selection on show stays
+        .on_mouse_down(MouseButton::Middle, cx.listener(|this, _: &MouseDownEvent, window, cx| {
+            #[cfg(target_os = "linux")]
+            { cx.stop_propagation(); this.screens.term.take_keys(window); if let Some(text) = cx.read_from_primary().and_then(|c| c.text()) { this.term_paste_text(&text, cx); } }
+            #[cfg(not(target_os = "linux"))]
+            let _ = (this, window, cx);
+        }))
+        .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); this.term_menu(e.position, cx); }))
         .child(div().h(crate::scale::tpx(HEAD)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(rgb(0x2a2f3a)).text_size(crate::scale::tpx(11.))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(rgb(vt::DEFAULT_FG)).child(label))
             .child(div().text_color(rgb(0x8a90a0)).whitespace_nowrap().child(hint))
@@ -684,5 +768,34 @@ mod tests {
         assert_eq!(selected_text(&vt, &Sel { a: (2, 1), b: (0, 4) }), "two\nthree\nfo", "either direction, trailing blanks dropped");
         let mut vt = Vt::new(10, 2); vt.feed(b"a\r\nb\r\nc\r\nd"); assert_eq!(vt.history(), 2);
         assert_eq!(selected_text(&vt, &Sel { a: (0, 0), b: (3, 0) }), "a\nb\nc\nd", "rows in the scrollback too");
+    }
+    #[test] fn a_double_click_takes_the_word_and_a_triple_the_row() {
+        let mut vt = Vt::new(40, 3); vt.feed(b"ls /home/user/a-b.txt  x\r\n\r\n  two words   ");
+        let w = |c: usize| word_at(&vt, (0, c)).map(|s| selected_text(&vt, &s));
+        assert_eq!(w(0).as_deref(), Some("ls")); assert_eq!(w(1).as_deref(), Some("ls"));
+        assert_eq!(w(8).as_deref(), Some("/home/user/a-b.txt"), "a path is one word"); assert_eq!(w(3).as_deref(), Some("/home/user/a-b.txt"));
+        assert_eq!(w(23).as_deref(), Some("x"), "a word of one cell");
+        assert_eq!(w(2), None, "on a blank, nothing"); assert_eq!(w(30), None, "past the row's text");
+        assert_eq!(row_sel(&vt, 2), Some(Sel { a: (2, 0), b: (2, 10) }), "to the last non-blank column");
+        assert_eq!(row_sel(&vt, 1), None, "an empty row");
+    }
+    #[test] fn a_drag_after_a_double_or_triple_click_goes_by_words_or_rows() {
+        let o = Sel { a: (1, 4), b: (1, 8) };
+        assert_eq!(extend(o, Some(Sel { a: (1, 12), b: (1, 15) }), (1, 13)), Sel { a: (1, 4), b: (1, 15) }, "on: the origin's start stays");
+        assert_eq!(extend(o, Some(Sel { a: (1, 0), b: (1, 2) }), (1, 1)), Sel { a: (1, 8), b: (1, 0) }, "back: the origin's end stays");
+        assert_eq!(extend(o, Some(o), (1, 6)), o, "inside: the origin");
+        assert_eq!(extend(o, None, (1, 10)), Sel { a: (1, 4), b: (1, 10) }, "a blank: its cell");
+        let row = Sel { a: (2, 0), b: (2, 9) };
+        assert_eq!(extend(row, Some(Sel { a: (4, 0), b: (4, 3) }), (4, 1)), Sel { a: (2, 0), b: (4, 3) }, "rows down");
+        assert_eq!(extend(row, Some(Sel { a: (0, 0), b: (0, 5) }), (0, 9)), Sel { a: (2, 9), b: (0, 0) }, "rows up");
+        // a double click on "world" dragged to "terminal" copies the words between, whole
+        let mut t = Term::new_detached(); t.key = "k".into(); t.ensure("k"); t.frame("k", None, b"hello world from the terminal", None, None);
+        t.press((0, 7), 2, false); assert_eq!(t.drag((0, 24)), true); assert_eq!(t.release().as_deref(), Some("world from the terminal"));
+        t.press((0, 2), 3, false); t.drag((0, 0)); assert_eq!(t.release().as_deref(), Some("hello world from the terminal"), "a triple click: the row");
+        t.press((0, 3), 1, false); assert_eq!(t.release(), None); assert_eq!(t.sel, None, "a click clears it");
+        t.press((0, 1), 1, false); t.drag((0, 3)); t.release(); t.press((0, 7), 1, true); assert_eq!(t.release().as_deref(), Some("ello wo"), "Shift+click extends from the anchor");
+        t.sel = None; t.press((0, 4), 1, true); assert_eq!(t.release(), None, "with nothing selected, a plain click");
+        t.press((0, 0), 2, false); assert_eq!(t.release().as_deref(), Some("hello"), "a double click's mouse up keeps it");
+        t.press((0, 5), 2, false); assert_eq!(t.sel, None, "a double click on a blank selects nothing");
     }
 }

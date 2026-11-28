@@ -5199,3 +5199,4 @@ settings.cad.mech.tab = Pestaña Mech
 settings.cad.mech.tab.note = Dónde se abre una pieza mecánica en el escritorio: en SolidCraft, para verla y editarla, o en el visor 3D de Backplane, solo para ver y más rápido. La cabecera de la pestaña Mech cambia entre ellos por un tiempo.
 settings.cad.mech.solidcraft = SolidCraft
 settings.cad.mech.backplane = Visor de Backplane
+common.cut = Cortar

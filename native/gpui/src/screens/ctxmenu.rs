@@ -38,12 +38,29 @@ pub const LOCAL_SOLIDCRAFT_OPEN: &str = "local:solidcraft-open";
 pub const LOCAL_DOWNLOAD: &str = "local:download";
 /// An item that opens a second menu where the first was (a project's Move to group): its `value` is the second menu's items, as JSON.
 pub const LOCAL_SUB: &str = "local:sub";
+/// A right click in a text field: the window's own items, acting on that field (`ctx_field`); the value says which ("cut", "copy", "paste", "all").
+pub const LOCAL_FIELD: &str = "local:field";
+/// A right click in the floating terminal: Copy and Paste there ("copy", "paste").
+pub const LOCAL_TERM: &str = "local:term";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 /// A right-click with text selected in the timeline: Copy and Quote (nothing without a selection).
 pub fn selection_items(selected: &str) -> Vec<Item> {
     if selected.is_empty() { vec![] }
     /* i18n-ok: menu labels, drawn through trs/t in render */ else { vec![item("Copy", LOCAL_COPY, selected, false), item("Quote", LOCAL_QUOTE, selected, false)] }
+}
+/// A text field's menu: Cut and Copy with a selection (never a secret's), Paste always, Select all with any text.
+pub fn field_items(has_sel: bool, has_text: bool) -> Vec<Item> {
+    let mut v = Vec::new();
+    /* i18n-ok: menu labels, drawn through trs in render */ if has_sel { v.extend([item("Cut", LOCAL_FIELD, "cut", false), item("Copy", LOCAL_FIELD, "copy", false)]); }
+    /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("Paste", LOCAL_FIELD, "paste", false));
+    /* i18n-ok: a menu label, drawn through trs in render */ if has_text { v.push(item("Select all", LOCAL_FIELD, "all", false)); }
+    v
+}
+/// The floating terminal's menu: Copy with a selection, Paste always.
+pub fn term_items(has_sel: bool) -> Vec<Item> {
+    /* i18n-ok: menu labels, drawn through trs in render */ let mut v = if has_sel { vec![item("Copy", LOCAL_TERM, "copy", false)] } else { vec![] };
+    /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("Paste", LOCAL_TERM, "paste", false)); v
 }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm, note: String::new() } }
 
@@ -194,6 +211,13 @@ pub fn sub_items(value: &str) -> Vec<Item> {
 /* i18n-ok: menu labels, drawn through trs in render */ fn project_rest(pid_raw: &str) -> Vec<Item> { vec![item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
+    /// A right click in a text field (composer::FieldMenu): its menu where the pointer was.
+    pub(crate) fn field_menu(&mut self, cx: &mut Context<Self>) {
+        let Some((field, at)) = super::composer::take_field_menu() else { return };
+        let Some((has_sel, has_text)) = field.upgrade().map(|f| f.read(cx).menu_state()) else { return };
+        self.screens.ctx_field = Some(field);
+        self.ctx_open(at, field_items(has_sel, has_text), cx);
+    }
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
         crate::art::forget_probes("ctx:"); crate::art::forget_probes("run-on:");
@@ -259,6 +283,13 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_DOWNLOAD => { self.ctx_close(cx); if let Some((u, n)) = v.split_once('\n') { self.download(u.to_string(), n.to_string(), super::dlbar::From::Other, cx); } return }
             Some((a, _)) if a == LOCAL_SAVE_IMAGE => { self.ctx_close(cx); if let Some(s) = self.screens.ctx_save.take() { self.save_image(s, cx); } return }
             Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); self.copy_image(cx); return }
+            // a text field's Cut, Copy, Paste, Select all: done in that field, and the keyboard goes back to it
+            Some((a, v)) if a == LOCAL_FIELD => {
+                self.ctx_close(cx);
+                if let Some(field) = self.screens.ctx_field.take().and_then(|f| f.upgrade()) { field.update(cx, |c, cx| c.menu_do(&v, window, cx)); window.focus(&field.focus_handle(cx)); }
+                return
+            }
+            Some((a, v)) if a == LOCAL_TERM => { self.ctx_close(cx); self.term_menu_do(&v, window, cx); return }
             // a second menu, where the first was (Move to group: the other groups, then New group…)
             Some((a, v)) if a == LOCAL_SUB => {
                 let items = sub_items(&v);
@@ -323,10 +354,10 @@ pub fn anchored(from: Bounds<Pixels>, window_h: Pixels, n: usize) -> Point<Pixel
     point(from.origin.x, y)
 }
 
-/// The menu over everything, with a backdrop that closes it.
+/// The menu over everything, with a backdrop that closes it; never past the window's edge.
 pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let mut list = div().absolute().left(m.at.x).top(m.at.y).min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).occlude();
+    let mut list = div().min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).occlude();
     for (i, it) in m.items.iter().enumerate() {
         let armed = m.armed == Some(i);
         let label = if armed { shown_armed_label(it) } else if it.action == LOCAL_SUB { format!("{} \u{203a}", crate::i18n::trs(&it.label)) } else if it.action == LOCAL_QUOTE { crate::i18n::t("menu.quote") } else { crate::i18n::trs(&it.label) };
@@ -338,7 +369,8 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
     div().id("ctx-backdrop").absolute().inset_0().occlude()
         .on_click(cx.listener(|this, _, _, cx| { this.ctx_close(cx); }))
         .on_mouse_down(MouseButton::Right, cx.listener(|this, _, _, cx| { this.ctx_close(cx); }))
-        .child(list).into_any_element()
+        // at the pointer, flipped above or to its left when it would go past the window's edge (a right click near the bottom: a field's menu)
+        .child(gpui::anchored().position(m.at).child(list)).into_any_element()
 }
 
 #[cfg(test)]
@@ -498,6 +530,21 @@ mod tests {
             assert!(items.iter().any(|i| i.action == LOCAL_SOLIDCRAFT_OPEN && i.label == "Open in SolidCraft"), "{p}");
         }
         assert!(!link_items("board.kicad_pcb", true, None).iter().any(|i| i.action == LOCAL_SOLIDCRAFT_OPEN));
+    }
+    #[test] fn a_text_fields_menu_offers_what_it_can_do() {
+        let labels = |v: Vec<Item>| v.iter().map(|i| { assert_eq!(i.action, LOCAL_FIELD); (i.label.clone(), i.value.clone()) }).collect::<Vec<_>>();
+        let l = |a: &str, b: &str| (a.to_string(), b.to_string());
+        assert_eq!(labels(field_items(false, false)), [l("Paste", "paste")], "an empty field: Paste only");
+        assert_eq!(labels(field_items(false, true)), [l("Paste", "paste"), l("Select all", "all")], "no selection");
+        assert_eq!(labels(field_items(true, true)), [l("Cut", "cut"), l("Copy", "copy"), l("Paste", "paste"), l("Select all", "all")]);
+        for (lang, want) in [("ja", ["切り取り", "コピー", "貼り付け", "すべて選択"]), ("es", ["Cortar", "Copiar", "Pegar", "Seleccionar todo"])] {
+            crate::i18n::with_lang(lang, || assert_eq!(field_items(true, true).iter().map(|i| crate::i18n::trs(&i.label)).collect::<Vec<_>>(), want, "{lang}"));
+        }
+    }
+    #[test] fn the_terminals_menu_copies_only_a_selection_and_always_pastes() {
+        let l = |v: Vec<Item>| v.into_iter().map(|i| { assert_eq!(i.action, LOCAL_TERM); (i.label, i.value) }).collect::<Vec<_>>();
+        assert_eq!(l(term_items(true)), [("Copy".to_string(), "copy".to_string()), ("Paste".to_string(), "paste".to_string())]);
+        assert_eq!(l(term_items(false)), [("Paste".to_string(), "paste".to_string())]);
     }
     #[test] fn selection_items_offer_copy_and_quote_when_non_empty() {
         assert!(selection_items("").is_empty());

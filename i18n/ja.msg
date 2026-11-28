@@ -5222,3 +5222,4 @@ settings.cad.mech.tab = Mech タブ
 settings.cad.mech.tab.note = デスクトップで機械部品を開く場所：SolidCraft（表示と編集）または Backplane の 3D ビューアー（表示のみ、高速）。Mech タブのヘッダーでしばらくの間切り替えられます。
 settings.cad.mech.solidcraft = SolidCraft
 settings.cad.mech.backplane = Backplane のビューアー
+common.cut = 切り取り
