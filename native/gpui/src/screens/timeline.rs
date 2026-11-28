@@ -120,7 +120,7 @@ impl Registry {
     pub fn extend(&mut self, head: Pos) {
         match (self.keyed.clone(), self.key(head)) { (Some((a, _)), Some(h)) => { self.keyed = Some((a, h)); self.sel.head = head; } _ => self.select(Selection { anchor: head, head }) }
     }
-    /// Extend an active drag according to its mode (character, double-click word, or triple-click block).
+    /// Extend an active drag according to its mode (character, double-click word, or triple-click line).
     pub fn extend_drag(&mut self, pos: Pos) {
         let Some(b) = self.blocks.get(pos.block) else { return };
         let (target_start, target_end) = match self.drag_mode {
@@ -129,7 +129,7 @@ impl Registry {
                 let w = select::word_at(&b.text, pos.off);
                 (Pos { block: pos.block, off: w.start }, Pos { block: pos.block, off: w.end })
             }
-            DragMode::Block => (Pos { block: pos.block, off: 0 }, Pos { block: pos.block, off: b.text.len() }),
+            DragMode::Block => { let l = select::line_at(&b.text, pos.off); (Pos { block: pos.block, off: l.start }, Pos { block: pos.block, off: l.end }) }
         };
         let Some((oa, ob)) = self.drag_origin.clone() else { self.select(Selection { anchor: target_start, head: target_end }); return; };
         let before = self.ord(&oa).map_or_else(|| pos < self.sel.anchor, |a| pos < a);
@@ -212,7 +212,7 @@ impl Registry {
         Some(Pos { block: i, off })
     }
     /// A press of the left button at `p` (`pos`: where `hit_scoped` puts it): a click puts the caret there (Shift extends the selection), a double
-    /// click selects the word and a triple the block, and the drag that follows goes by the same unit. Only on a block itself: off every block
+    /// click selects the word and a triple the line (a block without newlines: the block), and the drag that follows goes by the same unit. Only on a block itself: off every block
     /// (a margin, a fold's head, a button) a double or triple click clears the selection as a click does. True when it picked text.
     pub fn press(&mut self, p: Point<Pixels>, pos: Pos, clicks: usize, shift: bool, rows_only: bool) -> bool {
         let texts = self.texts();
@@ -224,7 +224,7 @@ impl Registry {
                 self.drag_mode = DragMode::Word; self.drag_origin = self.keyed.clone();
             }
             n if n >= 3 && direct => {
-                if let Some(s) = select::block_range(&texts, pos.block) { self.select(s); }
+                if let Some(s) = select::line_range(&texts, pos) { self.select(s); }
                 self.drag_mode = DragMode::Block; self.drag_origin = self.keyed.clone();
             }
             _ => {
@@ -2008,6 +2008,19 @@ mod tests {
         r.drag_mode = DragMode::Block; r.drag_origin = r.keyed.clone();
         r.extend_drag(Pos { block: 0, off: 3 });
         assert_eq!(select::extract(&r.texts(), &r.sel), "alpha beta gamma\n\ndelta epsilon");
+    }
+
+    #[test] fn a_triple_drag_grows_by_lines() {
+        let mut r = Registry::default();
+        frame(&mut r, &[("e1", 0, "a b\ncd ef\n\ngh"), ("e2", 0, "x1\ny2")]);
+        let p = |block, off| Pos { block, off };
+        r.select(select::line_range(&r.texts(), p(0, 5)).unwrap()); r.drag_mode = DragMode::Block; r.drag_origin = r.keyed.clone();
+        assert_eq!(select::extract(&r.texts(), &r.sel), "cd ef", "a triple click: the line");
+        r.extend_drag(p(0, 12)); assert_eq!(r.sel.ordered(), (p(0, 4), p(0, 13)));
+        r.extend_drag(p(0, 1)); assert_eq!(r.sel.ordered(), (p(0, 0), p(0, 9)), "back above: the anchor line stays");
+        r.extend_drag(p(0, 6)); assert_eq!(r.sel.ordered(), (p(0, 4), p(0, 9)));
+        r.extend_drag(p(1, 1)); assert_eq!(select::extract(&r.texts(), &r.sel), "cd ef\n\ngh\n\nx1", "into the next block: its line at the pointer");
+        r.extend_drag(p(1, 4)); assert_eq!(select::extract(&r.texts(), &r.sel), "cd ef\n\ngh\n\nx1\ny2");
     }
 
     #[test] fn drag_scroll_delta_clamps_above_below_and_inside_viewport() {
