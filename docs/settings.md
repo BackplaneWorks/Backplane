@@ -12,15 +12,16 @@ desktop draws what the menu rows say and sorts nothing.
 | System | Setup (with Import from 0.14 and Developer), Privacy, About and updates (with Network) |
 
 Pages are by topic. Each menu row carries `group`, `words` (its rows' labels, one a line, from the page as it stands: a row the page does
-not show now, such as Install FreeCAD once FreeCAD is found, is not there), `notes` (each label's note on the same line), `also` (plain
+not show now, such as Install FreeCAD once FreeCAD is found, is not there, nor is a heading, a label with nothing else such as Git or Web UI:
+the page is found by those through `aka`), `notes` (each label's note on the same line), `also` (plain
 words each row is found by on the same line, `ALSO`: what it does or was called, "night" for Quiet hours, "telemetry" for Share anonymous
 usage; a test holds that every key is a row) and `aka` (other names the page is found by, one a line: what it was called before, such as
-Time zone, Writing or Network and updates, or what it holds, such as Webhook or Tailscale). The desktop's search matches titles, aka names,
+Time zone, Writing or Network and updates, or what it holds, such as Webhook, Tailscale or Paired devices). The desktop's search matches titles, aka names,
 labels, notes and also words (this device's rows too, with a small table of their own). While the box holds something the page area lists
 what it found ("N found", one line a setting: its label, its note on one line, its page at the right; a page found only by its name is its
 own line), and the page list stays whole and in place: pages with nothing found dimmed, the others with their count. A press on a result
 (or Enter, on the one Up and Down highlight) opens its page, opens Advanced if the row is under it, scrolls the row into view and lights it
-for 1.5 s; the search text stays, and Esc or an empty box returns to the page as it was. Eight pages were folded into their
+for 1.5 s (Esc or another page puts the light out at once); the search text stays, and Esc or an empty box returns to the page as it was. Eight pages were folded into their
 neighbours: the ids `web`, `ring`, `import`, `developer`, `timezone`, `writing`, `git` and `network` still open Devices, Voice, Setup,
 Setup, Notifications, Agents, Threads and git, and About and updates (`canon`: a `settings-page` press, a saved session, a
 `backplane://settings/<id>` link). A test (`settings_inventory_is_all_still_reachable`) holds the list of every setting, action and field
@@ -41,10 +42,15 @@ attachment (Threads and git), each input of Mouse and trackpad under "Board and 
 (CAD), and Developer (Setup).
 
 Rows follow one pattern. A switch says On and Off (the values stay `on` and `off`). A text box and its button share the row's line, the
-box narrowed by the button. A page row the hub marks `"changed": true` lights another choice than a fresh hub would (`mark_changed`: the
+box narrowed by the button. A field the hub says is short (`field_w`: `"w"`, about how many characters it holds; quiet hours' From and Until,
+Machines' pairing code) is drawn that wide, on one line with the row's other short boxes and its buttons, at the right edge the row's chips
+share; a longer box before it keeps its own line above. The phones ignore `w`. A page row the hub marks `"changed": true` lights another choice than a fresh hub would (`mark_changed`: the
 page built again from an empty state, rows matched by label); with `"reset": {action, value}` it says the press that puts it back, and the
 desktop draws a small mark after the label and Reset beside it. This computer's rows are marked the same way against a fresh install, and a
-shortcut when its key is not its default (Shortcuts to defaults puts them back). Setup's rows, which read the disk, are not marked. A row
+shortcut when its key is not its default, with Reset beside it for that one (Shortcuts to defaults puts them all back). A press on a
+shortcut's button waits for its keys ("Type the keys…"): the next chord with Ctrl, Alt or Cmd (or a function key) becomes the shortcut. One
+that another shortcut answers to, or a key the app keeps (Enter, Esc, Tab, a plain letter), changes nothing and the row says why until the
+next press; Esc (Settings stays open) or a press elsewhere ends the wait. Setup's rows, which read the disk, are not marked. A row
 marked `"intro": true` is a paragraph that opens a group (Notify me for, Webhook, Standing rules, Task board, API keys, Ordering's How it
 works, Provider and model for new threads): drawn as a heading with its words under it, not as a setting.
 
