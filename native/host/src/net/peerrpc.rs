@@ -23,7 +23,9 @@ impl RpcHandler for PeerRpc {
                     r.extend(super::homemove::rows(uber, &at, hub.info_now()["home.move"].as_str().unwrap_or(""), &d["linked"]));
                     r.extend(super::alwayson::rows::machines_rows(&hub.info_now(), hub.setting(super::alwayson::other::STAYS_ON).await.as_deref() == Some("on")));
                     // `busy`: a sign-in panel there changes by itself now; the phones read the page again every 2 s while it says so
-                    let info = hub.info_now(); r.extend(crate::present::signin_there::open_rows(&info)); ok(id, json!({"rows": r, "busy": crate::present::signin_there::busy(&info)})) }
+                    let info = hub.info_now(); r.extend(crate::present::signin_there::open_rows(&info));
+                    // the rarely needed ones marked and last, as on the desktop's Machines page
+                    let r = crate::present::settings::mark_adv("machines", r); ok(id, json!({"rows": r, "busy": crate::present::signin_there::busy(&info)})) }
                 "machines.page.act" => match super::machinespage::act(&self.0, hub, &s("action"), &s("value"), &p["fields"]).await { Ok(x) => ok(id, x), Err(e) => err(id, &e) },
                 "machines.code" => match self.0.make_code().await { Ok(x) => ok(id, x), Err(e) => err(id, &e) },
                 "machines.pair" => match self.0.pair_with(hub, &s("address"), &s("code")).await { Ok((a, c)) => ok(id, json!({"attempt": a, "check": c})), Err(e) => err(id, &e) },

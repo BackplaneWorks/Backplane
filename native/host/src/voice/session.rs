@@ -331,7 +331,7 @@ impl Voice {
         hub.set_info("voice.job", &if err.is_empty() { String::new() } else { json!({"error": err}).to_string() }).await;
         self.st.lock().unwrap().job = false; self.page(&hub, client).await;
     }
-    async fn page(&self, hub: &Arc<Hub>, client: u64) { let rows = page::rows(&prefs(hub).await, &hub.info_now(), "", ""); hub.push(client, frame("", "page", json!({"rows": rows}))); }
+    async fn page(&self, hub: &Arc<Hub>, client: u64) { let rows = page::phone_rows(&prefs(hub).await, &hub.info_now()); hub.push(client, frame("", "page", json!({"rows": rows}))); }
     async fn op_job(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, cmd: &'static str, model: &str) -> Result<(), String> {
         if crate::copy::on() { return Err("A hub on a copied log cannot install or remove voice models.".into()) }
         { let mut g = self.st.lock().unwrap(); if g.job { return Err("A model operation is already running.".into()) } g.job = true; }
@@ -440,7 +440,7 @@ impl RpcHandler for VoiceRpc {
                 "always" => { let want = super::always::Cfg::of(&prefs(hub).await).on; let running = v.st.lock().unwrap().always.as_ref().map_or(false, |a| !a.off);
                     hub.push(who.client, frame("", "always", json!({"want": want, "running": running}))); ok(json!({"want": want, "running": running})) }
                 "act" => done(v.act(hub, who.client, p).await),
-                "page" => { let rows = page::rows(&prefs(hub).await, &hub.info_now(), "", ""); ok(json!({"rows": rows})) }
+                "page" => { let rows = page::phone_rows(&prefs(hub).await, &hub.info_now()); ok(json!({"rows": rows})) }
                 "page-act" => done(v.page_act(hub, who.client, s(p, "action"), s(p, "value")).await),
                 "install" => done(v.op_job(hub, who.client, "local-install", s(p, "model")).await),
                 "remove" => done(v.op_job(hub, who.client, "local-remove", s(p, "model")).await),

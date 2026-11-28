@@ -90,7 +90,8 @@ pub fn el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fie
             .children(string(raw, "text").lines().take(14).map(|l| div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(l.to_string())).collect::<Vec<_>>()).into_any_element(),
         "empty" => div().my_2().p_6().flex().flex_col().items_center().gap_2().border_1().border_dashed().border_color(c("line"))
             .child(crate::art::icon("plug", 22., c("faint"))).child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)))
-            .child(div().max_w(px(460.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).text_center().child(trs(&r.note))).child(div().pt_2().child(chips(cx, light, &r.buttons, i, false))).into_any_element(),
+            .when(!r.note.is_empty(), |d| d.child(div().max_w(px(460.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).text_center().child(trs(&r.note))))
+            .when(!r.buttons.is_empty(), |d| d.child(div().pt_2().child(chips(cx, light, &r.buttons, i, false)))).into_any_element(),
         "panel" => div().mt_3().pt_3().pb_2().flex().items_center().justify_between().gap_3().border_t_1().border_color(c("accent"))
             .child(note(div().flex().flex_col().gap_1().min_w_0().flex_1().child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).child(trs(&r.label))), &r.note, "dim"))
             .child(chips(cx, light, &r.buttons, i, false)).into_any_element(),

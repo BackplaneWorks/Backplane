@@ -11,33 +11,58 @@ desktop draws what the menu rows say and sorts nothing.
 | Connect | Devices (with Web UI: browser access, forwarding setup, the web address), Machines |
 | System | Setup (with Import from 0.14 and Developer), Privacy, About and updates (with Network) |
 
-Pages are by topic. Each menu row carries `group`, `words` (its rows' labels, one a line), `notes` (each label's note on the same line)
-and `aka` (other names the page is found by, one a line: what it was called before, such as Time zone, Writing or Network and updates,
-or what it holds, such as Webhook or Tailscale). The desktop's search matches titles, aka names, labels and notes (this device's own page
-too), names the first settings found under each page, and Enter opens the first page found. Eight pages were folded into their
+Pages are by topic. Each menu row carries `group`, `words` (its rows' labels, one a line, from the page as it stands: a row the page does
+not show now, such as Install FreeCAD once FreeCAD is found, is not there, nor is a heading, a label with nothing else such as Git or Web UI:
+the page is found by those through `aka`), `notes` (each label's note on the same line), `also` (plain
+words each row is found by on the same line, `ALSO`: what it does or was called, "night" for Quiet hours, "telemetry" for Share anonymous
+usage; a test holds that every key is a row) and `aka` (other names the page is found by, one a line: what it was called before, such as
+Time zone, Writing or Network and updates, or what it holds, such as Webhook, Tailscale or Paired devices). The desktop's search matches titles, aka names,
+labels, notes and also words (this device's rows too, with a small table of their own). While the box holds something the page area lists
+what it found ("N found", one line a setting: its label, its note on one line, its page at the right; a page found only by its name is its
+own line), and the page list stays whole and in place: pages with nothing found dimmed, the others with their count. A press on a result
+(or Enter, on the one Up and Down highlight) opens its page, opens Advanced if the row is under it, scrolls the row into view and lights it
+for 1.5 s (Esc or another page puts the light out at once); the search text stays, and Esc or an empty box returns to the page as it was. Eight pages were folded into their
 neighbours: the ids `web`, `ring`, `import`, `developer`, `timezone`, `writing`, `git` and `network` still open Devices, Voice, Setup,
 Setup, Notifications, Agents, Threads and git, and About and updates (`canon`: a `settings-page` press, a saved session, a
 `backplane://settings/<id>` link). A test (`settings_inventory_is_all_still_reachable`) holds the list of every setting, action and field
 the pages had before they were regrouped, so none is lost. The desktop puts this computer's own settings on the page of their topic, under
-"This device" above the hub's rows ("Every device"): Language, Theme, Text size, Font, the 3D background and the layout on Appearance,
+"This device" above the hub's rows ("Every device", left out where the hub's part opens with a heading of its own, Notifications' Notify me for):
+Language, Theme, Text size, Font, the 3D background and the layout on Appearance,
 Desktop notifications on Notifications, Streamer mode on Privacy. It adds three pages of its own: Keyboard (before Mouse and trackpad;
-the keys that cannot be changed under Advanced), Hubs (after Machines), both kept on this computer, and Accounts (leading Agents). A page
-opens at its top. The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
-the regrouping, and the web client its own dialog (`web/src/settings.ts`).
+Shortcuts to defaults first, the keys that cannot be changed under Advanced), Hubs (after Machines), both kept on this computer, and
+Accounts (leading Agents). A page opens at its top. The gear opens Settings on the page it was left on while the app runs (Appearance the
+first time; `settings::reopen`). Notifications puts the Time zone right after the quiet hours it governs; automatic, its note says so on a
+second line (no row of its own), and set by hand a row offers going back to automatic. What the hub refuses of a press in Settings (a Pair,
+a Save) is said in red on the page title's line (no row moves) until the next press, page or close, not on the thread behind; a row whose note is an error
+(quiet times, a zone name, the webhook's address) has `"tone": "bad"`. The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
+the regrouping, and the web client its own dialog (`web/src/settings.ts`). The phones' `voice.page`, `notify.page` and `machines.page` replies
+(and Voice's `page` frame) carry the same `adv` marks, their rows in the same order (`mark_adv`, below).
 
 A row marked `"adv": true` is rarely needed: a client folds these under Advanced at the end of the page, and a client that does not
 know the mark draws them where they are, last (the hub puts them after every other row, each part in its own order; a heading so
-marked comes only before rows so marked). Under Advanced: the webhook (Notifications), Short grace for read conversations and Largest
-attachment (Threads and git), each input of Mouse and trackpad under "Board and schematic: each input" and "3D and STEP: each input"
-(the page itself shows the zoom direction and the two presets), Bots: infinite context, the failover order and the writing model
-(Agents), How eager, End of turn: Jev, Voice commands and Send after silence (Voice), KiCad over its API, Board 3D and Open designs in
-(CAD), and Developer (Setup).
+marked comes only before rows so marked). Under Advanced: the webhook and iPhones that hear a push while there are none (Notifications),
+Short grace for read conversations and Largest attachment (Threads and git), each input of Mouse and trackpad under "Board and schematic:
+each input" and "3D and STEP: each input" (the page itself shows the zoom direction and the two presets), Bots: infinite context, the
+failover order and the writing model (Agents), Dictionary, Learned fixes, Pebble ring, How eager, End of turn: Jev, Jev check, Voice
+commands and Send after silence (Voice), KiCad over its API, Board 3D and Open designs in (CAD), Home, Home move and This machine stays on
+(Machines), and Developer (Setup). Rows are picked by label from one table (`present/settings.rs` `ADV`; whole parts such as the webhook or
+Developer are marked where the page adds them) and `mark_adv` marks and orders a page's rows for the desktop and the phones alike. A row that
+warns (`tone`: a home move that failed) is never folded, nor a machine's own row, whatever the person called it. The phones do not address
+these rows by position, so an app that does not know the mark draws the same rows, these last.
 
-Rows follow one pattern. A switch says On and Off (the values stay `on` and `off`). A text box and its button share the row's line, the
-box narrowed by the button. A page row the hub marks `"changed": true` lights another choice than a fresh hub would (`mark_changed`: the
+Rows follow one pattern. A switch says On and Off (the values stay `on` and `off`); a choice's chip is capitalised the same way
+(Projects, Auto, Stable, Normal, Native...; a program's name such as kicad-cli as it is), its value unchanged. A text box and its button share the row's line, the
+box narrowed by the button. A field the hub says is short (`field_w`: `"w"`, about how many characters it holds; quiet hours' From and Until,
+Machines' pairing code) is drawn that wide, on one line with the row's other short boxes and its buttons, at the right edge the row's chips
+share; a longer box before it keeps its own line above. The phones ignore `w`. Quiet hours' Save takes the two boxes as sent: a box sent
+empty (the desktop sends the one not touched empty) is the saved end, else the default's, both empty change nothing, and a typed time that
+is not HH:MM or makes the two ends the same is refused (`quiet_save`, for the desktop's row and `notify.page.act` alike). A page row the hub marks `"changed": true` lights another choice than a fresh hub would (`mark_changed`: the
 page built again from an empty state, rows matched by label); with `"reset": {action, value}` it says the press that puts it back, and the
 desktop draws a small mark after the label and Reset beside it. This computer's rows are marked the same way against a fresh install, and a
-shortcut when its key is not its default (Shortcuts to defaults puts them back). Setup's rows, which read the disk, are not marked. A row
+shortcut when its key is not its default, with Reset beside it for that one (Shortcuts to defaults puts them all back). A press on a
+shortcut's button waits for its keys ("Type the keys…"): the next chord with Ctrl, Alt or Cmd (or a function key) becomes the shortcut. One
+that another shortcut answers to, or a key the app keeps (Enter, Esc, Tab, a plain letter), changes nothing and the row says why until the
+next press; Esc (Settings stays open) or a press elsewhere ends the wait. Setup's rows, which read the disk, are not marked. A row
 marked `"intro": true` is a paragraph that opens a group (Notify me for, Webhook, Standing rules, Task board, API keys, Ordering's How it
 works, Provider and model for new threads): drawn as a heading with its words under it, not as a setting.
 

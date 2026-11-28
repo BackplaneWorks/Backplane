@@ -977,6 +977,7 @@ impl Render for Backplane {
         self.term_layout(window, cx);
         self.term_script(window, cx);
         self.find_seek(window);
+        crate::screens::settings::land(self, window, cx);
         let mut focused_backplane = false;
         if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); focused_backplane = true; }
         if std::mem::take(&mut self.screens.acct.script_menu) { self.combo_account(window, cx); }
@@ -1349,6 +1350,8 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) { for (id, label) in [("@keys", "Keyboard"), ("@hubs", "Hubs"), ("@accounts", "Accounts")] { ctl.push(CtlEntry { id: format!("set-nav:{id}"), label: label.into(), ctl: Ctl::SettingsPage(id.into()) }); } }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         /* i18n-ok: registered controls the e2e drivers press */ if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
+        // the search's results while the page area lists them: `set-hit:<page>:<n>`, the page's `n`th
+        /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::settings::is_open(self) && crate::screens::settings::results_shown(&self.screens.settings_ui) { let mut at: std::collections::HashMap<String, usize> = Default::default(); for (page, _, f) in crate::screens::settings::results(self) { let n = at.entry(page.clone()).or_default(); ctl.push(CtlEntry { id: format!("set-hit:{page}:{n}"), label: f.label.clone(), ctl: Ctl::SettingsHit(page.clone(), *n) }); *n += 1; } }
         // the shown page's Advanced fold, while it has one: `set-adv:<page>`
         /* i18n-ok: registered controls the e2e drivers press */ if let Some(p) = crate::screens::settings::adv_shown(self) { ctl.push(CtlEntry { id: format!("set-adv:{p}"), label: "Advanced".into(), ctl: Ctl::SettingsAdv(p) }); }
         // Settings > CAD's Install KiCad buttons (Install KiCad, Install, Cancel, Try again): `set:<action>`
@@ -1388,6 +1391,13 @@ impl Render for Backplane {
         if !ACT_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
             let weak = cx.entity().downgrade();
             cx.intercept_keystrokes(move |_, _, cx| { let _ = weak.update(cx, |this, _| crate::screens::kicad_update::person_acted(this)); }).detach();
+        }
+        // a shortcut waiting for its keys in Settings › Keyboard takes the next key typed, before any binding acts on it (Esc too: it ends the
+        // wait and shuts nothing): screens/settings.rs `recorded`. Registered once
+        static REC_WATCH: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        if !REC_WATCH.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            let weak = cx.entity().downgrade();
+            cx.intercept_keystrokes(move |ev, _, cx| { if weak.update(cx, |this, cx| crate::screens::settings::recorded(this, &ev.keystroke, cx)).unwrap_or(false) { cx.stop_propagation(); } }).detach();
         }
         let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")).capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, window, cx| { crate::keys::tip_pressed(e.position); crate::screens::kicad_update::person_acted(this); this.solidcraft_reclaim_to(window, cx); })),self.picker_keys(),self.screens.ctx.is_some(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(crate::scale::tpx(13.)).font_family(self.local.font.clone()).line_height(crate::scale::tpx(20.))
