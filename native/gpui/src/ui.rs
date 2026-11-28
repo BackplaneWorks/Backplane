@@ -925,6 +925,7 @@ impl Render for Backplane {
         crate::screens::desk::tick(self, window, cx);
         self.term_layout(window, cx);
         self.term_script(window, cx);
+        self.find_seek(window);
         let mut focused_backplane = false;
         if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); focused_backplane = true; }
         if std::mem::take(&mut self.screens.acct.script_menu) { self.combo_account(window, cx); }

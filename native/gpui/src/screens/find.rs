@@ -24,6 +24,8 @@ pub struct Find {
     pub want: String,
     /// the message marked in the timeline, and the one still being looked for (older pages on their way) with the pages read for it
     pub mark: String, pub going: Option<String>, pub pages: u32,
+    /// the message the timeline went to, its words not yet in view: the frames waited for its row to be drawn (`find_seek`)
+    pub seek: Option<(String, u8)>,
 }
 
 /// The query the hub is asked for: two characters or more (its own rule).
@@ -46,6 +48,23 @@ pub fn matches_of(result: &Value) -> (Vec<String>, usize, bool) {
 }
 /// Where a message is in the rows held: its own row (a message is a row of its id).
 pub fn row_of(rows: &[Value], msg: &str) -> Option<usize> { rows.iter().position(|e| e["id"].as_str() == Some(msg)) }
+/// The words found in a message's drawn blocks (in reading order): the first block holding the whole query (case aside), else the first
+/// holding its first word (the hub finds every word, anywhere in the message), and the byte range there.
+pub fn match_in(blocks: &[&str], q: &str) -> Option<(usize, std::ops::Range<usize>)> {
+    let q = q.trim();
+    let find = |w: &str| blocks.iter().enumerate().find_map(|(i, t)| find_ci(t, w).map(|at| (i, at..at + w.len())));
+    if q.is_empty() { return None }
+    find(q).or_else(|| q.split_whitespace().next().filter(|w| *w != q).and_then(find))
+}
+/// `w` in `t`, ASCII case aside (byte offsets of `t`).
+fn find_ci(t: &str, w: &str) -> Option<usize> {
+    if w.is_empty() || w.len() > t.len() { return None }
+    (0..=t.len() - w.len()).find(|&i| t.is_char_boundary(i) && t.as_bytes()[i..i + w.len()].eq_ignore_ascii_case(w.as_bytes()))
+}
+/// How far into its message the list starts so the found line stands a third of the way down the list (`y`: the line's top within the message).
+pub fn scroll_into(y: Pixels, list_h: Pixels) -> Pixels { (y - list_h / 3.).max(px(0.)) }
+/// Frames waited at most for the message's row to be drawn after the list went to it.
+const SEEK_FRAMES: u8 = 20;
 
 /// The bar's answer (false: not the bar's tag).
 pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
@@ -101,11 +120,11 @@ impl Backplane {
     /// Shut the bar: the mark goes, the keys go back to the message box.
     pub(crate) fn find_close(&mut self, cx: &mut Context<Self>) -> bool {
         if !self.screens.find.open && self.screens.find.mark.is_empty() { return false }
-        self.screens.find.open = false; self.screens.find.mark.clear(); self.screens.find.going = None; self.want_focus = true; cx.notify(); true
+        self.screens.find.open = false; self.screens.find.mark.clear(); self.screens.find.going = None; self.screens.find.seek = None; self.want_focus = true; cx.notify(); true
     }
     fn find_reset(&mut self, cx: &mut Context<Self>) {
         let f = &mut self.screens.find;
-        f.matches.clear(); f.total = 0; f.more = false; f.ix = 0; f.hits_q.clear(); f.asked = (0, String::new()); f.mark.clear(); f.going = None; f.want.clear(); f.q.clear();
+        f.matches.clear(); f.total = 0; f.more = false; f.ix = 0; f.hits_q.clear(); f.asked = (0, String::new()); f.mark.clear(); f.going = None; f.seek = None; f.want.clear(); f.q.clear();
         if let Some(i) = f.input.clone() { i.update(cx, |i, cx| i.set(String::new(), cx)); }
     }
     /// The words changed: after a pause the hub is asked for the thread's matches (the last answer for the words on show is the one kept).
@@ -129,6 +148,33 @@ impl Backplane {
         f.ix = step(f.ix, f.matches.len(), forward);
         let msg = f.matches[f.ix].clone(); self.find_go(msg); cx.notify();
     }
+    /// After the list went to a found message (at its top): once its row is drawn, the words themselves, a third of the way down the list and
+    /// selected (the selection's colour marks them; a long message's match is often far below its top). Waits a few frames at most, then stops.
+    pub(crate) fn find_seek(&mut self, window: &mut Window) {
+        let Some((msg, n)) = self.screens.find.seek.clone() else { return };
+        let Some(ix) = self.data["thread"]["entries"].as_array().and_then(|r| row_of(r, &msg)) else { self.screens.find.seek = None; return };
+        // the first frame after the list moved lays the row out; its blocks are known from the next
+        let found = if n == 0 { None } else {
+            let reg = self.screens.reg.borrow();
+            let blocks: Vec<(usize, &super::timeline::Info)> = reg.blocks.iter().enumerate().filter(|(_, b)| b.id == msg).collect();
+            let texts: Vec<&str> = blocks.iter().map(|(_, b)| b.text.as_str()).collect();
+            match_in(&texts, &self.screens.find.q).and_then(|(i, r)| {
+                let (ord, b) = blocks[i];
+                let y = b.layout.as_ref()?.position_for_index(r.start)?.y;
+                let item = self.timeline.bounds_for_item(ix)?;
+                Some((ord, r, y - item.top()))
+            })
+        };
+        match found {
+            Some((ord, r, y)) => {
+                self.timeline.scroll_to(ListOffset { item_ix: ix, offset_in_item: scroll_into(y, self.timeline.viewport_bounds().size.height) });
+                self.screens.reg.borrow_mut().select(super::select::Selection { anchor: super::select::Pos { block: ord, off: r.start }, head: super::select::Pos { block: ord, off: r.end } });
+                self.screens.find.seek = None; window.refresh();
+            }
+            None if n < SEEK_FRAMES => { self.screens.find.seek = Some((msg, n + 1)); window.request_animation_frame(); }
+            None => self.screens.find.seek = None,
+        }
+    }
     /// Show a message: marked, and the timeline at it once its row is held.
     pub(crate) fn find_go(&mut self, msg: String) {
         self.screens.find.mark = msg.clone(); self.screens.find.going = Some(msg); self.screens.find.pages = 0;
@@ -142,7 +188,7 @@ impl Backplane {
         self.screens.seeking = None; // a place kept from the last visit gives way to the message asked for
         if let Some(ix) = self.data["thread"]["entries"].as_array().and_then(|r| row_of(r, &msg)) {
             self.timeline.scroll_to(ListOffset { item_ix: ix, offset_in_item: px(0.) });
-            self.screens.find.going = None; return;
+            self.screens.find.going = None; self.screens.find.seek = Some((msg, 0)); return;
         }
         let older = crate::string(&self.data["thread"], "historyOlder");
         if older.is_empty() || self.screens.find.pages >= PAGES { self.screens.find.going = None; return; } // the start of the thread: it is not there
@@ -187,6 +233,15 @@ mod tests {
     #[test] fn the_count_says_where_the_reader_is() {
         assert_eq!(count(2, 12, false, true), "3 of 12"); assert_eq!(count(0, 1000, true, true), "1 of 1000+");
         assert_eq!(count(0, 0, false, true), "No matches"); assert_eq!(count(0, 0, false, false), "", "nothing before the hub answers");
+    }
+    #[test] fn the_words_are_found_in_the_message_and_put_a_third_down_the_list() {
+        let b = ["Long report", "Paragraph 46: the anode on V46 reads 246 V", "Paragraph 47: the anode on V47 reads 247 V", "V47 again"];
+        assert_eq!(match_in(&b, "V47"), Some((2, 27..30)), "the first block that holds it, and where");
+        assert_eq!(match_in(&b, "v47"), Some((2, 27..30)), "case aside");
+        assert_eq!(match_in(&b, "anode V47"), Some((1, 18..23)), "words apart: the first word's first place");
+        assert_eq!(match_in(&b, "V99"), None); assert_eq!(match_in(&b, " "), None); assert_eq!(match_in(&[], "V47"), None);
+        assert_eq!(match_in(&["Gr\u{fc}\u{df}e V47"], "v47"), Some((0, 8..11)), "byte offsets past non-ASCII letters");
+        assert_eq!(scroll_into(px(1200.), px(600.)), px(1000.)); assert_eq!(scroll_into(px(100.), px(600.)), px(0.), "near the top: the message's top");
     }
     #[test] fn the_hubs_answer_is_its_matches_in_order() {
         let r = json!({"q": "pine", "matches": [{"msg": "m1"}, {"msg": "m4"}], "total": 2, "more": false});
