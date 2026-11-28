@@ -11,7 +11,23 @@ pub struct Item { pub label: String, pub action: String, pub value: String, pub 
 #[derive(Clone, Debug)]
 pub struct Menu { pub at: Point<Pixels>, pub items: Vec<Item>, /// the item whose confirming click is awaited
     pub armed: Option<usize>, /// the probe ids of its entries are `<probe>:<label>` ("ctx" unless the opener names its own, e.g. "run-on")
-    pub probe: &'static str }
+    pub probe: &'static str, /// the highlighted row: Up/Down/Home/End move it, the pointer over a row puts it there, Enter or Space takes it
+    pub cur: Option<usize> }
+impl Menu { pub fn new(at: Point<Pixels>, items: Vec<Item>, probe: &'static str) -> Self { Menu { at, items, armed: None, probe, cur: None } } }
+
+/// A key that moves a menu's highlight.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Nav { Up, Down, Home, End }
+/// Where the highlight goes: Down and Up wrap round (with none, Down takes the first row and Up the last), Home and End jump; an empty menu has none.
+pub fn step(cur: Option<usize>, n: usize, key: Nav) -> Option<usize> {
+    if n == 0 { return None }
+    Some(match (key, cur.filter(|&i| i < n)) {
+        (Nav::Home, _) | (Nav::Down, None) => 0,
+        (Nav::End, _) | (Nav::Up, None) => n - 1,
+        (Nav::Down, Some(i)) => (i + 1) % n,
+        (Nav::Up, Some(i)) => (i + n - 1) % n,
+    })
+}
 
 /// The ▾ menu's "Find in thread": the window's own (the find bar over that thread, find.rs).
 pub const LOCAL_SEARCH: &str = "local:search-thread";
@@ -228,7 +244,7 @@ impl Backplane {
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
         crate::art::forget_probes("ctx:"); crate::art::forget_probes("run-on:");
-        self.screens.ctx = Some(Menu { at, items, armed: None, probe: "ctx" }); cx.notify();
+        self.screens.ctx = Some(Menu::new(at, items, "ctx")); cx.notify();
     }
     /// A file named in a message: the hub opens it (or shows it in its folder) on its machine; a relative path is from the thread's folder.
     /// A file link pressed (or its menu's Open): the hub opens it inside Backplane (`link-file`: its project's thread, the viewer tab that draws
@@ -267,13 +283,22 @@ impl Backplane {
         let at = anchored(from, window_h, items.len());
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
         crate::art::forget_probes("ctx:"); crate::art::forget_probes("run-on:");
-        self.screens.ctx = Some(Menu { at, items, armed: None, probe }); cx.notify();
+        self.screens.ctx = Some(Menu::new(at, items, probe)); cx.notify();
     }
     pub(crate) fn ctx_close(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(m) = self.screens.ctx.take() else { return false };
         crate::art::forget_probes(&format!("{}:", m.probe));
         if let Some(c) = disarm(&m) { let _ = self.tx.try_send(c); }
         cx.notify(); true
+    }
+    /// Up/Down/Home/End in an open menu, wherever the keyboard is (keys.rs binds them under `CtxMenu` at each field's depth, so the field behind it never gets them).
+    pub(crate) fn ctx_nav(&mut self, key: Nav, cx: &mut Context<Self>) {
+        let Some(m) = self.screens.ctx.as_mut() else { return };
+        m.cur = step(m.cur, m.items.len(), key); cx.notify();
+    }
+    /// Enter or Space: what a click on the highlighted row does (a Delete's first press arms it, the second does it); nothing highlighted, nothing done.
+    pub(crate) fn ctx_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(i) = self.screens.ctx.as_ref().and_then(|m| m.cur) { self.ctx_click(i, window, cx) }
     }
     fn ctx_click(&mut self, i: usize, window: &mut Window, cx: &mut Context<Self>) {
         let Some(m) = self.screens.ctx.as_mut() else { return };
@@ -301,13 +326,13 @@ impl Backplane {
             // a second menu, where the first was (Move to group: the other groups, then New group…)
             Some((a, v)) if a == LOCAL_SUB => {
                 let items = sub_items(&v);
-                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu { at, items, armed: None, probe }); cx.notify(); return
+                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu::new(at, items, probe)); cx.notify(); return
             }
             // the second menu, where the first was: the threads this one may go under
             Some((a, v)) if a == LOCAL_MOVE => {
                 let (tid, project) = v.split_once('|').unwrap_or((v.as_str(), ""));
                 let items = parent_choices(&self.data, project, tid);
-                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu { at, items, armed: None, probe }); cx.notify(); return
+                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu::new(at, items, probe)); cx.notify(); return
             }
             _ => {}
         }
@@ -367,11 +392,16 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
     let c = |n: &str| theme::color(light, n);
     let mut list = div().min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).occlude();
     for (i, it) in m.items.iter().enumerate() {
-        let armed = m.armed == Some(i);
+        let (armed, lit) = (m.armed == Some(i), m.cur == Some(i));
         let label = if armed { shown_armed_label(it) } else if it.action == LOCAL_SUB { format!("{} \u{203a}", crate::i18n::trs(&it.label)) } else if it.action == LOCAL_QUOTE { crate::i18n::t("menu.quote") } else { crate::i18n::trs(&it.label) };
         let danger = it.confirm;
         list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("ctx-{i}"))), { let (l, pr) = (it.label.clone(), m.probe); move || format!("{pr}:{l}") }).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
-            .when(armed, |d| d.bg(c("raise")).font_weight(FontWeight::BOLD)).hover(|s| s.bg(c("raise"))).child(label)
+            .when(armed, |d| d.font_weight(FontWeight::BOLD)).when(armed || lit, |d| d.bg(c("raise"))).child(label)
+            // one highlight: the pointer over a row moves the keyboard's there (the row's hover look is the highlight)
+            .on_hover(cx.listener(move |this, over: &bool, _, cx| if let Some(m) = this.screens.ctx.as_mut() {
+                let to = if *over { Some(i) } else if m.cur == Some(i) { None } else { m.cur };
+                if to != m.cur { m.cur = to; cx.notify(); }
+            }))
             .on_click(cx.listener(move |this, _, window, cx| this.ctx_click(i, window, cx))));
     }
     div().id("ctx-backdrop").absolute().inset_0().occlude()
@@ -455,9 +485,18 @@ mod tests {
         let pinned = j(r#"{"id":"t1","pinned":true}"#); assert_eq!(thread_items(&pinned, "p")[0].action, "row-unpin");
     }
     fn sent(c: &Option<Command>) -> Option<(String, String)> { match c { Some(Command::Action(a, v)) => Some((a.clone(), v.clone())), _ => None } }
+    #[test] fn the_keyboard_moves_the_highlight_round_the_menu() {
+        use Nav::*;
+        assert_eq!(step(None, 3, Down), Some(0), "the first Down takes the first row"); assert_eq!(step(None, 3, Up), Some(2), "the first Up the last");
+        assert_eq!(step(Some(0), 3, Down), Some(1)); assert_eq!(step(Some(2), 3, Down), Some(0), "Down wraps round"); assert_eq!(step(Some(0), 3, Up), Some(2), "Up wraps round");
+        assert_eq!(step(Some(1), 3, Home), Some(0)); assert_eq!(step(None, 3, End), Some(2)); assert_eq!(step(None, 3, Home), Some(0));
+        assert_eq!(step(Some(7), 3, Down), Some(0), "a row past the end (a shorter second menu) counts as none");
+        for k in [Up, Down, Home, End] { assert_eq!(step(None, 0, k), None, "an empty menu has no highlight"); assert_eq!(step(Some(0), 0, k), None); }
+        assert_eq!(step(Some(0), 1, Down), Some(0)); assert_eq!(step(Some(0), 1, Up), Some(0));
+    }
     #[test] fn delete_asks_in_the_menu_and_the_second_click_deletes() {
         let t = j(r#"{"id":"http://h:1|t7","pinned":false}"#);
-        let mut m = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx" };
+        let mut m = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx", cur: None };
         let del = m.items.iter().position(|i| i.action == "row-delete").unwrap();
         let s1 = press(&mut m, del, &Value::Null);
         assert_eq!(sent(&s1.send), Some(("row-delete".into(), "http://h:1|t7".into())), "the first click arms the hub's confirm"); assert!(!s1.close && m.armed == Some(del));
@@ -465,16 +504,16 @@ mod tests {
         let armed = j(r#"{"deleting":{"id":"http://h:1|t7"}}"#);
         let s2 = press(&mut m, del, &armed); assert_eq!(sent(&s2.send), Some(("row-delete".into(), "http://h:1|t7".into()))); assert!(s2.close, "the second click deletes and shuts the menu");
         // the hub forgot the armed delete in between (a sidebar page): the click arms it again, the menu stays
-        let mut m2 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: Some(del), probe: "ctx" };
+        let mut m2 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: Some(del), probe: "ctx", cur: None };
         let s3 = press(&mut m2, del, &Value::Null); assert!(!s3.close && sent(&s3.send).is_some());
         // shut with Delete armed: the hub's confirm goes too; shut with nothing armed sends nothing
         assert_eq!(sent(&disarm(&m2)), Some(("delete-no".into(), String::new()))); m2.armed = None; assert!(disarm(&m2).is_none());
         // a project's Remove asks in the menu, the hub hears only the second click
-        let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None, probe: "ctx" };
+        let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None, probe: "ctx", cur: None };
         let s = press(&mut p, 5, &Value::Null); assert!(s.send.is_none() && !s.close); assert_eq!(armed_label(&p.items[5]), "Click again to remove"); assert!(disarm(&p).is_none());
         let s = press(&mut p, 5, &Value::Null); assert_eq!(sent(&s.send), Some(("proj-remove".into(), "p1".into()))); assert!(s.close);
         // any other item does what it says at once
-        let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx" }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
+        let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx", cur: None }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
     }
     #[test] fn the_thread_names_menu_asks_before_its_delete_too() {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},"projects":[]}"#);

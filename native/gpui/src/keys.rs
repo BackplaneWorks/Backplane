@@ -8,7 +8,7 @@ use serde_json::Value;
 
 actions!(keys, [NewThread, NewChat, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, AlwaysOn, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
     AccountMenu, Account1, Account2, Account3, Account4, Account5, Account6, Account7, Account8, Account9,
-    PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
+    PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter, MenuUp, MenuDown, MenuHome, MenuEnd, MenuEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
     RailBoard, RailSchematic, Rail3d, RailGerbers, RailSimulation, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, MgmtPlan, TogglePlanMode, CommentKicad, Quit, CloseWindow, HideApp, HideOthers, ShowAll]);
@@ -37,6 +37,11 @@ actions!(keys, [NewThread, NewChat, OpenDiff, OpenFiles, StopTurn, ModelPicker, 
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const NOT_FIELD: &str = "!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 /// The open model menu has its keys wherever the keyboard is: the window says `Picker` while it is open, and these bind at the depth of each text field, after the field's own keys, so they come first.
 /* i18n-ok: key contexts */ const PICK_SCOPES: [&str; 6] = ["Picker", "Picker > Composer", "Picker > PickInput", "Picker > TextInput", "Picker > AskInput", "Picker > ImpInput"];
+/// An open right-click menu (ctxmenu.rs) has its keys wherever the keyboard is, as the model menu: the window says `CtxMenu` while it is open, and
+/// these bind at the depth of each place that has keys of its own (the fields, the shell, a copy button, a viewer), after theirs, so they come first
+/// and nothing behind the menu moves (Down leaves the caret, Enter sends nothing).
+/* i18n-ok: key contexts */ const MENU_SCOPES: [&str; 14] = ["CtxMenu", "CtxMenu > Composer", "CtxMenu > PickInput", "CtxMenu > TextInput", "CtxMenu > AskInput", "CtxMenu > ImpInput",
+    /* i18n-ok: key contexts */ "CtxMenu > FindInput", "CtxMenu > PadLength", "CtxMenu > Terminal", "CtxMenu > Copyable", "CtxMenu > CopyRun", "CtxMenu > Viewer", "CtxMenu > FilesPage", "CtxMenu > Sidebar"];
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Kind { Legacy, Rebind, Fixed }
@@ -210,6 +215,11 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     v.extend(window_bindings(mac()));
     // last: a copy button's keys win over the window's Ctrl+C at the same depth, and nothing above is derived from them (pad_bindings, term_bindings)
     v.extend(crate::screens::copyable::bindings());
+    // after even those: an open right-click menu's keys come first wherever the keyboard is
+    for c in MENU_SCOPES.map(Some) {
+        v.extend([KeyBinding::new(key("menu-up"), MenuUp, c), KeyBinding::new(key("menu-down"), MenuDown, c), KeyBinding::new("home", MenuHome, c), KeyBinding::new("end", MenuEnd, c),
+            KeyBinding::new(key("menu-enter"), MenuEnter, c), KeyBinding::new("space", MenuEnter, c)]);
+    }
     v
 }
 /// Cmd+Q quits the desktop client on a Mac (the hub runs on by itself), Cmd+W closes the window (the red button's path, `Backplane::close_window`)
@@ -329,24 +339,73 @@ fn has_tool(data: &Value, action: &str) -> bool { data["thread"]["tools"].as_arr
 static TIP_FONT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 pub fn set_tip_font(font: &str) { let mut f = TIP_FONT.lock().unwrap(); if *f != font { *f = font.to_string() } }
 pub fn tip_font() -> String { TIP_FONT.lock().unwrap().clone() }
-struct Tip(SharedString, bool);
+/// Tooltips get out of the way: none is drawn while a right-click menu is open (`set_tip_menu`, each draw), and a press hides the one of the
+/// element pressed until the pointer has left it. GPUI shows a tooltip half a second after the pointer stops, also when the press came in
+/// that half second, and again at the next move over the element: so a press (`tip_pressed`, the window's every mouse down) hushes the
+/// tooltips, a tooltip made while hushed draws nothing, and when that one goes (GPUI drops it once the pointer is off its element) the hush ends.
+/// Each press is a new hush (a number): a quiet tooltip of an earlier press, dropped after this one, does not end this one. A pointer that left
+/// the pressed element before any tooltip of it was made leaves no quiet one to go: a tooltip made farther than `TIP_REACH` from the press ends
+/// the hush instead (the next button's tooltip shows).
+static TIP_MENU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+static TIP_PRESSES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static TIP_HUSH: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+static TIP_AT: std::sync::Mutex<(f32, f32)> = std::sync::Mutex::new((0., 0.));
+const TIP_REACH: f32 = 12.;
+pub fn set_tip_menu(open: bool) { TIP_MENU.store(open, std::sync::atomic::Ordering::Relaxed) }
+pub fn tip_pressed(at: Point<Pixels>) {
+    *TIP_AT.lock().unwrap() = (f32::from(at.x), f32::from(at.y));
+    let n = TIP_PRESSES.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1; TIP_HUSH.store(n, std::sync::atomic::Ordering::Relaxed)
+}
+/// Carried by every tooltip view: the hush it was made under (0: none), whether it may draw now.
+pub(crate) struct Hush(u64);
+impl Hush {
+    /// For a tooltip made with the pointer at `at`.
+    pub(crate) fn new(at: Point<Pixels>) -> Self {
+        let h = TIP_HUSH.load(std::sync::atomic::Ordering::Relaxed);
+        let (px_, py_) = *TIP_AT.lock().unwrap();
+        if h != 0 && (f32::from(at.x) - px_).hypot(f32::from(at.y) - py_) > TIP_REACH { let _ = TIP_HUSH.compare_exchange(h, 0, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed); return Hush(0) }
+        Hush(h)
+    }
+    pub(crate) fn quiet(&self) -> bool { self.0 != 0 || TIP_MENU.load(std::sync::atomic::Ordering::Relaxed) }
+}
+impl Drop for Hush { fn drop(&mut self) { if self.0 != 0 { let _ = TIP_HUSH.compare_exchange(self.0, 0, std::sync::atomic::Ordering::Relaxed, std::sync::atomic::Ordering::Relaxed); } } }
+/// Where a tooltip of an element at the window's right edge (the rail) goes: wholly left of `at` (the element's bounds in the window), its right
+/// edge at the element's left edge, centred on it. GPUI puts a tooltip at the pointer (flipped left of it at the window's edge, over the
+/// element's own label), so the view, laid out at `origin` (the pointer as the tooltip was made, plus GPUI's 1 px), draws its box from there:
+/// the offsets of a strip `at.left` wide from the window's left edge, as tall as `strip`, the box at its right end and in its middle.
+pub fn left_of_offsets(origin: Point<Pixels>, at: Bounds<Pixels>, strip: Pixels) -> (Pixels, Pixels) {
+    (-origin.x, at.origin.y + at.size.height / 2. - strip / 2. - origin.y)
+}
+const TIP_STRIP: f32 = 120.;
+struct Tip(SharedString, bool, Hush, Option<(Point<Pixels>, Bounds<Pixels>)>);
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        if self.2.quiet() { return div().into_any_element() }
         let c = |n: &str| theme::color(self.1, n);
         let font = TIP_FONT.lock().unwrap().clone();
-        div().px_2().py_1().bg(c("panel")).border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("text")).when(!font.is_empty(), |d| d.font_family(font)).child(self.0.clone())
+        let tip = div().px_2().py_1().bg(c("panel")).border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("text")).when(!font.is_empty(), |d| d.font_family(font));
+        let Some((origin, at)) = self.3 else { return tip.child(self.0.clone()).into_any_element() };
+        let (x, y) = left_of_offsets(origin, at, px(TIP_STRIP));
+        div().size_0().child(div().absolute().left(x).top(y).w(at.origin.x.max(px(0.))).h(px(TIP_STRIP)).flex().justify_end().items_center()
+            .child(tip.flex_shrink_0().whitespace_nowrap().children(self.0.lines().map(|l| div().child(l.to_string())).collect::<Vec<_>>()))).into_any_element()
     }
 }
 /// A tooltip builder for `.tooltip(...)`: `text` through the catalog (English written in the code; a name or title the catalog does not know comes
 /// back as it is), then its key when it has one.
 pub fn tip(text: &str, key: &str, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let t: SharedString = tip_text(&tr(text), key).into();
-    move |_, cx| cx.new(|_| Tip(t.clone(), light)).into()
+    move |w, cx| cx.new(|_| Tip(t.clone(), light, Hush::new(w.mouse_position()), None)).into()
 }
 /// `tip` for a text already in the language in force (made with `tf`), so it is not looked up a second time.
 pub fn tip_raw(text: &str, key: &str, light: bool) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
     let t: SharedString = tip_text(text, key).into();
-    move |_, cx| cx.new(|_| Tip(t.clone(), light)).into()
+    move |w, cx| cx.new(|_| Tip(t.clone(), light, Hush::new(w.mouse_position()), None)).into()
+}
+/// `tip_raw` for an element at the window's right edge (a rail button): the tooltip wholly to its left, centred on it (`left_of_offsets`).
+/// `at` holds the element's bounds as last drawn.
+pub fn tip_left_of(text: &str, light: bool, at: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    let t: SharedString = text.to_string().into();
+    move |w, cx| { let origin = w.mouse_position() + point(px(1.), px(1.)); let b = at.get(); cx.new(|_| Tip(t.clone(), light, Hush::new(w.mouse_position()), Some((origin, b)))).into() }
 }
 /// A tooltip's words: the text, then its key when it has one.
 /* i18n-ok: the text and its key, no words */ pub fn tip_text(text: &str, key: &str) -> String { if key.is_empty() { text.to_string() } else { format!("{text} · {key}") } }
@@ -473,8 +532,8 @@ impl Backplane {
 }
 
 /// Registers every action on the root element.
-pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
-    /* i18n-ok: key contexts */ let el = el.key_context(if picker { "Backplane Picker" } else { "Backplane" }).on_modifiers_changed(cx.listener(|this, _: &ModifiersChangedEvent, window, cx| this.hints_maybe(window, cx)));
+pub fn attach(el: Div, picker: bool, menu: bool, cx: &mut Context<Backplane>) -> Div {
+    /* i18n-ok: key contexts */ let el = el.key_context(match (picker, menu) { (_, true) => "Backplane CtxMenu", (true, _) => "Backplane Picker", _ => "Backplane" }).on_modifiers_changed(cx.listener(|this, _: &ModifiersChangedEvent, window, cx| this.hints_maybe(window, cx)));
     macro_rules! on { ($el:expr, $a:ty, $f:expr) => { $el.on_action(cx.listener(|this, _: &$a, window, cx| { let _ = &window; ($f)(this, window, cx) })) } }
     let el = on!(el, NewThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
         let pid = new_target(&this.data, &this.selected, this.project_page.as_deref());
@@ -497,6 +556,12 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, PickLeft, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_side(Key::Left, w, cx));
     let el = on!(el, PickRight, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.picker_side(Key::Right, w, cx));
     let el = on!(el, PickEnter, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.picker_enter(cx));
+    use crate::screens::ctxmenu::Nav;
+    let el = on!(el, MenuUp, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.ctx_nav(Nav::Up, cx));
+    let el = on!(el, MenuDown, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.ctx_nav(Nav::Down, cx));
+    let el = on!(el, MenuHome, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.ctx_nav(Nav::Home, cx));
+    let el = on!(el, MenuEnd, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.ctx_nav(Nav::End, cx));
+    let el = on!(el, MenuEnter, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.ctx_enter(w, cx));
     let el = on!(el, PrevThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, false); this.key_go(n, cx) });
     let el = on!(el, NextThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, true); this.key_go(n, cx) });
     let el = on!(el, CloseWindow, |this: &mut Backplane, _: &mut Window, _: &mut Context<Backplane>| this.close_window()); // Cmd+W (#1198): the red button's path
@@ -790,6 +855,33 @@ mod tests {
     #[test] fn palette_and_dialog_scopes() {
         assert_eq!(d("escape", &["PickInput"]), "backplane::ClosePopup"); assert_eq!(d("escape", &["AskInput"]), "backplane::ClosePopup");
         assert_eq!(d("enter", &["PickInput"]), "composer::Go"); assert_eq!(d("ctrl-k", &["PickInput"]), "backplane::OpenPaletteKey", "the same chord shuts it");
+    }
+    #[test] fn an_open_right_click_menu_has_its_keys_wherever_the_keyboard_is() {
+        for ctx in [&["CtxMenu"][..], &["CtxMenu", "Composer"][..], &["CtxMenu", "TextInput"][..], &["CtxMenu", "AskInput"][..], &["CtxMenu", "FindInput"][..], &["CtxMenu", "Terminal"][..],
+            &["CtxMenu", "Copyable"][..], &["CtxMenu", "Sidebar"][..], &["CtxMenu", "Viewer", "Plot"][..]] {
+            for (k, a) in [("up", "MenuUp"), ("down", "MenuDown"), ("home", "MenuHome"), ("end", "MenuEnd"), ("enter", "MenuEnter"), ("space", "MenuEnter")] { assert_eq!(d(k, ctx), format!("keys::{a}"), "{k} in {ctx:?}"); }
+            assert_eq!(d("escape", ctx), if ctx.contains(&"Terminal") { "" } else { "backplane::ClosePopup" }, "Esc in {ctx:?}");
+        }
+        // shut, the same keys are the field's and the shell's again
+        assert_eq!(d("down", &["Composer"]), "composer::Down"); assert_eq!(d("enter", &["Composer"]), "backplane::Send"); assert_eq!(d("home", &["TextInput"]), "text_input::Home");
+    }
+    }
+    #[test] fn a_press_hushes_tooltips_until_the_quiet_one_of_that_press_goes() {
+        let (p, near, far) = (point(px(100.), px(100.)), point(px(108.), px(104.)), point(px(100.), px(148.)));
+        tip_pressed(p); let first = Hush::new(near); assert!(first.quiet(), "made after a press, the pointer still there: quiet");
+        tip_pressed(p); let second = Hush::new(p); assert!(second.quiet());
+        let hushed = || TIP_HUSH.load(std::sync::atomic::Ordering::Relaxed) != 0;
+        drop(first); assert!(hushed(), "an earlier press's quiet tooltip going does not end the newer hush");
+        drop(second); assert!(!hushed(), "the newer one going (the pointer off its element) ends it"); assert!(!Hush::new(p).quiet());
+        // the pointer left before a tooltip of the pressed element was made: the next element's, farther off, shows and ends the hush
+        tip_pressed(p); let next = Hush::new(far); assert!(!next.quiet() && !hushed());
+    }
+    #[test] fn a_rail_tooltip_sits_wholly_left_of_its_button_centred_on_it() {
+        // GPUI lays the tooltip's view out at the pointer (+1 px); the box's strip goes from the window's left edge to the button's, centred on the button
+        let (o, at, strip) = (point(px(1371.), px(401.)), Bounds::new(point(px(1350.), px(380.)), size(px(50.), px(48.))), px(120.));
+        let (x, y) = left_of_offsets(o, at, strip);
+        assert_eq!(o.x + x, px(0.), "the strip starts at the window's left edge and is the button's left edge wide, so the box's right edge is at the rail's left edge");
+        assert_eq!(o.y + y + strip / 2., at.origin.y + at.size.height / 2., "centred on the button");
     }
     #[test] fn the_open_model_menu_has_its_keys_wherever_the_keyboard_is() {
         for ctx in [&["Picker"][..], &["Picker", "PickInput"][..], &["Picker", "Composer"][..], &["Picker", "TextInput"][..], &["Picker", "AskInput"][..], &["Picker", "ImpInput"][..]] {

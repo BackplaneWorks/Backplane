@@ -1091,6 +1091,7 @@ impl Render for Backplane {
         // a swarm's page over the thread its viewer is drawn for: the page is what is open, so that thread has no header
         let head_thread = has_thread && !has_home && !crate::screens::swarm::over_thread(&self.data);
         crate::keys::set_tip_font(&self.local.font);
+        crate::keys::set_tip_menu(self.screens.ctx.is_some());
         let head = if head_thread { self.screens.head.layout(window, f32::from(window.viewport_size().width), &string(thread, "title"), &crate::screens::tools::tools(thread), &self.local.font, 13. * self.local.text_pct as f32 / 100.) } else { Default::default() };
         let (mut top_mid, mut head_row): (Option<AnyElement>, Option<AnyElement>) = (None, None);
         if head_thread {
@@ -1158,14 +1159,17 @@ impl Render for Backplane {
                 if active { lit.push(row.label); }
             }
             let icon_resolved = art::icon_name(row.icon);
+            // its bounds as drawn, for its tooltip: wholly left of the rail, never over the button's own label (keys::tip_left_of)
+            let at = std::rc::Rc::new(std::cell::Cell::new(Bounds::default()));
             let mut button = with_rect(div().id(SharedString::from(format!("rail-{}", row.label))), || format!("rail:{}", row.label))
                 .relative().flex().flex_col().items_center().h(crate::scale::tpx(48.)).flex_shrink_0().justify_center().gap_1().text_size(px(label_size))
                 .border_l_2().border_color(if row.present { gpui::Rgba { a: 0.6, ..c("accent") } } else { gpui::transparent_black().into() })
                 .when(active, |d| d.bg(c("raise")).border_color(c("accent")))
                 .text_color(c(if active { "text" } else if disabled { "rail-disabled" } else { "dim" }))
-                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else if disabled { "rail-disabled-icon" } else { "dim" })).child(div().max_w_full().when(ellipsis, |d| d.whitespace_nowrap().overflow_hidden().text_ellipsis()).child(label));
+                .child(ic(light, icon_resolved.unwrap_or("folder"), 18., if active { "accent" } else if disabled { "rail-disabled-icon" } else { "dim" })).child(div().max_w_full().when(ellipsis, |d| d.whitespace_nowrap().overflow_hidden().text_ellipsis()).child(label))
+                .child({ let at = at.clone(); canvas(move |b, _, _| at.set(b), |_, _, _, _| ()).absolute().inset_0() });
             if disabled {
-                button = button.tooltip(crate::keys::tip(row.why, "", light));
+                button = button.tooltip(crate::keys::tip_left_of(&crate::i18n::tr(row.why), light, at.clone()));
                 if collect_inv {
                     (if is_tool { &mut inv_tool } else { &mut inv_page }).push(RailInvRow {
                         id: id.into(), label: trs(row.label), group: row.group.into(), state: "disabled".into(), disabled: true,
@@ -1201,7 +1205,7 @@ impl Render for Backplane {
                     }));
                 }
                 button = button.cursor_pointer().hover(|s| s.bg(c("raise")).text_color(c("text")))
-                    .tooltip(crate::keys::tip_raw(&tooltip, "", light)).children(cap_el);
+                    .tooltip(crate::keys::tip_left_of(&tooltip, light, at.clone())).children(cap_el);
                 let action = match id {
                     "terminal" => Ctl::ToggleTerminal, "commands" => Ctl::OpenPalette, "simulation" => Ctl::KicadAct("simulation".into()),
                     "diff" => Ctl::Node("diff".into(), "".into()), _ => Ctl::Rail(id.into()),
@@ -1314,7 +1318,7 @@ impl Render for Backplane {
             let weak = cx.entity().downgrade();
             cx.intercept_keystrokes(move |_, _, cx| { let _ = weak.update(cx, |this, _| crate::screens::kicad_update::person_acted(this)); }).detach();
         }
-        let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")).capture_any_mouse_down(cx.listener(|this, _, window, cx| { crate::screens::kicad_update::person_acted(this); this.solidcraft_reclaim_to(window, cx); })),self.picker_keys(),cx)
+        let el = crate::keys::attach(div().size_full().flex().flex_col().bg(c("bg")).capture_any_mouse_down(cx.listener(|this, e: &MouseDownEvent, window, cx| { crate::keys::tip_pressed(e.position); crate::screens::kicad_update::person_acted(this); this.solidcraft_reclaim_to(window, cx); })),self.picker_keys(),self.screens.ctx.is_some(),cx)
             .on_drop(cx.listener(|this, paths: &ExternalPaths, _, cx| this.attach_event(&crate::screens::composer::ComposerEvent::Files(paths.paths().to_vec()), cx))).text_color(c("text")).text_size(crate::scale::tpx(13.)).font_family(self.local.font.clone()).line_height(crate::scale::tpx(20.))
             .relative().child(div().absolute().size_0().track_focus(&self.screens.root_focus)).on_action(cx.listener(|this, _: &crate::OpenPaletteKey, _, cx| if !this.palette_close(cx) { this.palette_open(cx) })).on_action(cx.listener(|this, _: &crate::screens::composer::FieldMenu, _, cx| this.field_menu(cx))).on_action(cx.listener(|this, _: &crate::screens::improvements::Toggle, _, cx| crate::screens::improvements::toggle(this, cx))).on_action(cx.listener(|this, _: &crate::ToggleSidebarKey, _, cx| this.side_flip(cx))).on_action(cx.listener(|this, _: &crate::FocusSearchKey, _, cx| if !this.palette_close(cx) { this.palette_open_find(cx) })).on_action(cx.listener(|this, _: &crate::FindInThreadKey, _, cx| this.find_open(cx))).on_action(cx.listener(Self::send)).on_action(cx.listener(Self::close_popup)).on_action(cx.listener(Self::copy_selection))
             // the dev build strip, only while a build is being made or waits to relaunch

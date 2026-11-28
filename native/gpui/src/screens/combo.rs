@@ -80,13 +80,16 @@ pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32
         .text_size(crate::scale::tpx(12.)).font(crate::art::mono_font()).flex().items_center().gap_2()
         .child(canvas(move |b, _, _| at.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full()).child(crate::art::probe("modelchip"))
         .child(super::picker::logo(&provider)).child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(c(tone(combo))).child(text))
-        .when(!tipped.is_empty() && !menu_open, |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tipped.clone(), light)).into()))
+        .when(!tipped.is_empty() && !menu_open, |d| d.tooltip(move |w, cx| { let at = w.mouse_position(); cx.new(|_| Tip::new(tipped.clone(), light, at)).into() }))
         .on_click(cx.listener(|this, _, window, cx| this.combo_click(window, cx)))
 }
 /// A hover of several lines.
-pub(crate) struct Tip(pub String, pub bool);
+pub(crate) struct Tip(pub String, pub bool, pub crate::keys::Hush);
+impl Tip { pub(crate) fn new(text: String, light: bool, at: Point<Pixels>) -> Self { Tip(text, light, crate::keys::Hush::new(at)) } }
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // as every tooltip (keys::Hush): nothing while a right-click menu is open or after a press on its element
+        if self.2.quiet() { return div() }
         let c = |n: &str| theme::color(self.1, n);
         div().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_color(c("text")).text_size(crate::scale::tpx(12.)).flex().flex_col().children(self.0.lines().map(|l| div().whitespace_nowrap().child(l.to_string())).collect::<Vec<_>>())
     }
