@@ -28,6 +28,7 @@ pub mod machines;
 pub mod bar;
 pub mod hints;
 pub mod blink;
+pub mod scrollbar;
 pub mod bots;
 pub mod swarm;
 pub mod drafts;
