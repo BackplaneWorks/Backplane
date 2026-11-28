@@ -27,6 +27,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlin.math.max
@@ -85,9 +87,9 @@ fun DrawPadSheet(close: () -> Unit, attach: (ByteArray) -> Unit) {
     val touched = { tick++ }
     Dialog(onDismissRequest = close, properties = DialogProperties(usePlatformDefaultWidth = false, dismissOnClickOutside = false)) {
         tick.let { } // read, so the sheet recomposes on each change
-        Column(Modifier.fillMaxWidth().padding(10.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(10.dp).testTag("pad"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(Msg.draw_title, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold)
-            Text(hint(pad.tool), Modifier.testTag("pad.hint"), color = dfaint, fontFamily = BpMono, fontSize = 11.sp) // wraps: the Box tool's hint is long
+        Column(Modifier.fillMaxWidth().padding(10.dp).clip(dShapeDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeDialog).padding(12.dp).testTag("pad"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(Msg.draw_title, color = dcs.onSurface, fontFamily = BpUi, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text(hint(pad.tool), Modifier.testTag("pad.hint"), color = dfaint, fontFamily = BpUi, fontSize = 13.sp) // wraps: the Box tool's hint is long
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 listOf(Triple(PadTool.Pen, "pen", Msg.android_pad_pen), Triple(PadTool.Boxes, "box", Msg.android_pad_box), Triple(PadTool.Eraser, "eraser", Msg.android_pad_eraser)).forEach { (t, id, label) ->
                     DBtn(label, pad.tool == t, modifier = Modifier.testTag("pad.$id")) { pad.setTool(t); touched() }
@@ -96,8 +98,8 @@ fun DrawPadSheet(close: () -> Unit, attach: (ByteArray) -> Unit) {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 PAD_COLORS.forEachIndexed { i, col ->
                     val on = pad.next % PAD_COLORS.size == i
-                    Box(Modifier.size(30.dp).border(BorderStroke(if (on) 3.dp else 1.dp, if (on) dcs.onSurface else dcs.outlineVariant)).padding(if (on) 3.dp else 1.dp)
-                        .background(Color(0xff000000.toInt() or col)).clickable { pad.setColor(i); touched() }.testTag("pad.color.$i"))
+                    Box(Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).border(BorderStroke(if (on) 3.dp else 1.dp, if (on) dcs.onSurface else dcs.outlineVariant), RoundedCornerShape(8.dp)).padding(if (on) 3.dp else 1.dp)
+                        .clip(RoundedCornerShape(if (on) 5.dp else 7.dp)).background(Color(0xff000000.toInt() or col)).clickable { pad.setColor(i); touched() }.testTag("pad.color.$i"))
                 }
             }
             Canvas(Modifier.fillMaxWidth().aspectRatio(PAD_W / PAD_H).background(Color.White).border(BorderStroke(1.dp, dcs.outlineVariant)).testTag("pad.paper").semantics { contentDescription = Msg.android_pad_paper }

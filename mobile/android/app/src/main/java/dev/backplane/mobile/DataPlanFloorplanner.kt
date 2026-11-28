@@ -22,6 +22,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -115,7 +116,7 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
 
     if (basePanel == null) {
         Column(Modifier.fillMaxSize().padding(14.dp)) {
-            DMono(Msg.gpui_mgmt_plan_reading, dfaint, 12)
+            DText(Msg.gpui_mgmt_plan_reading, dfaint, 13)
         }
         return
     }
@@ -316,9 +317,9 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                DMono(Msg.gpui_mgmt_plan_before, dcs.onSurface, 11, bold = true)
+                DText(Msg.gpui_mgmt_plan_before, dcs.onSurface, 13, bold = true, lines = 1)
                 if (!panel.empty) {
-                    DMono(stLabel, stColor, 10, Modifier.border(BorderStroke(1.dp, stColor)).padding(horizontal = 4.dp, vertical = 1.dp), bold = true)
+                    DMono(stLabel, stColor, 10, Modifier.border(BorderStroke(1.dp, stColor), androidx.compose.foundation.shape.CircleShape).padding(horizontal = 7.dp, vertical = 1.dp), bold = true)
                     if (panel.revision > 0) {
                         val revTag = "v" + panel.revision
                         DMono(revTag, dfaint, 10)
@@ -377,8 +378,8 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
 
         if (panel.empty) {
             Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                DMono(Msg.gpui_mgmt_plan_noboard, dcs.onSurfaceVariant, 12, bold = true)
-                DMono(Msg.gpui_mgmt_plan_emptysub, dfaint, 11, lines = 3)
+                DText(Msg.gpui_mgmt_plan_noboard, dcs.onSurfaceVariant, 14, bold = true)
+                DText(Msg.gpui_mgmt_plan_emptysub, dfaint, 13, lines = 3)
             }
             return@Column
         }
@@ -396,8 +397,9 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
                 Box(
                     Modifier
                         .height(30.dp)
+                        .clip(dShape)
                         .background(if (active) dcs.primary else dcs.surfaceVariant)
-                        .border(BorderStroke(1.dp, if (active) dcs.primary else dcs.outlineVariant))
+                        .border(BorderStroke(1.dp, if (active) dcs.primary else dcs.outlineVariant), dShape)
                         .clickable { activeLayer = l.layer; selectedVertex = null }
                         .padding(horizontal = 10.dp)
                         .testTag("plan.layer.${l.layer}"),
@@ -432,12 +434,12 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
             PlanMiniChip(Msg.gpui_mgmt_plan_fit, false, onClick = fitCameraNow)
             if (hasAwaiting) {
                 Box(
-                    Modifier.size(28.dp).background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant))
+                    Modifier.size(28.dp).clip(dShape).background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant), dShape)
                         .clickable { scope.launch { runCatching { DataClient.planApprove(pro, curLayer, emptyList(), true) } } },
                     contentAlignment = Alignment.Center,
                 ) { DMono("✓", dok, 12, bold = true) }
                 Box(
-                    Modifier.size(28.dp).background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant))
+                    Modifier.size(28.dp).clip(dShape).background(dcs.surface).border(BorderStroke(1.dp, dcs.outlineVariant), dShape)
                         .clickable { scope.launch { runCatching { DataClient.planApprove(pro, curLayer, emptyList(), false) } } },
                     contentAlignment = Alignment.Center,
                 ) { DMono("✗", dcs.error, 12, bold = true) }
@@ -1034,7 +1036,7 @@ internal fun PlanFloorplannerPanel(fallbackProject: String) {
                             else -> dcs.outlineVariant
                         }
                         Row(
-                            Modifier.height(30.dp).background(dcs.surface).border(BorderStroke(1.dp, stC)).clickable {
+                            Modifier.height(30.dp).clip(dShape).background(dcs.surface).border(BorderStroke(1.dp, stC), dShape).clickable {
                                 selectedId = it.id
                                 selectedVertex = null
                                 inspectorOpen = true
@@ -1111,10 +1113,10 @@ private fun PlanItemInspectorSheet(
                 DMono(item.name.ifEmpty { item.id }, dcs.onSurface, 14, bold = true)
                 DMono(layerTitle, dcs.onSurfaceVariant, 12)
                 if (item.edited || item.state == "edited") {
-                    DMono(Msg.gpui_mgmt_plan_edited, dwarn, 10, Modifier.border(BorderStroke(1.dp, dwarn)).padding(horizontal = 4.dp, vertical = 1.dp))
+                    DMono(Msg.gpui_mgmt_plan_edited, dwarn, 10, Modifier.border(BorderStroke(1.dp, dwarn), androidx.compose.foundation.shape.CircleShape).padding(horizontal = 7.dp, vertical = 1.dp))
                 }
                 if (item.locked) {
-                    DMono(Msg.gpui_mgmt_plan_locked, dcs.onSurfaceVariant, 10, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 4.dp, vertical = 1.dp))
+                    DMono(Msg.gpui_mgmt_plan_locked, dcs.onSurfaceVariant, 10, Modifier.border(BorderStroke(1.dp, dcs.outlineVariant), androidx.compose.foundation.shape.CircleShape).padding(horizontal = 7.dp, vertical = 1.dp))
                 }
                 Spacer(Modifier.weight(1f))
                 Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(20.dp).clickable(onClick = onDismiss))
@@ -1187,16 +1189,16 @@ private fun PlanItemInspectorSheet(
 @Composable
 private fun PlanMiniChip(label: String, active: Boolean, onClick: () -> Unit) {
     Box(
-        Modifier.height(26.dp).background(if (active) dcs.primary else dcs.surface).border(BorderStroke(1.dp, if (active) dcs.primary else dcs.outlineVariant))
+        Modifier.height(26.dp).clip(dShape).background(if (active) dcs.primary else dcs.surface).border(BorderStroke(1.dp, if (active) dcs.primary else dcs.outlineVariant), dShape)
             .clickable(onClick = onClick).padding(horizontal = 8.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
             label,
             color = if (active) dcs.onPrimary else dcs.onSurfaceVariant,
-            fontFamily = BpMono,
-            fontSize = 10.sp,
-            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+            fontFamily = BpUi,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.SemiBold,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )

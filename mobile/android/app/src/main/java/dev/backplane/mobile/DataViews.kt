@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -319,20 +320,27 @@ private fun AskPair(link: String) {
 }
 
 @Composable
-internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant, single: Boolean = false, keyboard: KeyboardOptions = KeyboardOptions.Default, actions: KeyboardActions = KeyboardActions.Default, focus: FocusRequester? = null, mono: Boolean = false) {
+internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = Color.Unspecified, single: Boolean = false, keyboard: KeyboardOptions = KeyboardOptions.Default, actions: KeyboardActions = KeyboardActions.Default, focus: FocusRequester? = null, mono: Boolean = false) {
     val face = if (mono) BpMono else BpUi; val size = if (mono) 13.sp else 15.sp
-    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(BorderStroke(1.dp, line), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
+    var focused by remember { mutableStateOf(false) }
+    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(dFieldLine(line, focused), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
         if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = face, fontSize = size, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), singleLine = single, maxLines = if (single) 1 else lines, keyboardOptions = keyboard, keyboardActions = actions, modifier = Modifier.fillMaxWidth().let { m -> focus?.let { m.focusRequester(it) } ?: m })
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), singleLine = single, maxLines = if (single) 1 else lines, keyboardOptions = keyboard, keyboardActions = actions, modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }.let { m -> focus?.let { m.focusRequester(it) } ?: m })
     }
 }
 
+/** A field's border: a caller's own colour (an error) wins; else the accent at 1.5 dp while focused, as the composer's box, and the quiet line otherwise. */
 @Composable
-internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant, mono: Boolean = false) {
+private fun dFieldLine(line: Color, focused: Boolean): BorderStroke =
+    if (line != Color.Unspecified) BorderStroke(1.dp, line) else if (focused) BorderStroke(1.5.dp, dcs.primary) else BorderStroke(1.dp, dcs.outlineVariant)
+
+@Composable
+internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = Color.Unspecified, mono: Boolean = false) {
     val face = if (mono) BpMono else BpUi; val size = if (mono) 13.sp else 15.sp
-    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(BorderStroke(1.dp, line), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
+    var focused by remember { mutableStateOf(false) }
+    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(dFieldLine(line, focused), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
         if (v.text.isEmpty()) Text(hint, color = dfaint, fontFamily = face, fontSize = size, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused })
     }
 }
 

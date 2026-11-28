@@ -348,7 +348,7 @@ private fun PickerSheet(title: String, close: () -> Unit, search: Boolean, rows:
         Column(Modifier.fillMaxWidth().fillMaxHeight(.75f)) {
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 DMono(title.uppercase(), dfaint, 11, Modifier.weight(1f))
-                DMono(Msg.android_done, dcs.primary, 13, Modifier.clickable(onClick = close).padding(8.dp).testTag("picker.done"), bold = true)
+                DText(Msg.android_done, dcs.primary, 14, Modifier.clip(dShape).clickable(onClick = close).padding(8.dp).testTag("picker.done"), bold = true, lines = 1)
             }
             if (search) DField(q, { q = it }, Msg.android_viewer_find, Modifier.padding(horizontal = 14.dp, vertical = 6.dp).testTag("picker.find"))
             DLine()
@@ -475,7 +475,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
 
 @Composable
 private fun ViewChip(label: String, on: Boolean, tag: String, onClick: () -> Unit) {
-    DMono(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.clip(dShape).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant), dShape).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp).testTag(tag))
+    DText(label, if (on) dcs.primary else dcs.onSurface, 12, Modifier.clip(dShape).background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant), dShape).clickable(onClick = onClick).padding(horizontal = 10.dp, vertical = 6.dp).testTag(tag), bold = true, lines = 1)
 }
 
 /** KiCad's high contrast, as the hub lists it: how the others show (a board), a box per layer (show or hide it), its name (make it the active one, again: all back), a comparison's marks last, Reset layers. */
@@ -484,7 +484,7 @@ private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, St
     Column(modifier.heightIn(max = 420.dp).clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).verticalScroll(rememberScrollState()).background(dcs.surfaceVariant).padding(8.dp).testTag("layer.menu"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         if (l.modes) Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             listOf(Msg.viewer_layers_all, Msg.viewer_layers_dim, Msg.viewer_layers_only).forEachIndexed { i, label ->
-                DMono(label, if (l.mode == i) dcs.primary else dcs.onSurface, 12, Modifier.clip(dShape).border(BorderStroke(1.dp, if (l.mode == i) dcs.primary else dcs.outlineVariant), dShape).clickable { act("mode", i.toString()) }.padding(horizontal = 8.dp, vertical = 3.dp).testTag("layer.mode.$i"))
+                DText(label, if (l.mode == i) dcs.primary else dcs.onSurface, 12, Modifier.clip(dShape).border(BorderStroke(1.dp, if (l.mode == i) dcs.primary else dcs.outlineVariant), dShape).clickable { act("mode", i.toString()) }.padding(horizontal = 8.dp, vertical = 3.dp).testTag("layer.mode.$i"), bold = true, lines = 1)
             }
         }
         l.rows.filter { it.layer in present }.forEach { r ->
@@ -494,7 +494,7 @@ private fun LayerMenu(l: DataClient.Layers, present: List<Int>, act: (String, St
                 DMono(Tr.t(r.name), if (r.active) dcs.primary else dcs.onSurface, 12, Modifier.clickable { act("pick", r.layer.toString()) }.testTag("layer.name.${r.layer}"))
             }
         }
-        if (l.reset) DMono(Msg.viewer_layers_reset, dcs.primary, 12, Modifier.clickable { act("reset", "") }.testTag("layer.reset"))
+        if (l.reset) DText(Msg.viewer_layers_reset, dcs.primary, 12, Modifier.clickable { act("reset", "") }.testTag("layer.reset"), bold = true, lines = 1)
     }
 }
 
@@ -1028,7 +1028,7 @@ private fun BrowserTab(thread: DThread) {
                     }
                     detectDragGestures(onDragEnd = { send(true) }, onDragCancel = { send(true) }) { c, d -> c.consume(); dx += d.x; dy += d.y; send(false) }
                 }, contentScale = ContentScale.FillWidth) }
-                none -> DMono(Msg.android_browser_none, dcs.onSurfaceVariant, 12, Modifier.padding(24.dp))
+                none -> DText(Msg.android_browser_none, dcs.onSurfaceVariant, 13, Modifier.padding(24.dp))
                 else -> CircularProgressIndicator()
             }
         }
@@ -1235,17 +1235,17 @@ private fun ReportPage(thread: DThread, kind: String, ticks: Boolean) {
         if (err.isNotEmpty()) DMono(Tr.t(err), dcs.error, 12)
         if (r == null && err.isEmpty()) CircularProgressIndicator()
         r?.let {
-            if (it.line.isNotEmpty()) DMono(Tr.t(it.line), dcs.primary, 12, bold = true)
+            if (it.line.isNotEmpty()) DText(Tr.t(it.line), dcs.primary, 13, bold = true)
             if (it.gate.isNotEmpty()) DMono(Tr.t(it.gate), dcs.onSurfaceVariant, 11)
             if (it.err.isNotEmpty()) DMono(Tr.t(it.err), dcs.error, 12)
             if (it.md.isNotEmpty()) MdText(it.md)
             if (ticks) tasks.forEachIndexed { i, t ->
                 Row(Modifier.fillMaxWidth().clickable { scope.launch { runCatching { DataClient.tick(thread.id, i) }.onSuccess { n -> if (n.isNotEmpty()) tasks = n } } }.padding(vertical = 6.dp).testTag("review.task.$i"), verticalAlignment = Alignment.CenterVertically) {
                     Box(Modifier.size(16.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(if (t.done) dcs.primary else dcs.surfaceVariant)); Spacer(Modifier.width(10.dp))
-                    Text(t.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
+                    Text(t.text, color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp)
                 }
             }
-            if (it.md.isEmpty() && it.line.isEmpty() && it.err.isEmpty() && tasks.isEmpty()) DMono(Msg.android_nothing, dcs.onSurfaceVariant, 12)
+            if (it.md.isEmpty() && it.line.isEmpty() && it.err.isEmpty() && tasks.isEmpty()) DText(Msg.android_nothing, dcs.onSurfaceVariant, 13)
         }
     }
 }
@@ -1261,13 +1261,13 @@ private fun CommentsPage(thread: DThread) {
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp).testTag("review.comments"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             if (err.isNotEmpty()) DMono(Tr.t(err), dcs.error, 12)
             val l = list
-            if (l == null) CircularProgressIndicator() else if (l.isEmpty()) DMono(Msg.android_comments_none, dcs.onSurfaceVariant, 12)
+            if (l == null) CircularProgressIndicator() else if (l.isEmpty()) DText(Msg.android_comments_none, dcs.onSurfaceVariant, 13)
             l?.filter { it.parent.isEmpty() }?.forEach { c ->
                 Column(Modifier.fillMaxWidth().clip(dShapeCard).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (c.resolved) dcs.outlineVariant else dcs.primary.copy(alpha = .6f)), dShapeCard).padding(10.dp)) {
                     Row { DMono((c.by.ifEmpty { Msg.android_you }) + if (c.resolved) " · " + Msg.android_resolved else "", dcs.onSurfaceVariant, 11, Modifier.weight(1f))
-                        DMono(if (c.resolved) Msg.android_reopen else Msg.android_resolve, dcs.primary, 11, Modifier.clickable { scope.launch { runCatching { DataClient.comment(thread.id, if (c.resolved) "reopen" else "resolve") { put("id", c.id) } }; load() } }.testTag("review.resolve.${c.id}")) }
-                    Text(c.text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp))
-                    l.filter { it.parent == c.id }.forEach { r -> Text("↳ " + r.text, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp)) }
+                        DText(if (c.resolved) Msg.android_reopen else Msg.android_resolve, dcs.primary, 12, bold = true, lines = 1, modifier = Modifier.clickable { scope.launch { runCatching { DataClient.comment(thread.id, if (c.resolved) "reopen" else "resolve") { put("id", c.id) } }; load() } }.testTag("review.resolve.${c.id}")) }
+                    Text(c.text, color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp, modifier = Modifier.padding(top = 4.dp))
+                    l.filter { it.parent == c.id }.forEach { r -> Text("↳ " + r.text, color = dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 13.sp, modifier = Modifier.padding(top = 4.dp)) }
                 }
             }
         }

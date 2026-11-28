@@ -60,7 +60,7 @@ import org.json.JSONObject
 fun ActionSheet(title: String, actions: List<Pair<String, () -> Unit>>, close: () -> Unit) {
     Dialog(onDismissRequest = close) {
         Column(Modifier.fillMaxWidth().clip(dShapeDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeDialog).testTag("sheet")) {
-            DMono(title.ifEmpty { Msg.thread_new }, dcs.onSurfaceVariant, 11, Modifier.padding(12.dp))
+            DText(title.ifEmpty { Msg.thread_new }, dcs.onSurfaceVariant, 13, Modifier.padding(12.dp), lines = 4)
             DLine()
             actions.forEach { (label, run) ->
                 Text(Tr.t(label), Modifier.fillMaxWidth().clickable { close(); run() }.padding(14.dp).testTag("sheet.$label"), color = if (label.startsWith("Delete") || label.startsWith("Remove")) dcs.error else dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp)
@@ -75,7 +75,7 @@ fun TextPrompt(title: String, initial: String, ok: String, close: () -> Unit, do
     var t by remember { mutableStateOf(initial) }
     Dialog(onDismissRequest = close) {
         Column(Modifier.fillMaxWidth().clip(dShapeDialog).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeDialog).padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            DMono(title, dcs.onSurfaceVariant, 11)
+            DText(title, dcs.onSurfaceVariant, 13, lines = 2)
             DField(t, { t = it }, "", Modifier.testTag("prompt.field"))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { DBtn(ok, true, t.isNotBlank(), Modifier.testTag("prompt.ok")) { close(); done(t.trim()) }; DBtn(Msg.common_cancel, false, onClick = close) }
         }
@@ -166,10 +166,10 @@ fun SearchResults(q: String, open: (String) -> Unit) {
     var res by remember { mutableStateOf<DataClient.Found?>(null) }
     LaunchedEffect(q) { res = if (q.isBlank()) null else runCatching { DataClient.search(q) }.getOrNull() }
     val r = res
-    if (r == null) { if (q.isNotBlank()) DMono(Msg.android_searching, modifier = Modifier.padding(12.dp)); return }
-    if (r.threads.isEmpty() && r.projects.isEmpty() && r.messages.isEmpty()) { DMono(Msg.android_search_none(q), modifier = Modifier.padding(12.dp).testTag("search.none")); return }
+    if (r == null) { if (q.isNotBlank()) DText(Msg.android_searching, dcs.onSurfaceVariant, 14, Modifier.padding(12.dp)); return }
+    if (r.threads.isEmpty() && r.projects.isEmpty() && r.messages.isEmpty()) { DText(Msg.android_search_none(q), dcs.onSurfaceVariant, 14, Modifier.padding(12.dp).testTag("search.none")); return }
     LazyColumn(Modifier.fillMaxSize().testTag("search.list")) {
-        items(r.projects, key = { "sp:${it.id}" }) { p -> Column { DMono(Msg.android_search_project(p.title), dcs.onSurface, 12, Modifier.fillMaxWidth().padding(12.dp)); DLine() } }
+        items(r.projects, key = { "sp:${it.id}" }) { p -> Column { DText(Msg.android_search_project(p.title), dcs.onSurface, 15, Modifier.fillMaxWidth().padding(12.dp), lines = 1); DLine() } }
         items(r.threads.filter { !it.history }, key = { "st:${it.id}" }) { t -> ThreadRowPublic(t) { open(t.id) } }
         // the old Scratch chats the search found, under their group's name (feature history)
         val old = r.threads.filter { it.history }
@@ -178,7 +178,7 @@ fun SearchResults(q: String, open: (String) -> Unit) {
         if (r.messages.isNotEmpty()) item("sm") { DMono(Msg.android_search_messages, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp).testTag("search.messages")) }
         items(r.messages, key = { "sm:${it.thread}:${it.msg}" }) { m ->
             Column(Modifier.fillMaxWidth().clickable { DataClient.pendingMsg = m.msg; open(m.thread) }.padding(horizontal = 12.dp, vertical = 10.dp).testTag("search.msg")) {
-                Text(marked(m.text, q, dcs.primary), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, maxLines = 3)
+                Text(marked(m.text, q, dcs.primary), color = dcs.onSurface, fontFamily = BpUi, fontSize = 14.sp, lineHeight = 19.sp, maxLines = 3, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 DMono(Tr.t(DataFind.who(m.role)) + " · " + m.title + (if (m.project.isNotEmpty()) " · " + m.project else "") + " · " + dAgo(m.at), dfaint, 11)
             }
             DLine()
@@ -209,7 +209,7 @@ fun PickerSheet(thread: String?, choice: DNewThreadChoice, choose: (DNewThreadCh
                 ?: ProviderMarks.providerOfChip(picker?.chip ?: "")
             if (activePv.isNotEmpty()) { ProviderMark(activePv, 14.dp); Spacer(Modifier.width(6.dp)) }
             DMono(picker?.chip?.let(Tr::t) ?: " ", dcs.onSurface, 12, Modifier.weight(1f).testTag("picker.chip"))
-            DMono(Msg.android_done, dcs.primary, 13, Modifier.clickable(onClick = close).padding(8.dp).testTag("picker.done"), bold = true)
+            DText(Msg.android_done, dcs.primary, 14, Modifier.clip(dShape).clickable(onClick = close).padding(8.dp).testTag("picker.done"), bold = true, lines = 1)
         }
         DLine()
         if (err.isNotEmpty()) Text(Tr.t(err), Modifier.padding(horizontal = 14.dp, vertical = 8.dp).testTag("picker.error"), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp)
@@ -384,7 +384,7 @@ fun FindInThread(tid: String, close: () -> Unit, go: (String) -> Unit) {
         Column(Modifier.fillMaxWidth().fillMaxHeight(.85f).testTag("find")) {
             Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
                 DMono(Msg.android_find_head, dcs.onSurfaceVariant, 11, Modifier.weight(1f))
-                DMono(Msg.android_done, dcs.primary, 13, Modifier.clickable(onClick = close).padding(8.dp).testTag("find.done"), bold = true)
+                DText(Msg.android_done, dcs.primary, 14, Modifier.clip(dShape).clickable(onClick = close).padding(8.dp).testTag("find.done"), bold = true, lines = 1)
             }
             Box(Modifier.padding(horizontal = 12.dp)) { DField(q, { q = it }, Msg.android_find_hint, Modifier.focusRequester(focus).testTag("find.field")) }
             LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
@@ -393,7 +393,7 @@ fun FindInThread(tid: String, close: () -> Unit, go: (String) -> Unit) {
             when {
                 err.isNotEmpty() -> DMono(Tr.t(err), dcs.error, 12, Modifier.padding(14.dp))
                 h == null -> {}
-                h.isEmpty() -> DMono(Msg.android_find_none(q.trim()), dfaint, 12, Modifier.padding(14.dp).testTag("find.none"))
+                h.isEmpty() -> DText(Msg.android_find_none(q.trim()), dfaint, 14, Modifier.padding(14.dp).testTag("find.none"))
                 else -> LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
                     items(h, key = { it.msg + it.at }) { x ->
                         Column(Modifier.fillMaxWidth().clickable { close(); go(x.msg) }.padding(horizontal = 14.dp, vertical = 10.dp).testTag("find.hit")) {
