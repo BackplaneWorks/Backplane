@@ -235,7 +235,7 @@ pub(super) fn body_with_panel(
         "diff" if data["busy"] == true || data["ready"] == false => {
             panestate::view(light, &PaneState::loading(trs("Loading…")), None)
         }
-        "diff" if data["files"].is_array() => viewer::diff_body(cx, light, data, None),
+        "diff" if data["files"].is_array() => viewer::diff_body(cx, &screens.reg, light, data, None),
         "review" if data.is_object() => {
             viewer::review_body(cx, &screens.reg, light, data, None, None, review_panel)
         }

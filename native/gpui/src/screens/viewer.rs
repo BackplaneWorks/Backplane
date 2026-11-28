@@ -445,9 +445,9 @@ fn pane_body_state(light: bool, st: &super::panestate::PaneState, actions: Optio
     }
 }
 
-fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: Header) -> AnyElement {
+fn diff_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, diff: &Value, actions: Header) -> AnyElement {
     let header = pane_header(light, actions.identity, diff_tools(cx, diff), actions.controls);
-    diff_body(cx, light, diff, Some(header))
+    diff_body(cx, reg, light, diff, Some(header))
 }
 
 pub(super) fn diff_tools(cx: &Context<Backplane>, diff: &Value) -> Vec<Tool> {
@@ -460,14 +460,21 @@ pub(super) fn diff_tools(cx: &Context<Backplane>, diff: &Value) -> Vec<Tool> {
     tools
 }
 
-pub(super) fn diff_body(cx: &mut Context<Backplane>, light: bool, diff: &Value, header: Option<AnyElement>) -> AnyElement {
+/// The page's text as the file view's: selectable on the "outside" surface (timeline.rs `doc_down`), a drag over it moved by the window's handler.
+fn doc_text<E: InteractiveElement>(cx: &mut Context<Backplane>, el: E) -> E {
+    el.on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+        .on_mouse_down(MouseButton::Right, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
+        .on_mouse_move(cx.listener(|this, e, _, cx| this.doc_move(e, cx)))
+}
+
+pub(super) fn diff_body(cx: &mut Context<Backplane>, reg: &Reg, light: bool, diff: &Value, header: Option<AnyElement>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     if !diff_changed(diff) && diff["reverting"] != true {
         let sum = trs(&string(diff, "summary"));
         return pane_body_state(light, &super::panestate::PaneState::empty(sum, String::new()), header, None);
     }
     let mut col = div().flex().flex_col().text_size(crate::scale::tpx(12.));
-    col = col.child(div().px_3().text_color(c("dim")).child(trs(&string(diff, "summary"))));
+    col = col.child(doc_text(cx, div().px_3().text_color(c("dim")).child(timeline::line_text(reg, light, trs(&string(diff, "summary")), ""))));
     // Revert asks first (Ui.revert): the diff stays on show while the person decides what to discard
     if diff["reverting"] == true {
         col = col.child(div().flex().flex_col().gap_2().px_3().py_2().bg(c("raise")).border_y_1().border_color(c("bad"))
@@ -476,18 +483,22 @@ pub(super) fn diff_body(cx: &mut Context<Backplane>, light: bool, diff: &Value, 
                 .child(btn(cx, light, "revert-cancel".into(), trs("Cancel"), false, Command::Action("revert-no".into(), String::new())))));
     }
     let mut budget = MAX_ROWS;
+    // the file headers and lines select and copy as the file view does, one line a row: the hub's `t` is the line without its +/- (pages.rs `parse`),
+    // and the numbers and the sign are drawn beside it, no text of the file, so a copy pasted into an editor is the lines as they are
+    let mut files = doc_text(cx, div().flex().flex_col());
     for f in diff_files(diff) {
         if budget == 0 { break; }
-        col = col.child(div().flex().gap_2().px_3().py_1().mt_1().bg(c("raise")).border_y_1().border_color(c("line")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(f.name.clone())).child(div().text_color(c("dim")).child(f.status.clone())));
+        files = files.child(div().flex().gap_2().px_3().py_1().mt_1().bg(c("raise")).border_y_1().border_color(c("line")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(timeline::line_text(reg, light, f.name.clone(), ""))).child(div().text_color(c("dim")).child(f.status.clone())));
         for l in &f.lines {
             if budget == 0 { break; } budget -= 1;
             let bg = match l.k { 1 => Some(theme::color(light, "ok")), 2 => Some(theme::color(light, "bad")), _ => None };
             let mut row = div().flex().gap_2().px_3().font(crate::art::mono_font());
             if let Some(mut b) = bg { b.a = 0.14; row = row.bg(b); }
             if l.k == 4 { row = row.text_color(c("accent")); }
-            col = col.child(row.child(div().w(px(34.)).text_color(c("faint")).child(if l.k == 2 { l.old.clone() } else { l.new.clone() })).child(div().w(px(10.)).child(diff_sign(l.k))).child(div().flex_1().whitespace_nowrap().child(l.t.clone())));
+            files = files.child(row.child(div().w(px(34.)).text_color(c("faint")).child(if l.k == 2 { l.old.clone() } else { l.new.clone() })).child(div().w(px(10.)).child(diff_sign(l.k))).child(div().flex_1().whitespace_nowrap().child(timeline::line_text(reg, light, l.t.clone(), ""))));
         }
     }
+    col = col.child(files);
     if budget == 0 { col = col.child(div().px_3().py_1().text_color(c("dim")).child(trs("… the rest of the diff is not shown"))); }
     match header { Some(h) => div().flex().flex_col().child(h).child(main_body(col)).into_any_element(), None => col.into_any_element() }
 }
@@ -932,13 +943,13 @@ pub(super) fn review_body(cx: &mut Context<Backplane>, reg: &Reg, light: bool, r
     if let Some(panel) = shared { return match bar { Some(h) => div().size_full().flex().flex_col().child(h).child(measured_body(panel)).into_any_element(), None => panel } }
     let title = string(review, "title");
     let page = arr(review, "tabs").find(|t| t["on"] == true).map(|t| string(t, "page")).unwrap_or_default();
-    if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(trs(&title)))
+    if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(doc_text(cx, div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.))).child(timeline::line_text(reg, light, trs(&title), "")))
         .children(matches!(page.as_str(), "bom" | "checks" | "release").then(|| btn(cx, light, "rv-run".into(), trs("Refresh"), false, Command::Action("rv-run".into(), String::new()))))); }
     // the Checks page: why the gate fails, and the checklist's boxes (a press ticks one: rv-tick <index>)
     if review["checks"].is_object() {
         let line = string(&review["checks"], "line"); let gate = string(&review["checks"], "gate");
-        if !line.is_empty() { col = col.child(div().text_color(c("dim")).child(trs(&line))); }
-        if !gate.is_empty() { col = col.child(div().text_color(c("bad")).child(trs(&gate))); }
+        if !line.is_empty() { col = col.child(doc_text(cx, div().text_color(c("dim"))).child(timeline::line_text(reg, light, trs(&line), ""))); }
+        if !gate.is_empty() { col = col.child(doc_text(cx, div().text_color(c("bad"))).child(timeline::line_text(reg, light, trs(&gate), ""))); }
         for t in arr(&review["checks"], "tasks") {
             let (done, idx) = (t["done"] == true, t["index"].as_u64().unwrap_or(0));
             col = col.child(div().id(SharedString::from(format!("rv-task-{idx}"))).flex().gap_2().items_center().cursor_pointer().hover(|s| s.bg(c("raise")))
@@ -968,7 +979,7 @@ pub(super) fn review_body(cx: &mut Context<Backplane>, reg: &Reg, light: bool, r
         col = col.child(body);
     }
     if review["release"].is_object() {
-        col = col.child(div().text_color(c("dim")).child(trs(&string(&review["release"], "note"))));
+        col = col.child(doc_text(cx, div().text_color(c("dim"))).child(timeline::line_text(reg, light, trs(&string(&review["release"], "note")), "")));
         let nodes = review["release"]["blocks"].as_array().map(Vec::as_slice).unwrap_or_default();
         let rel = div().flex().flex_col().gap_3()
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e, w, cx| this.doc_down(e, w, cx)))
@@ -1114,7 +1125,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             }
         }
     }
-    else if diff_on { let a = header(cx); diff_page(cx, light, &thread["diff"], a) }
+    else if diff_on { let a = header(cx); diff_page(cx, reg, light, &thread["diff"], a) }
         else if open == "files" && viewer["files"].is_object() { let a = header(cx); super::filesui::files_page(cx, light, &viewer["files"], files_ui, a) }
         else if matches!(open, "image" | "pdf" | "text") && viewer["file"].is_object() { let a = acts(cx); super::filesui::preview_page(cx, reg, light, open, viewer, files_ui, images, target, a) }
         else if open == "review" && viewer["review"].is_object() { let a = header(cx); review_page(cx, reg, light, &viewer["review"], &mut pv.loading, a, review_panel) }
@@ -1407,6 +1418,32 @@ fn resize_handle(cx: &mut Context<Backplane>) -> AnyElement {
         .into_any_element()
 }
 
+/// The sidebar's width a drag of its right edge asks for, in a window `window_w` wide: 200 to 480 px, and never so wide that the thread keeps less
+/// than THREAD_LEAST beside a fair viewer (else `fit` would fold the sidebar the moment the viewer opens).
+pub const SIDE_DRAG: (f32, f32) = (200., 480.);
+pub fn clamp_side(width: f32, window_w: f32) -> f32 {
+    let most = (window_w - RAIL_W - THREAD_LEAST - PANE_FAIR).min(SIDE_DRAG.1).max(SIDE_DRAG.0);
+    width.round().clamp(SIDE_DRAG.0, most)
+}
+struct SideDrag;
+fn set_side(this: &mut Backplane, w: u32, cx: &mut Context<Backplane>) {
+    if this.local.sidebar_px == w { return }
+    this.local.sidebar_px = w; this.ui_epoch += 1; cx.notify();
+    save_soon(cx);
+}
+/// The open sidebar's right edge: a 6 px strip over its border (the thread's side of it too), drag to resize, double click for the default width.
+/// Kept on this device as the Settings' Sidebar width is (local.rs `sidebar_px`); folding and unfolding keep it.
+pub(crate) fn side_handle(cx: &mut Context<Backplane>) -> AnyElement {
+    /* i18n-ok: a ui: id the drivers press */ div().flex_none().w_0().h_full().relative().child(crate::ui::with_rect(div().id("sidebar-resize"), || "ui:Sidebar edge".to_string()).absolute().left(px(-3.)).top_0().h_full().w(px(6.)).cursor_col_resize().hover(|d| d.bg(rgba(0x80808040)))
+        .on_drag(SideDrag, |_, _, _, cx| cx.new(|_| Ghost))
+        .on_drag_move(cx.listener(|this, e: &DragMoveEvent<SideDrag>, window, cx| {
+            let w = clamp_side(f32::from(e.event.position.x), f32::from(window.viewport_size().width));
+            set_side(this, w as u32, cx);
+        }))
+        .on_click(cx.listener(|this, e: &ClickEvent, _, cx| { if e.click_count() >= 2 { set_side(this, crate::local::Local::default().sidebar_px, cx); } })))
+        .into_any_element()
+}
+
 /// Desktop Mech uses embedded SolidCraft rather than `kicad.watch` solid frames.
 /// The watch a Mech part needs in Backplane's own viewer (mech_native; SolidCraft opens the file itself). Board, Schematic and 3D are watched by the
 /// commands of the action that opened them; a Mech part comes in after a `mech.list` reply, which carries no command, so the window asks for its
@@ -1681,6 +1718,27 @@ mod tests {
         let r = file_rows(&v["files"]); assert_eq!((r[0].kind.as_str(), r[1].detail.as_str()), ("folder", "1 KB"));
         let d = diff_files(&j(r#"{"summary":"1 file","files":[{"name":"a.rs","status":"M","lines":[{"k":4,"t":"@@ -1 +1 @@","o":"","n":""},{"k":2,"t":"old","o":"1","n":""},{"k":1,"t":"new","o":"","n":"1"}]}]}"#));
         assert_eq!(d[0].lines.len(), 3); assert_eq!((diff_sign(d[0].lines[1].k), diff_sign(d[0].lines[2].k), diff_sign(4)), ("-", "+", " "));
+    }
+    // a diff copied from the Diff page pastes into an editor as the lines themselves: one a row, no +/- gutter, no line numbers
+    // the sidebar's edge drags from 200 to 480 px, and never takes the room a fair viewer needs beside the thread (else opening it folds the sidebar)
+    #[test] fn the_sidebar_edge_drags_within_its_range_and_leaves_the_thread_and_a_viewer_room() {
+        assert_eq!((clamp_side(369.4, 1400.), clamp_side(120., 1400.), clamp_side(900., 1400.)), (369., 200., 480.));
+        assert_eq!(clamp_side(450., 1200.), 288., "1200 - rail 72 - thread 360 - fair viewer 480");
+        assert_eq!(clamp_side(450., 800.), 200., "a narrow window: the least, the fold of `fit` decides the rest");
+        for (w, x) in [(1400., 480.), (1200., 288.)] { assert!(fit(w, clamp_side(x, w), true, false, true).0, "the viewer opens beside it at {w}"); }
+        assert!(crate::local::SIDEBAR_PX.1 as f32 >= SIDE_DRAG.1 && (crate::local::SIDEBAR_PX.0 as f32) <= SIDE_DRAG.0, "a dragged width survives the file's own clamp");
+        assert_eq!(crate::local::Local::default().sidebar_px, 264, "double click: the default as it was");
+    }
+    #[test] fn a_diffs_lines_copy_without_their_gutter_one_a_row() {
+        let d = diff_files(&j(r#"{"summary":"1 file, +2 −1","files":[{"name":"notes.txt","status":"modified","lines":[{"k":4,"t":"@@ -1,2 +1,3 @@","o":"","n":""},{"k":0,"t":"alpha line one","o":"1","n":"1"},{"k":2,"t":"beta line two","o":"2","n":""},{"k":1,"t":"beta line 2","o":"","n":"2"},{"k":1,"t":"","o":"","n":"3"},{"k":1,"t":"gamma line three","o":"","n":"4"}]}]}"#));
+        let reg: Reg = Default::default(); reg.borrow_mut().begin_outside();
+        // as diff_body registers them: the file's name, then each line's text (the numbers and the sign are drawn beside, no block of their own)
+        let _ = timeline::line_text(&reg, false, d[0].name.clone(), "");
+        for l in &d[0].lines { let _ = timeline::line_text(&reg, false, l.t.clone(), ""); }
+        let r = reg.borrow(); let all = r.span(false).unwrap();
+        assert_eq!(super::super::select::extract(&r.texts(), &all), "notes.txt\n@@ -1,2 +1,3 @@\nalpha line one\nbeta line two\nbeta line 2\n\ngamma line three");
+        let three = super::super::select::Selection { anchor: super::super::select::Pos { block: 3, off: 0 }, head: super::super::select::Pos { block: 6, off: 5 } };
+        assert_eq!(super::super::select::extract(&r.texts(), &three), "beta line two\nbeta line 2\n\ngamma", "a drag over lines: their text, an empty line kept");
     }
     #[test] fn file_rows_take_the_icon_of_what_they_open_as_and_listed_only_ones_are_dim() {
         assert_eq!((file_icon("board"), file_icon("schematic"), file_icon("folder"), file_icon("pdf"), file_icon("text"), file_icon("")), ("circuit-board", "cpu", "folder", "file-text", "file", "file"));
