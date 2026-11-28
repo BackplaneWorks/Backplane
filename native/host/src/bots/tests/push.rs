@@ -400,7 +400,15 @@ async fn work(hub: &Arc<Hub>, th: &str, n: u64, end: &str, said: &str) {
 #[tokio::test] async fn the_pages_quiet_hours_and_urgent_presses_decide_what_is_held() {
     let s = setup("page-quiet").await; worker(&s.hub, "tw").await;
     // a time the gate could not read is refused and changes nothing
-    for (a, b) in [("25:00", "07:00"), ("22:00", "22:00"), ("22", "07:00"), ("", "")] { assert!(press(&s, "notify-quiet", "save", json!({"qfrom": a, "qto": b})).await.is_err(), "{a}-{b}"); }
+    for (a, b) in [("25:00", "07:00"), ("22:00", "22:00"), ("22", "07:00"), ("07:00", ""), ("", "7:00")] { assert!(press(&s, "notify-quiet", "save", json!({"qfrom": a, "qto": b})).await.is_err(), "{a}-{b}"); }
+    assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some("off"), "a refused save changes nothing");
+    // a box sent empty (the one the person did not touch) is as it is: the saved end, else the default's; both empty change nothing
+    press(&s, "notify-quiet", "save", json!({"qfrom": "", "qto": ""})).await.unwrap(); assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some("off"), "both empty: as it was");
+    press(&s, "notify-quiet", "save", json!({"qfrom": "23:00", "qto": ""})).await.unwrap(); assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some("23:00-07:00"), "only From: off had the default's Until");
+    press(&s, "notify-quiet", "save", json!({"qfrom": "", "qto": "06:30"})).await.unwrap(); assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some("23:00-06:30"), "only Until");
+    press(&s, "notify-quiet", "save", json!({"qfrom": " ", "qto": ""})).await.unwrap(); assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some("23:00-06:30"), "both empty: kept");
+    assert!(press(&s, "notify-quiet", "save", json!({"qfrom": "", "qto": "24:00"})).await.is_err(), "one typed wrong");
+    assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some("23:00-06:30"));
     assert!(press(&s, "setting", "notify.quiet=x", json!({})).await.is_err() && press(&s, "setting", "push.book=on", json!({})).await.is_err(), "only the page's own switches");
     let q = quiet_around_now(&s).await; let (from, to) = q.split_once('-').unwrap();
     press(&s, "notify-quiet", "save", json!({"qfrom": from, "qto": to})).await.unwrap();

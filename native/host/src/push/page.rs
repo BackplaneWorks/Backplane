@@ -25,11 +25,12 @@ pub fn devices_info<'a>(devices: impl Iterator<Item = &'a Device>) -> String {
 /// The settings a press of `setting` may write here: the alert kinds and urgent, each on or off.
 const TOGGLES: [&str; 5] = ["notify.needs", "notify.settled", "notify.reminders", "notify.all", super::QUIET_URGENT];
 
-/// The rows, for a client that asks.
+/// The rows, for a client that asks, the rarely needed ones marked and last as on the desktop (`present::settings::mark_adv`).
 pub async fn rows(hub: &Arc<Hub>, bots: &Bots) -> Vec<Value> {
     let devices = { let w = bots.world().await; devices_info(w.devices.values()) };
     let info = json!({"push.devices": devices});
-    crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::settings::notifications(st, &json!({}), &info))).unwrap_or_default()
+    let rows = crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::settings::notifications(st, &json!({}), &info))).unwrap_or_default();
+    crate::present::settings::mark_adv("notifications", rows)
 }
 
 /// A press. `Ok` when it was kept; `Err` says why not, in the person's words.
@@ -48,9 +49,14 @@ pub async fn act(hub: &Arc<Hub>, bots: &Bots, action: &str, value: &str, fields:
                 let cur = hub.setting(super::QUIET).await.unwrap_or_default();
                 set(super::QUIET, if super::window(&cur).is_some() { &cur } else { super::QUIET_DEFAULT })
             }
+            // a box sent empty is as it is (the saved end); both empty change nothing
             "save" => {
                 let f = |k: &str| fields[k].as_str().unwrap_or("");
-                set(super::QUIET, &crate::present::settings::quiet_spec(f("qfrom"), f("qto")).ok_or("Quiet hours are HH:MM to HH:MM, 24 hours, and not the same time twice.")?)
+                let saved = hub.setting(super::QUIET).await.unwrap_or_default();
+                match crate::present::settings::quiet_save(&saved, f("qfrom"), f("qto"))? {
+                    Some(spec) => set(super::QUIET, &spec),
+                    None => return Ok(()),
+                }
             }
             _ => return Err("notify-quiet: on, off or save".into()),
         },

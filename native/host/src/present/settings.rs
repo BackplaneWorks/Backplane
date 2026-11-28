@@ -163,10 +163,22 @@ fn git(st: &State) -> Vec<Value> {
 }
 
 /// The quiet window's two ends as `(from, to)`: the setting's own, else the default; None when quiet hours are off.
-pub fn quiet_ends(st: &State) -> Option<(String, String)> {
-    let raw = set(st, crate::push::QUIET, "").trim();
+pub fn quiet_ends(st: &State) -> Option<(String, String)> { quiet_ends_of(set(st, crate::push::QUIET, "")) }
+/// `quiet_ends` from the setting's value `raw` (empty: the default).
+fn quiet_ends_of(raw: &str) -> Option<(String, String)> {
+    let raw = raw.trim();
     let spec = if raw.is_empty() { crate::push::QUIET_DEFAULT } else { raw };
     let (a, b) = spec.split_once('-')?; crate::push::window(spec)?; Some((a.trim().to_string(), b.trim().to_string()))
+}
+/// What Save on quiet hours writes from the two boxes as sent, `saved` being the setting `notify.quiet` now: a box sent empty is as it is
+/// (the saved end, else the default's: a client sends the box the person did not touch empty), and both empty change nothing (`Ok(None)`).
+/// Err, in the person's words, when a typed time is not HH:MM, 24 hours, or the two ends are the same.
+pub fn quiet_save(saved: &str, from: &str, to: &str) -> Result<Option<String>, &'static str> {
+    const BAD: &str = "Quiet hours are HH:MM to HH:MM, 24 hours, and not the same time twice.";
+    let (from, to) = (from.trim(), to.trim());
+    if from.is_empty() && to.is_empty() { return Ok(None) }
+    let (a, b) = quiet_ends_of(saved).or_else(|| quiet_ends_of("")).ok_or(BAD)?;
+    quiet_spec(if from.is_empty() { &a } else { from }, if to.is_empty() { &b } else { to }).map(Some).ok_or(BAD)
 }
 /// What `notify.quiet` may become from two typed times: `HH:MM-HH:MM` the push gate reads, else None (the page says so).
 pub fn quiet_spec(from: &str, to: &str) -> Option<String> {
@@ -193,7 +205,8 @@ pub fn notifications(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     if let Some((from, to)) = ends {
         let f = if session["drafts"]["@f.qfrom"].is_string() { draft(session, "@f.qfrom").to_string() } else { from };
         let t = if session["drafts"]["@f.qto"].is_string() { draft(session, "@f.qto").to_string() } else { to };
-        let bad = draft(session, "@quiet.err") == "bad";
+        // `@quiet.err`: the two boxes as the last Save sent them (`act`); refused when the hub could not take them, which needs the saved ends
+        let bad = draft(session, "@quiet.err").split_once('\u{1f}').map_or(false, |(a, b)| quiet_save(set(st, crate::push::QUIET, ""), a, b).is_err());
         v.push(row_f("Quiet from and until", if bad { "Times are HH:MM, 24 hours, and not the same." } else { "HH:MM, 24 hours." }, vec![field_w("qfrom", "From, 22:00", &f, 6), field_w("qto", "Until, 07:00", &t, 6)], vec![btn("Save", "notify-quiet", "save", false)]));
     }
     let urgent = set(st, crate::push::QUIET_URGENT, "") == "on";
@@ -975,10 +988,30 @@ fn devices_and_web(st: &State, session: &Value, info: &Value) -> Vec<Value> {
 }
 
 /// Rarely needed: a client folds these under Advanced at the end of the page; a client that does not know the mark draws them where they are, last
-/// (`rows_of` puts them last). A heading marked so comes only before rows marked so.
+/// (`mark_adv` puts them last). A heading marked so comes only before rows marked so.
 fn adv(mut r: Value) -> Value { r["adv"] = json!(true); r }
-/// `rows` with the ones `pick` chooses marked rarely needed (`adv`).
-fn adv_if(rows: Vec<Value>, pick: impl Fn(&str) -> bool) -> Vec<Value> { rows.into_iter().map(|r| if pick(s(&r, "label")) { adv(r) } else { r }).collect() }
+/// The rows each page marks rarely needed by their label (a label ending in "…" is a prefix), on the desktop's pages (`rows_of`) and in the
+/// phones' replies (`voice.page`, `notify.page`, `machines.page`) alike. Whole parts a page adds under Advanced (the webhook, Developer, the
+/// failover order...) are marked where the page adds them.
+const ADV: &[(&str, &[&str])] = &[
+    ("notifications", &["iPhones that hear a push"]),
+    ("threads", &["Short grace for read conversations", "Largest attachment (MB)"]),
+    ("agents", &["Bots: infinite context (beta)"]),
+    ("cad", &["KiCad over its API", "Board 3D", "Open designs in"]),
+    ("voice", &["Dictionary", "Learned fixes", "Pebble ring", "How eager", "End of turn: Jev…", "Jev check", "Voice commands", "Send after silence"]),
+    ("machines", &["Home", "Home move", "This machine stays on"]),
+];
+/// Page `page`'s rows with the ones `ADV` names marked rarely needed (`adv`), and every row so marked after the others, each part in its own
+/// order. A row that warns (`tone`) is never marked: a move that failed or a check's warning stays in sight; nor is a machine's own row, which
+/// is named by the person and may be called like one of these.
+pub fn mark_adv(page: &str, rows: Vec<Value>) -> Vec<Value> {
+    let names = ADV.iter().find(|(p, _)| *p == page).map_or(&[][..], |(_, l)| *l);
+    let named = |l: &str| names.iter().any(|n| n.strip_suffix('…').map_or(*n == l, |pre| l.starts_with(pre)));
+    let machine = |r: &Value| r["buttons"].as_array().map_or(false, |b| b.iter().any(|b| matches!(s(b, "action"), "machine-remove" | "machine-introduce")));
+    let rows = rows.into_iter().map(|r| if named(s(&r, "label")) && r["tone"].is_null() && !machine(&r) { adv(r) } else { r });
+    let (mut v, last): (Vec<Value>, Vec<Value>) = rows.partition(|r| r["adv"] != true);
+    v.extend(last); v
+}
 /// Settings > Mouse and trackpad as a page: the zoom direction and the two presets, and under Advanced each kind's inputs under its own heading. `mouse` keeps its order.
 fn mouse_page(st: &State) -> Vec<Value> {
     let mut v = vec![]; let mut section: Option<String> = None;
@@ -1011,21 +1044,19 @@ fn empty_says(mut rows: Vec<Value>) -> Vec<Value> {
 fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
     let rows = match p { "appearance" => appearance(st),
         "notifications" => { let mut r = notifications(st, session, info); r.extend(timezone(st, session)); r.extend(webhook(st, session).into_iter().map(adv)); r }
-        "threads" => { let mut r = adv_if(threads(st), |l| l == "Short grace for read conversations" || l == "Largest attachment (MB)"); r.push(head("Git")); r.extend(git(st)); r }
+        "threads" => { let mut r = threads(st); r.push(head("Git")); r.extend(git(st)); r }
         "mouse" => mouse_page(st),
-        "agents" => { let mut a = adv_if(agents(st, info), |l| l == "Bots: infinite context (beta)"); a.extend(fallback(st, info).into_iter().map(adv)); a.extend(writing(st, info).into_iter().map(adv)); a }
+        "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info).into_iter().map(adv)); a.extend(writing(st, info).into_iter().map(adv)); a }
         "about" => { let mut r = updates(st, info); r.extend(about(info)); r.push(head("Network")); r.extend(net(info)); r }
         "setup" => { let mut r = super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()); r.extend(setup_rest(st, info)); r },
-        "cad" => empty_says(adv_if(cad(st, session, info), |l| matches!(l, "KiCad over its API" | "Board 3D" | "Open designs in"))),
+        "cad" => empty_says(cad(st, session, info)),
         "browser" => browser(st, session), "keys" => keys(st, session, info), "ordering" => ordering(st), "devices" => devices_and_web(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
             r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
             r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
             r.extend(super::signin_there::open_rows(info)); r }, "rules" => rules(st, session), "privacy" => privacy(st, info),
-        "voice" => { let mut r = voice(st, session, info); r.push(head("Ring")); r.extend(ring(st, session, info));
-            adv_if(r, |l| matches!(l, "How eager" | "Voice commands" | "Send after silence") || l.starts_with("End of turn: Jev")) }
+        "voice" => { let mut r = voice(st, session, info); r.push(head("Ring")); r.extend(ring(st, session, info)); r }
         "usage" => usage(st), "mcp" => mcp(session, info), _ => vec![] };
-    let (mut v, last): (Vec<Value>, Vec<Value>) = rows.into_iter().partition(|r| r["adv"] != true);
-    v.extend(last); v
+    mark_adv(p, rows)
 }
 /// Plain words the Settings search also finds a row by, keyed by its label: what it does, or what it was called (`also` on the menu row). A test holds
 /// that every label here is a row of some page, so none goes stale.
@@ -1239,12 +1270,13 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
                     if a != "mcp-dup" { for f in crate::mcpx::page::FIELDS { p.insert(f.into(), Value::Null); } } mcp_patch(p) } None => json!({}) }
             }
         }
-        // Notifications: every press goes to the hub as notify.page.act, with the times as typed (the phones send the same)
+        // Notifications: every press goes to the hub as notify.page.act, with the times as typed (the phones send the same; a box not touched
+        // goes empty, which the hub reads as the saved end). Save keeps what it sent in `@quiet.err`: the page says whether the hub can take it.
         a if a.starts_with("notify-") => {
             let fields = json!({"qfrom": draft(session, "@f.qfrom"), "qto": draft(session, "@f.qto")});
             send(session, hub, "notify.page.act", json!({"action": a, "value": value, "fields": fields}), &mut cmds, &mut rid);
             if a == "notify-quiet" && value != "save" { json!({"drafts": {"@f.qfrom": Value::Null, "@f.qto": Value::Null, "@quiet.err": ""}}) } else if a == "notify-quiet" {
-                if quiet_spec(draft(session, "@f.qfrom"), draft(session, "@f.qto")).is_some() { json!({"drafts": {"@quiet.err": ""}}) } else { json!({"drafts": {"@quiet.err": "bad"}}) } } else { json!({}) }
+                json!({"drafts": {"@quiet.err": format!("{}\u{1f}{}", draft(session, "@f.qfrom"), draft(session, "@f.qto"))}}) } else { json!({}) }
         }
         "key-sent" => json!({"drafts": {"@f.kname": "", "@key.err": "", "@keys.rm": ""}}),
         "key-err" => json!({"drafts": {"@key.err": value}}),
@@ -2094,6 +2126,62 @@ mod tests {
             "Keep Backplane's commits off my branch", "Short grace for read conversations", "Largest attachment (MB)"]);
         let a = labels(&rows_of(&st, &none, &none, "about"));
         assert!(a[0].starts_with("Hub: Backplane ") && a[1] == "Update channel" && a.iter().position(|l| l == "Network").map(|i| a[i + 1].starts_with("Tailscale: ")) == Some(true), "{a:?}");
+    }
+    #[test] fn the_phones_voice_page_ends_with_the_advanced_rows_and_keeps_the_others_in_order() {
+        let labels = |r: &[Value]| r.iter().map(|x| s(x, "label").to_string()).collect::<Vec<_>>();
+        let p: crate::voice::page::Prefs = [("voice.e.kicad".to_string(), "KiCad = key cad".to_string())].into_iter().collect();
+        let (plain, reply) = (crate::voice::page::rows(&p, &json!({}), "", ""), crate::voice::page::phone_rows(&p, &json!({})));
+        assert_eq!(reply.len(), plain.len(), "the same rows");
+        let at = reply.iter().position(|x| x["adv"] == true).expect("rows under Advanced");
+        assert!(reply[at..].iter().all(|x| x["adv"] == true), "{:?}", labels(&reply));
+        let adv = labels(&reply[at..]);
+        assert_eq!(adv, ["Dictionary", "Learned fixes", "Pebble ring", "How eager", "End of turn: Jev (TypeSafe)", "Voice commands", "Send after silence"]);
+        assert_eq!(labels(&reply[..at]), labels(&plain).into_iter().filter(|l| !adv.contains(l)).collect::<Vec<_>>(), "every other row keeps its order");
+        assert_eq!(labels(&reply[..2]), ["Speech to text", "Local model"]);
+        // the desktop's Voice page folds the same rows (after its Ring part)
+        let desk = rows_of(&st(&[]), &json!({}), &json!({}), "voice");
+        assert_eq!(desk.iter().filter(|x| x["adv"] == true).map(|x| s(x, "label").to_string()).collect::<Vec<_>>(), adv);
+    }
+    #[test] fn the_phones_notifications_and_machines_carry_the_same_marks() {
+        let n = mark_adv("notifications", notifications(&st(&[]), &json!({}), &json!({})));
+        assert_eq!((s(n.last().unwrap(), "label"), n.iter().filter(|x| x["adv"] == true).count()), ("iPhones that hear a push", 1), "none yet: rarely needed");
+        let d = rows_of(&st(&[]), &json!({}), &json!({}), "notifications");
+        assert_eq!(d.iter().filter(|x| x["adv"] == true).map(|x| s(x, "label")).collect::<Vec<_>>(), ["iPhones that hear a push", "Webhook", "Address", "Secret file"]);
+        // Machines: the home move and this machine staying on fold; a machine the person called Home and a move that failed do not
+        let linked = json!([{"id": "m1", "name": "Home", "url": "http://h.example:3787", "state": "paired"}]);
+        let mut r = crate::net::machinespage::rows(&json!({"linked": linked}), &|_| String::new());
+        r.extend(crate::net::homemove::rows(true, "", r#"{"state":"failed","note":"no room"}"#, &linked));
+        r.push(crate::net::alwayson::rows::stays_on_row(false, false));
+        let m = mark_adv("machines", r.clone());
+        let adv: Vec<&Value> = m.iter().filter(|x| x["adv"] == true).collect();
+        assert_eq!(adv.iter().map(|x| s(x, "label")).collect::<Vec<_>>(), ["Home", "This machine stays on"], "{m:?}");
+        assert_eq!(adv[0]["buttons"][0]["action"], "machine-home", "the move, not the machine");
+        assert!(m.iter().any(|x| x["label"] == "Home" && x["adv"].is_null()) && m.iter().any(|x| x["label"] == "Home move" && x["adv"].is_null()));
+        assert_eq!(m.len(), r.len());
+        // the other phone pages are as they were
+        for page in ["devices", "ring", "browser"] { assert_eq!(mark_adv(page, r.clone()), r, "{page}"); }
+    }
+    #[test] fn quiet_hours_save_with_one_box_edited() {
+        // a box sent empty (the one the person did not touch) is the saved end, else the default's; both empty change nothing
+        assert_eq!(quiet_save("", "23:00", ""), Ok(Some("23:00-07:00".into())), "only From");
+        assert_eq!(quiet_save("21:30-06:00", "", "06:30"), Ok(Some("21:30-06:30".into())), "only Until, the saved From");
+        assert_eq!(quiet_save("off", "23:00", ""), Ok(Some("23:00-07:00".into())), "off: the default's other end");
+        assert_eq!(quiet_save("21:30-06:00", "", " "), Ok(None), "both empty: as it is");
+        // a typed one still has to be right, and the two ends differ
+        for (a, b) in [("25:00", ""), ("", "7:00"), ("07:00", ""), ("23:00", "23:00"), ("23:00", "x")] { assert!(quiet_save("", a, b).is_err(), "{a}-{b}"); }
+        // the desktop: Save sends the boxes as they stand (the one not touched empty), and the page says whether the hub can take them
+        let sess = |from: &str| json!({"open": {"settings": true}, "drafts": {"@settings.page": "notifications", "@f.qfrom": from}, "rid": 5});
+        let note = |saved: &str, from: &str| {
+            let mut s2 = sess(from); let o = act("h", &s2, "notify-quiet", "save").unwrap();
+            let sent = o.cmds[0]["text"].as_str().unwrap().to_string(); assert!(sent.contains(&format!(r#""qfrom":"{from}""#)) && sent.contains(r#""qto":"""#), "{sent}");
+            s2["drafts"]["@quiet.err"] = o.patch["drafts"]["@quiet.err"].clone();
+            let rows = notifications(&st(&[("notify.quiet", saved)]), &s2, &json!({}));
+            s(rows.iter().find(|r| r["label"] == "Quiet from and until").unwrap(), "note").to_string()
+        };
+        assert_eq!(note("", "23:00"), "HH:MM, 24 hours.", "only From edited: saved");
+        assert_eq!(note("23:00-07:00", "23:00"), "HH:MM, 24 hours.", "and once the hub has it");
+        assert_eq!(note("", "25:00"), "Times are HH:MM, 24 hours, and not the same.");
+        assert_eq!(note("", "07:00"), "Times are HH:MM, 24 hours, and not the same.", "the same as the saved Until");
     }
     #[test] fn the_menu_says_other_names_each_page_is_found_by() {
         let v = view(&st(&[]), &json!({}), &json!({}));
