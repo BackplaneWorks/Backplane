@@ -19,6 +19,7 @@ impl Backplane {
         if let ComposerEvent::PopupMove(d) = event { let n = self.popup_rows().len(); if n > 0 { self.screens.popup_ix = popup_step(self.screens.popup_ix, *d, n); self.screens.popup_scroll.scroll_to_item(self.screens.popup_ix); self.m("popup", serde_json::json!({"ix": self.screens.popup_ix, "rows": n})); cx.notify(); } return; }
         if matches!(event, ComposerEvent::PopupPick) { self.popup_pick(cx); return; }
         if matches!(event, ComposerEvent::SelectAllTimeline) { self.select_all_key(None, cx); return; }
+        if let ComposerEvent::Recall(d) = event { self.recall_sent(*d, cx); return; }
         let cap = self.data["thread"]["cap"].as_u64().unwrap_or(DEFAULT_CAP);
         if let Err(e) = self.screens.attacher.event(&self.tx, &self.selected, cap, event) { self.error = e; }
         cx.notify();
@@ -119,6 +120,19 @@ impl Backplane {
     }
     /// Choose the highlighted row: the hub puts its word where the one being typed is.
     pub(crate) fn popup_pick(&mut self, cx: &mut Context<Self>) -> bool { self.popup_pick_by(cx, false) }
+    /// Up (-1) or Down (1) in the empty message box: what this person sent before in this thread, from its own rows (newest first), as a shell's history.
+    fn recall_sent(&mut self, dir: i32, cx: &mut Context<Self>) {
+        let history: Vec<String> = self.data["thread"]["entries"].as_array().into_iter().flatten().rev()
+            .filter(|e| e["kind"] == "user").map(|e| crate::string(e, "text")).filter(|t| !t.trim().is_empty()).collect();
+        let (text, held) = { let i = self.input.read(cx); (i.content.to_string(), i.recalled.clone()) };
+        let at = super::composer::recalled_at(&text, held.as_ref());
+        let next = super::composer::recall(&history, at, dir);
+        if next == at { return }
+        self.input.update(cx, |c, cx| match next {
+            Some(i) => { c.set(history[i].clone(), cx); c.recalled = Some((i, history[i].clone())); }
+            None => { c.set(String::new(), cx); c.recalled = None; }
+        });
+    }
     /// Enter on an open popup: completes the row, except a command typed in full, which is sent.
     pub(crate) fn popup_enter(&mut self, cx: &mut Context<Self>) -> bool { self.popup_pick_by(cx, true) }
     fn popup_pick_by(&mut self, cx: &mut Context<Self>, enter: bool) -> bool {
