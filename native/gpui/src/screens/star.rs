@@ -22,6 +22,7 @@ pub fn decision(o: &Offer, action: &str) -> Command { Command::Rpc("star.nudge".
 /// Whether the card is drawn now: an offer, and a pause (no turn running in the thread on screen, nothing typed, setup not up).
 pub fn due(o: Option<&Offer>, data: &Value, draft: &str) -> bool {
     o.is_some() && data["thread"]["sendAct"] != "interrupt" && draft.trim().is_empty() && !data["tour"].is_object() && !super::migrate::is_up(data)
+        && !data["settings"].is_object() // Settings is a window over the page: the card waits (it drew over Settings' page list)
 }
 
 /// Where the card sits: over the sidebar's foot, above its status line ("Connected"), as wide as the sidebar less its margins, so it covers
@@ -62,7 +63,7 @@ impl Backplane {
     /// The hub's word on the offer (a frame, or star.offer's answer on connect).
     pub(crate) fn star_offer(&mut self, v: &Value, cx: &mut Context<Self>) { let o = of(v); if self.screens.star != o { self.screens.star = o; cx.notify(); } }
     /// The card is on screen now.
-    pub(crate) fn star_up(&self, cx: &App) -> bool { due(self.screens.star.as_ref(), &self.data, &self.input.read(cx).content) }
+    pub(crate) fn star_up(&self, cx: &App) -> bool { due(self.screens.star.as_ref(), &self.data, &self.input.read(cx).content) && !self.screens.settings_ui.open_local }
     /// The person's choice: open also opens the page. The card goes at once; the hub tells every other client to hide it.
     pub(crate) fn star_decide(&mut self, action: &str, cx: &mut Context<Self>) {
         let Some(o) = self.screens.star.take() else { return };
@@ -97,6 +98,7 @@ mod tests {
         assert!(!due(Some(&o), &json!({"tour": {"step": "agents"}}), ""), "setup");
         assert!(!due(Some(&o), &json!({"migrate": {"state": "running"}}), ""), "an import");
         assert!(due(Some(&o), &json!({}), ""), "no thread open");
+        assert!(!due(Some(&o), &json!({"settings": {"rows": []}}), ""), "Settings open: the card waits, never over it");
     }
     #[test] fn nothing_is_shown_without_an_offer() {
         assert_eq!(of(&Value::Null), None, "decided, or never offered");
