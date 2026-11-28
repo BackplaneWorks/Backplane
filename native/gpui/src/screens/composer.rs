@@ -54,6 +54,8 @@ pub enum ComposerEvent {
     PopupMove(i32),
     /// The popup is open and Tab was pressed: the highlighted row is chosen.
     PopupPick,
+    /// Ctrl+A (Cmd+A) in the message box right after a selection in the thread or the document (the box kept the keyboard): the window selects all of that.
+    SelectAllTimeline,
 }
 
 /// Reference words drawn as chips in the draft (the colours are the accent over its own tint).
@@ -120,6 +122,8 @@ pub struct Composer {
     /// The most rows the box is tall (`MAX_LINES`); a one-row box (a row's rename) scrolls to the caret's row instead of growing over its neighbours.
     pub max_lines: f32,
     ctx: &'static str,
+    /// A selection was made elsewhere in the window (the thread's, `drop_selection`) and nothing was done in the box since: Ctrl+A selects all there.
+    elsewhere: bool,
 }
 
 impl EventEmitter<ComposerEvent> for Composer {}
@@ -133,7 +137,7 @@ impl Composer {
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
         /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, max_lines: MAX_LINES, ctx, focus: cx.focus_handle().tab_stop(tabs_between_fields(ctx)), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
-            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), total_h: px(0.), followed: None, selecting: false }
+            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), total_h: px(0.), followed: None, selecting: false, elsewhere: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
     pub fn dictate(&mut self, range: std::ops::Range<usize>, with: &str, caret: usize, cx: &mut Context<Self>) { self.ed.dictate(range, with, caret); self.sync(cx); }
@@ -146,7 +150,7 @@ impl Composer {
     pub fn editor(&self) -> &Editor { &self.ed }
     pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
     /// A selection made elsewhere in the window (the timeline's) is the one to copy: this one goes, the caret stays where it was.
-    pub fn drop_selection(&mut self, cx: &mut Context<Self>) { if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
+    pub fn drop_selection(&mut self, cx: &mut Context<Self>) { self.elsewhere = true; if !self.ed.selection().is_empty() { let h = self.ed.head(); self.ed.set_selection(h..h); cx.notify(); } }
     /// Insert a selected excerpt formatted as a Markdown blockquote at the caret/selection as one undoable edit.
     pub fn insert_quote(&mut self, selected: &str, cx: &mut Context<Self>) {
         let start = self.ed.selection().start;
@@ -157,9 +161,9 @@ impl Composer {
     pub fn menu_state(&self) -> (bool, bool) { (!self.masked && !self.ed.selection().is_empty(), !self.ed.is_empty()) }
     /// A right-click menu item ("cut", "copy", "paste", "all"): what its key does.
     pub fn menu_do(&mut self, what: &str, window: &mut Window, cx: &mut Context<Self>) {
-        match what { "cut" => self.cut(&Cut, window, cx), "copy" => self.copy(&Copy, window, cx), "paste" => self.paste(&Paste, window, cx), "all" => self.select_all(&SelectAll, window, cx), _ => {} }
+        match what { "cut" => self.cut(&Cut, window, cx), "copy" => self.copy(&Copy, window, cx), "paste" => self.paste(&Paste, window, cx), "all" => { self.elsewhere = false; self.select_all(&SelectAll, window, cx) } _ => {} }
     }
-    fn sync(&mut self, cx: &mut Context<Self>) { self.content = self.ed.text().to_string().into(); cx.notify(); }
+    fn sync(&mut self, cx: &mut Context<Self>) { self.elsewhere = false; self.content = self.ed.text().to_string().into(); cx.notify(); }
     fn edit(&mut self, cx: &mut Context<Self>, f: impl FnOnce(&mut Editor)) { f(&mut self.ed); self.sync(cx); }
 
     // ---- actions
@@ -185,7 +189,11 @@ impl Composer {
     fn doc_end(&mut self, _: &DocEnd, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_end(false)); }
     fn sel_doc_start(&mut self, _: &SelDocStart, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_start(true)); }
     fn sel_doc_end(&mut self, _: &SelDocEnd, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.doc_end(true)); }
-    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
+    fn select_all(&mut self, _: &SelectAll, _: &mut Window, cx: &mut Context<Self>) {
+        // just after a selection in the thread (the box kept the keyboard, as it does): all of the thread, as a page's Ctrl+A
+        /* i18n-ok: a key context */ if self.elsewhere && self.ctx == "Composer" { cx.emit(ComposerEvent::SelectAllTimeline); return }
+        self.edit(cx, |e| e.select_all());
+    }
     fn undo(&mut self, _: &Undo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.undo(); }); }
     fn redo(&mut self, _: &Redo, _: &mut Window, cx: &mut Context<Self>) { self.edit(cx, |e| { e.redo(); }); }
     fn go(&mut self, _: &Go, _: &mut Window, cx: &mut Context<Self>) { cx.emit(ComposerEvent::Submit); }

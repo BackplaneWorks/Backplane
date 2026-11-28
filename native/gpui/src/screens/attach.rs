@@ -177,7 +177,7 @@ impl Attacher {
                 });
                 if skipped > 0 { Err(crate::i18n::tf("gpui.attach.first", &[("max", MAX_FILES.into()), ("skipped", skipped.into())])) } else { Ok(()) }
             }
-            ComposerEvent::Submit | ComposerEvent::SubmitBack | ComposerEvent::CopyTimeline | ComposerEvent::PopupMove(_) | ComposerEvent::PopupPick => Ok(()),
+            ComposerEvent::Submit | ComposerEvent::SubmitBack | ComposerEvent::CopyTimeline | ComposerEvent::PopupMove(_) | ComposerEvent::PopupPick | ComposerEvent::SelectAllTimeline => Ok(()),
         }
     }
 }

@@ -18,6 +18,7 @@ impl Backplane {
         if matches!(event, ComposerEvent::CopyTimeline) { return self.timeline_copy(cx); }
         if let ComposerEvent::PopupMove(d) = event { let n = self.popup_rows().len(); if n > 0 { self.screens.popup_ix = popup_step(self.screens.popup_ix, *d, n); self.screens.popup_scroll.scroll_to_item(self.screens.popup_ix); self.m("popup", serde_json::json!({"ix": self.screens.popup_ix, "rows": n})); cx.notify(); } return; }
         if matches!(event, ComposerEvent::PopupPick) { self.popup_pick(cx); return; }
+        if matches!(event, ComposerEvent::SelectAllTimeline) { self.select_all_key(None, cx); return; }
         let cap = self.data["thread"]["cap"].as_u64().unwrap_or(DEFAULT_CAP);
         if let Err(e) = self.screens.attacher.event(&self.tx, &self.selected, cap, event) { self.error = e; }
         cx.notify();

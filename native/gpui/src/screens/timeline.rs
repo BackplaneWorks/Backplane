@@ -94,10 +94,19 @@ impl Registry {
     /// selects only there.
     pub fn inside(&self, p: Point<Pixels>, rows_only: bool) -> bool { self.blocks.iter().any(|b| in_scope(b, Some(rows_only)) && b.layout.as_ref().is_some_and(|l| l.bounds().contains(&p))) }
     /// From the first block of the rows' surface to the end of its last: Select all.
-    pub fn rows_span(&self) -> Option<Selection> {
-        let first = self.blocks.iter().position(|b| in_scope(b, Some(true)))?; let last = self.blocks.iter().rposition(|b| in_scope(b, Some(true)))?;
+    pub fn rows_span(&self) -> Option<Selection> { self.span(true) }
+    /// From the first block of a surface (the rows, or the open document's page) to the end of its last.
+    pub fn span(&self, rows_only: bool) -> Option<Selection> {
+        let first = self.blocks.iter().position(|b| in_scope(b, Some(rows_only)))?; let last = self.blocks.iter().rposition(|b| in_scope(b, Some(rows_only)))?;
         Some(Selection { anchor: Pos { block: first, off: 0 }, head: Pos { block: last, off: self.blocks[last].text.len() } })
     }
+    /// The surface the selection on screen was made on (true: the thread's rows; false: the document's page); None with nothing selected.
+    pub fn sel_surface(&self) -> Option<bool> {
+        if self.keyed.is_none() || self.sel.anchor == self.sel.head { return None }
+        self.blocks.get(self.sel.anchor.block).map(|b| in_scope(b, Some(true)))
+    }
+    /// Esc: the selection goes (true when there was one).
+    pub fn deselect(&mut self) -> bool { let had = self.keyed.is_some() && self.sel.anchor != self.sel.head; self.keyed = None; self.sel = Selection::default(); had }
     /// The block with this identity, as drawn this frame.
     fn at(&self, id: &str, idx: usize) -> Option<usize> { self.blocks.iter().position(|b| b.id == id && b.idx == idx) }
     fn key(&self, p: Pos) -> Option<KPos> { let b = self.blocks.get(p.block)?; Some(KPos { entry: b.id.clone(), idx: b.idx, off: p.off.min(b.text.len()) }) }
@@ -1568,6 +1577,27 @@ impl Backplane {
         let all = self.screens.reg.borrow().rows_span();
         if let Some(s) = all { self.screens.reg.borrow_mut().select(s); self.timeline_selection_made(window, cx); }
         self.notify_sel(true, cx);
+    }
+    /// Ctrl+A (Cmd+A on a Mac) with the keyboard in no field, terminal or web page, as a browser selects its page: the surface of the last
+    /// selection (the open document's page when it was made there), else the thread's rows. `window`: None from the message box, which keeps
+    /// the keyboard (its Copy copies this, `ComposerEvent::CopyTimeline`).
+    pub(crate) fn select_all_key(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) {
+        let surface = self.screens.reg.borrow().sel_surface().unwrap_or(true);
+        let all = { let r = self.screens.reg.borrow(); r.span(surface).or_else(|| if surface { None } else { r.span(true) }) };
+        let Some(s) = all else { return };
+        let rows_only = self.screens.reg.borrow().blocks.get(s.anchor.block).is_some_and(|b| in_scope(b, Some(true)));
+        self.screens.reg.borrow_mut().select(s);
+        match window { Some(w) => self.timeline_selection_made(w, cx), None => {
+            #[cfg(target_os = "linux")]
+            { let t = self.timeline_selected(); if !t.is_empty() { cx.write_to_primary(ClipboardItem::new_string(t)); } }
+        } }
+        self.notify_sel(rows_only, cx);
+    }
+    /// Esc with nothing above it to shut: the selection in the thread or the document goes (false when there was none).
+    pub(crate) fn selection_escape(&mut self, cx: &mut Context<Self>) -> bool {
+        let surface = self.screens.reg.borrow().sel_surface();
+        if !self.screens.reg.borrow_mut().deselect() { return false }
+        self.notify_sel(surface.unwrap_or(true), cx); true
     }
     /// The whole text of the message (or tool row, or ask) a block belongs to, as its Copy button gives it: the row's text from the hub, else the
     /// message's drawn blocks.

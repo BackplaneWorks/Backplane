@@ -187,6 +187,8 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     let k = |id: &str| l.key(id);
     v.extend([KeyBinding::new(&k("send"), crate::Send, Some("Composer")), KeyBinding::new("ctrl-enter", crate::Send, Some("Composer")),
         KeyBinding::new(&k("close"), crate::ClosePopup, None), KeyBinding::new("secondary-c", crate::CopySelection, Some(NOT_MAC_COMPOSER)),
+        // outside a field, a terminal or a web page, Ctrl+A (Cmd+A) selects the thread (or the open document) as a browser selects its page
+        /* i18n-ok: key contexts */ KeyBinding::new("secondary-a", crate::SelectAllKey, Some(&format!("{NOT_FIELD} && !Composer"))),
         KeyBinding::new(&k("sidebar"), crate::ToggleSidebarKey, None), KeyBinding::new(&k("search"), crate::FocusSearchKey, None),
         KeyBinding::new(&k("palette"), crate::OpenPaletteKey, None), KeyBinding::new("secondary-shift-p", crate::OpenPaletteKey, None),
         KeyBinding::new(&k("new"), NewThread, None), KeyBinding::new(&k("new-chat"), NewChat, None), KeyBinding::new(&k("diff"), OpenDiff, None), KeyBinding::new(&k("files"), OpenFiles, None),
@@ -873,6 +875,13 @@ mod tests {
         assert_eq!(d("enter", &["Copyable"]), "copyable::CopyIt"); assert_eq!(d(copy, &["Copyable"]), "copyable::CopyIt", "deeper than the window's copy");
         assert_eq!(d("enter", &["CopyRun"]), "copyable::RunIt");
         assert_eq!(d(copy, &[]), "backplane::CopySelection", "elsewhere the selection is copied as before"); assert_eq!(d("enter", &[]), "");
+    }
+    #[test] fn select_all_outside_a_field_selects_the_thread_and_stays_the_fields_and_the_shells_inside_them() {
+        let all = if mac() { "cmd-a" } else { "ctrl-a" };
+        assert_eq!(d(all, &[]), "backplane::SelectAllKey"); assert_eq!(d(all, &["Sidebar"]), "backplane::SelectAllKey", "the thread with the keyboard nowhere in particular");
+        assert_eq!(d(all, &["Composer"]), "composer::SelectAll", "the message box's own (it hands it on right after a selection in the thread)");
+        assert_eq!(d(all, &["TextInput"]), "text_input::SelectAll"); assert_eq!(d(all, &["Terminal"]), "", "the shell's own Ctrl+A");
+        assert_eq!(d(all, &["BrowserView"]), "", "a web page's own");
     }
     #[test] fn palette_and_dialog_scopes() {
         assert_eq!(d("escape", &["PickInput"]), "backplane::ClosePopup"); assert_eq!(d("escape", &["AskInput"]), "backplane::ClosePopup");
