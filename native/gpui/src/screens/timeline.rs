@@ -1260,6 +1260,13 @@ pub fn number_badge(light: bool, n: usize) -> Div {
 pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Option<AnyElement> {
     images_n(cx, light, list, key, target, imgs, false)
 }
+/// A picture's name as the person knows it: an attachment's label ("case.png"), not the stored file's name ("fe04384b-case.png"); else the
+/// path's last part.
+pub fn shown_name(it: &Value) -> String {
+    let label = it["label"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").trim();
+    if !label.is_empty() { return label.to_string() }
+    it["path"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_string()
+}
 /// `numbered`: each picture shows its place (a message's attached pictures, when there are several).
 pub fn images_n(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images, numbered: bool) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
@@ -1267,7 +1274,7 @@ pub fn images_n(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &st
     let mut row = div().flex().flex_wrap().gap_2();
     for (i, it) in items.iter().take(MAX_IMAGES).enumerate() {
         let url = it["url"].as_str().unwrap_or("");
-        let name = it["path"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_string();
+        let name = shown_name(it);
         let el = match imgs.get(target, url) {
             Slot::Ready(img) => { let shown = img.clone(); let n = name.clone();
                 let (bw, bh) = match super::images::dims(&img.bytes) { Some((w, h)) => super::images::fit(w, h, 480., 360.), None => (480., 120.) };
@@ -1759,6 +1766,11 @@ mod tests {
         frame(&mut r, &[("e3", 0, "third")]);
         assert!(r.sel.collapsed()); assert_eq!(select::extract(&r.texts(), &r.sel), ""); frame(&mut r, &[("e2", 0, "second"), ("e3", 0, "third")]);
         assert!(r.sel.collapsed(), "it does not come back");
+    }
+    #[test] fn a_picture_is_named_as_it_was_attached() {
+        assert_eq!(shown_name(&serde_json::json!({"label":"case.png","path":"/h/attachments/fe04384b-case.png"})), "case.png");
+        assert_eq!(shown_name(&serde_json::json!({"path":"/h/attachments/fe04384b-case.png"})), "fe04384b-case.png", "no label: the file's name");
+        assert_eq!(shown_name(&serde_json::json!({"label":"","path":"/p/shot.png"})), "shot.png");
     }
     #[test] fn blocks_in_one_message_are_numbered_from_zero() {
         let mut r = Registry::default(); r.begin();
