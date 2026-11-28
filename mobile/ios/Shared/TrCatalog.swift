@@ -4391,7 +4391,9 @@ mobile.diff.new	new	新規	nuevo
 mobile.diff.deleted	deleted	削除	eliminado
 mobile.diff.renamed	renamed	名前変更	renombrado
 mobile.diff.binary	binary	バイナリ	binario
+mobile.settings.advanced	Advanced	詳細設定	Avanzado
 android.attach.file	Choose a file	ファイルを選ぶ	Elegir un archivo
+android.connecting.word	connecting	接続中	conectando
 android.diff.pr	PR	PR	PR
 android.diff.commit.ask	Commit this thread''s changes with its title as the message, then push them?	このスレッドの変更をタイトルをメッセージとしてコミットし、プッシュしますか？	¿Confirmar los cambios de este hilo con su título como mensaje y enviarlos?
 android.diff.pr.ask	Commit this thread''s changes, push them and open a pull request?	このスレッドの変更をコミットしてプッシュし、プルリクエストを開きますか？	¿Confirmar los cambios de este hilo, enviarlos y abrir una pull request?
