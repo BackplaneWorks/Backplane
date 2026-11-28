@@ -2767,6 +2767,7 @@ gpui.side.old.chats.that.belong.to = どのプロジェクトにも属さない�
 gpui.side.group.projects = プロジェクトをグループ化
 gpui.side.on.projects.with.nothing.going = オン: 最近動きのないプロジェクトを Git のオーナー（なければフォルダ）ごとにまとめます。オフ: 1 つの一覧にし、自分で作ったグループだけを表示します。
 gpui.side.no.group = グループなし
+gpui.side.nomatch = 名前に一致しません。Enterで会話の中を検索します。
 gpui.e.freecad.install = FreeCADをインストール
 gpui.e.freecad.ask = FreeCADをインストールしますか？
 gpui.e.freecad.installing = FreeCADをインストール中

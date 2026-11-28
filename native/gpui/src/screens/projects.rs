@@ -126,6 +126,18 @@ pub fn query(data: &Value) -> String { string(&data["search"], "query") }
     if h.is_empty() || h == "Search projects and threads" || h == "Search projects" { SEARCH_HINT.into() } else { h }
 }
 
+/// The rows the hub's (filtered) sidebar has to draw under the Search field: projects and threads, Bub's section aside.
+pub fn side_rows(data: &Value) -> usize {
+    let n = |v: &Value| v.as_array().map_or(0, |r| r.len());
+    match data["sections"].as_array() { Some(s) => s.iter().filter(|s| s["kind"] != "bub").map(|s| n(&s["rows"])).sum(), None => n(&data["projects"]) + n(&data["active"]["rows"]) }
+}
+/// Words in the Search field and no name matches them: the list says so, and Enter looks for them in what was said.
+pub fn miss(query: &str, rows: usize) -> bool { !query.trim().is_empty() && rows == 0 }
+pub fn enter_goes_to_find(query: &str, rows: usize) -> bool { miss(query, rows) }
+/// The one dim line in place of the list when `miss` (where a thread's title would start, wrapped in a narrow sidebar; not a button).
+pub fn nomatch(light: bool, data: &Value) -> Option<AnyElement> {
+    miss(&query(data), side_rows(data)).then(|| div().w_full().py(crate::scale::tpx(8.)).pl(px(22.)).pr_3().text_size(crate::scale::tpx(12.)).text_color(theme::color(light, "faint")).child(crate::i18n::t("gpui.side.nomatch")).into_any_element())
+}
 pub fn search_cmd(text: &str) -> Command { Command::Action("proj-find-q".into(), text.to_string()) }
 pub fn go_cmd() -> Command { Command::Action("proj-go".into(), String::new()) }
 pub fn open_cmd() -> Command { Command::Action("picker-open".into(), String::new()) }
@@ -350,8 +362,16 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             if p.sent_q.last() == Some(&text) { return; }
             remember(&mut p.sent_q, &text); let _ = this.tx.try_send(search_cmd(&text));
         }).detach();
-        // Enter: the hub opens what was found and clears its query; the box forgets what it sent, so that clear is taken (an older "" sent is no echo)
-        cx.subscribe(&input, |this, _, ev: &ComposerEvent, _| if matches!(ev, ComposerEvent::Submit) { this.screens.projects.sent_q.clear(); let _ = this.tx.try_send(go_cmd()); }).detach();
+        // Enter: the hub opens what was found and clears its query; the box forgets what it sent, so that clear is taken (an older "" sent is no echo).
+        // When no name matches the words: the box clears and Find across threads opens holding them
+        cx.subscribe(&input, |this, input, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) {
+            let typed = input.read(cx).content.to_string(); this.screens.projects.sent_q.clear();
+            if !enter_goes_to_find(&typed, side_rows(&this.data)) { let _ = this.tx.try_send(go_cmd()); return }
+            remember(&mut this.screens.projects.sent_q, ""); let _ = this.tx.try_send(search_cmd(""));
+            input.update(cx, |i, cx| i.set(String::new(), cx));
+            this.palette_open_find(cx);
+            if let Some(p) = this.screens.palette.input.clone() { p.update(cx, |i, cx| i.set(typed.trim().to_string(), cx)); }
+        }).detach();
         this.screens.projects.search = Some(input);
     }
     let (q, h) = (query(&this.data), hint(&this.data));
@@ -1043,6 +1063,15 @@ mod home_tests {
     }
 
     use super::*; use serde_json::json; use core::prelude::v1::test;
+    /// Words that match no project or thread name: the line shows and Enter goes to Find across threads; spaces are no words.
+    #[test] fn a_search_that_matches_no_name_says_so_and_enter_finds_what_was_said() {
+        let empty = json!({"search": {"query": "feedback"}, "sections": [{"kind": "bub", "rows": [{"id": "b"}]}, {"kind": "projects", "id": "recent", "rows": []}]});
+        assert_eq!(side_rows(&empty), 0); assert!(miss("feedback", 0) && enter_goes_to_find("feedback", 0));
+        let hit = json!({"sections": [{"kind": "projects", "rows": [{"id": "h|p1"}]}, {"kind": "threads", "rows": []}]});
+        assert_eq!(side_rows(&hit), 1); assert!(!miss("oscillogoat", 1) && !enter_goes_to_find("oscillogoat", 1), "a name matches: Enter opens it as before");
+        assert!(!miss("", 0) && !miss("   ", 0), "spaces are no query");
+        assert_eq!(side_rows(&json!({"projects": [{"id": "p"}, {"id": "q"}]})), 2, "an older hub's projects count too");
+    }
     #[test] fn a_viewer_opened_on_a_projects_page_is_that_projects() {
         let d = json!({"projects": [{"id": "h|p1", "threads": [{"id": "h|t1"}], "settled": [{"id": "h|t2"}]}, {"id": "h|p2", "threads": [], "settled": [{"id": "h|t3"}]}, {"id": "h|p3", "threads": []}]});
         assert_eq!(page_view(&d, Some("p1"), "bot9", "board"), Some(("h|t1".to_string(), "board")), "another thread was open: the project's top thread");
