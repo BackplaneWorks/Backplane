@@ -929,7 +929,7 @@ private fun FilePreview(thread: DThread, path: String, line: Int = 0, close: () 
                 val text = remember(b) { String(b, Charsets.UTF_8).take(200_000) }
                 if (line > 0) { LinedText(text, line); return@Column }
                 Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp).testTag("preview.text")) {
-                    if (ext(path) == "md" || ext(path) == "markdown") MdText(text, thread = thread.id) else Text(text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
+                    if (ext(path) == "md" || ext(path) == "markdown") MdText(text, thread = thread.id, soft = true) else Text(text, color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp)
                 }
             }
             else -> DMono(Msg.android_file_nopreview(size(b.size.toLong())), dcs.onSurfaceVariant, 12, Modifier.padding(16.dp))

@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.launch
@@ -385,7 +386,8 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
                         StatusPill(pill)
                     }
                 }
-                DropdownMenu(menu, { menu = false }) {
+                // opens at the row's text inset, not flush with the screen's edge
+                DropdownMenu(menu, { menu = false }, offset = DpOffset(indent.dp, 0.dp)) {
                     if (r.wake.isNotEmpty()) {
                         DropdownMenuItem(text = { Text(Msg.menu_wake, fontFamily = BpUi) }, onClick = { menu = false; DataClient.snoozeRow(r.wake) }, modifier = Modifier.testTag("home.section.wake.${r.id}"))
                     }

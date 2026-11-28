@@ -209,8 +209,9 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
             if (sc.running) DBtn(Msg.composer_stop, false, modifier = Modifier.testTag("term.stop"), danger = true) { Terms.stop(key) }
             Spacer(Modifier.width(4.dp))
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
-            Canvas(Modifier.fillMaxSize().onSizeChanged { area = it }.testTag("term.screen")
+        // the thread's 8 dp side inset: the grid sits inside it (its columns lose only the inset), the touch area and the dark field stay full width
+        Box(Modifier.weight(1f).fillMaxWidth().background(Color(argb(VT_DEFAULT_BG)))) {
+            Canvas(Modifier.fillMaxSize().testTag("term.screen")
                 .pointerInput(Unit) { detectTapGestures(onTap = { focus.requestFocus(); kb?.show() }, onLongPress = { menu = true }) }
                 .pointerInput(tp) {
                     // one finger scrolls back through the scrollback; two pinch the font size, applied (and the pty resized) when they lift
@@ -228,7 +229,7 @@ internal fun TermFull(key: String, title0: String, back: () -> Unit) {
                         } while (ev.changes.any { it.pressed })
                         if (multi) { val next = (fontSp * pinch).coerceIn(6f, 30f); pinch = 1f; if (next != fontSp) { fontSp = next; prefs.edit().putFloat("term.font", next).apply() } }
                     }
-                }
+                }.padding(horizontal = 8.dp).onSizeChanged { area = it }
             ) {
                 rev
                 val lines = sc.vt.lines(scroll)
