@@ -754,7 +754,7 @@ pub fn solidcraft_rows(st: &State, session: &Value, info: &Value) -> Vec<Value> 
         else { "SolidCraft was not found. 3D models open and are edited in it. Install it below, or set the folder of one you have.".to_string() };
     let status = if !saved.trim().is_empty() && source != "set" && (!gui.is_empty() || !cli.is_empty()) { format!("{status}. Nothing runs in {}, so this one is used.", saved.trim()) } else { status };
     let path = if session["drafts"]["@f.scpath"].is_string() { draft(session, "@f.scpath") } else { saved };
-    let mut v = vec![row_f("SolidCraft", &status, vec![field("scpath", "Folder holding solidcraft and solidcraft-cli, empty to look for it", path)], vec![btn("Set", "solidcraft-path", "", true)])];
+    let mut v = vec![row_f("SolidCraft", &status, vec![field("scpath", "SolidCraft's folder", path)], vec![btn("Set", "solidcraft-path", "", true)])];
     let offer = &rt["offer"];
     let can = offer["available"] == true && gui.is_empty() && (offer["window"] == true || cli.is_empty());
     let (state, note) = (g(&inst, "state"), g(&inst, "note"));
@@ -808,9 +808,9 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
     let path = if session["drafts"]["@f.kpath"].is_string() { draft(session, "@f.kpath") } else { set(st, "kicad.path", "") };
     let free = if i("freecad").is_empty() { if set(st, "freecad.path", "").is_empty() { "FreeCAD was not found. Mechanical parts are made with it.".to_string() } else { "FreeCAD was not found at that path.".to_string() } } else { i("freecad").to_string() };
     let fpath = if session["drafts"]["@f.fpath"].is_string() { draft(session, "@f.fpath") } else { set(st, "freecad.path", "") };
-    let mut v = vec![row_f("KiCad", &kicad, vec![field("kpath", "Path to KiCad's command line, empty for the one on PATH", path)], vec![btn("Set", "kicad-path", "", true)])];
+    let mut v = vec![row_f("KiCad", &kicad, vec![field("kpath", "Path to kicad-cli", path)], vec![btn("Set", "kicad-path", "", true)])];
     v.extend(install_row(session, info, pkg));
-    v.push(row_f("FreeCAD", &free, vec![field("fpath", "Path to FreeCAD's command line (freecadcmd), empty to look for it", fpath)], vec![btn("Set", "freecad-path", "", true)]));
+    v.push(row_f("FreeCAD", &free, vec![field("fpath", "Path to freecadcmd", fpath)], vec![btn("Set", "freecad-path", "", true)]));
     v.extend(freecad_install_row(session, info, fc_here));
     v.extend(solidcraft_rows(st, session, info));
     v.extend([
@@ -996,6 +996,14 @@ fn setup_rest(st: &State, info: &Value) -> Vec<Value> {
     let mut r = vec![head("Import from 0.14")]; r.extend(super::onboard::import_rows(info));
     r.push(adv(head("Developer"))); r.extend(developer(st).into_iter().map(adv)); r
 }
+/// What an empty path box on CAD means, on a line of its row's note (the box's hint is kept short enough to fit it).
+fn empty_says(mut rows: Vec<Value>) -> Vec<Value> {
+    for r in &mut rows {
+        let what = match r["fields"][0]["name"].as_str() { Some("kpath") => "Empty uses the one on PATH.", Some("fpath" | "scpath") => "Empty looks for it.", _ => continue };
+        let note = s(r, "note"); r["note"] = json!(if note.is_empty() { what.to_string() } else { format!("{note}\n{what}") });
+    }
+    rows
+}
 /// One page's rows (without the way back), the rarely needed (`adv`) last, each part in its own order.
 fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
     let rows = match p { "appearance" => appearance(st),
@@ -1005,7 +1013,7 @@ fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
         "agents" => { let mut a = adv_if(agents(st, info), |l| l == "Bots: infinite context (beta)"); a.extend(fallback(st, info).into_iter().map(adv)); a.extend(writing(st, info).into_iter().map(adv)); a }
         "about" => { let mut r = updates(st, info); r.extend(about(info)); r.push(head("Network")); r.extend(net(info)); r }
         "setup" => { let mut r = super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()); r.extend(setup_rest(st, info)); r },
-        "cad" => adv_if(cad(st, session, info), |l| matches!(l, "KiCad over its API" | "Board 3D" | "Open designs in")),
+        "cad" => empty_says(adv_if(cad(st, session, info), |l| matches!(l, "KiCad over its API" | "Board 3D" | "Open designs in"))),
         "browser" => browser(st, session), "keys" => keys(st, session, info), "ordering" => ordering(st), "devices" => devices_and_web(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
             r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
             r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
@@ -1016,18 +1024,33 @@ fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
     let (mut v, last): (Vec<Value>, Vec<Value>) = rows.into_iter().partition(|r| r["adv"] != true);
     v.extend(last); v
 }
-/// What the Settings search looks through for each page besides its title: its rows' labels as a fresh hub shows them, one a line (`words`), and
-/// each of those rows' notes on the same line of `notes` (a note's own line breaks are spaces there), made once.
+/// Plain words the Settings search also finds a row by, keyed by its label: what it does, or what it was called (`also` on the menu row). A test holds
+/// that every label here is a row of some page, so none goes stale.
+const ALSO: &[(&str, &str)] = &[("Quiet hours", "night do not disturb dnd silence mute sleep"), ("Needs me", "approvals questions blocked"), ("Settled", "finished done failed merged"),
+    ("Everything", "all turns"), ("Urgent asks come through", "urgent night"), ("Time zone", "timezone clock utc"), ("Webhook", "http post hook slack"),
+    ("Theme", "dark mode light mode colours"), ("Thread list", "sidebar projects active"), ("Group projects", "sidebar folders owner"),
+    ("Worker grace (minutes)", "settle idle archive"), ("Personal grace (minutes)", "settle archive"), ("Continue after a restart", "resume restart"),
+    ("New threads work in", "worktree branch git local"), ("Largest attachment (MB)", "upload file size limit"), ("Push commits to the remote automatically", "git push auto"),
+    ("Keep Backplane's commits off my branch", "git commits refs"), ("Provider", "default agent claude codex"), ("Model", "default model opus fable sonnet effort"),
+    ("Show thinking", "reasoning thoughts"), ("Failover order", "fallback usage limit accounts switch"), ("Writing: provider", "titles names commit messages small model"),
+    ("Speech to text", "dictation transcribe whisper"), ("Always on", "hands free listen"), ("Send when I'm done", "end of turn auto send"),
+    ("KiCad", "path kicad-cli install"), ("FreeCAD", "path install mechanical"), ("SolidCraft", "path install step"), ("Mech tab", "mechanical viewer step 3d"),
+    ("Board 3D", "render model"), ("Open designs in", "viewer kicad editor"), ("Plan before routing", "routing plan approve"),
+    ("Start page", "browser home new tab"), ("Zoom direction", "scroll wheel invert natural"), ("Ordering", "buy it order boards parts purchase"),
+    ("Price estimates", "buy it quote cost"), ("Add a device", "pair phone qr code link android iphone"), ("Browser access", "web ui https tailscale"),
+    ("Pair a machine", "link computer code"), ("Update channel", "updates version stable beta nightly upgrade"),
+    ("Share anonymous usage", "telemetry analytics privacy data"), ("Replay first run", "setup onboarding again"), ("Standing rules", "instructions always")];
+fn also(label: &str) -> &'static str { ALSO.iter().find(|(l, _)| *l == label).map_or("", |(_, a)| *a) }
+/// What the Settings search looks through for page `id` besides its title, from the rows the page has as things stand (a row the page does not
+/// show now, Install FreeCAD with FreeCAD found, is not found): its rows' labels, one a line (`words`), each of those rows' note on the same line
+/// of `notes` (a note's own line breaks are spaces there) and its plain search words on the same line of `also` (`ALSO`).
 /// (Setup's own rows read the disk: it is found by its title and the sections it holds, Import from 0.14 and Developer with its rows.)
-fn page_words(id: &str) -> (&'static str, &'static str) {
-    static W: OnceLock<Vec<(&'static str, String, String)>> = OnceLock::new();
-    let all = W.get_or_init(|| { let (st, none) = (State::default(), json!({}));
-        PAGES.iter().map(|(id, _)| { let mut rows = if *id == "setup" { let mut r = vec![head("Setup"), head("Import from 0.14"), head("Developer")]; r.extend(developer(&st)); r } else { rows_of(&st, &none, &none, id) };
-            // what Devices shows only once browser access is on, or something is paired or shared: found by name all the same
-            if *id == "devices" { rows.extend(["Set up private HTTPS forwarding", "Web address", "Paired devices", "Shared files"].map(head)); }
-            let found: Vec<(&str, String)> = rows.iter().filter_map(|r| Some((r["label"].as_str().filter(|l| !l.is_empty())?, r["note"].as_str().unwrap_or("").replace('\n', " ")))).collect();
-            (*id, found.iter().map(|(l, _)| *l).collect::<Vec<_>>().join("\n"), found.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join("\n")) }).collect() });
-    all.iter().find(|(p, _, _)| *p == id).map_or(("", ""), |(_, w, n)| (w.as_str(), n.as_str()))
+fn page_words(st: &State, session: &Value, info: &Value, id: &str) -> (String, String, String) {
+    let mut rows = if id == "setup" { let mut r = vec![head("Setup"), head("Import from 0.14"), head("Developer")]; r.extend(developer(st)); r } else { rows_of(st, session, info, id) };
+    // what Devices shows only once browser access is on, or something is paired or shared: found by name all the same
+    if id == "devices" { for h in ["Set up private HTTPS forwarding", "Web address", "Paired devices", "Shared files"] { if !rows.iter().any(|r| r["label"] == h) { rows.push(head(h)); } } }
+    let found: Vec<(&str, String)> = rows.iter().filter_map(|r| Some((r["label"].as_str().filter(|l| !l.is_empty())?, r["note"].as_str().unwrap_or("").replace('\n', " ")))).collect();
+    (found.iter().map(|(l, _)| *l).collect::<Vec<_>>().join("\n"), found.iter().map(|(_, n)| n.as_str()).collect::<Vec<_>>().join("\n"), found.iter().map(|(l, _)| also(l)).collect::<Vec<_>>().join("\n"))
 }
 
 /// What was changed on a page: each row of `rows` whose lit choice is not the one a fresh hub lights (`fresh`: the same page built from
@@ -1058,10 +1081,11 @@ pub fn mark_changed(rows: &mut [Value], fresh: &[Value]) {
 pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     let p = page(session);
     let rows = if p.is_empty() {
-        // `words`: what the page holds, for a client's search (the desktop's nav finds "Group projects" under Appearance)
+        // `words`, `notes`, `also`: what the page holds, for a client's search (the desktop finds "Group projects" under Appearance, Quiet hours by "night")
         // `group`: the name a client draws once above the group's first page
         // `aka`: other names the page is found by (what it was called before the pages were regrouped), one a line
-        PAGES.iter().map(|(id, title)| { let mut r = row(title, "", vec![btn(&format!("{title} ›"), "settings-page", id, false)]); let (words, notes) = page_words(id); r["words"] = json!(words); r["notes"] = json!(notes); r["group"] = json!(group_of(id)); r["aka"] = json!(aka(id)); r }).collect()
+        PAGES.iter().map(|(id, title)| { let mut r = row(title, "", vec![btn(&format!("{title} ›"), "settings-page", id, false)]); let (words, notes, also) = page_words(st, session, info, id);
+            r["words"] = json!(words); r["notes"] = json!(notes); r["also"] = json!(also); r["group"] = json!(group_of(id)); r["aka"] = json!(aka(id)); r }).collect()
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
@@ -1379,6 +1403,28 @@ mod tests {
         assert_eq!(names, ["General", "Agents", "Workspace", "Connect", "System"], "every page is in a group, and a group's pages are together");
         assert_eq!(GROUPS.iter().map(|(_, p)| p.len()).sum::<usize>(), PAGES.len()); assert!(PAGES.iter().all(|(id, _)| !group_of(id).is_empty()));
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "notifications");
+    }
+    #[test] fn the_search_words_name_rows_that_exist_and_the_rows_on_the_page_as_it_stands() {
+        // every ALSO key is a row of some page of a fresh hub (a renamed row fails here, not silently in the search)
+        let all: Vec<String> = PAGES.iter().flat_map(|(id, _)| rows_of(&st(&[]), &json!({}), &json!({}), id)).filter_map(|r| r["label"].as_str().map(str::to_string)).collect();
+        for (l, _) in ALSO { assert!(all.iter().any(|x| x == l), "ALSO names {l}, which no page has"); }
+        let menu = view(&st(&[]), &json!({}), &json!({}));
+        let of = |m: &Value, id: &str| m["rows"].as_array().unwrap().iter().find(|r| r["buttons"][0]["value"] == id).unwrap().clone();
+        let n = of(&menu, "notifications"); let (words, also) = (n["words"].as_str().unwrap(), n["also"].as_str().unwrap());
+        assert_eq!(words.lines().count(), also.split('\n').count(), "line for line"); assert_eq!(words.lines().count(), n["notes"].as_str().unwrap().split('\n').count());
+        let at = words.lines().position(|l| l == "Quiet hours").expect("Quiet hours on Notifications");
+        assert!(also.split('\n').nth(at).unwrap().contains("night"), "{also}");
+        // what the page shows now: Install FreeCAD only while FreeCAD is not found
+        let cad = |info: Value| of(&view(&st(&[]), &json!({}), &info), "cad")["words"].as_str().unwrap().to_string();
+        assert!(cad(json!({})).lines().any(|l| l == "Install FreeCAD") || freecad_plan(&st(&[])).is_none());
+        assert!(!cad(json!({"freecad": "FreeCAD 1.1.4 · /usr/bin/freecadcmd"})).lines().any(|l| l == "Install FreeCAD"), "FreeCAD found: not offered, not found");
+    }
+    #[test] fn cads_path_boxes_have_short_hints_and_their_notes_say_what_empty_means() {
+        let r = rows_of(&st(&[]), &json!({}), &json!({}), "cad");
+        for (name, hint, empty) in [("kpath", "Path to kicad-cli", "Empty uses the one on PATH."), ("fpath", "Path to freecadcmd", "Empty looks for it."), ("scpath", "SolidCraft's folder", "Empty looks for it.")] {
+            let row = r.iter().find(|x| x["fields"][0]["name"] == name).unwrap_or_else(|| panic!("{name}"));
+            assert_eq!(row["fields"][0]["hint"], hint); let note = row["note"].as_str().unwrap(); assert!(note.ends_with(&format!("\n{empty}")), "{name}: {note}");
+        }
     }
     #[test] fn a_folded_pages_old_id_opens_the_page_that_holds_it() {
         for (old, now, head) in [("web", "devices", "Web UI"), ("ring", "voice", "Ring"), ("import", "setup", "Import from 0.14")] {

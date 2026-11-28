@@ -11,15 +11,22 @@ desktop draws what the menu rows say and sorts nothing.
 | Connect | Devices (with Web UI: browser access, forwarding setup, the web address), Machines |
 | System | Setup (with Import from 0.14 and Developer), Privacy, About and updates (with Network) |
 
-Pages are by topic. Each menu row carries `group`, `words` (its rows' labels, one a line), `notes` (each label's note on the same line)
-and `aka` (other names the page is found by, one a line: what it was called before, such as Time zone, Writing or Network and updates,
-or what it holds, such as Webhook or Tailscale). The desktop's search matches titles, aka names, labels and notes (this device's own page
-too), names the first settings found under each page, and Enter opens the first page found. Eight pages were folded into their
+Pages are by topic. Each menu row carries `group`, `words` (its rows' labels, one a line, from the page as it stands: a row the page does
+not show now, such as Install FreeCAD once FreeCAD is found, is not there), `notes` (each label's note on the same line), `also` (plain
+words each row is found by on the same line, `ALSO`: what it does or was called, "night" for Quiet hours, "telemetry" for Share anonymous
+usage; a test holds that every key is a row) and `aka` (other names the page is found by, one a line: what it was called before, such as
+Time zone, Writing or Network and updates, or what it holds, such as Webhook or Tailscale). The desktop's search matches titles, aka names,
+labels, notes and also words (this device's rows too, with a small table of their own). While the box holds something the page area lists
+what it found ("N found", one line a setting: its label, its note on one line, its page at the right; a page found only by its name is its
+own line), and the page list stays whole and in place: pages with nothing found dimmed, the others with their count. A press on a result
+(or Enter, on the one Up and Down highlight) opens its page, opens Advanced if the row is under it, scrolls the row into view and lights it
+for 1.5 s; the search text stays, and Esc or an empty box returns to the page as it was. Eight pages were folded into their
 neighbours: the ids `web`, `ring`, `import`, `developer`, `timezone`, `writing`, `git` and `network` still open Devices, Voice, Setup,
 Setup, Notifications, Agents, Threads and git, and About and updates (`canon`: a `settings-page` press, a saved session, a
 `backplane://settings/<id>` link). A test (`settings_inventory_is_all_still_reachable`) holds the list of every setting, action and field
 the pages had before they were regrouped, so none is lost. The desktop puts this computer's own settings on the page of their topic, under
-"This device" above the hub's rows ("Every device"): Language, Theme, Text size, Font, the 3D background and the layout on Appearance,
+"This device" above the hub's rows ("Every device", left out where the hub's part opens with a heading of its own, Notifications' Notify me for):
+Language, Theme, Text size, Font, the 3D background and the layout on Appearance,
 Desktop notifications on Notifications, Streamer mode on Privacy. It adds three pages of its own: Keyboard (before Mouse and trackpad;
 the keys that cannot be changed under Advanced), Hubs (after Machines), both kept on this computer, and Accounts (leading Agents). A page
 opens at its top. The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
