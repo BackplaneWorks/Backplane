@@ -127,9 +127,12 @@ pub fn grid_size(w: f32, h: f32, cw: f32, lh: f32) -> (u16, u16) {
     (f(w, cw, vt::MAX_COLS), f(h, lh, vt::MAX_ROWS))
 }
 /// The panel's place and size in a window of `vw` x `vh`: (x, y, w, h).
-pub fn panel(vw: f32, vh: f32) -> (f32, f32, f32, f32) {
-    let w = (vw - 160.).min(1000.).max(320.); let h = (vh * 0.48).min(460.).max(180.);
-    ((vw - w) / 2., (vh - h - 150.).max(40.), w, h)
+pub fn panel(vw: f32, vh: f32) -> (f32, f32, f32, f32) { panel_in(vw, vh, 0., 0.) }
+/// The same between the sidebar (`left` wide) and the rail (`right`): centred on the thread's column, never over the sidebar (it hung 63 px over it).
+pub fn panel_in(vw: f32, vh: f32, left: f32, right: f32) -> (f32, f32, f32, f32) {
+    let area = (vw - left - right).max(320.);
+    let w = (area - 160.).min(1000.).max(320.).min(area); let h = (vh * 0.48).min(460.).max(180.);
+    ((left + (area - w) / 2.).max(0.), (vh - h - 150.).max(40.), w, h)
 }
 /// The text of one absolute row (the scrollback's first row is 0).
 fn row_text(vt: &Vt, abs: usize) -> String {
@@ -420,7 +423,8 @@ impl Backplane {
         let font = window.text_system().resolve_font(&crate::art::mono_font());
         let cw = window.text_system().advance(font, px(FONT_PX), 'm').map(|s| f32::from(s.width)).unwrap_or(FONT_PX * 0.6).max(1.);
         let v = window.viewport_size();
-        let (_, _, w, h) = panel(f32::from(v.width), f32::from(v.height));
+        let left = if self.screens.side_shown { self.local.sidebar_px as f32 } else { super::viewer::STRIP_W };
+        let (_, _, w, h) = panel_in(f32::from(v.width), f32::from(v.height), left, super::viewer::RAIL_W); // the box `view` draws
         let (c, r) = grid_size(w - 2. * PAD, h - HEAD * crate::scale::s() - 2. * PAD, cw, LINE_PX);
         self.screens.term.cell = (cw, LINE_PX);
         if self.screens.term.resize(c, r) { let key = self.screens.term.key.clone(); self.term_rpc("term.resize", json!({"thread": key, "cols": c, "rows": r})); }
@@ -518,11 +522,11 @@ impl Backplane {
 fn e_id(key: &str) -> String { key.rsplit(':').next().unwrap_or("").to_string() }
 
 /// The panel, while it is open.
-pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &crate::local::Local, title: &str, t: &Term) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &crate::local::Local, title: &str, t: &Term, left: f32) -> Option<AnyElement> {
     if !t.open { return None }
     let c = |n: &str| theme::color(light, n);
     let v = window.viewport_size();
-    let (x, y, w, h) = panel(f32::from(v.width), f32::from(v.height));
+    let (x, y, w, h) = panel_in(f32::from(v.width), f32::from(v.height), left, super::viewer::RAIL_W);
     let (cw, lh) = t.cell;
     let focused = t.focused(window);
     let focus = t.focus.clone()?; let grid = t.grid.clone();
@@ -619,6 +623,8 @@ mod tests {
     #[test] fn the_grid_fits_the_panel() {
         assert_eq!(grid_size(800., 340., 8., 17.), (100, 20)); assert_eq!(grid_size(3., 3., 8., 17.), (1, 1)); assert_eq!(grid_size(1e6, 1e6, 1., 1.), (vt::MAX_COLS as u16, vt::MAX_ROWS as u16));
         let (x, y, w, h) = panel(1400., 900.); assert!(x > 0. && y >= 40. && w <= 1000. && h <= 460. && y + h <= 900.);
+        let (x, _, w, _) = panel_in(1400., 900., 264., 70.); assert!(x >= 264. && x + w <= 1400. - 70., "inside the thread's column: {x} {w}");
+        assert!(((x - 264.) - (1400. - 70. - x - w)).abs() < 1., "centred in it");
     }
     #[test] fn frames_draw_only_screens_it_holds_and_a_new_shell_starts_blank() {
         let mut t = Term { size: (20, 4), ..Term::new_detached() };
