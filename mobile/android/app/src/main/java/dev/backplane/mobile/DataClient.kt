@@ -1028,6 +1028,9 @@ object DataClient {
     data class ProjectCard(val goal: String, val boards: List<String>, val leadDays: Int = 0, val estimateWarnings: String = "")
     /** A project's goal and notes as written (`.backplane/intent.md`, feature `projecthome`'s `project.home`); "" when there are none. */
     suspend fun projectIntent(project: String): String = if (!has("projecthome")) "" else call("project.home", JSONObject().put("project", project)).optString("intent")
+    /** A project's board files (paths from its root, the project's own first; `project.home`), as the desktop's project page lists them. */
+    suspend fun projectBoards(project: String): List<String> = if (!has("projecthome")) emptyList() else
+        call("project.home", JSONObject().put("project", project)).optJSONArray("boards")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } }.orEmpty()
     suspend fun projectCard(project: String): ProjectCard? {
         if (!has("projectcard")) return null
         val o = call("project.card", JSONObject().put("project", project))

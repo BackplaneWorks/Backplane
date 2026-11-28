@@ -1384,6 +1384,11 @@ final class DataClient {
         guard has("projecthome"), let r = try? await call("project.home", ["project": project], as: DProjectHome.self) else { return "" }
         return r.intent
     }
+    /// A project's board files (paths from its root, the project's own first; `project.home`), as the desktop's project page lists them.
+    func projectBoards(_ project: String) async -> [String] {
+        guard has("projecthome"), let r = try? await call("project.home", ["project": project], as: DProjectHome.self) else { return [] }
+        return r.boards
+    }
     func projectCard(_ project: String) async -> DProjectCard? { guard has("projectcard") else { return nil }; return try? await call("project.card", ["project": project], as: DProjectCard.self) }
     func buyOfProject(_ project: String) async -> DBuy? { guard has("buy"), let b = (try? await call("thread.buy", ["project": project], as: DBuyReply.self))?.buy, !b.thread.isEmpty else { return nil }; return b }
     func buy(_ thread: String) async throws -> String { try await call("order.buy", ["thread": thread], as: DThreadRef.self).thread }
@@ -1675,7 +1680,7 @@ final class DataClient {
     }
 }
 
-/// `project.home`'s goal and notes (the rest of its answer is read elsewhere or not on the phone).
-struct DProjectHome: Decodable { var intent: String
-    enum CodingKeys: String, CodingKey { case intent }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); intent = (try? c.decode(String.self, forKey: .intent)) ?? "" } }
+/// `project.home`'s goal and notes and its board files (the rest of its answer is read elsewhere or not on the phone).
+struct DProjectHome: Decodable { var intent: String; var boards: [String]
+    enum CodingKeys: String, CodingKey { case intent, boards }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); intent = (try? c.decode(String.self, forKey: .intent)) ?? ""; boards = (try? c.decode([String].self, forKey: .boards)) ?? [] } }

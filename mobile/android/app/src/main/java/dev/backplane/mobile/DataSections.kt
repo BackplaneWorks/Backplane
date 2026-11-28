@@ -15,6 +15,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.DeveloperBoard
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Key
@@ -714,7 +715,7 @@ fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_secti
 
 /** A project's page: running, then needs you, then recent, then Done (n) folded; every machine's threads. */
 @Composable
-fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit = {}, openViewer: (String) -> Unit = {}, back: () -> Unit) {
+fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit = {}, openViewer: (String, String) -> Unit = { _, _ -> }, back: () -> Unit) {
     var done by remember { mutableStateOf(false) }
     // a long Done list: its newest rows, the rest behind the hub's "Older (m)" (`page-older`)
     var older by remember { mutableStateOf(false) }
@@ -754,7 +755,16 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             if (pr.root.isNotEmpty()) androidx.compose.foundation.text.selection.SelectionContainer { DMono(pr.root, dfaint, 11, Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp).testTag("project.page.path"), lines = 2) }
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 10.dp).testTag("project.page.tools"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 val tabs = (if (card?.boards?.isNotEmpty() == true) listOf("Board" to Msg.viewer_board, "Schematic" to Msg.viewer_schematic, "3D" to Msg.viewer_solid) else emptyList()) + ("Files" to Msg.viewer_files)
-                for ((tab, label) in tabs) DBtn(label, false, small = true, modifier = Modifier.testTag("project.page.tool.$tab")) { DataClient.openViewerTab = tab; openViewer("project-home-" + pr.id) }
+                for ((tab, label) in tabs) DBtn(label, false, small = true, modifier = Modifier.testTag("project.page.tool.$tab")) { DataClient.openViewerTab = tab; openViewer("project-home-" + pr.id, "") }
+            }
+            // more than one board: each opens on its own, as the desktop's project page lists them (one board: Board above is it)
+            var boards by remember(pr.id) { mutableStateOf<List<String>>(emptyList()) }
+            LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.projectBoards(pr.id) }.onSuccess { boards = it } }
+            if (boards.size > 1) Column(Modifier.fillMaxWidth().padding(bottom = 6.dp).testTag("project.page.boards")) {
+                boards.forEach { b -> Row(Modifier.fillMaxWidth().clickable { openViewer("project-home-" + pr.id, b) }.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.DeveloperBoard, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp))
+                    DMono(b, dcs.onSurface, 12, Modifier.weight(1f), lines = 2); Icon(Icons.Default.ChevronRight, null, tint = dfaint, modifier = Modifier.size(16.dp))
+                } }
             }
             card?.takeIf { it.goal.isNotEmpty() || it.boards.isNotEmpty() || it.leadDays > 0 || it.estimateWarnings.isNotEmpty() }?.let { c ->
                 Column(Modifier.fillMaxWidth().background(dcs.surface).clickable(enabled = c.goal.isNotEmpty()) { whole = !whole }.padding(horizontal = 12.dp, vertical = 8.dp).testTag("project.page.card")) {

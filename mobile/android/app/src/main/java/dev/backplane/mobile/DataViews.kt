@@ -144,7 +144,7 @@ fun DataRoot() {
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
-            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }, { page = Page.Viewer(it) }) { page = Page.Room(it) }
+            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }, { id, file -> page = Page.Viewer(id, file) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, Msg.palette_terminal) { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
             is Page.Viewer -> {
@@ -430,7 +430,7 @@ private val homeTab = mutableStateOf(HomeTab.INBOX)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openViewer: (String) -> Unit = {}, openRoom: (DataClient.Room) -> Unit) {
+private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openViewer: (String, String) -> Unit = { _, _ -> }, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var tab by homeTab
