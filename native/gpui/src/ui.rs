@@ -184,8 +184,11 @@ fn inline_text(node: &Value, out: &mut String) {
     for k in node["kids"].as_array().into_iter().flatten() { inline_text(k, out); }
 }
 
-pub(crate) fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
+pub(crate) fn block(node: &Value, light: bool, depth: usize) -> AnyElement { block_in(node, light, depth, None) }
+/// A hub block (an ask card's body); with `reg` its words are selectable text in the scope the caller opened, without it plain text.
+pub(crate) fn block_in(node: &Value, light: bool, depth: usize, reg: Option<&crate::screens::timeline::Reg>) -> AnyElement {
     let c = |name: &str| theme::color(light, name);
+    let words = |t: String| -> AnyElement { match reg { Some(r) => crate::screens::timeline::line_text(r, light, t, ""), None => t.into_any_element() } };
     let tag = node["tag"].as_str().unwrap_or("p");
     let mut text = String::new();
     match tag {
@@ -194,18 +197,18 @@ pub(crate) fn block(node: &Value, light: bool, depth: usize) -> AnyElement {
             for (i, item) in node["kids"].as_array().into_iter().flatten().enumerate() {
                 let mut t = String::new(); inline_text(item, &mut t);
                 let mark = if tag == "ol" { format!("{}.", i + 1) } else { "•".to_string() };
-                list = list.child(div().flex().gap_2().child(div().text_color(c("dim")).child(mark)).child(div().flex_1().child(t)));
+                list = list.child(div().flex().gap_2().child(div().text_color(c("dim")).child(mark)).child(div().flex_1().child(words(t))));
             }
             list.into_any_element()
         }
-        "pre" => { inline_text(node, &mut text); div().font(art::mono_font()).w_full().bg(c("raise")).border_1().border_color(c("line")).p_2().text_size(crate::scale::tpx(12.)).child(text).into_any_element() }
-        t if t.starts_with('h') && t.len() == 2 => { inline_text(node, &mut text); div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(text).into_any_element() }
+        "pre" => { inline_text(node, &mut text); div().font(art::mono_font()).w_full().bg(c("raise")).border_1().border_color(c("line")).p_2().text_size(crate::scale::tpx(12.)).child(words(text)).into_any_element() }
+        t if t.starts_with('h') && t.len() == 2 => { inline_text(node, &mut text); div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(words(text)).into_any_element() }
         "blockquote" => {
             let mut q = div().border_l_2().border_color(c("line")).pl_3().text_color(c("dim"));
-            if depth < 4 { for k in node["kids"].as_array().into_iter().flatten() { q = q.child(block(k, light, depth + 1)); } }
+            if depth < 4 { for k in node["kids"].as_array().into_iter().flatten() { q = q.child(block_in(k, light, depth + 1, reg)); } }
             q.into_any_element()
         }
-        _ => { inline_text(node, &mut text); div().child(text).into_any_element() }
+        _ => { inline_text(node, &mut text); div().child(words(text)).into_any_element() }
     }
 }
 
