@@ -1924,6 +1924,7 @@ gpui.previous.thread = 前のスレッド
 gpui.next.thread = 次のスレッド
 gpui.uberbot.chat = Uberbot チャット
 gpui.settle.or.unsettle.the.thread = スレッドを完了／完了を取り消す
+gpui.rename.the.open.thread = 開いているスレッドの名前を変更
 gpui.stop.the.running.turn = 実行中のターンを停止
 gpui.layer.focus.the.other.layers = レイヤーフォーカス：他のレイヤーをそのまま・薄く・非表示
 gpui.undo.the.last.stroke.or = 直前の線や変更を取り消す

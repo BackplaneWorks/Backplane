@@ -11,7 +11,7 @@ actions!(keys, [NewThread, NewChat, OpenDiff, OpenFiles, StopTurn, ModelPicker, 
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter, MenuUp, MenuDown, MenuHome, MenuEnd, MenuEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailGerbers, RailSimulation, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, MgmtPlan, TogglePlanMode, CommentKicad, Quit, CloseWindow, HideApp, HideOthers, ShowAll]);
+    RailBoard, RailSchematic, Rail3d, RailGerbers, RailSimulation, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, RenameThread, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, MgmtPlan, TogglePlanMode, CommentKicad, Quit, CloseWindow, HideApp, HideOthers, ShowAll]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -34,6 +34,9 @@ actions!(keys, [NewThread, NewChat, OpenDiff, OpenFiles, StopTurn, ModelPicker, 
 /// The composer is included, as in the old client: the board beside it answers without a click on the canvas. With no plot on show the key goes on to the composer (`key_layers`).
 /// Ctrl+L to the message box: everywhere but the shell (its Ctrl+L clears the screen) and the Browser page (its address bar)
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const NOT_SHELL: &str = "!Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
+/// Where F2 renames the open thread: no small text field, no shell, no web page has the keyboard. The message box may: it keeps the keyboard
+/// nearly always (a click on the timeline leaves it there) and F2 types nothing in it.
+/* i18n-ok: key contexts */ const NO_FIELD: &str = "!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const NOT_FIELD: &str = "!TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Terminal && !BrowserBar && !BrowserView && !CefBar && !CefPage";
 /// The open model menu has its keys wherever the keyboard is: the window says `Picker` while it is open, and these bind at the depth of each text field, after the field's own keys, so they come first.
 /* i18n-ok: key contexts */ const PICK_SCOPES: [&str; 6] = ["Picker", "Picker > Composer", "Picker > PickInput", "Picker > TextInput", "Picker > AskInput", "Picker > ImpInput"];
@@ -83,6 +86,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("new", "New thread", "Timeline", "secondary-n", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("new-chat", "New chat (no project)", "Sidebar", "secondary-shift-n", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("settle", "Settle or unsettle the thread", "Timeline", "secondary-shift-s", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("rename", "Rename the open thread", "Sidebar", "f2", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("stop", "Stop the running turn", "Timeline", "ctrl-.", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("diff", "Diff", "Viewer", "secondary-d", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("files", "Files", "Viewer", "secondary-p", Rebind),
@@ -145,7 +149,7 @@ pub fn show(key: &str, mac: bool) -> String {
             /* i18n-ok: key names stay as on the keyboard */ ("super", true) => "⌘".into(), ("super", false) => "Super".into(), ("alt", true) => "⌥".into(), ("alt", false) => "Alt".into(), ("shift", true) => "⇧".into(), ("shift", false) => "Shift".into(),
             /* i18n-ok: key names stay as on the keyboard */ ("escape", _) => "Esc".into(), ("enter", _) => "Enter".into(), ("delete", _) => "Delete".into(), ("backspace", _) => "Backspace".into(), ("tab", _) => "Tab".into(),
             /* i18n-ok: key names stay as on the keyboard */ ("up", _) => "Up".into(), ("down", _) => "Down".into(), ("left", _) => "Left".into(), ("right", _) => "Right".into(),
-            (k, _) if last && k.chars().count() == 1 => k.to_uppercase(), (k, _) => k.to_string(),
+            (k, _) if last && k.chars().count() == 1 => k.to_uppercase(), (k, _) if last && k.len() > 1 && k.starts_with('f') && k[1..].parse::<u8>().is_ok() => k.to_uppercase(), (k, _) => k.to_string(),
         });
     }
     if mac { out.concat() } else { out.join("+") }
@@ -185,7 +189,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("always"), AlwaysOn, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
         KeyBinding::new("/", FocusComposer, Some(SLASH)), KeyBinding::new(&k("focus-key"), FocusComposer, Some(NOT_SHELL)), KeyBinding::new(&k("find"), crate::FindInThreadKey, Some(NOT_SHELL)),
-        KeyBinding::new("?", ShowKeys, Some(FREE)), KeyBinding::new("shift-/", ShowKeys, Some(FREE)), KeyBinding::new("shift-?", ShowKeys, Some(FREE)), KeyBinding::new("f1", ShowKeys, None),
+        KeyBinding::new("?", ShowKeys, Some(FREE)), KeyBinding::new("shift-/", ShowKeys, Some(FREE)), KeyBinding::new("shift-?", ShowKeys, Some(FREE)), KeyBinding::new("f1", ShowKeys, None), KeyBinding::new("f2", RenameThread, Some(NO_FIELD)),
         KeyBinding::new("ctrl-;", CommentKicad, None), KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
     // Super+` (off a Mac: Cmd+` there goes from window to window) toggles the terminal too, from the shell as well, as in the old client
     if !mac() { v.push(KeyBinding::new("super-`", ToggleTerminal, None)); }
@@ -583,6 +587,11 @@ pub fn attach(el: Div, picker: bool, menu: bool, cx: &mut Context<Backplane>) ->
     let el = on!(el, UnfoldProject, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_fold(false, cx));
     let el = on!(el, CommentKicad, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.kcomment_key(w, cx));
     let el = on!(el, ShowKeys, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.keysheet_toggle(cx));
+    // F2: the open thread's Rename, as its row's right-click menu sends it (the hub opens the title box in the row)
+    let el = on!(el, RenameThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
+        let id = this.data["thread"]["id"].as_str().unwrap_or("").rsplit('|').next().unwrap_or("").to_string();
+        if !id.is_empty() && this.project_page.is_none() { let _ = this.tx.try_send(Command::Action("row-rename".into(), id)); cx.notify(); }
+    });
     let el = on!(el, MgmtBom, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "bom", cx));
     let el = on!(el, MgmtChecks, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "checks", cx));
     let el = on!(el, MgmtLife, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "life", cx));
@@ -865,6 +874,11 @@ mod tests {
         // shut, the same keys are the field's and the shell's again
         assert_eq!(d("down", &["Composer"]), "composer::Down"); assert_eq!(d("enter", &["Composer"]), "backplane::Send"); assert_eq!(d("home", &["TextInput"]), "text_input::Home");
     }
+    #[test] fn f2_renames_the_open_thread_from_the_message_box_but_not_from_a_small_field() {
+        for ctx in [&[][..], &["Composer"][..], &["Sidebar"][..], &["Viewer", "Plot"][..], &["Copyable"][..]] { assert_eq!(d("f2", ctx), "keys::RenameThread", "F2 in {ctx:?}"); }
+        for ctx in [&["TextInput"][..], &["AskInput"][..], &["FindInput"][..], &["Terminal"][..], &["Viewer", "CefPage"][..]] { assert_eq!(d("f2", ctx), "", "F2 in {ctx:?} is the field's"); }
+        assert_eq!(hint(&Local::default(), "rename"), "F2");
+    }
     }
     #[test] fn a_press_hushes_tooltips_until_the_quiet_one_of_that_press_goes() {
         let (p, near, far) = (point(px(100.), px(100.)), point(px(108.), px(104.)), point(px(100.), px(148.)));
@@ -911,6 +925,7 @@ mod tests {
     }
     #[test] fn keys_read_per_platform() {
         assert_eq!(show("secondary-shift-n", false), "Ctrl+Shift+N"); assert_eq!(show("secondary-shift-n", true), "⌘⇧N");
+        assert_eq!(show("f2", false), "F2"); assert_eq!(show("f2", true), "F2"); assert_eq!(show("ctrl-f", false), "Ctrl+F");
         assert_eq!(show("ctrl-.", false), "Ctrl+."); assert_eq!(show("escape", false), "Esc"); assert_eq!(show("alt-1", true), "⌥1"); assert_eq!(show("secondary-shift-[", false), "Ctrl+Shift+[");
     }
     #[test] fn every_rebindable_default_is_a_valid_keystroke_and_the_first_choice() {

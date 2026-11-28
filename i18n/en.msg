@@ -1901,6 +1901,7 @@ gpui.previous.thread = Previous thread
 gpui.next.thread = Next thread
 gpui.uberbot.chat = Uberbot chat
 gpui.settle.or.unsettle.the.thread = Settle or unsettle the thread
+gpui.rename.the.open.thread = Rename the open thread
 gpui.stop.the.running.turn = Stop the running turn
 gpui.layer.focus.the.other.layers = Layer focus: the other layers as they are, dimmed, hidden
 gpui.undo.the.last.stroke.or = Undo the last stroke or change

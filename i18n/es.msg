@@ -1902,6 +1902,7 @@ gpui.previous.thread = Hilo anterior
 gpui.next.thread = Hilo siguiente
 gpui.uberbot.chat = Chat de Uberbot
 gpui.settle.or.unsettle.the.thread = Cerrar o reabrir el hilo
+gpui.rename.the.open.thread = Renombrar el hilo abierto
 gpui.stop.the.running.turn = Detener el turno en curso
 gpui.layer.focus.the.other.layers = Enfoque de capa: las demás capas tal cual, atenuadas, ocultas
 gpui.undo.the.last.stroke.or = Deshacer el último trazo o cambio

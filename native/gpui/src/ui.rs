@@ -930,7 +930,8 @@ impl Render for Backplane {
         if std::mem::take(&mut self.screens.acct.script_menu) { self.combo_account(window, cx); }
         if self.models_pending { self.models_pending = false; self.picker_toggle(window, cx); }
         if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); focused_backplane = true; } }
-        if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); focused_backplane = true; } }
+        // a rename's title box (a row's Rename, F2) opens with the whole title selected: typing replaces it, as in every file manager
+        if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { let input = s.input.clone(); window.focus(&input.focus_handle(cx)); if n == crate::screens::tools::focus_target(&self.data) && n == "title" { input.update(cx, |c, cx| c.menu_do("all", window, cx)); } focused_backplane = true; } }
         if self.screens.focus_settings { self.screens.focus_settings = false; window.focus(&self.screens.settings_focus); focused_backplane = true; }
         if self.screens.setup.want_focus { self.screens.setup.want_focus = false; window.focus(&self.screens.setup_focus); focused_backplane = true; }
         if self.screens.palette.focus { self.screens.palette.focus = false; if let Some(i) = self.screens.palette.input.clone() { window.focus(&i.focus_handle(cx)); focused_backplane = true; } }
