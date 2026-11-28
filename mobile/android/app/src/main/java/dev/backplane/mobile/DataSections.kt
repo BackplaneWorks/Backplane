@@ -696,7 +696,7 @@ fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_secti
 
 /** A project's page: running, then needs you, then recent, then Done (n) folded; every machine's threads. */
 @Composable
-fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit = {}, back: () -> Unit) {
+fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit = {}, openViewer: (String) -> Unit = {}, back: () -> Unit) {
     var done by remember { mutableStateOf(false) }
     // a long Done list: its newest rows, the rest behind the hub's "Older (m)" (`page-older`)
     var older by remember { mutableStateOf(false) }
@@ -731,6 +731,13 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             var card by remember(pr.id) { mutableStateOf<DataClient.ProjectCard?>(null) }
             var whole by remember(pr.id) { mutableStateOf(false) }
             LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.projectCard(pr.id) }.onSuccess { card = it } }
+            // as the desktop's project page: the folder (selectable, so it can be copied), and the viewer on the project itself without a thread
+            // (`project-home-<id>`, the hub's own folder of a project): Board, Schematic and 3D when it has a board, Files always
+            if (pr.root.isNotEmpty()) androidx.compose.foundation.text.selection.SelectionContainer { DMono(pr.root, dfaint, 11, Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 6.dp).testTag("project.page.path"), lines = 2) }
+            Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp).padding(bottom = 10.dp).testTag("project.page.tools"), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                val tabs = (if (card?.boards?.isNotEmpty() == true) listOf("Board" to Msg.viewer_board, "Schematic" to Msg.viewer_schematic, "3D" to Msg.viewer_solid) else emptyList()) + ("Files" to Msg.viewer_files)
+                for ((tab, label) in tabs) DBtn(label, false, small = true, modifier = Modifier.testTag("project.page.tool.$tab")) { DataClient.openViewerTab = tab; openViewer("project-home-" + pr.id) }
+            }
             card?.takeIf { it.goal.isNotEmpty() || it.boards.isNotEmpty() || it.leadDays > 0 || it.estimateWarnings.isNotEmpty() }?.let { c ->
                 Column(Modifier.fillMaxWidth().background(dcs.surface).clickable(enabled = c.goal.isNotEmpty()) { whole = !whole }.padding(horizontal = 12.dp, vertical = 8.dp).testTag("project.page.card")) {
                     if (c.goal.isNotEmpty()) DText(c.goal, dcs.onSurface, 13, lines = if (whole) 20 else 2)

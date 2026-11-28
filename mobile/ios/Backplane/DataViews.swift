@@ -254,7 +254,11 @@ struct DataThreadsView: View {
         .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
         .navigationDestination(for: DSwarmRoute.self) { DataSwarmView(client: client, route: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in
-            if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
+            if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line, tab: r.tab) }
+            // a project's own viewer (the project page's Board / Schematic / 3D / Files): no thread, the project's folder (`project-home-<id>`)
+            else if r.id.hasPrefix("project-home-") && r.id.count > "project-home-".count {
+                DataViewerView(client: client, thread: DThread.stub(id: r.id, title: client.projects.first { "project-home-" + $0.id == r.id }?.title ?? r.id), openFile: r.file, line: r.line, tab: r.tab)
+            }
             else if !r.file.isEmpty { DataViewerView(client: client, thread: DThread.stub(id: r.id, title: (r.file as NSString).lastPathComponent), openFile: r.file, line: r.line) }
             else { DLoading(text: Tr.t(client.conn == .online ? "Loading the thread…" : "Connecting to the hub…")) } // never a blank page while the thread list comes
         }

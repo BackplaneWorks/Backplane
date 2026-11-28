@@ -289,6 +289,23 @@ struct DataProjectPageView: View {
     @State private var whole = false
     var body: some View {
         List {
+            // as the desktop's project page: the folder (selectable), and the viewer on the project itself without a thread
+            // (`project-home-<id>`): Board, Schematic and 3D when it has a board, Files always
+            if let p = project {
+                VStack(alignment: .leading, spacing: 8) {
+                    if !p.root.isEmpty { Text(verbatim: p.root).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(2).textSelection(.enabled).accessibilityIdentifier("data.project.page.path") }
+                    HStack(spacing: 8) {
+                        ForEach(((card?.boards.isEmpty ?? true) ? [] : ["Board", "Schematic", "3D"]) + ["Files"], id: \.self) { t in
+                            Button { path.append(DViewerRoute(id: "project-home-" + p.id, tab: t)) } label: {
+                                Text(Tr.t(t)).dui(12, weight: .semibold).lineLimit(1).foregroundStyle(BackplaneDesign.text)
+                                    .padding(.horizontal, 10).frame(minHeight: 30)
+                                    .background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.control))
+                                    .overlay(RoundedRectangle(cornerRadius: DRadius.control).strokeBorder(BackplaneDesign.line, lineWidth: 1))
+                            }.buttonStyle(.plain).accessibilityIdentifier("data.project.page.tool.\(t)")
+                        }
+                    }
+                }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).dataRow()
+            }
             if let c = card, !c.goal.isEmpty || !c.boards.isEmpty || c.leadDays > 0 || !c.estimateWarnings.isEmpty {
                 Button { whole.toggle() } label: {
                     VStack(alignment: .leading, spacing: 4) {

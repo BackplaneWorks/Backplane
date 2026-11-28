@@ -144,13 +144,15 @@ fun DataRoot() {
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
-            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
+            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }, { page = Page.Viewer(it) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, Msg.palette_terminal) { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
             is Page.Viewer -> {
                 val backPage = p.from ?: if (p.id.startsWith("project-home-")) Page.Home else Page.Thread(p.id)
                 BackHandler { page = backPage }
                 val viewerThread = DataClient.threads.firstOrNull { it.id == p.id }
+                    // a project's own viewer (the project page's Board / Schematic / 3D / Files): no thread, the project's folder
+                    ?: p.id.removePrefix("project-home-").takeIf { p.id.startsWith("project-home-") && it.isNotEmpty() }?.let { pid -> DThread(id = p.id, project = pid, title = DataClient.projects.firstOrNull { it.id == pid }?.title ?: pid, state = "idle", updatedAt = 0L, pinned = false, settled = false, archived = false, provider = "", model = "", preview = "", waiting = 0) }
                     ?: if (p.file.isNotEmpty()) DThread(id = p.id, project = "", title = p.file.substringAfterLast('/'), state = "idle", updatedAt = 0L, pinned = false, settled = false, archived = false, provider = "", model = "", preview = "", waiting = 0) else null
                 viewerThread?.let { ViewerScreen(it, p.file, p.line) { page = backPage } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
@@ -367,7 +369,7 @@ private val homeTab = mutableStateOf(HomeTab.INBOX)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
+private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openViewer: (String) -> Unit = {}, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var tab by homeTab
@@ -384,7 +386,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var secMenu by remember { mutableStateOf<DSecRow?>(null) }
     var secRename by remember { mutableStateOf<DSection?>(null) }
     var secNewSwarm by remember { mutableStateOf<String?>(null) }   // New swarm from a section project's menu (a project id)
-    secPage?.let { p -> androidx.activity.compose.BackHandler { showSec(null) }; ProjectPageScreen(p, open, { id -> showSec(null); newThread(id) }, { room -> showSec(null); openSwarm(room) }) { showSec(null) }; return }
+    secPage?.let { p -> androidx.activity.compose.BackHandler { showSec(null) }; ProjectPageScreen(p, open, { id -> showSec(null); newThread(id) }, { room -> showSec(null); openSwarm(room) }, openViewer) { showSec(null) }; return }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }

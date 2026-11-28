@@ -7,7 +7,7 @@ import WebKit
 // and are drawn by the app's Metal view (PlotCanvasView: pinch, pan, orbit, tap to inspect). Written without a simulator run: compile-checked only.
 
 /// `file` and `line`: a link to a file (src/x.rs:12) opens the viewer at it
-struct DViewerRoute: Hashable { var id: String; var file = ""; var line = 0 }
+struct DViewerRoute: Hashable { var id: String; var file = ""; var line = 0; var tab = "" }   // tab: the page to open on (the project page's Board / Schematic / 3D / Files)
 struct DEntryRow: Decodable, Identifiable { var dir: Bool; var size: Int; var name: String; var id: String { name }
     enum CodingKeys: String, CodingKey { case dir, size, name }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); dir = c.bool(.dir); size = c.int(.size); name = c.str(.name) } }
@@ -157,13 +157,15 @@ struct DataViewerView: View {
     @State private var sheetPick = ""
     @State private var choosing: String?
     @State private var mgmtOpen = ""
-    init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0) {
+    init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0, tab openTab: String = "") {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
         let e = ext(openFile)
         _tab = State(initialValue: openFile.isEmpty ? "Files" : e == "kicad_pcb" || e == "pcbdoc" ? "Board" : e == "kicad_sch" || e == "schdoc" ? "Schematic" : cadExt.contains(e) ? "Mech" : "Files")
         _target = State(initialValue: e == "kicad_pcb" || e == "pcbdoc" ? ("Board", openFile) : e == "kicad_sch" || e == "schdoc" ? ("Schematic", openFile) : cadExt.contains(e) ? ("Mech", openFile) : nil)
         _railState = State(initialValue: ViewerRailState(threadId: thread.id))
+        // a page asked for by name (the project page's buttons) is the person's own pick: the rail's reply keeps it
+        if !openTab.isEmpty && tabs.contains(openTab) { _tab = State(initialValue: openTab); _railState = State(initialValue: ViewerRailState(threadId: thread.id).onLocalSelect()) }
     }
     var body: some View {
         let hasRail = client.has("rail")
