@@ -255,7 +255,8 @@ impl Backplane {
             Event::Error(e)=>{if screens::hubbar::restart_bar(self.screens.hubbar.restarting.as_ref(),false,std::time::Instant::now()).is_none(){self.error=e;}self.screens.unsent.lost();self.sent_back(cx);},
             Event::Unpaired=>screens::pair::revoked(self,cx),
             // a refused view leaves no page to wait for: the pressed tab gives way at once, and the window says why
-            Event::Refused(e)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"refused":e.chars().take(160).collect::<String>()}));self.error=e;self.sent_back(cx);screens::viewer::forget_press();self.screens.rail_pending=None;self.screens.rail_at=None;self.ui_epoch+=1;cx.notify();}, // drawn now: a composer command's refusal (/project, /btw) came with no picture to repaint it
+            // while Settings is open the refusal is a press of its own (a Pair, a Save): said there, not left on the thread's line for after it shuts
+            Event::Refused(e)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"refused":e.chars().take(160).collect::<String>()}));if screens::settings::is_open(self){self.screens.settings_ui.refused=Some(e);}else{self.error=e;}self.sent_back(cx);screens::viewer::forget_press();self.screens.rail_pending=None;self.screens.rail_at=None;self.ui_epoch+=1;cx.notify();}, // drawn now: a composer command's refusal (/project, /btw) came with no picture to repaint it
             Event::Note(n)=>{self.note=n;self.ui_epoch+=1;cx.notify();},
             // the hub moved the composer on: a command left it, or the conversation's draft came back after an intent was saved. Another thread's is kept for when it opens
             Event::Compose(th,text)=>{if th==self.selected {self.input.update(cx,|input,cx|input.set(text.clone(),cx));}if text.is_empty(){self.drafts.remove(&th);}else{self.drafts.insert(th.clone(),text.clone());}self.screens.drafts.set(&th,&text);},
@@ -352,12 +353,16 @@ impl Backplane {
             cx.spawn(async move|this,cx|{loop{cx.background_executor().timer(Duration::from_secs(3600)).await;if this.update(cx,|this,_|{let _=this.tx.try_send(hub::Command::Rpc("update.status".into(),screens::settings::Secret(serde_json::json!({})),"hubupd"));}).is_err(){break}}}).detach();
         }
     }
-    /// The gear: Settings opens at once on Appearance with this device's rows (no round trip), and the hub is asked for its pages beside it.
+    /// The gear: Settings opens at once on the page it was left on while the app runs, Appearance the first time, with this device's rows
+    /// (no round trip), and the hub is asked for its pages beside it.
     pub fn open_settings(&mut self,cx:&mut Context<Self>){
         let hub_open=self.data["settings"].is_object();
         let ui=&mut self.screens.settings_ui;
         let opening=!(ui.open_local||hub_open);
-        if ui.open_local||hub_open{ui.open_local=false;ui.keys=false;ui.hubs=false;ui.accounts=false;} else {ui.open_local=true;ui.keys=false;ui.hubs=false;ui.accounts=false;if ui.page.is_empty(){ui.page="appearance".into();}self.screens.focus_settings=true;}
+        // shut: the page it was on is kept, and the gear opens it again (`settings::reopen`; the first time, Appearance)
+        if !opening{let left=screens::settings::current(self);self.screens.settings_ui.left=left;}
+        let ui=&mut self.screens.settings_ui; ui.refused=None;
+        if !opening{ui.open_local=false;ui.keys=false;ui.hubs=false;ui.accounts=false;} else {let (page,keys,hubs,accounts)=screens::settings::reopen(&ui.left);ui.open_local=true;ui.keys=keys;ui.hubs=hubs;ui.accounts=accounts;ui.page=page;self.screens.focus_settings=true;if accounts{screens::accounts::open_page(self,cx);}}
         if opening{self.solidcraft_lend(cx);}
         let _=self.tx.try_send(Command::Action("flag".into(),"settings".into()));cx.notify();
     }

@@ -29,8 +29,12 @@ the pages had before they were regrouped, so none is lost. The desktop puts this
 "This device" above the hub's rows ("Every device", left out where the hub's part opens with a heading of its own, Notifications' Notify me for):
 Language, Theme, Text size, Font, the 3D background and the layout on Appearance,
 Desktop notifications on Notifications, Streamer mode on Privacy. It adds three pages of its own: Keyboard (before Mouse and trackpad;
-the keys that cannot be changed under Advanced), Hubs (after Machines), both kept on this computer, and Accounts (leading Agents). A page
-opens at its top. The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
+Shortcuts to defaults first, the keys that cannot be changed under Advanced), Hubs (after Machines), both kept on this computer, and
+Accounts (leading Agents). A page opens at its top. The gear opens Settings on the page it was left on while the app runs (Appearance the
+first time; `settings::reopen`). Notifications puts the Time zone right after the quiet hours it governs; automatic, its note says so on a
+second line (no row of its own), and set by hand a row offers going back to automatic. What the hub refuses of a press in Settings (a Pair,
+a Save) is said in red on the page title's line (no row moves) until the next press, page or close, not on the thread behind; a row whose note is an error
+(quiet times, a zone name, the webhook's address) has `"tone": "bad"`. The phones keep their own pages (`devices.page`, `ring.page`, `notify.page`, ...), unchanged by
 the regrouping, and the web client its own dialog (`web/src/settings.ts`). The phones' `voice.page`, `notify.page` and `machines.page` replies
 (and Voice's `page` frame) carry the same `adv` marks, their rows in the same order (`mark_adv`, below).
 
@@ -46,7 +50,8 @@ Developer are marked where the page adds them) and `mark_adv` marks and orders a
 warns (`tone`: a home move that failed) is never folded, nor a machine's own row, whatever the person called it. The phones do not address
 these rows by position, so an app that does not know the mark draws the same rows, these last.
 
-Rows follow one pattern. A switch says On and Off (the values stay `on` and `off`). A text box and its button share the row's line, the
+Rows follow one pattern. A switch says On and Off (the values stay `on` and `off`); a choice's chip is capitalised the same way
+(Projects, Auto, Stable, Normal, Native...; a program's name such as kicad-cli as it is), its value unchanged. A text box and its button share the row's line, the
 box narrowed by the button. A field the hub says is short (`field_w`: `"w"`, about how many characters it holds; quiet hours' From and Until,
 Machines' pairing code) is drawn that wide, on one line with the row's other short boxes and its buttons, at the right edge the row's chips
 share; a longer box before it keeps its own line above. The phones ignore `w`. Quiet hours' Save takes the two boxes as sent: a box sent

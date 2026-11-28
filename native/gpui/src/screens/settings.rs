@@ -101,7 +101,9 @@ pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, /** 
     /** the search's results highlighted by Up and Down (Enter opens it) */ pub hit: usize, /** a result or a page was opened since the search last changed: the page shows, not the results */ pub landed: bool,
     /** a result pressed: its page, label and which row of that label it is, until the page draws it (`land`) */ pub pending: Option<(String, String, usize)>,
     /** the row a result led to, lit for `LIT_MS` */ pub lit: Option<(String, String, usize)>, lit_gen: u64, /** where the page was scrolled when the results took its place */ page_at: Option<Point<Pixels>>,
-    /** the shortcut whose button was pressed, waiting for the keys typed for it (`recorded`) */ pub rec: Option<String>, /** a chord refused for a shortcut: its id and why, its row's note until the next press */ pub rec_note: Option<(String, String)> }
+    /** the shortcut whose button was pressed, waiting for the keys typed for it (`recorded`) */ pub rec: Option<String>, /** a chord refused for a shortcut: its id and why, its row's note until the next press */ pub rec_note: Option<(String, String)>,
+    /** what the hub refused while Settings was open (a Pair, a Save): said beside the page's title until the next press, page or close */ pub refused: Option<String>,
+    /** the page Settings was on when it shut (`current`): the gear opens it again while the app runs (`reopen`) */ pub left: String }
 /// A setting the search can find on a page: its label, its note and the hub's plain search words for it (`also`: what it does, what it was called).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Find { pub label: String, pub note: String, pub also: String }
@@ -384,8 +386,9 @@ pub fn device_finds(rows: &[Row]) -> HashMap<String, Vec<Find>> {
 /// The page that holds each section of `device_rows`, by its heading: Appearance and Layout on Appearance, Notifications on Notifications,
 /// Streaming on Privacy, the keyboard shortcuts on this app's Keyboard page (`@keys`).
 /* i18n-ok: section headings matched, not drawn */ const DEVICE_PAGES: &[(&str, &str)] = &[("Appearance", "appearance"), ("Layout", "appearance"), ("Notifications", "notifications"), ("Streaming", "privacy"), ("Keyboard shortcuts", "@keys")];
-/// This device's rows on `page` (a hub page id, or `@keys`), in their order and without their section's heading. On `@keys` the keys that
-/// cannot be changed (no button) are marked rarely needed (`adv`) and go last, so the page lists what can be changed and folds the fixed ones.
+/// This device's rows on `page` (a hub page id, or `@keys`), in their order and without their section's heading. On `@keys` Shortcuts to
+/// defaults comes first, and the keys that cannot be changed (no button) are marked rarely needed (`adv`) and go last, so the page lists what
+/// can be changed and folds the fixed ones.
 pub fn device_section(page: &str, rows: &[Row]) -> Vec<Row> {
     let mut at = ""; let mut out: Vec<Row> = Vec::new();
     for r in rows {
@@ -394,6 +397,8 @@ pub fn device_section(page: &str, rows: &[Row]) -> Vec<Row> {
     }
     if page != "@keys" { return out }
     let (mut v, fixed): (Vec<Row>, Vec<Row>) = out.into_iter().partition(|r| !r.buttons.is_empty());
+    // Shortcuts to defaults first: a person who broke a key looks for it at the top, not under thirty rows
+    v.sort_by_key(|r| !r.buttons.iter().any(|b| b.action == "local:shortcuts-reset"));
     v.extend(fixed.into_iter().map(|mut r| { r.raw["adv"] = Value::Bool(true); r })); v
 }
 /// Whether a row is marked rarely needed (the hub's `adv`, or this device's fixed keys): drawn under the page's Advanced fold.
@@ -522,16 +527,22 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
 
 /// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
 /// A hub page of the nav, chosen (a click, or the e2e `click` on `set-nav:<page>`): what is typed goes first, then the hub is asked for the page.
-pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); let ui = &mut this.screens.settings_ui; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
+pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); let ui = &mut this.screens.settings_ui; ui.refused = None; ui.keys = false; ui.hubs = false; ui.accounts = false; ui.page = p.to_string(); ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
     // Usage opens with each account's limit bars over the totals: the hub's accounts read again (and each signed-in account's usage, at most every 5 minutes)
     if p == "usage" { super::accounts::list(this); super::accounts::refresh_usage(this); } }
+/// Where the gear opens Settings: the page it was on when it shut (`left`, this run of the app), else Appearance; as (hub page, Keyboard,
+/// Hubs, Accounts). One of this app's pages keeps Appearance as the hub's page behind it.
+pub fn reopen(left: &str) -> (String, bool, bool, bool) {
+    match left { "" => ("appearance".into(), false, false, false), "@keys" => ("appearance".into(), true, false, false), "@hubs" => ("appearance".into(), false, true, false),
+        "@accounts" => ("appearance".into(), false, false, true), p => (p.to_string(), false, false, false) }
+}
 /// A page of the nav, chosen: one of this app's three, or the hub's (`@device`, the page this device's rows had before they moved to the pages
 /// of their topic, is Appearance).
 pub fn open_nav(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     let id = if id == "@device" { "appearance" } else { id };
     if !id.starts_with('@') { go_page(this, id); cx.notify(); return }
     flush_fields(this);
-    let ui = &mut this.screens.settings_ui; ui.keys = id == "@keys"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts"; ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui);
+    let ui = &mut this.screens.settings_ui; ui.refused = None; ui.keys = id == "@keys"; ui.hubs = id == "@hubs"; ui.accounts = id == "@accounts"; ui.landed = true; ui.lit = None; end_recording(ui); to_top(ui);
     if id == "@accounts" { super::accounts::open_page(this, cx); }
     cx.notify();
 }
@@ -869,6 +880,7 @@ fn chip_el(cx: &mut Context<Backplane>, light: bool, i: usize, j: usize, b: &Btn
 
 /// A row's button pressed: the client's own actions here, a vault Save straight to the hub, anything else the view action it names.
 pub fn on_press(this: &mut Backplane, b2: &Btn, cx: &mut Context<Backplane>) {
+    this.screens.settings_ui.refused = None; // what the hub refused answered the press before: this one may be answered anew
     // a shortcut's button waits for the keys typed for it (`recorded`); any other press ends that wait
     if b2.action == "local:shortcut" { let ui = &mut this.screens.settings_ui; ui.rec_note = None; ui.rec = Some(b2.value.clone()); cx.notify(); return }
     end_recording(&mut this.screens.settings_ui);
@@ -879,8 +891,8 @@ pub fn on_press(this: &mut Backplane, b2: &Btn, cx: &mut Context<Backplane>) {
 /// label each, the open one on a rounded fill, a thin divider between groups) and the page's rows on the right with their own scroll.
 /// Settings shut (the ×, Esc, a click outside): this device's page and the accounts page at once, and the hub's pages when it has them open.
 pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
-    let hub = this.data["settings"].is_object();
-    let ui = &mut this.screens.settings_ui; ui.open_local = false; ui.keys = false; ui.accounts = false; ui.hubs = false; ui.pending = None; ui.lit = None; end_recording(ui);
+    let hub = this.data["settings"].is_object(); let left = current(this);
+    let ui = &mut this.screens.settings_ui; ui.left = left; ui.refused = None; ui.open_local = false; ui.keys = false; ui.accounts = false; ui.hubs = false; ui.pending = None; ui.lit = None; end_recording(ui);
     this.screens.acct.menu = false;
     if hub { let _ = this.tx.try_send(Command::Action("flag".into(), "settings".into())); }
     cx.notify();
@@ -955,8 +967,10 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
     if let Some(input) = &ui.search {
         let bx = div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise"));
-        // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only): `set-search`, where a pointer press puts the keys
-        let bx = if crate::art::rects_on() { bx.relative().child(canvas(|_, _, _| (), |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report("set-search", r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { bx };
+        // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only): `set-search`, where a pointer press puts the keys. In the control
+        // list too (`art::probe_rect`): a `pointer` step aims only at those, and without it the press went nowhere, the keys were typed
+        // into nothing and the scenario's Escape shut Settings
+        let bx = if crate::art::rects_on() { bx.relative().child(crate::art::probe_rect("set-search".into())).child(canvas(|_, _, _| (), |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report("set-search", r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { bx };
         nav = nav.child(bx.child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone())));
     }
     let lines = nav_lines(if hub_on { &ui.nav } else { &[] }, &ui.groups, &ui.finds, &ui.akas, &device_finds(&dev_rows), &ui.q);
@@ -999,7 +1013,10 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
                 .on_click(cx.listener(|this, _, _, cx| close(this, cx)))))
         .child(div().flex().flex_1().min_h_0().child(nav)
             .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().track_scroll(&ui.scroll).px(px(fit.gutter)).py_3().flex().flex_col()
-                .child(div().pb_1().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::BOLD).child(title))
+                // the title, and on its line what the hub refused of a press here (said by the hub, through the catalog already): beside the
+                // title, not under it, so no row moves away from the pointer that pressed it
+                .child(div().pb_1().flex().items_baseline().gap_3().child(div().flex_shrink_0().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::BOLD).child(title))
+                    .children(ui.refused.clone().map(|t| div().min_w_0().truncate().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(t))))
                 .children(sub.map(|t| div().pb_2().text_size(crate::scale::tpx(12.)).text_color(c(if on_acct { "dim" } else { "accent" })).child(trs(t)))).children(els)));
     // (the dim backdrop lets a press through: a thread clicked while Settings is open shuts Settings and shows that thread, as 0.14 did;
     // the dialog itself takes its own presses)
@@ -1076,7 +1093,7 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Theme", "Light or dark on this device, or follow what the hub says.", lo::THEMES.iter().map(|(k, lab)| b(lab, "theme", k, l.theme == *k)).collect()),
         // the text size: a slider (its stops are the setting's steps) and Reset beside it
         Row { raw: serde_json::json!({"slider": {"name": "text", "min": lo::TEXT_PCT.0, "max": lo::TEXT_PCT.1, "step": lo::TEXT_PCT.2, "value": l.text_pct}}),
-            /* i18n-ok: drawn through trs by row_el, nav_title or the title */ ..r("Text size", &tf("gpui.settings.textpct", &[("pct", l.text_pct.into())]), vec![b("Reset", "text-reset", "", l.text_pct == 100)]) },
+            /* i18n-ok: drawn through trs by row_el, nav_title or the title */ ..r("Text size", &tf("gpui.settings.textpct", &[("pct", l.text_pct.into())]), vec![b("Reset", "text-reset", "", l.text_pct != 100)]) }, // lit when there is something to reset
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Font", "The typeface of the interface and the thread.", lo::FONTS.iter().map(|(k, lab)| b(lab, "font", k, l.font == *k)).collect()),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("3D viewer background", "Behind Mech parts and the 3D board: Auto follows the theme.", lo::VIEWER_BGS.iter().map(|(k, lab)| b(lab, "viewer-bg", k, l.viewer_bg == *k)).collect()),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Custom background colour", "Pick a colour, then a lighter or darker shade of it.", lo::VIEWER_BG_SWATCHES.iter().map(|(lab, c)| b(lab, "viewer-bg-color", &format!("{c:06x}"), l.viewer_bg == "custom" && l.viewer_bg_rgb == *c))
@@ -1357,12 +1374,22 @@ mod tests {
         assert_eq!(device_section("notifications", &rows).iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["Desktop notifications"]);
         assert_eq!(device_section("privacy", &rows).iter().map(|r| r.label.as_str()).collect::<Vec<_>>(), ["Streamer mode", "Turn on while the screen is shared", "Turn on while a recording app runs"]);
         assert!(device_section("cad", &rows).is_empty() && device_section("@device", &rows).is_empty());
-        // Keyboard: what can be changed first, then Shortcuts to defaults, the fixed keys last and folded
+        // Keyboard: Shortcuts to defaults first, then what can be changed, the fixed keys last and folded
         let k = device_section("@keys", &rows);
         let first_fixed = k.iter().position(is_adv).expect("fixed keys");
         assert!(k[..first_fixed].iter().all(|r| !r.buttons.is_empty()) && k[first_fixed..].iter().all(|r| is_adv(r) && r.buttons.is_empty()), "the changeable keys, then the fixed ones");
-        assert_eq!(k[first_fixed - 1].label, "Shortcuts to defaults");
+        assert_eq!(k[0].label, "Shortcuts to defaults"); assert!(k[1..first_fixed].iter().all(|r| r.buttons[0].action == "local:shortcut"), "then each key in its order");
+        // Text size: its Reset lit only when there is a size to reset
+        let reset = |pct: u32| { let l = crate::local::Local { text_pct: pct, ..Default::default() }; device_section("appearance", &device_rows(&l)).into_iter().find(|r| r.label == "Text size").unwrap().buttons[0].on };
+        assert!(!reset(100) && reset(110));
         assert_eq!(k.len(), crate::keys::TABLE.len() + crate::keys::MISSING.len() + 1);
+    }
+    #[test] fn the_gear_reopens_the_page_settings_was_left_on() {
+        assert_eq!(reopen(""), ("appearance".to_string(), false, false, false), "the first open of a run");
+        assert_eq!(reopen("cad"), ("cad".to_string(), false, false, false));
+        assert_eq!(reopen("@keys"), ("appearance".to_string(), true, false, false));
+        assert_eq!(reopen("@hubs"), ("appearance".to_string(), false, true, false));
+        assert_eq!(reopen("@accounts"), ("appearance".to_string(), false, false, true));
     }
     #[test] fn advanced_rows_fold_and_a_search_opens_the_fold() {
         let rows = parse(&serde_json::json!({"rows": [{"label": "Desktop", "note": "n", "buttons": [{"label": "On", "action": "x", "value": "", "on": true}]},
