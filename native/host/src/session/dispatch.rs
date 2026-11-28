@@ -18,6 +18,8 @@ pub trait Facts: composer::Facts + select::Facts {
     fn fork_source(&self, _id: &str) -> String { String::new() }
     /// a drag's shelf: (section, ids in order) of a thread or of the projects (sidebar::order_of)
     fn order_of(&self, _kind: &str, _id: &str) -> Option<(String, Vec<String>)> { None }
+    /// the project a thread is in ("" for a chat in no project, or an unknown thread)
+    fn project_of(&self, _id: &str) -> String { String::new() }
 }
 
 pub struct Dispatched { pub session: Value, pub cmds: Vec<Value>, pub next_target: Option<Value> }
@@ -74,7 +76,12 @@ pub fn dispatch<F: Facts>(f: &F, params: &Value) -> Option<Dispatched> {
     } else if let Some(o) = crate::commands::reorder::act(hub, &params["session"], action, value, &|k, i| f.order_of(k, i)) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
     } else if let Some(o) = cmdact::act(&cmdact::Req { hub, session: &params["session"], sel, action, value, title_of: &|t| f.title_of(t) }) {
-        patch::merge(&mut session, &o.session_patch); (o.cmds, o.next_target, false)
+        patch::merge(&mut session, &o.session_patch);
+        // Remove project while one of its threads is on show: back to the start, as a deleted thread's Delete does (the thread stayed on
+        // screen with a live composer, its project gone from the sidebar)
+        let gone = removes_shown(action, value, &f.project_of(sel));
+        if gone { patch::merge(&mut session, &json!({"sel": ""})); }
+        (o.cmds, if gone { Some(json!({"kind": "recent", "id": ""})) } else { o.next_target }, false)
     } else if let Some(o) = thread_actions::act(f, hub, &params["session"], sel, action, value) {
         patch::merge(&mut session, &o.session_patch); (o.cmds, None, !o.look)
     } else if let Some(o) = pages::act_for(hub, &params["session"], sel, action, value, || {
@@ -119,7 +126,13 @@ impl select::Facts for StateFacts<'_> {
     fn order_enabled(&self) -> bool { self.0.settings.get("order.enabled").map_or(true, |v| v != "off") }
     fn estimates_on(&self) -> bool { self.0.settings.get("order.estimates").map_or(true, |v| v != "off") }
 }
+/// Whether an action removes the project of the thread on show (`shown_project`, its project id): Remove project on it.
+pub fn removes_shown(action: &str, value: &str, shown_project: &str) -> bool {
+    let raw = |x: &str| x.rsplit('|').next().unwrap_or("").to_string();
+    action == "proj-remove" && !shown_project.is_empty() && raw(value) == raw(shown_project)
+}
 impl Facts for StateFacts<'_> {
+    fn project_of(&self, id: &str) -> String { self.0.threads.get(id).map(|t| t.project.clone()).unwrap_or_default() }
     fn title_of(&self, id: &str) -> String { self.0.threads.get(id).map(|t| t.title.clone()).or_else(|| self.0.projects.get(id).map(|p| p.title.clone())).unwrap_or_default() }
     fn fork_source(&self, id: &str) -> String { self.0.settings.get(&format!("fork.{id}")).cloned().unwrap_or_default() }
     fn order_of(&self, kind: &str, id: &str) -> Option<(String, Vec<String>)> {
@@ -160,6 +173,20 @@ mod tests {
         json!({"hub": "http://127.0.0.1:3820", "cid": "parity-gpui", "now": 1793864523000u64, "target": {"kind": "thread", "id": T}, "action": action, "value": value, "session": session})
     }
     fn session() -> Value { json!({"sel": T, "rid": 2, "panel": false, "drafts": {T: "hello parity", "@boot": "", "@fab.at": "onon#t1700000002-3#idle"}, "info": {}}) }
+    #[test] fn removing_the_shown_threads_project_goes_back_to_the_start() {
+        assert!(removes_shown("proj-remove", "p1", "p1"));
+        assert!(removes_shown("proj-remove", "h|p1", "p1"));
+        assert!(!removes_shown("proj-remove", "p2", "p1"), "another project: the thread stays");
+        assert!(!removes_shown("proj-remove", "p1", ""), "a chat in no project, or nothing on show");
+        assert!(!removes_shown("proj-rename", "p1", "p1"));
+        struct P; impl composer::Facts for P { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
+        impl select::Facts for P { fn thread_exists(&self, _: &str) -> bool { true } fn turn_name(&self, _: &str) -> String { "idle".into() } fn order_enabled(&self) -> bool { true } fn estimates_on(&self) -> bool { true } }
+        impl Facts for P { fn title_of(&self, _: &str) -> String { "T".into() } fn root_of(&self, _: &str) -> String { "/w/r".into() } fn project_of(&self, _: &str) -> String { "p1".into() } }
+        let d = dispatch(&P, &params("proj-remove", "p1", session())).unwrap();
+        assert_eq!(d.session["sel"], json!(""), "{:?}", d.session); assert_eq!(d.next_target, Some(json!({"kind": "recent", "id": ""})));
+        let d = dispatch(&P, &params("proj-remove", "p9", session())).unwrap();
+        assert_eq!(d.session["sel"], json!(T)); assert!(d.next_target.is_none());
+    }
     #[test] fn a_send_is_the_composers_and_merges_its_patch() {
         let d = dispatch(&M { exists: T, running: false }, &params("send", "", session())).unwrap();
         assert_eq!(d.session["rid"], json!(3)); assert_eq!(d.session["drafts"][T], json!(""));
