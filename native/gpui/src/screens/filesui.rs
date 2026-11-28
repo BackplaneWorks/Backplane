@@ -393,7 +393,7 @@ pub(super) fn files_body(cx: &mut Context<Backplane>, light: bool, files: &Value
         let (ic, tok) = glyph(&r.kind);
         let on = ui.sel == Some(n);
         let (a_open, has_open) = (n, !r.action.is_empty() || crate::viewers::solidcraft_pane::is_cad_file(&r.value) || crate::viewers::solidcraft_pane::is_cad_file(&r.label));
-        list = list.child(div().id(SharedString::from(format!("file-{n}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).when(on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
+        list = list.child(div().id(SharedString::from(format!("file-{n}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).border_l_2().border_color(if on { c("accent") } else { gpui::Rgba { a: 0., ..c("accent") } }).when(on, |d| d.bg(c("raise"))) /* every row keeps the bar's 2 px, so the picked one does not move */
             .child(crate::art::icon(ic, 15., c(tok)))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(c(if has_open || r.kind == "folder" { "text" } else { "dim" })).child(r.label.clone()))
             .child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.detail)))
