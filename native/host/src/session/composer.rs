@@ -222,6 +222,8 @@ pub fn send(cx: &SendCtx, session: &Value) -> Option<ActOut> {
     let text = if !text.is_empty() && !reply_id.is_empty() && !reply_full.is_empty() { format!("{}\n\n{text}", reply_block(reply_id, reply_full)) } else { text };
     let text = text.as_str();
     if text.is_empty() { return Some(ActOut { session_patch: json!({}), cmds: vec![] }) } // Ui.send.k: nothing typed sends nothing
+    // no thread open: `/project` and `/new-project` need none (the desktop starts a chat with any other text, screens/projects.rs `no_thread_send`)
+    if sel.is_empty() { if let Some(w @ Word::Project(_)) = word_of(body) { return Some(run(cx, session, sel, w)) } }
     if sel.is_empty() || !safe(sel) { return Some(say("Open a thread first: this has nowhere to go yet.")) }
     if let Some(w) = word_of(body) { return Some(run(cx, session, sel, w)) }
     if cx.bot_thread && cx.bot.is_none() { return Some(say("This bot's thread is not ready, so nothing was sent. Your text is still here.")) }
@@ -678,6 +680,14 @@ mod tests {
         assert_eq!(act(&p("send-alt", ""), &Plain).unwrap().cmds, send_o.cmds, "Follow.mode answers steer for both");
         assert!(says(&act(&p("send", ""), &Bot).unwrap()).contains("nothing was sent"), "a bot's thread with no bot says so");
         for a in ["select", "row-pin", "interrupt", ""] { assert!(act(&p(a, "x"), &Plain).is_none(), "{a}") }
+    }
+    #[test] fn a_project_word_runs_with_no_thread_open_and_an_unsafe_selection_keeps_the_draft() {
+        let o = send(&cx(), &json!({"sel": "", "rid": 2, "drafts": {"": "/new-project puck"}, "info": {}})).unwrap();
+        assert_eq!(sent_method(&o).unwrap().0, "project.new", "made as from a thread");
+        let o = send(&cx(), &json!({"sel": "", "rid": 2, "drafts": {"": "/project"}, "info": {}})).unwrap();
+        assert_eq!(o.session_patch["drafts"]["@proj.open"], "1", "the Add project dialog");
+        let o = send(&cx(), &json!({"sel": "@x", "rid": 2, "drafts": {"@x": "hi"}, "info": {}})).unwrap();
+        assert!(says(&o).contains("nowhere to go")); assert_eq!(o.session_patch, json!({}), "the draft stays");
     }
     #[test] fn send_always_answers() {
         let cx = SendCtx { hub: "h", cid: "c", now_s: 1, bot_thread: false, bot: None, binding: None };

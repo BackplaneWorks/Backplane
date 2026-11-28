@@ -158,6 +158,14 @@ pub fn page_send(data: &Value, pid: &str, text: &str, picked: Option<&str>) -> O
     }
     Some(Ok((Command::Action("new-thread".into(), to.to_string()), text.to_string())))
 }
+/// Send with no thread open and no project page (the "Pick a thread" state): the text starts a chat with it as its first message, as New chat
+/// and Send would (`new-thread` in Chats, then `first_message`: the page's own way). `/project` and `/new-project` stay the hub's commands.
+pub fn no_thread_send(selected: &str, page_open: bool, text: &str) -> Option<Command> {
+    if !selected.is_empty() || page_open || text.trim().is_empty() { return None }
+    let lead = text.trim_start();
+    if ["/project", "/new-project"].iter().any(|w| lead.strip_prefix(w).is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace))) { return None }
+    Some(Command::Action("new-thread".into(), crate::keys::CHATS.into()))
+}
 /// The hub refused the new thread a page's Send asked for: the text goes back in the box (never lost), the window says why.
 pub fn take_back(first_send: &mut Option<(String, String, std::time::Instant)>) -> Option<String> { first_send.take().map(|(_, text, _)| text) }
 /// A page's Send, once the hub has made its thread (`id` from the reply, `<link>~<id>` on a linked machine): the typed text as that thread's first
@@ -1058,6 +1066,7 @@ mod home_tests {
         let mut fs = Some(("t0".to_string(), "a thread sent to boat-hub".to_string(), std::time::Instant::now()));
         assert_eq!(take_back(&mut fs).as_deref(), Some("a thread sent to boat-hub")); assert!(fs.is_none());
         // given back: into an empty box exactly; a box with new text keeps it, and the old text waits to be restored (never merged)
+        match no_thread_send("", false, "what is a pull-up resistor for") { Some(Command::Action(a, v)) => assert_eq!((a.as_str(), v.as_str()), ("new-thread", crate::keys::CHATS)), other => panic!("{other:?}") }
         match first_message("L~t9", "a thread sent to boat-hub") { Command::Rpc(m, p, _) => { assert_eq!(m, "turn.start"); assert_eq!((p.0["thread"].as_str(), p.0["text"].as_str()), (Some("L~t9"), Some("a thread sent to boat-hub"))) } other => panic!("{other:?}") }
         let mut r = None;
         assert_eq!(give_back("old".into(), "", &mut r).as_deref(), Some("old")); assert!(r.is_none());
@@ -1132,5 +1141,18 @@ mod home_tests {
         let page_only = json!({"sections": [], "projectPage": {"project": {"id": "http://h:1|p1", "nav": "page-nav-p1"}}});
         assert_eq!(nav_key(&page_only, "p1"), "page-nav-p1");
         assert_eq!(nav_key(&json!({}), "p1"), "");
+    }
+}
+
+#[cfg(test)]
+mod no_thread_tests {
+    use super::*;
+    #[core::prelude::v1::test] fn a_message_with_no_thread_open_starts_a_chat_with_it() {
+        assert!(matches!(no_thread_send("", false, "what is a pull-up resistor for"), Some(Command::Action(a, v)) if a == "new-thread" && v == crate::keys::CHATS));
+        assert!(no_thread_send("h|t1", false, "hi").is_none(), "a thread is open: it goes there");
+        assert!(no_thread_send("", true, "hi").is_none(), "a project's page starts its own thread");
+        assert!(no_thread_send("", false, "   ").is_none(), "nothing typed: nothing sent");
+        for w in ["/project ~/x", "/new-project puck", "/project"] { assert!(no_thread_send("", false, w).is_none(), "{w}: the hub's command") }
+        assert!(no_thread_send("", false, "/projects are fun").is_some());
     }
 }

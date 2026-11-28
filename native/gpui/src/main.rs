@@ -431,6 +431,12 @@ impl Backplane {
             self.screens.projects.first_send=Some((self.selected.rsplit('|').next().unwrap_or("").to_string(),text,Instant::now()));
             self.error.clear(); self.screens.projects.refused.clear(); self.arm_new();let _=self.tx.try_send(cmd);cx.notify();return;
         }
+        // no thread open and no page: the text starts a chat with it (as New chat and Send would), the page's way: the box keeps it until the hub made the chat
+        if let Some(cmd)=screens::projects::no_thread_send(&self.selected,self.project_page.is_some(),&text) {
+            if self.status!="Connected"||self.screens.projects.first_send.is_some() {return;}
+            self.screens.projects.first_send=Some((String::new(),text,Instant::now()));
+            self.error.clear(); self.arm_new();let _=self.tx.try_send(cmd);cx.notify();return;
+        }
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());
         // no hub now: the message waits in the window's own outbox (screens/unsent.rs), in the strip over the box, and goes once the hub is back
