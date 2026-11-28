@@ -68,7 +68,11 @@ fn intro(label: &str, note: &str) -> Value { let mut r = row(label, note, vec![]
 /// Mob.set.chips: one button per value, `setting key=value`, lit when it is the current one; the label is the value as VLabel.choice says it ("" is "default",
 /// on and off are "On" and "Off" as on every other switch).
 fn chips(values: &[&str], cur: &str, key: &str) -> Vec<Value> {
-    values.iter().map(|v| btn(match *v { "" => "default", "on" => "On", "off" => "Off", v => v }, "setting", &format!("{key}={v}"), *v == cur)).collect()
+    values.iter().map(|v| btn(match *v { "" => "default", "on" => "On", "off" => "Off", v => chip_word(v) }, "setting", &format!("{key}={v}"), *v == cur)).collect()
+}
+/// A choice's word as a chip says it, capitalised as "Dark" and "On" beside it are; a program's name ("kicad-cli") or a number as it is.
+fn chip_word(v: &str) -> &str {
+    match v { "projects" => "Projects", "active" => "Active", "auto" => "Auto", "local" => "Local", "stable" => "Stable", "beta" => "Beta", "nightly" => "Nightly", "native" => "Native", v => v }
 }
 fn onoff(on: bool) -> &'static str { if on { "on" } else { "off" } }
 
@@ -109,7 +113,7 @@ fn browser(st: &State, session: &Value) -> Vec<Value> {
 fn appearance(st: &State) -> Vec<Value> {
     vec![
         row("Theme", "The window and the web page (phones unset follow their own system).", { let cur = set(st, "ui.theme", ""); vec![btn("Dark", "setting", "ui.theme=dark", cur == "dark"), btn("Light", "setting", "ui.theme=light", cur == "light")] }),
-        row("Thread list", "Projects groups threads by project; active lists what is going on, what needs you first.", chips(&["projects", "active"], if set(st, "sidebar.view", "") == "active" { "active" } else { "projects" }, "sidebar.view")),
+        row("Thread list", "Projects groups threads by project; Active lists what is going on, what needs you first.", chips(&["projects", "active"], if set(st, "sidebar.view", "") == "active" { "active" } else { "projects" }, "sidebar.view")),
         row("Only threads that need attention", "On: under each project, its pinned threads and the one that is running or wants a look. Off: every thread you have not settled or archived stays listed.", chips(&["on", "off"], onoff(crate::present::sections::attention_only(st)), crate::present::sections::ATTENTION)),
         row("Group projects", "On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.", chips(&["on", "off"], onoff(crate::present::sections::groups_on(st)), crate::present::sections::GROUPS)),
     ]
@@ -134,7 +138,7 @@ fn threads(st: &State) -> Vec<Value> {
         row("Short grace for read conversations", "Use the worker grace for personal conversations once their reply is read and the work is complete.", chips(&["on", "off"], onoff(set(st, "settle.done", "off") == "on"), "settle.done")),
         row("Continue after a restart", "Turns a restart cuts short go on by themselves.", chips(&["on", "off"], onoff(set(st, "restart.continue", "on") != "off"), "restart.continue")),
         // thread.env (commands/plan.rs): what the + and a phone's new thread get; a thread asked for with its own env keeps it
-        row("New threads work in", "auto: a thread in a git project gets its own worktree and branch, so threads do not edit the same files; elsewhere the project folder. local: always the project folder.",
+        row("New threads work in", "Auto: a thread in a git project gets its own worktree and branch, so threads do not edit the same files; elsewhere the project folder. Local: always the project folder.",
             chips(&["auto", "local"], if set(st, "thread.env", "auto") == "local" { "local" } else { "auto" }, "thread.env")),
         row("Largest attachment (MB)", &format!("A file sent with a message, or shown from this hub, may be up to {} MB. Files stream from disk, so a large one costs disk space, not memory.", files_mb(st)),
             chips(&["128", "512", "1024", "2048", "4000"], &files_mb(st).to_string(), "files.max.mb")),
@@ -148,7 +152,7 @@ fn webhook(st: &State, session: &Value) -> Vec<Value> {
     let bad = draft(session, "@hook.err") == "bad";
     vec![
         intro("Webhook", "Posts when Notify me for would. A settle or a failure, an ask, a merge, a reminder or a note."),
-        row_f("Address", if bad { "The address must be http or https." } else { "An http or https address. Empty turns the webhook off." }, vec![field("whurl", "https://example.com/hook", url)], vec![btn("Save", "hook-url", "", false)]),
+        { let mut r = row_f("Address", if bad { "The address must be http or https." } else { "An http or https address. Empty turns the webhook off." }, vec![field("whurl", "https://example.com/hook", url)], vec![btn("Save", "hook-url", "", false)]); if bad { r["tone"] = json!("bad") } r },
         row_f("Secret file", "A path to the file that holds the secret. Empty uses the hub's default file. The secret itself is never shown.", vec![field("whsec", "Path to the secret file", sec)], vec![btn("Save", "hook-secret", "", false)]),
     ]
 }
@@ -207,7 +211,9 @@ pub fn notifications(st: &State, session: &Value, info: &Value) -> Vec<Value> {
         let t = if session["drafts"]["@f.qto"].is_string() { draft(session, "@f.qto").to_string() } else { to };
         // `@quiet.err`: the two boxes as the last Save sent them (`act`); refused when the hub could not take them, which needs the saved ends
         let bad = draft(session, "@quiet.err").split_once('\u{1f}').map_or(false, |(a, b)| quiet_save(set(st, crate::push::QUIET, ""), a, b).is_err());
-        v.push(row_f("Quiet from and until", if bad { "Times are HH:MM, 24 hours, and not the same." } else { "HH:MM, 24 hours." }, vec![field_w("qfrom", "From, 22:00", &f, 6), field_w("qto", "Until, 07:00", &t, 6)], vec![btn("Save", "notify-quiet", "save", false)]));
+        let mut r = row_f("Quiet from and until", if bad { "Times are HH:MM, 24 hours, and not the same." } else { "HH:MM, 24 hours." }, vec![field_w("qfrom", "From, 22:00", &f, 6), field_w("qto", "Until, 07:00", &t, 6)], vec![btn("Save", "notify-quiet", "save", false)]);
+        if bad { r["tone"] = json!("bad") } // the note is the error then, drawn as one
+        v.push(r);
     }
     let urgent = set(st, crate::push::QUIET_URGENT, "") == "on";
     v.push(row("Urgent asks come through", "An approval or a question that blocks an agent is pushed in quiet hours, and to a muted phone.", chips(&["on", "off"], onoff(urgent), crate::push::QUIET_URGENT)));
@@ -307,7 +313,7 @@ fn ordering(st: &State) -> Vec<Value> {
 fn updates(st: &State, info: &Value) -> Vec<Value> {
     let version = VERSION.get().map(String::as_str).unwrap_or("");
     vec![update_row(version, info["update.status"].as_str().unwrap_or("")),
-        row("Update channel", "Stable takes releases; beta also takes betas; nightly tracks nightly builds of main.", chips(&["stable", "beta", "nightly"], update_channel(set(st, "update.channel", "stable")), "update.channel"))]
+        row("Update channel", "Stable takes releases; Beta also takes betas; Nightly tracks nightly builds of main.", chips(&["stable", "beta", "nightly"], update_channel(set(st, "update.channel", "stable")), "update.channel"))]
 }
 /// Settings > About and updates, its Network section: what the hub reports of Tailscale, the pairing link, and what the always-on Boat hub costs.
 fn net(info: &Value) -> Vec<Value> {
@@ -614,9 +620,11 @@ fn timezone(st: &State, session: &Value) -> Vec<Value> {
         (false, "phone") => "Automatic: following your phone's time zone", (false, "machine") => "Automatic: following this machine's time zone", (false, _) => "Automatic: UTC until your phone or this machine reports a time zone",
     };
     let typed = draft(session, "@f.tzname");
-    let mut v = vec![row_f("Time zone", &format!("{zone} · {source}"), vec![field("tzname", "A zone name, e.g. Europe/Helsinki", typed)], vec![btn("Set", "tz-set", "", true)])];
-    if auto { v.push(row("Automatic", tip, vec![btn("Automatic", "tz-auto", "", false)])); } else { v.push(row("Automatic", tip, vec![])); }
-    if draft(session, "@tz.err") == "bad" { v.push(row("", "That is not a time zone name (like Europe/Helsinki)", vec![])); }
+    // automatic (nothing set by hand): what that means is the zone's own note, on a line of its own; set by hand, a row offers going back to it
+    let note = if auto { format!("{zone} · {source}") } else { format!("{zone} · {source}\n{tip}") };
+    let mut v = vec![row_f("Time zone", &note, vec![field("tzname", "A zone name, e.g. Europe/Helsinki", typed)], vec![btn("Set", "tz-set", "", true)])];
+    if auto { v.push(row("Automatic", tip, vec![btn("Automatic", "tz-auto", "", false)])); }
+    if draft(session, "@tz.err") == "bad" { v.push(row_tone("", "That is not a time zone name (like Europe/Helsinki)", "bad")); }
     v
 }
 
@@ -639,7 +647,7 @@ fn privacy(st: &State, info: &Value) -> Vec<Value> {
 /// Every button is the generic `setting key=value`, carrying the whole text its press makes.
 fn mouse(st: &State) -> Vec<Value> {
     use crate::mouse::{self as m, Kind, Scheme};
-    let mut v = vec![row("Zoom direction", "Applies to the wheel and a trackpad's pinch in every viewer.", vec![btn("normal", "setting", &format!("{}=off", m::INVERT_KEY), !m::inverted(set(st, m::INVERT_KEY, ""))), btn("inverted", "setting", &format!("{}=on", m::INVERT_KEY), m::inverted(set(st, m::INVERT_KEY, "")))])];
+    let mut v = vec![row("Zoom direction", "Applies to the wheel and a trackpad's pinch in every viewer.", vec![btn("Normal", "setting", &format!("{}=off", m::INVERT_KEY), !m::inverted(set(st, m::INVERT_KEY, ""))), btn("Inverted", "setting", &format!("{}=on", m::INVERT_KEY), m::inverted(set(st, m::INVERT_KEY, "")))])];
     for (kind, title) in [(Kind::Plot, "Board and schematic"), (Kind::Solid, "3D and STEP")] {
         let text = set(st, kind.key(), "");
         let s = Scheme::parse(kind, text);
@@ -1040,10 +1048,15 @@ fn empty_says(mut rows: Vec<Value>) -> Vec<Value> {
     }
     rows
 }
+/// Where Notifications puts the time zone: after the quiet hours' times (their On and Off row when they are off), else at the end.
+fn quiet_end(rows: &[Value]) -> usize {
+    ["Quiet from and until", "Quiet hours"].iter().find_map(|l| rows.iter().position(|r| r["label"] == *l)).map_or(rows.len(), |i| i + 1)
+}
 /// One page's rows (without the way back), the rarely needed (`adv`) last, each part in its own order.
 fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
     let rows = match p { "appearance" => appearance(st),
-        "notifications" => { let mut r = notifications(st, session, info); r.extend(timezone(st, session)); r.extend(webhook(st, session).into_iter().map(adv)); r }
+        // the time zone right after the quiet hours it governs (`notifications` itself is the phones' page too, which has no zone rows)
+        "notifications" => { let mut r = notifications(st, session, info); let at = quiet_end(&r); r.splice(at..at, timezone(st, session)); r.extend(webhook(st, session).into_iter().map(adv)); r }
         "threads" => { let mut r = threads(st); r.push(head("Git")); r.extend(git(st)); r }
         "mouse" => mouse_page(st),
         "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info).into_iter().map(adv)); a.extend(writing(st, info).into_iter().map(adv)); a }
@@ -1994,11 +2007,30 @@ mod tests {
     }
     #[test] fn the_zone_says_where_it_comes_from_and_a_bad_name_is_not_sent() {
         let r = page_rows(&st(&[("tz.machine", "Europe/Helsinki")]), "timezone", json!({}));
-        assert_eq!(by(&r, "Time zone")["note"], "Europe/Helsinki · this machine", "on Notifications now: the old id opens it");
+        assert_eq!(by(&r, "Time zone")["note"], "Europe/Helsinki · this machine\nAutomatic: following this machine's time zone", "on Notifications now: the old id opens it");
+        assert!(r.iter().all(|x| x["label"] != "Automatic"), "automatic: said in the zone's note, no row of its own with nothing to press");
+        let set_by_hand = page_rows(&st(&[("tz.machine", "Europe/Helsinki"), ("person.tz", "Asia/Tokyo")]), "notifications", json!({}));
+        assert_eq!(by(&set_by_hand, "Automatic")["buttons"][0]["action"], "tz-auto", "set by hand: a row goes back to automatic");
+        assert!(!s(by(&set_by_hand, "Time zone"), "note").contains('\n'));
         let bad = act("h", &json!({"rid": 1, "drafts": {"@f.tzname": "Not a zone!"}}), "tz-set", "").unwrap(); assert!(bad.cmds.is_empty() && bad.patch["drafts"]["@tz.err"] == "bad");
         let ok = act("h", &json!({"rid": 1, "drafts": {"@f.tzname": "Europe/Helsinki"}}), "tz-set", "").unwrap();
         assert_eq!(ok.cmds[0]["text"], json!(r#"{"id":1,"m":"zone.set","p":{"zone":"Europe/Helsinki"}}"#));
         assert_eq!(act("h", &json!({"rid": 2}), "tz-auto", "").unwrap().cmds[0]["text"], json!(r#"{"id":2,"m":"zone.set","p":{"zone":"auto"}}"#));
+    }
+    #[test] fn the_time_zone_sits_under_the_quiet_hours_and_a_refused_value_reads_as_an_error() {
+        let labels = |r: &[Value]| r.iter().map(|x| s(x, "label").to_string()).collect::<Vec<_>>();
+        let on = labels(&rows_of(&st(&[]), &json!({}), &json!({}), "notifications"));
+        let q = on.iter().position(|l| l == "Quiet from and until").unwrap(); assert_eq!(on[q + 1], "Time zone", "{on:?}");
+        let off = labels(&rows_of(&st(&[("notify.quiet", "off")]), &json!({}), &json!({}), "notifications"));
+        let q = off.iter().position(|l| l == "Quiet hours").unwrap(); assert_eq!(off[q + 1], "Time zone", "quiet hours off: under their switch, {off:?}");
+        assert!(notifications(&st(&[]), &json!({}), &json!({})).iter().all(|x| x["label"] != "Time zone"), "the phones' page is as it was");
+        // the errors: the quiet times, the zone name, the webhook's address
+        let bad = json!({"drafts": {"@quiet.err": "25:00\u{1f}", "@tz.err": "bad", "@hook.err": "bad"}});
+        let r = rows_of(&st(&[]), &bad, &json!({}), "notifications");
+        assert_eq!(by(&r, "Quiet from and until")["tone"], "bad"); assert_eq!(by(&r, "Address")["tone"], "bad");
+        assert_eq!(r.iter().find(|x| s(x, "note").starts_with("That is not a time zone name")).unwrap()["tone"], "bad");
+        let fine = rows_of(&st(&[]), &json!({}), &json!({}), "notifications");
+        assert!(fine.iter().all(|x| x["tone"].is_null()), "nothing refused: no row says so");
     }
     #[test] fn privacy_reads_the_choice_and_resets_with_the_next_number() {
         let r = page_rows(&st(&[("telemetry.share", "off"), ("telemetry.reset", "3")]), "privacy", json!({"telemetry.id": "abc"}));

@@ -9,6 +9,8 @@ use std::sync::Arc;
 
 fn btn(label: &str, action: &str, value: &str, on: bool) -> Value { json!({"label": label, "action": action, "value": value, "on": on}) }
 fn row(label: &str, note: &str, buttons: Vec<Value>) -> Value { json!({"label": label, "note": note, "buttons": buttons}) }
+/// How long a code or a request still works, in words: whole minutes, "under a minute" at the end (a count of seconds read as a stopwatch).
+pub fn left_words(secs: u64) -> String { if secs < 60 { "under a minute left".into() } else { format!("{} min left", (secs + 30) / 60) } }
 fn field(name: &str, hint: &str, value: &str) -> Value { json!({"name": name, "hint": hint, "secret": false, "value": value}) }
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 
@@ -51,7 +53,7 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
         r.push(x);
     }
     for q in d["requests"].as_array().into_iter().flatten() {
-        r.push(row(&format!("{} wants to pair", s(q, "name")), &format!("{} · check code {} (it must match the one on that machine) · {}s left", s(q, "url"), s(q, "check"), q["left"].as_u64().unwrap_or(0)),
+        r.push(row(&format!("{} wants to pair", s(q, "name")), &format!("{} · check code {} (it must match the one on that machine) · {}", s(q, "url"), s(q, "check"), left_words(q["left"].as_u64().unwrap_or(0))),
             vec![btn("Approve", "machine-approve", s(q, "id"), true), btn("Deny", "machine-deny", s(q, "id"), false)]));
     }
     for o in d["outgoing"].as_array().into_iter().flatten() {
@@ -74,7 +76,7 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
         {
             let addrs: Vec<&str> = c["addresses"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
             let at = if addrs.is_empty() { s(c, "address").to_string() } else { addrs.join(" or ") };
-            row("Machine code", &format!("{} · enter it with {} on the other machine · works once, {}s left. You approve its request here.", s(c, "code"), at, c["left"].as_u64().unwrap_or(0)), vec![btn("Make another", "machine-code", "", false)])
+            row("Machine code", &format!("{} · enter it with {} on the other machine · works once, {}. You approve its request here.", s(c, "code"), at, left_words(c["left"].as_u64().unwrap_or(0))), vec![btn("Make another", "machine-code", "", false)])
         }
     } else { row("Make a code", "A code lets one machine ask to pair with this one. Nothing links until you approve its request here.", vec![btn("Make a code", "machine-code", "", false)]) });
     r
@@ -134,6 +136,12 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_code_says_the_minutes_it_has_left() {
+        let rs = rows(&json!({"code": {"code": "ABCD", "address": "http://h:3787", "left": 600}}), &|_| String::new());
+        assert!(rs.iter().any(|r| r["note"].as_str().unwrap_or("").contains("works once, 10 min left.")), "{rs:?}");
+        assert_eq!((left_words(59), left_words(60), left_words(89), left_words(90)), ("under a minute left".into(), "1 min left".into(), "1 min left".into(), "2 min left".into()));
+    }
     #[test]
     fn the_pairing_code_box_is_short_and_the_address_box_is_not() {
         let rs = rows(&json!({}), &|_| String::new());

@@ -227,10 +227,20 @@
     },
     {
      "wait": 400
+    },
+    {
+     "action": [
+      "settings-page",
+      "notifications"
+     ]
+    },
+    {
+     "wait": 600
     }
    ],
    "text": [
-    "Quiet hours"
+    "Quiet hours",
+    "found"
    ]
   },
   {

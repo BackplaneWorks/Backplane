@@ -1965,7 +1965,7 @@ gpui.import.from.old	Import from 0.14	0.14からインポート	Importar desde 0
 gpui.developer	Developer	開発者	Desarrollador
 gpui.read.completed.threads.of.your	Read, completed threads of your own settle after this quiet period. 0 (the default) never settles them; threads that bots or launches started settle on their own.	自分の既読で完了したスレッドは、この無操作時間の後に完了扱いになります。0（既定）では完了扱いにならず、ボットや起動したスレッドは自動で完了扱いになります。	Tus propios hilos leídos y completados se cierran tras este periodo de inactividad. 0 (por defecto) nunca los cierra; los hilos iniciados por bots o lanzamientos se cierran solos.
 gpui.new.threads.work.in	New threads work in	新しいスレッドの作業場所	Los nuevos hilos trabajan en
-gpui.auto.a.thread.in.a	auto: a thread in a git project gets its own worktree and branch, so threads do not edit the same files; elsewhere the project folder. local: always the project folder.	auto: Gitプロジェクトのスレッドは専用のworktreeとブランチを持つため、スレッド同士が同じファイルを編集しません。それ以外はプロジェクトフォルダーを使います。local: 常にプロジェクトフォルダーを使います。	auto: un hilo en un proyecto git recibe su propio worktree y rama, así los hilos no editan los mismos archivos; en otros casos la carpeta del proyecto. local: siempre la carpeta del proyecto.
+gpui.auto.a.thread.in.a	Auto: a thread in a git project gets its own worktree and branch, so threads do not edit the same files; elsewhere the project folder. Local: always the project folder.	自動: Gitプロジェクトのスレッドは専用のworktreeとブランチを持つため、スレッド同士が同じファイルを編集しません。それ以外はプロジェクトフォルダーを使います。ローカル: 常にプロジェクトフォルダーを使います。	Auto: un hilo en un proyecto git recibe su propio worktree y rama, así los hilos no editan los mismos archivos; en otros casos la carpeta del proyecto. Local: siempre la carpeta del proyecto.
 gpui.each.thread.keeps.its.own	Each thread keeps its own; change it from the composer.	スレッドごとに保持されます。入力欄から変更できます。	Cada hilo guarda el suyo; cámbialo desde el compositor.
 gpui.enabled	Enabled	有効	Activado
 gpui.disabled	Disabled	無効	Desactivado
@@ -5094,6 +5094,10 @@ settings.cad.mech.solidcraft	SolidCraft	SolidCraft	SolidCraft
 settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Visor de Backplane
 common.cut	Cut	切り取り	Cortar
 menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
+settings.channel.beta	Beta	ベータ	Beta
+settings.channel.note2	Stable takes releases; Beta also takes betas; Nightly tracks nightly builds of main.	安定版はリリースのみ、ベータはベータ版も、ナイトリーは main のナイトリービルドを受け取ります。	Estable toma versiones publicadas; Beta también toma betas; Nocturno sigue las compilaciones nocturnas de main.
+settings.threadenv.local	Local	ローカル	Local
+settings.zoom.inverted	Inverted	反転	Invertido
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
