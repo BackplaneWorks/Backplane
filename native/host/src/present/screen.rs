@@ -494,7 +494,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     } else if let Some(o)=super::botforms::act(st,hub,&session,action,value) {
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else if let Some(o)=super::settings::act(hub,&session,action,value) {
+        let was_open=super::settings::is_open(&session);
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
+        // Settings closed: the viewer its opening shut comes back (viewer::reopen)
+        if was_open && !super::settings::is_open(&session) { if let Some(r)=super::viewer::reopen(st,hub,&session) { let th=text(&session,"sel").to_string(); cmds=applied_view(st,hub,&th,&mut session,&cmds,r); } }
     } else {
     // the viewers' actions read the open thread's state: a linked machine's mirror for its thread (its project folder is over there)
     let sel_id=text(&session,"sel").to_string();
