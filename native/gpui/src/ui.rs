@@ -865,7 +865,9 @@ impl Backplane {
         self.screens.parts.side_ctl = ctl;
         /* i18n-ok: a key context */ div().id("sidebar").size_full().flex().flex_col().track_focus(&self.screens.side_focus).key_context("Sidebar")
             .child(div().id("crew").flex_none().flex().flex_col().border_b_1().border_color(c("line")).children(crew))
-            .child(div().id("sidebar-list").flex_1().min_h_0().overflow_y_scroll().pb_3().children(rows)).into_any_element()
+            .child(div().flex_1().min_h_0().relative().flex().flex_col()
+                .child(div().id("sidebar-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&self.screens.side_scroll).pb_3().children(rows))
+                .child(crate::screens::scrollbar::bar("sidebar", crate::screens::scrollbar::Src::Handle(self.screens.side_scroll.clone()), light))).into_any_element()
     }
     /// The viewer's page, a part of the window (part.rs): a board or schematic is drawn again only when the page itself changed, not for
     /// a hover in the sidebar or the caret's blink.
@@ -912,7 +914,9 @@ impl Backplane {
             .children(if has_thread && self.selected.rsplit('|').next() == Some(self.screens.find.thread.as_str()) { crate::screens::find::bar(cx, light, &self.screens.find) } else { None })
             .when(!self.screens.reg.borrow().hover.is_empty(), |d| { let t = self.screens.reg.borrow().hover.clone(); d.child(link_address(light, &t, self.timeline.viewport_bounds().size.width)) })
             .when(no_rows, |d| d.child(div().flex_1().flex().justify_center().items_end().child(div().w_full().max_w(px(930.)).px_4().py_6().text_color(c("dim")).child(if has_thread && thread["loading"] == true { trs("Loading…") } else if has_thread { trs("Start a conversation.") } else { trs("Pick a thread, or start one with + next to a project.") }))))
-            .when(!no_rows, |d| d.child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0()))
+            .when(!no_rows, |d| d.child(div().flex_1().min_h_0().relative().flex().flex_col()
+                .child(list(self.timeline.clone(), cx.processor(|this, ix, _, cx| this.timeline_row(ix, cx))).flex_1().min_h_0())
+                .child(crate::screens::scrollbar::bar("timeline", crate::screens::scrollbar::Src::List(self.timeline.clone()), light))))
             .children(thread["live"].as_array().into_iter().flatten().map(|live| div().w_full().flex().justify_center().child(div().w_full().max_w(px(930.)).px_4().py_2().child(trs(&string(live, "text"))))))
             // after the list has drawn its rows: put them in reading order, and see whether history is wanted
             .child(canvas({ let (me, reg) = (cx.entity().downgrade(), self.screens.reg.clone()); move |_, _, cx| {
