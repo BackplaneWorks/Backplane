@@ -1333,6 +1333,9 @@ pub fn number_badge(light: bool, n: usize) -> Div {
 pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images) -> Option<AnyElement> {
     images_n(cx, light, list, key, target, imgs, false)
 }
+/// The box a message's picture is drawn in: one picture up to 480 x 360; several (a sent message's, numbered) a wrapping row of thumbnails at
+/// most 120 px high, so three pictures are one row and not a window-tall stack. Aspect kept, never larger than the picture.
+pub fn thumb_size(w: u32, h: u32, count: usize) -> (f32, f32) { if count >= 2 { super::images::fit(w, h, 480., 120.) } else { super::images::fit(w, h, 480., 360.) } }
 /// `numbered`: each picture shows its place (a message's attached pictures, when there are several).
 pub fn images_n(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str, target: Option<&super::attach::Target>, imgs: &super::images::Images, numbered: bool) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
@@ -1343,7 +1346,7 @@ pub fn images_n(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &st
         let name = it["path"].as_str().unwrap_or("").rsplit('/').next().unwrap_or("").to_string();
         let el = match imgs.get(target, url) {
             Slot::Ready(img) => { let shown = img.clone(); let n = name.clone();
-                let (bw, bh) = match super::images::dims(&img.bytes) { Some((w, h)) => super::images::fit(w, h, 480., 360.), None => (480., 120.) };
+                let (bw, bh) = match super::images::dims(&img.bytes) { Some((w, h)) => thumb_size(w, h, if numbered { items.len() } else { 1 }), None => (480., 120.) };
                 // a box of the picture's own aspect: layout and paint agree, so the picture never spills over the rows below. In a column
                 // narrower than the picture (a viewer open beside the thread) the box narrows with it and its height follows, so the picture
                 // is drawn whole instead of being cut at the column's edge.
@@ -1867,6 +1870,14 @@ mod tests {
         frame(&mut r, &[("e3", 0, "third")]);
         assert!(r.sel.collapsed()); assert_eq!(select::extract(&r.texts(), &r.sel), ""); frame(&mut r, &[("e2", 0, "second"), ("e3", 0, "third")]);
         assert!(r.sel.collapsed(), "it does not come back");
+    }
+    #[test] fn several_pictures_in_a_message_are_a_row_of_thumbs() {
+        let near = |a: (f32, f32), b: (f32, f32)| (a.0 - b.0).abs() < 0.01 && (a.1 - b.1).abs() < 0.01;
+        assert!(near(thumb_size(1600, 1000, 1), (480., 300.)), "one picture: as before");
+        assert!(near(thumb_size(1600, 1000, 3), (192., 120.)), "several: at most 120 high, aspect kept");
+        assert!(near(thumb_size(100, 80, 3), (100., 80.)), "never larger than the picture");
+        assert!(near(thumb_size(4000, 500, 2), (480., 60.)), "a wide one stays within the column's 480");
+        let (w, _) = thumb_size(1600, 1000, 3); assert!(3. * w + 2. * 8. <= 600., "three landscape pictures side by side fit a sent message's bubble");
     }
     #[test] fn blocks_in_one_message_are_numbered_from_zero() {
         let mut r = Registry::default(); r.begin();

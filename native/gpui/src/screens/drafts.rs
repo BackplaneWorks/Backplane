@@ -29,6 +29,11 @@ pub fn normalize(m: HashMap<String, String>) -> HashMap<String, String> {
 }
 
 /// Switching threads: the draft in the box is saved under the thread being left (by its own id) and the target's draft is returned.
+/// What the box holds for the thread being left: the box's text, or over a project's page (`page_open`) that thread's own saved draft (the
+/// box held the page's text, which is no draft of it: it came back as that thread's draft after a page's Send).
+pub fn leaving(map: &HashMap<String, String>, old: &str, box_now: &str, page_open: bool) -> String {
+    if page_open { map.get(raw_id(old)).cloned().unwrap_or_default() } else { box_now.to_string() }
+}
 pub fn switch(map: &mut HashMap<String, String>, old: &str, new: &str, current: &str) -> String {
     let o = raw_id(old);
     if !o.is_empty() { if current.trim().is_empty() { map.remove(o); } else { map.insert(o.to_string(), current.to_string()); } }
@@ -96,6 +101,14 @@ impl Writer {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_project_pages_text_is_no_draft_of_the_thread_under_it() {
+        let mut m = HashMap::new(); m.insert("t1".to_string(), "half a thought".to_string());
+        assert_eq!(leaving(&m, "h|t1", "page send check one", true), "half a thought", "the page's text is not the thread's");
+        assert_eq!(leaving(&m, "h|t1", "typed here", false), "typed here", "the thread's own box");
+        assert_eq!(leaving(&m, "t2", "page text", true), "", "a thread with no draft keeps none");
+        let cur = leaving(&m, "t1", "page send check one", true); let shown = switch(&mut m, "t1", "t9", &cur);
+        assert_eq!((m.get("t1").map(String::as_str), shown.as_str()), (Some("half a thought"), ""));
+    }
     use super::*;
     fn dir(n: &str) -> crate::tmp::TempDir { crate::tmp::dir(&format!("gpui-drafts-{n}")) }
     #[test] fn drafts_round_trip_and_blank_ones_are_dropped() {
