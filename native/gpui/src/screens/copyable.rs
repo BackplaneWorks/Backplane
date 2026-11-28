@@ -106,17 +106,23 @@ pub fn run_button(light: bool, id: impl Into<SharedString>, cmd: impl Into<Share
         .key_context("CopyRun").on_action(move |_: &RunIt, window, cx| { let _ = a2.update(cx, |this, cx| this.run_in_terminal(&c2, window, cx)); })
 }
 
+/// What a `chip`'s icon and its gap add to its label's width (the Settings rows lay their buttons out with it).
+pub const CHIP_ICON: f32 = 16.;
 /// A labelled copy press of the hub's (Settings' Copy link, Copy code, setup's Copy beside a command: action `copy`): the same copy, check
-/// and keyboard as `button`, on the chip `d` the caller styled. The label says Copied for a moment.
+/// and keyboard as `button`, on the chip `d` the caller styled. The label says Copied for a moment, in the room of the wider of the two words,
+/// so the chip keeps its width under the pointer.
 pub fn chip(d: Stateful<Div>, light: bool, label: String, id: impl Into<SharedString>, text: impl Into<SharedString>, cx: &mut App) -> Stateful<Div> {
     let (id, text): (SharedString, SharedString) = (id.into(), text.into());
     let c = |n: &str| theme::color(light, n);
     let done = just_copied(&id);
     let focus = focus_of(&id, cx);
     let (i1, t1, i2, t2) = (id.clone(), text.clone(), id, text);
+    let copied = crate::i18n::trs("Copied");
+    let wide = if crate::screens::settings::chip_w(&copied) > crate::screens::settings::chip_w(&label) { copied.clone() } else { label.clone() };
+    let shown = if done { copied } else { label };
     d.flex().items_center().gap_1().track_focus(&focus).focus(|s| s.border_1().border_color(c("accent")))
         .child(art::icon(if done { "check" } else { "copy" }, 12., c(if done { "ok" } else { "dim" })))
-        .child(if done { crate::i18n::trs("Copied") } else { label })
+        .child(div().relative().whitespace_nowrap().child(div().invisible().child(wide)).child(div().absolute().top_0().left_0().whitespace_nowrap().child(shown)))
         .on_mouse_down(MouseButton::Left, move |_, window, _| window.focus(&focus))
         .on_click(move |_, window, cx| { cx.stop_propagation(); copy(&i1, &t1, window, cx) })
         .key_context("Copyable").on_action(move |_: &CopyIt, window, cx| copy(&i2, &t2, window, cx))

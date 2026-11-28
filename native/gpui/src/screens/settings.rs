@@ -34,7 +34,7 @@ pub fn parse(settings: &Value) -> Vec<Row> {
         fields: r["fields"].as_array().into_iter().flatten().map(|f| { let vault = f["vault"].as_bool().unwrap_or(false); Field { name: string(f, "name"), hint: string(f, "hint"), secret: f["secret"].as_bool().unwrap_or(false), value: if vault { String::new() } else { string(f, "value") }, vault } }).collect(),
         qr: r["qr"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_string)).collect(),
         qrnote: string(r, "qrnote"), local: r["local"].as_bool().unwrap_or(false), tone: string(r, "tone"),
-        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true || r["progress"].is_number() || r["sublink"].is_object() || r["adv"] == true { r.clone() } else { Value::Null },
+        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true || r["progress"].is_number() || r["sublink"].is_object() || r["adv"] == true || r["changed"] == true || r["intro"] == true { r.clone() } else { Value::Null },
     }).collect()
 }
 
@@ -182,6 +182,52 @@ pub fn row_fit(avail: f32, chips: &[f32], field: f32, qr: f32) -> RowFit {
     if n > 0 { lines.push(n); }
     RowFit { stack, lines }
 }
+/// A row's button as wide as it is drawn: a copy press (`copyable::chip`) carries its icon and keeps the room of the wider of its label and
+/// "Copied", so it neither grows under the pointer nor ends past the edge the other buttons share.
+pub fn btn_w(b: &Btn) -> f32 {
+    if b.action != "copy" { return chip_w(&trs(&b.label)) }
+    super::copyable::CHIP_ICON + chip_w(&trs(&b.label)).max(chip_w(&trs("Copied")))
+}
+/// The least a text box keeps beside its row's buttons; narrower, the buttons go under it.
+pub const FIELD_MIN: f32 = 140.;
+/// The width of a row's last text box when its buttons share its line: the room the box would have alone (`field_w`) less the buttons (their
+/// widths as `btn_w` estimates them, on the generous side) and a 4 px gap before each; None when that leaves under `FIELD_MIN` (the buttons
+/// then go under the box). The line is drawn `field_w` wide, the box taking what the buttons leave, so it is never narrower than this.
+pub fn field_beside(field_w: f32, buttons: &[f32]) -> Option<f32> {
+    if buttons.is_empty() { return None }
+    let w = field_w - buttons.iter().map(|b| b + 4.).sum::<f32>();
+    (w >= FIELD_MIN).then_some(w)
+}
+/// What this device's settings differ in from a fresh install (`fresh`: `device_rows(&Local::default())`), as the hub marks its own rows
+/// (host present/settings.rs `mark_changed`): a row whose lit choice is another than the fresh one's (matched by label, and which of the rows with
+/// that label it is) gets `changed`, and `reset`, the fresh lit press, when its buttons press the same in both. A shortcut is changed when its key
+/// is not its default one (no Reset of its own: "Shortcuts to defaults" is there). The text size has its own Reset, and lights nothing to compare.
+pub fn mark_device(rows: &mut [Row], fresh: &[Row]) {
+    let nth = |all: &[Row], i: usize| all[..i].iter().filter(|r| r.label == all[i].label).count();
+    let lit = |r: &Row| -> Vec<Btn> { r.buttons.iter().filter(|b| b.on).cloned().collect() };
+    let presses = |r: &Row| -> Vec<(String, String)> { r.buttons.iter().map(|b| (b.action.clone(), b.value.clone())).collect() };
+    let all: &[Row] = rows;
+    let marks: Vec<Option<Option<Btn>>> = (0..all.len()).map(|i| {
+        let r = &all[i];
+        let d = fresh.iter().filter(|f| f.label == r.label).nth(nth(all, i))?;
+        if r.buttons.len() == 1 && r.buttons[0].action == "local:shortcut" { return (d.buttons.first().map(|b| &b.label) != Some(&r.buttons[0].label)).then_some(None) }
+        let (now, was) = (lit(r), lit(d));
+        let names = |v: &[Btn]| v.iter().map(|b| b.label.clone()).collect::<Vec<_>>();
+        if now.is_empty() || was.is_empty() || names(&now) == names(&was) { return None }
+        Some((was.len() == 1 && presses(r) == presses(d)).then(|| was[0].clone()))
+    }).collect();
+    for (r, m) in rows.iter_mut().zip(marks) {
+        let Some(m) = m else { continue };
+        r.raw["changed"] = Value::Bool(true);
+        if let Some(b) = m { r.raw["reset"] = serde_json::json!({"action": b.action, "value": b.value}); }
+    }
+}
+/// A group's name in the nav: the hub's English name, drawn through its own message (`gpui.settings.group.<name>`) where there is one, so a
+/// group is not read as the verb or another screen's word that says the same in English ("Connect").
+pub fn group_name(h: &str) -> String {
+    let key = format!("gpui.settings.group.{}", h.to_lowercase());
+    if crate::i18n::catalog().has_lang(&key, crate::i18n::Lang::En) { crate::i18n::t(&key) } else { trs(h) }
+}
 /// A page list entry's icon keeps its size, and its title ends in "…" when the list is narrow (it never runs under the icon).
 fn nav_icon_el(icon: AnyElement) -> Div { div().flex_shrink_0().child(icon) }
 fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(t)) }
@@ -290,8 +336,8 @@ pub fn device_section(page: &str, rows: &[Row]) -> Vec<Row> {
 }
 /// Whether a row is marked rarely needed (the hub's `adv`, or this device's fixed keys): drawn under the page's Advanced fold.
 pub fn is_adv(r: &Row) -> bool { r.raw["adv"] == true }
-/// A section heading (a label and nothing else), not a setting: the Advanced fold counts the settings only.
-pub fn is_heading(r: &Row) -> bool { r.kind.is_empty() && r.note.is_empty() && r.buttons.is_empty() && r.fields.is_empty() && r.qr.is_empty() && r.raw["slider"].is_null() }
+/// A section heading (a label and nothing else, or a paragraph that opens a group: the hub's `intro`), not a setting: the Advanced fold counts the settings only.
+pub fn is_heading(r: &Row) -> bool { r.raw["intro"] == true || r.kind.is_empty() && r.note.is_empty() && r.buttons.is_empty() && r.fields.is_empty() && r.qr.is_empty() && r.raw["slider"].is_null() }
 /// Whether a page's Advanced fold is drawn open: it was opened, or a search is typed that one of its folded rows matches.
 pub fn adv_open(rows: &[Row], q: &str, opened: bool) -> bool {
     opened || !hits(&rows.iter().filter(|r| is_adv(r) && !r.label.is_empty()).map(|r| (r.label.clone(), r.note.clone())).collect::<Vec<_>>(), q).is_empty()
@@ -301,6 +347,8 @@ pub struct FieldSlot { pub input: Entity<Composer>, pub vault: bool, pub hub: St
 
 impl FieldSlot { fn remember(&mut self, t: &str) { self.echo.remember(t); } }
 
+/// The settings fields that hold a path or a short value: one line tall, beside their row's button (the rest, words to write, wrap).
+pub const ONE_LINE: &[&str] = &["kpath", "fpath", "scpath", "tzname", "whurl", "whsec", "bstart", "qfrom", "qto", "maddr", "mcode", "kname"];
 /// One composer per field name. A form field's typing goes out as `bfield`, coalesced (the first change at once, the rest the newest after
 /// 30 ms); the hub's value is taken only when it is a real change. A vault field holds its text here and sends nothing until Save.
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
@@ -319,8 +367,9 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
         }
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         let (hint, secret, v) = (f.hint.clone(), f.secret, f.value.clone());
-        // a row's rename box is one row tall: a long title wrapped to three, drawn over the rows above and below it
-        let one_row = f.name == "title";
+        // a row's rename box is one row tall: a long title wrapped to three, drawn over the rows above and below it; so is a box for a path or
+        // a short value beside its row's button (`ONE_LINE`)
+        let one_row = f.name == "title" || ONE_LINE.contains(&f.name.as_str());
         input.update(cx, |i, cx| { i.set_placeholder(&trs(&hint)); i.masked = secret; if one_row { i.max_lines = 1.; } i.set(v, cx); });
         let field = f.clone();
         if !f.vault {
@@ -457,7 +506,12 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
         /* i18n-ok: a button the row draws through trs */ "sname" | "sval" => if let Some(packed) = secret_enter(&this.data) { save_vault(this, &Btn { label: "Save".into(), action: "secret-save".into(), value: packed, on: true }, cx); },
         "todonew" => send_todo(this, cx),
         n if n.starts_with("todo.") => { flush_fields(this); let _ = this.tx.try_send(Command::Action("todo-text".into(), n[5..].to_string())); cx.notify(); }
-        n => if let Some(a) = n.strip_prefix("sp.") { super::bots::send_space(this, a, cx) } }
+        n => if let Some(a) = n.strip_prefix("sp.") { super::bots::send_space(this, a, cx) } else if let Some(b) = enter_press(&parse(&this.data["settings"]), n) { on_press(this, &b, cx) } }
+}
+/// What Enter in a Settings box presses: its row's button when the row has just one (KiCad's path and Set, a machine's address and Connect).
+pub fn enter_press(rows: &[Row], field: &str) -> Option<Btn> {
+    let r = rows.iter().find(|r| r.fields.iter().any(|f| f.name == field))?;
+    if r.buttons.len() == 1 { r.buttons.first().cloned() } else { None }
 }
 
 /// A vault Save: the field is the button's (`@apikey` is `kval`, else `sval`); the typed value leaves in one request straight to the hub, and
@@ -535,7 +589,9 @@ pub fn structure(settings: &Value) -> String {
 /// The most chips on one line of a row's controls.
 const CHIPS_PER_LINE: usize = 6;
 /// A hub row as a dialog row: label and muted note on the left, the controls on the right, a hairline under it. A row that is only a label is a
-/// section heading; a label and a note with nothing to press or type is a paragraph.
+/// section heading, and so is a paragraph that opens a group (the hub's `intro`), its words under it; a label and a note with nothing to press or
+/// type is a paragraph. The last text box and the row's buttons share a line (`field_beside`). A row the hub (or `mark_device`) says is
+/// `changed` has a mark after its label, and Reset when it says how (`reset`).
 /// `avail`: the width the row is laid out in (`Fit::rows`); `row_fit` decides from it whether the controls go beside the words or under them.
 pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize, avail: f32) -> AnyElement {
     // a row drawn inside the card above it (a server's details): the row as usual, framed as the card's continuation
@@ -547,11 +603,19 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     if !controls && r.note.is_empty() {
         return div().pt_4().pb_1().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)).into_any_element();
     }
+    // a paragraph that opens a group: the heading, its words under it, no hairline (it is not a setting)
+    if r.raw["intro"] == true && !controls {
+        return div().pt_4().pb_1().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)))
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs(&r.note))).into_any_element();
+    }
     // a text field takes the room the controls have beside the words (a folder path or an address is longer than 260 px, and wrapped in the field)
     let field_w = (avail - LABEL_MIN - GAP).clamp(260., CONTROLS_MAX).min(avail);
     let slider = slider_of(&r.raw);
+    let btn_ws: Vec<f32> = r.buttons.iter().map(btn_w).collect();
+    // the last box and the buttons on one line, the box less the buttons' width (KiCad's path and Set); too narrow, the buttons go under it
+    let beside = if slider.is_none() && r.fields.last().map_or(false, |f| fields.contains_key(&f.name)) { field_beside(field_w, &btn_ws) } else { None };
     // a slider and its buttons are one line: the slider then the chips
-    let widths: Vec<f32> = if slider.is_some() { vec![] } else { r.buttons.iter().map(|b| chip_w(&trs(&b.label))).collect() };
+    let widths: Vec<f32> = if slider.is_some() || beside.is_some() { vec![] } else { btn_ws };
     let slider_w = slider.as_ref().map_or(0., |_| SLIDER_W + r.buttons.iter().map(|b| 8. + chip_w(&trs(&b.label))).sum::<f32>());
     let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { slider_w }, if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) });
     // the words keep their least width beside the controls (never squeezed to a letter a line), or the whole row's under a stack
@@ -561,7 +625,20 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let right_w = { let mut at = 0; let mut w = 0f32; for &n in &lines { w = w.max(widths[at..at + n].iter().sum::<f32>() + 4. * (n.max(1) - 1) as f32); at += n; }
         w.max(if has_field { field_w } else { slider_w }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
-    if !r.label.is_empty() { left = left.child(div().text_size(crate::scale::tpx(13.)).child(trs(&r.label))); }
+    if !r.label.is_empty() {
+        let label = div().text_size(crate::scale::tpx(13.)).child(trs(&r.label));
+        // changed from what a fresh install has: a mark after the label on its line, and Reset when the row says what puts it back (the label stays where it is)
+        left = if r.raw["changed"] != true { left.child(label) } else {
+            let mut line = div().flex().items_center().gap_2().text_size(crate::scale::tpx(13.)).child(label.min_w_0()).child(div().flex_none().size(px(6.)).bg(c("accent")));
+            if let Some(rs) = r.raw["reset"].as_object() {
+                /* i18n-ok: drawn through trs below */ let b = Btn { label: "Reset".into(), action: rs.get("action").and_then(Value::as_str).unwrap_or("").into(), value: rs.get("value").and_then(Value::as_str).unwrap_or("").into(), on: false };
+                let d = div().id(SharedString::from(format!("set-reset-{i}"))).flex_none().text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.underline().text_color(c("text")));
+                let d = if crate::art::rects_on() { let n = format!("btn:reset:{}", b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
+                line = line.child(d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b, cx))));
+            }
+            left.child(line)
+        };
+    }
     if !r.note.is_empty() {
         let note = div().text_size(crate::scale::tpx(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note));
         // a value to copy (the hub's `copy`: a path, an id, a link): its copy button shows while the pointer is on the row
@@ -582,8 +659,16 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         left = left.child(div().flex().child(d.child(label).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx)))));
     }
     let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(CONTROLS_MAX)) };
-    for f in &r.fields {
-        if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
+    let last = r.fields.len().saturating_sub(1);
+    for (k, f) in r.fields.iter().enumerate() {
+        let Some(slot) = fields.get(&f.name) else { continue };
+        // the line is as wide as a box alone, so the box starts where the boxes above it (and on the rows around) start; the buttons take
+        // what they are drawn at and the box the rest (`beside` is the least it gets, from the buttons' estimated widths)
+        match beside.filter(|_| k == last) {
+            Some(w) => right = right.child(div().w(px(field_w)).max_w_full().flex().items_center().gap_1().child(div().flex_1().min_w(px(w.min(FIELD_MIN))).px_2().py_1().bg(c("raise")).child(slot.input.clone()))
+                .children(r.buttons.iter().enumerate().map(|(j, b)| chip_el(cx, light, i, j, b)).collect::<Vec<_>>())),
+            None => right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())),
+        }
     }
     // the note under the code (code, address, until when) wraps in the room planned for the controls: one line of it widened the column past the dialog
     if !r.qr.is_empty() && crate::streamer::is_on() { right = right.child(div().w(px(qr_w(r.qr.len()))).h(px(qr_w(r.qr.len()))).flex().items_center().justify_center().p_3().border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("The code is hidden in streamer mode."))); }
@@ -597,24 +682,27 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         })));
     } else if !r.buttons.is_empty() {
         // (not a wrapping flex row: it does not grow its parent's height in gpui, and the next row would be drawn over it)
-        // chips in lines packed to the room they have (row_fit), at most CHIPS_PER_LINE each
+        // chips in lines packed to the room they have (row_fit), at most CHIPS_PER_LINE each (none when they are on the box's line)
         let mut start = 0;
         for n in lines {
             let (first, chunk) = (start, &r.buttons[start..start + n]); start += n;
-            right = right.child(div().flex().when(!stack, |d| d.justify_end()).gap_1().children(chunk.iter().enumerate().map(|(k, b)| {
-                let j = first + k; let b2 = b.clone();
-                let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer();
-                let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
-                // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named by what it does: `btn:<action>:<value>`
-                let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
-                // a copy press is the copy button (screens/copyable.rs): its check, its keyboard, the exact text
-                if b.action == "copy" { return super::copyable::chip(d, light, trs(&b.label), format!("set-copy-{i}-{j}"), b.value.clone(), cx).into_any_element() }
-                d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx))).into_any_element()
-            }).collect::<Vec<_>>()));
+            right = right.child(div().flex().when(!stack, |d| d.justify_end()).gap_1().children(chunk.iter().enumerate().map(|(k, b)| chip_el(cx, light, i, first + k, b)).collect::<Vec<_>>()));
         }
     }
     let line = if stack { div().flex().flex_col().gap_2() } else { div().flex().items_center().justify_between().gap(px(GAP)) };
     line.py_3().border_b_1().border_color(c("line")).child(left).child(right).into_any_element()
+}
+/// A row's button `j` of row `i`: lit or not, its press the row's action (a copy press is the copy button).
+fn chip_el(cx: &mut Context<Backplane>, light: bool, i: usize, j: usize, b: &Btn) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let b2 = b.clone();
+    let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer();
+    let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
+    // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named by what it does: `btn:<action>:<value>`
+    let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
+    // a copy press is the copy button (screens/copyable.rs): its check, its keyboard, the exact text
+    if b.action == "copy" { return super::copyable::chip(d, light, trs(&b.label), format!("set-copy-{i}-{j}"), b.value.clone(), cx).into_any_element() }
+    d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx))).into_any_element()
 }
 
 /// A row's button pressed: the client's own actions here, a vault Save straight to the hub, anything else the view action it names.
@@ -655,7 +743,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
             rows.insert(at, r);
         }
     }
-    let dev_rows = device_rows(local);
+    let mut dev_rows = device_rows(local);
+    mark_device(&mut dev_rows, &device_rows(&crate::local::Local::default()));
     let dev = if on_acct || on_hubs { vec![] } else { device_section(&page, &dev_rows) };
     let more = if on_page { rows.len().saturating_sub(1 + MAX_ROWS) } else { 0 };
     // a hub page that holds this device's rows too: "This device" over them (drawn while the hub's rows are on their way too, so nothing moves
@@ -685,7 +774,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     if lines.is_empty() { nav = nav.child(div().px_3().py_2().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Nothing matches"))); }
     for (n, line) in lines.iter().enumerate() {
         match line {
-            NavLine::Head(h) => nav = nav.child(div().px_3().pt(px(if n == 0 { 2. } else { 8. })).pb(px(2.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(h).to_uppercase())),
+            NavLine::Head(h) => nav = nav.child(div().px_3().pt(px(if n == 0 { 2. } else { 8. })).pb(px(2.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(group_name(h).to_uppercase())),
             NavLine::Item { id, title, hits } => {
                 let on = match id.as_str() { "@keys" => on_keys, "@hubs" => on_hubs, "@accounts" => on_acct, p => !on_keys && !on_acct && !on_hubs && p == page };
                 let el_id = match id.as_str() { "@keys" => "set-nav-keys".to_string(), "@hubs" => "set-nav-hubs".to_string(), "@accounts" => "set-nav-accounts".to_string(), p => format!("set-nav-{p}") };
@@ -1047,5 +1136,48 @@ mod tests {
         let set: Value = serde_json::from_str(include_str!("../../../../assets/icons.json")).unwrap();
         for p in ["appearance", "threads", "notifications", "timezone", "agents", "writing", "keys", "mcp", "voice", "rules", "usage", "git", "cad", "browser", "mouse", "ordering", "devices", "machines", "network", "setup", "privacy", "about", "developer", "@device", "@keys", "@hubs", "@accounts", "zzz"] { assert!(set.get(nav_icon(p)).is_some(), "{p}: {}", nav_icon(p)); }
         assert!(nav_matches("Appearance", "") && nav_matches("Appearance", " ear") && nav_matches("Appearance", "APP") && !nav_matches("Appearance", "zzz"));
+    }
+    #[test] fn a_box_and_its_buttons_share_a_line_while_the_box_keeps_140_px() {
+        let set = chip_w("Set");
+        let near = |a: Option<f32>, b: f32| a.map_or(false, |a| (a - b).abs() < 0.01);
+        assert!(near(field_beside(430., &[set]), 430. - set - 4.), "the box is the field's room less the button and its gap");
+        let two = [chip_w("Save"), chip_w("Use Jev")]; assert!(near(field_beside(430., &two), 430. - two[0] - two[1] - 8.));
+        assert_eq!(field_beside(260., &[200.]), None, "under 140 px the button goes under the box");
+        assert_eq!(field_beside(144. + 4. + 50., &[50.]), Some(144.)); assert_eq!(field_beside(139. + 4. + 50., &[50.]), None);
+        assert_eq!(field_beside(430., &[]), None, "a box alone keeps its width");
+        // the line the box and its buttons make is no wider than the room row_fit planned for the box
+        for avail in [400., 520., 700., 900.] { let w = (avail - LABEL_MIN - GAP).clamp(260., CONTROLS_MAX).min(avail); if let Some(b) = field_beside(w, &[set]) { assert!(b + 4. + set <= w + 0.01); } }
+        // a copy press keeps the room of the wider word, and its icon
+        let copy = Btn { label: "Copy".into(), action: "copy".into(), value: "x".into(), on: false };
+        assert!(btn_w(&copy) >= chip_w(&trs("Copied")) + super::super::copyable::CHIP_ICON && btn_w(&copy) > chip_w("Copy"));
+    }
+    #[test] fn a_row_keeps_what_the_hub_says_was_changed_and_how_to_reset_it_and_its_intro() {
+        let r = parse(&j(r#"{"rows":[{"label":"Mech tab","note":"","changed":true,"reset":{"action":"setting","value":"viewer.mech=solidcraft"},"buttons":[{"label":"SolidCraft","action":"setting","value":"viewer.mech=solidcraft","on":false}]},
+            {"label":"Notify me for","note":"Phone and desktop alerts.","intro":true,"buttons":[]},{"label":"Old","note":"","buttons":[]}]}"#));
+        assert_eq!((r[0].raw["changed"].as_bool(), r[0].raw["reset"]["value"].as_str()), (Some(true), Some("viewer.mech=solidcraft")));
+        assert!(r[1].raw["intro"] == true && is_heading(&r[1]), "an intro is a heading, not a setting the fold counts");
+        assert!(r[2].raw.is_null(), "an older hub's row: nothing more kept");
+        // Enter in a box presses its row's one button
+        let k = parse(&j(r#"{"rows":[{"label":"KiCad","note":"","fields":[{"name":"kpath","hint":"","value":""}],"buttons":[{"label":"Set","action":"kicad-path","value":"","on":true}]}]}"#));
+        assert_eq!(enter_press(&k, "kpath").map(|b| b.action), Some("kicad-path".into())); assert!(enter_press(&k, "fpath").is_none());
+    }
+    #[test] fn this_devices_changed_settings_are_marked_and_reset_to_a_fresh_install() {
+        let fresh = device_rows(&crate::local::Local::default());
+        let mut same = fresh.clone(); mark_device(&mut same, &fresh); assert!(same.iter().all(|r| r.raw["changed"].is_null()), "a fresh install has changed nothing");
+        let mut l = crate::local::Local::default(); l.font = crate::local::FONTS[1].0.into(); l.text_pct = 150;
+        let first = crate::keys::TABLE.iter().find(|x| x.kind != crate::keys::Kind::Fixed).unwrap(); l.shortcuts.insert(first.id.to_string(), "ctrl-alt-f9".into());
+        let mut rows = device_rows(&l); mark_device(&mut rows, &fresh);
+        let marked: Vec<&Row> = rows.iter().filter(|r| r.raw["changed"] == true).collect();
+        assert_eq!(marked.len(), 2, "{:?}", marked.iter().map(|r| &r.label).collect::<Vec<_>>());
+        let font = marked.iter().find(|r| r.label == "Font").unwrap(); assert_eq!((font.raw["reset"]["action"].as_str(), font.raw["reset"]["value"].as_str()), (Some("local:font"), Some(crate::local::FONTS[0].0)));
+        let key = marked.iter().find(|r| r.buttons.first().map_or(false, |b| b.action == "local:shortcut")).unwrap(); assert!(key.raw["reset"].is_null(), "Shortcuts to defaults puts keys back");
+        assert!(rows.iter().find(|r| r.label == "Text size").unwrap().raw["changed"].is_null(), "the text size has its own Reset");
+    }
+    #[test] fn a_group_is_named_by_its_own_message_and_not_the_verb() {
+        crate::i18n::with_lang("es", || {
+            assert_eq!(group_name("Connect"), "Conexión"); assert_eq!(group_name("System"), "Sistema"); assert_eq!(group_name("General"), "General");
+            assert_eq!(trs("Connect"), "Conectar", "a Connect button elsewhere keeps its verb");
+            assert_eq!(group_name("This device"), trs("This device"));
+        });
     }
 }

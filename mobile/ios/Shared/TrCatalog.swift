@@ -2044,6 +2044,8 @@ home.move.here	Make this machine the home	このマシンをホームにする	H
 gpui.settings.group.general	General	一般	General
 gpui.settings.group.agents	Agents	エージェント	Agentes
 gpui.settings.group.workspace	Workspace	ワークスペース	Espacio de trabajo
+gpui.settings.group.connect	Connect	接続	Conexión
+gpui.settings.group.system	System	システム	Sistema
 gpui.settings.web.ui	Web UI	Web UI	Interfaz web
 gpui.settings.shared.files	Shared files	共有ファイル	Archivos compartidos
 gpui.settings.page.threads.git	Threads and git	スレッドと git	Hilos y git
@@ -3029,6 +3031,8 @@ notify.quiet.hours	Quiet hours	静かな時間帯	Horas de silencio
 notify.a.push.waits.until.the	A push waits until the end of quiet hours, in your time zone, and goes then as one.	プッシュは静かな時間帯が終わる(あなたのタイムゾーン)まで待ち、終わるとまとめて送られます。	Una notificación push espera hasta el fin de las horas de silencio, en tu zona horaria, y se envía entonces junta.
 notify.quiet.from.and.until	Quiet from and until	静かな時間帯の開始と終了	Silencio desde y hasta
 notify.hh.mm.hours	HH:MM, 24 hours.	HH:MM(24時間表記)。	HH:MM, 24 horas.
+notify.quiet.from.hint	From, 22:00	開始、22:00	Desde, 22:00
+notify.quiet.until.hint	Until, 07:00	終了、07:00	Hasta, 07:00
 notify.times.are.hh.mm.hours	Times are HH:MM, 24 hours, and not the same.	時刻はHH:MM(24時間表記)で、同じ時刻にはできません。	Las horas son HH:MM, 24 horas, y no la misma.
 notify.quiet.hours.are.hh.mm	Quiet hours are HH:MM to HH:MM, 24 hours, and not the same time twice.	静かな時間帯はHH:MMからHH:MM(24時間表記)で、同じ時刻にはできません。	Las horas de silencio son HH:MM a HH:MM, 24 horas, y no la misma hora dos veces.
 notify.urgent.asks.come.through	Urgent asks come through	緊急の確認は通す	Las peticiones urgentes pasan
@@ -3049,6 +3053,8 @@ gpui.e.failover.default.order	Default order	既定の順序	Orden por defecto
 gpui.e.failover.use.the.default.order	Use the default order	既定の順序を使う	Usar el orden por defecto
 gpui.e.failover.choose.an.installed.provider.and	Choose an installed provider, and a model or its default, then add it to the end.	インストール済みのプロバイダーと、モデルまたはその既定を選び、末尾に追加します。	Elige un proveedor instalado, y un modelo o su predeterminado, y añádelo al final.
 gpui.e.failover.add.to.the.order	Add to the order	順序に追加	Añadir al orden
+gpui.e.failover.already.in.the.order	Already in the order.	すでに順序に入っています。	Ya está en el orden.
+gpui.e.failover.not.installed.here	Not installed on this machine.	このマシンにはインストールされていません。	No está instalado en esta máquina.
 ring.ring	Ring	リング	Anillo
 ring.pebble.index.ring	Pebble Index ring	Pebble Index リング	Anillo Pebble Index
 ring.test.event	Test event	テストイベント	Evento de prueba
@@ -5002,7 +5008,8 @@ gpui.c.solidcraft.no.embed	This window cannot embed SolidCraft (X11/XWayland or 
 gpui.c.solidcraft.no.container	Could not create embedded SolidCraft container window.	埋め込み用 SolidCraft コンテナウィンドウを作成できませんでした。	No se pudo crear el contenedor integrado de SolidCraft.
 gpui.c.solidcraft.own.window	SolidCraft is open in its own window.	SolidCraft は別ウィンドウで開いています。	SolidCraft está abierto en su propia ventana.
 gpui.c.solidcraft.not.installed	SolidCraft is not installed.	SolidCraft がインストールされていません。	SolidCraft no está instalado.
-gpui.c.solidcraft.install.desc	Install SolidCraft v0.50.0 (~228 MB) to view and edit STEP, SolidCraft, STL, and mesh files.	SolidCraft v0.50.0（約 228 MB）をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。	Instala SolidCraft v0.50.0 (~228 MB) para ver y editar archivos STEP, SolidCraft, STL y malla.
+gpui.c.solidcraft.install.desc	Install SolidCraft {version} (about {mb} MB) to view and edit STEP, SolidCraft, STL, and mesh files.	SolidCraft {version}（約 {mb} MB）をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。	Instala SolidCraft {version} (unos {mb} MB) para ver y editar archivos STEP, SolidCraft, STL y malla.
+gpui.c.solidcraft.install.desc.nosize	Install SolidCraft to view and edit STEP, SolidCraft, STL, and mesh files.	SolidCraft をインストールして STEP、SolidCraft、STL、メッシュファイルを表示・編集します。	Instala SolidCraft para ver y editar archivos STEP, SolidCraft, STL y malla.
 gpui.c.solidcraft.install.btn	Install SolidCraft	SolidCraft をインストール	Instalar SolidCraft
 gpui.c.solidcraft.installing	Installing SolidCraft…	SolidCraft をインストールしています…	Instalando SolidCraft…
 gpui.c.solidcraft.downloading	Downloading…	ダウンロード中…	Descargando…
@@ -8077,6 +8084,9 @@ settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Viso
 
     /// web.ring.heard.by.sure = Heard by {model}, {conf}% sure
     static func web_ring_heard_by_sure(model: String, conf: String) -> String { f("web.ring.heard.by.sure", ["model": model, "conf": conf]) }
+
+    /// gpui.c.solidcraft.install.desc = Install SolidCraft {version} (about {mb} MB) to view and edit STEP, SolidCraft, STL, and mesh files.
+    static func gpui_c_solidcraft_install_desc(version: String, mb: String) -> String { f("gpui.c.solidcraft.install.desc", ["version": version, "mb": mb]) }
 
     /// gpui.f2.solidcraft.ok = SolidCraft{v} at {path}. 3D models open and are edited in it.
     static func gpui_f2_solidcraft_ok(v: String, path: String) -> String { f("gpui.f2.solidcraft.ok", ["v": v, "path": path]) }

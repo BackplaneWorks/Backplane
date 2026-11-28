@@ -33,6 +33,14 @@ attachment (Threads and git), each input of Mouse and trackpad under "Board and 
 (Agents), How eager, End of turn: Jev, Voice commands and Send after silence (Voice), KiCad over its API, Board 3D and Open designs in
 (CAD), and Developer (Setup).
 
+Rows follow one pattern. A switch says On and Off (the values stay `on` and `off`). A text box and its button share the row's line, the
+box narrowed by the button. A page row the hub marks `"changed": true` lights another choice than a fresh hub would (`mark_changed`: the
+page built again from an empty state, rows matched by label); with `"reset": {action, value}` it says the press that puts it back, and the
+desktop draws a small mark after the label and Reset beside it. This computer's rows are marked the same way against a fresh install, and a
+shortcut when its key is not its default (Shortcuts to defaults puts them back). Setup's rows, which read the disk, are not marked. A row
+marked `"intro": true` is a paragraph that opens a group (Notify me for, Webhook, Standing rules, Task board, API keys, Ordering's How it
+works, Provider and model for new threads): drawn as a heading with its words under it, not as a setting.
+
 The occasional second click had a reproducible transport cause: a background
 `view.update` or `view.changed` could issue a newer presentation revision while
 Settings was opening or a same-target `settings-page` action was in flight.

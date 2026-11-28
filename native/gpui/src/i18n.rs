@@ -156,8 +156,9 @@ fn number_prefix(text: &str) -> impl Iterator<Item = (u64, &str)> {
 }
 
 // ---- the catalogs -------------------------------------------------------------------------------------------------------------------------
-/// Keys the reverse lookup never offers: their English is a frame with a free slot that would swallow other sentences.
-const NO_REVERSE: &[&str] = &["proj.addcand", "native.hub.connection", "native.task.parameter", "secret.asks", "voice.model.ready", "android.quiet.range"];
+/// Keys the reverse lookup never offers: their English is a frame with a free slot that would swallow other sentences, or a word another key
+/// says too and means otherwise (a Settings group's "Connect" is not the verb on a button: the nav draws its groups by key).
+const NO_REVERSE: &[&str] = &["proj.addcand", "native.hub.connection", "native.task.parameter", "secret.asks", "voice.model.ready", "android.quiet.range", "gpui.settings.group.connect", "gpui.settings.group.system"];
 pub struct Catalog {
     en: HashMap<String, Vec<Node>>, ja: HashMap<String, Vec<Node>>, es: HashMap<String, Vec<Node>>,
     /// English text of a message with no argument → its key.

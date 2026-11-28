@@ -57,9 +57,12 @@ fn row(label: &str, note: &str, buttons: Vec<Value>) -> Value {
 }
 fn row_f(label: &str, note: &str, fields: Vec<Value>, buttons: Vec<Value>) -> Value { json!({"label": label, "note": note, "fields": fields, "buttons": buttons}) }
 fn field(name: &str, hint: &str, value: &str) -> Value { json!({"name": name, "hint": hint, "secret": false, "value": value}) }
-/// Mob.set.chips: one button per value, `setting key=value`, lit when it is the current one; the label is the value as VLabel.choice says it ("" is "default").
+/// A paragraph that opens a group of rows (what they are about), not a setting: the clients draw it as a heading with its words under it.
+fn intro(label: &str, note: &str) -> Value { let mut r = row(label, note, vec![]); r["intro"] = json!(true); r }
+/// Mob.set.chips: one button per value, `setting key=value`, lit when it is the current one; the label is the value as VLabel.choice says it ("" is "default",
+/// on and off are "On" and "Off" as on every other switch).
 fn chips(values: &[&str], cur: &str, key: &str) -> Vec<Value> {
-    values.iter().map(|v| btn(if v.is_empty() { "default" } else { v }, "setting", &format!("{key}={v}"), *v == cur)).collect()
+    values.iter().map(|v| btn(match *v { "" => "default", "on" => "On", "off" => "Off", v => v }, "setting", &format!("{key}={v}"), *v == cur)).collect()
 }
 fn onoff(on: bool) -> &'static str { if on { "on" } else { "off" } }
 
@@ -99,7 +102,7 @@ fn browser(st: &State, session: &Value) -> Vec<Value> {
 
 fn appearance(st: &State) -> Vec<Value> {
     vec![
-        row("Theme", "The window and the web page (phones unset follow their own system).", chips(&["dark", "light"], set(st, "ui.theme", ""), "ui.theme")),
+        row("Theme", "The window and the web page (phones unset follow their own system).", { let cur = set(st, "ui.theme", ""); vec![btn("Dark", "setting", "ui.theme=dark", cur == "dark"), btn("Light", "setting", "ui.theme=light", cur == "light")] }),
         row("Thread list", "Projects groups threads by project; active lists what is going on, what needs you first.", chips(&["projects", "active"], if set(st, "sidebar.view", "") == "active" { "active" } else { "projects" }, "sidebar.view")),
         row("Only threads that need attention", "On: under each project, its pinned threads and the one that is running or wants a look. Off: every thread you have not settled or archived stays listed.", chips(&["on", "off"], onoff(crate::present::sections::attention_only(st)), crate::present::sections::ATTENTION)),
         row("Group projects", "On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.", chips(&["on", "off"], onoff(crate::present::sections::groups_on(st)), crate::present::sections::GROUPS)),
@@ -138,7 +141,7 @@ fn webhook(st: &State, session: &Value) -> Vec<Value> {
     let sec = if session["drafts"]["@f.whsec"].is_string() { draft(session, "@f.whsec") } else { set(st, "push.webhook.secret", "") };
     let bad = draft(session, "@hook.err") == "bad";
     vec![
-        row("Webhook", "Posts when Notify me for would. A settle or a failure, an ask, a merge, a reminder or a note.", vec![]),
+        intro("Webhook", "Posts when Notify me for would. A settle or a failure, an ask, a merge, a reminder or a note."),
         row_f("Address", if bad { "The address must be http or https." } else { "An http or https address. Empty turns the webhook off." }, vec![field("whurl", "https://example.com/hook", url)], vec![btn("Save", "hook-url", "", false)]),
         row_f("Secret file", "A path to the file that holds the secret. Empty uses the hub's default file. The secret itself is never shown.", vec![field("whsec", "Path to the secret file", sec)], vec![btn("Save", "hook-secret", "", false)]),
     ]
@@ -170,7 +173,7 @@ pub fn quiet_spec(from: &str, to: &str) -> Option<String> {
 /// urgent ask passes them, and each phone's mute. `info["push.devices"]` is the hub's list of phones that hear a push (`push::devices_info`): `[{h, name, mute}]`, `h` a
 /// handle that is not the token. Every client draws these rows (the desktop through the presenter, the phones through `notify.page`).
 pub fn notifications(st: &State, session: &Value, info: &Value) -> Vec<Value> {
-    let mut v = vec![row("Notify me for", "Phone and desktop alerts. The rest stays in the app as unread.", vec![])];
+    let mut v = vec![intro("Notify me for", "Phone and desktop alerts. The rest stays in the app as unread.")];
     for (kind, name, note) in [("needs", "Needs me", "Approvals, questions and anything an agent is blocked on until you act."),
         ("settled", "Settled", "Work you gave a thread is finished, failed, or its branch merged. Once per piece of work."),
         ("reminders", "Reminders", "Reminders and digests you scheduled."), ("all", "Everything", "Also every other turn that completes or fails, not only the work you gave a thread.")] {
@@ -180,12 +183,12 @@ pub fn notifications(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     v.push(row("Phones", "Only your uberbot pushes to a phone, and a phone window open on the thread is not pushed to.", vec![]));
     let ends = quiet_ends(st);
     v.push(row("Quiet hours", "A push waits until the end of quiet hours, in your time zone, and goes then as one.",
-        vec![btn("on", "notify-quiet", "on", ends.is_some()), btn("off", "notify-quiet", "off", ends.is_none())]));
+        vec![btn("On", "notify-quiet", "on", ends.is_some()), btn("Off", "notify-quiet", "off", ends.is_none())]));
     if let Some((from, to)) = ends {
         let f = if session["drafts"]["@f.qfrom"].is_string() { draft(session, "@f.qfrom").to_string() } else { from };
         let t = if session["drafts"]["@f.qto"].is_string() { draft(session, "@f.qto").to_string() } else { to };
         let bad = draft(session, "@quiet.err") == "bad";
-        v.push(row_f("Quiet from and until", if bad { "Times are HH:MM, 24 hours, and not the same." } else { "HH:MM, 24 hours." }, vec![field("qfrom", "22:00", &f), field("qto", "07:00", &t)], vec![btn("Save", "notify-quiet", "save", false)]));
+        v.push(row_f("Quiet from and until", if bad { "Times are HH:MM, 24 hours, and not the same." } else { "HH:MM, 24 hours." }, vec![field("qfrom", "From, 22:00", &f), field("qto", "Until, 07:00", &t)], vec![btn("Save", "notify-quiet", "save", false)]));
     }
     let urgent = set(st, crate::push::QUIET_URGENT, "") == "on";
     v.push(row("Urgent asks come through", "An approval or a question that blocks an agent is pushed in quiet hours, and to a muted phone.", chips(&["on", "off"], onoff(urgent), crate::push::QUIET_URGENT)));
@@ -243,7 +246,7 @@ fn agents(st: &State, info: &Value) -> Vec<Value> {
     if !ids.contains(&model) { ids.push(model); }
     let label = models["about"][prov]["labels"][if model.is_empty() { "default" } else { model }].as_str().unwrap_or("");
     vec![
-        row("Provider and model for new threads", "Each thread keeps its own; change it from the composer.", vec![]),
+        intro("Provider and model for new threads", "Each thread keeps its own; change it from the composer."),
         row("Provider", &if !super::keys::is_installed(&models, prov) { format!("{prov} is not installed") } else { cli.to_string() }, chips(PROVIDERS, prov, "agent.provider")),
         row("Model", &format!("{}: {}", if model.is_empty() { "default" } else { model }, label), chips(&ids, model, "agent.model")),
     ].into_iter().chain(updates).chain([
@@ -272,7 +275,7 @@ fn agent_updates(models: &Value, info: &Value) -> Vec<Value> {
 fn ordering(st: &State) -> Vec<Value> {
     let enabled = set(st, "order.enabled", "on") != "off";
     let mut v = vec![
-        row("How it works", "With Ordering on, a project whose design is ready shows Buy it in the thread's header. Buy it opens a buy thread. Its agent checks that every board and part is ready, asks you anything missing (quantities, finishes, where to ship), exports the manufacturing files into the project's mfg/ folder and sends them to Backplane's order server, which measures them and prices the exact order: manufacturing (boards, assembly, components and parts, with Backplane's fee included), shipping, and duties and taxes. The quote shows in the thread, and nothing is charged until you press Buy now and pay on Stripe's checkout page. A quote holds for 3 days. If the manufacturer's review raises the price, you're asked within 2 business days and can pay the difference or cancel for a full refund. Once paid, the thread shows the order's progress (placed, shipped, tracking). With Ordering off, nothing about your projects leaves this machine for ordering. Price estimates add a rough \"from $X\" to Buy it, worked out from each part's size and options without sending any files.", vec![]),
+        intro("How it works", "With Ordering on, a project whose design is ready shows Buy it in the thread's header. Buy it opens a buy thread. Its agent checks that every board and part is ready, asks you anything missing (quantities, finishes, where to ship), exports the manufacturing files into the project's mfg/ folder and sends them to Backplane's order server, which measures them and prices the exact order: manufacturing (boards, assembly, components and parts, with Backplane's fee included), shipping, and duties and taxes. The quote shows in the thread, and nothing is charged until you press Buy now and pay on Stripe's checkout page. A quote holds for 3 days. If the manufacturer's review raises the price, you're asked within 2 business days and can pay the difference or cancel for a full refund. Once paid, the thread shows the order's progress (placed, shipped, tracking). With Ordering off, nothing about your projects leaves this machine for ordering. Price estimates add a rough \"from $X\" to Buy it, worked out from each part's size and options without sending any files."),
         row("Ordering", "Order boards and parts from Backplane. Off: no prices or uploads.", chips(&["on", "off"], onoff(enabled), "order.enabled")),
     ];
     if enabled {
@@ -559,7 +562,7 @@ fn family(st: &State, pre: &str) -> Vec<Value> {
 }
 /// Rules and task board: what the person wants always or never done (`rules.set`, `rules.drop`), and the shared list of what is to be done (`board.set`, `board.drop`).
 fn rules(st: &State, session: &Value) -> Vec<Value> {
-    let mut v = vec![row("Standing rules", "Every agent's turn starts with the rules that apply to it. An enforced rule with tools is also checked: those tools are refused unless your latest message says its word.", vec![])];
+    let mut v = vec![intro("Standing rules", "Every agent's turn starts with the rules that apply to it. An enforced rule with tools is also checked: those tools are refused unless your latest message says its word.")];
     for r in family(st, "rule.") {
         let on = r["on"].as_bool().unwrap_or(true); let (tool, word) = (s(&r, "tool"), s(&r, "word"));
         let mut note = vec![if on { "On" } else { "Off" }.to_string()];
@@ -567,7 +570,7 @@ fn rules(st: &State, session: &Value) -> Vec<Value> {
         v.push(row(s(&r, "text"), &note.join(" · "), vec![btn(if on { "Turn off" } else { "Turn on" }, "rule-on", &format!("{}={}", s(&r, "id"), !on), false), btn("Remove", "rule-drop", s(&r, "id"), false)]));
     }
     v.push(row_f("New rule", "Its words, as you would say them to an agent.", vec![field("rtext", "e.g. Never push to main", draft(session, "@f.rtext"))], vec![btn("Add rule", "rule-add", "", true)]));
-    v.push(row("Task board", "One shared list: agents in every thread read and update it.", vec![]));
+    v.push(intro("Task board", "One shared list: agents in every thread read and update it."));
     let mut items = family(st, "board.");
     let rank = |x: &str| match x { "doing" => 0, "blocked" => 1, "todo" => 2, "done" => 3, _ => 4 };
     items.sort_by_key(|i| rank(s(i, "status")));
@@ -829,7 +832,7 @@ fn keys(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     let text = if home.is_empty() { String::new() } else { crate::settings::keys::names_kept(std::path::Path::new(home)) };
     let names: Vec<&str> = text.lines().filter(|l| !l.is_empty()).collect();
     let arming = draft(session, "@keys.rm");
-    let mut v = vec![row("API keys", "Kept on this machine, in the hub's secrets folder. Agents are told their names and where to load them, never the values.", vec![])];
+    let mut v = vec![intro("API keys", "Kept on this machine, in the hub's secrets folder. Agents are told their names and where to load them, never the values.")];
     if names.is_empty() { v.push(row("No keys yet", "", vec![])); }
     for n in &names {
         let ask = arming == *n;
@@ -855,7 +858,7 @@ fn fallback(st: &State, info: &Value) -> Vec<Value> {
     let inv: Value = serde_json::from_str(set(st, "accounts.inventory", "")).unwrap_or(Value::Null);
     let accounts = |p: &str| inv["profiles"].as_array().map_or(0, |a| a.iter().filter(|x| x["provider"] == p && x["state"] == "connected").count());
     let mut v = vec![row("Failover order", "Applies to all threads, bots, routines and subthreads. When an account hits its usage limit, work moves to another account of the same provider that has usage left, then down this list. When every account is out, Backplane says when the first one resets and continues then. Work moves back up the list as accounts reset.",
-        vec![btn("Enabled", "setting", "fallback.on=on", on), btn("Disabled", "setting", "fallback.on=off", !on)])];
+        vec![btn("On", "setting", "fallback.on=on", on), btn("Off", "setting", "fallback.on=off", !on)])];
     let down = |key: &str| { let mut r = chain.clone(); r.reverse(); let mut r = fb::up(&r, key); r.reverse(); r };
     for (i, t) in chain.iter().enumerate() {
         let key = t.key();
@@ -877,8 +880,11 @@ fn fallback(st: &State, info: &Value) -> Vec<Value> {
         v.push(row("Add a model", "Only installed models can be saved. Duplicate entries are not allowed.", chips(&models, am, "fallback.add.model")));
         let target = fb::Target { provider: ap.to_string(), model: if am == "default" { String::new() } else { am.to_string() } };
         let mut next = chain.clone(); next.push(target.clone());
-        let addable = (fb::caps_valid(&caps, &target) || (target.model.is_empty() && accounts(ap) > 0)) && !fb::has(&chain, &target.key());
-        v.push(row(&target.label(), "", if addable { vec![btn("Add to the order", "setting", &format!("fallback.chain={}", fb::show(&next)), false)] } else { vec![] }));
+        let there = fb::has(&chain, &target.key());
+        let addable = (fb::caps_valid(&caps, &target) || (target.model.is_empty() && accounts(ap) > 0)) && !there;
+        // what cannot be added says why, rather than a name with nothing under it
+        let why = if addable { "" } else if there { "Already in the order." } else { "Not installed on this machine." };
+        v.push(row(&target.label(), why, if addable { vec![btn("Add to the order", "setting", &format!("fallback.chain={}", fb::show(&next)), false)] } else { vec![] }));
     }
     v
 }
@@ -1021,7 +1027,31 @@ fn page_words(id: &str) -> (&'static str, &'static str) {
     all.iter().find(|(p, _, _)| *p == id).map_or(("", ""), |(_, w, n)| (w.as_str(), n.as_str()))
 }
 
-/// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back.
+/// What was changed on a page: each row of `rows` whose lit choice is not the one a fresh hub lights (`fresh`: the same page built from
+/// `State::default()`), the two matched by label and by which of the rows with that label it is, gets `changed`; when its buttons press the same
+/// (action, value) in both (their values do not depend on what is set) it also gets `reset`, the fresh hub's lit press. A row with a field, one
+/// that lights nothing on either side, or one a fresh hub does not show gets nothing. Choices are told apart by their labels, not their values:
+/// a mouse input's values carry the whole scheme, so every input's differ once one is changed (and its Reset is offered only while that one
+/// input is all that differs).
+pub fn mark_changed(rows: &mut [Value], fresh: &[Value]) {
+    let nth = |all: &[Value], i: usize| all[..i].iter().filter(|r| r["label"] == all[i]["label"]).count();
+    let lit = |r: &Value| -> Vec<Value> { r["buttons"].as_array().map_or(vec![], |b| b.iter().filter(|b| b["on"] == true).cloned().collect()) };
+    let names = |v: &[Value]| -> Vec<String> { v.iter().map(|b| s(b, "label").to_string()).collect() };
+    let presses = |r: &Value| -> Vec<(String, String)> { r["buttons"].as_array().map_or(vec![], |b| b.iter().map(|b| (s(b, "action").to_string(), s(b, "value").to_string())).collect()) };
+    let all: &[Value] = rows;
+    let marks: Vec<Option<Value>> = (0..all.len()).map(|i| {
+        let r = &all[i];
+        if r["fields"].as_array().map_or(false, |f| !f.is_empty()) { return None }
+        let d = fresh.iter().filter(|f| f["label"] == r["label"]).nth(nth(all, i))?;
+        let (now, was) = (lit(r), lit(d));
+        if now.is_empty() || was.is_empty() || names(&now) == names(&was) { return None }
+        Some(if was.len() == 1 && presses(r) == presses(d) { json!({"action": was[0]["action"], "value": was[0]["value"]}) } else { Value::Null })
+    }).collect();
+    for (r, m) in rows.iter_mut().zip(marks) { let Some(m) = m else { continue }; r["changed"] = json!(true); if !m.is_null() { r["reset"] = m; } }
+}
+
+/// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back. A page's rows say what
+/// differs from a fresh hub (`mark_changed`), but setup's, which read the disk.
 pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     let p = page(session);
     let rows = if p.is_empty() {
@@ -1032,7 +1062,9 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(rows_of(st, session, info, p));
+        let mut rows = rows_of(st, session, info, p);
+        if p != "setup" { mark_changed(&mut rows, &rows_of(&State::default(), session, info, p)); }
+        r.extend(rows);
         r
     };
     json!({"rows": rows})
@@ -2004,5 +2036,62 @@ mod tests {
         assert!(aka("notifications").lines().any(|l| l == "Time zone")); assert!(aka("agents").lines().any(|l| l == "Writing"));
         assert_eq!(aka("usage"), "", "a page with no other name says none");
         assert!(AKA.iter().all(|(id, _)| PAGES.iter().any(|(p, _)| p == id)), "every aka names a page");
+    }
+    #[test] fn a_changed_choice_is_marked_with_the_press_that_puts_it_back() {
+        let chip_row = |cur: &str| row("Board 3D", "", chips(&["native", "kicad-cli"], cur, "viewer.board3d"));
+        let mut r = vec![chip_row("kicad-cli")]; mark_changed(&mut r, &[chip_row("native")]);
+        assert_eq!((r[0]["changed"].as_bool(), &r[0]["reset"]), (Some(true), &json!({"action": "setting", "value": "viewer.board3d=native"})));
+        // the same choice as a fresh hub: nothing
+        let mut r = vec![chip_row("native")]; mark_changed(&mut r, &[chip_row("native")]); assert!(r[0]["changed"].is_null() && r[0]["reset"].is_null());
+        // values that carry more than the choice (a mouse input's whole scheme): changed, and no Reset that would put back the rest too
+        let input = |lit: usize, scheme: &str| row("Left drag", "", ["Pan", "Rotate"].iter().enumerate().map(|(i, a)| btn(a, "setting", &format!("mouse.2d={scheme}{i}"), i == lit)).collect());
+        let mut r = vec![input(1, "mine"), input(0, "mine")]; mark_changed(&mut r, &[input(0, "kicad"), input(0, "kicad")]);
+        assert_eq!((r[0]["changed"].as_bool(), r[0]["reset"].is_null()), (Some(true), true)); assert!(r[1]["changed"].is_null(), "the second Left drag lights what a fresh hub does");
+        // a row with a field, one that lights nothing, one a fresh hub does not have: nothing
+        let typed = |v: &str| row_f("Time zone", "", vec![field("tzname", "", v)], vec![btn("Set", "tz-set", "", true)]);
+        let mut r = vec![typed("Europe/Helsinki"), row("Price estimates", "", vec![]), chip_row("kicad-cli")];
+        mark_changed(&mut r, &[typed(""), row("Price estimates", "", chips(&["on", "off"], "on", "order.estimates"))]);
+        assert!(r.iter().all(|x| x["changed"].is_null()), "{r:?}");
+    }
+    #[test] fn the_cad_page_marks_only_what_was_changed_there() {
+        let r = page_rows(&st(&[("viewer.mech", "backplane")]), "cad", json!({}));
+        let marked: Vec<&str> = r.iter().filter(|x| x["changed"] == true).map(|x| s(x, "label")).collect();
+        assert_eq!(marked, ["Mech tab"]);
+        assert_eq!(by(&r, "Mech tab")["reset"], json!({"action": "setting", "value": "viewer.mech=solidcraft"}));
+        assert!(page_rows(&st(&[]), "cad", json!({})).iter().all(|x| x["changed"].is_null()), "a fresh hub has changed nothing");
+        // a mouse input changed: that row is marked; its Reset is the fresh press while nothing else differs (each value carries the whole
+        // scheme), and none once two inputs are changed (a press would put the other back too; the preset row does that)
+        let other = |r: &[Value], l: &str| by(r, l)["buttons"].as_array().unwrap().iter().find(|b| b["on"] != true).unwrap()["value"].as_str().unwrap().split_once('=').unwrap().1.to_string();
+        let one = other(&page_rows(&st(&[]), "mouse", json!({})), "Left drag");
+        let m = page_rows(&st(&[("mouse.2d", &one)]), "mouse", json!({}));
+        let marked: Vec<&str> = m.iter().filter(|x| x["changed"] == true).map(|x| s(x, "label")).collect();
+        assert_eq!(marked, ["Left drag"], "{one}"); assert_eq!(by(&m, "Left drag")["reset"]["value"], by(&page_rows(&st(&[]), "mouse", json!({})), "Left drag")["buttons"].as_array().unwrap().iter().find(|b| b["on"] == true).unwrap()["value"]);
+        let two = other(&m, "Right drag");
+        let m = page_rows(&st(&[("mouse.2d", &two)]), "mouse", json!({}));
+        let marked: Vec<&str> = m.iter().filter(|x| x["changed"] == true).map(|x| s(x, "label")).collect();
+        assert_eq!(marked, ["Left drag", "Right drag"], "{two}"); assert!(m.iter().filter(|x| x["changed"] == true).all(|x| x["reset"].is_null()));
+    }
+    #[test] fn switches_say_on_and_off_and_the_hubs_theme_says_dark_and_light() {
+        let words = |r: &Value| r["buttons"].as_array().unwrap().iter().map(|b| s(b, "label").to_string()).collect::<Vec<_>>();
+        let n = page_rows(&st(&[]), "notifications", json!({}));
+        for l in ["Needs me", "Everything", "Quiet hours", "Urgent asks come through"] { assert_eq!(words(by(&n, l)), ["On", "Off"], "{l}"); }
+        assert_eq!(by(&n, "Quiet hours")["buttons"][1]["value"], "off", "the values stay");
+        let q = by(&n, "Quiet from and until"); assert_eq!((q["fields"][0]["hint"].as_str(), q["fields"][1]["hint"].as_str()), (Some("From, 22:00"), Some("Until, 07:00")));
+        let c = page_rows(&st(&[]), "cad", json!({}));
+        assert_eq!(words(by(&c, "KiCad over its API")), ["On", "Off"]); assert_eq!(by(&c, "KiCad over its API")["buttons"][0]["value"], "kicad.ipc=on");
+        let t = page_rows(&st(&[]), "threads", json!({}));
+        assert_eq!(words(by(&t, "Continue after a restart")), ["On", "Off"]);
+        let a = page_rows(&st(&[]), "agents", json!({})); assert_eq!(words(by(&a, "Failover order")), ["On", "Off"]);
+        let th = by(&page_rows(&st(&[("ui.theme", "light")]), "appearance", json!({})), "Theme").clone();
+        assert_eq!(words(&th), ["Dark", "Light"]); assert_eq!((th["buttons"][1]["value"].as_str(), th["buttons"][1]["on"].as_bool()), (Some("ui.theme=light"), Some(true)));
+        // the paragraphs that open a group are said to be so, and stay rows
+        assert_eq!(n[1]["intro"], true); assert_eq!(by(&a, "Provider and model for new threads")["intro"], true); assert!(by(&n, "Phones")["intro"].is_null());
+    }
+    #[test] fn the_last_failover_row_says_why_it_cannot_be_added() {
+        let info = json!({"models": r#"{"claude":["opus"],"codex":["gpt-6"]}"#});
+        let last = |kv: &[(&str, &str)]| fallback(&st(kv), &info).last().cloned().unwrap();
+        let r = last(&[]); assert_eq!((s(&r, "label"), s(&r, "note"), r["buttons"].as_array().unwrap().len()), ("codex", "Already in the order.", 0));
+        let r = last(&[("fallback.chain", "claude")]); assert_eq!((s(&r, "note"), s(&r["buttons"][0], "label")), ("", "Add to the order"));
+        let r = last(&[("fallback.add.model", "gpt-6"), ("fallback.chain", "claude")]); assert_eq!(s(&r, "note"), "", "{r}");
     }
 }
