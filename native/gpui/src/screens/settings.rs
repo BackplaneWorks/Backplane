@@ -967,7 +967,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     // the rarely needed rows (`adv`) after a fold line, in their order; ids by index over both, so no two rows share one
     let (main, folded): (Vec<usize>, Vec<usize>) = (0..list.len()).partition(|&i| !is_adv(&list[i]));
     let hubs_rows = super::hubpick::rows_on(hub_list, on_home);
-    let mut els: Vec<AnyElement> = if on_hubs { hubs_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows) } else { main.iter().enumerate().map(|(k, &i)| { let e = row_el(cx, light, fields, &list[i], k, fit.rows); lit_el(i, e) }).collect() };
+    let mut els: Vec<AnyElement> = if on_hubs { hubs_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows, ui.adv.contains("accounts")) } else { main.iter().enumerate().map(|(k, &i)| { let e = row_el(cx, light, fields, &list[i], k, fit.rows); lit_el(i, e) }).collect() };
     if !on_hubs && !on_acct && !folded.is_empty() {
         let open = adv_open(&list, &ui.q, ui.adv.contains(&page));
         els.push(adv_el(cx, light, &page, folded.iter().filter(|&&i| !is_heading(&list[i])).count(), open));
@@ -1083,12 +1083,14 @@ pub fn adv_shown(this: &Backplane) -> Option<String> {
 }
 /// The Advanced fold of a page: a line as tall as a setting row, with its hairline, the chevron the sidebar's folds use, and how many settings are
 /// under it. A press opens or shuts it; it stays where it is (the rows appear under it).
-fn adv_el(cx: &mut Context<Backplane>, light: bool, page: &str, n: usize, open: bool) -> AnyElement {
+fn adv_el(cx: &mut Context<Backplane>, light: bool, page: &str, n: usize, open: bool) -> AnyElement { fold_el(cx, light, page, &trs("Advanced"), n, open) }
+/// The same fold line under another name (Settings › Accounts' "Not set up", keyed `accounts`): its open state is `SettingsUi::adv`'s, toggled by `toggle_adv`.
+pub(super) fn fold_el(cx: &mut Context<Backplane>, light: bool, page: &str, label: &str, n: usize, open: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let to = page.to_string();
     let d = div().id(SharedString::from(format!("set-adv-{page}"))).flex().items_center().py_3().border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("panel")))
         .child(div().h(px(24.)).flex().items_center().gap_2().child(crate::art::icon(if open { "chevron-down" } else { "chevron-right" }, 14., c("dim")))
-            .child(div().text_size(crate::scale::tpx(13.)).child(trs("Advanced"))).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n.to_string())));
+            .child(div().text_size(crate::scale::tpx(13.)).child(label.to_string())).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n.to_string())));
     // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only): `set-adv:<page>`
     let d = if crate::art::rects_on() { let rn = format!("set-adv:{page}"); d.relative().child(crate::art::probe_rect(rn.clone())).child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&rn, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
     d.on_click(cx.listener(move |this, _, _, cx| toggle_adv(this, &to, cx))).into_any_element()
