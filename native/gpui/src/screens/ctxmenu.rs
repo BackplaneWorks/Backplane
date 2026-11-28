@@ -42,12 +42,19 @@ pub const LOCAL_SUB: &str = "local:sub";
 pub const LOCAL_FIELD: &str = "local:field";
 /// A right click in the floating terminal: Copy and Paste there ("copy", "paste").
 pub const LOCAL_TERM: &str = "local:term";
+/// Select all in the thread: every block of its rows on screen (`Backplane::timeline_select_all`).
+pub const LOCAL_SELECT_ALL: &str = "local:select-all";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 /// A right-click with text selected in the timeline: Copy and Quote (nothing without a selection).
 pub fn selection_items(selected: &str) -> Vec<Item> {
     if selected.is_empty() { vec![] }
     /* i18n-ok: menu labels, drawn through trs/t in render */ else { vec![item("Copy", LOCAL_COPY, selected, false), item("Quote", LOCAL_QUOTE, selected, false)] }
+}
+/// A right-click on a message's text with nothing selected: Copy message (its whole text, as its Copy button gives) and Select all.
+pub fn message_items(text: &str) -> Vec<Item> {
+    /* i18n-ok: menu labels, drawn through trs in render */ let mut v = if text.is_empty() { vec![] } else { vec![item("Copy message", LOCAL_COPY, text, false)] };
+    /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("Select all", LOCAL_SELECT_ALL, "", false)); v
 }
 /// A text field's menu: Cut and Copy with a selection (never a secret's), Paste always, Select all with any text.
 pub fn field_items(has_sel: bool, has_text: bool) -> Vec<Item> {
@@ -290,6 +297,7 @@ impl Backplane {
                 return
             }
             Some((a, v)) if a == LOCAL_TERM => { self.ctx_close(cx); self.term_menu_do(&v, window, cx); return }
+            Some((a, _)) if a == LOCAL_SELECT_ALL => { self.ctx_close(cx); self.timeline_select_all(window, cx); return }
             // a second menu, where the first was (Move to group: the other groups, then New group…)
             Some((a, v)) if a == LOCAL_SUB => {
                 let items = sub_items(&v);
@@ -539,6 +547,15 @@ mod tests {
         assert_eq!(labels(field_items(true, true)), [l("Cut", "cut"), l("Copy", "copy"), l("Paste", "paste"), l("Select all", "all")]);
         for (lang, want) in [("ja", ["切り取り", "コピー", "貼り付け", "すべて選択"]), ("es", ["Cortar", "Copiar", "Pegar", "Seleccionar todo"])] {
             crate::i18n::with_lang(lang, || assert_eq!(field_items(true, true).iter().map(|i| crate::i18n::trs(&i.label)).collect::<Vec<_>>(), want, "{lang}"));
+        }
+    }
+    #[test] fn a_right_click_on_a_message_with_nothing_selected_copies_it_or_selects_all() {
+        let v = message_items("R1 is the anode load.\n\nR2 biases the cathode.");
+        assert_eq!(v.iter().map(|i| (i.label.as_str(), i.action.as_str(), i.value.as_str())).collect::<Vec<_>>(),
+            [("Copy message", LOCAL_COPY, "R1 is the anode load.\n\nR2 biases the cathode."), ("Select all", LOCAL_SELECT_ALL, "")]);
+        assert_eq!(message_items("").iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Select all"], "nothing to copy: Select all alone");
+        for (lang, want) in [("ja", ["メッセージをコピー", "すべて選択"]), ("es", ["Copiar mensaje", "Seleccionar todo"])] {
+            crate::i18n::with_lang(lang, || assert_eq!(message_items("x").iter().map(|i| crate::i18n::trs(&i.label)).collect::<Vec<_>>(), want, "{lang}"));
         }
     }
     #[test] fn the_terminals_menu_copies_only_a_selection_and_always_pastes() {

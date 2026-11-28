@@ -5057,6 +5057,7 @@ settings.cad.mech.tab.note	Where a mechanical part opens on the desktop: in Soli
 settings.cad.mech.solidcraft	SolidCraft	SolidCraft	SolidCraft
 settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Visor de Backplane
 common.cut	Cut	切り取り	Cortar
+menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

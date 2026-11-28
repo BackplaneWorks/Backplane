@@ -5200,3 +5200,4 @@ settings.cad.mech.tab.note = Dónde se abre una pieza mecánica en el escritorio
 settings.cad.mech.solidcraft = SolidCraft
 settings.cad.mech.backplane = Visor de Backplane
 common.cut = Cortar
+menu.copy.message = Copiar mensaje

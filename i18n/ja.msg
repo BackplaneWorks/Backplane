@@ -5223,3 +5223,4 @@ settings.cad.mech.tab.note = デスクトップで機械部品を開く場所：
 settings.cad.mech.solidcraft = SolidCraft
 settings.cad.mech.backplane = Backplane のビューアー
 common.cut = 切り取り
+menu.copy.message = メッセージをコピー

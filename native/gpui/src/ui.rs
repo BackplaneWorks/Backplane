@@ -229,7 +229,13 @@ pub(crate) fn ic(light: bool, name: &'static str, size: f32, tok: &str) -> AnyEl
 /// An activity line that is said whole (wrapped) instead of cut at the pane's width: an error, a restart, and a warning, which
 /// is something the person has to read to the end to act on ("Design files not committed to main: …" was cut after "Author i").
 fn act_whole(tone: &str) -> bool { tone.contains("error") || tone.contains("restart") || tone.contains("warn") }
+/// An activity row that is likely drawn cut (more than one line, or long): its whole text is its tooltip.
+fn act_cut(text: &str) -> bool { text.trim_end().contains('\n') || text.chars().count() > 80 }
 #[cfg(test)] mod act_tests {
+    #[test] fn a_long_or_many_line_row_shows_all_of_it_under_the_pointer() {
+        assert!(super::act_cut("cat <<EOF\nline\nEOF") && super::act_cut(&"x".repeat(81)));
+        assert!(!super::act_cut("grep -n go board.kicad_pcb # 1") && !super::act_cut("done\n"));
+    }
     #[test] fn a_warning_line_is_said_whole_like_an_error() {
         /* i18n-ok: tone names the hub sends, not drawn */ for t in ["error", "warn", "info restart"] { assert!(super::act_whole(t), "{t}") }
         for t in ["info", "", "tool"] { assert!(!super::act_whole(t), "{t}") }
@@ -546,7 +552,9 @@ impl Backplane {
                 let hover = string(&e, "hover"); let group = SharedString::from(format!("msg-{id}"));
                 // (after Copy and Reply, so the hidden time leaves no gap in front of them)
                 let foot = div().flex().items_center().gap_3().text_size(crate::scale::tpx(11.)).text_color(c("faint"));
-                let foot = if stamp.is_empty() && !hover.is_empty() { foot.child(tools).child(div().invisible().group_hover(group.clone(), |s| s.visible()).child(crate::i18n::trs(&hover))) } else { foot.child(crate::i18n::trs(&stamp)).child(tools) };
+                // (the stamp, "Finished 03:55 · 46s", is selectable as the reply above it is)
+                let foot = if stamp.is_empty() && !hover.is_empty() { foot.child(tools).child(div().invisible().group_hover(group.clone(), |s| s.visible()).child(crate::i18n::trs(&hover))) }
+                    else { foot.child(if stamp.is_empty() { div().into_any_element() } else { crate::screens::timeline::line_text(&reg, light, crate::i18n::trs(&stamp), "") }).child(tools) };
                 col.group(group).when(!streaming, |d| d.child(foot)).into_any_element()
             }
             "term" => self.term_card(&e, light, cx),
@@ -582,10 +590,15 @@ impl Backplane {
                     }
                     _ => {
                         let line = if whole { crate::i18n::trs(&text) } else { let mut l = text.lines().next().unwrap_or("").to_string(); if text.trim_end().contains('\n') { l.push_str(" …"); } l };
+                        // selectable as a message is; drawn cut to one line, a copy that runs to its end gives all of it (`line_text`)
+                        let line = crate::screens::timeline::line_text(&reg, light, line, if whole { "" } else { &text });
                         div().flex_1().min_w_0().when(!whole, |d| d.overflow_hidden().whitespace_nowrap().text_ellipsis()).when(tone.contains("error") && !tone.contains("restart"), |d| d.text_color(c("bad"))).child(line)
                     }
                 };
-                div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(crate::i18n::trs(&string(&e, "label")))).child(body).into_any_element()
+                // a long or many-line row drawn on one line: all of it under the pointer
+                let tip = (!whole && e["blocks"].as_array().map_or(true, |b| b.is_empty()) && act_cut(&text)).then(|| text.chars().take(2000).collect::<String>());
+                div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(crate::i18n::trs(&string(&e, "label")))).child(body)
+                    .when_some(tip, |d, t| d.tooltip(crate::keys::tip_raw(&t, "", light))).into_any_element()
             }
             // a call whose summary is only its name (WebSearch, TaskUpdate...): its name alone, so an open fold shows as many rows as it counts
             _ if !string(&e, "label").is_empty() => div().id(SharedString::from(format!("e-{id}"))).flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(string(&e, "label")).into_any_element(),
@@ -933,6 +946,8 @@ impl Render for Backplane {
         let c = |name: &str| theme::color(light, name);
         // the selectable text is the rows' part's and the viewer part's (part.rs); with the viewer shut, what its page drew is gone
         if !crate::screens::viewer::is_open(&self.data["thread"]) { self.screens.reg.borrow_mut().begin_outside(); }
+        // the asks' cards are the window's own: they draw again below (or are gone)
+        self.screens.reg.borrow_mut().begin_asks();
         self.screens.images.frame();
         if self.input.read(cx).light != light { self.input.update(cx, |i, _| i.light = light); for i in self.screens.ask_inputs.values() { i.update(cx, |i, _| i.light = light); } }
         let thread = &self.data["thread"];
@@ -1389,7 +1404,7 @@ impl Render for Backplane {
                         .children(crate::screens::order::view(cx, light, &thread["order"]))
                         // #1304: the agent has not answered the person's mid-turn message (screens/unanswered.rs)
                         .children(crate::screens::unanswered::view(cx, light, &thread["unanswered"]))
-                        .children(crate::screens::asks::view(cx, light, &self.screens.ask_inputs, &thread["asks"], &self.screens.plan_expanded, self.screens.plan_revising.as_deref()))
+                        .children(crate::screens::asks::view(cx, &self.screens.reg.clone(), light, &self.screens.ask_inputs, &thread["asks"], &self.screens.plan_expanded, self.screens.plan_revising.as_deref()))
                         .children(crate::screens::voice::pending_view(cx, light, &self.screens.voice, &self.selected.clone()))
                         .children(self.screens.voice.views.get(&self.selected).cloned().and_then(|v| crate::screens::voice::view(cx, light, &v, self.screens.voice.level, self.screens.voice.fix.clone().as_ref())))
                         .children(crate::screens::sidebox::btw(cx, light, &thread["btw"]))

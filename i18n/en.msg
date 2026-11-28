@@ -5200,3 +5200,4 @@ settings.cad.mech.tab.note = Where a mechanical part opens on the desktop: in So
 settings.cad.mech.solidcraft = SolidCraft
 settings.cad.mech.backplane = Backplane's viewer
 common.cut = Cut
+menu.copy.message = Copy message
