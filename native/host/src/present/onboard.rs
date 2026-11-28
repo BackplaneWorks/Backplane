@@ -624,7 +624,7 @@ fn project(f: &Facts, session: &Value, user_home: &str) -> Step {
     } else {
         let path = if session["drafts"]["@f.obproject"].is_string() { draft(session, "@f.obproject").to_string() } else { first_board(user_home) };
         let e = draft(session, "@ob.project.err");
-        let mut add = row("Folder", if e.is_empty() { "The full path of a folder on this computer." } else { e }, vec![btn("Create", "ob-project", "", true)]);
+        let mut add = row("Folder", if e.is_empty() { "The full path of a folder on this computer." } else { e }, vec![btn("Use this folder", "ob-project", "", true)]);
         add["fields"] = json!([{"name": "obproject", "hint": "Folder", "secret": false, "value": path}]);
         rows.push(add);
     }
@@ -1076,6 +1076,7 @@ mod tests {
         let p = at(&s0, "project", &i, &desk()); assert_eq!(row_of(&p, "Folder")["fields"][0]["value"], "/h/Backplane/first-board");
         assert_eq!(first_board(r"C:\Users\ann"), r"C:\Users\ann\Backplane\first-board", "Windows separators throughout");
         assert_eq!(row_of(&p, "Pair a phone")["buttons"][0]["action"], "device-invite");
+        assert_eq!(row_of(&p, "Folder")["buttons"][0]["label"], "Use this folder", "one word for a folder that exists (added) and one that does not (made)");
         let o = act(&s0, "h", &sess(json!({"@ob.step": "project"})), &i, &desk(), "/home/x", "ob-project", "").unwrap();
         assert_eq!(sent(&o, "project.new")[0]["path"], "/home/x/Backplane/first-board"); assert_eq!(sent(&o, "project.new")[0]["orAdd"], true);
         let bad = act(&s0, "h", &sess(json!({"@f.obproject": "here"})), &i, &desk(), "/home/x", "ob-project", "").unwrap(); assert!(bad.cmds.is_empty()); assert!(s(&bad.patch["drafts"], "@ob.project.err").contains("full path"));
@@ -1308,6 +1309,10 @@ mod tests {
         let mut d = typed.clone(); d["@ob.uber.look"] = json!(picked.to_string()); d["@ob.uber.color"] = json!("#6fb3f2");
         let p = page(&s0, &sess(d.clone()), &info("linux"), &desk(), "/h"); assert_eq!((p["rows"][0]["look"].as_u64(), p["rows"][0]["picked"].as_bool()), (Some(picked), Some(true)));
         assert_eq!(press(&s0, d.clone(), "ob-uber", "auto").patch["drafts"]["@ob.uber.look"], "auto");
+        // the box is drawn back with exactly what was typed, a trailing space too (a trimmed copy rewrote the field while typing and lost spaces)
+        let mut sp = typed.clone(); sp["@f.obubername"] = json!("Mochi ");
+        assert_eq!(page(&s0, &sess(sp.clone()), &info("linux"), &desk(), "/h")["rows"][0]["fields"][0]["value"], "Mochi ");
+        assert_eq!(sent(&press(&s0, sp, "ob-next", ""), "bots.create")[0]["name"], "Mochi", "Say hello trims");
         let mut bad = typed.clone(); bad["@f.obubercustom"] = json!("blue");
         assert_eq!(press(&s0, bad, "ob-uber", "custom").patch["drafts"]["@ob.uber.err"], "Type a colour like #6fb3f2.");
         // Say hello (the step's Next): made with the name, the colour and the pick, and the step stays for the arrival

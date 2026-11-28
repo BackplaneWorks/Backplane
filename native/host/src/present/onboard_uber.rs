@@ -52,7 +52,9 @@ pub fn step(f: &Facts, session: &Value) -> Step {
     let u = uber(f);
     let spawn = if draft(session, "@ob.uber.made") == "1" { u.map_or(String::new(), |(id, b)| format!("{id}:{}:{}:{}", b.name, b.look, b.color)) } else { String::new() };
     let spawn = spawn.as_str();
-    let mut r = cat_row("obubername", "obubercustom", &name, draft(session, "@f.obubercustom"), look, &color, "ob-uber", u.map(|_| "Save"), spawn);
+    // the box keeps exactly what is typed (a trimmed copy written back into it while typing dropped spaces and its undo); Say hello / Save trim
+    let typed = if session["drafts"]["@f.obubername"].is_string() { draft(session, "@f.obubername").to_string() } else { name.clone() };
+    let mut r = cat_row("obubername", "obubercustom", &typed, draft(session, "@f.obubercustom"), look, &color, "ob-uber", u.map(|_| "Save"), spawn);
     let err = draft(session, "@ob.uber.err");
     if !err.is_empty() { r["note"] = json!(err); r["tone"] = json!("warn"); }
     else if u.is_some() && spawn.is_empty() { r["note"] = json!("Your uberbot is here. A new name or colour is saved with Save."); }

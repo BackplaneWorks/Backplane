@@ -49,7 +49,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("newline", "New line in the message", "Composer", "shift-enter", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("send-alt", "Send (also)", "Composer", "ctrl-enter", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("focus", "Put the keyboard in the message box", "Composer", "/", Fixed),
-    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("focus-key", "Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)", "Composer", "secondary-l", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("focus-key", "Put the keyboard in the message box from anywhere", "Composer", "secondary-l", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("models", "Agent, model and effort", "Composer", "ctrl-m", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("plan-mode", "Toggle Plan mode (off · 1 turn · always)", "Composer", "shift-tab", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("account", "Account of this thread, with what each has left", "Composer", "secondary-shift-a", Rebind),

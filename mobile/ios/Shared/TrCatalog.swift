@@ -2284,7 +2284,7 @@ gpui.send.the.message	Send the message	メッセージを送信	Enviar el mensaj
 gpui.new.line.in.the.message	New line in the message	メッセージ内で改行	Nueva línea en el mensaje
 gpui.send.also	Send (also)	送信（別のキー）	Enviar (también)
 gpui.put.the.keyboard.in.the	Put the keyboard in the message box	メッセージ欄に入力を移す	Poner el foco en el cuadro de mensaje
-gpui.put.the.keyboard.in.the2	Put the keyboard in the message box, from anywhere (a field, a viewer, a dialog)	どこからでもメッセージ欄に入力を移す（入力欄・ビューア・ダイアログから）	Poner el foco en el cuadro de mensaje, desde cualquier lugar (un campo, un visor, un diálogo)
+gpui.put.the.keyboard.in.the2	Put the keyboard in the message box from anywhere	どこからでもメッセージ欄に入力を移す	Poner el foco en el cuadro de mensaje desde cualquier lugar
 gpui.agent.model.and.effort	Agent, model and effort	エージェント・モデル・推論の強さ	Agente, modelo y esfuerzo
 gpui.account.of.this.thread.with	Account of this thread, with what each has left	このスレッドのアカウント（各アカウントの残量つき）	Cuenta de este hilo, con lo que le queda a cada una
 gpui.pick.account.n.in	Pick account 1…9 in the account menu	アカウントメニューでアカウント1…9を選択	Elegir cuenta 1…9 en el menú de cuentas

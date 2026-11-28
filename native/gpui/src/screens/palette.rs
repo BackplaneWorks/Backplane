@@ -9,7 +9,7 @@ use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Do { AddBeside, Rail(String, String), SolidCraft(String), Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String),
-    /** the sidebar's "Add project" (the hub's folder picker) */ AddProject, /** Find across threads (Ctrl+Shift+F) */ FindAll, /** the sidebar's filter, focused */ Filter, /** the Improvements panel */ Improvements }
+    /** the sidebar's "Add project" (the hub's folder picker) */ AddProject, /** Find across threads (Ctrl+Shift+F) */ FindAll, /** the sidebar's filter, focused */ Filter, /** the Improvements panel */ Improvements, /** Plan mode's next setting (Shift+Tab) */ PlanMode }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
 /// The key that does what an item does, as the person reads it ("" for none).
@@ -84,9 +84,10 @@ pub fn rank(label: &str, q: &str) -> u8 {
 /// Words an item is also found by though its label does not hold them (lowercase, space separated).
 fn also(what: &Do) -> &'static str {
     match what {
-        Do::Shortcuts => "keys help hotkeys", Do::Settings => "preferences options", Do::Streamer => "privacy", Do::FindAll | Do::Filter => "search",
-        Do::AddProject => "clone git open folder new", Do::Improvements => "feedback bug report idea",
-        Do::Action(a, _) if a == "bot-new" || a == "room-new" => "create add", _ => "",
+        Do::Shortcuts => "keys help hotkeys", Do::Settings => "preferences options", Do::Streamer => "privacy", Do::FindAll | Do::Filter => "search", // i18n-ok: search words the box matches, never drawn
+        Do::AddProject => "clone git open folder new", Do::Improvements => "feedback bug report idea", // i18n-ok: search words the box matches, never drawn
+        Do::Action(a, _) if a == "bot-new" || a == "room-new" => "create add", Do::Action(a, _) if a == "swarm-new" => "agents group team", // i18n-ok: search words the box matches, never drawn
+        Do::PlanMode => "plan first", _ => "", // i18n-ok: search words the box matches, never drawn
     }
 }
 
@@ -117,6 +118,10 @@ fn items(data: &Value, can_embed: bool) -> Vec<Item> {
             v.push(Item { label: trs("New 3D part in SolidCraft"), place: trs("viewer"), kind: "action", what: Do::SolidCraft("new".into()), row: Value::Null });
         }
         v.push(Item { label: trs("Agent, model and effort"), place: String::new(), kind: "action", what: Do::Models, row: Value::Null });
+        if super::planmode::parse(&thread["planMode"]).is_some() { v.push(Item { label: crate::i18n::t("gpui.keys.planmode"), place: String::new(), kind: "action", what: Do::PlanMode, row: Value::Null }); }
+        // a project's thread: a swarm on its project (else only its row's right-click menu has it)
+        let (pid, ptitle) = (string(&thread["project"], "id"), string(&thread["project"], "title"));
+        if !pid.is_empty() && pid != "chats" { v.push(Item { label: crate::i18n::t("gpui.swarm.new"), place: ptitle, kind: "action", what: Do::Action("swarm-new".into(), pid), row: Value::Null }); }
         v.push(Item { label: trs("Previous thread"), place: String::new(), kind: "action", what: Do::Prev, row: Value::Null });
         v.push(Item { label: trs("Next thread"), place: String::new(), kind: "action", what: Do::Next, row: Value::Null });
     }
@@ -355,6 +360,7 @@ impl Backplane {
             Do::FindAll => { self.kicad_release(cx); self.want_focus = false; self.palette_open_find(cx); return }
             Do::Filter => self.focus_search(cx),
             Do::Improvements => super::improvements::toggle(self, cx),
+            Do::PlanMode => super::planmode::cycle(self, cx),
         }
         if gives_back { self.kicad_return(cx) } else { self.kicad_release(cx) }
         cx.notify();
@@ -429,6 +435,7 @@ pub(crate) fn selected_snapshot(data: &Value, p: &Palette) -> Value {
         Do::FindAll => "find-all".into(),
         Do::Filter => "filter".into(),
         Do::Improvements => "improvements".into(),
+        Do::PlanMode => "plan-mode".into(),
         Do::Message(t, m) => format!("message:{t}:{m}"),
     }).unwrap_or_default();
     serde_json::json!({
@@ -487,6 +494,14 @@ mod tests {
         assert!(r.iter().any(|i| i.label == "Find in all threads") && !r.iter().any(|i| i.what == Do::Streamer), "{r:?}");
         assert_eq!(found(all.clone(), "room", 10)[0].label, "New room");
         assert_eq!(found(all, "bot", 10)[0].what, Do::Action("bot-new".into(), String::new()));
+    }
+    #[test] fn a_projects_thread_offers_a_swarm_and_plan_mode() {
+        let d = serde_json::json!({"thread": {"id": "t1", "project": {"id": "p1", "title": "Motor"}, "planMode": {"phase": "off"}}});
+        let all = items(&d, false);
+        let sw = found(all.clone(), "swarm", 10); assert_eq!((sw[0].what.clone(), sw[0].place.as_str()), (Do::Action("swarm-new".into(), "p1".into()), "Motor"));
+        assert_eq!(found(all, "plan", 10)[0].what, Do::PlanMode);
+        let chat = items(&serde_json::json!({"thread": {"id": "c1", "project": {"id": "chats", "title": "Chats"}}}), false);
+        assert!(!chat.iter().any(|i| matches!(&i.what, Do::Action(a, _) if a == "swarm-new")), "a chat has no project to swarm on");
     }
     #[test] fn a_thread_the_sidebar_does_not_hold_is_found_by_its_title_from_the_hub() {
         let res = json!({"hits": [], "titles": [{"thread": "t1", "title": "Board layout review", "project": "Demo"}, {"thread": "t9", "title": "Old board notes", "project": "Amp"}]});

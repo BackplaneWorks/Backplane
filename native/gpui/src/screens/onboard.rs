@@ -94,7 +94,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     // the step
     let rows = settings::parse(&serde_json::json!({"rows": tour["rows"]}));
     let mut body = div().flex().flex_col().flex_shrink_0().gap_2().w_full().max_w(px(760.));
-    body = body.child(div().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(format!("{} · {}", trs(&string(tour, "counter")), trs(&string(tour, "progress")))));
+    body = body.child(div().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs(&string(tour, "counter")))); // "1 of 7" (the steps listed on the left say what is done: "1 of 7 · 2 of 6 done" read as a mistake)
     body = body.child(div().text_size(crate::scale::tpx(22.)).font_weight(FontWeight::BOLD).child(trs(&string(tour, "title"))));
     body = body.child(div().flex_shrink_0().w_full().text_size(crate::scale::tpx(14.)).text_color(c("dim")).line_height(crate::scale::tpx(21.)).child(trs(&string(tour, "body")))); // measured at the width it is drawn at, so its rows start below its last line
     for (i, r) in rows.iter().enumerate() { body = body.child(settings::row_el(cx, light, fields, r, 1000 + i, avail)); }
