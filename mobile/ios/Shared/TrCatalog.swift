@@ -1864,6 +1864,7 @@ viewer.diff.files.more	{n, number} more changed files not shown here	ここに�
 settings.settle.personal	Personal grace (minutes)	個人の会話の待機時間（分）	Gracia personal (minutos)
 settings.settle.personal.note	Read, completed personal conversations settle after this quiet period (240 minutes is four hours). 0 disables the timer.	既読で正常終了した個人の会話を、指定した非活動時間で完了済みに移します（240分は4時間）。0で無効です。	Las conversaciones personales leídas y completadas se cierran tras este periodo de inactividad (240 minutos son cuatro horas). 0 desactiva el temporizador.
 gpui.settings.more	… {n} more	…ほか{n}件	… {n} más
+gpui.settings.found	{n, plural, one {# found} other {# found}}	{n}件見つかりました	{n, plural, one {# encontrado} other {# encontrados}}
 gpui.settings.textpct	{pct}% of the standard size.	標準の{pct}%です。	{pct}% del tamaño estándar.
 gpui.settings.px	{px} px.	{px} pxです。	{px} px.
 gpui.appupdate.hub	Hub: Backplane {version}	ハブ: Backplane {version}	Hub: Backplane {version}
@@ -2924,10 +2925,12 @@ gpui.e.kicad.found	found · {path}	検出 · {path}	encontrado · {path}
 gpui.e.kicad.just	version {version} · {path}. Installed by Backplane just now.	バージョン{version} · {path}。Backplaneが今インストールしました。	versión {version} · {path}. Instalado por Backplane ahora mismo.
 gpui.e.kicad.passed	version {version} · {path}. Nothing runs at {set}, so this one is used.	バージョン{version} · {path}。{set}では何も動かないため、こちらを使います。	versión {version} · {path}. No hay nada ejecutable en {set}, así que se usa este.
 gpui.e.kicad.checking	checking	確認中	comprobando
-gpui.e.kicad.path.hint	Path to KiCad's command line, empty for the one on PATH	KiCadのコマンドラインのパス。空ならPATH上のものを使います	Ruta a la línea de comandos de KiCad, vacío para usar el de PATH
+gpui.e.kicad.path.hint	Path to kicad-cli	kicad-cliのパス	Ruta a kicad-cli
 gpui.e.freecad.notfound	FreeCAD was not found. Mechanical parts are made with it.	FreeCADが見つかりません。機構部品はFreeCADで作ります。	No se encontró FreeCAD. Las piezas mecánicas se crean con él.
 gpui.e.freecad.notat	FreeCAD was not found at that path.	そのパスにFreeCADが見つかりません。	No se encontró FreeCAD en esa ruta.
-gpui.e.freecad.path.hint	Path to FreeCAD's command line (freecadcmd), empty to look for it	FreeCADのコマンドライン（freecadcmd）のパス。空なら探します	Ruta a la línea de comandos de FreeCAD (freecadcmd), vacío para buscarlo
+gpui.e.freecad.path.hint	Path to freecadcmd	freecadcmdのパス	Ruta a freecadcmd
+gpui.e.path.empty.onpath	Empty uses the one on PATH.	空ならPATH上のものを使います。	Vacío usa el de PATH.
+gpui.e.path.empty.look	Empty looks for it.	空なら探します。	Vacío lo busca.
 gpui.e.keys.kept	Kept on this machine, in the hub's secrets folder. Agents are told their names and where to load them, never the values.	このマシンのハブのシークレットフォルダに保管します。エージェントには名前と読み込み場所だけを伝え、値は伝えません。	Guardada en esta máquina, en la carpeta de secretos del hub. A los agentes se les dice sus nombres y dónde cargarlas, nunca los valores.
 gpui.e.keys.again	Press again to forget it.	もう一度押すと削除します。	Pulsa de nuevo para olvidarla.
 gpui.e.keys.forget.it	Forget it	削除する	Olvidarla
@@ -5054,7 +5057,7 @@ gpui.f2.solidcraft.cli	SolidCraft''s command line{v} at {cli}. Agents model with
 gpui.f2.solidcraft.cli.nowin	SolidCraft''s command line{v} at {cli}. Agents model with it. Its window program, for the 3D pane, is not installed.	SolidCraft のコマンドライン{v}（{cli}）。エージェントがモデリングに使います。3D ペイン用のウィンドウプログラムは未インストールです。	Línea de comandos de SolidCraft{v} en {cli}. Los agentes modelan con ella. Su programa de ventana, para el panel 3D, no está instalado.
 gpui.c.solidcraft.settings.ask	Install SolidCraft?	SolidCraft をインストールしますか？	¿Instalar SolidCraft?
 gpui.c.solidcraft.settings.installing	Installing SolidCraft {v}	SolidCraft {v} をインストール中	Instalando SolidCraft {v}
-gpui.c.solidcraft.settings.folder.hint	Folder holding solidcraft and solidcraft-cli, empty to look for it	solidcraft と solidcraft-cli のフォルダ（空欄で自動検索）	Carpeta con solidcraft y solidcraft-cli, vacío para buscarlo
+gpui.c.solidcraft.settings.folder.hint	SolidCraft's folder	SolidCraftのフォルダ	Carpeta de SolidCraft
 gpui.c.solidcraft.settings.notfound.dir	SolidCraft was not found in that folder.	そのフォルダに SolidCraft が見つかりませんでした。	No se encontró SolidCraft en esa carpeta.
 gpui.c.solidcraft.settings.notfound	SolidCraft was not found. 3D models open and are edited in it. Install it below, or set the folder of one you have.	SolidCraft が見つかりませんでした。3D モデルの表示・編集に使われます。下からインストールするか、既存のフォルダを指定してください。	No se encontró SolidCraft. Los modelos 3D se abren y editan en él. Instálalo abajo o indica la carpeta de uno existente.
 gpui.c.solidcraft.settings.nopkg	No SolidCraft download is published for this computer. Install it from github.com/tangency-labs/solidcraft, then set its folder above.	このコンピュータ向けの SolidCraft ダウンロードは公開されていません。github.com/tangency-labs/solidcraft からインストールし、上のフォルダを指定してください。	No hay descarga de SolidCraft publicada para este equipo. Instálalo desde github.com/tangency-labs/solidcraft y luego indica su carpeta arriba.
@@ -5898,6 +5901,9 @@ menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
 
     /// gpui.settings.more = … {n} more
     static func gpui_settings_more(n: String) -> String { f("gpui.settings.more", ["n": n]) }
+
+    /// gpui.settings.found = {n, plural, one {# found} other {# found}}
+    static func gpui_settings_found(n: Int) -> String { f("gpui.settings.found", ["n": String(n)]) }
 
     /// gpui.settings.textpct = {pct}% of the standard size.
     static func gpui_settings_textpct(pct: String) -> String { f("gpui.settings.textpct", ["pct": pct]) }
