@@ -4395,6 +4395,7 @@ android.attach.file	Choose a file	ファイルを選ぶ	Elegir un archivo
 android.diff.pr	PR	PR	PR
 android.diff.commit.ask	Commit this thread''s changes with its title as the message, then push them?	このスレッドの変更をタイトルをメッセージとしてコミットし、プッシュしますか？	¿Confirmar los cambios de este hilo con su título como mensaje y enviarlos?
 android.diff.pr.ask	Commit this thread''s changes, push them and open a pull request?	このスレッドの変更をコミットしてプッシュし、プルリクエストを開きますか？	¿Confirmar los cambios de este hilo, enviarlos y abrir una pull request?
+android.ctx.pct	ctx {pct}%	ctx {pct}%	ctx {pct}%
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
@@ -7619,6 +7620,9 @@ menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
 
     /// mobile.diff.summary.one = 1 file, +{added} −{removed}
     static func mobile_diff_summary_one(added: String, removed: String) -> String { f("mobile.diff.summary.one", ["added": added, "removed": removed]) }
+
+    /// android.ctx.pct = ctx {pct}%
+    static func android_ctx_pct(pct: String) -> String { f("android.ctx.pct", ["pct": pct]) }
 
     /// ios.sections.running = {n, number} running
     static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }

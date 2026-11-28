@@ -1166,6 +1166,15 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             }
             DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.focusRequester(replyBox).testTag("thread.composer"), 6, if (planActive) planTint else dcs.primary)
             thread?.memory?.let { MemoryBar(it) }
+            // the context meter, as the desktop composer's "ctx N%", once it is worth a look (from half full; amber from 80%), in the memory bar's form so
+            // the tool row keeps its room: a tap shows Context & Prompt
+            thread?.ctxPct?.takeIf { it >= 50 }?.let { pct -> var ctxOpen by remember(id) { mutableStateOf(false) }
+                val tone = if (pct >= 80) dwarn else dcs.primary
+                Row(Modifier.fillMaxWidth().clickable(enabled = DataClient.has("threadContext")) { ctxOpen = true }.testTag("thread.ctx"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(48.dp).height(4.dp).background(dcs.outlineVariant)) { Box(Modifier.fillMaxHeight().fillMaxWidth(pct / 100f).background(tone)) }
+                    DMono(Msg.android_ctx_pct(pct), if (pct >= 80) dwarn else dcs.onSurfaceVariant, 11)
+                }
+                if (ctxOpen) ThreadContextSheet(id) { ctxOpen = false } }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { Msg.common_default }}" }, "thread.model", Modifier.weight(1f), provider = thread.provider) { models = true } else Spacer(Modifier.weight(1f))
                 if (DataClient.has("plan") && planMode != null) {

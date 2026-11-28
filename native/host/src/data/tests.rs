@@ -571,6 +571,11 @@ impl crate::api::RpcHandler for PushState {
     assert_eq!(ask(&mut ws, 2, "viewer.git", json!({"thread":"nope","action":"commit_push"})).await["ok"], false, "unknown thread");
     assert!(matches!(super::webpolicy::policy("viewer.git", &json!({"thread":"t2","action":"commit_push"})), super::webpolicy::Policy::Denied));
 }
+#[test] fn data_a_threads_context_is_a_percent_when_its_window_is_known() {
+    let row = |u: &str| { let mut r = json!({}); super::with_ctx(&mut r, u); r };
+    assert_eq!(row("62000/200000")["ctxPct"], 31); assert_eq!(row("250000/200000")["ctxPct"], 100, "never past full");
+    for u in ["", "62000/0", "0/200000", "x/y", "62000"] { assert!(row(u).get("ctxPct").is_none(), "{u}") }
+}
 #[test] fn data_a_messages_attached_files_are_listed() {
     // a file (not a picture) sent with a message: its line is not shown, so the entry lists it for the phone's chip, by its own name
     let t = "read this\n\n[attachment: /h/attachments/t1/k9f-data sheet.pdf]\n[attachment: /h/attachments/t1/k1-x.png]\n[attachment: /p/notes.csv]";

@@ -1368,6 +1368,20 @@ struct DataThreadView: View {
                     .padding(.horizontal, 10).padding(.vertical, 9).frame(minHeight: 44, alignment: .topLeading).dbox(borderColor)
                     .accessibilityLabel(Tr.t("Message"))
                 if let m = thread?.memory { MemoryBar(m: m) }
+                // the context meter, as the desktop composer's "ctx N%", once it is worth a look (from half full; amber from 80%), in the memory bar's form so
+                // the tool row keeps its room: a tap shows Context & Prompt
+                if let pct = thread?.ctxPct, pct >= 50 {
+                    Button { if client.has("threadContext") { contextOpen = true } } label: {
+                        HStack(spacing: 8) {
+                            ZStack(alignment: .leading) {
+                                Rectangle().fill(BackplaneDesign.line).frame(width: 48, height: 4)
+                                Rectangle().fill(pct >= 80 ? BackplaneDesign.warn : BackplaneDesign.accent).frame(width: 48 * CGFloat(min(pct, 100)) / 100, height: 4)
+                            }
+                            Text(Tr.android_ctx_pct(pct: String(pct))).dmono(11).foregroundStyle(pct >= 80 ? BackplaneDesign.warn : BackplaneDesign.dim)
+                            Spacer(minLength: 0)
+                        }.contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityIdentifier("data.thread.ctx")
+                }
                 HStack(spacing: 6) {
                     if client.has("picker") || thread?.chip.isEmpty == false {
                         let pv = (thread?.provider).flatMap { $0.isEmpty ? nil : $0 } ?? ProviderMarks.providerOfChip(chip)

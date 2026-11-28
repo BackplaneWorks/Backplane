@@ -4030,6 +4030,7 @@ android.attach.file = ファイルを選ぶ
 android.diff.pr = PR
 android.diff.commit.ask = このスレッドの変更をタイトルをメッセージとしてコミットし、プッシュしますか？
 android.diff.pr.ask = このスレッドの変更をコミットしてプッシュし、プルリクエストを開きますか？
+android.ctx.pct = ctx {pct}%
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
