@@ -302,8 +302,8 @@ fn attempt_panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, a: &Va
     // a link that comes back to this computer (Codex: redirect_uri on 127.0.0.1) finishes by itself: no code to paste
     let back_here = returns_here(&url);
     let help = if !ready { trs("Generating the sign-in link…") } else if !code.is_empty() { trs("Open the link and enter this code.") } else if back_here { trs("Open the link and sign in. Setup carries on by itself when you're done.") } else { trs("Open the link, sign in to Claude, then paste the code it shows.") };
-    col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c(if ready { "dim" } else { "accent" })).child(help));
-    if !code.is_empty() { col = col.child(div().text_size(crate::scale::tpx(20.)).font_weight(FontWeight::BOLD).child(code.clone())); }
+    col = col.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c(if ready { "dim" } else { "accent" })), help));
+    if !code.is_empty() { col = col.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(20.)).font_weight(FontWeight::BOLD), code.clone())); }
     if !url.is_empty() {
         let (u1, u2) = (url.clone(), url.clone());
         col = col.child(div().flex().items_center().gap_2()
@@ -318,8 +318,8 @@ fn attempt_panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, a: &Va
             .child(div().flex_1().h(crate::scale::tpx(28.)).px_2().flex().items_center().bg(c("raise")).child(input.clone()))
             .child(button(cx, light, format!("acct-code-{aid}"), &trs("Submit code"), true, false, move |this, cx| respond(this, &a1, cx))));
     }
-    if st.checking.contains(&aid) { col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("accent")).child(trs("Checking the code and your sign-in…"))); }
-    if !msg.is_empty() { col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&msg))); }
+    if st.checking.contains(&aid) { col = col.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c("accent")), trs("Checking the code and your sign-in…"))); }
+    if !msg.is_empty() { col = col.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c("bad")), trs(&msg))); }
     let (aid2, pid2) = (aid.clone(), pid.to_string());
     col.child(div().flex().child(button(cx, light, format!("acct-cancel-{aid}"), &trs("Cancel sign-in"), false, false, move |this, _| ask(this, json!({"op": "cancel", "profile": pid2, "attempt": aid2}))))).into_any_element()
 }
@@ -334,10 +334,10 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     let al = allowance(p); if !al.is_empty() { sub.push(al) }
     let head = if narrow { div().flex().flex_col().items_start() } else { div().flex().items_center() }.gap_3()
         .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(140.)).max_w_full()
-            .child(div().flex().items_center().gap_2().child(super::picker::logo(if p["provider"] == "codex" { "codex" } else { "claude" })).child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(string(p, "label")))
+            .child(div().flex().items_center().gap_2().child(super::picker::logo(if p["provider"] == "codex" { "codex" } else { "claude" })).child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD), string(p, "label")))
                 .when(default, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("New threads")))))
-            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(sub.join("  ·  "))))
-        .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
+            .child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c("dim")), sub.join("  ·  "))))
+        .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c(tok)), word)));
     let mut card = div().flex().flex_col().p_4().mb_3().border_1().border_color(c("line")).bg(c("view")).child(head);
     for el in controls(cx, light, st, p, i, default) { card = card.child(el); }
     card.into_any_element()
@@ -376,7 +376,7 @@ fn controls(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, 
     }
     let mut out = vec![row.into_any_element()];
     for a in attempts_of(&st.snap, &id) { out.push(attempt_panel(cx, light, st, &a, &id)); }
-    let why = failure_of(&st.snap, &id); if !why.is_empty() && attempts_of(&st.snap, &id).is_empty() { out.push(div().mt_2().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&why)).into_any_element()); }
+    let why = failure_of(&st.snap, &id); if !why.is_empty() && attempts_of(&st.snap, &id).is_empty() { out.push(super::settings::words(cx, light, div().mt_2().text_size(crate::scale::tpx(12.)).text_color(c("bad")), trs(&why)).into_any_element()); }
     out
 }
 fn state_of(snap: &Value, id: &str) -> String { profiles(snap).iter().find(|p| p["id"] == id).map(|p| string(p, "state")).unwrap_or_default() }
@@ -402,12 +402,12 @@ fn default_card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provide
     // a hold on the login or on an added account of the same identity: one account, out once
     let held = std::iter::once(String::new()).chain(twins.iter().map(|t| string(t, "id"))).find_map(|id| st.snap["holds"][&id]["text"].as_str().map(str::to_string));
     let card_row = if narrow { div().flex().flex_col().items_start() } else { div().flex().items_center() };
-    let mut words = div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(160.)).max_w_full().child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs("Default account")))
-        .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(default_line(&st.snap, provider)));
-    if let Some(t) = twin_line(&st.snap, provider) { words = words.child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(t)); }
+    let mut words = div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(160.)).max_w_full().child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD), trs("Default account")))
+        .child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c("dim")), default_line(&st.snap, provider)));
+    if let Some(t) = twin_line(&st.snap, provider) { words = words.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c("dim")), t)); }
     let mut row = card_row.gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view")).child(words)
         .child({ let (word, tok) = match held { Some(t) => (trs(&t), "warn"), None => (if def_default { trs("Used for new threads") } else { trs("Available") }, "ok") };
-            div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)) });
+            div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c(tok))).child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c(tok)), word)) });
     // the added copy can still be deleted from here (threads on it go on on the CLI login's identity once it is gone)
     for t in &twins {
         let pid = string(t, "id");
@@ -426,9 +426,9 @@ pub const ADD_ROW_MIN: f32 = 380.0;
 pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
-    out.push(div().pb_3().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Each account is a separate Claude or Codex subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
-    if !st.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
-    if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
+    out.push(super::settings::words(cx, light, div().pb_3().text_size(crate::scale::tpx(12.)).text_color(c("dim")), trs("Each account is a separate Claude or Codex subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
+    if !st.notice.is_empty() { out.push(super::settings::words(cx, light, div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("bad")), trs(&st.notice)).into_any_element()); }
+    if !st.info.is_empty() { out.push(super::settings::words(cx, light, div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("text")), st.info.clone()).into_any_element()); }
     // the hub's accounts by person (host settings/accounts_people.rs): one entry per email, each login of it with its bars; an older hub sends none and the cards below stand
     if let Some(people) = st.snap["people"].as_array() {
         for (i, e) in people.iter().enumerate() { out.push(person(cx, light, st, e, i, avail < ADD_ROW_MIN)); }
@@ -456,14 +456,14 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
 /// A bar's colour from the hub's tone: ok, warn (from 75%), bad (from 90%, or held), dim (a last reading).
 pub fn bar_color(tone: &str) -> &'static str { match tone { "ok" => "ok", "warn" => "warn", "bad" => "bad", _ => "faint" } }
 /// One limit window: its name and the hub's words over a bar filled to its share, in its tone.
-fn usage_bar(light: bool, b: &Value) -> AnyElement {
+fn usage_bar(cx: &mut Context<Backplane>, light: bool, b: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let tone = bar_color(b["tone"].as_str().unwrap_or(""));
     let used = (b["used"].as_f64().unwrap_or(0.0) / 100.0).clamp(0.0, 1.0) as f32;
     div().flex().flex_col().gap(px(3.)).w_full()
         .child(div().flex().items_center().gap_2().text_size(crate::scale::tpx(11.))
-            .child(div().flex_1().text_color(c("dim")).child(trs(&string(b, "name"))))
-            .child(div().text_color(c(if tone == "ok" { "faint" } else { tone })).child(trs(&string(b, "text")))))
+            .child(super::settings::words(cx, light, div().flex_1().text_color(c("dim")), trs(&string(b, "name"))))
+            .child(super::settings::words(cx, light, div().text_color(c(if tone == "ok" { "faint" } else { tone })), trs(&string(b, "text")))))
         .child(div().w_full().h(px(6.)).bg(c("raise")).border_1().border_color(c("line")).child(div().h_full().w(relative(used)).bg(c(tone))))
         .into_any_element()
 }
@@ -472,7 +472,7 @@ fn usage_bar(light: bool, b: &Value) -> AnyElement {
 fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i: usize, narrow: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut card = div().flex().flex_col().gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
-        .child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(string(e, "title")));
+        .child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD), string(e, "title")));
     for (j, l) in e["logins"].as_array().into_iter().flatten().enumerate() {
         let (pv, kind, pid) = (string(l, "provider"), string(l, "kind"), string(l, "profile"));
         let mut what = vec![trs(&string(l, "title"))];
@@ -483,14 +483,14 @@ fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i:
         let (word, tok) = if out { (trs(&string(l, "hold")), "warn") } else { (trs(&string(l, "line")), bar_color(l["tone"].as_str().unwrap_or(""))) };
         let head = if narrow { div().flex().flex_col().items_start() } else { div().flex().items_center() }.gap_3()
             .child(div().flex().items_center().gap_2().flex_1().min_w(px(140.)).child(super::picker::logo(&pv))
-                .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(what.join(" · ")))
+                .child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c("dim")), what.join(" · ")))
                 .when(l["default"] == true, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Used for new threads")))))
-            .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
+            .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c(tok)), word)));
         let mut col = div().flex().flex_col().gap_2().when(j > 0, |d| d.pt_3().border_t_1().border_color(c("line"))).child(head);
-        for b in l["bars"].as_array().into_iter().flatten() { col = col.child(usage_bar(light, b)); }
-        let note = string(l, "note"); if !note.is_empty() { col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&note))); }
+        for b in l["bars"].as_array().into_iter().flatten() { col = col.child(usage_bar(cx, light, b)); }
+        let note = string(l, "note"); if !note.is_empty() { col = col.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(11.)).text_color(c("faint")), trs(&note))); }
         let also: Vec<String> = l["also"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_string)).collect();
-        if !also.is_empty() { col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("{} {}: {}", trs("Also added as"), also.join(", "), trs("the same account, counted once")))); }
+        if !also.is_empty() { col = col.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(11.)).text_color(c("faint")), format!("{} {}: {}", trs("Also added as"), also.join(", "), trs("the same account, counted once")))); }
         if let Some(p) = profiles(&st.snap).into_iter().find(|p| string(p, "id") == pid && !pid.is_empty()) {
             for el in controls(cx, light, st, &p, i * 10 + j, l["default"] == true) { col = col.child(el); }
         } else if kind == "cli" && l["default"] != true && l["state"] == "connected" {
@@ -507,21 +507,21 @@ fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i:
 }
 
 /// Settings › Usage's head: each person and each login of theirs with its state or hold and a bar per limit window, no buttons (those are on Accounts).
-pub fn usage_summary(light: bool, st: &Accounts) -> Vec<AnyElement> {
+pub fn usage_summary(cx: &mut Context<Backplane>, light: bool, st: &Accounts) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let Some(people) = st.snap["people"].as_array() else { return vec![] };
     let mut out = vec![];
     for e in people {
-        let mut card = div().flex().flex_col().gap_2().pb_3().mb_3().border_b_1().border_color(c("line")).child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).child(string(e, "title")));
+        let mut card = div().flex().flex_col().gap_2().pb_3().mb_3().border_b_1().border_color(c("line")).child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD), string(e, "title")));
         for l in e["logins"].as_array().into_iter().flatten() {
             let pv = string(l, "provider");
             let mut what = vec![trs(&string(l, "title"))]; if let Some(p) = l["plan"].as_str().filter(|p| !p.is_empty()) { what.push(p.to_string()) }
             let (word, tok) = if l["out"] == true { (trs(&string(l, "hold")), "warn") } else { (trs(&string(l, "line")), bar_color(l["tone"].as_str().unwrap_or(""))) };
             card = card.child(div().flex().items_center().gap_2().child(super::picker::logo(&pv))
-                .child(div().flex_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(what.join(" · ")))
-                .child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
-            for b in l["bars"].as_array().into_iter().flatten() { card = card.child(usage_bar(light, b)); }
-            let note = string(l, "note"); if !note.is_empty() { card = card.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&note))); }
+                .child(super::settings::words(cx, light, div().flex_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")), what.join(" · ")))
+                .child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(12.)).text_color(c(tok)), word)));
+            for b in l["bars"].as_array().into_iter().flatten() { card = card.child(usage_bar(cx, light, b)); }
+            let note = string(l, "note"); if !note.is_empty() { card = card.child(super::settings::words(cx, light, div().text_size(crate::scale::tpx(11.)).text_color(c("faint")), trs(&note))); }
         }
         out.push(card.into_any_element());
     }
@@ -532,7 +532,7 @@ pub fn usage_summary(light: bool, st: &Accounts) -> Vec<AnyElement> {
 pub fn panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provider: &str) -> Vec<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let mut out: Vec<AnyElement> = vec![];
-    if !st.notice.is_empty() { out.push(div().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
+    if !st.notice.is_empty() { out.push(super::settings::words(cx, light, div().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("bad")), trs(&st.notice)).into_any_element()); }
     // the accounts of this provider and their sign-ins; adding another, named account is Settings › Accounts' alone
     for (i, p) in profiles(&st.snap).iter().enumerate().filter(|(_, p)| p["provider"] == provider) { out.push(card(cx, light, st, p, i, false)); }
     out
