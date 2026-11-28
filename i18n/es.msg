@@ -3979,6 +3979,12 @@ android.download.share = Compartir
 android.download.retry = Reintentar
 android.download.noapp = Ninguna app aquí abre ese archivo.
 android.download.button = Descargar
+mobile.diff.summary = {files} archivos, +{added} −{removed}
+mobile.diff.summary.one = 1 archivo, +{added} −{removed}
+mobile.diff.new = nuevo
+mobile.diff.deleted = eliminado
+mobile.diff.renamed = renombrado
+mobile.diff.binary = binario
 
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} ejecutándose

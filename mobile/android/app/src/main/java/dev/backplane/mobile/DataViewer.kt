@@ -1115,23 +1115,89 @@ private fun DiffTab(thread: DThread) {
             d == null -> CircularProgressIndicator(Modifier.padding(24.dp))
             nogit.isNotEmpty() -> DMono(Msg.android_diff_nogit, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.nogit"), lines = 4)
             d.isBlank() -> DMono(Msg.android_diff_none, dcs.onSurfaceVariant, 12, Modifier.padding(16.dp).testTag("diff.none"))
-            else -> {
-                val green = androidx.compose.ui.graphics.Color(0xFF4CAF7A); val lines = remember(d) { d.lines().take(4000) }
-                LazyColumn(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).testTag("diff.list")) {
-                    items(lines.size) { i ->
-                        val l = lines[i]
-                        val (c, bgc) = when {
-                            l.startsWith("+++") || l.startsWith("---") || l.startsWith("diff ") || l.startsWith("index ") -> dcs.onSurface to dcs.surfaceVariant
-                            l.startsWith("+") -> green to green.copy(alpha = .12f)
-                            l.startsWith("-") -> dcs.error to dcs.error.copy(alpha = .12f)
-                            l.startsWith("@@") -> dcs.primary to androidx.compose.ui.graphics.Color.Transparent
-                            else -> dcs.onSurfaceVariant to androidx.compose.ui.graphics.Color.Transparent
-                        }
-                        Text(l.ifEmpty { " " }, Modifier.fillMaxWidth().background(bgc).padding(horizontal = 8.dp, vertical = 1.dp), color = c, fontFamily = BpMono, fontSize = 11.sp, softWrap = false, fontWeight = if (l.startsWith("diff ")) FontWeight.Bold else FontWeight.Normal)
-                    }
-                }
+            else -> DiffFiles(thread, d)
+        }
+    }
+}
+
+/** The changed files (DiffModel): totals, then per file a header that folds and its numbered, wrapped lines. */
+@Composable
+private fun DiffFiles(thread: DThread, d: String) {
+    val p = remember(d) { DiffModel.parse(d) }
+    // gutter digits per file: 4, more when a file's numbers are longer
+    val digits = remember(p) { p.files.map { f -> maxOf(4, f.lines.maxOfOrNull { maxOf(it.old, it.new) }?.toString()?.length ?: 0) } }
+    val open = remember(thread.id) { mutableStateMapOf<String, Boolean>() }
+    val small = p.files.size <= 3
+    // open by default when few files or a short one; a file past the line cap (nothing of it kept) starts folded
+    fun isOpen(f: DiffModel.File) = open[f.path] ?: ((small || f.lines.size <= 80) && !(f.cut && f.lines.isEmpty()))
+    val ok = dok; val bad = dcs.error
+    // counts as plain digits (as the desktop writes them), so the +/− parts can be found and coloured
+    val sum = if (p.files.size == 1) Msg.mobile_diff_summary_one("${p.added}", "${p.removed}") else Msg.mobile_diff_summary("${p.files.size}", "${p.added}", "${p.removed}")
+    val sumText = remember(sum, ok, bad) {
+        androidx.compose.ui.text.buildAnnotatedString {
+            append(sum)
+            val a = "+${p.added}"; val i = sum.lastIndexOf(a); if (i >= 0) addStyle(androidx.compose.ui.text.SpanStyle(color = ok), i, i + a.length)
+            val r = "−${p.removed}"; val j = sum.lastIndexOf(r); if (j >= 0) addStyle(androidx.compose.ui.text.SpanStyle(color = bad), j, j + r.length)
+        }
+    }
+    Text(sumText, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("diff.summary"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+    DLine()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    LazyColumn(Modifier.fillMaxSize().testTag("diff.list")) {
+        p.files.forEachIndexed { i, f ->
+            val shown = isOpen(f)
+            item(key = "f:$i") { DiffFileHead(f, i, shown) { open[f.path] = !shown } }
+            if (shown) {
+                val w = with(density) { (digits[i] * 6 + 4).sp.toDp() }
+                items(f.lines.size, key = { j -> "l:$i:$j" }) { j -> DiffLineRow(f.lines[j], w) }
+                if (f.cut) item(key = "c:$i") { DMono(Msg.gpui_c_diff_cut, dcs.onSurfaceVariant, 12, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp).testTag("diff.cut.$i"), lines = 2) }
             }
         }
+    }
+}
+
+@Composable
+private fun DiffFileHead(f: DiffModel.File, i: Int, shown: Boolean, toggle: () -> Unit) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 44.dp).background(dcs.surfaceVariant).clickable(onClick = toggle).padding(horizontal = 8.dp, vertical = 6.dp).testTag("diff.file.$i"), verticalAlignment = Alignment.CenterVertically) {
+            Icon(if (shown) Icons.Filled.ExpandMore else Icons.Filled.ChevronRight, null, Modifier.size(16.dp), tint = dcs.onSurfaceVariant)
+            Spacer(Modifier.width(6.dp))
+            // the folder dim and cut at its end, the file name bold: a long path keeps its name (a middle ellipsis)
+            val cut = f.path.lastIndexOf('/')
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                // (aligned to its end: a cut folder's "…" sits against the name, with no gap)
+                if (cut >= 0) Text(f.path.substring(0, cut + 1), Modifier.weight(1f, fill = false), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis, textAlign = androidx.compose.ui.text.style.TextAlign.End)
+                Text(f.path.substring(cut + 1), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+            }
+            Spacer(Modifier.width(8.dp))
+            val word = when (f.state) { "new" -> Msg.mobile_diff_new; "deleted" -> Msg.mobile_diff_deleted; "renamed" -> Msg.mobile_diff_renamed; "binary" -> Msg.mobile_diff_binary; else -> "" }
+            if (word.isNotEmpty()) DMono(word, dcs.onSurfaceVariant, 11)
+            else {
+                DMono("+${f.added}", dok, 11); Spacer(Modifier.width(6.dp)); DMono("−${f.removed}", dcs.error, 11)
+            }
+        }
+        DLine()
+    }
+}
+
+@Composable
+private fun DiffLineRow(l: DiffModel.Line, gutter: androidx.compose.ui.unit.Dp) {
+    val (bg, fg) = when (l.kind) {
+        '+' -> dok.copy(alpha = .12f) to dcs.onSurface
+        '-' -> dcs.error.copy(alpha = .12f) to dcs.onSurface
+        '@' -> dcs.surfaceVariant to dcs.primary
+        '\\' -> Color.Transparent to dcs.onSurfaceVariant   // dim, still readable on the dark theme (it carries the too-big counts)
+        else -> Color.Transparent to dcs.onSurface
+    }
+    val text = when (l.kind) { '+', '-', ' ' -> "${l.kind}${l.text}"; else -> l.text }
+    Row(Modifier.fillMaxWidth().background(bg).padding(end = 8.dp)) {
+        listOf(l.old, l.new).forEach { n ->
+            Text(if (n > 0) "$n" else "", Modifier.width(gutter).padding(top = 2.dp), color = dfaint, fontFamily = BpMono, fontSize = 10.sp, maxLines = 1, softWrap = false,
+                textAlign = androidx.compose.ui.text.style.TextAlign.End)
+        }
+        Spacer(Modifier.width(8.dp))
+        Text(text.ifEmpty { " " }, Modifier.weight(1f).padding(vertical = 1.dp), color = fg, fontFamily = BpMono, fontSize = 12.sp, softWrap = true)
     }
 }
 

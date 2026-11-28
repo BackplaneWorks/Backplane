@@ -4366,6 +4366,12 @@ android.download.share	Share	共有	Compartir
 android.download.retry	Retry	再試行	Reintentar
 android.download.noapp	No app here opens that file.	このファイルを開けるアプリがありません。	Ninguna app aquí abre ese archivo.
 android.download.button	Download	ダウンロード	Descargar
+mobile.diff.summary	{files} files, +{added} −{removed}	{files} ファイル、+{added} −{removed}	{files} archivos, +{added} −{removed}
+mobile.diff.summary.one	1 file, +{added} −{removed}	1 ファイル、+{added} −{removed}	1 archivo, +{added} −{removed}
+mobile.diff.new	new	新規	nuevo
+mobile.diff.deleted	deleted	削除	eliminado
+mobile.diff.renamed	renamed	名前変更	renombrado
+mobile.diff.binary	binary	バイナリ	binario
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
@@ -7580,6 +7586,12 @@ settings.cad.mech.backplane	Backplane's viewer	Backplane のビューアー	Viso
 
     /// android.download.of = {have} of {total}
     static func android_download_of(have: String, total: String) -> String { f("android.download.of", ["have": have, "total": total]) }
+
+    /// mobile.diff.summary = {files} files, +{added} −{removed}
+    static func mobile_diff_summary(files: String, added: String, removed: String) -> String { f("mobile.diff.summary", ["files": files, "added": added, "removed": removed]) }
+
+    /// mobile.diff.summary.one = 1 file, +{added} −{removed}
+    static func mobile_diff_summary_one(added: String, removed: String) -> String { f("mobile.diff.summary.one", ["added": added, "removed": removed]) }
 
     /// ios.sections.running = {n, number} running
     static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }
