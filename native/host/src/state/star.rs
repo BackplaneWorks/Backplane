@@ -34,14 +34,14 @@ fn out(o: &Value, now: u64) -> bool {
 }
 /// whether a snoozed offer has come out again by now (the next prompt pushes it to the person's connection)
 pub fn woke(raw: &str, now: u64) -> bool { let o = parse_or_null(raw); gstr(&o, "status", "") == "snoozed" && out(&o, now) }
-/// Star.replay (Settings, Developer): the offer made again now, whatever was decided, under a fresh token so it is decided again like the first.
+/// Star.replay (Settings, Setup, Developer): the offer made again now, whatever was decided, under a fresh token so it is decided again like the first.
 /// The ids are marked `dev-` (no person's prompt), so the ledger stays bounded and well formed.
 pub fn replay(now: u64) -> Vec<Value> {
     let ids: Vec<String> = (1..=5).map(|i| format!("dev-{now}-{i}")).collect();
     let v = json!({"status": "sent", "ids": ids, "token": ids[4], "eligibleAt": now, "sentAt": now, "dev": true});
     vec![set(show(&v), now)]
 }
-/// Settings, Developer: where the suggestion stands, in a few words
+/// Settings, Setup, Developer: where the suggestion stands, in a few words
 pub fn standing(raw: &str) -> String {
     let o = parse_or_null(raw);
     match gstr(&o, "status", "") {

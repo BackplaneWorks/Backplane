@@ -568,10 +568,11 @@ pub fn row(l: &crate::local::Local, page: &str) -> Option<crate::screens::settin
         _ => None,
     }
 }
-/// Where the row goes: after the hub's own update row on Network (it follows "Update channel"), after the hub's version on About; else at the end.
+/// Where the row goes: right under the hub's version ("Hub: Backplane <v>", the first row of About and updates; "Backplane <v>" on an older
+/// hub's About), else after "Update channel", else at the end.
 pub fn row_at(labels: &[&str]) -> usize {
-    if let Some(i) = labels.iter().position(|l| *l == "Update channel") { return (i + 2).min(labels.len()) }
-    /* i18n-ok: hub row labels */ labels.iter().position(|l| l.starts_with("Hub: Backplane ") || l.starts_with("Backplane ")).map_or(labels.len(), |i| i + 1)
+    /* i18n-ok: hub row labels */ if let Some(i) = labels.iter().position(|l| l.starts_with("Hub: Backplane ") || l.starts_with("Backplane ")) { return i + 1 }
+    labels.iter().position(|l| *l == "Update channel").map_or(labels.len(), |i| i + 1)
 }
 
 #[cfg(test)]
@@ -645,6 +646,7 @@ mod tests {
         assert_eq!(row_at(&["Network", "Update channel"]), 2); assert_eq!(row_at(&["Network", "Tailscale"]), 2, "an older hub: at the end");
         assert_eq!(row_at(&["About", "Hub: Backplane 0.16.0", "Browser"]), 2, "About: under the hub's version");
         assert_eq!(row_at(&["About", "Backplane v0.15.2", "Browser"]), 2, "an older hub's label");
+        assert_eq!(row_at(&["Hub: Backplane 0.16.4", "Update channel", "Browser"]), 1, "About and updates: right under the hub's version, before its channel");
     }
     #[test] fn settings_rows_show_this_computers_app_and_warn_when_versions_differ() {
         crate::i18n::with_lang("en", || {

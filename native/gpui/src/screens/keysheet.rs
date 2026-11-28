@@ -1,5 +1,5 @@
 //! The keyboard shortcuts sheet: every key of `keys::TABLE`, with this device's choices, under its place. Opened from the palette ("Keyboard
-//! shortcuts") and with `?` or F1 when no text box has the keyboard; Esc, a click outside or the same key shuts it. Settings, This device changes them.
+//! shortcuts") and with `?` or F1 when no text box has the keyboard; Esc, a click outside or the same key shuts it. Settings, Keyboard changes them.
 //! Setup lists no keys (docs/ALWAYS-ON.md, D3): this sheet is where they are.
 use crate::{i18n::trs, keys, local::Local, theme, Backplane};
 use gpui::{prelude::*, *};

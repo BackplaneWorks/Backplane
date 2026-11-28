@@ -774,7 +774,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             ask.send("onboard.check", json!({}));
             json!({"drafts": {"@ob.open": "1", "@ob.closed": "", "@ob.step": first}, "open": {"settings": false}})
         }
-        // Settings, Developer: setup's progress forgotten, opened at the first step as on a new hub
+        // Settings, Setup, Developer: setup's progress forgotten, opened at the first step as on a new hub
         "ob-replay" => {
             let first = steps[0].id;
             for (k, v) in [("onboard.done", ""), ("onboard.skipped", ""), ("onboard.seen", ""), ("onboard.kicad.auto", ""), ("onboard.step", first)] { ask.put(k, v); }

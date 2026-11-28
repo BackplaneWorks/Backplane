@@ -294,6 +294,15 @@ pub fn plan_placement(prev: Option<nc::R>, next: Option<nc::R>, over: &[nc::R]) 
     }
 }
 
+/// What the not-installed screen says it would install: the hub's offer (info `solidcraft.runtime`), its version and its size in the words and
+/// the number Settings, CAD and setup use ("about 218 MB": MiB, rounded); with no size known, no number.
+pub fn install_words(runtime: &Value) -> String {
+    let offer = &runtime["offer"];
+    match offer["size"].as_u64().filter(|b| *b > 0) {
+        Some(b) => crate::i18n::tf("gpui.c.solidcraft.install.desc", &[("version", offer["version"].as_str().unwrap_or("").into()), ("mb", ((b + (1 << 19)) >> 20).to_string().into())]),
+        None => crate::i18n::t("gpui.c.solidcraft.install.desc.nosize"),
+    }
+}
 /// Result of deciding how to reclaim focus from the embedded SolidCraft child window.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ReclaimDecision {
@@ -1461,7 +1470,7 @@ impl Render for SolidCraftPane {
                             .max_w(px(380.))
                             .text_center()
                             .text_size(crate::scale::tpx(12.))
-                            .child(trs("Install SolidCraft v0.50.0 (~228 MB) to view and edit STEP, SolidCraft, STL, and mesh files.")),
+                            .child(install_words(&self.info["runtime"])),
                     )
                     .child(
                         crate::ui::with_rect(
@@ -2343,6 +2352,12 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_install_words_say_the_size_as_settings_does() {
+        let rt = json!({"installed": false, "offer": {"available": true, "version": "0.50.0", "size": 228331854u64}});
+        assert_eq!(crate::i18n::with_lang("en", || install_words(&rt)), "Install SolidCraft 0.50.0 (about 218 MB) to view and edit STEP, SolidCraft, STL, and mesh files.");
+        assert_eq!(crate::i18n::with_lang("en", || install_words(&json!({"installed": false}))), "Install SolidCraft to view and edit STEP, SolidCraft, STL, and mesh files.");
+    }
     #[test]
     fn pane_status_maps_runtime_and_lifecycle_states() {
         assert_eq!(pane_status(&json!({"state": "ready"}), true, true), PaneStatus::PoppedOut);
