@@ -90,6 +90,9 @@ pub fn boards(snap: &Value, card: &Value, root: &str) -> Vec<String> {
     let rel = |p: &str| p.strip_prefix(root).map(|r| r.trim_start_matches('/').to_string()).unwrap_or_else(|| p.to_string());
     let mut out: Vec<String> = snap["artifacts"].as_array().into_iter().flatten().filter(|a| a["kind"] == "board").map(|a| rel(a["path"].as_str().unwrap_or(""))).filter(|p| !p.is_empty()).collect();
     for b in card["board_files"].as_array().into_iter().flatten().filter_map(Value::as_str) { if !out.iter().any(|o| o == b) { out.push(b.to_string()); } }
+    // the project's own board first: a copy kept in a backup folder last, then the fewest folders deep (a page listed
+    // backups/pre-lib-cleanup/x.kicad_pcb above x.kicad_pcb); otherwise as found
+    out.sort_by_key(|p| { let backup = p.split('/').rev().skip(1).any(|d| d.to_ascii_lowercase().starts_with("backup")); (backup, p.matches('/').count()) });
     out.truncate(12); out
 }
 
@@ -716,7 +719,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
       bar = bar.child(crate::ui::with_rect(action_button(cx, light, "page-new-thread", "plus", crate::i18n::trs("New thread"), true), || "page-new-thread".to_string())
         .on_click(cx.listener(move |this, _, _, cx| { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid2.clone())); cx.notify(); }))); }
     { let r = root.clone();
-      bar = bar.child(action_button(cx, light, "page-open-folder", "folder-open", crate::i18n::trs("Open folder"), false).on_click(cx.listener(move |this, _, _, _| this.file_open(&r, false)))); }
+      bar = bar.child(action_button(cx, light, "page-open-folder", "external-link", crate::i18n::trs("Open folder"), false).on_click(cx.listener(move |this, _, _, _| this.file_open(&r, false)))); }
     if loaded { if let Some(top) = top.clone() {
         bar = bar.child(div().w(px(1.)).h(px(18.)).mx_1().bg(c("line")));
         let buttons = viewer_buttons(&snap);
@@ -877,6 +880,10 @@ pub fn controls(data: &Value) -> Vec<(String, String, Ctl)> {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_pages_boards_list_the_projects_own_board_before_its_backups() {
+        let snap = serde_json::json!({"artifacts": [{"kind":"board","path":"/p/backups/pre-lib-cleanup/osc.kicad_pcb"}, {"kind":"board","path":"/p/osc.kicad_pcb"}, {"kind":"board","path":"/p/sub/b.kicad_pcb"}, {"kind":"board","path":"/p/a.kicad_pcb"}]});
+        assert_eq!(boards(&snap, &Value::Null, "/p"), ["osc.kicad_pcb", "a.kicad_pcb", "sub/b.kicad_pcb", "backups/pre-lib-cleanup/osc.kicad_pcb"]);
+    }
     #[test] fn a_pages_list_is_its_head_each_readme_block_and_its_tail_and_an_anchor_finds_its_block() {
         use super::{item, items, anchors, PageItem as I};
         use crate::screens::md::{Align, Block as B};
