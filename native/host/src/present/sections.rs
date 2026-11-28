@@ -728,6 +728,12 @@ pub fn move_targets(st: &State, rows: &[MergedProject]) -> Value {
 
 // ---- a project's page -----------------------------------------------------------------------------------------------------
 /// A project's page: running, then needs you, then recent, then done behind "Done (n)". `done_open`: the person opened Done.
+/// The page's red line when this machine's folder of the project is not there (moved, deleted, a drive not mounted); "" otherwise.
+/// Only this machine's folder is checked; a copy of a log (root "/") and Chats have none to lose.
+pub fn folder_gone(p: &MergedProject) -> &'static str {
+    let gone = p.here.as_deref().is_some_and(|id| id != crate::sidebar::CHATS) && !crate::copy::on() && std::path::Path::new(&p.folder).is_absolute() && !std::path::Path::new(&p.folder).is_dir();
+    if gone { "This folder is gone." } else { "" }
+}
 pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: bool) -> Value {
     let Some(p) = rows.iter().find(|p| p.key == key) else { return Value::Null };
     let ths: Vec<Th> = p.threads.iter().map(|t| facts(st, p, t, c.now)).filter(listed).collect();
@@ -754,6 +760,7 @@ pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: b
     head["newThread"] = json!(p.here.clone().unwrap_or_default());
     // what a client's page head draws (the shape of a sidebar project row): its id here, else on the newest machine
     head["id"] = json!(qid(c.hub, &pid_of(p))); head["title"] = json!(p.name); head["root"] = json!(p.folder); head["nav"] = json!(p.key);
+    head["gone"] = json!(folder_gone(p));
     let mut sections = vec![
         json!({"id":"running","title":"Running","rows":running}),
         json!({"id":"needs","title":"Needs you","rows":needs}),

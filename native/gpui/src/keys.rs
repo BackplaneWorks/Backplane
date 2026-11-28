@@ -603,10 +603,7 @@ pub fn attach(el: Div, picker: bool, menu: bool, cx: &mut Context<Backplane>) ->
     let el = on!(el, TextSmaller, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.local_press("text", "-", cx));
     let el = on!(el, TextReset, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.local_press("text-reset", "", cx));
     // F2: the open thread's Rename, as its row's right-click menu sends it (the hub opens the title box in the row)
-    let el = on!(el, RenameThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
-        let id = this.data["thread"]["id"].as_str().unwrap_or("").rsplit('|').next().unwrap_or("").to_string();
-        if !id.is_empty() && this.project_page.is_none() { let _ = this.tx.try_send(Command::Action("row-rename".into(), id)); cx.notify(); }
-    });
+    let el = on!(el, RenameThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.rename_open_thread(cx));
     let el = on!(el, MgmtBom, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "bom", cx));
     let el = on!(el, MgmtChecks, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "checks", cx));
     let el = on!(el, MgmtLife, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "life", cx));
@@ -1047,5 +1044,13 @@ mod windows_ime_keys {
         for vk in [0x0Du16, 0x1B, 0x1B, 0x20, 0x41] {
             assert!(!gpui::is_windows_ime_vkey(vk), "{vk:#x}");
         }
+    }
+}
+
+impl Backplane {
+    /// The open thread's Rename (F2, a double click on its name in the header), as its row's right-click menu sends it.
+    pub(crate) fn rename_open_thread(&mut self, cx: &mut Context<Self>) {
+        let id = self.data["thread"]["id"].as_str().unwrap_or("").rsplit('|').next().unwrap_or("").to_string();
+        if !id.is_empty() && self.project_page.is_none() { let _ = self.tx.try_send(Command::Action("row-rename".into(), id)); cx.notify(); }
     }
 }

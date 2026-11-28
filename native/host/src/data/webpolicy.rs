@@ -185,6 +185,8 @@ fn classify(method: &str, params: &Value) -> Option<Policy> {
         // Initiates an order or checkout.
         "order.buy"
         | "thread.buy" => Denied,
+        // Commits and pushes the thread's work (the Diff header's Commit & push and PR): native apps only.
+        "viewer.git" => Denied,
         // The ring's recordings: listed and found (their words, where each went, the link that plays one), and heard again.
         "ring.list" => Passive,
         "ring.hear" => Activity,

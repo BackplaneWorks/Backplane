@@ -3158,6 +3158,7 @@ gpui.side.old.chats.that.belong.to	Old chats that belong to no project. New ones
 gpui.side.group.projects	Group projects	プロジェクトをグループ化	Agrupar proyectos
 gpui.side.on.projects.with.nothing.going	On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.	オン: 最近動きのないプロジェクトを Git のオーナー（なければフォルダ）ごとにまとめます。オフ: 1 つの一覧にし、自分で作ったグループだけを表示します。	Activado: los proyectos sin actividad reciente se agrupan por su propietario git, o por su carpeta. Desactivado: una sola lista y solo los grupos que tú crees.
 gpui.side.no.group	No group	グループなし	Sin grupo
+gpui.side.nomatch	No name matches. Enter searches what was said.	名前に一致しません。Enterで会話の中を検索します。	Ningún nombre coincide. Enter busca en lo dicho.
 gpui.e.freecad.install	Install FreeCAD	FreeCADをインストール	Instalar FreeCAD
 gpui.e.freecad.ask	Install FreeCAD?	FreeCADをインストールしますか？	¿Instalar FreeCAD?
 gpui.e.freecad.installing	Installing FreeCAD	FreeCADをインストール中	Instalando FreeCAD
@@ -3874,6 +3875,8 @@ android.hub.err.project.retry	Choose an existing project and retry this request.
 android.hub.err.project.message	Choose a project and enter a message before starting a thread.	スレッドを始める前に、プロジェクトを選んでメッセージを入力してください。	Elige un proyecto e introduce un mensaje antes de iniciar un hilo.
 android.hub.err.project.already	already a project: {root}	すでにプロジェクトです: {root}	ya es un proyecto: {root}
 android.hub.err.project.invalid	invalid project folder: {path}	無効なプロジェクトフォルダーです: {path}	carpeta de proyecto inválida: {path}
+android.hub.project.folder.gone	The project folder is gone: {path}. Put it back, or remove the project and add it where it is now.	プロジェクトのフォルダがありません: {path}。元の場所に戻すか、プロジェクトを削除して今ある場所で追加し直してください。	La carpeta del proyecto ya no está: {path}. Vuelve a ponerla, o quita el proyecto y añádelo donde está ahora.
+android.hub.project.page.gone	This folder is gone.	このフォルダはありません。	Esta carpeta ya no está.
 android.hub.err.project.nofolder	no folder given	フォルダーが指定されていません	no se indicó carpeta
 android.hub.err.project.unavailable	Project folder is unavailable.	プロジェクトフォルダーを使用できません。	La carpeta del proyecto no está disponible.
 android.hub.err.project.home	the project home could not be read	プロジェクトのホームを読み込めませんでした	no se pudo leer el inicio del proyecto
@@ -3973,6 +3976,7 @@ android.hub.machines.err.address	that is not an address (like http://box.example
 android.hub.machines.err.nocode	enter the code the other machine shows	相手のマシンに表示されたコードを入力してください	introduce el código que muestra la otra máquina
 android.hub.machines.err.already	already linked to that machine	そのマシンとはすでにリンク済みです	ya vinculada a esa máquina
 android.hub.machines.err.noanswer	{address} does not answer	{address}が応答しません	{address} no responde
+android.hub.machines.err.wrongcode	that code is not the one the other machine shows, or it has expired	そのコードは相手のマシンに表示されているものではないか、期限切れです	ese código no es el que muestra la otra máquina, o ha caducado
 android.hub.machines.err.nothing	the other machine answered nothing usable	相手のマシンから使える応答がありませんでした	la otra máquina no respondió nada utilizable
 android.hub.machines.err.attempt	unknown attempt	不明なペアリング試行です	intento desconocido
 android.hub.machines.err.invites	too many open invites: wait for one to expire, or revoke one in Settings > Devices	有効な招待が多すぎます。どれかが期限切れになるのを待つか、設定 > デバイスで取り消してください	demasiadas invitaciones abiertas: espera a que caduque una o revoca una en Ajustes > Dispositivos
@@ -4394,6 +4398,10 @@ mobile.diff.binary	binary	バイナリ	binario
 mobile.settings.advanced	Advanced	詳細設定	Avanzado
 android.attach.file	Choose a file	ファイルを選ぶ	Elegir un archivo
 android.connecting.word	connecting	接続中	conectando
+android.diff.pr	PR	PR	PR
+android.diff.commit.ask	Commit this thread''s changes with its title as the message, then push them?	このスレッドの変更をタイトルをメッセージとしてコミットし、プッシュしますか？	¿Confirmar los cambios de este hilo con su título como mensaje y enviarlos?
+android.diff.pr.ask	Commit this thread''s changes, push them and open a pull request?	このスレッドの変更をコミットしてプッシュし、プルリクエストを開きますか？	¿Confirmar los cambios de este hilo, enviarlos y abrir una pull request?
+android.ctx.pct	ctx {pct}%	ctx {pct}%	ctx {pct}%
 sidebar.sections.needs	Needs you	対応が必要	Te necesita
 sidebar.sections.pinned	Pinned	ピン留め	Fijados
 sidebar.sections.active	Active	進行中	Activos
@@ -7202,6 +7210,9 @@ menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
     /// android.hub.err.project.invalid = invalid project folder: {path}
     static func android_hub_err_project_invalid(path: String) -> String { f("android.hub.err.project.invalid", ["path": path]) }
 
+    /// android.hub.project.folder.gone = The project folder is gone: {path}. Put it back, or remove the project and add it where it is now.
+    static func android_hub_project_folder_gone(path: String) -> String { f("android.hub.project.folder.gone", ["path": path]) }
+
     /// android.hub.devices.used.by = Used by {name}. Each link pairs one device.
     static func android_hub_devices_used_by(name: String) -> String { f("android.hub.devices.used.by", ["name": name]) }
 
@@ -7618,6 +7629,9 @@ menu.copy.message	Copy message	メッセージをコピー	Copiar mensaje
 
     /// mobile.diff.summary.one = 1 file, +{added} −{removed}
     static func mobile_diff_summary_one(added: String, removed: String) -> String { f("mobile.diff.summary.one", ["added": added, "removed": removed]) }
+
+    /// android.ctx.pct = ctx {pct}%
+    static func android_ctx_pct(pct: String) -> String { f("android.ctx.pct", ["pct": pct]) }
 
     /// ios.sections.running = {n, number} running
     static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }

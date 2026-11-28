@@ -26,7 +26,23 @@ pub struct Find {
     pub mark: String, pub going: Option<String>, pub pages: u32,
     /// the message the timeline went to, its words not yet in view: the frames waited for its row to be drawn (`find_seek`)
     pub seek: Option<(String, u8)>,
+    /// which of the message's places to show when it is drawn, the one on show and how many its drawn text holds (0: not known yet)
+    pub at: At, pub occ: usize, pub occs: usize,
 }
+
+/// Which place in a message a step goes to: its first (going forward), its last (coming back from the next message), or the k-th.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum At { #[default] First, Last, Nth(usize) }
+/// Where Enter (`forward`) or Shift+Enter goes from place `occ` of the message `ix` (of `n` messages), whose drawn text holds `occs`
+/// places (0: none found there): the next place in the same message, else the next message's first (the previous one's last going back),
+/// wrapping round at both ends. `(message, place)`.
+pub fn step_at(ix: usize, occ: usize, occs: usize, n: usize, forward: bool) -> (usize, At) {
+    if n == 0 { return (0, At::First) }
+    if forward { if occ + 1 < occs { (ix, At::Nth(occ + 1)) } else { (step(ix, n, true), At::First) } }
+    else if occ > 0 && occs > 0 { (ix, At::Nth((occ - 1).min(occs - 1))) } else { (step(ix, n, false), At::Last) }
+}
+/// The place `at` names among `occs` places.
+pub fn place_of(at: At, occs: usize) -> usize { match at { At::First => 0, At::Last => occs.saturating_sub(1), At::Nth(k) => k.min(occs.saturating_sub(1)) } }
 
 /// The query the hub is asked for: two characters or more (its own rule).
 pub fn query_of(q: &str) -> Option<String> { let t = q.trim(); (t.chars().count() >= 2).then(|| t.to_string()) }
@@ -34,11 +50,13 @@ pub fn query_of(q: &str) -> Option<String> { let t = q.trim(); (t.chars().count(
 pub fn step(ix: usize, n: usize, forward: bool) -> usize { if n == 0 { 0 } else if forward { (ix + 1) % n } else { (ix + n - 1) % n } }
 /// The match to show when an answer comes: `want` when it is there, else the newest (the last).
 pub fn first(matches: &[String], want: &str) -> usize { matches.iter().position(|m| !want.is_empty() && m == want).unwrap_or(matches.len().saturating_sub(1)) }
-/// What the bar says: "3 of 12" ("3 of 1000+" past the hub's cap), "No matches", or nothing before an answer.
-pub fn count(ix: usize, n: usize, more: bool, answered: bool) -> String {
+/// What the bar says: "3 of 12" ("3 of 1000+" past the hub's cap) for the messages, then the place within the message on show when its
+/// drawn text holds more than one ("3 of 12 · 2/5"); "No matches", or nothing before an answer.
+pub fn count(ix: usize, n: usize, more: bool, answered: bool, occ: usize, occs: usize) -> String {
     if !answered { return String::new() }
     /* i18n-ok: a control id */ if n == 0 { return crate::i18n::trs("No matches") }
-    format!("{} of {}{}", ix + 1, n, if more { "+" } else { "" })
+    let within = if occs > 1 { format!(" \u{b7} {}/{}", occ + 1, occs) } else { String::new() };
+    format!("{} of {}{}{}", ix + 1, n, if more { "+" } else { "" }, within)
 }
 /// The matches of a `thread.find` answer.
 pub fn matches_of(result: &Value) -> (Vec<String>, usize, bool) {
@@ -50,16 +68,26 @@ pub fn matches_of(result: &Value) -> (Vec<String>, usize, bool) {
 pub fn row_of(rows: &[Value], msg: &str) -> Option<usize> { rows.iter().position(|e| e["id"].as_str() == Some(msg)) }
 /// The words found in a message's drawn blocks (in reading order): the first block holding the whole query (case aside), else the first
 /// holding its first word (the hub finds every word, anywhere in the message), and the byte range there.
-pub fn match_in(blocks: &[&str], q: &str) -> Option<(usize, std::ops::Range<usize>)> {
+pub fn match_in(blocks: &[&str], q: &str) -> Option<(usize, std::ops::Range<usize>)> { matches_in(blocks, q).into_iter().next() }
+/// Every place of the words in a message's drawn blocks, in reading order (block, byte range): the whole query's places (case aside), else,
+/// when it is nowhere, its first word's (the hub finds every word, anywhere in the message). Places never overlap.
+pub fn matches_in(blocks: &[&str], q: &str) -> Vec<(usize, std::ops::Range<usize>)> {
     let q = q.trim();
-    let find = |w: &str| blocks.iter().enumerate().find_map(|(i, t)| find_ci(t, w).map(|at| (i, at..at + w.len())));
-    if q.is_empty() { return None }
-    find(q).or_else(|| q.split_whitespace().next().filter(|w| *w != q).and_then(find))
+    let all = |w: &str| blocks.iter().enumerate().flat_map(|(i, t)| find_all_ci(t, w).into_iter().map(move |at| (i, at..at + w.len()))).collect::<Vec<_>>();
+    if q.is_empty() { return vec![] }
+    let whole = all(q);
+    if !whole.is_empty() { return whole }
+    q.split_whitespace().next().filter(|w| *w != q).map_or(vec![], all)
 }
-/// `w` in `t`, ASCII case aside (byte offsets of `t`).
-fn find_ci(t: &str, w: &str) -> Option<usize> {
-    if w.is_empty() || w.len() > t.len() { return None }
-    (0..=t.len() - w.len()).find(|&i| t.is_char_boundary(i) && t.as_bytes()[i..i + w.len()].eq_ignore_ascii_case(w.as_bytes()))
+/// Every place of `w` in `t`, ASCII case aside (byte offsets of `t`), one after another.
+fn find_all_ci(t: &str, w: &str) -> Vec<usize> {
+    let mut out = vec![];
+    if w.is_empty() || w.len() > t.len() { return out }
+    let mut i = 0;
+    while i + w.len() <= t.len() {
+        if t.is_char_boundary(i) && t.as_bytes()[i..i + w.len()].eq_ignore_ascii_case(w.as_bytes()) { out.push(i); i += w.len(); } else { i += 1; }
+    }
+    out
 }
 /// How far into its message the list starts so the found line stands a third of the way down the list (`y`: the line's top within the message).
 pub fn scroll_into(y: Pixels, list_h: Pixels) -> Pixels { (y - list_h / 3.).max(px(0.)) }
@@ -72,7 +100,7 @@ pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<
     let f = &mut this.screens.find;
     if tag != f.asked.0 || reply["ok"] != true { return true }
     let (m, total, more) = matches_of(&reply["result"]);
-    f.ix = first(&m, &f.want); f.want.clear(); f.matches = m; f.total = total; f.more = more; f.hits_q = f.asked.1.clone();
+    f.ix = first(&m, &f.want); f.want.clear(); f.at = At::First; f.occ = 0; f.occs = 0; f.matches = m; f.total = total; f.more = more; f.hits_q = f.asked.1.clone();
     match f.matches.get(f.ix).cloned() { Some(msg) => this.find_go(msg), None => { this.screens.find.mark.clear(); this.screens.find.going = None; } }
     cx.notify(); true
 }
@@ -80,7 +108,7 @@ pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<
 impl Backplane {
     fn find_input(&mut self, cx: &mut Context<Self>) -> Entity<Composer> {
         if let Some(i) = self.screens.find.input.clone() { return i }
-        let input = cx.new(|cx| Composer::with_context(cx, "FindInput"));
+        let input = cx.new(|cx| { let mut c = Composer::with_context(cx, "FindInput"); c.max_lines = 1.0; c });
         /* i18n-ok: a control id */ input.update(cx, |i, _| i.set_placeholder("Find in this thread"));
         cx.observe(&input, |this, input, cx| { let q = input.read(cx).content.to_string(); if q != this.screens.find.q { this.screens.find.q = q; this.find_ask(cx); } cx.notify(); }).detach();
         cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| match ev {
@@ -124,7 +152,7 @@ impl Backplane {
     }
     fn find_reset(&mut self, cx: &mut Context<Self>) {
         let f = &mut self.screens.find;
-        f.matches.clear(); f.total = 0; f.more = false; f.ix = 0; f.hits_q.clear(); f.asked = (0, String::new()); f.mark.clear(); f.going = None; f.seek = None; f.want.clear(); f.q.clear();
+        f.matches.clear(); f.total = 0; f.more = false; f.ix = 0; f.at = At::First; f.occ = 0; f.occs = 0; f.hits_q.clear(); f.asked = (0, String::new()); f.mark.clear(); f.going = None; f.seek = None; f.want.clear(); f.q.clear();
         if let Some(i) = f.input.clone() { i.update(cx, |i, cx| i.set(String::new(), cx)); }
     }
     /// The words changed: after a pause the hub is asked for the thread's matches (the last answer for the words on show is the one kept).
@@ -141,12 +169,19 @@ impl Backplane {
             });
         }).detach();
     }
-    /// Enter / the down arrow: the next match; Shift+Enter / the up arrow: the previous.
+    /// Enter / the down arrow: the next place of the words (the next one in the same message first, then the next message's first);
+    /// Shift+Enter / the up arrow: the previous (the previous message's last when leaving a message backwards).
     pub(crate) fn find_step(&mut self, forward: bool, cx: &mut Context<Self>) {
         let f = &mut self.screens.find;
         if f.matches.is_empty() { return }
-        f.ix = step(f.ix, f.matches.len(), forward);
-        let msg = f.matches[f.ix].clone(); self.find_go(msg); cx.notify();
+        let (ix, at) = step_at(f.ix, f.occ, f.occs, f.matches.len(), forward);
+        let msg = f.matches[ix].clone();
+        let same = ix == f.ix && matches!(at, At::Nth(_)) && f.going.is_none();
+        f.ix = ix; f.at = at;
+        // a place in the message on show whose row is drawn: its words are found again on the next frame (no trip to the message's top)
+        let drawn = same && self.data["thread"]["entries"].as_array().and_then(|r| row_of(r, &msg)).and_then(|i| self.timeline.bounds_for_item(i)).is_some();
+        if drawn { self.screens.find.seek = Some((msg, 1)); } else { if !same { self.screens.find.occs = 0; self.screens.find.occ = 0; } self.find_go(msg); }
+        cx.notify();
     }
     /// After the list went to a found message (at its top): once its row is drawn, the words themselves, a third of the way down the list and
     /// selected (the selection's colour marks them; a long message's match is often far below its top). Waits a few frames at most, then stops.
@@ -158,21 +193,24 @@ impl Backplane {
             let reg = self.screens.reg.borrow();
             let blocks: Vec<(usize, &super::timeline::Info)> = reg.blocks.iter().enumerate().filter(|(_, b)| b.id == msg).collect();
             let texts: Vec<&str> = blocks.iter().map(|(_, b)| b.text.as_str()).collect();
-            match_in(&texts, &self.screens.find.q).and_then(|(i, r)| {
+            let all = matches_in(&texts, &self.screens.find.q);
+            let k = place_of(self.screens.find.at, all.len());
+            all.get(k).cloned().and_then(|(i, r)| {
                 let (ord, b) = blocks[i];
                 let y = b.layout.as_ref()?.position_for_index(r.start)?.y;
                 let item = self.timeline.bounds_for_item(ix)?;
-                Some((ord, r, y - item.top()))
+                Some((ord, r, y - item.top(), k, all.len()))
             })
         };
         match found {
-            Some((ord, r, y)) => {
+            Some((ord, r, y, k, n)) => {
+                self.screens.find.occ = k; self.screens.find.occs = n;
                 self.timeline.scroll_to(ListOffset { item_ix: ix, offset_in_item: scroll_into(y, self.timeline.viewport_bounds().size.height) });
                 self.screens.reg.borrow_mut().select(super::select::Selection { anchor: super::select::Pos { block: ord, off: r.start }, head: super::select::Pos { block: ord, off: r.end } });
                 self.screens.find.seek = None; window.refresh();
             }
             None if n < SEEK_FRAMES => { self.screens.find.seek = Some((msg, n + 1)); window.request_animation_frame(); }
-            None => self.screens.find.seek = None,
+            None => { self.screens.find.seek = None; self.screens.find.occ = 0; self.screens.find.occs = 0; }
         }
     }
     /// Show a message: marked, and the timeline at it once its row is held.
@@ -202,7 +240,7 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, f: &Find) -> Option<AnyElem
     if !f.open { return None }
     let c = |n: &str| theme::color(light, n);
     let answered = query_of(&f.q).as_deref() == Some(f.hits_q.as_str());
-    let label = count(f.ix, f.matches.len(), f.more, answered);
+    let label = count(f.ix, f.matches.len(), f.more, answered, f.occ, f.occs);
     // previous and next as arrows in the text (the icon set has no up chevron and is generated, assets/GENERATED.md)
     let btn = |id: &'static str, glyph: &'static str, tip: &'static str| crate::ui::with_rect(div().id(id), move || format!("ui:{tip}")).cursor_pointer().w(px(22.)).h(px(22.)).flex().items_center().justify_center().text_color(c("dim")).hover(|s| s.bg(c("raise")).text_color(c("text"))).child(glyph);
     // a strip over the thread's rows (never over them: the message it marks would hide under it), the bar at its right
@@ -231,8 +269,9 @@ mod tests {
         assert_eq!((first(&m, "b"), first(&m, ""), first(&m, "gone"), first(&[], "")), (1, 2, 2, 0));
     }
     #[test] fn the_count_says_where_the_reader_is() {
-        assert_eq!(count(2, 12, false, true), "3 of 12"); assert_eq!(count(0, 1000, true, true), "1 of 1000+");
-        assert_eq!(count(0, 0, false, true), "No matches"); assert_eq!(count(0, 0, false, false), "", "nothing before the hub answers");
+        assert_eq!(count(2, 12, false, true, 0, 1), "3 of 12"); assert_eq!(count(0, 1000, true, true, 0, 0), "1 of 1000+");
+        assert_eq!(count(2, 12, false, true, 2, 60), "3 of 12 \u{b7} 3/60", "the place within a message that holds more than one");
+        assert_eq!(count(0, 0, false, true, 0, 0), "No matches"); assert_eq!(count(0, 0, false, false, 0, 0), "", "nothing before the hub answers");
     }
     #[test] fn the_words_are_found_in_the_message_and_put_a_third_down_the_list() {
         let b = ["Long report", "Paragraph 46: the anode on V46 reads 246 V", "Paragraph 47: the anode on V47 reads 247 V", "V47 again"];
@@ -242,6 +281,28 @@ mod tests {
         assert_eq!(match_in(&b, "V99"), None); assert_eq!(match_in(&b, " "), None); assert_eq!(match_in(&[], "V47"), None);
         assert_eq!(match_in(&["Gr\u{fc}\u{df}e V47"], "v47"), Some((0, 8..11)), "byte offsets past non-ASCII letters");
         assert_eq!(scroll_into(px(1200.), px(600.)), px(1000.)); assert_eq!(scroll_into(px(100.), px(600.)), px(0.), "near the top: the message's top");
+    }
+    #[test] fn every_place_in_a_message_is_found_in_reading_order() {
+        let b = ["Anode one", "the anode, the ANODE", "none here", "anodeanode"];
+        assert_eq!(matches_in(&b, "anode"), vec![(0, 0..5), (1, 4..9), (1, 15..20), (3, 0..5), (3, 5..10)]);
+        assert_eq!(matches_in(&b, "anode zz"), vec![(0, 0..5), (1, 4..9), (1, 15..20), (3, 0..5), (3, 5..10)], "words apart: the first word's places");
+        assert_eq!(matches_in(&["aaaa"], "aa"), vec![(0, 0..2), (0, 2..4)], "places never overlap");
+        assert!(matches_in(&b, "grid").is_empty()); assert!(matches_in(&[], "anode").is_empty());
+    }
+    #[test] fn enter_steps_through_every_place_then_the_next_message() {
+        // 3 messages; the one on show (1) holds 3 places
+        assert_eq!(step_at(1, 0, 3, 3, true), (1, At::Nth(1)), "the next place in the same message first");
+        assert_eq!(step_at(1, 2, 3, 3, true), (2, At::First), "past its last: the next message's first");
+        assert_eq!(step_at(2, 0, 1, 3, true), (0, At::First), "past the last message: round to the first");
+        assert_eq!(step_at(1, 2, 3, 3, false), (1, At::Nth(1)), "back: the previous place in the same message");
+        assert_eq!(step_at(1, 0, 3, 3, false), (0, At::Last), "back from its first: the previous message's last");
+        assert_eq!(step_at(0, 0, 2, 3, false), (2, At::Last), "back from the first message: round to the last message's last");
+        assert_eq!(step_at(1, 0, 0, 3, true), (2, At::First), "a message whose drawn text holds none: on to the next");
+        assert_eq!(step_at(1, 0, 0, 3, false), (0, At::Last), "and back to the previous");
+        assert_eq!(step_at(0, 4, 5, 1, true), (0, At::First), "one message: round to its own first place");
+        assert_eq!(step_at(0, 0, 5, 1, false), (0, At::Last), "and back to its own last");
+        assert_eq!(step_at(0, 0, 0, 0, true), (0, At::First), "no matches: nowhere to go");
+        assert_eq!((place_of(At::First, 4), place_of(At::Last, 4), place_of(At::Nth(2), 4), place_of(At::Nth(9), 4), place_of(At::Last, 0)), (0, 3, 2, 3, 0));
     }
     #[test] fn the_hubs_answer_is_its_matches_in_order() {
         let r = json!({"q": "pine", "matches": [{"msg": "m1"}, {"msg": "m4"}], "total": 2, "more": false});

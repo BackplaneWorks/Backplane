@@ -36,6 +36,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
@@ -145,7 +146,7 @@ fun DataRoot() {
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.safeDrawing)) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
-            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }, { page = Page.Viewer(it) }) { page = Page.Room(it) }
+            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders() }, { page = Page.New(it) }, { page = Page.Swarm(it) }, { id, file -> page = Page.Viewer(id, file) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, Msg.palette_terminal) { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
             is Page.Viewer -> {
@@ -321,20 +322,27 @@ private fun AskPair(link: String) {
 }
 
 @Composable
-internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant, single: Boolean = false, keyboard: KeyboardOptions = KeyboardOptions.Default, actions: KeyboardActions = KeyboardActions.Default, focus: FocusRequester? = null, mono: Boolean = false) {
+internal fun DField(v: String, on: (String) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = Color.Unspecified, single: Boolean = false, keyboard: KeyboardOptions = KeyboardOptions.Default, actions: KeyboardActions = KeyboardActions.Default, focus: FocusRequester? = null, mono: Boolean = false) {
     val face = if (mono) BpMono else BpUi; val size = if (mono) 13.sp else 15.sp
-    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(BorderStroke(1.dp, line), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
+    var focused by remember { mutableStateOf(false) }
+    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(dFieldLine(line, focused), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
         if (v.isEmpty()) Text(hint, color = dfaint, fontFamily = face, fontSize = size, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), singleLine = single, maxLines = if (single) 1 else lines, keyboardOptions = keyboard, keyboardActions = actions, modifier = Modifier.fillMaxWidth().let { m -> focus?.let { m.focusRequester(it) } ?: m })
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), singleLine = single, maxLines = if (single) 1 else lines, keyboardOptions = keyboard, keyboardActions = actions, modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused }.let { m -> focus?.let { m.focusRequester(it) } ?: m })
     }
 }
 
+/** A field's border: a caller's own colour (an error) wins; else the accent at 1.5 dp while focused, as the composer's box, and the quiet line otherwise. */
 @Composable
-internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = dcs.outlineVariant, mono: Boolean = false) {
+private fun dFieldLine(line: Color, focused: Boolean): BorderStroke =
+    if (line != Color.Unspecified) BorderStroke(1.dp, line) else if (focused) BorderStroke(1.5.dp, dcs.primary) else BorderStroke(1.dp, dcs.outlineVariant)
+
+@Composable
+internal fun DField(v: TextFieldValue, on: (TextFieldValue) -> Unit, hint: String, modifier: Modifier = Modifier, lines: Int = 1, line: Color = Color.Unspecified, mono: Boolean = false) {
     val face = if (mono) BpMono else BpUi; val size = if (mono) 13.sp else 15.sp
-    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(BorderStroke(1.dp, line), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
+    var focused by remember { mutableStateOf(false) }
+    Box(modifier.fillMaxWidth().clip(dShape).background(dview).border(dFieldLine(line, focused), dShape).padding(horizontal = 10.dp, vertical = 10.dp)) {
         if (v.text.isEmpty()) Text(hint, color = dfaint, fontFamily = face, fontSize = size, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth())
+        BasicTextField(v, on, textStyle = TextStyle(color = dcs.onSurface, fontFamily = face, fontSize = size), cursorBrush = SolidColor(dcs.primary), maxLines = lines, modifier = Modifier.fillMaxWidth().onFocusChanged { focused = it.isFocused })
     }
 }
 
@@ -431,7 +439,7 @@ private val homeTab = mutableStateOf(HomeTab.INBOX)
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openViewer: (String) -> Unit = {}, openRoom: (DataClient.Room) -> Unit) {
+private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openViewer: (String, String) -> Unit = { _, _ -> }, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var tab by homeTab
@@ -1170,6 +1178,15 @@ private fun ThreadBody(id: String, viewer: () -> Unit, hub: () -> Unit, go: (Str
             }
             DField(field, { DataClient.setField(id, it) }, Msg.android_composer_hint, Modifier.focusRequester(replyBox).testTag("thread.composer"), 6, if (planActive) planTint else dcs.primary)
             thread?.memory?.let { MemoryBar(it) }
+            // the context meter, as the desktop composer's "ctx N%", once it is worth a look (from half full; amber from 80%), in the memory bar's form so
+            // the tool row keeps its room: a tap shows Context & Prompt
+            thread?.ctxPct?.takeIf { it >= 50 }?.let { pct -> var ctxOpen by remember(id) { mutableStateOf(false) }
+                val tone = if (pct >= 80) dwarn else dcs.primary
+                Row(Modifier.fillMaxWidth().clickable(enabled = DataClient.has("threadContext")) { ctxOpen = true }.testTag("thread.ctx"), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.width(48.dp).height(4.dp).background(dcs.outlineVariant)) { Box(Modifier.fillMaxHeight().fillMaxWidth(pct / 100f).background(tone)) }
+                    DMono(Msg.android_ctx_pct(pct), if (pct >= 80) dwarn else dcs.onSurfaceVariant, 11)
+                }
+                if (ctxOpen) ThreadContextSheet(id) { ctxOpen = false } }
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (thread != null && (DataClient.has("picker") || thread.chip.isNotEmpty())) ModelChip(thread.chip.ifEmpty { "${thread.provider} / ${thread.model.ifEmpty { Msg.common_default }}" }, "thread.model", Modifier.weight(1f), provider = thread.provider) { models = true } else Spacer(Modifier.weight(1f))
                 if (DataClient.has("plan") && planMode != null) {

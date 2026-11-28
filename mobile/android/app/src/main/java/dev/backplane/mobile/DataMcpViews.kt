@@ -137,7 +137,7 @@ private fun Head(r: JSONObject, press: (JSONObject) -> Unit) {
     // the main button stands out only while no view is lit
     val main = if (bs.any { it.optBoolean("on") }) -1 else McpPage.primary(r)
     Column(Modifier.fillMaxWidth().testTag("mcp.head")) {
-        if (r.optString("note").isNotEmpty()) Text(Tr.t(r.optString("note")), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, lineHeight = 17.sp)
+        if (r.optString("note").isNotEmpty()) Text(Tr.t(r.optString("note")), color = dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 13.sp, lineHeight = 18.sp)
         if (bs.isNotEmpty()) Row(Modifier.fillMaxWidth().padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             bs.forEachIndexed { i, b -> McpChip(Tr.t(b.optString("label")), b.optBoolean("on"), Modifier.weight(1f).testTag("mcp.head.$i"), main = i == main, tall = true) { press(b) } }
         }
@@ -159,7 +159,7 @@ private fun Tile(icon: JSONObject?, size: Dp) {
     val bg = McpPage.hex(icon?.optString("bg").orEmpty())?.let { Color(it) } ?: dcs.surfaceContainerHigh
     val text = icon?.optString("text").orEmpty().ifEmpty { "·" }
     val fs = with(LocalDensity.current) { (size * McpPage.tileScale(text)).toSp() }
-    Box(Modifier.size(size).background(bg).then(if (Light) Modifier else Modifier.border(BorderStroke(1.dp, Color.White.copy(alpha = .08f)))), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(size).clip(androidx.compose.foundation.shape.RoundedCornerShape(8.dp)).background(bg).then(if (Light) Modifier else Modifier.border(BorderStroke(1.dp, Color.White.copy(alpha = .08f)), androidx.compose.foundation.shape.RoundedCornerShape(8.dp))), contentAlignment = Alignment.Center) {
         Text(text, color = Color.White, fontSize = fs, fontWeight = FontWeight.Bold, maxLines = 1, letterSpacing = 0.sp)
     }
 }
@@ -168,8 +168,8 @@ private fun Tile(icon: JSONObject?, size: Dp) {
 private fun Pill(p: JSONObject?) {
     val text = p?.optString("text").orEmpty(); if (text.isEmpty()) return
     val c = toneColor(p?.optString("tone").orEmpty())
-    Box(Modifier.background(c.copy(alpha = if (Light) .12f else .16f)).padding(horizontal = 6.dp, vertical = 1.dp)) {
-        Text(Tr.t(text), color = c, fontFamily = BpMono, fontSize = 10.5.sp, maxLines = 1)
+    Box(Modifier.background(c.copy(alpha = if (Light) .12f else .16f), CircleShape).padding(horizontal = 9.dp, vertical = 1.dp)) {
+        Text(Tr.t(text), color = c, fontFamily = BpUi, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
     }
 }
 
@@ -180,13 +180,13 @@ private fun Switch(t: JSONObject?, tag: String, press: (JSONObject) -> Unit) {
     val on = t.optBoolean("on")
     val b = JSONObject().put("action", t.optString("action")).put("value", t.optString("value"))
     if (t.optString("style") == "check") {
-        Box(Modifier.size(22.dp).background(if (on) dcs.primary else dcs.background).border(BorderStroke(1.5.dp, if (on) dcs.primary else dcs.onSurfaceVariant)).clickable { press(b) }.testTag(tag), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(22.dp).clip(androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).background(if (on) dcs.primary else dcs.background).border(BorderStroke(1.5.dp, if (on) dcs.primary else dcs.onSurfaceVariant), androidx.compose.foundation.shape.RoundedCornerShape(6.dp)).clickable { press(b) }.testTag(tag), contentAlignment = Alignment.Center) {
             if (on) Icon(Icons.Default.Check, null, tint = dcs.onPrimary, modifier = Modifier.size(16.dp))
         }
     } else {
-        Box(Modifier.size(38.dp, 22.dp).background(if (on) dcs.primary else dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant)).clickable { press(b) }.padding(4.dp).testTag(tag),
+        Box(Modifier.size(38.dp, 22.dp).clip(CircleShape).background(if (on) dcs.primary else dcs.surfaceContainerHigh).border(BorderStroke(1.dp, if (on) dcs.primary else dcs.outlineVariant), CircleShape).clickable { press(b) }.padding(4.dp).testTag(tag),
             contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart) {
-            Box(Modifier.size(12.dp).background(if (on) Color.White else dcs.onSurfaceVariant))
+            Box(Modifier.size(14.dp).background(if (on) Color.White else dcs.onSurfaceVariant, CircleShape))
         }
     }
 }
@@ -289,11 +289,11 @@ private fun Code(r: JSONObject) {
 private fun Empty(r: JSONObject, press: (JSONObject) -> Unit) {
     val line = dcs.outlineVariant
     Column(Modifier.fillMaxWidth().drawBehind {
-        val w = 1.dp.toPx(); drawRect(line, topLeft = Offset(w / 2, w / 2), size = size.copy(size.width - w, size.height - w), style = Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))))
+        val w = 1.dp.toPx(); drawRoundRect(line, topLeft = Offset(w / 2, w / 2), size = size.copy(size.width - w, size.height - w), cornerRadius = androidx.compose.ui.geometry.CornerRadius(dRCard.toPx()), style = Stroke(w, pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 4.dp.toPx()))))
     }.padding(horizontal = 20.dp, vertical = 24.dp).testTag("mcp.empty"), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Icon(Icons.Outlined.Cable, null, tint = dfaint, modifier = Modifier.size(26.dp))
-        Text(Tr.t(r.optString("label")), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
-        if (r.optString("note").isNotEmpty()) Text(Tr.t(r.optString("note")), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, lineHeight = 17.sp, textAlign = TextAlign.Center)
+        Text(Tr.t(r.optString("label")), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
+        if (r.optString("note").isNotEmpty()) Text(Tr.t(r.optString("note")), color = dcs.onSurfaceVariant, fontFamily = BpUi, fontSize = 13.sp, lineHeight = 18.sp, textAlign = TextAlign.Center)
         val bs = r.optJSONArray("buttons").items()
         if (bs.isNotEmpty()) FlowRow(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             bs.forEachIndexed { i, b -> McpChip(Tr.t(b.optString("label")), b.optBoolean("on"), main = i == 0) { press(b) } }

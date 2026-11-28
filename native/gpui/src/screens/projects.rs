@@ -129,6 +129,18 @@ pub fn query(data: &Value) -> String { string(&data["search"], "query") }
     if h.is_empty() || h == "Search projects and threads" || h == "Search projects" { SEARCH_HINT.into() } else { h }
 }
 
+/// The rows the hub's (filtered) sidebar has to draw under the Search field: projects and threads, Bub's section aside.
+pub fn side_rows(data: &Value) -> usize {
+    let n = |v: &Value| v.as_array().map_or(0, |r| r.len());
+    match data["sections"].as_array() { Some(s) => s.iter().filter(|s| s["kind"] != "bub").map(|s| n(&s["rows"])).sum(), None => n(&data["projects"]) + n(&data["active"]["rows"]) }
+}
+/// Words in the Search field and no name matches them: the list says so, and Enter looks for them in what was said.
+pub fn miss(query: &str, rows: usize) -> bool { !query.trim().is_empty() && rows == 0 }
+pub fn enter_goes_to_find(query: &str, rows: usize) -> bool { miss(query, rows) }
+/// The one dim line in place of the list when `miss` (where a thread's title would start, wrapped in a narrow sidebar; not a button).
+pub fn nomatch(light: bool, data: &Value) -> Option<AnyElement> {
+    miss(&query(data), side_rows(data)).then(|| div().w_full().py(crate::scale::tpx(8.)).pl(px(22.)).pr_3().text_size(crate::scale::tpx(12.)).text_color(theme::color(light, "faint")).child(crate::i18n::t("gpui.side.nomatch")).into_any_element())
+}
 pub fn search_cmd(text: &str) -> Command { Command::Action("proj-find-q".into(), text.to_string()) }
 pub fn go_cmd() -> Command { Command::Action("proj-go".into(), String::new()) }
 pub fn open_cmd() -> Command { Command::Action("picker-open".into(), String::new()) }
@@ -157,6 +169,14 @@ pub fn page_send(data: &Value, pid: &str, text: &str, picked: Option<&str>) -> O
         return Some(Ok((Command::Action("new-thread".into(), format!("{to}\u{1f}{pk}")), text.to_string())))
     }
     Some(Ok((Command::Action("new-thread".into(), to.to_string()), text.to_string())))
+}
+/// Send with no thread open and no project page (the "Pick a thread" state): the text starts a chat with it as its first message, as New chat
+/// and Send would (`new-thread` in Chats, then `first_message`: the page's own way). `/project` and `/new-project` stay the hub's commands.
+pub fn no_thread_send(selected: &str, page_open: bool, text: &str) -> Option<Command> {
+    if !selected.is_empty() || page_open || text.trim().is_empty() { return None }
+    let lead = text.trim_start();
+    if ["/project", "/new-project"].iter().any(|w| lead.strip_prefix(w).is_some_and(|r| r.is_empty() || r.starts_with(char::is_whitespace))) { return None }
+    Some(Command::Action("new-thread".into(), crate::keys::CHATS.into()))
 }
 /// The hub refused the new thread a page's Send asked for: the text goes back in the box (never lost), the window says why.
 pub fn take_back(first_send: &mut Option<(String, String, std::time::Instant)>) -> Option<String> { first_send.take().map(|(_, text, _)| text) }
@@ -364,8 +384,16 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             if p.sent_q.last() == Some(&text) { return; }
             remember(&mut p.sent_q, &text); let _ = this.tx.try_send(search_cmd(&text));
         }).detach();
-        // Enter: the hub opens what was found and clears its query; the box forgets what it sent, so that clear is taken (an older "" sent is no echo)
-        cx.subscribe(&input, |this, _, ev: &ComposerEvent, _| if matches!(ev, ComposerEvent::Submit) { this.screens.projects.sent_q.clear(); let _ = this.tx.try_send(go_cmd()); }).detach();
+        // Enter: the hub opens what was found and clears its query; the box forgets what it sent, so that clear is taken (an older "" sent is no echo).
+        // When no name matches the words: the box clears and Find across threads opens holding them
+        cx.subscribe(&input, |this, input, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) {
+            let typed = input.read(cx).content.to_string(); this.screens.projects.sent_q.clear();
+            if !enter_goes_to_find(&typed, side_rows(&this.data)) { let _ = this.tx.try_send(go_cmd()); return }
+            remember(&mut this.screens.projects.sent_q, ""); let _ = this.tx.try_send(search_cmd(""));
+            input.update(cx, |i, cx| i.set(String::new(), cx));
+            this.palette_open_find(cx);
+            if let Some(p) = this.screens.palette.input.clone() { p.update(cx, |i, cx| i.set(typed.trim().to_string(), cx)); }
+        }).detach();
         this.screens.projects.search = Some(input);
     }
     let (q, h) = (query(&this.data), hint(&this.data));
@@ -723,6 +751,9 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
         div().text_size(crate::scale::tpx(22.)).font_weight(FontWeight::BOLD).child(crate::streamer::project_shown(&string(p, "title"))).into_any_element(),
         div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::streamer::shown(&root)).into_any_element(),
     ];
+    // the hub's word that this machine's folder of the project is gone (present/sections.rs `folder_gone`)
+    let gone = string(&data["projectPage"]["project"], "gone");
+    if !gone.is_empty() { out.push(div().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(crate::i18n::trs(&gone)).into_any_element()) }
     // the actions: New thread first (the way in), Open folder, then the viewers the folder has something for (they open on the project's top thread)
     let mut bar = div().flex().flex_wrap().items_center().gap_2().pt_3().pb_1();
     { let pid2 = pid.to_string();
@@ -1055,6 +1086,7 @@ mod home_tests {
         let mut fs = Some(("t0".to_string(), "a thread sent to boat-hub".to_string(), std::time::Instant::now()));
         assert_eq!(take_back(&mut fs).as_deref(), Some("a thread sent to boat-hub")); assert!(fs.is_none());
         // given back: into an empty box exactly; a box with new text keeps it, and the old text waits to be restored (never merged)
+        match no_thread_send("", false, "what is a pull-up resistor for") { Some(Command::Action(a, v)) => assert_eq!((a.as_str(), v.as_str()), ("new-thread", crate::keys::CHATS)), other => panic!("{other:?}") }
         match first_message("L~t9", "a thread sent to boat-hub") { Command::Rpc(m, p, _) => { assert_eq!(m, "turn.start"); assert_eq!((p.0["thread"].as_str(), p.0["text"].as_str()), (Some("L~t9"), Some("a thread sent to boat-hub"))) } other => panic!("{other:?}") }
         let mut r = None;
         assert_eq!(give_back("old".into(), "", &mut r).as_deref(), Some("old")); assert!(r.is_none());
@@ -1063,6 +1095,15 @@ mod home_tests {
     }
 
     use super::*; use serde_json::json; use core::prelude::v1::test;
+    /// Words that match no project or thread name: the line shows and Enter goes to Find across threads; spaces are no words.
+    #[test] fn a_search_that_matches_no_name_says_so_and_enter_finds_what_was_said() {
+        let empty = json!({"search": {"query": "feedback"}, "sections": [{"kind": "bub", "rows": [{"id": "b"}]}, {"kind": "projects", "id": "recent", "rows": []}]});
+        assert_eq!(side_rows(&empty), 0); assert!(miss("feedback", 0) && enter_goes_to_find("feedback", 0));
+        let hit = json!({"sections": [{"kind": "projects", "rows": [{"id": "h|p1"}]}, {"kind": "threads", "rows": []}]});
+        assert_eq!(side_rows(&hit), 1); assert!(!miss("oscillogoat", 1) && !enter_goes_to_find("oscillogoat", 1), "a name matches: Enter opens it as before");
+        assert!(!miss("", 0) && !miss("   ", 0), "spaces are no query");
+        assert_eq!(side_rows(&json!({"projects": [{"id": "p"}, {"id": "q"}]})), 2, "an older hub's projects count too");
+    }
     #[test] fn a_viewer_opened_on_a_projects_page_is_that_projects() {
         let d = json!({"projects": [{"id": "h|p1", "threads": [{"id": "h|t1"}], "settled": [{"id": "h|t2"}]}, {"id": "h|p2", "threads": [], "settled": [{"id": "h|t3"}]}, {"id": "h|p3", "threads": []}]});
         assert_eq!(page_view(&d, Some("p1"), "bot9", "board"), Some(("h|t1".to_string(), "board")), "another thread was open: the project's top thread");
@@ -1129,5 +1170,18 @@ mod home_tests {
         let page_only = json!({"sections": [], "projectPage": {"project": {"id": "http://h:1|p1", "nav": "page-nav-p1"}}});
         assert_eq!(nav_key(&page_only, "p1"), "page-nav-p1");
         assert_eq!(nav_key(&json!({}), "p1"), "");
+    }
+}
+
+#[cfg(test)]
+mod no_thread_tests {
+    use super::*;
+    #[core::prelude::v1::test] fn a_message_with_no_thread_open_starts_a_chat_with_it() {
+        assert!(matches!(no_thread_send("", false, "what is a pull-up resistor for"), Some(Command::Action(a, v)) if a == "new-thread" && v == crate::keys::CHATS));
+        assert!(no_thread_send("h|t1", false, "hi").is_none(), "a thread is open: it goes there");
+        assert!(no_thread_send("", true, "hi").is_none(), "a project's page starts its own thread");
+        assert!(no_thread_send("", false, "   ").is_none(), "nothing typed: nothing sent");
+        for w in ["/project ~/x", "/new-project puck", "/project"] { assert!(no_thread_send("", false, w).is_none(), "{w}: the hub's command") }
+        assert!(no_thread_send("", false, "/projects are fun").is_some());
     }
 }

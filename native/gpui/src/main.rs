@@ -383,7 +383,8 @@ impl Backplane {
         if !key.is_empty(){self.go("project-page",key,cx);}
         let follow=screens::viewer::is_open(&self.data["thread"]).then(||screens::viewer::active_kind(&self.data["thread"]["viewer"],None)).and_then(|k|screens::projects::page_view(&self.data,Some(&pid),&self.selected,&k));
         // the page's box is its own: empty when the page opens over a thread (that thread's draft stays saved and comes back with it)
-        let was=self.project_page.replace(pid).is_some();if !was{self.input.update(cx,|i,cx|i.set(String::new(),cx));}
+        let prev=self.project_page.replace(pid.clone());if prev.is_none(){self.input.update(cx,|i,cx|i.set(String::new(),cx));}
+        if prev.as_deref()!=Some(pid.as_str()){self.screens.projects.refused.clear();} // another page: the last one's refusal is not this one's
         // the page's box has the keys, as a thread's does on open (its blue border said so; typed letters went to the window's keys: "b" opened Board)
         self.want_focus=true;self.ui_epoch+=1;cx.notify();
         if let Some((t,k))=follow {self.page_viewer(t,k,cx);}}
@@ -432,6 +433,12 @@ impl Backplane {
             // (the text stays in the box until the hub has made the thread: a refusal leaves it where it is, never emptied and put back)
             self.screens.projects.first_send=Some((self.selected.rsplit('|').next().unwrap_or("").to_string(),text,Instant::now()));
             self.error.clear(); self.screens.projects.refused.clear(); self.arm_new();let _=self.tx.try_send(cmd);cx.notify();return;
+        }
+        // no thread open and no page: the text starts a chat with it (as New chat and Send would), the page's way: the box keeps it until the hub made the chat
+        if let Some(cmd)=screens::projects::no_thread_send(&self.selected,self.project_page.is_some(),&text) {
+            if self.status!="Connected"||self.screens.projects.first_send.is_some() {return;}
+            self.screens.projects.first_send=Some((String::new(),text,Instant::now()));
+            self.error.clear(); self.arm_new();let _=self.tx.try_send(cmd);cx.notify();return;
         }
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());

@@ -988,6 +988,10 @@ object DataClient {
         try { call("thread.act", JSONObject().put("thread", tid).put("action", "fork")).optJSONObject("thread")?.let { val t = parseThread(it); upsert(t); opened(t.id) } }
         catch (e: Exception) { failure = e.message ?: "" }
     }
+    /** Back to the original (a fork, data/1 `forkOf`): the hub hands the fork's work to the thread it came from, with that thread's next message; `done` then opens it. */
+    fun backToOriginal(tid: String, done: () -> Unit) = scope.launch {
+        try { call("thread.act", JSONObject().put("thread", tid).put("action", "back")); done() } catch (e: Exception) { failure = e.message ?: "" }
+    }
     suspend fun badgeList(): JSONObject = call("badge.list", JSONObject())
     fun projectAct(id: String, action: String, title: String = "", value: String = "") = scope.launch {
         try {
@@ -1026,6 +1030,9 @@ object DataClient {
     data class ProjectCard(val goal: String, val boards: List<String>, val leadDays: Int = 0, val estimateWarnings: String = "")
     /** A project's goal and notes as written (`.backplane/intent.md`, feature `projecthome`'s `project.home`); "" when there are none. */
     suspend fun projectIntent(project: String): String = if (!has("projecthome")) "" else call("project.home", JSONObject().put("project", project)).optString("intent")
+    /** A project's board files (paths from its root, the project's own first; `project.home`), as the desktop's project page lists them. */
+    suspend fun projectBoards(project: String): List<String> = if (!has("projecthome")) emptyList() else
+        call("project.home", JSONObject().put("project", project)).optJSONArray("boards")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotEmpty() } }.orEmpty()
     suspend fun projectCard(project: String): ProjectCard? {
         if (!has("projectcard")) return null
         val o = call("project.card", JSONObject().put("project", project))
@@ -1374,6 +1381,8 @@ object DataClient {
     suspend fun screenBytes(tid: String): ByteArray? = withContext(Dispatchers.IO) { httpGet("/bots/" + android.net.Uri.encode(tid) + "/screen.jpg", "") }
 
     // ---- diff and review (features diff, review; the hub's git.diff and review.* requests)
+    /** The Diff header's Commit & push (`commit_push`) and PR (`commit_push_pr`): the hub's git in the thread's folder; git's answer lines. */
+    suspend fun gitAct(tid: String, action: String): String = call("viewer.git", JSONObject().put("thread", tid).put("action", action)).optString("text")
     suspend fun diff(tid: String): Pair<String, String> { val r = call("viewer.diff", JSONObject().put("thread", tid)); return r.optString("diff") to r.optString("nogit") }
     data class Task(val text: String, val done: Boolean, val group: String)
     data class Report(val md: String, val err: String, val gate: String, val line: String, val tasks: List<Task>)

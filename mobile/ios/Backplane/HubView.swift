@@ -149,29 +149,26 @@ struct DataTelemetryBanner: View {
     }
 }
 
-/// The GitHub star suggestion (DataClient.star): a small card under the top bar with the hub's title, the repository, why stars help, a Star on
-/// GitHub (opens the page, decides open), Later (a week, decides later) and Don't ask again (decides dismiss). It waits for a pause (DStarOffer.due).
+/// The GitHub star suggestion (DataClient.star): a compact card under the top bar, the hub's title on one line, then one row: Star on GitHub
+/// (opens the page, decides open), Later (a week, decides later) and a dim Don't ask again (decides dismiss). It waits for a pause (DStarOffer.due).
 struct DataStarBanner: View {
     let client: DataClient
     @Environment(\.openURL) private var openURL
     var body: some View {
         if let s = client.star, DStarOffer.due(s, running: client.threads.contains { $0.state == "working" || $0.state == "asking" }, typing: client.drafts.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 8) {
                     Image(systemName: "star.fill").font(.system(size: 14)).foregroundStyle(BackplaneDesign.accent)
-                    Text(Tr.t(s.text)).dmono(13, bold: true).foregroundStyle(BackplaneDesign.text)
+                    Text(Tr.t(s.text)).dui(15, weight: .semibold).foregroundStyle(BackplaneDesign.text).lineLimit(1)
                 }
-                Text(s.place).dmono(11).foregroundStyle(BackplaneDesign.faint)
-                if let w = s.why, !w.isEmpty { Text(Tr.t(w)).dmono(12).foregroundStyle(BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
-                Button { if let u = URL(string: s.url) { openURL(u) }; client.starDecide("open") } label: {
-                    HStack(spacing: 8) { Image(systemName: "star.fill"); Text(Tr.t(s.label.isEmpty ? "Star on GitHub" : s.label)).dmono(13, bold: true) }
-                        .frame(maxWidth: .infinity, minHeight: 34).foregroundStyle(BackplaneDesign.onAccent).background(BackplaneDesign.accent)
-                }.buttonStyle(.plain).accessibilityIdentifier("star.open")
                 HStack(spacing: 8) {
-                    Button(Tr.t("Later")) { client.starDecide("later") }.buttonStyle(DButton()).frame(maxWidth: .infinity).accessibilityIdentifier("star.later")
-                    Button(Tr.t("Don't ask again")) { client.starDecide("dismiss") }.buttonStyle(DButton()).frame(maxWidth: .infinity).accessibilityIdentifier("star.dismiss")
+                    Button(Tr.t(s.label.isEmpty ? "Star on GitHub" : s.label)) { if let u = URL(string: s.url) { openURL(u) }; client.starDecide("open") }
+                        .buttonStyle(DButton(primary: true, compact: true)).accessibilityIdentifier("star.open")
+                    Button(Tr.t("Later")) { client.starDecide("later") }.buttonStyle(DButton(compact: true)).accessibilityIdentifier("star.later")
+                    Spacer(minLength: 4)
+                    Button(Tr.t("Don't ask again")) { client.starDecide("dismiss") }.buttonStyle(.plain).dui(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1).frame(minHeight: 30).accessibilityIdentifier("star.dismiss")
                 }
-            }.padding(12).background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(BackplaneDesign.accent, lineWidth: 1)).padding(8)
+            }.padding(.horizontal, 12).padding(.vertical, 8).background(BackplaneDesign.raised, in: RoundedRectangle(cornerRadius: DRadius.card)).overlay(RoundedRectangle(cornerRadius: DRadius.card).stroke(BackplaneDesign.accent, lineWidth: 1)).padding(8)
         }
     }
 }

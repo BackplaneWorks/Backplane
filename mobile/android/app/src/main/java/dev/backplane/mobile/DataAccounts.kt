@@ -69,7 +69,7 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
                 DLine()
                 if (p.optString("error").isNotEmpty()) DMono(Tr.t(p.optString("error")), dcs.error, 11, lines = 4)
                 if (failure.isNotEmpty()) DMono(Tr.t(failure), dcs.error, 11, lines = 4)
-                DMono(Tr.t(p.optString("note")), dcs.onSurfaceVariant, 11, lines = 3)
+                DText(Tr.t(p.optString("note")), dcs.onSurfaceVariant, 13, lines = 3)
             } else {
                 p.optJSONArray("providers").objects().forEach { pv ->
                     val pid = pv.optString("provider")
@@ -78,7 +78,7 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
                         DMono(Tr.t(pv.optString("title")).uppercase(), dfaint)
                     }
                     val accounts = pv.optJSONArray("accounts").objects()
-                    if (accounts.isEmpty()) DMono(Msg.android_accounts_none, dfaint, 12)
+                    if (accounts.isEmpty()) DText(Msg.android_accounts_none, dfaint, 13)
                     accounts.forEach { a -> AccountRow(a) { open(a.optString("id")) } }
                     DBtn(Tr.t(pv.optString("add")), false, modifier = Modifier.testTag("accounts.add.${pv.optString("provider")}")) {
                         // Google asks no name: the sign-in starts at once, its own listener first (GoogleLoop)
@@ -88,7 +88,7 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
                 }
                 if (p.optString("error").isNotEmpty()) DMono(Tr.t(p.optString("error")), dcs.error, 11, lines = 4)
                 if (failure.isNotEmpty()) DMono(Tr.t(failure), dcs.error, 11, lines = 4)
-                DMono(Tr.t(p.optString("note")), dcs.onSurfaceVariant, 11, lines = 3)
+                DText(Tr.t(p.optString("note")), dcs.onSurfaceVariant, 13, lines = 3)
             }
         }
     }
@@ -98,7 +98,7 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
             confirmButton = { TextButton(onClick = {
                 adding = null
                 scope.launch { addAccount(pv, name, open) { failure = it } }
-            }) { Text(Msg.android_account_add, fontFamily = BpMono) } },
+            }) { Text(Msg.android_account_add, fontFamily = BpUi) } },
             dismissButton = { TextButton(onClick = { adding = null }) { Text(Msg.common_cancel, fontFamily = BpUi) } })
     }
 }
@@ -137,7 +137,7 @@ internal fun UsageBar(b: JSONObject) {
 private fun PersonCard(e: JSONObject, open: (String) -> Unit) {
     Column(Modifier.fillMaxWidth().clip(dShapeCard).border(BorderStroke(1.dp, dcs.outlineVariant), dShapeCard).background(dcs.surfaceVariant).padding(10.dp).testTag("accounts.person.${e.optString("key")}"),
         verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text(e.optString("title"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Text(e.optString("title"), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
         e.optJSONArray("logins").objects().forEachIndexed { i, l ->
             if (i > 0) DLine()
             val profile = l.optString("profile")
@@ -150,7 +150,7 @@ private fun PersonCard(e: JSONObject, open: (String) -> Unit) {
                     val pv = l.optString("provider")
                     if (ProviderMarks.spec(pv) != null) ProviderMark(pv, 13.dp)
                     DMono(what, dcs.onSurfaceVariant, 11, modifier = Modifier.weight(1f, fill = false))
-                    if (l.optBoolean("default")) DMono(Tr.t("Used for new threads"), dcs.onSurfaceVariant, 10, modifier = Modifier.background(dcs.surface).padding(horizontal = 5.dp, vertical = 1.dp))
+                    if (l.optBoolean("default")) DText(Tr.t("Used for new threads"), dcs.onSurfaceVariant, 11, modifier = Modifier.background(dcs.surface, androidx.compose.foundation.shape.CircleShape).padding(horizontal = 9.dp, vertical = 1.dp), bold = true, lines = 1)
                     Spacer(Modifier.weight(1f))
                     if (!out) DMono(Tr.t(l.optString("line")), tone(l.optString("tone")), 11)
                 }
@@ -172,7 +172,7 @@ private fun AccountRow(a: JSONObject, onClick: () -> Unit) {
         Box(Modifier.padding(top = 5.dp)) { DDot(tone(a.optString("tone")), 8) }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(a.optString("label"), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(a.optString("label"), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpUi, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
                 DMono(Tr.t(a.optString("line")), tone(a.optString("tone")), 11)
             }
             if (a.optString("email").isNotEmpty()) DMono(a.optString("email"), dcs.onSurfaceVariant, 11)

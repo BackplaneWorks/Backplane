@@ -306,8 +306,8 @@ internal fun TermsScreen(project: String?, back: () -> Unit, open: (String) -> U
         }
         DLine()
         val list = rows
-        if (list == null) DMono(if (DataClient.conn == DataClient.Conn.ONLINE) Msg.viewer_loading else Msg.android_offline_cap, dfaint, 12, Modifier.padding(14.dp))
-        else if (list.isEmpty()) DMono(Msg.android_terms_none, dfaint, 12, Modifier.padding(14.dp).testTag("terms.none"))
+        if (list == null) DText(if (DataClient.conn == DataClient.Conn.ONLINE) Msg.viewer_loading else Msg.android_offline_cap, dfaint, 14, Modifier.padding(14.dp))
+        else if (list.isEmpty()) DText(Msg.android_terms_none, dfaint, 14, Modifier.padding(14.dp).testTag("terms.none"))
         else LazyColumn(Modifier.fillMaxSize().testTag("terms.list")) {
             items(list, key = { it.key }) { r ->
                 Column(Modifier.fillMaxWidth().clickable { open(r.key) }.testTag("terms.row.${r.key}")) {

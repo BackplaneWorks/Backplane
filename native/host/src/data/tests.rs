@@ -374,6 +374,9 @@ impl crate::api::RpcHandler for PushState {
     let created = &fork["result"]["thread"];
     assert_eq!(created["title"], "Fork: First", "{fork}");
     assert_ne!(created["id"].as_str().unwrap(), "t1");
+    // Back to the original: the fork's work goes to t1 with its next message; a thread that is not a fork is refused
+    let back = ask(&mut ws, 82, "thread.act", json!({"thread":created["id"],"action":"back"})).await; assert_eq!(back["ok"], true, "{back}");
+    assert_eq!(ask(&mut ws, 83, "thread.act", json!({"thread":"t1","action":"back"})).await["ok"], false, "t1 is not a fork");
 }
 
 #[test] fn notify_says_what_the_gate_sent() {
@@ -560,6 +563,18 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 4, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["detail"], "alpha", "{r}");
     hub.commit(&json!({"$":"SettingSet","key":"summary.t1","value":"Routing the rail; DRC left.","at":1700000060})).await.unwrap();
     let r = ask(&mut ws, 5, "mentions.list", json!({"q":"fir","kind":">"})).await; assert_eq!(r["result"]["items"][0]["detail"], "Routing the rail; DRC left.", "{r}");
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_viewer_git_takes_commit_push_and_pr_only() {
+    // the Diff header's two actions from a phone; Revert and anything else is refused before git is asked, and a browser may not ask at all
+    let (_hub, port) = up("vgit").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    for a in ["revert", "", "init", "push"] { let r = ask(&mut ws, 1, "viewer.git", json!({"thread":"t2","action":a})).await; assert_eq!(r["ok"], false, "{a}: {r}"); }
+    assert_eq!(ask(&mut ws, 2, "viewer.git", json!({"thread":"nope","action":"commit_push"})).await["ok"], false, "unknown thread");
+    assert!(matches!(super::webpolicy::policy("viewer.git", &json!({"thread":"t2","action":"commit_push"})), super::webpolicy::Policy::Denied));
+}
+#[test] fn data_a_threads_context_is_a_percent_when_its_window_is_known() {
+    let row = |u: &str| { let mut r = json!({}); super::with_ctx(&mut r, u); r };
+    assert_eq!(row("62000/200000")["ctxPct"], 31); assert_eq!(row("250000/200000")["ctxPct"], 100, "never past full");
+    for u in ["", "62000/0", "0/200000", "x/y", "62000"] { assert!(row(u).get("ctxPct").is_none(), "{u}") }
 }
 #[test] fn data_a_messages_attached_files_are_listed() {
     // a file (not a picture) sent with a message: its line is not shown, so the entry lists it for the phone's chip, by its own name

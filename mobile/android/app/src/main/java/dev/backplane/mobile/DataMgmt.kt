@@ -134,7 +134,7 @@ internal fun MgmtHost(
 @Composable
 private fun BomPanel() {
     val d = DataClient.mgmtData("bom")
-    if (d == null) { DMono(Msg.gpui_mgmt_bom_reading, dcs.onSurfaceVariant, 12, Modifier.padding(12.dp)); return }
+    if (d == null) { DText(Msg.gpui_mgmt_bom_reading, dcs.onSurfaceVariant, 13, Modifier.padding(12.dp)); return }
     val lines = Mgmt.objs(d.optJSONArray("lines"))
     var q by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
@@ -150,7 +150,7 @@ private fun BomPanel() {
             if (d.optBoolean("paused")) DMono(Msg.gpui_mgmt_bom_paused, tone("faint"), 11)
         }
         // where stock and prices come from (the hub's words): one catalogue; other distributors by the agent's API keys
-        d.optString("stock_note").takeIf { it.isNotEmpty() }?.let { DMono(Tr.t(it), tone("faint"), 10, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp), lines = 3) }
+        d.optString("stock_note").takeIf { it.isNotEmpty() }?.let { DText(Tr.t(it), tone("faint"), 12, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp), lines = 3) }
         // a long-pressed line's editor, in the panel (not a box over it): the drawing stays in view
         val ed = editing
         if (ed != null) BomEdit(ed) { editing = null }
@@ -216,7 +216,7 @@ private fun BomEdit(l: JSONObject, close: () -> Unit) {
                 // the panel's own undo: the old value written back the same way
                 last?.takeIf { it.optInt("changed") > 0 }?.let { r -> DBtn(Msg.gpui_mgmt_bom_undo, false, modifier = Modifier.testTag("mgmt.bom.edit.undo")) { write(r.optString("field"), r.optString("was"), undo = true) } }
             }
-            if (said.isNotEmpty()) DMono(said, dcs.onSurfaceVariant, 11, lines = 3)
+            if (said.isNotEmpty()) DText(said, dcs.onSurfaceVariant, 13, lines = 3)
         }
     }
 }
@@ -225,7 +225,7 @@ private fun BomEdit(l: JSONObject, close: () -> Unit) {
 @Composable
 private fun ChecksPanel() {
     val d = DataClient.mgmtData("checks")
-    if (d == null) { DMono(Msg.android_nothing, dcs.onSurfaceVariant, 12, Modifier.padding(12.dp)); return }
+    if (d == null) { DText(Msg.android_nothing, dcs.onSurfaceVariant, 13, Modifier.padding(12.dp)); return }
     val scope = rememberCoroutineScope()
     var src by remember { mutableStateOf("") }
     var sel by remember { mutableStateOf("") }
@@ -240,7 +240,7 @@ private fun ChecksPanel() {
             DBtn(Msg.android_mgmt_all, src.isEmpty(), modifier = Modifier.testTag("mgmt.checks.src.all")) { src = "" }
             sources.forEach { s -> DBtn(label(s) + if (judged(s)) " · " + Msg.android_mgmt_judged else "", src == s, modifier = Modifier.testTag("mgmt.checks.src.$s")) { src = if (src == s) "" else s } }
         }
-        if (said.isNotEmpty()) DMono(said, dcs.onSurfaceVariant, 11, Modifier.padding(horizontal = 12.dp))
+        if (said.isNotEmpty()) DText(said, dcs.onSurfaceVariant, 13, Modifier.padding(horizontal = 12.dp))
         DLine()
         LazyColumn(Modifier.weight(1f).testTag("mgmt.checks.rows")) {
             groups.filter { src.isEmpty() || it.optString("source") == src }.forEach { g ->
@@ -257,10 +257,10 @@ private fun ChecksPanel() {
                     Column(Modifier.fillMaxWidth().background(if (sel == id) dcs.surfaceVariant else dcs.background).clickable {
                         sel = id; DataClient.lightRefs = Mgmt.findingRefs(r.optString("names")); scope.launch { runCatching { DataClient.checksFocus(id) } }
                     }.padding(horizontal = 12.dp, vertical = 8.dp).testTag("mgmt.checks.row.$id")) {
-                        DMono(Tr.t(r.optString("title")), dcs.onSurface, 12, lines = 2)
+                        DText(Tr.t(r.optString("title")), dcs.onSurface, 14, lines = 2)
                         if (r.optString("names").isNotEmpty() || sel == id) Row(verticalAlignment = Alignment.CenterVertically) {
                             DMono(r.optString("names"), dcs.onSurfaceVariant, 11, Modifier.weight(1f))
-                            if (sel == id) DMono(Msg.android_mgmt_fix, dcs.primary, 11, Modifier.clickable {
+                            if (sel == id) DText(Msg.android_mgmt_fix, dcs.primary, 12, bold = true, lines = 1, modifier = Modifier.clickable {
                                 scope.launch { runCatching { DataClient.checksFix(id) }.onSuccess { text -> if (text.isNotEmpty()) { val tid = DataClient.viewerThread; if (tid.isNotEmpty()) DataClient.send(tid, text); said = Msg.android_mgmt_sent } }.onFailure { said = Tr.t(it.message ?: "") } }
                             }.padding(start = 8.dp).testTag("mgmt.checks.fix.$id"))
                         }
@@ -272,5 +272,5 @@ private fun ChecksPanel() {
     }
 }
 
-@Composable private fun LifePanel() { DMono(Msg.android_nothing, dcs.onSurfaceVariant, 12, Modifier.padding(12.dp)) }
-@Composable private fun FabPanel() { DMono(Msg.android_nothing, dcs.onSurfaceVariant, 12, Modifier.padding(12.dp)) }
+@Composable private fun LifePanel() { DText(Msg.android_nothing, dcs.onSurfaceVariant, 13, Modifier.padding(12.dp)) }
+@Composable private fun FabPanel() { DText(Msg.android_nothing, dcs.onSurfaceVariant, 13, Modifier.padding(12.dp)) }

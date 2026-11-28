@@ -113,6 +113,8 @@ data class DThread(
     val swarm: String = "", // the swarm room this thread is a member of (feature swarm), "" for none: left out of its project's list, which shows the swarm once
     val memory: DMemory? = null, // infinite context: how far its memory is written (the hub's bots/recall/progress.rs); null for a thread without it
     val planMode: DPlanMode? = null,
+    val forkOf: String = "", // a fork: the thread it forked from (data/1 `forkOf`); its menu offers Back to the original
+    val ctxPct: Int = -1, // how full its context is, 0..100 (data/1 `ctxPct`, the desktop composer's "ctx N%"); -1 not known
 )
 /** A thread's memory progress, every word the hub's: the bar is [done] of [total], [state] caught | behind | held. */
 data class DMemory(val done: Long, val total: Long, val state: String, val line: String, val status: String, val lines: String, val viewLine: String) {
@@ -162,7 +164,7 @@ fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("r
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
-    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"), parseMemory(o.optJSONObject("memory")), parsePlanMode(o.optJSONObject("planMode")),
+    o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"), parseMemory(o.optJSONObject("memory")), parsePlanMode(o.optJSONObject("planMode")), forkOf = o.str("forkOf"), ctxPct = o.optInt("ctxPct", -1),
 )
 fun parseProjects(a: JSONArray?) = a.list(::parseProject)
 fun parseThreads(a: JSONArray?) = a.list(::parseThread)

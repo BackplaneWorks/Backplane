@@ -218,6 +218,7 @@ pub(super) fn thread_json_batched(hub: &Hub, m: &crate::model::Model, id: &str, 
     if let Some(pm) = st.map(|s| &s.plan_mode) {
         if !pm.is_null() && pm["phase"] != "off" { row["planMode"] = pm.clone(); }
     }
+    with_fork_of(&mut row, id); with_ctx(&mut row, &setting_of(&format!("usage.{id}")));
     Some(row)
 }
 
@@ -252,7 +253,18 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
         // infinite context (bots/recall/progress.rs): how far its memory is written, the composer's bar; null for a thread without it
         "memory":crate::bots::recall::progress::shown(&hub.cfg.home, id).unwrap_or(Value::Null)});
     if !plan_mode.is_null() && plan_mode["phase"] != "off" { row["planMode"] = plan_mode; }
+    with_fork_of(&mut row, id); with_ctx(&mut row, &setting_of(&format!("usage.{id}")));
     Some(row)
+}
+/// A fork's row names the thread it forked from (`forkOf`, the hub's `fork.<id>` record, present/keys.rs `forked`): a phone offers
+/// "Back to the original" (`thread.act back`) on it, as the desktop's header does. Left out for any other thread.
+fn with_fork_of(row: &mut Value, id: &str) { let f = setting_of(&format!("fork.{id}")); if !f.is_empty() { row["forkOf"] = json!(f) } }
+/// How full the thread's context is, as the desktop composer's "ctx N%" (present/tokstats.rs `chip`, setting `usage.<id>` = "used/window"):
+/// `ctxPct` 0..=100, left out while the window is not known.
+fn with_ctx(row: &mut Value, usage: &str) {
+    let n = |i: usize| usage.split('/').nth(i).and_then(|x| x.trim().parse::<u64>().ok()).unwrap_or(0);
+    let (used, window) = (n(0), n(1));
+    if used > 0 && window > 0 { row["ctxPct"] = json!((used * 100 / window).min(100)) }
 }
 pub(super) fn run_hidden(thread: &str) -> bool {
     crate::state::is_mail_run_id(thread)

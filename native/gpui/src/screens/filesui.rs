@@ -115,10 +115,10 @@ fn filter_text(this: &Backplane, cx: &App) -> String { this.screens.files.filter
 /// Called each frame (glue.rs): make the fields once, reset on a new folder, start the fetch a preview needs.
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.files.filter.is_none() {
-        let f = cx.new(|cx| Composer::with_context(cx, "AskInput"));
+        let f = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); c.max_lines = 1.0; c });
         f.update(cx, |i, _| i.set_placeholder(&trs("Filter this folder")));
         cx.observe(&f, |this, _, cx| { this.screens.files.sel = None; cx.notify(); }).detach();
-        let n = cx.new(|cx| Composer::with_context(cx, "AskInput"));
+        let n = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); c.max_lines = 1.0; c });
         cx.subscribe(&n, |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { commit_name(this, cx); }).detach();
         this.screens.files.filter = Some(f); this.screens.files.name = Some(n); this.screens.files.focus = Some(cx.focus_handle());
     }
@@ -393,7 +393,7 @@ pub(super) fn files_body(cx: &mut Context<Backplane>, light: bool, files: &Value
         let (ic, tok) = glyph(&r.kind);
         let on = ui.sel == Some(n);
         let (a_open, has_open) = (n, !r.action.is_empty() || crate::viewers::solidcraft_pane::is_cad_file(&r.value) || crate::viewers::solidcraft_pane::is_cad_file(&r.label));
-        list = list.child(div().id(SharedString::from(format!("file-{n}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).when(on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
+        list = list.child(div().id(SharedString::from(format!("file-{n}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).border_l_2().border_color(if on { c("accent") } else { gpui::Rgba { a: 0., ..c("accent") } }).when(on, |d| d.bg(c("raise"))) /* every row keeps the bar's 2 px, so the picked one does not move */
             .child(crate::art::icon(ic, 15., c(tok)))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(c(if has_open || r.kind == "folder" { "text" } else { "dim" })).child(r.label.clone()))
             .child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.detail)))

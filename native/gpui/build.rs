@@ -10,6 +10,12 @@ fn main() {
     if env::var_os("CARGO_FEATURE_CEF").is_some() && env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") && env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") {
         println!("cargo:rustc-link-arg-bin=backplane-gpui=/DELAYLOAD:libcef.dll");
     }
+    // Windows: the window's main thread gets an 8 MB stack, as on Linux and macOS (Windows gives 1 MB): a debug build drawing Settings' MCP
+    // servers page overflowed 1 MB and closed the window on CI's Windows sizes run (night n1128)
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        if env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc") { println!("cargo:rustc-link-arg-bin=backplane-gpui=/STACK:8388608"); }
+        else { println!("cargo:rustc-link-arg-bin=backplane-gpui=-Wl,--stack,8388608"); }
+    }
     // Windows: the app's icon as resource 1, the one gpui gives its windows (LoadImageW(module, 1)); also what the taskbar, Alt+Tab and Explorer show;
     // and its VERSIONINFO (native/winres.rs; assets/icon/backplane.ico is made by scripts/icons.sh)
     winres::embed("backplane-gpui.exe", "Backplane");
