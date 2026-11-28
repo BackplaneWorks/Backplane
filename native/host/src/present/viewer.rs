@@ -454,6 +454,10 @@ pub fn shut(hub: &str, session: &Value) -> (Value, Vec<Value>) {
     let mut out = json!({});
     if !s(d, &format!("@view:{sel}")).is_empty() {
         let mut drafts = serde_json::Map::new();
+        // what was open, so closing Settings brings it back (`reopen`): this thread, its page kind, its file and sheet
+        drafts.insert("@view.was".into(), json!(format!("{sel}\u{1f}{}", s(d, &format!("@view:{sel}")))));
+        drafts.insert("@view.was.file".into(), json!(s(d, &format!("@view.file:{sel}"))));
+        drafts.insert("@view.was.sheet".into(), json!(s(d, &format!("@view.sheet:{sel}"))));
         for k in ["@view", "@view.file", "@view.sheet"] { drafts.insert(format!("{k}:{sel}"), json!("")); }
         for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
         out = json!({"drafts": drafts});
@@ -466,6 +470,23 @@ pub fn shut(hub: &str, session: &Value) -> (Value, Vec<Value>) {
     }
     patch::merge(&mut out, &pages::leave(session, sel));
     (out, before)
+}
+
+/// Settings just closed: the viewer page its opening shut (`shut`'s `@view.was`) opens again as a rail press would, if the same thread is on
+/// show and nothing was opened beside it meanwhile. The `@view.was*` drafts are cleared either way. None when there is nothing to bring back.
+pub fn reopen(st: &State, hub: &str, session: &Value) -> Option<ViewOut> {
+    let d = &session["drafts"];
+    let was = s(d, "@view.was"); if was.is_empty() { return None }
+    let clear = json!({"drafts": {"@view.was": "", "@view.was.file": "", "@view.was.sheet": ""}});
+    let sel = s(session, "sel");
+    let (th, kind) = was.split_once('\u{1f}').unwrap_or(("", ""));
+    if th != sel || kind.is_empty() || !s(d, &format!("@view:{sel}")).is_empty() { return Some(ViewOut { patch: clear.clone(), before: vec![], boards_look: false }) }
+    let mut s1 = session.clone();
+    crate::session::patch::merge(&mut s1, &json!({"drafts": {format!("@view.file:{sel}"): s(d, "@view.was.file"), format!("@view.sheet:{sel}"): s(d, "@view.was.sheet")}}));
+    let Some(mut o) = view_action(st, hub, &s1, kind) else { return Some(ViewOut { patch: clear.clone(), before: vec![], boards_look: false }) };
+    let mut p = json!({"drafts": {format!("@view.file:{sel}"): s(d, "@view.was.file"), format!("@view.sheet:{sel}"): s(d, "@view.was.sheet")}});
+    crate::session::patch::merge(&mut p, &o.patch); crate::session::patch::merge(&mut p, &clear); o.patch = p;
+    Some(o)
 }
 
 /// The project's boards as the Boards menu lists them (View.board.rows): two or more, the one on show marked, the project's own marked as the default. None for one board or none.
@@ -3701,6 +3722,23 @@ mod tests {
         assert!(c[0]["text"].as_str().unwrap().contains("\"kind\":\"\""), "the watch stops");
         assert_eq!(s1["drafts"][format!("@view.board:{th}")], json!("a/a.kicad_pcb"));
         assert!(shut("h", &s1).1.is_empty(), "nothing open: nothing sent");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn closing_settings_brings_back_the_viewer_it_shut() {
+        let (st, th, d) = files_world("reopen");
+        let mut s1 = sess(&th, json!({})); let o = view_action(&st, "h", &s1, "board").unwrap(); crate::session::patch::merge(&mut s1, &o.patch);
+        let (p, _) = shut("h", &s1); crate::session::patch::merge(&mut s1, &p);
+        assert_eq!(s1["drafts"][format!("@view:{th}")], json!("")); assert_eq!(s1["drafts"]["@view.was"], json!(format!("{th}\u{1f}board")));
+        // closed: the board again, its watch asked for, the record gone
+        let mut back = s1.clone(); let o = reopen(&st, "h", &back).unwrap(); crate::session::patch::merge(&mut back, &o.patch);
+        assert_eq!(back["drafts"][format!("@view:{th}")], json!("board")); assert_eq!(back["drafts"]["@view.was"], json!(""));
+        assert!(o.before.iter().any(|c| c["text"].as_str().map_or(false, |t| t.contains("kicad.watch"))), "the watch starts again: {:?}", o.before);
+        assert!(reopen(&st, "h", &back).is_none(), "nothing recorded: nothing to do");
+        // another thread on show by then, or a viewer opened meanwhile: nothing reopens, the record goes
+        let mut other = s1.clone(); other["sel"] = json!("t-other");
+        let o = reopen(&st, "h", &other).unwrap(); assert_eq!(o.patch["drafts"]["@view.was"], json!("")); assert!(o.patch["drafts"].get(format!("@view:{th}")).is_none() && o.before.is_empty());
+        let mut opened = s1.clone(); opened["drafts"][format!("@view:{th}")] = json!("schematic");
+        let o = reopen(&st, "h", &opened).unwrap(); assert!(o.patch["drafts"].get(format!("@view:{th}")).is_none());
         let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_probe_is_kept_per_board_and_shown_on_every_page_of_it() {
