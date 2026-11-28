@@ -453,6 +453,11 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // The hub's answers this request carries (Diff, Review) are applied before anything is answered; the commands they make go out first.
     let read_cmds=match p["reads"].as_array().filter(|r|!r.is_empty()) { Some(reads)=>crate::session::pages::apply_reads(&crate::session::dispatch::StateFacts(st),hub,&mut session,reads), None=>vec![] };
     let mut cmds=read_cmds.clone();
+    // a bot or a room the person just made (its reply came with this request): its page opens, as its sidebar row would open it
+    if action.is_empty() { if let Some(target)=go_made(st,&mut session) {
+        if let Some(o)=session.as_object_mut() { o.remove("route"); }
+        return Some(json!({"remoteReady":false,"nextTarget":target,"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+    } }
     // The shared pure dispatcher owns composer/commands/select; this root owns private sidebar paging.
     let mut adopted=p.clone(); adopted["session"]=session.clone();
     let dispatched=crate::session::dispatch::dispatch(&crate::session::dispatch::StateFacts(st),&adopted);
@@ -1008,6 +1013,20 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let window=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
     let window=if thread.is_empty() { window }else{p["window"].clone()};
     Some(json!({"remoteReady":true,"shown":shown,"session":session,"cmds":cmds,"overlay":{"j":overlay,"key":hub,"name":hub.split(':').next().unwrap_or("")},"window":window,"local":ns.local()}))
+}
+
+/// The page of what the person just made with New bot or New room (`@go.bot` / `@go.room`: its name, set when the hub accepted it, session/pages.rs):
+/// the bot of that name, or the newest room of that name. The mark is taken either way; None when there is none or nothing of that name is known yet.
+pub(crate) fn go_made(st:&State,session:&mut Value)->Option<Value> {
+    let take=|session:&mut Value,k:&str|->String { let v=session["drafts"][k].as_str().unwrap_or("").to_string(); if !v.is_empty() { session["drafts"][k]=json!(""); } v };
+    let bot=take(session,"@go.bot"); let room=take(session,"@go.room"); let roomid=take(session,"@go.roomid");
+    if !roomid.is_empty() && st.rooms_nav.contains_key(&roomid) { return Some(json!({"kind":"room","id":roomid})) }
+    if !bot.is_empty() { if let Some((id,_))=st.bots_nav.iter().find(|(_,b)|b.name==bot) { return Some(json!({"kind":"bot","id":id})) } }
+    if !room.is_empty() {
+        let seq=|id:&str|->(u64,u64) { let mut it=id.trim_start_matches(|c:char|c.is_ascii_alphabetic()).splitn(2,'-'); (it.next().and_then(|n|n.parse().ok()).unwrap_or(0),it.next().and_then(|n|n.parse().ok()).unwrap_or(0)) };
+        if let Some((id,_))=st.rooms_nav.iter().filter(|(id,r)|r.name==room&&!r.ephemeral&&!id.starts_with("dm:")).max_by_key(|(id,_)|seq(id)) { return Some(json!({"kind":"room","id":id})) }
+    }
+    None
 }
 
 #[cfg(test)]

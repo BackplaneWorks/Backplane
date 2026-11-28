@@ -18,6 +18,9 @@ pub fn signin(drafts: &Value) -> Value {
     s
 }
 
+/// Whether the field's text gets the "isn't a repository address" line: something typed that is no address and matches none of the person's
+/// repositories (signed out, nothing matches: the field was silent on `notaurl`); never while their list is still loading.
+fn bad_address(t: &str, rows: bool, loading: bool) -> bool { !t.is_empty() && !rows && !loading && super::parse(t).is_none() }
 /// The repository step: what the field holds as an address (its Clone row), then the person's repositories that match.
 pub fn repo_step(drafts: &Value, home: &str) -> Value {
     let _ = home;
@@ -38,7 +41,7 @@ pub fn repo_step(drafts: &Value, home: &str) -> Value {
         else if !super::gh::state_hint(state).is_empty() && text.trim().is_empty() { items.push(json!({"label": super::gh::state_hint(state), "action": "", "value": "", "kind": "note"})); }
     }
     let t = text.trim();
-    let error = if !t.is_empty() && items.iter().all(|i| i["kind"] == "note") && super::parse(t).is_none() && (t.contains("://") || t.contains('@') || t.contains(':')) { "That isn't a repository address: paste an https or ssh URL, or owner/repo." } else { "" };
+    let error = if bad_address(t, !rows.is_empty(), loading) { "That isn't a repository address: paste an https or ssh URL, or owner/repo." } else { "" };
     json!({"mode": "clone", "tabs": tabs(true), "icon": "git", "text": text, "hint": "Repository: https or ssh URL, or owner/repo", "error": error, "items": items, "more": more.saturating_sub(rows.len()), "cut": false, "signin": signin(drafts)})
 }
 
@@ -72,4 +75,14 @@ pub fn dest_header(drafts: &Value) -> (Value, Value) {
     let repo = json!({"label": shown, "action": "proj-clone-back", "value": "", "change": "Change"});
     let on = d(drafts, "@proj.nothread").is_empty();
     (repo, json!({"label": "Start a thread in it", "action": "proj-clone-thread", "value": if on { "off" } else { "on" }, "kind": "toggle", "on": on}))
+}
+
+#[cfg(test)]
+mod address_tests {
+    #[test] fn text_that_is_no_address_and_finds_no_repository_says_so() {
+        assert!(super::bad_address("notaurl", false, false), "signed out or nothing matches: say what it needs");
+        assert!(!super::bad_address("kicad", true, false), "a search that finds repositories is fine");
+        assert!(!super::bad_address("notaurl", false, true), "still loading");
+        assert!(!super::bad_address("", false, false) && !super::bad_address("owner/repo", false, false) && !super::bad_address("https://github.com/o/r", false, false));
+    }
 }

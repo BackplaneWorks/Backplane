@@ -134,9 +134,12 @@ pub fn type_cmd(text: &str) -> Command { Command::Action("picker-type".into(), t
 /// older text would add the wrong folder).
 pub fn submit_cmd(data: &Value, typed: &str) -> Option<Command> {
     let f = folders(data)?;
-    if f.text != typed { return None }
+    if f.text != typed || enter_off(typed) { return None }
     f.items.into_iter().find(|i| i.kind == "add" && !i.action.is_empty()).map(|i| Command::Action(i.action, i.value))
 }
+/// The home folder or the root, where the dialog opens: Enter there does not add it (one key made the whole home folder a project); its Add row
+/// is drawn unlit and is taken only by a click or the arrow keys.
+pub fn enter_off(typed: &str) -> bool { matches!(typed.trim(), "" | "~" | "~/" | "/") }
 /// Send on a project's page: the new thread goes where its "runs on" line says (the picker's choice, the hub's first `newOn` entry: this
 /// machine's project id or a linked machine's `<link>~<id>`), and the typed text waits to be its first message once it is on show.
 /// `picked`: what the person picked here for this project. The target must be on that machine, or nothing is sent (Err: the words to show,
@@ -428,11 +431,11 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
         let hit = cx.listener(move |this, _: &gpui::ClickEvent, _, cx| { let typed = this.screens.projects.folder.as_ref().map(|i| i.read(cx).content.to_string()); let k = typed.and_then(|t| click(&this.data, &t, i)); key(this, k, cx); });
         let row = crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().flex_none().items_center().gap_2().w_full().when(faint, |d| d.opacity(0.45));
         match it.kind.as_str() {
-            "add" => top.push(row.h(crate::scale::tpx(34.)).px(px(11.)).bg(c("accent")).text_size(crate::scale::tpx(13.)).text_color(c("on-accent")).when(!faint, |d| d.cursor_pointer().hover(|s| s.opacity(0.9)))
-                .child(crate::ui::ic(light, if a == "proj-add" { "plus" } else if a == "proj-new" { "folder-plus" } else if a.starts_with("proj-clone") { "git-branch" } else { "folder-down" }, 15., "on-accent"))
+            "add" => { let lit = !enter_off(&typed); top.push(row.h(crate::scale::tpx(34.)).px(px(11.)).when(lit, |d| d.bg(c("accent")).text_color(c("on-accent"))).when(!lit, |d| d.px(px(10.)).border_1().border_color(c("line")).text_color(c("text"))).text_size(crate::scale::tpx(13.)).when(!faint, |d| d.cursor_pointer().hover(|s| s.opacity(0.9)))
+                .child(crate::ui::ic(light, if a == "proj-add" { "plus" } else if a == "proj-new" { "folder-plus" } else if a.starts_with("proj-clone") { "git-branch" } else { "folder-down" }, 15., if lit { "on-accent" } else { "dim" }))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(fit(&crate::i18n::trs(&it.label), 72)))
-                .when(mark.is_none() && !faint, |d| d.child(div().flex_none().text_size(crate::scale::tpx(11.)).opacity(0.7).child("Enter" /* i18n-ok: a key's name */)))
-                .on_click(hit).into_any_element()),
+                .when(lit && mark.is_none() && !faint, |d| d.child(div().flex_none().text_size(crate::scale::tpx(11.)).opacity(0.7).child("Enter" /* i18n-ok: a key's name */)))
+                .on_click(hit).into_any_element()) },
             "note" => top.push(row.h(crate::scale::tpx(34.)).px(px(10.)).border_1().border_color(c(if it.tone == "bad" { "bad" } else { "line" })).text_size(crate::scale::tpx(13.)).text_color(c("dim"))
                 .child(if it.tone == "bad" { crate::ui::ic(light, "x", 14., "bad") } else if it.action.is_empty() && it.label.ends_with('…') { crate::ui::ic(light, "clock", 14., "dim") } else { crate::ui::ic(light, "circle-check", 14., "ok") })
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(fit(&crate::i18n::trs(&it.label), 76))).into_any_element()),
@@ -906,7 +909,9 @@ mod tests {
         let d = j(r#"{"folders":{"text":"~/Doc","hint":"Path","error":"","items":[{"label":"Documents","action":"proj-cd","value":"~/Documents/","kind":"dir"},{"label":"Add ~/Doc","action":"proj-add","value":"~/Doc","kind":"add"}]}}"#);
         let f = folders(&d).unwrap(); assert_eq!(f.items.len(), 2); assert_eq!(f.items[1].action, "proj-add");
         assert!(matches!(submit_cmd(&d, "~/Doc"), Some(Command::Action(a, v)) if a == "proj-add" && v == "~/Doc"), "Enter adds what the rows were made for");
-        assert!(submit_cmd(&d, "~/Docs").is_none(), "rows for an older text: Enter waits"); assert!(matches!(close_on_escape(&d), Some(Command::Action(a, _)) if a == "proj-close"));
+        assert!(submit_cmd(&d, "~/Docs").is_none(), "rows for an older text: Enter waits");
+        let home = j(r#"{"folders":{"text":"~/","hint":"Path","error":"","items":[{"label":"Add ~","action":"proj-add","value":"~/","kind":"add"}]}}"#);
+        assert!(submit_cmd(&home, "~/").is_none(), "Enter at the home folder adds nothing"); assert!(enter_off("/") && enter_off("~") && !enter_off("~/kicad/")); assert!(matches!(close_on_escape(&d), Some(Command::Action(a, _)) if a == "proj-close"));
         assert!(folders(&Value::Null).is_none() && close_on_escape(&Value::Null).is_none());
         assert_eq!(controls(&d).iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["ui:Add project", "folder-0", "folder-1", "folders-cancel"]);
         assert_eq!(f.items[0].tag, "", "an older hub sends no tag");

@@ -377,6 +377,7 @@ pub fn secret_enter(data: &Value) -> Option<String> { Some(string(&data["thread"
 
 pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
     if (name.starts_with("ob") || (name == "sval" && this.data["tour"].is_object())) && super::onboard::submit(this, name, cx) { return }
+    if super::bots::form_submit(this, name, cx) { return } // Enter in the New bot / New room form: its Create / Save
     match name { "rpost" => super::bots::send_post(this, "rpost", "room-post", cx), "rtext" => super::bots::send_post(this, "rtext", "remote-send", cx), "title" => { // Enter in the rename box saves, as its Rename button does (nothing for a blank title)
             let id = string(&this.data["renaming"], "id");
             let text = this.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();

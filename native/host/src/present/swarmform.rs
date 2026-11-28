@@ -62,8 +62,10 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
             let members: Vec<Value> = rs.iter().map(|r| { let mut m = json!({"provider": r.provider}); if !r.model.is_empty() { m["model"] = json!(r.model) } if !r.role.trim().is_empty() { m["role"] = json!(r.role.trim()) } m }).collect();
             let mut p = json!({"project": draft(session, "@snew"), "topic": topic, "members": members});
             for (k, f) in [("goal", "@f.sgoal"), ("seed", "@f.sseed")] { let t = draft(session, f).trim(); if !t.is_empty() { p[k] = json!(t) } }
+            let req = rid;
             cmds.push(json!({"type": "send", "hub": hub, "text": json!({"id": rid, "m": "swarm.create", "p": p}).to_string()})); rid += 1;
-            json!({"drafts": {"@snew": "", "@f.stopic": "", "@f.sgoal": "", "@f.sseed": "", "@snew.members": ""}})
+            // the reply opens the swarm's board (session/pages.rs `apply_reads` → `@go.roomid`, present/screen.rs `go_made`): the form closed on nothing before
+            json!({"drafts": {"@snew": "", "@f.stopic": "", "@f.sgoal": "", "@f.sseed": "", "@snew.members": "", format!("@s.req:{req}"): "1"}})
         }
         // the swarm page's add-member picker
         "swarm-add-open" => json!({"drafts": {"@sadd": "1", "@sadd.provider": default_provider(st), "@sadd.model": ""}}),
@@ -78,7 +80,7 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
 
 /// An agent's choices (`agents` is `keys::picker_agents`): each agent, whether it can be used here, and which is on.
 fn providers(agents: &Value, on: &str) -> Value {
-    Value::Array(super::keys::AGENTS.iter().map(|(p, what)| json!({"label": p, "value": p, "note": what, "on": *p == on, "ok": agents[*p]["ok"] != false})).collect())
+    Value::Array(super::keys::AGENTS.iter().map(|(p, what)| json!({"label": super::botforms::provider_name(p), "value": p, "note": what, "on": *p == on, "ok": agents[*p]["ok"] != false})).collect())
 }
 /// The agent's models, the one chosen on.
 fn models(agents: &Value, provider: &str, model: &str) -> Value {
@@ -163,6 +165,12 @@ mod tests {
         assert_eq!(r["m"], "swarm.create"); assert_eq!(r["id"], 5);
         assert_eq!(r["p"], json!({"project": "p1", "topic": "debounce", "goal": "a clean button", "seed": "see src/btn.rs", "members": [{"provider": "claude", "model": "opus"}, {"provider": "codex", "role": "tester"}]}));
         assert!(new_swarm(&st, &s, &agents()).is_none() && s["rid"] == 6, "the form shuts");
+        assert_eq!(f["members"][1]["providers"][0]["label"], "Claude Code", "names, not ids");
+        // the reply opens the swarm's board
+        let mut st = st; st.apply_line(r#"{"$":"RoomSet","id":"r9-1","name":"debounce","members":"thread:t1","kind":"swarm","project":"p1","at":9}"#);
+        s["sel"] = json!("t0");
+        crate::session::pages::apply_reads(&crate::session::dispatch::StateFacts(&st), "h", &mut s, &[json!({"kind": "history.refs", "method": "swarm.create", "id": 5, "ok": true, "result": {"room": "r9-1"}})]);
+        assert_eq!(crate::present::screen::go_made(&st, &mut s), Some(json!({"kind": "room", "id": "r9-1"})));
     }
     #[test] fn a_swarm_keeps_two_to_eight_members() {
         let st = st(); let mut s = sess(json!({}));
